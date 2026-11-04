@@ -53,6 +53,29 @@ defmodule Shuttle.RetainedTerminalTest do
     refute Enum.any?(FakeRex.calls(), fn {bin, _, _} -> bin == "tmux" end)
   end
 
+  # A self-interrupt must terminate the command before it can print.
+  test "a child retains interrupt handling", %{tmp_dir: dir, opts: opts} do
+    assert :ok =
+             RetainedTerminal.start(
+               "interrupt",
+               dir,
+               ["bash", "-c", "kill -INT $$; printf ignored"],
+               %{},
+               FakeRex,
+               opts
+             )
+
+    {_, _, command_opts} =
+      Enum.find(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end)
+
+    spec = Jason.decode!(command_opts[:input])
+
+    ["bash", "-l", script] =
+      get_in(spec, ["initial_windows", Access.at(0), "layout", "block", "options", "command"])
+
+    assert {_output, 130} = System.cmd("bash", [script])
+  end
+
   test "server restart and missing block never adopt a running receipt", %{
     tmp_dir: dir,
     opts: opts
@@ -96,5 +119,49 @@ defmodule Shuttle.RetainedTerminalTest do
              RetainedTerminal.observe("capture", FakeRex, opts)
 
     assert File.exists?(Path.join(opts[:state_dir], "capture.json"))
+  end
+end
+
+defmodule Shuttle.RetainedTerminalRealTest do
+  use ExUnit.Case, async: false
+  alias Shuttle.{RetainedTerminal, Rex}
+  alias Shuttle.Test.IsolatedRex
+  @moduletag :tmp_dir
+  @moduletag skip: IsolatedRex.skip?()
+  @runner Shuttle.Runner.Default
+
+  test "the retained child owns terminal input and preserves its exit status", %{tmp_dir: dir} do
+    IsolatedRex.start(dir)
+    opts = [state_dir: Path.join(dir, "retained")]
+    ready = Path.join(dir, "ready")
+
+    assert :ok =
+             RetainedTerminal.start(
+               "input",
+               dir,
+               [
+                 "bash",
+                 "-c",
+                 "stty sane; touch '#{ready}'; read -r answer; printf 'answer=%s\\n' \"$answer\"; exit 7"
+               ],
+               %{},
+               @runner,
+               opts
+             )
+
+    IsolatedRex.await(fn -> File.exists?(ready) end)
+    record = File.read!(Path.join(opts[:state_dir], "input.json")) |> Jason.decode!()
+    assert {:ok, _} = Rex.paste(@runner, record["session_id"], record["block_id"], "hello")
+
+    assert {:ok, _} = Rex.send_key(@runner, record["session_id"], record["block_id"], "enter")
+
+    IsolatedRex.await(fn ->
+      match?(
+        {:ok, %{dead: true, exit_status: 7, screen: ["answer=hello"]}},
+        RetainedTerminal.observe("input", @runner, opts)
+      )
+    end)
+
+    assert :ok = RetainedTerminal.stop("input", @runner, opts)
   end
 end

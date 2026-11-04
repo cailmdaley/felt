@@ -217,11 +217,15 @@ defmodule Shuttle.RetainedTerminal do
     receipt=#{quote_sh(Path.join(dir, "receipt"))}
     exec > >(tee -a #{quote_sh(Path.join(dir, "output"))}) 2>&1
     started=$(date +%s)
-    #{Enum.map_join(argv, " ", &quote_sh/1)} &
-    child=$!
-    printf 'running|%s|%s\n' "$child" "$started" > "$receipt.tmp"
-    mv "$receipt.tmp" "$receipt"
-    if wait "$child"; then status=0; else status=$?; fi
+    if bash -c 'receipt=$1; started=$2; shift 2
+      printf "running|%s|%s\\n" "$$" "$started" > "$receipt.tmp"
+      mv "$receipt.tmp" "$receipt"
+      exec "$@"' retained "$receipt" "$started" #{Enum.map_join(argv, " ", &quote_sh/1)}; then
+      status=0
+    else
+      status=$?
+    fi
+    IFS='|' read -r phase child started < "$receipt"
     printf 'ended|%s|%s|%s|%s\n' "$child" "$started" "$(date +%s)" "$status" > "$receipt.tmp"
     mv "$receipt.tmp" "$receipt"
     exit "$status"
