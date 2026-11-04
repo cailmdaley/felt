@@ -9,6 +9,15 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
+func TestDaemonAssemblyOutputsAreIgnored(t *testing.T) {
+	env := testEnv(t)
+	for _, path := range []string{"bin/rel-built", "bin/rel.generation-fixture/bin/shuttled"} {
+		if out, err := env.Command("git", "-C", "../..", "check-ignore", path).CombinedOutput(); err != nil {
+			t.Errorf("assembly output %s is not ignored: %v %s", path, err, out)
+		}
+	}
+}
+
 func TestCheckoutBuildsAndLinkedRestartsNeverSelectOrCycleHostDaemon(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

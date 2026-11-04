@@ -38,6 +38,8 @@ erl_crash.dump
 shuttle-*.tar
 # Built daemon release + its generated version module
 /bin/rel/
+/bin/rel-built
+/bin/rel.generation-*/
 /bin/rel.next/
 /bin/rel.prev/
 /bin/rel.retained-*/
