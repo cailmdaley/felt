@@ -1031,6 +1031,7 @@ trap finish EXIT
 trap 'exit 143' TERM HUP
 trap 'exit 130' INT
 tmp=\$SHUTTLE_DEPLOY_TMP
+export SHUTTLE_DEPLOY_LOG_FILE=\"\$tmp/log\"
 printf '%s' $(shell_quote "$LOCK_SOURCE") > \"\$tmp/main.go\"
 deploy_step 'compile lock helper'
 GOMAXPROCS=2 GOFLAGS=-p=2 go build -o \"\$tmp/lock\" \"\$tmp/main.go\" &
