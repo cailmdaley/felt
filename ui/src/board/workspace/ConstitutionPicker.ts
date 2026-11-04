@@ -4,6 +4,8 @@ import { groupRunKey } from './groupJump.js'
 
 export interface ConstitutionPickerOptions {
   cards(): KanbanCard[]
+  /** Place sidebar-only folds after retained rows have been patched. */
+  decorate?(el: HTMLElement): void
   files?(card: KanbanCard): string[]
   current?(card: KanbanCard): boolean
   revealCurrent?: boolean
@@ -190,6 +192,7 @@ export class ConstitutionPicker {
       if (parent === this.list) listCursor = cursor
       this.opts.onRow?.(row.el, card)
     }
+    this.opts.decorate?.(this.list)
     if (reveal && selected && selected !== this.revealed) this.reveal()
   }
   /** Scroll the current row into view; its scroll margin keeps its group's caption in sight above it. */

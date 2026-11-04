@@ -71,7 +71,7 @@ export function addThreadFixtures(example: WorkspaceExample, now: number, many =
 }
 
 /**
- * One Desk row per family, placed by the most urgent need in its tree: a root
+ * Roots beside their leading requests: a root
  * in Your turn over ten workers, a working root over four askers and another
  * over seven, a resting root whose only life is a thread, and a root awaiting
  * review while its threads work.
@@ -108,5 +108,33 @@ export function addFamilyFixtures(example: WorkspaceExample, now: number): void 
       runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `session-${row.id}`, last_activity_at: at.getTime() } : null,
     })
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\nFamily fixture.`
+  }
+}
+
+/** Two seats with requests, reviews, and work for the sidebar's folded tree. */
+export function addSidebarFixtures(example: WorkspaceExample, now: number): void {
+  example.feed.fibers = []
+  const rows = [
+    { id: 'chair', name: 'CMB cross-correlations chair', status: 'active', phase: 'working', seat: true },
+    { id: 'hub', name: 'Shear survey hub', status: 'active', phase: 'working', seat: true },
+    { id: 'rest', name: 'Resting research chair', status: 'open', horizon: 'stashed', seat: true },
+    { id: 'rest/review', parent: 'rest', name: 'Review the rotation model', status: 'closed' },
+    ...['chair', 'hub'].flatMap(root => [
+      ...Array.from({ length: 5 }, (_, n) => ({ id: `${root}/review-${n}`, parent: root, name: `Review ${root === 'chair' ? 'cross-spectrum' : 'shear'} ${n + 1}`, status: 'closed' })),
+      { id: `${root}/question`, parent: root, name: `Choose the ${root === 'chair' ? 'overlap cut' : 'leakage model'}`, status: 'active', phase: 'attention' },
+      { id: `${root}/analysis`, parent: root, name: 'Response analysis', status: 'active', phase: 'working' },
+      { id: `${root}/analysis/deep`, parent: `${root}/analysis`, name: 'Check the response kernel', status: 'active', phase: 'working' },
+    ]),
+  ] as Array<{ id: string; name: string; parent?: string; status: string; phase?: string; seat?: boolean; horizon?: string }>
+  for (const row of rows) {
+    example.feed.fibers.push({
+      origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/constitution.md`, orchestrator: row.parent,
+      fiber: { id: row.id, uid: row.id, name: row.name, status: row.status, horizon: row.horizon,
+        created_at: new Date(now - 3600000).toISOString(), closed_at: row.status === 'closed' ? new Date(now - 60000).toISOString() : undefined,
+        shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'codex-sol', role: row.seat ? 'chair' : undefined, seat: row.seat,
+          ask: row.phase === 'attention' ? { text: 'Which model?', at: new Date(now - 120000).toISOString() } : undefined } },
+      runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `sidebar-${row.id}` } : null,
+    })
+    example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\nEvidence ready.`
   }
 }

@@ -337,20 +337,25 @@ export class Workspace {
   private sidebarCards(): KanbanCard[] {
     return this.opts.deskRows()
   }
-  /** Resolve a family page through the lead row used by Desk placement. */
+  /** Resolve a family page through its root, regardless of which thread leads its need. */
   private sidebarRoot(card: KanbanCard): KanbanCard {
     const index = this.opts.threadIndex?.()
-    return index ? index.family(index.card(card)).lead : card
+    return index ? index.family(index.card(card)).root : card
   }
-  /** Resolve the lead's Desk column, folding scheduled work into Resting. */
-  private sidebarPlace(card: KanbanCard): string {
+  private sidebarCaptionCard(card: KanbanCard): KanbanCard {
     const root = this.sidebarRoot(card)
+    if (this.opts.deskRows().some(row => cardIdentity(row) === cardIdentity(root))) return root
+    return this.opts.threadIndex?.().family(root).lead ?? root
+  }
+  /** Resolve the root's Desk column, or its lead's when the root is absent. */
+  private sidebarPlace(card: KanbanCard): string {
+    const root = this.sidebarCaptionCard(card)
     const column = this.opts.deskPlacement?.(root)?.column ?? deskColumn(root)
     return column === 'scheduled' ? 'resting' : column
   }
   /** A Desk row keeps its Desk caption; an unplaced current page gets its own run. */
   private sidebarGroup(card: KanbanCard): string {
-    const root = this.sidebarRoot(card)
+    const root = this.sidebarCaptionCard(card)
     const placement = this.opts.deskPlacement?.(root)
     if (placement) return placement.group
     if (this.isOpenPage(card)) return 'Open'
@@ -359,7 +364,7 @@ export class Workspace {
   }
   /** A card's Desk column: In flight holds both its bands' groups. */
   private sidebarColumn(card: KanbanCard): string {
-    const root = this.sidebarRoot(card)
+    const root = this.sidebarCaptionCard(card)
     const placement = this.opts.deskPlacement?.(root)
     if (!placement && this.isOpenPage(card)) return 'Open'
     const column = placement?.column ?? this.sidebarPlace(root)
@@ -374,7 +379,7 @@ export class Workspace {
   private isOpenPage(card: KanbanCard): boolean {
     const current = this.current?.card
     if (!current || cardIdentity(current) !== cardIdentity(card)) return false
-    const root = this.sidebarRoot(card)
+    const root = this.sidebarCaptionCard(card)
     if (this.opts.deskPlacement?.(root)) return false
     return !this.opts.deskRows().some(row => cardIdentity(row) === cardIdentity(root))
   }

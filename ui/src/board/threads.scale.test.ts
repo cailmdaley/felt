@@ -48,7 +48,7 @@ function counted<T extends object>(target: T, names: readonly (keyof T)[], run: 
 /** Growing the input fourfold grows linear work about fourfold; a quadratic regression gives about sixteen. */
 const LINEAR = 6
 
-describe('a family of many threads is still one row', () => {
+describe('a family keeps its root and its leading request', () => {
   // A root in Your turn over ten working threads; a working root over twelve threads in Your turn.
   const family = (rootPhase: string, threadPhase: string, n: number) => parseCompositeFeed({ host: 'owner', fibers: [['cmbx', null, rootPhase], ...Array.from({ length: n }, (_, k) => [`cmbx/t${k}`, 'cmbx', threadPhase])]
     .map(([id, parent, phase]) => ({ origin: 'owner', felt_store: '/store', path: `${id}.md`, orchestrator: parent,
@@ -68,8 +68,8 @@ describe('a family of many threads is still one row', () => {
   it('a working root over twelve askers leads with the first, lists three, and folds nine', () => {
     const board = buildKanbanResponseFromComposite(family('working', 'waiting', 12))
     const desk = draw(board)
-    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
-    expect(desk.querySelector('.kbn-card')!.getAttribute('data-fiber-id')).toBe('cmbx/t0')
+    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(2)
+    expect([...desk.querySelectorAll('.kbn-card')].map(el => el.getAttribute('data-fiber-id'))).toEqual(['cmbx/t0', 'cmbx'])
     expect(desk.querySelector('.kbn-card-crumb')!.textContent).toBe('cmbx /\u00a0')
     expect([...desk.querySelectorAll('.kbn-family-ask-name')].map(el => el.textContent)).toEqual(['cmbx/t1', 'cmbx/t2', 'cmbx/t3'])
     expect(desk.querySelector('.kbn-family-more')!.textContent).toBe('+8 more')
@@ -93,7 +93,7 @@ describe('thread read model at fleet scale', () => {
       const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
         stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} })
       const desk = renderer.renderNowSection(board.now, {})
-      // Each tree is one row; a family's many askers fold to three sub-lines and a `+N more`.
+      // Each tree keeps its root and leading request; a family's many askers fold to three sub-lines and a `+N more`.
       expect(desk.querySelectorAll('.kbn-card')).toHaveLength(threadIndexFor(board).frontier().filter(c => board.now.inFlight.includes(c)).length)
       for (const asks of desk.querySelectorAll('.kbn-family-asks')) expect(asks.querySelectorAll('.kbn-family-ask').length).toBeLessThanOrEqual(3)
       expect(desk.querySelector('.kbn-thread-tree')).toBeNull()

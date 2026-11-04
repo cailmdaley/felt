@@ -17,22 +17,22 @@ export function board(rows: Row[]): KanbanResponse {
 export const ids = (cards: readonly { id: string }[]) => cards.map(c => c.id)
 const desk = (b: KanbanResponse) => [...b.now.drafts, ...b.now.inFlight, ...b.now.awaitingReview, ...b.stash, ...b.roles, ...b.timeline.past, ...b.timeline.futureDated]
 
-describe('the Desk draws each family once, in the column of its most urgent need', () => {
-  it('a quiet root with a review and a deeper question is one row: the question, with its crumb', () => {
+describe('the Desk keeps roots beside the threads leading their needs', () => {
+  it('a quiet root stays in Resting beside a deeper question with its crumb', () => {
     const b = board([
       { id: 'hub', status: 'open', horizon: 'stashed' },
       { id: 'hub/review', parent: 'hub', status: 'closed' },
       { id: 'hub/mid', parent: 'hub', status: 'closed', tempered: true },
       { id: 'hub/mid/ask', parent: 'hub/mid', status: 'active', ask: true },
     ])
-    expect(ids(desk(b))).toStrictEqual(['hub/mid/ask'])
+    expect(ids(desk(b))).toStrictEqual(['hub/mid/ask', 'hub'])
     expect(inFlightBand(b.now.inFlight[0])).toBe('yourTurn')
     const index = threadIndexFor(b)
     expect(index.ancestry(b.now.inFlight[0]).map(a => [a.name, a.card?.id])).toEqual([['hub', 'hub'], ['hub/mid', 'hub/mid']])
     expect(index.family(b.now.inFlight[0]).others).toEqual({ yours: 0, review: 1, working: 0 })
     expect(ids(boardCards(b)).sort()).toEqual(['hub', 'hub/mid', 'hub/mid/ask', 'hub/review'])
   })
-  it('a working root with a thread waiting on the human sits in Your turn, led by that thread', () => {
+  it('a working root stays in Working beside its thread in Your turn', () => {
     const b = board([
       { id: 'hub', status: 'active', phase: 'working' },
       { id: 'hub/ask', parent: 'hub', status: 'active', ask: true },
@@ -40,7 +40,7 @@ describe('the Desk draws each family once, in the column of its most urgent need
       { id: 'hub/quiet/review', parent: 'hub/quiet', status: 'closed' },
       { id: 'hub/draft', parent: 'hub', status: 'open' },
     ])
-    expect(ids(desk(b))).toStrictEqual(['hub/ask'])
+    expect(ids(desk(b))).toStrictEqual(['hub/ask', 'hub'])
     expect(inFlightBand(b.now.inFlight[0])).toBe('yourTurn')
     expect(threadIndexFor(b).family(b.now.inFlight[0]).others).toEqual({ yours: 0, review: 1, working: 1 })
   })
@@ -56,7 +56,7 @@ describe('the Desk draws each family once, in the column of its most urgent need
   })
   it('an armed workerless node asks nothing; a prompt and an idle turn both ask, and the prompt leads', () => {
     const b = board([{ id: 'hub', status: 'active' }, { id: 'hub/idle', parent: 'hub', status: 'active', phase: 'waiting' }, { id: 'hub/prompt', parent: 'hub', status: 'open', phase: 'attention' }])
-    expect(ids(desk(b))).toStrictEqual(['hub/prompt'])
+    expect(ids(desk(b))).toStrictEqual(['hub/prompt', 'hub'])
     expect(ids(threadIndexFor(b).family(b.now.inFlight[0]).askers)).toStrictEqual(['hub/prompt', 'hub/idle'])
   })
   it('a root that asks leads its row over a thread\'s question, so it is never both crumb and sub-line', () => {
@@ -72,6 +72,21 @@ describe('the Desk draws each family once, in the column of its most urgent need
   })
   it('breaks a malformed cycle and retains every conversation', () => {
     const b = board([{ id: 'a', parent: 'b', status: 'active', ask: true }, { id: 'b', parent: 'a', status: 'active', phase: 'working' }])
-    expect(desk(b)).toHaveLength(1); expect(boardCards(b)).toHaveLength(2)
+    expect(desk(b)).toHaveLength(2); expect(boardCards(b)).toHaveLength(2)
   })
+})
+
+it('keeps a working seat beside its asking thread and a resting seat beside its review', () => {
+  const b = board([
+    { id: 'working-seat', seat: true, status: 'active', phase: 'working' },
+    { id: 'working-seat/ask', parent: 'working-seat', status: 'active', ask: true },
+    { id: 'resting-seat', seat: true, status: 'open', horizon: 'stashed' },
+    { id: 'resting-seat/review', parent: 'resting-seat', status: 'closed' },
+  ])
+  expect(ids(b.now.inFlight)).toEqual(['working-seat/ask', 'working-seat'])
+  expect(ids(b.roles)).toEqual(['resting-seat'])
+  expect(ids(b.now.awaitingReview)).toEqual(['resting-seat/review'])
+  const index = threadIndexFor(b)
+  expect(index.others(b.now.inFlight[1])).toEqual({ yours: 1, review: 0, working: 0 })
+  expect(index.others(b.now.inFlight[0])).toEqual({ yours: 0, review: 0, working: 1 })
 })

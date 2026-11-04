@@ -370,3 +370,24 @@
   .ws-reader[data-page='chat'] .ws-rail-toggle { top: calc(4px + env(safe-area-inset-top)); right: 4px; }
   .ws-reader[data-page='chat']:has(.ws-rail-toggle:not([hidden])) .ws-chat-head { padding-right: calc(4px + var(--ws-phone-target)); }
 }
+
+/* Family folds share the sidebar's quiet type and ink. */
+.ws-sidebar-fold {
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 8px;
+  text-align: left;
+}
+.ws-channel-list > .ws-sidebar-fold,
+.ws-channel-group > .ws-sidebar-fold { display: block; margin-left: 22px; opacity: .65; }
+.ws-channel-row[aria-level]:not([aria-level="1"]) { padding-left: calc(16px + var(--sidebar-depth, 1) * 12px); }
+.ws-sidebar-count, .ws-sidebar-crumb { opacity: .6; font-family: var(--font-serif);
+  font-size: var(--type-label); }
+.ws-sidebar-count { margin-left: auto; white-space: nowrap; }
+
+.ws-sidebar-fold[data-fold="working"]::before { content: '▸ '; }
+.ws-sidebar-fold[data-fold="working"][aria-expanded="true"]::before { content: '▾ '; }

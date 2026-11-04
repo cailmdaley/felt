@@ -38,9 +38,10 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
     if (title) title.prepend(crumb)
     else host.prepend(crumb)
   }
-  if (family.lead !== index.card(card)) return
+  if (family.lead !== index.card(card) && family.root !== index.card(card)) return
+  const others = index.others(card)
   if (family.root !== index.card(card)) host.setAttribute('aria-label', `${family.root.name} / ${host.getAttribute('aria-label') ?? card.name}`)
-  const { working, needs } = familyCounts(family.others)
+  const { working, needs } = familyCounts(others)
   if (working || needs) {
     const count = document.createElement('button'); count.type = 'button'; count.className = 'kbn-thread-count'
     const label = document.createElement('span')
@@ -48,8 +49,8 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
     label.textContent = needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : `${working} working`
     count.append(label)
     count.title = [
-      family.others.yours > 0 && `${family.others.yours} your turn`,
-      family.others.review > 0 && `${family.others.review} awaiting review`,
+      others.yours > 0 && `${others.yours} your turn`,
+      others.review > 0 && `${others.review} awaiting review`,
       working > 0 && `${working} working elsewhere in this family`,
     ].filter(Boolean).join(', ')
     count.setAttribute('aria-label', `${count.title}; open its threads`)
@@ -61,7 +62,7 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
     const age = document.createElement('span'); age.className = 'kbn-row-elapsed'; age.textContent = elapsed
     end.prepend(age)
   }
-  const rest = family.askers.slice(1)
+  const rest = family.lead === index.card(card) ? family.askers.slice(1) : []
   if (!rest.length) return
   const list = document.createElement('div'); list.className = 'kbn-family-asks'
   list.setAttribute('role', 'list')

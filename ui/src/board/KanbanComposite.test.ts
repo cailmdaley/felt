@@ -17,13 +17,13 @@ describe('constitution roll-up', () => {
       fiber: { id, name: id, status, tempered, shuttle: { kind: 'oneshot' } },
     }))
     const board = buildKanbanResponseFromComposite(parseCompositeFeed({ host: 'local', fibers }))
-    expect(board.now.inFlight).toHaveLength(0)
+    expect(board.now.inFlight.map(c => c.id)).toEqual(['hub'])
     expect(board.now.drafts.map(c => c.id)).toStrictEqual(['hub-lookalike'])
     expect(board.now.awaitingReview.map(c => c.id)).toStrictEqual(['hub/folder/child/deep'])
-    expect(board.threads).toHaveLength(4)
-    expect(board.threads?.find(c => c.id === 'hub')?.threadSummary).toEqual({ unfinished: 2, waiting: 0, working: 0, toReview: 1, drafts: 1, archived: 2 })
+    expect(board.threads).toHaveLength(3)
+    expect(board.now.inFlight.find(c => c.id === 'hub')?.threadSummary).toEqual({ unfinished: 2, waiting: 0, working: 0, toReview: 1, drafts: 1, archived: 2 })
     expect(board.threads?.find(c => c.id.endsWith('/child'))?.threadSummary?.toReview).toBe(1)
-    expect(board.totals.inFlight).toBe(0)
+    expect(board.totals.inFlight).toBe(1)
   })
 })
 

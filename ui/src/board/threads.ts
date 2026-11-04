@@ -11,8 +11,8 @@ export const THREAD_LABEL: Record<ThreadState, string> = {
   waiting: 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
 }
 /**
- * What a family needs from the human, most urgent first. Its one Desk row
- * sits where the most urgent need anywhere in the tree puts it.
+ * What a family needs from the human, most urgent first. Its lead sits
+ * where the most urgent need in the tree puts it, beside the root's own row.
  */
 export type FamilyNeed = 'yours' | 'review' | 'working'
 const FAMILY_NEEDS: readonly FamilyNeed[] = ['yours', 'review', 'working']
@@ -221,11 +221,23 @@ export class ThreadIndex {
   family(card: KanbanCard): Family {
     return this.families.get(this.key(card)) ?? { root: card, lead: card, need: null, askers: [card], others: { yours: 0, review: 0, working: 0 } }
   }
-  /** The Desk's rows: each family's lead, once, in root order. */
+  /** The Desk keeps each root and the thread leading its family's need, in root order. */
   frontier(): KanbanCard[] {
     const rows: KanbanCard[] = []
-    for (const key of this.states.keys()) if (!this.parents.has(key)) rows.push(this.families.get(key)!.lead)
+    for (const key of this.states.keys()) if (!this.parents.has(key)) {
+      const { root, lead } = this.families.get(key)!
+      rows.push(root)
+      if (lead !== root) rows.push(lead)
+    }
     return rows
+  }
+  /** Every other family node, counted relative to the row displaying the count. */
+  others(card: KanbanCard): Record<FamilyNeed, number> {
+    const family = this.family(card), counts = { ...family.others }
+    const leadNeed = this.need(family.lead), ownNeed = this.need(this.card(card))
+    if (leadNeed) counts[leadNeed]++
+    if (ownNeed) counts[ownNeed]--
+    return counts
   }
   /** Cached parent-chain tooltips keep deep rail rendering linear in graph reads. */
   ancestryTitle(card: KanbanCard): string {

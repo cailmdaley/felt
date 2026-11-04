@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { registerSidebarTreeJourneys } from './sidebarTree.mjs'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
@@ -673,7 +674,7 @@ test('Desk action menus open on a phone long press without hover', async p => {
 
 test('Desk family action menus preserve native activation and Resting row stacking', async p => {
   const fixture = new URL(url); fixture.searchParams.set('example', 'threads'); await p.goto(fixture.href)
-  const family = p.locator('.kbn-desk .kbn-card').filter({ hasText: name })
+  const family = p.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]')
   await family.waitFor()
   await p.keyboard.press('j'); await p.keyboard.press('h'); await p.keyboard.press('Home')
   for (let row = 0; row < 10 && !await family.evaluate(el => el.classList.contains('kbn-key-selected')); row++) await p.keyboard.press('j')
@@ -3362,6 +3363,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await still(p, 'summoning Find', () => p.keyboard.press('/'))
 }, viewport)
 
+registerSidebarTreeJourneys(test)
 registerNavigationJourneys(test)
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)

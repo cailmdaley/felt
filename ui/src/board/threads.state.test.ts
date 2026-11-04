@@ -70,9 +70,9 @@ describe('a family sits where the most urgent need in its tree puts it', () => {
   const review = (id: string) => kid(id, { status: 'closed' })
   const place = (cards: KanbanCard[]) => {
     const index = new ThreadIndex(cards), rows = index.frontier()
-    expect(rows).toHaveLength(1)
     const family = index.family(rows[0])
-    return { lead: rows[0].id, need: family.need, askers: family.askers.map(c => c.id), others: family.others }
+    expect(rows).toEqual(family.root === family.lead ? [family.root] : [family.root, family.lead])
+    return { lead: family.lead.id, need: family.need, askers: family.askers.map(c => c.id), others: family.others }
   }
   it('Your turn outranks a verdict, which outranks a live worker', () => {
     expect(place([root(), review('r'), yours('y')])).toMatchObject({ lead: 'cmbx/y', need: 'yours', others: { review: 1, working: 1 } })
