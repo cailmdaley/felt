@@ -72,6 +72,11 @@ fi
 		t.Fatal(err)
 	}
 	write(filepath.Join(f.bin, "bash"), "#!/bin/sh\n[ \"$1\" != -lc ] || { shift; exec '"+realBash+"' -c \"$1\"; }\nexec '"+realBash+"' \"$@\"\n")
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*/lock) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\nfi\nexec '"+realGo+"' \"$@\"\n")
 	write(filepath.Join(f.bin, "ssh"), `#!/bin/sh
 shift
 exec bash -c "$*"
@@ -200,6 +205,16 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployLockBootstrapIsBoundedAndHomeHosted(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	cmd, log := f.start(t, "bounded-bootstrap", "CHECK_LOCK_BUILD=1")
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("lock bootstrap: %v %s", err, fleetRead(log))
 	}
 }
 
