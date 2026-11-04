@@ -266,6 +266,24 @@ func fleetTouch(t *testing.T, path string) {
 	}
 }
 
+func TestDeployCallerScriptIsImmutableDuringCheckoutEdits(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	cmd, log := f.start(t, "caller-edited")
+	deployAwait(t, "build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
+	replacement := strings.Repeat("# replacement bytes\n", 10000) + "printf 'mutated caller executed\\n' >&2; exit 66\n"
+	if err := os.WriteFile(filepath.Join(f.repo, "bin/shuttle-deploy"), []byte(replacement), 0755); err != nil {
+		t.Fatal(err)
+	}
+	fleetTouch(t, f.gate)
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("caller changed during deployment: %v %s", err, fleetRead(log))
+	}
+	if strings.Contains(fleetRead(log), "mutated caller executed") {
+		t.Fatal("running deploy read changed script bytes")
+	}
+}
+
 func TestDeploySSHParsesJoinedArgumentsAndLoadsLoginProfile(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)

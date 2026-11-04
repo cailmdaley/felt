@@ -42,6 +42,12 @@
 # preference to the checkout's, so a bundle that lands after the build would not
 # be the one served.
 
+# Read the entrypoint once: a checkout refresh or editor must not replace bytes
+# Bash has yet to read while an earlier host is building.
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  exec bash -c "$(<"$0")" "$0" "$@"
+fi
+
 set -uo pipefail
 
 for arg in "$@"; do
@@ -198,7 +204,7 @@ ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
 bad()  { printf '  %s✗%s %s: %s\n' "$RED" "$RESET" "${HOST:-deploy}" "$1" >&2; }
 say()  { printf '\n%s▸ %s%s\n' "$BOLD" "$1" "$RESET"; }
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 HOSTS="$FLEET_ORDER"
 PUSH=1
 HANDSHAKE=0
