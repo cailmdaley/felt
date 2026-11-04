@@ -154,7 +154,7 @@ defmodule Shuttle.Meeting do
     with_meeting_lock(fn ->
       with {:ok, snapshot, _context} <- inspect_current(opts),
            :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
-           %{state: state, phone: false} = row when state in ["loading", "live"] <-
+           %{state: "live", phone: false} = row <-
              snapshot.meeting,
            executable when is_binary(executable) <- find_hark(opts),
            {_output, 0} <-
