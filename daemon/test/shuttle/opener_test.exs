@@ -52,6 +52,7 @@ defmodule Shuttle.OpenerTest do
   end
 
   test "Rex-held worker reveals its immutable session despite a display rename" do
+    Env.put_app_env(:os_type, {:unix, :darwin})
     assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
     sid = FakeRex.fixture("session_create")["session_id"]
     FakeRex.sessions(Map.update!(FakeRex.state().sessions, sid, &%{&1 | label: "human label"}))
@@ -100,6 +101,7 @@ defmodule Shuttle.OpenerTest do
   end
 
   test "one open logs lookup, client, selection and activation timings" do
+    Env.put_app_env(:os_type, {:unix, :darwin})
     assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
 
     log =
