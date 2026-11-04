@@ -125,7 +125,9 @@ case "$1 $2" in
  'host check-owner') exit 0;;
  'daemon loop-present') exit 1;;
  'daemon activate-release') shift 2; TEST_RELEASE="$1"; export TEST_RELEASE; shift 2; exec "$@";;
- 'daemon prune-releases') echo prune >> "$EVENTS";;
+ 'daemon prune-releases')
+  if [ "${CHECK_OLD_PRUNE:-0}" = 1 ] && [ -d "$4/.leases" ]; then git -C "$3" worktree remove --force "$4/.leases" || exit 19; fi
+  echo prune >> "$EVENTS";;
  'daemon release') echo release >> "$EVENTS";;
  *) echo "unexpected shuttle $*" >&2; exit 20;;
 esac
@@ -212,6 +214,19 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployRollbackDoesNotExposeLeasesToOldPruners(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	cmd, log := f.startArgs(t, "old-pruner", "fake", []string{"--ref", f.sha}, "CHECK_OLD_PRUNE=1")
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("rollback: %v %s", err, fleetRead(log))
+	}
+	if _, err := os.Stat(filepath.Join(f.remote+".deploy", ".leases")); !os.IsNotExist(err) {
+		t.Fatalf("lease metadata exposed to old pruner: %v", err)
 	}
 }
 

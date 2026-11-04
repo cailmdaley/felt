@@ -220,7 +220,7 @@ func (a *app) daemonPruneReleasesCmd() *cobra.Command {
 					}
 					// Lease before removal, and hold it until Git finishes. A deploy
 					// takes this same lease before creating or using its worktree.
-					leases := filepath.Join(args[1], ".leases")
+					leases := filepath.Join(filepath.Dir(pointer), "deploy", "leases")
 					if err := os.MkdirAll(leases, 0700); err != nil {
 						return err
 					}
