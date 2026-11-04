@@ -399,7 +399,11 @@ defmodule Shuttle.Terminal.Rex do
         {:error, :not_found} ->
           {:cont, {:ok, names}}
 
-        {:error, _} ->
+        {:error, reason} ->
+          Logger.warning(
+            "Cannot inventory Rex worker blocks for #{s["session_id"]} (#{inspect(s["label"])}): #{inspect(reason)}"
+          )
+
           {:halt, {:error, :unknown}}
       end
     end)

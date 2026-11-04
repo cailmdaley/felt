@@ -32,10 +32,19 @@ defmodule Shuttle.Terminal.RexTest do
   end
 
   @tag :phantom
-  test "a failed block inventory cannot turn a persisted Rex binding into a live worker" do
+  @tag :inventory_diagnostic
+  test "a failed block inventory holds the whole inventory and names the unreadable session" do
     assert :ok = Rex.launch(FakeRex, @name, "/tmp", "/tmp/worker.sh", [])
+    assert {:ok, %{"bindings" => %{@name => binding}}} = RexBindings.read()
+    sid = binding["session_id"]
+    sessions = Map.update!(FakeRex.state().sessions, sid, &%{&1 | label: "unreadable family"})
+    FakeRex.sessions(sessions)
     FakeRex.reply("session.list_blocks", {"request timed out", :timeout})
-    assert {:error, :unknown} = Rex.list(FakeRex)
+    log = capture_log(fn -> assert {:error, :unknown} = Rex.list(FakeRex) end)
+    assert log =~ sid
+    assert log =~ "unreadable family"
+    assert log =~ "request timed out"
+    assert {:ok, %{"bindings" => %{@name => ^binding}}} = RexBindings.read()
   end
 
   test "version exposes unusable Rex configuration without probing the server", %{tmp_dir: dir} do
