@@ -4,11 +4,8 @@ defmodule Shuttle.Profile.FunctionsTest do
   alias Shuttle.Profile.Functions
 
   defmodule EmptyUidRunner do
-    def cmd("felt", ["-C", _store, "show", _uid, "-j"], _opts),
+    def cmd("felt", ["-C", _store, "show", _uid, "-j", "--exact"], _opts),
       do: {"not found", 1}
-
-    def cmd("felt", ["-C", _store, "ls", "-j", "-s", "all"], _opts),
-      do: {"[]", 0}
   end
 
   test "captures selected function counters for a process that has exited" do
@@ -23,7 +20,7 @@ defmodule Shuttle.Profile.FunctionsTest do
       assert {Jason, :decode, 1} in state.active
       assert {Jason, :decode, 2} in state.active
       assert {Shuttle.Poller, :run_shuttle_listing, 5} in state.active
-      assert {Shuttle.FeltStores, :felt_ls_json, 1} in state.active
+      assert {Shuttle.FeltStores, :felt_show_json, 3} in state.active
       assert {Shuttle.FiberDocuments, :ls_rows, 4} in state.active
 
       test_pid = self()
@@ -123,7 +120,7 @@ defmodule Shuttle.Profile.FunctionsTest do
 
     try do
       state = Functions.start(session)
-      assert {Shuttle.FeltStores, :felt_ls_json, 1} in state.active
+      assert {Shuttle.FeltStores, :felt_show_json, 3} in state.active
 
       tasks =
         for _ <- 1..45 do
@@ -164,7 +161,7 @@ defmodule Shuttle.Profile.FunctionsTest do
 
       helper_pids =
         result["source_process_functions"]
-        |> Enum.filter(&(&1["function"] == "Shuttle.FeltStores.felt_ls_json/1"))
+        |> Enum.filter(&(&1["function"] == "Shuttle.FeltStores.felt_show_json/3"))
         |> MapSet.new(& &1["pid"])
 
       assert MapSet.subset?(decode_pids, helper_pids)

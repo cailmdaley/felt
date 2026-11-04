@@ -19,7 +19,7 @@ defmodule Shuttle.Profile.Functions do
     {Shuttle.Poller, :owner_feed_base, 1},
     {Shuttle.Poller, :stamp_runtime, 3},
     {Shuttle.Poller, :stamp_pending_results, 2},
-    {Shuttle.FeltStores, :felt_ls_json, 1},
+    {Shuttle.FeltStores, :felt_show_json, 3},
     {Shuttle.FiberDocuments, :ls_rows, 4},
     {Shuttle.Poller.Snapshot, :build_snapshot, 1},
     {Shuttle.Poller.Snapshot, :put_runtime, 5},
@@ -55,7 +55,7 @@ defmodule Shuttle.Profile.Functions do
   @max_rows 40
   @source_helpers [
     "Shuttle.Poller.run_shuttle_listing/5",
-    "Shuttle.FeltStores.felt_ls_json/1",
+    "Shuttle.FeltStores.felt_show_json/3",
     "Shuttle.FiberDocuments.ls_rows/4"
   ]
   @max_source_process_rows @max_rows * length(@source_helpers)
