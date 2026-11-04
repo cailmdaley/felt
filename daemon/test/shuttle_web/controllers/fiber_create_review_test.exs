@@ -6,6 +6,41 @@ defmodule ShuttleWeb.FiberCreateReviewTest do
   @endpoint ShuttleWeb.Endpoint
 
   @tag :tmp_dir
+  test "loom-only owners create in a polled namespace instead of initializing private stores", %{
+    tmp_dir: tmp
+  } do
+    for layout <- ["no-store", "private-store"] do
+      loom = Path.join([tmp, layout, "loom"])
+      project = Path.join([tmp, layout, "project"])
+      File.mkdir_p!(Path.join(loom, ".felt"))
+      File.mkdir_p!(project)
+      if layout == "private-store", do: File.mkdir_p!(Path.join(project, ".felt"))
+      Env.put_env("SHUTTLE_STORES", loom)
+      id = "science/team/hub/thread"
+      uid = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+
+      response =
+        post(
+          api_conn(),
+          "/api/v1/fiber/create",
+          Jason.encode!(%{
+            id: id,
+            uid: uid,
+            name: "Thread",
+            frontmatter: %{status: "active", shuttle: %{kind: "oneshot", project_dir: project}}
+          })
+        )
+        |> json_response(200)
+
+      {:ok, felt_root} = Shuttle.Realpath.resolve(Path.join(loom, ".felt"))
+      assert String.starts_with?(response["path"], felt_root <> "/")
+      assert {:ok, %{fiber_id: ^id, uid: ^uid}} = Shuttle.FeltStores.resolve_request(uid)
+      assert Path.wildcard(Path.join([project, ".felt", "**", "*.md"])) == []
+      if layout == "no-store", do: refute(File.exists?(Path.join(project, ".felt")))
+    end
+  end
+
+  @tag :tmp_dir
   test "transferred UIDs cannot duplicate an existing owner document", %{tmp_dir: tmp} do
     loom = Path.join(tmp, "loom")
     project = Path.join(tmp, "project")

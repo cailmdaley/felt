@@ -86,6 +86,9 @@ time.
 The owning daemon creates the exact enclosing-store-relative `id`, without requiring its parent document to exist.
 A project whose `.felt` points into a subtree uses the enclosing store's namespace, so the project prefix is not added again.
 It validates an armed constitution's `project_dir` on that host and stamps its `shuttle.host`.
+The worker cwd does not create or register a store: creation uses a configured physical store, preferring the cwd's namespace only when that namespace is polled.
+The owner refuses confirmation when the resulting path is outside every polled store.
+Transferred UIDs already present on the owner are refused.
 The response is `{id, path, uid, host, status}` after the owner reads back the written document.
 `path` is the owner's Markdown filename, `uid` is the intrinsic fiber identity, and `host` and `status` confirm the owning host and persisted status.
 A resumed local draft is retained unless the response confirms the requested identity and armed status.
