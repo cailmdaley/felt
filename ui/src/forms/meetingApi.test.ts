@@ -120,6 +120,17 @@ describe('joinMeeting', () => {
       .resolves.toMatchObject({ kind: 'recording', error: 'receiver native inbox denied this message; no turn started', meeting: { state: 'live' } })
   })
 
+  it('holds Join when the start response body is lost', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue({
+      ok: true, status: 200, json: async () => { throw new Error('lost body') },
+    } as unknown as Response)
+    const input = { fiberId: 'task', mode: 'phone' as const, recorder: 'original' }
+    await expect(joinMeeting('https://lost-body.example', input, fetcher))
+      .resolves.toMatchObject({ kind: 'error', uncertain: true, recorder: 'original' })
+    await joinMeeting('https://lost-body.example', input, fetcher)
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
   it('keeps a recording that the worker did not receive distinct from a failed start', async () => {
     const recording = vi.fn<typeof fetch>().mockResolvedValue(
       reply({ recording: true, error: 'Fiber is closed — reopen it before dispatching.', meeting: { state: 'live' } }, 422),

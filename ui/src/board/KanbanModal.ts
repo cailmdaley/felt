@@ -81,6 +81,7 @@ import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { joinDeliveryPhrase, meetingStatusUrl, supportedMeetingModes, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
 import { joinMeeting as requestMeetingJoin, setMeetingSystemAudio as requestMeetingSystemAudio, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
+import { recordingStartHold } from '../forms/recordingStart'
 import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
 import {
   collectCards,
@@ -282,7 +283,6 @@ export class KanbanModal {
   private compositeEtag: string | null = null
   private meetingStatus: MeetingStatus = { available: false, modes: [], recorder: null, meeting: null }
   private meetingRecorder: string | null = null
-  private meetingStartUncertain = false
   private meetingPollTimer: number | null = null
   private meetingClockTimer: number | null = null
   private meetingFetchPromise: Promise<void> | null = null
@@ -379,7 +379,7 @@ export class KanbanModal {
       this.openWorkerAfterGesture,
       {
         meeting: {
-          canJoin: () => !this.meetingStartUncertain && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
+          canJoin: () => !recordingStartHold(this.shuttleBase) && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
           modes: () => supportedMeetingModes(this.meetingStatus, isMobileViewport()),
           recorder: () => this.meetingStatus.recorder ?? null,
           join: (card, mode, note, options) => this.joinCardMeeting(card, mode, note, options),
@@ -456,7 +456,7 @@ export class KanbanModal {
     composeNote: () => Promise<string>,
     { session, systemAudio = true }: MeetingJoinOptions,
   ): Promise<MeetingJoinResult> {
-    if (this.meetingStartUncertain) return { error: 'Recording start is unconfirmed. Inspect the recorder before starting another meeting.', delivered: false }
+    if (recordingStartHold(this.shuttleBase)) return { error: 'Recording start is unconfirmed. Inspect the recorder before starting another meeting.', delivered: false }
     const recorder = this.meetingStatus.recorder
     let opening: PhoneCaptureAttempt | undefined
     let generation: number | undefined
@@ -491,7 +491,6 @@ export class KanbanModal {
     })
     if (outcome.kind === 'error') {
       if (outcome.uncertain) {
-        this.meetingStartUncertain = true
         this.meetingRecorder = outcome.recorder ?? recorder ?? null
         void this.refreshMeeting()
       }
@@ -1703,7 +1702,7 @@ export class KanbanModal {
         const availabilityChanged = status.available !== this.meetingStatus.available
         this.meetingStatus = status
         if (status.meeting) this.meetingRecorder = status.recorder ?? status.meeting.recorder ?? null
-        else if (!this.meetingStartUncertain) this.meetingRecorder = null
+        else if (!recordingStartHold(this.shuttleBase)) this.meetingRecorder = null
         this.phoneAudio.observe(status.meeting)
         this.syncMeetingClock()
         this.dock.syncMeeting()

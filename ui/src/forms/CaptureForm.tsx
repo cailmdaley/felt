@@ -23,7 +23,7 @@
  * Capture's own.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { AppDialog } from './AppDialog'
 import { injectStyles } from './injectStyles'
 import {
@@ -39,6 +39,7 @@ import type { PhoneCaptureAttempt, PhoneCaptureHooks } from '../board/phoneMeeti
 import { meetingStatusUrl, parseMeetingRecord, type MeetingRecord } from '../board/meeting'
 import { rememberedMeetingProject, rememberMeetingProject } from './meetingProject'
 import { parseCaptureMeetingCapabilities, type MeetingLanguage, type MeetingMode } from './meetingApi'
+import { holdRecordingStart, recordingStartHold, resolveRecordingStart, subscribeRecordingStart } from './recordingStart'
 import { agentGroups, resolveEffort, type AgentEntry } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'
 import type { Host, Project } from './projectModel'
@@ -120,7 +121,8 @@ export function CaptureForm({
   })
   const [initialSelection] = useState(() => mobileMeeting ? rememberedMeetingProject(hosts, availableProjects) : undefined)
   const [submitting, setSubmitting] = useState(false)
-  const [startUncertain, setStartUncertain] = useState(false)
+  const heldRecorder = useSyncExternalStore(subscribeRecordingStart, () => recordingStartHold(shuttleBase))
+  const startUncertain = heldRecorder !== null
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const mounted = useRef(true)
@@ -202,7 +204,7 @@ export function CaptureForm({
   }
 
   const submit = async (): Promise<void> => {
-    if (submittingRef.current || startUncertain) return
+    if (submittingRef.current || startUncertain || recordingStartHold(shuttleBase)) return
     const trimmed = prompt.trim()
     if (meetingIntent && meetingCapabilities.loading) {
       setError('Meeting availability is still loading.')
@@ -232,7 +234,11 @@ export function CaptureForm({
       pendingAudio.current = opening ?? null
       const generation = opening ? await opening.ready : null
       if (!mounted.current) return
+      if (requestedMeetingMode && recordingStartHold(shuttleBase)) {
+        throw new Error('Recording start is unconfirmed. Inspect the recorder before starting another meeting.')
+      }
       startSent = true
+      if (requestedMeetingMode) holdRecordingStart(shuttleBase, meetingCapabilities.recorder)
       const res = await fetch(`${shuttleBase}/api/v1/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -249,15 +255,18 @@ export function CaptureForm({
           recorder: meetingCapabilities.recorder,
         })),
       })
-      const data = (await res.json().catch(() => ({}))) as CaptureResponseData
+      const data = (await res.json()) as CaptureResponseData
       startAnswered = true
       const outcome = captureOutcome(res, data, {
         projectDir: selectedProject.path,
         meetingMode: requestedMeetingMode,
         host: selectedHost.label,
       })
+      if (requestedMeetingMode && !(outcome.kind === 'error' && outcome.uncertain)) resolveRecordingStart(shuttleBase)
       if (outcome.kind === 'error') {
-        if (outcome.uncertain) setStartUncertain(true)
+        if (outcome.uncertain) {
+          holdRecordingStart(shuttleBase, typeof data.recorder === 'string' ? data.recorder : meetingCapabilities.recorder)
+        }
         throw new Error(outcome.message)
       }
       if (outcome.kind === 'meeting-recording') {
@@ -283,7 +292,6 @@ export function CaptureForm({
       pendingAudio.current = null
       submittingRef.current = false
       const uncertain = requestedMeetingMode !== null && startSent && !startAnswered
-      if (uncertain) setStartUncertain(true)
       setError(uncertain
         ? 'Recording start is unconfirmed. Inspect the recorder before starting another meeting; this form will not retry.'
         : daemonErrorMessage(err))
@@ -309,6 +317,13 @@ export function CaptureForm({
       onOpenAutoFocus={mobileMeeting ? (event) => event.preventDefault() : undefined}
     >
       <div className={`form-sheet${mobileMeeting && meetingEnabled ? ' capture-mobile-meeting' : ''}`}  onKeyDown={handleKeyDown}>
+        {startUncertain && !submitting && <div className="form-error" role="alert">
+          <p>Recording start is unconfirmed on {heldRecorder}. Inspect the recorder before starting another meeting.</p>
+          <button type="button" className="form-btn form-cancel" data-resolve-recording onClick={() => {
+            resolveRecordingStart(shuttleBase)
+            setError(null)
+          }}>I inspected the recorder; release the hold</button>
+        </div>}
         <textarea
           ref={textareaRef}
           className="capture-yap"

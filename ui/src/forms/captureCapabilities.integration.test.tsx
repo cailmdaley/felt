@@ -72,7 +72,12 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   mobile = false
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: mobile && query === MOBILE_MEDIA })))
-  vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() })
+  const storage = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+  })
   status = { available: true, modes, recorder: 'local', meeting: null }
   bind = vi.fn()
   begin = vi.fn(() => ({ ready: Promise.resolve(7), bind, cancel: vi.fn() }))
@@ -158,12 +163,58 @@ describe('rendered Capture capabilities', () => {
     expect(meetingResult).toHaveBeenCalledWith(expect.objectContaining({ meeting: expect.objectContaining({ recorder: 'local' }) }))
   })
 
-  it.each(['network', 'remote uncertainty'])('does not retry an ambiguous meeting start: %s', async (failure) => {
+  it('rechecks the shared hold after opening phone audio before sending Capture', async () => {
+    mobile = true
+    let ready!: (generation: number) => void
+    begin.mockReturnValue({ ready: new Promise(resolve => { ready = resolve }), bind, cancel: vi.fn() })
+    await mount()
+    click('.form-submit')
+    const { joinMeeting } = await import('./meetingApi')
+    await act(async () => {
+      await joinMeeting(base, { fiberId: 'task', mode: 'call', recorder: 'local' }, async () => { throw new Error('lost response') })
+      ready(7)
+    })
+    await tick()
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/capture'))).toHaveLength(0)
+    expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(true)
+  })
+
+  it('keeps an ambiguous start held across Capture remount and blocks board join', async () => {
+    const storage = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    })
+    mobile = true
+    await mount()
+    fetcher.mockImplementation(async (url: string) => {
+      if (url.endsWith('/capture')) throw new Error('lost response')
+      return response({ available: true, modes, recorder: 'remote', meeting: null })
+    })
+    click('.form-submit')
+    await tick()
+    await act(async () => root!.unmount())
+    root = null
+    await mount()
+    expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(true)
+    const { joinMeeting } = await import('./meetingApi')
+    const joined = await joinMeeting(base, { fiberId: 'task', mode: 'phone' }, fetcher as unknown as typeof fetch)
+    expect(joined.kind).toBe('error')
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith('/meeting/join'))).toBe(false)
+    expect(document.body.textContent).toContain('local')
+    click('[data-resolve-recording]')
+    await tick()
+    expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(false)
+  })
+
+  it.each(['network', 'remote uncertainty', 'lost body'])('does not retry an ambiguous meeting start: %s', async (failure) => {
     mobile = true
     await mount()
     fetcher.mockImplementation(async (url: string) => {
       if (!url.endsWith('/capture')) return response(status)
       if (failure === 'network') throw new Error('lost response')
+      if (failure === 'lost body') return { ok: true, status: 200, json: async () => { throw new Error('lost body') } }
       return { ok: false, status: 502, json: async () => ({ recording_unknown: true, recorder: 'remote', error: 'Inspect the recorder before retrying.' }) }
     })
     click('.form-submit')

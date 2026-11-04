@@ -1,4 +1,5 @@
 import { meetingJoinable, parseMeetingRecord, parseMeetingStatus, type MeetingRecord, type MeetingMode } from '../board/meeting'
+import { holdRecordingStart, recordingStartHold, resolveRecordingStart } from './recordingStart'
 export type { MeetingMode } from '../board/meeting'
 export type MeetingLanguage = 'auto' | 'fr' | 'en'
 
@@ -118,23 +119,32 @@ export async function joinMeeting(
   input: JoinMeetingInput,
   fetcher: typeof fetch = fetch,
 ): Promise<JoinMeetingOutcome> {
+  if (recordingStartHold(shuttleBase)) return {
+    kind: 'error', message: 'Recording start is unconfirmed. Inspect the recorder in Capture before starting another meeting.',
+  }
+  holdRecordingStart(shuttleBase, input.recorder ?? null)
   let response: Response
+  let payload: Record<string, unknown>
   try {
     response = await fetcher(`${shuttleBase}/api/v1/meeting/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(joinMeetingBody(input)),
     })
+    payload = await response.json() as Record<string, unknown>
   } catch (error: unknown) {
     return { kind: 'error', uncertain: true, recorder: input.recorder,
       message: `Recording start couldn't be confirmed: ${(error as Error)?.message ?? String(error)}. Inspect the recorder before starting another meeting.` }
   }
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
-  if (payload.recording_unknown === true) return {
-    kind: 'error', uncertain: true,
-    recorder: typeof payload.recorder === 'string' ? payload.recorder : input.recorder,
-    message: responseError(payload, response.status),
+  if (payload.recording_unknown === true) {
+    holdRecordingStart(shuttleBase, typeof payload.recorder === 'string' ? payload.recorder : input.recorder ?? null)
+    return {
+      kind: 'error', uncertain: true,
+      recorder: typeof payload.recorder === 'string' ? payload.recorder : input.recorder,
+      message: responseError(payload, response.status),
+    }
   }
+  resolveRecordingStart(shuttleBase)
   const delivery = payload.delivery && typeof payload.delivery === 'object'
     ? payload.delivery as Record<string, unknown>
     : null
