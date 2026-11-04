@@ -331,6 +331,8 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	syscall.CloseOnExec(sockets[0])
+	syscall.CloseOnExec(sockets[1])
 	parent, child := os.NewFile(uintptr(sockets[0]), "activation-owner"), os.NewFile(uintptr(sockets[1]), "activation-transaction")
 	defer parent.Close()
 	defer child.Close()

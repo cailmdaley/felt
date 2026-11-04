@@ -190,6 +190,8 @@ Do not delete lock files to recover a deploy; their existence is not evidence th
 
 **A transaction dies with its observer.** SSH is attached and streams output directly; its exit status and the bootstrap's completion sentinel determine success. There is no detached runner or result polling.
 The same helper supervises the local transport and the target transaction. Only the deployer holds its caller lifeline's write end: even a killed deployer closes the transport's stdin. On the target, observer EOF, TERM, INT or HUP cancels lock acquisition or sends TERM to the owned transaction group, then KILL after three seconds. A forgotten waiter cannot acquire a lock and deploy later.
+The activation socket's original endpoints are close-on-exec. Only its transaction endpoint is passed as fd 5; preparation, activation commands and harnesses close fd 5 before starting children, so owner death gives the transaction EOF.
+
 SSH uses a 15-second connect timeout and 15-second keepalives with three missed replies, including preflights and rsync transports, detecting a dead established link in about a minute. Failed preflights retain native SSH stderr.
 
 `SHUTTLE_DEPLOY_TIMEOUT_SECONDS` bounds each attached transaction, including login/bootstrap, lock waits, builds and finishing work; it defaults to 7200 seconds. The caller and target share that absolute deadline. It bounds a hung transport or scheduler without waiting indefinitely for a result file.
