@@ -58,6 +58,7 @@ if [ "${CI_GATE:-}" = 1 ]; then
 fi
 `)
 	write(filepath.Join(f.repo, "tracked"), "target\n")
+	write(filepath.Join(f.repo, "package.json"), `{"name":"felt"}`)
 	write(filepath.Join(f.repo, "bin/shuttle-launch"), `#!/bin/sh
 sha=$(git -C "${TEST_RELEASE%/bin/rel}" rev-parse HEAD)
 printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
@@ -138,6 +139,12 @@ cat "$STATE"
 	for name, body := range map[string]string{"systemctl": "exit 1", "launchctl": "exit 1", "lsof": "exit 0", "pi": "exit 0"} {
 		write(filepath.Join(f.bin, name), "#!/bin/sh\n"+body+"\n")
 	}
+	write(filepath.Join(f.bin, "pi"), `#!/bin/sh
+if [ -n "${PI_CHECKOUT:-}" ]; then
+ echo "pi-inspect $(git -C "$PI_CHECKOUT" rev-parse HEAD)" >> "$EVENTS"
+ printf '  %s\n    %s\n' "$PI_CHECKOUT" "$PI_CHECKOUT"
+fi
+`)
 	// No listener PID can ever reach xargs/kill; the fake returns an empty list.
 	write(f.state, `{"git_short_sha":"0000000","release_path":"/old","ready":true,"booted_at":"2026-01-01T00:00:00Z"}`)
 	f.env = append(os.Environ(), "HOME="+f.home, "PATH="+f.bin+":"+os.Getenv("PATH"), "FAKE_BIN="+f.bin, "FLEET_ROOT="+f.root, "EVENTS="+f.events, "STATE="+f.state, "BUILD_GATE="+f.gate, "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0", "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1", "SHUTTLE_AGENTS_FILE="+filepath.Join(f.root, "absent"), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
@@ -214,6 +221,47 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployRefreshesCheckoutAfterReleaseBeforePiInspection(t *testing.T) {
+	t.Parallel()
+	for _, dirty := range []bool{false, true} {
+		t.Run(fmt.Sprint(dirty), func(t *testing.T) {
+			f := newDeployFleet(t)
+			fleetTouch(t, f.gate)
+			old := f.sha
+			if err := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("new"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			f.git(t, f.repo, "commit", "-am", "new")
+			f.git(t, f.repo, "push")
+			f.sha = f.git(t, f.repo, "rev-parse", "HEAD")
+			extra := []string{"PI_CHECKOUT=" + f.remote}
+			if dirty {
+				if err := os.WriteFile(filepath.Join(f.remote, "tracked"), []byte("my edits"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				extra = nil
+			}
+			cmd, log := f.start(t, "fresh-checkout", extra...)
+			if err := cmd.Wait(); err != nil {
+				t.Fatalf("deploy: %v %s", err, fleetRead(log))
+			}
+			got := f.git(t, f.remote, "rev-parse", "HEAD")
+			if !dirty && got != f.sha {
+				t.Fatalf("regular checkout stayed stale: %s", got)
+			}
+			if dirty && (got != old || !strings.Contains(fleetRead(log), "checkout freshness: left")) {
+				t.Fatalf("dirty checkout not preserved/advised: %s %s", got, fleetRead(log))
+			}
+			if !dirty {
+				events := fleetRead(f.events)
+				if strings.Index(events, "release\n") > strings.Index(events, "pi-inspect "+f.sha) || !strings.Contains(events, "pi-inspect "+f.sha) {
+					t.Fatalf("Pi inspected before release/freshness: %s", events)
+				}
+			}
+		})
 	}
 }
 
