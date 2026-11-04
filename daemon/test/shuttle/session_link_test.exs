@@ -234,6 +234,39 @@ defmodule Shuttle.SessionLinkTest do
     assert SessionLink.stats(opts[:server]).bytes_read == stable
   end
 
+  test "an unchanged consumed transcript is statted without opening it again" do
+    roots = fixture()
+    path = claude_path(roots)
+    File.write!(path, line(bridge(@first)))
+    parent = self()
+
+    after_pass = fn _, _, _ ->
+      send(parent, {:checked, self()})
+      receive do: (:continue -> :ok)
+    end
+
+    {pid, opts} = start_resolver(roots, after_pass: after_pass)
+    assert %{availability: :resolving} = SessionLink.resolve(@session, opts)
+    assert_receive {:checked, ^pid}
+    trace = :trace.session_create(:session_link_unchanged, self(), [])
+
+    try do
+      :trace.function(trace, {Shuttle.FS, :open, 2}, true, [:local])
+      :trace.function(trace, {Shuttle.FS, :stat, 2}, true, [:local])
+      :trace.process(trace, pid, true, [:call])
+      assert SessionLink.cached_url(@session, opts) == @first
+      send(pid, :continue)
+      assert_receive {:checked, ^pid}
+      delivered = :trace.delivered(trace, pid)
+      assert_receive {:trace_delivered, ^pid, ^delivered}
+      assert_receive {:trace, ^pid, :call, {Shuttle.FS, :stat, [^path, _]}}
+      refute_receive {:trace, ^pid, :call, {Shuttle.FS, :open, [^path, _]}}, 0
+    after
+      send(pid, :continue)
+      :trace.session_destroy(trace)
+    end
+  end
+
   test "an incomplete final JSONL line is retained and parsed only after newline" do
     roots = fixture()
     path = claude_path(roots)

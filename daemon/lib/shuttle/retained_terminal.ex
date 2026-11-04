@@ -1,6 +1,6 @@
 defmodule Shuttle.RetainedTerminal do
   @moduledoc "Rex auxiliary launches with durable ownership, exit receipts and output."
-  alias Shuttle.{FS, Rex}
+  alias Shuttle.{Env, FS, Rex}
 
   def rex?(opts \\ []),
     do: Keyword.get(opts, :terminal, Shuttle.Terminal.primary()) == Shuttle.Terminal.Rex
@@ -100,6 +100,41 @@ defmodule Shuttle.RetainedTerminal do
   end
 
   defp inspect_launch(name, record, runner, opts) do
+    if linux_child_alive?(record) do
+      {:ok, observation(record, false)}
+    else
+      inspect_rex_launch(name, record, runner, opts)
+    end
+  end
+
+  # The receipt's child belongs to the unique retained wrapper. This is only
+  # a positive proof; missing or ambiguous kernel evidence falls back to Rex.
+  # observe/3 has already checked the server instance before reaching here.
+  defp linux_child_alive?(%{"session_id" => sid, "block_id" => bid, "dir" => dir})
+       when is_binary(sid) and is_binary(bid) do
+    proc = Env.app(:proc_root, "/proc")
+    script = Path.join(dir, "run.sh")
+
+    with {:unix, :linux} <- Env.app(:os_type) || :os.type(),
+         {:ok, receipt} <- FS.read(Path.join(dir, "receipt")),
+         ["running", child, _started] <- String.split(String.trim(receipt), "|"),
+         {pid, ""} when pid > 0 <- Integer.parse(child),
+         {:ok, cmdline} <- FS.read(Path.join([proc, child, "cmdline"])),
+         true <- cmdline != "",
+         {:ok, status} <- FS.read(Path.join([proc, child, "status"])),
+         [_, parent] <- Regex.run(~r/^PPid:\s+([1-9][0-9]*)$/m, status),
+         {:ok, parent_cmdline} <- FS.read(Path.join([proc, parent, "cmdline"])),
+         [shell, "-l", ^script] <- String.split(parent_cmdline, <<0>>, trim: true),
+         true <- Path.basename(shell) in ["bash", "-bash"] do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp linux_child_alive?(_), do: false
+
+  defp inspect_rex_launch(name, record, runner, opts) do
     with {:ok, record} <- resolve(record, runner),
          :ok <- write(name, record, opts),
          {:ok, blocks} <- Rex.blocks(runner, record["session_id"]) do
@@ -265,6 +300,12 @@ defmodule Shuttle.RetainedTerminal do
   defp locked(name, opts, fun),
     do: Shuttle.Terminal.with_lock({__MODULE__, path(name, opts)}, fun)
 
-  defp integer(value), do: String.to_integer(value)
+  defp integer(value) do
+    case Integer.parse(value) do
+      {number, ""} -> number
+      _ -> nil
+    end
+  end
+
   defp quote_sh(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 end

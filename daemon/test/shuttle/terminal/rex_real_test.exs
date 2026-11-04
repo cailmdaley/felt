@@ -197,7 +197,10 @@ defmodule Shuttle.Terminal.RexRealTest do
       "work/design/family/b"
     ])
 
-    names = ["probe-family-b", "probe-family-a"]
+    suffix = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+    a = "probe-family-#{suffix}-a"
+    b = "probe-family-#{suffix}-b"
+    names = [b, a]
     on_exit(fn -> Enum.each(names, &File.rm(WorkerProcess.script_path(&1))) end)
 
     for {name, leaf} <- Enum.zip(names, ["b", "a"]) do
@@ -210,14 +213,14 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {:ok, [%{"session_id" => sid, "label" => "design/family"}]} = Rex.sessions(@runner)
     assert {:ok, [%{"label" => "└ a"}, %{"label" => "└ b"}]} = Rex.windows(@runner, sid)
     assert {:ok, doc} = RexBindings.read()
-    assert doc["bindings"]["probe-family-a"]["session_id"] == sid
-    assert doc["bindings"]["probe-family-b"]["session_id"] == sid
+    assert doc["bindings"][a]["session_id"] == sid
+    assert doc["bindings"][b]["session_id"] == sid
     assert {:ok, blocks} = Rex.blocks(@runner, sid)
     assert Enum.sort(Enum.map(blocks, & &1["label"])) == Enum.sort(names)
-    assert {"", 0} = Terminal.stop(@runner, "probe-family-a", backends: [Backend])
-    assert :present = Backend.probe(@runner, "probe-family-b")
+    assert {"", 0} = Terminal.stop(@runner, a, backends: [Backend])
+    assert :present = Backend.probe(@runner, b)
     assert {:ok, [%{"label" => "└ b"}]} = Rex.windows(@runner, sid)
-    assert {"", 0} = Terminal.stop(@runner, "probe-family-b", backends: [Backend])
+    assert {"", 0} = Terminal.stop(@runner, b, backends: [Backend])
     assert {:ok, []} = Rex.sessions(@runner)
   end
 
