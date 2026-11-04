@@ -57,10 +57,14 @@ defmodule Shuttle.StandingExitRegressionTest do
     assert {_, 0} = System.cmd("go", ["build", "-o", helper, fixture], stderr_to_stdout: true)
     port = Port.open({:spawn_executable, helper}, [:binary, :exit_status, args: [c.path]])
     assert_receive {^port, {:data, "locked\n"}}, 30_000
+
     try do
       task = Task.async(fn -> LifecycleStore.mark_awaiting("role") end)
       assert Task.yield(task, 200) == nil, "daemon mutation bypassed the CLI's advisory lock"
-      text = File.read!(c.path) |> String.replace("Worker result.", "Concurrent committed result.")
+
+      text =
+        File.read!(c.path) |> String.replace("Worker result.", "Concurrent committed result.")
+
       File.write!(c.path, text)
       Port.command(port, "\n")
       assert {:ok, _} = Task.await(task, 30_000)

@@ -5067,9 +5067,6 @@ defmodule Shuttle.Poller do
 
           {:ok, fiber} ->
             cond do
-              not host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) ->
-                {state, {:error, :foreign_host}}
-
               Map.get(fiber, "status") == "closed" ->
                 {state, {:error, :closed}}
 
@@ -5085,6 +5082,9 @@ defmodule Shuttle.Poller do
               # keyed by the fiber's uid; without one there is no name to take.
               Dispatcher.session_name(fiber_id, Map.get(fiber, "uid")) == nil ->
                 {state, {:error, :uid_missing}}
+
+              not host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) ->
+                {state, {:error, :foreign_host}}
 
               true ->
                 register_claimed_session(state, fiber_id, fiber, tmux_session, opts)
