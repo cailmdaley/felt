@@ -54,7 +54,7 @@ defmodule Shuttle.StandingExitRegressionTest do
   test "standing exit takes the real Go document lock and preserves a committed body", c do
     helper = Path.join(c.root, "fiber-lock")
     fixture = Path.expand("../fixtures/fiber_lock/main.go", __DIR__)
-    assert {_, 0} = System.cmd("go", ["build", "-o", helper, fixture], stderr_to_stdout: true)
+    assert {_, 0} = System.cmd("go", ["build", "-p", "2", "-o", helper, fixture], stderr_to_stdout: true)
     port = Port.open({:spawn_executable, helper}, [:binary, :exit_status, args: [c.path]])
     assert_receive {^port, {:data, "locked\n"}}, 30_000
 
@@ -102,7 +102,7 @@ defmodule Shuttle.StandingExitRegressionTest do
     assert File.read!(c.path) =~ "status: closed"
   end
 
-  test "accept followed by a later real dispatch does not manufacture a conclusion", c do
+  test "accept followed by a later dispatch stamp does not manufacture a conclusion", c do
     assert {:ok, _} = Shuttle.CLI.run(["-C", c.root, "accept", "role", "--local"])
     assert {:ok, output} = Shuttle.CLI.run(["-C", c.root, "show", "role", "--json"])
     accepted = Jason.decode!(output)
