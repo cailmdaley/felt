@@ -204,7 +204,7 @@ export function CaptureForm({
   }
 
   const submit = async (): Promise<void> => {
-    if (submittingRef.current || startUncertain || recordingStartHold(shuttleBase)) return
+    if (submittingRef.current || (meetingEnabled && (startUncertain || recordingStartHold(shuttleBase)))) return
     const trimmed = prompt.trim()
     if (meetingIntent && meetingCapabilities.loading) {
       setError('Meeting availability is still loading.')
@@ -412,7 +412,7 @@ export function CaptureForm({
           verb={meetingEnabled ? 'start meeting' : 'spawn'}
           submitLabel={submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start meeting' : 'Spawn'}
           submitting={submitting}
-          disabled={submitting || startUncertain || (meetingIntent && !meetingAvailable) || (!meetingEnabled && !prompt.trim())}
+          disabled={submitting || (meetingEnabled && startUncertain) || (meetingIntent && !meetingAvailable) || (!meetingEnabled && !prompt.trim())}
           tone="cobalt"
           onCancel={onCancel}
           onSubmit={() => void submit()}

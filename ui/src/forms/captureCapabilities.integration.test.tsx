@@ -179,6 +179,18 @@ describe('rendered Capture capabilities', () => {
     expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(true)
   })
 
+  it('allows a plain note while a recording start is held', async () => {
+    const { holdRecordingStart } = await import('./recordingStart')
+    holdRecordingStart(base, 'local')
+    await mount({}, false)
+    yap()
+    expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(false)
+    click('.form-submit')
+    await tick()
+    expect(captureBody()).not.toHaveProperty('meeting')
+    expect(spawned).toHaveBeenCalledOnce()
+  })
+
   it('keeps an ambiguous start held across Capture remount and blocks board join', async () => {
     const storage = new Map<string, string>()
     vi.stubGlobal('localStorage', {
