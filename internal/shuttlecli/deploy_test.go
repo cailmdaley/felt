@@ -703,7 +703,8 @@ func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(paths[1], "untracked"), []byte("dirty"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	leaseDir := filepath.Join(deployRoot, ".leases")
+	env := testEnv(t)
+	leaseDir := filepath.Join(env.Getenv("HOME"), ".shuttle", "deploy", "leases")
 	if err := os.MkdirAll(leaseDir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -727,7 +728,6 @@ func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v %s", err, out)
 	}
-	env := testEnv(t)
 	selectedRelease := writeTestDaemonRelease(t, filepath.Join(paths[0], "bin", "rel"))
 	if err := newApp(env).selectDaemonRelease(selectedRelease); err != nil {
 		t.Fatal(err)
