@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { registerChangeJourneys } from './change.mjs'
 import { registerSidebarTreeJourneys } from './sidebarTree.mjs'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -19,6 +20,7 @@ const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?exa
 const name = 'Calibrate the shear response'
 const tests = []
 const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce', touch = false) => tests.push({ name, run, viewport, sidebarChoice, reducedMotion, touch })
+registerChangeJourneys(test)
 const selected = p => p.locator('.ws-page.ws-selected')
 const plainThemeLabel = "Plain (drop this constitution's theme)"
 const displayLabel = label => ({ 'calibration-report': 'Calibration report', 'brief.md': 'Field note' })[label] ?? label

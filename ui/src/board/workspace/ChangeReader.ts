@@ -102,8 +102,9 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   }
   const annotations = new Set<{ file: ChangeFile; diff: FileDiff<ChangeComment> }>()
   const sideOf = (side: AnnotationSide): 'new' | 'old' => side === 'deletions' ? 'old' : 'new'
+  const lineAnnotations = (file: ChangeFile) => draft.comments.filter(c => c.file === file.path).map(c => ({ side: c.side === 'old' ? 'deletions' as const : 'additions' as const, lineNumber: c.line, metadata: c }))
   const refreshAnnotations = (): void => {
-    for (const entry of annotations) entry.diff.render({ lineAnnotations: draft.comments.filter(c => c.file === entry.file.path).map(c => ({ side: c.side === 'old' ? 'deletions' : 'additions', lineNumber: c.line, metadata: c })) })
+    for (const entry of annotations) entry.diff.render({ lineAnnotations: lineAnnotations(entry.file) })
   }
   const commentField = (comment: ChangeComment): HTMLElement => {
     const box = el('div', 'change-comment')
@@ -142,8 +143,8 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
       renderAnnotation: annotation => commentField(annotation.metadata),
       unsafeCSS: ':host { --diffs-font-family: var(--font-mono); --diffs-font-size: var(--type-code-block); --diffs-line-height: 20px; }',
     })
-    diff.render({ fileDiff: parsed, containerWrapper: host })
-    const entry = { file, diff }; annotations.add(entry); refreshAnnotations()
+    diff.render({ fileDiff: parsed, containerWrapper: host, lineAnnotations: lineAnnotations(file) })
+    const entry = { file, diff }; annotations.add(entry)
     return () => { annotations.delete(entry); diff.cleanUp(); host.replaceChildren() }
   }
   const io = new IntersectionObserver(entries => {

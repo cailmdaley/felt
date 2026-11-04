@@ -614,6 +614,12 @@ export class Reader {
     return Math.min(max, width)
   }
   private layoutNavbar(): void {
+    const trail = this.navbar.querySelector('.ws-nav-trail')!
+    const parent = this.phone.matches && this.document?.kind !== 'chat' ? trail : this.el
+    if (this.railToggle.parentElement !== parent) {
+      if (parent === trail) trail.insertBefore(this.railToggle, trail.querySelector('.ws-phone-document-menu'))
+      else this.el.insertBefore(this.railToggle, this.navbar.nextSibling)
+    }
     if (this.phone.matches) this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
   }
   private layout(animate: boolean): void {
