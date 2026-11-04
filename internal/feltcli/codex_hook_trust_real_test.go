@@ -15,9 +15,7 @@ import (
 func TestCodexHookTrustRealPrivateAppServer(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
-	if _, err := env.LookPath("codex"); err != nil {
-		t.Skip("codex is not installed")
-	}
+	requireRealCodex(t, env)
 	root, err := os.MkdirTemp("/tmp", "felt-hooktrust-")
 	if err != nil {
 		t.Fatal(err)
@@ -32,9 +30,6 @@ func TestCodexHookTrustRealPrivateAppServer(t *testing.T) {
 	// Setup may run from a project; trust must not depend on it.
 	env.Chdir(repoRoot(t))
 	a := testApp(t, env)
-	if version, old := a.codexVersionTooOld(); old {
-		t.Skipf("Codex %s exposes definition-only hook hashes; plugin-content trust requires Codex %s or newer", version, codexHookTrustMinimum)
-	}
 	source := repoRoot(t)
 	// Promote a private sealed generation where setup puts it.
 	candidate := filepath.Join(root, ".felt", pluginRuntimeDirName, pluginCurrentName)
