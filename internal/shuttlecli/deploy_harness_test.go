@@ -91,6 +91,7 @@ func fakeHarnessReceipt(t *testing.T, sealed string, bundles ...string) string {
 }
 
 type harnessDeployCase struct {
+	setupWarning     string // stderr from the native setup command
 	receipt          string // `felt setup receipt --json` before setup
 	receiptRC        string // its exit status before setup
 	afterRC          string // its exit status once a Claude/Codex setup has run
@@ -137,6 +138,7 @@ func runHarnessDeploy(t *testing.T, c harnessDeployCase) (string, []string, erro
 			t.Fatal(err)
 		}
 	}
+	write(filepath.Join(fake, "setup.warning"), c.setupWarning, 0600)
 	write(filepath.Join(fake, "receipt.json"), c.receipt, 0o644)
 	write(filepath.Join(fake, "receipt.rc"), c.receiptRC, 0o644)
 	write(filepath.Join(fake, "receipt.after"), c.afterRC, 0o644)
@@ -210,6 +212,7 @@ case "$*" in
     [ -f "$d/pi.after" ] && cp "$d/pi.after" "$d/pi-felt/HEAD_SHA"
     exit 0 ;;
   setup\ *)
+    [ ! -s "$d/setup.warning" ] || cat "$d/setup.warning" >&2
     echo "$*" >> "$d/calls"
     cp "$d/receipt.after" "$d/receipt.rc"
     [ ! -f "$d/receipt.after.json" ] || cp "$d/receipt.after.json" "$d/receipt.json" ;;
@@ -267,6 +270,41 @@ harness_setup_cmd "$CHECKOUT" | /bin/bash
 		t.Errorf("git mutations = %v, want %v", readLines("git-mutations"), c.wantGitMutations)
 	}
 	return string(out), calls, runErr
+}
+
+func TestDeployHarnessFailureRetainsNativeSetupStderr(t *testing.T) {
+	t.Parallel()
+	out, _, err := runHarnessDeploy(t, harnessDeployCase{receipt: fakeHarnessReceipt(t, harnessOld, "codex"), receiptRC: "1", afterRC: "1", version: "dev", setupWarning: "native-trust-warning-token\n"})
+	if err == nil {
+		t.Fatal("broken receipt accepted")
+	}
+	if !strings.Contains(out, "native-trust-warning-token") {
+		t.Fatalf("native setup stderr discarded: %s", out)
+	}
+}
+
+func TestDeployRefreshHarnessFailureRetainsFullDiagnostics(t *testing.T) {
+	t.Parallel()
+	source, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := shellFunction(t, string(source), "refresh_harnesses") + `
+harness_setup_cmd() { :; }
+run_on_visible() { printf 'native-trust-warning-token\n'; printf 'harness-fail receipt is broken\n'; return 1; }
+bad() { printf '%s\n' "$1" >&2; }
+ok() { :; }
+refresh_harnesses fake /checkout
+`
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("harness failure accepted")
+	}
+	if !strings.Contains(string(out), "native-trust-warning-token") {
+		t.Fatalf("transaction discarded harness diagnostics: %s", out)
+	}
 }
 
 func TestDeployHarnessSetup(t *testing.T) {

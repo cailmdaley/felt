@@ -737,7 +737,7 @@ if [ -n "$harnesses" ]; then
     summary="${harnesses}current"
   else
     for h in $harnesses; do
-      out=$(felt setup "$h" --source "$dir" 2>&1) || fail "felt setup $h failed: $(tail_of "$out")"
+      felt setup "$h" --source "$dir" || fail "felt setup $h failed"
     done
     if ! felt setup receipt >/dev/null 2>&1; then
       repair=$(problems)
@@ -834,6 +834,7 @@ refresh_harnesses() { # $1 = "" (local) | host, $2 = checkout dir
   line=$(printf '%s\n' "$out" | sed -n 's/^harness-ok //p' | tail -n 1)
   [ -n "$line" ] && { ok "$line"; return 0; }
   line=$(printf '%s\n' "$out" | sed -n 's/^harness-fail //p' | tail -n 1)
+  printf '%s\n' "$out" >&2
   bad "${line:-harness setup did not report: $(printf '%s' "$out" | tail -n 2)}"
   return 1
 }
