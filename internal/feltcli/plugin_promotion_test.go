@@ -694,3 +694,119 @@ func TestNativeCodexInspectionRealIsolatedHome(t *testing.T) {
 		t.Fatalf("isolated native installation = %#v, want absent", state)
 	}
 }
+
+func TestSingleHarnessSetupRefreshesBothEnabledCaches(t *testing.T) {
+	t.Parallel()
+	for _, target := range []string{"claude", "codex"} {
+		t.Run(target, func(t *testing.T) {
+			f := newRemoteSetupFixture(t, "claude")
+			codexState := t.TempDir()
+			f.env.Set("SECOND_NATIVE_STATE", codexState)
+			fakeCommand(t, f.env, "codex", "FAKE_NATIVE_STATE=\"$SECOND_NATIVE_STATE\"\nFAKE_CODEX_CACHE=1\n"+codexSetupFake)
+			if err := f.a.installPluginViaCLI(f.source); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.a.installCodexPluginViaCLI(f.source); err != nil {
+				t.Fatal(err)
+			}
+			f.setGeneration(t, "two")
+			var err error
+			if target == "claude" {
+				err = f.a.installPluginViaCLI(f.source)
+			} else {
+				err = f.a.installCodexPluginViaCLI(f.source)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)
+			if err := f.a.verifyClaudeLoadedGeneration(current); err != nil {
+				t.Errorf("Claude stale: %v", err)
+			}
+			if err := f.a.verifyCodexLoadedGeneration(current); err != nil {
+				t.Errorf("Codex stale: %v", err)
+			}
+		})
+	}
+}
+
+func TestSharedPromotionRestoresBothCachesWhenSecondHarnessFails(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "claude")
+	f.env.Set("SECOND_NATIVE_STATE", t.TempDir())
+	fakeCommand(t, f.env, "codex", "FAKE_NATIVE_STATE=\"$SECOND_NATIVE_STATE\"\nFAKE_CODEX_CACHE=1\nFAKE_NATIVE_FAIL_ONCE=\"${SECOND_FAIL:-0}\"\n"+codexSetupFake)
+	if err := f.a.installPluginViaCLI(f.source); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.installCodexPluginViaCLI(f.source); err != nil {
+		t.Fatal(err)
+	}
+	f.setGeneration(t, "two")
+	f.env.Set("SECOND_FAIL", "1")
+	if err := f.a.installPluginViaCLI(f.source); err == nil {
+		t.Fatal("second harness failure committed promotion")
+	}
+	if got := f.currentGeneration(t); got != "one" {
+		t.Fatalf("restored generation = %q", got)
+	}
+	current := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)
+	if err := f.a.verifyClaudeLoadedGeneration(current); err != nil {
+		t.Errorf("Claude rollback: %v", err)
+	}
+	if err := f.a.verifyCodexLoadedGeneration(current); err != nil {
+		t.Errorf("Codex rollback: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(current), pluginJournalName)); !os.IsNotExist(err) {
+		t.Fatalf("rollback left journal: %v", err)
+	}
+}
+
+func TestFailedPromotionRestoresExternalInstallationWithoutCurrent(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			f := newRemoteSetupFixture(t, harness)
+			for name, data := range map[string][]byte{"source": []byte(f.source), "installed": nil} {
+				if err := os.WriteFile(filepath.Join(f.stateDir, name), data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.env.Set("FAKE_NATIVE_FAIL_ONCE", "1")
+			var err error
+			if harness == "claude" {
+				err = f.a.installPluginViaCLI(f.source)
+			} else {
+				err = f.a.installCodexPluginViaCLI(f.source)
+			}
+			if err == nil {
+				t.Fatal("candidate failure was ignored")
+			}
+			restored, readErr := os.ReadFile(filepath.Join(f.stateDir, "source"))
+			if readErr != nil || strings.TrimSpace(string(restored)) != f.source {
+				t.Fatalf("native source after rollback = %q, %v; want %s", restored, readErr, f.source)
+			}
+			if _, err := os.Stat(filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginJournalName)); !os.IsNotExist(err) {
+				t.Fatalf("verified external rollback left journal: %v", err)
+			}
+		})
+	}
+}
+
+func TestPromotionRefusesUnrecoverableNativeSource(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			f := newRemoteSetupFixture(t, harness)
+			marketplace, plugins := `[{"name":"cailmdaley-felt"}]`, `[]`
+			if harness == "codex" {
+				marketplace, plugins = `{"marketplaces":[{"name":"cailmdaley-felt"}]}`, `{"installed":[]}`
+			}
+			fakeCommand(t, f.env, harness, "if [ \"$2\" = marketplace ]; then printf '%s\\n' '"+marketplace+"'; else printf '%s\\n' '"+plugins+"'; fi\n")
+			called := false
+			err := f.a.withStagedPluginCandidateWithRestore(f.source, func(string) error { called = true; return nil }, nil)
+			if err == nil || called {
+				t.Fatalf("unrecoverable source permitted promotion: called=%t err=%v", called, err)
+			}
+		})
+	}
+}

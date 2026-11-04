@@ -143,6 +143,9 @@ func (a *app) captureCodexInstallationRaw() (codexInstallationState, error) {
 	if err != nil {
 		return codexInstallationState{}, err
 	}
+	if configured && source == "" {
+		return codexInstallationState{}, errors.New("inspecting Codex marketplace: configured source is not recoverable from CLI JSON")
+	}
 	installed, err := a.inspectCodexPluginRef(codexPluginRef)
 	if err != nil {
 		return codexInstallationState{}, err
@@ -695,17 +698,26 @@ func (a *app) recoverPluginPromotion(runtimeDir string) error {
 }
 
 func (a *app) reconcilePluginNativeIntent(current string, intent *pluginNativeIntent) error {
+	_, statErr := os.Stat(current)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return fmt.Errorf("checking restored plugin source: %w", statErr)
+	}
+	var err error
 	if intent.Claude != nil {
-		if err := a.reconcileClaudeInstallation(*intent.Claude, current); err != nil {
-			return err
+		source := current
+		if os.IsNotExist(statErr) && intent.Claude.Configured {
+			source = claudeMarketplaceSource(intent.Claude.Marketplace)
 		}
+		err = errors.Join(err, a.reconcileClaudeInstallation(*intent.Claude, source))
 	}
 	if intent.Codex != nil {
-		if err := a.reconcileCodexInstallation(*intent.Codex, current); err != nil {
-			return err
+		source := current
+		if os.IsNotExist(statErr) && intent.Codex.Configured {
+			source = intent.Codex.Source
 		}
+		err = errors.Join(err, a.reconcileCodexInstallation(*intent.Codex, source))
 	}
-	return nil
+	return err
 }
 
 func (a *app) reconcileClaudeInstallation(intent claudeInstallationState, current string) error {
@@ -721,7 +733,9 @@ func (a *app) reconcileClaudeInstallation(intent claudeInstallationState, curren
 		return err
 	}
 	if a.claudeInstallationMatches(state, intent, current) {
-		return nil
+		if !intent.Installed || a.verifyClaudeLoadedGeneration(current) == nil {
+			return nil
+		}
 	}
 	pluginRef := "felt@" + marketplaceName
 	if !intent.Configured {
@@ -808,6 +822,9 @@ func (a *app) captureClaudeInstallationRaw() (claudeInstallationState, error) {
 	entry, configured, err := a.inspectClaudeMarketplace(marketplaceName)
 	if err != nil {
 		return claudeInstallationState{}, err
+	}
+	if configured && claudeMarketplaceSource(entry) == "" {
+		return claudeInstallationState{}, errors.New("inspecting Claude marketplace: configured source is not recoverable from CLI JSON")
 	}
 	installed, err := a.inspectClaudePlugin("felt@" + marketplaceName)
 	return claudeInstallationState{Marketplace: entry, Configured: configured, Installed: installed}, err
@@ -975,7 +992,31 @@ func (a *app) sealAndPromote(candidate string, identity pluginGenerationIdentity
 		_ = os.RemoveAll(candidate)
 		return err
 	}
-	return a.promotePluginCandidate(candidate, install, restore, intent)
+	current := filepath.Join(filepath.Dir(candidate), pluginCurrentName)
+	installAll := func(source string) error {
+		if err := install(source); err != nil {
+			return err
+		}
+		if intent.Claude != nil && intent.Claude.Installed && a.verifyClaudeLoadedGeneration(source) != nil {
+			if err := a.installClaudePluginAtSource(source); err != nil {
+				return err
+			}
+		}
+		if intent.Codex != nil && intent.Codex.Installed && a.verifyCodexLoadedGeneration(source) != nil {
+			if err := a.installCodexPluginAtSource(source); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	restoreAll := func() error {
+		var err error
+		if restore != nil {
+			err = restore()
+		}
+		return errors.Join(err, a.reconcilePluginNativeIntent(current, intent))
+	}
+	return a.promotePluginCandidate(candidate, installAll, restoreAll, intent)
 }
 
 // remoteMarketplaceRef is the small subset of GitHub's ref syntax accepted by

@@ -29,11 +29,8 @@ func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, w
 	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
 	journal, statErr := readJSONFile[pluginPromotionJournal](filepath.Join(runtimeDir, pluginJournalName))
 	if wantPendingReconciliation {
-		if statErr != nil || journal.Phase != "pending_reconciliation" {
+		if statErr != nil || journal.Phase != "pending_reconciliation" || journal.Native == nil {
 			t.Fatalf("unverified native rollback must retain recovery intent: %#v (%v)", journal, statErr)
-		}
-		if !strings.Contains(err.Error(), "verifying restored Codex") {
-			t.Fatalf("rollback did not diagnose its unverified cache: %v", err)
 		}
 	} else if !os.IsNotExist(statErr) {
 		t.Fatalf("verified rollback left a pending journal: %v", statErr)
@@ -62,7 +59,10 @@ func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 				err := h.install(f.a, f.remote+"#"+tamper)
 				// Alter/metadata modes corrupt every native install, including
 				// rollback. Such a rollback must retain its recovery journal.
-				assertRefusedBeforeCommit(t, f, err, "one", h.name == "codex" && tamper != "stale")
+				assertRefusedBeforeCommit(t, f, err, "one", tamper != "stale")
+				if h.name == "codex" && tamper != "stale" && !strings.Contains(err.Error(), "verifying restored Codex") {
+					t.Fatalf("rollback did not diagnose its unverified cache: %v", err)
+				}
 
 				// With the lie removed the same source promotes and verifies
 				// cleanly after the refusal.
