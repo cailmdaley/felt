@@ -21,7 +21,7 @@ type deployFleet struct {
 
 func newDeployFleet(t *testing.T) *deployFleet {
 	t.Helper()
-	f := &deployFleet{root: t.TempDir()}
+	f := &deployFleet{root: filepath.Join(t.TempDir(), "fleet's space")}
 	f.repo = filepath.Join(f.root, "repo")
 	f.remote = filepath.Join(f.root, "remote")
 	f.origin = filepath.Join(f.root, "origin")
@@ -263,6 +263,27 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeploySSHParsesJoinedArgumentsAndLoadsLoginProfile(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	snippet := `printf "joined argument's value: %s\\n" "$LOGIN_PROFILE_LOADED"; printf 'login-stderr-token\\n' >&2; exit 37`
+	cmd := exec.Command(filepath.Join(f.bin, "ssh"), "fake", "bash", "-lc", shellQuote(snippet))
+	cmd.Env = f.env
+	out, err := cmd.CombinedOutput()
+	exit, ok := err.(*exec.ExitError)
+	if !ok || exit.ExitCode() != 37 {
+		t.Fatalf("remote exit: %v %s", err, out)
+	}
+	if !strings.Contains(string(out), "joined argument's value: yes") || !strings.Contains(string(out), "login-stderr-token") {
+		t.Fatalf("SSH quoting, login profile or stderr lost: %s", out)
+	}
+	fleetTouch(t, f.gate)
+	deploy, log := f.start(t, "quoted-paths")
+	if err := deploy.Wait(); err != nil {
+		t.Fatalf("quoted-path deployment: %v %s", err, fleetRead(log))
 	}
 }
 
