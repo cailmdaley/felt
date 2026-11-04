@@ -38,6 +38,15 @@ for reason in contract migration unavailable; do
   echo "PASS: $reason hold refuses completion"
 done
 fixture_health='"contract":{"ok":true},"reconciliation_hold":null'
+saved_base=$base
+base='"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","release_path":"/generation-a","ready":true'
+if verify_and_finish '' /checkout 0 >"$root/out" 2>&1; then
+  echo 'FAIL: receipt without incarnation completed' >&2; exit 1
+fi
+grep -q 'automated rollback requires incarnation-bound release support' "$root/out" || { echo 'FAIL: rollback floor is not explained'; exit 1; }
+[ ! -f "$root/finished" ] || { echo 'FAIL: unsupported rollback reached release/pruning'; exit 1; }
+base=$saved_base
+echo 'PASS: unsupported rollback refuses release with its protocol floor'
 verify_and_finish '' /checkout 0
 [ -s "$root/finished" ]
 echo 'PASS: healthy receipt completes'

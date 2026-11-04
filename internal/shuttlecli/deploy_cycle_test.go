@@ -88,9 +88,6 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(filepath.Join(root, "bin", "rel", "bin", "shuttled"), "#!/bin/sh\nexit 0\n")
-	if err := os.Symlink("rel", filepath.Join(root, "bin", "rel-built")); err != nil {
-		t.Fatal(err)
-	}
 	write(filepath.Join(data, "repo"), filepath.Join(root, "bin", "rel")+"\n")
 	build := exec.Command("go", "build", "-o", filepath.Join(root, "shuttle"), "../../cmd/shuttle")
 	if out, err := build.CombinedOutput(); err != nil {

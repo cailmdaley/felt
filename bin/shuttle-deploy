@@ -7,6 +7,9 @@
 #   bin/shuttle-deploy --list                 # show the host table
 #   bin/shuttle-deploy --no-push              # skip the git push (already pushed)
 #   bin/shuttle-deploy --ref v2.0.0-rc.1      # build an exact revision in immutable worktrees
+# Targets must support incarnation-bound release (e8fc948a or a descendant).
+# Older revisions are not automated rollback targets; release stays held.
+#
 #   bin/shuttle-deploy --handshake            # bootstrap interactive ssh auth when
 #                                             # no live master — human must approve
 #
@@ -571,7 +574,7 @@ wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
     if [ "$sha" = "$TARGET_SHA" ] && [ "$release_path" = "$expected" ] && [ "$ready" = true ] && [ -z "$health" ] &&
        { [ -z "${DEPLOY_VERSION:-}" ] || [ "$mix_vsn" = "$DEPLOY_VERSION" ]; } &&
        [ -n "$booted" ] && [ "$booted" \> "$DEPLOY_STARTED_AT" ]; then
-      VERIFIED_RELEASE_RECEIPT="$(printf '%s' "$version" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v.get("incarnation"),str) and v["incarnation"]; print(json.dumps({k:v[k] for k in ("incarnation","release_path")}))')" || return 1
+      VERIFIED_RELEASE_RECEIPT="$(printf '%s' "$version" | python3 -c 'import json,sys; v=json.load(sys.stdin); isinstance(v.get("incarnation"),str) and v["incarnation"] or sys.exit("automated rollback requires incarnation-bound release support (e8fc948a or a descendant); quarantine remains held"); print(json.dumps({k:v[k] for k in ("incarnation","release_path")}))')" || return 1
       return 0
     fi
 
@@ -904,7 +907,7 @@ deploy_local() {
 remote_host_cycle() { # Deployed checkout, previous release root; runs on its owner.
   local checkout="$1" previous="$2" supervisor=""
   supervisor="$(run_local "$(supervisor_probe_cmd)")" || { bad "could not inspect the host's supervisor"; return 1; }
-  EXPECTED_RELEASE="$(run_local "cd $(shell_quote "$checkout/bin/rel-built") && pwd -P")" || return 1
+  EXPECTED_RELEASE="$(run_local "if [ -d $(shell_quote "$checkout/bin/rel-built") ]; then cd $(shell_quote "$checkout/bin/rel-built"); else cd $(shell_quote "$checkout/bin/rel"); fi && pwd -P")" || return 1
   local cycle
   if [ "$supervisor" = tmux ]; then
     # Keep the live loop; only its listener needs a graceful cycle. Recreating
