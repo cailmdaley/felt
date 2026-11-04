@@ -829,6 +829,7 @@ defmodule Shuttle.DispatcherTest do
 
     script = File.read!(List.last(args))
     assert script =~ "Mode: resume"
+    assert script =~ "before that turn finished"
     assert script =~ "--resume '#{session}'"
     refute String.replace(script, Dispatcher.passthrough_block(), "") =~ " || "
   end

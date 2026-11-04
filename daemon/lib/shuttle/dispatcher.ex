@@ -409,6 +409,12 @@ defmodule Shuttle.Dispatcher do
     )
   end
 
+  defp render_cut_off_turn_prompt(fiber_id, opts) do
+    render_resume_prompt(fiber_id, opts) <>
+      "\n\nYour terminal closed during your last turn, before that turn finished. " <>
+      "Continue it from where it stopped."
+  end
+
   # Renders the user's dispatch message (the `:user_message` parameter) as a
   # "From User" block for inclusion in the dispatch prompt. Returns "" when no
   # message is carried (or it is blank).
@@ -1181,7 +1187,18 @@ defmodule Shuttle.Dispatcher do
             )
 
             quiet? = Keyword.get(opts, :restoration) and quiet_restoration?(session_id, opts)
-            resume_prompt = if quiet?, do: "", else: render_resume_prompt(fiber_id, prompt_opts)
+
+            resume_prompt =
+              cond do
+                quiet? ->
+                  ""
+
+                Keyword.get(opts, :restoration) ->
+                  render_cut_off_turn_prompt(fiber_id, prompt_opts)
+
+                true ->
+                  render_resume_prompt(fiber_id, prompt_opts)
+              end
 
             resume_agent =
               if quiet? and agent.cli == "claude",
