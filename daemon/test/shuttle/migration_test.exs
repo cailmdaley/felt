@@ -1099,9 +1099,13 @@ defmodule Shuttle.MigrationTest do
       if request["mode"] == "forward" do
         {:ok, _, raw, _, body} = FiberDoc.read_path(path)
 
-        FiberDoc.write!(path, raw, body <> "\n## Status\nSaved concurrently.\n", [
-          {:put, "status", "closed"}
-        ])
+        FiberDoc.write!(
+          path,
+          raw,
+          body <> "\n## Status\nSaved concurrently.\n",
+          [
+            {:put, "status", "closed"}
+          ], before_body: body)
       end
 
       run.(request)

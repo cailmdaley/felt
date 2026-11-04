@@ -1,21 +1,12 @@
 defmodule Shuttle.FiberDoc do
   @moduledoc """
-  Low-level surgical read/write of a fiber's frontmatter document — the single
-  primitive the daemon uses to flip fields on a felt `.md` without disturbing the
-  rest of the file.
-
-  `Shuttle.LifecycleStore` writes the felt-native lifecycle fields (`status`,
-  `tempered`, `closed-at`) through it on mark-awaiting / park / rearm.
-
-  The write path edits the raw frontmatter TEXT directly (via
-  `Shuttle.FrontmatterEdit`) and never round-trips the parsed map through an
-  emitter — that round-trip used to reorder keys (churn across machines) and
-  collapse multi-line block scalars like `outcome: |-` into
-  `inspect/1`-escaped one-liners the felt CLI could no longer parse (the fiber
-  vanished from the kanban). Writes are atomic (tmp + rename).
+  Read fiber frontmatter and prepare surgical edits. Snapshot-based writes use
+  Shuttle's locked compare-and-swap writer; a changed source document refuses
+  the edit rather than replacing another writer's content. Standing lifecycle
+  decisions use `Shuttle.LifecycleStore`'s run-conditional writer.
   """
 
-  alias Shuttle.{FeltStores, FrontmatterEdit, Realpath}
+  alias Shuttle.{FeltStores, FrontmatterEdit}
 
   @doc """
   Read a fiber by id, returning `{:ok, path, raw_fm, frontmatter, body}`.
@@ -74,57 +65,30 @@ defmodule Shuttle.FiberDoc do
   end
 
   @doc """
-  Atomic (tmp + rename), surgical write: apply the edit `ops` to the raw
-  frontmatter text and reconstruct the file. Only the targeted frontmatter lines
-  change; the `body` is re-emitted verbatim.
-
-  Byte-stability of the fences: `split_frontmatter` splits on `"\\n---"`, so the
-  newline that terminated the last frontmatter line is consumed by the split, and
-  `body` begins with the `"\\n"` that terminates the closing `---` fence line. We
-  therefore normalize the frontmatter to exactly one trailing newline and write
-  the closing fence as bare `"---"` (no newline) — `body`'s leading `"\\n"`
-  completes it. Writing `"---\\n"` here instead would double the newline and grow
-  a blank line after the fence on every write.
-
-  The replacement goes through a hidden, per-write temp file beside the target
-  (`.<name>-<unique>.tmp`, the shape felt's own atomic writer uses and the
-  store `.gitignore` ignores), so concurrent writers never share a temp file.
-  A symlinked target is followed, as felt follows it: the file it names is
-  replaced and the link stays. The write takes no lock and does not fsync.
+  Apply `ops` only if the document still matches `raw_fm` and `body`. Shuttle
+  checks the source digest after acquiring the canonical felt lock and commits
+  the patch atomically. A stale or missing document raises without writing.
   """
-  @spec write!(String.t(), String.t(), String.t(), [FrontmatterEdit.op()]) :: :ok
-  def write!(path, raw_fm, body, ops) do
+  @spec write!(String.t(), String.t(), String.t(), [FrontmatterEdit.op()], keyword()) :: :ok
+  def write!(path, raw_fm, body, ops, opts \\ []) do
+    original_body = Keyword.get(opts, :before_body, body)
+    original = "---\n" <> ensure_single_trailing_newline(raw_fm) <> "---" <> original_body
     new_fm = raw_fm |> FrontmatterEdit.apply(ops) |> ensure_single_trailing_newline()
-    target = write_target(path)
-    tmp = temp_path(target)
 
-    try do
-      Shuttle.FS.write!(tmp, ["---\n", new_fm, "---", body, ensure_trailing_newline(body)])
-      Shuttle.FS.rename!(tmp, target)
-    rescue
-      error ->
-        Shuttle.FS.rm(tmp)
-        reraise error, __STACKTRACE__
+    request = %{
+      "path" => path,
+      "before_sha256" => :crypto.hash(:sha256, original) |> Base.encode16(case: :lower),
+      "after" => "---\n" <> new_fm <> "---" <> body <> ensure_trailing_newline(body)
+    }
+
+    case Shuttle.CLI.run(["patch-document"],
+           input: Jason.encode!(request) <> "\n",
+           timeout_ms: :infinity,
+           runner: Shuttle.Runner.Default
+         ) do
+      {:ok, _} -> :ok
+      failure -> raise "conditional document patch failed: #{inspect(failure)}"
     end
-
-    :ok
-  end
-
-  # An existing symlink target is written through; a dangling link, which
-  # cannot be followed, is replaced like any other path.
-  defp write_target(path) do
-    with {:ok, %File.Stat{type: :symlink}} <- Shuttle.FS.lstat(path),
-         true <- Shuttle.FS.exists?(path),
-         {:ok, resolved} <- Realpath.resolve(path) do
-      resolved
-    else
-      _ -> path
-    end
-  end
-
-  defp temp_path(target) do
-    unique = "#{System.pid()}-#{System.unique_integer([:positive])}"
-    Path.join(Path.dirname(target), ".#{Path.basename(target)}-#{unique}.tmp")
   end
 
   defp resolve_path(fiber_id) do

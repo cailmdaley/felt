@@ -59,18 +59,25 @@ defmodule Shuttle.FiberDocTest do
 
   # Every writer gets its own temp file: with one shared name, a second
   # writer's rename finds the first one's temp already gone.
-  test "concurrent write! calls never collide on a temp file" do
+  test "concurrent snapshot writes refuse stale images instead of losing completed edits" do
     path = write_doc!("---\nid: sample\nstatus: open\n---\nbody\n")
     {:ok, ^path, raw_fm, _fm, body} = FiberDoc.read_path(path)
 
     results =
       1..20
       |> Enum.map(fn i ->
-        Task.async(fn -> FiberDoc.write!(path, raw_fm, body, [{:put, "status", "s#{i}"}]) end)
+        Task.async(fn ->
+          try do
+            FiberDoc.write!(path, raw_fm, body, [{:put, "status", "s#{i}"}])
+          rescue
+            error -> {:refused, Exception.message(error)}
+          end
+        end)
       end)
       |> Task.await_many()
 
-    assert Enum.all?(results, &(&1 == :ok))
+    assert Enum.count(results, &(&1 == :ok)) == 1
+    assert Enum.count(results, &match?({:refused, _}, &1)) == 19
     assert File.read!(path) =~ ~r/\A---\nid: sample\nstatus: s\d+\n---\nbody\n\z/
     assert temp_files(Path.dirname(path)) == []
   end
@@ -88,15 +95,17 @@ defmodule Shuttle.FiberDocTest do
     assert temp_files(Path.dirname(real)) == []
   end
 
-  test "write! replaces a dangling symlink with a regular file" do
+  test "a snapshot mutation refuses a missing document behind a dangling symlink" do
     dir = Path.dirname(write_doc!("---\nid: other\n---\n"))
     link = Path.join(dir, "dangling.md")
     missing = Path.join(dir, "missing.md")
     File.ln_s!(missing, link)
 
-    assert :ok = FiberDoc.write!(link, "id: sample\nstatus: open\n", "\n", [])
+    assert_raise RuntimeError, fn ->
+      FiberDoc.write!(link, "id: sample\nstatus: open\n", "\n", [])
+    end
 
-    assert {:ok, %File.Stat{type: :regular}} = File.lstat(link)
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(link)
     refute File.exists?(missing)
   end
 end

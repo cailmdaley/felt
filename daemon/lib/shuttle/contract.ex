@@ -52,7 +52,8 @@ defmodule Shuttle.Contract do
       "felt show --exact and felt add --namespace; lifecycle --fiber-path (verified UID path hints); " <>
         "resolved lifecycle reads remain exact for UID-less documents",
     32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)",
-    33 => "standing-transition (locked conditional run disposition and force rearm)"
+    33 =>
+      "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."
