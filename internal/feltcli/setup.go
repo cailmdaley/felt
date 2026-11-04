@@ -392,6 +392,9 @@ func (a *app) installClaudePluginAtSource(repoRoot string) error {
 	}
 
 	if _, present, err := promotedGenerationForVerify(repoRoot); err == nil && present && a.verifyClaudeLoadedGeneration(repoRoot) == nil {
+		if removed := a.pruneLegacyClaudeHooks(); removed > 0 {
+			fmt.Fprintf(a.env.Stdout, "✓ Removed %d legacy Claude hook entries (served via plugin)\n", removed)
+		}
 		fmt.Fprintln(a.env.Stdout, "✓ Claude plugin payload unchanged; left installed bytes intact")
 		return nil
 	}
