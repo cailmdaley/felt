@@ -384,6 +384,31 @@ func TestCodexHookTrustOnlyWritesFeltAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCodexHookTrustExplainsLiveRuntimeRecovery(t *testing.T) {
+	for _, entry := range []string{"setup", "trust-only"} {
+		t.Run(entry, func(t *testing.T) {
+			t.Parallel()
+			env, streams := testEnv(t)
+			fakeCodexTrust(t, env, []codexTrustHook{feltHook("session_start", "modified")})
+			a := testApp(t, env)
+			if entry == "setup" {
+				a.refreshCodexHookTrust()
+			} else if err := a.trustCodexHooks(); err != nil {
+				t.Fatal(err)
+			}
+			out := streams.Stdout.String()
+			for _, want := range []string{"installed plugin hooks", "even for new threads", "exit that session", "codex --no-daemon resume <session-id>", "old writer to unload", "--trust-hooks alone does not refresh"} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("trust success omitted %q: %s", want, out)
+				}
+			}
+			if streams.Stderr.String() != "" {
+				t.Fatalf("healthy trust emitted a warning: %s", streams.Stderr.String())
+			}
+		})
+	}
+}
+
 func TestCodexHookTrustFailuresWarnAndReceiptRejects(t *testing.T) {
 	for _, failure := range []string{"write", "list", "verify", "missing", "identity"} {
 		t.Run(failure, func(t *testing.T) {

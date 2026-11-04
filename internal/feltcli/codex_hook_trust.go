@@ -501,13 +501,20 @@ func (a *app) inspectCodexHookTrust(write bool) error {
 	return nil
 }
 
+// reportCodexHookTrust describes persisted approval, not another process's
+// loaded hook runtime. A private App Server cannot refresh a live one.
+func (a *app) reportCodexHookTrust() {
+	fmt.Fprintln(a.env.Stdout, "✓ Codex trusts felt's installed plugin hooks")
+	fmt.Fprintln(a.env.Stdout, "Note: running Codex App Servers can retain old hooks and approvals after a plugin refresh, even for new threads. If a session reports `plugin contents changed; hook approval required`, exit that session, then run `codex --no-daemon resume <session-id>`; wait for the old writer to unload if Codex says it is still active. Repeating --trust-hooks alone does not refresh that runtime.")
+}
+
 // refreshCodexHookTrust is setup's trust step; it warns and never fails setup.
 func (a *app) refreshCodexHookTrust() {
 	report := a.codexHookTrust(true)
 	switch report.State {
 	case codexTrustAbsent:
 	case codexTrustTrusted:
-		fmt.Fprintln(a.env.Stdout, "✓ Codex trusts felt's plugin hooks")
+		a.reportCodexHookTrust()
 	case codexTrustUnsupported:
 		fmt.Fprintf(a.env.Stderr, "Warning: %s.\n", report.note())
 	default:
@@ -524,8 +531,7 @@ func (a *app) trustCodexHooks() error {
 		report := a.codexHookTrust(true)
 		switch report.State {
 		case codexTrustTrusted:
-			fmt.Fprintln(a.env.Stdout, "✓ Codex trusts felt's plugin hooks")
-			fmt.Fprintf(a.env.Stderr, "Note: %s.\n", report.note())
+			a.reportCodexHookTrust()
 			return nil
 		case codexTrustUnsupported:
 			return errors.New(report.note())

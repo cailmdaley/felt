@@ -62,8 +62,23 @@ Resumes retain these files; delete a session's claims only to deliberately re-en
 Its rollout `event_msg/token_count` records provide `info.last_token_usage.total_tokens` and `info.model_context_window`; cumulative billing totals are never used.
 The transcript format isn't a stable Codex hook API, so unsupported formats fail open rather than estimating context.
 `felt setup codex` records trust for felt's own plugin hooks through a temporary Codex App Server config API (Codex 0.166.0 or newer), only after verifying that Codex's cache holds the promoted generation.
-Other hooks' trust is untouched; `felt setup codex --trust-hooks` repairs trust without reinstalling, and `felt setup receipt` detects untrusted or modified hooks.
-An older Codex or an unreachable shared server is a receipt note, not a failure.
+Other hooks' trust is untouched; `felt setup codex --trust-hooks` repairs persisted trust without reinstalling, and `felt setup receipt` detects untrusted or modified hooks in a fresh private runtime.
+An older Codex is an advisory receipt note; failure to inspect a supported Codex is a receipt failure.
+
+**Persisted approval does not refresh a running Codex App Server.**
+Codex 0.166.0 retains hook definitions and approvals in that process and checks plugin contents again before executing each hook.
+If setup replaces the cache, a live session can report `plugin contents changed; hook approval required` even after setup and the receipt confirm trust.
+New threads on that same server can fail too; a new terminal alone does not guarantee a fresh runtime.
+Exit the affected session, then resume the conversation with `codex --no-daemon resume <session-id>` to load the installed hooks and persisted approvals in a fresh runtime.
+If Codex reports an active writer, wait for the previous session to unload before resuming; do not run two writers against the same conversation.
+Repeating `--trust-hooks` alone cannot refresh another process's in-memory approval.
+Felt neither restarts that process nor bypasses Codex's checks, and a shell guard cannot intercept a refusal that happens before the shell runs.
+Codex's native plugin commands own the cache and can remove old version roots; felt cannot guarantee uninterrupted live hooks during a refresh.
+
+Other plugins' definition-only approvals can also fail after their contents change.
+Codex migrates such approvals to a private `.hook-trust` baseline; a missing `trusted_content_hash` alone does not prove failure.
+Review and approve those plugins through Codex's `/hooks` interface, then use a fresh runtime if an existing session retains stale approval.
+Felt does not approve another plugin's contents on its author's behalf.
 
 Refresh a source build on the current machine with `felt setup claude --source <clean-main-checkout>` and `felt setup codex --source <clean-main-checkout>` for installed harnesses, then check `felt setup receipt --json`.
 These commands promote `~/.felt/plugin-runtime/current` transactionally; they don't restart or deploy the daemon.
