@@ -611,10 +611,13 @@ fi
 SH
 }
 
+release_verified_deploy() {
+  release_quarantine "$1" && ok "live on $TARGET_SHA, quarantine released" \
+    || { bad "quarantine release failed"; return 1; }
+}
+
 finish_verified_deploy() { # host, regular checkout, previous live tree
   local host="$1" checkout="$2" previous="${3:-}"
-  release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
-    || { bad "quarantine release failed"; return 1; }
   previous="$(run_value "$host" "$(remember_previous_cmd "$previous" "${EXPECTED_RELEASE%/bin/rel}")")" \
     || { bad 'rollback receipt: could not retain previous release'; return 1; }
   run_on_visible "$host" "$(refresh_checkout_cmd "$checkout")" || ok "checkout freshness: could not inspect $checkout; left unchanged"
@@ -625,9 +628,20 @@ finish_verified_deploy() { # host, regular checkout, previous live tree
   }
 }
 
-verify_and_finish() { # host, regular checkout, previous live tree
+verify_and_release() {
   wait_for_sha "$1" || return 1
-  finish_verified_deploy "$@"
+  release_verified_deploy "$1"
+}
+
+activation_window() {
+  local status=0 ack
+  printf B >&5 && IFS= read -r ack <&5 || return 1
+  trap ':' TERM INT HUP
+  remote_host_cycle "" "$1" && verify_and_release "" || status=$?
+  trap 'exit 143' TERM HUP
+  trap 'exit 130' INT
+  printf E >&5 && IFS= read -r ack <&5 || return 1
+  return "$status"
 }
 
 # A shipped-UI host receives a snapshot of the pinned local tree's bundle.
@@ -901,12 +915,12 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
   DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
   previous="$(previous_deploy "" "$SOURCE")"
   deploy_step 'prepare pinned revision'
-  bash -c "$(revision_checkout_cmd "$SOURCE" "$previous")" 3>&- 4>&- \
+  bash -c "$(revision_checkout_cmd "$SOURCE" "$previous")" 3>&- 4>&- 5>&- \
     || { bad 'prepare: could not prepare the pinned revision'; return 1; }
   tree="$ROOT/$TARGET_COMMIT"
   if [ "$MODE" = ui ]; then
     deploy_step 'build UI'
-    bash -c "cd $(shell_quote "$tree") && make ui" \
+    bash -c "cd $(shell_quote "$tree") && make ui" 5>&- \
       || { bad 'build UI: failed'; return 1; }
     cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
     return 0
@@ -924,7 +938,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
     deploy_step 'build/install CLIs'
     cmd="$(build_checkout_cmd "$tree" "$SKIP_UI")"
     [ -z "$BUILD_WRAP" ] || cmd="$BUILD_WRAP bash -lc $(shell_quote "$cmd")"
-    bash -c "$cmd" || { bad 'build/install CLIs: failed'; return 1; }
+    bash -c "$cmd" 5>&- || { bad 'build/install CLIs: failed'; return 1; }
   fi
   if [ -n "$SNAPSHOT" ]; then
     cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
@@ -934,16 +948,16 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
       || { bad 'agent registry: could not publish'; return 1; }
   fi
   deploy_step 'config migration'
-  bash -c "$(config_migration_cmd)" 3>&- 4>&- || { bad 'config migration: failed'; return 1; }
+  bash -c "$(config_migration_cmd)" 3>&- 4>&- 5>&- || { bad 'config migration: failed'; return 1; }
   if ! target_is_live "$before"; then
-    deploy_step 'activate release'
-    remote_host_cycle "" "$tree" || return 1
-    deploy_step 'verify and finish'
-    verify_and_finish "" "$SOURCE" "$previous" || { bad 'verify/finish: failed'; return 1; }
+    deploy_step 'activate/verify/release'
+    activation_window "$tree" || { bad 'activate/verify/release: failed'; return 1; }
   else
-    deploy_step 'finish coalesced release'
-    finish_verified_deploy "" "$SOURCE" "$previous"
+    deploy_step 'release coalesced daemon'
+    release_verified_deploy "" || return 1
   fi
+  deploy_step 'checkout/harness/prune'
+  finish_verified_deploy "" "$SOURCE" "$previous"
 }
 
 target_is_live() {
@@ -966,11 +980,11 @@ transaction_script() {
     "$(shell_quote "$4")" "$(shell_quote "$5")" "$(shell_quote "$6")" "$(shell_quote "$7")"
   declare -f shell_quote ok bad run_value deploy_step deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
     build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
-    version_ready target_is_live wait_for_sha release_quarantine finish_verified_deploy verify_and_finish prune_deploy_cmd \
+    version_ready target_is_live wait_for_sha release_quarantine release_verified_deploy finish_verified_deploy verify_and_release activation_window prune_deploy_cmd \
     remember_previous_cmd refresh_checkout_cmd harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
     remote_host_cycle host_transaction
   # All subsequent commands are host-local and inherit this login shell's PATH.
-  printf '%s\n' 'run_on() { bash -c "$2" 3>&- 4>&-; }' 'run_on_visible() { bash -c "$2" 3>&- 4>&-; }' \
+  printf '%s\n' 'run_on() { bash -c "$2" 3>&- 4>&- 5>&-; }' 'run_on_visible() { bash -c "$2" 3>&- 4>&- 5>&-; }' \
     'deploy_step "resolve worktree root"' \
     'ROOT=$(bash -c "$(deploy_root_cmd "$SOURCE")") || exit 1' 'host_transaction'
 }

@@ -63,6 +63,8 @@ fi
 	write(filepath.Join(f.repo, "daemon/mix.exs"), "# fixture\n")
 	write(filepath.Join(f.repo, "ui/package-lock.json"), "{}\n")
 	write(filepath.Join(f.repo, "bin/shuttle-launch"), `#!/bin/sh
+bash -c 'trap -p TERM' > "$FLEET_ROOT/launcher-term-trap"
+if [ "${ACTIVATION_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/activation-entered"; while [ ! -f "$FLEET_ROOT/activation-go" ]; do sleep .02; done; fi
 sha=$(git -C "${TEST_RELEASE%/bin/rel}" rev-parse HEAD)
 printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
 echo cycle >> "$EVENTS"
@@ -121,7 +123,7 @@ shift
 exec /usr/bin/env -i TEST_REMOTE=1 SHUTTLE_TEST_SSH_HELPER=1 SHUTTLE_TEST_GO_CACHES_PINNED=1 HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local \
  FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
  CHECK_CLEANUP_ORDER="${CHECK_CLEANUP_ORDER:-0}" FAIL_LOCK_BUILD="${FAIL_LOCK_BUILD:-0}" FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
- CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" `+shellQuote(testBinary)+` -test.run=^TestDeploySSHHelperProcess$ -- "$*"
+ ACTIVATION_GATE="${ACTIVATION_GATE:-0}" CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" `+shellQuote(testBinary)+` -test.run=^TestDeploySSHHelperProcess$ -- "$*"
 `)
 	write(filepath.Join(f.bin, "make"), `#!/bin/sh
 case "$1" in
