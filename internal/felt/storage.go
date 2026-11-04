@@ -601,14 +601,36 @@ func UpdateFiberFile(path, id string, mutate func(*Felt) error) (*Felt, error) {
 		return nil, err
 	}
 	f.Path = path
-	if err := mutate(f); err != nil {
-		return nil, err
-	}
-	data, err = f.Marshal()
+	originalBody := f.Body
+	original, err := f.Marshal()
 	if err != nil {
 		return nil, err
 	}
-	if err := WriteFiberFile(path, data); err != nil {
+	if err := mutate(f); err != nil {
+		return nil, err
+	}
+	updated, err := f.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	// Body-only edits retain the authored frontmatter, including comments.
+	_, _, beforeBody, _ := frontmatterBounds(original)
+	_, _, afterBody, _ := frontmatterBounds(updated)
+	if bytes.Equal(original[:beforeBody], updated[:afterBody]) {
+		_, _, rawBody, err := frontmatterBounds(data)
+		if err != nil {
+			return nil, err
+		}
+		body := string(data[rawBody:])
+		if originalBody != "" {
+			start := strings.Index(body, originalBody)
+			body = body[:start] + f.Body + body[start+len(originalBody):]
+		} else {
+			body = "\n" + f.Body + "\n"
+		}
+		updated = append(append([]byte(nil), data[:rawBody]...), []byte(body)...)
+	}
+	if err := WriteFiberFile(path, updated); err != nil {
 		return nil, err
 	}
 	return f, nil
@@ -824,8 +846,16 @@ type MoveResult struct {
 // changes are written; a moved fiber's id is its location, not its content,
 // so the rename alone moves it.
 func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
+	unlock, err := LockFiberFile(s.moveJournalPath())
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	oldID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(oldID)))
 	newID = filepath.ToSlash(filepath.Clean(strings.TrimSpace(newID)))
+	if result, recovered, err := s.recoverMove(oldID, newID); recovered || err != nil {
+		return result, err
+	}
 	if oldID == "." || oldID == "" || newID == "." || newID == "" {
 		return nil, fmt.Errorf("invalid felt id")
 	}
@@ -879,6 +909,9 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 	if err := os.MkdirAll(filepath.Dir(newRoot), 0755); err != nil {
 		return nil, fmt.Errorf("creating destination parent %s: %w", filepath.Dir(newRoot), err)
 	}
+	if err := s.saveMove(oldID, newID, writes, outsideWrites); err != nil {
+		return nil, err
+	}
 	s.forgetWalk()
 	if err := os.Rename(oldRoot, newRoot); err != nil {
 		return nil, fmt.Errorf("moving subtree %s -> %s: %w", oldRoot, newRoot, err)
@@ -899,6 +932,9 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 	}
 	sort.Strings(result.Rewritten)
 	sort.Strings(result.Outside)
+	if err := s.finishMove(); err != nil {
+		return result, err
+	}
 	return result, s.pruneEmptyDirs(filepath.Dir(oldRoot))
 }
 
@@ -906,9 +942,9 @@ func (s *Storage) MoveSubtree(oldID, newID string) (*MoveResult, error) {
 // written after it. path is where the file already is; empty means the fiber
 // moved, and its file is found by id once the rename has happened.
 type pendingWrite struct {
-	id   string
-	path string
-	data []byte
+	id           string
+	path         string
+	replacements map[string]string
 }
 
 func (w pendingWrite) write(s *Storage) error {
@@ -916,7 +952,22 @@ func (w pendingWrite) write(s *Storage) error {
 	if path == "" {
 		path = s.Path(w.id)
 	}
-	if err := WriteFiberFile(path, w.data); err != nil {
+	_, err := UpdateFiberFile(path, w.id, func(f *Felt) error {
+		rewrite := func(ref string) (string, bool) { replacement, ok := w.replacements[ref]; return replacement, ok }
+		f.RewriteDataFlowRefs(func(ref string) (string, bool) {
+			target, fragment := splitDataFlowRef(ref)
+			if replaced, ok := rewrite(target); ok {
+				if fragment != "" {
+					replaced += "." + fragment
+				}
+				return replaced, true
+			}
+			return "", false
+		})
+		f.Body, _ = RewriteBodyRefs(f.Body, rewrite)
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("writing file %s: %w", path, err)
 	}
 	return nil
@@ -961,8 +1012,13 @@ func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID
 	var writes []pendingWrite
 	for _, f := range sources {
 		sourceNew, moved := remapIDPrefix(f.ID, oldID, newID)
+		replacements := map[string]string{}
 		rewrite := func(target string) (string, bool) {
-			return rewriteMovedRef(before, after, f.ID, sourceNew, target, oldID, newID)
+			replaced, changed := rewriteMovedRef(before, after, f.ID, sourceNew, target, oldID, newID)
+			if changed {
+				replacements[target] = replaced
+			}
+			return replaced, changed
 		}
 		clone := *f
 		clone.ID = sourceNew
@@ -977,26 +1033,12 @@ func planMoveRewrites(all, sources []*Felt, external *ExternalRefs, oldID, newID
 			}
 			return next, true
 		})
-		body, bodyChanged := RewriteBodyRefs(f.Body, rewrite)
+		_, bodyChanged := RewriteBodyRefs(f.Body, rewrite)
 		if !flowChanged && !bodyChanged {
 			continue
 		}
 
-		var data []byte
-		var err error
-		if flowChanged {
-			// inputs.from lives in frontmatter, so the file is re-rendered.
-			clone.Body = body
-			data, err = clone.Marshal()
-		} else {
-			// A body-only change edits the body bytes in place, leaving the
-			// frontmatter exactly as its author wrote it.
-			data, err = rewriteFileBody(f.Path, rewrite)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("rewriting references in %s: %w", f.ID, err)
-		}
-		w := pendingWrite{id: sourceNew, path: f.Path, data: data}
+		w := pendingWrite{id: sourceNew, path: f.Path, replacements: replacements}
 		if moved {
 			w.path = ""
 		}

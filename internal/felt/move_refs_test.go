@@ -45,6 +45,53 @@ func newMoveFixture(t *testing.T) *Storage {
 	return s
 }
 
+func TestMoveRewritePreservesEditAfterPlanning(t *testing.T) {
+	t.Parallel()
+	s := newMoveFixture(t)
+	writeFiberFile(t, s, "c", fiber("C", "See [[a/x]]."))
+	all, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writes, err := planMoveRewrites(all, all, nil, "a/x", "b/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFiberFile(t, s, "c", "---\nid: fixture-C\nname: C\nstatus: closed\ncustom: keep\n---\n\nSee [[a/x]].\nConcurrent result.\n")
+	for _, w := range writes {
+		if err := w.write(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := readFiberFile(t, s, "c")
+	if !strings.Contains(got, "status: closed") || !strings.Contains(got, "Concurrent result.") || !strings.Contains(got, "[[b/x]]") {
+		t.Fatalf("move lost concurrent edit:\n%s", got)
+	}
+}
+
+func TestMoveSubtreeRetriesInterruptedReferenceRewrites(t *testing.T) {
+	t.Parallel()
+	s := newMoveFixture(t)
+	writeFiberFile(t, s, "c", fiber("C", "See [[a/x]]."))
+	unlock, err := s.LockFiber("c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if _, err := s.MoveSubtree("a/x", "b/x"); err == nil {
+		t.Fatal("move bypassed locked reference instead of retaining unfinished rewrites")
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MoveSubtree("a/x", "b/x"); err != nil {
+		t.Fatalf("retry interrupted move: %v", err)
+	}
+	if got := readFiberFile(t, s, "c"); !strings.Contains(got, "[[b/x]]") {
+		t.Fatalf("unfinished reference: %s", got)
+	}
+}
+
 func TestMoveSubtreeRewritesBodyLinks(t *testing.T) {
 	t.Parallel()
 	s := newMoveFixture(t)
