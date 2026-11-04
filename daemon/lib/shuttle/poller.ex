@@ -4287,8 +4287,14 @@ defmodule Shuttle.Poller do
   @doc false
   def owning_store(fiber_id, state) do
     case store_for_fiber(fiber_id, state) do
-      {:ok, h} -> h
-      {:error, _} -> List.first(state.felt_stores)
+      {:ok, store} ->
+        Shuttle.FeltStores.namespace_store(store)
+
+      {:error, _} ->
+        case List.first(state.felt_stores) do
+          nil -> nil
+          store -> Shuttle.FeltStores.namespace_store(store)
+        end
     end
   end
 

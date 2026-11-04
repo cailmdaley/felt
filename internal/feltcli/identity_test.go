@@ -38,6 +38,14 @@ func TestNamespaceIdentityParity(t *testing.T) {
 	}
 	for _, view := range []string{root, project} {
 		t.Run(filepath.Base(view), func(t *testing.T) {
+			namespace, err := filepath.EvalSymlinks(felt.NamespaceStorage(felt.NewStorage(view)).Root())
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantRoot, err := filepath.EvalSymlinks(st.Root())
+			if err != nil || namespace != wantRoot {
+				t.Fatalf("namespace root = %s, want %s (%v)", namespace, wantRoot, err)
+			}
 			for _, lookup := range fixture.Lookups {
 				out, _, err := executeCLI(t, view, "show", lookup.Query, "--exact", "-j")
 				if lookup.ID == nil {

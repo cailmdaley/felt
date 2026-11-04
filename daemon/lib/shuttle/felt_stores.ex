@@ -420,7 +420,7 @@ defmodule Shuttle.FeltStores do
       store, acc ->
         case felt_show_json(store, identifier, exact) do
           {:ok, %{"path" => path} = fiber} when is_binary(path) and path != "" ->
-            owner = owning_store(stores, path) || store
+            owner = owning_store(stores, path) || namespace_store(store)
 
             owner_fiber =
               if owner == store, do: fiber, else: felt_for_path(owner, fiber)
@@ -447,9 +447,37 @@ defmodule Shuttle.FeltStores do
   # `.felt/` is a prefix of felt's carried (symlink-resolved) path. nil when no
   # configured store owns it (the caller keeps the queried store as a fallback).
   defp owning_store(stores, path) do
-    Enum.find(stores, fn store ->
-      String.starts_with?(path, store_felt_realpath(store) <> "/")
-    end)
+    case Enum.find(stores, fn store ->
+           String.starts_with?(path, store_felt_realpath(store) <> "/")
+         end) do
+      nil -> nil
+      store -> namespace_store(store)
+    end
+  end
+
+  @doc "The enclosing namespace root used for exact fiber reads and writes."
+  @spec namespace_store(String.t()) :: String.t()
+  def namespace_store(store) do
+    root = store_felt_realpath(store)
+
+    if Path.basename(root) == ".felt" do
+      store
+    else
+      case enclosing_felt(root) do
+        nil -> store
+        felt -> Path.dirname(felt)
+      end
+    end
+  end
+
+  defp enclosing_felt(path) do
+    parent = Path.dirname(path)
+
+    cond do
+      Path.basename(path) == ".felt" -> path
+      parent == path -> nil
+      true -> enclosing_felt(parent)
+    end
   end
 
   # Re-query by intrinsic identity when switching stores, so a view's alias

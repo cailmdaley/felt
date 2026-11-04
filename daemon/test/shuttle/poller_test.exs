@@ -6968,6 +6968,15 @@ defmodule Shuttle.PollerTest do
     {loom, project}
   end
 
+  test "cached owning store retains the enclosing namespace for writes" do
+    {loom, project} = loom_project_symlink!()
+    id = "ai-futures/portolan/kanban-modal"
+    state = %Poller.State{felt_stores: [project], fiber_store_cache: %{id => project}}
+
+    assert FeltStores.store_felt_realpath(Poller.owning_store(id, state)) ==
+             FeltStores.store_felt_realpath(loom)
+  end
+
   test "store_for_fiber finds a fiber in the first configured store" do
     host_a = multi_host_dir("a")
 

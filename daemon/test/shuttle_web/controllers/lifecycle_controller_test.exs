@@ -53,6 +53,16 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       assert File.read!(path) == content
     end
 
+    # A subtree view can also contain a different document at the doubled path.
+    # The writer must use the resolved namespace, not reinterpret the id there.
+    doubled =
+      Path.join([store, ".felt", "science", "team", "science", "team", "worker", "worker.md"])
+
+    File.mkdir_p!(Path.dirname(doubled))
+    other = String.replace(content, uid, "01ARZ3NDEKTSV4RRFFQ69G5FAY")
+    File.write!(doubled, other)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", project)
+
     # The sender's path can lag a move; the owner's intrinsic identity cannot.
     conn = post(api_conn(), "/api/v1/lifecycle", Jason.encode!(%{action: "rest", fiber: uid}))
     assert conn.status == 200
@@ -65,6 +75,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              |> YamlElixir.read_from_string()
 
     assert %{"id" => ^uid, "status" => "open", "horizon" => "stashed"} = parsed
+    assert File.read!(doubled) == other
   end
 
   test "a poller stopping during a lifecycle request returns a structured uncertainty" do
