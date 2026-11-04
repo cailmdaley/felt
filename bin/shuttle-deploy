@@ -1051,7 +1051,7 @@ exit \"\$status\""
   if [ -z "$host" ]; then
     env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" bash -c "$RUN_SOURCE" -- "$token" < "$RUN_DIR/lifetime" 6>&- &
   else
-    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" ssh \
+    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" ssh -o BatchMode=yes \
       $(fleet_flags "$host") "$(fleet_ssh "$host")" "bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$token")" < "$RUN_DIR/lifetime" 6>&- &
   fi
   active=$!

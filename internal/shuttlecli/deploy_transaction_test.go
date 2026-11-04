@@ -125,6 +125,7 @@ echo $$ > "$FLEET_ROOT/ssh.pid"
 for option in ConnectTimeout=15 ServerAliveInterval=15 ServerAliveCountMax=3; do
  case "$*" in *"$option"*) ;; *) echo "missing SSH bound: $option" >&2; exit 94;; esac
 done
+case "$*" in *SHUTTLE_DEPLOY_DONE_*) case "$*" in *BatchMode=yes*) ;; *) echo transaction-ssh-may-prompt >&2; exit 93;; esac;; esac
 if [ "${SSH_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/ssh-entered"; while [ ! -f "$FLEET_ROOT/ssh-go" ]; do sleep .02; done; fi
 while :; do case "${1:-}" in -o) shift 2;; -n) shift;; *) break;; esac; done
 shift
@@ -473,6 +474,15 @@ func TestDeployKilledWaiterNeverAcquiresAfterHolder(t *testing.T) {
 	}
 	if builds := strings.Count(fleetRead(f.events), "build "); builds != 1 {
 		t.Fatalf("forgotten waiter ran later: %s", fleetRead(f.events))
+	}
+}
+
+func TestDeployTransactionSSHNeverPrompts(t *testing.T) {
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	cmd, log := f.start(t, "batch-mode")
+	if e := cmd.Wait(); e != nil {
+		t.Fatalf("background transaction SSH permits prompting: %v %s", e, fleetRead(log))
 	}
 }
 
