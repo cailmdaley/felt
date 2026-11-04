@@ -1227,6 +1227,8 @@ defmodule Shuttle.Dispatcher do
               end
 
             resumed_at = DateTime.utc_now()
+            prepared = prepared_dispatch("resume", session_id, resumed_at, agent, opts)
+            opts = Keyword.put(opts, :prepared_launch, prepared)
 
             fallback_signal =
               if agent.cli == "pi" and not Keyword.get(opts, :restoration),
@@ -1275,22 +1277,23 @@ defmodule Shuttle.Dispatcher do
                 runner,
                 Keyword.put(opts, :conversation_uuid, session_id),
                 fn ->
-                  record_dispatch_session(
-                    fiber_id,
-                    session_id,
-                    runner,
-                    Keyword.merge(opts,
-                      felt_store: felt_store,
-                      run_id: Keyword.get(opts, :run_id),
-                      tmux: session,
-                      harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-                      uid: Keyword.get(opts, :uid),
-                      ledger_kind: :resume,
-                      dispatched_at: DateTime.to_iso8601(resumed_at)
+                  recorded =
+                    record_dispatch_session(
+                      fiber_id,
+                      session_id,
+                      runner,
+                      Keyword.merge(opts,
+                        felt_store: felt_store,
+                        run_id: Keyword.get(opts, :run_id),
+                        tmux: session,
+                        harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                        uid: Keyword.get(opts, :uid),
+                        ledger_kind: :resume,
+                        dispatched_at: DateTime.to_iso8601(resumed_at)
+                      )
                     )
-                  )
 
-                  if fallback_signal do
+                  if fallback_signal && recorded == :ok do
                     fallback_opts =
                       Keyword.merge(opts,
                         felt_store: felt_store,
@@ -1327,6 +1330,20 @@ defmodule Shuttle.Dispatcher do
         {command, session_uuid} =
           build_fresh_command(agent, fiber_id, prompt_context, prompt_opts)
 
+        {uuid, boundary} =
+          case session_uuid do
+            {:claude, uuid} -> {uuid, DateTime.utc_now()}
+            {:capture, _, _, boundary} -> {nil, boundary}
+            :none -> {nil, DateTime.utc_now()}
+          end
+
+        prepared = prepared_dispatch("fresh", uuid, boundary, agent, opts)
+
+        opts =
+          opts
+          |> Keyword.put(:prepared_launch, prepared)
+          |> Keyword.put(:dispatched_at, prepared["dispatched_at"])
+
         Logger.info("Dispatching #{fiber_id} via #{agent.id} → tmux session #{session}")
 
         run_script =
@@ -1342,14 +1359,7 @@ defmodule Shuttle.Dispatcher do
           work_dir,
           run_script,
           runner,
-          Keyword.put(
-            opts,
-            :conversation_uuid,
-            case session_uuid do
-              {:claude, uuid} -> uuid
-              _ -> nil
-            end
-          ),
+          opts,
           fn ->
             store_session_id(
               fiber_id,
@@ -1369,12 +1379,28 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  defp prepared_dispatch(intent, uuid, boundary, agent, opts) do
+    %{
+      "intent" => intent,
+      "session_uuid" => uuid,
+      "dispatched_at" => DateTime.to_iso8601(boundary),
+      "run_id" => opts[:run_id],
+      "harness" => Shuttle.SessionLedger.harness_for_cli(agent.cli)
+    }
+  end
+
   # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
   # propagates unchanged — nothing is stamped for a worker that never started.
   defp spawn_and_record(session, work_dir, run_script, runner, opts, record_fun) do
     launch_opts =
       opts
-      |> Keyword.take([:fiber, :felt_store, :launch_evidence, :conversation_uuid])
+      |> Keyword.take([
+        :fiber,
+        :felt_store,
+        :launch_evidence,
+        :conversation_uuid,
+        :prepared_launch
+      ])
       |> Keyword.put(:preflighted, true)
 
     case Shuttle.Terminal.launch(runner, session, work_dir, run_script, launch_opts) do
@@ -1483,28 +1509,28 @@ defmodule Shuttle.Dispatcher do
          runner,
          opts
        ) do
-    record_dispatch_session(fiber_id, nil, runner, opts)
+    with :ok <- record_dispatch_session(fiber_id, nil, runner, opts) do
+      # Fire-and-forget: capture the session UUID from the harness's JSONL file
+      # in a background task. `dispatched_at` is already on disk, so the card can
+      # honestly report `identity_pending` while a cold harness starts; the
+      # elapsed-time deadline above leaves ordinary startup latency room without
+      # letting a failed capture task live forever. Supervised (not bare
+      # Task.start) so tests can enumerate and kill stragglers before tearing
+      # down the tmp dirs the backfill writes into.
+      Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+        deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
 
-    # Fire-and-forget: capture the session UUID from the harness's JSONL file
-    # in a background task. `dispatched_at` is already on disk, so the card can
-    # honestly report `identity_pending` while a cold harness starts; the
-    # elapsed-time deadline above leaves ordinary startup latency room without
-    # letting a failed capture task live forever. Supervised (not bare
-    # Task.start) so tests can enumerate and kill stragglers before tearing
-    # down the tmp dirs the backfill writes into.
-    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-      deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
-
-      capture_and_backfill(
-        fiber_id,
-        cli,
-        work_dir,
-        dispatched_after,
-        runner,
-        opts,
-        deadline
-      )
-    end)
+        capture_and_backfill(
+          fiber_id,
+          cli,
+          work_dir,
+          dispatched_after,
+          runner,
+          opts,
+          deadline
+        )
+      end)
+    end
   end
 
   defp store_session_id(fiber_id, :none, runner, opts),
@@ -1662,6 +1688,49 @@ defmodule Shuttle.Dispatcher do
     end)
   end
 
+  @doc false
+  def recover_prepared_dispatch(fiber_id, fiber, session, runner, store) do
+    case Shuttle.Terminal.LaunchAttempts.prepared(session, runner) do
+      {:ok, facts} ->
+        runtime = get_in(fiber, ["shuttle", "runtime"]) || %{}
+
+        facts =
+          if runtime["dispatched_at"] == facts["dispatched_at"] and
+               runtime["session_uuid"] not in [nil, ""],
+             do: Map.put(facts, "session_uuid", runtime["session_uuid"]),
+             else: facts
+
+        opts = [
+          felt_store: store,
+          tmux: session,
+          uid: fiber["uid"],
+          harness: facts["harness"],
+          run_id: facts["run_id"],
+          dispatched_at: facts["dispatched_at"],
+          ledger_kind: if(facts["intent"] == "resume", do: :resume, else: :dispatch)
+        ]
+
+        runtime = %{
+          "dispatched_at" => facts["dispatched_at"],
+          "session_uuid" => facts["session_uuid"],
+          "run_id" => facts["run_id"]
+        }
+
+        projected = put_in(fiber, ["shuttle", "runtime"], runtime)
+
+        case record_dispatch_session(fiber_id, facts["session_uuid"], runner, opts) do
+          :ok -> {:ok, projected, facts}
+          {:error, reason} -> {:pending, projected, facts, reason}
+        end
+
+      {:error, _} = error ->
+        error
+
+      :none ->
+        :none
+    end
+  end
+
   # The one runtime-marker writer both entry points share: guard on the felt
   # store, run the caller's Continuation write, and on success log + append the
   # structural half to the session ledger. A missing store suppresses the
@@ -1690,17 +1759,36 @@ defmodule Shuttle.Dispatcher do
               )
             end
 
+            if label == "dispatch marker",
+              do:
+                Shuttle.Terminal.LaunchAttempts.commit_dispatch(opts[:tmux], opts[:dispatched_at])
+
+            :ok
+
           {:error, reason} ->
             Logger.warning(
               "Could not write #{label} for #{fiber_id} (#{store}): #{inspect(reason)}"
             )
+
+            if poller = opts[:poller],
+              do:
+                send(
+                  poller,
+                  {:identity_capture_failed, fiber_id, opts[:identity_token],
+                   "Dispatch marker write failed: #{inspect(reason)}"}
+                )
+
+            {:error, reason}
         end
 
       _ ->
         Logger.debug("write_runtime_marker (#{label}): no felt_store for #{fiber_id}; skipping")
+        {:error, :no_store}
     end
   rescue
-    e -> Logger.warning("Could not write #{label} for #{fiber_id}: #{inspect(e)}")
+    e ->
+      Logger.warning("Could not write #{label} for #{fiber_id}: #{inspect(e)}")
+      {:error, e}
   end
 
   # Append the fiber↔session pairing to this host's session ledger. Carries the

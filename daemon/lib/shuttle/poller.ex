@@ -1343,6 +1343,7 @@ defmodule Shuttle.Poller do
       {:fallback_started, _, _, _} -> true
       {:identity_capture_failed, _, _, _} -> true
       {:retry_identity, _, _} -> true
+      {:retry_prepared_dispatch, _, _} -> true
       _ -> false
     end
   end
@@ -1684,6 +1685,26 @@ defmodule Shuttle.Poller do
           Map.update!(state.running, key, &Map.put(&1, :identity_error, to_string(reason)))
 
         {:noreply, %{state | running: running}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  defp transition_info({:retry_prepared_dispatch, fiber_id, session}, state) do
+    case running_worker(state, fiber_id) do
+      %{session: ^session} = worker ->
+        case fetch_fiber_full(fiber_id, state) do
+          {:ok, fiber} ->
+            key = running_key(state, fiber_id)
+            worker = Map.delete(worker, :dispatch_mirror_pending)
+            state = %{state | running: Map.put(state.running, key, worker)}
+            {:noreply, acquire_worker_identity(state, fiber_id, fiber)}
+
+          {:error, _} ->
+            retry_prepared_dispatch(state, fiber_id, worker)
+            {:noreply, state}
+        end
 
       _ ->
         {:noreply, state}
@@ -3523,14 +3544,78 @@ defmodule Shuttle.Poller do
   end
 
   @doc false
+  def recover_prepared_worker(state, fiber_id, fiber, worker) do
+    case Dispatcher.recover_prepared_dispatch(
+           fiber_id,
+           fiber,
+           worker.session,
+           state.runner,
+           owning_store(fiber_id, state)
+         ) do
+      {:ok, fiber, facts} ->
+        worker =
+          prepared_worker_identity(worker, facts)
+          |> Map.delete(:identity_error)
+          |> Map.delete(:dispatch_mirror_pending)
+
+        {fiber, worker}
+
+      {:pending, fiber, facts, reason} ->
+        unless worker[:dispatch_mirror_pending],
+          do: retry_prepared_dispatch(state, fiber_id, worker)
+
+        worker =
+          prepared_worker_identity(worker, facts)
+          |> Map.put(:identity_error, inspect(reason))
+          |> Map.put(:dispatch_mirror_pending, true)
+
+        {fiber, worker}
+
+      {:error, reason} ->
+        unless worker[:dispatch_mirror_pending],
+          do: retry_prepared_dispatch(state, fiber_id, worker)
+
+        {fiber,
+         worker
+         |> Map.put(:session_uuid, nil)
+         |> Map.put(:identity_error, inspect(reason))
+         |> Map.put(:dispatch_mirror_pending, true)}
+
+      :none ->
+        {fiber, worker}
+    end
+  end
+
+  defp prepared_worker_identity(worker, facts) do
+    worker
+    |> Map.put(:session_uuid, present_string(facts["session_uuid"]))
+    |> Map.put(:context_harness, Shuttle.Harnesses.normalize(facts["harness"]))
+  end
+
+  defp retry_prepared_dispatch(state, fiber_id, worker) do
+    Process.send_after(
+      state.self_ref,
+      {:retry_prepared_dispatch, fiber_id, worker.session},
+      Shuttle.Env.app(:session_capture_retry_ms, 30_000)
+    )
+  end
+
+  @doc false
   def acquire_worker_identity(state, fiber_id, fiber) do
     worker = running_worker(state, fiber_id)
+
+    {fiber, worker} =
+      if worker,
+        do: recover_prepared_worker(state, fiber_id, fiber, worker),
+        else: {fiber, worker}
+
+    state = if worker, do: put_running(state, running_key(state, fiber_id), worker), else: state
     cli = worker_cli(worker, fiber)
     uuid = worker_session_uuid(worker, fiber)
     boundary = get_in(fiber, ["shuttle", "runtime", "dispatched_at"]) || ""
     signal = worker && Dispatcher.pending_resume_fallback(worker.session, boundary)
 
-    if worker && (uuid == nil || signal != nil) do
+    if worker && !worker[:dispatch_mirror_pending] && (uuid == nil || signal != nil) do
       token = make_ref()
       key = running_key(state, fiber_id)
       worker = worker |> Map.put(:session_uuid, uuid) |> Map.put(:identity_token, token)
@@ -5789,6 +5874,13 @@ defmodule Shuttle.Poller do
     worker =
       case persist_context_receiver(state, meta, meta) do
         {:ok, epoch, harness, address} ->
+          unless meta[:dispatch_mirror_pending] do
+            Shuttle.Terminal.LaunchAttempts.finish_dispatch(
+              meta.session,
+              Map.get(meta, :session_uuid)
+            )
+          end
+
           meta
           |> Map.put(:context_epoch, epoch)
           |> Map.put(:context_harness, harness)

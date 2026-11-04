@@ -154,6 +154,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
     # Restore the owned receiver only for an assignment we still supervise.
     running_meta = Poller.recover_context_receiver(state, running_meta, fiber)
+    {fiber, running_meta} = Poller.recover_prepared_worker(state, fiber_id, fiber, running_meta)
     watch_adopted_session(state, fiber_id, fiber, runtime_key, running_meta)
   end
 

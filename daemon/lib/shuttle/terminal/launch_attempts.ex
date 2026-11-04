@@ -49,6 +49,54 @@ defmodule Shuttle.Terminal.LaunchAttempts do
     end)
   end
 
+  @doc "Prepared metadata is usable only for the exact live script recorded before launch."
+  def prepared(name, runner) do
+    case get(name) do
+      {:ok, %{"dispatch" => dispatch, "script" => script}} when is_map(dispatch) ->
+        with {:ok, procs} <- Shuttle.WorkerProcess.scan(runner),
+             %{} = proc <- Shuttle.WorkerProcess.script_process(procs, script),
+             %{} <- Shuttle.WorkerProcess.session_process([proc], name) do
+          {:ok, dispatch}
+        else
+          _ ->
+            if Shuttle.Terminal.status(runner, name) == :gone,
+              do: :none,
+              else: {:error, :execution_unproven}
+        end
+
+      _ ->
+        :none
+    end
+  end
+
+  def commit_dispatch(name, stamp) when is_binary(name) and is_binary(stamp) do
+    locked(name, fn ->
+      with {:ok, raw} <- FS.read(path(name)),
+           %{"dispatch" => %{"dispatched_at" => ^stamp}} = info <- decode(name, raw) do
+        write(name, Map.put(info, "dispatch_mirrored", stamp))
+      else
+        _ -> :ok
+      end
+    end)
+  end
+
+  def commit_dispatch(_, _), do: :ok
+
+  def finish_dispatch(name, uuid) do
+    locked(name, fn ->
+      with {:ok, raw} <- FS.read(path(name)),
+           %{
+             "dispatch" => %{"dispatched_at" => stamp, "session_uuid" => expected},
+             "dispatch_mirrored" => stamp
+           } = info <- decode(name, raw),
+           true <- expected in [nil, uuid] do
+        write(name, Map.drop(info, ["dispatch", "dispatch_mirrored"]))
+      else
+        _ -> :ok
+      end
+    end)
+  end
+
   @doc "Reservations that can hold a conversation before its harness appears."
   def for_conversation(uuid) do
     directory = Path.dirname(path(""))

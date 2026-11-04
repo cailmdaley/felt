@@ -187,7 +187,7 @@ defmodule Shuttle.Terminal do
       end)
     end
 
-    case opts[:conversation_uuid] do
+    case opts[:conversation_uuid] || get_in(opts, [:prepared_launch, "session_uuid"]) do
       uuid when is_binary(uuid) and uuid != "" -> with_lock({:conversation, uuid}, acquire)
       _ -> acquire.()
     end
@@ -237,7 +237,11 @@ defmodule Shuttle.Terminal do
       path = WorkerProcess.script_path(name)
       Shuttle.FS.write_private!(path, script_text, 0o700)
 
-      case LaunchAttempts.record(name, path, %{"conversation_uuid" => opts[:conversation_uuid]}) do
+      case LaunchAttempts.record(name, path, %{
+             "conversation_uuid" =>
+               opts[:conversation_uuid] || get_in(opts, [:prepared_launch, "session_uuid"]),
+             "dispatch" => opts[:prepared_launch]
+           }) do
         :ok ->
           launch_backend(runner, backend, name, cwd, path, opts)
 

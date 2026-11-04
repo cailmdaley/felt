@@ -7391,6 +7391,129 @@ defmodule Shuttle.PollerTest do
 
   # ── Claim (write-and-claim) ──
 
+  defmodule CrashAfterCreateRunner do
+    def cmd("tmux", ["new-session" | _] = args, opts) do
+      MockRunner.cmd("tmux", args, opts)
+      throw(:daemon_died_after_create)
+    end
+
+    def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
+  end
+
+  @tag :prepared_launch
+  test "adoption completes the dispatch boundary and UUID after a crash immediately after spawn" do
+    id = "tests/prepared-launch"
+    root = MockRunner.felt_root()
+    MockRunner.set_fiber(id, make_fiber(id))
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: oneshot\nhost: test-host\nagent: claude-sonnet\nproject_dir: #{root}\n",
+      "active"
+    )
+
+    assert catch_throw(
+             Dispatcher.dispatch(id,
+               runner: CrashAfterCreateRunner,
+               felt_store: root,
+               prompt_context: {:standing_run, "run-crashed"}
+             )
+           ) == :daemon_died_after_create
+
+    {"tmux", args} =
+      Enum.find(MockRunner.commands(), fn {cmd, args} ->
+        cmd == "tmux" and hd(args) == "new-session"
+      end)
+
+    script = List.last(args)
+    [_, uuid] = Regex.run(~r/--session-id '([^']+)'/, File.read!(script))
+    MockRunner.set_ps_result({"812 1 bash -l #{script}\n", 0})
+    refute get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"])
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [root])
+    await_boot_cycle!(poller)
+    assert Poller.session_uuid(poller, id) == uuid
+    runtime = get_in(MockRunner.fiber(id), ["shuttle", "runtime"])
+    assert is_binary(runtime["dispatched_at"])
+    assert runtime["run_id"] == "run-crashed"
+
+    assert Enum.any?(
+             Shuttle.SessionLedger.read_since(0),
+             &(&1["session"] == uuid and &1["fiber"] == id)
+           )
+  end
+
+  @tag :prepared_launch
+  test "prepared pending capture reconstructs its boundary before acquiring Pi identity" do
+    id = "tests/prepared-pi"
+    root = MockRunner.felt_root()
+    Env.put_env("SHUTTLE_PI_SESSIONS_DIR", Path.join(root, "pi-sessions"))
+    MockRunner.set_fiber(id, make_fiber(id))
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: oneshot\nhost: test-host\nagent: pi-luna\nproject_dir: #{root}\n",
+      "active"
+    )
+
+    assert catch_throw(
+             Dispatcher.dispatch(id,
+               runner: CrashAfterCreateRunner,
+               felt_store: root,
+               work_dir: root
+             )
+           ) == :daemon_died_after_create
+
+    {"tmux", args} =
+      Enum.find(MockRunner.commands(), fn {cmd, args} ->
+        cmd == "tmux" and hd(args) == "new-session"
+      end)
+
+    script = List.last(args)
+    session = FiberUid.session(id)
+
+    assert {:ok, %{"dispatch" => %{"dispatched_at" => boundary, "session_uuid" => nil}}} =
+             Shuttle.Terminal.LaunchAttempts.get(session)
+
+    MockRunner.set_ps_result({"812 1 bash -l #{script}\n", 0})
+    path = Path.join(Shuttle.HarnessPaths.pi_sessions_dir(root), "session.jsonl")
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "type" => "session",
+        "id" => "prepared-pi-uuid",
+        "cwd" => root,
+        "timestamp" => boundary
+      }) <> "\n" <> Jason.encode!(%{"text" => "Fiber: #{id}"}) <> "\n"
+    )
+
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [root])
+    await_boot_cycle!(poller)
+    assert_eventually(fn -> assert Poller.session_uuid(poller, id) == "prepared-pi-uuid" end)
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == boundary
+  end
+
+  @tag :prepared_launch
+  test "prepared metadata cannot be applied to a successor with the same terminal name" do
+    id = "tests/prepared-successor"
+    root = MockRunner.felt_root()
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nhost: test-host\nagent: claude-sonnet\n", "active")
+
+    assert catch_throw(Dispatcher.dispatch(id, runner: CrashAfterCreateRunner, felt_store: root)) ==
+             :daemon_died_after_create
+
+    session = FiberUid.session(id)
+    MockRunner.remove_tmux_session(session)
+    MockRunner.add_tmux_session(session)
+    MockRunner.set_ps_result({"812 1 bash -l /tmp/shuttle-run-#{session}.999.sh\n", 0})
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [root])
+    await_boot_cycle!(poller)
+    assert Poller.session_uuid(poller, id) == nil
+    refute get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"])
+  end
+
   @tag :claim_execution
   test "a predecessor claim retry cannot fill a successor's pending identity" do
     id = "tests/stale-claim"
