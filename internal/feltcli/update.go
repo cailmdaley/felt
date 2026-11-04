@@ -51,6 +51,7 @@ PATH, and the Codex and pi integrations where felt is already installed.`,
 
 			if a.updatePairIsCurrent(feltPath, current, latest, a.feltBuildVersion()) {
 				fmt.Fprintf(a.env.Stdout, "Already up to date (%s)\n", current)
+				a.finishUpdate(feltPath, latest)
 				return nil
 			}
 			if current == latestClean {
@@ -92,12 +93,21 @@ PATH, and the Codex and pi integrations where felt is already installed.`,
 			}
 
 			fmt.Fprintf(a.env.Stdout, "Updated felt and shuttle to %s\n", latestClean)
-			a.refreshPluginAfterUpdate(a.defaultMarketplaceRef())
+			a.finishUpdate(feltPath, latest)
 			return nil
 		},
 	}
 	command.GroupID = groupAgents
 	return command
+}
+
+func (a *app) finishUpdate(feltPath, latest string) {
+	command := a.env.Command(feltPath, "setup", "refresh", "--source", marketplaceRepo+"#"+latest)
+	command.Stdout = a.env.Stdout
+	command.Stderr = a.env.Stderr
+	if err := command.Run(); err != nil {
+		fmt.Fprintf(a.env.Stdout, "Integration refresh failed: %v; rerun `felt update` to retry.\n", err)
+	}
 }
 
 // refreshPluginAfterUpdate keeps both agent integrations in lockstep with the

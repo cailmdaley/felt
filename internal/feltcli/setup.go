@@ -57,6 +57,16 @@ func (a *app) setupCmd() *cobra.Command {
 	command.AddCommand(a.setupReceiptCmd())
 	command.AddCommand(a.setupSkillsCmd())
 	command.AddCommand(a.setupValidateCmd())
+	var source string
+	refresh := &cobra.Command{
+		Use: "refresh", Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			a.refreshPluginAfterUpdate(source)
+			return nil
+		},
+	}
+	refresh.Flags().StringVar(&source, "source", a.defaultMarketplaceRef(), "Marketplace source")
+	command.AddCommand(refresh)
 	return command
 }
 

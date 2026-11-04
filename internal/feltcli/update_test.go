@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -312,5 +313,46 @@ func TestReplaceBinaryPairRollbackKeepsCommandsAndRemovesUnusedBackups(t *testin
 				t.Fatalf("rollback left staging or backup files: %v, %v", entries, err)
 			}
 		})
+	}
+}
+
+func TestUpdateRefreshRunsInstalledExecutableAtDownloadedTag(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	calls := fakeCallLog(t, env, "felt", "")
+	executable, err := env.LookPath("felt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testApp(t, env)
+	a.version = "1.0.0"
+	a.finishUpdate(executable, "v2.0.0")
+	if got := string(calls()); got != "setup refresh --source cailmdaley/felt#v2.0.0\n" {
+		t.Fatalf("installed executable refresh = %q; want new process using downloaded tag", got)
+	}
+}
+
+func TestUpdateRefreshRealExecutableSealsItsOwnBuild(t *testing.T) {
+	t.Parallel()
+	executable := filepath.Join(t.TempDir(), "felt")
+	build := exec.Command("go", "build", "-ldflags=-X main.version=2.0.0", "-o", executable, "./cmd/felt")
+	build.Dir = repoRoot(t)
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build felt: %v\n%s", err, output)
+	}
+	f := newRemoteSetupFixture(t, "claude")
+	f.env.Set("FELT_BIN", executable)
+	f.a.version = "1.0.0"
+	f.a.finishUpdate(executable, "v2.0.0")
+	current := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)
+	identity, err := validatePluginGeneration(filepath.Join(current, "claude-plugin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.RequestedRef != "v2.0.0" || !strings.HasPrefix(identity.FeltBuild, "2.0.0") {
+		t.Fatalf("refreshed identity = %#v", identity)
+	}
+	if err := f.a.verifyClaudeLoadedGeneration(current); err != nil {
+		t.Fatal(err)
 	}
 }
