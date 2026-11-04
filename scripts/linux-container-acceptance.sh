@@ -44,7 +44,7 @@ su - ada -c 'test -x ~/.local/bin/felt' || fail "felt CLI not installed"
 su - ada -c 'test -x ~/.local/bin/shuttle' || fail "shuttle CLI not installed"
 su - ada -c '~/.local/bin/felt --help >/dev/null' || fail "felt CLI does not run"
 su - ada -c '~/.local/bin/shuttle version >/dev/null' || fail "shuttle CLI does not run"
-su - ada -c 'test -x ~/felt/bin/rel/bin/shuttled' || fail "daemon release not built"
+su - ada -c 'test -x ~/felt/bin/rel-built/bin/shuttled' || fail "daemon release not built"
 su - ada -c 'test -f ~/.shuttle/repo && grep -q "/home/ada/felt" ~/.shuttle/repo' || fail "~/.shuttle/repo state file missing/wrong"
 su - ada -c 'test -x ~/.local/bin/shuttle-launch' || fail "shuttle-launch not installed"
 

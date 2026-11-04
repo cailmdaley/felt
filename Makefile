@@ -309,7 +309,7 @@ install:
 # daemon on crash, start it at login/boot.
 #
 # `shuttle daemon install` owns the templates in daemon/share/ (also copied
-# into the release by daemon/mix.exs). This target passes bin/rel through
+# into the release by daemon/mix.exs). This target passes bin/rel-built through
 # SHUTTLE_RELEASE; the CLI owns per-OS rendering and stop behavior. Checkout
 # and fetched-release installation use the same renderer.
 #
@@ -318,7 +318,7 @@ install:
 # stopping anything, so a host without systemd can keep its daemon running.
 install-agent: daemon cli
 	@$(MAKE) --no-print-directory cli-install
-	@PATH="$(INSTALL_DIR):$$PATH" SHUTTLE_RELEASE='$(CURDIR)/bin/rel' '$(CURDIR)/shuttle' daemon install \
+	@PATH="$(INSTALL_DIR):$$PATH" SHUTTLE_RELEASE='$(CURDIR)/bin/rel-built' '$(CURDIR)/shuttle' daemon install \
 	 $(if $(strip $(AGENT_STORES)),--stores '$(AGENT_STORES)',) \
 	 $(if $(strip $(AGENT_PATH)),--path '$(AGENT_PATH)',) \
 	 --log '$(LOG)' \

@@ -84,6 +84,8 @@ case "$1 $2" in
   printf '%s\n' "$3" > "$HOME/.shuttle/repo"
   shift 3; [ "$1" = -- ] || exit 8; shift; exec "$@" ;;
  'daemon stop') exit 0 ;;
+ 'daemon install') [ -x "$SHUTTLE_RELEASE/bin/shuttled" ] ;;
+ 'daemon select-release') [ -x "$3/bin/shuttled" ] ;;
  *) exit 9 ;;
 esac
 `
@@ -161,6 +163,24 @@ esac
 	canonicalLinked, _ := filepath.EvalSymlinks(linked)
 	if !strings.Contains(string(calls), "daemon stop --within "+canonicalLinked) {
 		t.Fatalf("linked stop was not scoped: %s", calls)
+	}
+	// Both installer entry points must consume the generation just assembled,
+	// not an old directory-based release left in this checkout.
+	if err := os.RemoveAll(legacy.Dir); err != nil {
+		t.Fatal(err)
+	}
+	run(main, "install-agent")
+	bootstrap, err := os.ReadFile("../../scripts/bootstrap.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	function := strings.Split(strings.Split(string(bootstrap), "start_respawn_loop() {")[1], "\n}\n")[0]
+	sysenvtest.FakeCommand(t, env, "tmux", "#!/bin/sh\nexit 0\n")
+	env.Set("REPO", main)
+	env.Set("SHUTTLE_BIN", filepath.Join(main, "shuttle"))
+	command := env.Command("bash", "-c", "ok() { :; }; note() { :; }; die() { exit 1; }; "+function)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("bootstrap release selection: %v\n%s", err, out)
 	}
 	run(main, "restart")
 	calls, _ = os.ReadFile(events)
