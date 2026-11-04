@@ -179,30 +179,20 @@ endif
 	@# local path match what release.yml does for the same reason.
 	cd daemon && MIX_ENV=prod $(MIX) compile
 	cd daemon && MIX_ENV=prod $(MIX) compile.app --force
-	@# Assemble beside the live release and swap, never in place. A running
-	@# daemon holds NIF .so files open under bin/rel/lib; on an NFS home that
-	@# turns every unlink into a .nfs* silly-rename stub, and `--overwrite`'s
-	@# rm_rf of the old lib dirs dies with "file already exists". The old tree
-	@# lives on as bin/rel.prev (the running BEAM keeps its inodes). When a
-	@# daemon still holds bin/rel.prev at the next build — two builds with no
-	@# cycle between them — its .nfs* stubs make the tree unremovable, so it is
-	@# set aside as bin/rel.retained-<epoch> and swept by a later build once
-	@# nothing holds it.
-	rm -rf bin/rel.next
-	cd daemon && MIX_ENV=prod $(MIX) release shuttled --overwrite --path ../bin/rel.next
-	@if [ -f ui/dist/index.html ]; then \
-	  for app in bin/rel.next/lib/shuttle-*; do \
+	@# Every assembly has a permanent pathname. Selection canonicalizes the
+	@# convenience symlink; a later build cannot replace a selected VM's BEAMs.
+	@set -eu; \
+	mkdir -p bin; \
+	generation=$$(mktemp -d "$(CURDIR)/bin/rel.generation-XXXXXXXX"); \
+	(cd daemon && MIX_ENV=prod $(MIX) release shuttled --path "$$generation"); \
+	if [ -f ui/dist/index.html ]; then \
+	  for app in "$$generation"/lib/shuttle-*; do \
 	    mkdir -p "$$app/priv/ui"; \
 	    rm -rf "$$app/priv/ui/dist"; \
 	    cp -R ui/dist "$$app/priv/ui/"; \
 	  done; \
-	fi
-	@for d in bin/rel.retained-*; do [ -d "$$d" ] && rm -rf "$$d" 2>/dev/null; done; true
-	@if [ -d bin/rel.prev ] && ! rm -rf bin/rel.prev 2>/dev/null; then \
-	  mv bin/rel.prev "bin/rel.retained-$$(date +%s)"; \
-	fi
-	@[ -d bin/rel ] && mv bin/rel bin/rel.prev || true
-	mv bin/rel.next bin/rel
+	fi; \
+	python3 -c 'import os,sys; dest,gen=sys.argv[1:]; os.symlink(os.path.basename(gen), gen+".link"); os.replace(gen+".link",dest)' "$(CURDIR)/bin/rel-built" "$$generation"
 
 # ── test ─────────────────────────────────────────────────────────────────
 test: go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test

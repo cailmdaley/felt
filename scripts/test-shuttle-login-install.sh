@@ -64,6 +64,9 @@ for helper in shuttle-launch tailscaled-launch shuttle-ensure; do
   cmp "$WORK/selected/bin/$helper" "$WORK/home/.local/bin/$helper"
 done
 [ ! -e "$WORK/starts" ]
+# Selected source builds name an immutable assembly, not the bin/rel alias.
+printf '%s\n' "$WORK/selected/bin/rel.generation-test" > "$WORK/home/.shuttle/repo"
+run_install
 printf 'other\n' > "$WORK/home/.shuttle/owner-node"
 if run_install; then echo 'installer overwrote an existing owner pin' >&2; exit 1; fi
 [ "$(cat "$WORK/home/.shuttle/owner-node")" = other ]

@@ -70,7 +70,7 @@ start-selected:
 case "$1" in release)
  while [ "$1" != --path ]; do shift; done
  shift; mkdir -p "$1/bin"
- printf '#!/bin/sh\nexit 0\n' > "$1/bin/shuttled"
+ printf '#!/bin/sh\n# build %s\nexit 0\n' "$BUILD_ID" > "$1/bin/shuttled"
  chmod +x "$1/bin/shuttled"
  ;; esac
 exit 0
@@ -110,8 +110,39 @@ esac
 		}
 		return string(out)
 	}
+	// A deployed pathname from a directory-based build remains untouched too.
+	legacy := writeTestDaemonRelease(t, filepath.Join(main, "bin", "rel"))
+	legacyBefore, _ := os.ReadFile(legacy.Launcher)
 	for _, root := range []string{main, linked} {
 		run(root, "build")
+	}
+	legacyAfter, err := os.ReadFile(legacy.Launcher)
+	if err != nil || string(legacyAfter) != string(legacyBefore) {
+		t.Fatalf("build replaced an existing directory-based release: %v", err)
+	}
+	// A selection retains one assembled generation across subsequent builds.
+	a := newApp(env)
+	release, err := a.validateDaemonRelease(filepath.Join(main, "bin", "rel-built"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.selectDaemonRelease(release); err != nil {
+		t.Fatal(err)
+	}
+	selected, _ := os.ReadFile(pointer)
+	before, _ := os.ReadFile(release.Launcher)
+	env.Set("BUILD_ID", "second")
+	run(main, "daemon")
+	after, err := os.ReadFile(release.Launcher)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("ordinary build replaced selected generation %s: %q -> %q (%v)", selected, before, after, err)
+	}
+	latest, err := a.validateDaemonRelease(filepath.Join(main, "bin", "rel-built"))
+	if err != nil || latest.Dir == release.Dir {
+		t.Fatalf("build did not publish a distinct generation: %v, %s", err, latest.Dir)
+	}
+	if err := os.WriteFile(pointer, []byte(initial), 0600); err != nil {
+		t.Fatal(err)
 	}
 	output := run(linked, "restart")
 	if !strings.Contains(output, "daemon is selected elsewhere") || !strings.Contains(output, "--hosts local --ref") {

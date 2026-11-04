@@ -14,7 +14,7 @@ case "${1:-}" in
     fi
     if [ "$1" = restart ]; then
       make -C "$root" cli-install
-      exec "$root/shuttle" daemon activate-release "$root/bin/rel" -- make -C "$root" stop start
+      exec "$root/shuttle" daemon activate-release "$root/bin/rel-built" -- make -C "$root" stop start
     fi
     exec make -C "$root" start-selected
     ;;

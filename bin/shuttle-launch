@@ -63,7 +63,9 @@ esac
 SESSION=shuttle-daemon
 
 release_dir() {
-  if [ -x "$1/bin/rel/bin/shuttled" ]; then
+  if [ -x "$1/bin/rel-built/bin/shuttled" ]; then
+    printf '%s\n' "$1/bin/rel-built"
+  elif [ -x "$1/bin/rel/bin/shuttled" ]; then
     printf '%s\n' "$1/bin/rel"
   elif [ -x "$1/bin/shuttled" ]; then
     printf '%s\n' "$1"

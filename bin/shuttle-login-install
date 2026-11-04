@@ -24,7 +24,7 @@ if [ ! -s "$repo_file" ]; then
 fi
 repo=$(head -n 1 "$repo_file")
 case "$repo" in
-  */bin/rel) repo=${repo%/bin/rel} ;;
+  */bin/rel|*/bin/rel.generation-*) repo=${repo%/bin/*} ;;
 esac
 if [ ! -x "$repo/bin/shuttle-launch" ] \
   || [ ! -x "$repo/bin/tailscaled-launch" ] \

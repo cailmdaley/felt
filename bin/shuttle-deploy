@@ -613,7 +613,7 @@ SH
 
 release_verified_deploy() {
   release_quarantine || { bad "quarantine release failed"; return 1; }
-  run_local "$(remember_previous_cmd "${1:-}" "${EXPECTED_RELEASE%/bin/rel}")" >/dev/null \
+  run_local "$(remember_previous_cmd "${1:-}" "${EXPECTED_RELEASE%/bin/*}")" >/dev/null \
     || { bad 'rollback receipt: could not retain previous release'; return 1; }
   ok "live on $TARGET_SHA, quarantine released"
 }
@@ -623,8 +623,8 @@ finish_verified_deploy() { # Regular checkout; rollback provenance is already re
   previous="$(run_local 'if [ -f "$HOME/.shuttle/deploy/previous" ]; then cat "$HOME/.shuttle/deploy/previous"; fi')" \
     || { bad 'rollback receipt: could not read previous release'; return 1; }
   run_local "$(refresh_checkout_cmd "$checkout")" || ok "checkout freshness: could not inspect $checkout; left unchanged"
-  refresh_harnesses "${EXPECTED_RELEASE%/bin/rel}" || { bad "harness setup failed"; return 1; }
-  run_local "$(prune_deploy_cmd "$checkout" "$previous" "${EXPECTED_RELEASE%/bin/rel}/shuttle")" || {
+  refresh_harnesses "${EXPECTED_RELEASE%/bin/*}" || { bad "harness setup failed"; return 1; }
+  run_local "$(prune_deploy_cmd "$checkout" "$previous" "${EXPECTED_RELEASE%/bin/*}/shuttle")" || {
     bad "could not prune deploy worktrees on ${HOST:-local}"
     return 1
   }
@@ -877,7 +877,7 @@ deploy_local() {
 remote_host_cycle() { # Deployed checkout, previous release root; runs on its owner.
   local checkout="$1" previous="$2" supervisor=""
   supervisor="$(run_local "$(supervisor_probe_cmd)")" || { bad "could not inspect the host's supervisor"; return 1; }
-  EXPECTED_RELEASE="$(run_local "cd $(shell_quote "$checkout/bin/rel") && pwd -P")" || return 1
+  EXPECTED_RELEASE="$(run_local "cd $(shell_quote "$checkout/bin/rel-built") && pwd -P")" || return 1
   local cycle
   if [ "$supervisor" = tmux ]; then
     # Keep the live loop; only its listener needs a graceful cycle. Recreating
