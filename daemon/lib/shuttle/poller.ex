@@ -489,8 +489,11 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp thread_owner_feeds do
-    Shuttle.RemoteFiberRegistry.feeds()
+  defp thread_owner_feeds(demand \\ :reader) do
+    case demand do
+      :reader -> Shuttle.RemoteFiberRegistry.feeds()
+      :background -> Shuttle.RemoteFiberRegistry.cached_feeds()
+    end
   catch
     :exit, _ -> %{}
   end
@@ -4773,7 +4776,7 @@ defmodule Shuttle.Poller do
         entries,
         state.own_host_id,
         local_store_by_uid,
-        thread_owner_feeds()
+        thread_owner_feeds(:background)
       )
 
     {entries, live, reachable}

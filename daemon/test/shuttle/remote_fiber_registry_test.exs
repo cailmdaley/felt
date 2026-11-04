@@ -16,9 +16,14 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     def start_link(_ \\ []), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
     def reset, do: Agent.update(__MODULE__, fn _ -> %{} end)
     def set(url, response), do: Agent.update(__MODULE__, &Map.put(&1, url, response))
+    def calls(url), do: Agent.get(__MODULE__, &Map.get(&1, {:calls, url}, 0))
 
     @impl true
-    def get(url, _timeout_ms), do: Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set}))
+    def get(url, _timeout_ms) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        {Map.get(state, url, {:error, :not_set}), Map.update(state, {:calls, url}, 1, &(&1 + 1))}
+      end)
+    end
 
     # Conditional-fetch transport. Derives a content etag from the scripted
     # response body and honors If-None-Match: a matching etag returns 304 (empty
@@ -26,7 +31,13 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     # through unchanged. This lets tests exercise the real 200/304 round-trip.
     @impl true
     def get(url, req_headers, _timeout_ms) do
-      case Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set})) do
+      response =
+        Agent.get_and_update(__MODULE__, fn state ->
+          {Map.get(state, url, {:error, :not_set}),
+           Map.update(state, {:calls, url}, 1, &(&1 + 1))}
+        end)
+
+      case response do
         {:ok, body} ->
           etag = etag_for(body)
           inm = header(req_headers, "if-none-match")
@@ -112,6 +123,32 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         Process.sleep(5)
         wait_for_feed(pid, name, attempts - 1)
     end
+  end
+
+  defp wait_until(fun, attempts \\ 1_000)
+  defp wait_until(_fun, 0), do: flunk("condition did not become true")
+
+  defp wait_until(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(1)
+      wait_until(fun, attempts - 1)
+    end
+  end
+
+  defp tick_registry(pid) do
+    send(pid, {:tick, make_ref()})
+    :sys.get_state(pid)
+  end
+
+  defp wait_for_successful_feed(pid, name) do
+    wait_until(fn ->
+      case RemoteFiberRegistry.cached_feeds(pid) do
+        %{^name => %{last_polled_at: %DateTime{}, stale: false}} -> true
+        _ -> false
+      end
+    end)
   end
 
   # A clock the test owns: `clock` reads it, `advance.(ms)` moves it forward.
@@ -473,6 +510,59 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     end
   end
 
+  describe "reader-driven cadence" do
+    test "cached feed reads do not reheat polling, retain the idle staleness window, and refresh is immediate",
+         %{
+           dir: dir
+         } do
+      {clock, advance} = fake_clock()
+      remote = candide(poll_interval_ms: 5, stale_multiplier: 1)
+      url = Remote.fibers_url(remote)
+      MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :rfr_reader_cadence,
+           remotes: [remote],
+           client: MockClient,
+           tick_interval_ms: 60_000,
+           auto_poll: false,
+           store_dir: dir,
+           clock: clock}
+        )
+
+      tick_registry(pid)
+      wait_until(fn -> MockClient.calls(url) == 1 end)
+      wait_for_successful_feed(pid, "candide")
+
+      advance.(30_000)
+      tick_registry(pid)
+      assert MockClient.calls(url) == 1
+
+      assert %{"candide" => %{stale: false}} = RemoteFiberRegistry.feeds(pid)
+      tick_registry(pid)
+      wait_until(fn -> MockClient.calls(url) == 2 end)
+      wait_for_successful_feed(pid, "candide")
+
+      # A board's 15s composite refresh is well inside the 45s reader lease.
+      advance.(15_000)
+      tick_registry(pid)
+      wait_until(fn -> MockClient.calls(url) == 3 end)
+      wait_for_successful_feed(pid, "candide")
+
+      advance.(30_001)
+      read_at = :sys.get_state(pid).last_read_at
+      assert %{"candide" => %{stale: false}} = RemoteFiberRegistry.cached_feeds(pid)
+      assert :sys.get_state(pid).last_read_at == read_at
+      tick_registry(pid)
+      assert MockClient.calls(url) == 3
+
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      assert MockClient.calls(url) == 4
+    end
+  end
+
   describe "staleness over time" do
     # A feed is stale iff its last SUCCESS is older than stale_multiplier ×
     # poll_interval (here 1 × 200ms), or there has been none. A failed poll
@@ -563,6 +653,39 @@ defmodule Shuttle.RemoteFiberRegistryTest do
 
     defp write_fleet(path, entries),
       do: File.write!(path, Jason.encode!(%{"version" => 1, "remotes" => entries}))
+
+    test "an empty boot keeps ticking and discovers a later peer without restart", %{
+      dir: dir,
+      path: path
+    } do
+      write_fleet(path, [])
+      url = "http://127.0.0.1:4002/api/v1/fibers?shuttle=true"
+      MockClient.set(url, {:ok, feed_body([sample_fiber("late-peer")])})
+
+      pid =
+        start_supervised!(
+          {RemoteFiberRegistry,
+           name: :rfr_empty_boot_discovery,
+           client: MockClient,
+           auto_poll: true,
+           tick_interval_ms: 5,
+           store_dir: dir}
+        )
+
+      Process.sleep(15)
+      assert MockClient.calls(url) == 0
+
+      write_fleet(path, [%{"name" => "cineca", "port" => 4002, "poll_interval_ms" => 60_000}])
+
+      wait_until(fn -> MockClient.calls(url) > 0 end)
+
+      wait_until(fn ->
+        case RemoteFiberRegistry.cached_feeds(pid) do
+          %{"cineca" => %{fibers: [%{"fiber" => %{"id" => "late-peer"}}], stale: false}} -> true
+          _ -> false
+        end
+      end)
+    end
 
     test "an added remote joins the board and a removed one leaves it", %{dir: dir, path: path} do
       write_fleet(path, [%{"name" => "candide", "port" => 4001}])

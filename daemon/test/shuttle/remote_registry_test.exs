@@ -28,9 +28,13 @@ defmodule Shuttle.RemoteRegistryTest do
 
     def set(url, response), do: Agent.update(__MODULE__, &Map.put(&1, url, response))
 
+    def calls(url), do: Agent.get(__MODULE__, &Map.get(&1, {:calls, url}, 0))
+
     @impl true
     def get(url, _timeout_ms) do
-      Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set}))
+      Agent.get_and_update(__MODULE__, fn state ->
+        {Map.get(state, url, {:error, :not_set}), Map.update(state, {:calls, url}, 1, &(&1 + 1))}
+      end)
     end
   end
 
@@ -140,6 +144,23 @@ defmodule Shuttle.RemoteRegistryTest do
     clock = fn -> Agent.get(agent, & &1) end
     advance = fn ms -> Agent.update(agent, &DateTime.add(&1, ms, :millisecond)) end
     {clock, advance}
+  end
+
+  defp wait_until(fun, attempts \\ 1_000)
+  defp wait_until(_fun, 0), do: flunk("condition did not become true")
+
+  defp wait_until(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(1)
+      wait_until(fun, attempts - 1)
+    end
+  end
+
+  defp tick_registry(pid) do
+    send(pid, {:tick, make_ref()})
+    :sys.get_state(pid)
   end
 
   describe "Remote.from_config/1 with a remote_socket" do
@@ -465,6 +486,48 @@ defmodule Shuttle.RemoteRegistryTest do
       assert_receive {:fleet, %{"candide" => %{remote: %Remote{name: "candide"}} = candide}}
       assert MapSet.member?(candide.running, "work/foo")
       assert %DateTime{} = candide.last_polled_at
+    end
+  end
+
+  describe "reader-driven cadence" do
+    test "idle polls use the 60-second floor; a snapshot read restores fast polling until it expires" do
+      url = "http://localhost:4001/api/v1/state"
+      MockClient.set(url, {:ok, snapshot_with_running([])})
+      {clock, advance} = fake_clock(~U[2026-11-05 00:00:00Z])
+
+      {:ok, pid} =
+        RemoteRegistry.start_link(
+          name: :reg_reader_cadence,
+          remotes: [candide_remote(poll_interval_ms: 5_000)],
+          client: MockClient,
+          auto_poll: false,
+          clock: clock
+        )
+
+      tick_registry(pid)
+      assert MockClient.calls(url) == 1
+
+      advance.(20_000)
+      tick_registry(pid)
+      assert MockClient.calls(url) == 1
+
+      assert %{} != RemoteRegistry.snapshot(pid, "candide")
+      tick_registry(pid)
+      assert MockClient.calls(url) == 2
+
+      # The board refreshes its composite every 15s; one such refresh must
+      # leave the configured fast cadence active.
+      advance.(15_000)
+      tick_registry(pid)
+      assert MockClient.calls(url) == 3
+
+      advance.(30_001)
+      tick_registry(pid)
+      assert MockClient.calls(url) == 3
+
+      assert %{} != RemoteRegistry.snapshot(pid, "candide")
+      tick_registry(pid)
+      assert MockClient.calls(url) == 4
     end
   end
 
@@ -1704,6 +1767,41 @@ defmodule Shuttle.RemoteRegistryTest do
       # POSIX mtime is 1-second granular; the change token folds in size, and
       # these fleets differ in length, so the edit is always observable.
       :ok
+    end
+
+    test "an empty boot keeps ticking and discovers a later fleet-file peer", %{path: path} do
+      write_fleet(path, [])
+      url = "http://127.0.0.1:4002/api/v1/state"
+
+      MockClient.set(
+        url,
+        {:ok,
+         Jason.encode!(%{
+           "host" => "cineca",
+           "eligible" => [%{"fiber_id" => "late-peer"}],
+           "blocked" => [],
+           "retrying" => []
+         })}
+      )
+
+      {:ok, pid} =
+        RemoteRegistry.start_link(
+          name: :reg_empty_boot_discovery,
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: true,
+          tick_interval_ms: 5
+        )
+
+      Process.sleep(15)
+      assert MockClient.calls(url) == 0
+
+      write_fleet(path, [%{"name" => "cineca", "port" => 4002, "poll_interval_ms" => 60_000}])
+
+      wait_until(fn -> MockClient.calls(url) == 1 end)
+
+      assert %{"cineca" => %{snapshot: %{"host" => "cineca"}, stale: false}} =
+               RemoteRegistry.snapshots(pid)
     end
 
     test "an added remote is initialized and an existing one keeps its recovery state",

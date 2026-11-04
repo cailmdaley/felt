@@ -547,6 +547,12 @@ the login ensure recreates a missing loop after an SSH login; hub SSH recovery
 can do the same if the hub is reachable and its credentials are valid. The
 login ensure and SSH recovery launchers honor the owner-node pin.
 
+Remote state and fiber registries follow discovery even when no peers are known at boot.
+They poll at each remote's configured interval for 45 seconds after a board or composite API read, and at least 60 seconds apart otherwise.
+Background thread reconciliation reads the cache without requesting fast polling; remote thread results still arrive through the background feed, with up to one minute of polling latency.
+Cached data's staleness window follows that cadence, while recovery actions retain their own deadlines.
+Explicit feed refreshes fetch immediately.
+
 On a Rex host, the dispatcher checks for the Rex server on its poll tick and
 starts it when absent, even when no worker is waiting to launch. Rex keeps
 sessions outside the daemon, so ordinary daemon restarts leave them running.

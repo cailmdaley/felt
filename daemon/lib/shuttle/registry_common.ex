@@ -110,6 +110,26 @@ defmodule Shuttle.RegistryCommon do
     %{state | tick_timer_ref: timer_ref}
   end
 
+  @doc "Mark a registry read as demand for its configured polling cadence."
+  def mark_read(state), do: %{state | last_read_at: state.clock.()}
+
+  @doc "Poll at the configured cadence for 45s after a read, otherwise at least 60s."
+  def poll_interval(state, remote) do
+    case state.last_read_at do
+      %DateTime{} = at ->
+        if DateTime.diff(state.clock.(), at, :millisecond) < 45_000,
+          do: remote.poll_interval_ms,
+          else: max(remote.poll_interval_ms, 60_000)
+
+      nil ->
+        max(remote.poll_interval_ms, 60_000)
+    end
+  end
+
+  @doc "Use the current polling cadence when deciding whether cached data is stale."
+  def polling_remote(state, remote),
+    do: %{remote | poll_interval_ms: poll_interval(state, remote)}
+
   # ── Conditional feed fetch ──
 
   @doc """

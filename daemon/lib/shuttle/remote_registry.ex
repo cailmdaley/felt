@@ -4,7 +4,7 @@ defmodule Shuttle.RemoteRegistry do
   endpoint, caches the snapshot per origin, and owns the cross-host
   recovery cascade when a remote stops answering.
 
-  The laptop's local Shuttle daemon uses this registry to:
+  Each host's Shuttle daemon uses this registry to:
 
     * **Composite snapshot** — `ShuttleWeb.StateController` returns
       the local snapshot plus per-origin remote snapshots so the
@@ -15,10 +15,10 @@ defmodule Shuttle.RemoteRegistry do
       cascade: bounce the local launchd-managed tunnel, SSH-check the
       remote daemon, restart it when needed, then exponential backoff.
 
-  Snapshot pull stays fire-and-forget HTTP polling: the remote daemon
-  doesn't know it's being polled, no persistent connections, no auth
-  state. Failures only mark the origin as stale or recovering; the
-  registry never crashes.
+  Snapshot reads use conditional HTTP requests over reusable transport
+  connections. Public reads request the configured polling cadence for 45
+  seconds; otherwise polling uses a 60-second floor. Recovery actions retain
+  their own deadlines. Failures mark the origin as stale or recovering.
 
   ## Configuration
 
@@ -106,6 +106,7 @@ defmodule Shuttle.RemoteRegistry do
       :user_uid,
       :remotes_token,
       clock: &DateTime.utc_now/0,
+      last_read_at: nil,
       reload_from_file?: false,
       snapshots: %{}
     ]
@@ -300,7 +301,7 @@ defmodule Shuttle.RemoteRegistry do
     }
 
     state =
-      if remotes == [] or not auto_poll do
+      if not auto_poll do
         state
       else
         RegistryCommon.schedule_tick(state, 0)
@@ -311,11 +312,11 @@ defmodule Shuttle.RemoteRegistry do
 
   @impl true
   def handle_call(:snapshots, _from, state) do
-    {:reply, build_snapshots_view(state), state}
+    {:reply, build_snapshots_view(state), RegistryCommon.mark_read(state)}
   end
 
   def handle_call({:snapshot, name}, _from, state) do
-    {:reply, build_one_view(state, name), state}
+    {:reply, build_one_view(state, name), RegistryCommon.mark_read(state)}
   end
 
   def handle_call({:reset_breaker, name}, _from, state) do
@@ -345,7 +346,7 @@ defmodule Shuttle.RemoteRegistry do
   end
 
   def handle_call(:poll_now, _from, state) do
-    state = poll_all(state)
+    state = state |> RegistryCommon.mark_read() |> poll_all()
     {:reply, :ok, state}
   end
 
@@ -399,7 +400,7 @@ defmodule Shuttle.RemoteRegistry do
       Map.new(state.snapshots, fn {name, entry} ->
         {name,
          %{
-           remote: entry.remote,
+           remote: RegistryCommon.polling_remote(state, entry.remote),
            last_polled_at: entry.last_polled_at,
            running: running_keys(entry.snapshot)
          }}
@@ -476,8 +477,8 @@ defmodule Shuttle.RemoteRegistry do
        ) do
     interval_ms =
       case recovery_state do
-        :tripped -> max(remote.poll_interval_ms, state.tripped_poll_floor_ms)
-        _ -> remote.poll_interval_ms
+        :tripped -> max(RegistryCommon.poll_interval(state, remote), state.tripped_poll_floor_ms)
+        _ -> RegistryCommon.poll_interval(state, remote)
       end
 
     now_ms - DateTime.to_unix(last, :millisecond) >= interval_ms
@@ -1341,14 +1342,21 @@ defmodule Shuttle.RemoteRegistry do
     now = state.clock.()
 
     Map.new(state.snapshots, fn {name, entry} ->
-      {name, view_entry(entry, now)}
+      {name,
+       view_entry(%{entry | remote: RegistryCommon.polling_remote(state, entry.remote)}, now)}
     end)
   end
 
   defp build_one_view(%State{} = state, name) do
     case Map.get(state.snapshots, name) do
-      nil -> nil
-      entry -> view_entry(entry, state.clock.())
+      nil ->
+        nil
+
+      entry ->
+        view_entry(
+          %{entry | remote: RegistryCommon.polling_remote(state, entry.remote)},
+          state.clock.()
+        )
     end
   end
 

@@ -14,7 +14,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       loop must stay responsive.
 
     * **`RemoteFiberRegistry`** (this module) polls the heavier `/fibers` feed
-      purely for the cross-host kanban board. A fibers-fetch failure here must
+      for the cross-host board and thread reconciliation. A fetch failure must
       NOT perturb recovery — it only marks the origin's feed stale.
 
   Keeping them apart matters for two reasons: a slow or failing fiber feed never
@@ -54,7 +54,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       `last_polled_at` and lets time do the work: its staleness bound is
       minutes wide and measures the age of the data, which a restore does not
       change. This registry's window is `stale_multiplier × poll_interval`
-      (~10s at the defaults) and claims the owner was just observed, so a quick
+      at the current reader-driven cadence and claims the owner was just observed, so a quick
       daemon bounce would serve restored rows as *fresh*.
       An entry read from disk is last-known-good, not observed, so it carries
       `restored?: true`, which forces `stale?/2` regardless of the clock, and
@@ -103,6 +103,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       :remotes_token,
       :store_dir,
       :clock,
+      last_read_at: nil,
       reload_from_file?: false,
       feeds: %{},
       # ref => remote name, for the in-flight fetch guard
@@ -166,6 +167,10 @@ defmodule Shuttle.RemoteFiberRegistry do
   def feeds(server) do
     RegistryCommon.read(server, :feeds, %{})
   end
+
+  @doc "Read cached feeds for background reconciliation without requesting faster polling."
+  def cached_feeds(server \\ Shuttle.Env.server(__MODULE__)),
+    do: RegistryCommon.read(server, :cached_feeds, %{})
 
   @doc """
   Synchronously fetches every remote's feed once and returns when all have been
@@ -252,7 +257,7 @@ defmodule Shuttle.RemoteFiberRegistry do
     )
 
     state =
-      if remotes == [] or not auto_poll do
+      if not auto_poll do
         state
       else
         RegistryCommon.schedule_tick(state, 0)
@@ -263,11 +268,15 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @impl true
   def handle_call(:feeds, _from, state) do
+    {:reply, build_feeds_view(state), RegistryCommon.mark_read(state)}
+  end
+
+  def handle_call(:cached_feeds, _from, state) do
     {:reply, build_feeds_view(state), state}
   end
 
   def handle_call(:refresh_now, _from, state) do
-    state = reload_remotes(state)
+    state = state |> RegistryCommon.mark_read() |> reload_remotes()
     now = now(state)
 
     feeds =
@@ -347,7 +356,8 @@ defmodule Shuttle.RemoteFiberRegistry do
     Enum.reduce(state.remotes, state, fn remote, acc ->
       entry = Map.get(acc.feeds, remote.name, initial_entry(remote))
 
-      if MapSet.member?(in_flight, remote.name) or not due?(entry, remote, now_ms) do
+      if MapSet.member?(in_flight, remote.name) or
+           not due?(entry, RegistryCommon.polling_remote(state, remote), now_ms) do
         acc
       else
         start_fetch(acc, remote)
@@ -556,7 +566,8 @@ defmodule Shuttle.RemoteFiberRegistry do
          fibers: entry.fibers,
          stores: entry.stores,
          last_polled_at: entry.last_polled_at,
-         stale: stale?(entry, now),
+         stale:
+           stale?(%{entry | remote: RegistryCommon.polling_remote(state, entry.remote)}, now),
          last_error: entry.last_error,
          # The owning host's own cache-freshness signal, carried through so the
          # board can render "stale as of T" from the server's view (nil until
