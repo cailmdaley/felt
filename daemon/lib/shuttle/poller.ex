@@ -5307,8 +5307,8 @@ defmodule Shuttle.Poller do
             # The daemon does NOT write the handoff marker — the WORKER does,
             # via `shuttle handoff`, as its second-to-last act. A worker
             # that dies without handing off leaves no handoff marker, so the
-            # next dispatch resumes its transcript while warm and starts fresh
-            # once cold (`Dispatcher.check_resume_intent/2`). The clean/dirty
+            # next dispatch resumes its local transcript when it belongs to
+            # that dispatch (`Dispatcher.check_resume_intent/2`). The clean/dirty
             # distinction lives entirely in the presence (and timestamp) of
             # the worker-written handoff marker; this exit path only drives
             # the document state machine below.

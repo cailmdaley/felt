@@ -25,7 +25,7 @@ defmodule Shuttle.ContinuationTest do
     def cmd(_command, _args, _opts), do: {"boom", 1}
   end
 
-  describe "transcript warmth" do
+  describe "transcript lookup" do
     @session "0883ade1-08e0-4457-94c6-7ac12137eb0f"
 
     test "transcript_stat resolves the harness file and reads its mtime" do
@@ -45,17 +45,6 @@ defmodule Shuttle.ContinuationTest do
                pi_root: root,
                codex_root: root
              ) == nil
-    end
-
-    test "warm? compares the transcript's age to the window" do
-      now = ~U[2026-06-20 19:00:00Z]
-      t = fn age -> %{path: "/t", mtime: DateTime.add(now, -age, :second)} end
-
-      assert Continuation.warm?(t.(0), now, 60)
-      assert Continuation.warm?(t.(60), now, 60)
-      refute Continuation.warm?(t.(61), now, 60)
-      refute Continuation.warm?(nil, now, 60)
-      assert Continuation.warm_window_s() == 45 * 60
     end
   end
 

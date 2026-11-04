@@ -260,13 +260,12 @@ defmodule Shuttle.Dispatcher do
 
   The no-handoff rule: with no session, or a clean handoff since dispatch
   (`handed_off_at >= dispatched_at`), start fresh.
-  Otherwise the session's transcript decides — see `continue_or_cold/3`.
+  Otherwise the session's transcript decides — see `continue_or_cold/4`.
 
   Options:
     * `:resume_mode` — as above.
     * `:transcript` — `fn session_id -> %{path, mtime} | nil end`, the
       transcript lookup (default `Shuttle.Continuation.transcript_stat/1`).
-    * `:now` — the `DateTime` the transcript's age is measured against.
   """
   @type continuation ::
           :fresh
@@ -294,11 +293,11 @@ defmodule Shuttle.Dispatcher do
         continuation(fiber, session_id, opts, :resume_always)
 
       "continue" ->
-        continuation(fiber, session_id, opts, :resume_if_warm)
+        continuation(fiber, session_id, opts, :resume_if_present)
 
       _ ->
         if Shuttle.Poller.fiber_kind(fiber) == "oneshot",
-          do: continuation(fiber, session_id, opts, :resume_if_warm),
+          do: continuation(fiber, session_id, opts, :resume_if_present),
           else: :fresh
     end
   end
@@ -319,21 +318,17 @@ defmodule Shuttle.Dispatcher do
   #   - last written before this dispatch's `dispatched_at` → the id is not
   #     this dispatch's session (a Pi launch whose own id was never
   #     scraped leaves its predecessor's in the marker) → plain fresh;
-  #   - written within the warm window → resume, while the prompt cache still
-  #     holds it (unless the caller only wants fresh);
-  #   - older, or not on this host → fresh, naming the cut-off session. Past the
-  #     window a resume replays the whole transcript uncached, which costs more
-  #     than a fresh worker reading `## Status`, whatever its size.
+  #   - present on this host → resume (unless the caller only wants fresh);
+  #   - absent → fresh, naming the cut-off session.
   defp continue_or_cold(fiber, session_id, opts, want) do
     lookup = Keyword.get(opts, :transcript, &Shuttle.Continuation.transcript_stat/1)
     transcript = lookup.(session_id)
-    now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
 
     cond do
       Shuttle.Continuation.predates_dispatch?(transcript, fiber) ->
         :fresh
 
-      want == :resume_if_warm and Shuttle.Continuation.warm?(transcript, now) ->
+      want == :resume_if_present and transcript != nil ->
         {:previous, session_id}
 
       true ->

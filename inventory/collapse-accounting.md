@@ -113,13 +113,13 @@ session handle and sends only a nonblank prompt, on each harness's channel`.
 | capture refuses | error naming `claude`; no new-session | WRAP capture × `:missing` |
 | effort / chrome (5 tests, 9 asserts) | each flag fragment present or absent | EFF rows |
 | resume command (8 tests, 20 asserts) | per-harness fragments; no `<<<`; ends with the handle | RES |
-| warm / cold / no transcript | 60 s and 2700 s → previous; 2701 s → `{:cold, uuid, path}`; nil → `{:cold, uuid, nil}` | CONT, exact |
+| local / missing transcript | local transcript from the dispatch → previous; nil → `{:cold, uuid, nil}` | CONT, exact |
 | clean handoff | `:fresh`; transcript not looked up | CONT `:after_dispatch` + `refute_received` |
 | app surface | nil → previous; handed off → fresh; no lookup | CONT app rows |
 | explicit previous | previous at 10 h and nil | CONT previous rows (largest age 3601 s, same branch) |
-| fresh with warm transcript | not previous | CONT exact `{:cold, …}` (stronger) |
-| predecessor | 3601 s → fresh; 3600 s → cold | CONT `by_transcript` rows |
-| continue | pinned 60 → previous; 2701 → cold; standing + handoff → fresh; no runtime → fresh | CONT continue rows |
+| fresh with local transcript | not previous | CONT exact `{:cold, …}` (stronger) |
+| predecessor | 3601 s → fresh; 3600 s → previous | CONT `by_transcript` rows |
+| continue | pinned 60 and 2701 → previous; standing + handoff → fresh; no runtime → fresh | CONT continue rows |
 | previous with no id | `{:error, :missing_session_id}` | CONT previous × no session |
 | standing / first run / clean | fresh | CONT rows; default arity still called near line 1483 |
 | darwin, no server | exact anchor argv; anchor is not a worker name; kitty before new-session | TMUX `launches ==`, `refute shuttle_session?("shuttle-anchor")`, `kitty_at < new_session_at` |

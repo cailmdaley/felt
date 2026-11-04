@@ -1576,15 +1576,12 @@ defmodule Shuttle.DispatcherTest do
       end
     end
 
-    defp intent(fiber, age_s),
-      do: Dispatcher.check_resume_intent(fiber, transcript: transcript(age_s), now: @now)
-
     # Every combination of what the decision reads, against the rule as the
     # docs state it. `runtime` is what the daemon stamped: a session and its
     # dispatch, a session with no dispatch time, a dispatch whose session id was
     # never learned, or nothing. Transcript ages are seconds before @now, an
-    # hour after the 18:00 dispatch: 45 * 60 is the warm window's edge, 3600 the
-    # dispatch's own second, 3601 a predecessor's transcript.
+    # hour after the 18:00 dispatch: 3600 is the dispatch's own second,
+    # 3601 a predecessor's transcript.
     test "the continuation follows resume_mode, kind, session, handoff, surface and transcript",
          ctx do
       for mode <- [nil, "previous", "fresh", "continue"],
@@ -1602,7 +1599,7 @@ defmodule Shuttle.DispatcherTest do
           transcript(age).(id)
         end
 
-        opts = [transcript: lookup, now: @now] ++ if(mode, do: [resume_mode: mode], else: [])
+        opts = [transcript: lookup] ++ if(mode, do: [resume_mode: mode], else: [])
         clean? = runtime in [:undated, :never] or handoff in [:at_dispatch, :after_dispatch]
         {expected, looks?} = expected_continuation(mode, kind, session, clean?, age)
 
@@ -1618,18 +1615,10 @@ defmodule Shuttle.DispatcherTest do
       end
     end
 
-    test "the warm window is one application setting", ctx do
-      Shuttle.Test.Env.put_app_env(:resume_warm_window_s, 10)
-
-      assert {:previous, _} = intent(dispatched_fiber(ctx), 10)
-      assert {:cold, _, _} = intent(dispatched_fiber(ctx), 11)
-    end
-
     test "resolve_resume_intent passes the transcript lookup through", ctx do
       assert {:cold, _, nil} =
                Dispatcher.resolve_resume_intent(:constitution, dispatched_fiber(ctx),
-                 transcript: transcript(nil),
-                 now: @now
+                 transcript: transcript(nil)
                )
     end
 
@@ -1648,13 +1637,13 @@ defmodule Shuttle.DispatcherTest do
       end
     end
 
-    # A transcript not on this host, or past the warm window (or any, for
-    # "fresh"), is a cut-off session the prompt names; one written before the
+    # A transcript not on this host (or any, for "fresh") is a cut-off
+    # session the prompt names; one written before the
     # dispatch is a predecessor's, and says nothing about this run.
     defp by_transcript(_mode, session, nil), do: {:cold, session, nil}
     defp by_transcript(_mode, _session, age) when age > 3600, do: :fresh
 
-    defp by_transcript(mode, session, age) when age <= 45 * 60 and mode != "fresh",
+    defp by_transcript(mode, session, _age) when mode != "fresh",
       do: {:previous, session}
 
     defp by_transcript(_mode, session, _age), do: {:cold, session, "/t/#{session}.jsonl"}

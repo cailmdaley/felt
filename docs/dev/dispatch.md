@@ -103,18 +103,12 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   worker is gone, `Dispatcher.check_resume_intent/2` decides between resuming
   its transcript and starting fresh. A `handed_off_at` newer than
   `dispatched_at` (the worker's own `shuttle handoff`) means fresh. No
-  newer handoff means the session died without handing off, and then its
-  transcript's age decides: last written within the warm window (45 minutes,
-  `config :shuttle, :resume_warm_window_s`) → resume `session_uuid`; older, or
-  not on this host → fresh, with the prompt naming the cut-off session and its
-  transcript path. A transcript last written before `dispatched_at` is not
+  newer handoff means the session died without handing off: a transcript on
+  this host resumes `session_uuid`; a missing transcript starts fresh, with
+  the prompt naming the cut-off session. A transcript last written before `dispatched_at` is not
   that dispatch's session — a codex/pi launch stamps `dispatched_at` at once
   but its own id only when the scrape backfills it, so the marker can still
-  name the predecessor — and that dispatch goes plain fresh. A resume replays
-  the whole transcript into the model, which is cheap only while the
-  harness's prompt cache still holds it, so a worker killed by a host outage
-  hours ago costs less as a fresh worker reading `## Status` — whatever the
-  transcript's size. The lookup is one resolve through
+  name the predecessor — and that dispatch goes plain fresh. The lookup is one resolve through
   `Shuttle.Transcript.path/2` and one stat, taken only on that no-handoff
   branch.
   A standing constitution starts fresh on the autonomous loop.

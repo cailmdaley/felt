@@ -5,9 +5,9 @@ defmodule Shuttle.Delivery do
   A live worker receives it through session messaging (`Shuttle.Messaging`),
   woken as for any task request. A fiber with no live worker launches with the
   message as its From User, under the dispatcher's `"continue"` rule: it
-  resumes a previous conversation that ended without a handoff while its
-  transcript is still warm, and otherwise starts fresh — after a clean
-  handoff, a cold or missing transcript, or no previous run at all. Only the
+  resumes a previous conversation that ended without a handoff when its
+  transcript is on this host and belongs to that dispatch; otherwise it starts
+  fresh — after a clean handoff, a missing transcript, or no previous run. Only the
   board's explicit Resume forces a resume.
   """
 

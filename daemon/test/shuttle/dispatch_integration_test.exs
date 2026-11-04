@@ -572,10 +572,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert script =~ "sleep 2"
   end
 
-  # The cold half: the same dirty death, but the transcript was last written
-  # past the warm window (a host outage, say) — a fresh worker, told what was
-  # cut off and where its transcript is.
-  test "dirty death with a cold transcript → fresh launch naming the cut-off session",
+  # An old transcript still resumes when it belongs to the dispatch.
+  test "dirty death with an old transcript → resume",
        %{host: host} do
     write_fiber(host, "tests/cli-cold", """
     ---
@@ -592,21 +590,13 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     session = "c1a0e5e0-0000-4000-8000-000000000002"
     write_dispatch_marker(host, "tests/cli-cold", session, ago(4 * 3600))
-    path = write_transcript(session, 3 * 3600)
+    write_transcript(session, 3 * 3600)
 
     assert {:ok, _} =
              Dispatcher.dispatch("tests/cli-cold", runner: IntegrationRunner, felt_store: host)
 
     script = read_run_script()
-    refute script =~ "--resume"
-    assert [_, launched] = Regex.run(~r/--session-id '?([0-9a-f-]{36})/, script)
-    refute launched == session
-
-    assert script =~
-             "Previous session: #{session} (claude-code) ended without a handoff " <>
-               "(host outage, kill, or crash)."
-
-    assert script =~ "Its transcript, to consult as needed after reading Status: #{path}"
+    assert script =~ "--resume '#{session}'"
   end
 
   test "dirty death with no transcript on this host → fresh launch saying so", %{host: host} do

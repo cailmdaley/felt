@@ -98,17 +98,15 @@ uninstalling are separate decisions, and the block stays as historical record.
 ### Resume vs fresh
 
 Workers start fresh by default. Resuming a transcript happens in three cases:
-you press Resume on the board; a oneshot died dirty and its transcript is still
-warm; or you send a message to a fiber whose worker died dirty while its
-transcript is still warm. A death counts as dirty when `handed_off_at` is
-missing or older than `dispatched_at`, which is why the handoff verb matters.
-A transcript is warm when it was written in the last 45 minutes, while the
-model's prompt cache still holds it; resuming a colder one would replay it
-uncached, so the worker starts fresh instead and its prompt names the cut-off
-session and its transcript. Codex workers follow the same warm transcript rule as other terminal harnesses.
+you press Resume on the board; a oneshot died dirty and its transcript is on
+this host; or you message a fiber whose worker died dirty and whose transcript
+is on this host. A death counts as dirty when `handed_off_at` is missing or
+older than `dispatched_at`. A transcript predating the dispatch belongs to a
+predecessor and starts fresh; a missing transcript starts fresh with the cut-off
+session named in the prompt. This rule applies to all terminal harnesses.
 
-New session on the board always starts fresh. Scheduled runs, ad-hoc standing
-runs, daemon recovery, and orphan adoption start fresh too.
+New session on the board always starts fresh. Scheduled and ad-hoc standing runs start fresh too. Daemon recovery restores
+previously running oneshots as described below.
 
 ## The board
 
@@ -174,7 +172,7 @@ as `blocked`. A healthy run or a force-dispatch clears it.
 On every start, the daemon parks fresh autonomous work in `pending_launch`.
 Previously-running oneshot workers restore from their durable continuation markers without a release.
 A finished or ambiguous turn reopens its conversation quietly; an interrupted turn receives a continuation prompt.
-Restoration preserves the conversation even beyond the transcript cache window.
+Restoration preserves the conversation regardless of transcript age.
 Oneshot seats follow the same rule.
 Standing cron runs retain their close-to-review lifecycle when their worker dies; a due occurrence carries its own authorization and passes through the quarantine.
 CLI/daemon contract and reconciliation holds remain independent gates.
