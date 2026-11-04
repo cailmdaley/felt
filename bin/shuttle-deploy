@@ -798,7 +798,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
   local previous tree cmd harness_failed=0 before
   DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
   previous="$(previous_deploy "" "$SOURCE")"
-  bash -c "$(revision_checkout_cmd "$SOURCE" "$previous")" \
+  bash -c "$(revision_checkout_cmd "$SOURCE" "$previous")" 3>&- 4>&- \
     || { bad 'prepare: could not prepare the pinned revision'; return 1; }
   tree="$ROOT/$TARGET_COMMIT"
   if [ "$MODE" = ui ]; then
@@ -827,7 +827,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
     mkdir -p "$HOME/.config/shuttle" && cp "$STAGE/agents.json" "$HOME/.config/shuttle/agents.json" \
       || { bad 'agent registry: could not publish'; return 1; }
   fi
-  bash -c "$(config_migration_cmd)" || { bad 'config migration: failed'; return 1; }
+  bash -c "$(config_migration_cmd)" 3>&- 4>&- || { bad 'config migration: failed'; return 1; }
   refresh_harnesses "" "$tree" || harness_failed=1
   if ! target_is_live "$before"; then
     remote_host_cycle "" "$tree" || return 1
@@ -859,7 +859,7 @@ transaction_script() {
     harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
     remote_host_cycle host_transaction
   # All subsequent commands are host-local and inherit this login shell's PATH.
-  printf '%s\n' 'run_on() { bash -c "$2"; }' 'run_on_visible() { bash -c "$2"; }' \
+  printf '%s\n' 'run_on() { bash -c "$2" 3>&- 4>&-; }' 'run_on_visible() { bash -c "$2" 3>&- 4>&-; }' \
     'ROOT=$(bash -c "$(deploy_root_cmd "$SOURCE")") || exit 1' 'host_transaction'
 }
 

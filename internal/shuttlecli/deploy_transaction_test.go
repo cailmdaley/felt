@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -61,6 +62,10 @@ fi
 sha=$(git -C "${TEST_RELEASE%/bin/rel}" rev-parse HEAD)
 printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
 echo cycle >> "$EVENTS"
+if [ "${BACKGROUND_LAUNCHER:-0}" = 1 ]; then
+ nohup sleep 300 >/dev/null 2>&1 &
+ echo $! > "$FLEET_ROOT/background.pid"
+fi
 `)
 	realBash, err := exec.LookPath("bash")
 	if err != nil {
@@ -195,6 +200,29 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployLauncherCannotRetainTransactionLocks(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	t.Cleanup(func() {
+		if pid, err := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "background.pid")))); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	cmd, log := f.start(t, "background-launcher", "BACKGROUND_LAUNCHER=1")
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("deploy: %v %s", err, fleetRead(log))
+	}
+	lock, err := os.OpenFile(filepath.Join(f.home, ".shuttle", "deploy.lock"), os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("finished deploy's background launcher retained host lock: %v", err)
 	}
 }
 
