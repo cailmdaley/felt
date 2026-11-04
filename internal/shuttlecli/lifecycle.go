@@ -424,13 +424,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			if projectDirErr != nil {
 				return projectDirErr
 			}
-			if err := a.checkArmable(args[0], "resume", block); err != nil {
-				return err
-			}
 			if owner != "" {
-				if f.Status == felt.StatusClosed && !standingAwaiting(f, block) {
-					return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and arm it", args[0], args[0])
-				}
 				fields := map[string]any{}
 				if cmd.Flags().Changed("project-dir") {
 					fields["project_dir"] = block.ProjectDir
@@ -439,6 +433,9 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				if err != nil {
 					var missing daemonStatusError
 					if st != nil && f.Status == felt.StatusOpen && errors.As(err, &missing) && missing.status == 404 {
+						if err := a.checkArmable(args[0], "resume", block); err != nil {
+							return err
+						}
 						if err := unclose(f, felt.StatusActive); err != nil {
 							return err
 						}
@@ -471,6 +468,9 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				return nil
 			}
 
+			if err := a.checkArmable(args[0], "resume", block); err != nil {
+				return err
+			}
 			if err := clearBlockedOn(f); err != nil {
 				return err
 			}
@@ -603,7 +603,8 @@ func (a *app) routeLocalReopen(cmd *cobra.Command, query string, asDraft bool, r
 // then writes locally, where every refusal is reported. Remote owners always
 // route, regardless of qualifies, and never fall back to a mirror write. A daemon refusal, an owner-check
 // failure, or a request the daemon received but did not answer is routed, with
-// its error — the last because the transition may still apply there.
+// its error — the last because the transition may still apply there. Remote
+// resume uses its locked command path, posting before any local arming gates.
 func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool, fields ...map[string]any) (routed bool, err error) {
 	f, _, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
@@ -620,7 +621,7 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 	// Resolve ownership before the local fast path's qualification. A remote
 	// request always carries origin and never consults the hub's snapshot.
 	if owner != "" {
-		// Resume validates and transfers drafts in its locked command path.
+		// Resume posts first and validates only a missing draft's transfer.
 		if verb == "resume" {
 			return false, nil
 		}

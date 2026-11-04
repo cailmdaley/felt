@@ -19,6 +19,36 @@ func subtreeView(t *testing.T, loom, prefix string) string {
 	return project
 }
 
+func TestRemoteResumeLetsOwnerValidateItsDocument(t *testing.T) {
+	for _, stale := range []string{"closed", "owner-only-agent"} {
+		t.Run(stale, func(t *testing.T) {
+			env := remoteLifecycleEnv(t)
+			dir, st := newStore(t)
+			status := felt.StatusOpen
+			block := remoteShuttleBlock("/remote/project")
+			if stale == "closed" {
+				status = felt.StatusClosed
+			} else {
+				block["agent"] = "owner-only-agent"
+			}
+			seedShuttleRole(t, st, "task", status, block, nil)
+			var bodies requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/lifecycle" {
+					bodies.record(t, r)
+				}
+				fmt.Fprint(w, `resumed`)
+			}))
+			if _, _, err := executeIn(t, env, dir, "resume", "task"); err != nil {
+				t.Fatal(err)
+			}
+			if got := bodies.last(); got["action"] != "resume" {
+				t.Fatalf("owner never received resume: %#v", got)
+			}
+		})
+	}
+}
+
 func TestLocalOwnerViewLifecycleCarriesIntrinsicIdentity(t *testing.T) {
 	for _, command := range [][]string{{"rest"}, {"close"}, {"reopen"}, {"accept"}, {"resume"}, {"dispatch"}, {"dispatch", "--release-launch-reservation"}} {
 		verb := command[0]
