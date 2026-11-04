@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +67,13 @@ func TestLockWaitsNamesHolderAndSurvivesKilledDeployer(t *testing.T) {
 		b, _ := os.ReadFile(logPath)
 		return strings.Contains(string(b), "waiting for") && strings.Contains(string(b), "holder: host=fake target=aaa deployer=first")
 	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	bounded := exec.CommandContext(ctx, binary, host, lease, "bounded", "bash", "-c", ":")
+	bounded.Env = append(os.Environ(), "SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=0")
+	if out, err := bounded.CombinedOutput(); err == nil || !strings.Contains(string(out), "timed out") || !strings.Contains(string(out), "deployer=first") {
+		t.Fatalf("lock wait must time out naming holder: %v %s", err, out)
+	}
 	// Remove the waiter before probing the crashed holder's inherited lock,
 	// so a newly acquired second lock cannot mask a missing inheritance.
 	if err := second.Process.Kill(); err != nil {
