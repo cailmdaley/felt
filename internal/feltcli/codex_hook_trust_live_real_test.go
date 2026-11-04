@@ -117,6 +117,19 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	oldSkillPath := filepath.Join(filepath.Dir(filepath.Dir(legacyHooks[0].SourcePath)), "skills", "felt", "SKILL.md")
+	if _, err := os.ReadFile(oldSkillPath); err != nil {
+		t.Fatal(err)
+	}
+	var oldSkills json.RawMessage
+	if err := legacy.call("skills/list", map[string]any{"cwds": []string{root}, "forceReload": false}, &oldSkills); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"felt:felt", "felt:shuttle"} {
+		if !bytes.Contains(oldSkills, []byte(`"name":"`+name+`"`)) {
+			t.Fatalf("combined skill not discovered: %s", name)
+		}
+	}
 	approvePrivateCodexHooks(t, legacy, filepath.Join(root, ".codex"), legacyHooks)
 	legacyID := thread(legacy)
 	requirePrivateHookStatus(t, privateCodexHookTurn(t, legacy, legacyID), "completed", "")
@@ -127,6 +140,21 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 	setup()
 	if strings.Count(output.String(), "Codex hook bundle changed:") != 1 {
 		t.Fatalf("migration warning: %s", output.String())
+	}
+	if _, err := os.ReadFile(oldSkillPath); !os.IsNotExist(err) {
+		t.Fatalf("expected old combined skill path to vanish at migration: %s (%v)", oldSkillPath, err)
+	}
+	var migratedSkills json.RawMessage
+	if err := legacy.call("skills/list", map[string]any{"cwds": []string{root}, "forceReload": false}, &migratedSkills); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"felt-skills:felt", "felt-skills:shuttle"} {
+		if !bytes.Contains(migratedSkills, []byte(`"name":"`+name+`"`)) {
+			t.Fatalf("live skill inventory did not follow migration: %s", name)
+		}
+	}
+	if bytes.Contains(migratedSkills, []byte(`"name":"felt:felt"`)) {
+		t.Fatal("live inventory retained the removed combined skill")
 	}
 	requirePrivateHookStatus(t, privateCodexHookTurn(t, legacy, legacyID), "failed", "plugin contents changed; hook approval required")
 	live := open()

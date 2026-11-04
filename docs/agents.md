@@ -93,9 +93,24 @@ The first migration from the combined plugin to separate hooks and skills is
 such a change, even with identical hook commands. The conversation stays alive,
 but refused hooks stop context injection, mailbox delivery, event recording,
 and automatic handoff nudges until the runtime is refreshed. Fresh runtimes
-load the newly approved bundles. Go-only and skills-only updates do not change
+load the newly approved bundles. Codex exposes the skills as `felt-skills:felt`
+and `felt-skills:shuttle`. Migration removes the old combined cache's skill
+files: an agent holding an old `felt:felt` or `felt:shuttle` path can get
+“file not found” when trying to read it. On Codex 0.166.0, `skills/list` in the
+already-live server discovers the new names and paths even without a forced
+reload, while its hook approval remains stale. Text already read into a
+conversation is not rewritten by setup; use the new inventory paths.
+Go-only and skills-only updates do not change
 the hook bundle and require no hook cutover. No worker pinning or old-generation
 retention is involved.
+
+When manually rolling back to a release with the combined plugin, remove the
+split skills plugin before running that release's setup, so Codex does not
+load duplicate copies:
+
+```sh
+codex plugin remove felt-skills@cailmdaley-felt
+```
 
 `install.sh` (the curl installer) runs both commands automatically for whichever
 CLI it finds on `PATH`, with no opt-out flag — see
@@ -120,9 +135,9 @@ same two skills; hooks on Claude/Codex correspond to extension events on pi.
 
 ### Skills
 
-- **felt** — the substrate practice: filing fibers, updating outcomes and
+- **felt** (`felt-skills:felt` in Codex) — the substrate practice: filing fibers, updating outcomes and
   bodies, additional YAML fields, end-of-session sweeps, maintenance passes.
-- **shuttle** — the dispatch practice: authoring constitutions, worker
+- **shuttle** (`felt-skills:shuttle` in Codex) — the dispatch practice: authoring constitutions, worker
   dispatch, operating the board. Only relevant once you're using the
   optional [shuttle](shuttle/index.md) layer.
 

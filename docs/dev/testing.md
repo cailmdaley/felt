@@ -34,6 +34,22 @@ A new production child belongs in the independent manifest in `test/support/prod
 An exact-path source audit covers all daemon modules; only `shuttle/fs.ex` may use the file APIs behind that boundary.
 The suite also checks raw stream read-ahead, explicit buffer options, universal timestamps in a negative-offset host zone, and protected-store exclusion diagnostics.
 
+## Required real Codex plugin tests
+
+CI's Go job and `make test-linux` install checksum-pinned Codex 0.166.0 with
+`scripts/install-test-codex.sh` and set `FELT_REQUIRE_REAL_CODEX=1`. Under that
+flag, a missing or too-old Codex is a failure, not a skip. The Linux image key
+includes the installer checksum so changing the pin rebuilds the image.
+
+`TestCodexHookTrustRealPrivateAppServer` and
+`TestCodexHookTrustRealLiveRefresh` use isolated HOME/CODEX_HOME directories,
+private stdio App Servers, and a loopback-only inference stub; no account,
+operator session, shared daemon, or public inference endpoint is involved.
+They cover trust, live migration, Go-only and skills-only updates, and require
+`skills/list` to discover enabled, readable `felt-skills:felt` and
+`felt-skills:shuttle` skills. The migration probe also observes old skill paths
+vanishing and the live inventory finding the replacement names.
+
 ## Real Rex tests
 
 `daemon/test/shuttle/terminal/rex_real_test.exs` and `internal/shuttlecli/terminal_rex_real_test.go` start a private Rex server on a temporary Unix socket with its own state directory.
