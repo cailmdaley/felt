@@ -521,7 +521,8 @@ the other platform's file for inspection, and it is accepted *only* alongside
 On Linux, `scripts/bootstrap.sh` installs `shuttle-ensure` and adds it to the
 Bash or Zsh login profile. It records the short hostname that ran bootstrap in
 `~/.shuttle/owner-node`; set `SHUTTLE_OWNER_NODE` during bootstrap to choose a
-different owner node. Each login prints the node that owns the daemon. The
+different owner node. Each login prints the node that owns the daemon to stderr,
+keeping stdout available for machine-readable SSH replies. The
 ensure returns immediately after starting a detached check, and only the owner
 node may start the userspace `tailscaled` loop or the daemon's configured
 supervisor. The daemon and tailscaled launchers enforce the same owner pin,
