@@ -12,13 +12,35 @@ defmodule ShuttleWeb.VersionController do
 
   use Phoenix.Controller, formats: [:json]
 
-  def show(conn, _params) do
+  def show(conn, params) do
+    case Shuttle.OriginRouter.route(Map.get(params, "origin")) do
+      :local ->
+        show_local(conn)
+
+      {:remote, remote} ->
+        case Shuttle.OriginRouter.forward_get(remote, "/api/v1/version", params) do
+          {:forwarded, status, content_type, body} ->
+            conn |> put_resp_content_type(content_type) |> send_resp(status, body)
+
+          {:error, reason} ->
+            conn
+            |> put_status(502)
+            |> json(%{error: "owner version unavailable", detail: inspect(reason)})
+        end
+
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+    end
+  end
+
+  defp show_local(conn) do
     readiness = Shuttle.Readiness.status()
     health = poller_health(readiness.ready)
 
     json(
       conn,
       Shuttle.BuildStamp.stamp()
+      |> Map.put(:contract_level, Shuttle.Contract.expected_level())
       |> Map.put(:ready, readiness.ready)
       |> Map.put(:boot_hold, readiness.boot_hold)
       |> Map.put(:boot, readiness.boot)

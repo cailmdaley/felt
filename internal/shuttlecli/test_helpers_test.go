@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -156,7 +157,13 @@ func ownHost(t testing.TB, env *sysenv.Env, hostID string) {
 // SHUTTLE_DAEMON_URL at it; the server closes when the test ends.
 func serveDaemon(t testing.TB, env *sysenv.Env, handler http.Handler) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if level := env.Getenv("SHUTTLE_TEST_OWNER_CONTRACT"); level != "" && r.URL.Path == "/api/v1/version" && r.URL.Query().Get("origin") != "" {
+			fmt.Fprintf(w, `{"host":%q,"contract_level":%s}`, r.URL.Query().Get("origin"), level)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	t.Cleanup(server.Close)
 	env.Set("SHUTTLE_DAEMON_URL", server.URL)
 	return server
