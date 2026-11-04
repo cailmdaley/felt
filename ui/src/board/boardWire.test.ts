@@ -458,6 +458,25 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
 })
 
 describe('optimistic response cache coherence', () => {
+  it('holds polls while a stashed surface gesture is still writing', async () => {
+    const c = card()
+    let finish!: (value: Response) => void
+    const reads = vi.fn()
+    globalThis.fetch = vi.fn(async input => {
+      if (String(input).includes('/lifecycle')) return new Promise<Response>(resolve => { finish = resolve })
+      if (String(input).includes('/fibers/composite')) reads()
+      return Response.json({})
+    }) as typeof fetch
+    const board = asPrivate(makeBoard())
+    board.applyResponse(response({ now: { drafts: [c], inFlight: [], awaitingReview: [] } }))
+    board.setSurface(c, 'stashed')
+    await board.fetchAndRender()
+    expect(reads).not.toHaveBeenCalled()
+    expect(board.lastResponse?.stash.map(card => card.id)).toContain(c.id)
+    finish(Response.json({}))
+    await vi.waitFor(() => expect(reads).toHaveBeenCalledOnce())
+  })
+
   it.each([1, 2])('reconciles refused launches unconditionally after all %s gestures settle', async count => {
     const cards = Array.from({ length: count }, (_, i) => card({ id: `task-${i}`, shuttleProjectDir: '/work' }))
     const feed = { host: 'local', fibers: cards.map(c => ({

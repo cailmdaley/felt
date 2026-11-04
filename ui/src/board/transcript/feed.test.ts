@@ -418,6 +418,30 @@ it('emits plain text after the bounded wait, then patches the record when a late
   reader.dispose()
 })
 
+it('emits no candidate entries when disposed during the evidence wait', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+  const raw = JSON.stringify({ type: 'custom_message', customType: 'shuttle', content: '[Shuttle message pending from shuttle]\nOld session' }) + '\n'
+  const transcript = response(raw, 200, { 'x-transcript-offset': '0' })
+  const bytes = vi.spyOn(transcript, 'arrayBuffer').mockResolvedValue(new TextEncoder().encode(raw).buffer)
+  const { reader, onEntries } = feed(async input => String(input).includes('/messages?')
+    ? new Promise<Response>(() => {})
+    : transcript, { provenance: true })
+  try {
+    const read = reader.read()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.getTimerCount()).toBe(1)
+    expect(onEntries).not.toHaveBeenCalled()
+    reader.dispose()
+    await vi.advanceTimersByTimeAsync(501)
+    await read
+    expect(onEntries).not.toHaveBeenCalled()
+  } finally {
+    reader.dispose()
+    bytes.mockRestore()
+    vi.useRealTimers()
+  }
+})
+
 it('spends at most one 500 ms evidence wait across a batch of candidate records', async () => {
   const messages = Array.from({ length: 12 }, (_, index) => {
     const envelope = `[Shuttle message slow-${index} from shuttle]\nDelivery ${index}`
