@@ -114,7 +114,7 @@ exec `+shellQuote(realRm)+` "$@"
 echo ssh >> "$EVENTS"
 echo $$ > "$FLEET_ROOT/ssh.pid"
 if [ "${SSH_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/ssh-entered"; while [ ! -f "$FLEET_ROOT/ssh-go" ]; do sleep .02; done; fi
-while [ "${1:-}" = -o ]; do shift 2; done
+while :; do case "${1:-}" in -o) shift 2;; -n) shift;; *) break;; esac; done
 shift
 # Real SSH joins arguments, then the remote shell parses that command. The
 # isolated login shim sources this fixture's profile and preserves stderr.
@@ -883,6 +883,7 @@ daemon_kill() { printf 'echo listener-kill'; }
 respawn_launcher_restart_cmd() { printf 'echo restart'; }
 run_on() { bash -c "$2"; }
 run_on_visible() { bash -c "$2"; }
+run_value() { run_on_visible "$@"; }
 bad() { echo "$*" >&2; }
 ` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle '' "$ROOT"`
 			cmd := exec.Command("bash", "-c", harness)
