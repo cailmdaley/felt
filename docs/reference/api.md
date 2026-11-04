@@ -421,7 +421,8 @@ the meeting joins this constitution) and the note go to the fiber's worker
 through `/deliver` on its owner. The answer is `{meeting, delivery}`, where
 `delivery` is `/deliver`'s body; if delivery fails after hark starts, it carries
 the delivery's status with `recording: true` and `error`, and the recording
-continues. Start errors are the same as meeting capture's.
+continues. Shuttle also sends transcript batches and the end marker to the
+worker while hark records. Start errors are the same as meeting capture's.
 
 `POST /meeting/start` accepts `{origin?, recorder?, meeting: {mode, system_audio?}, note?}`
 and records without any agent: no capture is routed and nothing goes to

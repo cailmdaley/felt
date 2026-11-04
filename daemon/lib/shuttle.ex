@@ -218,6 +218,11 @@ defmodule Shuttle.Application do
     local = for {Shuttle.Local, child} <- optional, do: child
     fleet = for {Shuttle.Fleet, child} <- optional, do: child
 
+    core =
+      if Shuttle.Env.app(:start_meeting_transcript_relay, true),
+        do: core ++ [Shuttle.Meeting.TranscriptRelay],
+        else: core
+
     Enum.map(core, &Supervisor.child_spec(&1, [])) ++
       [
         endpoint,

@@ -10,6 +10,7 @@ defmodule ShuttleWeb.MeetingController do
   """
 
   use Phoenix.Controller, formats: [:json]
+  require Logger
 
   alias Shuttle.{Meeting, MeetingRouter}
 
@@ -132,6 +133,18 @@ defmodule ShuttleWeb.MeetingController do
           ShuttleWeb.DeliverController.route(fiber_id, prompt, origin, "shuttle", %{
             "daemon_sender" => true
           })
+
+        if Shuttle.Env.app(:start_meeting_transcript_relay, true) and status < 300 do
+          case Shuttle.Meeting.TranscriptRelay.start(row, fiber_id, origin) do
+            :ok ->
+              :ok
+
+            {:error, reason} ->
+              Logger.error(
+                "meeting transcript relay could not start launch=#{row.launch}: #{inspect(reason)}"
+              )
+          end
+        end
 
         Meeting.log_delivery(row, status, delivery)
         body = MeetingRouter.stamp(%{meeting: row, delivery: delivery})

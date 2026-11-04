@@ -32,8 +32,19 @@ func TestIsLiveDaemonChildProbe(t *testing.T) {
 	})
 	want := os.Getenv("FELT_DAEMON_OWNER_EXPECTED") == "true"
 	a := newApp(env)
-	if got := a.isLiveDaemonChild(); got != want {
+	got := a.isLiveDaemonChild()
+	if alternate := os.Getenv("FELT_DAEMON_OWNER_ALT_HOST"); alternate != "" {
+		settings, err := a.resolveHostSettings()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = a.isLiveDaemonChildForHost(settings, alternate)
+	}
+	if got != want {
 		t.Fatalf("live daemon child = %t, want %t", got, want)
+	}
+	if os.Getenv("FELT_DAEMON_OWNER_ALT_HOST") != "" {
+		return
 	}
 	frame := `{"address":"shuttle://host/claude/target","text":"daemon notice","from":"shuttle","daemon_sender":true,"message_id":"daemon-probe","wake":true}`
 	request, err := a.buildMessageRequest(strings.NewReader(frame+"\n"), nil, &messageOptions{requestJSON: true})
@@ -140,8 +151,67 @@ func TestDaemonSenderRequiresLiveOwnerAncestor(t *testing.T) {
 	probe(false)
 }
 
+func TestDaemonOwnerPathSurvivesHostnameDomainChanges(t *testing.T) {
+	a := newApp(testEnv(t))
+	settings, err := a.resolveHostSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := a.daemonOwnerPathFor("LAPTOP.local", settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := a.daemonOwnerPathFor("laptop.home", settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local != home {
+		t.Fatalf("domain suffix changed the daemon ownership path: %q != %q", local, home)
+	}
+	other, err := a.daemonOwnerPathFor("cluster-b", settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other == local {
+		t.Fatal("different machine names share a daemon ownership path")
+	}
+}
+
+func TestDaemonChildAttributionSurvivesHostnameDomainChanges(t *testing.T) {
+	env := testEnv(t)
+	a := newApp(env)
+	settings, err := a.resolveHostSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := a.daemonOwnerPathFor("LAPTOP.local", settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	birth, err := processBirth(env, os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := json.Marshal(daemonOwner{PID: os.Getpid(), Birth: birth})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, owner, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.Command(os.Args[0], "-test.run=^TestIsLiveDaemonChildProbe$")
+	command.Env = daemonProbeEnv(os.Environ(), "inner", "true", env.Getenv("HOME"), settings.Listen, "", "laptop.home")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("daemon child with changed hostname suffix: %v\n%s", err, output)
+	}
+}
+
 func daemonProbeEnv(environment []string, values ...string) []string {
-	keys := []string{"FELT_DAEMON_OWNER_PROBE", "FELT_DAEMON_OWNER_EXPECTED", "FELT_DAEMON_OWNER_HOME", "FELT_DAEMON_OWNER_LISTEN", "FELT_DAEMON_OWNER_SHUTTLE"}
+	keys := []string{"FELT_DAEMON_OWNER_PROBE", "FELT_DAEMON_OWNER_EXPECTED", "FELT_DAEMON_OWNER_HOME", "FELT_DAEMON_OWNER_LISTEN", "FELT_DAEMON_OWNER_SHUTTLE", "FELT_DAEMON_OWNER_ALT_HOST"}
 	for _, key := range keys {
 		prefix := key + "="
 		filtered := environment[:0]
@@ -166,6 +236,9 @@ func daemonProbeEnv(environment []string, values ...string) []string {
 	}
 	if len(values) > 4 {
 		environment = append(environment, "FELT_DAEMON_OWNER_SHUTTLE="+values[4])
+	}
+	if len(values) > 5 {
+		environment = append(environment, "FELT_DAEMON_OWNER_ALT_HOST="+values[5])
 	}
 	return environment
 }

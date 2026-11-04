@@ -113,6 +113,7 @@ defmodule ShuttleWeb.DeliverController do
               opts = [
                 from: sender,
                 from_claim: claim,
+                message_id: context["message_id"],
                 daemon_sender: context["daemon_sender"] == true
               ]
 

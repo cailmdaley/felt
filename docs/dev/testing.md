@@ -121,7 +121,7 @@ and add your test to its file.
 - **Temporal read APIs:** the `activity`, `commits`, `sent_files` and `sessions` controllers, and `temporal_composite`.
 - **Session and commit history:** `session_ledger`, `session_link`, `session_resume`, `commit_ledger`, `transcript`.
 - **Messaging:** the `messaging`, `deliver`, `attachments` and `claim` controllers.
-- **Meetings:** `meeting_test.exs`, `capture_controller`, `meeting_audio_socket`.
+- **Meetings:** `meeting_test.exs`, `meeting_transcript_relay_test.exs`, `capture_controller`, `meeting_audio_socket`.
 - **Startup and readiness:** `application_boot`, `readiness`, `build_stamp`, `log_level`, `log_rotator`.
 - **Test-support guards:** `env_guard_test.exs`, `env_isolation_test.exs`, `operator_files_guard_test.exs`.
 

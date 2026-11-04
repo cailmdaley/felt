@@ -267,8 +267,9 @@ defmodule Shuttle.Meeting do
 
   defp joined_line({:fiber, fiber_id}),
     do:
-      "This meeting joins this constitution (`#{fiber_id}`): you stay its worker; " <>
-        "follow meeting.md's section on a joined meeting. "
+      "This meeting joins this constitution (`#{fiber_id}`): you stay its worker. " <>
+        "The transcript and its `# ended` marker will arrive here in batches; use the path above to revisit it, and don't run `shuttle follow`. " <>
+        "Follow meeting.md's section on a joined meeting. "
 
   defp joined_line(_capture), do: ""
 

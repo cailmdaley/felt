@@ -145,15 +145,20 @@ func (a *app) claimDaemonOwner(settings hostSettings, replacePID int, installing
 }
 
 func (a *app) daemonOwnerPath(settings hostSettings) (string, error) {
-	home, err := a.env.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
 	host, err := a.env.Hostname()
 	if err != nil {
 		return "", err
 	}
-	key := fmt.Sprintf("%x", sha256.Sum256([]byte(host+"\x00"+settings.listen.Network+"\x00"+settings.listen.Address)))
+	return a.daemonOwnerPathFor(host, settings)
+}
+
+func (a *app) daemonOwnerPathFor(host string, settings hostSettings) (string, error) {
+	home, err := a.env.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	identity := normalizeHostname(host)
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte(identity+"\x00"+settings.listen.Network+"\x00"+settings.listen.Address)))
 	return filepath.Join(home, ".shuttle", "daemon-owners", key+".json"), nil
 }
 
@@ -162,7 +167,15 @@ func (a *app) isLiveDaemonChild() bool {
 	if err != nil {
 		return false
 	}
-	path, err := a.daemonOwnerPath(settings)
+	host, err := a.env.Hostname()
+	if err != nil {
+		return false
+	}
+	return a.isLiveDaemonChildForHost(settings, host)
+}
+
+func (a *app) isLiveDaemonChildForHost(settings hostSettings, host string) bool {
+	path, err := a.daemonOwnerPathFor(host, settings)
 	if err != nil {
 		return false
 	}
@@ -182,7 +195,7 @@ func (a *app) isLiveDaemonChild() bool {
 	current := os.Getpid()
 	for range 4 {
 		parent, _, ok := messaging.ProcessParent(current)
-		if !ok || parent <= 0 {
+		if !ok || parent <= 1 || parent == current {
 			return false
 		}
 		if parent == owner.PID {

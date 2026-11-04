@@ -12,6 +12,8 @@ The user starts a meeting from the board, either from the Capture form in meetin
 
 Follow it with `shuttle follow <path>`, under `Monitor` in Claude Code, elsewhere by reading its stdout. It waits for the file, prints what is already there, then delivers batches, flushing at once when someone says your name, and exits at `# ended`. The transcript mostly explains itself. Three things it can't show: lines are whole turns and can land slightly out of order around interruptions; the recognizer mangles names and jargon, so read generously; and you can name a speaker yourself by appending a line such as `# S2 = Martin` once the content makes it clear.
 
+For a joined meeting started from the board, Shuttle sends transcript batches and `# ended` to the worker automatically; don't also run `shuttle follow` for that recording.
+
 ### Steps
 
 1. **Capture as usual, with two meeting specifics** ([capture.md](capture.md), steps 1–5). The fiber is the meeting: file it where the project keeps meetings, conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub from the note and the project's tree, and give its body the time, the mode and the transcript path. With an empty note a provisional name is fine; rename it once the first minutes make the subject clear. Your role is `scribe`. This page defines the office; the `roles/scribe` charter holds only the user's conventions and what past meetings taught, and outranks this page where they differ. If the store has none, create it with just its name and an empty working-knowledge section. Post the supplied `Claim` as given, after the install; it carries the meeting's launch id, and the board seats the meeting on your fiber's card.

@@ -73,7 +73,7 @@ defmodule Shuttle.Delivery do
           "from" => Keyword.get(opts, :from, "shuttle"),
           "from_claim" => Keyword.get(opts, :from_claim, ""),
           "wake" => true,
-          "message_id" => message_id()
+          "message_id" => Keyword.get(opts, :message_id) || message_id()
         }
 
         sender =
