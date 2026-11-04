@@ -7498,6 +7498,30 @@ defmodule Shuttle.PollerTest do
   end
 
   @tag :prepared_launch
+  test "prepared recovery preserves context when a custom CLI has no known harness" do
+    id = "tests/prepared-custom"
+    root = MockRunner.felt_root()
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nhost: other-host\n", "open")
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [root])
+    await_boot_cycle!(poller)
+    state = :sys.get_state(poller)
+    session = FiberUid.session(id)
+    script = Path.join(root, "shuttle-run-#{session}.42.sh")
+    File.write!(script, "sleep 300")
+    facts = %{"intent" => "fresh", "session_uuid" => nil,
+      "dispatched_at" => DateTime.to_iso8601(DateTime.utc_now()),
+      "harness" => Shuttle.SessionLedger.harness_for_cli("aider")}
+    assert :ok = Shuttle.Terminal.LaunchAttempts.record(session, script, %{"dispatch" => facts})
+    MockRunner.add_tmux_session(session)
+    MockRunner.set_ps_result({"812 1 bash -l #{script}\n", 0})
+    worker = %{session: session, context_harness: "custom-context", session_uuid: nil}
+    assert {_, recovered} = Poller.recover_prepared_worker(state, id, MockRunner.fiber(id), worker)
+    assert recovered.context_harness == "custom-context"
+    assert recovered.session_uuid == nil
+  end
+
+  @tag :prepared_launch
   test "prepared metadata cannot be applied to a successor with the same terminal name" do
     id = "tests/prepared-successor"
     root = MockRunner.felt_root()

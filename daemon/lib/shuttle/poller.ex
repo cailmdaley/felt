@@ -3587,9 +3587,15 @@ defmodule Shuttle.Poller do
   end
 
   defp prepared_worker_identity(worker, facts) do
-    worker
-    |> Map.put(:session_uuid, present_string(facts["session_uuid"]))
-    |> Map.put(:context_harness, Shuttle.Harnesses.normalize(facts["harness"]))
+    worker = Map.put(worker, :session_uuid, present_string(facts["session_uuid"]))
+
+    case facts["harness"] do
+      harness when is_binary(harness) ->
+        Map.put(worker, :context_harness, Shuttle.Harnesses.normalize(harness))
+
+      _ ->
+        worker
+    end
   end
 
   defp retry_prepared_dispatch(state, fiber_id, worker) do
