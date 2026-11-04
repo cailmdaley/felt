@@ -1582,6 +1582,13 @@ export class TranscriptBand {
     else if (status === 'error') text = 'The transcript could not be read.'
     else if (status === 'empty-live') text = 'Nothing recorded yet.'
     this.note.textContent = text
+    if (!this.target?.live && (status === 'error' || status === 'unreachable' || status === 'pending')) {
+      const retry = document.createElement('button')
+      retry.type = 'button'
+      retry.textContent = 'Retry'
+      retry.addEventListener('click', () => { void this.readNow() })
+      this.note.append(' ', retry)
+    }
     this.note.hidden = !text
   }
 

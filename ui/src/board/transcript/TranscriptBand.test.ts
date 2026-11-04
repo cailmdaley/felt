@@ -630,6 +630,23 @@ describe('TranscriptBand', () => {
     expect(band.el.querySelector('.ws-transcript-pane [data-turn="0"]')?.textContent).toContain('Early outcome')
   })
 
+  it.each([202, 503, 500])('offers a historical retry after HTTP %s and renders the recovered transcript', async status => {
+    let healthy = false
+    const recovered = fixtureFetch({ [latestId]: records('Recovered prompt', 'Recovered answer') })
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => healthy
+      ? recovered(input, init) : new Response('', { status }))
+    const band = makeBand(fetcher)
+    band.read(target(latestId))
+    await settle()
+    const retry = [...band.el.querySelectorAll('button')].find(button => button.textContent === 'Retry')
+    expect(retry).toBeDefined()
+    healthy = true
+    retry!.click()
+    await settle()
+    expect(band.el.textContent).toContain('Recovered answer')
+    expect(band.el.querySelector('.ws-transcript-note')?.textContent).not.toContain('Retry')
+  })
+
   it.each([404, 202, 503])('reads the full outcome even when the initial transcript response is %s', async (status) => {
     const band = makeBand(vi.fn<typeof fetch>(async () => new Response('', { status })))
     band.follow(target(latestId))
