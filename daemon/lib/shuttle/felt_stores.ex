@@ -370,8 +370,20 @@ defmodule Shuttle.FeltStores do
   end
 
   @doc "Resolve an exact namespace path or intrinsic UID for a lifecycle write."
-  def resolve_request(identifier) do
-    case resolve_with(identifier, configured_stores(), true) do
+  def resolve_request(identifier, path_hint \\ nil) do
+    stores = configured_stores()
+
+    hinted =
+      if Shuttle.ULID.valid?(identifier) and is_binary(path_hint) and path_hint != "" do
+        Enum.find_value(stores, fn store ->
+          case show_resolution([store], path_hint, true) do
+            %{uid: ^identifier} = resolved -> {:ok, resolved}
+            _ -> nil
+          end
+        end)
+      end
+
+    case hinted || resolve_with(identifier, stores, true) do
       {:ok, resolved} -> {:ok, resolved}
       {:error, :not_found} -> {:error, :not_found, missing_on_host(identifier)}
       {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}

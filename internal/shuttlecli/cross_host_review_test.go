@@ -156,6 +156,9 @@ func TestLocalOwnerViewLifecycleCarriesIntrinsicIdentity(t *testing.T) {
 			if got := bodies.last()[key]; got != f.UID {
 				t.Fatalf("%s sent %v, want UID %s", verb, got, f.UID)
 			}
+			if verb != "dispatch" && bodies.last()["fiber_path"] != "science/team/design/rex" {
+				t.Fatalf("noncanonical hint: %#v", bodies.last())
+			}
 		})
 	}
 }

@@ -9,6 +9,39 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
+func TestExactUIDPathHintVerifiesIdentityBeforeWalking(t *testing.T) {
+	t.Parallel()
+	root, st := newStore(t)
+	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+	seedFiber(t, st, "team/target", uid, "active", nil, nil)
+	seedFiber(t, st, "trap/duplicate", uid, "active", nil, nil)
+	read := func(hint, want string) {
+		t.Helper()
+		out, _, err := executeCLI(t, root, "show", uid, "--exact", "--path-hint", hint, "-j")
+		if err != nil {
+			t.Fatalf("hint %q: %v", hint, err)
+		}
+		var fiber felt.Felt
+		if err := json.Unmarshal([]byte(out), &fiber); err != nil || fiber.ID != want {
+			t.Fatalf("hint %q resolved %s, want %s (%v)", hint, out, want, err)
+		}
+	}
+	// A UID walk would refuse the duplicate; a verified path needs no walk.
+	read("team/target", "team/target")
+	if err := os.RemoveAll(filepath.Dir(st.Path("trap/duplicate"))); err != nil {
+		t.Fatal(err)
+	}
+	seedFiber(t, st, "other/wrong", "01ARZ3NDEKTSV4RRFFQ69G5FAW", "active", nil, nil)
+	if err := os.MkdirAll(filepath.Join(root, ".felt", "moved"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Dir(st.Path("team/target")), filepath.Join(root, ".felt", "moved", "target")); err != nil {
+		t.Fatal(err)
+	}
+	read("team/target", "moved/target")
+	read("other/wrong", "moved/target")
+}
+
 // The daemon consumes the same cases through its real felt CLI boundary.
 func TestNamespaceIdentityParity(t *testing.T) {
 	t.Parallel()

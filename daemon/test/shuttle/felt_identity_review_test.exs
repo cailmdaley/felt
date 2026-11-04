@@ -24,6 +24,34 @@ defmodule Shuttle.FeltIdentityReviewTest do
     path
   end
 
+  defmodule HintOnlyRunner do
+    def cmd("felt", ["-C", _store, "show", id | _] = args, opts) do
+      if Shuttle.ULID.valid?(id),
+        do: {"UID walk forbidden by this request budget", 1},
+        else: Shuttle.Runner.Default.cmd("felt", args, opts)
+    end
+
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
+
+  @tag :tmp_dir
+  test "verified lifecycle path hints avoid UID walks in both resolution and the real writer", %{
+    tmp_dir: tmp
+  } do
+    store = Path.join(tmp, "store")
+    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+    wanted = write_fiber(store, "team/target", uid)
+    trap = write_fiber(store, "elsewhere/trap", uid)
+    Env.put_env("SHUTTLE_STORES", store)
+    Env.put_app_env(:felt_stores_runner, HintOnlyRunner)
+
+    assert {:ok, _} =
+             Shuttle.LifecycleService.transition(:pause, uid, ["--no-kill"], "team/target")
+
+    assert File.read!(wanted) =~ "status: open"
+    assert File.read!(trap) =~ "status: active"
+  end
+
   @tag :tmp_dir
   test "serialized lifecycle keeps the exactly resolved store and UID", %{tmp_dir: tmp} do
     loom = Path.join(tmp, "loom")

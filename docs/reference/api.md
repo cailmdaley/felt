@@ -90,6 +90,8 @@ The worker cwd does not create or register a store: creation uses a configured p
 The owner refuses confirmation when the resulting path is outside every polled store.
 Transferred UIDs already present on the owner are refused.
 The response is `{id, path, uid, host, status}` after the owner reads back the written document.
+Before cross-host creation or `resume --project-dir`, the CLI reads the owner's live `/version?origin=<owner>` and requires `contract_level >= 31`.
+`GET /version` publishes `contract_level` even while the daemon is booting; with `origin`, it forwards to that owner.
 `path` is the owner's Markdown filename, `uid` is the intrinsic fiber identity, and `host` and `status` confirm the owning host and persisted status.
 A resumed local draft is retained unless the response confirms the requested identity and armed status.
 A supplied `uid` preserves an existing document's identity during transfer.
@@ -103,6 +105,10 @@ fields, and runs the matching `shuttle <action>` on the owning host:
 `install`, `repeat`, `reshape`, `pause`, `rest`, `resume`, `accept`, `close`, `reopen`,
 `set-model`, `set-agent`, `role`, `seat`, `set-outcome` or
 `uninstall`.
+Lifecycle requests can carry `fiber_path`, an exact namespace path verified against the requested UID before a full UID search.
+A stale or mismatched hint falls back to UID resolution; it never changes the requested identity.
+An authoritative miss returns 404 with `{error_code: "fiber_not_found", host, fiber, error}`.
+Ambiguous identities and resolution failures are not misses and never authorize a draft transfer.
 The `role` action takes `role: <role-slug>`, or `clear: true` to remove both role and seat.
 An optional `new_name: "Office name"` passes `--new "Office name"` to the CLI to create a missing charter in the shared namespace.
 Existing charters are preserved, and without `new_name` the charter must already exist.

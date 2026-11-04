@@ -639,6 +639,7 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 	if !qualifies(f, block) {
 		return false, nil
 	}
+	fields = append(fields, map[string]any{"fiber_path": fiberPathHint(f)})
 	output, err := a.postLifecycle(verb, fiberAddress(f), fields...)
 	if err == nil {
 		fmt.Fprint(a.env.Stdout, output)

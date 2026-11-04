@@ -25,7 +25,12 @@ func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt
 		return nil, nil, felt.Ref{}, err
 	}
 	storage := felt.NewStorage(root)
-	ref, err := felt.ResolveRef(storage, felt.CommandScope(a.env, root, a.dir), query)
+	var ref felt.Ref
+	if a.fiberPathHint != "" && felt.LooksLikeUID(query) {
+		ref, err = felt.ResolveAddressRefWithHint(storage, query, a.fiberPathHint)
+	} else {
+		ref, err = felt.ResolveRef(storage, felt.CommandScope(a.env, root, a.dir), query)
+	}
 	if err != nil {
 		// Only an established miss permits owner lookup. Ambiguous queries and
 		// local read failures must keep their original meaning.

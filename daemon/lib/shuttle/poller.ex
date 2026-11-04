@@ -2345,8 +2345,8 @@ defmodule Shuttle.Poller do
         # Internal runtime callers can address a tracked worker. HTTP requests
         # carry the resolved target and never re-enter interactive resolution.
         identifier when is_binary(identifier) ->
-          {key, slug} = resolve_identity(state, identifier)
-          {owning_store(slug, state), slug, if(Shuttle.ULID.valid?(key), do: key)}
+          {_key, slug} = resolve_identity(state, identifier)
+          {owning_store(slug, state), slug, nil}
       end
 
     address = uid || slug
@@ -2355,7 +2355,7 @@ defmodule Shuttle.Poller do
       LifecycleService.write(verb, address,
         runner: state.runner,
         felt_store: store,
-        args: args
+        args: args ++ LifecycleService.hint_args(%{uid: uid, fiber_id: slug})
       )
 
     # A rest disarms first (the write above lands `status: open` before any
@@ -2377,7 +2377,7 @@ defmodule Shuttle.Poller do
     state =
       case result do
         {:ok, _} when state.document_cache_ready ->
-          refresh_document_entry(state, address, [store])
+          refresh_document_entry(state, slug, [store])
 
         _ ->
           state

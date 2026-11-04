@@ -97,7 +97,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   # Lifecycle transitions go through `Shuttle.LifecycleService`, which runs
   # Shuttle's writer inside the Poller, serialized with its state changes.
-  defp execute("accept", %{"fiber" => fiber}), do: lifecycle(:accept, fiber)
+  defp execute("accept", %{"fiber" => fiber} = params), do: lifecycle(:accept, fiber, params)
 
   defp execute("resume", %{"fiber" => fiber} = params),
     do: lifecycle_with_args(:resume, fiber, params)
@@ -120,20 +120,26 @@ defmodule ShuttleWeb.LifecycleController do
         _ -> []
       end
 
-    LifecycleService.transition(:rest, fiber, add_string_flag(args, "--actor", params["actor"]))
+    LifecycleService.transition(
+      :rest,
+      fiber,
+      add_string_flag(args, "--actor", params["actor"]),
+      params["fiber_path"]
+    )
     |> clean_result()
   end
 
   defp execute(action, %{"fiber" => fiber} = params) when action in ["role", "seat", "pause"] do
     with {:ok, [^action, ^fiber | args]} <- args_for(action, params) do
       verb = %{"role" => :role, "seat" => :seat, "pause" => :pause}[action]
-      verb |> LifecycleService.transition(fiber, args) |> clean_result()
+      verb |> LifecycleService.transition(fiber, args, params["fiber_path"]) |> clean_result()
     end
   end
 
   defp execute(action, %{"fiber" => fiber} = params)
        when action in ~w(install repeat reshape set-model set-agent set-outcome uninstall) do
-    with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
+    with {:ok, %{store: felt_store, fiber_id: fiber_id}} <-
+           resolve_fiber(fiber, params["fiber_path"]) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
       |> run_elem(felt_store)
@@ -146,12 +152,12 @@ defmodule ShuttleWeb.LifecycleController do
     action = Atom.to_string(verb)
 
     with {:ok, [^action, ^fiber | args]} <- args_for(action, params) do
-      verb |> LifecycleService.transition(fiber, args) |> clean_result()
+      verb |> LifecycleService.transition(fiber, args, params["fiber_path"]) |> clean_result()
     end
   end
 
-  defp refresh_card(%{"fiber" => fiber}) do
-    case resolve_fiber(fiber) do
+  defp refresh_card(%{"fiber" => fiber} = params) do
+    case resolve_fiber(fiber, params["fiber_path"]) do
       {:ok, %{fiber_id: fiber_id}} -> Shuttle.Poller.refresh_document(fiber_id)
       _ -> :ok
     end
@@ -159,7 +165,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp refresh_card(_), do: :ok
 
-  defp resolve_fiber(identifier), do: FeltStores.resolve_request(identifier)
+  defp resolve_fiber(identifier, hint), do: FeltStores.resolve_request(identifier, hint)
 
   defp run_elem({:ok, args}, felt_store), do: run(args, felt_store)
   defp run_elem(error, _felt_store), do: error
@@ -301,7 +307,8 @@ defmodule ShuttleWeb.LifecycleController do
     |> clean_result()
   end
 
-  defp lifecycle(verb, fiber), do: verb |> LifecycleService.transition(fiber) |> clean_result()
+  defp lifecycle(verb, fiber, params),
+    do: verb |> LifecycleService.transition(fiber, [], params["fiber_path"]) |> clean_result()
 
   defp clean_result({:command_error, status, output}),
     do: {:command_error, status, clean_command_output(output)}

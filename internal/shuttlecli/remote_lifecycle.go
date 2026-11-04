@@ -238,6 +238,10 @@ func fiberAddress(f *felt.Felt) string {
 	if f.UID != "" {
 		return f.UID
 	}
+	return fiberPathHint(f)
+}
+
+func fiberPathHint(f *felt.Felt) string {
 	if rel, err := feltStoreRelativePath(f.Path); err == nil {
 		if id, err := fiberIDFromStorePath(rel); err == nil {
 			return id
@@ -254,7 +258,7 @@ func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields 
 			}
 		}
 	}
-	payload := map[string]any{"action": action, "fiber": fiberAddress(fiber), "origin": owner}
+	payload := map[string]any{"action": action, "fiber": fiberAddress(fiber), "origin": owner, "fiber_path": fiberPathHint(fiber)}
 	for key, value := range fields {
 		payload[key] = value
 	}

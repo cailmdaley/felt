@@ -102,9 +102,10 @@ type app struct {
 	// restarting host's session ledger to become trustworthy again.
 	messageResolveWait time.Duration
 
-	env  *sysenv.Env
-	json bool   // --json
-	dir  string // -C
+	env           *sysenv.Env
+	json          bool   // --json
+	dir           string // -C
+	fiberPathHint string // --fiber-path
 
 	// osHostname is os.Hostname, the last tier of resolveOwnHost.
 	osHostname func() (string, error)
@@ -214,6 +215,7 @@ func (a *app) rootCmd() *cobra.Command {
 	)
 	root.SetHelpCommandGroupID(groupOperations)
 	root.PersistentFlags().BoolVarP(&a.json, "json", "j", false, "Output in JSON format")
+	root.PersistentFlags().StringVar(&a.fiberPathHint, "fiber-path", "", "Exact namespace path to verify before walking for a fiber UID")
 	root.PersistentFlags().StringVarP(&a.dir, "store", "C", "", "Felt store root (directory containing .felt/)")
 	for _, command := range []*cobra.Command{
 		a.shuttleAgentsCmd(),
