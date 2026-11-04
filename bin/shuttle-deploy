@@ -937,6 +937,10 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
     fi
     deploy_step 'build/install CLIs'
     cmd="$(build_checkout_cmd "$tree" "$SKIP_UI")"
+    case "${BUILD_WRAP%% *}" in
+      srun|*/srun)
+        case " $BUILD_WRAP " in *' --immediate'*|*' -I'*) ;; *) BUILD_WRAP="$BUILD_WRAP --immediate=60";; esac;;
+    esac
     [ -z "$BUILD_WRAP" ] || cmd="$BUILD_WRAP bash -lc $(shell_quote "$cmd")"
     bash -c "$cmd" 5>&- || { bad 'build/install CLIs: failed'; return 1; }
   fi
