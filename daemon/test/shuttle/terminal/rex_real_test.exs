@@ -51,6 +51,50 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {:ok, %{"instance_id" => ^instance}} = Rex.call(@runner, "server.status", %{})
   end
 
+  @tag skip: not Shuttle.Test.IsolatedRex.restore_supported?()
+  test "restored windows from a restarted server are not adopted as workers", %{root: root} do
+    name = "restore-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle"
+    script = Path.join(root, "worker.sh")
+    File.write!(script, "sleep 300\n")
+    assert :ok = Backend.launch(@runner, name, root, script, [])
+    assert {:ok, before} = RexBindings.read()
+    assert :present = Backend.probe(@runner, name)
+    endpoint = "unix://#{root}/rex.sock"
+    executable = Rex.bin()
+
+    assert {_, 0} =
+             System.cmd(executable, ["--autostart=false", "-S", endpoint, "server", "stop"],
+               stderr_to_stdout: true
+             )
+
+    port =
+      Port.open({:spawn_executable, executable}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        args: [
+          "server",
+          "run",
+          "--listen",
+          endpoint,
+          "--state-dir",
+          "#{root}/state"
+        ]
+      ])
+
+    {:os_pid, pid} = Port.info(port, :os_pid)
+    on_exit(fn -> System.cmd("kill", ["-TERM", to_string(pid)], stderr_to_stdout: true) end)
+    await(fn -> match?({:ok, _}, Rex.whoami(@runner)) end)
+    assert {:ok, %{"instance_id" => instance}} = Rex.whoami(@runner)
+    refute instance == before["instance"]
+    assert {:ok, blocks} = Rex.blocks(@runner, before["bindings"][name]["session_id"])
+    assert Enum.any?(blocks, &(&1["block_id"] == before["bindings"][name]["block_id"]))
+    assert {:ok, []} = Backend.list(@runner)
+    assert :absent = Backend.probe(@runner, name)
+    assert :ok = Backend.launch(@runner, name, root, script, [])
+    assert :present = Backend.probe(@runner, name)
+  end
+
   test "isolated launch, immutable binding, environment, bracketed paste, native rename and stop",
        %{root: root} do
     name = "probe-r3-#{System.unique_integer([:positive])}-shuttle"

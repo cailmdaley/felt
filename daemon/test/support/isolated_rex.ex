@@ -9,6 +9,19 @@ defmodule Shuttle.Test.IsolatedRex do
     is_nil(Rex.bin()) or Enum.any?(executables, &is_nil(Shuttle.Env.find_executable(&1)))
   end
 
+  def restore_supported? do
+    case Rex.bin() do
+      nil ->
+        false
+
+      bin ->
+        case System.cmd(bin, ["server", "run", "--help"], stderr_to_stdout: true) do
+          {help, 0} -> String.contains?(help, "--restore")
+          _ -> false
+        end
+    end
+  end
+
   def start(data_dir) do
     root = Path.join(System.tmp_dir!(), "rex-test-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)
