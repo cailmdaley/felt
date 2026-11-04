@@ -56,6 +56,39 @@ defmodule Shuttle.EventStreamTest do
 
   defp kinds(buckets), do: Enum.map(buckets, &{div(&1.m - @t0, @m), &1.k, &1.n})
 
+  test "restart after two rotations leaves an idle-only suffix uncertain", %{path: path} do
+    append(path, [ev("stop", 0, %{"backgroundTasks" => 1})])
+    name = :event_stream_rotation_uncertain
+
+    pid =
+      start_supervised!(
+        {EventStream,
+         events_file: path, name: name, clock: fn -> @t0 end, poll_interval_ms: 3_600_000}
+      )
+
+    assert EventStream.session_activity(name)["s1"].phase == "working"
+    File.rename!(path, path <> ".1")
+    append(path, [ev("user_prompt_submit", 1, %{"sessionId" => "other"})])
+    all(name, path)
+    File.rename!(path, path <> ".1")
+    append(path, [ev("notification", 2, %{"notificationKind" => "idle_prompt"})])
+    all(name, path)
+    assert EventStream.session_activity(name)["s1"].phase == "working"
+    GenServer.stop(pid)
+    restarted = :event_stream_rotation_restarted
+
+    start_supervised!(
+      {EventStream,
+       events_file: path, name: restarted, clock: fn -> @t0 end, poll_interval_ms: 3_600_000},
+      id: :restarted
+    )
+
+    refute Map.has_key?(EventStream.session_activity(restarted), "s1")
+    append(path, [ev("stop", 3, %{"backgroundTasks" => 1})])
+    all(restarted, path)
+    assert EventStream.session_activity(restarted)["s1"].phase == "working"
+  end
+
   test "phase readers copy compact projections, not retained event history", %{path: path} do
     append(path, Enum.map(1..5_000, &ev("pre_tool_use", 0, %{"id" => to_string(&1)})))
     name = :event_stream_compact_projection

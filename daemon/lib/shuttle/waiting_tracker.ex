@@ -210,6 +210,15 @@ defmodule Shuttle.WaitingTracker do
     )
   end
 
+  defp do_transition(
+         %Session{turn: :unstarted} = session,
+         "notification",
+         %{"notificationKind" => "idle_prompt"} = event,
+         now
+       ) do
+    touch(session, event, now, [])
+  end
+
   defp do_transition(session, "notification", event, now) do
     pending =
       if Map.get(event, "notificationKind") == "idle_prompt", do: session.pending, else: true
