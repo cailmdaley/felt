@@ -162,6 +162,45 @@ func TestLateEOFFinishesOnlyActivation(t *testing.T) {
 	}
 	free(t, filepath.Join(root, "host.lock"))
 }
+func TestLostOutputObserverClosesTransport(t *testing.T) {
+	binary := build(t)
+	root := t.TempDir()
+	script := filepath.Join(root, "script")
+	if e := os.WriteFile(script, []byte("bootstrap"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	input, life, e := os.Pipe()
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer input.Close()
+	defer life.Close()
+	reader, output, e := os.Pipe()
+	if e != nil {
+		t.Fatal(e)
+	}
+	reader.Close()
+	defer output.Close()
+	log, e := os.Create(filepath.Join(root, "log"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer log.Close()
+	cmd := exec.Command(binary, "--observe", script, "completion", "bash", "-c", `read -r size; dd bs=1 count="$size" of=/dev/null 2>/dev/null; printf 'output\n'; cat >/dev/null; exit 143`)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, log
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if e = cmd.Start(); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
+	if e = result(t, cmd); e == nil {
+		t.Fatal("closed output observer reported success")
+	}
+	if !strings.Contains(contents(log.Name()), "broken pipe") {
+		t.Fatalf("output failure did not cancel transport: %s", contents(log.Name()))
+	}
+}
+
 func TestDeadlineKillsTermIgnoringGroup(t *testing.T) {
 	binary := build(t)
 	root := t.TempDir()
