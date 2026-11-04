@@ -267,10 +267,11 @@ Use `--ref` for an intentional rollback; an explicit commit object has no ref to
 The caller snapshots its entrypoint in memory, and serialized remote scripts travel on stdin rather than in SSH command arguments.
 A ready target coalesces without another build or daemon cycle.
 Host lock waits are bounded by `SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS` (3600 seconds), and name the holder.
-Only the transaction and local builds inherit the locks; preparation, harnesses and activation close them before launching children.
-A host-owned `nohup` runner owns helper compilation through cleanup; losing SSH does not cancel it.
-Each attempt prints a private `~/.shuttle/deploy/runs/<run>` directory containing its ordered log, last step, runner PID and final exit result.
-A failed observer is not evidence that deployment stopped; inspect that run before retrying.
+The helper, transaction and local builds hold the locks until their last descriptor closes; preparation, harness and activation command shells drop the lock descriptors before launching children.
+SSH stays attached. Observer EOF or TERM/INT/HUP cancels waits and the owned transaction group, with TERM then KILL after three seconds. A killed deployer cannot leave a waiter that deploys later.
+`SHUTTLE_DEPLOY_TIMEOUT_SECONDS` bounds each attached transaction, including bootstrap, at 7200 seconds by default. Pointer selection through verified readiness and quarantine release defers observer/signal cancellation; finishing work does not. The hard deadline still terminates a stalled activation.
+One private `~/.shuttle/deploy/last-run.log` is overwritten per attempt; there are no detached run records or result polling. Lock metadata names the executing node as well as PID/group. File creation does not change the login umask.
+The bootstrap is fully framed before a login shell can read stdin; query captures and final completion have explicit frames. SSH uses bounded connection and keepalive waits, and scheduler builds get a bounded `srun --immediate` queue wait.
 The bootstrap helper is built with capped Go parallelism under `~/.shuttle/deploy/tools`, and its shell waits for the binary to exit before removing the workspace, including on failures.
 This ordering permits cleanup on NFS without an executing binary's `.nfs` file retaining the directory.
 Tree leases live under `~/.shuttle/deploy/leases`.

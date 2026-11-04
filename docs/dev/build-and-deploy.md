@@ -173,46 +173,37 @@ A ready daemon already serving that exact root and revision coalesces without an
 A newer descendant is not substituted for the requested revision.
 
 A host-local kernel lock at `~/.shuttle/deploy.lock` serializes the entire transaction, from worktree preparation through build, activation, readiness, quarantine release and pruning.
-A waiting run prints the holder's target, initiating host and PID, host-side PID, acquisition time, and durable run directory.
+A waiting run prints the holder's target, initiating host and PID, executing node's hostname, helper PID/process group and acquisition time.
 Lock waits are bounded by `SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS` (3600 seconds by default); timeout fails that host and names the holder instead of stalling the remaining fleet indefinitely.
 The helper compiles `scripts/deploy-lock/main.go` with `GOMAXPROCS=2 GOFLAGS=-p=2` under `~/.shuttle/deploy/tools`, then runs the resulting binary.
-A host-owned shell waits for that binary to exit before removing its temporary directory on success or failure.
+An attached outer shell waits for that binary to exit before removing its temporary directory on success or failure. If the helper is killed, that shell kills its remaining process group before cleanup.
 Removing an executing binary on NFS leaves a `.nfs` file that prevents directory removal, so cleanup belongs outside the helper's process lifetime.
 There is no Go compiler parent during the transaction and no dependency on `/tmp` permitting executable files.
 Locking does not depend on the installed CLI version.
-The transaction shell and local build subprocesses inherit the lock descriptors, so a crashed helper cannot unlock their ongoing build.
-Non-build steps close descriptors 3 and 4 before preparing trees, inspecting harnesses, or activating daemons; background launchers and newly started tmux servers cannot retain a finished deploy's locks.
-An `srun` job on another node inherits no local descriptor and relies on its submitting transaction's lifetime.
-A dead transaction releases its locks without deleting lock files.
+The helper, transaction shell and local build subprocesses inherit the lock descriptors. The locks drop only when the last holder closes them or exits, including cancelled build descendants, not when cancellation starts or the helper alone dies.
+Preparation, harness and activation command shells close descriptors 3 and 4; background launchers and newly started tmux servers cannot retain a finished deploy's locks. The activation control descriptor is closed in those commands and builds too.
+An `srun` job on another node inherits no local descriptor and relies on its submitting client's lifetime and cancellation. Kernel lock release does not delete lock files.
 Different hosts can deploy concurrently.
 Do not delete lock files to recover a deploy; their existence is not evidence that they are held.
 
 ### Transaction ownership and diagnostics
 
-A deploy belongs to the target host, not its SSH connection.
-The caller sends script bytes on stdin to a login shell; SSH arguments carry only the shell command, not the serialized transaction.
-After login, `scripts/deploy-run.sh` launches a `nohup` runner with disconnected stdin and output redirected to a private durable run directory under `~/.shuttle/deploy/runs/`.
-This includes helper compilation, lock acquisition, the locked transaction and cleanup.
-The caller streams that run's ordered stdout and stderr and reports its exit status.
-It prints the run path before compilation and each step as it begins; failed runs name the last step and exit code alongside the command's stderr.
-Slow login or compilation is therefore distinguishable from a stalled locked transaction.
+**A transaction dies with its observer.** SSH is attached and streams output directly; its exit status and the bootstrap's completion sentinel determine success. There is no detached runner or result polling.
+The same helper supervises the local transport and the target transaction. Only the deployer holds its caller lifeline's write end: even a killed deployer closes the transport's stdin. On the target, observer EOF, TERM, INT or HUP cancels lock acquisition or sends TERM to the owned transaction group, then KILL after three seconds. A forgotten waiter cannot acquire a lock and deploy later.
+SSH uses a 15-second connect timeout and 15-second keepalives with three missed replies, detecting a dead established link in about a minute.
 
-**Losing SSH does not cancel deployment.**
-The runner continues, holds its locks through the transaction and publishes `result` only after cleanup.
-A failed observer must not be interpreted as a failed or cancelled host operation.
-Inspect the printed directory on the owner host:
+`SHUTTLE_DEPLOY_TIMEOUT_SECONDS` bounds each attached transaction, including login/bootstrap, lock waits, builds and finishing work; it defaults to 7200 seconds. The caller and target share that absolute deadline. It bounds a hung transport or scheduler without waiting indefinitely for a result file.
+Pointer selection through readiness verification and quarantine release is the protected unit. The helper defers observer/signal cancellation across that unit, then cancels before checkout refresh, harness setup and pruning. The hard transaction deadline still forces termination if activation itself stalls. Build, queue and lock waits are not protected.
+
+The caller sends a length-framed bootstrap on stdin. The target reads it completely before starting a login shell, whose stdin is `/dev/null`; a separate descriptor carries observer lifetime. Captured query values have explicit begin/end frames, so profile stdout cannot become a path or JSON value. A profile that exits zero without executing the bootstrap cannot report deployment success.
+
+Each target overwrites one private `~/.shuttle/deploy/last-run.log`, retaining ordered stdout/stderr and failure diagnostics even when SSH disappears. There are no persistent run directories. File privacy does not change the login umask inherited by builds or launched services.
 
 ```sh
-cat ~/.shuttle/deploy/runs/<run>/step    # last step entered
-cat ~/.shuttle/deploy/runs/<run>/result  # recorded exit code, if available
-tail -n 50 ~/.shuttle/deploy/runs/<run>/log
+tail -n 50 ~/.shuttle/deploy/last-run.log
 ```
 
-A missing result means no exit has been recorded; it does not prove the process is still alive.
-The directory also contains the runner's `pid` and serialized `start.sh` for diagnosis.
-Run records remain available after successful and failed attempts; they are not bootstrap temporary directories.
-A subsequent deploy either names the active holder and waits within the configured deadline, or acquires the freed lock and checks whether the target is already ready.
-A completed matching deployment coalesces without another restart.
+After cancellation and group exit, a new deploy can acquire the lock. A completed matching deployment coalesces without another restart.
 
 ### Release verification and retention
 
@@ -371,6 +362,7 @@ The optional string is a trusted shell command prefix: deployment runs `<build_w
 Only the build (including its checkout directory, CLI installation and version environment) is wrapped.
 Fetching the pinned object, worktree preparation, harness refresh, and daemon cycling stay outside the wrapper.
 The lock bootstrap also runs outside the wrapper, with its own bounded Go parallelism.
+An `srun` prefix gets `--immediate=60` unless it supplies an immediate limit, bounding its queue wait. Cancellation signals the submitting client in the transaction group so it cancels its step.
 This composes with `build_ui: false` and `SKIP_UI=1`.
 
 `bin/shuttle-deploy --list` shows the choice per host (`build` or `shipped`).
