@@ -102,7 +102,7 @@ resolution and uses <slug> as spelled.`,
 			// orders a never-edited fiber by when it was born, not file mtime.
 			f.Touch(f.CreatedAt)
 
-			if err := storage.Write(f); err != nil {
+			if err := storage.Create(f); err != nil {
 				return err
 			}
 

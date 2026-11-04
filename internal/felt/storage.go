@@ -543,6 +543,38 @@ func (s *Storage) CheckAvailableID(id string) error {
 	return nil
 }
 
+// Create publishes a new fiber without replacing an existing document.
+// The availability check shares Update's advisory lock, and publication itself
+// is create-if-absent so even an uncoordinated creator cannot be overwritten.
+func (s *Storage) Create(f *Felt) error {
+	if f == nil {
+		return fmt.Errorf("cannot create nil felt")
+	}
+	unlock, err := s.LockFiber(f.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := s.CheckAvailableID(f.ID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(f.UID) == "" {
+		f.UID = NewULID()
+	}
+	data, err := f.Marshal()
+	if err != nil {
+		return err
+	}
+	s.forgetWalk()
+	if err := atomicfile.WriteNewUnsynced(s.Path(f.ID), data, 0644); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("fiber %q already exists", f.ID)
+		}
+		return err
+	}
+	return nil
+}
+
 // Update takes the fiber's advisory lock, reloads its current document, and
 // commits the mutation without replacing unrelated concurrent changes.
 func (s *Storage) Update(id string, mutate func(*Felt) error) (*Felt, error) {

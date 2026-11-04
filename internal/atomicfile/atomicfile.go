@@ -60,6 +60,23 @@ func WriteUnsynced(path string, data []byte, perm os.FileMode) error {
 	return write(path, data, perm, false)
 }
 
+// WriteNewUnsynced installs a complete file only if path is absent. Linking
+// the completed temporary inode publishes it atomically without replacement.
+func WriteNewUnsynced(path string, data []byte, perm os.FileMode) error {
+	f, err := create(path, perm, false)
+	if err != nil {
+		return err
+	}
+	defer f.Abort()
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Link(f.Name(), path)
+}
+
 func write(path string, data []byte, perm os.FileMode, durable bool) error {
 	f, err := create(path, perm, durable)
 	if err != nil {

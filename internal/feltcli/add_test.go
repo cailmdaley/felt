@@ -4,9 +4,41 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
+
+func TestAddDoesNotOverwriteConcurrentCreator(t *testing.T) {
+	t.Parallel()
+	dir, storage := newStore(t)
+	unlock, err := storage.LockFiber("collision")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	done := make(chan error, 1)
+	go func() { _, err := runCommand(t, dir, "add", "collision", "Losing creator", "--top-level"); done <- err }()
+	select {
+	case err := <-done:
+		t.Fatalf("add bypassed creation lock: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	winner := &felt.Felt{ID: "collision", Name: "Winning creator", Body: "Must survive"}
+	if err := storage.Write(winner); err != nil {
+		t.Fatal(err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("losing add = %v", err)
+	}
+	got := mustRead(t, storage, "collision")
+	if got.UID != winner.UID || got.Name != winner.Name || got.Body != winner.Body {
+		t.Fatalf("creator overwritten: %+v", got)
+	}
+}
 
 func TestAddMintsNativeUID(t *testing.T) {
 	t.Parallel()
