@@ -128,6 +128,27 @@ defmodule Shuttle.PollerTest do
     assert wide_collisions["wide-shared"] |> hd() == {"wide-01", "uid-wide-01", "wide-01"}
   end
 
+  defmodule RefusedArmRunner do
+    def cmd("shuttle", args, opts) do
+      if "standing-transition" in args,
+        do: {"simulated arm failure", 1},
+        else: MockRunner.cmd("shuttle", args, opts)
+    end
+    def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
+  end
+
+  test "force start refuses a failed standing rearm before terminal launch" do
+    id = "tests/refused-arm"
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    MockRunner.set_shuttle(id, "kind: standing\nhost: test-host\nagent: claude-sonnet\nproject_dir: #{MockRunner.felt_root()}\n", "closed")
+    {:ok, poller} = start_poller!(runner: RefusedArmRunner, felt_stores: [MockRunner.felt_root()], boot_quarantine: true, poll_interval_ms: 600_000)
+    await_boot_cycle!(poller)
+    assert {:error, {:arm_refused, %{message: message}}} = Poller.dispatch_fiber(poller, id, force: true)
+    assert message =~ "simulated arm failure"
+    refute Enum.any?(MockRunner.commands(), fn {command, args} -> command == "tmux" and "new-session" in args end)
+    assert MockRunner.fiber(id)["status"] == "closed"
+  end
+
   defmodule IdentityRunner do
     def cmd(command, args, opts) do
       if command == "shuttle" and "mark-runtime" in args and

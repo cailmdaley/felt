@@ -12,10 +12,9 @@ defmodule Shuttle.Continuation do
       (claude: the `--session-id` it generated; codex/pi: scraped from the
       JSONL), so nothing is plumbed to the worker.
     * `shuttle.runtime.handed_off_at` — **written by the WORKER at clean exit**
-      via `shuttle handoff`, and by a human re-arm: Shuttle's `accept` / `resume`
-      in the same write as the status, a force-dispatch
-      `Shuttle.LifecycleStore.rearm` as a second write after it.
-      A clean exit is the only thing that stamps it newer than the dispatch.
+      via `shuttle handoff`, and by human acceptance or force rearm in the
+      same locked write as the status. The current run's exit verb distinguishes
+      worker handoff from human rearm.
 
   The fields are **per-host by nature** but safe in git: only the owning host
   (`shuttle.host`) dispatches or resumes a fiber, so `session_uuid` is written
@@ -255,9 +254,9 @@ defmodule Shuttle.Continuation do
   @doc """
   Stamp `shuttle.runtime.handed_off_at = now` — the clean-exit / human-re-arm
   signal — by shelling `shuttle mark-runtime --handed-off-at`
-  (`-C felt_store`). The worker's own exit uses `shuttle handoff`; this is the
-  daemon-side entry point (the `LifecycleStore` conclude after a force-dispatch
-  rearm or a self-healed standing constitution, and tests).
+  (`-C felt_store`). The worker's own exit uses `shuttle handoff`; standing
+  lifecycle transitions use `LifecycleStore` to write status and conclusion
+  atomically. This helper stamps only the runtime conclusion.
   """
   @spec mark_handed_off(module(), String.t(), String.t()) :: :ok | {:error, term()}
   def mark_handed_off(runner, felt_store, fiber_id)

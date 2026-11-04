@@ -4753,19 +4753,21 @@ defmodule Shuttle.Poller do
   end
 
   # Re-arm a closed or paused standing constitution so the board's start both
-  # spawns it now and leaves it armed for its schedule. A failed re-arm is
-  # logged and the start proceeds.
+  # spawns it and leaves it armed for its schedule. A failed re-arm refuses
+  # the launch before a terminal is created.
   defp rearm_standing(state, fiber_id) do
     case LifecycleStore.rearm(fiber_id,
            runner: state.runner,
            felt_stores: state.felt_stores,
            own_host_id: state.own_host_id
          ) do
-      {:ok, msg} -> Logger.info("force-dispatch re-arm #{fiber_id}: #{String.trim(msg)}")
-      {:error, reason} -> Logger.warning("force-dispatch re-arm #{fiber_id} failed: #{reason}")
-    end
+      {:ok, msg} ->
+        Logger.info("force-dispatch re-arm #{fiber_id}: #{String.trim(msg)}")
+        :ok
 
-    :ok
+      {:error, reason} ->
+        arm_refused(fiber_id, reason, nil)
+    end
   end
 
   defp awaiting_standing?(fiber) do
