@@ -93,7 +93,9 @@ func TestObserverEOFAndSignalsCancelGroup(t *testing.T) {
 			if how == "deadline" {
 				env = append(env, "SHUTTLE_DEPLOY_TIMEOUT_SECONDS=1")
 			}
-			cmd, pipe, log := start(t, binary, root, how, `trap 'exit 143' TERM; sleep 300 & echo $! > "$1/descendant"; touch "$1/entered"; wait`, env...)
+			// Even a child that treats TERM as a successful exit cannot turn a
+			// cancelled deployment into success.
+			cmd, pipe, log := start(t, binary, root, how, `trap 'exit 0' TERM; sleep 300 & echo $! > "$1/descendant"; touch "$1/entered"; wait`, env...)
 			await(t, log, func() bool { return present(filepath.Join(root, "entered")) })
 			switch how {
 			case "eof":
