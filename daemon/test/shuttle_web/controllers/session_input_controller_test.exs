@@ -8,7 +8,7 @@ defmodule ShuttleWeb.SessionInputControllerTest do
   @endpoint ShuttleWeb.Endpoint
 
   defmodule Runner do
-    def cmd("tmux", ["has-session", _target], _opts), do: {"", 0}
+    def cmd("tmux", ["has-session" | _], _opts), do: Process.get(:session_input_tmux, {"", 0})
 
     def cmd("ps", _args, _opts), do: Process.get(:session_input_ps, {"", 0})
 
@@ -19,7 +19,7 @@ defmodule ShuttleWeb.SessionInputControllerTest do
 
     def cmd("tmux", args, _opts) do
       send(Shuttle.Env.app(:session_input_test), {:tmux, args})
-      {"", 0}
+      Process.get(:session_input_tmux, {"", 0})
     end
   end
 
@@ -73,6 +73,43 @@ defmodule ShuttleWeb.SessionInputControllerTest do
                Jason.encode!(%{fiber: uid})
              )
              |> json_response(200)
+  end
+
+  for {route, address, status} <- [
+        {"input", :session, 503},
+        {"receiver", :session, 503},
+        {"prepare-terminal", :session, 404},
+        {"prepare-terminal", :fiber, 404}
+      ] do
+    @tag :reachable_terminal
+    test "#{route} by #{address} does not mistake a live process for a reachable terminal", %{
+      path: path
+    } do
+      session = "11111111-1111-4111-8111-111111111111"
+      uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+      record_session(path, session, uid, "worker-shuttle")
+      Process.put(:session_input_tmux, {"tmux timed out", :timeout})
+
+      Process.put(
+        :session_input_ps,
+        {"812 700 bash -l /tmp/shuttle-run-worker-shuttle.42.sh\n" <>
+           "813 812 codex resume #{session}\n", 0}
+      )
+
+      Process.put(:session_input_identity, {~s({"status":"present","start":"birth-813"}), 0})
+      assert Shuttle.Terminal.status(Runner, "worker-shuttle") == :alive
+
+      params =
+        if unquote(address) == :fiber,
+          do: %{fiber: uid},
+          else: %{session_uuid: session, text: "continue"}
+
+      conn = post(api_conn(), "/api/v1/sessions/#{unquote(route)}", Jason.encode!(params))
+      body = json_response(conn, unquote(status))
+      if unquote(status) == 503, do: assert(body["code"] == "terminal_unavailable")
+      refute_received {:tmux, _}
+      refute_received {:identity_probe, _}
+    end
   end
 
   test "rejects a session whose UUID is no longer the uid's current binding", %{path: path} do

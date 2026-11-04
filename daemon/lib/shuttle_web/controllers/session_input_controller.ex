@@ -12,7 +12,7 @@ defmodule ShuttleWeb.SessionInputController do
       {:ok, terminal} ->
         runner = Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default)
 
-        case Terminal.status(runner, terminal) do
+        case terminal_state(runner, terminal) do
           :alive ->
             case Terminal.paste(runner, terminal, text) do
               :ok -> json(conn, %{status: "submitted"})
@@ -39,7 +39,7 @@ defmodule ShuttleWeb.SessionInputController do
       {:ok, terminal} ->
         runner = Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default)
 
-        case Terminal.status(runner, terminal) do
+        case terminal_state(runner, terminal) do
           :alive -> receiver_process(conn, session, terminal, runner)
           :gone -> error(conn, 404, "session_not_running", "Codex session is not running")
           :unknown -> error(conn, 503, "terminal_unavailable", "Terminal state is unknown")
@@ -52,6 +52,12 @@ defmodule ShuttleWeb.SessionInputController do
 
   def receiver(conn, _params),
     do: error(conn, 400, "invalid_request", "session_uuid is required")
+
+  defp terminal_state(runner, terminal) do
+    if Terminal.locate(runner, terminal),
+      do: :alive,
+      else: if(Terminal.status(runner, terminal) == :gone, do: :gone, else: :unknown)
+  end
 
   defp receiver_process(conn, session, terminal, runner) do
     case WorkerProcess.scan(runner) do

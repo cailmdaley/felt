@@ -32,7 +32,7 @@ defmodule ShuttleWeb.TerminalController do
         latest_terminal = SessionLedger.latest_for_terminal(terminal)
 
         if is_map(latest_terminal) and latest_terminal["session"] == session and
-             latest_terminal["uid"] == uid and Terminal.status(runner(), terminal) == :alive do
+             latest_terminal["uid"] == uid and Terminal.locate(runner(), terminal) != nil do
           json(conn, %{tmux_session: terminal})
         else
           not_found(conn)
@@ -50,7 +50,7 @@ defmodule ShuttleWeb.TerminalController do
         latest = SessionLedger.latest_for_uid(uid)
 
         if is_map(latest) and latest["session"] == session and
-             latest["tmux"] == terminal and Terminal.status(runner(), terminal) == :alive do
+             latest["tmux"] == terminal and Terminal.locate(runner(), terminal) != nil do
           json(conn, %{tmux_session: terminal})
         else
           not_found(conn)

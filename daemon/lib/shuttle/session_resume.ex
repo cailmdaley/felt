@@ -122,17 +122,16 @@ defmodule Shuttle.SessionResume do
     with :ok <- not_the_worker(session, live.()),
          {:ok, plan} <- plan(session, opts),
          :ok <- Terminal.require_config() do
-      case Terminal.status(runner, plan.tmux) do
-        :alive ->
-          {:ok, %{tmux_session: plan.tmux, created: false}}
-
-        :unknown ->
-          # Uncertainty prevents launch, but does not prove a reusable viewer.
-          with :ok <- not_held(session, runner),
-               do: {:error, "Resume terminal visibility is unknown; holding without launch"}
-
-        :gone ->
-          with :ok <- not_held(session, runner), do: start(plan, runner)
+      if Terminal.locate(runner, plan.tmux) do
+        {:ok, %{tmux_session: plan.tmux, created: false}}
+      else
+        with :ok <- not_held(session, runner) do
+          case Terminal.status(runner, plan.tmux) do
+            :gone -> start(plan, runner)
+            :alive -> reuse(plan, runner)
+            :unknown -> unreachable()
+          end
+        end
       end
     end
   end
@@ -184,18 +183,29 @@ defmodule Shuttle.SessionResume do
         {:ok, %{tmux_session: plan.tmux, created: true}}
 
       {:error, :already_running} ->
-        {:ok, %{tmux_session: plan.tmux, created: false}}
+        reuse(plan, runner)
 
-      {:error, {_tag, message}} ->
+      {:error, {_tag, message}} when is_binary(message) ->
         {:error, message}
 
-      {:error, message} ->
+      {:error, message} when is_binary(message) ->
         # An external tmux client can still win the name outside our launch lock.
         if String.contains?(message, "duplicate session"),
-          do: {:ok, %{tmux_session: plan.tmux, created: false}},
+          do: reuse(plan, runner),
           else: {:error, message}
+
+      {:error, reason} ->
+        {:error, "Resume terminal failed: #{inspect(reason)}"}
     end
   end
+
+  defp reuse(plan, runner) do
+    if Terminal.locate(runner, plan.tmux),
+      do: {:ok, %{tmux_session: plan.tmux, created: false}},
+      else: unreachable()
+  end
+
+  defp unreachable, do: {:error, "Resume terminal is unreachable; holding without launch"}
 
   # No tmux session shows this conversation, yet a process tmux cannot see
   # (a worker whose tmux socket was deleted) may still hold it open.

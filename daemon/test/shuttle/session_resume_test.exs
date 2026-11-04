@@ -82,6 +82,7 @@ defmodule Shuttle.SessionResumeTest do
 
       case {command, args} do
         {"tmux", ["has-session" | _]} ->
+          if hook = Shuttle.Env.app(:resume_probe_hook), do: hook.()
           if Agent.get(__MODULE__, & &1.running), do: {"", 0}, else: {"can't find session", 1}
 
         {"shuttle", ["agents", "resolve", id, "--json"]} ->
@@ -99,9 +100,12 @@ defmodule Shuttle.SessionResumeTest do
           Agent.get(__MODULE__, &Map.get(&1, :ps, {"", 0}))
 
         {"tmux", ["new-session" | _]} ->
-          if Agent.get(__MODULE__, &Map.get(&1, :duplicate)),
-            do: {"duplicate session: resume-x", 1},
-            else: {"", 0}
+          if Agent.get(__MODULE__, &Map.get(&1, :duplicate)) do
+            set_running(true)
+            {"duplicate session: resume-x", 1}
+          else
+            {"", 0}
+          end
 
         _ ->
           {"", 0}
@@ -289,6 +293,23 @@ defmodule Shuttle.SessionResumeTest do
       File.rm(script)
     end
 
+    for probe <- [1, 3] do
+      @tag :reachable_terminal
+      test "run-script presence at probe #{probe} holds launch but cannot supply an unreachable viewer" do
+        Env.put_app_env(:resume_probe_hook, fn ->
+          count = Process.get(:resume_probe_count, 0) + 1
+          Process.put(:resume_probe_count, count)
+
+          if count == unquote(probe),
+            do: Runner.set_ps({"812 1 bash -l /tmp/shuttle-run-resume-#{@claude}.42.sh\n", 0})
+        end)
+
+        assert {:error, reason} = SessionResume.prepare(@claude, runner: Runner)
+        assert reason =~ "unreachable"
+        refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
+      end
+    end
+
     test "a resume already running is found, not started twice" do
       Runner.set_running(true)
 
@@ -339,7 +360,13 @@ defmodule Shuttle.SessionResumeTest do
             Shuttle.Test.FakeRex.sessions(%{
               "session:concurrent" => %{
                 label: "resume-" <> @pi,
-                blocks: [%{"block_id" => "block:concurrent", "label" => "resume-" <> @pi}]
+                blocks: [
+                  %{
+                    "block_id" => "block:concurrent",
+                    "label" => "resume-" <> @pi,
+                    "window_id" => "window:concurrent"
+                  }
+                ]
               }
             })
           end
