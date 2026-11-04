@@ -483,6 +483,13 @@ to that total, each socket read may take up to 120 s, and a forward allows
 empty, without following links. Re-sending a file refreshes its mtime. The board's composer uploads here
 before it sends a directive and appends one `[Image: <path>]` line per image and one `[File: <path>]` line per other file.
 
+Desktop meeting requests accept `meeting.system_audio` (boolean, default `true`).
+Set it to `false` to start with only mic transcription.
+`POST /meeting/system-audio` accepts `{recorder?, launch, enabled}` and changes system transcription during the addressed live desktop meeting.
+The raw system reference remains available for mic echo cancellation.
+A stale launch returns 409; phone meetings reject this control.
+The meeting row reports `system_audio` from hark’s lifecycle state.
+
 `POST /meeting/stop` accepts `{recorder, launch}` and returns HTTP 202 with `{meeting}` or 404 when no meeting exists.
 The recorder checks the launch identity inside the same lock as Stop; a stale control cannot stop a replacement recording.
 An unknown recorder is refused rather than falling through to the hub's local meeting.
@@ -793,10 +800,3 @@ A reviewed close has a distinct quiet notice naming the verdict.
 Unreachable owners and failed reads return 503, so the mailbox retains the notice for retry.
 Existing notices without structured signal metadata are checked by their lifecycle message ID and the thread address in their text.
 Mailbox delivery validates notices before emitting them and durably acknowledges each successful direct delivery independently.
-
-Desktop meeting requests accept `meeting.system_audio` (boolean, default `true`).
-Set it to `false` to start with only mic transcription.
-`POST /meeting/system-audio` accepts `{recorder?, launch, enabled}` and changes system transcription during the addressed live desktop meeting.
-The raw system reference remains available for mic echo cancellation.
-A stale launch returns 409; phone meetings reject this control.
-The meeting row reports `system_audio` from hark’s lifecycle state.

@@ -1548,6 +1548,29 @@ defmodule Shuttle.MeetingTest do
     assert message =~ "unknown origin"
   end
 
+  test "system audio rejects invalid startup settings and phone controls", %{hark_dir: dir} do
+    for value <- [nil, "false", 0] do
+      assert {:error, {:validation, "meeting.system_audio must be a boolean"}} =
+               Meeting.start(
+                 %{"mode" => "call", "system_audio" => value},
+                 :record,
+                 "Audio",
+                 "local"
+               )
+    end
+
+    write_meeting(dir, %{
+      "launch" => "phone",
+      "pid" => 321,
+      "phase" => "live",
+      "phone" => "/tmp/phone.sock"
+    })
+
+    set_current_meeting_handler("phone", 321)
+    assert {:error, {:validation, _}} = Meeting.system_audio(false, launch: "phone")
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "env" end)
+  end
+
   test "system audio control is launch-bound and preserves the mic", %{hark_dir: dir} do
     write_meeting(dir, %{
       "launch" => "current",
