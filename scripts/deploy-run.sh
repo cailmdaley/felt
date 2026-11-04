@@ -23,10 +23,8 @@ trap 'exit 143' TERM HUP
 trap 'exit 130' INT
 mkdir -p "$HOME/.shuttle/deploy/tools" || exit 1
 tmp=$(mktemp -d "$HOME/.shuttle/deploy/tools/lock.XXXXXX") || exit 1
-log="$HOME/.shuttle/deploy/last-run.log"
 (umask 077; : > "$tmp/log") || exit 1
 exec 9>> "$tmp/log"
-mv -f "$tmp/log" "$log" || exit 1
 log_stream() {
   trap '' PIPE
   while IFS= read -r line || [ -n "$line" ]; do

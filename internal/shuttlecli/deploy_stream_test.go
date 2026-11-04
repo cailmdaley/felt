@@ -12,6 +12,33 @@ import (
 	"time"
 )
 
+func TestDeployWaitingAttemptPreservesOwnersLog(t *testing.T) {
+	f := newDeployFleet(t)
+	defer fleetTouch(t, f.gate)
+	first, log := f.start(t, "log-owner")
+	deployAwait(t, "owner build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
+	path := filepath.Join(f.home, ".shuttle/deploy/last-run.log")
+	before, e := os.Stat(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	waiter, waitLog := f.start(t, "log-waiter")
+	deployAwait(t, "waiter: "+waitLog, func() bool { return strings.Contains(fleetRead(waitLog), "waiting for") })
+	after, e := os.Stat(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !os.SameFile(before, after) || !strings.Contains(fleetRead(path), "build/install CLIs") {
+		t.Fatal("waiting attempt overwrote the held transaction's diagnostics")
+	}
+	waiter.Process.Kill()
+	waiter.Wait()
+	fleetTouch(t, f.gate)
+	if e := first.Wait(); e != nil {
+		t.Fatalf("owner: %v %s", e, fleetRead(log))
+	}
+}
+
 func TestDeployStoppedObserverCannotLeaveRollbackWaiter(t *testing.T) {
 	f := newDeployFleet(t)
 	if e := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("new target\n"), 0600); e != nil {

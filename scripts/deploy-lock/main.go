@@ -327,6 +327,11 @@ func run(args []string) error {
 		return err
 	}
 	defer lease.Close()
+	if log := os.Getenv("SHUTTLE_DEPLOY_LOG_FILE"); log != "" {
+		if err = os.Rename(log, filepath.Join(os.Getenv("HOME"), ".shuttle/deploy/last-run.log")); err != nil {
+			return err
+		}
+	}
 	sockets, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		return err
