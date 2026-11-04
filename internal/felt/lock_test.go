@@ -281,7 +281,7 @@ func TestEnsureGitignoreCoversSupportFiles_AddsOnlyMissingLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := lockOnly + ".*.tmp\n"; string(data) != want {
+	if want := lockOnly + ".*.tmp\n.move-pending.json*\n"; string(data) != want {
 		t.Fatalf(".gitignore = %q, want %q", data, want)
 	}
 }

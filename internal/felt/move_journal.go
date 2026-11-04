@@ -1,6 +1,8 @@
 package felt
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,30 +12,48 @@ import (
 	"github.com/cailmdaley/felt/internal/atomicfile"
 )
 
-// A move journal retains reference substitutions rather than document images.
-// Replaying it patches the current documents and cannot restore an old body.
+// A move journal retains reference-resolution context rather than document
+// images. Replaying it patches current documents and cannot restore an old body.
 type moveJournal struct {
 	OldID   string
 	NewID   string
-	Inside  []moveRewrite
-	Outside []moveRewrite
+	Inside  moveRewriteGroup
+	Outside moveRewriteGroup
+}
+type moveRewriteGroup struct {
+	Context *moveRewriteContext
+	Writes  []moveRewrite
 }
 type moveRewrite struct {
 	ID           string
 	Path         string
-	Replacements map[string]string
+	SourceOld    string
+	BeforeSHA256 string
+	AfterSHA256  string
+	Done         bool
+}
+
+func moveDigest(data []byte) string {
+	digest := sha256.Sum256(data)
+	return hex.EncodeToString(digest[:])
 }
 
 func (s *Storage) moveJournalPath() string { return filepath.Join(s.root, ".move-pending.json") }
 func (s *Storage) saveMove(oldID, newID string, inside, outside []pendingWrite) error {
-	convert := func(writes []pendingWrite) []moveRewrite {
-		result := make([]moveRewrite, 0, len(writes))
+	convert := func(writes []pendingWrite) moveRewriteGroup {
+		result := moveRewriteGroup{}
 		for _, w := range writes {
-			result = append(result, moveRewrite{w.id, w.path, w.replacements})
+			result.Context = w.context
+			result.Writes = append(result.Writes, moveRewrite{ID: w.id, Path: w.path, SourceOld: w.sourceOld})
 		}
 		return result
 	}
-	data, err := json.Marshal(moveJournal{oldID, newID, convert(inside), convert(outside)})
+	journal := &moveJournal{oldID, newID, convert(inside), convert(outside)}
+	return s.writeMoveJournal(journal)
+}
+
+func (s *Storage) writeMoveJournal(journal *moveJournal) error {
+	data, err := json.Marshal(journal)
 	if err != nil {
 		return err
 	}
@@ -70,12 +90,19 @@ func (s *Storage) recoverMove(oldID, newID string) (*MoveResult, bool, error) {
 	s.forgetWalk()
 	result := &MoveResult{}
 	for _, group := range []struct {
-		writes []moveRewrite
-		ids    *[]string
-	}{{journal.Inside, &result.Rewritten}, {journal.Outside, &result.Outside}} {
-		for _, w := range group.writes {
-			if err := (pendingWrite{w.ID, w.Path, w.Replacements}).write(s); err != nil {
-				return result, true, fmt.Errorf("unfinished move; repeat %s -> %s: %w", oldID, newID, err)
+		rewrites *moveRewriteGroup
+		ids      *[]string
+	}{{&journal.Inside, &result.Rewritten}, {&journal.Outside, &result.Outside}} {
+		for i := range group.rewrites.Writes {
+			w := &group.rewrites.Writes[i]
+			if !w.Done {
+				if err := (pendingWrite{w.ID, w.Path, w.SourceOld, group.rewrites.Context}).writeJournaled(s, w, &journal); err != nil {
+					return result, true, fmt.Errorf("unfinished move; repeat %s -> %s: %w", oldID, newID, err)
+				}
+				w.Done = true
+				if err := s.writeMoveJournal(&journal); err != nil {
+					return result, true, err
+				}
 			}
 			*group.ids = append(*group.ids, w.ID)
 		}

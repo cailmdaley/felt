@@ -1,6 +1,7 @@
 package felt
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -57,14 +58,14 @@ func TestMoveRewritePreservesEditAfterPlanning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFiberFile(t, s, "c", "---\nid: fixture-C\nname: C\nstatus: closed\ncustom: keep\n---\n\nSee [[a/x]].\nConcurrent result.\n")
+	writeFiberFile(t, s, "c", "---\nid: fixture-C\nname: C\nstatus: closed\ncustom: keep\n---\n\nSee [[a/x]].\nConcurrent result and [[a/x/y]].\n")
 	for _, w := range writes {
 		if err := w.write(s); err != nil {
 			t.Fatal(err)
 		}
 	}
 	got := readFiberFile(t, s, "c")
-	if !strings.Contains(got, "status: closed") || !strings.Contains(got, "Concurrent result.") || !strings.Contains(got, "[[b/x]]") {
+	if !strings.Contains(got, "status: closed") || !strings.Contains(got, "Concurrent result and [[b/x/y]].") || !strings.Contains(got, "[[b/x]]") {
 		t.Fatalf("move lost concurrent edit:\n%s", got)
 	}
 }
@@ -89,6 +90,48 @@ func TestMoveSubtreeRetriesInterruptedReferenceRewrites(t *testing.T) {
 	}
 	if got := readFiberFile(t, s, "c"); !strings.Contains(got, "[[b/x]]") {
 		t.Fatalf("unfinished reference: %s", got)
+	}
+}
+
+func TestMoveRetryDoesNotReinterpretAnAlreadyRewrittenLink(t *testing.T) {
+	t.Parallel()
+	s := newMoveFixture(t)
+	writeFiberFile(t, s, "b/xy", fiber("XY", ""))
+	writeFiberFile(t, s, "c", fiber("C", "See [[a/x]]."))
+	writeFiberFile(t, s, "d", fiber("D", "See [[a/x]]."))
+	unlock, err := s.LockFiber("d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if _, err := s.MoveSubtree("a/x", "b/x"); err == nil {
+		t.Fatal("expected interrupted rewrite")
+	}
+	// Model a crash after replacement but before its completion receipt.
+	data, err := os.ReadFile(s.moveJournalPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journal moveJournal
+	if err := json.Unmarshal(data, &journal); err != nil {
+		t.Fatal(err)
+	}
+	for i := range journal.Inside.Writes {
+		if journal.Inside.Writes[i].ID == "c" {
+			journal.Inside.Writes[i].Done = false
+		}
+	}
+	if err := s.writeMoveJournal(&journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MoveSubtree("a/x", "b/x"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFiberFile(t, s, "c"); !strings.Contains(got, "[[b/x]]") {
+		t.Fatalf("retry reinterpreted the applied link:\n%s", got)
 	}
 }
 

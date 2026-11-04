@@ -13,6 +13,7 @@ import (
 type documentEdit struct {
 	start, end int
 	text       string
+	indent     int
 }
 
 // mutationBytes applies only fields whose values the callback changed. Authored
@@ -108,7 +109,7 @@ func mutationBytes(raw, before, after []byte, oldBody, newBody string) ([]byte, 
 				prefix := strings.Repeat(" ", indent)
 				text = prefix + strings.ReplaceAll(rendered, "\n", "\n"+prefix) + "\n"
 			}
-			edits = append(edits, documentEdit{begin, finish, text})
+			edits = append(edits, documentEdit{begin, finish, text, indent})
 		}
 		return nil
 	}
@@ -117,7 +118,17 @@ func mutationBytes(raw, before, after []byte, oldBody, newBody string) ([]byte, 
 		return nil, err
 	}
 	// Stable ordering keeps additions at the same mapping boundary deterministic.
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	sort.SliceStable(edits, func(i, j int) bool {
+		if edits[i].start != edits[j].start {
+			return edits[i].start > edits[j].start
+		}
+		if edits[i].end != edits[j].end {
+			return edits[i].end > edits[j].end
+		}
+		// At a shared boundary, insert the outer sibling first so the nested
+		// addition lands before it and remains inside its mapping.
+		return edits[i].indent < edits[j].indent
+	})
 	for _, edit := range edits {
 		replacement := strings.TrimSuffix(edit.text, "\n")
 		var insert []string

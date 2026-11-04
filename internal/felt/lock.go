@@ -152,7 +152,7 @@ func (s *Storage) LockFiber(id string) (unlock func() error, err error) {
 //     exclusion), so gitignore is the answer to the litter, not cleanup.
 //   - ".*.tmp": the hidden temp files internal/atomicfile renames into place,
 //     visible to git only while a write is in flight or after a crash.
-var requiredGitignoreLines = []string{"*.md.lock", ".*.tmp"}
+var requiredGitignoreLines = []string{"*.md.lock", ".*.tmp", ".move-pending.json*"}
 
 // feltGitignoreHeader marks a .gitignore as felt's own generated file (see
 // defaultGitignore) — the only kind ensureGitignoreCoversSupportFiles will
