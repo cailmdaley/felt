@@ -406,9 +406,9 @@ defmodule Shuttle.FeltStores do
   # ownership by that path — NOT by which store happened to address it. felt's
   # JSON carries `path` (absolute, symlink-resolved), so the same physical file
   # resolves to the same path from every symlink view; the owning store is the
-  # one whose realpath `.felt/` physically contains it. Re-querying felt against
-  # the owner yields the owner-relative `id` (the address subsequent
-  # `felt -C <owner>` commands need), instead of a symlink-view alias.
+  # one whose realpath `.felt/` physically contains it. The carried physical
+  # path yields the owner-relative `id` that subsequent writes need, rather
+  # than a symlink-view alias.
   # Returns the resolved map, `:timeout` (some store never answered and none
   # resolved — absence is not established), or nil (every store answered "not
   # mine").
@@ -422,10 +422,7 @@ defmodule Shuttle.FeltStores do
           {:ok, %{"path" => path} = fiber} when is_binary(path) and path != "" ->
             owner = owning_store(stores, path) || namespace_store(store)
 
-            owner_fiber =
-              if owner == store, do: fiber, else: felt_for_path(owner, fiber)
-
-            resolved_from(owner, owner_fiber) || acc
+            resolved_from(owner, felt_for_path(owner, fiber)) || acc
 
           {:error, :timeout} ->
             :timeout
@@ -480,15 +477,14 @@ defmodule Shuttle.FeltStores do
     end
   end
 
-  # Re-query by intrinsic identity when switching stores, so a view's alias
-  # cannot select a different same-named fiber in the owning store.
+  # The physical path carries the owner-relative address even without a UID.
+  # Re-resolving a view's id in another store can select a different document.
   defp felt_for_path(owner, fiber) do
-    identifier = fiber["uid"] || fiber["id"]
-
-    case felt_show_json(owner, identifier, true) do
-      {:ok, %{"path" => _} = resolved} -> resolved
-      _ -> fiber
-    end
+    relative = Path.relative_to(fiber["path"], store_felt_realpath(owner))
+    leaf = relative |> Path.basename() |> Path.rootname()
+    parent = Path.dirname(relative)
+    id = if Path.basename(parent) == leaf, do: parent, else: Path.rootname(relative)
+    Map.put(fiber, "id", id)
   end
 
   defp felt_show_json(store, identifier, exact) do

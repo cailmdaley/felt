@@ -537,8 +537,10 @@ defmodule Shuttle.FeltStoresTest do
         if String.contains?(host, "wedged") do
           {"felt timed out after 60000ms", :timeout}
         else
-          {Jason.encode!(%{"id" => "debug", "path" => Path.join(host, ".felt/debug/debug.md")}),
-           0}
+          {Jason.encode!(%{
+             "id" => "debug",
+             "path" => Path.join(Shuttle.FeltStores.store_felt_realpath(host), "debug/debug.md")
+           }), 0}
         end
       end
     end

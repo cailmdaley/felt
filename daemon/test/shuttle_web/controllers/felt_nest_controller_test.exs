@@ -108,7 +108,8 @@ defmodule ShuttleWeb.FeltNestControllerTest do
             if [ "$a" = "-C" ]; then next_store=1; fi
             if [ "$a" = "show" ]; then next_id=1; fi
           done
-          printf '{"id":"%s","path":"%s/.felt/%s/x.md"}\\n' "$id" "$store" "$id"
+          physical="$(cd "$store/.felt" && pwd -P)"
+          printf '{"id":"%s","path":"%s/%s/%s.md"}\\n' "$id" "$physical" "$id" "${id##*/}"
           ;;
         *)
           printf '%s\\n' "$@" > "$FELT_ARGS_FILE"

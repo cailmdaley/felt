@@ -11,8 +11,10 @@ defmodule ShuttleWeb.MessagingControllerTest do
     @behaviour Shuttle.Runner
 
     def cmd("felt", ["-C", store, "show", "work/worker", "-j", "--exact"], _opts) do
-      {Jason.encode!(%{id: "work/worker", path: Path.join(store, ".felt/work/worker/worker.md")}),
-       0}
+      {Jason.encode!(%{
+         id: "work/worker",
+         path: Path.join(Shuttle.FeltStores.store_felt_realpath(store), "work/worker/worker.md")
+       }), 0}
     end
 
     def cmd(
