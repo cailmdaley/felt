@@ -1734,6 +1734,7 @@ defmodule Shuttle.RemoteRegistryTest do
       ])
 
       MockClient.set("http://127.0.0.1:4002/api/v1/state", {:ok, snapshot_with_running(["b"])})
+      Process.sleep(1_010)
       :ok = RemoteRegistry.poll_now(:reg_fleet_add)
 
       snapshots = RemoteRegistry.snapshots(:reg_fleet_add)
@@ -1771,6 +1772,7 @@ defmodule Shuttle.RemoteRegistryTest do
       assert map_size(RemoteRegistry.snapshots(:reg_fleet_rm)) == 2
 
       write_fleet(path, [%{"name" => "candide", "port" => 4001, "poll_interval_ms" => 1}])
+      Process.sleep(1_010)
       :ok = RemoteRegistry.poll_now(:reg_fleet_rm)
 
       snapshots = RemoteRegistry.snapshots(:reg_fleet_rm)

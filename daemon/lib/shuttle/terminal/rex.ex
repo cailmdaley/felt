@@ -72,7 +72,9 @@ defmodule Shuttle.Terminal.Rex do
     Shuttle.Terminal.with_lock({__MODULE__, Bindings.path(), :instance}, fn ->
       with {:ok, doc} <- Bindings.read(),
            :ok <- reconcile_instance(runner, doc, instance) do
-        if doc["server"], do: Bindings.set_instance(instance), else: :ok
+        if doc["server"] && doc["instance"] != instance,
+          do: Bindings.set_instance(instance),
+          else: :ok
       end
     end)
   end

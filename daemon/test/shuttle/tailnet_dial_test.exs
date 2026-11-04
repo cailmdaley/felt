@@ -424,7 +424,7 @@ defmodule Shuttle.TailnetDialTest do
     assert %{configured: true, socket: nil, bridges: []} = TailnetDial.status()
   end
 
-  test "a remotes-file path change invalidates cached socket config with matching metadata", %{
+  test "a remotes content digest invalidates cached socket config despite matching metadata", %{
     base: base
   } do
     first_file = Path.join(base, "remotes-first.json")
@@ -466,7 +466,7 @@ defmodule Shuttle.TailnetDialTest do
              )
 
     System.put_env("SHUTTLE_REMOTES_FILE", second_file)
-    assert Shuttle.Remotes.config_token() == first_token
+    assert Shuttle.Remotes.config_token() != first_token
 
     assert {:error, {:tailnet_dial, :config, :invalid_tailscale_socket}} =
              Shuttle.RemoteRegistry.Client.Default.get(

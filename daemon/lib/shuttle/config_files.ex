@@ -265,8 +265,8 @@ defmodule Shuttle.ConfigFiles do
 
   The write itself is tmp + rename inside the file's own directory, so a
   reader polling the path sees either the old bytes or the new ones and never
-  a half-written file. Every reader here polls: `Shuttle.RemoteRegistry` stats
-  the fleet file every second. The staging name carries a unique suffix, so
+  a half-written file. Runtime readers share a one-second snapshot; this writer invalidates it
+  before returning. The staging name carries a unique suffix, so
   two writers racing on one file cannot rename each other's bytes into place —
   see `commit/2`.
   """
@@ -462,35 +462,40 @@ defmodule Shuttle.ConfigFiles do
   # invites, since the same file is reachable from two hubs and a phone.
   defp commit(id, text) do
     path = path(id)
-    tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
 
-    with :ok <- Shuttle.FS.mkdir_p(Path.dirname(path)),
-         :ok <- Shuttle.FS.write(tmp, text),
-         :ok <- Shuttle.FS.rename(tmp, path) do
-      Logger.info("ConfigFiles: wrote #{path} (#{byte_size(text)} bytes)")
-      # The digest is of the bytes just written, not of a fresh read — the
-      # same hole `read/1` closes, at the other end (see `content_row/2`).
-      {:ok, content_row(id, text)}
-    else
-      {:error, reason} ->
-        Shuttle.FS.rm(tmp)
-        {:error, "#{path}: #{Shuttle.FS.format_error(reason)}"}
-    end
+    Shuttle.RuntimeDocuments.change(path, fn ->
+      tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
+
+      with :ok <- Shuttle.FS.mkdir_p(Path.dirname(path)),
+           :ok <- Shuttle.FS.write(tmp, text),
+           :ok <- Shuttle.FS.rename(tmp, path) do
+        Logger.info("ConfigFiles: wrote #{path} (#{byte_size(text)} bytes)")
+        # The digest is of the bytes just written, not of a fresh read — the
+        # same hole `read/1` closes, at the other end (see `content_row/2`).
+        {:ok, content_row(id, text)}
+      else
+        {:error, reason} ->
+          Shuttle.FS.rm(tmp)
+          {:error, "#{path}: #{Shuttle.FS.format_error(reason)}"}
+      end
+    end)
   end
 
   defp remove(id) do
     path = path(id)
 
-    case Shuttle.FS.rm(path) do
-      :ok ->
-        Logger.info("ConfigFiles: removed #{path}")
-        {:ok, content_row(id, nil)}
+    Shuttle.RuntimeDocuments.change(path, fn ->
+      case Shuttle.FS.rm(path) do
+        :ok ->
+          Logger.info("ConfigFiles: removed #{path}")
+          {:ok, content_row(id, nil)}
 
-      {:error, :enoent} ->
-        {:ok, content_row(id, nil)}
+        {:error, :enoent} ->
+          {:ok, content_row(id, nil)}
 
-      {:error, reason} ->
-        {:error, "#{path}: #{Shuttle.FS.format_error(reason)}"}
-    end
+        {:error, reason} ->
+          {:error, "#{path}: #{Shuttle.FS.format_error(reason)}"}
+      end
+    end)
   end
 end

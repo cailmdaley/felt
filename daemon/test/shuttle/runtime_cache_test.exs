@@ -20,6 +20,16 @@ defmodule Shuttle.RuntimeCacheTest do
     assert_receive :loaded
   end
 
+  test "expired entries are reclaimed even when their keys are never read again" do
+    key = {__MODULE__, make_ref()}
+    Shuttle.RuntimeCache.put(key, "expired", -1)
+    scoped = Shuttle.Env.scope_key(key)
+    assert [_] = :ets.lookup(Shuttle.RuntimeCache, scoped)
+    send(Process.whereis(Shuttle.RuntimeCache), :prune)
+    :sys.get_state(Shuttle.RuntimeCache)
+    assert [] = :ets.lookup(Shuttle.RuntimeCache, scoped)
+  end
+
   test "path and executable lookup work before the cache owner starts" do
     script = """
     false = Process.whereis(Shuttle.RuntimeCache) != nil

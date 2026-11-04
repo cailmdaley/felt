@@ -100,6 +100,14 @@ defmodule Shuttle.ConfigFilesTest do
     {:ok, dir: dir, paths: paths}
   end
 
+  test "settings writes and deletes invalidate a warm runtime snapshot", %{paths: paths} do
+    assert {:error, :enoent} = Shuttle.RuntimeDocuments.read(paths[:stores])
+    assert {:ok, _} = ConfigFiles.write(:stores, @stores_doc)
+    assert {:ok, @stores_doc} = Shuttle.RuntimeDocuments.read(paths[:stores])
+    assert {:ok, _} = ConfigFiles.write(:stores, "")
+    assert {:error, :enoent} = Shuttle.RuntimeDocuments.read(paths[:stores])
+  end
+
   describe "parse_id/1" do
     test "accepts the five file stems, which are also `ids/0`" do
       assert ConfigFiles.parse_id("stores") == {:ok, :stores}

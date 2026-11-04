@@ -259,9 +259,11 @@ defmodule Shuttle.Remotes do
   """
   @spec tailscale_socket_source() ::
           {:configured, term()} | {:system, nil} | {:default, String.t()} | {:none, nil}
-  def tailscale_socket_source do
+  def tailscale_socket_source, do: socket_source(&document/0)
+
+  defp socket_source(read_document) do
     case Shuttle.Env.app(:tailscale_socket) do
-      nil -> doc_socket_source(document())
+      nil -> doc_socket_source(read_document.())
       false -> {:none, nil}
       value -> explicit_socket_source(value)
     end
@@ -320,7 +322,7 @@ defmodule Shuttle.Remotes do
   # Selection is cached for reconciliation, never authorization. Every new
   # connection to the default path checks the literal ancestry again.
   def authorize_socket(path) do
-    case tailscale_socket_source() do
+    case socket_source(&fresh_document/0) do
       {:configured, configured} ->
         if normalized_tailscale_socket(configured) == path,
           do: :ok,
@@ -456,16 +458,16 @@ defmodule Shuttle.Remotes do
   The registries and the dial reconciler
   compare it each tick, so `shuttle remotes add`, a newly discovered peer, and
   a userspace tailscaled starting after the daemon take effect without a daemon
-  bounce; default socket appearance, disappearance, or trust changes can take
-  up to 60 s to enter this token. Size is folded in because POSIX mtime has 1-second
-  granularity and an edit-and-save inside the same second is ordinary.
+  bounce. File edits enter the shared document snapshot within one second;
+  its content digest detects same-size edits. Default socket appearance,
+  disappearance, or trust changes can take up to 60 s to enter this token.
   """
   @spec config_token() ::
-          {{integer(), non_neg_integer()} | nil, non_neg_integer(), String.t() | nil}
+          {{binary(), non_neg_integer()} | nil, non_neg_integer(), String.t() | nil}
   def config_token do
     file =
-      case Shuttle.FS.stat(config_path(), time: :posix) do
-        {:ok, %File.Stat{mtime: mtime, size: size}} -> {mtime, size}
+      case Shuttle.RuntimeDocuments.read(config_path()) do
+        {:ok, content} -> {:crypto.hash(:sha256, content), byte_size(content)}
         _ -> nil
       end
 
@@ -493,10 +495,15 @@ defmodule Shuttle.Remotes do
     end
   end
 
-  defp read_document do
-    path = config_path()
+  defp fresh_document do
+    case read_document(&Shuttle.FS.read/1) do
+      {:ok, doc} -> doc
+      :error -> nil
+    end
+  end
 
-    with {:ok, content} <- Shuttle.FS.read(path),
+  defp read_document(reader \\ &Shuttle.RuntimeDocuments.read/1) do
+    with {:ok, content} <- reader.(config_path()),
          {:ok, decoded} <- Jason.decode(content) do
       {:ok, decoded}
     else
