@@ -61,6 +61,34 @@ func (s *Storage) writeMoveJournal(journal *moveJournal) error {
 }
 func (s *Storage) finishMove() error { return os.Remove(s.moveJournalPath()) }
 
+// PendingMove returns the canonical endpoints of an unfinished move, or empty
+// endpoints when no journal exists.
+func (s *Storage) PendingMove() (string, string, error) {
+	data, err := os.ReadFile(s.moveJournalPath())
+	if os.IsNotExist(err) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	var journal moveJournal
+	if err := json.Unmarshal(data, &journal); err != nil {
+		return "", "", err
+	}
+	return journal.OldID, journal.NewID, nil
+}
+
+// AbandonMove removes only the recovery journal. It neither rolls back the
+// subtree nor edits references; the caller takes responsibility for those.
+func (s *Storage) AbandonMove() error {
+	unlock, err := LockFiberFile(s.moveJournalPath())
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.finishMove()
+}
+
 // An interrupted move is resumed by repeating the same nest command. A different
 // move is refused while its reference rewrites are pending.
 func (s *Storage) recoverMove(oldID, newID string) (*MoveResult, bool, error) {

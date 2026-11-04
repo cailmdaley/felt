@@ -141,6 +141,80 @@ committed ids rather than minting their own.`,
 	return command
 }
 
+// retryMove recognizes either endpoint before ordinary resolution and checks.
+func (a *app) retryMove(storage *felt.Storage, args []string) (bool, error) {
+	stores := []*felt.Storage{storage}
+	if ext := storage.ExternalRefs(); ext != nil {
+		stores = append(stores, felt.NewStorage(filepath.Dir(ext.Root())))
+	}
+	for _, candidate := range stores {
+		oldID, newID, err := candidate.PendingMove()
+		if err != nil {
+			return true, err
+		}
+		if oldID == "" {
+			continue
+		}
+		spellings := []string{args[0]}
+		if candidate != storage {
+			spellings = append(spellings, path.Join(storage.ExternalRefs().Prefix(), args[0]))
+		}
+		for _, child := range spellings {
+			if child != oldID && child != newID {
+				continue
+			}
+			parent := ""
+			if len(args) == 2 {
+				ref, err := resolveNestParent(candidate, "", args[1])
+				if err != nil {
+					continue
+				}
+				parent = ref.ID
+			}
+			if felt.ParentPath(newID) != parent {
+				continue
+			}
+			result, err := candidate.MoveSubtree(oldID, newID)
+			if result != nil {
+				a.printRewrittenRefs(candidate, result)
+			}
+			return true, err
+		}
+	}
+	return false, nil
+}
+
+func (a *app) recoverMoveCmd() *cobra.Command {
+	var abandon bool
+	command := &cobra.Command{
+		Use: "recover-move", Short: "Finish an interrupted move, or abandon its pending rewrites", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			storage, _, err := felt.RequireStore(a.env, a.dir)
+			if err != nil {
+				return err
+			}
+			oldID, newID, err := storage.PendingMove()
+			if err != nil {
+				return err
+			}
+			if oldID == "" {
+				return fmt.Errorf("no pending move in this store")
+			}
+			if abandon {
+				return storage.AbandonMove()
+			}
+			result, err := storage.MoveSubtree(oldID, newID)
+			if result != nil {
+				a.printRewrittenRefs(storage, result)
+			}
+			return err
+		},
+	}
+	command.GroupID = groupStore
+	command.Flags().BoolVar(&abandon, "abandon", false, "Drop the journal without undoing the move or repairing remaining references")
+	return command
+}
+
 func (a *app) nestCmd() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "nest <child> <parent>",
@@ -166,6 +240,9 @@ outside this view, the move happens in the enclosing store.`,
 			}
 			scopeID := felt.CommandScope(a.env, root, a.dir)
 
+			if handled, err := a.retryMove(storage, args); handled {
+				return err
+			}
 			childRef, err := felt.ResolveExactRef(storage, scopeID, args[0])
 			if err != nil {
 				return err
@@ -196,8 +273,7 @@ outside this view, the move happens in the enclosing store.`,
 			}
 			result, err := where.Storage.MoveSubtree(childID, targetID)
 			if err != nil {
-				// A write that fails after the rename leaves the subtree moved;
-				// name what was rewritten so the rest can be finished by hand.
+				// The journal retains unfinished rewrites after the rename.
 				if result != nil {
 					a.printRewrittenRefs(where.Storage, result)
 				}
@@ -246,6 +322,9 @@ store's top level.`,
 			}
 			scopeID := felt.CommandScope(a.env, root, a.dir)
 
+			if handled, err := a.retryMove(storage, args); handled {
+				return err
+			}
 			child, err := felt.ResolveExactRef(storage, scopeID, args[0])
 			if err != nil {
 				return err
@@ -262,8 +341,7 @@ store's top level.`,
 			}
 			result, err := child.Storage.MoveSubtree(child.ID, targetID)
 			if err != nil {
-				// A write that fails after the rename leaves the subtree moved;
-				// name what was rewritten so the rest can be finished by hand.
+				// The journal retains unfinished rewrites after the rename.
 				if result != nil {
 					a.printRewrittenRefs(child.Storage, result)
 				}

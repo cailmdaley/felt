@@ -199,6 +199,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.syncCmd(),
 		a.nestCmd(),
 		a.unnestCmd(),
+		a.recoverMoveCmd(),
 		a.migrateCmd(),
 		a.backfillIDsCmd(),
 		a.sessionCmd(),

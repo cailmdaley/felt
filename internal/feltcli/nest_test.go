@@ -7,6 +7,82 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
+func TestMoveCommandRetriesAfterRename(t *testing.T) {
+	for _, verb := range []string{"nest", "unnest"} {
+		for _, spelling := range []string{"old", "new"} {
+			t.Run(verb+"/"+spelling, func(t *testing.T) {
+				dir, storage := newStore(t)
+				for _, id := range []string{"a", "a/x", "b", "ref"} {
+					f := &felt.Felt{ID: id, Name: id}
+					if id == "ref" {
+						f.Body = "See [[a/x]]."
+					}
+					if err := storage.Write(f); err != nil {
+						t.Fatal(err)
+					}
+				}
+				args := []string{verb, "a/x"}
+				target := "x"
+				if verb == "nest" {
+					args = append(args, "b")
+					target = "b/x"
+				}
+				unlock, err := storage.LockFiber("ref")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer unlock()
+				if _, err := runCommand(t, dir, args...); err == nil {
+					t.Fatal("expected interrupted move")
+				}
+				if err := unlock(); err != nil {
+					t.Fatal(err)
+				}
+				if spelling == "new" {
+					args[1] = target
+				}
+				if out, err := runCommand(t, dir, args...); err != nil {
+					t.Fatalf("retry: %v\n%s", err, out)
+				}
+				if got := mustRead(t, storage, "ref").Body; got != "See [["+target+"]]." {
+					t.Fatal(got)
+				}
+			})
+		}
+	}
+}
+
+func TestAbandonPendingMovePreservesDocuments(t *testing.T) {
+	dir, storage := newStore(t)
+	for _, id := range []string{"a", "a/x", "b", "ref"} {
+		f := &felt.Felt{ID: id, Name: id, Body: "See [[a/x]]."}
+		if err := storage.Write(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unlock, err := storage.LockFiber("ref")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if _, err := runCommand(t, dir, "nest", "a/x", "b"); err == nil {
+		t.Fatal("expected interruption")
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	before := mustRead(t, storage, "ref").Body
+	if _, err := runCommand(t, dir, "recover-move", "--abandon"); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustRead(t, storage, "ref").Body; got != before {
+		t.Fatalf("abandon edited document: %s", got)
+	}
+	if _, err := runCommand(t, dir, "unnest", "b/x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNestNamesRewrittenFibersAndCheckStaysClean(t *testing.T) {
 	t.Parallel()
 	dir, storage := newStore(t)
