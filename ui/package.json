@@ -13,6 +13,7 @@
     "e2e": "npm run build && npm run harness:board && node e2e/run.mjs",
     "harness:board": "vite build -c vite.harness-board.config.ts",
     "perf": "npm run harness:board && node e2e/performance.mjs",
+    "perf:typing": "npm run harness:board && TYPING_GATE=1 node e2e/typing.mjs",
     "screenshots:docs": "npm run harness:board && node scripts/capture-docs.mjs",
     "video:docs": "node scripts/render-tour.mjs"
   },

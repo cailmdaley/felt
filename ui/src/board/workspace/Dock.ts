@@ -1277,30 +1277,14 @@ export class Dock {
     message.rows = 1
     message.placeholder = ''
     message.setAttribute('aria-label', 'Message for the next worker')
-    // The field is one line, focused or not; only text that wraps grows it.
-    // The text always has the field's whole width: while it fits beside the
-    // verbs they ride its line, and once it would reach them (or holds a line
-    // break) they drop to a row of their own inside the field's foot. The
-    // decision measures the text against the room beside the verbs, so it is
-    // the same on either side of the switch and never flickers.
-    let ruler: CanvasRenderingContext2D | null = null
-    let room = 0
-    const measure = (): void => {
-      if (!box.isConnected || !box.clientWidth) return
-      ruler ??= document.createElement('canvas').getContext?.('2d') ?? null
-      if (!ruler) return
-      const text = getComputedStyle(message), field = getComputedStyle(box)
-      ruler.font = text.font
-      room = box.clientWidth - parseFloat(field.paddingLeft) - parseFloat(field.paddingRight)
-        - foot.offsetWidth - (parseFloat(field.columnGap) || 0) - parseFloat(text.paddingLeft) - parseFloat(text.paddingRight)
-    }
+    // CSS gives the message the full width and the verbs their own footer.
+    // Native field sizing grows wrapped text without a synchronous layout read.
     const nativeSizing = globalThis.CSS?.supports?.('field-sizing', 'content') ?? false
     if (nativeSizing) {
       message.style.setProperty('field-sizing', 'content')
       message.style.height = 'auto'
     }
     const fit = (): void => {
-      box.classList.toggle('kbn-ctl-composer-stacked', message.value.includes('\n') || (ruler?.measureText(message.value).width ?? 0) > room)
       if (!nativeSizing) {
         message.style.height = ''
         if (message.value && message.scrollHeight > message.clientHeight) message.style.height = `${message.scrollHeight}px`
@@ -1310,26 +1294,25 @@ export class Dock {
     const scheduleFit = (): void => {
       if (!fitFrame) fitFrame = requestAnimationFrame(() => { fitFrame = 0; fit() })
     }
-    const resize = (): void => { measure(); scheduleFit() }
-    if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(resize)
-      observer.observe(box)
-      this.composerDisposers.push(() => observer.disconnect())
+    if (!nativeSizing) {
+      message.addEventListener('input', scheduleFit)
+      window.addEventListener('resize', scheduleFit)
+      this.composerDisposers.push(() => window.removeEventListener('resize', scheduleFit))
+      if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(scheduleFit)
+        observer.observe(box)
+        this.composerDisposers.push(() => observer.disconnect())
+      }
     }
-    const initialFit = requestAnimationFrame(resize)
-    this.composerDisposers.push(() => { cancelAnimationFrame(initialFit); cancelAnimationFrame(fitFrame) })
-    message.addEventListener('input', scheduleFit)
+    this.composerDisposers.push(() => cancelAnimationFrame(fitFrame))
     // The draft belongs to its constitution and outlives a reload in this
     // browser; a send that lands empties the field and so drops it.
     const draftStore = `shuttle:composer-draft:${JSON.stringify([card.originId, card.uid ?? card.id])}`
     try { message.value = localStorage.getItem(draftStore) ?? '' } catch { /* storage unavailable */ }
-    if (message.value) requestAnimationFrame(fit)
+    if (message.value && !nativeSizing) scheduleFit()
     message.addEventListener('input', () => {
       try { if (message.value) localStorage.setItem(draftStore, message.value); else localStorage.removeItem(draftStore) } catch { /* storage unavailable */ }
     })
-    window.addEventListener('resize', resize)
-    this.composerDisposers.push(() => window.removeEventListener('resize', resize))
-
     // Two lines under the box: a send's outcome (and the project-directory
     // prompt a refused start raises), and the images turned away. Neither
     // writes over the other.
