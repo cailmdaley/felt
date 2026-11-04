@@ -176,6 +176,18 @@ func (a *app) daemonPruneReleasesCmd() *cobra.Command {
 				}
 				protected := append(append([]string{}, keep...), strings.TrimSpace(string(selected)), receipt.ReleasePath)
 				packages, _ := a.env.Command("pi", "list").Output()
+				// Only registered worktrees are ours to remove. Interrupted Git
+				// operations can leave ordinary directories under the deploy root.
+				listed, err := a.env.Command("git", "-C", args[0], "worktree", "list", "--porcelain", "-z").Output()
+				if err != nil {
+					return fmt.Errorf("listing deploy worktrees: %w", err)
+				}
+				registered := map[string]bool{}
+				for _, field := range strings.Split(string(listed), "\x00") {
+					if path, ok := strings.CutPrefix(field, "worktree "); ok {
+						registered[canonicalReleasePath(path)] = true
+					}
+				}
 				entries, err := os.ReadDir(args[1])
 				if err != nil {
 					return err
@@ -185,6 +197,9 @@ func (a *app) daemonPruneReleasesCmd() *cobra.Command {
 						continue
 					}
 					candidate := filepath.Join(args[1], entry.Name())
+					if !registered[canonicalReleasePath(candidate)] {
+						continue
+					}
 					retain := strings.Contains(string(packages), "    "+candidate)
 					for _, path := range protected {
 						if path != "" && releasePathWithin(candidate, path) {
@@ -194,8 +209,30 @@ func (a *app) daemonPruneReleasesCmd() *cobra.Command {
 					if retain {
 						continue
 					}
-					if output, err := a.env.Command("git", "-C", args[0], "worktree", "remove", "--force", candidate).CombinedOutput(); err != nil {
-						return fmt.Errorf("pruning %s: %w: %s", candidate, err, output)
+					// Lease before removal, and hold it until Git finishes. A deploy
+					// takes this same lease before creating or using its worktree.
+					leases := filepath.Join(args[1], ".leases")
+					if err := os.MkdirAll(leases, 0700); err != nil {
+						return err
+					}
+					lease, err := os.OpenFile(filepath.Join(leases, entry.Name()+".lock"), os.O_CREATE|os.O_RDWR, 0600)
+					if err != nil {
+						return err
+					}
+					err = syscall.Flock(int(lease.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+					if errors.Is(err, syscall.EWOULDBLOCK) {
+						lease.Close()
+						fmt.Fprintf(a.env.Stdout, "retaining leased deploy worktree %s\n", candidate)
+						continue
+					}
+					if err != nil {
+						lease.Close()
+						return err
+					}
+					output, removeErr := a.env.Command("git", "-C", args[0], "worktree", "remove", "--force", candidate).CombinedOutput()
+					lease.Close()
+					if removeErr != nil {
+						return fmt.Errorf("pruning %s: %w: %s", candidate, removeErr, output)
 					}
 				}
 				return a.env.Command("git", "-C", args[0], "worktree", "prune").Run()

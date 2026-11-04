@@ -10,13 +10,11 @@
 #   bin/shuttle-deploy --handshake            # bootstrap interactive ssh auth when
 #                                             # no live master — human must approve
 #
-# Per host the ritual is the one AGENTS.md documents ("Deploying is ALWAYS
-# safe"): pull → make build → migrate Shuttle config and refresh an installed
-# supervisor → bring the harness plugins up to date → cycle the daemon (kill
-# its listener — the loopback port or unix socket `shuttle host` resolves on
-# that host — then let the host's supervisor bring it back) → verify
-# git_short_sha flipped → release the boot quarantine. A host whose harness
-# plugins still disagree with its felt build fails, but only after its daemon
+# Each run resolves one commit. Under a host lock it prepares a detached root,
+# builds, refreshes harnesses, activates, verifies and releases quarantine.
+# A per-tree kernel lease protects preparation and builds from pruning.
+# Hosts already serving the ready target coalesce without another cycle.
+# A host whose harness plugins disagree with its felt build fails after its daemon
 # step has run. Each host builds its CLI and daemon using its login-shell
 # environment, and its UI too unless it is marked `"build_ui": false` — see the
 # bundle note below. The operator agent registry is synced too: the board reads
@@ -197,7 +195,7 @@ shell_quote() {
 
 BOLD=$'\033[1m'; GREEN=$'\033[32m'; RED=$'\033[31m'; RESET=$'\033[0m'
 ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
-bad()  { printf '  %s✗%s %s\n' "$RED" "$RESET" "$1"; }
+bad()  { printf '  %s✗%s %s: %s\n' "$RED" "$RESET" "${HOST:-deploy}" "$1" >&2; }
 say()  { printf '\n%s▸ %s%s\n' "$BOLD" "$1" "$RESET"; }
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -239,7 +237,6 @@ DEPLOY_VERSION=""
 if [ -n "$DEPLOY_REF" ] && [[ "$DEPLOY_REF" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
   DEPLOY_VERSION="${BASH_REMATCH[1]}"
 fi
-DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
 
 if [ "$PUSH" = 1 ]; then
   say "push (target $TARGET_SHA)"
@@ -257,19 +254,9 @@ warn_target_ci() {
 
 warn_target_ci
 
-# Remote hosts pull the upstream, so the upstream must hold the target: a
-# rejected or skipped push would otherwise deploy whatever someone else pushed.
-for h in $HOSTS; do
-  [ -n "$DEPLOY_REF" ] && break
-  [ "$h" = local ] && continue
-  git -C "$REPO" fetch -q 2>/dev/null
-  if ! git -C "$REPO" merge-base --is-ancestor HEAD '@{u}' 2>/dev/null ||
-     [ "$(git -C "$REPO" rev-parse HEAD)" != "$(git -C "$REPO" rev-parse '@{u}' 2>/dev/null)" ]; then
-    bad "HEAD $TARGET_SHA is not what its upstream holds; remotes would pull something else — push (or pull) first"
-    exit 1
-  fi
-  break
-done
+# Every host fetches this object, never a moving branch. Harness packages use
+# the same exact-ref path even when the caller omitted --ref.
+DEPLOY_REF="${DEPLOY_REF:-HEAD}"
 
 # Exact-ref worktrees are immutable runtime roots. Build in a new path, seed
 # only disposable caches by copying, and prune old roots only after verification.
@@ -357,13 +344,14 @@ source=$(shell_quote "$checkout")
 commit=$(shell_quote "$TARGET_COMMIT")
 root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")"))
 target="\$root/\$commit"
-git -C "\$source" fetch --tags origin
-git -C "\$source" cat-file -e "\$commit^{commit}"
+git -C "\$source" cat-file -e "\$commit^{commit}" 2>/dev/null || git -C "\$source" fetch origin "\$commit"
 if [ ! -d "\$target" ]; then
   mkdir -p "\$root"
   git -C "\$source" worktree add --detach "\$target" "\$commit"
   $(seed_deploy_cache_cmd "$previous")
 fi
+[ "\$(git -C "\$target" rev-parse HEAD)" = "\$commit" ]
+[ -z "\$(git -C "\$target" status --porcelain --untracked-files=no)" ]
 SH
 }
 
@@ -390,9 +378,6 @@ build_checkout_cmd() {
   return 0
 }
 
-BUILD_REPO="$REPO"
-PREVIOUS_LOCAL=""
-
 # Shell snippets reach the daemon at the address `shuttle host --json`
 # resolves: its unix socket on a shared or exposed host, loopback TCP
 # otherwise. Both `felt` and `shuttle` must be on PATH; an error from the host
@@ -407,18 +392,6 @@ listen_prelude() {
   printf '%s' 'sock=; port=4000; '
   printf '%s' 'case "$l" in unix://*) sock="${l#unix://}";; tcp://127.0.0.1:*) port="${l##*:}";; esac; '
   printf '%s' 'base=http://127.0.0.1:$port; [ -n "$sock" ] && base=http://localhost; '
-}
-
-# Resolve the listen address up front, with shuttle's error visible — every
-# later step discards stderr, and a resolution failure would look like a dead daemon.
-check_listen() { # $1 = "" (local) | host
-  local out
-  if [ -z "$1" ]; then out=$(bash -lc "$(listen_prelude)"'echo "listen-ok ${sock:-$base}"' 2>&1)
-  else out=$(ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$(listen_prelude)"'echo "listen-ok ${sock:-$base}"')" 2>&1); fi
-  case "$out" in
-    *listen-ok*) return 0 ;;
-    *) bad "cannot resolve the daemon's listen address: $(printf '%s' "$out" | tail -n 3)"; return 1 ;;
-  esac
 }
 
 daemon_call() { # $1 = extra curl args, $2 = API path
@@ -464,7 +437,7 @@ version_ready() { # JSON response -> true only for an explicit ready:true
 }
 
 release_quarantine() { # $1 = "" | host
-  run_on "$1" "$(daemon_call "-X POST" /api/v1/quarantine/release)" | grep -q '"ok":true'
+  run_on_visible "$1" 'shuttle daemon release'
 }
 
 wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also ready
@@ -532,7 +505,6 @@ finish_verified_deploy() { # $1 = host, $2 = checkout, $3 = harness failure flag
   release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
     || { bad "quarantine release failed"; return 1; }
   [ "$harness_failed" = 0 ] || { bad "harness setup failed"; return 1; }
-  [ -n "$DEPLOY_REF" ] || return 0
   run_on_visible "$host" "$(prune_deploy_cmd "$checkout" "$previous" "${EXPECTED_RELEASE%/bin/rel}/shuttle")" || {
     bad "could not prune deploy worktrees on ${host:-local}"
     return 1
@@ -544,15 +516,12 @@ verify_and_finish() { # $1 = host, $2 = checkout, $3 = harness failure flag, $4 
   finish_verified_deploy "$@"
 }
 
-# A host marked `"build_ui": false` is served the deploy host's bundle, so the
-# deploy host must hold a current one before the first such remote is reached.
-# `make ui` is cheap after the first call in a deploy — npm ci is stamped on the
-# lockfile and vite rebuilds from a warm cache — and deploy_local's `make build`
-# has already done it, so the flag keeps a full-fleet run to one build.
+# A shipped-UI host receives a snapshot of the pinned local tree's bundle.
+# Once copied under the local lease, the snapshot is independent of pruning.
 LOCAL_UI_BUILT=0
 ensure_local_ui() {
   [ "$LOCAL_UI_BUILT" = 1 ] && return 0
-  bash -lc "cd $(shell_quote "$BUILD_REPO") && make ui" >/dev/null \
+  run_transaction "" "$REPO" ui "" "" "$UI_SNAPSHOT" \
     || { bad "make ui failed on the deploy host; it has no bundle to ship"; return 1; }
   LOCAL_UI_BUILT=1
 }
@@ -564,7 +533,7 @@ ship_ui() { # $1 = host, $2 = ssh destination, $3 = checkout dir, $4 = ssh flags
   ensure_local_ui || return 1
   ssh $4 "$2" "mkdir -p $(shell_quote "$3/ui")" \
     || { bad "could not prepare $3/ui"; return 1; }
-  rsync -az --delete -e "ssh $4" "$BUILD_REPO/ui/dist/" "$2:$3/ui/dist/" \
+  rsync -az --delete -e "ssh $4" "$UI_SNAPSHOT/" "$2:$3/ui/dist/" \
     || { bad "could not ship the UI bundle"; return 1; }
   ok "shipped ui/dist (this host does not build it)"
 }
@@ -763,8 +732,7 @@ SH
 
 refresh_harnesses() { # $1 = "" (local) | host, $2 = checkout dir
   local out line
-  if [ -z "$1" ]; then out=$(bash -lc "$(harness_setup_cmd "$2")" 2>&1)
-  else out=$(ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$(harness_setup_cmd "$2")")" 2>&1); fi
+  out=$(run_on_visible "$1" "$(harness_setup_cmd "$2")" 2>&1)
   line=$(printf '%s\n' "$out" | sed -n 's/^harness-ok //p' | tail -n 1)
   [ -n "$line" ] && { ok "$line"; return 0; }
   line=$(printf '%s\n' "$out" | sed -n 's/^harness-fail //p' | tail -n 1)
@@ -774,21 +742,8 @@ refresh_harnesses() { # $1 = "" (local) | host, $2 = checkout dir
 
 deploy_local() {
   say "local ($TARGET_SHA)"
-  bash -lc "$(build_checkout_cmd "$BUILD_REPO")" >/dev/null \
-    || { bad "make build failed"; return 1; }
+  run_transaction "" "$REPO" deploy "" "" "$UI_SNAPSHOT" || return 1
   LOCAL_UI_BUILT=1
-  run_on "" "$(config_migration_cmd)" \
-    || { bad "config migration failed on the deploy host"; return 1; }
-  # A harness failure is reported now and fails the host after its daemon step.
-  local harness_failed=0
-  refresh_harnesses "" "$BUILD_REPO" || harness_failed=1
-  check_listen "" || return 1
-  remote_host_cycle "" "$BUILD_REPO" || return 1
-  verify_and_finish "" "$REPO" "$harness_failed" "$PREVIOUS_LOCAL" || {
-    bad "deployment did not complete successfully on the deploy host"
-    return 1
-  }
-  return 0
 }
 
 remote_host_cycle() { # $1 = host, $2 = deployed checkout
@@ -796,73 +751,134 @@ remote_host_cycle() { # $1 = host, $2 = deployed checkout
   supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
   EXPECTED_RELEASE="$(run_on_visible "$host" "cd $(shell_quote "$checkout/bin/rel") && pwd -P")" || return 1
   local cycle
-  cycle="set -eu; $(daemon_kill)
+  if [ "$supervisor" = tmux ]; then
+    # Keep the live loop; only its listener needs a graceful cycle. Recreating
+    # the loop as well can kill the replacement it has just started.
+    cycle="set -eu
+install -m 755 $(shell_quote "$checkout/bin/shuttle-launch") \"\$HOME/.local/bin/shuttle-launch\"
+$(daemon_kill)"
+  else
+    cycle="set -eu; $(listen_prelude)
+touch \"\${dd:-\${SHUTTLE_DATA_DIR:-\$HOME/.shuttle}}/heartbeat.stopped\"
 $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
+    # An unsupervised listener needs stopping before a new owner can start.
+    [ "$supervisor" != 0 ] || cycle="set -eu; $(daemon_kill)
+$(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
+  fi
   run_on_visible "$host" "$(shell_quote "$checkout/shuttle") daemon activate-release $(shell_quote "$EXPECTED_RELEASE") -- bash -c $(shell_quote "$cycle")" \
     || { bad "could not select and cycle the release on ${host:-local}"; return 1; }
 }
 
-deploy_remote() {
-  local host="$1" dir="" dest="" flags="" build_cmd="" remote_root="" previous="" skip_ui=0
-  dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
-  say "$host ($dest:$dir)"
-  ssh $flags "$dest" "true" 2>/dev/null \
-    || try_handshake "$host" \
-    || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
-  if [ -n "$DEPLOY_REF" ]; then
-    previous="$(previous_deploy "$host" "$dir")"
-    run_on_visible "$host" "$(revision_checkout_cmd "$dir" "$previous")" \
-      || { bad "could not prepare the deploy revision"; return 1; }
-    remote_root="$(run_on_visible "$host" "$(deploy_root_cmd "$dir")")" \
-      || { bad "could not resolve the deploy worktree root on $host"; return 1; }
-    dir="${remote_root%/}/$TARGET_COMMIT"
+host_transaction() { # Runs entirely on the target, under host and tree locks.
+  local previous tree cmd harness_failed=0 before
+  DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
+  previous="$(previous_deploy "" "$SOURCE")"
+  bash -c "$(revision_checkout_cmd "$SOURCE" "$previous")" \
+    || { bad 'prepare: could not prepare the pinned revision'; return 1; }
+  tree="$ROOT/$TARGET_COMMIT"
+  if [ "$MODE" = ui ]; then
+    bash -c "cd $(shell_quote "$tree") && make ui" \
+      || { bad 'build UI: failed'; return 1; }
+    cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
+    return 0
   fi
-  # The bundle goes over BEFORE the build, so the release this build assembles
-  # embeds it (see the bundle note at the top of this file).
-  if ! builds_ui "$host"; then
-    ship_ui "$host" "$dest" "$dir" "$flags" || return 1
-    skip_ui=1
+  EXPECTED_RELEASE="$tree/bin/rel"
+  before="$(version_json "" || true)"
+  if target_is_live "$before"; then
+    ok "already ready on $TARGET_SHA at $EXPECTED_RELEASE; coalescing without a daemon cycle"
+  else
+    if [ "$SKIP_UI" = 1 ]; then
+      rm -rf "$tree/ui/dist" && mkdir -p "$tree/ui/dist" && cp -R "$STAGE/ui/dist/." "$tree/ui/dist/" \
+        || { bad 'ship UI: could not publish the staged bundle'; return 1; }
+    fi
+    cmd="$(build_checkout_cmd "$tree" "$SKIP_UI")"
+    [ -z "$BUILD_WRAP" ] || cmd="$BUILD_WRAP bash -lc $(shell_quote "$cmd")"
+    bash -c "$cmd" || { bad 'build/install CLIs: failed'; return 1; }
   fi
-  build_cmd="$(build_checkout_cmd "$dir" "$skip_ui")"
-  local wrap
-  wrap="$(fleet_build_wrap "$host")"
-  if [ -n "$wrap" ]; then
-    build_cmd="$wrap bash -lc $(shell_quote "$build_cmd")"
+  if [ -n "$SNAPSHOT" ]; then
+    cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
   fi
-  if [ -z "$DEPLOY_REF" ]; then
-    build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
+  if [ -n "$STAGE" ] && [ -f "$STAGE/agents.json" ]; then
+    mkdir -p "$HOME/.config/shuttle" && cp "$STAGE/agents.json" "$HOME/.config/shuttle/agents.json" \
+      || { bad 'agent registry: could not publish'; return 1; }
   fi
-  ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
-    || { bad "pull/build failed"; return 1; }
-  if [ -f "$AGENTS_FILE" ]; then
-    ssh $flags "$dest" "mkdir -p ~/.config/shuttle" \
-      || { bad "could not prepare remote agent registry"; return 1; }
-    rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:.config/shuttle/agents.json" \
-      || { bad "could not sync remote agent registry"; return 1; }
+  bash -c "$(config_migration_cmd)" || { bad 'config migration: failed'; return 1; }
+  refresh_harnesses "" "$tree" || harness_failed=1
+  if ! target_is_live "$before"; then
+    remote_host_cycle "" "$tree" || return 1
+    verify_and_finish "" "$SOURCE" "$harness_failed" "$previous" || { bad 'verify/finish: failed'; return 1; }
+  else
+    finish_verified_deploy "" "$SOURCE" "$harness_failed" "$previous"
   fi
-  run_on_visible "$host" "$(config_migration_cmd)" \
-    || { bad "config migration failed on $host"; return 1; }
-  local harness_failed=0
-  refresh_harnesses "$host" "$dir" || harness_failed=1
-  # Cycle through the installed supervisor, or replace the tmux loop when no
-  # launchd/systemd unit owns this host.
-  check_listen "$host" || return 1
-  remote_host_cycle "$host" "$dir" || return 1
-  verify_and_finish "$host" "$(fleet_dir "$host")" "$harness_failed" "$previous" \
-    || { bad "deployment did not complete successfully on $host"; return 1; }
-  return 0
 }
 
-if [ -n "$DEPLOY_REF" ]; then
-  PREVIOUS_LOCAL="$(previous_deploy "" "$REPO")"
-  run_on_visible "" "$(revision_checkout_cmd "$REPO" "$PREVIOUS_LOCAL")" \
-    || { bad "could not prepare the deploy revision"; exit 1; }
-  BUILD_ROOT="$(bash -lc "$(deploy_root_cmd "$REPO")")" || exit 1
-  BUILD_REPO="$BUILD_ROOT/$TARGET_COMMIT"
-fi
+target_is_live() {
+  version_ready "$1" &&
+    [ "$(printf '%s' "$1" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')" = "$TARGET_SHA" ] &&
+    [ "$(printf '%s' "$1" | sed -n 's/.*"release_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')" = "$EXPECTED_RELEASE" ] &&
+    { [ -z "$DEPLOY_VERSION" ] ||
+      [ "$(printf '%s' "$1" | sed -n 's/.*"mix_vsn"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')" = "$DEPLOY_VERSION" ]; }
+}
+
+transaction_script() {
+  local name
+  for name in TARGET_COMMIT TARGET_SHA DEPLOY_REF DEPLOY_VERSION BOLD GREEN RED RESET; do
+    printf '%s=%s\n' "$name" "$(shell_quote "${!name}")"
+  done
+  printf 'HOST=%s\nSOURCE=%s\nMODE=%s\nSTAGE=%s\nSKIP_UI=%s\nBUILD_WRAP=%s\nSNAPSHOT=%s\n' \
+    "$(shell_quote "${1:-local}")" "$(shell_quote "$2")" "$(shell_quote "$3")" \
+    "$(shell_quote "$4")" "$(shell_quote "$5")" "$(shell_quote "$6")" "$(shell_quote "$7")"
+  declare -f shell_quote ok bad deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
+    build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
+    version_ready target_is_live wait_for_sha release_quarantine finish_verified_deploy verify_and_finish prune_deploy_cmd \
+    harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_kill respawn_launcher_restart_cmd \
+    remote_host_cycle host_transaction
+  # All subsequent commands are host-local and inherit this login shell's PATH.
+  printf '%s\n' 'run_on() { bash -c "$2"; }' 'run_on_visible() { bash -c "$2"; }' \
+    'ROOT=$(bash -c "$(deploy_root_cmd "$SOURCE")") || exit 1' 'host_transaction'
+}
+
+run_transaction() { # host, source, mode, staged files, build wrapper, UI snapshot
+  local host="$1" source="$2" mode="$3" stage="$4" wrap="$5" snapshot="$6" skip_ui=0 script bootstrap
+  builds_ui "${host:-local}" || skip_ui=1
+  script="$(transaction_script "$host" "$source" "$mode" "$stage" "$skip_ui" "$wrap" "$snapshot")"
+  bootstrap="set -eu
+root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$source")"))
+tmp=\$(mktemp -d)
+trap $(shell_quote "rm -rf \"\$tmp\" $(shell_quote "$stage")") EXIT
+printf '%s' $(shell_quote "$LOCK_SOURCE") > \"\$tmp/main.go\"
+go run \"\$tmp/main.go\" \"\$HOME/.shuttle/deploy.lock\" \"\$root/.leases/$TARGET_COMMIT.lock\" \
+  $(shell_quote "host=${host:-local} target=$TARGET_COMMIT deployer=$DEPLOYER") bash -c $(shell_quote "$script")"
+  run_on_visible "$host" "$bootstrap" || { bad "${host:-local}: host transaction failed"; return 1; }
+}
+
+deploy_remote() {
+  local host="$1" dir dest flags stage
+  dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
+  say "$host ($dest:$dir)"
+  ssh $flags "$dest" true 2>/dev/null || try_handshake "$host" \
+    || { bad 'ssh: unreachable; authenticate first'; return 1; }
+  stage="$(run_on_visible "$host" 'mktemp -d')" || { bad 'stage: failed'; return 1; }
+  if ! builds_ui "$host"; then
+    ship_ui "$host" "$dest" "$stage" "$flags" || return 1
+  fi
+  if [ -f "$AGENTS_FILE" ]; then
+    rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:$stage/agents.json" \
+      || { bad 'stage agent registry: failed'; return 1; }
+  fi
+  run_transaction "$host" "$dir" deploy "$stage" "$(fleet_build_wrap "$host")" ""
+}
+
+LOCK_SOURCE="$(<"$REPO/scripts/deploy-lock/main.go")"
+DEPLOYER="$(hostname):$$"
+RUN_DIR="$(mktemp -d)" || exit 1
+trap 'rm -rf "$RUN_DIR"' EXIT
+UI_SNAPSHOT="$RUN_DIR/ui"
+mkdir -p "$UI_SNAPSHOT"
 
 FAILED=""
 for h in $HOSTS; do
+  HOST="$h"
   if [ "$h" = local ]; then deploy_local || FAILED="$FAILED $h"
   else deploy_remote "$h" || FAILED="$FAILED $h"; fi
 done

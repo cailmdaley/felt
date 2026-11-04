@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 )
 
@@ -702,6 +703,22 @@ func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(paths[1], "untracked"), []byte("dirty"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	leaseDir := filepath.Join(deployRoot, ".leases")
+	if err := os.MkdirAll(leaseDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := os.OpenFile(filepath.Join(leaseDir, commits[5]+".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Close()
+	if err := syscall.Flock(int(lease.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(deployRoot, "stale-not-a-worktree")
+	if err := os.MkdirAll(stale, 0700); err != nil {
+		t.Fatal(err)
+	}
 	fakeBin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(fakeBin, "pi"), []byte("#!/bin/sh\nprintf 'local package\\n    %s\\n' \"$PI_TREE\"\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -736,18 +753,30 @@ func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
 	if !observedLock.Load() {
 		t.Fatal("pruning observed releases without excluding concurrent selections")
 	}
-	for _, path := range paths[:5] {
+	if !strings.Contains(string(out), "retaining leased deploy worktree") {
+		t.Fatalf("lease was not reported: %s", out)
+	}
+	for _, path := range append(paths[:6:6], stale) {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("retained worktree %s missing: %v", path, err)
 		}
 	}
-	for _, path := range paths[5:] {
+	for _, path := range paths[6:] {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("obsolete worktree remains: %s (%v)", path, err)
 		}
 		if strings.Contains(git("worktree", "list", "--porcelain"), path) {
 			t.Errorf("removed worktree still registered: %s", path)
 		}
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := env.Command("bash", "-c", command).CombinedOutput(); err != nil {
+		t.Fatalf("prune expired lease: %v %s", err, out)
+	}
+	if _, err := os.Stat(paths[5]); !os.IsNotExist(err) {
+		t.Fatalf("released lease still protects tree: %v", err)
 	}
 }
 
@@ -820,7 +849,7 @@ prune_deploy_cmd() { printf prune; }
 	}
 }
 
-func TestDeployRemotePullsWithBuiltOrShippedUI(t *testing.T) {
+func TestDeployHostBuildsPinnedTreeWithBuiltOrShippedUI(t *testing.T) {
 	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
@@ -832,32 +861,41 @@ func TestDeployRemotePullsWithBuiltOrShippedUI(t *testing.T) {
 			dir := t.TempDir()
 			events := filepath.Join(dir, "events")
 			harness := `fleet_dir() { printf '%s' "$CHECKOUT"; }
-fleet_ssh() { printf remote; }
-fleet_flags() { :; }
-fleet_build_wrap() { printf '%s' "$BUILD_WRAP"; }
 wrapper() { printf 'wrap\n' >> "$EVENTS"; "$@"; }
 export -f wrapper
 builds_ui() { [ "$BUILD_UI" = 1 ]; }
 say() { :; }
 ok() { :; }
 bad() { echo "$1" >&2; }
-ship_ui() { printf 'ship\n' >> "$EVENTS"; }
-git() { printf 'git %s\n' "$*" >> "$EVENTS"; }
-make() { printf 'make %s\n' "$*" >> "$EVENTS"; }
-export -f git make
-ssh() { [ "$2" = true ] || bash -c "$2"; }
-run_on() { printf 1; }
-run_on_visible() { :; }
+previous_deploy() { :; }
+revision_checkout_cmd() { printf '%s' 'echo "prepare pinned" >> "$EVENTS"'; }
+version_json() { :; }
+target_is_live() { return 1; }
+make() {
+  [ "$SKIP_UI" != 1 ] || [ -f "$PWD/ui/dist/index.html" ] || return 9
+  printf 'make %s\n' "$*" >> "$EVENTS"
+}
+export -f make
 config_migration_cmd() { :; }
 refresh_harnesses() { :; }
-check_listen() { :; }
-supervisor_probe_cmd() { :; }
-daemon_kill() { :; }
-respawn_launcher_restart_cmd() { :; }
-verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "remote_host_cycle") + shellFunction(t, string(script), "deploy_remote") + `deploy_remote remote`
+remote_host_cycle() { printf 'cycle\n' >> "$EVENTS"; }
+wait_for_sha() { printf 'verified\n' >> "$EVENTS"; }
+finish_verified_deploy() { printf 'released\n' >> "$EVENTS"; }
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "verify_and_finish") + shellFunction(t, string(script), "host_transaction") + `host_transaction`
+			for _, path := range []string{filepath.Join(dir, "sha", "ui", "dist"), filepath.Join(dir, "stage", "ui", "dist")} {
+				if err := os.MkdirAll(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dir, "stage", "ui", "dist", "index.html"), []byte("bundle"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			cmd := exec.Command("bash", "-c", harness)
-			cmd.Env = append(os.Environ(), "CHECKOUT="+dir, "EVENTS="+events, "BUILD_UI="+buildUI, "BUILD_WRAP="+wrap, "DEPLOY_REF=", "DEPLOY_VERSION=", "AGENTS_FILE="+filepath.Join(dir, "absent"))
+			skip := "0"
+			if buildUI == "0" {
+				skip = "1"
+			}
+			cmd.Env = append(os.Environ(), "CHECKOUT="+dir, "SOURCE="+dir, "ROOT="+dir, "TARGET_COMMIT=sha", "MODE=deploy", "STAGE="+filepath.Join(dir, "stage"), "SNAPSHOT=", "EVENTS="+events, "SKIP_UI="+skip, "BUILD_UI="+buildUI, "BUILD_WRAP="+wrap, "DEPLOY_VERSION=")
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("remote deploy: %v\n%s", err, out)
 			}
@@ -865,9 +903,9 @@ verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "git pull --ff-only -q\nmake build\nmake cli-install\nverified\n"
+			want := "prepare pinned\nmake build\nmake cli-install\ncycle\nverified\nreleased\n"
 			if buildUI == "0" {
-				want = "ship\ngit pull --ff-only -q\nmake build SKIP_UI=1\nmake cli-install\nverified\n"
+				want = strings.Replace(want, "make build\n", "make build SKIP_UI=1\n", 1)
 			}
 			if wrap != "" {
 				want = strings.Replace(want, "make build", "wrap\nmake build", 1)
