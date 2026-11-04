@@ -36,7 +36,7 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 	}})
 	a := newApp(env)
 	a.eventNow = func() time.Time { return now }
-	out := a.boardDigest("pi", "s")
+	out, acknowledge := a.boardDigest("pi", "s")
 	if !strings.Contains(out, "Family board (family)") || !strings.Contains(out, "+2 earlier: shuttle board") {
 		t.Fatal(out)
 	}
@@ -59,6 +59,7 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 	if queries[0] != "0" {
 		t.Fatal(queries)
 	}
+	acknowledge()
 	path := filepath.Join(env.Getenv("SHUTTLE_DATA_DIR"), "board-cursors", "pi-s.json")
 	before, err := os.ReadFile(path)
 	if err != nil {
@@ -68,7 +69,7 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 	if json.Unmarshal(before, &c) != nil || len(c.Seen) != 9 {
 		t.Fatalf("cursor %s", before)
 	}
-	if out = a.boardDigest("pi", "s"); out != "" {
+	if out, _ = a.boardDigest("pi", "s"); out != "" {
 		t.Fatalf("replayed %q", out)
 	}
 	if queries[1] != "0" {
@@ -77,7 +78,7 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 	before, _ = os.ReadFile(path)
 	fail = true
 	now = now.Add(time.Minute)
-	if out = a.boardDigest("pi", "s"); out != "" {
+	if out, _ = a.boardDigest("pi", "s"); out != "" {
 		t.Fatal(out)
 	}
 	after, _ := os.ReadFile(path)
@@ -257,6 +258,33 @@ type boardFailWriter struct{}
 
 func (boardFailWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("write failed") }
 
+func TestBoardDigestWriteFailureRetainsCursor(t *testing.T) {
+	env := messageHookEnv(t, "host")
+	env.Set("SHUTTLE_MESSAGES", "off")
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"family":{"label":"family"},"records":[{"id":"one","timestamp":1793300000000,"kind":"post","member":"child","text":"undelivered digest"}]}`)
+	}})
+	a := newApp(env)
+	prompt := `{"hook_event_name":"UserPromptSubmit","harness":"pi","session_id":"s"}`
+	if err := a.runEventAndMessageHook(strings.NewReader(prompt), boardFailWriter{}); err == nil {
+		t.Fatal("output failure was ignored")
+	}
+	var out bytes.Buffer
+	if err := a.runEventAndMessageHook(strings.NewReader(prompt), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "undelivered digest") {
+		t.Fatalf("digest was lost: %q", out.String())
+	}
+	out.Reset()
+	if err := a.runEventAndMessageHook(strings.NewReader(prompt), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("digest replayed after successful output: %q", out.String())
+	}
+}
+
 func TestBoardMailboxWriteFailureRetainsMessage(t *testing.T) {
 	env := messageHookEnv(t, "host")
 	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
@@ -274,8 +302,8 @@ func TestBoardMailboxWriteFailureRetainsMessage(t *testing.T) {
 	_ = a.runEventAndMessageHook(bytes.NewReader(prompt), boardFailWriter{})
 	var out bytes.Buffer
 	_ = a.runEventAndMessageHook(bytes.NewReader(prompt), &out)
-	if !strings.Contains(out.String(), "mail") {
-		t.Fatalf("mail was acknowledged after output failure: %s", out.String())
+	if !strings.Contains(out.String(), "mail") || !strings.Contains(out.String(), "Family board") {
+		t.Fatalf("mail or digest was acknowledged after output failure: %s", out.String())
 	}
 }
 

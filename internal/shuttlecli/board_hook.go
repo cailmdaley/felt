@@ -146,14 +146,14 @@ func boardDigestLine(r boardRow) string {
 
 const boardDigestLines = 6
 
-func (a *app) boardDigest(harness, session string) string {
+func (a *app) boardDigest(harness, session string) (text string, acknowledge func()) {
 	// Native ids are file names, not paths.
 	if session == "" || filepath.Base(session) != session || session == "." || session == ".." {
-		return ""
+		return "", nil
 	}
 	dir, err := shuttle.DataDir(a.env)
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	path := filepath.Join(dir, "board-cursors", harness+"-"+session+".json")
 	pruneBoardCursors(filepath.Dir(path), a.eventNow())
@@ -163,18 +163,18 @@ func (a *app) boardDigest(harness, session string) string {
 	}
 	endpoint, err := a.daemonEndpoint("/api/v1/board/family")
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	// The daemon bounds retention by its own clock. An ID cursor catches
 	// arrivals whose writer clock predates the viewer's last successful turn.
 	q := url.Values{"session": {harness + ":" + session}, "since_ms": {"0"}}
 	body, err := a.getDaemon(endpoint+"?"+q.Encode(), 1500*time.Millisecond)
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	var response boardResponse
 	if json.Unmarshal(body, &response) != nil || response.Family == nil {
-		return ""
+		return "", nil
 	}
 	seen := make(map[string]bool, len(cursor.Seen))
 	for _, id := range cursor.Seen {
@@ -196,13 +196,15 @@ func (a *app) boardDigest(harness, session string) string {
 			nextSeen[r.ID] = true
 		}
 	}
-	if os.MkdirAll(filepath.Dir(path), 0700) == nil {
-		if b, err := json.Marshal(next); err == nil {
-			_ = atomicfile.Write(path, b, 0600)
+	acknowledge = func() {
+		if os.MkdirAll(filepath.Dir(path), 0700) == nil {
+			if b, err := json.Marshal(next); err == nil {
+				_ = atomicfile.Write(path, b, 0600)
+			}
 		}
 	}
 	if len(fresh) == 0 {
-		return ""
+		return "", nil
 	}
 	label := ""
 	if response.Family != nil {
@@ -219,5 +221,5 @@ func (a *app) boardDigest(harness, session string) string {
 		out.WriteString(boardDigestLine(r))
 		out.WriteByte('\n')
 	}
-	return strings.TrimSuffix(out.String(), "\n")
+	return strings.TrimSuffix(out.String(), "\n"), acknowledge
 }

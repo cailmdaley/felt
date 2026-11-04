@@ -39,11 +39,13 @@ func TestBoardDigestFindsLateRecordsAndKeepsUnresolvedCursor(t *testing.T) {
 	a.boardDigest("codex", "s")
 	late = true
 	now = now.Add(time.Minute)
-	if out := a.boardDigest("codex", "s"); !strings.Contains(out, "arrived late") {
+	out, acknowledge := a.boardDigest("codex", "s")
+	if !strings.Contains(out, "arrived late") {
 		t.Fatalf("late record missing: %q", out)
 	}
+	acknowledge()
 	now = now.Add(20 * time.Minute)
-	if out := a.boardDigest("codex", "s"); out != "" {
+	if out, _ := a.boardDigest("codex", "s"); out != "" {
 		t.Fatalf("late record replayed: %q", out)
 	}
 }
