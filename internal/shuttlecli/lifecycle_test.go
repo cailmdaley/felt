@@ -199,7 +199,7 @@ func TestShuttleClose_UsesLocalDaemon(t *testing.T) {
 	if out, err := runIn(t, env, dir, "close", "f", "--tempered=true", "--quiet", "--actor", "chair"); err != nil {
 		t.Fatalf("close: %v\n%s", err, out)
 	}
-	if body := bodies.last(); body["action"] != "close" || body["fiber"] != "f" || body["tempered"] != true || body["quiet"] != true || body["actor"] != "chair" {
+	if body := bodies.last(); body["action"] != "close" || body["fiber"] != mustRead(t, storage, "f").UID || body["tempered"] != true || body["quiet"] != true || body["actor"] != "chair" {
 		t.Fatalf("lifecycle request = %#v", body)
 	}
 	if got := mustRead(t, storage, "f").Status; got != felt.StatusActive {
@@ -430,7 +430,7 @@ func TestShuttleReopen_UsesLocalDaemon(t *testing.T) {
 	if out, err := runIn(t, env, dir, "reopen", "f", "--as-draft", "--project-dir", dir); err != nil {
 		t.Fatalf("reopen: %v\n%s", err, out)
 	}
-	if body := bodies.last(); body["action"] != "reopen" || body["fiber"] != "f" || body["as_draft"] != true || body["project_dir"] != dir {
+	if body := bodies.last(); body["action"] != "reopen" || body["fiber"] != mustRead(t, storage, "f").UID || body["as_draft"] != true || body["project_dir"] != dir {
 		t.Fatalf("lifecycle request = %#v", body)
 	}
 	if got := mustRead(t, storage, "f").Status; got != felt.StatusClosed {
@@ -928,7 +928,7 @@ func TestShuttleAccept_RoutesThroughDaemonWithoutHoldingTheLock(t *testing.T) {
 	default:
 		t.Fatal("the daemon saw no lifecycle request")
 	}
-	if want := map[string]any{"action": "accept", "fiber": "f"}; !reflect.DeepEqual(got, want) {
+	if want := map[string]any{"action": "accept", "fiber": mustRead(t, storage, "f").UID}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("lifecycle request = %v, want %v", got, want)
 	}
 	if status := mustRead(t, storage, "f").Status; status != felt.StatusClosed {
@@ -1086,7 +1086,7 @@ func TestShuttleRest_RoutesThroughDaemon(t *testing.T) {
 	if err != nil || !strings.Contains(out, "rested by the daemon") {
 		t.Fatalf("routed rest: %v\n%s", err, out)
 	}
-	if got := <-requests; !reflect.DeepEqual(got, map[string]any{"action": "rest", "fiber": "f"}) {
+	if got := <-requests; !reflect.DeepEqual(got, map[string]any{"action": "rest", "fiber": mustRead(t, storage, "f").UID}) {
 		t.Fatalf("lifecycle request = %v", got)
 	}
 	if status := mustRead(t, storage, "f").Status; status != felt.StatusActive {
