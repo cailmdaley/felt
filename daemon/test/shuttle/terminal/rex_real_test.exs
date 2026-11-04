@@ -24,6 +24,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     {:ok, root: root}
   end
 
+  @tag skip: not Shuttle.Test.IsolatedRex.restore_supported?()
   test "non-macOS readiness starts the default endpoint and preserves the server across calls", %{
     root: root
   } do

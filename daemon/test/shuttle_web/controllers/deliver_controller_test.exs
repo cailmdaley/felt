@@ -120,22 +120,20 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert script =~ "join the meeting"
   end
 
-  test "a conversation cut off long ago is not resumed: a fresh launch names it" do
+  test "a conversation cut off long ago resumes carrying the message" do
     session = "de11ae00-0000-4000-8000-000000000002"
     # Dispatched three hours ago; its transcript last written two hours ago.
     put_previous_run("tests/deliver-cold", session, %{
       "dispatched_at" => DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -3 * 3600))
     })
 
-    path = write_transcript(session, 2 * 3600)
+    write_transcript(session, 2 * 3600)
 
-    assert %{"delivered" => true, "delivery" => "dispatch"} =
+    assert %{"delivered" => true, "delivery" => "resume"} =
              deliver("tests/deliver-cold", "join the meeting")
 
     script = run_script()
-    refute script =~ "--resume"
-    assert script =~ "Previous session: #{session}"
-    assert script =~ path
+    assert script =~ "--resume '#{session}'"
     assert script =~ "join the meeting"
   end
 
