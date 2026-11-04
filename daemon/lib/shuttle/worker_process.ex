@@ -368,6 +368,23 @@ defmodule Shuttle.WorkerProcess do
     end
   end
 
+  @doc "Resolve a claimant's immutable script before changing its terminal label."
+  def claim_aliases(runner, source, canonical) do
+    procs =
+      case scan(runner) do
+        {:ok, procs} -> procs
+        {:error, :unknown} -> []
+      end
+
+    reserved =
+      case Shuttle.Terminal.LaunchAttempts.get(source) do
+        {:ok, %{"script" => script}} -> [%{args: "bash -l " <> script}]
+        _ -> []
+      end
+
+    migration_aliases(procs ++ reserved, source, canonical)
+  end
+
   def write_migration_aliases(aliases) do
     Enum.reduce_while(aliases, :ok, fn {path, _, new}, :ok ->
       case write_alias(path, new) do

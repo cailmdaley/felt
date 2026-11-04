@@ -73,6 +73,18 @@ defmodule Shuttle.TerminalTest do
     end
   end
 
+  defmodule ClaimedTmuxRunner do
+    def cmd("tmux", args, opts) do
+      if Shuttle.Env.app(:claim_hidden, false) do
+        {"no server running", 1}
+      else
+        IsolatedTmuxRunner.cmd("tmux", args, opts)
+      end
+    end
+
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
+
   defmodule SlowScanTmuxRunner do
     def cmd("ps", _args, _opts), do: {"ps timed out", :timeout}
 
@@ -611,6 +623,34 @@ defmodule Shuttle.TerminalTest do
     assert :ok = Tmux.close(IsolatedTmuxRunner, "$0")
     assert :present = Tmux.probe(IsolatedTmuxRunner, "victim")
     assert :absent = Tmux.close(IsolatedTmuxRunner, "$0")
+  end
+
+  @tag :tmp_dir
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "claimed capture on a private tmux server remains stoppable without terminal visibility",
+       %{tmp_dir: dir} do
+    socket = Path.join(System.tmp_dir!(), "claim-#{System.unique_integer([:positive])}.sock")
+    Env.put_app_env(:terminal_test_socket, socket)
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_app_env(:worker_stop_ladder, [{nil, 0}, {"TERM", 2_000}, {"KILL", 2_000}])
+    on_exit(fn -> System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true) end)
+    source = "capture-real"
+    canonical = "claimed-01KTHDNZS287ZSSG8X8V59XKC1-shuttle"
+
+    assert :ok =
+             Terminal.launch(
+               ClaimedTmuxRunner,
+               source,
+               dir,
+               "trap 'rm -f \"$0\"' EXIT\nsleep 300\n", preflighted: true)
+
+    aliases = Shuttle.WorkerProcess.claim_aliases(ClaimedTmuxRunner, source, canonical)
+    assert :ok = Shuttle.WorkerProcess.write_migration_aliases(aliases)
+    assert :ok = Terminal.rename(ClaimedTmuxRunner, source, canonical)
+    Env.put_app_env(:claim_hidden, true)
+    assert :alive = Terminal.status(ClaimedTmuxRunner, canonical)
+    assert {"", 0} = Terminal.stop(ClaimedTmuxRunner, canonical)
+    assert :gone = Terminal.status(ClaimedTmuxRunner, canonical)
   end
 
   @tag :phantom

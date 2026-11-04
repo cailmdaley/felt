@@ -5065,8 +5065,20 @@ defmodule Shuttle.Poller do
   end
 
   defp rename_claim_terminal(runner, session, canonical, opts) do
-    with {:ok, source} <- claim_terminal_source(runner, session, opts),
-         do: Shuttle.Terminal.rename(runner, source, canonical, fiber: opts[:fiber])
+    with {:ok, source} <- claim_terminal_source(runner, session, opts) do
+      aliases = Shuttle.WorkerProcess.claim_aliases(runner, session, canonical)
+
+      with :ok <- Shuttle.WorkerProcess.write_migration_aliases(aliases) do
+        case Shuttle.Terminal.rename(runner, source, canonical, fiber: opts[:fiber]) do
+          :ok ->
+            :ok
+
+          error ->
+            Shuttle.WorkerProcess.restore_migration_aliases(aliases)
+            error
+        end
+      end
+    end
   end
 
   defp claim_terminal_source(runner, "session:" <> _ = session, opts) do

@@ -7391,6 +7391,25 @@ defmodule Shuttle.PollerTest do
 
   # ── Claim (write-and-claim) ──
 
+  @tag :terminal_identity
+  test "claim binds the immutable capture script for liveness" do
+    id = "tests/claim-process-alias"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nhost: other-host\n", "open")
+    MockRunner.add_tmux_session("capture-alias")
+    MockRunner.set_ps_result({"812 1 bash -l /tmp/shuttle-run-capture-alias.42.sh\n", 0})
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()])
+    await_boot_cycle!(poller)
+
+    assert {:ok, %{session: canonical}} = Poller.claim_session(poller, id, "capture-alias", [])
+    MockRunner.remove_tmux_session(canonical)
+    assert Shuttle.Terminal.status(MockRunner, canonical) == :alive
+    assert {:ok, names} = Shuttle.Terminal.list_workers(MockRunner)
+    assert canonical in names
+    successor = Shuttle.WorkerProcess.parse("813 1 bash -l /tmp/shuttle-run-capture-alias.43.sh\n")
+    assert Shuttle.WorkerProcess.session_process(successor, canonical) == nil
+  end
+
   test "claim registers a live external session: rename, runtime, exit handling" do
     id = "tests/claim-me"
     MockRunner.set_fiber(id, make_fiber(id, %{"uid" => "01KTHDNZS287ZSSG8X8V59XKC1"}))
