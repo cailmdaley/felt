@@ -748,6 +748,45 @@ func postEditInput(tool, filePath string) postToolInput {
 	return in
 }
 
+func TestPostToolHookWaitsForLifecycleLock(t *testing.T) {
+	t.Parallel()
+	_, storage := newStore(t)
+	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", Status: felt.StatusActive, CreatedAt: time.Now().Add(-24 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := storage.LockFiber("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	data, _ := json.Marshal(postEditInput("Edit", storage.Path("alpha")))
+	done := make(chan error, 1)
+	go func() { done <- runPostToolHook(strings.NewReader(string(data))) }()
+	select {
+	case err := <-done:
+		t.Fatalf("hook bypassed lifecycle lock: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	f := mustRead(t, storage, "alpha")
+	if err := f.SetStatus(felt.StatusClosed, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.Body = "Worker result"
+	if err := storage.Write(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	got := mustRead(t, storage, "alpha")
+	if got.Status != felt.StatusClosed || got.Body != "Worker result" {
+		t.Fatalf("hook lost lifecycle: %+v", got)
+	}
+}
+
 func TestPostToolHookStampsEdit(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

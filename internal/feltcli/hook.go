@@ -492,20 +492,16 @@ func runPostToolHook(stdin io.Reader) error {
 	}
 
 	storage := felt.NewStorage(root)
-	f, err := storage.Read(id)
-	if err != nil {
-		// Path looked fiber-shaped but isn't a real fiber (companion file in a
-		// non-fiber dir, half-written file, etc.) — leave it alone.
-		return nil
-	}
 	now := time.Now()
-	// Anchor, not just updated-at: a fiber `felt add` created minutes ago is
-	// already as recent as a stamp would make it.
-	if anchor := f.RecencyAnchor(); !anchor.IsZero() && now.Sub(anchor) < postToolTouchInterval {
+	// Missing or incomplete documents and lock failures are best-effort misses.
+	_, _ = storage.Update(id, func(f *felt.Felt) error {
+		// Creation and lifecycle writes can already supply a fresh anchor.
+		if anchor := f.RecencyAnchor(); !anchor.IsZero() && now.Sub(anchor) < postToolTouchInterval {
+			return nil
+		}
+		f.Touch(now)
 		return nil
-	}
-	f.Touch(now)
-	_ = storage.Write(f)
+	})
 	return nil
 }
 
