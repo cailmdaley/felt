@@ -316,7 +316,13 @@ felt's plugin is left alone, so the deploy never installs a plugin the operator
 did not install or has removed. A host with no such harness reports
 `harness plugins: none carry felt`.
 
-Each receipt bundle's `inspection` says how its enablement was established:
+The schema-2 JSON receipt separates per-bundle diagnostics from deployment
+selection: `bundles[].active` reports each bundle's activation, while the
+unique `harnesses[]` rows carry `harness`, `enabled`, `inspection`, and `repair`.
+Deployment consumers select enabled harness rows once, not one setup per
+bundle; the split Codex integration still requires only one `felt setup codex`.
+
+Each receipt bundle's `inspection` says how its activation was established:
 `confirmed` by the harness's own plugin list, `configured` by its config and
 cache alone, or `unknown` when the list failed or the config could not be read.
 The helper sets up confirmed and configured bundles. An unknown bundle fails the

@@ -50,6 +50,7 @@ type RuntimeReceipt struct {
 	Repair     string                   `json:"repair,omitempty"`
 	Felt       ReceiptComponent         `json:"felt"`
 	Bundles    []ReceiptBundle          `json:"bundles"`
+	Harnesses  []ReceiptHarness         `json:"harnesses"`
 	Hooks      ReceiptComponent         `json:"hooks"`
 	Generation ReceiptGenerationReceipt `json:"generation"`
 }
@@ -69,6 +70,39 @@ type ReceiptComponent struct {
 	CodexTrust *ReceiptCodexTrust `json:"codex_trust,omitempty"`
 }
 
+// ReceiptHarness is the unique deployment selection for a harness. Bundle
+// activation remains separate so diagnostics do not duplicate setup work.
+type ReceiptHarness struct {
+	Harness    string            `json:"harness"`
+	Enabled    bool              `json:"enabled"`
+	Inspection receiptInspection `json:"inspection"`
+	Repair     string            `json:"repair,omitempty"`
+}
+
+func receiptHarnesses(bundles []ReceiptBundle) []ReceiptHarness {
+	var harnesses []ReceiptHarness
+	positions := map[string]int{}
+	for _, bundle := range bundles {
+		index, ok := positions[bundle.Harness]
+		if !ok {
+			index = len(harnesses)
+			positions[bundle.Harness] = index
+			harnesses = append(harnesses, ReceiptHarness{Harness: bundle.Harness, Inspection: inspectionConfirmed})
+		}
+		h := &harnesses[index]
+		h.Enabled = h.Enabled || bundle.Enabled
+		if bundle.Inspection == inspectionUnknown || bundle.Inspection == "" {
+			h.Inspection = inspectionUnknown
+		} else if bundle.Inspection == inspectionConfigured && h.Inspection != inspectionUnknown {
+			h.Inspection = inspectionConfigured
+		}
+		if h.Repair == "" {
+			h.Repair = bundle.Repair
+		}
+	}
+	return harnesses
+}
+
 type ReceiptFeltCopy struct {
 	Path  string `json:"path"`
 	Build string `json:"build"`
@@ -80,7 +114,7 @@ type ReceiptBundle struct {
 	Source  string `json:"source,omitempty"`
 	Path    string `json:"path,omitempty"`
 	Version string `json:"version,omitempty"`
-	Enabled bool   `json:"enabled"`
+	Enabled bool   `json:"active"`
 	// Inspection is how Enabled was established.
 	Inspection receiptInspection `json:"inspection"`
 	Evidence   string            `json:"evidence,omitempty"`
@@ -182,10 +216,11 @@ machine-readable receipt.`,
 }
 
 func (a *app) collectRuntimeReceipt() RuntimeReceipt {
-	r := RuntimeReceipt{Schema: 1}
+	r := RuntimeReceipt{Schema: 2}
 	r.Felt = a.collectFeltReceipt()
 	r.Bundles = a.collectCodexBundle()
 	r.Bundles = append(r.Bundles, a.collectClaudeBundle()...)
+	r.Harnesses = receiptHarnesses(r.Bundles)
 	r.Hooks = a.collectHookReceipt(r.Bundles)
 	r.Generation = a.collectGenerationReceipt(r.Bundles, r.Felt)
 	r.Status, r.Repair = combineReceiptStatus(r.Felt.Status, r.Bundles, r.Hooks.Status, r.Generation.Status)
