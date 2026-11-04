@@ -8,7 +8,7 @@ import (
 
 // ShuttleContractLevel is the integer version of the daemon-shelled CLI
 // surface: every flag/output shape the Elixir daemon depends on when it shells
-// `shuttle <verb>` for lifecycle writes and fiber discovery. It is NOT felt's
+// `felt` and `shuttle` for lifecycle writes and fiber discovery. It is NOT felt's
 // release version (Version, set via ldflags) — that tracks the whole binary;
 // this tracks the narrower CLI contract so the daemon can boot-check compatibility.
 //
@@ -23,8 +23,7 @@ import (
 //     daemon parses it (e.g. mark-runtime's success text, an exit code the
 //     daemon now branches on)
 //
-// Do NOT bump for changes that don't touch a command the daemon shells (human
-// verbs like `felt add` or read-only views the daemon does not consume).
+// Do NOT bump for commands or views the daemon does not consume.
 //
 // At daemon boot, the Poller shells `shuttle contract`, parses the bare
 // integer it prints on stdout, and compares it to its own baked expectation —
@@ -32,7 +31,7 @@ import (
 // shelled write at a time. Bumped in lockstep with
 // daemon/lib/shuttle/contract.ex's @expected_level, whose @level_surfaces
 // names what each level adds so a skew reports the missing verb.
-const ShuttleContractLevel = 30
+const ShuttleContractLevel = 31
 
 func (a *app) shuttleContractCmd() *cobra.Command {
 	shuttleContractCmd := &cobra.Command{
