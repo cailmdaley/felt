@@ -5188,7 +5188,8 @@ defmodule Shuttle.Poller do
 
   defp rename_claim_terminal(runner, session, canonical, opts) do
     with {:ok, source} <- claim_terminal_source(runner, session, opts) do
-      aliases = Shuttle.WorkerProcess.claim_aliases(runner, session, canonical)
+      script_source = claim_script_source(source)
+      aliases = Shuttle.WorkerProcess.claim_aliases(runner, script_source, canonical)
 
       with :ok <- Shuttle.WorkerProcess.write_migration_aliases(aliases) do
         case Shuttle.Terminal.rename(runner, source, canonical, fiber: opts[:fiber]) do
@@ -5200,6 +5201,21 @@ defmodule Shuttle.Poller do
             error
         end
       end
+    end
+  end
+
+  defp claim_script_source(source) do
+    if Shuttle.Terminal.native_ref?(source) do
+      with {:ok, %{"bindings" => bindings}} <- Shuttle.Terminal.RexBindings.read(),
+           [{name, _}] <- Enum.filter(bindings, fn {_name, binding} ->
+             source in [binding["session_id"], binding["block_id"]]
+           end) do
+        name
+      else
+        _ -> source
+      end
+    else
+      source
     end
   end
 

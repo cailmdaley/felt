@@ -11,6 +11,8 @@ defmodule Shuttle.Terminal.RexRealTest do
   import Shuttle.Test.PollerHelpers
 
   defmodule ClaimRunner do
+    def cmd("tmux", _args, _opts), do: {"no server running", 1}
+
     def cmd(command, args, opts) when command in ["shuttle", "felt"],
       do: Shuttle.Test.FeltStoreRunner.cmd(command, args, opts)
 
@@ -483,6 +485,35 @@ defmodule Shuttle.Terminal.RexRealTest do
     end)
 
     assert {_, 0} = System.cmd(tmux, ["-S", socket, "has-session", "-t", "=probe-worker"])
+  end
+
+  test "native Rex capture claims retain their immutable script assignment", %{root: root} do
+    alias Shuttle.Test.{FeltStoreRunner, FiberUid}
+    FeltStoreRunner.start!()
+    store = FeltStoreRunner.felt_root()
+    on_exit(fn -> File.rm_rf(store) end)
+    Env.put_env("SHUTTLE_STORES", store)
+    Env.put_app_env(:terminal_backend, Backend)
+    FeltStoreRunner.set_fiber("native-capture", make_fiber("native-capture"))
+    FeltStoreRunner.set_shuttle("native-capture", "kind: oneshot\nhost: other-host\n", "open")
+    {:ok, p} = start_poller!(runner: ClaimRunner, felt_stores: [store])
+    await_boot_cycle!(p)
+    source = "capture-native"
+    assert :ok = Terminal.launch(ClaimRunner, source, root,
+      "trap 'rm -f \"$0\"' EXIT\nsleep 300\n", preflighted: true)
+    assert {:ok, %{"bindings" => %{^source => binding}}} = RexBindings.read()
+    assert {:ok, %{"script" => script}} = Terminal.LaunchAttempts.get(source)
+    await(fn ->
+      {:ok, procs} = WorkerProcess.scan(@runner)
+      WorkerProcess.script_process(procs, script) != nil
+    end)
+    canonical = FiberUid.session("native-capture")
+    assert {:ok, %{session: ^canonical}} = Shuttle.Poller.claim_session(p,
+      "native-capture", binding["session_id"], tmux_pane: binding["block_id"])
+    assert {:ok, procs} = WorkerProcess.scan(@runner)
+    assert WorkerProcess.session_process(procs, canonical)
+    assert canonical in WorkerProcess.sessions(procs)
+    assert {"", 0} = Terminal.stop(@runner, canonical, backends: [Backend])
   end
 
   test "a human-labelled native session is claimed canonically and a retry keeps its watcher", %{
