@@ -247,3 +247,70 @@ func updateArchive(t *testing.T, binaries map[string][]byte) []byte {
 	}
 	return output.Bytes()
 }
+
+func TestReplaceBinaryPairKeepsCommandsPresentAtEveryRename(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for _, name := range []string{"felt", "shuttle"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("old "+name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := replaceBinaryPairWithRename(filepath.Join(dir, "felt"), map[string][]byte{"felt": []byte("new felt"), "shuttle": []byte("new shuttle")}, func(from, to string) error {
+		if err := os.Rename(from, to); err != nil {
+			return err
+		}
+		for _, name := range []string{"felt", "shuttle"} {
+			if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+				t.Fatalf("command %s missing after rename %s -> %s: %v", name, from, to, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplaceBinaryPairRollbackKeepsCommandsAndRemovesUnusedBackups(t *testing.T) {
+	t.Parallel()
+	for _, failAt := range []string{"felt", "shuttle"} {
+		t.Run(failAt, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, name := range []string{"felt", "shuttle"} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte("old "+name), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			failed := false
+			err := replaceBinaryPairWithRename(filepath.Join(dir, "felt"), map[string][]byte{"felt": []byte("new felt"), "shuttle": []byte("new shuttle")}, func(from, to string) error {
+				if !failed && filepath.Base(to) == failAt {
+					failed = true
+					return os.ErrPermission
+				}
+				if err := os.Rename(from, to); err != nil {
+					return err
+				}
+				for _, name := range []string{"felt", "shuttle"} {
+					if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+						t.Fatalf("rollback lost command %s: %v", name, err)
+					}
+				}
+				return nil
+			})
+			if err == nil {
+				t.Fatal("failed install succeeded")
+			}
+			for _, name := range []string{"felt", "shuttle"} {
+				got, err := os.ReadFile(filepath.Join(dir, name))
+				if err != nil || string(got) != "old "+name {
+					t.Fatalf("rollback %s = %q, %v", name, got, err)
+				}
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 2 {
+				t.Fatalf("rollback left staging or backup files: %v, %v", entries, err)
+			}
+		})
+	}
+}

@@ -291,6 +291,10 @@ func extractBinaries(r io.Reader) (map[string][]byte, error) {
 }
 
 func replaceBinaryPair(feltPath string, binaries map[string][]byte) error {
+	return replaceBinaryPairWithRename(feltPath, binaries, os.Rename)
+}
+
+func replaceBinaryPairWithRename(feltPath string, binaries map[string][]byte, rename func(string, string) error) error {
 	feltBinary, feltOK := binaries["felt"]
 	shuttleBinary, shuttleOK := binaries["shuttle"]
 	if !feltOK || !shuttleOK {
@@ -312,11 +316,11 @@ func replaceBinaryPair(feltPath string, binaries map[string][]byte) error {
 	}
 
 	type stagedBinary struct {
-		target string
-		temp   string
-		backup string
-		moved  bool
-		placed bool
+		target   string
+		temp     string
+		backup   string
+		backedUp bool
+		placed   bool
 	}
 	staged := make([]stagedBinary, 0, len(targets))
 	cleanupTemps := func() {
@@ -324,7 +328,7 @@ func replaceBinaryPair(feltPath string, binaries map[string][]byte) error {
 			if item.temp != "" {
 				_ = os.Remove(item.temp)
 			}
-			if item.backup != "" && !item.moved {
+			if item.backup != "" && !item.backedUp {
 				_ = os.Remove(item.backup)
 			}
 		}
@@ -362,14 +366,19 @@ func replaceBinaryPair(feltPath string, binaries map[string][]byte) error {
 		var rollbackErr error
 		for i := len(staged) - 1; i >= 0; i-- {
 			item := &staged[i]
-			if item.placed {
+			if item.placed && !item.backedUp {
 				if err := os.Remove(item.target); err != nil && !errors.Is(err, os.ErrNotExist) {
 					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("removing new %q: %w", item.target, err))
 				}
 			}
-			if item.moved {
-				if err := os.Rename(item.backup, item.target); err != nil {
-					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restoring %q: %w", item.target, err))
+			if item.backedUp {
+				if item.placed {
+					if err := rename(item.backup, item.target); err != nil {
+						rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restoring %q: %w", item.target, err))
+						continue
+					}
+				} else if err := os.Remove(item.backup); err != nil {
+					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("removing unused backup %q: %w", item.backup, err))
 				}
 			}
 		}
@@ -392,24 +401,26 @@ func replaceBinaryPair(feltPath string, binaries map[string][]byte) error {
 			if err := os.Remove(item.backup); err != nil {
 				return errors.Join(fmt.Errorf("removing backup placeholder for %q: %w", item.target, err), rollback())
 			}
-			if err := os.Rename(item.target, item.backup); err != nil {
+			// Retain the live path until its replacement is ready. Linking also
+			// preserves a symlink destination for rollback without following it.
+			if err := os.Link(item.target, item.backup); err != nil {
 				return errors.Join(fmt.Errorf("backing up %q: %w", item.target, err), rollback())
 			}
-			item.moved = true
+			item.backedUp = true
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return errors.Join(fmt.Errorf("checking backup source %q: %w", item.target, err), rollback())
 		}
 	}
 	for i := range staged {
 		item := &staged[i]
-		if err := os.Rename(item.temp, item.target); err != nil {
+		if err := rename(item.temp, item.target); err != nil {
 			return errors.Join(fmt.Errorf("installing %q: %w", item.target, err), rollback())
 		}
 		item.temp = ""
 		item.placed = true
 	}
 	for _, item := range staged {
-		if item.moved {
+		if item.backedUp {
 			if err := os.Remove(item.backup); err != nil {
 				return fmt.Errorf("both CLIs were updated, but removing backup %q failed: %w", item.backup, err)
 			}
