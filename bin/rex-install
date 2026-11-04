@@ -1,0 +1,37 @@
+#!/bin/sh
+# Install the Linux snapshot CLI without changing any server process.
+set -eu
+
+[ "$(uname -s)" = Linux ] || { echo "rex-install requires Linux" >&2; exit 1; }
+case $(uname -m) in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "Unsupported Rex architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' 0
+trap 'exit 1' HUP INT TERM
+base=https://blob.superlogical.com
+file=rex-linux-$arch.tar.gz
+curl -fsSL "$base/api/releases/rex/snapshot" -o "$work/release.json"
+# The release API supplies hex identifiers and flat artifact records.
+commit=$(awk -F '"commit"[[:space:]]*:[[:space:]]*"' 'NF > 1 { split($2, a, "\""); print a[1]; exit }' "$work/release.json")
+sha=$(awk -v file="$file" 'BEGIN { RS="}" }
+    $0 ~ "\"filename\"[[:space:]]*:[[:space:]]*\"" file "\"" {
+        sub(/^.*"sha256"[[:space:]]*:[[:space:]]*"/, "")
+        sub(/".*/, "")
+        print; exit
+    }' "$work/release.json")
+case $commit in ''|*[!0-9a-f]*) echo "Invalid release commit" >&2; exit 1 ;; esac
+case $sha in ''|*[!0-9a-f]*) echo "Invalid release sha256 for $file" >&2; exit 1 ;; esac
+[ "${#sha}" -eq 64 ] || { echo "Invalid release sha256 for $file" >&2; exit 1; }
+curl -fsSL "$base/download/rex/snapshot/$commit/$file" -o "$work/$file"
+(cd "$work" && printf '%s  %s\n' "$sha" "$file" | sha256sum -c -)
+tar -xzf "$work/$file" -C "$work" rex
+mkdir -p "$HOME/.local/bin"
+# Rename a new inode so replacing the executable works while a server uses it.
+install -m 755 "$work/rex" "$HOME/.local/bin/.rex-install-$$"
+mv -f "$HOME/.local/bin/.rex-install-$$" "$HOME/.local/bin/rex"
+echo "Installed Rex snapshot $commit in ~/.local/bin/rex."
+echo "No running server was touched. A running server keeps its version until it stops; stopping it ends every session."

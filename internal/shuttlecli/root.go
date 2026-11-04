@@ -108,11 +108,11 @@ type app struct {
 
 	// osHostname is os.Hostname, the last tier of resolveOwnHost.
 	osHostname func() (string, error)
-	// hostGOOS is runtime.GOOS: the platform whose tunnel supervisor
-	// tunnels install renders and places.
+	// hostGOOS is runtime.GOOS: the host platform for terminals and supervisors.
 	hostGOOS string
 	// terminals holds the host's observation/stop backends, resolved lazily.
-	terminals []terminalBackend
+	terminals          []terminalBackend
+	rexTailnetListener func() bool
 	// detectTmuxOrigin reports which launchd coalition owns the tmux server.
 	detectTmuxOrigin func() tmuxOriginReport
 	// loginEnvCapture is the login-shell capture installDaemonSupervisor uses.
@@ -174,6 +174,7 @@ func newApp(env *sysenv.Env) *app {
 		}
 		return progstatus.Write(path, b)
 	}
+	a.rexTailnetListener = func() bool { return probeRexTailnetListener("http://127.0.0.1:7297/") }
 	a.detectTmuxOrigin = a.probeTmuxOrigin
 	a.loginEnvCapture = a.captureLoginEnv
 	a.execDaemonRelease = a.execRelease

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // Rex health is read-only: every request disables autostart and no request
@@ -17,6 +19,10 @@ func (a *app) collectRexReceipt() *ReceiptRex {
 		return nil
 	}
 	rec := &ReceiptRex{Status: receiptHealthy, Privacy: map[string]string{}}
+	if a.hostGOOS != "darwin" {
+		up := a.rexTailnetListener()
+		rec.TailnetListener = &up
+	}
 	r := &rexTerminal{a: a}
 	out, err := r.command("", "whoami", "--json")
 	if err != nil {
@@ -24,7 +30,11 @@ func (a *app) collectRexReceipt() *ReceiptRex {
 		if errors.Is(err, errRexAbsent) || errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
 			rec.Status = receiptMissing
 		}
-		rec.Repair = fmt.Sprintf("open Rex and check its server connection: %v", err)
+		if a.hostGOOS == "darwin" {
+			rec.Repair = fmt.Sprintf("open Rex and check its server connection: %v", err)
+		} else {
+			rec.Repair = fmt.Sprintf("check the Rex installation and daemon log; Shuttle starts a missing server when launching workers: %v", err)
+		}
 		return rec
 	}
 	var server struct {
@@ -35,6 +45,10 @@ func (a *app) collectRexReceipt() *ReceiptRex {
 		return rec
 	}
 	rec.Reachable, rec.Version = true, server.Version
+
+	if a.hostGOOS != "darwin" {
+		return rec
+	}
 
 	var privacy struct {
 		Services *[]struct {
@@ -95,7 +109,11 @@ func (a *app) printRexReceipt(rec *ReceiptRex) {
 	if rec == nil {
 		return
 	}
-	fmt.Fprintf(a.env.Stdout, "Rex: %s (reachable=%t, version=%s, app client=%t)\n", rec.Status, rec.Reachable, rec.Version, rec.AppClient)
+	if rec.TailnetListener != nil {
+		fmt.Fprintf(a.env.Stdout, "Rex: %s (reachable=%t, version=%s, tailnet listener :7297=%t)\n", rec.Status, rec.Reachable, rec.Version, *rec.TailnetListener)
+	} else {
+		fmt.Fprintf(a.env.Stdout, "Rex: %s (reachable=%t, version=%s, app client=%t)\n", rec.Status, rec.Reachable, rec.Version, rec.AppClient)
+	}
 	if len(rec.Privacy) > 0 {
 		fmt.Fprintf(a.env.Stdout, "  Rex Server Full Disk Access: %s\n", rec.Privacy["full_disk_access"])
 	}
@@ -105,4 +123,20 @@ func (a *app) printRexReceipt(rec *ReceiptRex) {
 	if rec.Repair != "" {
 		fmt.Fprintf(a.env.Stdout, "  Rex: %s\n", rec.Repair)
 	}
+}
+
+// A direct loopback request has no Tailscale identity. Rex's tailnet listener
+// refuses it with this response; a successful probe does not prove remote reachability.
+func probeRexTailnetListener(endpoint string) bool {
+	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{Proxy: nil}}
+	defer client.CloseIdleConnections()
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Error string `json:"error"`
+	}
+	return resp.StatusCode == http.StatusForbidden && json.NewDecoder(resp.Body).Decode(&body) == nil && body.Error == "connection was not classified by its listener"
 }

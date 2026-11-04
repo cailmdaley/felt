@@ -7,6 +7,7 @@ defmodule Shuttle.Terminal.RexTest do
   @name "probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle"
 
   setup %{tmp_dir: dir} do
+    Env.put_app_env(:os_type, {:unix, :darwin})
     Env.put_env("SHUTTLE_DATA_DIR", dir)
     Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
     Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
@@ -39,6 +40,82 @@ defmodule Shuttle.Terminal.RexTest do
     assert %{state: "unavailable", available: false, reason: invalid} = Rex.health()
     assert invalid =~ "invalid_bindings"
     assert {:error, {:rex_server_unavailable, _}} = Rex.ensure_ready(FakeRex)
+    assert FakeRex.calls() == []
+  end
+
+  test "Linux readiness starts a private persistent server with the selected tailscaled", %{
+    tmp_dir: dir
+  } do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    Env.put_app_env(:tailscale_socket, "/private/tailscaled.sock")
+    FakeRex.reply("whoami", {"server is not running", 4})
+    assert :ok = Rex.ensure_ready(FakeRex)
+    [{_, argv, _}] = Enum.filter(FakeRex.calls(), fn {_, args, _} -> "start" in args end)
+
+    assert argv ==
+             Shuttle.Rex.flags() ++
+               [
+                 "server",
+                 "start",
+                 "--state-dir",
+                 Path.join(dir, "rex/state"),
+                 "--tailscaled-socket",
+                 "/private/tailscaled.sock",
+                 "--extra-listen",
+                 "tailnet://:7297"
+               ]
+
+    assert Bitwise.band(File.stat!(Path.join(dir, "rex")).mode, 0o777) == 0o700
+    assert :ok = Rex.ensure_ready(FakeRex)
+    assert Enum.count(FakeRex.calls(), fn {_, args, _} -> "start" in args end) == 1
+    refute Enum.any?(FakeRex.calls(), fn {bin, args, _} -> bin == "open" or "stop" in args end)
+  end
+
+  test "Linux falls back to local-only without tailscaled and logs the missing listener" do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    Env.put_app_env(:tailscale_socket, "system")
+    FakeRex.reply("whoami", {"server is not running", 4})
+
+    Env.put_app_env(:fake_rex_hook, fn
+      "server.start" ->
+        if Enum.any?(FakeRex.calls(), fn {_, args, _} -> "start" in args end),
+          do: FakeRex.clear_reply("server.start"),
+          else: FakeRex.reply("server.start", {"Failed to connect to local Tailscale daemon", 1})
+
+      _ ->
+        :ok
+    end)
+
+    assert capture_log(fn -> assert :ok = Rex.ensure_ready(FakeRex) end) =~ "local-only"
+    [first, second] = for {_, args, _} <- FakeRex.calls(), "start" in args, do: args
+    assert "--extra-listen" in first
+    refute "--tailscaled-socket" in first
+    refute "--extra-listen" in second
+    refute "--tailscaled-socket" in second
+  end
+
+  test "Linux startup failure propagates, and uncertain liveness never starts a server" do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    FakeRex.reply("whoami", {"request timed out", :timeout})
+    assert :ok = Rex.ensure_ready(FakeRex)
+    refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "start" in args end)
+    FakeRex.reply("whoami", {"server is not running", 4})
+    FakeRex.reply("server.start", {"permission denied", 1})
+
+    assert capture_log(fn ->
+             assert {:error, {:rex_server_unavailable, reason}} = Rex.ensure_ready(FakeRex)
+             assert reason =~ "permission denied"
+           end) =~ "local-only"
+  end
+
+  test "Linux reveal does not activate an app even with an app client" do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    FakeRex.clients([%{"client_id" => "client:app", "info" => %{"kind" => "app"}}])
+
+    assert {:error, reason} =
+             Rex.reveal_binding(FakeRex, %{"session_id" => "session:1", "window_id" => "window:1"})
+
+    assert reason =~ "macOS"
     assert FakeRex.calls() == []
   end
 

@@ -95,6 +95,7 @@ type ReceiptRex struct {
 	Version         string            `json:"version,omitempty"`
 	Privacy         map[string]string `json:"privacy"`
 	ResponsiblePath string            `json:"responsible_path,omitempty"`
+	TailnetListener *bool             `json:"tailnet_listener,omitempty"`
 	AppClient       bool              `json:"app_client"`
 }
 

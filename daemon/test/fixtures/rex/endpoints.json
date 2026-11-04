@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Mac discovery",
+    "os": "darwin",
+    "home": "/home/example",
+    "data": "",
+    "override": "",
+    "want": ""
+  },
+  {
+    "name": "Linux default",
+    "os": "linux",
+    "home": "/home/example",
+    "data": "",
+    "override": "",
+    "want": "unix:///home/example/.shuttle/rex/server.sock"
+  },
+  {
+    "name": "data directory",
+    "os": "linux",
+    "home": "/home/example",
+    "data": "/private/shuttle",
+    "override": "",
+    "want": "unix:///private/shuttle/rex/server.sock"
+  },
+  {
+    "name": "expanded data directory",
+    "os": "linux",
+    "home": "/home/example",
+    "data": " ~/.state ",
+    "override": "",
+    "want": "unix:///home/example/.state/rex/server.sock"
+  },
+  {
+    "name": "linux explicit endpoint",
+    "os": "linux",
+    "home": "/home/example",
+    "data": "/private/shuttle",
+    "override": "unix:///explicit.sock",
+    "want": "unix:///explicit.sock"
+  },
+  {
+    "name": "darwin explicit endpoint",
+    "os": "darwin",
+    "home": "/home/example",
+    "data": "/private/shuttle",
+    "override": "unix:///explicit.sock",
+    "want": "unix:///explicit.sock"
+  }
+]

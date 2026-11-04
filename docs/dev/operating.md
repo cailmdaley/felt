@@ -68,11 +68,16 @@ Uncertain tmux visibility holds rather than launching a duplicate; the missing-s
 ## Terminal backends
 
 `shuttle host --json` and `GET /api/v1/version` report the host's selected `terminal`, `tmux` or `rex`.
-For a Rex-held worker, `shuttle attach <fiber>` opens the local Rex app rather than attaching a TTY; a remote Rex worker cannot be opened through SSH.
+For a Rex-held worker on macOS, `shuttle attach <fiber>` opens the local Rex app rather than attaching a TTY; opening an app on Linux or a remote Rex worker through SSH is unsupported.
 A tmux-held worker attaches in the calling TTY, including on a Rex-configured host.
 The local board's Rex opener can view remote tmux workers over SSH.
 `shuttle claim` inside a Rex block sends its native session and block references; the daemon binds them to the worker name.
-See [Rex setup](../shuttle/installation.md#rex-terminal-backend) for privacy and app configuration.
+On Linux, install Rex rootlessly with `bin/rex-install` and select `"terminal": "rex"` in `~/.config/shuttle/host.json`.
+Shuttle starts a missing server on `unix://<data dir>/rex/server.sock`, keeps its state in `<data dir>/rex/state`, and requests the Tailscale-identified listener on port 7297.
+If Tailscale is unavailable at startup, the daemon logs the failure and starts local-only; `shuttle doctor` reports the running version and listener status without Apple checks.
+`SHUTTLE_REX_SERVER` overrides the endpoint for both the daemon and CLI, and workers inherit it.
+Shuttle never stops a Rex server: daemon restarts and CLI updates preserve sessions, while `rex server stop` ends every session.
+See [Rex setup](../shuttle/installation.md#rex-terminal-backend) for installation, endpoint and macOS privacy configuration.
 
 ## Terminal Codex workers
 

@@ -17,12 +17,15 @@ defmodule Shuttle.Terminal.RuntimeEnv do
 
   def values do
     Enum.flat_map(@names, fn name ->
-      case Shuttle.Env.get(name) do
+      case value(name) do
         nil -> []
         value -> [{name, value}]
       end
     end)
   end
+
+  defp value("SHUTTLE_REX_SERVER"), do: Shuttle.Rex.server()
+  defp value(name), do: Shuttle.Env.get(name)
 
   def tmux_args do
     configured = Map.new(values())

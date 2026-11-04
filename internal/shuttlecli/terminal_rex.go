@@ -83,6 +83,20 @@ func (a *app) rexBin() (string, error) {
 	return a.env.LookPath(filepath.Join(home, "Library", "Application Support", "com.superlogical.rex", "RexServer", "Versions", "Current", "Rex Server.app", "Contents", "MacOS", "rex"))
 }
 
+func (a *app) rexServer() (string, error) {
+	if server := a.env.Getenv("SHUTTLE_REX_SERVER"); server != "" {
+		return server, nil
+	}
+	if a.hostGOOS == "darwin" {
+		return "", nil
+	}
+	dir, err := shuttle.DataDir(a.env)
+	if err != nil {
+		return "", err
+	}
+	return "unix://" + filepath.Join(dir, "rex", "server.sock"), nil
+}
+
 var errRexAbsent = errors.New("Rex server absent")
 var errRexNotFound = errors.New("Rex target not found")
 
@@ -92,7 +106,11 @@ func (r *rexTerminal) command(input string, args ...string) ([]byte, error) {
 		return nil, err
 	}
 	flags := []string{"--autostart=false", "--timeout", "5s"}
-	if server := r.a.env.Getenv("SHUTTLE_REX_SERVER"); server != "" {
+	server, err := r.a.rexServer()
+	if err != nil {
+		return nil, err
+	}
+	if server != "" {
 		flags = append(flags, "-S", server)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)

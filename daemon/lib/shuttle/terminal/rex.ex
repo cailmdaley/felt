@@ -48,15 +48,11 @@ defmodule Shuttle.Terminal.Rex do
         :ok
 
       {:error, :server_absent} ->
-        case runner.cmd("open", ["-g", "-b", "com.superlogical.rex"], stderr_to_stdout: true) do
-          {_, 0} ->
-            case await(fn -> Rex.whoami(runner) end, 10_000) do
-              {:ok, _} -> :ok
-              _ -> unavailable()
-            end
-
-          _ ->
-            unavailable()
+        with :ok <- start_server(runner),
+             {:ok, _} <- await(fn -> Rex.whoami(runner) end, 10_000) do
+          :ok
+        else
+          error -> unavailable("Rex server is unavailable: #{inspect(error)}")
         end
 
       {:error, _} ->
@@ -64,10 +60,40 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp unavailable(
-         message \\ "Open Rex and grant Rex Server access; the Rex server is unavailable"
-       ),
-       do: {:error, {:rex_server_unavailable, message}}
+  defp start_server(runner) do
+    if Rex.macos?() do
+      case runner.cmd("open", ["-g", "-b", "com.superlogical.rex"], stderr_to_stdout: true) do
+        {_, 0} -> :ok
+        error -> {:error, error}
+      end
+    else
+      dir = Path.join(Shuttle.data_dir(), "rex")
+
+      with :ok <- Shuttle.FS.mkdir_p(dir),
+           :ok <- Shuttle.FS.chmod(dir, 0o700) do
+        args = ["server", "start", "--state-dir", Path.join(dir, "state")]
+        socket = Shuttle.Remotes.tailscale_socket()
+        tailnet = if socket, do: ["--tailscaled-socket", socket], else: []
+
+        case Rex.command(runner, args ++ tailnet ++ ["--extra-listen", "tailnet://:7297"]) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "Rex tailnet listener unavailable; starting local-only server: #{inspect(reason)}"
+            )
+
+            case Rex.command(runner, args) do
+              {:ok, _} -> :ok
+              error -> error
+            end
+        end
+      end
+    end
+  end
+
+  defp unavailable(message), do: {:error, {:rex_server_unavailable, message}}
 
   @impl true
   def launch(runner, name, cwd, script_path, opts) do
@@ -592,7 +618,8 @@ defmodule Shuttle.Terminal.Rex do
   defp reveal_session(runner, sid, wid) do
     alias Shuttle.OpenTrace
 
-    with {:ok, client} <- OpenTrace.step(:app_client, fn -> ensure_app_client(runner) end),
+    with :ok <- local_app_supported(),
+         {:ok, client} <- OpenTrace.step(:app_client, fn -> ensure_app_client(runner) end),
          {:ok, _} <- OpenTrace.step(:select, fn -> Rex.select(runner, client, sid, wid) end),
          {_, 0} <-
            OpenTrace.step(:activate, fn ->
@@ -743,6 +770,14 @@ defmodule Shuttle.Terminal.Rex do
            end) do
       {:ok, b["session_id"]}
     end
+  end
+
+  defp local_app_supported do
+    if Rex.macos?(),
+      do: :ok,
+      else:
+        {:error,
+         {:unknown, "Opening a Rex app is supported only on macOS; connect with a Rex client."}}
   end
 
   defp ensure_app_client(runner) do

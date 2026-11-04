@@ -61,6 +61,11 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   Each constitution family has one session and each worker or viewer has one window; only block labels retain worker names for recovery.
   Family placement is fixed at launch, and closing a worker removes its window, then its session only if empty and daemon-created.
   A Rex host also observes and stops existing tmux workers when tmux is available.
+  On Linux, `bin/rex-install` installs the checksum-verified snapshot rootlessly; `"terminal": "rex"` selects it in `host.json`.
+  Shuttle starts a missing server on `unix://<data dir>/rex/server.sock` with state in `<data dir>/rex/state`, requesting the Tailscale-identified port 7297 listener and falling back to local-only when startup fails.
+  `SHUTTLE_REX_SERVER` wins over that endpoint or macOS discovery, and workers inherit it.
+  macOS app activation runs only on macOS.
+  Shuttle never stops the server: daemon restarts and CLI installation preserve sessions; `rex server stop` ends every session.
 - **Execution backends own conversations; shuttle owns task assignment and observation.**
   Claude, Codex and Pi workers use the selected terminal backend. Existing
   conversations retain their native identity across daemon restarts; a closed

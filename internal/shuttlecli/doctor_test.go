@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,7 @@ func TestDoctorRexReceipt(t *testing.T) {
 			env.Set("SHUTTLE_REX_BIN", bin)
 			env.Set("SHUTTLE_REX_SERVER", "unix:///doctor-test.sock")
 			a := newApp(env)
+			a.hostGOOS = "darwin"
 			rec := a.collectRexReceipt()
 			if rec == nil || rec.Status != tc.want || rec.Reachable != tc.reachable || rec.AppClient != tc.app || (rec.Warning != "") != tc.warning {
 				t.Fatalf("Rex receipt = %+v", rec)
@@ -99,7 +101,9 @@ func TestDoctorRexMissingBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	env.Set("SHUTTLE_REX_BIN", "/does-not-exist/rex")
-	rec := newApp(env).collectRexReceipt()
+	a := newApp(env)
+	a.rexTailnetListener = func() bool { return false }
+	rec := a.collectRexReceipt()
 	if rec == nil || rec.Status != receiptMissing || rec.Repair == "" || rec.Reachable {
 		t.Fatalf("missing Rex binary = %+v", rec)
 	}
@@ -304,6 +308,68 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			}
 			if tc.name == "healthy" && (got.TailnetDial == nil || !got.TailnetDial.Configured || got.TailnetDial.Socket != "/run/tailscale.sock" || len(got.TailnetDial.Bridges) != 1 || got.TailnetDial.Bridges[0].Status != "ready") {
 				t.Fatalf("version tailnet dial fields = %+v", got.TailnetDial)
+			}
+		})
+	}
+}
+
+func TestDoctorLinuxRexReceipt(t *testing.T) {
+	t.Parallel()
+	for _, up := range []bool{false, true} {
+		t.Run(fmt.Sprint(up), func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			if err := os.WriteFile(env.Getenv("SHUTTLE_HOST_CONFIG_FILE"), []byte(`{"terminal":"rex"}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(t.TempDir(), "rex")
+			sysenvtest.LinkScript(t, bin, `#!/bin/sh
+case "$*" in
+ *'whoami --json') echo '{"rex_version":"linux-test"}' ;;
+ *) exit 99 ;;
+esac
+`)
+			env.Set("SHUTTLE_REX_BIN", bin)
+			a := newApp(env)
+			a.hostGOOS = "linux"
+			a.rexTailnetListener = func() bool { return up }
+			rec := a.collectRexReceipt()
+			if rec.Status != receiptHealthy || !rec.Reachable || rec.Version != "linux-test" || rec.TailnetListener == nil || *rec.TailnetListener != up || rec.Warning != "" || rec.Repair != "" || len(rec.Privacy) != 0 {
+				t.Fatalf("Linux receipt: %+v", rec)
+			}
+			var stdout bytes.Buffer
+			env.Stdout = &stdout
+			a.printRexReceipt(rec)
+			if !strings.Contains(stdout.String(), fmt.Sprintf("tailnet listener :7297=%t", up)) || strings.Contains(stdout.String(), "app client") || strings.Contains(stdout.String(), "Full Disk") {
+				t.Fatal(stdout.String())
+			}
+		})
+	}
+}
+
+func TestRexTailnetListenerProbe(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		code int
+		body string
+		want bool
+	}{
+		{"Rex gate", 403, `{"error":"connection was not classified by its listener"}`, true},
+		{"other forbidden", 403, `{"error":"forbidden"}`, false},
+		{"other service", 200, `{}`, false},
+		{"invalid response", 403, `not json`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(tc.code); fmt.Fprint(w, tc.body) }))
+			defer srv.Close()
+			if got := probeRexTailnetListener(srv.URL); got != tc.want {
+				t.Fatalf("probe = %t", got)
+			}
+			srv.Close()
+			if probeRexTailnetListener(srv.URL) {
+				t.Fatal("closed listener reported up")
 			}
 		})
 	}

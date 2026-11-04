@@ -298,3 +298,43 @@ func TestRexBindingReadAndTerminalObservations(t *testing.T) {
 		}
 	}
 }
+
+func TestRexEndpointParity(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("../../daemon/test/fixtures/rex/endpoints.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct{ Name, OS, Home, Data, Override, Want string }
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			env.Set("HOME", tc.Home)
+			env.Set("SHUTTLE_DATA_DIR", tc.Data)
+			env.Set("SHUTTLE_REX_SERVER", tc.Override)
+			a := newApp(env)
+			a.hostGOOS = tc.OS
+			got, err := a.rexServer()
+			if err != nil || got != tc.Want {
+				t.Fatalf("endpoint = %q, %v; want %q", got, err, tc.Want)
+			}
+			// Check the command actually uses the resolved endpoint with autostart off.
+			bin := filepath.Join(t.TempDir(), "rex")
+			sysenvtest.LinkScript(t, bin, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+			env.Set("SHUTTLE_REX_BIN", bin)
+			out, err := (&rexTerminal{a: a}).command("", "whoami", "--json")
+			want := "--autostart=false\n--timeout\n5s\n"
+			if tc.Want != "" {
+				want += "-S\n" + tc.Want + "\n"
+			}
+			want += "whoami\n--json\n"
+			if err != nil || string(out) != want {
+				t.Fatalf("command: %q, %v; want %q", out, err, want)
+			}
+		})
+	}
+}

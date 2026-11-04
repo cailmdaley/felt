@@ -714,12 +714,45 @@ If you move the release manually, select its new absolute path with `shuttle dae
 
 ## Rex terminal backend
 
-On a macOS host with Rex installed, add `"terminal": "rex"` to `~/.config/shuttle/host.json`, preserving its other keys.
+On macOS or Linux, add `"terminal": "rex"` to `~/.config/shuttle/host.json`, preserving its other keys.
 The default is `"tmux"`; invalid values prevent daemon startup, and a change takes effect on restart.
+
+### Linux
+
+Run `bin/rex-install` from the checkout to install the latest Linux snapshot into `~/.local/bin/rex`, without root or jq.
+It supports amd64 and arm64, verifies the release API's SHA-256 checksum, and replaces only the executable.
+Keep `~/.local/bin` on the daemon's PATH, or set `SHUTTLE_REX_BIN` to the executable's absolute path.
+The installer never starts, stops or upgrades a running server.
+
+When a worker needs Rex and its server is absent, Shuttle starts a detached server on `unix://<data dir>/rex/server.sock` with state in `<data dir>/rex/state`.
+The data directory is `$SHUTTLE_DATA_DIR`, defaulting to `~/.shuttle`; its `rex` directory has mode 0700.
+This socket does not depend on `$XDG_RUNTIME_DIR` surviving logout.
+Shuttle requests `--extra-listen tailnet://:7297` and passes the private tailscaled socket resolved from the remotes configuration, or uses the system tailscaled.
+The listener admits Tailscale-identified callers; an ordinary loopback caller is refused, including another user on a shared host.
+If that start fails, Shuttle logs the failure and retries without the tailnet listener so local workers don't depend on Tailscale.
+A running server retains its configuration; Shuttle never restarts it to add a listener.
+
+Run `shuttle doctor` to inspect server reachability, the running server's version, and the port 7297 listener.
+The listener check recognizes Rex's loopback refusal; it doesn't verify reachability from another tailnet host.
+A missing listener doesn't prevent local work.
+Linux diagnostics don't check Apple privacy grants or require an app client.
+Opening a local Rex app through Shuttle is macOS-only; use a Rex client to reach a Linux server.
+
+### macOS
+
 Keep the Rex app installed, grant **Rex Server** Full Disk Access in macOS Privacy & Security, and enable Remote Control in the Rex app settings so Shuttle can select sessions.
+The app and launchd own the server; Shuttle opens the app when its server is absent.
 Run `shuttle doctor` to inspect Rex reachability, its app client and privacy status; Full Disk Access is a warning, not a dispatch gate.
 
-Rex holds worker sessions independently of the daemon; stopping its server ends those sessions.
+### Endpoints and session lifetime
+
+`SHUTTLE_REX_SERVER` overrides server selection in both the daemon and CLI.
+Without it, Linux uses the Shuttle-owned socket and macOS uses Rex's discovery.
+Workers inherit the selected endpoint, and ordinary Rex requests always disable autostart.
+
+Rex holds worker sessions independently of the daemon, so daemon restarts and CLI installation leave them running.
+Shuttle only starts missing servers; it never stops a Rex server.
+`rex server stop` ends **every session** on that server, and a running server keeps its version until it stops.
 Shuttle observes existing tmux workers on a Rex host when tmux is available, but launches new terminal workers in Rex.
 Claude Remote Control and Hark meetings still use tmux for retained panes and session options.
 On macOS, their tmux anchor is launched through Rex on a Rex host and through Kitty on a tmux host.

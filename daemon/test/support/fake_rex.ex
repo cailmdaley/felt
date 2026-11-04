@@ -53,11 +53,12 @@ defmodule Shuttle.Test.FakeRex do
   defp request("open", args, _), do: {"open", args, nil}
 
   defp request(_, args, opts) do
-    args = Enum.drop_while(args, &(&1 not in ["api", "whoami", "client", "send-key"]))
+    args = Enum.drop_while(args, &(&1 not in ["api", "whoami", "client", "send-key", "server"]))
 
     case args do
       ["api", "call", "-s", sid, method, "-"] -> {method, Jason.decode!(opts[:input]), sid}
       ["api", "call", method, "-"] -> {method, Jason.decode!(opts[:input]), nil}
+      ["server", "start" | args] -> {"server.start", args, nil}
       ["whoami", "--json"] -> {"whoami", %{}, nil}
       ["client", "ls", "--json"] -> {"client.list", %{}, nil}
       ["send-key", "-s", sid, "-b", bid, key] -> {"send-key", %{bid: bid, key: key}, sid}
@@ -69,6 +70,10 @@ defmodule Shuttle.Test.FakeRex do
 
   defp run("ps", _, _, state), do: {{"", 0}, state}
   defp run("whoami", _, _, state), do: {fixture("whoami"), state}
+
+  defp run("server.start", _, _, state),
+    do: {{"started", 0}, %{state | replies: Map.delete(state.replies, "whoami")}}
+
   defp run("open", _, _, state), do: {{"", 0}, state}
   defp run("client.list", _, _, state), do: {%{"clients" => state.clients}, state}
   defp run("client.perform", _, _, state), do: {%{"performed_by" => "client:app"}, state}

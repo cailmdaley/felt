@@ -6,10 +6,35 @@ defmodule Shuttle.RexTest do
   setup %{tmp_dir: dir} do
     Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
     Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
-    Env.put_env("SHUTTLE_REX_SERVER", "unix:///env.sock")
+    Env.delete_env("SHUTTLE_REX_SERVER")
     Env.put_app_env(:rex_server, "unix:///scope.sock")
     Env.put_env("SHUTTLE_DATA_DIR", dir)
     :ok
+  end
+
+  test "endpoint rule agrees with the CLI and is exported into workers" do
+    Env.delete_app_env(:rex_server)
+
+    for c <- FakeRex.fixture("endpoints") do
+      Env.put_app_env(:os_type, {:unix, if(c["os"] == "darwin", do: :darwin, else: :linux)})
+      Env.put_env("HOME", c["home"])
+      Env.put_env("SHUTTLE_DATA_DIR", c["data"])
+
+      if c["override"] == "",
+        do: Env.delete_env("SHUTTLE_REX_SERVER"),
+        else: Env.put_env("SHUTTLE_REX_SERVER", c["override"])
+
+      assert (Rex.server() || "") == c["want"], c["name"]
+      assert Enum.member?(Rex.flags(), "-S") == (c["want"] != "")
+      script = Rex.environment_script() <> "printf '%s' \"${SHUTTLE_REX_SERVER-}\""
+
+      assert {output, 0} =
+               System.cmd("/bin/sh", ["-c", script],
+                 env: [{"SHUTTLE_REX_SERVER", "wrong-server"}]
+               )
+
+      assert output == c["want"]
+    end
   end
 
   test "Rex fixtures use synthetic host identity and environment paths" do
@@ -97,7 +122,7 @@ defmodule Shuttle.RexTest do
     assert Jason.decode!(opts[:input]) == %{}
     assert opts[:input_eof]
     assert opts[:timeout_ms] == 6_000
-    Env.delete_app_env(:rex_server)
+    Env.put_env("SHUTTLE_REX_SERVER", "unix:///env.sock")
     assert List.last(Rex.flags()) == "unix:///env.sock"
   end
 

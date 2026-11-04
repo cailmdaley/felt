@@ -24,6 +24,33 @@ defmodule Shuttle.Terminal.RexRealTest do
     {:ok, root: root}
   end
 
+  test "non-macOS readiness starts the default endpoint and preserves the server across calls", %{
+    root: root
+  } do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    Env.put_app_env(:tailscale_socket, Path.join(root, "absent-tailscaled.sock"))
+    Env.delete_app_env(:rex_server)
+    Env.delete_env("SHUTTLE_REX_SERVER")
+    Env.put_env("SHUTTLE_DATA_DIR", root)
+    endpoint = Rex.server()
+    assert endpoint == "unix://" <> Path.join(root, "rex/server.sock")
+    executable = Rex.bin()
+
+    on_exit(fn ->
+      # This server and its state belong only to this test.
+      System.cmd(executable, ["--autostart=false", "-S", endpoint, "server", "stop"],
+        stderr_to_stdout: true
+      )
+    end)
+
+    assert ExUnit.CaptureLog.capture_log(fn -> assert :ok = Backend.ensure_ready(@runner) end) =~
+             "local-only"
+
+    assert {:ok, %{"instance_id" => instance}} = Rex.call(@runner, "server.status", %{})
+    assert :ok = Backend.ensure_ready(@runner)
+    assert {:ok, %{"instance_id" => ^instance}} = Rex.call(@runner, "server.status", %{})
+  end
+
   test "isolated launch, immutable binding, environment, bracketed paste, native rename and stop",
        %{root: root} do
     name = "probe-r3-#{System.unique_integer([:positive])}-shuttle"

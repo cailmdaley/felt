@@ -19,11 +19,24 @@ defmodule Shuttle.Rex do
     end
   end
 
+  def macos?, do: (Env.app(:os_type) || :os.type()) == {:unix, :darwin}
+
+  def server do
+    case Env.get("SHUTTLE_REX_SERVER") do
+      value when value in [nil, ""] ->
+        Env.app(:rex_server) ||
+          if(!macos?(), do: "unix://" <> Path.join(Shuttle.data_dir(), "rex/server.sock"))
+
+      endpoint ->
+        endpoint
+    end
+  end
+
   def flags do
     ["--autostart=false", "--timeout", "5s"] ++
-      case Env.app(:rex_server) || Env.get("SHUTTLE_REX_SERVER") do
+      case server() do
         nil -> []
-        server -> ["-S", server]
+        endpoint -> ["-S", endpoint]
       end
   end
 

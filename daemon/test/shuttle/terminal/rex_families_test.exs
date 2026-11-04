@@ -7,6 +7,7 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
   @root "work/design/family"
 
   setup %{tmp_dir: dir} do
+    Env.put_app_env(:os_type, {:unix, :darwin})
     Env.put_env("SHUTTLE_DATA_DIR", dir)
     Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
     Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
