@@ -17,6 +17,50 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
     :ok
   end
 
+  test "a new server instance retires restored worker and viewer windows before recovery" do
+    assert :ok = launch("a", @root <> "/a")
+    assert {:ok, sid} = Backend.viewer(FakeRex, "b@remote", ["sleep", "60"], fiber: @root <> "/b")
+    assert {:ok, before} = RexBindings.read()
+    assert before["instance"] == FakeRex.fixture("whoami")["instance_id"]
+
+    FakeRex.reply(
+      "whoami",
+      {Jason.encode!(Map.put(FakeRex.fixture("whoami"), "instance_id", "new-instance")), 0}
+    )
+
+    assert {:ok, []} = Backend.list(FakeRex)
+
+    assert {:ok, %{"instance" => "new-instance", "bindings" => %{}, "viewers" => %{}}} =
+             RexBindings.read()
+
+    assert :absent = Backend.probe(FakeRex, "a")
+    refute Map.has_key?(FakeRex.state().sessions, sid)
+    assert :ok = launch("a", @root <> "/a")
+    assert :present = Backend.probe(FakeRex, "a")
+  end
+
+  test "same instance preserves bindings and an unobservable server changes nothing" do
+    assert :ok = launch("a", @root <> "/a")
+    assert {:ok, before} = RexBindings.read()
+    assert :ok = Backend.ensure_ready(FakeRex)
+    assert {:ok, ["a"]} = Backend.list(FakeRex)
+    assert {:ok, ^before} = RexBindings.read()
+    FakeRex.reply("whoami", {"request timed out", :timeout})
+    assert :ok = Backend.ensure_ready(FakeRex)
+    assert {:error, :unknown} = Backend.list(FakeRex)
+    assert {:ok, ^before} = RexBindings.read()
+    assert :present = Backend.probe(FakeRex, "a")
+  end
+
+  test "a document without an instance adopts the live server without retiring windows" do
+    assert :ok = launch("a", @root <> "/a")
+    assert {:ok, before} = RexBindings.read()
+    File.write!(RexBindings.path(), Jason.encode!(Map.delete(before, "instance")))
+    assert :ok = Backend.ensure_ready(FakeRex)
+    assert {:ok, ^before} = RexBindings.read()
+    assert :present = Backend.probe(FakeRex, "a")
+  end
+
   test "family resolution uses constitution ancestors even with no live root" do
     rows = [
       %{"id" => "work", "tags" => []},

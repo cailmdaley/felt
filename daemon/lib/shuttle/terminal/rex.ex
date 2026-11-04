@@ -44,19 +44,75 @@ defmodule Shuttle.Terminal.Rex do
 
   defp ensure_server(runner) do
     case Rex.whoami(runner) do
-      {:ok, _} ->
-        :ok
+      {:ok, identity} ->
+        reconcile(runner, identity)
 
       {:error, :server_absent} ->
         with :ok <- start_server(runner),
-             {:ok, _} <- await(fn -> Rex.whoami(runner) end, 10_000) do
-          :ok
+             {:ok, identity} <- await(fn -> Rex.whoami(runner) end, 10_000) do
+          reconcile(runner, identity)
         else
           error -> unavailable("Rex server is unavailable: #{inspect(error)}")
         end
 
       {:error, _} ->
         :ok
+    end
+  end
+
+  defp reconcile(runner, %{"instance_id" => instance}) when is_binary(instance) do
+    Shuttle.Terminal.with_lock({__MODULE__, Bindings.path(), :instance}, fn ->
+      with {:ok, doc} <- Bindings.read(),
+           :ok <- reconcile_instance(runner, doc, instance) do
+        if doc["server"], do: Bindings.set_instance(instance), else: :ok
+      end
+    end)
+  end
+
+  defp reconcile(_, _), do: :ok
+
+  defp reconcile_instance(_, %{"instance" => instance}, instance), do: :ok
+  defp reconcile_instance(_, doc, _) when not is_map_key(doc, "instance"), do: :ok
+  defp reconcile_instance(_, %{"instance" => nil}, _), do: :ok
+
+  defp reconcile_instance(runner, doc, _) do
+    Enum.reduce_while(["bindings", "viewers"], :ok, fn kind, :ok ->
+      Enum.reduce_while(doc[kind] || %{}, :ok, fn {key, binding}, :ok ->
+        result =
+          with :ok <- retire_stale_window(runner, binding) do
+            if kind == "bindings",
+              do: Bindings.delete(key, binding),
+              else: Bindings.delete_viewer(key, binding)
+          end
+
+        if result == :ok, do: {:cont, :ok}, else: {:halt, result}
+      end)
+      |> then(fn result -> if result == :ok, do: {:cont, :ok}, else: {:halt, result} end)
+    end)
+  end
+
+  defp retire_stale_window(runner, %{"window_id" => wid} = binding) when is_binary(wid),
+    do: retire_worker_window(runner, binding)
+
+  defp retire_stale_window(runner, binding) do
+    case Rex.blocks(runner, binding["session_id"]) do
+      {:ok, blocks} ->
+        case Enum.find(blocks, &(&1["block_id"] == binding["block_id"])) do
+          nil ->
+            :ok
+
+          %{"window_id" => wid} when is_binary(wid) ->
+            retire_worker_window(runner, Map.put(binding, "window_id", wid))
+
+          _ ->
+            {:error, :unknown}
+        end
+
+      {:error, :not_found} ->
+        :ok
+
+      error ->
+        error
     end
   end
 
@@ -100,12 +156,14 @@ defmodule Shuttle.Terminal.Rex do
   @impl true
   def launch(runner, name, cwd, script_path, opts) do
     with :ok <- valid_label(name),
-         {:ok, %{"host_id" => server}} <- Rex.whoami(runner),
+         {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
+         :ok <- reconcile(runner, identity),
          {:ok, family} <- Tree.resolve(opts[:fiber] || Tree.fiber_for(name), opts) do
       spec = create_spec(name, cwd, script_path, opts)
 
       case in_family(runner, family, name, spec, server, fn binding ->
-             Bindings.put(name, binding, server)
+             with :ok <- Bindings.put(name, binding, server),
+                  do: Bindings.set_instance(identity["instance_id"])
            end) do
         {:ok, _} -> :ok
         error -> error
@@ -257,7 +315,9 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def list(runner) do
-    with {:ok, doc} <- Bindings.read(),
+    with {:ok, identity} <- Rex.whoami(runner),
+         :ok <- reconcile(runner, identity),
+         {:ok, doc} <- Bindings.read(),
          :ok <- sweep(runner),
          {:ok, sessions} <- Rex.sessions(runner),
          :ok <- prune_bindings(runner, doc, Enum.map(sessions, & &1["session_id"])) do
@@ -717,15 +777,16 @@ defmodule Shuttle.Terminal.Rex do
   defp viewer_locked(runner, key, label, argv, opts) do
     Shuttle.Terminal.with_lock({__MODULE__, :viewer, key}, fn ->
       with :ok <- valid_label(label),
+           {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
+           :ok <- reconcile(runner, identity),
            {:ok, _} <- Rex.sessions(runner),
            :ok <- sweep(runner),
-           {:ok, doc} <- Bindings.read(),
-           {:ok, %{"host_id" => server}} <- Rex.whoami(runner) do
+           {:ok, doc} <- Bindings.read() do
         b = if doc["server"] == server, do: get_in(doc, ["viewers", key])
 
         case viewer_alive(runner, b) do
           {:ok, true} -> {:ok, b["session_id"]}
-          {:ok, false} -> create_viewer(runner, key, label, argv, opts, b, server)
+          {:ok, false} -> create_viewer(runner, key, label, argv, opts, b, server, identity)
           error -> error
         end
       end
@@ -742,7 +803,7 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp create_viewer(runner, key, label, argv, opts, old, server) do
+  defp create_viewer(runner, key, label, argv, opts, old, server, identity) do
     suffix =
       case Regex.run(~r/@([^@]*)$/u, key) do
         [_, host] -> " @" <> host
@@ -765,7 +826,8 @@ defmodule Shuttle.Terminal.Rex do
     with {:ok, family} <- Tree.resolve(opts[:fiber] || (old && old["fiber"]), opts),
          {:ok, b} <-
            in_family(runner, family, key, spec, server, fn b ->
-             Bindings.put_viewer(key, Map.put(b, "suffix", suffix), server)
+             with :ok <- Bindings.put_viewer(key, Map.put(b, "suffix", suffix), server),
+                  do: Bindings.set_instance(identity["instance_id"])
            end) do
       {:ok, b["session_id"]}
     end
@@ -1022,7 +1084,10 @@ defmodule Shuttle.Terminal.Rex do
   defp retire_empty(runner, b), do: destroy_empty(runner, b["session_id"])
 
   defp store(runner, name, b) do
-    with {:ok, %{"host_id" => server}} <- Rex.whoami(runner), do: Bindings.put(name, b, server)
+    with {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
+         :ok <- reconcile(runner, identity),
+         :ok <- Bindings.put(name, b, server),
+         do: Bindings.set_instance(identity["instance_id"])
   end
 
   defp binding(sid, bid),

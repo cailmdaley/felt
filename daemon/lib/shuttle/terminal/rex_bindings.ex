@@ -11,6 +11,10 @@ defmodule Shuttle.Terminal.RexBindings do
     end
   end
 
+  def set_instance(instance) do
+    update(&Map.put(&1, "instance", instance))
+  end
+
   def put(name, binding, server) when is_binary(server) do
     update(fn doc ->
       bindings = if doc["server"] in [nil, server], do: doc["bindings"], else: %{}
