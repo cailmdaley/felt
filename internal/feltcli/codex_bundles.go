@@ -56,6 +56,7 @@ func materializeCodexBundles(current string) error {
 func (a *app) codexBundlesFromList(plugins []receiptInstalledPlugin) ([]ReceiptBundle, bool) {
 	var bundles []ReceiptBundle
 	found := false
+	enabledFound := false
 	seen := map[string]bool{}
 	for _, name := range codexBundleNames {
 		for _, plugin := range plugins {
@@ -67,6 +68,7 @@ func (a *app) codexBundlesFromList(plugins []receiptInstalledPlugin) ([]ReceiptB
 			if !plugin.Enabled {
 				continue
 			}
+			enabledFound = true
 			root, err := a.verifiedCodexBundleRoot(name)
 			if err != nil {
 				bundles = append(bundles, ReceiptBundle{Name: name, Harness: "codex", Enabled: true, Inspection: inspectionConfirmed, Evidence: "codex plugin list and cache", Status: receiptMismatch, Repair: fmt.Sprintf("%v; run `felt setup codex`", err)})
@@ -76,7 +78,7 @@ func (a *app) codexBundlesFromList(plugins []receiptInstalledPlugin) ([]ReceiptB
 			bundles = append(bundles, a.bundleFromActivePlugin("codex", plugin))
 		}
 	}
-	if found {
+	if enabledFound {
 		runtimeDir, err := a.pluginRuntimeDir()
 		if err == nil {
 			expected, present, err := promotedGenerationForVerify(filepath.Join(runtimeDir, pluginCurrentName))
