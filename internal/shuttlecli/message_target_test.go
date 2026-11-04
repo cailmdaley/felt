@@ -561,6 +561,122 @@ func TestResolveMessageTargetFiberWithoutRuntimeSessionIsClear(t *testing.T) {
 
 // A thread created on its owner reaches this host's stores only through Git;
 // until then the owner feed is what makes it addressable by path or UID.
+func TestResolveMessageTargetFreshRemoteWorkerUsesOwnerPeerBeforeLedgerBinding(t *testing.T) {
+	t.Parallel()
+	for _, localView := range []string{"absent", "own-subtree", "other-subtree", "wrong-leaf"} {
+		t.Run(localView, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			const id = "science/team/hub/worker"
+			if localView == "own-subtree" || localView == "other-subtree" {
+				loom, st := newStore(t)
+				seedShuttleRole(t, st, id, felt.StatusActive, map[string]any{"host": "worker-node", "kind": "oneshot"}, nil)
+				seedPlainFiber(t, st, "elsewhere/anchor", "")
+				project := t.TempDir()
+				prefix := "science/team"
+				if localView == "other-subtree" {
+					prefix = "elsewhere"
+				}
+				if err := os.Symlink(filepath.Join(loom, ".felt", filepath.FromSlash(prefix)), filepath.Join(project, ".felt")); err != nil {
+					t.Fatal(err)
+				}
+				isolateMessageFiberStore(env, project)
+			} else if localView == "wrong-leaf" {
+				store := writeMessageTargetFiberWithID(t, "unrelated/worker", "01ARZ3NDEKTSV4RRFFQ69G5FAW", map[string]any{"host": "other-node"})
+				isolateMessageFiberStore(env, store)
+			} else {
+				isolateMessageFiberStore(env, "")
+			}
+			uid := messageTargetFiberUID
+			if localView == "own-subtree" || localView == "other-subtree" {
+				lookup, err := newApp(env).lookupShuttleAddressFibers(id)
+				if err != nil || len(lookup.Fibers) != 1 {
+					t.Fatalf("subtree lookup: %#v, %v", lookup, err)
+				}
+				uid = lookup.Fibers[0].UID
+			}
+			peers, _ := json.Marshal(messaging.Directory{Sessions: []messaging.Session{{
+				Address: "shuttle://worker-node/codex/" + messageTargetSession,
+				Host:    "worker-node", Harness: "codex", ID: messageTargetSession,
+				Fiber: id, FiberUID: uid, State: "hook",
+			}}})
+			ledger, _ := json.Marshal(sessionLedgerResponse{Records: []SessionProvenance{},
+				Origins: map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}}})
+			feed := `{"fibers":[{"origin":"worker-node","fiber":{"id":"` + uid + `","uid":"` + uid + `","slug":"` + id + `","shuttle":{"kind":"oneshot","host":"worker-node"}}}]}`
+			daemonStub(t, env, map[string]http.HandlerFunc{
+				"/api/v1/peers": jsonBody(string(peers)), sessionsCompositePath: jsonBody(string(ledger)),
+				"/api/v1/fibers/composite": jsonBody(feed),
+				"/api/v1/deliver": func(w http.ResponseWriter, r *http.Request) {
+					var request map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&request)
+					if request["fiber_id"] != uid || request["origin"] != "worker-node" {
+						t.Errorf("owner delivery = %#v", request)
+					}
+					w.WriteHeader(http.StatusConflict)
+					fmt.Fprint(w, `{"live":true}`)
+				},
+				"/api/v1/messages": func(w http.ResponseWriter, r *http.Request) {
+					var request messaging.Request
+					_ = json.NewDecoder(r.Body).Decode(&request)
+					if request.Address != "shuttle://worker-node/codex/"+messageTargetSession {
+						t.Errorf("recipient = %s", request.Address)
+					}
+					_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: messaging.StatusAccepted, Transport: "codex-native"})
+				},
+			})
+			for _, target := range []string{id, uid} {
+				got, err := newApp(env).resolveMessageTarget(target)
+				if err != nil {
+					t.Fatalf("fresh remote %s: %v", target, err)
+				}
+				if want := "shuttle://worker-node/codex/" + messageTargetSession; got != want {
+					t.Fatalf("address %q, want %q", got, want)
+				}
+			}
+			if out, _, err := runMessage(t, newApp(env), id, "Read the revised brief"); err != nil || !strings.HasPrefix(out, "accepted ") {
+				t.Fatalf("message to fresh remote worker: %q, %v", out, err)
+			}
+		})
+	}
+}
+
+func TestFreshFiberPeerFallbackRefusesUnverifiedBindings(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"wrong-owner", "wrong-uid", "missing-uid", "multiple-peers", "stale-owner", "different-runtime"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			f := &felt.Felt{ID: "hub/worker", UID: messageTargetFiberUID}
+			block := map[string]any{"host": "worker-node", "kind": "oneshot"}
+			peers := []messaging.Session{{Address: "shuttle://worker-node/pi/worker-A", Fiber: f.ID, FiberUID: f.UID}}
+			origins := map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}}
+			switch scenario {
+			case "wrong-owner":
+				peers[0].Address = "shuttle://another-node/pi/worker-A"
+			case "wrong-uid":
+				peers[0].FiberUID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+			case "missing-uid":
+				peers[0].FiberUID = ""
+			case "multiple-peers":
+				peers = append(peers, messaging.Session{Address: "shuttle://worker-node/pi/worker-B", Fiber: f.ID, FiberUID: f.UID})
+			case "stale-owner":
+				origins["worker-node"] = map[string]any{"stale": true}
+			case "different-runtime":
+				block["runtime"] = map[string]any{"session_uuid": "worker-B"}
+			}
+			if err := f.SetExtraField("shuttle", block); err != nil {
+				t.Fatal(err)
+			}
+			address, err := newApp(testEnv(t)).currentFiberMessageAddress(f, nil, origins, peers)
+			if err == nil {
+				t.Fatalf("%s selected unverified address %q", scenario, address)
+			}
+			if scenario == "multiple-peers" && !strings.Contains(err.Error(), "multiple live peer addresses") {
+				t.Fatalf("ambiguous peers: %v", err)
+			}
+		})
+	}
+}
+
 func TestResolveMessageTargetFiberKnownOnlyToItsOwner(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

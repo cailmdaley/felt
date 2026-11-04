@@ -305,9 +305,10 @@ matches, and a slug naming several fibers is refused with their full paths. A fi
 claim ledger row, which the owning host writes. When the fiber's
 `shuttle.runtime.session_uuid` or another live session registered for the
 fiber differs, the command notes it on stderr and still uses the ledger's
-worker. A fiber with no ledger row, an unavailable ledger, or a stale or
-failing ledger feed from the worker's host or the fiber's owning host is
-refused, since a newer worker there could be missing.
+worker.
+Before a fresh worker has its first ledger row, one live peer on the owning host with the fiber's exact UID can supply its native address.
+Multiple matching peers, an unavailable ledger, or a stale or failing ledger feed are refused, since a newer worker could be missing.
+A fiber absent from local stores can resolve by exact path or UID through the owner's live feed, without waiting for Git sync.
 A managed Codex ledger row on either surface keeps its transcript id in `session` and its address id in `thread_id`.
 A hook-only CLI peer can establish the ledger session's exact address for context delivery even without a separate thread mapping.
 A Codex row whose thread identity cannot otherwise be established is refused.

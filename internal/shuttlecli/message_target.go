@@ -116,8 +116,12 @@ func (a *app) resolveMessageTargetOnce(target string) (string, error) {
 		}
 	}
 	var feedErr error
-	if len(sessionCandidates) == 0 && fiberLookup.candidateCount() == 0 && !fiberLookup.refused() {
-		fiberLookup.Fibers, feedErr = a.ownerFeedFibers(target)
+	if len(sessionCandidates) == 0 && len(fiberLookup.Fibers) == 0 && len(fiberLookup.Ambiguous) == 0 {
+		var ownerFibers []*felt.Felt
+		ownerFibers, feedErr = a.ownerFeedFibers(target)
+		if len(ownerFibers) > 0 {
+			fiberLookup = addressFiberLookup{Fibers: ownerFibers}
+		}
 	}
 	sessionCandidates = uniqueMessageCandidates(sessionCandidates)
 	if len(unmappedLedger) > 0 {
@@ -270,7 +274,8 @@ func uniqueMessageCandidates(candidates []messageTargetCandidate) []messageTarge
 // the owning host writes it and the composite ledger fetches it live. The
 // fiber's git copy of shuttle.runtime.session_uuid lags until that host pushes,
 // so a disagreement is reported on stderr rather than refused. Resolution
-// fails closed when the ledger has no row for the fiber, when the ledger feed
+// uses a unique owner peer with the same UID before the first ledger binding.
+// It fails closed when neither source has a binding, when the ledger feed
 // from the worker's host or the fiber's owning host is not fresh (a newer
 // dispatch there could be missing), when a Codex worker's thread id cannot be
 // established, or when the peer mapping is ambiguous.
@@ -289,6 +294,18 @@ func (a *app) currentFiberMessageAddress(f *felt.Felt, records []SessionProvenan
 		return "", err
 	}
 	if worker == nil {
+		// A fresh worker can register its native address before its first
+		// ledger binding. Only the owner's exact fiber registration can fill
+		// that interval; a stale owner feed cannot establish absence.
+		if problem := ledgerOriginProblem(origins, block.Host); problem == "" {
+			candidates := liveFiberPeerCandidates(f, block.Host, runtimeID, peers)
+			if len(candidates) == 1 {
+				return candidates[0].Address, nil
+			}
+			if len(candidates) > 1 {
+				return "", fmt.Errorf("fiber %q maps to multiple live peer addresses: %s", fiberName, messageTargetLabels(candidates, addressFiberLookup{}, nil))
+			}
+		}
 		if runtimeID == "" {
 			return "", fmt.Errorf("fiber %q has no recorded worker session (no session-ledger row and shuttle.runtime.session_uuid is empty)", fiberName)
 		}
@@ -320,6 +337,25 @@ func (a *app) currentFiberMessageAddress(f *felt.Felt, records []SessionProvenan
 	}
 	a.noteFiberWorkerDisagreements(f, runtimeID, worker, address, peers)
 	return address, nil
+}
+
+func liveFiberPeerCandidates(f *felt.Felt, owner, runtimeID string, peers []messaging.Session) []messageTargetCandidate {
+	var candidates []messageTargetCandidate
+	for _, peer := range peers {
+		address, err := messaging.ParseAddress(peer.Address)
+		if err != nil || address.Host != owner || !peerSessionMatchesFiber(peer, f.ID, f.UID) ||
+			(f.UID != "" && peer.FiberUID != f.UID) {
+			continue
+		}
+		if runtimeID != "" && address.ID != runtimeID && peer.TranscriptID != runtimeID {
+			continue
+		}
+		canonical, err := messaging.FormatAddress(address.Host, address.Harness, address.ID)
+		if err == nil {
+			candidates = append(candidates, messageTargetCandidate{Address: canonical, Fiber: f.ID})
+		}
+	}
+	return uniqueMessageCandidates(candidates)
 }
 
 // ledgerOriginProblem describes why the composite ledger's feed from host is

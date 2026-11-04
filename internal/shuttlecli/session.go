@@ -61,8 +61,16 @@ func (a *app) lookupShuttleAddressFibers(query string) (addressFiberLookup, erro
 	lookup := addressFiberLookup{}
 	seen := map[string]bool{}
 	for _, store := range stores {
-		f, err := felt.NewStorage(store).FindMetadataWithoutGuessing("", query)
+		storage := felt.NamespaceStorage(felt.NewStorage(store))
+		ref, err := felt.ResolveExactRef(storage, "", query)
+		var f *felt.Felt
 		if err == nil {
+			f, err = ref.Storage.FindMetadataInScope("", ref.ID)
+		}
+		if err == nil {
+			if canonical, canonicalErr := a.canonicalFiberID(f.Path); canonicalErr == nil {
+				f.ID = canonical
+			}
 			key := f.Path
 			if key == "" {
 				key = store + "\x00" + f.ID
