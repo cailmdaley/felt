@@ -252,7 +252,8 @@ defmodule ShuttleWeb.FeltEditControllerTest do
             if [ "$next" = 1 ]; then store="$a"; next=0; fi
             if [ "$a" = "-C" ]; then next=1; fi
           done
-          printf '{"id":"tests/remote-tags","path":"%s/.felt/tests/remote-tags/remote-tags.md"}\\n' "$store"
+          physical="$(cd "$store/.felt" && pwd -P)"
+          printf '{"id":"tests/remote-tags","path":"%s/tests/remote-tags/remote-tags.md"}\\n' "$physical"
           ;;
         *)
           printf '%s\\n' "$@" > "$FELT_ARGS_FILE"
