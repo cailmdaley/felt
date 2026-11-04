@@ -3,10 +3,11 @@ defmodule ShuttleWeb.DeliverController do
   Agent-API endpoint: POST /api/v1/deliver
 
   Body `{fiber_id, text, from?, origin?, context_only?, message_id?, wake?,
-  unless_live?}`. Puts `text` in front of the fiber's
+  unless_live?, resume_mode?}`. Puts `text` in front of the fiber's
   worker on its owning host (`Shuttle.Delivery`): a live worker is messaged, a
   dormant one resumes (or dispatches, if it never ran) with `text` as its From
-  User. A request carrying `origin` is forwarded to that owner's identical
+  User. `resume_mode` (`"fresh"` or `"previous"`) names that choice instead, as
+  in `Shuttle.Delivery`. A request carrying `origin` is forwarded to that owner's identical
   route.
 
   With `context_only` (and a `message_id`), `text` is queued in the fiber's
@@ -44,6 +45,7 @@ defmodule ShuttleWeb.DeliverController do
           "notify_when_idle",
           "notify_wake",
           "reply_to",
+          "resume_mode",
           "sender_proof",
           "wake",
           "unless_live",
@@ -114,7 +116,8 @@ defmodule ShuttleWeb.DeliverController do
                 from: sender,
                 from_claim: claim,
                 message_id: context["message_id"],
-                daemon_sender: context["daemon_sender"] == true
+                daemon_sender: context["daemon_sender"] == true,
+                resume_mode: resume_mode(context["resume_mode"])
               ]
 
               fiber_id |> Delivery.deliver(text, opts) |> reply(fiber_id)
@@ -122,6 +125,9 @@ defmodule ShuttleWeb.DeliverController do
         end
     end
   end
+
+  defp resume_mode(mode) when mode in ["fresh", "previous"], do: mode
+  defp resume_mode(_mode), do: nil
 
   defp verified_sender(context, from, text, consume) do
     request = %{

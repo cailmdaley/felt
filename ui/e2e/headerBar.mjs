@@ -437,7 +437,7 @@ export function registerHeaderBarJourneys(test) {
       const arm = composer.locator('.kbn-ctl-meet-arm')
       const geometry = await composer.evaluate(el => {
         const rect = el.getBoundingClientRect()
-        const controls = [...el.querySelectorAll('.kbn-ctl-meet-arm, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => {
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet-arm, .kbn-ctl-meet-audio, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => {
           const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, center: r.top + r.height / 2 }
         })
         return { left: rect.left, right: rect.right, controls }
@@ -458,17 +458,17 @@ export function registerHeaderBarJourneys(test) {
       assert.equal(await arm.getAttribute('aria-pressed'), 'true')
       const armed = await composer.evaluate(el => {
         const box = el.getBoundingClientRect()
-        const controls = [...el.querySelectorAll('.kbn-ctl-meet-arm, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
-        return { fits: controls.every(r => r.left >= box.left && r.right <= box.right), centers: controls.map(r => r.top + r.height / 2), startVisible: el.querySelector('.kbn-ctl-meet-primary').checkVisibility(), armedChipHidden: el.querySelector('.kbn-ctl-meet-chip').hidden }
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet-arm, .kbn-ctl-meet-audio, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
+        return { fits: controls.every(r => r.left >= box.left && r.right <= box.right), centers: controls.map(r => r.top + r.height / 2), armedChipHidden: el.querySelector('.kbn-ctl-meet-chip').hidden }
       })
-      assert.ok(armed.startVisible && armed.armedChipHidden && armed.fits, `armed actions remain visible inside the composer at ${width}: ${JSON.stringify(armed)}`)
+      assert.ok(armed.armedChipHidden && armed.fits, `armed actions remain visible inside the composer at ${width}: ${JSON.stringify(armed)}`)
       const rows = new Set(armed.centers.map(center => Math.round(center)))
       assert.ok(rows.size <= 2, `armed footer uses at most two rows at ${width}: ${JSON.stringify(armed.centers)}`)
       await arm.click()
       assert.equal(await arm.getAttribute('aria-pressed'), 'false')
     }
   }, { width: 1440, height: 900 })
-  test('A meeting started from the visible composer action stays visible with Stop', async page => {
+  test('A meeting sent from a composer verb stays visible with Stop', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
@@ -479,7 +479,8 @@ export function registerHeaderBarJourneys(test) {
     await openRoot(page)
     const composer = page.locator('.ws-selected .kbn-ctl-composer')
     await composer.locator('.kbn-ctl-meet-arm').click()
-    await composer.getByRole('button', { name: 'Start meeting', exact: true }).click()
+    page.once('dialog', dialog => dialog.accept())
+    await composer.locator('.kbn-ctl-sends .kbn-ctl-send').first().click()
     await page.waitForFunction(() => document.querySelector('.kbn-detail-transcript-meta .kbn-detail-transcript-stop')?.checkVisibility())
     const stop = page.locator('.ws-selected .kbn-detail-transcript-meta .kbn-detail-transcript-stop')
     await stop.waitFor({ state: 'visible' })

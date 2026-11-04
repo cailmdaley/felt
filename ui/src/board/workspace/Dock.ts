@@ -54,6 +54,8 @@ function latestTarget(card: KanbanCard): TranscriptTarget | null {
 }
 
 
+type SessionMode = 'fresh' | 'previous'
+
 function meetingStopVisibility(hasActions: boolean, collapsed: boolean, hosted: boolean): { global: boolean; pane: boolean } {
   return {
     global: hasActions && (!hosted || collapsed),
@@ -68,6 +70,12 @@ export interface MeetingJoinResult {
   delivered: boolean
 }
 
+/** Which session takes a joined meeting, and whether it records system audio. */
+export interface MeetingJoinOptions {
+  session: SessionMode
+  systemAudio?: boolean
+}
+
 /** The board's meeting control, lent to the dock. */
 export interface MeetingJoinControl {
   /** The selected recorder is available and nothing is recording. */
@@ -79,7 +87,7 @@ export interface MeetingJoinControl {
    *  failure. Called inside the pick's gesture; Phone opens audio before
    *  awaiting `note`. Resolves to the error to show (null once recording
    *  began) and whether the worker received the meeting. */
-  join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>, systemAudio?: boolean): Promise<MeetingJoinResult>
+  join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>, options: MeetingJoinOptions): Promise<MeetingJoinResult>
   /** The meeting the board last observed, if any. */
   current(): MeetingRecord | null
   /** Stop (or dismiss, once failed) the recording: the board's one stop path. */
@@ -467,7 +475,6 @@ export interface DockOptions {
  * drawer only, inside its fiber page.
  */
 export class Dock {
-  meetingSystemAudioEnabled(): boolean { return this.meetingSystemAudio() }
   private readonly bands = new Map<string, Dock>()
   private root: HTMLElement | null = null
   private headRoot: HTMLElement | null = null
@@ -499,8 +506,7 @@ export class Dock {
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
   private meetingArmed: () => boolean = () => false
-  private meetingStart: (() => void) | null = null
-  private meetingSystemAudio: () => boolean = () => true
+  private meetingStart: ((mode: SessionMode, verb: HTMLButtonElement) => void) | null = null
   private dismissParent: (() => boolean) | null = null
   private dismissConversation: (() => boolean) | null = null
   private composerSend: ComposerSend | null = null
@@ -690,7 +696,6 @@ export class Dock {
     this.dismissConversation = this.dismissParent = null
     this.meetingArmed = () => false
     this.meetingStart = null
-    this.meetingSystemAudio = () => true
     for (const dispose of this.composerDisposers.splice(0)) dispose()
     if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
     this.searchDebounce = null
@@ -1089,7 +1094,7 @@ export class Dock {
       button.innerHTML = headerIcon(spec.icon)
       const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = spec.label
       button.append(word)
-      button.addEventListener('click', () => this.el.querySelector<HTMLButtonElement>(spec.verb === 'resume' ? '.kbn-ctl-resume' : '.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)')?.click())
+      button.addEventListener('click', () => this.el.querySelector<HTMLButtonElement>(spec.verb === 'resume' ? '.kbn-ctl-resume' : '.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')?.click())
       sessionActions.append(button)
       return [spec.verb, button] as const
     }))
@@ -1249,7 +1254,7 @@ export class Dock {
       verdict.hidden = !offered.length && !sessionOffered.length
       sessionActions.hidden = !sessionOffered.length
       for (const spec of SESSION_VERBS) sessionButtons.get(spec.verb)!.hidden = !sessionOffered.includes(spec.verb)
-      const freshComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)')
+      const freshComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')
       const resumeComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')
       sessionButtons.get('launch')!.disabled = Boolean(freshComposerButton?.disabled)
       sessionButtons.get('newSession')!.disabled = Boolean(freshComposerButton?.disabled)
@@ -1339,7 +1344,6 @@ export class Dock {
     let busy = false
     const fresh = ctlButton('', 'kbn-ctl-send')
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
-    let meetingStartButton: HTMLButtonElement | undefined
     let meetingControl: HTMLElement | undefined
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
@@ -1352,30 +1356,26 @@ export class Dock {
       const live = resumable && hasLiveWorker(card)
       const warmUntil = resumable && !live ? this.transcriptBand?.cacheWarm(card.sessionUuid!) : undefined
       const armed = this.meetingArmed()
-      const freshLabel = armed ? 'New session ⌥↵' : live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
-      const resumeLabel = armed ? (live ? 'Send' : 'Resume') : live ? 'Send ↵' : 'Resume ⌥↵'
+      const withMeeting = armed ? ' with a meeting' : ''
+      const freshLabel = live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
+      const resumeLabel = live ? 'Send ↵' : 'Resume ⌥↵'
       this.paintLabel(fresh, freshLabel)
       this.paintLabel(resume, resumeLabel)
-      if (meetingStartButton) this.paintLabel(meetingStartButton, 'Start meeting ↵')
-      fresh.classList.toggle('kbn-ctl-secondary', live || armed)
-      fresh.title = armed ? `Start a new session (⌥↵)${live ? ', cutting the live worker' : ''}` : live ? 'Start a new session, cutting the live worker (⌥↵)' : resumable ? 'Start a new session (↵)' : ''
-      if (meetingStartButton) meetingStartButton.title = 'Start meeting (↵)'
-      resume.classList.toggle('kbn-ctl-secondary', armed || (resumable && !live))
-      resume.title = armed ? (live ? 'Send the message to the live worker' : 'Resume the previous session')
-        : live ? 'Send the message to the live worker (↵)'
-        : resumable ? `Resume the previous session (⌥↵)${warmUntil === undefined ? '' : ` · cache warm until ${clockTime(warmUntil)}`}` : ''
+      fresh.classList.toggle('kbn-ctl-secondary', live)
+      fresh.title = live ? `Start a new session${withMeeting}, cutting the live worker (⌥↵)` : resumable ? `Start a new session${withMeeting} (↵)` : armed ? 'Start with a meeting (↵)' : ''
+      resume.classList.toggle('kbn-ctl-secondary', resumable && !live)
+      resume.title = live ? (armed ? 'Send the meeting to the live worker (↵)' : 'Send the message to the live worker (↵)')
+        : resumable ? `Resume the previous session${withMeeting} (⌥↵)${warmUntil === undefined ? '' : ` · cache warm until ${clockTime(warmUntil)}`}` : ''
       if (warmUntil === undefined) delete resume.dataset.cache; else resume.dataset.cache = 'warm'
       resume.hidden = false
       const ordered = live ? [resume, fresh] : [fresh, resume]
       const controls = [...(meetingControl ? [meetingControl] : []), ...ordered]
       if (controls.some((control, index) => sends.children[index] !== control) || sends.children.length !== controls.length) sends.replaceChildren(...controls)
-      if (meetingStartButton) meetingStartButton.hidden = !armed
-      box.classList.toggle('kbn-ctl-composer-meeting-armed', armed)
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
-      const idle = hasLiveWorker(card) && message.value.trim() === '' && images.list.length === 0
+      const idle = hasLiveWorker(card) && !armed && message.value.trim() === '' && images.list.length === 0
       if (!busy && !this.blockedDispatches.has(resume)) resume.disabled = idle || !resumable
-      message.placeholder = this.meetingArmed() ? 'A note for the meeting (optional)'
+      message.placeholder = armed ? 'A note for the meeting (optional)'
         : ''
       this.actPaint?.()
     }
@@ -1383,7 +1383,7 @@ export class Dock {
     message.addEventListener('input', () => this.composerPaint?.())
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
       busy = on
-      for (const verb of [fresh, resume, ...(meetingStartButton ? [meetingStartButton] : [])]) if (on || verb !== except) verb.disabled = on
+      for (const verb of [fresh, resume]) if (on || verb !== except) verb.disabled = on
       if (!on) this.composerPaint?.()
       else this.actPaint?.()
       for (const control of err.querySelectorAll<HTMLInputElement | HTMLButtonElement>('.kbn-start-prompt input, .kbn-start-prompt button')) control.disabled = on
@@ -1480,13 +1480,10 @@ export class Dock {
       void this.meeting?.stop?.(current)
     })
     this.meetingGlobalStop = meetingStop
-    const meeting = this.meeting ? this.buildMeeting(card, err, send, (armed, controls) => {
-      if (!armed && meetingStartButton) controls.append(meetingStartButton)
+    meetingControl = this.meeting ? this.buildMeeting(card, err, send, () => {
       this.composerPaint?.()
       fit()
-    }) : null
-    meetingStartButton = meeting?.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start') ?? undefined
-    meetingControl = meeting ?? undefined
+    }) : undefined
     this.composerPaint()
     foot.append(meetChip, meetingStop)
     foot.append(sends)
@@ -1500,21 +1497,22 @@ export class Dock {
       const parked = send.draftKey()
       this.showStartPrompt(err, card, pending.body, () => send.compose(parked), 'fresh', fresh)
     }
-    fresh.addEventListener('click', (e) => {
-      e.stopPropagation()
-      void this.runRequeue(card, send.compose, 'fresh', fresh, err).then((ok) => ok && send.sent())
-    })
-    // A message handed to a live worker shows in the chat at once; the transcript records it only when the worker reads it.
-    const landed = (ok: boolean, mode: 'fresh' | 'previous', live: boolean): void => {
-      if (!ok) return
-      if (mode === 'previous' && live && composed) this.transcriptBand?.pend(composed.text)
-      send.sent()
-    }
-    resume.addEventListener('click', (e) => {
-      e.stopPropagation()
+    // Every composer verb goes through here; an armed meeting travels with it.
+    const dispatch = (mode: SessionMode, verb: HTMLButtonElement): void => {
+      if (this.meetingArmed()) {
+        if (!this.blockedDispatches.has(verb)) this.meetingStart?.(mode, verb)
+        return
+      }
       const live = hasLiveWorker(card)
-      void this.runRequeue(card, send.compose, 'previous', resume, err).then((ok) => landed(ok, 'previous', live))
-    })
+      void this.runRequeue(card, send.compose, mode, verb, err).then(ok => {
+        if (!ok) return
+        // A message handed to a live worker shows in the chat at once; the transcript records it only when the worker reads it.
+        if (mode === 'previous' && live && composed) this.transcriptBand?.pend(composed.text)
+        send.sent()
+      })
+    }
+    fresh.addEventListener('click', event => { event.stopPropagation(); dispatch('fresh', fresh) })
+    resume.addEventListener('click', event => { event.stopPropagation(); dispatch('previous', resume) })
 
     message.addEventListener('keydown', event => {
       // Escape steps out of the field and hands the keys back to the reader;
@@ -1527,16 +1525,10 @@ export class Dock {
       if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return
-      if (this.meetingArmed() && !event.altKey) { this.meetingStart?.(); return }
-      if (this.meetingArmed() && event.altKey) {
-        void this.runRequeue(card, send.compose, 'fresh', fresh, err).then(ok => landed(ok, 'fresh', false))
-        return
-      }
       // ↵ is the default verb the buttons show, ⌥↵ the secondary.
       const resumable = Boolean(card.sessionUuid)
-      const live = hasLiveWorker(card)
-      const resumeSession = resumable && (live ? !event.altKey : event.altKey)
-      void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => landed(ok, resumeSession ? 'previous' : 'fresh', live))
+      const resumeSession = resumable && (hasLiveWorker(card) ? !event.altKey : event.altKey)
+      dispatch(resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh)
     })
     box.append(message, strip.el, foot)
     wrap.append(box, imageErr, err)
@@ -1568,20 +1560,21 @@ export class Dock {
   }
 
   /**
-   * Meeting, for this constitution: a button in the composer's control row.
-   * Off by default. Once armed, Enter and the primary composer button start recording on the
-   * daemon — nothing records before that press; mobile opens this tab's mic in
-   * the press's gesture and keeps its controls on the board. The composer's
-   * message, with its images' lines, becomes the meeting's note, and the
-   * worker — live or not — receives the meeting as a joined constitution.
+   * Meeting, for this constitution: a toggle in the composer's control row.
+   * Off by default. While it is on, the composer's verbs carry a meeting:
+   * New session, Resume or Send starts recording on the daemon and hands that
+   * session the meeting, with the composer's message and its images' lines as
+   * the note. Nothing records before that press; mobile opens this tab's mic
+   * in the press's gesture and keeps its controls on the board.
    *
-   * One meeting records at a time. While any does, the button stays in its
-   * place, off and inert, naming the recording on hover. The button is also
-   * disabled when the device's required audio mode is unavailable.
-   * It follows the board's meeting poll.
-   * `onArm` hears the button so the primary composer action can name its job.
+   * A desktop call shows its audio beside the toggle while it is on.
+   *
+   * One meeting records at a time. While any does, the toggle stays in its
+   * place, off and inert, naming the recording on hover. It is also disabled
+   * when the device's required audio mode is unavailable. It follows the
+   * board's meeting poll. `onArm` hears the toggle so the composer can repaint.
    */
-  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: (armed: boolean, controls: HTMLElement) => void = () => {}): HTMLElement {
+  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: () => void): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
     const armButton = ctlButton('Meeting', 'kbn-ctl-meet-arm')
@@ -1604,26 +1597,19 @@ export class Dock {
     armButton.replaceChildren(icon, word)
     const requiredMode = (): MeetingMode => isMobileViewport() ? 'phone' : 'call'
     const canJoin = (): boolean => !!this.meeting?.canJoin() && this.meeting.modes().includes(requiredMode())
-    const startButton = ctlButton('Start meeting', 'kbn-ctl-send kbn-ctl-meet-start kbn-ctl-meet-primary')
-    startButton.setAttribute('aria-label', 'Start meeting')
     let starting = false
     let armed = false
-    const systemAudio = document.createElement('label')
-    systemAudio.className = 'kbn-ctl-system-audio'
-    const systemAudioInput = document.createElement('input')
-    systemAudioInput.type = 'checkbox'
-    systemAudioInput.checked = true
-    systemAudioInput.setAttribute('aria-label', 'System audio')
-    const systemAudioText = document.createElement('span')
-    systemAudioText.textContent = 'System audio'
-    systemAudio.append(systemAudioInput, systemAudioText)
+    const audio = document.createElement('select')
+    audio.className = 'kbn-ctl-select kbn-ctl-meet-audio'
+    audio.setAttribute('aria-label', 'Meeting audio')
+    audio.append(new Option('Mic + system audio', 'system'), new Option('Mic only', 'mic'))
+    this.composerDisposers.push(anchorSelect(audio))
     const arm = (on: boolean): void => {
       armed = on
       armButton.setAttribute('aria-pressed', String(on))
       armButton.classList.toggle('kbn-ctl-meet-on', on)
-      startButton.hidden = !on
-      systemAudio.hidden = !on || requiredMode() !== 'call'
-      onArm(on, wrap)
+      audio.hidden = !on || requiredMode() !== 'call'
+      onArm()
     }
     arm(false)
     armButton.addEventListener('click', () => arm(!armed))
@@ -1640,25 +1626,26 @@ export class Dock {
       const recording = current !== null && current.state !== 'failed'
       const held = starting || send.busy() || recording || !canJoin()
       armButton.disabled = held
-      startButton.disabled = held
-      armButton.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : armed ? 'Meeting armed; Enter starts recording' : 'Arm a meeting'
+      audio.disabled = held
+      armButton.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : armed ? 'Sending starts recording' : 'Record a meeting with this message'
       if (recording) armButton.setAttribute('aria-label', `Meeting recording: ${current.title?.trim() || 'a meeting'}`)
       else armButton.setAttribute('aria-label', 'Meeting')
       if ((recording || !canJoin()) && armed && !starting) arm(false)
     }
     this.meetingPaint = paint
 
-    const start = (): void => {
+    this.meetingStart = (mode, verb) => {
       if (!armed || starting || send.busy() || !canJoin()) return
+      if (mode === 'fresh' && !this.confirmCut(card)) return
       starting = true
       send.setBusy(true)
-      this.paintLabel(startButton, 'Starting…')
+      verb.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
       err.style.display = 'none'
       // The join is called inside the press's gesture, so Phone can open the
       // mic; it resolves the note (uploading any images) after that.
       const epoch = this.epoch
       let joined: Promise<MeetingJoinResult>
-      try { joined = this.meeting!.join(card, requiredMode(), send.compose, this.meetingSystemAudio()) }
+      try { joined = this.meeting!.join(card, requiredMode(), send.compose, { session: mode, systemAudio: audio.value === 'system' }) }
       catch (error) { joined = Promise.reject(error) }
       let began = false
       void joined.then(({ error, delivered }) => {
@@ -1678,17 +1665,11 @@ export class Dock {
         err.style.display = ''
       }).finally(() => {
         starting = false
-        this.paintLabel(startButton, 'Start meeting')
         if (began && epoch === this.epoch) arm(false)
         send.setBusy(false)
       })
     }
-    this.meetingStart = start
-    startButton.addEventListener('click', e => { e.stopPropagation(); start() })
-    systemAudio.hidden = true
-    wrap.append(armButton, systemAudio, startButton)
-    systemAudioInput.addEventListener('change', () => { this.meetingPaint?.() })
-    this.meetingSystemAudio = () => systemAudioInput.checked
+    wrap.append(armButton, audio)
     paint()
     return wrap
   }
@@ -2259,20 +2240,7 @@ export class Dock {
     projectDir?: string,
   ): Promise<boolean> {
     if (this.composerSend?.busy()) return false
-    // A "New session" over a LIVE worker is a CUT: the daemon stamps the
-    // clean-exit marker, kills the running session, and starts fresh — which
-    // discards whatever in-flight context that worker was holding. Confirm
-    // before doing that. A dormant card (no live worker) cuts nothing, so it's
-    // silent; Resume never cuts, so it never confirms.
-    if (mode === 'fresh' && hasWorkerToStop(card)) {
-      const working = card.runtimePhase === 'working' ? ' (actively working)' : ''
-      const ok = window.confirm(
-        `A worker is still running for “${card.name}”${working}.\n\n` +
-          `Start a new session? This cuts the open session and discards its ` +
-          `in-flight context. Use Resume instead to continue that worker.`,
-      )
-      if (!ok) return false
-    }
+    if (mode === 'fresh' && !this.confirmCut(card)) return false
 
     // Every composer verb is held until this send lands or fails.
     const busy = this.composerBusy
@@ -2282,6 +2250,23 @@ export class Dock {
     } finally {
       busy?.(false, btn)
     }
+  }
+
+  /**
+   * A "New session" over a LIVE worker is a CUT: the daemon stamps the
+   * clean-exit marker, kills the running session, and starts fresh — which
+   * discards whatever in-flight context that worker was holding. Confirm
+   * before doing that. A dormant card (no live worker) cuts nothing, so it's
+   * silent; Resume never cuts, so it never confirms.
+   */
+  private confirmCut(card: KanbanCard): boolean {
+    if (!hasWorkerToStop(card)) return true
+    const working = card.runtimePhase === 'working' ? ' (actively working)' : ''
+    return window.confirm(
+      `A worker is still running for “${card.name}”${working}.\n\n` +
+        `Start a new session? This cuts the open session and discards its ` +
+        `in-flight context. Use Resume instead to continue that worker.`,
+    )
   }
 
   /** {@link runRequeue} past its confirmation: compose, dispatch, report. */

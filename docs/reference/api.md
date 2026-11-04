@@ -413,12 +413,14 @@ A transport failure after forwarding a start returns `recording_unknown: true` a
 The hub never retries or falls back to another recorder after attempting that write: the first recorder may already be recording.
 Capture and Join hold further starts after an ambiguous answer and instruct the operator to inspect the recorder before starting another meeting.
 
-`POST /meeting/join` accepts `{fiber_id, origin?, recorder?, meeting: {mode}, note?}`. It
+`POST /meeting/join` accepts `{fiber_id, origin?, recorder?, meeting: {mode, system_audio?}, note?, resume_mode?}`. It
 starts hark exactly as meeting capture does, mirrored toward `origin`, and names
 the recording after the note's first line or, with no note, the fiber's leaf.
 The meeting message (the same facts as a meeting capture's, plus a line saying
 the meeting joins this constitution) and the note go to the fiber's worker
-through `/deliver` on its owner. The answer is `{meeting, delivery}`, where
+through `/deliver` on its owner. `resume_mode` selects the session as it does
+for `/dispatch`: `previous` messages a live worker or resumes a dormant one, and
+`fresh` starts a new session, cutting a live worker. The answer is `{meeting, delivery}`, where
 `delivery` is `/deliver`'s body; if delivery fails after hark starts, it carries
 the delivery's status with `recording: true` and `error`, and the recording
 continues. Shuttle also sends transcript batches and the end marker to the

@@ -234,11 +234,11 @@ describe('anchored pickers', () => {
     const toggle = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
     const field = q<HTMLTextAreaElement>('textarea')
     expect([toggle.tagName, toggle.getAttribute('aria-pressed')]).toEqual(['BUTTON', 'false'])
-    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-primary').hidden]).toEqual([false, true])
+    expect(q('.kbn-ctl-meet-audio').hidden).toBe(true)
 
     toggle.click()
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
-    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-primary').hidden]).toEqual([false, false])
+    expect(q('.kbn-ctl-meet-audio').hidden).toBe(false)
     expect(q('.kbn-ctl-meet-chip').hidden).toBe(true)
     expect((q('.kbn-ctl-meet-chip') as HTMLButtonElement).disabled).toBe(true)
     expect(meetingBand.el.querySelector('[aria-label="Meeting kind"]')).toBeNull()
@@ -246,7 +246,7 @@ describe('anchored pickers', () => {
     vi.mocked(fetch).mockClear()
     field.value = 'agenda'
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    expect(join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'call', expect.any(Function), true)
+    expect(join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'call', expect.any(Function), { session: 'fresh', systemAudio: true })
     expect(writes()).toEqual([])
     await flush()
     expect(toggle.getAttribute('aria-pressed')).toBe('false')
@@ -300,49 +300,46 @@ describe('anchored pickers', () => {
     document.body.append(meetingBand.el)
     const toggle = meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
     toggle.click()
-    meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-primary')!.click()
+    meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     await flush()
     expect(meetingBand.el.querySelector('.kbn-ctl-compose > .kbn-detail-error:last-child')!.textContent).toBe('hark unavailable')
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
     meetingDock.reset()
   })
 
-  it('keeps Meeting armed after a failed new-session dispatch, so Enter still starts the meeting', async () => {
-    const join = vi.fn(async () => ({ error: null, delivered: true }))
+  it('keeps Meeting armed after a meeting send fails, so Enter tries again', async () => {
+    const join = vi.fn(async () => ({ error: 'hark unavailable', delivered: false }))
     const control = { canJoin: () => true, modes: () => ['call', 'phone'], current: () => null, join }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const meetingBand = meetingDock.bandFor(task())
     document.body.append(meetingBand.el)
     const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
     q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
-    vi.mocked(fetch).mockImplementation(async () => response({ error: 'dispatch failed' }, 500))
-    q<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)').click()
+    q<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)').click()
     await flush()
-    expect(q<HTMLButtonElement>('.kbn-ctl-meet-primary').hidden).toBe(false)
-    expect(q<HTMLButtonElement>('.kbn-ctl-meet-primary').textContent).toBe('Start meeting ↵')
+    expect(q<HTMLButtonElement>('.kbn-ctl-meet-arm').getAttribute('aria-pressed')).toBe('true')
     q<HTMLTextAreaElement>('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    expect(join).toHaveBeenCalledTimes(1)
+    expect(join).toHaveBeenCalledTimes(2)
     meetingDock.reset()
   })
 
-  it('uses Enter for join and Alt+Enter for a fresh dispatch while Meeting is armed', async () => {
-    const join = vi.fn(async () => ({ error: null, delivered: false }))
+  it('gives Enter and Alt+Enter the same sessions with Meeting armed as without', async () => {
+    const join = vi.fn(async (..._args: unknown[]) => ({ error: null, delivered: false }))
     const control = { canJoin: () => true, modes: () => ['call', 'phone'], current: () => null, join }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
-    const meetingBand = meetingDock.bandFor(task())
+    const meetingBand = meetingDock.bandFor(task({ sessionUuid: 'prior' }))
     document.body.append(meetingBand.el)
     const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
     const toggle = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
     toggle.click()
+    vi.mocked(fetch).mockClear()
     q<HTMLTextAreaElement>('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    expect(join).toHaveBeenCalledTimes(1)
     await flush()
     toggle.click()
-    vi.mocked(fetch).mockClear()
     q<HTMLTextAreaElement>('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true }))
     await flush()
-    expect(writes()).toHaveLength(1)
-    expect(writes()[0]).toMatchObject({ fiber_id: 'a/task', ad_hoc: true, resume_mode: 'fresh' })
+    expect(join.mock.calls.map(call => (call[3] as { session: string }).session)).toEqual(['fresh', 'previous'])
+    expect(writes()).toEqual([])
     meetingDock.reset()
   })
 
@@ -444,36 +441,103 @@ describe('anchored pickers', () => {
     meetingDock.reset()
   })
 
-  it('routes the meeting armed composer button to Start meeting and preserves a visible New session action', async () => {
-    const recording = null
-    const join = vi.fn(async (..._args: unknown[]) => ({ error: null, delivered: true }))
-    const control = { canJoin: () => true, modes: () => ['call', 'phone'], current: () => recording, join }
-    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
-    const meetingBand = meetingDock.bandFor(task({ id: 'roles/surveyor', uid: 'surveyor', sessionUuid: 'prior', status: 'open', shuttleSeat: true, shuttleRole: 'surveyor', effectiveHorizon: 'stashed' }))
-    document.body.append(meetingBand.el)
-    const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
-    const start = q<HTMLButtonElement>('.kbn-ctl-meet-primary')
-    expect(start.textContent).toBe('Start meeting ↵')
-    expect(q<HTMLButtonElement>('.kbn-ctl-resume').hidden).toBe(false)
-    const newSession = q<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)')
-    expect([newSession.hidden, newSession.textContent]).toEqual([false, 'New session ⌥↵'])
-    const liveDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
-    const liveBand = liveDock.bandFor(task({ sessionUuid: 'running', workerState: { state: 'running' } as never }))
-    document.body.append(liveBand.el)
-    liveBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
-    expect(liveBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)')!.title).toContain('cutting the live worker')
-    liveDock.reset()
-    q<HTMLButtonElement>('.ws-header-session[aria-label="New session"]').click()
-    expect(join).not.toHaveBeenCalled()
-    await flush()
-    q<HTMLTextAreaElement>('textarea').value = 'agenda'
-    start.click()
-    expect(start.disabled).toBe(true)
-    expect(join).toHaveBeenCalledTimes(1)
-    expect(join.mock.calls[0][2]).toEqual(expect.any(Function))
-    await flush()
-    meetingDock.reset()
+  describe('an armed meeting travels with every composer verb', () => {
+    const fresh = '.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)'
+    const mountMeeting = (card: KanbanCard) => {
+      const join = vi.fn(async (..._args: unknown[]) => ({ error: null, delivered: true }))
+      const control = { canJoin: () => true, modes: () => ['call', 'phone'], current: () => null, join }
+      const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+      const meetingBand = meetingDock.bandFor(card)
+      document.body.append(meetingBand.el)
+      const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
+      q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+      return { join, meetingDock, q }
+    }
+    const resting = () => task({ id: 'roles/surveyor', uid: 'surveyor', sessionUuid: 'prior', status: 'open', shuttleSeat: true, shuttleRole: 'surveyor', effectiveHorizon: 'stashed' })
+    const running = () => task({ sessionUuid: 'running', workerState: { state: 'running' } as never })
+
+    it('keeps the verbs and their shortcuts unchanged', () => {
+      const { q, meetingDock } = mountMeeting(resting())
+      expect(meetingDock.el.querySelector('.kbn-ctl-meet-primary, .kbn-ctl-meet-start')).toBeNull()
+      expect(q(fresh).textContent).toBe('New session ↵')
+      expect(q('.kbn-ctl-resume').textContent).toBe('Resume ⌥↵')
+      meetingDock.reset()
+    })
+
+    it.each([
+      ['New session', fresh, 'fresh'],
+      ['Resume', '.kbn-ctl-resume', 'previous'],
+    ] as const)('%s starts the meeting in that session', async (_name, verb, session) => {
+      const { join, q, meetingDock } = mountMeeting(resting())
+      q<HTMLButtonElement>(verb).click()
+      expect(q<HTMLButtonElement>(verb).disabled).toBe(true)
+      expect(join).toHaveBeenCalledTimes(1)
+      expect(join.mock.calls[0][3]).toEqual({ session, systemAudio: true })
+      await flush()
+      expect(q<HTMLButtonElement>('.kbn-ctl-meet-arm').getAttribute('aria-pressed')).toBe('false')
+      meetingDock.reset()
+    })
+
+    it('sends a meeting with no message to a live worker, and Enter follows the shown default', async () => {
+      const { join, q, meetingDock } = mountMeeting(running())
+      expect(q<HTMLButtonElement>('.kbn-ctl-resume').disabled).toBe(false)
+      q<HTMLTextAreaElement>('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      expect(join.mock.calls[0][3]).toEqual({ session: 'previous', systemAudio: true })
+      await flush()
+      meetingDock.reset()
+    })
+
+    it('asks before a new session with a meeting cuts the live worker', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      const { join, q, meetingDock } = mountMeeting(running())
+      q<HTMLButtonElement>(fresh).click()
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(join).not.toHaveBeenCalled()
+      confirm.mockReturnValue(true)
+      q<HTMLButtonElement>(fresh).click()
+      expect(join.mock.calls[0][3]).toEqual({ session: 'fresh', systemAudio: true })
+      await flush()
+      meetingDock.reset()
+      confirm.mockRestore()
+    })
+
+    it('records mic only when the audio dropdown says so', async () => {
+      const { join, q, meetingDock } = mountMeeting(resting())
+      const audio = q<HTMLSelectElement>('.kbn-ctl-meet-audio')
+      expect([...audio.options].map(option => option.text)).toEqual(['Mic + system audio', 'Mic only'])
+      audio.value = 'mic'
+      q<HTMLButtonElement>('.kbn-ctl-resume').click()
+      expect(join.mock.calls[0][3]).toEqual({ session: 'previous', systemAudio: false })
+      await flush()
+      meetingDock.reset()
+    })
+
+    it('holds a meeting back from a verb blocked by a running worker', async () => {
+      const join = vi.fn(async (..._args: unknown[]) => ({ error: null, delivered: true }))
+      const control = { canJoin: () => true, modes: () => ['call', 'phone'], current: () => null, join }
+      const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+      const meetingBand = meetingDock.bandFor(task())
+      document.body.append(meetingBand.el)
+      const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
+      vi.mocked(fetch).mockImplementation(async () => response({}, 409))
+      q<HTMLTextAreaElement>('textarea').value = 'hello'
+      q<HTMLButtonElement>(fresh).click()
+      await flush()
+      expect(q(fresh).textContent).toBe('Already running')
+      q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+      q<HTMLTextAreaElement>('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      expect(join).not.toHaveBeenCalled()
+      expect(q(fresh).textContent).toBe('Already running')
+      meetingDock.reset()
+    })
+
+    it('a header session verb carries the meeting as its composer verb does', async () => {
+      const { join, q, meetingDock } = mountMeeting(resting())
+      q<HTMLButtonElement>('.ws-header-session[aria-label="New session"]').click()
+      expect(join.mock.calls[0][3]).toEqual({ session: 'fresh', systemAudio: true })
+      await flush()
+      meetingDock.reset()
+    })
   })
 
   it('offers Resume and New session for a resting role seat', () => {

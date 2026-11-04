@@ -683,7 +683,8 @@ defmodule Shuttle.MeetingTest do
             "fiber_id" => "cosmo/shear-bmodes",
             "origin" => "project-host",
             "meeting" => %{"mode" => "call"},
-            "note" => ""
+            "note" => "",
+            "resume_mode" => "fresh"
           })
         )
       end)
@@ -713,6 +714,7 @@ defmodule Shuttle.MeetingTest do
     assert request["fiber_id"] == "cosmo/shear-bmodes"
     assert request["from"] == "shuttle"
     assert request["from_claim"] in [nil, ""]
+    assert request["resume_mode"] == "fresh"
     assert request["text"] =~ "Meeting mode (call)."
     assert request["text"] =~ "~/.hark/meetings/2026-09-25_1403_shear-bmodes.txt"
     assert request["text"] =~ "joins this constitution (`cosmo/shear-bmodes`)"

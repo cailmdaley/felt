@@ -7,8 +7,11 @@ defmodule Shuttle.Delivery do
   message as its From User, under the dispatcher's `"continue"` rule: it
   resumes a previous conversation that ended without a handoff when its
   transcript is on this host and belongs to that dispatch; otherwise it starts
-  fresh — after a clean handoff, a missing transcript, or no previous run. Only the
-  board's explicit Resume forces a resume.
+  fresh — after a clean handoff, a missing transcript, or no previous run.
+
+  A `resume_mode` option carries the board's explicit verb. `"previous"` forces
+  the resume and still messages a live worker; `"fresh"` starts a new session,
+  cutting a live worker.
   """
 
   alias Shuttle.{Harnesses, Messaging, Poller, SessionLedger}
@@ -20,10 +23,8 @@ defmodule Shuttle.Delivery do
 
   @spec deliver(String.t(), String.t(), keyword()) :: result()
   def deliver(fiber_id, text, opts \\ []) do
-    case Poller.live_worker(fiber_id) do
-      nil -> launch(fiber_id, text, opts)
-      worker -> message(worker, text, opts)
-    end
+    worker = if opts[:resume_mode] != "fresh", do: Poller.live_worker(fiber_id)
+    if worker, do: message(worker, text, opts), else: launch(fiber_id, text, opts)
   end
 
   defp launch(fiber_id, text, opts) do
@@ -36,7 +37,7 @@ defmodule Shuttle.Delivery do
         force: true,
         ad_hoc: true,
         user_message: text,
-        resume_mode: "continue"
+        resume_mode: opts[:resume_mode] || "continue"
       )
 
     # A worker that appeared between the look and the launch takes the message.

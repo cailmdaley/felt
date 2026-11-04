@@ -369,11 +369,17 @@ export function CaptureForm({
             </Field>
           )}
           {meetingEnabled && !mobileMeeting && (
-            <label className="capture-system-audio">
-              <input type="checkbox" checked={systemAudio} disabled={submitting}
-                onChange={(event) => setSystemAudio(event.target.checked)} />
-              System audio
-            </label>
+            <Field label="Audio">
+              <select
+                aria-label="Meeting audio"
+                value={systemAudio ? 'system' : 'mic'}
+                disabled={submitting}
+                onChange={(event) => setSystemAudio(event.target.value === 'system')}
+              >
+                <option value="system">Mic + system audio</option>
+                <option value="mic">Mic only</option>
+              </select>
+            </Field>
           )}
         </div>
         {addProject.pathOpen && onProjectAdded && (
@@ -479,14 +485,6 @@ export function injectCaptureFormStyles(): void {
       font-size: var(--type-meta);
       line-height: var(--leading-tight);
       overflow-wrap: anywhere;
-    }
-    .capture-system-audio {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 36px;
-      color: var(--kbn-graphite);
-      font-size: var(--type-note);
     }
     .capture-meeting-row {
       display: flex;

@@ -195,8 +195,8 @@
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip:hover:not(:disabled) { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip:disabled { cursor: default; }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip[hidden] { display: none; }
-/* Meeting arming stays visible beside the session verbs. */
-.ws-dock .kbn-ctl-meet { display: contents; }
+/* The meeting toggle, joined to its audio choice while on. */
+.ws-dock .kbn-ctl-meet { display: inline-flex; flex: none; }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm {
   display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px;
   min-width: var(--ctl-h); min-height: var(--ctl-h); padding-inline: 9px;
@@ -207,8 +207,15 @@
 .ws-dock .kbn-ctl-meet-arm svg { display: block; flex: none; width: 16px; height: 16px; }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm.kbn-ctl-meet-on { border-color: var(--ws-ink) !important; background: var(--ws-fill); color: var(--ws-ink); }
 .ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
-.ws-dock .kbn-ctl-system-audio { display: inline-flex; align-items: center; gap: 5px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
-.ws-dock .kbn-ctl-system-audio[hidden] { display: none; }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm:has(+ .kbn-ctl-meet-audio:not([hidden])) { border-start-end-radius: 0; border-end-end-radius: 0; }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-audio {
+  height: auto; min-height: var(--ctl-h); margin-inline-start: calc(-1 * var(--ws-line-width));
+  border-color: var(--ws-ink); border-start-start-radius: 0; border-end-start-radius: 0;
+  background-color: transparent; color: var(--ws-ink); font: var(--type-label)/var(--leading-ui) var(--font-serif);
+  cursor: pointer;
+}
+.ws-dock .kbn-ctl-meet-audio:disabled { opacity: .6; cursor: default; }
+.ws-dock .kbn-ctl-meet .ws-select-option { font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 @container (max-width: 360px) {
   .ws-chat .kbn-ctl-meet-arm { width: var(--ctl-h); padding-inline: 0; }
   .ws-chat .kbn-ctl-meet-arm .kbn-ctl-meet-label { display: none; }

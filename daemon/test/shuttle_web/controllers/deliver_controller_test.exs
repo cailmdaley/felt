@@ -193,6 +193,48 @@ defmodule ShuttleWeb.DeliverControllerTest do
              end)
   end
 
+  test "resume_mode fresh starts a new session over a live worker" do
+    fiber_id = "tests/deliver-fresh-live"
+    session_uuid = message_live_worker(fiber_id)
+
+    assert %{"delivered" => true, "delivery" => "dispatch"} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber_id,
+                 "text" => "join the meeting",
+                 "resume_mode" => "fresh"
+               })
+             )
+             |> json_response(200)
+
+    refute_received {:message, _request}
+    script = run_script()
+    refute script =~ "--resume"
+    assert script =~ "join the meeting"
+    refute Poller.live_worker(fiber_id).session_uuid == session_uuid
+  end
+
+  test "resume_mode previous still messages a live worker" do
+    fiber_id = "tests/deliver-previous-live"
+    message_live_worker(fiber_id)
+
+    assert %{"delivered" => true, "delivery" => "message"} =
+             api_conn()
+             |> post(
+               "/api/v1/deliver",
+               Jason.encode!(%{
+                 "fiber_id" => fiber_id,
+                 "text" => "join the meeting",
+                 "resume_mode" => "previous"
+               })
+             )
+             |> json_response(200)
+
+    assert_received {:message, %{"text" => "join the meeting"}}
+  end
+
   defp message_live_worker(fiber_id) do
     put_constitution(fiber_id)
     assert {:ok, _session} = Poller.dispatch_fiber(fiber_id, [])

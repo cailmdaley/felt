@@ -311,7 +311,7 @@ describe('the composer takes pasted images', () => {
     textarea().value = 'first thought'
     paste(textarea(), [png('one.png')])
     composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
-    composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
+    composer.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
 
     textarea().value = 'first thought, and a second'
     upload.resolve(uploaded('/srv/a.png'))
@@ -334,7 +334,7 @@ describe('the composer takes pasted images', () => {
     const start = (): void => {
       const meetingArm = composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
       if (meetingArm.getAttribute('aria-pressed') !== 'true') meetingArm.click()
-      composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
+      composer.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     }
     fetch.mockResolvedValue(uploaded('/srv/a.png'))
     textarea().value = 'note'

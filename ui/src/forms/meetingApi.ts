@@ -69,6 +69,7 @@ export interface JoinMeetingInput {
   mode: MeetingMode
   note?: string
   systemAudio?: boolean
+  session?: 'fresh' | 'previous'
 }
 
 /**
@@ -107,6 +108,7 @@ export function joinMeetingBody(input: JoinMeetingInput): Record<string, unknown
     ...(input.recorder && input.mode !== 'phone' ? { recorder: input.recorder } : {}),
     meeting: { mode: input.mode, ...(input.mode === 'call' && input.systemAudio === false ? { system_audio: false } : {}) },
     ...(note ? { note } : {}),
+    ...(input.session ? { resume_mode: input.session } : {}),
   }
 }
 

@@ -66,7 +66,8 @@ describe('joinMeeting', () => {
   })
 
   it('starts a call with only the mic when system audio is unchecked', () => {
-    expect(joinMeetingBody({ fiberId: 'loom/shear', mode: 'call', systemAudio: false })).toMatchObject({
+    expect(joinMeetingBody({ fiberId: 'loom/shear', mode: 'call', systemAudio: false, session: 'fresh' })).toMatchObject({
+      resume_mode: 'fresh',
       meeting: { mode: 'call', system_audio: false },
     })
   })

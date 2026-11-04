@@ -39,9 +39,10 @@ defmodule ShuttleWeb.MeetingController do
   end
 
   @doc """
-  Body `{fiber_id, origin?, recorder?, meeting: {mode}, note?}`. Selects a recorder, mirrors
-  the transcript toward `origin`, and delivers the meeting message to the
-  fiber's worker. The answer carries the delivery's status: 202 with
+  Body `{fiber_id, origin?, recorder?, meeting: {mode, system_audio?}, note?,
+  resume_mode?}`. Selects a recorder, mirrors the transcript toward `origin`,
+  and delivers the meeting message to the fiber's worker, in the session
+  `resume_mode` names (`Shuttle.Delivery`). The answer carries the delivery's status: 202 with
   `delivery.delivered: null` when the message was sent but its arrival is
   unconfirmed; a delivery failure after recording began adds `recording: true`
   and the error beside the live row.
@@ -130,9 +131,13 @@ defmodule ShuttleWeb.MeetingController do
          ) do
       {:ok, %{meeting: row, prompt: prompt}} ->
         {status, delivery} =
-          ShuttleWeb.DeliverController.route(fiber_id, prompt, origin, "shuttle", %{
-            "daemon_sender" => true
-          })
+          ShuttleWeb.DeliverController.route(
+            fiber_id,
+            prompt,
+            origin,
+            "shuttle",
+            params |> Map.take(["resume_mode"]) |> Map.put("daemon_sender", true)
+          )
 
         if Shuttle.Env.app(:start_meeting_transcript_relay, true) and status < 300 do
           case Shuttle.Meeting.TranscriptRelay.start(row, fiber_id, origin) do

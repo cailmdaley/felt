@@ -42,7 +42,7 @@ import { watchAppearance } from './appearance.js'
 import './KanbanModal.css'
 import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
-import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
+import { Dock, type MeetingJoinOptions, type MeetingJoinResult } from './workspace/Dock.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { constitutionAction } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
@@ -382,7 +382,7 @@ export class KanbanModal {
           canJoin: () => !this.meetingStartUncertain && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
           modes: () => supportedMeetingModes(this.meetingStatus, isMobileViewport()),
           recorder: () => this.meetingStatus.recorder ?? null,
-          join: (card, mode, note, systemAudio) => this.joinCardMeeting(card, mode, note, systemAudio),
+          join: (card, mode, note, options) => this.joinCardMeeting(card, mode, note, options),
           current: () => this.meetingStatus.meeting,
           stop: (meeting) => this.stopCurrentMeeting(meeting),
           stopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
@@ -454,7 +454,7 @@ export class KanbanModal {
     card: KanbanCard,
     mode: MeetingMode,
     composeNote: () => Promise<string>,
-    systemAudio = true,
+    { session, systemAudio = true }: MeetingJoinOptions,
   ): Promise<MeetingJoinResult> {
     if (this.meetingStartUncertain) return { error: 'Recording start is unconfirmed. Inspect the recorder before starting another meeting.', delivered: false }
     const recorder = this.meetingStatus.recorder
@@ -486,6 +486,7 @@ export class KanbanModal {
       recorder,
       mode,
       systemAudio,
+      session,
       note,
     })
     if (outcome.kind === 'error') {

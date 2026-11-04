@@ -38,21 +38,24 @@ try {
     })
     await toggle.click()
     assert.equal(await meeting.getByRole('radio').count(), 0)
-    assert.ok(await meeting.getByRole('button', { name: 'Start meeting', exact: true }).isVisible())
+    assert.equal(await controls.getByRole('button', { name: 'Start meeting', exact: true }).count(), 0)
+    assert.equal(await meeting.getByRole('combobox', { name: 'Meeting audio', exact: true }).isVisible(), !mobile)
     assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
     assert.deepEqual(await page.evaluate(() => window.joins), [], 'arming records nothing')
     await toggle.click()
     assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
-    assert.equal(await meeting.getByRole('button', { name: 'Start meeting', exact: true }).isVisible(), false)
+    assert.equal(await meeting.getByRole('combobox', { name: 'Meeting audio', exact: true }).isVisible(), false)
     await toggle.click()
     if (process.env.MEETING_SCREENSHOT_DIR) {
       await page.screenshot({ path: `${process.env.MEETING_SCREENSHOT_DIR}/meeting-${mobile ? 'phone' : 'desktop'}.png` })
     }
     if (!mobile) {
-      await meeting.getByRole('button', { name: 'Start meeting', exact: true }).click()
+      page.once('dialog', dialog => dialog.accept())
+      await controls.locator('.kbn-ctl-sends .kbn-ctl-send').first().click()
       await page.waitForFunction(() => window.joins?.length === 1)
       const [join] = await page.evaluate(() => window.joins)
       assert.equal(join.meeting.mode, 'call')
+      assert.equal(join.resume_mode, 'fresh')
       assert.equal(join.recorder, 'recorder-host')
       assert.ok(join.origin && join.origin !== join.recorder)
     }
