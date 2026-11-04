@@ -44,7 +44,7 @@ func newDeployFleet(t *testing.T) *deployFleet {
 			t.Fatal(err)
 		}
 	}
-	for _, relative := range []string{"bin/shuttle-deploy", "scripts/deploy-lock/main.go"} {
+	for _, relative := range []string{"bin/shuttle-deploy", "scripts/deploy-lock/main.go", "scripts/deploy-run.sh"} {
 		data, err := os.ReadFile(filepath.Join("../..", relative))
 		if err != nil {
 			t.Fatal(err)
@@ -75,17 +75,31 @@ fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "bash"), "#!/bin/sh\n[ \"$1\" != -lc ] || { shift; exec '"+realBash+"' -c \"$1\"; }\nexec '"+realBash+"' \"$@\"\n")
+	write(filepath.Join(f.home, ".bash_profile"), "export LOGIN_PROFILE_LOADED=yes\n")
+	write(filepath.Join(f.bin, "bash"), "#!/bin/sh\ncase \"$1\" in\n-lc) shift; exec '"+realBash+"' -c '. \"$HOME/.bash_profile\"; eval \"$1\"' login \"$1\";;\n-l) shift; exec '"+realBash+"' -c '. \"$HOME/.bash_profile\"; source /dev/stdin' login;;\nesac\nexec '"+realBash+"' \"$@\"\n")
+	realRm, err := exec.LookPath("rm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(f.bin, "rm"), `#!/bin/sh
+if [ "${CHECK_CLEANUP_ORDER:-0}" = 1 ]; then
+ case "$*" in *"/.shuttle/deploy/tools/lock."*)
+ pid=$(sed -n 's/.*; pid=\([0-9]*\);.*/\1/p' "$HOME/.shuttle/deploy.lock")
+ if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo cleanup-before-helper-exit >&2; exit 41; fi;;
+ esac
+fi
+exec `+shellQuote(realRm)+` "$@"
+`)
 	realGo, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*/lock) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\nfi\nexec '"+realGo+"' \"$@\"\n")
+	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*/lock) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\nfi\nexec '"+realGo+"' \"$@\"\n")
 	realSleep, err := exec.LookPath("sleep")
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "sleep"), "#!/bin/sh\nif [ \"${CHECK_POLL:-0}\" = 1 ]; then\n echo \"poll-interval $1\" >> \"$EVENTS\"\n sed 's/\"ready\":false/\"ready\":true/' \"$STATE\" > \"$STATE.next\"; mv \"$STATE.next\" \"$STATE\"\nelse exec '"+realSleep+"' \"$@\"; fi\n")
+	write(filepath.Join(f.bin, "sleep"), "#!/bin/sh\nif [ \"${CHECK_POLL:-0}\" = 1 ] && [ -f \"$FLEET_ROOT/readiness-observed\" ]; then\n echo \"poll-interval $1\" >> \"$EVENTS\"\n sed 's/\"ready\":false/\"ready\":true/' \"$STATE\" > \"$STATE.next\"; mv \"$STATE.next\" \"$STATE\"\nelse exec '"+realSleep+"' \"$@\"; fi\n")
 	cache, err := exec.Command(realGo, "env", "GOCACHE").Output()
 	if err != nil {
 		t.Fatal(err)
@@ -93,11 +107,14 @@ fi
 	f.env = append(f.env, "GOCACHE="+strings.TrimSpace(string(cache)))
 	write(filepath.Join(f.bin, "ssh"), `#!/bin/sh
 echo ssh >> "$EVENTS"
+echo $$ > "$FLEET_ROOT/ssh.pid"
 if [ "${SSH_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/ssh-entered"; while [ ! -f "$FLEET_ROOT/ssh-go" ]; do sleep .02; done; fi
 shift
+# Real SSH joins arguments, then the remote shell parses that command. The
+# isolated login shim sources this fixture's profile and preserves stderr.
 exec /usr/bin/env -i HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local \
  FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
- FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
+ CHECK_CLEANUP_ORDER="${CHECK_CLEANUP_ORDER:-0}" FAIL_LOCK_BUILD="${FAIL_LOCK_BUILD:-0}" FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
  CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" bash -c "$*"
 `)
 	write(filepath.Join(f.bin, "make"), `#!/bin/sh
@@ -158,6 +175,7 @@ case "$1 $2" in
 esac
 `)
 	write(filepath.Join(f.bin, "curl"), `#!/bin/sh
+if grep -q '"ready":false' "$STATE"; then touch "$FLEET_ROOT/readiness-observed"; fi
 cat "$STATE"
 `)
 	for name, body := range map[string]string{"systemctl": "exit 1", "launchctl": "exit 1", "lsof": "exit 0", "pi": "exit 0"} {
@@ -232,8 +250,8 @@ func (f *deployFleet) startArgs(t *testing.T, name, host string, args []string, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		if cmd.ProcessState == nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			_ = cmd.Wait()
 		}
 		log.Close()
@@ -245,6 +263,101 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployBootstrapCleanupWaitsForHelperExit(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	cmd, log := f.start(t, "cleanup-order", "CHECK_CLEANUP_ORDER=1")
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("deploy: %v %s", err, fleetRead(log))
+	}
+	if strings.Contains(fleetRead(log), "cleanup-before-helper-exit") {
+		t.Fatalf("NFS executable cleaned before helper exit: %s", fleetRead(log))
+	}
+	entries, err := os.ReadDir(filepath.Join(f.home, ".shuttle/deploy/tools"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("bootstrap workspace leaked: %v %v", entries, err)
+	}
+}
+
+func TestDeployDisconnectedObserverLeavesLockedRunWithDurableResult(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	first, log := f.start(t, "disconnected")
+	deployAwait(t, "build: "+log, func() bool { _, err := os.Stat(filepath.Join(f.root, "build-entered")); return err == nil })
+	dirs, err := filepath.Glob(filepath.Join(f.home, ".shuttle/deploy/runs/*"))
+	if err != nil || len(dirs) != 1 {
+		t.Fatalf("run directories: %v %v", dirs, err)
+	}
+	run := dirs[0]
+	pid, err := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "ssh.pid"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Wait(); err == nil {
+		t.Fatal("lost observer reported success")
+	}
+	if !strings.Contains(fleetRead(log), "SSH disconnect does not cancel") {
+		t.Fatalf("disconnect policy missing: %s", fleetRead(log))
+	}
+	lock, err := os.OpenFile(filepath.Join(f.home, ".shuttle/deploy.lock"), os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	lock.Close()
+	if err != syscall.EWOULDBLOCK {
+		t.Fatalf("disconnected run lost host lock: %v", err)
+	}
+	second, secondLog := f.start(t, "bounded-wait", "SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=0")
+	if err := second.Wait(); err == nil {
+		t.Fatal("second deployer ignored held lock")
+	}
+	if out := fleetRead(secondLog); !strings.Contains(out, "timed out waiting") || !strings.Contains(out, "run="+run) {
+		t.Fatalf("holder diagnostic: %s", out)
+	}
+	fleetTouch(t, f.gate)
+	deployAwait(t, "durable result: "+run, func() bool { _, err := os.Stat(filepath.Join(run, "result")); return err == nil })
+	if result := strings.TrimSpace(fleetRead(filepath.Join(run, "result"))); result != "0" {
+		t.Fatalf("disconnected result %s: %s", result, fleetRead(filepath.Join(run, "log")))
+	}
+	entries, err := os.ReadDir(filepath.Join(f.home, ".shuttle/deploy/tools"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("bootstrap workspace leaked: %v %v", entries, err)
+	}
+	third, thirdLog := f.start(t, "coalesced-after-disconnect")
+	if err := third.Wait(); err != nil {
+		t.Fatalf("coalesce: %v %s", err, fleetRead(thirdLog))
+	}
+	if cycles := strings.Count(fleetRead(f.events), "cycle\n"); cycles != 1 {
+		t.Fatalf("want one cycle, got %d: %s", cycles, fleetRead(f.events))
+	}
+}
+
+func TestDeployBootstrapFailureReportsStepAndCleansWorkspace(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	cmd, log := f.start(t, "failed-bootstrap", "FAIL_LOCK_BUILD=1")
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("bootstrap failure accepted")
+	}
+	got := fleetRead(log)
+	if !strings.Contains(got, "bootstrap-stderr-token") || !strings.Contains(got, "compile lock helper: failed (exit 42)") {
+		t.Fatalf("missing failed step/stderr: %s", got)
+	}
+	entries, err := os.ReadDir(filepath.Join(f.home, ".shuttle/deploy/tools"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("bootstrap workspace leaked: %v", entries)
 	}
 }
 

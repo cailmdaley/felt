@@ -867,20 +867,31 @@ $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
     || { bad "could not select and cycle the release on ${host:-local}"; return 1; }
 }
 
+deploy_step() {
+  printf '  %s: %s\n' "${HOST:-local}" "$1" >&2
+  if [ -n "${SHUTTLE_DEPLOY_RUN_DIR:-}" ]; then
+    printf '%s\n' "$1" > "$SHUTTLE_DEPLOY_RUN_DIR/step"
+  fi
+}
+
 host_transaction() { # Runs entirely on the target, under host and tree locks.
   local previous tree cmd before
+  deploy_step 'observe previous release'
   DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
   previous="$(previous_deploy "" "$SOURCE")"
+  deploy_step 'prepare pinned revision'
   bash -c "$(revision_checkout_cmd "$SOURCE" "$previous")" 3>&- 4>&- \
     || { bad 'prepare: could not prepare the pinned revision'; return 1; }
   tree="$ROOT/$TARGET_COMMIT"
   if [ "$MODE" = ui ]; then
+    deploy_step 'build UI'
     bash -c "cd $(shell_quote "$tree") && make ui" \
       || { bad 'build UI: failed'; return 1; }
     cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
     return 0
   fi
   EXPECTED_RELEASE="$tree/bin/rel"
+  deploy_step 'inspect current release'
   before="$(version_json "" || true)"
   if target_is_live "$before"; then
     ok "already ready on $TARGET_SHA at $EXPECTED_RELEASE; coalescing without a daemon cycle"
@@ -889,6 +900,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
       rm -rf "$tree/ui/dist" && mkdir -p "$tree/ui/dist" && cp -R "$STAGE/ui/dist/." "$tree/ui/dist/" \
         || { bad 'ship UI: could not publish the staged bundle'; return 1; }
     fi
+    deploy_step 'build/install CLIs'
     cmd="$(build_checkout_cmd "$tree" "$SKIP_UI")"
     [ -z "$BUILD_WRAP" ] || cmd="$BUILD_WRAP bash -lc $(shell_quote "$cmd")"
     bash -c "$cmd" || { bad 'build/install CLIs: failed'; return 1; }
@@ -900,11 +912,15 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
     mkdir -p "$HOME/.config/shuttle" && cp "$STAGE/agents.json" "$HOME/.config/shuttle/agents.json" \
       || { bad 'agent registry: could not publish'; return 1; }
   fi
+  deploy_step 'config migration'
   bash -c "$(config_migration_cmd)" 3>&- 4>&- || { bad 'config migration: failed'; return 1; }
   if ! target_is_live "$before"; then
+    deploy_step 'activate release'
     remote_host_cycle "" "$tree" || return 1
+    deploy_step 'verify and finish'
     verify_and_finish "" "$SOURCE" "$previous" || { bad 'verify/finish: failed'; return 1; }
   else
+    deploy_step 'finish coalesced release'
     finish_verified_deploy "" "$SOURCE" "$previous"
   fi
 }
@@ -927,31 +943,66 @@ transaction_script() {
   printf 'HOST=%s\nSOURCE=%s\nMODE=%s\nSTAGE=%s\nSKIP_UI=%s\nBUILD_WRAP=%s\nSNAPSHOT=%s\n' \
     "$(shell_quote "${1:-local}")" "$(shell_quote "$2")" "$(shell_quote "$3")" \
     "$(shell_quote "$4")" "$(shell_quote "$5")" "$(shell_quote "$6")" "$(shell_quote "$7")"
-  declare -f shell_quote ok bad deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
+  declare -f shell_quote ok bad deploy_step deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
     build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
     version_ready target_is_live wait_for_sha release_quarantine finish_verified_deploy verify_and_finish prune_deploy_cmd \
     remember_previous_cmd refresh_checkout_cmd harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
     remote_host_cycle host_transaction
   # All subsequent commands are host-local and inherit this login shell's PATH.
   printf '%s\n' 'run_on() { bash -c "$2" 3>&- 4>&-; }' 'run_on_visible() { bash -c "$2" 3>&- 4>&-; }' \
-    'trap '\''rm -rf "$SHUTTLE_DEPLOY_BOOTSTRAP_DIR" "$STAGE"'\'' EXIT' \
+    'deploy_step "resolve worktree root"' \
     'ROOT=$(bash -c "$(deploy_root_cmd "$SOURCE")") || exit 1' 'host_transaction'
 }
 
 run_transaction() { # host, source, mode, staged files, build wrapper, UI snapshot
-  local host="$1" source="$2" mode="$3" stage="$4" wrap="$5" snapshot="$6" skip_ui=0 script bootstrap
+  local host="$1" source="$2" mode="$3" stage="$4" wrap="$5" snapshot="$6" skip_ui=0 script bootstrap driver status
   builds_ui "${host:-local}" || skip_ui=1
   script="$(transaction_script "$host" "$source" "$mode" "$stage" "$skip_ui" "$wrap" "$snapshot")"
   bootstrap="set -eu
-root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$source")"))
+HOST=$(shell_quote "${host:-local}")
+tmp=''
+$(declare -f deploy_step)
+finish() {
+  status=\$?
+  trap - EXIT
+  step=\$(cat \"\$SHUTTLE_DEPLOY_RUN_DIR/step\" 2>/dev/null || printf bootstrap)
+  if ! rm -rf \"\$tmp\" $(shell_quote "$stage"); then
+    printf '  %s: cleanup bootstrap workspace: failed\\n' \"\$HOST\" >&2
+    if [ \"\$status\" = 0 ]; then status=1; step='cleanup bootstrap workspace'; fi
+  fi
+  printf '\\n  %s: %s: ' \"\$HOST\" \"\$step\"
+  if [ \"\$status\" = 0 ]; then printf 'completed\\n'; else printf 'failed (exit %s)\\n' \"\$status\"; fi
+  printf '%s\\n' \"\$status\" > \"\$SHUTTLE_DEPLOY_RUN_DIR/result.next\"
+  mv \"\$SHUTTLE_DEPLOY_RUN_DIR/result.next\" \"\$SHUTTLE_DEPLOY_RUN_DIR/result\"
+  exit \"\$status\"
+}
+trap finish EXIT
+deploy_step 'create helper workspace'
 mkdir -p \"\$HOME/.shuttle/deploy/tools\"
 tmp=\$(mktemp -d \"\$HOME/.shuttle/deploy/tools/lock.XXXXXX\")
-trap $(shell_quote "rm -rf \"\$tmp\" $(shell_quote "$stage")") EXIT
 printf '%s' $(shell_quote "$LOCK_SOURCE") > \"\$tmp/main.go\"
+deploy_step 'compile lock helper'
 GOMAXPROCS=2 GOFLAGS=-p=2 go build -o \"\$tmp/lock\" \"\$tmp/main.go\"
-SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=$(shell_quote "${SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS:-3600}") SHUTTLE_DEPLOY_BOOTSTRAP_DIR=\"\$tmp\" exec \"\$tmp/lock\" \"\$HOME/.shuttle/deploy.lock\" \"\$HOME/.shuttle/deploy/leases/$TARGET_COMMIT.lock\" \
-  $(shell_quote "host=${host:-local} target=$TARGET_COMMIT deployer=$DEPLOYER") bash -c $(shell_quote "$script")"
-  run_on_visible "$host" "$bootstrap" || { bad "${host:-local}: host transaction failed"; return 1; }
+deploy_step 'acquire host and tree locks'
+SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=$(shell_quote "${SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS:-3600}") \"\$tmp/lock\" \"\$HOME/.shuttle/deploy.lock\" \"\$HOME/.shuttle/deploy/leases/$TARGET_COMMIT.lock\" \
+  \"host=${host:-local} target=$TARGET_COMMIT deployer=$DEPLOYER run=\$SHUTTLE_DEPLOY_RUN_DIR\" bash -c $(shell_quote "$script")"
+  driver="RUN_ID=$(shell_quote "${RUN_DIR##*/}-${host:-local}-$mode")
+HOST=$(shell_quote "${host:-local}")
+BOOTSTRAP=$(shell_quote "$bootstrap")
+$RUN_SOURCE"
+  # Script bytes travel on stdin, not through SSH's joined command arguments.
+  # The detached runner owns execution; this connection only observes its log.
+  printf '  %s: starting login shell and host-owned transaction\n' "${host:-local}" >&2
+  if [ -z "$host" ]; then
+    bash -l -s <<< "$driver"
+  else
+    ssh $(fleet_flags "$host") "$(fleet_ssh "$host")" 'bash -l -s' <<< "$driver"
+  fi
+  status=$?
+  if [ "$status" != 0 ]; then
+    bad "transaction/observer exited $status; SSH disconnect does not cancel the host-owned run; inspect ~/.shuttle/deploy/runs/${RUN_DIR##*/}-${host:-local}-$mode"
+    return 1
+  fi
 }
 
 deploy_remote() {
@@ -972,6 +1023,7 @@ deploy_remote() {
 }
 
 LOCK_SOURCE="$(<"$REPO/scripts/deploy-lock/main.go")"
+RUN_SOURCE="$(<"$REPO/scripts/deploy-run.sh")"
 DEPLOYER="$(hostname):$$"
 RUN_DIR="$(mktemp -d)" || exit 1
 trap 'rm -rf "$RUN_DIR"' EXIT
