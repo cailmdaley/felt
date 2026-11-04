@@ -624,3 +624,33 @@ func TestRemoteMarketplaceAcquisitionFailureCleansUpAndDoesNotInstall(t *testing
 		t.Fatalf("failed acquisition left temporary checkout: %v", entries)
 	}
 }
+
+func TestFailedPromotionRetainsJournalThroughNativeRollback(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	runtimeDir := t.TempDir()
+	candidate := filepath.Join(runtimeDir, ".candidate")
+	if err := os.Mkdir(candidate, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	intent := &pluginNativeIntent{Claude: &claudeInstallationState{}}
+	interrupted := func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("rollback interruption did not occur")
+			}
+		}()
+		_ = testApp(t, env).promotePluginCandidate(candidate, func(string) error { return os.ErrPermission }, func() error {
+			journal, err := readJSONFile[pluginPromotionJournal](filepath.Join(runtimeDir, pluginJournalName))
+			if err != nil || journal.Native == nil || journal.Phase != "pending_reconciliation" {
+				t.Fatalf("rollback intent absent during native repair: %#v, %v", journal, err)
+			}
+			panic("interrupted native repair")
+		}, intent)
+	}
+	interrupted()
+	journal, err := readJSONFile[pluginPromotionJournal](filepath.Join(runtimeDir, pluginJournalName))
+	if err != nil || journal.Native == nil {
+		t.Fatalf("interruption lost native intent: %#v, %v", journal, err)
+	}
+}

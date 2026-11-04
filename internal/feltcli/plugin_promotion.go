@@ -531,16 +531,21 @@ func (a *app) promotePluginCandidate(candidate string, install func(string) erro
 	}
 
 	fail := func(cause error) error {
-		rollbackErr := rollbackPluginPromotion(runtimeDir, current, hadOld, cause)
+		if err := writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native}); err != nil {
+			return errors.Join(cause, err)
+		}
+		if err := rollbackPluginFiles(runtimeDir, current, hadOld); err != nil {
+			return errors.Join(cause, err)
+		}
 		if restore != nil {
 			if restoreErr := restore(); restoreErr != nil {
-				_ = writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native})
-				rollbackErr = fmt.Errorf("%w; restoring native installation: %v", rollbackErr, restoreErr)
+				return fmt.Errorf("%w; restoring native installation: %v", cause, restoreErr)
 			}
 		} else if native != nil {
-			_ = writePluginJournal(journal, pluginPromotionJournal{Candidate: current, Phase: "pending_reconciliation", HadOld: hadOld, Native: native})
+			return cause
 		}
-		return rollbackErr
+		_ = os.Remove(journal)
+		return cause
 	}
 	if err := install(current); err != nil {
 		return fail(fmt.Errorf("plugin candidate rejected: %w; last known-good preserved", err))
@@ -573,23 +578,28 @@ func (a *app) capturePluginNativeIntent() *pluginNativeIntent {
 }
 
 func rollbackPluginPromotion(runtimeDir, candidate string, hadOld bool, cause error) error {
+	err := rollbackPluginFiles(runtimeDir, candidate, hadOld)
+	if err == nil {
+		_ = os.Remove(filepath.Join(runtimeDir, pluginJournalName))
+	}
+	return errors.Join(cause, err)
+}
+
+func rollbackPluginFiles(runtimeDir, candidate string, hadOld bool) error {
 	current := filepath.Join(runtimeDir, pluginCurrentName)
 	previous := filepath.Join(runtimeDir, pluginPreviousName)
-	if candidate == current {
-		_ = os.RemoveAll(current)
-	} else {
-		_ = os.RemoveAll(candidate)
+	if err := os.RemoveAll(candidate); err != nil {
+		return fmt.Errorf("removing failed plugin candidate: %w", err)
 	}
 	if hadOld {
 		if err := os.Rename(previous, current); err != nil {
-			return fmt.Errorf("%w; restoring last known-good plugin: %v", cause, err)
+			return fmt.Errorf("restoring last known-good plugin: %w", err)
 		}
 		// Best-effort: a rollback has no better move on sync failure, so the
 		// restored current carries weaker durability than a forward promotion.
 		_ = atomicfile.SyncDir(filepath.Dir(current))
 	}
-	_ = os.Remove(filepath.Join(runtimeDir, pluginJournalName))
-	return cause
+	return nil
 }
 
 func (a *app) recoverPluginPromotion(runtimeDir string) error {
