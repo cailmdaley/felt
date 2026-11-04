@@ -48,7 +48,7 @@ defmodule Shuttle.Contract do
     28 => "message --request-json attested_sender (cross-host verified senders)",
     29 => "scan-changes (incremental physical-store metadata index)",
     30 => "scan-changes (newline-framed opaque metadata index)",
-    31 => "felt show --exact and felt add --namespace (cross-host fiber identity)"
+    31 => "felt show --exact and felt add --namespace; lifecycle --fiber-path (verified UID path hints)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

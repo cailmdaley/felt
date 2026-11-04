@@ -928,7 +928,7 @@ func TestShuttleAccept_RoutesThroughDaemonWithoutHoldingTheLock(t *testing.T) {
 	default:
 		t.Fatal("the daemon saw no lifecycle request")
 	}
-	if want := map[string]any{"action": "accept", "fiber": mustRead(t, storage, "f").UID}; !reflect.DeepEqual(got, want) {
+	if want := map[string]any{"action": "accept", "fiber": mustRead(t, storage, "f").UID, "fiber_path": "f"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("lifecycle request = %v, want %v", got, want)
 	}
 	if status := mustRead(t, storage, "f").Status; status != felt.StatusClosed {
@@ -1086,7 +1086,7 @@ func TestShuttleRest_RoutesThroughDaemon(t *testing.T) {
 	if err != nil || !strings.Contains(out, "rested by the daemon") {
 		t.Fatalf("routed rest: %v\n%s", err, out)
 	}
-	if got := <-requests; !reflect.DeepEqual(got, map[string]any{"action": "rest", "fiber": mustRead(t, storage, "f").UID}) {
+	if got := <-requests; !reflect.DeepEqual(got, map[string]any{"action": "rest", "fiber": mustRead(t, storage, "f").UID, "fiber_path": "f"}) {
 		t.Fatalf("lifecycle request = %v", got)
 	}
 	if status := mustRead(t, storage, "f").Status; status != felt.StatusActive {

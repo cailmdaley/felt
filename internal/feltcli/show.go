@@ -18,7 +18,7 @@ import (
 // command was given (the felt root sets it from env).
 func NewShowCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 	var showBodyOnly, showExact bool
-	var showDetail string
+	var showDetail, showPathHint string
 	var showCitations bool
 	var showConsumers bool
 	var showField string
@@ -80,7 +80,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				var f *felt.Felt
 				var err error
 				if showExact {
-					target, err = felt.ResolveAddressRef(storage, args[0])
+					target, err = felt.ResolveAddressRefWithHint(storage, args[0], showPathHint)
 					if err == nil {
 						f, err = find(target.Storage, "", target.ID)
 					}
@@ -184,6 +184,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 	}
 
 	command.GroupID = groupFibers
+	command.Flags().StringVar(&showPathHint, "path-hint", "", "Exact namespace path to verify before walking for an intrinsic UID (--exact)")
 	command.Flags().BoolVar(&showExact, "exact", false, "Resolve only an intrinsic UID or an exact path in the enclosing store namespace")
 	command.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Print the body and the line it starts on")
 	command.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (name, compact, summary, full)")

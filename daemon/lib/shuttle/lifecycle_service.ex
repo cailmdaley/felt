@@ -32,20 +32,27 @@ defmodule Shuttle.LifecycleService do
 
   @type verb :: :accept | :resume | :reopen | :close | :pause | :rest | :role | :seat | :clear_ask
 
-  @spec transition(verb(), String.t(), [String.t()]) ::
+  @spec transition(verb(), String.t(), [String.t()], String.t() | nil) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
-  def transition(verb, identifier, args \\ [])
+  def transition(verb, identifier, args \\ [], path_hint \\ nil)
       when verb in [:accept, :resume, :reopen, :close, :pause, :rest, :role, :seat, :clear_ask] and
              is_binary(identifier) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id} = resolved} <-
-           FeltStores.resolve_request(identifier) do
+           FeltStores.resolve_request(identifier, path_hint) do
       if is_pid(GenServer.whereis(Shuttle.Env.server(Poller))) do
         Poller.lifecycle_transition(Shuttle.Env.server(Poller), verb, resolved, args)
       else
-        write(verb, resolved.uid || fiber_id, felt_store: felt_store, args: args)
+        write(verb, resolved.uid || fiber_id,
+          felt_store: felt_store,
+          args: args ++ hint_args(resolved)
+        )
       end
     end
   end
+
+  @doc false
+  def hint_args(%{uid: uid, fiber_id: id}) when is_binary(uid), do: ["--fiber-path", id]
+  def hint_args(_), do: []
 
   @doc """
   Shell `shuttle -C <store> <verb> <fiber_id> --local`. `opts` go to

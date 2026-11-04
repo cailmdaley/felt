@@ -182,6 +182,22 @@ func ResolveAddressRef(storage *Storage, query string) (Ref, error) {
 	return Ref{Storage: storage, ID: f.ID, UID: f.UID}, nil
 }
 
+// ResolveAddressRefWithHint verifies intrinsic identity at an exact path before
+// walking for a UID. A stale or mismatched hint cannot change the identity.
+func ResolveAddressRefWithHint(storage *Storage, query, hint string) (Ref, error) {
+	if LooksLikeUID(query) && hint != "" {
+		ref, err := ResolveAddressRef(storage, hint)
+		if err == nil && strings.EqualFold(ref.UID, query) {
+			return ref, nil
+		}
+		var missing *NoFiberMatchError
+		if err != nil && !errors.As(err, &missing) {
+			return Ref{}, err
+		}
+	}
+	return ResolveAddressRef(storage, query)
+}
+
 // ReadResolved resolves query and reads the fiber it names with read. A UID
 // resolves to an id first, and the fiber can move before the read: when the
 // fiber read there is missing or carries another UID, the UID is resolved and
