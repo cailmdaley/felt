@@ -240,6 +240,24 @@ describe('TranscriptBand', () => {
     expect(band.el.textContent).not.toContain('A delivered message.')
   })
 
+  it('keeps sends addressed to the live session while history is pinned', async () => {
+    const band = new TranscriptBand({
+      shuttleBase: 'https://board.example', inline: true,
+      fetch: fixtureFetch({ [latestId]: records('Live', 'Answer'), [earlierId]: records('History', 'Old answer') }),
+    })
+    bands.push(band)
+    document.body.append(band.el)
+    band.follow(target(latestId))
+    await settle()
+    band.read(target(earlierId))
+    await settle()
+    band.pend('Sent to live')
+    expect(band.el.querySelectorAll('.ws-transcript-msg-sending')).toHaveLength(0)
+    band.read(target(latestId))
+    await settle()
+    expect(band.el.querySelectorAll('.ws-transcript-msg-sending')).toHaveLength(1)
+  })
+
   it('scopes pending sends to the selected session and host without confirming them elsewhere', async () => {
     const text = 'A pending message'
     const other = records(text, 'Another session answer')

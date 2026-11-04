@@ -1291,8 +1291,8 @@ export class TranscriptBand {
     state.className = 'ws-transcript-sending'
     state.textContent = 'sent · not yet read'
     message.kicker.prepend(state)
-    this.sent.push({ text: words, at, node: message.node, target: { ...this.target } })
-    this.sentList.append(message.node)
+    this.sent.push({ text: words, at, node: message.node, target: { ...(this.latest ?? this.target) } })
+    this.paintSent()
     this.scroller.scrollTop = this.scroller.scrollHeight
   }
 
