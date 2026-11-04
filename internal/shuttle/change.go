@@ -156,7 +156,7 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		fields = fields[4:]
 	}
 	diff := func(format ...string) (string, error) {
-		args := []string{"diff", "-O", os.DevNull, "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames", "--ignore-submodules=none", "--submodule=short"}
+		args := []string{"diff", "-O", os.DevNull, "--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--find-renames", "--ignore-submodules=none", "--submodule=short"}
 		args = append(args, format...)
 		return git(append(args, baseSHA, headSHA, "--")...)
 	}
@@ -194,16 +194,31 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		return nil, nil, err
 	}
 	hunks := []ChangeHunk{}
-	fileIndex := -1
+	file := ""
+	inHunk := false
 	for _, line := range strings.Split(c.Patch, "\n") {
 		if strings.HasPrefix(line, "diff --git ") {
-			fileIndex++
+			file, inHunk = "", false
+			continue
+		}
+		if !inHunk && (strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ")) {
+			path := strings.TrimSuffix(line[4:], "\t")
+			if strings.HasPrefix(path, "\"") {
+				path, err = strconv.Unquote(path)
+				if err != nil {
+					return nil, nil, fmt.Errorf("decode Git patch path: %w", err)
+				}
+			}
+			if path != "/dev/null" {
+				file = path[2:]
+			}
 			continue
 		}
 		match := changeHunkHeader.FindStringSubmatch(line)
 		if match == nil {
 			continue
 		}
+		inHunk = true
 		count := func(s string) int {
 			if s == "" {
 				return 1
@@ -213,7 +228,7 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		}
 		oldFrom, _ := strconv.Atoi(match[1])
 		newFrom, _ := strconv.Atoi(match[3])
-		hunks = append(hunks, ChangeHunk{File: c.Files[fileIndex].Path, OldFrom: oldFrom, OldLines: count(match[2]), NewFrom: newFrom, NewLines: count(match[4])})
+		hunks = append(hunks, ChangeHunk{File: file, OldFrom: oldFrom, OldLines: count(match[2]), NewFrom: newFrom, NewLines: count(match[4])})
 	}
 	return c, hunks, nil
 }
