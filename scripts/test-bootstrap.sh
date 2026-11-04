@@ -24,7 +24,7 @@ cat > "$WORK/bin/hostname" <<'STUB'
 #!/bin/bash
 printf 'login-a\n'
 STUB
-for tool in mix tmux felt shuttle node npm; do
+for tool in mix tmux felt shuttle node npm python3; do
   cat > "$WORK/bin/$tool" <<'STUB'
 #!/bin/bash
 exit 0
@@ -39,7 +39,7 @@ if [[ " $* " == *' ui '* && "${BOOTSTRAP_TEST_FAIL_UI:-0}" == 1 ]]; then
 fi
 STUB
 chmod +x "$WORK/bin/uname" "$WORK/bin/hostname" "$WORK/bin/mix" "$WORK/bin/tmux" \
-  "$WORK/bin/felt" "$WORK/bin/shuttle" "$WORK/bin/make" "$WORK/node-bin/"*
+  "$WORK/bin/felt" "$WORK/bin/shuttle" "$WORK/bin/make" "$WORK/bin/python3" "$WORK/node-bin/"*
 
 login_path() {
   printf 'export PATH=%q\n' "$1" > "$WORK/home/.bash_profile"
@@ -55,6 +55,12 @@ run_bootstrap() {
 fail() { cat "$WORK/output" >&2; printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 login_path "$WORK/bin:$WORK/node-bin"
+mv "$WORK/bin/python3" "$WORK/python3-stub"
+if run_bootstrap --dry-run; then fail 'missing Python allowed daemon build prerequisites'; fi
+grep -F 'python3 — MISSING' "$WORK/output" >/dev/null || fail 'missing Python not diagnosed'
+[ ! -e "$WORK/calls" ] && [ ! -e "$WORK/home/.shuttle" ] || fail 'missing Python reached installation writes'
+mv "$WORK/python3-stub" "$WORK/bin/python3"
+printf 'PASS: missing Python fails before installation writes\n'
 run_bootstrap --dry-run || fail 'login shell did not find node/npm'
 grep -F "node ($WORK/node-bin/node)" "$WORK/output" >/dev/null \
   || fail 'node did not resolve through the login profile'

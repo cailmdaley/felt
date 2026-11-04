@@ -100,6 +100,7 @@ if [ "$SKIP_CLI" = 1 ]; then
           "drop --skip-cli to build both CLIs from this checkout, or put shuttle on PATH."
 fi
 
+require "python3" python3 "needed to publish the daemon release symlink." "install Python 3 (brew install python / apt install python3)."
 require "node"  node "needed to build the served ui/dist board." "install Node 22+ (brew install node / nvm)."
 require "npm"   npm  "needed to build the served ui/dist board." "ships with Node."
 
