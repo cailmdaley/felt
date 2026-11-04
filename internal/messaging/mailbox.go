@@ -202,6 +202,30 @@ func mailboxUnavailable(env *sysenv.Env, harness, id, host string) string {
 	return ""
 }
 
+// mailboxReceiverEnded requires positive evidence; a failed identity probe
+// does not establish that a receiver has gone away.
+func mailboxReceiverEnded(env *sysenv.Env, harness, id, host string) bool {
+	r, err := mailboxRegistrationFor(env, harness, id)
+	if errors.Is(err, os.ErrNotExist) {
+		b, readErr := readBounded(filepath.Join(mailboxDir(env, harness, id), "ended.json"), 16384)
+		return readErr == nil && json.Unmarshal(b, &r) == nil && r.ID == id && r.Host == host
+	}
+	if err != nil || r.ID != id || r.Host != host {
+		return false
+	}
+	if r.Ended {
+		return true
+	}
+	if r.PID <= 0 || r.Start == "" {
+		return false
+	}
+	if errors.Is(processSignalZero(r.PID), syscall.ESRCH) {
+		return true
+	}
+	actual := processStartToken(r.PID)
+	return actual != "" && actual != r.Start
+}
+
 func mailboxRegistrationFor(env *sysenv.Env, harness, id string) (mailboxRegistration, error) {
 	b, err := readBounded(filepath.Join(mailboxDir(env, harness, id), "receiver.json"), 16384)
 	var r mailboxRegistration

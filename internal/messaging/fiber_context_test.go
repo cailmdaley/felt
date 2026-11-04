@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -477,8 +476,9 @@ func TestCurrentThreadSignalRecognizesMissingRouteFromCLIStderr(t *testing.T) {
 }
 
 func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
-	for _, ended := range []bool{false, true} {
-		t.Run(fmt.Sprint(ended), func(t *testing.T) {
+	for _, evidence := range []string{"missing", "ended", "killed", "replaced", "unverified"} {
+		t.Run(evidence, func(t *testing.T) {
+			ended := evidence == "ended" || evidence == "killed" || evidence == "replaced"
 			env := testEnv(t)
 			request := Request{MessageID: "unknown-result", Text: "thread child closed: done"}
 			if err := QueueFiberContext(env, "fiber", request); err != nil {
@@ -503,12 +503,32 @@ func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
 			if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", first, request, sender); err == nil {
 				t.Fatal("unknown outcome acknowledged")
 			}
-			if ended {
-				if err := RegisterMailbox(env, "claude", "A", "host", "/project", os.Getpid(), true); err != nil {
+			if evidence != "missing" {
+				receiver := startReceiver(t)
+				if err := RegisterMailbox(env, "claude", "A", "host", "/project", receiver.Process.Pid, true); err != nil {
 					t.Fatal(err)
 				}
-				if err := RegisterMailbox(env, "claude", "A", "host", "/project", os.Getpid(), false); err != nil {
-					t.Fatal(err)
+				switch evidence {
+				case "ended":
+					if err := RegisterMailbox(env, "claude", "A", "host", "/project", receiver.Process.Pid, false); err != nil {
+						t.Fatal(err)
+					}
+				case "killed":
+					_ = receiver.Process.Kill()
+					_, _ = receiver.Process.Wait()
+				case "replaced", "unverified":
+					reg, err := mailboxRegistrationFor(env, "claude", "A")
+					if err != nil {
+						t.Fatal(err)
+					}
+					reg.Start = "different-process"
+					if evidence == "unverified" {
+						reg.PID = 0
+					}
+					b, _ := json.Marshal(reg)
+					if err := mailboxWrite(filepath.Join(mailboxDir(env, "claude", "A"), "receiver.json"), b, false); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			for i := 0; i < 2; i++ {

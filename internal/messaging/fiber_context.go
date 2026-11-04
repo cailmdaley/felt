@@ -415,7 +415,7 @@ func possibleRepeatContext(text string) string {
 
 func fiberContextSessionEnded(env *sysenv.Env, host, address string) bool {
 	a, err := ParseAddress(address)
-	return err == nil && a.Host == host && strings.HasPrefix(mailboxUnavailable(env, a.Harness, a.ID, host), "session has ended;")
+	return err == nil && a.Host == host && mailboxReceiverEnded(env, a.Harness, a.ID, host)
 }
 
 func sendFiberContextAttempt(ctx context.Context, env *sysenv.Env, host string, request Request, address string) (Receipt, error) {
