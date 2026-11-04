@@ -242,11 +242,16 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     railFrame = 0
     const top = scroll.getBoundingClientRect().top + 100
     const active = sections.filter(section => section.element.getBoundingClientRect().top <= top).at(-1)
-    for (const section of sections) section.link.setAttribute('aria-current', section === active ? 'location' : 'false')
+    for (const section of sections) {
+      const current = section === active ? 'location' : 'false'
+      if (section.link.getAttribute('aria-current') !== current) section.link.setAttribute('aria-current', current)
+    }
   }
   const scheduleLocation = (): void => { if (!railFrame) railFrame = requestAnimationFrame(paintLocation) }
+  const locationResize = new ResizeObserver(scheduleLocation)
+  locationResize.observe(scroll); locationResize.observe(main)
   scroll.addEventListener('scroll', scheduleLocation, { passive: true }); scheduleLocation()
-  disposers.push(() => io.disconnect(), () => { cancelAnimationFrame(railFrame); scroll.removeEventListener('scroll', scheduleLocation) })
+  disposers.push(() => io.disconnect(), () => { locationResize.disconnect(); cancelAnimationFrame(railFrame); scroll.removeEventListener('scroll', scheduleLocation) })
   rail.addEventListener('keydown', event => {
     if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
     const links = [...rail.querySelectorAll('button')], index = links.indexOf(event.target as HTMLButtonElement)

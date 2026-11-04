@@ -31,8 +31,11 @@ recovery, one owner-routed delivery with an exact head and old-side anchor,
 relative-link Back navigation, the no-story inventory, and bounded large-file
 mounts. The probe launches its own headless browser, writes light/dark
 screenshots at desktop and 390px, and records render/scroll timings and DOM counts.
-Its render timings use the self-contained harness: they do not include production
-lazy-chunk or grammar downloads.
+Cold measurements use fresh page realms and identical hash navigation after the
+board is ready. Warm measurements retain the highlighter and adjacent-document
+prefetch; the output records whether the target was already rendered. These
+self-contained harness timings exclude production lazy-chunk and grammar downloads.
+The output also includes the built reader, engine and TypeScript grammar gzip sizes.
 
 ## Rendering boundary
 
@@ -50,6 +53,8 @@ patch hunks, not source outside the snapshot. Inline comments use
 `render({lineAnnotations})`; `setLineAnnotations` stages data without painting it.
 
 Theme colors map workspace paper/ink/verdict/stop/machine tokens to Pierre's
-CSS-variable theme. Both widths use unified, wrapped diffs. Drafts and viewed
+CSS-variable theme. Both widths use unified, wrapped diffs. Phone reviews keep
+their navigation visible, with the contents control inside the top bar rather
+than floating over the chapter tabs. Drafts and viewed
 marks are browser-local and keyed by owner/path and head. Sending uses the same
 force-dispatch worker route as the composer, with previous-session intent.

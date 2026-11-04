@@ -9,6 +9,7 @@ export function registerChangeJourneys(test) {
     await page.locator('.ws-selected .ws-report-chip[data-document-key$="/family.change.json"]').first().click()
     await page.locator('.ws-selected .change-reader').waitFor()
     await page.locator('.ws-selected diffs-container [data-line-index]').first().waitFor()
+    await page.waitForFunction(() => document.querySelector('.ws-selected .change-reader') && !document.querySelector('.ws-selected .change-contents [aria-current="location"]'))
   }
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) test(`A change opens, persists a review, and sends one owner-routed message (${viewport.width}px)`, async page => {
     await open(page)
