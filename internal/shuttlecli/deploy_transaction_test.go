@@ -121,9 +121,13 @@ exec `+shellQuote(realRm)+` "$@"
 	write(filepath.Join(f.bin, "ssh"), `#!/bin/sh
 echo ssh >> "$EVENTS"
 echo $$ > "$FLEET_ROOT/ssh.pid"
+for option in ConnectTimeout=15 ServerAliveInterval=15 ServerAliveCountMax=3; do
+ case "$*" in *"$option"*) ;; *) echo "missing SSH bound: $option" >&2; exit 94;; esac
+done
 if [ "${SSH_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/ssh-entered"; while [ ! -f "$FLEET_ROOT/ssh-go" ]; do sleep .02; done; fi
 while :; do case "${1:-}" in -o) shift 2;; -n) shift;; *) break;; esac; done
 shift
+if [ "${FAIL_SSH_PREFLIGHT:-0}" = 1 ] && [ "$*" = true ]; then echo preflight-ssh-stderr-token >&2; exit 255; fi
 # Real SSH joins arguments, then the remote shell parses that command. The
 # isolated login shim sources this fixture's profile and preserves stderr.
 exec /usr/bin/env -i TEST_REMOTE=1 SHUTTLE_TEST_SSH_HELPER=1 SHUTTLE_TEST_GO_CACHES_PINNED=1 HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local \
@@ -303,7 +307,7 @@ func TestDeploySSHParsesJoinedArgumentsAndLoadsLoginProfile(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
 	snippet := `printf "joined argument's value: %s\\n" "$LOGIN_PROFILE_LOADED"; printf 'login-stderr-token\\n' >&2; exit 37`
-	cmd := exec.Command(filepath.Join(f.bin, "ssh"), "fake", "bash", "-lc", shellQuote(snippet))
+	cmd := exec.Command(filepath.Join(f.bin, "ssh"), "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "fake", "bash", "-lc", shellQuote(snippet))
 	cmd.Env = f.env
 	out, err := cmd.CombinedOutput()
 	exit, ok := err.(*exec.ExitError)
@@ -468,6 +472,21 @@ func TestDeployKilledWaiterNeverAcquiresAfterHolder(t *testing.T) {
 	}
 	if builds := strings.Count(fleetRead(f.events), "build "); builds != 1 {
 		t.Fatalf("forgotten waiter ran later: %s", fleetRead(f.events))
+	}
+}
+
+func TestDeploySSHPreflightIsBoundedAndRetainsStderr(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	cmd, log := f.start(t, "ssh-preflight", "FAIL_SSH_PREFLIGHT=1")
+	if e := cmd.Wait(); e == nil {
+		t.Fatal("failed SSH preflight succeeded")
+	}
+	if !strings.Contains(fleetRead(log), "preflight-ssh-stderr-token") {
+		t.Fatalf("unbounded preflight or missing native stderr: %s", fleetRead(log))
+	}
+	if strings.Contains(fleetRead(log), "attached transaction;") {
+		t.Fatal("transaction started after failed SSH preflight")
 	}
 }
 
