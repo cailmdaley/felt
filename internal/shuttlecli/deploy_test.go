@@ -20,7 +20,7 @@ func TestShuttleDeployWaitsForFreshReadyVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wait := "EXPECTED_RELEASE=/expected/release\n" + shellFunction(t, string(script), "wait_for_sha")
+	wait := "EXPECTED_RELEASE=/expected/release\n" + shellFunction(t, string(script), "version_launch_health") + shellFunction(t, string(script), "wait_for_sha")
 	callsFile := filepath.Join(t.TempDir(), "version-calls")
 
 	harness := `TARGET_SHA=abc123
@@ -35,7 +35,7 @@ version_json() {
   if [ "$calls" -eq 1 ]; then
     printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":false}'
   else
-    printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","release_path":"/expected/release","incarnation":"verified-a","ready":true}'
+    printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","release_path":"/expected/release","incarnation":"verified-a","ready":true,"contract":{"ok":true},"reconciliation_hold":null}'
   fi
 }
 sleep() { :; }
@@ -50,6 +50,14 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 	}
 	if !strings.Contains(string(out), "still booting") || !strings.Contains(string(out), "polls=2") {
 		t.Fatalf("did not wait through ready:false before success: %s", out)
+	}
+}
+
+func TestDeployLaunchHealthShell(t *testing.T) {
+	t.Parallel()
+	out, err := exec.Command("bash", "../../scripts/test-shuttle-deploy.sh").CombinedOutput()
+	if err != nil {
+		t.Fatalf("deploy launch health: %v\n%s", err, out)
 	}
 }
 
@@ -256,7 +264,7 @@ SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0
 SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1
 version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":false}'; }
 sleep() { :; }
-` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "wait_for_sha") + `
+` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "version_launch_health") + shellFunction(t, string(script), "wait_for_sha") + `
 wait_for_sha ""
 `
 	cmd := exec.Command("bash", "-c", harness)
@@ -998,8 +1006,8 @@ DEPLOY_VERSION=2.0.0-rc.1
 EXPECTED_RELEASE=/expected/release
 DEPLOY_STARTED_AT=2026-01-01T00:00:00
 SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0
-version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":true,"release_path":"/expected/release","mix_vsn":"0.1.0"}'; }
-` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "wait_for_sha") + "\nwait_for_sha ''\n"
+version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":true,"release_path":"/expected/release","mix_vsn":"0.1.0","contract":{"ok":true},"reconciliation_hold":null}'; }
+` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "version_launch_health") + shellFunction(t, string(script), "wait_for_sha") + "\nwait_for_sha ''\n"
 	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "expected 2.0.0-rc.1") {
 		t.Fatalf("wrong daemon version accepted: %v\n%s", err, out)

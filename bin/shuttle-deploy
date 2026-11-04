@@ -517,6 +517,23 @@ version_ready() { # JSON response -> true only for an explicit ready:true
   printf '%s\n' "$1" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true([,}])'
 }
 
+version_launch_health() { # JSON response -> empty only when launch holds are clear
+  printf '%s' "$1" | python3 -c '
+import json,sys
+try:
+    v=json.load(sys.stdin)
+    contract=v.get("contract") or {}
+    if contract.get("ok") is not True:
+        print("contract: " + str(contract.get("reason") or "Poller receipt unavailable"))
+    elif "reconciliation_hold" not in v:
+        print("Poller reconciliation receipt unavailable")
+    elif v["reconciliation_hold"] is not None:
+        print("migration recovery: " + json.dumps(v["reconciliation_hold"]))
+except (ValueError, TypeError, AttributeError):
+    print("Poller receipt unavailable")
+'
+}
+
 release_quarantine() {
   [ -n "${VERIFIED_RELEASE_RECEIPT:-}" ] || { echo 'missing verified daemon identity' >&2; return 1; }
   local body="{\"expected\":$VERIFIED_RELEASE_RECEIPT}"
@@ -526,6 +543,8 @@ release_quarantine() {
 wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
   local host="${HOST:-local}" expected="${1:-${EXPECTED_RELEASE:-}}" version="" sha="" booted="" ready="" mix_vsn="" release_path="" started="" now="" elapsed="" next_notice=""
   [ -n "$expected" ] || { echo "deploy verification requires an expected release_path" >&2; return 1; }
+  local health=""
+  VERIFIED_RELEASE_RECEIPT=""
   local timeout="${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}"
   local interval="${SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS:-5}"
 
@@ -546,9 +565,10 @@ wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
       return 1
     fi
 
-    # SHA and boot time prove this is the new BEAM; ready proves synchronous
-    # child init (including Poller orphan adoption) has completed.
-    if [ "$sha" = "$TARGET_SHA" ] && [ "$release_path" = "$expected" ] && [ "$ready" = true ] &&
+    health="$(version_launch_health "$version")" || return 1
+    # Initialization and launch health are independent: boot quarantine is
+    # releasable, but contract skew and migration recovery must clear first.
+    if [ "$sha" = "$TARGET_SHA" ] && [ "$release_path" = "$expected" ] && [ "$ready" = true ] && [ -z "$health" ] &&
        { [ -z "${DEPLOY_VERSION:-}" ] || [ "$mix_vsn" = "$DEPLOY_VERSION" ]; } &&
        [ -n "$booted" ] && [ "$booted" \> "$DEPLOY_STARTED_AT" ]; then
       VERIFIED_RELEASE_RECEIPT="$(printf '%s' "$version" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v.get("incarnation"),str) and v["incarnation"]; print(json.dumps({k:v[k] for k in ("incarnation","release_path")}))')" || return 1
@@ -562,6 +582,8 @@ wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
         printf '  daemon on %s did not answer /api/v1/version within %ss\n' "${host:-local}" "$timeout" >&2
       elif [ "$ready" != true ]; then
         printf '  daemon on %s is still booting after %ss; /api/v1/version must report ready:true\n' "${host:-local}" "$elapsed" >&2
+      elif [ -n "$health" ]; then
+        printf '  daemon on %s holds launches: %s\n' "${host:-local}" "$health" >&2
       elif [ -n "${DEPLOY_VERSION:-}" ] && [ "$mix_vsn" != "$DEPLOY_VERSION" ]; then
         printf '  daemon on %s reports version %s; expected %s\n' "${host:-local}" "${mix_vsn:-missing}" "$DEPLOY_VERSION" >&2
       else
@@ -575,6 +597,8 @@ wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
         printf '  waiting for daemon on %s to answer /api/v1/version (%ss elapsed)\n' "${host:-local}" "$elapsed" >&2
       elif [ "$ready" != true ]; then
         printf '  daemon on %s is still booting; waiting for ready:true (%ss elapsed)\n' "${host:-local}" "$elapsed" >&2
+      elif [ -n "$health" ]; then
+        printf '  daemon on %s holds launches: %s (%ss elapsed)\n' "${host:-local}" "$health" "$elapsed" >&2
       else
         printf '  daemon on %s answers but its fresh boot on %s is not verified (%ss elapsed)\n' "${host:-local}" "$TARGET_SHA" "$elapsed" >&2
       fi
