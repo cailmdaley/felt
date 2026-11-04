@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,109 +12,166 @@ import (
 
 func await(t *testing.T, description string, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	until := time.Now().Add(20 * time.Second)
 	for !condition() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", description)
+		if time.Now().After(until) {
+			t.Fatalf("timed out: %s", description)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
-
-func TestLockWaitsNamesHolderAndSurvivesKilledDeployer(t *testing.T) {
-	root := t.TempDir()
-	binary := filepath.Join(root, "deploy-lock")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v %s", err, out)
+func contents(path string) string { b, _ := os.ReadFile(path); return string(b) }
+func present(path string) bool    { _, e := os.Stat(path); return e == nil }
+func build(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "lock")
+	if out, e := exec.Command("go", "build", "-o", p, ".").CombinedOutput(); e != nil {
+		t.Fatalf("build: %v %s", e, out)
 	}
-	host, lease := filepath.Join(root, "host.lock"), filepath.Join(root, "tree.lock")
-	gate := filepath.Join(root, "gate")
-	if err := syscall.Mkfifo(gate, 0600); err != nil {
-		t.Fatal(err)
+	return p
+}
+func start(t *testing.T, binary, root, label, script string, env ...string) (*exec.Cmd, *os.File, string) {
+	t.Helper()
+	logPath := filepath.Join(root, label+".log")
+	log, e := os.Create(logPath)
+	if e != nil {
+		t.Fatal(e)
 	}
-	entered, finished := filepath.Join(root, "entered"), filepath.Join(root, "finished")
-	logPath := filepath.Join(root, "log")
-	log, err := os.Create(logPath)
-	if err != nil {
-		t.Fatal(err)
+	r, w, e := os.Pipe()
+	if e != nil {
+		t.Fatal(e)
 	}
-	defer log.Close()
-	first := exec.Command(binary, host, lease, "host=fake target=aaa deployer=first", "bash", "-c", `echo entered > "$1"; read -r line < "$2"`, "transaction", entered, gate)
-	first.Stdout, first.Stderr = log, log
-	first.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := first.Start(); err != nil {
-		t.Fatal(err)
+	cmd := exec.Command(binary, filepath.Join(root, "host.lock"), filepath.Join(root, label+".lease"), "target="+label, "bash", "-c", script, "transaction", root)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = r, log, log
+	cmd.Env = append(os.Environ(), env...)
+	if e = cmd.Start(); e != nil {
+		t.Fatal(e)
 	}
-	t.Cleanup(func() { _ = syscall.Kill(-first.Process.Pid, syscall.SIGKILL) })
-	await(t, "first transaction", func() bool { _, err := os.Stat(entered); return err == nil })
-	startSecond := func() *exec.Cmd {
-		command := exec.Command(binary, host, lease, "host=fake target=bbb deployer=second", "bash", "-c", `echo finished > "$1"; exit 7`, "transaction", finished)
-		command.Stdout, command.Stderr = log, log
-		if err := command.Start(); err != nil {
-			t.Fatal(err)
+	r.Close()
+	t.Cleanup(func() {
+		w.Close()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if cmd.ProcessState == nil {
+			_ = cmd.Wait()
 		}
-		t.Cleanup(func() {
-			if command.ProcessState == nil {
-				_ = command.Process.Kill()
-				_ = command.Wait()
+		log.Close()
+	})
+	return cmd, w, logPath
+}
+func result(t *testing.T, cmd *exec.Cmd) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(10 * time.Second):
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-done
+		t.Fatal("transaction did not stop within 10 seconds")
+		return nil
+	}
+}
+func free(t *testing.T, path string) {
+	t.Helper()
+	f, e := os.OpenFile(path, os.O_RDWR, 0600)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer f.Close()
+	if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
+		t.Fatalf("lock retained: %v", e)
+	}
+}
+func TestObserverEOFAndSignalsCancelGroup(t *testing.T) {
+	binary := build(t)
+	for _, how := range []string{"eof", "TERM", "INT", "HUP", "deadline"} {
+		t.Run(how, func(t *testing.T) {
+			root := t.TempDir()
+			env := []string{}
+			if how == "deadline" {
+				env = append(env, "SHUTTLE_DEPLOY_TIMEOUT_SECONDS=1")
+			}
+			cmd, pipe, log := start(t, binary, root, how, `trap 'exit 143' TERM; sleep 300 & echo $! > "$1/descendant"; touch "$1/entered"; wait`, env...)
+			await(t, log, func() bool { return present(filepath.Join(root, "entered")) })
+			switch how {
+			case "eof":
+				pipe.Close()
+			case "TERM":
+				cmd.Process.Signal(syscall.SIGTERM)
+			case "INT":
+				cmd.Process.Signal(syscall.SIGINT)
+			case "HUP":
+				cmd.Process.Signal(syscall.SIGHUP)
+			}
+			if e := result(t, cmd); e == nil {
+				t.Fatalf("cancel reported success: %s", contents(log))
+			}
+			free(t, filepath.Join(root, "host.lock"))
+			free(t, filepath.Join(root, how+".lease"))
+			if !strings.Contains(contents(log), "cancelling group") {
+				t.Fatalf("missing cancellation: %s", contents(log))
 			}
 		})
-		return command
 	}
-	second := startSecond()
-	await(t, "holder diagnostic", func() bool {
-		b, _ := os.ReadFile(logPath)
-		return strings.Contains(string(b), "waiting for") && strings.Contains(string(b), "holder: host=fake target=aaa deployer=first")
-	})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	bounded := exec.CommandContext(ctx, binary, host, lease, "bounded", "bash", "-c", ":")
-	bounded.Env = append(os.Environ(), "SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=0")
-	if out, err := bounded.CombinedOutput(); err == nil || !strings.Contains(string(out), "timed out") || !strings.Contains(string(out), "deployer=first") {
-		t.Fatalf("lock wait must time out naming holder: %v %s", err, out)
+}
+func TestForgottenWaiterNeverRuns(t *testing.T) {
+	binary := build(t)
+	root := t.TempDir()
+	holder, life, log := start(t, binary, root, "holder", `touch "$1/entered"; sleep 300`)
+	await(t, log, func() bool { return present(filepath.Join(root, "entered")) })
+	waiter, observer, waitlog := start(t, binary, root, "waiter", `touch "$1/forbidden"`)
+	await(t, waitlog, func() bool { return strings.Contains(contents(waitlog), "waiting for") })
+	observer.Close()
+	if e := result(t, waiter); e == nil {
+		t.Fatal("abandoned waiter succeeded")
 	}
-	// Remove the waiter before probing the crashed holder's inherited lock,
-	// so a newly acquired second lock cannot mask a missing inheritance.
-	if err := second.Process.Kill(); err != nil {
-		t.Fatal(err)
+	life.Close()
+	_ = result(t, holder)
+	free(t, filepath.Join(root, "host.lock"))
+	next, nextlife, nextlog := start(t, binary, root, "next", `exit 7`)
+	defer nextlife.Close()
+	e := result(t, next)
+	if exit, ok := e.(*exec.ExitError); !ok || exit.ExitCode() != 7 {
+		t.Fatalf("status %v: %s", e, contents(nextlog))
 	}
-	_ = second.Wait()
-	if err := first.Process.Kill(); err != nil {
-		t.Fatal(err)
+	if present(filepath.Join(root, "forbidden")) {
+		t.Fatal("abandoned waiter deployed later")
 	}
-	_ = first.Wait()
-	// The build's inherited descriptors, not the controller's PID, own the locks.
-	for _, path := range []string{host, lease} {
-		probe, err := os.OpenFile(path, os.O_RDWR, 0600)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		probe.Close()
-		if err != syscall.EWOULDBLOCK {
-			t.Fatalf("crash dropped live transaction lock %s: %v", path, err)
-		}
+	node, _ := os.Hostname()
+	if !strings.Contains(contents(log), "node="+node) {
+		t.Fatalf("holder lacks node: %s", contents(log))
 	}
-	second = startSecond()
-	if _, err := os.Stat(finished); !os.IsNotExist(err) {
-		t.Fatalf("second transaction overlapped first: %v", err)
+}
+func TestLateEOFFinishesOnlyActivation(t *testing.T) {
+	binary := build(t)
+	root := t.TempDir()
+	cmd, pipe, log := start(t, binary, root, "activation", `printf B >&5; read -r ack <&5; trap '' TERM INT HUP; touch "$1/critical"; while [ ! -f "$1/release" ]; do sleep .02; done; touch "$1/activated"; printf E >&5; trap 'exit 143' TERM; sleep 300`)
+	await(t, log, func() bool { return present(filepath.Join(root, "critical")) })
+	pipe.Close()
+	await(t, log, func() bool { return strings.Contains(contents(log), "deferred through activation") })
+	if e := os.WriteFile(filepath.Join(root, "release"), nil, 0600); e != nil {
+		t.Fatal(e)
 	}
-	unblock, err := os.OpenFile(gate, os.O_WRONLY, 0600)
-	if err != nil {
-		t.Fatal(err)
+	if e := result(t, cmd); e == nil {
+		t.Fatalf("cancelled activation reported success: %s", contents(log))
 	}
-	_, _ = unblock.WriteString("continue\n")
-	unblock.Close()
-	err = second.Wait()
-	exit, ok := err.(*exec.ExitError)
-	if !ok || exit.ExitCode() != 7 {
-		t.Fatalf("child exit status=%v, want 7", err)
+	if !present(filepath.Join(root, "activated")) {
+		t.Fatal("activation torn by EOF")
 	}
-	if _, err := os.Stat(finished); err != nil {
-		t.Fatal(err)
+	free(t, filepath.Join(root, "host.lock"))
+}
+func TestDeadlineKillsTermIgnoringGroup(t *testing.T) {
+	binary := build(t)
+	root := t.TempDir()
+	cmd, life, log := start(t, binary, root, "stubborn", `trap '' TERM INT HUP; touch "$1/entered"; sleep 300`, "SHUTTLE_DEPLOY_TIMEOUT_SECONDS=1")
+	defer life.Close()
+	if e := result(t, cmd); e == nil {
+		t.Fatal("stubborn command succeeded")
 	}
-	// A dead transaction needs no timeout or stale-lock deletion to recover.
-	if out, err := exec.Command(binary, host, lease, "third", "bash", "-c", ":").CombinedOutput(); err != nil {
-		t.Fatalf("recover: %v %s", err, out)
+	if !strings.Contains(contents(log), "KILL group") {
+		t.Fatalf("missing escalation: %s", contents(log))
 	}
+	free(t, filepath.Join(root, "host.lock"))
 }
