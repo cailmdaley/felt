@@ -221,6 +221,18 @@ func requestCouldHaveReachedDaemon(err error) bool {
 	return strings.Contains(err.Error(), "reaching daemon") || strings.Contains(err.Error(), "reading daemon response")
 }
 
+func ownerFiberMissing(err error, owner string) bool {
+	var response daemonStatusError
+	if !errors.As(err, &response) || response.status != 404 {
+		return false
+	}
+	var missing struct {
+		Code string `json:"error_code"`
+		Host string `json:"host"`
+	}
+	return json.Unmarshal([]byte(response.body), &missing) == nil && missing.Code == "fiber_not_found" && missing.Host == owner
+}
+
 // fiberAddress carries intrinsic identity across hosts, independent of store views.
 func fiberAddress(f *felt.Felt) string {
 	if f.UID != "" {

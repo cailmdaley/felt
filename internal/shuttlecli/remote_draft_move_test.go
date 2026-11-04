@@ -27,7 +27,7 @@ func TestRemoteResumeRetainsDraftUntilOwnerConfirmsArmedWrite(t *testing.T) {
 			draft := mustRead(t, st, "draft")
 			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/lifecycle" {
-					http.Error(w, "not found", http.StatusNotFound)
+					workerFiberMissing(w)
 					return
 				}
 				fmt.Fprintf(w, reply, draft.ID, draft.UID, "/remote/loom/.felt/draft/draft.md")
@@ -58,7 +58,7 @@ func TestRemoteResumeTransfersSubtreeDraftAtNamespacePath(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/lifecycle":
 			lifecycle.record(t, r)
-			http.Error(w, "not found", http.StatusNotFound)
+			workerFiberMissing(w)
 		case "/api/v1/fiber/create":
 			creates.record(t, r)
 			payload := creates.last()
@@ -111,7 +111,7 @@ func TestRemoteResumeMovesDraft(t *testing.T) {
 			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/v1/lifecycle":
-					http.Error(w, "not found", http.StatusNotFound)
+					workerFiberMissing(w)
 				case "/api/v1/state/composite":
 					fmt.Fprint(w, `{"remotes":{"worker":{"snapshot":{"boot_quarantine":true}}}}`)
 				case "/api/v1/fiber/create":

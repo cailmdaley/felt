@@ -365,6 +365,7 @@ defmodule Shuttle.FeltStores do
       {:ok, resolved} -> {:ok, resolved}
       {:error, :not_found} -> {:error, "fiber not found: #{identifier}"}
       {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
+      {:error, reason} -> {:error, "felt failed resolving #{identifier}: #{inspect(reason)}"}
     end
   end
 
@@ -374,6 +375,7 @@ defmodule Shuttle.FeltStores do
       {:ok, resolved} -> {:ok, resolved}
       {:error, :not_found} -> {:error, :not_found, missing_on_host(identifier)}
       {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
+      {:error, reason} -> {:error, "felt failed resolving #{identifier}: #{inspect(reason)}"}
     end
   end
 
@@ -398,6 +400,7 @@ defmodule Shuttle.FeltStores do
     case show_resolution(stores, identifier, exact) do
       nil -> {:error, :not_found}
       :timeout -> {:error, :timeout}
+      {:error, _} = error -> error
       resolved -> {:ok, resolved}
     end
   end
@@ -427,8 +430,11 @@ defmodule Shuttle.FeltStores do
           {:error, :timeout} ->
             :timeout
 
-          _ ->
+          {:error, :not_found} ->
             acc
+
+          {:error, reason} ->
+            {:error, reason}
         end
     end)
   end
@@ -488,20 +494,33 @@ defmodule Shuttle.FeltStores do
   end
 
   defp felt_show_json(store, identifier, exact) do
-    # Never fold stderr into stdout: felt prints "no fiber found matching …" to
-    # stderr and JSON to stdout. A miss exits non-zero with empty stdout.
-    # A `:timeout` from the bounded runner is kept distinct from a miss: the
-    # store never answered, so "not found" is not established.
+    # JSON error codes distinguish authoritative absence from ambiguity,
+    # unreadable stores and a CLI that does not implement this protocol.
     args = ["-C", store, "show", identifier, "-j"]
     args = if exact, do: args ++ ["--exact"], else: args
 
     case runner().cmd("felt", args, stderr_to_stdout: false) do
-      {output, 0} -> Jason.decode(output)
-      {_output, :timeout} -> {:error, :timeout}
-      {_output, _status} -> {:error, :not_found}
+      {output, 0} ->
+        Jason.decode(output)
+
+      {_output, :timeout} ->
+        {:error, :timeout}
+
+      {output, status} ->
+        case Jason.decode(output) do
+          {:ok, %{"error_code" => "not_found"}} ->
+            {:error, :not_found}
+
+          {:ok, %{"error" => message}} ->
+            {:error, {:resolution_failed, message}}
+
+          _ ->
+            {:error,
+             {:resolution_failed, "felt show exited #{inspect(status)}: #{String.trim(output)}"}}
+        end
     end
   rescue
-    _ -> {:error, :not_found}
+    error -> {:error, {:resolution_failed, Exception.message(error)}}
   end
 
   # The command runner, behind the same config seam as `Shuttle.Felt` — these

@@ -62,6 +62,7 @@ defmodule ShuttleWeb.FiberController do
          :ok <- validate_status(frontmatter["status"]),
          :ok <- validate_shuttle(frontmatter["shuttle"], frontmatter["status"]),
          :ok <- validate_fiber_id(fiber_id),
+         :ok <- unused_uid(uid),
          {:ok, path, generated_uid} <- felt_add(fiber_id, name, body, frontmatter),
          :ok <- inject_create_frontmatter(path, frontmatter, uid),
          uid = if(uid == "", do: generated_uid, else: uid),
@@ -295,6 +296,17 @@ defmodule ShuttleWeb.FiberController do
         _ -> []
       end
     end)
+  end
+
+  defp unused_uid(""), do: :ok
+
+  defp unused_uid(uid) do
+    case FeltStores.resolve_request(uid) do
+      {:ok, _} -> {:error, "UID #{uid} already exists on this owner"}
+      {:error, :not_found, _} -> :ok
+      {:error, :timeout, reason} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp validate_uid(""), do: :ok

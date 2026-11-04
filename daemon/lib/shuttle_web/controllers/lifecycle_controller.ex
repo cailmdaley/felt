@@ -73,6 +73,16 @@ defmodule ShuttleWeb.LifecycleController do
       |> put_resp_content_type("text/plain")
       |> send_resp(200, output)
     else
+      {:error, :not_found, reason} ->
+        conn
+        |> put_status(404)
+        |> json(%{
+          error_code: "fiber_not_found",
+          host: Shuttle.Poller.own_host_id(),
+          fiber: params["fiber"],
+          error: reason
+        })
+
       {:error, :timeout, reason} ->
         conn |> put_status(503) |> json(%{error: reason, retryable: true})
 

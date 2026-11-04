@@ -5,7 +5,7 @@ defmodule Shuttle.Profile.FunctionsTest do
 
   defmodule EmptyUidRunner do
     def cmd("felt", ["-C", _store, "show", _uid, "-j", "--exact"], _opts),
-      do: {"not found", 1}
+      do: {~s({"error_code":"not_found"}), 1}
   end
 
   test "captures selected function counters for a process that has exited" do

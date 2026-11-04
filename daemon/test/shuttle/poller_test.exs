@@ -6999,6 +6999,7 @@ defmodule Shuttle.PollerTest do
 
   test "store_for_fiber returns :not_found for an unknown fiber" do
     host_a = multi_host_dir("a")
+    File.mkdir_p!(Path.join(host_a, ".felt"))
 
     assert {:error, :not_found} = FeltStores.store_for_fiber("tests/no-such-fiber", [host_a])
   end
