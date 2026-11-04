@@ -57,11 +57,30 @@ func TestFiberContextReachesCodexQuietResumeWithEndedHook(t *testing.T) {
 	if err := DeliverFiberContext(context.Background(), env, "fiber-quiet-resume", "host", address, generation); err != nil {
 		t.Fatalf("deliver to quiet resumed Codex: %v", err)
 	}
-	if n, err := PendingFiberContext(env, "fiber-quiet-resume"); err != nil || n != 0 {
-		t.Fatalf("fiber context pending after session mailbox queue = %d, %v", n, err)
+	if n, err := PendingFiberContext(env, "fiber-quiet-resume"); err != nil || n != 1 {
+		t.Fatalf("fiber context pending before hook = %d, %v", n, err)
 	}
-	if !pendingMailboxText(t, env, "codex", id, request.Text) {
-		t.Fatal("fiber context was not moved to the resumed session's next hook")
+	if pendingMailboxText(t, env, "codex", id, request.Text) {
+		t.Fatal("fiber context was copied into a session queue")
+	}
+	const successor = "successor"
+	if err := RegisterMailbox(env, "codex", successor, "host", "/work", os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	nextAddress := "shuttle://host/codex/" + successor
+	next, err := TransitionFiberReceiver(env, "fiber-quiet-resume", "host", "next", nextAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeliverFiberContext(context.Background(), env, "fiber-quiet-resume", "host", nextAddress, next); err != nil {
+		t.Fatal(err)
+	}
+	var got []Request
+	if err := OfferMailbox(env, "codex", successor, "host", func(batch []Request) error { got = append(got, batch...); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Text != request.Text {
+		t.Fatalf("successor context = %+v", got)
 	}
 }
 
