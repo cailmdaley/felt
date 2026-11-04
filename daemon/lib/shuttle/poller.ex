@@ -1132,6 +1132,7 @@ defmodule Shuttle.Poller do
     observed = %{
       now_ms: System.system_time(:millisecond),
       live: Map.keys(state.running),
+      listen: Shuttle.listen(),
       host: state.own_host_id,
       node: DaemonHeartbeat.node_name(),
       os_pid: System.pid(),
@@ -1175,6 +1176,7 @@ defmodule Shuttle.Poller do
     pid =
       DaemonHeartbeat.write_async(state.daemon_heartbeat_file,
         booted_at: state.daemon_booted_at,
+        listen: Shuttle.listen(),
         host: state.own_host_id,
         node: DaemonHeartbeat.node_name(),
         held: state.boot_quarantine or not state.contract_check.ok,

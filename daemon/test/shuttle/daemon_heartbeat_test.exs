@@ -83,6 +83,7 @@ defmodule Shuttle.DaemonHeartbeatTest do
      Map.merge(
        %{
          "v" => 1,
+         "listen" => "tcp://127.0.0.1:4101",
          "host" => "fleet-host",
          "node" => "login01",
          "held" => false,
@@ -100,13 +101,34 @@ defmodule Shuttle.DaemonHeartbeatTest do
     DaemonHeartbeat.verdict(
       read_result,
       Map.merge(
-        %{now_ms: @now, live: [], host: "fleet-host", node: "login01", os_pid: "222"},
+        %{
+          now_ms: @now,
+          live: [],
+          host: "fleet-host",
+          node: "login01",
+          os_pid: "222",
+          listen: "tcp://127.0.0.1:4101"
+        },
         observed
       )
     )
   end
 
   describe "verdict" do
+    test "a released sibling listener cannot authorize a held instance", %{path: path} do
+      {:ok, released} = hb()
+      held = Map.put(released, "held", true)
+      File.write!(path, Jason.encode!(held))
+      # The other live listener writes after this instance's held heartbeat.
+      File.write!(path, Jason.encode!(Map.put(released, "listen", "tcp://127.0.0.1:4101")))
+      assert {:hold, _} = judge(DaemonHeartbeat.read(path), %{listen: "tcp://127.0.0.1:4102"})
+    end
+
+    test "a heartbeat without listener identity holds" do
+      {:ok, record} = hb()
+      assert {:hold, _} = judge({:ok, Map.delete(record, "listen")})
+    end
+
     test "the baseline heartbeat releases" do
       assert {:release, _} = judge(hb())
     end

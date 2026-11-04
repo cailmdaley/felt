@@ -191,6 +191,7 @@ defmodule Shuttle.DaemonHeartbeat do
          "v" => json["v"],
          "at" => at,
          "booted_at" => booted_at,
+         "listen" => string_or_nil(json["listen"]),
          "host" => string_or_nil(json["host"]),
          "node" => string_or_nil(json["node"]),
          "held" => json["held"],
@@ -221,6 +222,7 @@ defmodule Shuttle.DaemonHeartbeat do
       "v" => @version,
       "at" => Keyword.get(opts, :at, System.system_time(:millisecond)),
       "booted_at" => Keyword.fetch!(opts, :booted_at),
+      "listen" => Keyword.get(opts, :listen),
       "host" => Keyword.get(opts, :host),
       "node" => Keyword.get(opts, :node),
       "held" => Keyword.get(opts, :held),
@@ -354,6 +356,9 @@ defmodule Shuttle.DaemonHeartbeat do
     recent_boots = 1 + Enum.count(hb["boots"] || [], &(now_ms - &1 <= @crash_loop_window_ms))
 
     cond do
+      not is_binary(hb["listen"]) or hb["listen"] != Map.get(observed, :listen) ->
+        {:hold, "daemon heartbeat has no matching listener identity"}
+
       hb["host"] != Map.get(observed, :host) or hb["node"] != Map.get(observed, :node) ->
         {:hold,
          "daemon heartbeat was written by host #{inspect(hb["host"])} on node " <>

@@ -3731,6 +3731,7 @@ defmodule Shuttle.PollerTest do
         %{
           "v" => 1,
           "host" => System.fetch_env!("SHUTTLE_HOST"),
+          "listen" => Shuttle.listen(),
           "node" => Shuttle.DaemonHeartbeat.node_name(),
           "held" => false,
           # Not this test VM's pid: these records stand in for a previous VM.
