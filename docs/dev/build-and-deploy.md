@@ -156,31 +156,47 @@ bin/shuttle-deploy --ref v2.0.0-rc.1 --no-push
 ```
 
 Every invocation resolves `--ref` (or `HEAD` when omitted) to one full commit before contacting any host.
+When a remote is targeted, preflight fetches origin and verifies that the target is reachable from an advertised origin ref before building or cycling any host.
+An implicit target must also descend from the checkout's fetched upstream; `--ref` explicitly authorizes a rollback or divergent revision.
+A local-only deployment can use an unpublished commit.
 Each host uses exactly that object in a detached Git worktree under `<main-worktree>.deploy/<commit>`; no host pulls a moving branch.
 Git's common directory selects the main worktree, so linked checkouts share one deploy root.
-The regular checkout's branch and local edits stay in place, including when deploying locally from a linked worktree.
-An existing deploy root must have the target `HEAD` and no tracked edits.
+After successful quarantine release, the regular checkout fast-forwards to the target when it is on a branch, has no tracked edits, and can fast-forward without overwriting untracked files.
+Otherwise it stays untouched with an advisory; checkout freshness does not itself fail the host.
+Harness inspection runs after this refresh, so Pi can keep loading its package from the regular checkout at the deployed revision.
+This also applies when the invoking checkout is linked.
+A deploy root must have the target `HEAD`, valid Git metadata, and no tracked edits.
+Invalid, incomplete, or missing-but-registered roots are unlocked, removed and recreated under the lease before retrying the build.
 A ready daemon already serving that exact root and revision coalesces without another build or daemon cycle; harness verification, quarantine release and pruning still run.
 A newer descendant is not substituted for the requested revision.
 
 A host-local kernel lock at `~/.shuttle/deploy.lock` serializes the entire transaction, from worktree preparation through build, activation, readiness, quarantine release and pruning.
 A waiting run prints the holder's target, initiating host and PID, host-side PID, and acquisition time.
-The helper ships `scripts/deploy-lock/main.go` to a temporary directory and runs it with the host's Go build toolchain, so locking does not depend on its installed CLI version.
-The transaction and its build children inherit the lock descriptors: a crashed controller cannot unlock an ongoing build, and a dead transaction releases its locks without a timeout or manual cleanup.
+Lock waits are bounded by `SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS` (3600 seconds by default); timeout fails that host and names the holder instead of stalling the remaining fleet indefinitely.
+The helper compiles `scripts/deploy-lock/main.go` with `GOMAXPROCS=2 GOFLAGS=-p=2` under `~/.shuttle/deploy/tools`, then execs the resulting binary.
+There is no Go compiler parent during the transaction and no dependency on `/tmp` permitting executable files.
+Locking does not depend on the installed CLI version.
+The transaction shell and local build subprocesses inherit the lock descriptors, so a crashed helper cannot unlock their ongoing build.
+Non-build steps close descriptors 3 and 4 before preparing trees, inspecting harnesses, or activating daemons; background launchers and newly started tmux servers cannot retain a finished deploy's locks.
+An `srun` job on another node inherits no local descriptor and relies on its submitting transaction's lifetime.
+A dead transaction releases its locks without deleting lock files.
 Different hosts can deploy concurrently.
 Do not delete lock files to recover a deploy; their existence is not evidence that they are held.
 
 Before retargeting the launcher, the helper reads the live daemon's commit from `/api/v1/version`.
-After the new daemon verifies a fresh ready boot, harness setup succeeds, and quarantine release succeeds, it removes other worktrees under the deploy root with `git worktree remove --force`, then runs `git worktree prune`.
+After a fresh ready boot, quarantine release, advisory checkout refresh and successful harness setup, the helper removes obsolete worktrees with `git worktree remove --force`, then runs `git worktree prune`.
 It keeps the new tree, the previous live tree, any tree referenced by `pi list`, the current pointer target, and the running daemon's reported `release_path`.
+The previous release is recorded at `~/.shuttle/deploy/previous` after release; a coalesced run reuses that record instead of treating its own target as the rollback root.
 Pruning observes and removes under the same release lock as activation and selection, so it cannot delete a selected or running release.
-Each transaction also holds a kernel lease at `<deploy-root>/.leases/<commit>.lock` before creating or using its tree.
+Each transaction also holds a kernel lease at `~/.shuttle/deploy/leases/<commit>.lock` before creating or using its tree.
+Lease metadata stays outside deploy roots so rollback targets with older pruning code do not try to remove it as a worktree.
 Pruning tries that lease without waiting and skips an in-flight tree; released leases do not retain obsolete trees.
 Only registered Git worktrees are removed, so stale ordinary directories do not fail pruning.
 An unavailable or unreported running release refuses pruning.
 Generated files and local edits do not prevent removal of other trees.
 
 A new worktree seeds `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the previous live tree.
+If that tree is unavailable or is the target being created, it seeds from the regular checkout instead.
 These are Mix dependencies and compiled artifacts, plus npm dependencies and the `.npm-ci-stamp` that lets `make ui` skip `npm ci`.
 Symlinked cache roots disable seeding.
 Otherwise the helper stages no-dereference copies (APFS clones with `cp -c` on macOS, reflinks where supported on Linux) and publishes them only after successful copying; any seeding failure is reported and the build proceeds cold.
@@ -196,21 +212,19 @@ Push the verified revision, then deploy it on each host:
    Every environment entry except `SHUTTLE_RELEASE` stays verbatim, including
    host identity, proxies, and an absent `TMUX_TMPDIR`.
    Other service settings and unrelated definitions stay untouched.
-3. Run `felt setup <harness>` for each harness that carries felt's plugin, so
-   its hooks and skills match the felt just built, and check that `felt setup
-   receipt` passes (see [harness plugins](#harness-plugins)).
-4. Atomically select the built release immediately before cycling through its supervisor or respawn loop.
+3. Atomically select the built release immediately before cycling through its supervisor or respawn loop.
    A verified live tmux loop takes precedence over service files.
    It stays running, disables competing service managers, and respawns its listener after a graceful SIGTERM.
    If disabling a competing manager already stopped the original listener, the replacement from the loop is left alone.
    A service-owned daemon is cycled once through that manager, without a separate listener kill.
    A loaded supervisor's pin migration counts as that cycle; the activation callback does not restart it again.
    An unsupervised listener is stopped before installing the respawn launcher.
-5. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
-   `release_path` equals the selected release, and `ready` is `true` (up to 15 minutes by default; set
-   `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` to override).
-6. Check the changed behavior through the live API or board.
-7. Run `shuttle daemon release` to release the boot quarantine.
+4. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances, `release_path` equals the selected release, and `ready` is `true`.
+   `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` defaults to 900 and `SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS` to 5; both overrides are forwarded explicitly to remote transactions.
+5. Run `shuttle daemon release` to release the boot quarantine and record the previous release.
+6. Fast-forward the clean regular checkout when possible, then run `felt setup <harness>` for each harness carrying felt's plugin and check `felt setup receipt` (see [harness plugins](#harness-plugins)).
+7. Prune obsolete deploy roots after the harness checks succeed.
+8. Check the changed behavior through the live API or board.
 
 Refreshing an answering daemon is allowed only when the target service manager reports the PID that holds its listener.
 The check needs `lsof`; an unreachable manager, missing inspection tool, stale unit file, or different owner refuses the refresh without stopping the listener.
@@ -231,7 +245,7 @@ The helper builds both CLIs, the daemon, and — on every host that is not marke
 `"build_ui": false` — the UI, on that host.
 An autonomous worker should deploy a built, tested, independently reviewed change.
 Restarting briefly interrupts the API and board; existing tmux workers keep running.
-Every deploy quarantines fresh launches until `shuttle daemon release`:
+Every daemon cycle quarantines fresh launches until `shuttle daemon release`:
 previously-running workers restore without that gate.
 the cycle touches `$SHUTTLE_DATA_DIR/heartbeat.stopped` on the target host and
 then stops the daemon with SIGTERM (whose shutdown touches the marker again), so
@@ -262,8 +276,7 @@ ssh <host> "bash -lc 'cd <checkout> && git pull --ff-only && make build'"
 
 `make build` installs a new `felt`, but each harness keeps running the plugin
 generation it was last set up with, and `felt setup receipt` fails once the
-two disagree. The helper therefore runs `felt setup` on every host, in its
-login shell, after the build.
+two disagree. The helper runs harness setup in the host's login environment after activation, quarantine release and the advisory checkout refresh.
 
 A harness counts as installed where felt's plugin is enabled in it: Claude Code
 and Codex as the enabled bundles in `felt setup receipt --json`, and pi as a
@@ -323,7 +336,9 @@ A remote can also set `"build_wrap": "srun -p serial --cpus-per-task=8 --mem=16G
 to run its build through a scheduler.
 The optional string is a trusted shell command prefix: deployment runs `<build_wrap> bash -lc '<build>'` inside the SSH login shell.
 Only the build (including its checkout directory, CLI installation and version environment) is wrapped.
-Fetching the pinned object, worktree preparation, harness refresh, and daemon cycling stay outside the wrapper. This composes with `build_ui: false` and `SKIP_UI=1`.
+Fetching the pinned object, worktree preparation, harness refresh, and daemon cycling stay outside the wrapper.
+The lock bootstrap also runs outside the wrapper, with its own bounded Go parallelism.
+This composes with `build_ui: false` and `SKIP_UI=1`.
 
 `bin/shuttle-deploy --list` shows the choice per host (`build` or `shipped`).
 For a `shipped` host the helper snapshots the pinned revision's local `ui/dist` while holding the local tree's lease.

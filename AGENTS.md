@@ -249,19 +249,29 @@ CI runs `npm test`, then type-checks and builds the bundle with
 
 ### Deploying
 
-Deploying is **always safe** — the terminal backend owns the worker process, shuttle only owns
-the watcher, so restarting the daemon never kills running jobs. An autonomous
-worker that has built and verified a change SHOULD deploy it.
+Restarting the daemon preserves terminal workers: the terminal backend owns their processes, while Shuttle owns their watchers.
+An autonomous worker that has built and verified a change SHOULD deploy it.
 
 ```
-push → on the host: pull → make build → felt setup <harness> for each
-harness carrying felt's plugin → cycle the :4000 listener (the host's
-supervisor brings it back) → poll /api/v1/version until git_short_sha matches,
-booted_at advances, and ready is true → shuttle daemon release
+resolve one commit → push → preflight origin availability and default-branch freshness
+→ on each host, under its deploy lock and tree lease: prepare the detached SHA root
+→ make build + make cli-install → activate through the selected supervisor
+→ verify SHA, fresh boot, release_path and ready → release quarantine
+→ fast-forward the clean regular checkout → refresh harnesses → prune
 ```
 
-`bin/shuttle-deploy` builds source checkouts in each host's login shell across the fleet in
-`~/.config/shuttle/remotes.json`. A host marked `"build_ui": false` there is built
+`bin/shuttle-deploy` uses the fleet in `~/.config/shuttle/remotes.json` and each host's login environment.
+Every run builds the resolved commit in `<main-worktree>.deploy/<sha>`, including default and linked-worktree invocations.
+Remote targets require that origin advertises history containing the commit; an implicit target must descend from the checkout's fetched upstream.
+Use `--ref` for an intentional rollback.
+A ready target coalesces without another build or daemon cycle.
+Host lock waits are bounded by `SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS` (3600 seconds), and name the holder.
+Only the transaction and local builds inherit the locks; preparation, harnesses and activation close them before launching children.
+The bootstrap helper is built with capped Go parallelism under `~/.shuttle/deploy/tools`, and tree leases live under `~/.shuttle/deploy/leases`.
+Checkout refresh after release is a clean branch fast-forward only; a skipped refresh is advisory, never itself a host failure.
+Pi is inspected after refresh, and a genuinely mismatched package still fails its harness check.
+The previous release is recorded outside the deploy tree so coalescing retains the rollback root.
+ A host marked `"build_ui": false` there is built
 with `SKIP_UI=1` and has the deploy host's `ui/dist` rsynced in before the build
 instead — for a cluster login node on a network filesystem, where `npm ci` alone
 costs minutes. It brings each harness's felt plugin up to the new build
@@ -269,7 +279,7 @@ costs minutes. It brings each harness's felt plugin up to the new build
 already passes at `HEAD` from a clean build), and a host whose `felt setup
 receipt` still fails afterwards fails, naming each unhealthy component and
 its repair.
-**Every deploy and operator restart arms the boot quarantine**
+**Every daemon cycle and operator restart arms the boot quarantine**
 — the cycle touches the daemon's stop marker and sends SIGTERM — so no fresh
 oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing constitutions
 still fire). Only on a host that opted in does a hard-killed, previously
