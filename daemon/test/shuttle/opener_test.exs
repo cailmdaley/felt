@@ -22,6 +22,13 @@ defmodule Shuttle.OpenerTest do
     end
   end
 
+  defmodule Forward do
+    def post(url, body, _, _) do
+      send(Shuttle.Env.app(:opener_test), {:reveal, url, Jason.decode!(body)})
+      Shuttle.Env.app(:reveal_response, {:ok, 200, ~s({"revealed":true})})
+    end
+  end
+
   setup %{tmp_dir: dir} do
     Env.put_env("SHUTTLE_DATA_DIR", dir)
     Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
@@ -31,6 +38,7 @@ defmodule Shuttle.OpenerTest do
     Env.put_app_env(:kitty_impl, Kitty)
     Env.put_app_env(:opener_test, self())
     Env.put_app_env(:opener_http_client, Client)
+    Env.put_app_env(:write_forward_client, Forward)
     Env.put_app_env(:remotes, [%{name: "remote-a", port: 4001, ssh: "login-a"}])
     FakeRex.clients([%{"client_id" => "client:app", "info" => %{"kind" => "app"}}])
     tools = Path.join(dir, "tools")
@@ -310,13 +318,25 @@ defmodule Shuttle.OpenerTest do
     assert FakeRex.calls() == []
   end
 
-  test "remote Rex is explicitly unsupported on a Rex display" do
+  test "remote Rex selects on the owner and activates the local app" do
+    Env.put_app_env(:os_type, {:unix, :darwin})
     Env.put_app_env(:opener_version, {:ok, ~s({"terminal":"rex"})})
+    Env.put_app_env(:remotes, [%{name: "remote-a", url: "http://worker.example.test:4000"}])
+    assert :ok = Opener.open(@name, "remote-a")
 
-    assert {:error, "opening a worker on a remote Rex server is not supported yet"} =
-             Opener.open(@name, "remote-a")
+    assert_received {:reveal, "http://worker.example.test:4000/api/v1/terminal/reveal",
+                     %{"name" => @name}}
 
-    refute_received {:kitty, _, _}
+    assert [{"open", ["-b", "com.superlogical.rex"], _}] = FakeRex.calls()
+  end
+
+  test "remote Rex reports the owner address when no app client is attached" do
+    Env.put_app_env(:opener_version, {:ok, ~s({"terminal":"rex"})})
+    Env.put_app_env(:remotes, [%{name: "remote-a", url: "http://worker.example.test:4000"}])
+    Env.put_app_env(:reveal_response, {:ok, 422, ~s({"code":"no_app_client"})})
+    assert {:error, reason} = Opener.open(@name, "remote-a")
+    assert reason =~ "Add Remote Host…"
+    assert reason =~ "http://worker.example.test:7297"
     assert FakeRex.calls() == []
   end
 

@@ -108,15 +108,45 @@ defmodule Shuttle.Terminal.RexTest do
            end) =~ "local-only"
   end
 
-  test "Linux reveal does not activate an app even with an app client" do
+  test "Linux owner reveals a worker to its attached app without activating it" do
     Env.put_app_env(:os_type, {:unix, :linux})
     FakeRex.clients([%{"client_id" => "client:app", "info" => %{"kind" => "app"}}])
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
 
-    assert {:error, reason} =
-             Rex.reveal_binding(FakeRex, %{"session_id" => "session:1", "window_id" => "window:1"})
+    conn =
+      ShuttleWeb.AttachController.reveal(Plug.Test.conn(:post, "/api/v1/terminal/reveal"), %{
+        "name" => @name
+      })
 
-    assert reason =~ "macOS"
-    assert FakeRex.calls() == []
+    assert %{"revealed" => true} = Jason.decode!(conn.resp_body)
+
+    assert [{_, _, opts}] =
+             Enum.filter(FakeRex.calls(), fn {_, args, _} -> "client.perform" in args end)
+
+    assert %{"args" => %{"session_id" => _, "window_id" => _}} = Jason.decode!(opts[:input])
+    refute Enum.any?(FakeRex.calls(), fn {bin, _, _} -> bin == "open" end)
+  end
+
+  test "Linux owner reports no app client and an absent worker" do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+
+    conn =
+      ShuttleWeb.AttachController.reveal(Plug.Test.conn(:post, "/api/v1/terminal/reveal"), %{
+        "name" => @name
+      })
+
+    assert conn.status == 422
+    assert %{"code" => "no_app_client"} = Jason.decode!(conn.resp_body)
+
+    conn =
+      ShuttleWeb.AttachController.reveal(Plug.Test.conn(:post, "/api/v1/terminal/reveal"), %{
+        "name" => "missing"
+      })
+
+    assert %{"error" => reason} = Jason.decode!(conn.resp_body)
+    assert reason =~ "absent or unobservable"
+    refute Enum.any?(FakeRex.calls(), fn {bin, _, _} -> bin == "open" end)
   end
 
   test "launch uses the captured specification and persists nested create IDs" do

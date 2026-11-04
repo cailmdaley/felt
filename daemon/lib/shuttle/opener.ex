@@ -32,7 +32,10 @@ defmodule Shuttle.Opener do
 
       case OpenTrace.step(:locate, fn -> Terminal.locate_target(runner, name) end) do
         {Rex, binding} ->
-          Rex.reveal_binding(runner, binding)
+          case Rex.reveal_binding(runner, binding) do
+            {:error, :no_app_client} -> {:error, "No Rex app client is attached to this server"}
+            result -> result
+          end
 
         {Terminal.Tmux, _} ->
           Rex.reveal_tmux(name, nil, nil, fiber: Shuttle.Terminal.RexTree.fiber_for(name))
@@ -47,11 +50,22 @@ defmodule Shuttle.Opener do
 
   defp open_remote(name, host, remote) do
     if Terminal.primary() == Rex do
-      with :ok <- OpenTrace.step(:remote_backend, fn -> remote_tmux(remote) end),
-           {:ok, destination} <-
-             OpenTrace.step(:ssh_destination, fn -> Kitty.ssh_destination(host) end) do
-        fiber = OpenTrace.step(:remote_fiber, fn -> remote_fiber(name, remote) end)
-        OpenTrace.step(:viewer, fn -> Rex.reveal_tmux(name, host, destination, fiber: fiber) end)
+      case OpenTrace.step(:remote_backend, fn -> remote_backend(remote) end) do
+        {:ok, "rex"} ->
+          reveal_remote_rex(name, remote)
+
+        {:ok, "tmux"} ->
+          with {:ok, destination} <-
+                 OpenTrace.step(:ssh_destination, fn -> Kitty.ssh_destination(host) end) do
+            fiber = OpenTrace.step(:remote_fiber, fn -> remote_fiber(name, remote) end)
+
+            OpenTrace.step(:viewer, fn ->
+              Rex.reveal_tmux(name, host, destination, fiber: fiber)
+            end)
+          end
+
+        error ->
+          error
       end
     else
       OpenTrace.step(:kitty, fn -> kitty().open(name, host) end)
@@ -60,21 +74,60 @@ defmodule Shuttle.Opener do
 
   # A daemon without the terminal field uses tmux. An unavailable or malformed
   # version is not evidence that an ssh/tmux viewer can reach the worker.
-  defp remote_tmux(remote) do
+  defp remote_backend(remote) do
     client = Env.app(:opener_http_client, Shuttle.RemoteRegistry.Client.Default)
 
     with {:ok, body} <-
            client.get(Remote.url_for(remote, "/api/v1/version"), remote.request_timeout_ms),
          {:ok, version} when is_map(version) <- Jason.decode(body) do
       case Map.get(version, "terminal", "tmux") do
-        "tmux" -> :ok
-        "rex" -> {:error, "opening a worker on a remote Rex server is not supported yet"}
+        backend when backend in ["tmux", "rex"] -> {:ok, backend}
         _ -> {:error, "#{remote.name} reports an unsupported terminal backend"}
       end
     else
       _ ->
         {:error,
          "Cannot determine #{remote.name}'s terminal backend; its daemon could not be reached or returned an invalid version"}
+    end
+  end
+
+  @doc "Reveal a Rex worker on its owner, without routing through the display hub."
+  def reveal_owned_rex(name) do
+    runner = Env.app(:rex_runner, Shuttle.Runner.Default)
+
+    case Rex.locate(runner, name) do
+      {:ok, binding} -> Rex.reveal_binding(runner, binding)
+      _ -> {:error, "Cannot locate terminal #{name}; it is absent or unobservable"}
+    end
+  end
+
+  defp reveal_remote_rex(name, remote) do
+    case OriginRouter.forward(remote, "/api/v1/terminal/reveal", %{"name" => name}) do
+      {:forwarded, 200, _} ->
+        case Rex.activate_app(Env.app(:rex_runner, Shuttle.Runner.Default)) do
+          :ok -> :ok
+          {:error, reason} -> {:error, "Cannot activate Rex app: #{inspect(reason)}"}
+        end
+
+      {:forwarded, _, body} ->
+        case Jason.decode(body) do
+          {:ok, %{"code" => "no_app_client"}} ->
+            address =
+              %URI{scheme: "http", host: URI.parse(remote.url).host, port: 7297}
+              |> URI.to_string()
+
+            {:error,
+             "No Rex app client is attached to #{remote.name}. Choose Add Remote Host… in the Rex app and enter #{address}"}
+
+          {:ok, %{"error" => message}} when is_binary(message) ->
+            {:error, "#{remote.name}: #{message}"}
+
+          _ ->
+            {:error, "#{remote.name} could not reveal the Rex worker"}
+        end
+
+      {:error, _} ->
+        {:error, "#{remote.name} could not be reached to reveal the Rex worker"}
     end
   end
 

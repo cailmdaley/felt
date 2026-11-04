@@ -68,9 +68,10 @@ Uncertain tmux visibility holds rather than launching a duplicate; the missing-s
 ## Terminal backends
 
 `shuttle host --json` and `GET /api/v1/version` report the host's selected `terminal`, `tmux` or `rex`.
-For a Rex-held worker on macOS, `shuttle attach <fiber>` opens the local Rex app rather than attaching a TTY; opening an app on Linux or a remote Rex worker through SSH is unsupported.
+For a Rex-held worker on macOS, `shuttle attach <fiber>` opens the local Rex app rather than attaching a TTY.
 A tmux-held worker attaches in the calling TTY, including on a Rex-configured host.
-The local board's Rex opener can view remote tmux workers over SSH.
+The board opens remote tmux workers over SSH; for a remote Rex worker, the owner selects the worker in an attached Rex app client and the macOS hub activates the app.
+First choose **Add Remote Host…** in the Rex app and enter `http://<owner>.<tailnet>:7297`, using the owner daemon's configured URL host.
 `shuttle claim` inside a Rex block sends its native session and block references; the daemon binds them to the worker name.
 On Linux, install Rex rootlessly with `bin/rex-install` and select `"terminal": "rex"` in `~/.config/shuttle/host.json`.
 Shuttle starts a missing server on `unix://<data dir>/rex/server.sock`, keeps its state in `<data dir>/rex/state`, and requests the Tailscale-identified listener on port 7297.

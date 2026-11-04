@@ -15,8 +15,9 @@ defmodule ShuttleWeb.AttachController do
 
   Unlike the kanban write-plane this is **not** owner-routed: the terminal must
   open on the machine serving the UI (where the human is), so the receiving
-  daemon always opens the viewer locally. `Shuttle.Opener` selects Rex or
-  kitty for this host's display and uses ssh for remote tmux terminals.
+  daemon opens the viewer locally. `Shuttle.Opener` selects Rex or kitty for
+  this host's display, uses SSH for remote tmux terminals, and asks a remote Rex
+  owner to select its worker in the attached app client.
 
   `shuttle_host` is optional; absent/own-host → local. Returns 200
   `{ "attached": true, "session": <tmux session> }` on success, 400 for a
@@ -32,6 +33,23 @@ defmodule ShuttleWeb.AttachController do
 
   alias Shuttle.{OpenTrace, OriginRouter, Remote, SessionResume, Transcript}
   alias ShuttleWeb.SessionResumeController
+
+  def reveal(conn, %{"name" => name}) when is_binary(name) and name != "" do
+    case Shuttle.Opener.reveal_owned_rex(name) do
+      :ok ->
+        json(conn, %{revealed: true})
+
+      {:error, :no_app_client} ->
+        conn
+        |> put_status(422)
+        |> json(%{code: "no_app_client", error: "No Rex app client is attached"})
+
+      {:error, reason} ->
+        conn |> put_status(422) |> json(%{error: reason})
+    end
+  end
+
+  def reveal(conn, _), do: conn |> put_status(400) |> json(%{error: "name is required"})
 
   def create(conn, params) do
     OpenTrace.run(params["tmux_session"] || params["session"], params["shuttle_host"], fn ->

@@ -618,15 +618,12 @@ defmodule Shuttle.Terminal.Rex do
   defp reveal_session(runner, sid, wid) do
     alias Shuttle.OpenTrace
 
-    with :ok <- local_app_supported(),
-         {:ok, client} <- OpenTrace.step(:app_client, fn -> ensure_app_client(runner) end),
+    with {:ok, client} <- OpenTrace.step(:app_client, fn -> ensure_app_client(runner) end),
          {:ok, _} <- OpenTrace.step(:select, fn -> Rex.select(runner, client, sid, wid) end),
-         {_, 0} <-
-           OpenTrace.step(:activate, fn ->
-             runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true)
-           end) do
+         :ok <- activate_app(runner) do
       :ok
     else
+      {:error, :no_app_client} = error -> error
       error -> open_error(error)
     end
   end
@@ -772,20 +769,30 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp local_app_supported do
-    if Rex.macos?(),
-      do: :ok,
-      else:
-        {:error,
-         {:unknown, "Opening a Rex app is supported only on macOS; connect with a Rex client."}}
+  @doc "Activate the Rex app on a macOS display."
+  def activate_app(runner) do
+    if Rex.macos?() do
+      Shuttle.OpenTrace.step(:activate, fn ->
+        case runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true) do
+          {_, 0} -> :ok
+          error -> {:error, error}
+        end
+      end)
+    else
+      :ok
+    end
   end
 
   defp ensure_app_client(runner) do
     case Rex.app_client(runner) do
       {:error, :not_found} ->
-        case runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true) do
-          {_, 0} -> await(fn -> Rex.app_client(runner) end, 5_000)
-          error -> {:error, {:unknown, inspect(error)}}
+        if Rex.macos?() do
+          case runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true) do
+            {_, 0} -> await(fn -> Rex.app_client(runner) end, 5_000)
+            error -> {:error, {:unknown, inspect(error)}}
+          end
+        else
+          {:error, :no_app_client}
         end
 
       result ->

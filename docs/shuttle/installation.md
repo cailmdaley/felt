@@ -736,7 +736,9 @@ Run `shuttle doctor` to inspect server reachability, the running server's versio
 The listener check recognizes Rex's loopback refusal; it doesn't verify reachability from another tailnet host.
 A missing listener doesn't prevent local work.
 Linux diagnostics don't check Apple privacy grants or require an app client.
-Opening a local Rex app through Shuttle is macOS-only; use a Rex client to reach a Linux server.
+To open a remote Rex worker from the board, first choose **Add Remote Host…** in the Rex app and enter `http://<owner>.<tailnet>:7297`, using the host from the hub's configured remote URL.
+The owner selects the worker in the attached app client, and the macOS hub activates Rex.
+The Rex server must have a reachable tailnet listener; a local-only fallback cannot accept that connection.
 
 ### macOS
 
