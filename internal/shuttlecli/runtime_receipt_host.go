@@ -523,6 +523,9 @@ func (a *app) evaluateHost(ev hostEvidence) ReceiptHost {
 					describeHostSource(ev.settings.ListenSource, ev.settings.File)))
 		}
 		for _, l := range h.Listeners {
+			if l.Role == "tailscaled" && tailscaledPeerAPI(l) {
+				continue
+			}
 			if gatedDaemonTCP && l.Role == "daemon" && daemonTCPListenerMatches(l, ev.daemonListen) {
 				continue
 			}
@@ -590,9 +593,43 @@ func listenerRepair(role string) string {
 	case "tunnel":
 		return "stop the tunnel's TCP local end: disable that remote or set its tunnel.manager to none, then rerun `shuttle tunnels install`"
 	case "tailscaled":
-		return "run tailscaled without a local TCP listener (no --outbound-http-proxy-listen or --socks5-server), and point `tailscale serve` at the daemon's socket"
+		return "run tailscaled without a local TCP proxy listener (no --outbound-http-proxy-listen or --socks5-server), then rerun `shuttle doctor`"
 	}
 	return "restart onto a daemon that gates TCP peers by uid, or remove the TCP override and use the class's unix socket"
+}
+
+// tailscaledPeerAPI distinguishes its peer listener from configured local proxies.
+// If the command or a proxy address cannot be read, retain the conservative finding.
+func tailscaledPeerAPI(l ReceiptListener) bool {
+	args := strings.Fields(l.Command)
+	if len(args) == 0 {
+		return false
+	}
+	for i := 1; i < len(args); i++ {
+		name, value, hasValue := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
+		if name != "socks5-server" && name != "outbound-http-proxy-listen" {
+			continue
+		}
+		if !hasValue {
+			i++
+			if i >= len(args) {
+				return false
+			}
+			value = args[i]
+		}
+		if value == "" {
+			continue
+		}
+		_, portText, err := net.SplitHostPort(value)
+		if err != nil {
+			return false
+		}
+		port, err := strconv.Atoi(portText)
+		if err != nil || port == 0 || port == l.Port {
+			return false
+		}
+	}
+	return true
 }
 
 // hostFileRepair words the repair for a host file or listener setting that

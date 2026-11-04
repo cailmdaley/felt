@@ -936,6 +936,35 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	}
 }
 
+func TestEvaluateHostTailscaledPeerAPIAndProxies(t *testing.T) {
+	t.Parallel()
+	one := 1
+	base := hostEvidence{settings: hostSettings{Class: "shared-multi-user", Listen: "unix:///srv/s.sock", listen: listenAddr{"unix", "/srv/s.sock"}}, users: &one, listenFrom: "ss"}
+	for _, tc := range []struct {
+		name, command string
+		port          int
+		mismatch      bool
+	}{
+		{"peerapi", "tailscaled --tun=userspace-networking", 54403, false},
+		{"peerapi beside proxy", "tailscaled --socks5-server=localhost:1055", 54403, false},
+		{"socks proxy", "tailscaled --socks5-server=localhost:1055", 1055, true},
+		{"http proxy", "tailscaled -outbound-http-proxy-listen 127.0.0.1:8080", 8080, true},
+		{"unknown command", "", 54403, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := base
+			ev.listeners = []rawListener{{Process: "tailscaled", PID: 42, Command: tc.command, Address: "127.0.0.1", Port: tc.port}}
+			got := newApp(testEnv(t)).evaluateHost(ev)
+			if (got.Status == receiptMismatch) != tc.mismatch {
+				t.Fatalf("got %+v", got)
+			}
+			if strings.Contains(got.Repair, "point `tailscale serve` at the daemon's socket") {
+				t.Fatalf("unusable repair: %s", got.Repair)
+			}
+		})
+	}
+}
+
 // TestEvaluateHost_OneRepairPerRemedy — each listener is its own problem, but
 // two daemon listeners share one repair, and each role words its own.
 func TestEvaluateHost_OneRepairPerRemedy(t *testing.T) {
