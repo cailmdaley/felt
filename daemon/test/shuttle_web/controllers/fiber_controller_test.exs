@@ -15,7 +15,7 @@ defmodule ShuttleWeb.FiberControllerTest do
         "shuttle-fiber-controller-#{System.unique_integer([:positive])}"
       )
 
-    File.mkdir_p!(tmp)
+    File.mkdir_p!(Path.join(tmp, ".felt"))
 
     Env.put_env("SHUTTLE_STORES", tmp)
     Env.put_env("SHUTTLE_STORES_FILE", Path.join(tmp, "felt_stores.json"))
@@ -63,6 +63,10 @@ defmodule ShuttleWeb.FiberControllerTest do
                      Shuttle.FeltStores.store_felt_realpath(loom)
         end
       end
+
+      # Project views resolve addresses, but creation must remain observable
+      # through a physical store the daemon polls.
+      Env.put_env("SHUTTLE_STORES", Enum.uniq([loom, store]) |> Enum.join(","))
 
       for id <- fixture["creates"] do
         conn =
@@ -228,13 +232,13 @@ defmodule ShuttleWeb.FiberControllerTest do
     assert {_json, 0} = System.cmd("felt", ["-C", tmp, "show", "tests/transferred", "-j"])
   end
 
-  test "POST /api/v1/fiber/create writes under shuttle.project_dir when it differs from daemon root",
+  test "POST /api/v1/fiber/create keeps an unregistered worker cwd out of store selection",
        %{
          tmp: tmp
        } do
     daemon_root = Path.join(tmp, "daemon-root")
     project_dir = Path.join(tmp, "project-dir")
-    File.mkdir_p!(daemon_root)
+    File.mkdir_p!(Path.join(daemon_root, ".felt"))
     File.mkdir_p!(project_dir)
     Env.put_env("SHUTTLE_STORES", daemon_root)
 
@@ -260,11 +264,8 @@ defmodule ShuttleWeb.FiberControllerTest do
     assert %{"id" => "tests/project-local", "path" => path} = Jason.decode!(conn.resp_body)
     assert conn.status == 200
 
-    assert_felt_path(path, project_dir, ["tests", "project-local", "project-local.md"])
-
-    refute File.exists?(
-             Path.join([daemon_root, ".felt", "tests", "project-local", "project-local.md"])
-           )
+    assert_felt_path(path, daemon_root, ["tests", "project-local", "project-local.md"])
+    refute File.exists?(Path.join(project_dir, ".felt"))
   end
 
   test "create announces the physical store, not the first store with the same slug", %{tmp: tmp} do

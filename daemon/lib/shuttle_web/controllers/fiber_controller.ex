@@ -63,15 +63,17 @@ defmodule ShuttleWeb.FiberController do
          :ok <- validate_shuttle(frontmatter["shuttle"], frontmatter["status"]),
          :ok <- validate_fiber_id(fiber_id),
          :ok <- unused_uid(uid),
-         {:ok, path, generated_uid} <- felt_add(fiber_id, name, body, frontmatter),
+         {:ok, root} <- create_root(frontmatter),
+         {:ok, path, generated_uid} <- felt_add(root, fiber_id, name, body, frontmatter),
+         {:ok, store} <- polled_store(path),
          :ok <- inject_create_frontmatter(path, frontmatter, uid),
          uid = if(uid == "", do: generated_uid, else: uid),
          :ok <-
-           confirm_created(felt_root(frontmatter), fiber_id, path, uid, status_of(frontmatter)) do
+           confirm_created(root, fiber_id, path, uid, status_of(frontmatter)) do
       # Announce the new document to the Poller: an armed constitution
       # dispatches on the next tick, and the owner's feed lists it now, even
       # on a store whose discovery stays hot between full scans.
-      announce_created(path, uid)
+      Shuttle.Poller.refresh_created_document(store, uid)
 
       json(conn, %{
         id: fiber_id,
@@ -88,15 +90,19 @@ defmodule ShuttleWeb.FiberController do
     end
   end
 
-  defp announce_created(path, uid) do
-    {:ok, path} = Shuttle.Realpath.resolve(path)
+  defp polled_stores do
+    Enum.filter(FeltStores.configured_stores(), fn store ->
+      match?({:ok, %File.Stat{type: :directory}}, Shuttle.FS.lstat(Path.join(store, ".felt")))
+    end)
+  end
 
-    FeltStores.configured_stores()
-    |> Enum.filter(&String.starts_with?(path, FeltStores.store_felt_realpath(&1) <> "/"))
-    |> Enum.max_by(&String.length(FeltStores.store_felt_realpath(&1)), fn -> nil end)
-    |> case do
-      nil -> :ok
-      store -> Shuttle.Poller.refresh_created_document(store, uid)
+  defp polled_store(path) do
+    case Enum.find(
+           polled_stores(),
+           &String.starts_with?(path, FeltStores.store_felt_realpath(&1) <> "/")
+         ) do
+      nil -> {:error, "created path is outside every polled store"}
+      store -> {:ok, store}
     end
   end
 
@@ -169,15 +175,12 @@ defmodule ShuttleWeb.FiberController do
   # felt owns placement, identity and duplicate rejection. `--namespace`
   # addresses the enclosing store rather than a project-rooted subtree, without
   # name inference. The returned path is felt's carried physical path.
-  defp felt_add(fiber_id, name, body, frontmatter) do
-    root = felt_root(frontmatter)
-
+  defp felt_add(root, fiber_id, name, body, frontmatter) do
     args =
       ["-C", root, "add", fiber_id, name, "--namespace", "-s", status_of(frontmatter)] ++
         body_args(body) ++ tag_args(frontmatter) ++ native_field_args(frontmatter)
 
-    with :ok <- ensure_felt_repo(root),
-         {:ok, _output} <- Shuttle.Felt.run(args) do
+    with {:ok, _output} <- Shuttle.Felt.run(args) do
       case felt_metadata(root, fiber_id) do
         {:ok, path, uid, _status} -> {:ok, path, uid}
         error -> error
@@ -185,21 +188,6 @@ defmodule ShuttleWeb.FiberController do
     else
       {:error, reason} -> {:error, reason}
       {:command_error, _status, output} -> {:error, "felt add failed: #{String.trim(output)}"}
-    end
-  end
-
-  # Keep the endpoint self-sufficient: a daemon store is normally already a
-  # felt repo, but `project_dir` may be a fresh checkout. `felt init` is idempotent ("creates or repairs"), so this is a
-  # no-op on existing stores and the missing-repo fix on new ones. felt's
-  # `init` ignores `-C` for placement and writes `.felt/` at its working
-  # directory, so we drive it with `cd:` rather than `-C`.
-  defp ensure_felt_repo(root) do
-    Shuttle.FS.mkdir_p!(root)
-
-    case Shuttle.Felt.run(["init"], cd: root) do
-      {:ok, _output} -> :ok
-      {:command_error, _status, output} -> {:error, "felt init failed: #{String.trim(output)}"}
-      {:error, reason} -> {:error, "felt init failed: #{reason}"}
     end
   end
 
@@ -341,14 +329,26 @@ defmodule ShuttleWeb.FiberController do
     end
   end
 
-  defp felt_root(%{"shuttle" => %{"project_dir" => project_dir}})
-       when is_binary(project_dir) and project_dir != "" do
-    Shuttle.Env.expand(project_dir)
-  end
+  # A worker cwd is not a fiber store. Prefer its namespace only when that
+  # namespace is polled here; otherwise creation belongs to the primary store.
+  defp create_root(frontmatter) do
+    stores = polled_stores()
+    project = get_in(frontmatter, ["shuttle", "project_dir"])
 
-  defp felt_root(_frontmatter) do
-    FeltStores.configured_stores()
-    |> List.first()
+    preferred =
+      if is_binary(project) and project != "",
+        do: FeltStores.namespace_store(Shuttle.Env.expand(project))
+
+    store =
+      Enum.find(stores, fn store ->
+        preferred &&
+          FeltStores.store_felt_realpath(store) == FeltStores.store_felt_realpath(preferred)
+      end) || List.first(stores)
+
+    case store do
+      nil -> {:error, "no polled felt store is configured for creation"}
+      store -> {:ok, FeltStores.namespace_store(store)}
+    end
   end
 
   defp required_string(params, key) do
