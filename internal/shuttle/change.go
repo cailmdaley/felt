@@ -3,7 +3,9 @@ package shuttle
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -102,7 +104,7 @@ type ChangeReport struct {
 }
 
 // BuildChange invokes Git directly; refs resolve before any tree or log reads.
-// Base is the exact comparison tree, not an implicit merge base.
+// Base is the merge base of the requested base ref and head.
 func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (*Change, []ChangeHunk, error) {
 	git := func(args ...string) (string, error) {
 		cmd := env.Command("git", append([]string{"-C", repo}, args...)...)
@@ -126,18 +128,28 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 	if err != nil {
 		return nil, nil, err
 	}
-	root, err := git("rev-parse", "--show-toplevel")
+	mergeBase, err := git("merge-base", baseSHA, headSHA)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("no common ancestor for %q and %q: %w", base, head, err)
 	}
-	root = strings.TrimSpace(root)
+	baseSHA = strings.TrimSpace(mergeBase)
+	origin, _ := git("config", "--get", "remote.origin.url")
+	name, forgeURL := changeOrigin(strings.TrimSpace(origin))
+	if name == "" {
+		worktrees, err := git("worktree", "list", "--porcelain", "-z")
+		if err != nil {
+			return nil, nil, err
+		}
+		mainDir, _, _ := strings.Cut(strings.TrimPrefix(worktrees, "worktree "), "\x00")
+		name = filepath.Base(mainDir)
+	}
 	if head == "HEAD" {
 		ref, err := git("symbolic-ref", "--quiet", "--short", "HEAD")
 		if err == nil {
 			head = strings.TrimSpace(ref)
 		}
 	}
-	c := &Change{Version: 1, Repo: ChangeRepo{Name: filepath.Base(root), Dir: repo}, Base: baseSHA, Head: headSHA, BaseRef: base, HeadRef: head, Story: story, Files: []ChangeFile{}, Commits: []ChangeCommit{}}
+	c := &Change{Version: 1, Repo: ChangeRepo{Name: name, Dir: repo, ForgeURL: forgeURL}, Base: baseSHA, Head: headSHA, BaseRef: base, HeadRef: head, Story: story, Files: []ChangeFile{}, Commits: []ChangeCommit{}}
 	subject, err := git("show", "-s", "--format=%s", headSHA, "--")
 	if err != nil {
 		return nil, nil, err
@@ -244,6 +256,37 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		hunks = append(hunks, ChangeHunk{File: file, OldFrom: oldFrom, OldLines: count(match[2]), NewFrom: newFrom, NewLines: count(match[4])})
 	}
 	return c, hunks, nil
+}
+
+// changeOrigin extracts repository identity without contacting the remote.
+func changeOrigin(origin string) (string, *string) {
+	if origin == "" {
+		return "", nil
+	}
+	u, err := url.Parse(origin)
+	if err == nil && u.Host != "" {
+		name := strings.TrimSuffix(path.Base(strings.TrimRight(u.Path, "/")), ".git")
+		if u.Scheme == "http" || u.Scheme == "https" {
+			u.Scheme, u.User, u.RawQuery, u.Fragment = "https", nil, "", ""
+			u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), ".git")
+			u.RawPath = ""
+			forge := u.String()
+			return name, &forge
+		}
+		return name, nil
+	}
+	remotePath := origin
+	if host, p, ok := strings.Cut(origin, ":"); ok && !strings.Contains(host, "/") {
+		remotePath = p
+		if _, h, ok := strings.Cut(host, "@"); ok {
+			host = h
+		}
+		if host == "github.com" || host == "gitlab.com" {
+			forge := "https://" + host + "/" + strings.TrimSuffix(strings.Trim(p, "/"), ".git")
+			return strings.TrimSuffix(path.Base(strings.TrimRight(p, "/")), ".git"), &forge
+		}
+	}
+	return strings.TrimSuffix(path.Base(strings.TrimRight(remotePath, "/")), ".git"), nil
 }
 
 var changeHunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)

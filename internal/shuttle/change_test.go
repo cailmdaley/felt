@@ -48,6 +48,7 @@ func TestBuildChangeRealGit(t *testing.T) {
 	put("old name\t.go", "rename me\n")
 	put("image.bin", "\x00old\x00")
 	put("line\nbreak.go", "before\n")
+	put("deleted-on-main.go", "untouched on topic\n")
 	git("add", ".")
 	git("commit", "-m", "base")
 	base := git("rev-parse", "HEAD")
@@ -119,10 +120,11 @@ func TestBuildChangeRealGit(t *testing.T) {
 	if !strings.Contains(string(encoded), `"flags":[]`) || !strings.Contains(string(encoded), `"chapters":[]`) {
 		t.Fatalf("story arrays: %s", encoded)
 	}
-	// A side branch advances main; explicit merge-base remains the snapshot base.
+	// Main-only additions and deletions must not appear reversed in the topic change.
 	git("checkout", "--", "modified.go")
 	git("checkout", "main")
 	put("main-only.go", "main\n")
+	git("rm", "deleted-on-main.go")
 	git("add", ".")
 	git("commit", "-m", "main advance")
 	mergeBase := git("merge-base", "main", "topic/change")
@@ -136,12 +138,24 @@ func TestBuildChangeRealGit(t *testing.T) {
 	if merged.Base != base || merged.Head != head || merged.Patch != c.Patch || len(merged.Commits) != 1 {
 		t.Fatalf("merge-base snapshot: %+v", merged)
 	}
-	direct, _, err := BuildChange(env, repo, "main", "topic/change", nil)
+	direct, directHunks, err := BuildChange(env, repo, "main", "topic/change", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if direct.Base != git("rev-parse", "main") || !strings.Contains(direct.Patch, "main-only.go") {
-		t.Fatal("explicit base was replaced by a merge base")
+	if direct.Base != base || direct.BaseRef != "main" || direct.Patch != c.Patch || !reflect.DeepEqual(direct.Files, c.Files) || !reflect.DeepEqual(direct.Commits, c.Commits) || !reflect.DeepEqual(directHunks, hunks) {
+		t.Fatalf("diverged base changed the topic snapshot: %+v", direct)
+	}
+	if strings.Contains(direct.Patch, "main-only.go") || strings.Contains(direct.Patch, "deleted-on-main.go") {
+		t.Fatal("main-only changes leaked into topic patch")
+	}
+	if !reflect.DeepEqual(ValidateChange(direct, directHunks), report) {
+		t.Fatal("coverage does not describe the merge-base diff")
+	}
+	changedByCommits := git("diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "-M", direct.Commits[0].SHA)
+	for _, f := range direct.Files {
+		if !strings.Contains("\x00"+changedByCommits, "\x00"+f.Path+"\x00") {
+			t.Errorf("file %q is not in the topic commit", f.Path)
+		}
 	}
 	git("checkout", "--detach", head)
 	detached, _, err := BuildChange(env, repo, base, "HEAD", nil)
@@ -154,6 +168,12 @@ func TestBuildChangeRealGit(t *testing.T) {
 	empty, emptyHunks, err := BuildChange(env, repo, head, head, nil)
 	if err != nil || len(empty.Files) != 0 || len(empty.Commits) != 0 || len(emptyHunks) != 0 || empty.Patch != "" {
 		t.Fatalf("empty: %+v, %v", empty, err)
+	}
+	git("checkout", "--orphan", "unrelated")
+	git("rm", "-rf", ".")
+	git("commit", "--allow-empty", "-m", "unrelated root")
+	if _, _, err := BuildChange(env, repo, "main", "unrelated", nil); err == nil || !strings.Contains(err.Error(), "no common ancestor") {
+		t.Fatalf("unrelated history: %v", err)
 	}
 }
 

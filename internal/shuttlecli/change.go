@@ -18,9 +18,9 @@ func (a *app) changeCmd() *cobra.Command {
 	var check bool
 	cmd := &cobra.Command{
 		Use: "change <fiber> --base B", Short: "Bake a Git change and its reading story into a fiber companion",
-		Long: `Snapshot committed base..head into <name>.change.json beside the fiber.
-Runs Git on this host; no daemon or model is needed. Base is the exact tree to
-compare, not an implicit merge base. Use git merge-base to select one explicitly.
+		Long: `Snapshot the change since merge-base(base, head) into <name>.change.json beside
+the fiber, like a pull request's three-dot diff. No common ancestor is an error.
+Runs Git on this host; no daemon or model is needed.
 With --story, validate every stop and flag and report hunk coverage. Flags do not
 count as coverage. --check validates and reports without writing a companion.
 --json emits the validation and coverage report, not the change bundle.`,
@@ -132,7 +132,7 @@ count as coverage. --check validates and reports without writing a companion.
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&base, "base", "", "Base commit or ref (required; compared directly to head)")
+	cmd.Flags().StringVar(&base, "base", "", "Base commit or ref (required; comparison starts at its merge base with head)")
 	cmd.Flags().StringVar(&head, "head", "HEAD", "Head commit or ref")
 	cmd.Flags().StringVar(&repo, "repo", "", "Worktree directory (fiber's shuttle.project_dir, else cwd)")
 	cmd.Flags().StringVar(&storyPath, "story", "", "JSON story with chapters, stops, flags and role overrides")

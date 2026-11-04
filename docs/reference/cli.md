@@ -276,7 +276,7 @@ shuttle change review-task --base origin/main --head topic/change \
 
 | Option | Meaning |
 |---|---|
-| `--base B` | Required commit or ref; compare this exact tree to head |
+| `--base B` | Required commit or ref; compare its merge base with head to head |
 | `--head H` | Head commit or ref, default `HEAD` |
 | `--repo DIR` | Git worktree directory, default fiber's `shuttle.project_dir`, else cwd |
 | `--story FILE` | Optional JSON reading story with chapters, stops, flags and role overrides |
@@ -284,9 +284,13 @@ shuttle change review-task --base origin/main --head topic/change \
 | `--check` | Validate and report without writing |
 | `--json`, `-j` | Output the validation and hunk-coverage report as JSON |
 
-The command resolves base and head to SHAs and writes `<name>.change.json` atomically beside the fiber's Markdown file.
+The command resolves the supplied refs, finds their merge base and writes `<name>.change.json` atomically beside the fiber's Markdown file.
+The patch, files, hunks, coverage and commits all describe the change from that common ancestor to head, like a pull request's three-dot diff.
+The bundle's `base` records the merge-base SHA; `base_ref` preserves the supplied base ref.
+No common ancestor is an error.
 Only committed content enters the snapshot; dirty and untracked files are excluded.
-Base is not implicitly replaced with a merge base: use `--base "$(git merge-base origin/main HEAD)"` when that is the comparison you want.
+`repo.name` comes from origin's repository path, falling back to the main worktree directory's basename.
+`repo.forge_url` normalizes HTTP(S) origins and scp-style GitHub/GitLab origins to HTTPS without credentials, query, fragment or `.git`; other origins produce `null`.
 The bundle contains the commits, unified patch, file inventory with path-derived roles, and `story: null` when no story is supplied.
 The title comes from the story's optional `title`, otherwise the head commit subject.
 A fiber doesn't need a Shuttle block; a block naming another host requires running the command there.

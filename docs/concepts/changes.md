@@ -1,6 +1,6 @@
 # Changes
 
-A **change** is a snapshot of two committed Git trees, with an optional story that explains a useful reading order.
+A **change** is a snapshot of what head adds since it diverged from a base ref, with an optional story that explains a useful reading order.
 It doesn't require a GitHub PR or a GitLab MR.
 `shuttle change` writes the snapshot as a `<name>.change.json` [companion file](companions.md) beside a fiber's Markdown document.
 The bundle contains the patch, commit metadata and file inventory, so reading it doesn't require access to Git or the forge.
@@ -22,13 +22,12 @@ The filename defaults to the head ref with slashes replaced by hyphens and punct
 The write is atomic, and an invalid story leaves any existing bundle untouched.
 A fiber doesn't need a `shuttle:` block, but a block naming another host is refused: run the command on that host.
 
-Base and head resolve to commit SHAs before the snapshot is read.
-The comparison is exactly `base..head`, not an implicit merge base, and excludes dirty or untracked files.
-To show a branch's work since divergence, choose the merge base explicitly:
-
-```bash
-shuttle change review-task --base "$(git merge-base origin/main HEAD)"
-```
+The base ref and head resolve to commit SHAs, then Git finds their common ancestor with `git merge-base`.
+The patch, file inventory, hunks, coverage and commit list all compare that merge-base SHA to head, like a pull request's three-dot diff (`base...head`).
+Work added to the base branch after divergence doesn't appear reversed in the change.
+When base is already an ancestor of head, the comparison starts at base itself.
+No common ancestor is an error.
+Dirty and untracked files are excluded.
 
 Rebake after changing the commits or story.
 The bundle is a snapshot, not a live branch view, and its line references describe the captured head.
@@ -72,9 +71,9 @@ The CLI runs Git directly and makes no model calls.
 |---|---|
 | `version` | Schema version, currently `1` |
 | `title` | The story's optional `title`, otherwise the head commit subject |
-| `repo` | `name` is the worktree root's basename; `dir` is the absolute directory used for Git; `forge_url` is nullable and the CLI emits `null` |
-| `base`, `head` | Resolved commit SHAs |
-| `base_ref`, `head_ref` | Supplied refs; `HEAD` becomes the short branch name when attached, and stays `HEAD` when detached |
+| `repo` | `name` comes from origin's repository path, falling back to the main worktree directory's basename; `dir` is the absolute directory used for Git; `forge_url` is origin's HTTP(S) URL or scp-style GitHub/GitLab URL normalized to HTTPS without credentials, query, fragment or `.git`, otherwise `null` |
+| `base`, `head` | The merge-base SHA and resolved head SHA |
+| `base_ref`, `head_ref` | `base_ref` preserves what the user typed, even when base has advanced beyond the fork; `head_ref` is the supplied ref, with `HEAD` becoming the short branch name when attached and staying `HEAD` when detached |
 | `commits` | Commits reachable from head but not base, oldest first, with author name and RFC3339 author time |
 | `patch` | Unified Git diff with three context lines and rename detection; binary changes carry Git's binary notice rather than binary contents |
 | `files` | Repository-relative file paths, status, role and line counts; renamed files use the destination path, deleted files use the old path |
