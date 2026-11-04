@@ -254,9 +254,8 @@ func run(args []string) error {
 	ctx, cause := context.WithCancelCause(ctx)
 	defer cause(nil)
 	signals := make(chan os.Signal, 8)
-	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGPIPE)
 	defer signal.Stop(signals)
-	signal.Ignore(syscall.SIGPIPE)
 	go func() {
 		select {
 		case s := <-signals:

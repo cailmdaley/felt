@@ -226,6 +226,19 @@ func TestLostOutputObserverClosesTransport(t *testing.T) {
 	}
 }
 
+func TestTransactionDoesNotInheritIgnoredSIGPIPE(t *testing.T) {
+	binary := build(t)
+	root := t.TempDir()
+	cmd, life, log := start(t, binary, root, "pipe-signal", `trap -p PIPE > "$1/pipe-signal"; exit 7`)
+	defer life.Close()
+	if e := result(t, cmd); e == nil {
+		t.Fatalf("missing transaction status: %s", contents(log))
+	}
+	if got := contents(filepath.Join(root, "pipe-signal")); got != "" {
+		t.Fatalf("inherited ignored SIGPIPE: %s", got)
+	}
+}
+
 func TestActivationRefusesInsufficientDeadlineBudget(t *testing.T) {
 	binary := build(t)
 	root := t.TempDir()
