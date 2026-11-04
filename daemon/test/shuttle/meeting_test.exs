@@ -1813,6 +1813,22 @@ defmodule Shuttle.MeetingTest do
     end
   end
 
+  test "stop dismisses a failed pane when real ps confirms its pid is absent", %{hark_dir: hark_dir} do
+    pid = "99998"
+    assert {"", 1} = System.cmd("ps", ["-p", pid, "-o", "command="])
+    write_meeting(hark_dir, %{"launch" => "absent", "pid" => pid, "phase" => "failed"})
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["display-message" | _], _, :present -> {{"1|1|1234|absent|\n", 0}, :present}
+      "tmux", ["kill-session" | _], _, :present -> {{"", 0}, :absent}
+      "tmux", ["has-session" | _], _, :absent -> {{"can't find session: hark-meeting", 1}, :absent}
+      "ps", args, _, state -> {System.cmd("ps", args, stderr_to_stdout: true), state}
+      _, _, _, state -> {{"", 0}, state}
+    end, :present)
+
+    assert {:ok, %{meeting: nil}} = Meeting.stop(launch: "absent")
+  end
+
   test "stop preserves the recording when process observation times out", %{hark_dir: hark_dir} do
     write_meeting(hark_dir, %{"launch" => "unknown", "pid" => 321, "phase" => "live"})
 

@@ -850,6 +850,15 @@ defmodule Shuttle.Meeting do
           {command, 0} ->
             if String.contains?(String.downcase(command), "hark"), do: :hark, else: :not_hark
 
+          {"", 1} ->
+            case run(opts, "ps", ["-A", "-o", "pid="]) do
+              {pids, 0} ->
+                if pid in String.split(pids), do: :unknown, else: :not_hark
+
+              _ ->
+                :unknown
+            end
+
           _ ->
             :unknown
         end
