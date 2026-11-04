@@ -294,6 +294,11 @@ func (a *app) collectCodexBundle() []ReceiptBundle {
 					if !plugin.Enabled {
 						return nil
 					}
+					root, err := a.verifiedCodexCacheRoot()
+					if err != nil {
+						return []ReceiptBundle{{Harness: "codex", Enabled: true, Inspection: inspectionConfirmed, Evidence: "codex plugin list and cache", Status: receiptMismatch, Repair: fmt.Sprintf("%v; run `felt setup codex`", err)}}
+					}
+					plugin.Source.Path = root
 					return []ReceiptBundle{a.bundleFromActivePlugin("codex", plugin)}
 				}
 				// A host may intentionally use only Claude (or only Codex). The

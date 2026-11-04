@@ -10,8 +10,8 @@ import (
 // These tests prove the trust boundary the promotion commit rests on: a
 // native CLI's zero exit status is not evidence, only a cache that carries
 // the promoted generation marker and digest is. The fakes behave like the
-// real CLIs — they copy the registered source's payload into a private cache
-// and report that path through `plugin list --json` — and the tamper modes
+// real CLIs — they copy the registered source's payload into a private cache;
+// Codex reports the source while Claude reports its cache — and the tamper modes
 // make them lie the specific ways a real harness can: serving a stale cache,
 // altering the payload, or never materializing the marker.
 

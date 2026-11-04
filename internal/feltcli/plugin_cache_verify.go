@@ -50,10 +50,9 @@ func (a *app) verifyClaudeLoadedGeneration(current string) error {
 	return fmt.Errorf("verifying Claude cache: plugin list does not report %s as installed", ref)
 }
 
-// verifyCodexLoadedGeneration checks the cache `codex plugin list --json`
-// reports as installed against the promoted generation at current.
+// verifyCodexLoadedGeneration checks the installed plugin and its versioned cache.
 func (a *app) verifyCodexLoadedGeneration(current string) error {
-	expected, present, err := promotedGenerationForVerify(current)
+	_, present, err := promotedGenerationForVerify(current)
 	if err != nil || !present {
 		return err
 	}
@@ -76,10 +75,8 @@ func (a *app) verifyCodexLoadedGeneration(current string) error {
 			// a materialization failure; verify the bytes and surface the gap.
 			fmt.Fprintf(a.env.Stdout, "⚠ %s is installed but disabled; the verified plugin will not load until you re-enable it in Codex\n", codexPluginRef)
 		}
-		if plugin.Source.Path == "" {
-			return fmt.Errorf("verifying Codex cache: plugin list reports %s without a cache path", codexPluginRef)
-		}
-		return verifyLoadedGeneration("codex", expected, plugin.Source.Path)
+		_, err := a.verifiedCodexCacheRoot()
+		return err
 	}
 	return fmt.Errorf("verifying Codex cache: plugin list does not report %s as installed", codexPluginRef)
 }

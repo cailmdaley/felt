@@ -142,7 +142,7 @@ func TestFeltBuildMatchesVersionSeparatesLocalRevisions(t *testing.T) {
 	}
 }
 
-func TestCollectCodexBundleUsesActivePluginSourceNotCache(t *testing.T) {
+func TestCollectCodexBundleRejectsUnverifiedCache(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
 	a := testApp(t, env)
@@ -183,8 +183,8 @@ func TestCollectCodexBundleUsesActivePluginSourceNotCache(t *testing.T) {
 	if len(bundles) != 1 {
 		t.Fatalf("bundles = %#v, want one active bundle", bundles)
 	}
-	if bundles[0].Path != source || bundles[0].Version != "1.1.0" {
-		t.Fatalf("active bundle = %#v, cache path was incorrectly selected", bundles[0])
+	if bundles[0].Status != receiptMismatch {
+		t.Fatalf("unverified cache reported as %#v", bundles[0])
 	}
 }
 

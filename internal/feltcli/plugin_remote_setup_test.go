@@ -68,6 +68,7 @@ fi
 		fakeCommand(t, env, "claude", claudeSetupFake)
 	} else {
 		fakeCommand(t, env, "codex", codexSetupFake)
+		env.Set("FAKE_CODEX_CACHE", "1")
 	}
 	sysenvtest.OnlyPath(env)
 	env.Set("FELT_BIN", felt)
@@ -117,8 +118,8 @@ var remotePayloads struct {
 
 // nativeFakePrologue is the shell prologue both harness fakes share.
 // materialize_cache mimics the real CLI: a successful install copies the
-// registered source's plugin payload into a private cache, and plugin list
-// reports that cache path. Tamper modes let tests exercise a lying zero exit;
+// registered source's plugin payload into a private cache. Claude reports
+// that cache path; Codex reports the source. Tamper modes exercise a lying zero exit;
 // stale-update mirrors the real CLI's documented behavior where update on an
 // unchanged version keeps the old cache but a fresh install re-copies (only
 // the Claude fixture drives that mode).
@@ -131,6 +132,10 @@ materialize_cache() {
   verb="${1:-install}"
   cache="$FAKE_NATIVE_STATE/cache"
   src=$(cat "$source_file")
+  if [ "${FAKE_CODEX_CACHE:-0}" = 1 ]; then
+    version=$(grep '"version"' "$src/claude-plugin/.codex-plugin/plugin.json" | head -1 | cut -d '"' -f 4)
+    cache="$HOME/.codex/plugins/cache/cailmdaley-felt/felt/$version"
+  fi
   case "${FAKE_NATIVE_TAMPER:-}" in
     stale)
       if [ ! -d "$cache" ]; then
@@ -223,7 +228,8 @@ const codexSetupFake = nativeFakePrologue + `if [ "$1" = plugin ] && [ "$2" = ma
 fi
 if [ "$1" = plugin ] && [ "$2" = list ]; then
   if [ -f "$installed_file" ]; then
-    printf '{"installed":[{"pluginId":"felt@cailmdaley-felt","enabled":true,"source":{"path":"%s"}}]}\n' "$FAKE_NATIVE_STATE/cache"
+    source=$(cat "$source_file")
+    printf '{"installed":[{"pluginId":"felt@cailmdaley-felt","enabled":true,"source":{"path":"%s/claude-plugin"}}]}\n' "$source"
   else
     printf '%s\n' '{"installed":[]}'
   fi
