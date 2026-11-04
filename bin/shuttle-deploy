@@ -633,11 +633,11 @@ verify_and_release() {
   release_verified_deploy "$1"
 }
 
-activation_window() {
-  local status=0 ack
+activation_window() { # host, prepared activation command
+  local host="$1" command="$2" status=0 ack
   printf B >&5 && IFS= read -r ack <&5 || return 1
   trap ':' TERM INT HUP
-  remote_host_cycle "" "$1" && verify_and_release "" || status=$?
+  run_on_visible "$host" "$command" && verify_and_release "$host" || status=$?
   trap 'exit 143' TERM HUP
   trap 'exit 130' INT
   printf E >&5 && IFS= read -r ack <&5 || return 1
@@ -900,8 +900,8 @@ $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
   fi
   cycle='[ "${SHUTTLE_ACTIVATION_CYCLED:-0}" != 1 ] || exit 0
 '"$cycle"
-  run_on_visible "$host" "$(shell_quote "$checkout/shuttle") daemon activate-release $(shell_quote "$EXPECTED_RELEASE") -- bash -c $(shell_quote "$cycle")" \
-    || { bad "could not select and cycle the release on ${host:-local}"; return 1; }
+  activation_window "$host" "$(shell_quote "$checkout/shuttle") daemon activate-release $(shell_quote "$EXPECTED_RELEASE") -- bash -c $(shell_quote "$cycle")" \
+    || { bad "could not activate, verify and release on ${host:-local}"; return 1; }
 }
 
 deploy_step() {
@@ -955,7 +955,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
   bash -c "$(config_migration_cmd)" 3>&- 4>&- 5>&- || { bad 'config migration: failed'; return 1; }
   if ! target_is_live "$before"; then
     deploy_step 'activate/verify/release'
-    activation_window "$tree" || { bad 'activate/verify/release: failed'; return 1; }
+    remote_host_cycle "" "$tree" || { bad 'activate/verify/release: failed'; return 1; }
   else
     deploy_step 'release coalesced daemon'
     release_verified_deploy "" || return 1
@@ -1034,6 +1034,7 @@ deploy_step 'acquire host and tree locks'
 SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=$(shell_quote "${SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS:-3600}") \"\$tmp/lock\" \"\$HOME/.shuttle/deploy.lock\" \"\$HOME/.shuttle/deploy/leases/$TARGET_COMMIT.lock\" \
   \"host=${host:-local} target=$TARGET_COMMIT deployer=$DEPLOYER\" bash -c $(shell_quote "$script") <&7 7<&- &
 child=\$!
+DEPLOY_STEP='host transaction'
 wait \"\$child\"
 status=\$?
 kill -KILL -- \"-\$child\" 2>/dev/null || true

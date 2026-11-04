@@ -31,8 +31,10 @@ log_stream() {
     printf '%s\n' "$line" 2>/dev/null || true
   done
 }
-exec 8> >(log_stream)
+mkfifo "$tmp/output" || exit 1
+log_stream < "$tmp/output" &
 logger=$!
+exec 8> "$tmp/output"
 exec 9>&-
 IFS= read -r size || exit 1
 case "$size" in ''|*[!0-9]*) echo 'deploy: invalid bootstrap frame' >&8; exit 1;; esac
