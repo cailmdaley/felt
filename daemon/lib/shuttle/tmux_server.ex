@@ -96,8 +96,13 @@ defmodule Shuttle.TmuxServer do
   @spec refusal_message(String.t()) :: String.t()
   def refusal_message(error) do
     "No tmux server is running on this machine, and Shuttle could not ask kitty to start one " <>
-      "(#{error}). Start a tmux server from a kitty you opened from the Dock or Finder " <>
-      "(`tmux new-session -d -s #{@anchor}`), or enable kitty remote control, then dispatch again."
+      "(#{error}). On macOS the daemon must never start the tmux server itself: every " <>
+      "process under it — the worker, its shells, its tools — would be charged to the daemon's " <>
+      "binary by macOS privacy (TCC), so each one raises an \"erlexec wants to access data from " <>
+      "other apps\" prompt and the daemon cannot hold those grants. Start a tmux server from " <>
+      "a kitty you opened from the Dock or Finder (`tmux new-session -d -s #{@anchor}`) — not " <>
+      "from a launcher's hotkey panel, whose privacy grants it would inherit — or enable kitty " <>
+      "remote control, then dispatch again."
   end
 
   defp refuse(reason) do

@@ -148,6 +148,7 @@ defmodule Shuttle.PollerTest do
   # ── Setup ──
 
   setup do
+    Env.put_app_env(:terminal_backend, Shuttle.Terminal.Tmux)
     MockRunner.start!()
     MockRunner.reset()
     mock_felt_root = MockRunner.felt_root()

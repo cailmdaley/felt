@@ -455,6 +455,7 @@ defmodule Shuttle.DispatcherTest do
   # ── Setup ──
 
   setup do
+    Shuttle.Test.Env.put_app_env(:terminal_backend, Shuttle.Terminal.Tmux)
     start_supervised!(MockRunner)
     MockRunner.reset()
 
