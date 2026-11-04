@@ -91,8 +91,7 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 			}
 			write(filepath.Join(release.Dir, "share", name), string(source))
 			env.Set("SHUTTLE_RELEASE", release.Dir)
-			// A real unrelated foreground process has the same release identity
-			// that stopDaemonRelease's release-wide pgrep would select.
+			// A real unrelated foreground process shares the daemon's release identity.
 			otherPath := filepath.Join(release.Dir, "releases", "other", "start")
 			if err := os.MkdirAll(filepath.Dir(otherPath), 0755); err != nil {
 				t.Fatal(err)

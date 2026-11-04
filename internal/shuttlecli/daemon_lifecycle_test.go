@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestDaemonLifecycleHTTPUsesTCPAndUnixListeners(t *testing.T) {
@@ -478,41 +480,19 @@ func TestFindDaemonReleaseSupportsFetchedReleaseInShuttleState(t *testing.T) {
 	}
 }
 
-func TestStopDaemonMarksAndSignalsOnlyThisRelease(t *testing.T) {
+func TestStopDaemonWithoutListenerDoesNotSignalReleaseSibling(t *testing.T) {
 	t.Parallel()
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release.with.dots"))
-	dataDir := filepath.Join(t.TempDir(), "daemon-data")
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", dataDir)
+	sysenvtest.FakeCommand(t, env, "lsof", "#!/bin/sh\nexit 1\n")
 	a := newApp(env)
-	finds := 0
-	a.daemonFindPIDs = func(pattern string) ([]int, error) {
-		if !strings.Contains(pattern, regexp.QuoteMeta(release.Dir)) {
-			t.Fatalf("process pattern %q does not identify release %q", pattern, release.Dir)
-		}
-		finds++
-		if finds == 1 {
-			return []int{1234}, nil
-		}
-		return nil, nil
-	}
-	var signals []syscall.Signal
-	a.daemonSignalPID = func(pid int, signal syscall.Signal) error {
-		if pid != 1234 {
-			t.Fatalf("signal pid %d, want 1234", pid)
-		}
-		if _, err := os.Stat(filepath.Join(dataDir, "heartbeat.stopped")); err != nil {
-			t.Fatalf("stop marker must exist before signal %v: %v", signal, err)
-		}
-		signals = append(signals, signal)
-		return nil
-	}
-	a.daemonPause = func(time.Duration) {}
-	if err := a.stopDaemonRelease(release); err != nil {
+	a.daemonFindPIDs = func(string) ([]int, error) { t.Fatal("release-wide process search"); return nil, nil }
+	a.daemonSignalPID = func(int, syscall.Signal) error { t.Fatal("signal without listener owner"); return nil }
+	settings, err := a.resolveHostSettings()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(signals) != 1 || signals[0] != syscall.SIGTERM {
-		t.Fatalf("signals = %v, want SIGTERM only", signals)
+	if err := a.stopDaemonEndpoint(settings, ""); err != nil {
+		t.Fatal(err)
 	}
 }
 

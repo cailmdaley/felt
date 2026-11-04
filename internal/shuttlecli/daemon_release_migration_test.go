@@ -202,6 +202,24 @@ func TestWorktreeScopedStopRefusesForeignOrUnreportedRelease(t *testing.T) {
 			defer server.Close()
 			env.Set("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
 			a := newApp(env)
+			settings, err := a.resolveHostSettings()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ownerPath, err := a.daemonOwnerPath(settings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			birth, err := processBirth(env, os.Getpid())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(ownerPath), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(ownerPath, []byte(fmt.Sprintf(`{"pid":%d,"birth":%q}`, os.Getpid(), birth)), 0600); err != nil {
+				t.Fatal(err)
+			}
 			calls := 0
 			a.daemonFindPIDs = func(pattern string) ([]int, error) {
 				calls++
@@ -213,9 +231,9 @@ func TestWorktreeScopedStopRefusesForeignOrUnreportedRelease(t *testing.T) {
 			signals := 0
 			a.daemonSignalPID = func(int, syscall.Signal) error { signals++; return nil }
 			a.daemonPause = func(time.Duration) {}
-			_, _, err := executeApp(t, a, t.TempDir(), "daemon", "stop", "--within", root)
+			_, _, err = executeApp(t, a, t.TempDir(), "daemon", "stop", "--within", root)
 			inside := path != "" && releasePathWithin(root, path)
-			if (err == nil) != inside || (!inside && (calls != 0 || signals != 0)) || (inside && signals != 1) {
+			if (err == nil) != inside || (!inside && (calls != 0 || signals != 0)) || (inside && signals != 2) {
 				t.Fatalf("stop release %q: err=%v scans=%d signals=%d", path, err, calls, signals)
 			}
 		})

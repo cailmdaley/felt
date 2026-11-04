@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -160,6 +163,76 @@ func (a *app) daemonOwnerPathFor(host string, settings hostSettings) (string, er
 	identity := normalizeHostname(host)
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(identity+"\x00"+settings.listen.Network+"\x00"+settings.listen.Address)))
 	return filepath.Join(home, ".shuttle", "daemon-owners", key+".json"), nil
+}
+
+// resolveDaemonEndpointOwner binds lifecycle signals to one listener, never to
+// the release directory shared by independent instances.
+func (a *app) resolveDaemonEndpointOwner(settings hostSettings) (daemonOwner, error) {
+	path, err := a.daemonOwnerPath(settings)
+	if err != nil {
+		return daemonOwner{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var claim daemonOwner
+		if json.Unmarshal(data, &claim) != nil || claim.PID <= 0 || claim.Birth == "" {
+			return daemonOwner{}, fmt.Errorf("invalid daemon ownership claim %s", path)
+		}
+		birth, birthErr := processBirth(a.env, claim.PID)
+		if birthErr == nil && birth == claim.Birth {
+			if claim.Supervisor != "" {
+				return daemonOwner{}, errors.New("daemon supervisor installation is still in progress")
+			}
+			return claim, nil
+		}
+		if birthErr != nil && syscall.Kill(claim.PID, 0) != syscall.ESRCH {
+			return daemonOwner{}, birthErr
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return daemonOwner{}, err
+	}
+	args := []string{"-nP", "-t"}
+	if settings.listen.Network == "unix" {
+		args = append(args, "-U", "--", settings.listen.Address)
+	} else {
+		_, port, err := net.SplitHostPort(settings.listen.Address)
+		if err != nil {
+			return daemonOwner{}, err
+		}
+		args = append(args, "-iTCP@127.0.0.1:"+port, "-sTCP:LISTEN")
+	}
+	output, err := a.env.Command("lsof", args...).Output()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 && len(output) == 0 {
+			return daemonOwner{}, nil
+		}
+		return daemonOwner{}, fmt.Errorf("resolving daemon listener owner: %w", err)
+	}
+	pids := strings.Fields(string(output))
+	if len(pids) != 1 {
+		return daemonOwner{}, fmt.Errorf("ambiguous daemon listener owners: %s", output)
+	}
+	pid, err := strconv.Atoi(pids[0])
+	if err != nil || pid <= 0 {
+		return daemonOwner{}, fmt.Errorf("invalid listener PID: %s", output)
+	}
+	birth, err := processBirth(a.env, pid)
+	if err != nil {
+		return daemonOwner{}, err
+	}
+	return daemonOwner{PID: pid, Birth: birth}, nil
+}
+
+func (a *app) signalDaemonOwner(owner daemonOwner, signal syscall.Signal) error {
+	birth, err := processBirth(a.env, owner.PID)
+	if err != nil {
+		return fmt.Errorf("cannot verify daemon before signal: %w", err)
+	}
+	if birth != owner.Birth {
+		return errors.New("daemon owner changed before signal")
+	}
+	return a.daemonSignalPID(owner.PID, signal)
 }
 
 func (a *app) isLiveDaemonChild() bool {

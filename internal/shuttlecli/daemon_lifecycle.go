@@ -347,46 +347,46 @@ func (a *app) newShuttleDaemonStopCommand() *cobra.Command {
 	var within string
 	command := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the running daemon using its booted release",
+		Short: "Stop the daemon owning the configured listener",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var release daemonRelease
-			if settings, err := a.resolveHostSettings(); err == nil {
-				if body, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
-					var receipt struct {
-						ReleasePath string `json:"release_path"`
-					}
-					if json.Unmarshal(body, &receipt) == nil && filepath.IsAbs(receipt.ReleasePath) {
-						release.Dir = receipt.ReleasePath
-					}
-				}
+			settings, err := a.resolveHostSettings()
+			if err != nil {
+				return err
 			}
-			if within != "" {
-				if release.Dir == "" || !releasePathWithin(within, release.Dir) {
-					return fmt.Errorf("refusing to stop daemon outside worktree %q (running release_path: %q)", within, release.Dir)
-				}
-			} else if release.Dir == "" {
-				var err error
-				release, err = a.findDaemonRelease()
-				if err != nil {
-					return err
-				}
-			}
-			return a.stopDaemonRelease(release)
+			return a.stopDaemonEndpoint(settings, within)
 		},
 	}
 	command.Flags().StringVar(&within, "within", "", "Refuse to stop a daemon whose reported release is outside this directory")
 	return command
 }
 
-func (a *app) stopDaemonRelease(release daemonRelease) error {
-	pattern := daemonProcessPattern(release.Dir)
-	pids, err := a.daemonFindPIDs(pattern)
+func (a *app) stopDaemonEndpoint(settings hostSettings, within string) error {
+	owner, err := a.resolveDaemonEndpointOwner(settings)
 	if err != nil {
 		return err
 	}
-	if len(pids) == 0 {
+	if owner.PID == 0 {
 		return nil
+	}
+	if within != "" {
+		body, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second)
+		if err != nil {
+			return err
+		}
+		var receipt struct {
+			ReleasePath string `json:"release_path"`
+		}
+		if json.Unmarshal(body, &receipt) != nil || !releasePathWithin(within, receipt.ReleasePath) {
+			return fmt.Errorf("refusing to stop daemon outside worktree %q (running release_path: %q)", within, receipt.ReleasePath)
+		}
+		confirmed, err := a.resolveDaemonEndpointOwner(settings)
+		if err != nil {
+			return err
+		}
+		if confirmed != owner {
+			return errors.New("daemon owner changed while checking --within")
+		}
 	}
 	marker, err := a.daemonStopMarkerPath()
 	if err != nil {
@@ -395,18 +395,24 @@ func (a *app) stopDaemonRelease(release daemonRelease) error {
 	if err := touchDaemonStopMarker(marker); err != nil {
 		return fmt.Errorf("marking the requested daemon stop: %w", err)
 	}
-	pid := pids[0]
-	fmt.Fprintf(a.env.Stdout, "stopping the running daemon (pid %d)\n", pid)
-	_ = a.daemonSignalPID(pid, syscall.SIGTERM)
+	fmt.Fprintf(a.env.Stdout, "stopping the running daemon (pid %d)\n", owner.PID)
+	if err := a.signalDaemonOwner(owner, syscall.SIGTERM); err != nil {
+		return err
+	}
 	for i := 0; i < 5; i++ {
 		a.daemonPause(time.Second)
-		pids, err = a.daemonFindPIDs(pattern)
-		if err != nil || len(pids) == 0 {
-			return err
+		birth, err := processBirth(a.env, owner.PID)
+		if err != nil {
+			if syscall.Kill(owner.PID, 0) == syscall.ESRCH {
+				return nil
+			}
+			return fmt.Errorf("cannot verify daemon while stopping: %w", err)
+		}
+		if birth != owner.Birth {
+			return nil
 		}
 	}
-	_ = a.daemonSignalPID(pid, syscall.SIGKILL)
-	return nil
+	return a.signalDaemonOwner(owner, syscall.SIGKILL)
 }
 
 func daemonProcessPattern(releaseDir string) string {
