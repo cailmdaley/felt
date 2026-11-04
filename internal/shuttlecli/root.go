@@ -231,6 +231,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.shuttleContractCmd(),
 		a.processIdentityCmd(),
 		a.scanChangesCmd(),
+		a.changeCmd(),
 		a.installCmd(),
 		a.threadCmd(),
 		a.threadsCmd(),
