@@ -860,6 +860,7 @@ transaction_script() {
     remote_host_cycle host_transaction
   # All subsequent commands are host-local and inherit this login shell's PATH.
   printf '%s\n' 'run_on() { bash -c "$2" 3>&- 4>&-; }' 'run_on_visible() { bash -c "$2" 3>&- 4>&-; }' \
+    'trap '\''rm -rf "$SHUTTLE_DEPLOY_BOOTSTRAP_DIR" "$STAGE"'\'' EXIT' \
     'ROOT=$(bash -c "$(deploy_root_cmd "$SOURCE")") || exit 1' 'host_transaction'
 }
 
@@ -869,10 +870,12 @@ run_transaction() { # host, source, mode, staged files, build wrapper, UI snapsh
   script="$(transaction_script "$host" "$source" "$mode" "$stage" "$skip_ui" "$wrap" "$snapshot")"
   bootstrap="set -eu
 root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$source")"))
-tmp=\$(mktemp -d)
+mkdir -p \"\$HOME/.shuttle/deploy/tools\"
+tmp=\$(mktemp -d \"\$HOME/.shuttle/deploy/tools/lock.XXXXXX\")
 trap $(shell_quote "rm -rf \"\$tmp\" $(shell_quote "$stage")") EXIT
 printf '%s' $(shell_quote "$LOCK_SOURCE") > \"\$tmp/main.go\"
-go run \"\$tmp/main.go\" \"\$HOME/.shuttle/deploy.lock\" \"\$root/.leases/$TARGET_COMMIT.lock\" \
+GOMAXPROCS=2 GOFLAGS=-p=2 go build -o \"\$tmp/lock\" \"\$tmp/main.go\"
+SHUTTLE_DEPLOY_BOOTSTRAP_DIR=\"\$tmp\" exec \"\$tmp/lock\" \"\$HOME/.shuttle/deploy.lock\" \"\$root/.leases/$TARGET_COMMIT.lock\" \
   $(shell_quote "host=${host:-local} target=$TARGET_COMMIT deployer=$DEPLOYER") bash -c $(shell_quote "$script")"
   run_on_visible "$host" "$bootstrap" || { bad "${host:-local}: host transaction failed"; return 1; }
 }
