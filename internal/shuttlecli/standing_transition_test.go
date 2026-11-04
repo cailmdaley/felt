@@ -175,10 +175,7 @@ func TestStandingTransitionCommandAndAtomicForceRearm(t *testing.T) {
 		if err := f.SetExtraField("ask", map[string]any{"text": "Keep this question"}); err != nil {
 			return err
 		}
-		block := f.ExtraFields["shuttle"]
-		// Extra config is opaque to the force-start verdict.
-		_ = block
-		return nil
+		return shuttle.SetField(f, "blocked_on", "A question for the human")
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -192,6 +189,10 @@ func TestStandingTransitionCommandAndAtomicForceRearm(t *testing.T) {
 	f := mustRead(t, st, "role")
 	if f.Status != felt.StatusActive || runtimeString(f, "handed_off_at") == "" || runtimeString(f, "thread_exit_verb") != "rearmed" || f.ExtraFields["ask"] == nil {
 		t.Fatalf("partial force rearm: %+v", f)
+	}
+	blockedOn := felt.MappingValueNode(f.ExtraFields["shuttle"], "blocked_on")
+	if blockedOn == nil || blockedOn.Value != "A question for the human" {
+		t.Fatal("force rearm cleared blocked_on")
 	}
 	if !strings.Contains(out, `"changed":true`) {
 		t.Fatal(out)
