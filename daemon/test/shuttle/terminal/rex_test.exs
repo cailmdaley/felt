@@ -59,6 +59,7 @@ defmodule Shuttle.Terminal.RexTest do
                  "start",
                  "--state-dir",
                  Path.join(dir, "rex/state"),
+                 "--restore=false",
                  "--tailscaled-socket",
                  "/private/tailscaled.sock",
                  "--extra-listen",

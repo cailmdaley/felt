@@ -71,7 +71,9 @@ defmodule Shuttle.Terminal.Rex do
 
       with :ok <- Shuttle.FS.mkdir_p(dir),
            :ok <- Shuttle.FS.chmod(dir, 0o700) do
-        args = ["server", "start", "--state-dir", Path.join(dir, "state")]
+        # Shuttle restores workers itself; a block Rex restored holds a bare
+        # shell under the worker's label and would pass for the live worker.
+        args = ["server", "start", "--state-dir", Path.join(dir, "state"), "--restore=false"]
         socket = Shuttle.Remotes.tailscale_socket()
         tailnet = if socket, do: ["--tailscaled-socket", socket], else: []
 

@@ -753,6 +753,7 @@ Without it, Linux uses the Shuttle-owned socket and macOS uses Rex's discovery.
 Workers inherit the selected endpoint, and ordinary Rex requests always disable autostart.
 
 Rex holds worker sessions independently of the daemon, so daemon restarts and CLI installation leave them running.
+A Shuttle-owned server runs with `--restore=false`: Shuttle resumes its workers itself, and a block Rex restored would be a bare shell carrying the worker's label.
 Shuttle only starts missing servers; it never stops a Rex server.
 `rex server stop` ends **every session** on that server, and a running server keeps its version until it stops.
 Shuttle observes existing tmux workers on a Rex host when tmux is available, but launches new terminal workers in Rex.
