@@ -144,6 +144,10 @@ func shellQuote(value string) string {
 // accepted the request, so it must never be reported as a safe-to-repeat
 // failure.
 func remoteRouteError(cmd *cobra.Command, args []string, owner string, err error) error {
+	var preflight ownerPreflightError
+	if errors.As(err, &preflight) {
+		return err
+	}
 	var moved movedDraftError
 	if errors.As(err, &moved) {
 		return err
@@ -222,6 +226,10 @@ func requestCouldHaveReachedDaemon(err error) bool {
 }
 
 func ownerFiberMissing(err error, owner string) bool {
+	var preflight ownerPreflightError
+	if errors.As(err, &preflight) {
+		return false
+	}
 	var response daemonStatusError
 	if !errors.As(err, &response) || response.status != 404 {
 		return false
@@ -254,7 +262,7 @@ func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields 
 	if action == "resume" {
 		if _, changesProject := fields["project_dir"]; changesProject {
 			if err := a.requireOwnerNamespaceContract(owner); err != nil {
-				return "", err
+				return "", ownerPreflightError{err}
 			}
 		}
 	}
@@ -282,7 +290,7 @@ func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields 
 // and validates any armed project_dir against its own filesystem.
 func (a *app) postOwnerFiberCreate(owner string, payload map[string]any) ([]byte, error) {
 	if err := a.requireOwnerNamespaceContract(owner); err != nil {
-		return nil, err
+		return nil, ownerPreflightError{err}
 	}
 	payload["origin"] = owner
 	body, err := json.Marshal(payload)
@@ -295,6 +303,15 @@ func (a *app) postOwnerFiberCreate(owner string, payload map[string]any) ([]byte
 	}
 	return a.postRouted(owner, endpoint, body)
 }
+
+// ownerPreflightError is a read-only refusal, not a failed mutation POST.
+// Keep its phase when routing errors or deciding whether a draft may transfer.
+type ownerPreflightError struct{ err error }
+
+func (e ownerPreflightError) Error() string {
+	return fmt.Sprintf("%v; the guarded write request was not sent", e.err)
+}
+func (e ownerPreflightError) Unwrap() error { return e.err }
 
 const ownerNamespaceContractLevel = 31
 
