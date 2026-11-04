@@ -44,7 +44,21 @@ defmodule Shuttle.TerminalTest do
   end
 
   defmodule ConcurrentRunner do
-    def cmd("ps", _args, _opts), do: Shuttle.Env.app(:terminal_test_ps, {"", 0})
+    def cmd("ps", _args, _opts) do
+      if owner = Shuttle.Env.app(:conversation_scan_owner) do
+        count = Process.get(:conversation_scans, 0) + 1
+        Process.put(:conversation_scans, count)
+
+        if count == 2 do
+          send(owner, {:conversation_checked, self()})
+          receive do
+            :continue_scan -> :ok
+          end
+        end
+      end
+
+      Shuttle.Env.app(:terminal_test_ps, {"", 0})
+    end
 
     def cmd("tmux", ["has-session", "-t", "=" <> name], _opts) do
       {state, _owner} = Shuttle.Env.app(:terminal_test_state)
@@ -532,6 +546,8 @@ defmodule Shuttle.TerminalTest do
     Env.put_app_env(:terminal_test_state, {state, self()})
     Env.put_app_env(:terminal_pause_name, "worker-race-shuttle")
     uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    Env.put_app_env(:conversation_scan_owner, self())
+    owner = self()
 
     first =
       Task.async(fn ->
@@ -541,22 +557,30 @@ defmodule Shuttle.TerminalTest do
         )
       end)
 
-    assert_receive {:launching, pid, "worker-race-shuttle", _}
+    assert_receive {:conversation_checked, first_pid}
 
     second =
       Task.async(fn ->
+        send(owner, {:second_started, self()})
         Terminal.launch(ConcurrentRunner, "resume-" <> uuid, dir, "true",
           preflighted: true,
           conversation_uuid: uuid
         )
       end)
 
+    assert_receive {:second_started, second_pid}
+    refute_receive {:conversation_checked, ^second_pid}, 200
+    send(first_pid, :continue_scan)
+    assert_receive {:launching, pid, "worker-race-shuttle", _}
     send(pid, :finish_launch)
     assert :ok = Task.await(first)
+    assert_receive {:conversation_checked, ^second_pid}
+    send(second_pid, :continue_scan)
     assert {:error, {:transcript_held, _}} = Task.await(second)
     refute_receive {:launching, _, "resume-" <> _, _}
 
     Agent.update(state, fn _ -> MapSet.new() end)
+    Env.put_app_env(:conversation_scan_owner, nil)
 
     assert :ok =
              Terminal.launch(ConcurrentRunner, "resume-" <> uuid, dir, "true",
