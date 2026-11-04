@@ -8,23 +8,29 @@ defmodule Shuttle.Meeting.Control do
   def reconcile(identity), do: GenServer.call(__MODULE__, {:reconcile, identity})
   def claim_stop(identity), do: GenServer.call(__MODULE__, {:claim_stop, identity})
   def release_stop(identity), do: GenServer.call(__MODULE__, {:release_stop, identity})
+  def confirm_stop(identity), do: GenServer.call(__MODULE__, {:confirm_stop, identity})
 
   @impl true
   def init(state), do: {:ok, state}
 
   @impl true
   def handle_call({:reconcile, identity}, _from, claim) do
-    {:reply, :ok, if(claim == identity, do: claim, else: nil)}
+    {:reply, :ok, if(match?({^identity, _}, claim), do: claim, else: nil)}
   end
 
-  def handle_call({:claim_stop, identity}, _from, identity),
-    do: {:reply, :already_claimed, identity}
+  def handle_call({:claim_stop, identity}, _from, {identity, status} = claim),
+    do: {:reply, status, claim}
 
   def handle_call({:claim_stop, identity}, _from, _claim),
-    do: {:reply, :claimed, identity}
+    do: {:reply, :claimed, {identity, :unconfirmed}}
+
+  def handle_call({:confirm_stop, identity}, _from, {identity, _}),
+    do: {:reply, :ok, {identity, :already_claimed}}
+
+  def handle_call({:confirm_stop, _identity}, _from, claim), do: {:reply, :ok, claim}
 
   def handle_call({:release_stop, identity}, _from, claim),
-    do: {:reply, :ok, if(claim == identity, do: nil, else: claim)}
+    do: {:reply, :ok, if(match?({^identity, _}, claim), do: nil, else: claim)}
 end
 
 defmodule Shuttle.Meeting do
@@ -811,10 +817,14 @@ defmodule Shuttle.Meeting do
     with pid when not is_nil(pid) <- pid,
          :claimed <- Shuttle.Meeting.Control.claim_stop({pid, launch}),
          {_output, 0} <- run(opts, "kill", ["-INT", pid]) do
+      Shuttle.Meeting.Control.confirm_stop({pid, launch})
       show(opts)
     else
       :already_claimed ->
         show(opts)
+
+      :unconfirmed ->
+        {:error, {:operation, "meeting stop is unconfirmed"}}
 
       nil ->
         {:error, {:operation, "meeting process has no valid pid"}}

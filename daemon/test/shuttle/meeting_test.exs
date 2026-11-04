@@ -1672,6 +1672,22 @@ defmodule Shuttle.MeetingTest do
            end)
   end
 
+  test "a timed out signal remains unconfirmed on retry", %{hark_dir: hark_dir} do
+    write_meeting(hark_dir, %{"launch" => "timeout", "pid" => 321, "phase" => "live"})
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["display-message" | _], _, state -> {{"0|0|1234|timeout|\n", 0}, state}
+      "ps", _, _, state -> {{"hark capture", 0}, state}
+      "kill", _, _, state -> {{"timed out", :timeout}, state}
+      _, _, _, state -> {{"", 0}, state}
+    end)
+
+    assert {:error, {:operation, _}} = Meeting.stop()
+    assert {:error, {:operation, message}} = Meeting.stop()
+    assert message =~ "unconfirmed"
+    assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "kill" end) == 1
+  end
+
   test "a failed signal releases the stop claim for retry", %{hark_dir: hark_dir} do
     write_meeting(hark_dir, %{"launch" => "retry", "pid" => 321, "phase" => "live"})
 
