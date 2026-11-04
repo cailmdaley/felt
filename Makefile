@@ -183,7 +183,11 @@ endif
 	@# convenience symlink; a later build cannot replace a selected VM's BEAMs.
 	@set -eu; \
 	mkdir -p bin; \
-	generation=$$(mktemp -d "$(CURDIR)/bin/rel.generation-XXXXXXXX"); \
+	assembly=$$(mktemp -d "$(CURDIR)/bin/.rel.assembly-XXXXXXXX"); \
+	generation="$(CURDIR)/bin/rel.generation-$${assembly##*-}"; \
+	trap 'rm -rf "$$assembly" "$$generation" "$$generation.link"' 0; \
+	touch "$$assembly/.assembling"; \
+	mv "$$assembly" "$$generation"; \
 	(cd daemon && MIX_ENV=prod $(MIX) release shuttled --path "$$generation"); \
 	if [ -f ui/dist/index.html ]; then \
 	  for app in "$$generation"/lib/shuttle-*; do \
@@ -192,7 +196,9 @@ endif
 	    cp -R ui/dist "$$app/priv/ui/"; \
 	  done; \
 	fi; \
-	python3 -c 'import os,sys; dest,gen=sys.argv[1:]; os.symlink(os.path.basename(gen), gen+".link"); os.replace(gen+".link",dest)' "$(CURDIR)/bin/rel-built" "$$generation"
+	python3 -c 'import os,sys; dest,gen=sys.argv[1:]; os.symlink(os.path.basename(gen), gen+".link"); os.replace(gen+".link",dest)' "$(CURDIR)/bin/rel-built" "$$generation"; \
+	trap - 0; \
+	rm "$$generation/.assembling"
 
 # ── test ─────────────────────────────────────────────────────────────────
 test: go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test
@@ -342,5 +348,6 @@ status: cli
 
 clean:
 	rm -rf daemon/_build
-	rm -rf bin/rel bin/rel.next bin/rel.prev
+	rm -rf bin/rel bin/rel.next bin/rel.prev bin/rel.generation-* bin/.rel.assembly-*
+	rm -f bin/rel-built
 	rm -f Elixir.*.beam felt felt-linux shuttle shuttle-linux

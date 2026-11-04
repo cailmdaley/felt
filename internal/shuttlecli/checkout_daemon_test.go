@@ -1,6 +1,9 @@
 package shuttlecli
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +11,46 @@ import (
 
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
+
+func TestPruneCheckoutGenerationsRetainsReferencesAndAssembly(t *testing.T) {
+	env := testEnv(t)
+	root := t.TempDir()
+	for _, name := range []string{"selected", "running", "built", "obsolete", "assembling"} {
+		writeTestDaemonRelease(t, filepath.Join(root, "bin", "rel.generation-"+name))
+	}
+	pending := filepath.Join(root, "bin", "rel.generation-assembling", ".assembling")
+	if err := os.WriteFile(pending, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("rel.generation-built", filepath.Join(root, "bin", "rel-built")); err != nil {
+		t.Fatal(err)
+	}
+	a := newApp(env)
+	if err := a.selectDaemonRelease(daemonRelease{Dir: filepath.Join(root, "bin", "rel.generation-selected")}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"release_path":%q}`, filepath.Join(root, "bin", "rel.generation-running"))
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
+	deployRoot := t.TempDir()
+	sysenvtest.FakeCommand(t, env, "git", "#!/bin/sh\nexit 0\n")
+	sysenvtest.FakeCommand(t, env, "pi", "#!/bin/sh\nexit 0\n")
+	command := a.daemonPruneReleasesCmd()
+	command.SetArgs([]string{root, deployRoot})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"selected", "running", "built", "assembling"} {
+		if _, err := os.Stat(filepath.Join(root, "bin", "rel.generation-"+name)); err != nil {
+			t.Errorf("lost %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "bin", "rel.generation-obsolete")); !os.IsNotExist(err) {
+		t.Errorf("obsolete generation retained: %v", err)
+	}
+}
 
 func TestDaemonAssemblyOutputsAreIgnored(t *testing.T) {
 	env := testEnv(t)
@@ -77,6 +120,7 @@ start-selected:
 	env.Set("SKIP_UI", "1")
 	fakeMix := sysenvtest.FakeCommand(t, env, "mix", `#!/bin/sh
 case "$1" in release)
+ [ "${FAIL_RELEASE:-0}" != 1 ] || exit 42
  while [ "$1" != --path ]; do shift; done
  shift; mkdir -p "$1/bin"
  printf '#!/bin/sh\n# build %s\nexit 0\n' "$BUILD_ID" > "$1/bin/shuttled"
@@ -191,9 +235,26 @@ esac
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("bootstrap release selection: %v\n%s", err, out)
 	}
+	env.Set("FAIL_RELEASE", "1")
+	failed := env.Command("make", "-C", main, "MIX="+fakeMix, "daemon")
+	if out, err := failed.CombinedOutput(); err == nil {
+		t.Fatalf("failed assembly reported success: %s", out)
+	}
+	assemblies, _ := filepath.Glob(filepath.Join(main, "bin", "rel.generation-*"))
+	for _, assembly := range assemblies {
+		if _, err := os.Stat(filepath.Join(assembly, "bin", "shuttled")); err != nil {
+			t.Fatalf("failed assembly left %s", assembly)
+		}
+	}
+	env.Set("FAIL_RELEASE", "0")
 	run(main, "restart")
 	calls, _ = os.ReadFile(events)
 	if strings.Contains(string(calls), "BAD") || !strings.Contains(string(calls), "explicit-cli-install") || !strings.Contains(string(calls), "daemon activate-release") || !strings.Contains(string(calls), "started-selected") {
 		t.Fatalf("main restart did not use checkout CLI: %s", calls)
+	}
+	run(main, "clean")
+	remaining, _ := filepath.Glob(filepath.Join(main, "bin", "rel*"))
+	if len(remaining) != 0 {
+		t.Fatalf("clean left assemblies: %v", remaining)
 	}
 }

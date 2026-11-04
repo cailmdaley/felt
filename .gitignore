@@ -40,6 +40,7 @@ shuttle-*.tar
 /bin/rel/
 /bin/rel-built
 /bin/rel.generation-*/
+/bin/.rel.assembly-*/
 /bin/rel.next/
 /bin/rel.prev/
 /bin/rel.retained-*/

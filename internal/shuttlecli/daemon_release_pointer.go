@@ -156,11 +156,60 @@ func releasePathWithin(root, path string) bool {
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
+func checkoutGenerationCandidates(checkout string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(checkout, "bin"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var candidates []string
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "rel.generation-") {
+			continue
+		}
+		path := filepath.Join(checkout, "bin", entry.Name())
+		if _, err := os.Stat(filepath.Join(path, ".assembling")); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		candidates = append(candidates, path)
+	}
+	return candidates, nil
+}
+
+func pruneCheckoutGenerations(candidates, protected []string) error {
+	for _, candidate := range candidates {
+		retain := false
+		for _, path := range protected {
+			if path != "" && releasePathWithin(candidate, path) {
+				retain = true
+				break
+			}
+		}
+		if !retain {
+			if err := os.RemoveAll(candidate); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (a *app) daemonPruneReleasesCmd() *cobra.Command {
 	var keep []string
 	command := &cobra.Command{Use: "prune-releases <checkout> <deploy-root>", Hidden: true, Args: cobra.ExactArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return a.withReleaseLock(func() error {
+				// Snapshot completed candidates before reading references. A build
+				// publishes rel-built before dropping its assembly marker, so a
+				// concurrent publication is either excluded or protected below.
+				candidates, err := checkoutGenerationCandidates(args[0])
+				if err != nil {
+					return err
+				}
 				pointer, err := a.releasePointerPath()
 				if err != nil {
 					return err
@@ -183,7 +232,10 @@ func (a *app) daemonPruneReleasesCmd() *cobra.Command {
 				if json.Unmarshal(body, &receipt) != nil || !filepath.IsAbs(receipt.ReleasePath) {
 					return errors.New("not pruning: /api/v1/version has no absolute release_path")
 				}
-				protected := append(append([]string{}, keep...), strings.TrimSpace(string(selected)), receipt.ReleasePath)
+				protected := append(append([]string{}, keep...), strings.TrimSpace(string(selected)), receipt.ReleasePath, canonicalReleasePath(filepath.Join(args[0], "bin", "rel-built")))
+				if err := pruneCheckoutGenerations(candidates, protected); err != nil {
+					return err
+				}
 				packages, _ := a.env.Command("pi", "list").Output()
 				// Only registered worktrees are ours to remove. Interrupted Git
 				// operations can leave ordinary directories under the deploy root.
