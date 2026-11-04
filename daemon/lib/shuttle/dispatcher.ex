@@ -189,7 +189,8 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Hook state is reconstructed from the host's durable event stream at boot.
-  # A positive working phase means the turn was in flight. Missing or closed
+  # A positive working phase means the turn was in flight, including a process
+  # that ended inside its turn when its terminal closed. Missing or closed
   # evidence reopens quietly, since waking a human's conversation is the costly
   # ambiguity.
   defp quiet_restoration?(session_id, opts) do

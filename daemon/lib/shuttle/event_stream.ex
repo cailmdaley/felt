@@ -365,7 +365,13 @@ defmodule Shuttle.EventStream do
 
   def handle_call({:session_phase, session_id}, _from, state) do
     state = state |> follow() |> publish()
-    phase = Map.get(WaitingTracker.phases(state.waiting, state.clock.()), session_id, %{})[:phase]
+    phases = WaitingTracker.phases(state.waiting, state.clock.())
+
+    phase =
+      if WaitingTracker.cut_off?(state.waiting, session_id),
+        do: "working",
+        else: Map.get(phases, session_id, %{})[:phase]
+
     {:reply, phase, state}
   end
 

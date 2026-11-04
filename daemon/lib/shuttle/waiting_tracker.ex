@@ -22,6 +22,7 @@ defmodule Shuttle.WaitingTracker do
   defmodule Session do
     @moduledoc false
     defstruct turn: :unstarted,
+              cut_off: false,
               bg: 0,
               kids: 0,
               pending: false,
@@ -53,6 +54,14 @@ defmodule Shuttle.WaitingTracker do
     end)
     |> Map.reject(fn {_id, activity} -> is_nil(activity.phase) end)
   end
+
+  @doc """
+  True when the session's process ended inside an open turn. A closed terminal
+  still fires the harness's session-end hook, so this keeps the evidence that
+  `session_end` would otherwise erase until the conversation next opens.
+  """
+  @spec cut_off?(sessions(), String.t()) :: boolean()
+  def cut_off?(sessions, id), do: match?(%{^id => %Session{cut_off: true}}, sessions)
 
   @doc "Applies one decoded event to the session map."
   @spec apply_event(sessions(), map(), integer()) :: sessions()
@@ -158,6 +167,7 @@ defmodule Shuttle.WaitingTracker do
   defp do_transition(session, "session_end", event, now) do
     touch(session, event, now,
       turn: :ended,
+      cut_off: session.cut_off or session.turn == :open,
       bg: 0,
       kids: 0,
       pending: false,
@@ -169,6 +179,7 @@ defmodule Shuttle.WaitingTracker do
   defp do_transition(session, "session_start", event, now) do
     touch(session, event, now,
       turn: if(session.turn == :unstarted, do: :unstarted, else: :closed),
+      cut_off: false,
       bg: 0,
       kids: 0,
       pending: false,

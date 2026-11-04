@@ -93,6 +93,19 @@ defmodule Shuttle.EventStreamTest do
     assert EventStream.session_activity(name)["s1"].phase == "waiting"
   end
 
+  test "a session whose terminal closed inside its turn catches up as working", %{path: path} do
+    name = :"event_stream_#{System.unique_integer([:positive])}"
+    append(path, [ev("user_prompt_submit", 0), ev("session_end", 1)])
+
+    start_supervised!(
+      {EventStream,
+       events_file: path, name: name, clock: fn -> @t0 end, poll_interval_ms: 3_600_000}
+    )
+
+    assert EventStream.catch_up_session_phase("s1", name) == "working"
+    assert EventStream.session_activity(name)["s1"].phase == "waiting"
+  end
+
   test "missing event stream evidence stays ambiguous" do
     assert EventStream.catch_up_session_phase("unknown-session", :missing_event_stream) == nil
   end

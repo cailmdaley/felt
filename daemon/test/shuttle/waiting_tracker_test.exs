@@ -137,6 +137,28 @@ defmodule Shuttle.WaitingTrackerTest do
     assert phase(sessions, "session-a", @now + 1) == "waiting"
   end
 
+  test "a session ending inside its turn stays cut off until it reopens" do
+    sessions = fold([event("session_start"), event("user_prompt_submit"), event("session_end")])
+    assert Tracker.cut_off?(sessions, "session-a")
+    assert phase(sessions, "session-a") == "waiting"
+
+    sessions = Tracker.apply_event(sessions, event("session_end"), @now)
+    assert Tracker.cut_off?(sessions, "session-a")
+
+    refute sessions
+           |> Tracker.apply_event(event("session_start"), @now)
+           |> Tracker.cut_off?("session-a")
+  end
+
+  test "a session ending after its turn closed is not cut off" do
+    for last <- ["stop", "interrupted"] do
+      sessions = fold([event("user_prompt_submit"), event(last), event("session_end")])
+      refute Tracker.cut_off?(sessions, "session-a")
+    end
+
+    refute Tracker.cut_off?(%{}, "unknown-session")
+  end
+
   test "idle notification closes the turn without clearing an existing permission" do
     sessions =
       fold([event("notification", "session-a", %{"notificationKind" => "permission_prompt"})])
