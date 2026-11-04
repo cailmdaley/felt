@@ -93,6 +93,7 @@ func remoteLifecycleEnv(t *testing.T) *sysenv.Env {
 	t.Helper()
 	env := testEnv(t)
 	ownHost(t, env, "hub")
+	env.Set("SHUTTLE_TEST_OWNER_CONTRACT", fmt.Sprint(ownerNamespaceContractLevel))
 	writeRemotesIn(t, env, `{"version":1,"remotes":[{"name":"worker","port":4001}]}`)
 	return env
 }

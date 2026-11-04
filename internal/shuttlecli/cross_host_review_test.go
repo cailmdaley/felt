@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -17,6 +18,43 @@ func subtreeView(t *testing.T, loom, prefix string) string {
 		t.Fatal(err)
 	}
 	return project
+}
+
+func TestCrossHostWritesRequireOwnerNamespaceContract(t *testing.T) {
+	for _, operation := range []string{"create", "resume-project"} {
+		t.Run(operation, func(t *testing.T) {
+			env := remoteLifecycleEnv(t)
+			env.Set("SHUTTLE_TEST_OWNER_CONTRACT", "")
+			dir, st := newStore(t)
+			seedShuttleRole(t, st, "hub", felt.StatusOpen, remoteShuttleBlock("/remote/project"), nil)
+			posts := 0
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/version" {
+					fmt.Fprint(w, `{"host":"worker","contract_level":30}`)
+					return
+				}
+				if r.Method == "POST" {
+					posts++
+				}
+				if r.URL.Path == "/api/v1/fiber/create" {
+					fmt.Fprint(w, `{"id":"hub/measure","uid":"01ARZ3NDEKTSV4RRFFQ69G5FAX","host":"worker","status":"active","path":"/owner/measure.md"}`)
+				} else {
+					fmt.Fprint(w, `resumed`)
+				}
+			}))
+			args := []string{"thread", "hub", "Measure"}
+			if operation == "resume-project" {
+				args = []string{"resume", "hub", "--project-dir", "/remote/project"}
+			}
+			_, _, err := executeIn(t, env, dir, args...)
+			if err == nil || !strings.Contains(err.Error(), "deploy") || !strings.Contains(err.Error(), "worker") {
+				t.Fatalf("old owner accepted: %v (posts=%d)", err, posts)
+			}
+			if posts != 0 {
+				t.Fatalf("sent %d writes to incompatible owner", posts)
+			}
+		})
+	}
 }
 
 func TestRemoteResumeLetsOwnerValidateItsDocument(t *testing.T) {

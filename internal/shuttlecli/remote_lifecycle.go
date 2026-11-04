@@ -235,6 +235,13 @@ func fiberAddress(f *felt.Felt) string {
 }
 
 func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields map[string]any) (string, error) {
+	if action == "resume" {
+		if _, changesProject := fields["project_dir"]; changesProject {
+			if err := a.requireOwnerNamespaceContract(owner); err != nil {
+				return "", err
+			}
+		}
+	}
 	payload := map[string]any{"action": action, "fiber": fiberAddress(fiber), "origin": owner}
 	for key, value := range fields {
 		payload[key] = value
@@ -258,6 +265,9 @@ func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields 
 // daemon's owner-routed create endpoint. The destination daemon owns placement
 // and validates any armed project_dir against its own filesystem.
 func (a *app) postOwnerFiberCreate(owner string, payload map[string]any) ([]byte, error) {
+	if err := a.requireOwnerNamespaceContract(owner); err != nil {
+		return nil, err
+	}
 	payload["origin"] = owner
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -268,6 +278,38 @@ func (a *app) postOwnerFiberCreate(owner string, payload map[string]any) ([]byte
 		return nil, err
 	}
 	return a.postRouted(owner, endpoint, body)
+}
+
+const ownerNamespaceContractLevel = 31
+
+// Namespace creation and resume's project-dir patch require the owner's
+// protocol, not the hub's build or an archived peer report.
+func (a *app) requireOwnerNamespaceContract(owner string) error {
+	endpoint, err := a.daemonEndpoint("/api/v1/version")
+	if err != nil {
+		return err
+	}
+	body, err := a.getDaemon(endpoint+"?origin="+url.QueryEscape(owner), daemonPostTimeout)
+	if err != nil {
+		return fmt.Errorf("checking namespace contract on owner %q: %w", owner, err)
+	}
+	var version struct {
+		Host     string `json:"host"`
+		Level    int    `json:"contract_level"`
+		Contract struct {
+			Expected int `json:"expected"`
+		} `json:"contract"`
+	}
+	if err := json.Unmarshal(body, &version); err != nil {
+		return fmt.Errorf("cannot verify namespace contract on owner %q; deploy it before cross-host writes: %w", owner, err)
+	}
+	if version.Level == 0 {
+		version.Level = version.Contract.Expected
+	}
+	if version.Host != owner || version.Level < ownerNamespaceContractLevel {
+		return fmt.Errorf("owner %q requires contract level %d for cross-host namespace writes (reported host %q, level %d); deploy the owner and routing daemon before retrying", owner, ownerNamespaceContractLevel, version.Host, version.Level)
+	}
+	return nil
 }
 
 func (a *app) postOwnerDispatch(owner string, fiber *felt.Felt, fields map[string]any) ([]byte, error) {
