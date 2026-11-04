@@ -142,7 +142,7 @@ defmodule Shuttle.TailnetPeers do
             state: "unavailable",
             via: nil,
             error: "discovery round failed: #{Exception.format_banner(kind, reason)}",
-            peers: [],
+            peers: recent_peers(state.previous, round_now(state.opts)),
             rejected: []
           }
       end
@@ -200,7 +200,7 @@ defmodule Shuttle.TailnetPeers do
 
       report.state == "unavailable" and last_state != {report.state, report.error} ->
         Logger.warning(
-          "TailnetPeers: discovery unavailable (#{report.error}); the fleet is remotes.json alone"
+          "TailnetPeers: discovery unavailable (#{report.error}); retaining #{length(report.peers)} recent peer(s)"
         )
 
       true ->
@@ -230,7 +230,8 @@ defmodule Shuttle.TailnetPeers do
         read = Keyword.get(opts, :read_status, &read_status/0)
         probe = Keyword.get(opts, :probe, &probe/1)
         own = Keyword.get_lazy(opts, :own_host, &Shuttle.Poller.daemon_host_id/0)
-        now = Keyword.get_lazy(opts, :now_ms, fn -> System.system_time(:millisecond) end)
+        now = round_now(opts)
+        unavailable = %{base | state: "unavailable", peers: recent_peers(previous, now)}
 
         case isolated(read, @status_timeout_ms + 1_000) do
           {:ok, {:ok, %{"BackendState" => "Running"} = status, via}} ->
@@ -239,20 +240,25 @@ defmodule Shuttle.TailnetPeers do
 
           {:ok, {:ok, status, via}} ->
             backend = Map.get(status, "BackendState") || "in an unknown state"
-            %{base | state: "unavailable", via: via, error: "tailscale is #{backend}"}
+            %{unavailable | via: via, error: "tailscale is #{backend}"}
 
           {:ok, {:error, via, reason}} ->
-            %{base | state: "unavailable", via: via, error: reason}
+            %{unavailable | via: via, error: reason}
 
           {:error, reason} ->
             %{
-              base
-              | state: "unavailable",
-                error: "reading the tailnet status failed: #{format_reason(reason)}"
+              unavailable
+              | error: "reading the tailnet status failed: #{format_reason(reason)}"
             }
         end
     end
   end
+
+  defp round_now(opts),
+    do: Keyword.get_lazy(opts, :now_ms, fn -> System.system_time(:millisecond) end)
+
+  defp recent_peers(previous, now),
+    do: Enum.filter(previous, &(now - &1["seen_at_ms"] < @retain_ms))
 
   defp probe_all(status, probe) do
     urls = status |> candidates() |> Enum.filter(& &1.online) |> Enum.map(& &1.url)

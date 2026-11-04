@@ -8,6 +8,11 @@ defmodule Shuttle.TailnetPeersTest do
 
   @fixture_dir Path.expand("../fixtures/tailnet_peers", __DIR__)
 
+  defmodule OwnerClient do
+    def get(_url, _timeout),
+      do: Agent.get(Shuttle.Env.app(:tailnet_owner_response), & &1)
+  end
+
   describe "parity with the Go resolver" do
     # internal/shuttlecli/remotes_discovery_test.go reads the same fixtures and
     # asserts `resolved` from `remotes` and `discovered`. Discovery itself runs
@@ -89,6 +94,36 @@ defmodule Shuttle.TailnetPeersTest do
       Shuttle.Test.Env.delete_app_env(:remotes)
       Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
       :ok
+    end
+
+    test "whole-status failures retain verified owners without extending their lifetime" do
+      seen =
+        TailnetPeers.run_round([],
+          read_status: fn -> {:ok, @status, "cli"} end,
+          probe: fn @url -> %{"body" => body("hub-a")} end,
+          own_host: "me",
+          now_ms: 0
+        )
+
+      assert [%{"name" => "hub-a", "seen_at_ms" => 0}] = seen.peers
+
+      for read <- [
+            fn -> {:error, "cli", "timeout"} end,
+            fn -> {:ok, %{"BackendState" => "Stopped"}, "cli"} end,
+            fn -> raise "status crashed" end
+          ] do
+        retained = TailnetPeers.run_round(seen.peers, read_status: read, now_ms: 599_999)
+        assert retained.state == "unavailable"
+        assert retained.peers == seen.peers
+        expired = TailnetPeers.run_round(retained.peers, read_status: read, now_ms: 600_000)
+        assert expired.peers == []
+      end
+
+      file = write_remotes(%{"defaults" => %{"discover" => false}, "remotes" => []})
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", file)
+      disabled = TailnetPeers.run_round(seen.peers, now_ms: 1)
+      assert disabled.state == "disabled"
+      assert disabled.peers == []
     end
 
     test "tailscale that cannot be read yields no peers and says why" do
@@ -176,6 +211,84 @@ defmodule Shuttle.TailnetPeersTest do
       assert status.state == "ok"
       assert status.via == "cli"
       assert [%{name: "hub-a", dns_name: "hub-a.example.ts.net"}] = status.peers
+    end
+
+    @tag :tmp_dir
+    test "status outage keeps owner rows stale until retention expires", %{tmp_dir: dir} do
+      response =
+        start_supervised!(
+          {Agent,
+           fn ->
+             {:ok, Jason.encode!(%{"fibers" => [%{"fiber" => %{"id" => "remembered"}}]})}
+           end},
+          id: :owner_response
+        )
+
+      Shuttle.Test.Env.put_app_env(:tailnet_owner_response, response)
+      clock = start_supervised!({Agent, fn -> ~U[2026-11-04 00:00:00Z] end}, id: :feed_clock)
+
+      discovery =
+        start_supervised!(
+          {TailnetPeers,
+           boot_delay_ms: 60_000,
+           interval_ms: 60_000,
+           now_ms: 0,
+           own_host: "me",
+           read_status: fn -> {:ok, @status, "cli"} end,
+           probe: fn @url -> %{"body" => body("hub-a")} end}
+        )
+
+      send(discovery, :discover)
+      :sys.get_state(discovery)
+
+      registry =
+        start_supervised!(
+          {Shuttle.RemoteFiberRegistry,
+           name: nil,
+           client: OwnerClient,
+           auto_poll: false,
+           store_dir: dir,
+           clock: fn -> Agent.get(clock, & &1) end}
+        )
+
+      :ok = Shuttle.RemoteFiberRegistry.refresh_now(registry)
+
+      assert %{"hub-a" => %{stale: false, fibers: [%{"fiber" => %{"id" => "remembered"}}]}} =
+               Shuttle.RemoteFiberRegistry.feeds(registry)
+
+      generation = TailnetPeers.generation()
+      Agent.update(response, fn _ -> {:error, :econnrefused} end)
+      Agent.update(clock, &DateTime.add(&1, 599_999, :millisecond))
+
+      :sys.replace_state(discovery, fn state ->
+        %{
+          state
+          | opts:
+              Keyword.merge(state.opts,
+                now_ms: 599_999,
+                read_status: fn -> {:error, "cli", "timeout"} end
+              )
+        }
+      end)
+
+      send(discovery, :discover)
+      :sys.get_state(discovery)
+      assert TailnetPeers.status().state == "unavailable"
+      assert TailnetPeers.generation() == generation
+      :ok = Shuttle.RemoteFiberRegistry.refresh_now(registry)
+
+      assert %{"hub-a" => %{stale: true, fibers: [%{"fiber" => %{"id" => "remembered"}}]}} =
+               Shuttle.RemoteFiberRegistry.feeds(registry)
+
+      :sys.replace_state(discovery, fn state ->
+        %{state | opts: Keyword.put(state.opts, :now_ms, 600_000)}
+      end)
+
+      send(discovery, :discover)
+      :sys.get_state(discovery)
+      assert TailnetPeers.peers() == []
+      :ok = Shuttle.RemoteFiberRegistry.refresh_now(registry)
+      assert Shuttle.RemoteFiberRegistry.feeds(registry) == %{}
     end
 
     test "without the process the fleet is the file alone" do
