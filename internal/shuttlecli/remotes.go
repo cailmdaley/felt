@@ -769,8 +769,8 @@ func firstNonZero(values ...int) int {
 	return 0
 }
 
-// saveRemotes writes the fleet atomically (tmp + rename). An empty fleet deletes
-// the file, matching the stores/projects writers.
+// saveRemotes writes the fleet atomically (tmp + rename), including an empty
+// fleet so its discovery, transport, and polling policy survives.
 func (a *app) saveRemotes(doc remotesFile) error {
 	path, err := a.shuttleRemotesPath()
 	if err != nil {

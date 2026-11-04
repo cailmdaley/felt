@@ -257,11 +257,10 @@ defmodule Shuttle.ConfigFiles do
   @doc """
   Replace a file's contents, once its own reader has accepted the candidate.
 
-  Empty (or whitespace-only) text **removes** the file. That is the same
-  vocabulary the two structured writers already speak — `PathListConfig.save/2`
-  deletes on `[]`, and the Go CLI deletes `remotes.json` when the last remote
-  goes — and it is the only way to say "this host has no fleet" from a surface
-  with no shell.
+  Empty (or whitespace-only) text **removes** the file, including its policy.
+  An empty fleet document keeps `remotes.json` and its policy, as does removing
+  the last remote through the Go CLI.
+  `PathListConfig.save/2` deletes its stores/projects file on `[]`.
 
   The write itself is tmp + rename inside the file's own directory, so a
   reader polling the path sees either the old bytes or the new ones and never
