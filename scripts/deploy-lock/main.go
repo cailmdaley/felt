@@ -26,15 +26,7 @@ func deadline() (time.Time, error) {
 		}
 		return time.Unix(n, 0), nil
 	}
-	value = os.Getenv("SHUTTLE_DEPLOY_TIMEOUT_SECONDS")
-	if value == "" {
-		value = "7200"
-	}
-	n, err := strconv.Atoi(value)
-	if err != nil || n <= 0 {
-		return time.Time{}, fmt.Errorf("invalid SHUTTLE_DEPLOY_TIMEOUT_SECONDS: %q", value)
-	}
-	return time.Now().Add(time.Duration(n) * time.Second), nil
+	return time.Now().Add(2 * time.Hour), nil
 }
 
 func acquire(ctx context.Context, path, holder string) (*os.File, error) {
