@@ -500,7 +500,7 @@ defmodule Shuttle.TailnetDialTest do
         name: "idle-keep-alive"
       )
 
-    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+    baseline = {remote.name, relay_children(remote.name)}
     url = "https://#{@host}:#{tls_port}/api/v1/version"
 
     assert {:ok, "tailnet-response"} =
@@ -555,7 +555,7 @@ defmodule Shuttle.TailnetDialTest do
         name: "slow-answer"
       )
 
-    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+    baseline = {remote.name, relay_children(remote.name)}
 
     request =
       Task.async(fn ->
@@ -615,7 +615,7 @@ defmodule Shuttle.TailnetDialTest do
         name: "idle-in-flight"
       )
 
-    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+    baseline = {remote.name, relay_children(remote.name)}
 
     request =
       Task.async(fn ->
@@ -640,6 +640,25 @@ defmodule Shuttle.TailnetDialTest do
     assert %{bridges: [%{name: "idle-in-flight", status: "ready"}]} = TailnetDial.status()
   end
 
+  test "stopping a bridge closes an active relay socket", %{base: base} do
+    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
+    on_exit(fn -> restore_cacerts(previous_cacerts) end)
+
+    {tls_port, _peer} = start_silent_tls_peer(base)
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    remote = start_bridge(base, localapi, @host, 443)
+    path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
+
+    {:ok, client} =
+      :gen_tcp.connect({:local, path}, 0, [:binary, active: false], @http_timeout_ms)
+
+    assert_receive {:silent_tls_handshake, _}
+    bridge = TailnetDial.bridge_pid(remote.name)
+    :ok = GenServer.stop(bridge, :normal)
+    assert {:error, :closed} = :gen_tcp.recv(client, 0, @http_timeout_ms)
+  end
+
   test "a closed client cannot leave a stalled TLS relay task behind", %{base: base} do
     previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
     Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
@@ -649,7 +668,7 @@ defmodule Shuttle.TailnetDialTest do
     localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
     remote = start_bridge(base, localapi, @host, 443, request_timeout_ms: 250)
     path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
-    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+    baseline = {remote.name, relay_children(remote.name)}
 
     {:ok, client} =
       :gen_tcp.connect({:local, path}, 0, [:binary, active: false], @http_timeout_ms)
@@ -681,7 +700,7 @@ defmodule Shuttle.TailnetDialTest do
     # drain can end this relay.
     remote = start_bridge(base, localapi, @host, 443, request_timeout_ms: 5_000)
     path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
-    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+    baseline = {remote.name, relay_children(remote.name)}
 
     {:ok, client} =
       :gen_tcp.connect({:local, path}, 0, [:binary, active: false], @http_timeout_ms)
@@ -1298,7 +1317,12 @@ defmodule Shuttle.TailnetDialTest do
 
   # Relays started since `baseline`. Relays left by earlier tests may be
   # reaped mid-test, so a test compares only what it added.
-  defp new_relays(baseline), do: Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
+  defp new_relays({name, baseline}), do: relay_children(name) -- baseline
+
+  defp relay_children(name) do
+    %{relay_supervisor: supervisor} = :sys.get_state(TailnetDial.bridge_pid(name))
+    Task.Supervisor.children(supervisor)
+  end
 
   # A ceiling of ~30 s, reached only when the condition never holds: a passing
   # test returns as soon as it does, however loaded the machine.

@@ -53,9 +53,13 @@ defmodule Shuttle.TailnetDial.Bridge do
       {:ok, listener} ->
         :ok = Shuttle.Host.restrict_bound_socket!(path)
         owner = self()
+        {:ok, relay_supervisor} = Task.Supervisor.start_link()
+
+        accept_opts =
+          opts |> Keyword.put(:owner, owner) |> Keyword.put(:relay_supervisor, relay_supervisor)
 
         {acceptor, acceptor_monitor} =
-          spawn_monitor(fn -> accept_loop(listener, Keyword.put(opts, :owner, owner)) end)
+          spawn_monitor(fn -> accept_loop(listener, accept_opts) end)
 
         name = Keyword.fetch!(opts, :name)
         host = Keyword.fetch!(opts, :host)
@@ -65,6 +69,7 @@ defmodule Shuttle.TailnetDial.Bridge do
         {:ok,
          %{
            listener: listener,
+           relay_supervisor: relay_supervisor,
            acceptor: acceptor,
            acceptor_monitor: acceptor_monitor,
            path: path,
@@ -96,6 +101,7 @@ defmodule Shuttle.TailnetDial.Bridge do
         _reason,
         %{
           listener: listener,
+          relay_supervisor: relay_supervisor,
           acceptor: acceptor,
           acceptor_monitor: monitor,
           path: path,
@@ -107,6 +113,7 @@ defmodule Shuttle.TailnetDial.Bridge do
     Process.exit(acceptor, :shutdown)
     Process.demonitor(monitor, [:flush])
     :gen_tcp.close(listener)
+    if Process.alive?(relay_supervisor), do: Supervisor.stop(relay_supervisor)
     Shuttle.TailnetDial.unregister_bridge(name, host, port)
     Shuttle.FS.rm(path)
     :ok
@@ -127,7 +134,7 @@ defmodule Shuttle.TailnetDial.Bridge do
   end
 
   defp start_connection(client, opts) do
-    case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+    case Task.Supervisor.start_child(Keyword.fetch!(opts, :relay_supervisor), fn ->
            receive do
              :tailnet_socket_ready -> handle_connection(client, opts)
            end
