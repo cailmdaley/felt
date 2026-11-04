@@ -1,7 +1,7 @@
 defmodule Shuttle.Profile do
   @moduledoc """
   On-demand, single-flight VM profiling. Trace sessions isolate this instrument
-  from other tracers. File, Erlang file, and prim_file entries are separate
+  from other tracers. Shuttle.FS, File, Erlang file, and prim_file entries are separate
   layers, not additive NIF totals: OTP's file server hides the original caller
   at the prim_file boundary, so the public layers retain application callers.
 
@@ -211,7 +211,7 @@ defmodule Shuttle.Profile do
   defp start_trace(session) do
     spec = [{:_, [], [{:message, {:caller}}]}]
 
-    for module <- [:prim_file, :file, File] do
+    for module <- [:prim_file, :file, File, Shuttle.FS] do
       Code.ensure_loaded!(module)
 
       for {function, arity} <- module.module_info(:exports),
