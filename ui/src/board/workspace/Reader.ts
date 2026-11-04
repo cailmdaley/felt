@@ -35,6 +35,7 @@ export interface ReaderOptions {
   shuttleBase: string
   themes?: ChannelThemes
   buildProse(doc: WorkspaceDocument): HTMLElement
+  disposeProse?(doc: WorkspaceDocument): void
   onRefreshProse(doc: WorkspaceDocument): void | Promise<void>
   onSelect(key: DocKey): void
   onNavigate?(source: WorkspaceDocument, href: string): void
@@ -262,6 +263,7 @@ export class Reader {
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
+      disposeProse: opts.disposeProse,
       onRefreshProse: opts.onRefreshProse,
       onSelect: key => this.openDocument(key),
       onNavigate: (source, href) => this.opts.onNavigate?.(source, href),

@@ -8,6 +8,7 @@ import { projectDeskFrontier } from '../KanbanReadModel.js'
 import { deskOrder } from '../deskOrdering.js'
 import { response as boardResponse } from '../testFixtures.js'
 import { Dock } from './Dock.js'
+import { TranscriptBand } from '../transcript/TranscriptBand.js'
 import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
 import * as FiberProse from './FiberProse.js'
@@ -129,6 +130,24 @@ beforeEach(() => {
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('releases transcript models and listeners when chat documents leave the live budget, restoring drafts on return', async () => {
+  bodyCards = boardCards = Array.from({ length: 18 }, (_, i) => card({
+    id: `work/chat-${i}`, uid: `chat-${i}`, originId: 'host-a', shuttleKind: 'oneshot', path: `work/chat-${i}/chat-${i}.md`,
+  }))
+  const dispose = vi.spyOn(TranscriptBand.prototype, 'dispose')
+  workspace.open(boardCards[0], 'Desk'); await flush()
+  const original = document.querySelector<HTMLTextAreaElement>('.ws-selected textarea')!
+  original.value = 'A draft that survives document eviction'
+  original.dispatchEvent(new Event('input'))
+  for (const card of boardCards.slice(1)) { workspace.open(card, 'Desk'); await flush() }
+  expect(dispose.mock.calls.length).toBeGreaterThanOrEqual(12)
+  expect(original.isConnected).toBe(false)
+  workspace.open(boardCards[0], 'Desk'); await flush()
+  const restored = document.querySelector<HTMLTextAreaElement>('.ws-selected textarea')!
+  expect(restored).not.toBe(original)
+  expect(restored.value).toBe('A draft that survives document eviction')
+})
 
 it('does not redraw an unchanged active channel and follows changed cards across navigation', async () => {
   workspace.open(cards[0], 'Desk')

@@ -663,6 +663,13 @@ export class Dock {
     return band
   }
 
+  /** Document eviction releases the conversation model, timers and listeners with its DOM. */
+  releaseBand(card: KanbanCard): void {
+    const key = JSON.stringify([card.originId, card.uid ?? card.id])
+    this.bands.get(key)?.reset()
+    this.bands.delete(key)
+  }
+
   /** Forget the cards and their controls. */
   reset(): void {
     for (const band of this.bands.values()) band.reset()

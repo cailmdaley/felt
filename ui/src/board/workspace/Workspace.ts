@@ -208,6 +208,10 @@ export class Workspace {
       onScan: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card), true, true),
       onOrchestrator: () => this.openOrchestrator(),
       buildProse: doc => doc.kind === 'chat' ? this.chat(doc.key) : this.prose(doc.key),
+      disposeProse: doc => {
+        const state = [...this.channels.values()].find(s => (chatDocument(s.channel) ?? proseDocument(s.channel))?.key === doc.key)
+        if (state) this.dock.releaseBand(state.card)
+      },
       onRefreshProse: async doc => {
         const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === doc.key)
         if (!state) return

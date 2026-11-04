@@ -86,6 +86,7 @@ export class DocumentHost {
   private readonly options: {
     shuttleBase: string
     buildProse: (doc: WorkspaceDocument) => HTMLElement
+    disposeProse?: (doc: WorkspaceDocument) => void
     onSelect: (key: DocKey) => void
     onNavigate?: (source: WorkspaceDocument, href: string) => void
     /** Active-document positions, including restoration, from local or validated bridge scrolls. */
@@ -496,6 +497,7 @@ export class DocumentHost {
     state.stopScroll?.()
     state.stopScroll = null
     state.readScroll = null
+    if (state.frame.viewer && built(state.frame.doc)) this.options.disposeProse?.(state.frame.doc)
     disposeFileViewer(state.frame.viewer)
     disposeFileViewer(state.pending)
     state.pending = null
