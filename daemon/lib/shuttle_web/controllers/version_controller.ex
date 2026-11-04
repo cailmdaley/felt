@@ -68,6 +68,7 @@ defmodule ShuttleWeb.VersionController do
     snapshot = Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), 1_500)
 
     %{
+      incarnation: snapshot[:incarnation],
       contract: Map.put(snapshot[:contract] || %{}, :expected, Shuttle.Contract.expected_level()),
       reconciliation_hold: get_in(snapshot, [:poll_health, :reconciliation_hold])
     }

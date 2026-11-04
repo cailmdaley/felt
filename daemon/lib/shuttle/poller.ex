@@ -299,6 +299,7 @@ defmodule Shuttle.Poller do
       # `write_daemon_heartbeat/1`).
       daemon_heartbeat_writer: nil,
       daemon_booted_at: nil,
+      daemon_incarnation: nil,
       daemon_boots: [],
       # True once adoption has a confirmed session scan and healthy document
       # listings, rebuilt `running` and reconciled durable receiver authority.
@@ -849,7 +850,11 @@ defmodule Shuttle.Poller do
 
   @spec release_boot_quarantine(GenServer.server()) :: :ok
   def release_boot_quarantine(server) do
-    GenServer.call(server, :release_boot_quarantine)
+    release_boot_quarantine(server, nil)
+  end
+
+  def release_boot_quarantine(server, expected) do
+    GenServer.call(server, {:release_boot_quarantine, expected})
   end
 
   # ── Server ──
@@ -1090,6 +1095,7 @@ defmodule Shuttle.Poller do
           DaemonHeartbeat.default_write_interval_ms()
         ),
       daemon_booted_at: System.system_time(:millisecond),
+      daemon_incarnation: Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
       quarantine_auto_release:
         Keyword.get_lazy(opts, :quarantine_auto_release, &Shuttle.Host.quarantine_auto_release?/0)
     }
@@ -1340,6 +1346,7 @@ defmodule Shuttle.Poller do
       {:kill_session, _} -> true
       {:capture, _, _} -> true
       :release_boot_quarantine -> true
+      {:release_boot_quarantine, _} -> true
       {:dispatched_identity, _, _, _} -> true
       {:captured_session, _, _, _, _} -> true
       {:fallback_started, _, _, _} -> true
@@ -2411,6 +2418,19 @@ defmodule Shuttle.Poller do
 
   defp transition_call(:orchestrator_state, _from, state) do
     {:reply, add_poll_health(Snapshot.build_full_state(state), state), state}
+  end
+
+  defp transition_call({:release_boot_quarantine, expected}, from, state) do
+    identity = %{
+      "incarnation" => state.daemon_incarnation,
+      "release_path" => Shuttle.BuildStamp.stamp().release_path
+    }
+
+    if is_nil(expected) or expected == identity do
+      transition_call(:release_boot_quarantine, from, state)
+    else
+      {:reply, {:error, :incarnation_mismatch}, state}
+    end
   end
 
   defp transition_call(:release_boot_quarantine, _from, %{boot_quarantine: false} = state) do
@@ -6869,7 +6889,9 @@ defmodule Shuttle.Poller do
   end
 
   defp add_poll_health(snapshot, %State{} = state) do
-    Map.put(snapshot, :poll_health, %{
+    snapshot
+    |> Map.put(:incarnation, state.daemon_incarnation)
+    |> Map.put(:poll_health, %{
       state:
         if(state.reconciliation_hold,
           do: "reconciliation_required",

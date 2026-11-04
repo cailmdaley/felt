@@ -518,7 +518,9 @@ version_ready() { # JSON response -> true only for an explicit ready:true
 }
 
 release_quarantine() {
-  run_local 'shuttle daemon release'
+  [ -n "${VERIFIED_RELEASE_RECEIPT:-}" ] || { echo 'missing verified daemon identity' >&2; return 1; }
+  local body="{\"expected\":$VERIFIED_RELEASE_RECEIPT}"
+  run_local "$(daemon_call "-f -X POST -H 'Content-Type: application/json' --data $(shell_quote "$body")" /api/v1/quarantine/release)" | grep -q '"ok":true'
 }
 
 wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
@@ -549,6 +551,7 @@ wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
     if [ "$sha" = "$TARGET_SHA" ] && [ "$release_path" = "$expected" ] && [ "$ready" = true ] &&
        { [ -z "${DEPLOY_VERSION:-}" ] || [ "$mix_vsn" = "$DEPLOY_VERSION" ]; } &&
        [ -n "$booted" ] && [ "$booted" \> "$DEPLOY_STARTED_AT" ]; then
+      VERIFIED_RELEASE_RECEIPT="$(printf '%s' "$version" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v.get("incarnation"),str) and v["incarnation"]; print(json.dumps({k:v[k] for k in ("incarnation","release_path")}))')" || return 1
       return 0
     fi
 

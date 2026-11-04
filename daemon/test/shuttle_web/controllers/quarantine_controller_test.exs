@@ -43,6 +43,25 @@ defmodule ShuttleWeb.QuarantineControllerTest do
     assert %{"ok" => true} = json_response(conn, 200)
   end
 
+  test "a verified release cannot authorize a replacement Poller" do
+    Shuttle.Test.PollerHelpers.start_poller!(
+      runner: QuietRunner,
+      felt_stores: [],
+      boot_quarantine: true
+    )
+
+    receipt = get(api_conn(), "/api/v1/version") |> json_response(200)
+    expected = %{"incarnation" => "superseded", "release_path" => receipt["release_path"]}
+    conn = post(api_conn(), "/api/v1/quarantine/release", Jason.encode!(%{expected: expected}))
+    assert %{"error" => "incarnation_mismatch"} = json_response(conn, 409)
+    assert Shuttle.Poller.snapshot().boot_quarantine
+
+    expected = Map.put(expected, "incarnation", receipt["incarnation"])
+    conn = post(api_conn(), "/api/v1/quarantine/release", Jason.encode!(%{expected: expected}))
+    assert %{"ok" => true} = json_response(conn, 200)
+    refute Shuttle.Poller.snapshot().boot_quarantine
+  end
+
   test "503 when no Poller is running" do
     conn = post(api_conn(), "/api/v1/quarantine/release", "{}")
     assert %{"error" => "poller_unavailable"} = json_response(conn, 503)

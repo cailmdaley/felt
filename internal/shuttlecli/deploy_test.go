@@ -35,7 +35,7 @@ version_json() {
   if [ "$calls" -eq 1 ]; then
     printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":false}'
   else
-    printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","release_path":"/expected/release","ready":true}'
+    printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","release_path":"/expected/release","incarnation":"verified-a","ready":true}'
   fi
 }
 sleep() { :; }
@@ -50,6 +50,23 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 	}
 	if !strings.Contains(string(out), "still booting") || !strings.Contains(string(out), "polls=2") {
 		t.Fatalf("did not wait through ready:false before success: %s", out)
+	}
+}
+
+func TestDeployReleaseCarriesVerifiedIncarnation(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `VERIFIED_RELEASE_RECEIPT='{"incarnation":"verified-a","release_path":"/generation-a"}'
+shell_quote() { printf "'%s'" "$1"; }
+daemon_call() { printf '%s' "$1"; }
+run_on_visible() { printf '%s\\n' "$2" >&2; printf '{"ok":true}'; }
+` + shellFunction(t, string(script), "release_quarantine") + "\nrelease_quarantine ''\n"
+	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
+	if err != nil || !strings.Contains(string(out), `"expected":{"incarnation":"verified-a","release_path":"/generation-a"}`) {
+		t.Fatalf("release omitted verified identity: %v %s", err, out)
 	}
 }
 

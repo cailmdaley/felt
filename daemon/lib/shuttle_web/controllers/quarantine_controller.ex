@@ -32,10 +32,10 @@ defmodule ShuttleWeb.QuarantineController do
 
     case OriginRouter.route_host(origin) do
       :local ->
-        release_local(conn)
+        release_local(conn, Map.get(params, "expected"))
 
       {:remote, %Remote{} = remote} ->
-        forward(conn, remote, origin)
+        forward(conn, remote, origin, params)
 
       # Releasing is dispatch AUTHORITY. An origin this daemon cannot place
       # must not degrade to "release mine instead" — that is the one degrade
@@ -47,10 +47,13 @@ defmodule ShuttleWeb.QuarantineController do
     end
   end
 
-  defp release_local(conn) do
-    case release() do
+  defp release_local(conn, expected) do
+    case release(expected) do
       :ok ->
         json(conn, %{ok: true, boot_quarantine: false})
+
+      {:error, :incarnation_mismatch} ->
+        conn |> put_status(:conflict) |> json(%{ok: false, error: "incarnation_mismatch"})
 
       {:error, reason} ->
         conn
@@ -59,10 +62,14 @@ defmodule ShuttleWeb.QuarantineController do
     end
   end
 
-  defp forward(conn, remote, origin) do
+  defp forward(conn, remote, origin, params) do
     relay_json(
       conn,
-      OriginRouter.forward(remote, "/api/v1/quarantine/release", %{"origin" => origin}),
+      OriginRouter.forward(
+        remote,
+        "/api/v1/quarantine/release",
+        Map.take(params, ["origin", "expected"])
+      ),
       fn name, reason ->
         %{
           ok: false,
@@ -74,8 +81,8 @@ defmodule ShuttleWeb.QuarantineController do
     )
   end
 
-  defp release do
-    Shuttle.Poller.release_boot_quarantine()
+  defp release(expected) do
+    Shuttle.Poller.release_boot_quarantine(Shuttle.Env.server(Shuttle.Poller), expected)
   catch
     :exit, reason -> {:error, reason}
   end
