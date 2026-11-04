@@ -195,6 +195,17 @@ describe('rendered Capture capabilities', () => {
     expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(true)
   })
 
+  it('reports the HTTP error for a plain capture with a non-JSON response', async () => {
+    await mount({}, false)
+    yap()
+    fetcher.mockImplementation(async () => ({
+      ok: false, status: 502, json: async () => { throw new SyntaxError('Unexpected token <') },
+    }))
+    click('.form-submit')
+    await tick()
+    expect(query('.form-error').textContent).toContain('Capture failed (502)')
+  })
+
   it('allows a plain note while a recording start is held', async () => {
     const { holdRecordingStart } = await import('./recordingStart')
     holdRecordingStart(base, 'local')

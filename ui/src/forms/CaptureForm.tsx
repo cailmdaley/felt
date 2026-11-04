@@ -255,7 +255,7 @@ export function CaptureForm({
           recorder: meetingCapabilities.recorder,
         })),
       })
-      const data = (await res.json()) as CaptureResponseData
+      const data = (await (requestedMeetingMode ? res.json() : res.json().catch(() => ({})))) as CaptureResponseData
       startAnswered = true
       const outcome = captureOutcome(res, data, {
         projectDir: selectedProject.path,
