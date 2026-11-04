@@ -226,6 +226,43 @@ func TestLostOutputObserverClosesTransport(t *testing.T) {
 	}
 }
 
+func TestActivationRefusesInsufficientDeadlineBudget(t *testing.T) {
+	binary := build(t)
+	root := t.TempDir()
+	cmd, life, log := start(t, binary, root, "budget", `printf B >&5; read -r ack <&5 || exit 43; touch "$1/pointer"`, "SHUTTLE_DEPLOY_TIMEOUT_SECONDS=4", "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
+	defer life.Close()
+	if e := result(t, cmd); e == nil || present(filepath.Join(root, "pointer")) {
+		t.Fatalf("activation began without readiness reserve: %v %s", e, contents(log))
+	}
+	if !strings.Contains(contents(log), "insufficient activation deadline budget") {
+		t.Fatalf("missing budget diagnosis: %s", contents(log))
+	}
+}
+
+func TestHardDeadlineStillStopsStalledActivation(t *testing.T) {
+	binary := build(t)
+	root := t.TempDir()
+	cmd, life, log := start(t, binary, root, "stalled", `printf B >&5; read -r ack <&5; trap '' TERM; touch "$1/critical"; sleep 300`, "SHUTTLE_DEPLOY_TIMEOUT_SECONDS=70", "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
+	defer life.Close()
+	await(t, log, func() bool { return present(filepath.Join(root, "critical")) })
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case e := <-done:
+		if e == nil {
+			t.Fatal("stalled activation succeeded")
+		}
+	case <-time.After(85 * time.Second):
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-done
+		t.Fatal("hard activation deadline did not stop the group")
+	}
+	if !strings.Contains(contents(log), "overall host deadline exceeded") {
+		t.Fatalf("missing hard deadline: %s", contents(log))
+	}
+	free(t, filepath.Join(root, "host.lock"))
+}
+
 func TestDeadlineKillsTermIgnoringGroup(t *testing.T) {
 	binary := build(t)
 	root := t.TempDir()
