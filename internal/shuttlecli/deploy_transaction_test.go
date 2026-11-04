@@ -717,6 +717,9 @@ func TestDeployLauncherCannotRetainTransactionLocks(t *testing.T) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("deploy: %v %s", err, fleetRead(log))
 	}
+	if pid, err := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "background.pid")))); err != nil || pid <= 0 {
+		t.Fatalf("background launcher did not run: %v %s", err, fleetRead(log))
+	}
 	lock, err := os.OpenFile(filepath.Join(f.home, ".shuttle", "deploy.lock"), os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatal(err)
