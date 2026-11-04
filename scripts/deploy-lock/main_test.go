@@ -226,6 +226,27 @@ func TestLostOutputObserverClosesTransport(t *testing.T) {
 	}
 }
 
+func TestActivationControlGetsEOFWhenOwnerDies(t *testing.T) {
+	binary := build(t)
+	root := t.TempDir()
+	cmd, life, log := start(t, binary, root, "control-eof", `touch "$1/entered"; read -r ack <&5; echo $? > "$1/control-eof"`)
+	defer life.Close()
+	await(t, log, func() bool { return present(filepath.Join(root, "entered")) })
+	cmd.Process.Kill()
+	_ = result(t, cmd)
+	until := time.Now().Add(2 * time.Second)
+	for !present(filepath.Join(root, "control-eof")) && time.Now().Before(until) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !present(filepath.Join(root, "control-eof")) {
+		t.Fatal("transaction retained an activation-owner socket and never received EOF")
+	}
+	if strings.TrimSpace(contents(filepath.Join(root, "control-eof"))) == "0" {
+		t.Fatal("activation owner death produced data, not EOF")
+	}
+	free(t, filepath.Join(root, "host.lock"))
+}
+
 func TestTransactionDoesNotInheritIgnoredSIGPIPE(t *testing.T) {
 	binary := build(t)
 	root := t.TempDir()
