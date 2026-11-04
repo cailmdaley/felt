@@ -132,6 +132,38 @@ func TestMessageToDormantFiberJSONReceiptNeverClaimsDelivery(t *testing.T) {
 	}
 }
 
+func TestContextOnlyLiveFiberUsesDurableMailbox(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir(),
+		"runtime": map[string]any{"session_uuid": messageTargetSession},
+	})
+	isolateMessageFiberStore(env, store)
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/deliver": func(w http.ResponseWriter, r *http.Request) {
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if payload["unless_live"] != false {
+				t.Error("quiet context bypassed the fiber mailbox for a live worker")
+			}
+			if payload["wake"] != false {
+				t.Error("quiet context requested a wake")
+			}
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"queued":true}`))
+		},
+	})
+	app := newApp(env)
+	receipt, err := app.queueForNextWorker(messaging.Request{Address: "work/worker", MessageID: "quiet", Text: "follow the fiber"})
+	if err != nil || receipt == nil {
+		t.Fatalf("queue = %+v, %v", receipt, err)
+	}
+	if strings.Contains(receipt.Detail, "no live worker") {
+		t.Fatalf("receipt invents worker absence: %+v", receipt)
+	}
+}
+
 func TestMessageToLiveFiberSendsToItsWorker(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
