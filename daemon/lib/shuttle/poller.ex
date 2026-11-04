@@ -4987,6 +4987,16 @@ defmodule Shuttle.Poller do
   # cache so the board reflects the claim immediately.
   defp do_claim_session(%State{} = state, fiber_id, uid, tmux_session, opts) do
     state = reconcile_running_fiber(state, fiber_id)
+    canonical = Dispatcher.session_name(fiber_id, uid)
+    interrupted = interrupted_claim?(state.runner, tmux_session, canonical, opts)
+
+    state =
+      if interrupted and running_worker(state, fiber_id) do
+        stop_watcher(running_worker(state, fiber_id))
+        remove_running(state, running_key(state, fiber_id))
+      else
+        state
+      end
 
     running = running_worker(state, fiber_id)
 
@@ -4997,7 +5007,7 @@ defmodule Shuttle.Poller do
     live_session =
       case fetch_fiber_full(fiber_id, state) do
         {:ok, fiber} ->
-          if Dispatcher.worker_present?(fiber, state.runner),
+          if not interrupted and Dispatcher.worker_present?(fiber, state.runner),
             do: Dispatcher.session_name(fiber["id"], fiber["uid"])
 
         {:error, _} ->
@@ -5066,6 +5076,19 @@ defmodule Shuttle.Poller do
                 register_claimed_session(state, fiber_id, fiber, tmux_session, opts)
             end
         end
+    end
+  end
+
+  defp interrupted_claim?(_runner, source, source, _opts), do: false
+  defp interrupted_claim?(_runner, _source, nil, _opts), do: false
+
+  defp interrupted_claim?(runner, session, canonical, opts) do
+    with {:ok, source} <- claim_terminal_source(runner, session, opts),
+         backend when not is_nil(backend) <- Shuttle.Terminal.locate(runner, source),
+         true <- Enum.all?(Shuttle.Terminal.backends(), &(&1.probe(runner, canonical) == :absent)) do
+      Shuttle.WorkerProcess.interrupted_claim?(runner, claim_script_source(source), canonical)
+    else
+      _ -> false
     end
   end
 
@@ -5207,9 +5230,10 @@ defmodule Shuttle.Poller do
   defp claim_script_source(source) do
     if Shuttle.Terminal.native_ref?(source) do
       with {:ok, %{"bindings" => bindings}} <- Shuttle.Terminal.RexBindings.read(),
-           [{name, _}] <- Enum.filter(bindings, fn {_name, binding} ->
-             source in [binding["session_id"], binding["block_id"]]
-           end) do
+           [{name, _}] <-
+             Enum.filter(bindings, fn {_name, binding} ->
+               source in [binding["session_id"], binding["block_id"]]
+             end) do
         name
       else
         _ -> source

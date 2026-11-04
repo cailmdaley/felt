@@ -394,6 +394,22 @@ defmodule Shuttle.WorkerProcess do
     migration_aliases(procs ++ reserved, source, canonical)
   end
 
+  @doc "An alias persisted while the immutable script still names its source assignment."
+  def interrupted_claim?(runner, source, canonical) do
+    case scan(runner) do
+      {:ok, procs} ->
+        Enum.any?(procs, fn proc ->
+          case script_token(proc.args) do
+            {_, ^source} -> not tmux?(proc) and script_session(proc) == canonical
+            _ -> false
+          end
+        end)
+
+      {:error, :unknown} ->
+        false
+    end
+  end
+
   def write_migration_aliases(aliases) do
     Enum.reduce_while(aliases, :ok, fn {path, _, new}, :ok ->
       case write_alias(path, new) do

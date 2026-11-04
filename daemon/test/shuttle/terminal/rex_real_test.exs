@@ -487,33 +487,56 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {_, 0} = System.cmd(tmux, ["-S", socket, "has-session", "-t", "=probe-worker"])
   end
 
-  test "native Rex capture claims retain their immutable script assignment", %{root: root} do
-    alias Shuttle.Test.{FeltStoreRunner, FiberUid}
-    FeltStoreRunner.start!()
-    store = FeltStoreRunner.felt_root()
-    on_exit(fn -> File.rm_rf(store) end)
-    Env.put_env("SHUTTLE_STORES", store)
-    Env.put_app_env(:terminal_backend, Backend)
-    FeltStoreRunner.set_fiber("native-capture", make_fiber("native-capture"))
-    FeltStoreRunner.set_shuttle("native-capture", "kind: oneshot\nhost: other-host\n", "open")
-    {:ok, p} = start_poller!(runner: ClaimRunner, felt_stores: [store])
-    await_boot_cycle!(p)
-    source = "capture-native"
-    assert :ok = Terminal.launch(ClaimRunner, source, root,
-      "trap 'rm -f \"$0\"' EXIT\nsleep 300\n", preflighted: true)
-    assert {:ok, %{"bindings" => %{^source => binding}}} = RexBindings.read()
-    assert {:ok, %{"script" => script}} = Terminal.LaunchAttempts.get(source)
-    await(fn ->
-      {:ok, procs} = WorkerProcess.scan(@runner)
-      WorkerProcess.script_process(procs, script) != nil
-    end)
-    canonical = FiberUid.session("native-capture")
-    assert {:ok, %{session: ^canonical}} = Shuttle.Poller.claim_session(p,
-      "native-capture", binding["session_id"], tmux_pane: binding["block_id"])
-    assert {:ok, procs} = WorkerProcess.scan(@runner)
-    assert WorkerProcess.session_process(procs, canonical)
-    assert canonical in WorkerProcess.sessions(procs)
-    assert {"", 0} = Terminal.stop(@runner, canonical, backends: [Backend])
+  for interrupted <- [false, true] do
+    test "native Rex capture claims retain their immutable script assignment (interrupted=#{interrupted})",
+         %{root: root} do
+      alias Shuttle.Test.{FeltStoreRunner, FiberUid}
+      FeltStoreRunner.start!()
+      store = FeltStoreRunner.felt_root()
+      on_exit(fn -> File.rm_rf(store) end)
+      Env.put_env("SHUTTLE_STORES", store)
+      Env.put_app_env(:terminal_backend, Backend)
+      FeltStoreRunner.set_fiber("native-capture", make_fiber("native-capture"))
+      FeltStoreRunner.set_shuttle("native-capture", "kind: oneshot\nhost: other-host\n", "open")
+      {:ok, p} = start_poller!(runner: ClaimRunner, felt_stores: [store])
+      await_boot_cycle!(p)
+      source = "capture-native"
+
+      assert :ok =
+               Terminal.launch(ClaimRunner, source, root, "trap 'rm -f \"$0\"' EXIT\nsleep 300\n",
+                 preflighted: true
+               )
+
+      assert {:ok, %{"bindings" => %{^source => binding}}} = RexBindings.read()
+      assert {:ok, %{"script" => script}} = Terminal.LaunchAttempts.get(source)
+
+      await(fn ->
+        {:ok, procs} = WorkerProcess.scan(@runner)
+        WorkerProcess.script_process(procs, script) != nil
+      end)
+
+      canonical = FiberUid.session("native-capture")
+
+      if unquote(interrupted) do
+        assert catch_throw(
+                 (fn ->
+                    aliases = WorkerProcess.claim_aliases(ClaimRunner, source, canonical)
+                    :ok = WorkerProcess.write_migration_aliases(aliases)
+                    throw(:crashed_before_rename)
+                  end).()
+               ) == :crashed_before_rename
+      end
+
+      assert {:ok, %{session: ^canonical}} =
+               Shuttle.Poller.claim_session(p, "native-capture", binding["session_id"],
+                 tmux_pane: binding["block_id"]
+               )
+
+      assert {:ok, procs} = WorkerProcess.scan(@runner)
+      assert WorkerProcess.session_process(procs, canonical)
+      assert canonical in WorkerProcess.sessions(procs)
+      assert {"", 0} = Terminal.stop(@runner, canonical, backends: [Backend])
+    end
   end
 
   test "a human-labelled native session is claimed canonically and a retry keeps its watcher", %{

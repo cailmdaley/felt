@@ -7509,14 +7509,22 @@ defmodule Shuttle.PollerTest do
     session = FiberUid.session(id)
     script = Path.join(root, "shuttle-run-#{session}.42.sh")
     File.write!(script, "sleep 300")
-    facts = %{"intent" => "fresh", "session_uuid" => nil,
+
+    facts = %{
+      "intent" => "fresh",
+      "session_uuid" => nil,
       "dispatched_at" => DateTime.to_iso8601(DateTime.utc_now()),
-      "harness" => Shuttle.SessionLedger.harness_for_cli("aider")}
+      "harness" => Shuttle.SessionLedger.harness_for_cli("aider")
+    }
+
     assert :ok = Shuttle.Terminal.LaunchAttempts.record(session, script, %{"dispatch" => facts})
     MockRunner.add_tmux_session(session)
     MockRunner.set_ps_result({"812 1 bash -l #{script}\n", 0})
     worker = %{session: session, context_harness: "custom-context", session_uuid: nil}
-    assert {_, recovered} = Poller.recover_prepared_worker(state, id, MockRunner.fiber(id), worker)
+
+    assert {_, recovered} =
+             Poller.recover_prepared_worker(state, id, MockRunner.fiber(id), worker)
+
     assert recovered.context_harness == "custom-context"
     assert recovered.session_uuid == nil
   end
@@ -7575,6 +7583,47 @@ defmodule Shuttle.PollerTest do
     MockRunner.remove_tmux_session(canonical)
     MockRunner.add_tmux_session(canonical)
     assert {:error, :already_running} = Poller.claim_session(poller, id, "capture-successor", [])
+  end
+
+  @tag :terminal_identity
+  test "a claim interrupted after alias persistence completes its source rename on retry" do
+    id = "tests/interrupted-claim"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nhost: other-host\n", "open")
+    MockRunner.add_tmux_session("capture-interrupted")
+    MockRunner.set_ps_result({"812 1 bash -l /tmp/shuttle-run-capture-interrupted.42.sh\n", 0})
+    canonical = FiberUid.session(id)
+    # The surviving files are the checkpoint at which the daemon loses execution.
+    assert catch_throw(
+             (fn ->
+                aliases =
+                  Shuttle.WorkerProcess.claim_aliases(
+                    MockRunner,
+                    "capture-interrupted",
+                    canonical
+                  )
+
+                :ok = Shuttle.WorkerProcess.write_migration_aliases(aliases)
+                throw(:crashed_before_rename)
+              end).()
+           ) == :crashed_before_rename
+
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()])
+    await_boot_cycle!(poller)
+
+    assert {:ok, %{session: ^canonical}} =
+             Poller.claim_session(poller, id, "capture-interrupted",
+               session_uuid: "interrupted-uuid"
+             )
+
+    assert :present = Shuttle.Terminal.Tmux.probe(MockRunner, canonical)
+    assert :absent = Shuttle.Terminal.Tmux.probe(MockRunner, "capture-interrupted")
+    assert Poller.session_uuid(poller, id) == "interrupted-uuid"
+
+    assert {:ok, _} =
+             Poller.claim_session(poller, id, "capture-interrupted",
+               session_uuid: "interrupted-uuid"
+             )
   end
 
   @tag :terminal_identity

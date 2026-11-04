@@ -51,6 +51,7 @@ defmodule Shuttle.TerminalTest do
 
         if count == 2 do
           send(owner, {:conversation_checked, self()})
+
           receive do
             :continue_scan -> :ok
           end
@@ -562,6 +563,7 @@ defmodule Shuttle.TerminalTest do
     second =
       Task.async(fn ->
         send(owner, {:second_started, self()})
+
         Terminal.launch(ConcurrentRunner, "resume-" <> uuid, dir, "true",
           preflighted: true,
           conversation_uuid: uuid
@@ -590,16 +592,20 @@ defmodule Shuttle.TerminalTest do
   end
 
   @tag :tmp_dir
-  test "conversation scans ignore atomic temporaries and diagnose unrelated corrupt records", %{tmp_dir: dir} do
+  test "conversation scans ignore atomic temporaries and diagnose unrelated corrupt records", %{
+    tmp_dir: dir
+  } do
     Env.put_env("SHUTTLE_DATA_DIR", dir)
     attempts = Path.join([dir, "terminals", "launch-attempts"])
     File.mkdir_p!(attempts)
     File.write!(Path.join(attempts, "abc.123.tmp"), "")
     assert {:ok, []} = Shuttle.Terminal.LaunchAttempts.for_conversation("other")
     File.write!(Path.join(attempts, "corrupt"), "not json")
+
     assert ExUnit.CaptureLog.capture_log(fn ->
-      assert {:ok, []} = Shuttle.Terminal.LaunchAttempts.for_conversation("other")
-    end) =~ "corrupt"
+             assert {:ok, []} = Shuttle.Terminal.LaunchAttempts.for_conversation("other")
+           end) =~ "corrupt"
+
     File.write!(Path.join(attempts, "known"), Jason.encode!(%{"conversation_uuid" => "held"}))
     assert {:ok, []} = Shuttle.Terminal.LaunchAttempts.for_conversation("other")
     assert {:error, :unknown} = Shuttle.Terminal.LaunchAttempts.for_conversation("held")
@@ -897,11 +903,18 @@ defmodule Shuttle.TerminalTest do
     on_exit(fn -> System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true) end)
 
     for name <- ["worker-shuttle", "$literal"] do
-      assert {pane, 0} = IsolatedTmuxRunner.cmd("tmux",
-        ["new-session", "-d", "-s", name, "-P", "-F", "\#{pane_id}", "cat"], [])
+      assert {pane, 0} =
+               IsolatedTmuxRunner.cmd(
+                 "tmux",
+                 ["new-session", "-d", "-s", name, "-P", "-F", "\#{pane_id}", "cat"],
+                 []
+               )
+
       assert :ok = Tmux.paste(IsolatedTmuxRunner, name, "hello exact worker")
-      assert {output, 0} = IsolatedTmuxRunner.cmd("tmux",
-        ["capture-pane", "-p", "-t", String.trim(pane)], [])
+
+      assert {output, 0} =
+               IsolatedTmuxRunner.cmd("tmux", ["capture-pane", "-p", "-t", String.trim(pane)], [])
+
       assert output =~ "hello exact worker"
     end
 
