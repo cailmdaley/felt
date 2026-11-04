@@ -23,7 +23,7 @@ import (
 // pluginId and split plugin hashes, and config/batchWrite.
 const codexHookTrustMinimum = "0.166.0"
 
-const defaultCodexTrustTimeout = 20 * time.Second
+const defaultCodexTrustTimeout = 60 * time.Second
 
 type codexTrustHook struct {
 	Key         string `json:"key"`

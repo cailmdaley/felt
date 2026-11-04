@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
@@ -19,11 +20,12 @@ import (
 // Hook definitions are per server (a live server can hold an older view);
 // persisted trust is one store shared by every server, as config.toml is.
 type fakeTrustServer struct {
-	hooks string // {"data":[{"hooks":[...]}]}
-	store string // {"<key>": "<definition>/<content>"}
-	log   string
-	fail  string
-	mu    *sync.Mutex
+	hooks     string // {"data":[{"hooks":[...]}]}
+	store     string // {"<key>": "<definition>/<content>"}
+	log       string
+	fail      string
+	mu        *sync.Mutex
+	initDelay time.Duration
 }
 
 func (s fakeTrustServer) handle(line []byte) []byte {
@@ -54,6 +56,8 @@ func (s fakeTrustServer) handle(line []byte) []byte {
 	var result any = map[string]any{}
 	var rpcError any
 	switch req.Method {
+	case "initialize":
+		time.Sleep(s.initDelay)
 	case "hooks/list":
 		var state struct {
 			Data []struct {
@@ -131,6 +135,13 @@ func TestCodexTrustRPCProcess(t *testing.T) {
 		return
 	}
 	server := fakeTrustServer{hooks: os.Getenv("TRUST_HOOKS"), store: os.Getenv("TRUST_STORE"), log: os.Getenv("TRUST_LOG"), fail: os.Getenv("TRUST_FAIL")}
+	if delay := os.Getenv("TRUST_INIT_DELAY"); delay != "" {
+		var err error
+		server.initDelay, err = time.ParseDuration(delay)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	for scanner.Scan() {
@@ -281,6 +292,22 @@ func trustHook(plugin, key, status string) codexTrustHook {
 
 func feltHook(event, status string) codexTrustHook {
 	return trustHook(codexPluginRef, codexPluginRef+":hooks/hooks.json:"+event+":0:0", status)
+}
+
+func TestCodexTrustAllowsSlowServerInitialization(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	fakeCodexTrust(t, env, nil)
+	env.Set("TRUST_INIT_DELAY", "21s")
+	rpc, err := testApp(t, env).openCodexTrustRPC()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rpc.close()
+	var result json.RawMessage
+	if err := rpc.call("hooks/list", map[string]any{"cwds": []string{homeOf(t, env)}}, &result); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Negative control: remove the pluginId filter; the request assertion catches
