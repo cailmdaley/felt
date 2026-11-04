@@ -1006,6 +1006,7 @@ run_transaction() { # host, source, mode, staged files, build wrapper, UI snapsh
   bootstrap="set -eu
 HOST=$(shell_quote "${host:-local}")
 export SHUTTLE_DEPLOY_DEADLINE=$until
+export SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=$(shell_quote "${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}")
 DEPLOY_STEP=bootstrap
 child=''
 $(declare -f deploy_step)

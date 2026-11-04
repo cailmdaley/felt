@@ -207,6 +207,14 @@ func owned(ctx context.Context, until time.Time, cmd *exec.Cmd, control *os.File
 			}
 			switch event {
 			case 'B':
+				ready := 900
+				if n, e := strconv.Atoi(os.Getenv("SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS")); e == nil && n >= 0 {
+					ready = n
+				}
+				reserve := time.Duration(ready)*time.Second + time.Minute
+				if reason == nil && time.Until(until) <= reserve {
+					reason = fmt.Errorf("insufficient activation deadline budget: need more than %s, have %s", reserve, time.Until(until).Round(time.Second))
+				}
 				if reason == nil {
 					critical = true
 					if _, err := control.Write([]byte("ok\n")); err != nil {
