@@ -27,9 +27,9 @@ defmodule Shuttle.Poller.ChangeDiscovery do
       result =
         if Shuttle.FS.protected?(Path.join(store, ".felt")) or
              Shuttle.FS.protected?(Shuttle.FeltStores.store_felt_realpath(store)) do
-          {:ok, %{index: %{}, ids: [], rows: []}}
+          {:ok, %{index: "{}", indexed_paths: 0, ids: [], rows: []}}
         else
-          scan(state, store, Map.get(indexes, store, %{}))
+          scan(state, store, Map.get(indexes, store, "{}"))
         end
 
       result =
@@ -46,14 +46,18 @@ defmodule Shuttle.Poller.ChangeDiscovery do
   end
 
   defp scan(state, store, index) do
+    previous = if is_binary(index), do: index, else: "{}"
+
     case state.runner.cmd("shuttle", ["-C", store, "scan-changes"],
-           input: Jason.encode!(index) <> "\n",
+           input: previous,
            timeout_ms: 60_000
          ) do
       {output, 0} ->
-        with {:ok, %{"index" => next, "ids" => ids}} <- Jason.decode(output),
+        with [header, next] <- String.split(output, "\n", parts: 2),
+             {:ok, %{"ids" => ids, "indexed_paths" => indexed_paths}} <- Jason.decode(header),
+             true <- is_binary(next) and next != "",
              {:ok, %{rows: rows}} <- Shuttle.Poller.list_changed_fibers(store, state, ids) do
-          {:ok, %{index: next, ids: ids, rows: rows}}
+          {:ok, %{index: next, indexed_paths: indexed_paths, ids: ids, rows: rows}}
         else
           error -> {:error, inspect(error)}
         end

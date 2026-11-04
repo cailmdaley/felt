@@ -20,8 +20,8 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Metadata discovery uses `shuttle scan-changes` with JSON index frames.
-  @expected_level 29
+  # Metadata discovery uses `shuttle scan-changes` with opaque index frames.
+  @expected_level 30
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -46,7 +46,8 @@ defmodule Shuttle.Contract do
     26 => "mark-runtime --thread-exit-verb (durable lifecycle signal supersession)",
     27 => "context-mailbox put --retained-at (bounded thread notice retention)",
     28 => "message --request-json attested_sender (cross-host verified senders)",
-    29 => "scan-changes (incremental physical-store metadata index)"
+    29 => "scan-changes (incremental physical-store metadata index)",
+    30 => "scan-changes (newline-framed opaque metadata index)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

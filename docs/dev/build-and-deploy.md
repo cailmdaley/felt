@@ -97,6 +97,12 @@ and `/api/v1/state`. `make daemon` therefore builds both Go CLIs first
 (`SKIP_CLI=1` trusts both on `PATH`). The Elixir suite shells both CLIs too, so
 run `make cli-install` before `make mix-test` after changing either boundary.
 
+`shuttle scan-changes` reads the previous metadata index as JSON on stdin.
+Its output has a small JSON header (`ids` and `indexed_paths`), a newline,
+and the next JSON index.
+The daemon decodes the header and retains the index as opaque bytes for the next scan;
+the Go CLI owns its paths and nanosecond timestamps.
+
 ### The release's runtime stays out of workers and builds
 
 A daemon started from `bin/rel` runs with the release's ERTS first on `PATH`

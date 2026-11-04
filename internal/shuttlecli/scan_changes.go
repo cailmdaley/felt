@@ -20,7 +20,27 @@ func (a *app) scanChangesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return json.NewEncoder(a.env.Stdout).Encode(result)
+			// The daemon retains the metadata index as opaque JSON bytes. Keep
+			// only the small changed-address header in the BEAM JSON parser.
+			header, err := json.Marshal(struct {
+				IDs          []string `json:"ids"`
+				IndexedPaths int      `json:"indexed_paths"`
+			}{IDs: result.IDs, IndexedPaths: len(result.Index)})
+			if err != nil {
+				return err
+			}
+			index, err := json.Marshal(result.Index)
+			if err != nil {
+				return err
+			}
+			if _, err := a.env.Stdout.Write(header); err != nil {
+				return err
+			}
+			if _, err := a.env.Stdout.Write([]byte{'\n'}); err != nil {
+				return err
+			}
+			_, err = a.env.Stdout.Write(index)
+			return err
 		},
 	}
 }

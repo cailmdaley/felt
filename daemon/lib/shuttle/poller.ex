@@ -6289,7 +6289,7 @@ defmodule Shuttle.Poller do
             Map.put(state.change_health, store, %{
               ok: true,
               duration_ms: result.duration_ms,
-              indexed_paths: map_size(result.index),
+              indexed_paths: result.indexed_paths,
               changed_addresses: length(result.ids),
               completed_at: DateTime.to_iso8601(DateTime.utc_now())
             })
