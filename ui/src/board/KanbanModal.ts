@@ -1482,6 +1482,12 @@ export class KanbanModal {
       this.announce(`${card.name} runs on its schedule; drag it to In flight to run it now.`)
       return
     }
+    // A future day on a non-snoozing card changes only its date, not its
+    // lifecycle. An explicit Now placement has no date (or clears it).
+    if (horizon === 'now' && typeof opts.due === 'string') {
+      void this.scheduleDue(card, opts.due)
+      return
+    }
     const wantsCold = horizon === 'stashed' ? (opts.cold ?? false) : undefined
     // A bare stash keeps the card's own `due:` — `due` stays undefined, which
     // commitSurface reads as "don't send the key", and felt leaves the line
@@ -1509,6 +1515,16 @@ export class KanbanModal {
     }
 
     void this.commitSurface(card, horizon, { cold: wantsCold, due, dropsStaleDue })
+  }
+
+  private async scheduleDue(card: KanbanCard, due: string): Promise<void> {
+    try {
+      await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, due }, 'Date edit failed')
+      this.announce(`“${card.name}” is due ${formatDue(due)}.`)
+    } catch (err) {
+      this.showBanner(`Couldn't date “${card.name}”: ${errText(err)}`, 'error')
+    }
+    await this.fetchAndRender()
   }
 
   /**

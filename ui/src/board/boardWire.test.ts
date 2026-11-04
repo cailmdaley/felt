@@ -299,6 +299,18 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     expect(wire.calls).toEqual([])
   })
 
+  it('adds a future day to live work without killing or changing its lifecycle', async () => {
+    const due = dayFromNow(7)
+    asPrivate(makeBoard()).setSurface(card({
+      status: 'active', workerState: 'running', tmuxSession: 'live-worker',
+    }), 'now', { due })
+    await wire.settled()
+    expect(wire.writes()).toEqual([{
+      url: `${BASE}/api/v1/felt-edit`, method: 'POST',
+      body: { fiber_id: 'fiber-1', origin: 'local', due },
+    }])
+  })
+
   it('snoozes with until on the lifecycle write even if the cold presentation edit fails', async () => {
     const board = asPrivate(makeBoard())
     const banner = vi.spyOn(board, 'showBanner')
