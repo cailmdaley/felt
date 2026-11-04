@@ -301,11 +301,12 @@ SH
 }
 
 seed_deploy_cache_cmd() {
-  local source="$1" # The emitted snippet runs with the caller's target variable.
+  local source="$1" fallback="${2:-}" # The emitted snippet uses the caller's target.
   cat <<SH
 (
   set +e
   source=$(shell_quote "$source")
+  if [ ! -d "\$source" ] || [ "\$source" -ef "\$target" ]; then source=$(shell_quote "$fallback"); fi
   [ -d "\$source" ] || exit 0
   for relative in daemon/deps daemon/_build ui/node_modules; do
     if [ -L "\$source/\$relative" ] || [ -L "\$target/\$relative" ]; then
@@ -383,7 +384,7 @@ if ! valid_target; then
   git -C "\$source" worktree prune
   mkdir -p "\$root"
   git -C "\$source" worktree add --detach "\$target" "\$commit"
-  $(seed_deploy_cache_cmd "$previous")
+  $(seed_deploy_cache_cmd "$previous" "$checkout")
 fi
 valid_target
 SH

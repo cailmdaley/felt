@@ -59,6 +59,8 @@ fi
 `)
 	write(filepath.Join(f.repo, "tracked"), "target\n")
 	write(filepath.Join(f.repo, "package.json"), `{"name":"felt"}`)
+	write(filepath.Join(f.repo, "daemon/mix.exs"), "# fixture\n")
+	write(filepath.Join(f.repo, "ui/package-lock.json"), "{}\n")
 	write(filepath.Join(f.repo, "bin/shuttle-launch"), `#!/bin/sh
 sha=$(git -C "${TEST_RELEASE%/bin/rel}" rev-parse HEAD)
 printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
@@ -243,6 +245,37 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployFirstPinnedTreeSeedsRegularCheckoutCaches(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	for _, relative := range []string{"daemon/deps/package/cache", "daemon/_build/prod/cache", "ui/node_modules/package/cache"} {
+		path := filepath.Join(f.repo, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("warm"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + shellFunction(t, string(script), "revision_checkout_cmd") + `revision_checkout_cmd "$SOURCE" "$SOURCE.deploy/$TARGET_COMMIT" | bash -eu`
+	cmd := exec.Command("bash", "-c", harness)
+	cmd.Env = append(f.env, "SOURCE="+f.repo, "TARGET_COMMIT="+f.sha)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("prepare: %v %s", err, out)
+	}
+	t.Logf("preparation: %s", out)
+	for _, relative := range []string{"daemon/deps/package/cache", "daemon/_build/prod/cache", "ui/node_modules/package/cache"} {
+		if got := fleetRead(filepath.Join(f.repo+".deploy", f.sha, relative)); got != "warm" {
+			t.Fatalf("regular checkout cache %s not seeded: %q", relative, got)
+		}
 	}
 }
 
