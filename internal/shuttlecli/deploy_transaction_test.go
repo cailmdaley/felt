@@ -69,6 +69,7 @@ fi
 	write(filepath.Join(f.repo, "daemon/mix.exs"), "# fixture\n")
 	write(filepath.Join(f.repo, "ui/package-lock.json"), "{}\n")
 	write(filepath.Join(f.repo, "bin/shuttle-launch"), `#!/bin/sh
+if (: >&3) 2>/dev/null || (: >&4) 2>/dev/null; then echo launcher-inherited-deploy-lock >&2; exit 92; fi
 bash -c 'trap -p TERM' > "$FLEET_ROOT/launcher-term-trap"
 if [ "${ACTIVATION_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/activation-entered"; while [ ! -f "$FLEET_ROOT/activation-go" ]; do sleep .02; done; fi
 sha=$(git -C "${TEST_RELEASE%/bin/rel}" rev-parse HEAD)
@@ -263,16 +264,16 @@ func (f *deployFleet) startArgs(t *testing.T, name, host string, args []string, 
 	cmd := exec.Command("bash", append([]string{filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", host, "--no-push"}, args...)...)
 	cmd.Env = append(append([]string{}, f.env...), extra...)
 	cmd.Stdout, cmd.Stderr = log, log
-	// A private process group lets failure cleanup include the fake remote build.
+	// Fixture signals never reach the test runner's process group.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if cmd.ProcessState == nil {
-			_ = cmd.Wait()
-		}
+		// The deployer's lifeline cancels its owned helpers; a reaped process
+		// group number must not be used as a later cleanup handle.
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
 		log.Close()
 	})
 	return cmd, logPath
@@ -712,11 +713,6 @@ func TestDeployLauncherCannotRetainTransactionLocks(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
-	t.Cleanup(func() {
-		if pid, err := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "background.pid")))); err == nil {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
-	})
 	cmd, log := f.start(t, "background-launcher", "BACKGROUND_LAUNCHER=1")
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("deploy: %v %s", err, fleetRead(log))
