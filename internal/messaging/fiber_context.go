@@ -327,9 +327,7 @@ func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, addr
 	// Hooks offer the fiber queue itself, so replacing a conversation before
 	// its next hook cannot strand a result in a session-scoped pending queue.
 	if a.Harness == "codex" {
-		if err := discoverCodexTerminalReceiver(ctx, env, a); err != nil {
-			return err
-		}
+		_ = discoverCodexTerminalReceiver(ctx, env, a)
 	}
 	hook := MailboxAvailable(env, a.Harness, a.ID, host)
 	if err := ensureDir(root, 0700); err != nil {
