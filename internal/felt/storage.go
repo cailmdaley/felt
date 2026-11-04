@@ -543,6 +543,45 @@ func (s *Storage) CheckAvailableID(id string) error {
 	return nil
 }
 
+// Update takes the fiber's advisory lock, reloads its current document, and
+// commits the mutation without replacing unrelated concurrent changes.
+func (s *Storage) Update(id string, mutate func(*Felt) error) (*Felt, error) {
+	ensureGitignoreCoversSupportFiles(s.root)
+	s.forgetWalk()
+	return UpdateFiberFile(s.Path(id), id, mutate)
+}
+
+// UpdateFiberFile is the read-modify-write boundary for a known document path.
+// The callback runs under the canonical advisory lock against a fresh full read.
+// Returning an error leaves the document untouched.
+func UpdateFiberFile(path, id string, mutate func(*Felt) error) (*Felt, error) {
+	unlock, err := LockFiberFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := Parse(id, data)
+	if err != nil {
+		return nil, err
+	}
+	f.Path = path
+	if err := mutate(f); err != nil {
+		return nil, err
+	}
+	data, err = f.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	if err := WriteFiberFile(path, data); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
 // Write saves a felt to disk. The file is replaced atomically, so a
 // concurrent reader sees the old document or the new one, never a truncated
 // file. A felt without an intrinsic id is

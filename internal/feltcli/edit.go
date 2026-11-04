@@ -48,11 +48,6 @@ own, structured ones included.`,
 				return err
 			}
 			storage = target.Storage
-			f, err := storage.Read(target.ID)
-			if err != nil {
-				return err
-			}
-
 			hasFlags := len(collectChangedEditFields(cmd)) > 0
 			if !hasFlags {
 				return fmt.Errorf("no changes requested: use edit flags (use --body only when you intend to overwrite the full body)")
@@ -61,68 +56,71 @@ own, structured ones included.`,
 			bodyOverwritten := false
 			bodyCleared := false
 
-			if cmd.Flags().Changed("name") {
-				f.Name = editName
-			}
-			if cmd.Flags().Changed("status") {
-				if err := f.SetStatus(editStatus, time.Now()); err != nil {
-					return err
+			f, err := storage.Update(target.ID, func(f *felt.Felt) error {
+				if cmd.Flags().Changed("name") {
+					f.Name = editName
 				}
-			}
-			if cmd.Flags().Changed("body") {
-				if f.Body != "" && editBody != f.Body && !f.HasEmptyBody() {
-					bodyOverwritten = true
-				}
-				if f.Body != "" && editBody == "" && !f.HasEmptyBody() {
-					bodyCleared = true
-				}
-				f.Body = editBody
-			}
-			if cmd.Flags().Changed("outcome") {
-				f.Outcome = editOutcome
-			}
-			if cmd.Flags().Changed("due") {
-				if editDue == "" {
-					f.Due = nil
-				} else {
-					due, err := time.Parse("2006-01-02", editDue)
-					if err != nil {
-						return fmt.Errorf("invalid due date (use YYYY-MM-DD): %w", err)
-					}
-					f.Due = &due
-				}
-			}
-			if cmd.Flags().Changed("tag") {
-				for _, tag := range splitListFlag(editTags) {
-					f.AddTag(tag)
-				}
-			}
-			if cmd.Flags().Changed("untag") {
-				for _, tag := range splitListFlag(editUntag) {
-					f.RemoveTag(tag)
-				}
-			}
-			if cmd.Flags().Changed("unset") {
-				for _, key := range editUnset {
-					if err := unsetExtraField(f, key); err != nil {
+				if cmd.Flags().Changed("status") {
+					if err := f.SetStatus(editStatus, time.Now()); err != nil {
 						return err
 					}
 				}
-			}
-			if cmd.Flags().Changed("set") {
-				for _, assignment := range editSet {
-					if err := setExtraField(f, assignment); err != nil {
-						return err
+				if cmd.Flags().Changed("body") {
+					if f.Body != "" && editBody != f.Body && !f.HasEmptyBody() {
+						bodyOverwritten = true
+					}
+					if f.Body != "" && editBody == "" && !f.HasEmptyBody() {
+						bodyCleared = true
+					}
+					f.Body = editBody
+				}
+				if cmd.Flags().Changed("outcome") {
+					f.Outcome = editOutcome
+				}
+				if cmd.Flags().Changed("due") {
+					if editDue == "" {
+						f.Due = nil
+					} else {
+						due, err := time.Parse("2006-01-02", editDue)
+						if err != nil {
+							return fmt.Errorf("invalid due date (use YYYY-MM-DD): %w", err)
+						}
+						f.Due = &due
 					}
 				}
-			}
-			// Bump the durable recency anchor: a felt edit is a content write felt
-			// itself records, so updated-at travels in git and seeds a fresh
-			// clone's recency at this moment rather than mtime. Stamped before
-			// Write so it lands in the file the mechanical event then hashes.
-			f.Touch(time.Now())
+				if cmd.Flags().Changed("tag") {
+					for _, tag := range splitListFlag(editTags) {
+						f.AddTag(tag)
+					}
+				}
+				if cmd.Flags().Changed("untag") {
+					for _, tag := range splitListFlag(editUntag) {
+						f.RemoveTag(tag)
+					}
+				}
+				if cmd.Flags().Changed("unset") {
+					for _, key := range editUnset {
+						if err := unsetExtraField(f, key); err != nil {
+							return err
+						}
+					}
+				}
+				if cmd.Flags().Changed("set") {
+					for _, assignment := range editSet {
+						if err := setExtraField(f, assignment); err != nil {
+							return err
+						}
+					}
+				}
+				// Bump the durable recency anchor: a felt edit is a content write felt
+				// itself records, so updated-at travels in git and seeds a fresh
+				// clone's recency at this moment rather than mtime. Stamped before
+				// Write so it lands in the file the mechanical event then hashes.
+				f.Touch(time.Now())
 
-			if err := storage.Write(f); err != nil {
+				return nil
+			})
+			if err != nil {
 				return err
 			}
 

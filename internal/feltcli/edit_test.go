@@ -4,9 +4,49 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
+
+func TestEditWaitsForLifecycleLockAndReloads(t *testing.T) {
+	t.Parallel()
+	dir, storage := newStore(t)
+	seedFiber(t, storage, "worker", "", felt.StatusActive, map[string]any{"runtime": map[string]any{"dispatched_at": "2026-01-01T00:00:00Z"}}, nil)
+	unlock, err := storage.LockFiber("worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	done := make(chan error, 1)
+	go func() { _, err := runCommand(t, dir, "edit", "worker", "--outcome", "New digest"); done <- err }()
+	select {
+	case err := <-done:
+		t.Fatalf("edit bypassed held lifecycle lock: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	current := mustRead(t, storage, "worker")
+	if err := current.SetStatus(felt.StatusClosed, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := current.SetExtraField("shuttle", map[string]any{"runtime": map[string]any{"handed_off_at": "2026-01-02T00:00:00Z"}}); err != nil {
+		t.Fatal(err)
+	}
+	current.Body = "Worker result"
+	if err := storage.Write(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	got := mustRead(t, storage, "worker")
+	if got.Status != felt.StatusClosed || got.ClosedAt == nil || got.Body != "Worker result" || got.Outcome != "New digest" || !strings.Contains(got.ExtraFields["shuttle"].Content[1].Content[0].Value, "handed_off_at") {
+		t.Fatalf("edit lost current lifecycle/content: %+v", got)
+	}
+}
 
 func TestEditMetadataFlags(t *testing.T) {
 	t.Parallel()
