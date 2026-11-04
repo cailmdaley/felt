@@ -51,6 +51,13 @@ defmodule Shuttle.RemoteFiberRegistryTest do
 
         {:error, reason} ->
           {:error, reason}
+
+        {:blocked, test_pid, tag, body} ->
+          send(test_pid, {:fetch_started, tag, self()})
+
+          receive do
+            {:release, ^tag} -> {:ok, 200, [{"etag", etag_for(body)}], body}
+          end
       end
     end
 
@@ -235,6 +242,50 @@ defmodule Shuttle.RemoteFiberRegistryTest do
 
       assert %{"candide" => %{stale: false, fibers: [%{"fiber" => %{"id" => "after"}}]}} =
                RemoteFiberRegistry.feeds(pid)
+    end
+
+    for refresh <- [:single, :all] do
+      @refresh refresh
+      test "#{refresh} forced refresh revokes an older background observation", %{dir: dir} do
+        url = Remote.fibers_url(candide())
+        MockClient.set(url, {:blocked, self(), :old, feed_body([sample_fiber("old")])})
+
+        registry =
+          start_supervised!(
+            {RemoteFiberRegistry,
+             name: nil,
+             remotes: [candide(poll_interval_ms: 60_000)],
+             client: MockClient,
+             auto_poll: false,
+             tick_interval_ms: 60_000,
+             store_dir: dir}
+          )
+
+        send(registry, {:tick, make_ref()})
+        assert_receive {:fetch_started, :old, old_task}, 5_000
+        old_monitor = Process.monitor(old_task)
+        MockClient.set(url, {:blocked, self(), :new, feed_body([sample_fiber("new")])})
+
+        refresh =
+          Task.async(fn ->
+            case @refresh do
+              :single -> RemoteFiberRegistry.refresh(registry, "candide")
+              :all -> RemoteFiberRegistry.refresh_now(registry)
+            end
+          end)
+
+        assert_receive {:fetch_started, :new, ^registry}, 5_000
+        send(old_task, {:release, :old})
+        assert_receive {:DOWN, ^old_monitor, :process, ^old_task, :normal}, 5_000
+        send(registry, {:release, :new})
+        assert Task.await(refresh, 5_000) == :ok
+
+        assert %{"candide" => %{fibers: [%{"fiber" => %{"id" => "new"}}]}} =
+                 RemoteFiberRegistry.feeds(registry)
+
+        assert %{"fibers" => [%{"fiber" => %{"id" => "new"}}]} =
+                 Jason.decode!(File.read!(Path.join(dir, "candide.json")))
+      end
     end
 
     test "malformed JSON on a never-succeeded feed reads stale (nil last-success)", %{dir: dir} do

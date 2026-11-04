@@ -276,7 +276,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   end
 
   def handle_call(:refresh_now, _from, state) do
-    state = state |> RegistryCommon.mark_read() |> reload_remotes()
+    state = state |> RegistryCommon.mark_read() |> reload_remotes() |> revoke_fetches(:all)
     now = now(state)
 
     feeds =
@@ -292,6 +292,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   def handle_call({:refresh, name}, _from, state) do
     case Enum.find(state.remotes, &(&1.name == name)) do
       %Remote{} = remote ->
+        state = revoke_fetches(state, name)
         now = now(state)
         entry = Map.get(state.feeds, remote.name, initial_entry(remote))
         result = fetch_fibers(remote, state.client, state.request_timeout_ms, entry[:etag])
@@ -387,6 +388,19 @@ defmodule Shuttle.RemoteFiberRegistry do
 
     feeds = RegistryCommon.stamp_attempt(state.feeds, remote, now(state), &initial_entry/1)
     %{state | tasks: Map.put(state.tasks, task.ref, name), feeds: feeds}
+  end
+
+  # Forced observations supersede background requests that began before them.
+  # A revoked task may finish, but its unregistered reference cannot publish.
+  defp revoke_fetches(state, name) do
+    Enum.reduce(state.tasks, state, fn {ref, origin}, acc ->
+      if name == :all or origin == name do
+        Process.demonitor(ref, [:flush])
+        %{acc | tasks: Map.delete(acc.tasks, ref)}
+      else
+        acc
+      end
+    end)
   end
 
   defp record_task_result(%State{} = state, ref, name, result) do
