@@ -107,7 +107,7 @@ defmodule Shuttle.Dispatcher do
          {:ok, fiber} <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          {:ok, uid} <- check_uid(fiber_id, fiber),
          :ok <- Shuttle.Terminal.require_config(),
-         :ok <- check_not_running(fiber_id, uid, runner),
+         :ok <- check_not_running(fiber, runner),
          {:ok, agent} <- resolve_agent(fiber, fiber_id),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
@@ -143,6 +143,7 @@ defmodule Shuttle.Dispatcher do
             identity_token: Keyword.get(opts, :identity_token),
             felt_store: felt_store,
             uid: uid,
+            launch_evidence: Shuttle.Continuation.launch_evidence?(fiber),
             kind: Shuttle.Poller.fiber_kind(fiber),
             fiber_path: Map.get(fiber, "path"),
             fiber: Map.get(fiber, "id") || fiber_id,
@@ -874,14 +875,18 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # A live worker blocks a fresh dispatch OR a resume. `present?` treats an
-  # inconclusive `has-session` as present, so a transient tmux failure can
-  # never let a dispatch (especially a resume) spawn over a still-live worker —
-  # the daemon refuses with :already_running and the caller adopts instead.
-  defp check_not_running(fiber_id, uid, runner) do
-    if Shuttle.Terminal.present?(runner, session_name(fiber_id, uid)),
-      do: {:error, :already_running},
-      else: :ok
+  @doc "The dispatch gate shared with the poller: uncertainty holds only a prior launch."
+  def worker_present?(fiber, runner) do
+    session = session_name(fiber["id"], fiber["uid"])
+
+    session != nil and
+      Shuttle.Terminal.present?(runner, session,
+        launch_evidence: Shuttle.Continuation.launch_evidence?(fiber)
+      )
+  end
+
+  defp check_not_running(fiber, runner) do
+    if worker_present?(fiber, runner), do: {:error, :already_running}, else: :ok
   end
 
   defp resolve_agent(fiber, fiber_id) do
@@ -1265,8 +1270,7 @@ defmodule Shuttle.Dispatcher do
                 work_dir,
                 run_script,
                 runner,
-                opts[:fiber] || fiber_id,
-                felt_store,
+                opts,
                 fn ->
                   record_dispatch_session(
                     fiber_id,
@@ -1335,8 +1339,7 @@ defmodule Shuttle.Dispatcher do
           work_dir,
           run_script,
           runner,
-          opts[:fiber] || fiber_id,
-          felt_store,
+          opts,
           fn ->
             store_session_id(
               fiber_id,
@@ -1358,12 +1361,13 @@ defmodule Shuttle.Dispatcher do
 
   # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
   # propagates unchanged — nothing is stamped for a worker that never started.
-  defp spawn_and_record(session, work_dir, run_script, runner, fiber_id, felt_store, record_fun) do
-    case Shuttle.Terminal.launch(runner, session, work_dir, run_script,
-           fiber: fiber_id,
-           felt_store: felt_store,
-           preflighted: true
-         ) do
+  defp spawn_and_record(session, work_dir, run_script, runner, opts, record_fun) do
+    launch_opts =
+      opts
+      |> Keyword.take([:fiber, :felt_store, :launch_evidence])
+      |> Keyword.put(:preflighted, true)
+
+    case Shuttle.Terminal.launch(runner, session, work_dir, run_script, launch_opts) do
       :ok ->
         Logger.info("Worker running: #{Shuttle.Terminal.primary().id()} #{session}")
         record_fun.()

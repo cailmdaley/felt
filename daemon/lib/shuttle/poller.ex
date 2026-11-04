@@ -4686,7 +4686,8 @@ defmodule Shuttle.Poller do
         end
 
       {:error, :already_running} ->
-        # Session exists but we don't have a watcher — adopt it
+        # A refusal can be uncertainty about a prior launch. Adopt only when
+        # a fresh observation positively identifies the worker.
         state = SessionReconciliation.adopt_session(state, fiber_id)
         state = %{state | dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)}
         {state, {:error, :already_running}}
@@ -5534,11 +5535,14 @@ defmodule Shuttle.Poller do
     running_key(state, fiber_id) != nil or Map.has_key?(state.running, runtime_key)
   end
 
-  # A tracked worker, or a live session under the fiber's name that nothing
-  # tracks yet.
-  defp open_session?(%State{} = state, fiber_id, runtime_key, uid) do
+  # Tracked assignments retain ownership on uncertainty. For an untracked
+  # fiber, use the dispatcher's gate against its current durable evidence.
+  defp open_session?(%State{} = state, fiber_id, runtime_key, _uid) do
     tracked?(state, fiber_id, runtime_key) or
-      live_session_for_fiber(state, fiber_id, uid) != nil
+      case fetch_fiber_full(fiber_id, state) do
+        {:ok, fiber} -> Dispatcher.worker_present?(fiber, state.runner)
+        {:error, _} -> false
+      end
   end
 
   # The fiber's live terminal worker session, else nil.
@@ -5547,7 +5551,7 @@ defmodule Shuttle.Poller do
     session =
       Dispatcher.session_name(fiber_id, uid || metadata_uid(running_worker(state, fiber_id)))
 
-    if session && already_running_session?(state, session), do: session
+    if session && Shuttle.Terminal.status(state.runner, session) == :alive, do: session
   end
 
   # A host runs as many workers as its fibers ask for unless host.json caps

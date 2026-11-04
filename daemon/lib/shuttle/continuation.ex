@@ -105,6 +105,18 @@ defmodule Shuttle.Continuation do
     end
   end
 
+  @doc "A dispatch stamp or harness identity is evidence of a prior launch, even before UUID capture."
+  def launch_evidence?(fiber) do
+    block = shuttle_block(fiber)
+
+    Enum.any?(["dispatched_at", "session_uuid"], fn field ->
+      case runtime_field(block, field) do
+        value when is_binary(value) and value != "" -> true
+        _ -> false
+      end
+    end)
+  end
+
   @doc "`shuttle.runtime.dispatched_at` as a `DateTime`, or `nil`."
   @spec dispatched_at(map()) :: DateTime.t() | nil
   def dispatched_at(fiber),

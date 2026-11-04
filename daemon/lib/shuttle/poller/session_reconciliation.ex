@@ -87,9 +87,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
     end
   end
 
-  # `session` is the *live* session to adopt. Callers that discovered a live
-  # orphan pass its exact name; the default is the fiber's live worker session,
-  # else its worker name, for callers that only have the fiber identity.
+  # A supplied session comes from a positive inventory observation. A caller
+  # with only a fiber identity must prove presence; a dispatch refusal alone
+  # can mean uncertainty and cannot authorize adoption.
   def adopt_session(state, fiber_id, session \\ nil) do
     # Fetch first so the uid for the session name comes straight off the fiber.
     # The runtime maps key by the fiber's runtime key; felt I/O stays
@@ -98,14 +98,11 @@ defmodule Shuttle.Poller.SessionReconciliation do
       {:ok, fiber} ->
         uid = Map.get(fiber, "uid")
 
-        session =
-          session || Poller.live_session_for_fiber(state, fiber_id, uid) ||
-            Dispatcher.session_name(fiber_id, uid)
+        session = session || Poller.live_session_for_fiber(state, fiber_id, uid)
 
         cond do
-          # No uid, so no worker name and nothing to adopt under one.
           session == nil ->
-            Logger.debug("Skipping adoption for #{fiber_id}: the fiber has no intrinsic id")
+            Logger.debug("Skipping adoption for #{fiber_id}: no positive worker evidence")
             state
 
           Map.get(fiber, "status") != "closed" ->

@@ -29,9 +29,9 @@ defmodule Shuttle.WorkerProcess do
       embedded Codex argv to its session only when its start token matches a
       kernel lifetime observation through `shuttle process-identity`.
 
-  A scan that fails (non-zero exit, timeout, no uid) is `{:error, :unknown}`,
-  and every caller reads uncertainty as "present" — the doctrine of
-  `Shuttle.Terminal`.
+  A scan that fails (non-zero exit, timeout, no uid) is `{:error, :unknown}`.
+  `Shuttle.Terminal` retains assignments with launch evidence on uncertainty;
+  it does not infer a worker's existence from a failed scan.
   """
 
   require Logger

@@ -4805,6 +4805,134 @@ defmodule Shuttle.PollerTest do
     assert script =~ ~r/^shuttle-run-#{Regex.escape(session)}\.\d+\.sh$/
   end
 
+  defmodule PhantomRunner do
+    def cmd("/bin/echo", args, opts), do: Shuttle.Test.FakeRex.cmd("/bin/echo", args, opts)
+    def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
+  end
+
+  describe "launch evidence on a Rex host with an unavailable process scan" do
+    @describetag :phantom
+
+    setup do
+      alias Shuttle.Test.FakeRex
+      Env.put_app_env(:fake_rex, start_supervised!(FakeRex))
+      Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
+      Env.put_app_env(:os_type, {:unix, :linux})
+      Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      FakeRex.reply("whoami", {"server is not running", 4})
+      FakeRex.reply("session.list", {"server is not running", 4})
+
+      Env.put_app_env(:fake_rex_hook, fn
+        "server.start" -> FakeRex.clear_reply("session.list")
+        _ -> :ok
+      end)
+
+      MockRunner.set_ps_result({"ps timed out", :timeout})
+      id = "tests/never-launched"
+      MockRunner.set_fiber(id, make_fiber(id))
+      MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+      {:ok, fiber_id: id}
+    end
+
+    for automatic? <- [false, true] do
+      test "a never-launched fiber launches with automatic=#{automatic?}", %{fiber_id: id} do
+        {:ok, poller} =
+          start_poller!(
+            runner: PhantomRunner,
+            felt_stores: [MockRunner.felt_root()],
+            boot_quarantine: true,
+            poll_interval_ms: 600_000
+          )
+
+        await_boot_cycle!(poller)
+        assert Poller.worker_status(poller, id) == nil
+        assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == nil
+        assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == nil
+
+        if unquote(automatic?) do
+          assert :ok = Poller.release_boot_quarantine(poller)
+          sync_poll_cycle!(poller)
+        else
+          assert {:ok, _} = Poller.dispatch_fiber(poller, id, force: true)
+        end
+
+        assert %{session: session} = Poller.worker_status(poller, id)
+        assert session == FiberUid.session(id)
+        assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"])
+        assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"])
+
+        assert Enum.count(Shuttle.Test.FakeRex.calls(), fn {_, args, _} ->
+                 "session.create" in args
+               end) == 1
+      end
+    end
+
+    test "a positively adopted worker without a UUID remains tracked when observation times out",
+         %{fiber_id: id} do
+      session = FiberUid.session(id)
+      MockRunner.set_ps_result({"812 1 bash -l /tmp/shuttle-run-#{session}.1.sh\n", 0})
+
+      {:ok, poller} =
+        start_poller!(
+          runner: PhantomRunner,
+          felt_stores: [MockRunner.felt_root()],
+          boot_quarantine: true,
+          poll_interval_ms: 600_000
+        )
+
+      await_boot_cycle!(poller)
+      assert %{pid: watcher, session: ^session} = Poller.worker_status(poller, id)
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == nil
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == nil
+      MockRunner.set_ps_result({"ps timed out", :timeout})
+      sync_poll_cycle!(poller)
+      assert %{pid: ^watcher} = Poller.worker_status(poller, id)
+      assert {:error, :already_running} = Poller.dispatch_fiber(poller, id, force: true)
+
+      refute Enum.any?(Shuttle.Test.FakeRex.calls(), fn {_, args, _} ->
+               "session.create" in args
+             end)
+    end
+
+    for runtime <- ["  dispatched_at: 2026-11-04T00:00:00Z\n", "  session_uuid: held-uuid\n"] do
+      test "unknown liveness with #{String.trim(runtime)} blocks without adopting", %{
+        fiber_id: id
+      } do
+        MockRunner.set_shuttle(
+          id,
+          "kind: oneshot\nagent: claude-sonnet\nruntime:\n" <> unquote(runtime),
+          "active"
+        )
+
+        opts = [
+          runner: PhantomRunner,
+          felt_stores: [MockRunner.felt_root()],
+          boot_quarantine: true,
+          poll_interval_ms: 600_000
+        ]
+
+        {:ok, poller} = start_poller!(opts)
+        await_boot_cycle!(poller)
+        assert :ok = Poller.release_boot_quarantine(poller)
+        sync_poll_cycle!(poller)
+        assert Poller.worker_status(poller, id) == nil
+        assert {:error, :already_running} = Poller.dispatch_fiber(poller, id, force: true)
+        assert Poller.worker_status(poller, id) == nil
+        assert :sys.get_state(poller).was_running == MapSet.new()
+
+        GenServer.stop(poller)
+        {:ok, restarted} = start_poller!(opts)
+        await_boot_cycle!(restarted)
+        assert {:error, :already_running} = Poller.dispatch_fiber(restarted, id, force: true)
+        assert Poller.worker_status(restarted, id) == nil
+
+        refute Enum.any?(Shuttle.Test.FakeRex.calls(), fn {_, args, _} ->
+                 "session.create" in args or "session.new_window" in args
+               end)
+      end
+    end
+  end
+
   describe "a resume onto a transcript a live process tmux cannot see still holds" do
     setup do
       fiber_id = "tests/transcript-held"
@@ -4863,7 +4991,7 @@ defmodule Shuttle.PollerTest do
     test "is held back when the process scan cannot run", ctx do
       # Uncertainty counts as present: with tmux answering "can't find session"
       # and no process scan, the fiber's own session may still be running, so
-      # the dispatch reads as already running (and is adopted) — nothing spawns.
+      # dispatch holds as already running without adopting an unobserved worker.
       MockRunner.set_ps_result({"ps: boom", 1})
 
       assert {:error, :already_running} =

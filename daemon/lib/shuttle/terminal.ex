@@ -2,10 +2,11 @@ defmodule Shuttle.Terminal do
   @moduledoc """
   Worker terminal lifecycle and conservative liveness policy.
 
-  A terminal's positive presence gives `:alive`. Only positive absence from
-  every backend AND a successful process scan finding no run script gives
-  `:gone`. Every other observation is `:unknown`, which counts as present:
-  uncertainty never frees a worker's name for a duplicate dispatch.
+  A terminal or run-script process gives positive `:alive` evidence. Only
+  positive absence from every backend AND a successful process scan finding
+  no run script gives `:gone`. Every other observation is `:unknown`.
+  Unknown liveness retains a worker with launch evidence, but does not create
+  one or prevent a fiber's first launch.
 
   Backends own terminal primitives. This facade owns the process fallback,
   per-name launch serialization, run scripts, and the stop signal ladder.
@@ -71,8 +72,7 @@ defmodule Shuttle.Terminal do
 
     cond do
       :present in probes -> :alive
-      Enum.all?(probes, &(&1 == :absent)) -> absent_status(runner, name, hd(backends))
-      true -> :unknown
+      true -> process_status(runner, name, observations, hd(backends))
     end
   end
 
@@ -92,23 +92,36 @@ defmodule Shuttle.Terminal do
     end
   end
 
-  defp absent_status(runner, name, backend) do
-    with {:ok, procs} <- WorkerProcess.scan(runner),
-         %{} = proc <- WorkerProcess.session_process(procs, name) do
-      WorkerProcess.warn_once({:unreachable, name}, fn ->
-        "#{backend.id()} cannot see session #{name}, but its worker is running " <>
-          "(bash pid #{proc.pid}, parent #{proc.ppid}) — " <>
-          backend.unreachable_hint(procs, proc)
-      end)
+  defp process_status(runner, name, observations, backend) do
+    with {:ok, procs} <- WorkerProcess.scan(runner) do
+      case WorkerProcess.session_process(procs, name) do
+        nil ->
+          if Enum.all?(observations, fn {_, probe} -> probe == :absent end),
+            do: :gone,
+            else: :unknown
 
-      :unknown
+        proc ->
+          WorkerProcess.warn_once({:unreachable, name}, fn ->
+            "#{backend.id()} cannot see session #{name}, but its worker is running " <>
+              "(bash pid #{proc.pid}, parent #{proc.ppid}) — " <>
+              backend.unreachable_hint(procs, proc)
+          end)
+
+          :alive
+      end
     else
       {:error, :unknown} -> :unknown
-      nil -> :gone
     end
   end
 
-  def present?(runner, name), do: status(runner, name) != :gone
+  @doc "Unknown liveness holds an existing assignment, never invents a first launch."
+  def present?(runner, name, opts \\ []) do
+    case status(runner, name) do
+      :alive -> true
+      :gone -> false
+      :unknown -> Keyword.get(opts, :launch_evidence, true) or rex_bound?(name)
+    end
+  end
 
   def locate(runner, name) do
     case locate_target(runner, name) do
@@ -144,7 +157,7 @@ defmodule Shuttle.Terminal do
   defp remember_holder(name, backend),
     do: Shuttle.RuntimeCache.put({__MODULE__, :holder, name}, backend.id(), 10_000)
 
-  @doc "Launch only when the name is positively free; keep its script in the worker's argv."
+  @doc "Serialize launches using the assignment's evidence; keep the script in the worker's argv."
   def launch(runner, name, cwd, script_text, opts \\ []) do
     with_lock(name, fn ->
       with :ok <- require_config() do
@@ -154,7 +167,7 @@ defmodule Shuttle.Terminal do
   end
 
   defp launch_ready(runner, name, cwd, script_text, opts) do
-    if status(runner, name) == :gone do
+    if not present?(runner, name, opts) do
       backend = primary()
 
       with :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)) do

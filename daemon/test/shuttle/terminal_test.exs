@@ -73,6 +73,18 @@ defmodule Shuttle.TerminalTest do
     end
   end
 
+  defmodule SlowScanTmuxRunner do
+    def cmd("ps", _args, _opts), do: {"ps timed out", :timeout}
+
+    def cmd("tmux", ["has-session" | _] = args, opts) do
+      if Shuttle.Env.app(:terminal_test_probe_timeout, false),
+        do: {"tmux timed out", :timeout},
+        else: IsolatedTmuxRunner.cmd("tmux", args, opts)
+    end
+
+    def cmd("tmux", args, opts), do: IsolatedTmuxRunner.cmd("tmux", args, opts)
+  end
+
   defp stub(result, ps \\ {"", 0}) do
     Process.put(:tmux_result, result)
     Process.put(:ps_result, ps)
@@ -95,14 +107,14 @@ defmodule Shuttle.TerminalTest do
     {{"error connecting to /tmp/tmux-501/default (No such file or directory)", 1}, {"", 0},
      "leaf-shuttle", :gone, true},
     # An unreachable live run script holds only its exact session name.
-    {@absent, {@run_script_ps, 0}, "leaf-01ABC-shuttle", :unknown, true},
+    {@absent, {@run_script_ps, 0}, "leaf-01ABC-shuttle", :alive, true},
     {@absent, {@run_script_ps, 0}, "other-shuttle", :gone, true},
     {@absent, {@run_script_ps, 0}, "01ABC-shuttle", :gone, true},
     {@absent, {"ps: boom", 1}, "leaf-shuttle", :unknown, true},
     {@absent, {"", :timeout}, "leaf-shuttle", :unknown, true},
-    {{"command not found: tmux", 127}, {"", 0}, "leaf", :unknown, false},
-    {{"", 1}, {"", 0}, "leaf", :unknown, false},
-    {{"fork: Resource temporarily unavailable", 1}, {"", 0}, "leaf", :unknown, false}
+    {{"command not found: tmux", 127}, {"", 0}, "leaf", :unknown, true},
+    {{"", 1}, {"", 0}, "leaf", :unknown, true},
+    {{"fork: Resource temporarily unavailable", 1}, {"", 0}, "leaf", :unknown, true}
   ]
 
   test "wire uses observed holder without probing and clears it on uncertainty" do
@@ -140,6 +152,24 @@ defmodule Shuttle.TerminalTest do
     assert Terminal.present?(stub({"", 0}), "leaf")
     assert Terminal.present?(stub({"some transient error", 1}), "leaf")
     refute Terminal.present?(stub({"can't find session: leaf", 1}), "leaf")
+  end
+
+  @tag :phantom
+  test "first-launch uncertainty is not presence, but positive process evidence always holds the name" do
+    for {tmux, ps} <- [
+          {@absent, {"ps timed out", :timeout}},
+          {{"tmux timed out", :timeout}, {"", 0}},
+          {{"tmux timed out", :timeout}, {"ps timed out", :timeout}}
+        ] do
+      refute Terminal.present?(stub(tmux, ps), "leaf-01ABC-shuttle", launch_evidence: false)
+      assert Terminal.present?(stub(tmux, ps), "leaf-01ABC-shuttle", launch_evidence: true)
+    end
+
+    for tmux <- [@absent, {"tmux timed out", :timeout}] do
+      assert Terminal.present?(stub(tmux, {@run_script_ps, 0}), "leaf-01ABC-shuttle",
+               launch_evidence: false
+             )
+    end
   end
 
   test "uses an exact-match target (= prefix) so a prefix sibling can't false-match" do
@@ -224,9 +254,29 @@ defmodule Shuttle.TerminalTest do
                end)
     end
 
+    @tag :phantom
+    test "a persisted Rex binding holds a name on uncertainty even without a fiber runtime marker" do
+      name = "bound-without-marker"
+      stub(@absent)
+      assert :ok = Terminal.launch(MixedRunner, name, "/tmp", "sleep 30\n")
+
+      on_exit(fn ->
+        Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-run-#{name}.*.sh"))
+        |> Enum.each(&File.rm/1)
+      end)
+
+      Shuttle.Test.FakeRex.reply("session.list_blocks", {"request timed out", :timeout})
+      stub(@absent, {"ps timed out", :timeout})
+      assert Terminal.status(MixedRunner, name) == :unknown
+      assert Terminal.present?(MixedRunner, name, launch_evidence: false)
+
+      assert {:error, :already_running} =
+               Terminal.launch(MixedRunner, name, "/tmp", "duplicate", launch_evidence: false)
+    end
+
     test "absence requires both backends and a successful process scan" do
       stub(@absent, {@run_script_ps, 0})
-      assert Terminal.status(MixedRunner, "leaf-01ABC-shuttle") == :unknown
+      assert Terminal.status(MixedRunner, "leaf-01ABC-shuttle") == :alive
       stub({"uncertain", :timeout})
       assert Terminal.status(MixedRunner, "leaf") == :unknown
       stub(@absent)
@@ -292,7 +342,10 @@ defmodule Shuttle.TerminalTest do
              )
 
       assert ["-e", "SHUTTLE_LISTEN"] =
-               Enum.find(Enum.chunk_every(args, 2, 1, :discard), &(&1 == ["-e", "SHUTTLE_LISTEN"]))
+               Enum.find(
+                 Enum.chunk_every(args, 2, 1, :discard),
+                 &(&1 == ["-e", "SHUTTLE_LISTEN"])
+               )
 
       assert ["-c", "/tmp", "bash", "-l", path] = Enum.drop_while(args, &(&1 != "-c"))
 
@@ -435,6 +488,57 @@ defmodule Shuttle.TerminalTest do
              IsolatedTmuxRunner.cmd("tmux", ["ls", "-F", "\#{session_id} \#{session_name}"], [])
 
     assert Enum.sort(String.split(names, "\n", trim: true)) == ["$0 victim", "$1 migrated-worker"]
+  end
+
+  @tag :phantom
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "a real private tmux server launches an unlaunched name despite ps timeout, but never duplicates it" do
+    socket =
+      Path.join(System.tmp_dir!(), "first-launch-#{System.unique_integer([:positive])}.sock")
+
+    Env.put_app_env(:terminal_test_socket, socket)
+    Env.put_app_env(:os_type, {:unix, :linux})
+    Env.put_app_env(:terminal_backend, Tmux)
+    name = "first-launch-#{System.unique_integer([:positive])}-shuttle"
+
+    on_exit(fn ->
+      System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true)
+
+      Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-run-#{name}.*.sh"))
+      |> Enum.each(&File.rm/1)
+    end)
+
+    assert {_, 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", "sentinel", "sleep 300"],
+               []
+             )
+
+    assert :unknown = Terminal.status(SlowScanTmuxRunner, name)
+
+    assert :ok =
+             Terminal.launch(SlowScanTmuxRunner, name, System.tmp_dir!(), "sleep 300\n",
+               launch_evidence: false
+             )
+
+    assert :present = Tmux.probe(IsolatedTmuxRunner, name)
+
+    assert {:error, :already_running} =
+             Terminal.launch(SlowScanTmuxRunner, name, System.tmp_dir!(), "exit 1\n",
+               launch_evidence: false
+             )
+
+    Env.put_app_env(:terminal_test_probe_timeout, true)
+
+    assert {:error, :already_running} =
+             Terminal.launch(SlowScanTmuxRunner, name, System.tmp_dir!(), "exit 1\n",
+               launch_evidence: true
+             )
+
+    assert :present = Tmux.probe(IsolatedTmuxRunner, name)
+    assert {listing, 0} = IsolatedTmuxRunner.cmd("tmux", ["ls", "-F", "\#{session_name}"], [])
+    assert Enum.sort(String.split(listing, "\n", trim: true)) == Enum.sort(["sentinel", name])
   end
 
   test "native references do not overlap tmux names or pane IDs" do
