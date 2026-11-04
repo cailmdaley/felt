@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
-import { frames, layoutShift, unexpected } from './layoutShift.mjs'
+import { frames, layoutShift, settleTransitions, unexpected } from './layoutShift.mjs'
 import { registerNavigationJourneys } from './navBack.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
@@ -87,6 +87,20 @@ test('The layout-shift guard ignores hidden geometry but catches visible movemen
   const visible = await layoutShift(p, { regions: ['#layout-shift-fixture'], act: () => move('visible') })
   assert.equal(visible.length, 1); assert.equal(visible[0].dx, 10)
   await p.locator('#layout-shift-fixture').evaluate(el => el.remove())
+})
+
+test('Transition settling waits for delayed geometry', async p => {
+  await p.evaluate(() => {
+    const el = document.createElement('div')
+    el.id = 'transition-fixture'
+    el.style.cssText = 'width:10px; height:10px; transition: transform 200ms linear 100ms'
+    document.body.append(el)
+    el.getBoundingClientRect()
+    el.style.transform = 'translateX(100px)'
+  })
+  await settleTransitions(p, '#transition-fixture')
+  assert.equal(await p.locator('#transition-fixture').evaluate(el => getComputedStyle(el).transform), 'matrix(1, 0, 0, 1, 100, 0)')
+  await p.locator('#transition-fixture').evaluate(el => el.remove())
 })
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
@@ -3254,8 +3268,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   for (let i = 0; i < 5; i++) await fixed('deleting leaves the header still', () => p.keyboard.press('Backspace'))
   await field.fill(''); assert.equal((await field.boundingBox()).height, before.height)
   await fixed('blurring the composer', () => field.evaluate(el => el.blur()))
+  if (phone) await settleTransitions(p, '.ws-navbar')
   if (!phone) await composerKeyStaysPut(p)
   await field.focus()
+  if (phone) await settleTransitions(p, '.ws-navbar')
   const meetingArm = selected(p).locator('.kbn-ctl-meet-arm')
   for (const state of ['on', 'off']) await fixed(`Meeting ${state} leaves the header still`, () => meetingArm.click())
   await field.evaluate(el => el.blur())

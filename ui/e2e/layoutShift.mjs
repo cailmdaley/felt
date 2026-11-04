@@ -14,6 +14,14 @@ export async function frames(p) {
   await p.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 }
 
+/** Wait for a surface's in-progress CSS transitions, including their delay. */
+export async function settleTransitions(p, selector) {
+  await p.locator(selector).evaluate(async el => {
+    getComputedStyle(el).transform // Flush style so newly started transitions exist.
+    await Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {})))
+  })
+}
+
 export async function layoutShift(p, { regions, act, allow = [], settle = 0, positionsOnly = false }) {
   await frames(p)
   await p.evaluate(regions => {
