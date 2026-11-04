@@ -78,8 +78,13 @@ case "$1" in
   touch "$FLEET_ROOT/build-entered"
   while [ ! -f "$BUILD_GATE" ]; do sleep .02; done
   [ "${FAIL_BUILD:-0}" != 1 ] || exit 13
-  mkdir -p bin/rel ui/dist
-  echo '<html>pinned bundle</html>' > ui/dist/index.html
+  mkdir -p bin/rel
+  if [ "${2:-}" = SKIP_UI=1 ]; then
+    [ -f ui/dist/index.html ] || exit 17
+  else
+    mkdir -p ui/dist
+    echo '<html>pinned bundle</html>' > ui/dist/index.html
+  fi
   cp "$FAKE_BIN/shuttle" ./shuttle
   ;;
  ui) mkdir -p ui/dist; echo bundle > ui/dist/index.html ;;
@@ -87,6 +92,15 @@ case "$1" in
  *) exit 19 ;;
 esac
 `)
+	write(filepath.Join(f.bin, "rsync"), `#!/bin/sh
+previous=
+for arg in "$@"; do source="$previous"; previous="$arg"; done
+dest="${previous#*:}"
+printf 'rsync %s %s\n' "$source" "$dest" >> "$EVENTS"
+if [ -d "$source" ]; then mkdir -p "$dest"; cp -R "$source/." "$dest/"
+else mkdir -p "$(dirname "$dest")"; cp "$source" "$dest"; fi
+`)
+	write(filepath.Join(f.bin, "build-wrapper"), "#!/bin/sh\necho wrapper >> \"$EVENTS\"\nexec \"$@\"\n")
 	write(filepath.Join(f.bin, "felt"), `#!/bin/sh
 case "$*" in
  'setup receipt --json') printf '{\n  "bundles": [],\n  "status": "healthy"\n}\n';;
@@ -149,12 +163,17 @@ func deployAwait(t *testing.T, description string, condition func() bool) {
 }
 func (f *deployFleet) start(t *testing.T, name string, extra ...string) (*exec.Cmd, string) {
 	t.Helper()
+	return f.startHost(t, name, "fake", extra...)
+}
+
+func (f *deployFleet) startHost(t *testing.T, name, host string, extra ...string) (*exec.Cmd, string) {
+	t.Helper()
 	logPath := filepath.Join(f.root, name+".log")
 	log, err := os.Create(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", "fake", "--no-push")
+	cmd := exec.Command("bash", filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", host, "--no-push")
 	cmd.Env = append(append([]string{}, f.env...), extra...)
 	cmd.Stdout, cmd.Stderr = log, log
 	// A private process group lets failure cleanup include the fake remote build.
@@ -248,5 +267,109 @@ func TestDeployFailureNamesHostAndStep(t *testing.T) {
 	}
 	if got := fleetRead(f.events); strings.Contains(got, "cycle") || strings.Contains(got, "release") {
 		t.Fatalf("failed build changed daemon: %s", got)
+	}
+}
+
+func TestDeployLocalDefaultsToStableRootFromLinkedWorktree(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	main := f.repo
+	linked := filepath.Join(f.root, "linked-work")
+	f.git(t, main, "worktree", "add", "-b", "work", linked)
+	f.repo = linked
+	fleetTouch(t, f.gate)
+	cmd, log := f.startHost(t, "local-linked", "local")
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("local deploy: %v %s", err, fleetRead(log))
+	}
+	canonical, err := filepath.EvalSymlinks(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(canonical+".deploy", f.sha, "bin", "rel")
+	if got := fleetRead(f.state); !strings.Contains(got, want) || strings.Contains(got, linked) {
+		t.Fatalf("local release is not the stable pinned root %s: %s", want, got)
+	}
+	if got := f.git(t, linked, "branch", "--show-current"); got != "work" {
+		t.Fatalf("linked branch changed: %s", got)
+	}
+}
+
+func TestDeployShipsPinnedUISnapshotBeforeWrappedBuild(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	fleet := fmt.Sprintf(`{"remotes":[{"name":"fake","ssh":"fake","checkout":%q,"build_ui":false,"build_wrap":"build-wrapper"}]}`, f.remote)
+	if err := os.WriteFile(filepath.Join(f.root, "remotes.json"), []byte(fleet), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd, log := f.start(t, "shipped-ui")
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("shipped deploy: %v %s", err, fleetRead(log))
+	}
+	events := fleetRead(f.events)
+	ship, wrap, build := strings.Index(events, "rsync "), strings.Index(events, "wrapper\n"), strings.Index(events, "build "+f.sha+" build SKIP_UI=1")
+	if ship < 0 || wrap <= ship || build <= wrap {
+		t.Fatalf("UI must ship before the wrapped build: %s", events)
+	}
+	if got := fleetRead(filepath.Join(f.remote+".deploy", f.sha, "ui", "dist", "index.html")); strings.TrimSpace(got) != "bundle" {
+		t.Fatalf("wrong shipped bundle: %q", got)
+	}
+}
+
+func TestDeployCycleUsesExactlyOneOwner(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range []string{"tmux", "1", "0", "migrated"} {
+		t.Run(owner, func(t *testing.T) {
+			root := t.TempDir()
+			for _, dir := range []string{filepath.Join(root, "bin", "rel"), filepath.Join(root, "home", ".local", "bin"), filepath.Join(root, "home", ".shuttle")} {
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(root, "bin", "shuttle-launch"), []byte("#!/bin/sh\necho restart\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "shuttle"), []byte("#!/bin/sh\nshift 4\nexec \"$@\"\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			harness := `
+supervisor_probe_cmd() { printf 'echo %s' "$OWNER"; }
+listen_prelude() { printf 'dd="$HOME/.shuttle"; '; }
+daemon_listener_cmd() { printf ':'; }
+disable_competing_supervisors_cmd() { :; }
+daemon_kill() { printf 'echo listener-kill'; }
+respawn_launcher_restart_cmd() { printf 'echo restart'; }
+run_on() { bash -c "$2"; }
+run_on_visible() { bash -c "$2"; }
+bad() { echo "$*" >&2; }
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle '' "$ROOT"`
+			cmd := exec.Command("bash", "-c", harness)
+			cmd.Env = append(os.Environ(), "ROOT="+root, "HOME="+filepath.Join(root, "home"), "OWNER="+owner)
+			if owner == "migrated" {
+				cmd.Env = append(cmd.Env, "SHUTTLE_ACTIVATION_CYCLED=1")
+			}
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("cycle: %v %s", err, out)
+			}
+			want := "restart\n"
+			if owner == "tmux" {
+				want = "listener-kill\n"
+			}
+			if owner == "0" {
+				want = "listener-kill\nrestart\n"
+			}
+			if owner == "migrated" {
+				want = ""
+			}
+			if string(out) != want {
+				t.Fatalf("owner %s cycle=%q, want %q", owner, out, want)
+			}
+		})
 	}
 }

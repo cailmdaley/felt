@@ -400,7 +400,23 @@ daemon_call() { # $1 = extra curl args, $2 = API path
   printf '%s' "curl -s --max-time 10 $1"' ${sock:+--unix-socket "$sock"} "$base'"$2"'"'
 }
 
-# Kill whatever holds the daemon's listener; the host's supervisor restarts it.
+daemon_listener_cmd() {
+  printf '%s' 'if [ -n "$sock" ]; then lsof -t -- "$sock"; else lsof -ti:"$port" -sTCP:LISTEN; fi'
+}
+
+disable_competing_supervisors_cmd() {
+  cat <<'SH'
+if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1 &&
+   { systemctl --user is-enabled --quiet shuttle-daemon.service 2>/dev/null || systemctl --user is-active --quiet shuttle-daemon.service 2>/dev/null; }; then
+  systemctl --user disable --now shuttle-daemon.service || exit 1
+fi
+if command -v launchctl >/dev/null 2>&1 && launchctl print "gui/$(id -u)/io.shuttle.daemon" >/dev/null 2>&1; then
+  launchctl bootout "gui/$(id -u)/io.shuttle.daemon" || exit 1
+fi
+SH
+}
+
+# Kill the daemon's listener; the host's supervisor restarts it.
 # The snippet runs on the target host (run_on), and touches the daemon's stop
 # marker there before the SIGTERM, so the rebuilt daemon's boot quarantine holds
 # (Shuttle.DaemonHeartbeat). The marker lives in the data directory that host's
@@ -408,7 +424,10 @@ daemon_call() { # $1 = extra curl args, $2 = API path
 daemon_kill() {
   listen_prelude
   printf '%s' 'touch "${dd:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}/heartbeat.stopped" 2>/dev/null; '
-  printf '%s' 'if [ -n "$sock" ]; then lsof -t -- "$sock"; else lsof -ti:"$port" -sTCP:LISTEN; fi | xargs -r kill'
+  printf 'pids=$(%s || true); ' "$(daemon_listener_cmd)"
+  # When switching away from a competing service, signal only the listener
+  # observed before that service stopped, never its replacement from the loop.
+  printf '%s' 'for pid in $pids; do for original in ${cycle_listener_pids-$pids}; do if [ "$pid" = "$original" ]; then kill "$pid"; break; fi; done; done'
 }
 
 run_on() { # $1 = "" (local) | host, $2 = shell snippet (login shell, so both CLIs are on PATH)
@@ -756,6 +775,10 @@ remote_host_cycle() { # $1 = host, $2 = deployed checkout
     # the loop as well can kill the replacement it has just started.
     cycle="set -eu
 install -m 755 $(shell_quote "$checkout/bin/shuttle-launch") \"\$HOME/.local/bin/shuttle-launch\"
+$(listen_prelude)
+cycle_listener_pids=\$($(daemon_listener_cmd) || true)
+touch \"\${dd:-\${SHUTTLE_DATA_DIR:-\$HOME/.shuttle}}/heartbeat.stopped\"
+$(disable_competing_supervisors_cmd)
 $(daemon_kill)"
   else
     cycle="set -eu; $(listen_prelude)
@@ -765,6 +788,8 @@ $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
     [ "$supervisor" != 0 ] || cycle="set -eu; $(daemon_kill)
 $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
   fi
+  cycle='[ "${SHUTTLE_ACTIVATION_CYCLED:-0}" != 1 ] || exit 0
+'"$cycle"
   run_on_visible "$host" "$(shell_quote "$checkout/shuttle") daemon activate-release $(shell_quote "$EXPECTED_RELEASE") -- bash -c $(shell_quote "$cycle")" \
     || { bad "could not select and cycle the release on ${host:-local}"; return 1; }
 }
@@ -831,7 +856,7 @@ transaction_script() {
   declare -f shell_quote ok bad deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
     build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
     version_ready target_is_live wait_for_sha release_quarantine finish_verified_deploy verify_and_finish prune_deploy_cmd \
-    harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_kill respawn_launcher_restart_cmd \
+    harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
     remote_host_cycle host_transaction
   # All subsequent commands are host-local and inherit this login shell's PATH.
   printf '%s\n' 'run_on() { bash -c "$2"; }' 'run_on_visible() { bash -c "$2"; }' \

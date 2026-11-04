@@ -67,7 +67,7 @@ esac
 			if err := os.Chmod(path, 0640); err != nil {
 				t.Fatal(err)
 			}
-			callback := `printf 'cycle:%s\n' "$(head -n 1 "$HOME/.shuttle/repo")" >> "$TEST_EVENTS"`
+			callback := `[ "$SHUTTLE_ACTIVATION_CYCLED" = 1 ] || exit 8; printf 'cycle:%s\n' "$(head -n 1 "$HOME/.shuttle/repo")" >> "$TEST_EVENTS"`
 			_, stderr, err := executeIn(t, env, t.TempDir(), "daemon", "activate-release", next.Dir, "--", "/bin/sh", "-c", callback)
 			if (err == nil) != owned {
 				t.Fatalf("owned=%t activation: %v %s", owned, err, stderr)
@@ -100,7 +100,8 @@ esac
 				t.Fatalf("selection/cycle order: %q; want %q", events, wantEvents)
 			}
 			// A second activation has no pin migration and does not reload the manager.
-			_, stderr, err = executeIn(t, env, t.TempDir(), "daemon", "activate-release", next.Dir, "--", "/bin/sh", "-c", ":")
+			env.Set("SHUTTLE_ACTIVATION_CYCLED", "1")
+			_, stderr, err = executeIn(t, env, t.TempDir(), "daemon", "activate-release", next.Dir, "--", "/bin/sh", "-c", `[ "$SHUTTLE_ACTIVATION_CYCLED" = 0 ]`)
 			if err != nil {
 				t.Fatalf("second activation: %v %s", err, stderr)
 			}
