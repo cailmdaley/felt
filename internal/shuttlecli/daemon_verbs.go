@@ -53,6 +53,12 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 				return err
 			}
 			fields := map[string]any{"ad_hoc": adHoc}
+			release, _ := cmd.Flags().GetBool("release-launch-reservation")
+			if release {
+				fmt.Fprintln(a.env.Stderr, "WARNING: Releasing an uncertain launch reservation may create a duplicate worker.")
+				fields["release_launch_reservation"] = true
+				fields["force"] = true
+			}
 			if messageSet {
 				fields["user_message"] = message
 			}
@@ -69,9 +75,9 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 					}
 				}
 			}
-			request := map[string]any{"fiber_id": args[0], "ad_hoc": adHoc}
-			if messageSet {
-				request["user_message"] = message
+			request := map[string]any{"fiber_id": args[0]}
+			for key, value := range fields {
+				request[key] = value
 			}
 			payload, err := json.Marshal(request)
 			if err != nil {
@@ -89,6 +95,7 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 			return nil
 		},
 	}
+	shuttleDispatchCmd.Flags().Bool("release-launch-reservation", false, "Release an uncertain launch reservation and dispatch manually; a duplicate worker is possible")
 	shuttleDispatchCmd.Flags().Bool("ad-hoc", false, "For standing constitutions, dispatch an ad-hoc run without consuming the scheduled occurrence")
 	shuttleDispatchCmd.Flags().StringVar(&dispatchMessage, "message", "", "Launch directive for the worker (the From User prompt block)")
 	shuttleDispatchCmd.Flags().StringVar(&dispatchMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")

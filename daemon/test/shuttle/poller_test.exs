@@ -4840,7 +4840,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_ps_result({"ps timed out", :timeout})
     {:ok, restarted} = start_poller!(opts)
     await_boot_cycle!(restarted)
-    assert {:error, :already_running} = Poller.dispatch_fiber(restarted, id, force: true)
+    assert {:error, {:launch_reserved, _}} = Poller.dispatch_fiber(restarted, id, force: true)
     assert length(new_session_scripts()) == 1
     assert Poller.worker_status(restarted, id) == nil
   end
@@ -4917,7 +4917,7 @@ defmodule Shuttle.PollerTest do
       assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == nil
       MockRunner.set_ps_result({"ps timed out", :timeout})
       FakeRex.reply("session.list_blocks", {"request timed out", :timeout})
-      assert {:error, :already_running} = Poller.dispatch_fiber(poller, id, force: true)
+      assert {:error, {:launch_reserved, _}} = Poller.dispatch_fiber(poller, id, force: true)
       assert :counters.get(counter, 1) == 1
       assert Poller.worker_status(poller, id) == nil
 
@@ -4931,7 +4931,7 @@ defmodule Shuttle.PollerTest do
       GenServer.stop(poller)
       {:ok, restarted} = start_poller!(opts)
       await_boot_cycle!(restarted)
-      assert {:error, :already_running} = Poller.dispatch_fiber(restarted, id, force: true)
+      assert {:error, {:launch_reserved, _}} = Poller.dispatch_fiber(restarted, id, force: true)
       assert :counters.get(counter, 1) == 1
       assert File.exists?(script)
     end
@@ -7154,6 +7154,91 @@ defmodule Shuttle.PollerTest do
     assert_eventually(fn ->
       assert Poller.snapshot(poller).felt_stores == ["/tmp/host-c"]
     end)
+  end
+
+  @tag :reservation_visibility
+  test "an uncertain attempt is visible, survives restart, and needs explicit operator release" do
+    id = "tests/reservation-operator"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+    session = FiberUid.session(id)
+    script = Shuttle.WorkerProcess.script_path(session)
+    File.write!(script, "sleep 1000\n")
+    on_exit(fn -> File.rm(script) end)
+    assert :ok = Shuttle.Terminal.LaunchAttempts.record(session, script)
+    MockRunner.set_ps_result({"ps timed out", :timeout})
+
+    opts = [
+      runner: MockRunner,
+      felt_stores: [MockRunner.felt_root()],
+      boot_quarantine: true,
+      poll_interval_ms: 600_000
+    ]
+
+    {:ok, poller} = start_poller!(opts)
+    await_boot_cycle!(poller)
+    GenServer.stop(poller)
+    {:ok, poller} = start_poller!(opts)
+    await_boot_cycle!(poller)
+    assert :ok = Poller.release_boot_quarantine(poller)
+    sync_poll_cycle!(poller)
+    assert Enum.any?(Poller.snapshot(poller).blocked, &(&1.fiber_id == id))
+
+    for mode <- [nil, "fresh"] do
+      assert {:error, {:launch_reserved, reservation}} =
+               Poller.dispatch_fiber(poller, id, force: true, resume_mode: mode)
+
+      assert reservation["worker"] == session
+      assert reservation["age_seconds"] >= 0
+      assert {:ok, _, _} = DateTime.from_iso8601(reservation["recorded_at"])
+
+      assert {409, %{reason: "launch_reserved", message: message}} =
+               ShuttleWeb.DispatchReply.render(id, {:error, {:launch_reserved, reservation}})
+
+      assert message =~ "--release-launch-reservation"
+      assert message =~ "duplicate"
+
+      assert Enum.any?(Poller.snapshot(poller).blocked, fn row ->
+               row.fiber_id == id and row.reason =~ session and row.reason =~ "duplicate"
+             end)
+    end
+
+    assert Poller.worker_status(poller, id) == nil
+    assert new_session_scripts() == []
+
+    assert {:ok, ^session} =
+             Poller.dispatch_fiber(poller, id, force: true, release_launch_reservation: true)
+
+    assert [_] = new_session_scripts()
+    assert File.exists?(script)
+  end
+
+  @tag :reservation_visibility
+  test "a crash after reserving self-heals on confirmed absence" do
+    id = "tests/reservation-crash"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+    session = FiberUid.session(id)
+    script = Shuttle.WorkerProcess.script_path(session)
+    File.write!(script, "sleep 1000\n")
+    on_exit(fn -> File.rm(script) end)
+    assert :ok = Shuttle.Terminal.LaunchAttempts.record(session, script)
+    MockRunner.set_ps_result({"ps timed out", :timeout})
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(poller)
+    assert {:error, {:launch_reserved, _}} = Poller.dispatch_fiber(poller, id, force: true)
+    MockRunner.set_ps_result({"", 0})
+    assert {:ok, ^session} = Poller.dispatch_fiber(poller, id, force: true)
+    refute File.exists?(script)
+    assert [_] = new_session_scripts()
   end
 
   @tag :unobserved_cut

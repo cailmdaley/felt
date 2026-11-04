@@ -299,6 +299,48 @@ func TestShuttleRemoteDraftReopenUsesLifecycleAction(t *testing.T) {
 	}
 }
 
+func TestDispatchLaunchReservationReleaseIsExplicitAndOwnerRouted(t *testing.T) {
+	t.Parallel()
+	for _, host := range []string{"hub", "worker"} {
+		for _, release := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/release=%t", host, release), func(t *testing.T) {
+				t.Parallel()
+				env := remoteLifecycleEnv(t)
+				dir, storage := newStore(t)
+				block := remoteShuttleBlock(t.TempDir())
+				block["host"] = host
+				seedShuttleRole(t, storage, "active", felt.StatusActive, block, nil)
+				var bodies requestBodies
+				serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					bodies.record(t, r)
+					_, _ = w.Write([]byte(`{"dispatched":true}`))
+				}))
+				args := []string{"dispatch", "active"}
+				if release {
+					args = append(args, "--release-launch-reservation")
+				} else {
+					args = append(args, "--ad-hoc")
+				}
+				_, stderr, err := executeIn(t, env, dir, args...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := bodies.last()
+				if release {
+					if got["release_launch_reservation"] != true || got["force"] != true || !strings.Contains(stderr, "duplicate worker") {
+						t.Fatalf("missing explicit release/warning: %#v %q", got, stderr)
+					}
+				} else if _, ok := got["release_launch_reservation"]; ok {
+					t.Fatalf("plain dispatch released a reservation: %#v", got)
+				}
+				if host == "worker" && got["origin"] != "worker" {
+					t.Fatalf("release not owner-routed: %#v", got)
+				}
+			})
+		}
+	}
+}
+
 func TestShuttleRemoteDispatchRoutesAndCarriesMessageFile(t *testing.T) {
 	t.Parallel()
 	env := remoteLifecycleEnv(t)

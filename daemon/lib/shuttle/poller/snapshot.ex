@@ -410,6 +410,9 @@ defmodule Shuttle.Poller.Snapshot do
   # A dispatch preflight refusal carries its own operator-facing message — the
   # one thing a stranger needs on the board to fix their install. Show the
   # message, not the tuple.
+  defp format_block_reason({:launch_reserved, reservation}),
+    do: Shuttle.Terminal.LaunchAttempts.message(reservation)
+
   defp format_block_reason({tag, message}) when Shuttle.Dispatcher.refusal?(tag, message),
     do: message
 

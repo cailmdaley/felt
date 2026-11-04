@@ -270,7 +270,7 @@ defmodule Shuttle.TerminalTest do
       assert Terminal.status(MixedRunner, name) == :unknown
       assert Terminal.present?(MixedRunner, name, launch_evidence: false)
 
-      assert {:error, :already_running} =
+      assert {:error, {:launch_reserved, _}} =
                Terminal.launch(MixedRunner, name, "/tmp", "duplicate", launch_evidence: false)
     end
 
@@ -384,7 +384,7 @@ defmodule Shuttle.TerminalTest do
       path = List.last(args)
       on_exit(fn -> File.rm(path) end)
 
-      assert {:error, :already_running} =
+      assert {:error, {:launch_reserved, _}} =
                Terminal.launch(
                  stub({"timed out", :timeout}, {"ps timed out", :timeout}),
                  name,
@@ -433,7 +433,7 @@ defmodule Shuttle.TerminalTest do
       path = List.last(args)
       assert File.exists?(path)
 
-      assert {:error, :already_running} =
+      assert {:error, {:launch_reserved, _}} =
                Terminal.launch(
                  stub(@absent, {"ps timed out", :timeout}),
                  name,
@@ -628,7 +628,7 @@ defmodule Shuttle.TerminalTest do
 
     Env.put_app_env(:terminal_test_probe_timeout, true)
 
-    assert {:error, :already_running} =
+    assert {:error, {:launch_reserved, _}} =
              Terminal.launch(SlowScanTmuxRunner, name, System.tmp_dir!(), "exit 1\n",
                launch_evidence: true
              )

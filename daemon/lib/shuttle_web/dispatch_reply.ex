@@ -48,6 +48,17 @@ defmodule ShuttleWeb.DispatchReply do
      }}
   end
 
+  def render(fiber_id, {:error, {:launch_reserved, reservation}}) do
+    {409,
+     %{
+       dispatched: false,
+       reason: "launch_reserved",
+       fiber_id: fiber_id,
+       reservation: reservation,
+       message: Shuttle.Terminal.LaunchAttempts.message(reservation)
+     }}
+  end
+
   def render(fiber_id, {:error, :already_running}), do: {409, already_running_body(fiber_id)}
 
   def render(fiber_id, {:error, reason}) when reason in [:closed, :not_active],

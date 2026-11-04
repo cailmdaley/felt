@@ -439,7 +439,7 @@ stays `~/`-relative. Start errors are the same as meeting capture's, including
 `recording_unknown` after an unconfirmed forwarded start.
 
 `POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
-user_message?, project_dir?}` (plus `origin` to forward). A forced start
+user_message?, project_dir?, release_launch_reservation?}` (plus `origin` to forward). A forced start
 (`force` or `ad_hoc`) never runs a worker in the felt store. Every check runs
 before a session is cut or a document written: the owning daemon needs a
 `project_dir` that is a directory on its host. It then arms the fiber in one

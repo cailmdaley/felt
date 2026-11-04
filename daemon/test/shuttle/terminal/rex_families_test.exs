@@ -48,7 +48,7 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
     FakeRex.reply("session.list_blocks", {"request timed out", :timeout})
     FakeRex.reply("ps", {"ps timed out", :timeout})
 
-    assert {:error, :already_running} =
+    assert {:error, {:launch_reserved, _}} =
              Shuttle.Terminal.launch(FakeRex, "attempt-sibling-b", dir, "duplicate",
                fiber: @root <> "/b",
                launch_evidence: false

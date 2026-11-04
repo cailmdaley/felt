@@ -137,6 +137,35 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   the checkpoint instead of handing off. This is
   the contract, not a gap.
 
+## Uncertain launch reservations
+
+Before requesting a worker launch from a terminal backend, Shuttle writes a host-local reservation under `$SHUTTLE_DATA_DIR/terminals/launch-attempts/`.
+The record carries the worker name, script path, UTC timestamp and uncertainty reason.
+Read-only preparation failures retire the reservation; an unanswered create or new-window request, an unconfirmed cleanup, or a daemon crash keeps it.
+A successful launch keeps its reservation to cover a failed runtime write.
+The script's exit trap deletes the script, which retires the reservation without needing a successful process scan.
+Confirmed absence of every terminal backend and of the run-script process also permits retirement and retry.
+There is no TTL: a killed worker can leave its script behind, so age alone never authorizes another launch.
+Reservations follow the full terminal worker name, not the fiber UID alone.
+Before renaming a fiber with an outstanding reservation, stop or otherwise reconcile its old named worker; renaming does not transfer this launch ownership.
+
+When visibility is uncertain, a reservation refuses dispatch with `launch_reserved`, not `already_running`.
+The dispatch API returns HTTP 409 with the reservation and a message naming the worker, age, reason and release command.
+The poller retains the refusal in `blocked` and the fiber's `dispatch_error`, so the board shows it even when no worker is tracked.
+Plain force and force-plus-fresh do not release it.
+
+After checking the owning host, an operator can explicitly accept possible duplication:
+
+```bash
+shuttle dispatch <fiber-id-or-uid> --release-launch-reservation
+```
+
+This owner-routed manual dispatch releases only the reservation and warns that a duplicate worker is possible.
+It preserves the old script because its worker may still need it.
+It does not bypass positively observed workers, other ownership evidence or transcript-holder checks.
+The API equivalent is `POST /api/v1/dispatch` with `release_launch_reservation: true` and `force: true`.
+Use `shuttle snapshot` to inspect held fibers through the existing `blocked` list.
+
 ## Codex terminal workers
 
 Codex runs through the Codex CLI in the selected terminal backend, like Claude

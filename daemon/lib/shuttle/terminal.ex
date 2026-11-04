@@ -116,18 +116,32 @@ defmodule Shuttle.Terminal do
 
   @doc "Unknown liveness holds an existing assignment, never invents a first launch."
   def present?(runner, name, opts \\ []) do
+    check_available(runner, name, opts) != :ok
+  end
+
+  def check_available(runner, name, opts \\ []) do
     case status(runner, name) do
       :alive ->
-        true
+        {:error, :already_running}
 
       :gone ->
-        false
+        :ok
 
       :unknown ->
-        Keyword.get(opts, :launch_evidence, true) or rex_bound?(name) or
-          LaunchAttempts.pending?(name)
+        case LaunchAttempts.get(name) do
+          {:ok, info} ->
+            {:error, {:launch_reserved, info}}
+
+          :none ->
+            if Keyword.get(opts, :launch_evidence, true) or rex_bound?(name),
+              do: {:error, :already_running},
+              else: :ok
+        end
     end
   end
+
+  def release_reservation(name),
+    do: with_lock(name, fn -> LaunchAttempts.release(name) end)
 
   def locate(runner, name) do
     case locate_target(runner, name) do
@@ -173,26 +187,23 @@ defmodule Shuttle.Terminal do
   end
 
   defp launch_ready(runner, name, cwd, script_text, opts) do
-    if not present?(runner, name, opts) do
-      backend = primary()
+    backend = primary()
 
-      with :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)),
-           :ok <- LaunchAttempts.clear(name) do
-        path = WorkerProcess.script_path(name)
-        Shuttle.FS.write!(path, script_text)
-        Shuttle.FS.chmod!(path, 0o755)
+    with :ok <- check_available(runner, name, opts),
+         :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)),
+         :ok <- LaunchAttempts.clear(name) do
+      path = WorkerProcess.script_path(name)
+      Shuttle.FS.write!(path, script_text)
+      Shuttle.FS.chmod!(path, 0o755)
 
-        case LaunchAttempts.record(name, path) do
-          :ok ->
-            launch_backend(runner, backend, name, cwd, path, opts)
+      case LaunchAttempts.record(name, path) do
+        :ok ->
+          launch_backend(runner, backend, name, cwd, path, opts)
 
-          error ->
-            Shuttle.FS.rm(path)
-            error
-        end
+        error ->
+          Shuttle.FS.rm(path)
+          error
       end
-    else
-      {:error, :already_running}
     end
   end
 
@@ -202,7 +213,8 @@ defmodule Shuttle.Terminal do
         refresh_layout(runner, backend)
         :ok
 
-      {:error, {:unknown, _}} = error ->
+      {:error, {:unknown, reason}} = error ->
+        LaunchAttempts.note(name, reason)
         error
 
       {:error, _} = error ->

@@ -62,6 +62,8 @@ defmodule ShuttleWeb.DispatchController do
         Shuttle.Poller.dispatch_fiber(fiber_id,
           force: force or ad_hoc,
           ad_hoc: ad_hoc,
+          release_launch_reservation:
+            truthy?(Map.get(params, "release_launch_reservation", false)),
           user_message: normalize_text(Map.get(params, "user_message")),
           resume_mode: normalize_resume_mode(Map.get(params, "resume_mode")),
           project_dir: normalize_text(Map.get(params, "project_dir"))

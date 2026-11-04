@@ -4366,7 +4366,7 @@ defmodule Shuttle.Poller do
     state = reconcile_running_fiber(state, fiber_id)
     uid = resolved_uid(state, fiber_id, runtime_key)
 
-    case prepare_forced_start(state, fiber_id, runtime_key, uid, opts) do
+    case prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts) do
       {:ok, state} ->
         case dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
           {:reply, {:ok, _} = result, state} ->
@@ -4379,6 +4379,33 @@ defmodule Shuttle.Poller do
 
       {:error, reason, state} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts) do
+    with {:ok, prepared} <- prepare_forced_start(state, fiber_id, runtime_key, uid, opts),
+         :ok <- release_launch_reservation(prepared, fiber_id, opts) do
+      {:ok, prepared}
+    else
+      {:error, reason} -> {:error, reason, state}
+      other -> other
+    end
+  end
+
+  defp release_launch_reservation(state, fiber_id, opts) do
+    if Keyword.get(opts, :release_launch_reservation, false) do
+      with {:ok, fiber} <- fetch_fiber_full(fiber_id, state) do
+        if dispatch_eligible?(fiber, state, opts) do
+          case Dispatcher.session_name(fiber["id"], fiber["uid"]) do
+            nil -> :ok
+            name -> Shuttle.Terminal.release_reservation(name)
+          end
+        else
+          {:error, dispatch_ineligible_reason(fiber, state, opts)}
+        end
+      end
+    else
+      :ok
     end
   end
 
@@ -4396,6 +4423,11 @@ defmodule Shuttle.Poller do
       if Keyword.get(opts, :resume_mode) == "previous" and is_binary(message),
         do: live_tmux_session(state, fiber_id, uid)
 
+    worker_check =
+      if is_binary(paste_into),
+        do: :ok,
+        else: open_worker_check(state, fiber_id, runtime_key)
+
     cond do
       is_binary(paste_into) ->
         # Resume with a message on a live terminal worker: the message is the
@@ -4405,8 +4437,17 @@ defmodule Shuttle.Poller do
           {:error, reason} -> {:reply, {:error, {:paste_failed, reason}}, state}
         end
 
-      open_session?(state, fiber_id, runtime_key, uid) ->
-        {:reply, {:error, :already_running}, state}
+      worker_check != :ok ->
+        state =
+          case {worker_check, fetch_fiber_full(fiber_id, state)} do
+            {{:error, {:launch_reserved, _} = reason}, {:ok, fiber}} ->
+              record_dispatch_failure(state, fiber, reason)
+
+            _ ->
+              state
+          end
+
+        {:reply, worker_check, state}
 
       true ->
         case fetch_fiber_full(fiber_id, state) do
@@ -5546,11 +5587,18 @@ defmodule Shuttle.Poller do
   # Tracked assignments retain ownership on uncertainty. For an untracked
   # fiber, use the dispatcher's gate against its current durable evidence.
   defp open_session?(%State{} = state, fiber_id, runtime_key, _uid) do
-    tracked?(state, fiber_id, runtime_key) or
+    open_worker_check(state, fiber_id, runtime_key) != :ok
+  end
+
+  defp open_worker_check(state, fiber_id, runtime_key) do
+    if tracked?(state, fiber_id, runtime_key) do
+      {:error, :already_running}
+    else
       case fetch_fiber_full(fiber_id, state) do
-        {:ok, fiber} -> Dispatcher.worker_present?(fiber, state.runner)
-        {:error, _} -> false
+        {:ok, fiber} -> Dispatcher.check_worker(fiber, state.runner)
+        {:error, _} -> :ok
       end
+    end
   end
 
   # The fiber's live terminal worker session, else nil.

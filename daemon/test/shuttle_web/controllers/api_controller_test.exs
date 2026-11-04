@@ -90,6 +90,38 @@ defmodule ShuttleWeb.APIControllerTest do
 
   # ── POST /api/v1/dispatch ──
 
+  @tag :reservation_visibility
+  test "dispatch reports an unconfirmed reservation and forwards explicit release to the poller" do
+    id = "tests/api-reservation"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, oneshot_shuttle())
+    session = FiberUid.session(id)
+    script = Shuttle.WorkerProcess.script_path(session)
+    File.write!(script, "sleep 1000\n")
+    on_exit(fn -> File.rm(script) end)
+    assert :ok = Shuttle.Terminal.LaunchAttempts.record(session, script)
+    MockRunner.set_ps_result({"ps timed out", :timeout})
+    conn = post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{fiber_id: id, force: true}))
+
+    assert %{
+             "reason" => "launch_reserved",
+             "reservation" => %{"worker" => ^session},
+             "message" => message
+           } = json_response(conn, 409)
+
+    assert message =~ "--release-launch-reservation"
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/dispatch",
+        Jason.encode!(%{fiber_id: id, force: true, release_launch_reservation: true})
+      )
+
+    assert %{"dispatched" => true} = json_response(conn, 200)
+    assert File.exists?(script)
+  end
+
   test "dispatches a fiber via API" do
     fiber = make_fiber("tests/api-dispatch")
     MockRunner.set_fiber("tests/api-dispatch", fiber)

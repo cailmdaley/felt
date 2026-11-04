@@ -876,18 +876,21 @@ defmodule Shuttle.Dispatcher do
   end
 
   @doc "The dispatch gate shared with the poller: uncertainty holds only a prior launch."
-  def worker_present?(fiber, runner) do
-    session = session_name(fiber["id"], fiber["uid"])
+  def worker_present?(fiber, runner), do: check_worker(fiber, runner) != :ok
 
-    session != nil and
-      Shuttle.Terminal.present?(runner, session,
-        launch_evidence: Shuttle.Continuation.launch_evidence?(fiber)
-      )
+  def check_worker(fiber, runner) do
+    case session_name(fiber["id"], fiber["uid"]) do
+      nil ->
+        :ok
+
+      session ->
+        Shuttle.Terminal.check_available(runner, session,
+          launch_evidence: Shuttle.Continuation.launch_evidence?(fiber)
+        )
+    end
   end
 
-  defp check_not_running(fiber, runner) do
-    if worker_present?(fiber, runner), do: {:error, :already_running}, else: :ok
-  end
+  defp check_not_running(fiber, runner), do: check_worker(fiber, runner)
 
   defp resolve_agent(fiber, fiber_id) do
     # Shuttle resolves name + axes → the effective record and inlines it under
