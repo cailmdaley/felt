@@ -263,11 +263,17 @@ resolve one commit → push → preflight origin availability and default-branch
 `bin/shuttle-deploy` uses the fleet in `~/.config/shuttle/remotes.json` and each host's login environment.
 Every run builds the resolved commit in `<main-worktree>.deploy/<sha>`, including default and linked-worktree invocations.
 Remote targets require that origin advertises history containing the commit; an implicit target must descend from the checkout's fetched upstream.
-Use `--ref` for an intentional rollback.
+Use `--ref` for an intentional rollback; an explicit commit object has no ref to push.
+The caller snapshots its entrypoint in memory, and serialized remote scripts travel on stdin rather than in SSH command arguments.
 A ready target coalesces without another build or daemon cycle.
 Host lock waits are bounded by `SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS` (3600 seconds), and name the holder.
 Only the transaction and local builds inherit the locks; preparation, harnesses and activation close them before launching children.
-The bootstrap helper is built with capped Go parallelism under `~/.shuttle/deploy/tools`, and tree leases live under `~/.shuttle/deploy/leases`.
+A host-owned `nohup` runner owns helper compilation through cleanup; losing SSH does not cancel it.
+Each attempt prints a private `~/.shuttle/deploy/runs/<run>` directory containing its ordered log, last step, runner PID and final exit result.
+A failed observer is not evidence that deployment stopped; inspect that run before retrying.
+The bootstrap helper is built with capped Go parallelism under `~/.shuttle/deploy/tools`, and its shell waits for the binary to exit before removing the workspace, including on failures.
+This ordering permits cleanup on NFS without an executing binary's `.nfs` file retaining the directory.
+Tree leases live under `~/.shuttle/deploy/leases`.
 Checkout refresh after release is a clean branch fast-forward only; a skipped refresh is advisory, never itself a host failure.
 Pi is inspected after refresh, and a genuinely mismatched package still fails its harness check.
 The previous release is recorded outside the deploy tree so coalescing retains the rollback root.

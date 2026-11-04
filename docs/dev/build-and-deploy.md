@@ -156,6 +156,8 @@ bin/shuttle-deploy --ref v2.0.0-rc.1 --no-push
 ```
 
 Every invocation resolves `--ref` (or `HEAD` when omitted) to one full commit before contacting any host.
+An explicit commit object has no ref to push; branches and tags are pushed unless `--no-push` is set.
+The caller executes an in-memory copy of its entrypoint, so refreshing or editing its checkout cannot replace script bytes Bash has yet to read.
 When a remote is targeted, preflight fetches origin and verifies that the target is reachable from an advertised origin ref before building or cycling any host.
 An implicit target must also descend from the checkout's fetched upstream; `--ref` explicitly authorizes a rollback or divergent revision.
 A local-only deployment can use an unpublished commit.
@@ -171,9 +173,11 @@ A ready daemon already serving that exact root and revision coalesces without an
 A newer descendant is not substituted for the requested revision.
 
 A host-local kernel lock at `~/.shuttle/deploy.lock` serializes the entire transaction, from worktree preparation through build, activation, readiness, quarantine release and pruning.
-A waiting run prints the holder's target, initiating host and PID, host-side PID, and acquisition time.
+A waiting run prints the holder's target, initiating host and PID, host-side PID, acquisition time, and durable run directory.
 Lock waits are bounded by `SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS` (3600 seconds by default); timeout fails that host and names the holder instead of stalling the remaining fleet indefinitely.
-The helper compiles `scripts/deploy-lock/main.go` with `GOMAXPROCS=2 GOFLAGS=-p=2` under `~/.shuttle/deploy/tools`, then execs the resulting binary.
+The helper compiles `scripts/deploy-lock/main.go` with `GOMAXPROCS=2 GOFLAGS=-p=2` under `~/.shuttle/deploy/tools`, then runs the resulting binary.
+A host-owned shell waits for that binary to exit before removing its temporary directory on success or failure.
+Removing an executing binary on NFS leaves a `.nfs` file that prevents directory removal, so cleanup belongs outside the helper's process lifetime.
 There is no Go compiler parent during the transaction and no dependency on `/tmp` permitting executable files.
 Locking does not depend on the installed CLI version.
 The transaction shell and local build subprocesses inherit the lock descriptors, so a crashed helper cannot unlock their ongoing build.
@@ -182,6 +186,35 @@ An `srun` job on another node inherits no local descriptor and relies on its sub
 A dead transaction releases its locks without deleting lock files.
 Different hosts can deploy concurrently.
 Do not delete lock files to recover a deploy; their existence is not evidence that they are held.
+
+### Transaction ownership and diagnostics
+
+A deploy belongs to the target host, not its SSH connection.
+The caller sends script bytes on stdin to a login shell; SSH arguments carry only the shell command, not the serialized transaction.
+After login, `scripts/deploy-run.sh` launches a `nohup` runner with disconnected stdin and output redirected to a private durable run directory under `~/.shuttle/deploy/runs/`.
+This includes helper compilation, lock acquisition, the locked transaction and cleanup.
+The caller streams that run's ordered stdout and stderr and reports its exit status.
+It prints the run path before compilation and each step as it begins; failed runs name the last step and exit code alongside the command's stderr.
+Slow login or compilation is therefore distinguishable from a stalled locked transaction.
+
+**Losing SSH does not cancel deployment.**
+The runner continues, holds its locks through the transaction and publishes `result` only after cleanup.
+A failed observer must not be interpreted as a failed or cancelled host operation.
+Inspect the printed directory on the owner host:
+
+```sh
+cat ~/.shuttle/deploy/runs/<run>/step    # last step entered
+cat ~/.shuttle/deploy/runs/<run>/result  # recorded exit code, if available
+tail -n 50 ~/.shuttle/deploy/runs/<run>/log
+```
+
+A missing result means no exit has been recorded; it does not prove the process is still alive.
+The directory also contains the runner's `pid` and serialized `start.sh` for diagnosis.
+Run records remain available after successful and failed attempts; they are not bootstrap temporary directories.
+A subsequent deploy either names the active holder and waits within the configured deadline, or acquires the freed lock and checks whether the target is already ready.
+A completed matching deployment coalesces without another restart.
+
+### Release verification and retention
 
 Before retargeting the launcher, the helper reads the live daemon's commit from `/api/v1/version`.
 After a fresh ready boot, quarantine release, advisory checkout refresh and successful harness setup, the helper removes obsolete worktrees with `git worktree remove --force`, then runs `git worktree prune`.
