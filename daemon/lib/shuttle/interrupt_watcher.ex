@@ -85,15 +85,15 @@ defmodule Shuttle.InterruptWatcher do
 
     case is_binary(path) && Shuttle.FS.stat(path) do
       {:ok, %{size: size}} when size != memo.size ->
-        memo = %{memo | size: size}
-
         case interrupt(tail(path, size), turn.harness) do
           {record, at} when at >= turn.at and record != memo.emitted ->
-            state.emit.(id, turn.harness, {record, at})
-            %{memo | emitted: record}
+            case state.emit.(id, turn.harness, {record, at}) do
+              :ok -> %{memo | size: size, emitted: record}
+              {:error, _} -> memo
+            end
 
           _ ->
-            memo
+            %{memo | size: size}
         end
 
       _ ->
@@ -202,6 +202,8 @@ defmodule Shuttle.InterruptWatcher do
         Logger.warning(
           "interrupt watcher: recording #{session}'s interrupt failed: #{inspect(other)}"
         )
+
+        {:error, other}
     end
   end
 

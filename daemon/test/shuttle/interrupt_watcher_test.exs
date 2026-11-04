@@ -129,6 +129,71 @@ defmodule Shuttle.InterruptWatcherTest do
   end
 
   @tag :tmp_dir
+  test "failed interrupt emission retries unchanged and with trailing metadata", %{tmp_dir: dir} do
+    events = Path.join(dir, "events")
+    transcript = Path.join(dir, "transcript")
+
+    File.write!(
+      events,
+      line(%{
+        "type" => "user_prompt_submit",
+        "sessionId" => "s",
+        "timestamp" => @t0,
+        "harness" => "claude-code"
+      })
+    )
+
+    File.write!(transcript, claude_interrupt(@t0 + 1))
+    stream = :"retry_stream_#{System.unique_integer([:positive])}"
+
+    start_supervised!(
+      {EventStream,
+       name: stream,
+       events_file: events,
+       poll_interval_ms: 3_600_000,
+       clock: fn -> @t0 + 10_000 end}
+    )
+
+    parent = self()
+
+    emit = fn _, _, _ ->
+      send(parent, :attempt)
+      {:error, :transient}
+    end
+
+    state = %{
+      stream: stream,
+      path: fn _ -> transcript end,
+      emit: emit,
+      clock: fn -> @t0 + 10_000 end,
+      quiet_ms: 0,
+      seen: %{}
+    }
+
+    state = InterruptWatcher.scan(state)
+    assert_receive :attempt
+    state = InterruptWatcher.scan(state)
+    assert_receive :attempt
+    File.write!(transcript, line(%{"type" => "metadata"}), [:append])
+    state = InterruptWatcher.scan(state)
+    assert_receive :attempt
+
+    state =
+      %{
+        state
+        | emit: fn _, _, _ ->
+            send(parent, :success)
+            :ok
+          end
+      }
+      |> InterruptWatcher.scan()
+
+    assert_receive :success
+    InterruptWatcher.scan(state)
+    refute_receive :success
+  end
+
+  @tag :tmp_dir
   test "a silent open turn whose transcript ends in an interrupt is recorded once", %{
     tmp_dir: dir
   } do
