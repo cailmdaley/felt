@@ -1549,12 +1549,16 @@ export class KanbanModal {
       // applies (standing). Every card on a Desk column carries a shuttle
       // block, so the lifecycle verbs always apply — see `shouldIncludeInKanban`.
       const hasVerdict = card.status === 'closed' && card.tempered !== undefined
+      const alreadyResting = !hasWorkerToStop(card) && card.status === 'open' && card.storedHorizon === 'stashed'
       if (horizon === 'stashed' && !hasVerdict) {
-        await this.postJson('/api/v1/lifecycle', {
-          action: 'rest', fiber: card.id, origin: card.originId,
-          ...(typeof opts.due === 'string' ? { until: opts.due } : {}),
-        }, 'Rest failed')
-        rested = true
+        // Re-dating resting work preserves its blocker; --until replaces it.
+        if (!alreadyResting) {
+          await this.postJson('/api/v1/lifecycle', {
+            action: 'rest', fiber: card.id, origin: card.originId,
+            ...(typeof opts.due === 'string' ? { until: opts.due } : {}),
+          }, 'Rest failed')
+          rested = true
+        }
       } else {
         // Any other planning surface (a future date, or back onto the desk)
         // holds DRAFTS. Parking a running card there stops its worker — alive

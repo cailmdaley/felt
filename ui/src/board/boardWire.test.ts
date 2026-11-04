@@ -312,6 +312,14 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     }])
   })
 
+  it('redates a resting card without replacing its blocker through rest until', async () => {
+    const due = dayFromNow(7)
+    asPrivate(makeBoard()).setSurface(card({ status: 'open', storedHorizon: 'stashed' }), 'stashed', { due })
+    await wire.settled()
+    expect(wire.bodiesTo('/api/v1/lifecycle').every(body => !('until' in body))).toBe(true)
+    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toHaveProperty('due', due)
+  })
+
   it('snoozes with until on the lifecycle write even if the cold presentation edit fails', async () => {
     const board = asPrivate(makeBoard())
     const banner = vi.spyOn(board, 'showBanner')
