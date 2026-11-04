@@ -116,6 +116,24 @@ describe('ChronicleFeeds cadence', () => {
     expect(feeds.commits?.key).toBe(`${grown.first}:${grown.last}`)
   })
 
+  it('retains the prior commit window and retries a failed expansion', async () => {
+    const { fetchers } = countingFetchers()
+    const feeds = new ChronicleFeeds()
+    await feeds.sync(fetchers, window, { nowMs: NOW })
+    const prior = feeds.commits
+    const grown = windowAround(NOW, 84, 14)
+    let calls = 0
+    fetchers.commits = async () => {
+      calls++
+      return { host: calls === 1 ? '' : 'ada', records: [] }
+    }
+    await feeds.sync(fetchers, grown, { nowMs: NOW + 15_000 })
+    expect(feeds.commits).toEqual(prior)
+    await feeds.sync(fetchers, grown, { nowMs: NOW + 30_000 })
+    expect(calls).toBe(2)
+    expect(feeds.commits?.key).toBe(`${grown.first}:${grown.last}`)
+  })
+
   it('lets a poll landing mid-sweep wait on it rather than start another', async () => {
     const { fetchers, asked } = countingFetchers()
     const feeds = new ChronicleFeeds()

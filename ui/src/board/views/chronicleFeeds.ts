@@ -178,7 +178,7 @@ export class ChronicleFeeds {
     if (this.held?.key === key) return
     this.commitsWanted = key
     const res = await fetchers.commits(...commitsSpan(window))
-    if (this.commitsWanted === key) this.held = { key, records: res.records }
+    if (this.commitsWanted === key && landed(res)) this.held = { key, records: res.records }
   }
 
   private noteActivityOrigins(results: readonly ActivityResult[]): void {
