@@ -51,6 +51,17 @@ defmodule Shuttle.ContractTest do
     assert result.reason =~ "felt add --namespace"
   end
 
+  defmodule Level30Runner do
+    @behaviour Shuttle.Runner
+    def cmd("shuttle", ["contract"], _opts), do: {"30\n", 0}
+  end
+
+  test "UID-less exact writes require a CLI that preserves resolved addresses" do
+    result = Shuttle.Contract.check(Level30Runner)
+    refute result.ok
+    assert result.reason =~ "UID-less"
+  end
+
   test "the expected level covers the receiver-authority verbs" do
     assert Shuttle.Contract.expected_level() >= 15
   end

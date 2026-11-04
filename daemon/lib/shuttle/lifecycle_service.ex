@@ -51,7 +51,7 @@ defmodule Shuttle.LifecycleService do
   end
 
   @doc false
-  def hint_args(%{uid: uid, fiber_id: id}) when is_binary(uid), do: ["--fiber-path", id]
+  def hint_args(%{fiber_id: id}), do: ["--fiber-path", id]
   def hint_args(_), do: []
 
   @doc """

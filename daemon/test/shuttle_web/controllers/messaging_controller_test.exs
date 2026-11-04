@@ -19,7 +19,17 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
     def cmd(
           "shuttle",
-          ["-C", store, "ask", "work/worker", "--clear", "--answered-by", from],
+          [
+            "-C",
+            store,
+            "ask",
+            "work/worker",
+            "--clear",
+            "--answered-by",
+            from,
+            "--fiber-path",
+            "work/worker"
+          ],
           _opts
         ) do
       send(

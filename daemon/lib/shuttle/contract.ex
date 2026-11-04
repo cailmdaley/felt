@@ -48,7 +48,9 @@ defmodule Shuttle.Contract do
     28 => "message --request-json attested_sender (cross-host verified senders)",
     29 => "scan-changes (incremental physical-store metadata index)",
     30 => "scan-changes (newline-framed opaque metadata index)",
-    31 => "felt show --exact and felt add --namespace; lifecycle --fiber-path (verified UID path hints)"
+    31 =>
+      "felt show --exact and felt add --namespace; lifecycle --fiber-path (verified UID path hints); " <>
+        "resolved lifecycle reads remain exact for UID-less documents"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

@@ -2,12 +2,39 @@ package feltcli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
+
+func TestResolvedReadsNeverGuessAfterLossOrReplacement(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []felt.ParseMode{felt.ParseFull, felt.ParseMetadataOnly} {
+		_, st := newStore(t)
+		uid := "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+		seedFiber(t, st, "worker", uid, "active", nil, nil)
+		seedFiber(t, st, "elsewhere/worker", "01ARZ3NDEKTSV4RRFFQ69G5FAW", "active", nil, nil)
+		ref, err := felt.ResolveAddressRef(st, "worker")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(st.Path("worker")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := felt.ReadRef(ref, mode); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("missing address read via convenience lookup: %v", err)
+		}
+		if err := os.WriteFile(st.Path("worker"), []byte("---\nid: 01ARZ3NDEKTSV4RRFFQ69G5FAW\nname: Replacement\nstatus: active\n---\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if f, err := felt.ReadRef(ref, mode); err == nil {
+			t.Fatalf("accepted replaced UID: %+v", f)
+		}
+	}
+}
 
 func TestExactUIDPathHintVerifiesIdentityBeforeWalking(t *testing.T) {
 	t.Parallel()

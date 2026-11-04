@@ -20,6 +20,23 @@ func subtreeView(t *testing.T, loom, prefix string) string {
 	return project
 }
 
+func TestExactOwnerWriterNeverGuessesOrFallsBackToRemote(t *testing.T) {
+	env := remoteLifecycleEnv(t)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "elsewhere/worker", felt.StatusActive, remoteShuttleBlock("/remote/project"), nil)
+	calls := 0
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; http.NotFound(w, r) }))
+	if _, _, err := executeIn(t, env, dir, "pause", "worker", "--local", "--no-kill", "--fiber-path", "worker"); err == nil {
+		t.Fatal("missing exact address succeeded")
+	}
+	if calls != 0 {
+		t.Fatalf("exact writer attempted %d remote lookups", calls)
+	}
+	if f := mustRead(t, st, "elsewhere/worker"); f.Status != felt.StatusActive {
+		t.Fatalf("mutated guessed target: %+v", f)
+	}
+}
+
 func TestRemoteResumeTransfersOnlyOnAuthoritativeOwnerMiss(t *testing.T) {
 	for _, body := range []string{`not found`, `{"error_code":"fiber_not_found","host":"someone-else"}`, `{"error_code":"resolution_failed","host":"worker"}`} {
 		t.Run(body, func(t *testing.T) {

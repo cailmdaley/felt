@@ -2355,7 +2355,7 @@ defmodule Shuttle.Poller do
       LifecycleService.write(verb, address,
         runner: state.runner,
         felt_store: store,
-        args: args ++ LifecycleService.hint_args(%{uid: uid, fiber_id: slug})
+        args: args ++ if(is_map(target), do: LifecycleService.hint_args(target), else: [])
       )
 
     # A rest disarms first (the write above lands `status: open` before any
