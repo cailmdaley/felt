@@ -395,7 +395,7 @@ A `null` mirror host means the transcript is local.
 The daemon derives
 the meeting title and transcript name from the first line of `prompt`, or uses
 `Meeting` when no note is supplied.
-It starts hark in the selected recorder's `hark-meeting` tmux session, then continues the ordinary owner-routed capture flow.
+It starts hark in the selected recorder's `hark-meeting` terminal launch, then continues the ordinary owner-routed capture flow.
 A `phone` start without an explicit `recorder` uses capability-based selection; other modes default to the receiving daemon.
 The `origin` remains the agent's owner when the request crosses to a recorder, including when the owner is the requesting hub.
 For a remote `origin`, hark writes locally and mirrors to

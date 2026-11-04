@@ -757,8 +757,9 @@ A Shuttle-owned server runs with `--restore=false`: Shuttle resumes its workers 
 Shuttle only starts missing servers; it never stops a Rex server.
 `rex server stop` ends **every session** on that server, and a running server keeps its version until it stops.
 Shuttle observes existing tmux workers on a Rex host when tmux is available, but launches new terminal workers in Rex.
-Claude Remote Control and Hark meetings still use tmux for retained panes and session options.
-On macOS, their tmux anchor is launched through Rex on a Rex host and through Kitty on a tmux host.
+Claude Remote Control and Hark meetings use Rex blocks on Rex hosts.
+Shuttle records launch metadata, exit status and output under its data directory. A Rex server restart makes an interrupted capture fail while preserving its transcript; Remote Control retries automatically.
+On macOS tmux-primary hosts, Kitty launches the tmux anchor.
 See [Opening conversations](conversations.md) for attach and remote limitations.
 
 ## Terminal program status
@@ -786,15 +787,15 @@ The script uses `command claude`, bypassing shell functions that add flags inten
 Remote Control child sessions don't receive Shuttle's worker prompt or task assignment.
 
 The daemon reads this setting every 30 seconds without a restart.
-It owns the tmux session `shuttle-remote-control`, adopts it across daemon restarts, replaces it when the directory or arguments change, and stops it when the key is absent or invalid.
+It owns the `shuttle-remote-control` terminal launch, adopts it across daemon restarts, replaces it when the directory or arguments change, and stops it when the key is absent or invalid.
 Invalid settings also log a warning.
 The host starts independently of the boot quarantine because it waits for a human to open a session.
-On macOS it uses the same terminal-rooted tmux server policy as workers.
+On Rex hosts it runs in a Rex block; tmux-primary hosts use the same terminal-rooted tmux server policy as workers.
 
 Inspect it with `shuttle remote-control` or `shuttle remote-control --json`.
 The status reports the pane PID, start time, starts during this daemon lifetime (`restarts`), last exit status and up to 20 nonempty screen lines, and the next retry time.
 Short-lived hosts retry after 2 seconds, doubling to a 300-second cap; an actual lifetime of at least 60 seconds resets the wait to 2 seconds.
-The daemon retains a dead pane to collect its exit evidence and holds rather than spawning when tmux or process liveness is uncertain.
+The daemon retains exit evidence in a dead tmux pane or a Rex launch receipt, and holds rather than spawning when terminal or process liveness is uncertain.
 A lost session without a death timestamp counts conservatively as a short failure.
 
 A manually started host in the same folder can refuse the managed host with an “already served” message.

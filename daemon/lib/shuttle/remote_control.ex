@@ -1,10 +1,10 @@
 defmodule Shuttle.RemoteControl do
   @moduledoc """
-  Reconciles one host-local Claude Remote Control environment in tmux.
+  Reconciles one host-local Claude Remote Control environment in the selected terminal.
 
-  tmux owns the process across daemon restarts. A digest of its configuration
-  identifies the desired launch, and session creation / pane death timestamps measure
-  lifetime even when a fresh daemon adopts a dead pane. Uncertain observations
+  The terminal owns the process across daemon restarts. A configuration digest
+  identifies the desired launch, and durable launch and exit timestamps measure
+  lifetime even when a fresh daemon adopts an exited process. Uncertain observations
   hold the session rather than authorizing another host.
   """
   use GenServer
@@ -38,6 +38,7 @@ defmodule Shuttle.RemoteControl do
   def init(opts) do
     state = %{
       runner: Keyword.get(opts, :runner, Shuttle.Runner.Default),
+      terminal_opts: Keyword.take(opts, [:terminal, :state_dir]),
       config: Keyword.get(opts, :config, &Host.remote_control/0),
       clock: Keyword.get(opts, :clock, fn -> System.system_time(:second) end),
       interval: Keyword.get(opts, :interval_ms, @interval),
@@ -92,9 +93,12 @@ defmodule Shuttle.RemoteControl do
     desired = state.config.()
     now = state.clock.()
 
-    case observe(state.runner) do
+    case observe(state) do
       {:error, message} ->
-        update(state, state: :error, message: message)
+        update(state,
+          state: :error,
+          message: if(is_binary(message), do: message, else: inspect(message))
+        )
 
       observation ->
         reconcile_desired(state, desired, observation, now)
@@ -175,7 +179,7 @@ defmodule Shuttle.RemoteControl do
   end
 
   defp record_exit(state, pane, now) do
-    # A dead pane remains in tmux during backoff. Count it only once.
+    # An exited launch remains observable during backoff. Count it only once.
     if state.status.next_attempt_at do
       state
     else
@@ -207,8 +211,7 @@ defmodule Shuttle.RemoteControl do
       update(state, state: :waiting)
     else
       with :ok <- if(dead?, do: stop(state), else: :ok),
-           :ok <- TmuxServer.ensure_available(state.runner),
-           :ok <- confirm_server(state.runner),
+           :ok <- prepare_terminal(state),
            :ok <- spawn_host(state, config, script) do
         # The next observation supplies the pane pid and actual creation time.
         %{
@@ -251,14 +254,64 @@ defmodule Shuttle.RemoteControl do
     end
   end
 
+  defp prepare_terminal(state) do
+    if Shuttle.RetainedTerminal.rex?(state.terminal_opts) do
+      :ok
+    else
+      with :ok <- TmuxServer.ensure_available(state.runner), do: confirm_server(state.runner)
+    end
+  end
+
   defp stop(state) do
+    if Shuttle.RetainedTerminal.rex?(state.terminal_opts),
+      do: Shuttle.RetainedTerminal.stop(@session, state.runner, state.terminal_opts),
+      else: stop_tmux(state)
+  end
+
+  defp stop_tmux(state) do
     case Terminal.stop(state.runner, @session, backends: [Tmux]) do
       {_, 0} -> :ok
       {output, _} -> {:error, "Cannot stop Remote Control: #{output}"}
     end
   end
 
-  defp observe(runner) do
+  defp observe(state) do
+    if Shuttle.RetainedTerminal.rex?(state.terminal_opts) do
+      with :ok <- retire_tmux_host(state.runner) do
+        case Shuttle.RetainedTerminal.observe(@session, state.runner, state.terminal_opts) do
+          {:ok, pane} -> {:ok, Map.put(pane, :digest, pane.metadata["digest"])}
+          other -> other
+        end
+      end
+    else
+      observe_tmux(state.runner)
+    end
+  end
+
+  defp retire_tmux_host(runner) do
+    if Shuttle.Env.find_executable("tmux") do
+      case Tmux.probe(runner, @session) do
+        :absent ->
+          :ok
+
+        :present ->
+          case Tmux.close(runner, "=" <> @session) do
+            result when result in [:ok, :absent] ->
+              :ok
+
+            {:error, reason} ->
+              {:error, "Cannot retire Remote Control tmux session: #{inspect(reason)}"}
+          end
+
+        :unknown ->
+          {:error, "Remote Control tmux session is uncertain; holding"}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp observe_tmux(runner) do
     case Terminal.status(runner, @session, backends: [Tmux]) do
       :gone -> :gone
       :unknown -> {:error, "Remote Control tmux session is uncertain; holding"}
@@ -329,6 +382,26 @@ defmodule Shuttle.RemoteControl do
   end
 
   defp spawn_host(state, config, script) do
+    if Shuttle.RetainedTerminal.rex?(state.terminal_opts) do
+      path = WorkerProcess.script_path(@session)
+
+      with :ok <- Shuttle.FS.write(path, script),
+           :ok <- Shuttle.FS.chmod(path, 0o700) do
+        Shuttle.RetainedTerminal.start(
+          @session,
+          config.dir,
+          ["bash", "-l", path],
+          %{"digest" => state.digest},
+          state.runner,
+          state.terminal_opts
+        )
+      end
+    else
+      spawn_tmux(state, config, script)
+    end
+  end
+
+  defp spawn_tmux(state, config, script) do
     path = WorkerProcess.script_path(@session)
 
     with :ok <- Shuttle.FS.write(path, script),

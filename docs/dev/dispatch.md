@@ -159,7 +159,7 @@ Stop closes the worker's window and destroys an empty session only when Shuttle 
 Per-worker session bindings retain their addresses until their workers end, and refiling a live worker does not move it into another family.
 Rex workers start under Rex Server; the daemon starts an absent Rex app and refuses dispatch if the server remains unavailable.
 On Rex hosts, existing tmux workers remain observable and stoppable when tmux is installed.
-Auxiliary tmux services use a Rex-launched anchor on Rex hosts and a Kitty-launched anchor on tmux hosts.
+Remote Control and Hark also use the selected backend. Rex launches keep their ownership, lifecycle receipts and output in Shuttle-owned files; they do not require a tmux server.
 
 ### tmux server ownership (macOS)
 
@@ -177,7 +177,7 @@ Auxiliary tmux services use a Rex-launched anchor on Rex hosts and a Kitty-launc
   restarts the way a terminal-launched one does). The plist template header
   documents the same fact for the daemon's own working directory; this is the
   same rule applied to everything the daemon spawns downstream of it.
-- **The terminal owns the fork.** When no tmux server exists, the daemon asks Kitty on a tmux host or Rex on a Rex host to start an anchor session.
+- **The terminal owns the fork.** When no tmux server exists on a tmux-primary host, the daemon asks Kitty to start an anchor session.
   The terminal's process tree owns the server and its privacy attribution.
 - **A failed launcher is refused, never silently daemon-forked.** The `tmux_server_unavailable` refusal reaches the board through the normal preflight cooldown.
 - **Attribution: how a running server is told apart from a daemon-forked

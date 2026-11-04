@@ -244,3 +244,116 @@ defmodule Shuttle.RemoteControlTest do
     assert starts(runner) == 1
   end
 end
+
+defmodule Shuttle.RemoteControlRexTest do
+  use ExUnit.Case, async: true
+  alias Shuttle.{RemoteControl, Test.Env, Test.FakeRex}
+  @moduletag :tmp_dir
+
+  setup %{tmp_dir: dir} do
+    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
+    config = start_supervised!({Agent, fn -> %{dir: dir, args: []} end})
+
+    rc =
+      Env.start_scoped!(
+        {RemoteControl,
+         name: nil,
+         runner: FakeRex,
+         terminal: Shuttle.Terminal.Rex,
+         interval_ms: :infinity,
+         config: fn ->
+           case Agent.get(config, & &1) do
+             nil -> nil
+             value -> {:ok, value}
+           end
+         end}
+      )
+
+    RemoteControl.status(rc)
+    %{rc: rc, config: config, dir: dir}
+  end
+
+  test "Rex launch is adopted and config removal stops it without tmux", %{rc: rc, config: config} do
+    assert %{state: :running, restarts: 1} = RemoteControl.reconcile(rc)
+    assert FakeRex.state().creates == 1
+    assert %{state: :running} = RemoteControl.reconcile(rc)
+    assert FakeRex.state().creates == 1
+    Agent.update(config, fn _ -> nil end)
+    assert %{state: :disabled} = RemoteControl.reconcile(rc)
+    assert FakeRex.state().sessions == %{}
+
+    refute Enum.any?(FakeRex.calls(), fn {bin, args, _} ->
+             bin == "tmux" and hd(args) in ["new-session", "start-server"]
+           end)
+  end
+
+  test "a server restart records a failure instead of adopting a restored shell", %{rc: rc} do
+    assert %{state: :running} = RemoteControl.reconcile(rc)
+    identity = FakeRex.fixture("whoami") |> Map.put("instance_id", "replacement")
+    FakeRex.reply("whoami", {Jason.encode!(identity), 0})
+
+    assert %{state: :waiting, last_exit: %{status: nil}, next_attempt_at: %DateTime{}} =
+             RemoteControl.reconcile(rc)
+
+    assert FakeRex.state().creates == 1
+  end
+end
+
+defmodule Shuttle.RemoteControlMigrationTest do
+  use ExUnit.Case, async: true
+  alias Shuttle.{RemoteControl, Test.Env, Test.FakeRex}
+  @moduletag :tmp_dir
+
+  defmodule Runner do
+    def cmd("tmux", args, _opts) do
+      Agent.get_and_update(Env.server!(__MODULE__), fn s ->
+        case args do
+          ["has-session", "-t", "=shuttle-remote-control"] ->
+            {if(s.live, do: {"", 0}, else: {"can't find session", 1}), s}
+
+          ["kill-session", "-t", "=shuttle-remote-control"] ->
+            {{"", 0}, %{s | live: false, stops: s.stops + 1}}
+        end
+      end)
+    end
+
+    def cmd(command, args, opts), do: FakeRex.cmd(command, args, opts)
+  end
+
+  test "upgrade closes only the positively observed tmux host before starting Rex", %{
+    tmp_dir: dir
+  } do
+    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
+    # A real executable path lets the non-starting migration probe run.
+    File.write!(Path.join(dir, "tmux"), "#!/bin/sh\nexit 1\n")
+    File.chmod!(Path.join(dir, "tmux"), 0o755)
+    Env.prepend_path(dir)
+
+    legacy =
+      start_supervised!(
+        Supervisor.child_spec({Agent, fn -> %{live: true, stops: 0} end}, id: :legacy)
+      )
+
+    Env.put_server(Runner, legacy)
+
+    rc =
+      Env.start_scoped!(
+        {RemoteControl,
+         name: nil,
+         runner: Runner,
+         terminal: Shuttle.Terminal.Rex,
+         interval_ms: :infinity,
+         config: fn -> {:ok, %{dir: dir, args: []}} end}
+      )
+
+    assert %{state: :starting} = RemoteControl.status(rc)
+    assert %{live: false, stops: 1} = Agent.get(legacy, & &1)
+    assert %{state: :running} = RemoteControl.reconcile(rc)
+    assert FakeRex.state().creates == 1
+    assert %{live: false, stops: 1} = Agent.get(legacy, & &1)
+  end
+end

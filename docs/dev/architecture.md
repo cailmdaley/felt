@@ -302,7 +302,7 @@ Session labels name the family; tab labels and order present its fiber tree; blo
 Shuttle closes worker windows independently and destroys only empty daemon-created sessions.
 `Shuttle.Opener` selects Rex or Kitty for the local display: Rex selects a local worker's session and window, and provides viewer windows for local or remote tmux sessions.
 Remote Rex opening is not supported.
-Remote Control host and Hark meetings retain tmux for dead panes, options and respawn; daemon supervision loops also retain tmux.
+Remote Control and Hark use the selected terminal. On Rex, `Shuttle.RetainedTerminal` records immutable launch addresses, configuration metadata, exit receipts and output under the Shuttle data directory. A changed Rex server instance makes an old launch dead, even if Rex restored its block. Remote Control retries through its reconciler; an interrupted Hark capture remains failed with its transcript intact. Cluster daemon supervision loops retain tmux.
 
 Windows is unsupported.
 

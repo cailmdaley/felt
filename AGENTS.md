@@ -60,6 +60,9 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   On Rex, the daemon-written binding to session, window and block IDs is authoritative.
   Each constitution family has one session and each worker or viewer has one window; only block labels retain worker names for recovery.
   Family placement is fixed at launch, and closing a worker removes its window, then its session only if empty and daemon-created.
+  Remote Control and Hark use the selected backend too. Rex auxiliary launches retain
+  ownership, exit receipts and output in Shuttle-owned files; a changed server instance
+  makes an old launch dead. Rex hosts need no tmux anchor.
   A Rex host also observes and stops existing tmux workers when tmux is available.
   On Linux, `bin/rex-install` installs the checksum-verified snapshot rootlessly; `"terminal": "rex"` selects it in `host.json`.
   Shuttle starts a missing server on `unix://<data dir>/rex/server.sock` with state in `<data dir>/rex/state`, requesting the Tailscale-identified port 7297 listener and falling back to local-only when startup fails.

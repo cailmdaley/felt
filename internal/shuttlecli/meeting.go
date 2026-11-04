@@ -94,7 +94,7 @@ with recording_unknown: inspect that recorder before starting another.`,
 func (a *app) shuttleMeetingStopCmd() *cobra.Command {
 	stop := &cobra.Command{
 		Use:   "stop [--recorder <host> --launch <id>]",
-		Short: "Stop a recording, or dismiss its failed tmux pane",
+		Short: "Stop a recording, or dismiss its failed terminal launch",
 		Long: `Ask the local daemon to stop the recording on --recorder, or on this
 host when it is omitted. An addressed stop needs the recording's --launch id,
 which shuttle meeting start printed, so it never stops a newer recording.`,
