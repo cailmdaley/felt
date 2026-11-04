@@ -546,6 +546,21 @@ wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also
   done
 }
 
+remember_previous_cmd() {
+  cat <<SH
+set -eu
+previous=$(shell_quote "$1")
+current=$(shell_quote "$2")
+state="\$HOME/.shuttle/deploy/previous"
+mkdir -p "\$(dirname "\$state")"
+if [ -n "\$previous" ] && [ "\$previous" != "\$current" ]; then
+  printf '%s\\n' "\$previous" > "\$state.next"
+  mv "\$state.next" "\$state"
+fi
+[ ! -f "\$state" ] || cat "\$state"
+SH
+}
+
 refresh_checkout_cmd() {
   cat <<SH
 source=$(shell_quote "$1")
@@ -565,6 +580,8 @@ finish_verified_deploy() { # host, regular checkout, previous live tree
   local host="$1" checkout="$2" previous="${3:-}"
   release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
     || { bad "quarantine release failed"; return 1; }
+  previous="$(run_on_visible "$host" "$(remember_previous_cmd "$previous" "${EXPECTED_RELEASE%/bin/rel}")")" \
+    || { bad 'rollback receipt: could not retain previous release'; return 1; }
   run_on_visible "$host" "$(refresh_checkout_cmd "$checkout")" || ok "checkout freshness: could not inspect $checkout; left unchanged"
   refresh_harnesses "$host" "${EXPECTED_RELEASE%/bin/rel}" || { bad "harness setup failed"; return 1; }
   run_on_visible "$host" "$(prune_deploy_cmd "$checkout" "$previous" "${EXPECTED_RELEASE%/bin/rel}/shuttle")" || {
@@ -900,7 +917,7 @@ transaction_script() {
   declare -f shell_quote ok bad deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
     build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
     version_ready target_is_live wait_for_sha release_quarantine finish_verified_deploy verify_and_finish prune_deploy_cmd \
-    refresh_checkout_cmd harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
+    remember_previous_cmd refresh_checkout_cmd harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
     remote_host_cycle host_transaction
   # All subsequent commands are host-local and inherit this login shell's PATH.
   printf '%s\n' 'run_on() { bash -c "$2" 3>&- 4>&-; }' 'run_on_visible() { bash -c "$2" 3>&- 4>&-; }' \
