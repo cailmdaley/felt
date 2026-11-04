@@ -31,6 +31,21 @@ describe('change lanes and coverage', () => {
     const change = bundle(); change.files[0].role = 'docs'
     expect(assignLanes(change).remaining.map(f => f.path)).toEqual(['gen.ts', 'app.ts'])
   })
+  it('matches binary and mode-only patches by identity, independent of inventory order', () => {
+    const change = bundle()
+    change.files = [{ ...change.files[0], path: 'text.ts' }, { ...change.files[0], path: 'é.bin' }]
+    change.patch = 'diff --git "a/\\303\\251.bin" "b/\\303\\251.bin"\nBinary files differ\n' + patch('text.ts')
+    const files = changeFiles(change)
+    expect(files[0].hunks).toHaveLength(2)
+    expect(files[1].hunks).toHaveLength(0)
+    expect(files[1].header).toContain('Binary files differ')
+  })
+  it('matches a metadata-only rename by its declared destination', () => {
+    const change = bundle(); change.files = [{ ...change.files[0], path: 'text.ts' }, { ...change.files[0], path: 'b/new name.ts' }]
+    change.patch = 'diff --git a/old.ts b/b/new name.ts\nsimilarity index 100%\nrename from old.ts\nrename to b/new name.ts\n' + patch('text.ts')
+    expect(changeFiles(change)[1].hunks).toHaveLength(0)
+    expect(changeFiles(change)[1].header).toContain('rename to b/new name.ts')
+  })
   it('retains metadata-only changes in Remaining', () => {
     const change = bundle(); change.patch = 'diff --git a/app.ts b/app.ts\nold mode 100644\nnew mode 100755\n'; change.files = change.files.slice(0, 1)
     expect(assignLanes(change).remaining[0].header).toContain('new mode 100755')

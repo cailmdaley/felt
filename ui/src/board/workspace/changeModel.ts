@@ -33,8 +33,10 @@ export function changeFiles(bundle: ChangeBundle): ChangeFile[] {
     const header = lines.slice(0, first < 0 ? lines.length : first).join('\n')
     const destination = lines.find(line => line.startsWith('+++ '))?.slice(4)
     const source = lines.find(line => line.startsWith('--- '))?.slice(4)
+    const moved = lines.find(line => line.startsWith('rename to ') || line.startsWith('copy to '))?.replace(/^(?:rename|copy) to /, '')
+    const names = lines[0].slice('diff --git '.length).replace(/"(?:\\.|[^"\\])*"/g, unquote)
     const path = destination && destination !== '/dev/null' ? unquote(destination).replace(/^b\//, '')
-      : source ? unquote(source).replace(/^a\//, '') : undefined
+      : source ? unquote(source).replace(/^a\//, '') : moved ? unquote(moved) : undefined
     const hunks: ChangeHunk[] = []
     let hunk: ChangeHunk | undefined, old = 0, next = 0
     for (const line of lines.slice(first < 0 ? lines.length : first)) {
@@ -49,11 +51,11 @@ export function changeFiles(bundle: ChangeBundle): ChangeFile[] {
         if (line[0] === ' ' || line[0] === '+') next++
       }
     }
-    return { path, header, hunks }
+    return { path, names, header, hunks }
   })
-  return bundle.files.map((file, index) => {
-    // Metadata-only changes have no ---/+++ header; Git and the inventory share their order.
-    const patch = patches.find(p => p.path === file.path) ?? patches[index]
+  return bundle.files.map(file => {
+    // Metadata-only changes identify their path in Git's name pair or rename/copy destination.
+    const patch = patches.find(p => p.path === file.path || p.names === `a/${file.path} b/${file.path}`)
     return { ...file, role: bundle.story?.roles?.[file.path] ?? file.role, header: patch?.header ?? '', hunks: patch?.hunks ?? [] }
   })
 }
