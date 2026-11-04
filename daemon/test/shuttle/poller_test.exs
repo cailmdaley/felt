@@ -7156,6 +7156,67 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
+  @tag :claim_evidence
+  test "claim cannot replace an untracked worker whose prior launch is currently unobservable" do
+    id = "tests/claim-held"
+    MockRunner.set_fiber(id, make_fiber(id))
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: claude-sonnet\nruntime:\n  dispatched_at: 2026-11-04T00:00:00Z\n  session_uuid: held-uuid\n",
+      "active"
+    )
+
+    MockRunner.add_tmux_session("capture-claimant")
+    MockRunner.set_ps_result({"ps timed out", :timeout})
+    original = get_in(MockRunner.fiber(id), ["shuttle", "runtime"])
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(poller)
+
+    assert {:error, :already_running} =
+             Poller.claim_session(poller, id, "capture-claimant", session_uuid: "second-uuid")
+
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime"]) == original
+    assert Poller.worker_status(poller, id) == nil
+
+    refute Enum.any?(MockRunner.commands(), fn {command, args} ->
+             command == "tmux" and hd(args) == "rename-session"
+           end)
+  end
+
+  @tag :claim_evidence
+  test "a never-launched fiber remains claimable when ps is unobservable" do
+    id = "tests/claim-unlaunched"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+    MockRunner.add_tmux_session("capture-claimant")
+    MockRunner.set_ps_result({"ps timed out", :timeout})
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(poller)
+
+    assert {:ok, %{session: session}} =
+             Poller.claim_session(poller, id, "capture-claimant", session_uuid: "claimed-uuid")
+
+    assert session == FiberUid.session(id)
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "claimed-uuid"
+  end
+
   # ── Claim (write-and-claim) ──
 
   test "claim registers a live external session: rename, runtime, exit handling" do

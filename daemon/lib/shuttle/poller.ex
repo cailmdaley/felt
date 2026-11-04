@@ -4751,7 +4751,15 @@ defmodule Shuttle.Poller do
     # `<leaf>-<uid>-shuttle` name — a live session under it for a
     # not-yet-running fiber is then refused with :already_running instead of
     # degrading to a rename collision.
-    live_session = live_session_for_fiber(state, fiber_id, uid)
+    live_session =
+      case fetch_fiber_full(fiber_id, state) do
+        {:ok, fiber} ->
+          if Dispatcher.worker_present?(fiber, state.runner),
+            do: Dispatcher.session_name(fiber["id"], fiber["uid"])
+
+        {:error, _} ->
+          nil
+      end
 
     cond do
       running != nil and Shuttle.Terminal.native_ref?(tmux_session) ->
