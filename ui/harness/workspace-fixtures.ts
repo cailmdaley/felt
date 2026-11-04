@@ -444,13 +444,12 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     { id: 'research/workspace/method-note', name: 'Method note' },
     ...NOTE_FIBERS.map(({ id, name }) => ({ id, name })),
   ]
-  const fileMap = new Map(files.map(item => [key(item.owner, item.path), item]))
   const fileResponse = (url: string, method: string, requestHeaders?: HeadersInit): Response => {
     const parsed = new URL(url, 'http://workspace-harness.invalid')
     const path = parsed.searchParams.get('path') ?? ''
     const owner = parsed.searchParams.get('origin') || WORKSPACE_HOST
     // Theme comparisons show each bundled base without the custom fixture layer.
-    const found = path === `${mainDir}/theme.css` && previewFor(WORKSPACE_UID) ? undefined : fileMap.get(key(owner, path))
+    const found = path === `${mainDir}/theme.css` && previewFor(WORKSPACE_UID) ? undefined : files.find(file => file.owner === owner && file.path === path)
     if (parsed.pathname.endsWith('/file-info')) {
       return new Response(JSON.stringify(found
         ? { exists: true, size: found.body.size, modified_at: Math.floor(now / 1000) }

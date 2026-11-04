@@ -36,6 +36,7 @@
  * harness-board-dist/index.html via file://. The page ships with the bundle,
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
+import { addChangeFixtures } from './change-fixtures.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
 import { addSidebarFixtures, addFamilyFixtures, addFrontierFixtures, addThreadFixtures } from './thread-fixtures.js'
 import { KanbanModal } from '../src/board/KanbanModal.js'
@@ -67,7 +68,7 @@ const search = new URLSearchParams(window.location.search)
 const example = search.get('example')
 const transcriptScenario = search.get('transcript')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
-const workspaceFixture = example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' || example === 'sidebar-tree' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
+const workspaceFixture = example === 'change' || example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' || example === 'sidebar-tree' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
 if (workspaceFixture && search.has('long-title')) {
   const fiber = workspaceFixture.feed.fibers.find(row => (row.fiber as Record<string, unknown>).id === WORKSPACE_ID)!.fiber as Record<string, unknown>
   fiber.name = LONG_WORKSPACE_NAME
@@ -82,6 +83,7 @@ if (workspaceFixture && transcriptScenario === 'live') {
   const pdf = workspaceFixture.receipts.find(file => String(file.fullPath).endsWith('response.pdf'))
   if (pdf) workspaceFixture.receipts.push({ ...pdf, timestamp: now + 17_000, sessionId: WORKSPACE_LATEST_SESSION })
 }
+if (workspaceFixture && example === 'change') addChangeFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'nav-back') addNavigationFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
