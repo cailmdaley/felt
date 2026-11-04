@@ -107,6 +107,7 @@ type completion struct {
 	token   string
 	pending string
 	seen    bool
+	cancel  context.CancelCauseFunc
 }
 
 func (c *completion) Write(p []byte) (int, error) {
@@ -122,7 +123,11 @@ func (c *completion) Write(p []byte) (int, error) {
 			c.seen = true
 		}
 	}
-	return os.Stdout.Write(p)
+	n, err := os.Stdout.Write(p)
+	if err != nil {
+		c.cancel(err)
+	}
+	return n, err
 }
 
 func owned(ctx context.Context, until time.Time, cmd *exec.Cmd, control *os.File, feed *os.File) error {
@@ -273,7 +278,7 @@ func run(args []string) error {
 		cmd := exec.Command(args[3], args[4:]...)
 		cmd.WaitDelay = time.Second
 		cmd.Stdin = input
-		proof := &completion{token: args[2]}
+		proof := &completion{token: args[2], cancel: cause}
 		cmd.Stdout = proof
 		cmd.Stderr = os.Stderr
 		go func() {
