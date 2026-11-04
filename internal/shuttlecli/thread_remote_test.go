@@ -24,7 +24,7 @@ func TestThreadFromSubtreeViewSendsNamespacePath(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/fiber/create":
 			bodies.record(t, r)
-			fmt.Fprintf(w, `{"id":%q,"uid":"01JARZ3NDEKTSV4RRFFQ69G5FA"}`, bodies.last()["id"])
+			fmt.Fprint(w, `{"id":"science/team/hub/measure","uid":"01JARZ3NDEKTSV4RRFFQ69G5FA","host":"worker","status":"active"}`)
 		case "/api/v1/project-dir/resolve":
 			fmt.Fprint(w, `{"path":"/remote/project"}`)
 		default:
@@ -57,7 +57,7 @@ func TestThreadRemoteDirectoryValidation(t *testing.T) {
 			var bodies requestBodies
 			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/fiber/create" {
-					_, _ = w.Write([]byte(`{"id":"parent/ask","uid":"01JARZ3NDEKTSV4RRFFQ69G5FA"}`))
+					_, _ = w.Write([]byte(`{"id":"parent/ask","uid":"01JARZ3NDEKTSV4RRFFQ69G5FA","host":"worker","status":"active"}`))
 					return
 				}
 				if r.URL.Path != "/api/v1/project-dir/resolve" {
@@ -148,14 +148,14 @@ func TestRemoteThreadInvalidCreateIdentityIsReportedAsUncertain(t *testing.T) {
 		case "/api/v1/project-dir/resolve":
 			_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
 		case "/api/v1/fiber/create":
-			_, _ = w.Write([]byte(`{"id":"parent/measure","uid":"not-a-ulid"}`))
+			_, _ = w.Write([]byte(`{"id":"parent/measure","uid":"not-a-ulid","host":"worker","status":"active"}`))
 		default:
 			t.Errorf("unexpected request %s", r.URL.String())
 			http.NotFound(w, r)
 		}
 	}))
 	_, _, err := executeIn(t, env, dir, "thread", "parent", "Measure", "--host", "worker", "--project-dir", "/remote/project")
-	if err == nil || !strings.Contains(err.Error(), "may have created thread parent/measure") {
+	if err == nil || !strings.Contains(err.Error(), "fiber may already exist") {
 		t.Fatalf("create response error = %v", err)
 	}
 	if _, err := st.Read("parent/measure"); err == nil {
@@ -175,8 +175,11 @@ func TestRemoteThreadCreatesOnOwnerAndCanBeControlledWithoutMirror(t *testing.T)
 			_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/fiber/create":
 			creates.record(t, r)
-			created := creates.last()
-			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":"01JARZ3NDEKTSV4RRFFQ69G5FA"}`, created["id"])
+			id := "parent/measure"
+			if len(creates.all()) == 2 {
+				id = "parent/measure/build-report"
+			}
+			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":"01JARZ3NDEKTSV4RRFFQ69G5FA","host":"worker","status":"active"}`, id)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/fibers/composite":
 			_, _ = w.Write([]byte(`{"fibers":[{"path":"parent/measure/measure.md","origin":"worker","fiber":{"id":"01JARZ3NDEKTSV4RRFFQ69G5FA","slug":"parent/measure","name":"Measure","status":"open","shuttle":{"kind":"oneshot","host":"worker","agent":"claude-opus","project_dir":"/remote/project"}}}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/fibers/parent/measure":

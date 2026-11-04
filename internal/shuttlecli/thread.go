@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -179,27 +178,12 @@ remote draft made with --disabled stays in this store while you write it;
 				return err
 			}
 			if owner != "" {
-				response, err := a.postOwnerFiberCreate(owner, map[string]any{
-					"id": child.ID, "name": child.Name, "body": child.Body,
-					"frontmatter": map[string]any{
-						"status": string(child.Status), "tags": child.Tags,
-						"shuttle": block,
-					},
-				})
-				if err != nil {
+				// The owner mints the identity and confirms the same write contract
+				// as an install or draft transfer.
+				child.UID = ""
+				if _, err := a.createRemoteFiberWithPath(owner, child, block); err != nil {
 					return remoteRouteError(cmd, args, owner, err)
 				}
-				var created struct {
-					ID  string `json:"id"`
-					UID string `json:"uid"`
-				}
-				if err := json.Unmarshal(response, &created); err != nil {
-					return fmt.Errorf("owner %s may have created thread %s, but its response identity could not be read; inspect it before retrying: %w", owner, child.ID, err)
-				}
-				if created.ID != child.ID || !felt.LooksLikeUID(created.UID) || created.UID != strings.ToUpper(created.UID) {
-					return fmt.Errorf("owner %s may have created thread %s, but returned an invalid identity; inspect it before retrying", owner, child.ID)
-				}
-				child.UID = created.UID
 			} else {
 				child.Touch(child.CreatedAt)
 				if err := a.writeFiber(st, child); err != nil {
