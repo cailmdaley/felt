@@ -378,6 +378,8 @@ defmodule Shuttle.FeltStores do
         Enum.find_value(stores, fn store ->
           case show_resolution([store], path_hint, true) do
             %{uid: ^identifier} = resolved -> {:ok, resolved}
+            :timeout -> {:error, :timeout}
+            {:error, _} = error -> error
             _ -> nil
           end
         end)
