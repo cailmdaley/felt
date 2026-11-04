@@ -182,18 +182,18 @@ func (a *app) gitResolvedCommit(root string) string {
 	return strings.ToLower(commit)
 }
 
-// pluginPayloadDigest hashes relative path, executable mode, and contents for
-// every regular payload file. Release provenance is forbidden in this tree.
+// pluginPayloadDigest hashes relative paths, entry types, executable file mode,
+// and file contents, including empty directories. Release provenance is forbidden.
 func pluginPayloadDigest(root string) (string, error) {
 	var paths []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if info.IsDir() {
+		if path == root {
 			return nil
 		}
-		if !info.Mode().IsRegular() {
+		if !info.IsDir() && !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported plugin payload entry %q", path)
 		}
 		// Codex hashes the entire root, including unrelated metadata and
@@ -219,7 +219,11 @@ func pluginPayloadDigest(root string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(h, "%s\x00%03o\x00", rel, info.Mode().Perm()&0o111)
+		if info.IsDir() {
+			fmt.Fprintf(h, "%s\x00dir\x00", rel)
+			continue
+		}
+		fmt.Fprintf(h, "%s\x00file\x00%03o\x00", rel, info.Mode().Perm()&0o111)
 		file, err := os.Open(path)
 		if err != nil {
 			return "", err
