@@ -216,6 +216,8 @@ untouched by any of this.
 | `shuttle role <fiber> <role-slug> [--new "Office name"]` | Set `shuttle.role` to a role charter slug; `--new` creates a missing charter, and `--clear` clears both role and seat. Preserves lifecycle and execution settings |
 | `shuttle seat <fiber>` | Set `shuttle.seat: true`; requires `shuttle.role`. `--clear` removes the seat field. Preserves lifecycle and execution settings |
 
+Older CLIs can duplicate UID-less documents and delete the sender's copy when resuming across store views; cross-host documents need an intrinsic `id:` UID.
+
 `roles` and `role --new` use the enclosing shared store's `roles/` namespace when the project is a view into that store.
 Nested charter notes are excluded from the list.
 `role --new` validates the slug before creating anything and leaves existing charters untouched.
