@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
@@ -44,6 +45,16 @@ func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt,
 		return nil, nil
 	}
 	lookup, err := a.lookupShuttleAddressFibers(target)
+	if err != nil || len(lookup.Ambiguous) > 0 {
+		return nil, nil
+	}
+	if len(lookup.Fibers) == 0 {
+		var ownerFibers []*felt.Felt
+		ownerFibers, err = a.ownerFeedFibers(target)
+		if len(ownerFibers) > 0 {
+			lookup = addressFiberLookup{Fibers: ownerFibers}
+		}
+	}
 	if err != nil || lookup.refused() || len(lookup.Fibers) != 1 {
 		return nil, nil
 	}
