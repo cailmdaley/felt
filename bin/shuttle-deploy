@@ -241,7 +241,12 @@ fi
 if [ "$PUSH" = 1 ]; then
   say "push (target $TARGET_SHA)"
   if [ -n "$DEPLOY_REF" ]; then
-    git -C "$REPO" push origin "$DEPLOY_REF" && ok "pushed" || { bad "git push failed"; exit 1; }
+    PUSH_REF="$(git -C "$REPO" rev-parse --symbolic-full-name "$DEPLOY_REF")" || exit 1
+    if [ -n "$PUSH_REF" ]; then
+      git -C "$REPO" push origin "$PUSH_REF" && ok "pushed" || { bad "git push failed"; exit 1; }
+    else
+      ok "target $TARGET_SHA is a commit, not a ref to push"
+    fi
   else
     git -C "$REPO" push && ok "pushed" || { bad "git push failed"; exit 1; }
   fi

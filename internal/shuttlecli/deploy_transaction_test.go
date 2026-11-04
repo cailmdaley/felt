@@ -248,6 +248,17 @@ func fleetTouch(t *testing.T, path string) {
 	}
 }
 
+func TestDeployCommitRefDoesNotPushAnObjectAsABranch(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	cmd := exec.Command("bash", filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", "fake", "--ref", f.sha[:8])
+	cmd.Env = f.env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("commit ref deployment: %v %s", err, out)
+	}
+}
+
 func TestDeployFirstPinnedTreeSeedsRegularCheckoutCaches(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
