@@ -17,6 +17,14 @@ defmodule Shuttle.Terminal.RexRealTest do
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
+  defmodule CrashAfterCreateRunner do
+    def cmd(command, args, opts) do
+      result = Shuttle.Runner.Default.cmd(command, args, opts)
+      if Shuttle.Env.app(:rex_crash_operation) in args, do: throw(:rex_launch_crash)
+      result
+    end
+  end
+
   defmodule RexMustNotRun do
     def cmd(command, args, _opts),
       do:
@@ -222,6 +230,77 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {:ok, [%{"label" => "└ b"}]} = Rex.windows(@runner, sid)
     assert {"", 0} = Terminal.stop(@runner, b, backends: [Backend])
     assert {:ok, []} = Rex.sessions(@runner)
+  end
+
+  for operation <- ["session.create", "session.new_window"] do
+    test "a crash after real Rex #{operation} preserves provable native ownership", %{root: root} do
+      Env.put_app_env(:terminal_backend, Backend)
+      family = "work/crash-family"
+      Shuttle.Test.RexFamilyStore.write(root, [family, family <> "/a", family <> "/b"])
+
+      if unquote(operation) == "session.new_window" do
+        assert :ok =
+                 Terminal.launch(
+                   @runner,
+                   "crash-sibling-a",
+                   root,
+                   Backend.script("crash-sibling-a").env <> "sleep 300\n",
+                   fiber: family <> "/a"
+                 )
+      end
+
+      name = "crash-binding-b"
+      Env.put_app_env(:rex_crash_operation, unquote(operation))
+
+      assert catch_throw(
+               Terminal.launch(
+                 CrashAfterCreateRunner,
+                 name,
+                 root,
+                 Backend.script(name).env <> "sleep 300\n",
+                 fiber: family <> "/b"
+               )
+             ) == :rex_launch_crash
+
+      assert {:ok, %{"rex" => intent, "script" => reserved_script}} =
+               Terminal.LaunchAttempts.get(name)
+
+      assert is_binary(intent["instance"]), inspect(intent)
+      await(fn -> match?({:ok, _}, Backend.identity(@runner, name)) end)
+      assert {:ok, procs} = WorkerProcess.scan(@runner)
+      assert {:ok, %{"child_pid" => script_pid}} = Backend.identity(@runner, name)
+
+      assert %{pid: ^script_pid} =
+               WorkerProcess.script_process(
+                 Enum.filter(procs, &(&1.pid == script_pid)),
+                 reserved_script
+               )
+
+      assert {:ok, identity} = Rex.whoami(@runner)
+      assert identity["instance_id"] == intent["instance"]
+      assert {:ok, doc} = RexBindings.read()
+      assert doc["instance"] in [nil, intent["instance"]], inspect({doc, intent})
+      assert doc["server"] in [nil, intent["server"]], inspect({doc, intent})
+
+      assert get_in(doc, ["families", intent["family"]]) in [
+               nil,
+               doc["bindings"][name]["session_id"]
+             ],
+             inspect({doc, intent})
+
+      refute doc["bindings"][name]["recovered"]
+      assert doc["bindings"][name]["family"] == family
+      assert {:ok, attempt} = Terminal.LaunchAttempts.get(name)
+      refute attempt["rex"]
+      assert {"", 0} = Terminal.stop(@runner, name, backends: [Backend])
+
+      if unquote(operation) == "session.new_window" do
+        assert :present = Backend.probe(@runner, "crash-sibling-a")
+        assert {"", 0} = Terminal.stop(@runner, "crash-sibling-a", backends: [Backend])
+      end
+
+      assert {:ok, []} = Rex.sessions(@runner)
+    end
   end
 
   test "a 120-character fiber leaf launches with bounded display and block labels", %{root: root} do

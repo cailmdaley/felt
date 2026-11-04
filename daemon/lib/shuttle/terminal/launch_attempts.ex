@@ -49,6 +49,30 @@ defmodule Shuttle.Terminal.LaunchAttempts do
     end)
   end
 
+  def prepare_binding(name, script, intent),
+    do: change_script(name, script, &Map.put(&1, "rex", intent))
+
+  def commit_binding(name, script),
+    do: change_script(name, script, &Map.delete(&1, "rex"))
+
+  defp change_script(name, script, change) do
+    locked(name, fn ->
+      case FS.read(path(name)) do
+        {:ok, raw} ->
+          case decode(name, raw) do
+            %{"script" => ^script} = info -> write(name, change.(info))
+            _ -> {:error, :reservation_changed}
+          end
+
+        {:error, :enoent} ->
+          :ok
+
+        {:error, _} = error ->
+          error
+      end
+    end)
+  end
+
   @doc "Prepared metadata is usable only for the exact live script recorded before launch."
   def prepared(name, runner) do
     case get(name) do

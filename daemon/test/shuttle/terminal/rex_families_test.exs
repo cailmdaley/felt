@@ -57,6 +57,55 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
     assert Enum.count(FakeRex.calls(), fn {_, args, _} -> "session.new_window" in args end) == 1
   end
 
+  defmodule CrashAfterWindowRunner do
+    def cmd(command, args, opts) do
+      result = FakeRex.cmd(command, args, opts)
+      if "session.new_window" in args, do: throw(:crash_after_window)
+      result
+    end
+  end
+
+  @tag :owned_binding
+  test "a reserved script proves ownership after Rex creates a sibling but before its binding lands",
+       %{tmp_dir: dir} do
+    Env.put_app_env(:terminal_backend, Backend)
+    assert :ok = launch("a", @root <> "/a")
+
+    assert catch_throw(
+             Shuttle.Terminal.launch(CrashAfterWindowRunner, "b", dir, "sleep 300\n",
+               fiber: @root <> "/b"
+             )
+           ) == :crash_after_window
+
+    assert {:ok, %{"script" => script}} = Shuttle.Terminal.LaunchAttempts.get("b")
+    assert {:ok, doc} = RexBindings.read()
+    refute doc["bindings"]["b"]
+    assert :present = Backend.probe(FakeRex, "b")
+    assert {:error, _} = Backend.close(FakeRex, "b")
+    sid = doc["bindings"]["a"]["session_id"]
+    block = Enum.find(FakeRex.state().sessions[sid].blocks, &(&1["label"] == "b"))
+    path = RexBindings.pid_path(block["block_id"])
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "812\n#{sid}\n#{block["block_id"]}\n")
+    FakeRex.reply("ps", {"812 1 bash -l /tmp/shuttle-run-b.999.sh\n", 0})
+    assert {:error, _} = Backend.close(FakeRex, "b")
+    FakeRex.reply("ps", {"812 1 bash -l #{script}\n", 0})
+
+    FakeRex.reply(
+      "whoami",
+      {Jason.encode!(Map.put(FakeRex.fixture("whoami"), "instance_id", "different-instance")), 0}
+    )
+
+    assert {:error, _} = Backend.close(FakeRex, "b")
+    FakeRex.reply("whoami", {Jason.encode!(FakeRex.fixture("whoami")), 0})
+    assert :present = Backend.probe(FakeRex, "b")
+    assert {:ok, recovered} = RexBindings.read()
+    refute recovered["bindings"]["b"]["recovered"]
+    assert recovered["bindings"]["b"]["family"] == @root
+    assert :ok = Backend.close(FakeRex, "b")
+    assert :present = Backend.probe(FakeRex, "a")
+  end
+
   test "a new server instance retires restored worker and viewer windows before recovery" do
     assert :ok = launch("a", @root <> "/a")
     assert {:ok, sid} = Backend.viewer(FakeRex, "b@remote", ["sleep", "60"], fiber: @root <> "/b")

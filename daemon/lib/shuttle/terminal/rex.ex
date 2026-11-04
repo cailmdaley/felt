@@ -6,6 +6,7 @@ defmodule Shuttle.Terminal.Rex do
   alias Shuttle.{Env, Rex, WorkerProcess}
   alias Shuttle.Terminal.RexBindings, as: Bindings
   alias Shuttle.Terminal.RexTree, as: Tree
+  alias Shuttle.Terminal.LaunchAttempts
 
   @impl true
   def id, do: "rex"
@@ -171,10 +172,19 @@ defmodule Shuttle.Terminal.Rex do
          {:ok, family} <- Tree.resolve(opts[:fiber] || Tree.fiber_for(name), opts) do
       spec = create_spec(name, cwd, script_path, opts)
 
-      case in_family(runner, family, name, spec, server, fn binding ->
-             with :ok <- Bindings.put(name, binding, server),
-                  do: Bindings.set_instance(identity["instance_id"])
-           end) do
+      case in_family(
+             runner,
+             family,
+             name,
+             spec,
+             server,
+             fn binding ->
+               with :ok <- Bindings.put(name, binding, server),
+                    :ok <- Bindings.set_instance(identity["instance_id"]),
+                    do: LaunchAttempts.commit_binding(name, script_path)
+             end,
+             %{script: script_path, instance: identity["instance_id"]}
+           ) do
         {:ok, _} -> :ok
         error -> error
       end
@@ -229,7 +239,7 @@ defmodule Shuttle.Terminal.Rex do
   defp family_lock(root, fun),
     do: Shuttle.Terminal.with_lock({__MODULE__, Bindings.path(), :family, root}, fun)
 
-  defp in_family(runner, family, name, spec, server, store) do
+  defp in_family(runner, family, name, spec, server, store, launch \\ nil) do
     root = if family, do: family.family, else: name
 
     family_lock(root, fn ->
@@ -249,29 +259,48 @@ defmodule Shuttle.Terminal.Rex do
             do: Map.put(window, "window_label", Tree.display_label(entry.label)),
             else: window
 
-        result =
-          if existing do
-            with {:ok, reply} <- Rex.new_window(runner, sid, window),
-                 do: window_binding(sid, reply)
-          else
-            spec = %{
-              spec
-              | "label" =>
-                  if(family,
-                    do: Tree.display_label(Tree.session_label(root)),
-                    else: spec["label"]
-                  ),
-                "initial_windows" => [window]
+        prepared =
+          if launch do
+            intent = %{
+              "server" => server,
+              "instance" => launch.instance,
+              "family" => root,
+              "depth" => entry.depth,
+              "fiber" => if(family, do: family.fiber),
+              "scope" => if(existing, do: "window", else: "session"),
+              "session_id" => if(existing, do: sid)
             }
 
-            with {:ok, reply} <- Rex.create(runner, spec),
-                 {:ok, b} <- created_binding(reply) do
-              case Bindings.put_family(root, b["session_id"], server) do
-                :ok ->
-                  {:ok, b}
+            LaunchAttempts.prepare_binding(name, launch.script, intent)
+          else
+            :ok
+          end
 
-                error ->
-                  launch_cleanup(error, fn -> Rex.destroy(runner, b["session_id"]) end)
+        result =
+          with :ok <- prepared do
+            if existing do
+              with {:ok, reply} <- Rex.new_window(runner, sid, window),
+                   do: window_binding(sid, reply)
+            else
+              spec = %{
+                spec
+                | "label" =>
+                    if(family,
+                      do: Tree.display_label(Tree.session_label(root)),
+                      else: spec["label"]
+                    ),
+                  "initial_windows" => [window]
+              }
+
+              with {:ok, reply} <- Rex.create(runner, spec),
+                   {:ok, b} <- created_binding(reply) do
+                case Bindings.put_family(root, b["session_id"], server) do
+                  :ok ->
+                    {:ok, b}
+
+                  error ->
+                    launch_cleanup(error, fn -> Rex.destroy(runner, b["session_id"]) end)
+                end
               end
             end
           end
@@ -996,16 +1025,18 @@ defmodule Shuttle.Terminal.Rex do
   # A successful block inventory proves the session exists too. Only a missing
   # session needs a fleet-wide label scan; transport uncertainty keeps its binding.
   defp resolve_bound(runner, name, b, opts) do
-    case live_block(runner, name, b, opts) do
-      {:error, :not_found} = absent ->
-        if current_binding(name) == b do
-          with :ok <- Bindings.delete(name, b), do: recover_name(runner, name)
-        else
-          absent
-        end
+    with {:ok, b} <- upgrade_pending_binding(runner, name, b) do
+      case live_block(runner, name, b, opts) do
+        {:error, :not_found} = absent ->
+          if current_binding(name) == b do
+            with :ok <- Bindings.delete(name, b), do: recover_name(runner, name)
+          else
+            absent
+          end
 
-      result ->
-        result
+        result ->
+          result
+      end
     end
   end
 
@@ -1059,6 +1090,44 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
+  defp upgrade_pending_binding(_runner, _name, b) when not is_map_key(b, "recovered"),
+    do: {:ok, b}
+
+  defp upgrade_pending_binding(runner, name, b) do
+    with {:ok, %{"rex" => intent, "script" => script}} <- LaunchAttempts.get(name),
+         %{"server" => server, "instance" => instance, "family" => root, "scope" => scope} <-
+           intent,
+         true <- is_binary(instance) and scope in ["session", "window"],
+         true <- scope == "session" or intent["session_id"] == b["session_id"],
+         {:ok, %{"host_id" => ^server, "instance_id" => ^instance}} <- Rex.whoami(runner),
+         {:ok, procs} <- WorkerProcess.scan(runner),
+         {:ok, pid} <- worker_pid(name, b, procs),
+         %{pid: ^pid} <-
+           WorkerProcess.script_process(Enum.filter(procs, &(&1.pid == pid)), script) do
+      family_lock(root, fn ->
+        with {:ok, doc} <- Bindings.read(),
+             true <- doc["server"] in [nil, server] and doc["instance"] in [nil, instance],
+             true <- get_in(doc, ["families", root]) in [nil, b["session_id"]] do
+          owned =
+            b
+            |> Map.drop(["recovered", "session_owned"])
+            |> Map.merge(Map.take(intent, ["family", "depth", "fiber"]))
+
+          with :ok <- Bindings.put_family(root, b["session_id"], server),
+               :ok <- Bindings.put(name, owned, server),
+               :ok <- Bindings.set_instance(instance),
+               :ok <- LaunchAttempts.commit_binding(name, script),
+               do: {:ok, owned}
+        else
+          false -> {:ok, b}
+          error -> error
+        end
+      end)
+    else
+      _ -> {:ok, b}
+    end
+  end
+
   defp recover_block(runner, name, sid) do
     with {:ok, blocks} <- Rex.blocks(runner, sid) do
       # Native claims may select a sole human pane. Name recovery requires
@@ -1074,7 +1143,10 @@ defmodule Shuttle.Terminal.Rex do
 
           if name do
             b = Map.put(b, "recovered", true)
-            with :ok <- store(runner, name, b), do: {:ok, b}
+
+            with {:ok, b} <- upgrade_pending_binding(runner, name, b),
+                 :ok <- store(runner, name, b),
+                 do: {:ok, b}
           else
             {:ok, b}
           end
