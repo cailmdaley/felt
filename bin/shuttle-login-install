@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Install login recovery from the selected release on its live owner node.
+set -euo pipefail
+
+case "${1:-}" in
+  -h|--help)
+    echo 'Usage: bin/shuttle-login-install'
+    echo 'Install login recovery from the selected release; run on the node serving its daemon.'
+    exit 0
+    ;;
+  '') ;;
+  *) echo "unexpected argument: $1" >&2; exit 2 ;;
+esac
+
+if [ "$(uname -s)" != Linux ]; then
+  echo "login recovery install requires Linux" >&2
+  exit 1
+fi
+
+repo_file="$HOME/.shuttle/repo"
+if [ ! -s "$repo_file" ]; then
+  echo "missing selected release pointer: $repo_file" >&2
+  exit 1
+fi
+repo=$(head -n 1 "$repo_file")
+case "$repo" in
+  */bin/rel) repo=${repo%/bin/rel} ;;
+esac
+if [ ! -x "$repo/bin/shuttle-launch" ] \
+  || [ ! -x "$repo/bin/tailscaled-launch" ] \
+  || [ ! -x "$repo/bin/shuttle-ensure" ]; then
+  echo "selected path does not contain the login recovery helpers: $repo" >&2
+  exit 1
+fi
+
+shuttle_cli="$HOME/.local/bin/shuttle"
+if [ ! -x "$shuttle_cli" ]; then
+  echo "missing installed Shuttle CLI: $shuttle_cli" >&2
+  exit 1
+fi
+if ! env -u SHUTTLE_DAEMON_URL "$shuttle_cli" daemon status >/dev/null 2>&1; then
+  echo "the selected Shuttle daemon does not answer locally; leaving owner-node unset" >&2
+  exit 1
+fi
+
+node=$(hostname -s 2>/dev/null || hostname)
+node=${node%%.*}
+owner=${SHUTTLE_OWNER_NODE:-$node}
+owner=${owner%%.*}
+if [ -z "$node" ] || [ "$owner" != "$node" ]; then
+  echo "install login recovery on the node serving the daemon ($node), not $owner" >&2
+  exit 1
+fi
+if [ -s "$HOME/.shuttle/owner-node" ] \
+  && [ "$(head -n 1 "$HOME/.shuttle/owner-node")" != "$node" ]; then
+  echo 'owner-node differs from this node; resolve ownership before installing login recovery' >&2
+  exit 1
+fi
+
+mkdir -p "$HOME/.local/bin" "$HOME/.shuttle"
+# Shared-home first installs must not overwrite a concurrent node's claim.
+if ! (set -o noclobber; printf '%s\n' "$owner" > "$HOME/.shuttle/owner-node") 2>/dev/null; then
+  if [ "$(head -n 1 "$HOME/.shuttle/owner-node")" != "$node" ]; then
+    echo 'another node claimed ownership; leaving its login recovery unchanged' >&2
+    exit 1
+  fi
+fi
+
+for helper in shuttle-launch tailscaled-launch shuttle-ensure; do
+  rm -f "$HOME/.local/bin/$helper"
+  cp "$repo/bin/$helper" "$HOME/.local/bin/$helper"
+  chmod +x "$HOME/.local/bin/$helper"
+done
+
+login_shell=${SHELL:-}
+login_shell=${login_shell##*/}
+case "$login_shell" in
+  zsh) profile="$HOME/.zprofile" ;;
+  bash)
+    if [ -e "$HOME/.bash_profile" ]; then profile="$HOME/.bash_profile"
+    elif [ -e "$HOME/.bash_login" ]; then profile="$HOME/.bash_login"
+    else profile="$HOME/.profile"; fi
+    ;;
+  *) profile="" ;;
+esac
+
+if [ -n "$profile" ] && ! grep -Fq '# shuttle-ensure' "$profile" 2>/dev/null; then
+  cat >> "$profile" <<'PROFILE'
+
+# shuttle-ensure
+if [ -x "$HOME/.local/bin/shuttle-ensure" ]; then
+  "$HOME/.local/bin/shuttle-ensure"
+fi
+PROFILE
+fi
+
+printf 'Installed login recovery helpers from %s; daemon owner: %s\n' \
+  "$repo" "$(head -n 1 "$HOME/.shuttle/owner-node")"

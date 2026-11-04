@@ -234,6 +234,7 @@ migrate-test:
 bootstrap-test:
 	bash scripts/test-bootstrap.sh
 	bash scripts/test-shuttle-ensure.sh
+	bash scripts/test-shuttle-login-install.sh
 
 # The shell layer the Go and Elixir suites cannot reach: hooks.json's
 # ${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT} fallback and felt-bin.sh's PATH

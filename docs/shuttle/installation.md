@@ -518,6 +518,13 @@ the other platform's file for inspection, and it is accepted *only* alongside
 
 ### Cluster login recovery and Rex
 
+For an existing deployment, run `bin/shuttle-login-install` from a checkout on
+the node that serves the daemon, after deploying the matching CLI and daemon.
+It installs the helpers and profile hook from the selected release without
+restarting services, and refuses to stamp ownership unless the daemon answers
+locally and the owner pin agrees with this node.
+Run this step on each Linux host after `bin/shuttle-deploy` when adding login recovery.
+
 On Linux, `scripts/bootstrap.sh` installs `shuttle-ensure` and adds it to the
 Bash or Zsh login profile. It records the short hostname that ran bootstrap in
 `~/.shuttle/owner-node`; set `SHUTTLE_OWNER_NODE` during bootstrap to choose a
