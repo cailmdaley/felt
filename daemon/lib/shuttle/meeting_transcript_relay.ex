@@ -1,26 +1,208 @@
 defmodule Shuttle.Meeting.TranscriptRelay do
   @moduledoc false
+  use Supervisor
+
+  @state_dir "meeting-transcript-relays"
+
+  def start_link(opts \\ []) do
+    server = Keyword.get(opts, :name, __MODULE__)
+    Supervisor.start_link(__MODULE__, opts, name: supervisor_name(server))
+  end
+
+  def start(row, fiber_id, origin, opts \\ []) do
+    server = Keyword.get(opts, :server, __MODULE__)
+    GenServer.call(coordinator_name(server), {:start, row, fiber_id, origin})
+  end
+
+  @impl true
+  def init(opts) do
+    server = Keyword.get(opts, :name, __MODULE__)
+    directory = Keyword.get(opts, :directory, Path.join(Shuttle.data_dir(), @state_dir))
+
+    children = [
+      {DynamicSupervisor, strategy: :one_for_one, name: dynamic_name(server)},
+      {Shuttle.Meeting.TranscriptRelay.Coordinator,
+       Keyword.merge(opts,
+         name: coordinator_name(server),
+         directory: directory,
+         dynamic: dynamic_name(server)
+       )}
+    ]
+
+    Supervisor.init(children, strategy: :one_for_all)
+  end
+
+  defp supervisor_name(server), do: Module.concat(server, Supervisor)
+  defp coordinator_name(server), do: Module.concat(server, Coordinator)
+  defp dynamic_name(server), do: Module.concat(server, DynamicSupervisor)
+end
+
+defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
+  @moduledoc false
+  use GenServer
+
+  def start_link(opts),
+    do: GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
+
+  @impl true
+  def init(opts) do
+    directory = Keyword.fetch!(opts, :directory)
+    dynamic = Keyword.fetch!(opts, :dynamic)
+    state = %{directory: directory, dynamic: dynamic, options: opts, workers: %{}}
+    {:ok, recover(state)}
+  end
+
+  @impl true
+  def handle_call({:start, row, fiber_id, origin}, _from, state) do
+    transcript = value(row, :transcript)
+
+    config = %{
+      "launch" => value(row, :launch),
+      "fiber_id" => fiber_id,
+      "origin" => origin,
+      "transcript" => transcript,
+      "title" => value(row, :title) || Path.basename(transcript || "meeting.txt", ".txt"),
+      "offset" => 0
+    }
+
+    if Enum.all?(
+         [config["launch"], config["fiber_id"], transcript],
+         &(is_binary(&1) and &1 != "")
+       ) do
+      {reply, state} = start_worker(state, config, false)
+      {:reply, if(match?({:ok, _}, reply), do: :ok, else: reply), state}
+    else
+      {:reply, {:error, :invalid_meeting}, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    workers = Map.reject(state.workers, fn {_launch, {_pid, monitor}} -> monitor == ref end)
+    {:noreply, %{state | workers: workers}}
+  end
+
+  def handle_info({:worker_started, launch, pid}, state) do
+    case Map.get(state.workers, launch) do
+      {_old_pid, old_ref} -> Process.demonitor(old_ref, [:flush])
+      nil -> :ok
+    end
+
+    ref = Process.monitor(pid)
+    {:noreply, %{state | workers: Map.put(state.workers, launch, {pid, ref})}}
+  end
+
+  defp recover(state) do
+    case Shuttle.FS.ls(state.directory) do
+      {:ok, files} ->
+        Enum.reduce(files, state, fn file, acc ->
+          if String.ends_with?(file, ".json") do
+            path = Path.join(acc.directory, file)
+
+            case Shuttle.FS.read(path) do
+              {:ok, bytes} ->
+                case Jason.decode(bytes) do
+                  {:ok, %{"launch" => _launch} = config} ->
+                    elem(start_worker(acc, config, true), 1)
+
+                  _ ->
+                    acc
+                end
+
+              _ ->
+                acc
+            end
+          else
+            acc
+          end
+        end)
+
+      _ ->
+        state
+    end
+  end
+
+  defp start_worker(state, config, recovering?) do
+    launch = config["launch"]
+
+    case Map.get(state.workers, launch) do
+      {pid, _ref} when is_pid(pid) ->
+        {{:ok, :already_running}, state}
+
+      nil ->
+        path = Path.join(state.directory, state_file(launch))
+
+        with :ok <- ensure_config(path, config, recovering?),
+             opts <- [
+               file: path,
+               coordinator: self(),
+               poll_ms: Keyword.get(state.options, :poll_ms, 5_000),
+               deliver:
+                 Keyword.get(
+                   state.options,
+                   :deliver,
+                   &Shuttle.Meeting.TranscriptRelay.Worker.deliver/1
+                 ),
+               observe:
+                 Keyword.get(
+                   state.options,
+                   :observe,
+                   &Shuttle.Meeting.TranscriptRelay.Worker.observe/0
+                 )
+             ],
+             {:ok, pid} <-
+               DynamicSupervisor.start_child(
+                 state.dynamic,
+                 {Shuttle.Meeting.TranscriptRelay.Worker, opts}
+               ) do
+          ref = Process.monitor(pid)
+          {{:ok, pid}, put_in(state.workers[launch], {pid, ref})}
+        else
+          {:error, reason} -> {{:error, reason}, state}
+        end
+    end
+  end
+
+  defp ensure_config(path, config, recovering?) do
+    with :ok <- Shuttle.FS.mkdir_p(Path.dirname(path)) do
+      case Shuttle.FS.read(path) do
+        {:ok, _existing} when recovering? -> :ok
+        {:ok, _existing} -> :ok
+        {:error, _} -> Shuttle.FS.write_atomic(path, Jason.encode!(config) <> "\n")
+      end
+    end
+  end
+
+  defp state_file(launch) do
+    digest = :crypto.hash(:sha256, launch) |> Base.encode16(case: :lower)
+    digest <> ".json"
+  end
+
+  defp value(row, key), do: Map.get(row, key) || Map.get(row, Atom.to_string(key))
+end
+
+defmodule Shuttle.Meeting.TranscriptRelay.Worker do
+  @moduledoc false
   use GenServer
 
   require Logger
 
   @poll_ms 5_000
   @batch_lines 30
-  @state_file "meeting-transcript-relay.json"
 
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
-  end
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
-  @doc "Start forwarding transcript batches for a joined meeting."
-  def start(row, fiber_id, origin, opts \\ []) do
-    server = Keyword.get(opts, :server, __MODULE__)
-    GenServer.call(server, {:start, row, fiber_id, origin})
+  def child_spec(opts) do
+    %{
+      id: {__MODULE__, Keyword.fetch!(opts, :file)},
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :transient
+    }
   end
 
   @impl true
   def init(opts) do
-    file = Keyword.get(opts, :file, Path.join(Shuttle.data_dir(), @state_file))
+    file = Keyword.fetch!(opts, :file)
 
     state = %{
       file: file,
@@ -30,33 +212,15 @@ defmodule Shuttle.Meeting.TranscriptRelay do
       observe: Keyword.get(opts, :observe, &observe/0)
     }
 
+    if state.config,
+      do:
+        send(
+          Keyword.fetch!(opts, :coordinator),
+          {:worker_started, state.config["launch"], self()}
+        )
+
     schedule(state.poll_ms)
     {:ok, state}
-  end
-
-  @impl true
-  def handle_call({:start, row, fiber_id, origin}, _from, state) do
-    config = %{
-      "launch" => value(row, :launch),
-      "fiber_id" => fiber_id,
-      "origin" => origin,
-      "transcript" => value(row, :transcript),
-      "title" =>
-        value(row, :title) || Path.basename(value(row, :transcript) || "meeting.txt", ".txt"),
-      "offset" => 0
-    }
-
-    if Enum.all?(
-         [config["launch"], config["fiber_id"], config["transcript"]],
-         &(is_binary(&1) and &1 != "")
-       ) do
-      case write_config(state.file, config) do
-        :ok -> {:reply, :ok, %{state | config: config}}
-        {:error, reason} -> {:reply, {:error, reason}, state}
-      end
-    else
-      {:reply, {:error, :invalid_meeting}, state}
-    end
   end
 
   @impl true
@@ -74,8 +238,12 @@ defmodule Shuttle.Meeting.TranscriptRelay do
       :ended -> Logger.info("meeting transcript relay ended")
     end
 
-    schedule(state.poll_ms)
-    {:noreply, state}
+    if outcome == :ended do
+      {:stop, :normal, state}
+    else
+      schedule(state.poll_ms)
+      {:noreply, state}
+    end
   end
 
   defp poll(state) do
@@ -225,14 +393,14 @@ defmodule Shuttle.Meeting.TranscriptRelay do
   defp confirmed?(%{"delivered" => true}), do: true
   defp confirmed?(_outcome), do: false
 
-  defp deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: message_id}) do
+  def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: message_id}) do
     ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", %{
       "daemon_sender" => true,
       "message_id" => message_id
     })
   end
 
-  defp observe, do: Shuttle.Meeting.show()
+  def observe, do: Shuttle.Meeting.show()
 
   defp finish(state) do
     Shuttle.FS.rm(state.file)
@@ -268,6 +436,5 @@ defmodule Shuttle.Meeting.TranscriptRelay do
          do: :ok
   end
 
-  defp value(row, key), do: Map.get(row, key) || Map.get(row, Atom.to_string(key))
   defp schedule(ms), do: Process.send_after(self(), :poll, ms)
 end

@@ -38,7 +38,9 @@ defmodule Shuttle.ThreadsTest do
 
   defp claim_test_daemon_owner!(home) do
     {hostname, 0} = System.cmd("hostname", [])
-    hostname = String.trim(hostname)
+
+    hostname =
+      hostname |> String.trim() |> String.downcase() |> String.split(".", parts: 2) |> hd()
 
     listen_network = "tcp"
     listen_address = "127.0.0.1:4000"
