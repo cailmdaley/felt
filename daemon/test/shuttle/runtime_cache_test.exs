@@ -40,7 +40,7 @@ defmodule Shuttle.RuntimeCacheTest do
     """
 
     assert {"boot lookup ok\n", 0} =
-             System.cmd("elixir", ["-pa", "_build/test/lib/shuttle/ebin", "-e", script],
+             System.cmd("elixir", ["-pa", Application.app_dir(:shuttle, "ebin"), "-e", script],
                env: [{"ERL_FLAGS", "+S 2:2"}],
                stderr_to_stdout: true
              )
