@@ -174,7 +174,8 @@ type Private = {
     plan: { writes: Array<{ fiberId: string; newDep: string }>; protectedIds: string[] },
   ) => Promise<void>
   showBanner: (message: string, kind: 'error' | 'info') => void
-  transition: (c: KanbanCard, target: 'tempered' | 'composted') => void
+  fetchAndRender: () => Promise<void>
+  transition: (c: KanbanCard, target: 'tempered' | 'composted' | 'inFlight') => void
   setSurface: (c: KanbanCard, h: 'now' | 'stashed', o?: { cold?: boolean; due?: string | null }) => void
   livePatch: (
     c: KanbanCard,
@@ -435,6 +436,49 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
       origin: 'local',
       unset: ['horizon', 'cold'],
     })
+  })
+})
+
+describe('optimistic response cache coherence', () => {
+  it.each([1, 2])('reconciles refused launches unconditionally after all %s gestures settle', async count => {
+    const cards = Array.from({ length: count }, (_, i) => card({ id: `task-${i}`, shuttleProjectDir: '/work' }))
+    const feed = { host: 'local', fibers: cards.map(c => ({
+      origin: 'local', felt_store: '/store', path: c.path,
+      fiber: { id: c.id, name: c.name, status: 'open', shuttle: { kind: 'oneshot', project_dir: '/work' } },
+    })) }
+    const replies: Array<(res: Response) => void> = []
+    const reads: Headers[] = []
+    globalThis.fetch = vi.fn(async (input, init) => {
+      if (String(input).includes('/fibers/composite')) {
+        const headers = new Headers(init?.headers)
+        reads.push(headers)
+        return headers.get('If-None-Match') === '"same"'
+          ? new Response(null, { status: 304 })
+          : Response.json(feed, { headers: { ETag: '"same"' } })
+      }
+      if (String(input).includes('/dispatch')) return new Promise<Response>(resolve => replies.push(resolve))
+      return Response.json({})
+    }) as typeof fetch
+    const board = asPrivate(makeBoard())
+    const failed = new Promise<void>(resolve => {
+      vi.spyOn(board, 'showBanner').mockImplementation(() => resolve())
+    })
+    await board.fetchAndRender()
+    for (const c of cards) board.transition(c, 'inFlight')
+    await vi.waitFor(() => expect(replies).toHaveLength(count))
+    expect(board.lastResponse?.now.inFlight).toHaveLength(count)
+    replies[0](Response.json({ error: 'refused' }, { status: 422 }))
+    if (count === 2) {
+      // A completed gesture must not erase the other one's outstanding paint.
+      await failed
+      expect(reads).toHaveLength(1)
+      expect(board.lastResponse?.now.inFlight).toHaveLength(2)
+      replies[1](Response.json({ error: 'refused' }, { status: 422 }))
+    }
+    await vi.waitFor(() => expect(reads).toHaveLength(2))
+    expect(reads[1].has('If-None-Match')).toBe(false)
+    await vi.waitFor(() => expect(board.lastResponse?.now.drafts).toHaveLength(count))
+    expect(board.lastResponse?.now.inFlight).toHaveLength(0)
   })
 })
 

@@ -294,7 +294,7 @@ export class KanbanModal {
    * How many multi-write gestures are still landing.
    *
    * A counter keeps nested writes from releasing the poll guard early.
-   * The gesture's own refetch always runs.
+   * The last gesture fetches an authoritative response for all of them.
    */
   private gestureDepth = 0
   private workspace: Workspace | null = null
@@ -1299,10 +1299,9 @@ export class KanbanModal {
     target: ColumnKind,
     needSurfaceShift: boolean,
   ): Promise<void> {
-    // Held across the writes AND the trailing reconcile: the launch half can
-    // take seconds, and until the daemon has actually dispatched, the honest
-    // server answer is "this card is a draft" — true, and not what was asked
-    // for. The poll stays out until the refetch below settles it.
+    // Held across outstanding writes: a launch can take seconds, during
+    // which a poll would erase its optimistic placement with the old draft.
+    // The last completed gesture releases the poll and reconciles.
     this.gestureDepth += 1
     try {
       if (needSurfaceShift) {
@@ -1336,13 +1335,9 @@ export class KanbanModal {
       this.showBanner(`Couldn't move “${card.name}” to ${COLUMN_TITLES[target]}: ${msg}`, 'error')
       this.announce(`Move failed: ${msg}`)
     }
-    try {
-      // Always refetch — server is the source of truth. Reconciles (or reverts)
-      // the optimistic placement.
-      await this.fetchAndRender()
-    } finally {
-      this.gestureDepth -= 1
-    }
+    this.gestureDepth -= 1
+    // The last outstanding gesture reconciles all optimistic placements.
+    await this.fetchAndRender()
   }
 
   /**
@@ -1541,6 +1536,7 @@ export class KanbanModal {
     horizon: HorizonKind,
     opts: { cold?: boolean; due?: string | null; dropsStaleDue?: boolean },
   ): Promise<void> {
+    this.gestureDepth += 1
     let rested = false
     try {
       // Into Resting is `shuttle rest`, the worker's own exit said by hand: the
@@ -1603,6 +1599,7 @@ export class KanbanModal {
       this.showBanner(message, 'error')
       this.announce(message)
     }
+    this.gestureDepth -= 1
     await this.fetchAndRender()
   }
 
@@ -1693,6 +1690,8 @@ export class KanbanModal {
    */
   private applyResponse(data: KanbanResponse): void {
     ++this.inflightFetchToken
+    // The validator describes the server copy, not this optimistic render.
+    this.compositeEtag = null
     this.lastResponse = data
     this.lastResponseSig = this.computeResponseSignature(data)
     this.render(data)
@@ -1781,6 +1780,7 @@ export class KanbanModal {
   }
 
   private async fetchAndRender(): Promise<void> {
+    if (this.gestureDepth > 0) return
     void this.fetchMeetingStatus()
     this.terminalHost.refresh()
     this.lastFetchStartedAt = Date.now()
