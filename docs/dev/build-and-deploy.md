@@ -201,8 +201,10 @@ Push the verified revision, then deploy it on each host:
    receipt` passes (see [harness plugins](#harness-plugins)).
 4. Atomically select the built release immediately before cycling through its supervisor or respawn loop.
    A verified live tmux loop takes precedence over service files.
-   It stays running and respawns its listener after one graceful SIGTERM.
+   It stays running, disables competing service managers, and respawns its listener after a graceful SIGTERM.
+   If disabling a competing manager already stopped the original listener, the replacement from the loop is left alone.
    A service-owned daemon is cycled once through that manager, without a separate listener kill.
+   A loaded supervisor's pin migration counts as that cycle; the activation callback does not restart it again.
    An unsupervised listener is stopped before installing the respawn launcher.
 5. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
    `release_path` equals the selected release, and `ready` is `true` (up to 15 minutes by default; set
@@ -286,10 +288,8 @@ network. They are skipped when the receipt already passes and its active
 generation was sealed at the checkout's `HEAD` by a clean build. A dirty
 checkout builds felt as `dev (<sha>-dirty)`, which does not identify a single
 tree, so a dirty host is set up again on every deploy. pi has no `--source`
-flag and no generation. For pi's GitHub package, a regular deploy runs
-`felt setup pi` only when pi's clone is not at the checkout's `HEAD`. An exact-ref
-deploy fetches and detaches a clean clone at the deployed commit when it differs;
-tracked edits or a commit that cannot be fetched fail the host. A local felt
+flag and no generation. For pi's GitHub package, deployment fetches and detaches a clean clone at the pinned commit when it differs from the checkout's `HEAD`.
+Tracked edits or a commit that cannot be fetched fail the host. A local felt
 package is never re-pointed: it is current when
 it is the deployed checkout or sits at its `HEAD`, and otherwise the host fails
 with the package's path and commit. Any pi package other than the deployed

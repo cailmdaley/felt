@@ -122,7 +122,16 @@ func (a *app) daemonActivateReleaseCmd() *cobra.Command {
 				if err := a.reloadReleaseMigrations(plans, true); err != nil {
 					return rollback(err)
 				}
-				command := a.env.Command(commandPath, args[2:]...)
+				// The callback can avoid a second restart when a loaded pin
+				// migration has already cycled the selected supervisor.
+				cycleEnv := a.env.Clone()
+				cycleEnv.Set("SHUTTLE_ACTIVATION_CYCLED", "0")
+				for _, plan := range plans {
+					if plan.loaded {
+						cycleEnv.Set("SHUTTLE_ACTIVATION_CYCLED", "1")
+					}
+				}
+				command := cycleEnv.Command(commandPath, args[2:]...)
 				command.Stdin, command.Stdout, command.Stderr = a.env.Stdin, a.env.Stdout, a.env.Stderr
 				if err := command.Run(); err != nil {
 					return rollback(fmt.Errorf("cycling selected release %s: %w", release.Dir, err))

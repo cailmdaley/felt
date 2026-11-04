@@ -127,7 +127,7 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 	// select the tmux loop and cycle the listener through that loop.
 	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
 	cycle := shellFunction(t, string(script), "remote_host_cycle")
-	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "listen_prelude") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "respawn_launcher_restart_cmd") + probe + cycle + `run_on() { /bin/dash -c "$2"; }
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "listen_prelude") + shellFunction(t, string(script), "daemon_listener_cmd") + shellFunction(t, string(script), "disable_competing_supervisors_cmd") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "respawn_launcher_restart_cmd") + probe + cycle + `run_on() { /bin/dash -c "$2"; }
 run_on_visible() { /bin/dash -c "$2"; }
 bad() { echo "$*" >&2; }
 remote_host_cycle remote "$SHUTTLE_DIR"
@@ -144,6 +144,58 @@ remote_host_cycle remote "$SHUTTLE_DIR"
 	}
 	if got := strings.TrimSpace(string(mustOutput(t, tmux, "-S", socket, "list-sessions", "-F", "#{session_name}"))); got != "shuttle-daemon" {
 		t.Fatalf("real tmux session = %q", got)
+	}
+}
+
+func TestDeployTmuxDisablesCompetingServiceWithoutKillingReplacement(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	bin := filepath.Join(root, "fakebin")
+	home := filepath.Join(root, "home")
+	for _, dir := range []string{bin, filepath.Join(home, ".local", "bin"), filepath.Join(home, ".shuttle"), filepath.Join(root, "bin", "rel")} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pids := filepath.Join(root, "pids")
+	write(pids, "123\n")
+	write(filepath.Join(bin, "lsof"), "#!/bin/sh\ncat \"$PIDS\"\n")
+	write(filepath.Join(bin, "systemctl"), `#!/bin/sh
+case "$*" in
+ *disable*) [ -f "$HOME/.shuttle/heartbeat.stopped" ] || exit 8; echo disabled >> "$EVENTS"; echo 456 > "$PIDS";;
+ *) exit 0;;
+esac
+`)
+	write(filepath.Join(bin, "launchctl"), "#!/bin/sh\nexit 1\n")
+	write(filepath.Join(root, "bin", "shuttle-launch"), "#!/bin/sh\necho unexpected-restart >> \"$EVENTS\"\n")
+	write(filepath.Join(root, "shuttle"), "#!/bin/sh\nshift 4\nexec \"$@\"\n")
+	harness := `
+kill() { echo "kill $*" >> "$EVENTS"; }
+export -f kill
+supervisor_probe_cmd() { printf 'echo tmux'; }
+listen_prelude() { printf 'sock=; port=1; dd="$HOME/.shuttle"; '; }
+run_on() { bash -c "$2"; }
+run_on_visible() { bash -c "$2"; }
+bad() { echo "$*" >&2; }
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "daemon_listener_cmd") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "disable_competing_supervisors_cmd") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle '' "$ROOT"`
+	events := filepath.Join(root, "events")
+	cmd := exec.Command("bash", "-c", harness)
+	cmd.Env = append(os.Environ(), "ROOT="+root, "HOME="+home, "PIDS="+pids, "EVENTS="+events, "PATH="+bin+":"+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("cycle: %v %s", err, out)
+	}
+	if got := fleetRead(events); got != "disabled\n" {
+		t.Fatalf("competing service was not disabled or its replacement was killed: %s", got)
 	}
 }
 
