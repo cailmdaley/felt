@@ -233,7 +233,8 @@ fi
 exit 0
 `
 
-const codexSetupFake = nativeFakePrologue + `if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
+const codexSetupFake = nativeFakePrologue + `if [ "${FAKE_CODEX_JSON_WARNING:-0}" = 1 ]; then printf 'WARNING: private test home\n' >&2; fi
+if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
   if [ -f "$source_file" ]; then
     source=$(cat "$source_file")
     printf '{"marketplaces":[{"name":"cailmdaley-felt","root":"%s","marketplaceSource":{"sourceType":"directory","source":"%s"}}]}\n' "$source" "$source"

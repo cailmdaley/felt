@@ -973,11 +973,20 @@ func codexMarketplaceConflict(out string) bool {
 	return strings.Contains(out, "marketplace '"+marketplaceName+"' is already added from a different source")
 }
 
-// runCodexCLIQuiet invokes the codex CLI capturing combined output instead of
-// streaming it, so a failure the caller recovers from doesn't print an alarming
-// error the user can't act on.
+// runCodexCLIQuiet captures diagnostics without streaming them. Structured
+// commands keep stderr warnings out of the JSON response.
 func (a *app) runCodexCLIQuiet(args ...string) (string, error) {
-	out, err := a.env.Command("codex", args...).CombinedOutput()
+	cmd := a.env.Command("codex", args...)
+	if slices.Contains(args, "--json") {
+		var diagnostic strings.Builder
+		cmd.Stderr = &diagnostic
+		out, err := cmd.Output()
+		if err != nil {
+			return string(out), fmt.Errorf("%w: %s", err, strings.TrimSpace(diagnostic.String()))
+		}
+		return string(out), nil
+	}
+	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
