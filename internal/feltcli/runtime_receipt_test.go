@@ -281,6 +281,22 @@ func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
 	}
 }
 
+func TestPendingPromotionRepairOutranksHookTrustRepair(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "codex")
+	if err := f.a.installCodexPluginViaCLI(f.remote); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginJournalName)
+	if err := os.WriteFile(journal, []byte(`{"phase":"swapped"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	receipt := f.a.collectRuntimeReceipt()
+	if !strings.Contains(receipt.Repair, "felt setup codex`") || strings.Contains(receipt.Repair, "--trust-hooks") {
+		t.Fatalf("pending promotion has non-recovering repair: %+v", receipt)
+	}
+}
+
 func TestCollectGenerationReceiptRejectsSameVersionDifferentDigest(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)

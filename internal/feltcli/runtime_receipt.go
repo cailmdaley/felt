@@ -94,11 +94,12 @@ type ReceiptBundle struct {
 // promotion.  Keeping the check in the receipt means a cache path is never
 // treated as healthy merely because its manifest version happens to match.
 type ReceiptGenerationReceipt struct {
-	Status     receiptStatus              `json:"status"`
-	Repair     string                     `json:"repair,omitempty"`
-	ActivePath string                     `json:"active_path,omitempty"`
-	Active     *pluginGenerationIdentity  `json:"active,omitempty"`
-	Harnesses  []ReceiptHarnessGeneration `json:"harnesses,omitempty"`
+	PendingPromotion bool                       `json:"pending_promotion,omitempty"`
+	Status           receiptStatus              `json:"status"`
+	Repair           string                     `json:"repair,omitempty"`
+	ActivePath       string                     `json:"active_path,omitempty"`
+	Active           *pluginGenerationIdentity  `json:"active,omitempty"`
+	Harnesses        []ReceiptHarnessGeneration `json:"harnesses,omitempty"`
 }
 
 type ReceiptHarnessGeneration struct {
@@ -194,7 +195,7 @@ func (a *app) collectRuntimeReceipt() RuntimeReceipt {
 	if r.Hooks.Status != receiptHealthy && r.Hooks.Status == r.Status && r.Hooks.Repair != "" {
 		r.Repair = r.Hooks.Repair
 	}
-	if r.Generation.Status != receiptHealthy && r.Generation.Status == r.Status {
+	if r.Generation.PendingPromotion || (r.Generation.Status != receiptHealthy && r.Generation.Status == r.Status) {
 		r.Repair = r.Generation.Repair
 	}
 	return r
@@ -629,8 +630,9 @@ func (a *app) collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComp
 	journalPath := filepath.Join(runtimeDir, pluginJournalName)
 	if _, err := os.Stat(journalPath); err == nil {
 		return ReceiptGenerationReceipt{
-			Status: receiptPartial,
-			Repair: fmt.Sprintf("finish or recover the pending plugin promotion at %s, then rerun `felt setup receipt --json`", journalPath),
+			PendingPromotion: true,
+			Status:           receiptPartial,
+			Repair:           fmt.Sprintf("run `felt setup codex` (or `felt setup claude` for a Claude-only installation) to finish or recover the pending plugin promotion at %s, then rerun `felt setup receipt --json`", journalPath),
 		}
 	} else if !os.IsNotExist(err) {
 		return ReceiptGenerationReceipt{Status: receiptPartial, Repair: fmt.Sprintf("cannot inspect pending plugin promotion %s: %v", journalPath, err)}
