@@ -15,9 +15,10 @@ func codexPluginFileClass(path string) string {
 	switch path {
 	case ".claude-plugin/marketplace.json", "claude-plugin/.claude-plugin/plugin.json", "claude-plugin/.codex-plugin/plugin.json":
 		return "hook-bundle"
-	}
-	if strings.HasPrefix(path, "claude-plugin/hooks/") {
+	case "claude-plugin/hooks/hooks.json", "claude-plugin/hooks/event.sh", "claude-plugin/hooks/felt-bin.sh", "claude-plugin/hooks/handoff.sh", "claude-plugin/hooks/remind.sh", "claude-plugin/hooks/session.sh", "claude-plugin/hooks/shuttle-bin.sh", "claude-plugin/hooks/touch.sh":
 		return "hook-bundle"
+	case "claude-plugin/hooks/handoff.mjs", "claude-plugin/hooks/lib/handoff.mjs":
+		return "pi-only"
 	}
 	if strings.HasPrefix(path, "claude-plugin/skills/") {
 		return "skills-bundle"
@@ -84,6 +85,55 @@ func TestCodexPluginPayloadClassificationGate(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestCodexHookAllowlistRejectsUnclassifiedReleaseFiles(t *testing.T) {
+	for _, path := range []string{"claude-plugin/hooks/BUILD_COMMIT", "claude-plugin/hooks/release.json", "claude-plugin/hooks/new.sh"} {
+		if class := codexPluginFileClass(path); class != "" {
+			t.Errorf("unreviewed source %s automatically classified as %s", path, class)
+		}
+	}
+}
+
+func TestCodexGeneratedHookTreeMatchesAllowlist(t *testing.T) {
+	t.Parallel()
+	candidate := t.TempDir()
+	if err := copyTree(filepath.Join(repoRoot(t), "claude-plugin"), filepath.Join(candidate, "claude-plugin")); err != nil {
+		t.Fatal(err)
+	}
+	if err := materializeCodexBundles(candidate); err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]bool{
+		".codex-plugin": true, ".codex-plugin/plugin.json": true, "hooks": true,
+		"hooks/hooks.json": true, "hooks/event.sh": true, "hooks/felt-bin.sh": true,
+		"hooks/handoff.sh": true, "hooks/remind.sh": true, "hooks/session.sh": true,
+		"hooks/shuttle-bin.sh": true, "hooks/touch.sh": true,
+	}
+	root := codexBundleSource(candidate, "felt")
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if !expected[rel] {
+			t.Errorf("unexpected entry in hashed hook root: %s", rel)
+		}
+		delete(expected, rel)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(expected) > 0 {
+		t.Fatalf("hook root missing allowlisted entries: %v", expected)
 	}
 }
 
