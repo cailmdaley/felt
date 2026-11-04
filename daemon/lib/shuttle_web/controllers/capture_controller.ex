@@ -49,7 +49,8 @@ defmodule ShuttleWeb.CaptureController do
            params["meeting"],
            :capture,
            Map.get(params, "prompt"),
-           Map.get(params, "origin")
+           Map.get(params, "origin"),
+           capture_destination: Map.get(params, "project_dir")
          ) do
       {:ok, %{meeting: row, prompt: prompt, launch: launch}} ->
         params =

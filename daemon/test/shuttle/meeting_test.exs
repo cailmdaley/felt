@@ -1685,7 +1685,9 @@ defmodule Shuttle.MeetingTest do
     assert {:error, {:operation, _}} = Meeting.stop()
     assert {:error, {:operation, message}} = Meeting.stop()
     assert message =~ "unconfirmed"
-    assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "kill" end) == 1
+
+    assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "kill" end) ==
+             1
   end
 
   test "a failed signal releases the stop claim for retry", %{hark_dir: hark_dir} do
@@ -1829,18 +1831,32 @@ defmodule Shuttle.MeetingTest do
     end
   end
 
-  test "stop dismisses a failed pane when real ps confirms its pid is absent", %{hark_dir: hark_dir} do
+  test "stop dismisses a failed pane when real ps confirms its pid is absent", %{
+    hark_dir: hark_dir
+  } do
     pid = "99998"
     assert {"", 1} = System.cmd("ps", ["-p", pid, "-o", "command="])
     write_meeting(hark_dir, %{"launch" => "absent", "pid" => pid, "phase" => "failed"})
 
-    Shuttle.Test.MeetingRunner.set_handler(fn
-      "tmux", ["display-message" | _], _, :present -> {{"1|1|1234|absent|\n", 0}, :present}
-      "tmux", ["kill-session" | _], _, :present -> {{"", 0}, :absent}
-      "tmux", ["has-session" | _], _, :absent -> {{"can't find session: hark-meeting", 1}, :absent}
-      "ps", args, _, state -> {System.cmd("ps", args, stderr_to_stdout: true), state}
-      _, _, _, state -> {{"", 0}, state}
-    end, :present)
+    Shuttle.Test.MeetingRunner.set_handler(
+      fn
+        "tmux", ["display-message" | _], _, :present ->
+          {{"1|1|1234|absent|\n", 0}, :present}
+
+        "tmux", ["kill-session" | _], _, :present ->
+          {{"", 0}, :absent}
+
+        "tmux", ["has-session" | _], _, :absent ->
+          {{"can't find session: hark-meeting", 1}, :absent}
+
+        "ps", args, _, state ->
+          {System.cmd("ps", args, stderr_to_stdout: true), state}
+
+        _, _, _, state ->
+          {{"", 0}, state}
+      end,
+      :present
+    )
 
     assert {:ok, %{meeting: nil}} = Meeting.stop(launch: "absent")
   end
@@ -1982,6 +1998,27 @@ defmodule Shuttle.MeetingTest do
            end)
 
     refute Enum.any?(calls, fn {command, _, _} -> command == "kill" end)
+  end
+
+  test "a recording exposes an interrupted agent handoff on later reads", %{hark_dir: dir} do
+    set_starting_meeting_handler(dir)
+
+    assert {:ok, %{launch: launch}} =
+             Meeting.start(%{"mode" => "call"}, {:fiber, "project/fiber"}, "review", nil)
+
+    assert {:ok,
+            %{
+              meeting: %{
+                launch: ^launch,
+                handoff: %{"status" => "unconfirmed", "target" => "project/fiber"}
+              }
+            }} =
+             Meeting.show()
+
+    Meeting.log_delivery(%{launch: launch}, 202, %{delivered: nil})
+    assert {:ok, %{meeting: %{handoff: %{"status" => "reported-success"}}}} = Meeting.show()
+    Meeting.log_delivery(%{launch: launch}, 502, %{error: "unreachable"})
+    assert {:ok, %{meeting: %{handoff: %{"status" => "reported-failure"}}}} = Meeting.show()
   end
 
   test "a second meeting in the same minute gets its own transcript and HARK_DIR is explicit", %{

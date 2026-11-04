@@ -370,6 +370,7 @@ defmodule Shuttle.Meeting do
          :ok <- dismiss_failed(context, opts),
          {:ok, paths} <- reserve_meeting_paths(name, origin, opts),
          launch_id <- launch_id(),
+         :ok <- write_handoff_intent(launch_id, target, origin, opts),
          fiber <- target_fiber(target),
          argv <- hark_argv(executable, paths, title, mode, launch_id, language, system_audio),
          :ok <- create_session(argv, launch_id, fiber, opts),
@@ -396,9 +397,76 @@ defmodule Shuttle.Meeting do
   def log_delivery(row, status, outcome) do
     launch = row[:launch] || row["launch"]
 
+    case read_handoff(launch, []) do
+      nil ->
+        :ok
+
+      receipt ->
+        state = if status < 300, do: "reported-success", else: "reported-failure"
+
+        case write_handoff(launch, Map.put(receipt, "status", state), []) do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error("meeting handoff receipt write failed: #{inspect(reason)}")
+        end
+    end
+
     Logger.info(
       "meeting delivery launch=#{launch} status=#{status} outcome=#{Jason.encode!(outcome)}"
     )
+  end
+
+  defp write_handoff_intent(_launch, :record, _origin, _opts), do: :ok
+
+  defp write_handoff_intent(launch, target, origin, opts) do
+    {kind, destination} =
+      case target do
+        :capture -> {"capture", Keyword.get(opts, :capture_destination)}
+        {:fiber, id} -> {"fiber", id}
+      end
+
+    receipt = %{
+      "status" => "pending",
+      "kind" => kind,
+      "target" => destination,
+      "origin" => origin
+    }
+
+    case write_handoff(launch, receipt, opts) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, {:operation, "could not save meeting handoff: #{inspect(reason)}"}}
+    end
+  end
+
+  defp handoff_path(launch, opts), do: Path.join([hark_dir(opts), "handoffs", launch <> ".json"])
+
+  defp write_handoff(launch, receipt, opts) do
+    path = handoff_path(launch, opts)
+
+    with :ok <- Shuttle.FS.mkdir_p(Path.dirname(path)),
+         do: Shuttle.FS.write_atomic(path, Jason.encode!(receipt))
+  end
+
+  defp read_handoff(launch, opts) when is_binary(launch) do
+    with true <- Regex.match?(~r/\A[A-Za-z0-9_-]+\z/, launch),
+         {:ok, content} <- Shuttle.FS.read(handoff_path(launch, opts)),
+         {:ok, receipt} when is_map(receipt) <- Jason.decode(content),
+         do: receipt,
+         else: (_ -> nil)
+  end
+
+  defp read_handoff(_, _opts), do: nil
+
+  defp visible_handoff(launch, opts) do
+    case read_handoff(launch, opts) do
+      %{"status" => "pending"} = receipt -> Map.put(receipt, "status", "unconfirmed")
+      receipt -> receipt
+    end
   end
 
   defp agent_prompt(_mode, _transcript, :record, _note), do: nil
@@ -747,6 +815,10 @@ defmodule Shuttle.Meeting do
             meeting
             |> Map.put(:tail, transcript_tail(meeting.transcript))
             |> find_scribe_fiber(launch_from(usable_meeting) || tmux_launch(tmux), opts)
+            |> Map.put(
+              :handoff,
+              visible_handoff(launch_from(usable_meeting) || tmux_launch(tmux), opts)
+            )
           else
             nil
           end
