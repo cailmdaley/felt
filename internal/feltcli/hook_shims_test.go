@@ -40,6 +40,54 @@ func TestRecorderHookSchedule(t *testing.T) {
 	}
 }
 
+func TestHookCommandsSurviveRemovedPluginRoot(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "claude-plugin", "hooks", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "removed")
+	for event, groups := range config.Hooks {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				cmd := exec.Command("sh", "-c", hook.Command)
+				cmd.Env = []string{"PLUGIN_ROOT=" + root, "CLAUDE_PLUGIN_ROOT="}
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Errorf("%s: %s: %v: %s", event, hook.Command, err, out)
+				}
+			}
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"session.sh", "event.sh", "handoff.sh", "remind.sh", "touch.sh"} {
+		if err := os.WriteFile(filepath.Join(root, "hooks", name), []byte("#!/bin/sh\nprintf called"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for event, groups := range config.Hooks {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				cmd := exec.Command("sh", "-c", hook.Command)
+				cmd.Env = []string{"PLUGIN_ROOT=" + root, "CLAUDE_PLUGIN_ROOT="}
+				if out, err := cmd.CombinedOutput(); err != nil || string(out) != "called" {
+					t.Errorf("%s: %s: %v: %s", event, hook.Command, err, out)
+				}
+			}
+		}
+	}
+}
+
 func TestReminderShellGate(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "must-not-run")

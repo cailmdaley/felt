@@ -5,11 +5,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/session.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/session.sh\"; [ ! -x \"$p\" ] || \"$p\""
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       }
@@ -19,11 +19,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/handoff.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/handoff.sh\"; [ ! -x \"$p\" ] || \"$p\""
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       }
@@ -33,11 +33,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/remind.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/remind.sh\"; [ ! -x \"$p\" ] || \"$p\""
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       }
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/handoff.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/handoff.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       },
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/touch.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/touch.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       },
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       }
@@ -74,7 +74,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       }
@@ -84,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"",
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\"",
             "async": true
           }
         ]
@@ -95,7 +95,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       }
@@ -105,7 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
           }
         ]
       }
