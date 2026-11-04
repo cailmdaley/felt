@@ -113,6 +113,17 @@
     "aliases": ["pi-terra"]
   },
   {
+    "id": "pi-openai-sol",
+    "cli": "pi",
+    "provider": "openai",
+    "model": "gpt-6.1-sol",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high", "max"],
+    "default_effort": "medium",
+    "cost_class": "standard",
+    "aliases": ["pi-sol"]
+  },
+  {
     "id": "pi-haiku",
     "cli": "pi",
     "provider": "anthropic",
