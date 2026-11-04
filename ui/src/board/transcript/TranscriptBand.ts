@@ -846,7 +846,7 @@ export class TranscriptBand {
   private readonly inlineWorking: HTMLElement
   /** Messages sent from the composer that the transcript has not yet recorded, drawn after the last turn. */
   private readonly sentList = document.createElement('div')
-  private sent: { text: string; at: number; node: HTMLElement }[] = []
+  private sent: { text: string; at: number; node: HTMLElement; target: TranscriptTarget }[] = []
   private sessions: HTMLElement | null = null
   private cacheTimer: number | null = null
   private readonly openButton: HTMLButtonElement
@@ -1131,6 +1131,7 @@ export class TranscriptBand {
     if (!target) {
       this.closeFull()
       this.target = null
+      this.paintSent()
       this.paintTasks()
       this.hasReadCurrent = false
       this.stopFollowing()
@@ -1153,6 +1154,7 @@ export class TranscriptBand {
     }
 
     this.target = { ...target }
+    this.paintSent()
     this.paintTasks()
     this.el.hidden = false
     if (previous && this.sameTarget(previous, target)) {
@@ -1279,7 +1281,7 @@ export class TranscriptBand {
    */
   pend(text: string): void {
     const words = text.trim()
-    if (!words || !this.inline) return
+    if (!words || !this.inline || !this.target) return
     const message = createMessage('you')
     message.node.classList.add('ws-transcript-msg-sending')
     message.prose.textContent = words
@@ -1289,9 +1291,15 @@ export class TranscriptBand {
     state.className = 'ws-transcript-sending'
     state.textContent = 'sent · not yet read'
     message.kicker.prepend(state)
-    this.sent.push({ text: words, at, node: message.node })
+    this.sent.push({ text: words, at, node: message.node, target: { ...this.target } })
     this.sentList.append(message.node)
     this.scroller.scrollTop = this.scroller.scrollHeight
+  }
+
+  private paintSent(): void {
+    this.sentList.replaceChildren(...this.sent
+      .filter(sent => this.target && this.sameTarget(sent.target, this.target))
+      .map(sent => sent.node))
   }
 
   /** A sent message is confirmed by a recorded prompt holding its opening words, near or after its send. */
@@ -1301,6 +1309,7 @@ export class TranscriptBand {
     // Hosts' clocks differ, so a prompt up to two minutes before the send still counts.
     const prompts = this.model.turns.slice(-8).map(turn => turn.prompt).filter(prompt => prompt !== null)
     this.sent = this.sent.filter(sent => {
+      if (!this.target || !this.sameTarget(sent.target, this.target)) return true
       const opening = flat(sent.text).slice(0, 60)
       const landed = prompts.some(prompt => (prompt.at ?? Infinity) >= sent.at - 120_000 && flat(prompt.text).includes(opening))
       if (landed) sent.node.remove()

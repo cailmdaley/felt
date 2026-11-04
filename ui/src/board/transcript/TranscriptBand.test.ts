@@ -209,6 +209,31 @@ describe('TranscriptBand', () => {
     expect(band.el.querySelector('.ws-transcript-pane .ws-transcript-thread-notice a')?.getAttribute('data-fiber')).toBe('work/child')
     expect(band.el.querySelector('.ws-transcript-steps')).toBeNull()
   })
+  it('scopes pending sends to the selected session and host without confirming them elsewhere', async () => {
+    const text = 'A pending message'
+    const other = records(text, 'Another session answer')
+    ;(other[0] as { timestamp: string }).timestamp = new Date(Date.now()).toISOString()
+    const band = new TranscriptBand({
+      shuttleBase: 'https://board.example', inline: true,
+      fetch: fixtureFetch({ [latestId]: records('Original', 'Original answer'), [earlierId]: other }),
+    })
+    bands.push(band)
+    document.body.append(band.el)
+    band.read(target(latestId))
+    await settle()
+    band.pend(text)
+    expect(band.el.querySelectorAll('.ws-transcript-msg-sending')).toHaveLength(1)
+    band.read(target(earlierId))
+    await settle()
+    expect(band.el.querySelectorAll('.ws-transcript-msg-sending')).toHaveLength(0)
+    band.read(target(latestId, { host: 'another-host' }))
+    await settle()
+    expect(band.el.querySelectorAll('.ws-transcript-msg-sending')).toHaveLength(0)
+    band.read(target(latestId))
+    await settle()
+    expect(band.el.querySelectorAll('.ws-transcript-msg-sending')).toHaveLength(1)
+  })
+
   it('keeps an expanded sent-message row when its tool result arrives', async () => {
     const session = latestId
     const items: unknown[] = [
