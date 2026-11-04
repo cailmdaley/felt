@@ -28,16 +28,28 @@ func codexPluginFileClass(path string) string {
 func TestCodexPluginPayloadClassificationGate(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
- // Check all source files, including every tracked file, without requiring
- // Git metadata in release archives or Linux container mounts.
- for _,directory := range []string{"claude-plugin",".claude-plugin"} {
-  if err := filepath.Walk(filepath.Join(root,directory),func(path string,info os.FileInfo,err error) error {
-   if err != nil { return err }; if info.IsDir() { return nil }
-   relative,err := filepath.Rel(root,path); if err != nil { return err }
-   if codexPluginFileClass(filepath.ToSlash(relative)) == "" { t.Errorf("unclassified plugin file %s: assign it to the hook-bundle or skills-bundle before shipping",relative) }
-   return nil
-  }); err != nil { t.Fatal(err) }
- }
+	// Check all source files, including every tracked file, without requiring
+	// Git metadata in release archives or Linux container mounts.
+	for _, directory := range []string{"claude-plugin", ".claude-plugin"} {
+		if err := filepath.Walk(filepath.Join(root, directory), func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+			relative, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			if codexPluginFileClass(filepath.ToSlash(relative)) == "" {
+				t.Errorf("unclassified plugin file %s: assign it to the hook-bundle or skills-bundle before shipping", relative)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	candidate := t.TempDir()
 	for _, name := range []string{".claude-plugin", "claude-plugin"} {
 		if err := copyTree(filepath.Join(root, name), filepath.Join(candidate, name)); err != nil {
@@ -151,6 +163,23 @@ func TestCodexReceiptVerifiesBothBundles(t *testing.T) {
 	bundles = f.a.collectCodexBundle()
 	if len(bundles) != 2 || bundles[1].Status != receiptMissing {
 		t.Fatalf("missing skills not diagnosed: %+v", bundles)
+	}
+}
+
+func TestCodexRollbackVerifiesSkillsCache(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "codex")
+	if err := f.a.installCodexPluginViaCLI(f.remote); err != nil {
+		t.Fatal(err)
+	}
+	state := f.a.captureCodexInstallation()
+	if !state.Installed || !state.SkillsInstalled {
+		t.Fatalf("incomplete native capture: %+v", state)
+	}
+	f.env.Set("FAKE_NATIVE_TAMPER", "alter-skills")
+	err := f.a.restoreCodexInstallation(state)
+	if err == nil || !strings.Contains(err.Error(), "verifying restored Codex felt-skills") {
+		t.Fatalf("unverified skills rollback was accepted: %v", err)
 	}
 }
 

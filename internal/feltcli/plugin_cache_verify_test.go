@@ -15,7 +15,7 @@ import (
 // make them lie the specific ways a real harness can: serving a stale cache,
 // altering the payload, or adding release metadata to the hashed root.
 
-func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, wantGeneration string) {
+func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, wantGeneration string, wantPendingReconciliation bool) {
 	t.Helper()
 	if err == nil || !strings.Contains(err.Error(), "last known-good preserved") {
 		t.Fatalf("unverified cache error = %v, want refused promotion", err)
@@ -27,8 +27,16 @@ func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, w
 		t.Fatalf("refused promotion replaced current generation with %q, want %q", got, wantGeneration)
 	}
 	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
-	if _, statErr := os.Stat(filepath.Join(runtimeDir, pluginJournalName)); statErr == nil {
-		t.Fatal("refused promotion left a pending journal")
+	journal, statErr := readJSONFile[pluginPromotionJournal](filepath.Join(runtimeDir, pluginJournalName))
+	if wantPendingReconciliation {
+		if statErr != nil || journal.Phase != "pending_reconciliation" {
+			t.Fatalf("unverified native rollback must retain recovery intent: %#v (%v)", journal, statErr)
+		}
+		if !strings.Contains(err.Error(), "verifying restored Codex") {
+			t.Fatalf("rollback did not diagnose its unverified cache: %v", err)
+		}
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("verified rollback left a pending journal: %v", statErr)
 	}
 	if _, statErr := os.Stat(filepath.Join(runtimeDir, pluginPreviousName)); !os.IsNotExist(statErr) {
 		t.Fatalf("refused promotion left a parked previous copy: %v", statErr)
@@ -52,7 +60,9 @@ func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 				f.setGeneration(t, "poisoned-"+tamper)
 				f.env.Set("FAKE_NATIVE_TAMPER", tamper)
 				err := h.install(f.a, f.remote+"#"+tamper)
-				assertRefusedBeforeCommit(t, f, err, "one")
+				// Alter/metadata modes corrupt every native install, including
+				// rollback. Such a rollback must retain its recovery journal.
+				assertRefusedBeforeCommit(t, f, err, "one", h.name == "codex" && tamper != "stale")
 
 				// With the lie removed the same source promotes and verifies
 				// cleanly after the refusal.
@@ -63,6 +73,9 @@ func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 				}
 				if got := f.currentGeneration(t); got != "honest" {
 					t.Fatalf("post-retry generation = %q, want honest", got)
+				}
+				if _, err := os.Stat(filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginJournalName)); !os.IsNotExist(err) {
+					t.Fatalf("honest retry left pending recovery: %v", err)
 				}
 			})
 		}

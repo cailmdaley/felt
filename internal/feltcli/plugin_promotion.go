@@ -233,6 +233,16 @@ func (a *app) restoreCodexInstallation(state codexInstallationState) error {
 			return fmt.Errorf("restoring Codex skills: %w", err)
 		}
 	}
+	for _, bundle := range []struct {
+		name      string
+		installed bool
+	}{{"felt", state.Installed}, {"felt-skills", state.SkillsInstalled}} {
+		if bundle.installed {
+			if err := a.verifyCodexLoadedBundle(state.Source, bundle.name); err != nil {
+				return fmt.Errorf("verifying restored Codex %s: %w", bundle.name, err)
+			}
+		}
+	}
 	if state.Installed {
 		a.refreshCodexHookTrust()
 	}
