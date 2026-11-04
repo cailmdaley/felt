@@ -56,7 +56,11 @@ defmodule ShuttleWeb.FiberControllerTest do
             assert {:error, :not_found} = Shuttle.FeltStores.resolve_fiber(lookup["query"])
 
           id ->
-            assert {:ok, %{fiber_id: ^id}} = Shuttle.FeltStores.resolve_fiber(lookup["query"])
+            assert {:ok, %{fiber_id: ^id, store: owner}} =
+                     Shuttle.FeltStores.resolve_fiber(lookup["query"])
+
+            assert Shuttle.FeltStores.store_felt_realpath(owner) ==
+                     Shuttle.FeltStores.store_felt_realpath(loom)
         end
       end
 
