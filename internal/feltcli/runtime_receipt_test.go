@@ -281,6 +281,54 @@ func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
 	}
 }
 
+func TestReceiptJSONEmitsOneDeploymentRowPerHarness(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "codex")
+	if err := f.a.installCodexPluginViaCLI(f.remote); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(f.a.collectRuntimeReceipt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(encoded, &doc); err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]int{}
+	var walk func(any)
+	walk = func(value any) {
+		switch node := value.(type) {
+		case map[string]any:
+			if on, _ := node["enabled"].(bool); on {
+				if h, _ := node["harness"].(string); h != "" {
+					rows[h]++
+				}
+			}
+			for _, child := range node {
+				walk(child)
+			}
+		case []any:
+			for _, child := range node {
+				walk(child)
+			}
+		}
+	}
+	walk(doc)
+	if rows["codex"] != 1 {
+		t.Fatalf("deployment sees %d Codex entries, want one: %s", rows["codex"], encoded)
+	}
+	bundles := doc["bundles"].([]any)
+	if len(bundles) != 2 {
+		t.Fatalf("deduplication lost bundle diagnostics: %s", encoded)
+	}
+	for _, entry := range bundles {
+		if entry.(map[string]any)["active"] != true {
+			t.Fatalf("bundle enablement lost: %s", encoded)
+		}
+	}
+}
+
 func TestPendingPromotionRepairOutranksHookTrustRepair(t *testing.T) {
 	t.Parallel()
 	f := newRemoteSetupFixture(t, "codex")
