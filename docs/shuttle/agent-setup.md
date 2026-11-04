@@ -59,6 +59,15 @@ felt setup claude
 # Or: felt setup pi
 ```
 
+For Codex, setup verifies separate hook and skills plugins and records hook
+approval through Codex 0.166.0 or newer. Go-only and skills-only refreshes leave
+the installed hook bundle untouched. A genuine hook change, including the
+first combined-to-split migration, interrupts hooks in existing live runtimes:
+explain the warning, have the affected session exit, then resume it with
+`codex --no-daemon resume <session-id>`. A healthy receipt does not refresh that
+live process. Do not restart or terminate other workers on the user's behalf;
+see [live Codex sessions](../agents.md#live-codex-sessions-during-a-hook-change).
+
 Check the installed command help before using the steps below.
 Run `shuttle claim --help` before attempting adoption.
 If the installed release lacks that command or default-store setup, explain that this guided flow requires the newer source build and follow [Build from a checkout](installation.md#build-from-a-checkout), or use the installed version's documented manual route.

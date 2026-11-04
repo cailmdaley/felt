@@ -300,9 +300,12 @@ ssh <host> "bash -lc 'cd <checkout> && git pull --ff-only && make build'"
 
 ### Harness plugins
 
-`make build` installs a new `felt`, but each harness keeps running the plugin
-generation it was last set up with, and `felt setup receipt` fails once the
-two disagree. The helper runs harness setup in the host's login environment after activation, quarantine release and the advisory checkout refresh.
+`make build` installs a new `felt`; harness setup reconciles its plugin payload
+and records the source/build identity outside all plugin roots. The helper
+runs harness setup in the host's login environment after activation, quarantine
+release and the advisory checkout refresh, when the receipt does not already
+identify that clean revision. A changed source/build identity does not by
+itself require reinstalling a native plugin cache.
 
 A harness counts as installed where felt's plugin is enabled in it: Claude Code
 and Codex as the enabled bundles in `felt setup receipt --json`, and pi as a
@@ -327,7 +330,27 @@ network. They are skipped when the receipt already passes and its active
 generation was sealed at the checkout's `HEAD` by a clean build. A dirty
 checkout builds felt as `dev (<sha>-dirty)`, which does not identify a single
 tree, so a dirty host is set up again on every deploy. pi has no `--source`
-flag and no generation. For pi's GitHub package, deployment fetches and detaches a clean clone at the pinned commit when it differs from the checkout's `HEAD`.
+flag and no generation. Setup compares actual native cache bytes against
+external provenance at `~/.felt/plugin-runtime/current/.felt-generation.json`.
+Claude's combined plugin and Codex's `felt` hook bundle and `felt-skills`
+bundle each skip native install/update/remove/add when their payload matches.
+Codex manifests use an adapter-format version, not the release version: a
+Go-only revision changes zero hashed plugin bytes, and a skills-only revision
+leaves the installed hook root untouched.
+
+A genuine Codex hook change installs normally and warns that live processes
+will refuse hooks until restarted. Exit each affected session, then run
+`codex --no-daemon resume <session-id>`; wait for an old writer to unload if
+necessary. A new terminal can reuse the stale App Server, so it is not enough.
+The first combined-to-split setup requires this same cutover even with unchanged
+hook commands. The process and conversation survive, but hooks fail until the
+runtime is refreshed; a healthy receipt verifies installed state, not live
+runtime approval. Setup neither restarts workers nor retains per-worker
+plugin generations. Keep CLI hook interfaces compatible with installed
+wrappers, which resolve the separately upgraded Felt and Shuttle binaries.
+See [plugin integration](releasing.md#plugin-promotion) for the trust boundary.
+
+For pi's GitHub package, deployment fetches and detaches a clean clone at the pinned commit when it differs from the checkout's `HEAD`.
 Tracked edits or a commit that cannot be fetched fail the host. A local felt
 package is never re-pointed: it is current when
 it is the deployed checkout or sits at its `HEAD`, and otherwise the host fails
