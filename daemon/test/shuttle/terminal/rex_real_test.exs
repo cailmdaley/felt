@@ -497,8 +497,8 @@ defmodule Shuttle.Terminal.RexRealTest do
       Env.put_env("SHUTTLE_STORES", store)
       Env.put_app_env(:terminal_backend, Backend)
       FeltStoreRunner.set_fiber("native-capture", make_fiber("native-capture"))
-      FeltStoreRunner.set_shuttle("native-capture", "kind: oneshot\nhost: other-host\n", "open")
-      {:ok, p} = start_poller!(runner: ClaimRunner, felt_stores: [store])
+      FeltStoreRunner.set_shuttle("native-capture", "kind: oneshot\nhost: test-host\n", "open")
+      {:ok, p} = start_poller!(runner: ClaimRunner, own_host_id: "test-host", felt_stores: [store])
       await_boot_cycle!(p)
       source = "capture-native"
 
