@@ -4,6 +4,7 @@ import { assignLanes, reviewMessage, type ChangeRange, type ChangeBundle, type C
 import './change-reader.css'
 import { mountChangeWindow } from './changeWindow.js'
 import { validateChangeBundle } from './changeValidation.js'
+import { changeFileLabel } from './changeFileLabel.js'
 
 registerCustomCSSVariableTheme('shuttle-change', {})
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -205,15 +206,20 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     const card = el(collapsed ? 'details' : 'article', 'change-file'); card.dataset.changeFile = file.path; card.dataset.status = file.status
     const head = el(collapsed ? 'summary' : 'header', 'change-file-head')
     const name = el('span', 'change-file-name', `${file.path}${stop?.from ? `:${stop.from}${stop.to && stop.to !== stop.from ? `–${stop.to}` : ''}${stop.side === 'old' ? ' (old)' : ''}` : ''}`)
-    head.append(name, el('span', 'change-role', [file.role, stop?.importance].filter(Boolean).join(' · ')), mark(id)); card.append(head)
+    const identity = el('div', 'change-file-identity'); identity.append(name, el('span', 'change-file-status', changeFileLabel(file)))
+    const role = `${file.role}${Object.hasOwn(bundle.story?.roles ?? {}, file.path) ? ' (role override)' : ''}`
+    const viewedControl = mark(id)
+    head.append(identity, el('span', 'change-role', [role, stop?.importance].filter(Boolean).join(' · ')), viewedControl); card.append(head)
     if (stop?.note) card.append(prose(stop.note))
     parent.append(card); sectionIds.push(id)
     const body = el('div', 'change-file-body'); card.append(body)
     const view = { card, file, showAll: () => {
-      if (collapsed) { (card as HTMLDetailsElement).open = true; if (!body.childNodes.length) addDiff(body, file, hunks) }
+      if (collapsed) { (card as HTMLDetailsElement).open = true; viewedControl.disabled = false; if (!body.childNodes.length) addDiff(body, file, hunks) }
     } }
     views.push(view)
-    if (collapsed) card.addEventListener('toggle', () => { if ((card as HTMLDetailsElement).open && !body.childNodes.length) addDiff(body, file, hunks) })
+    if (collapsed) card.addEventListener('toggle', () => {
+      if ((card as HTMLDetailsElement).open) { viewedControl.disabled = false; if (!body.childNodes.length) addDiff(body, file, hunks) }
+    })
     else addDiff(body, file, hunks)
     if (stop && (stop.from !== undefined || stop.to !== undefined)) {
       let whole = false

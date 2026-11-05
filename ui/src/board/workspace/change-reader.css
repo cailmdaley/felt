@@ -57,7 +57,9 @@
 .change-why { color: var(--ws-ink-muted); font-size: var(--type-note); border-left: 1px solid var(--ws-hairline); padding-left: 12px; margin: 16px 0; }
 .change-file { margin: 18px 0 30px; border: 1px solid var(--ws-hairline-soft); border-radius: 5px; overflow: clip; min-width: 0; scroll-margin-top: 16px; }
 .change-file-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--ws-fill); font-size: var(--type-meta); }
-.change-file-name { font-family: var(--font-mono); overflow-wrap: anywhere; flex: 1; min-width: 0; }
+.change-file-identity { flex: 1; min-width: 0; }
+.change-file-name { display: block; font-family: var(--font-mono); overflow-wrap: anywhere; min-width: 0; }
+.change-file-status { display: block; color: var(--ws-ink-muted); font-size: var(--type-meta); overflow-wrap: anywhere; }
 .change-role { font-size: var(--type-meta); color: var(--ws-ink-muted); }
 .change-reader .change-viewed { font-size: var(--type-meta); white-space: nowrap; padding: 4px 7px; }
 .change-viewed[aria-pressed="true"] { color: var(--ws-verdict); }
