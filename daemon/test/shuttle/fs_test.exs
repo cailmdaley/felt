@@ -3,6 +3,27 @@ defmodule Shuttle.FSTest do
   alias Shuttle.FS
   @moduletag :tmp_dir
 
+  test "private writes refuse existing files and symlinks", %{tmp_dir: root} do
+    target = Path.join(root, "target")
+    link = Path.join(root, "link")
+    File.write!(target, "unchanged")
+    File.ln_s!(target, link)
+
+    assert {:error, :eexist} = FS.write_private(target, "secret")
+    assert {:error, :eexist} = FS.write_private(link, "secret")
+    assert File.read!(target) == "unchanged"
+  end
+
+  test "private writes create owner-only files", %{tmp_dir: root} do
+    for mode <- [0o600, 0o700] do
+      path = Path.join(root, Integer.to_string(mode))
+      assert :ok = FS.write_private(path, "secret", mode)
+      assert File.read!(path) == "secret"
+      assert {:ok, %{mode: actual}} = File.stat(path)
+      assert Bitwise.band(actual, 0o777) == mode
+    end
+  end
+
   test "raw operations work while the shared file server is suspended", %{tmp_dir: root} do
     # A separate VM avoids stopping the test runner's own code loader.
     script = ~S"""

@@ -72,9 +72,9 @@ defmodule Shuttle.Terminal.Tmux do
   @doc "Paste one multiline message with bracketed paste, then submit after the harness takes it."
   @impl true
   def paste(runner, session, text) when is_binary(text) do
-    buffer = "shuttle-paste-" <> Integer.to_string(System.unique_integer([:positive]))
+    buffer = "shuttle-paste-" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
     path = Path.join(System.tmp_dir!(), buffer)
-    Shuttle.FS.write!(path, text)
+    Shuttle.FS.write_private!(path, text)
 
     try do
       runner.cmd("tmux", ["send-keys", "-t", session, "-X", "cancel"], stderr_to_stdout: true)

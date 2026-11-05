@@ -318,7 +318,7 @@ defmodule Shuttle.TerminalTest do
     end
 
     @tag :tmp_dir
-    test "writes an executable script and launches bash -l at its tracked path", %{
+    test "writes an owner-only script and launches bash -l at its tracked path", %{
       tmp_dir: data_dir
     } do
       name = "terminal-test-#{System.unique_integer([:positive])}"
@@ -355,7 +355,7 @@ defmodule Shuttle.TerminalTest do
       on_exit(fn -> File.rm(path) end)
       assert File.read!(path) == "echo worker\n"
       assert {:ok, %{mode: mode}} = File.stat(path)
-      assert Bitwise.band(mode, 0o777) == 0o755
+      assert Bitwise.band(mode, 0o777) == 0o700
       assert Path.basename(path) =~ "shuttle-run-#{name}."
     end
 

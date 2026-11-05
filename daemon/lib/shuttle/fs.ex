@@ -62,6 +62,19 @@ defmodule Shuttle.FS do
     end
   end
 
+  def write_private(path, bytes, mode \\ 0o600) do
+    with {:ok, fd} <- open(path, [:write, :binary, :exclusive]) do
+      try do
+        with :ok <- chmod(path, mode), do: write(fd, bytes)
+      after
+        close(fd)
+      end
+    end
+  end
+
+  def write_private!(path, bytes, mode \\ 0o600),
+    do: bang(write_private(path, bytes, mode), "write file", path)
+
   def write_atomic(path, bytes) do
     tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
 

@@ -193,8 +193,7 @@ defmodule Shuttle.Terminal do
          :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)),
          :ok <- LaunchAttempts.clear(name) do
       path = WorkerProcess.script_path(name)
-      Shuttle.FS.write!(path, script_text)
-      Shuttle.FS.chmod!(path, 0o755)
+      Shuttle.FS.write_private!(path, script_text, 0o700)
 
       case LaunchAttempts.record(name, path) do
         :ok ->

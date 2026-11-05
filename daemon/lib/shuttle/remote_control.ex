@@ -385,8 +385,7 @@ defmodule Shuttle.RemoteControl do
     if Shuttle.RetainedTerminal.rex?(state.terminal_opts) do
       path = WorkerProcess.script_path(@session)
 
-      with :ok <- Shuttle.FS.write(path, script),
-           :ok <- Shuttle.FS.chmod(path, 0o700) do
+      with :ok <- Shuttle.FS.write_private(path, script, 0o700) do
         Shuttle.RetainedTerminal.start(
           @session,
           config.dir,
@@ -404,8 +403,7 @@ defmodule Shuttle.RemoteControl do
   defp spawn_tmux(state, config, script) do
     path = WorkerProcess.script_path(@session)
 
-    with :ok <- Shuttle.FS.write(path, script),
-         :ok <- Shuttle.FS.chmod(path, 0o700) do
+    with :ok <- Shuttle.FS.write_private(path, script, 0o700) do
       # An empty pane cannot race to exit before remain-on-exit and the digest
       # are set. Only respawn-pane starts the login shell / host command.
       args = [
