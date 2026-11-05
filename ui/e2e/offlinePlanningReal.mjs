@@ -44,7 +44,7 @@ try {
       await drafts.first().waitFor()
       const banner = page.locator('.kbn-banner-error')
       await banner.waitFor()
-      assert.match(await banner.textContent(), /Couldn't rest/)
+      assert.match(await banner.textContent(), /Rest failed:.*HTTP 502/)
       assert.doesNotMatch(await banner.textContent(), /Saved a local exit/)
       const feed = await page.evaluate(async () => (await fetch('/api/v1/fibers/composite')).json())
       const row = feed.fibers.find(row => row.fiber.id === uid || row.fiber.uid === uid)
