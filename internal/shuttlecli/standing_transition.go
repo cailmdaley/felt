@@ -86,7 +86,14 @@ func applyStandingTransition(req standingTransitionRequest) (standingTransitionR
 		if req.Recovery && (result.Disposition == shuttle.RunUnrecorded || strings.HasPrefix(req.RunID, "adhoc-")) {
 			return nil
 		}
-		if err := f.SetStatus(felt.StatusClosed, time.Now()); err != nil {
+		closedAt := time.Now()
+		if req.Recovery {
+			closedAt = shuttle.RuntimeTimestamp(runtimeString(f, "dispatched_at"))
+			if handoff := shuttle.RuntimeTimestamp(runtimeString(f, "handed_off_at")); handoff.After(closedAt) {
+				closedAt = handoff
+			}
+		}
+		if err := f.SetStatus(felt.StatusClosed, closedAt); err != nil {
 			return err
 		}
 		if err := f.SetExtraField("tempered", nil); err != nil {

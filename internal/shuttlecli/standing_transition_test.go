@@ -159,6 +159,31 @@ func TestStandingRunDispositionAndRecoveryPolicy(t *testing.T) {
 	}
 }
 
+func TestRecoveryCloseUsesLastServiceEvent(t *testing.T) {
+	t.Parallel()
+	for _, handoff := range []string{"", "2026-01-01T00:00:00Z", "2026-01-03T00:00:00Z"} {
+		t.Run(handoff, func(t *testing.T) {
+			st, req := seedStandingTransition(t)
+			if _, err := st.Update("role", func(f *felt.Felt) error {
+				return shuttle.SetRuntimeField(f, "handed_off_at", handoff)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			result, err := applyStandingTransition(req)
+			if err != nil || !result.Changed {
+				t.Fatalf("recovery: %+v %v", result, err)
+			}
+			want := shuttle.RuntimeTimestamp(req.DispatchedAt)
+			if at := shuttle.RuntimeTimestamp(handoff); at.After(want) {
+				want = at
+			}
+			if got := mustRead(t, st, "role").ClosedAt; !got.Equal(want) {
+				t.Fatalf("recovery close = %s, want service event %s", got, want)
+			}
+		})
+	}
+}
+
 func TestUnrecordedLaunchRequiresAnObservedExit(t *testing.T) {
 	t.Parallel()
 	for _, recovery := range []bool{true, false} {

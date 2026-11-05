@@ -2127,46 +2127,44 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert read_frontmatter(host, id)["status"] == "active"
   end
 
-  test "a daemon-down dirty death with an older handoff awaits review, then fires its next occurrence fresh",
-       %{host: host} do
-    id = seed_due_closed_standing(host, older_handoff: true)
-    path = fiber_file(host, id)
-    File.write!(path, String.replace(File.read!(path), "status: closed", "status: active"))
-    original_handoff = get_in(read_frontmatter(host, id), ["shuttle", "runtime", "handed_off_at"])
+  for clean <- [false, true] do
+    @tag :standing_downtime_gap
+    test "an occurrence during downtime is served exactly once after a #{if clean, do: "clean", else: "dirty"} exit",
+         %{host: host} do
+      id = seed_due_closed_standing(host, older_handoff: true)
+      path = fiber_file(host, id)
+      File.write!(path, String.replace(File.read!(path), "status: closed", "status: active"))
 
-    {:ok, poller} =
-      start_poller!(
-        runner: IntegrationRunner,
-        max_concurrent_workers: 0,
-        poll_interval_ms: 600_000,
-        felt_stores: [host]
-      )
+      if unquote(clean), do: write_handoff_marker(host, id, ago(120))
 
-    for _ <- 1..3, do: sync_poll_cycle!(poller)
-    assert read_frontmatter(host, id)["status"] == "closed"
+      {:ok, poller} =
+        start_poller!(
+          runner: IntegrationRunner,
+          boot_quarantine: true,
+          max_concurrent_workers: 0,
+          poll_interval_ms: 600_000,
+          felt_stores: [host]
+        )
 
-    assert_same_instant(
-      get_in(read_frontmatter(host, id), ["shuttle", "runtime", "handed_off_at"]),
-      original_handoff
-    )
+      for _ <- 1..3, do: sync_poll_cycle!(poller)
+      assert read_frontmatter(host, id)["status"] == "active"
+      :sys.replace_state(poller, &%{&1 | max_concurrent_workers: 1})
+      sync_poll_cycle!(poller)
+      assert read_run_script() =~ "Run:"
+      refute read_run_script() =~ "--resume"
 
-    back = DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -120, :second))
+      state = :sys.get_state(poller)
+      %{pid: watcher, session: session} = state.running[Poller.running_key(state, id)]
+      IntegrationRunner.remove_tmux_session(session)
+      send(poller, {:worker_exited, id, watcher, session, :normal_exit})
+      :sys.get_state(poller)
+      for _ <- 1..3, do: sync_poll_cycle!(poller)
+      assert read_frontmatter(host, id)["status"] == "closed"
 
-    File.write!(
-      path,
-      Regex.replace(~r/^closed-at: .*$/m, File.read!(path), ~s(closed-at: "#{back}"))
-    )
-
-    for _ <- 1..3, do: sync_poll_cycle!(poller)
-    assert read_frontmatter(host, id)["status"] == "active"
-    :sys.replace_state(poller, &%{&1 | max_concurrent_workers: 1})
-    sync_poll_cycle!(poller)
-    assert read_run_script() =~ "Run:"
-    refute read_run_script() =~ "--resume"
-
-    assert Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and "new-session" in args
-           end) == 1
+      assert Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and "new-session" in args
+             end) == 1
+    end
   end
 
   test "a launch failure leaves the blocked feed when a standing run closes for review", %{
@@ -2198,6 +2196,7 @@ defmodule Shuttle.DispatchIntegrationTest do
   test "plain local reopen retains a discarded run's dirty dispatch, while conclude-run keeps it armed",
        %{host: host} do
     id = seed_due_closed_standing(host)
+    write_dispatch_marker(host, id, "12345678-1234-4000-8000-123456789abc")
     {_, 0} = IntegrationRunner.cmd("shuttle", ["close", id, "--tempered=false", "--local"], [])
     {_, 0} = IntegrationRunner.cmd("shuttle", ["reopen", id, "--local"], [])
     assert read_frontmatter(host, id)["status"] == "active"
