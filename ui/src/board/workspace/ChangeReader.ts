@@ -131,6 +131,7 @@ export function mountChangeReader(
       })
     const view = candidates.find((view) => matchingWindow(view.card)) ?? candidates[0]
     if (!view) return
+    ;(view.card as HTMLDetailsElement).open = true
     if (!matchingWindow(view.card)) view.showAll()
     const host = matchingWindow(view.card)
     if (!host) {
@@ -185,11 +186,12 @@ export function mountChangeReader(
     stop?: { note?: string; importance?: string; from?: number; to?: number; side?: string },
   ): void => {
     const collapsed = file.role === 'generated' && !stop
-    const card = el(collapsed ? 'details' : 'article', 'change-file')
+    const card = el('details', 'change-file') as HTMLDetailsElement
+    card.open = !collapsed && !navigation.isViewed(id)
     card.dataset.changeFile = file.path
     card.dataset.viewId = id
     card.dataset.status = file.status
-    const head = el(collapsed ? 'summary' : 'header', 'change-file-head')
+    const head = el('summary', 'change-file-head')
     const end = stop?.to && stop.to !== stop.from ? `–${stop.to}` : ''
     const side = stop?.side === 'old' ? ' (old)' : ''
     const range = stop?.from ? `:${stop.from}${end}${side}` : ''
@@ -199,6 +201,11 @@ export function mountChangeReader(
     const role = `${file.role}${Object.hasOwn(bundle.story?.roles ?? {}, file.path) ? ' (role override)' : ''}`
     const viewedControl = mark(id)
     viewedControl.disabled = collapsed && !navigation.isViewed(id)
+    viewedControl.addEventListener('click', event => {
+      event.preventDefault()
+      card.open = !navigation.isViewed(id)
+      if (card.open) view.showAll()
+    })
     head.append(
       identity,
       el('span', 'change-role', [role, stop?.importance].filter(Boolean).join(' · ')),
@@ -214,23 +221,20 @@ export function mountChangeReader(
       card,
       file,
       showAll: () => {
-        if (collapsed) {
-          ;(card as HTMLDetailsElement).open = true
-          viewedControl.disabled = false
-          if (!body.childNodes.length) addDiff(body, file, hunks)
-        }
+        card.open = true
+        viewedControl.disabled = false
+        if (!body.childNodes.length) addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
       },
     }
     views.push(view)
-    if (collapsed)
-      card.addEventListener('toggle', () => {
+    card.addEventListener('toggle', () => {
         if ((card as HTMLDetailsElement).open) {
           viewedControl.disabled = false
           if (!body.childNodes.length) addDiff(body, file, hunks)
         }
       })
-    else addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
-    if (collapsed && reading.expanded.includes(id)) {
+    if (card.open) addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
+    if (!navigation.isViewed(id) && reading.expanded.includes(id)) {
       ;(card as HTMLDetailsElement).open = true
       view.showAll()
     }
@@ -252,7 +256,9 @@ export function mountChangeReader(
       toggle.textContent = whole ? 'Show chosen range' : 'Show file diff'
       toggle.className = 'change-range-toggle'
       card.insertBefore(toggle, body)
+      const open = view.showAll
       view.showAll = () => {
+        open()
         if (!whole) toggle.click()
       }
     }

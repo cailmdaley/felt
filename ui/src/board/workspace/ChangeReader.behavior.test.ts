@@ -29,6 +29,20 @@ function lineComment(root: HTMLElement, text: string) {
   type(field, text)
 }
 
+it('folds viewed cards, remembers them on return, and opens them when unmarked', () => {
+  const first = mount(bundle(), 'viewed-fold')
+  const card = first.root.querySelector<HTMLDetailsElement>('.change-file')!
+  expect(card.open).toBe(true)
+  card.querySelector<HTMLButtonElement>('.change-viewed')!.click()
+  expect(card.open).toBe(false)
+  first.reader.dispose()
+  const next = mount(bundle(), 'viewed-fold')
+  const restored = next.root.querySelector<HTMLDetailsElement>('.change-file')!
+  expect(restored.open).toBe(false)
+  restored.querySelector<HTMLButtonElement>('.change-viewed')!.click()
+  expect(restored.open).toBe(true)
+})
+
 it('shows statuses, old paths, modes and type changes even for files with text hunks', () => {
   const b = bundle(), original = b.files[0]
   b.files = [
