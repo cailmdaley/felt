@@ -82,7 +82,7 @@ fi
 }
 
 // remotePayload is the felt checkout the fake git clones for generation: the
-// repository's plugin payload with generation.txt naming it. A generation's
+// repository's plugin payload with distinct hook and skill bytes. A generation's
 // checkout is built once per test binary and only ever read.
 func (f *remoteSetupFixture) remotePayload(t *testing.T, generation string) string {
 	t.Helper()
@@ -104,15 +104,17 @@ func (f *remoteSetupFixture) remotePayload(t *testing.T, generation string) stri
 	if err := os.WriteFile(filepath.Join(root, "claude-plugin", "hooks", "generation.txt"), []byte(generation), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(root, "claude-plugin", "hooks", "event.sh")
-	fscript, err := os.OpenFile(script, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = fscript.WriteString("\n# Fixture generation: " + generation + "\n")
-	fscript.Close()
-	if err != nil {
-		t.Fatal(err)
+	for _, relative := range []string{"hooks/event.sh", "skills/felt/SKILL.md"} {
+		script := filepath.Join(root, "claude-plugin", relative)
+		fscript, err := os.OpenFile(script, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = fscript.WriteString("\n# Fixture generation: " + generation + "\n")
+		fscript.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	if remotePayloads.roots == nil {
 		remotePayloads.roots = map[string]string{}
