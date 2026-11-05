@@ -162,6 +162,9 @@ registry at `~/.config/shuttle/stores.json`. shuttle assumes no default store.
 A oneshot constitution may carry `shuttle.pulse: 59m` to wake its own conversation at that interval.
 The interval ranges from one minute to 24 hours.
 An optional `window` with `start`, `end` and an IANA `tz` limits ticks to local wall time; the start is included, the end excluded, and overnight windows are allowed.
+The first tick in each window starts a fresh session from the fiber, without spending a turn in the old conversation.
+If the old session is busy, that reset waits for it to become idle.
+Keep the fiber's Status current during the day; there is no goodbye turn.
 Pulses apply to any oneshot constitution, including but not limited to seats.
 The daemon resumes the same session after an exit, even when its transcript is cold, unless the session handed off; a handoff starts the successor from the fiber.
 A busy session skips the tick and tries at the next interval, without interrupting or stacking turns.

@@ -88,6 +88,32 @@ defmodule Shuttle.PulseTest do
     refute Pulse.dormant_wait?(handed, row, @now)
   end
 
+  test "window succession follows the opening date, including overnight and DST" do
+    window = %{"start" => "08:00", "end" => "20:00", "tz" => "Europe/Paris"}
+    f = put_in(fiber(), ["shuttle", "pulse"], %{"every" => "59m", "window" => window})
+    row = %{"state" => "scheduled", "next_tick" => "2026-01-01T00:00:00Z"}
+    assert Pulse.window_reset_due?(f, row, @now)
+    today = put_in(f, ["shuttle", "runtime", "dispatched_at"], "2026-11-02T07:00:00Z")
+    refute Pulse.window_reset_due?(today, row, ~U[2026-11-02 12:00:00Z])
+    refute Pulse.window_reset_due?(f, row, ~U[2026-11-02 06:59:59Z])
+    refute Pulse.window_reset_due?(fiber(), row, @now)
+    standing = put_in(f, ["shuttle", "kind"], "standing")
+    refute Pulse.window_reset_due?(standing, row, @now)
+
+    night =
+      put_in(f, ["shuttle", "pulse", "window"], %{window | "start" => "22:00", "end" => "06:00"})
+
+    night = put_in(night, ["shuttle", "runtime", "dispatched_at"], "2026-11-01T21:00:00Z")
+    refute Pulse.window_reset_due?(night, row, ~U[2026-11-02 04:00:00Z])
+    assert Pulse.window_reset_due?(night, row, ~U[2026-11-02 21:00:00Z])
+
+    fall =
+      put_in(f, ["shuttle", "pulse", "window"], %{window | "start" => "02:00", "end" => "03:00"})
+
+    fall = put_in(fall, ["shuttle", "runtime", "dispatched_at"], "2026-10-25T00:00:00Z")
+    refute Pulse.window_reset_due?(fall, row, ~U[2026-10-25 01:30:00Z])
+  end
+
   test "an unsupported pulse cannot hold a dormant session from ordinary dispatch" do
     unsupported = put_in(fiber(), ["shuttle", "resolved", "agent", "cli"], "pi")
     row = Pulse.reconcile(%{}, [unsupported], "test-host", @now)["watch-uid"]
@@ -136,5 +162,26 @@ defmodule Shuttle.PulseTest do
 
     refute Map.has_key?(f, "pulse")
     assert f == fiber()
+  end
+
+  @tag :tmp_dir
+  test "an overnight pending tick survives restart and releases into the new window", %{
+    tmp_dir: tmp
+  } do
+    Env.put_env("SHUTTLE_DATA_DIR", tmp)
+    window = %{"start" => "08:00", "end" => "20:00", "tz" => "Europe/Paris"}
+    f = put_in(fiber(), ["shuttle", "pulse"], %{"every" => "59m", "window" => window})
+    yesterday = ~U[2026-11-01 18:59:00Z]
+    pulses = Pulse.reconcile(%{}, [f], "test-host", yesterday)
+    pulses = Pulse.reserve(pulses, "watch-uid", "conversation", "conversation", yesterday)
+    assert :ok = Pulse.save(pulses)
+    restored = Pulse.load() |> Pulse.reconcile([f], "test-host", @now)
+
+    activity = %{
+      "conversation" => %{phase: "waiting", last_event_at: DateTime.to_unix(@now, :millisecond)}
+    }
+
+    observed = Pulse.observe(restored, [f], activity, [], @now)
+    assert Pulse.window_reset_due?(f, observed["watch-uid"], @now)
   end
 end

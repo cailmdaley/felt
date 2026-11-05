@@ -84,6 +84,8 @@ Pulse applies to any oneshot constitution, whether or not it is a seat.
 Standing constitutions keep their cron schedule and review lifecycle.
 
 The daemon sends each pulse to the constitution's own conversation.
+With a window, its first tick starts a fresh session from the fiber; a busy conversation keeps running until it becomes idle, then the reset proceeds.
+The old conversation spends no turn handing off, so keep Status current during the day.
 If its session exited, Shuttle resumes that session even when its transcript is cold.
 A clean handoff starts the successor from the fiber.
 A busy conversation skips that tick and waits for the next interval.

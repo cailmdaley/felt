@@ -2841,6 +2841,9 @@ defmodule Shuttle.Poller do
         {next, _} = do_dispatch_fiber(state, fiber)
         next
 
+      Shuttle.Pulse.window_reset_due?(fiber, row, now) ->
+        start_pulse_window(state, fiber, now)
+
       Shuttle.Pulse.due?(row, now) and
           not Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) ->
         pulses = Shuttle.Pulse.advance(state.pulses, fiber, now)
@@ -2884,59 +2887,95 @@ defmodule Shuttle.Poller do
         sending? = Enum.any?(acc.pulse_jobs, fn {_, {job_key, _}} -> key == job_key end)
 
         if worker && not sending? && Shuttle.Pulse.due?(row, now) do
-          pulses = Shuttle.Pulse.advance(acc.pulses, fiber, now)
-          next = persist_pulses(acc, pulses)
-
-          if next.pulses == pulses and pulse_idle?(next, worker, fiber) and
-               Shuttle.Pulse.in_window?(Shuttle.Pulse.config(fiber).window, now) do
-            uuid = worker_session_uuid(worker, fiber)
-            cli = worker_cli(worker, fiber)
-
-            payload = %{
-              "address" => Shuttle.Messaging.address("local", cli, uuid),
-              "text" => Shuttle.Pulse.message(row, now),
-              "from" => "shuttle",
-              "wake" => true,
-              "idle_only" => true,
-              "message_id" => "pulse-#{key}-#{DateTime.to_unix(now, :millisecond)}"
-            }
-
-            # Claude's native inbox defers a race with a new turn. Keep one durable
-            # reservation until a later idle event, including across daemon restarts.
-            reserved =
-              if cli == "claude",
-                do: Shuttle.Pulse.reserve(next.pulses, key, uuid, uuid, now),
-                else: next.pulses
-
-            reserved_state = persist_pulses(next, reserved)
-
-            if reserved_state.pulses == reserved do
-              callers = [self() | Process.get(:"$callers", [])]
-
-              task =
-                Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
-                  Shuttle.Env.adopt_callers(callers)
-
-                  case Shuttle.Env.app(:pulse_sender) do
-                    sender when is_function(sender, 1) -> sender.(payload)
-                    _ -> Shuttle.Messaging.send_daemon_message(payload)
-                  end
-                end)
-
-              %{
-                reserved_state
-                | pulse_jobs: Map.put(reserved_state.pulse_jobs, task.ref, {key, now})
-              }
-            else
-              reserved_state
-            end
+          if Shuttle.Pulse.window_reset_due?(fiber, row, now) do
+            if pulse_idle?(acc, worker, fiber),
+              do: start_pulse_window(acc, fiber, now),
+              else: acc
           else
-            next
+            pulses = Shuttle.Pulse.advance(acc.pulses, fiber, now)
+            next = persist_pulses(acc, pulses)
+
+            if next.pulses == pulses and pulse_idle?(next, worker, fiber) and
+                 Shuttle.Pulse.in_window?(Shuttle.Pulse.config(fiber).window, now) do
+              uuid = worker_session_uuid(worker, fiber)
+              cli = worker_cli(worker, fiber)
+
+              payload = %{
+                "address" => Shuttle.Messaging.address("local", cli, uuid),
+                "text" => Shuttle.Pulse.message(row, now),
+                "from" => "shuttle",
+                "wake" => true,
+                "idle_only" => true,
+                "message_id" => "pulse-#{key}-#{DateTime.to_unix(now, :millisecond)}"
+              }
+
+              # Claude's native inbox defers a race with a new turn. Keep one durable
+              # reservation until a later idle event, including across daemon restarts.
+              reserved =
+                if cli == "claude",
+                  do: Shuttle.Pulse.reserve(next.pulses, key, uuid, uuid, now),
+                  else: next.pulses
+
+              reserved_state = persist_pulses(next, reserved)
+
+              if reserved_state.pulses == reserved do
+                callers = [self() | Process.get(:"$callers", [])]
+
+                task =
+                  Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
+                    Shuttle.Env.adopt_callers(callers)
+
+                    case Shuttle.Env.app(:pulse_sender) do
+                      sender when is_function(sender, 1) -> sender.(payload)
+                      _ -> Shuttle.Messaging.send_daemon_message(payload)
+                    end
+                  end)
+
+                %{
+                  reserved_state
+                  | pulse_jobs: Map.put(reserved_state.pulse_jobs, task.ref, {key, now})
+                }
+              else
+                reserved_state
+              end
+            else
+              next
+            end
           end
         else
           acc
         end
       end)
+    end
+  end
+
+  defp start_pulse_window(state, fiber, now) do
+    fiber_id = fiber_address(fiber)
+    worker = running_worker(state, fiber_id)
+    live = worker || live_session_for_fiber(state, fiber_id, fiber["uid"])
+
+    if live && not pulse_idle?(state, worker, fiber) do
+      state
+    else
+      replace_pulse_session(state, fiber, now)
+    end
+  end
+
+  defp replace_pulse_session(state, fiber, now) do
+    fiber_id = fiber_address(fiber)
+    next = cut_open_session(state, fiber_id, fiber["uid"])
+
+    if running_worker(next, fiber_id) do
+      next
+    else
+      {next, result} = do_dispatch_fiber(next, fiber, resume_mode: "fresh")
+
+      if match?({:ok, _}, result) do
+        pulses = next.pulses |> Shuttle.Pulse.advance(fiber, now)
+        persist_pulses(next, Shuttle.Pulse.delivered(pulses, runtime_key_for_fiber(fiber), now))
+      else
+        next
+      end
     end
   end
 
@@ -6149,10 +6188,9 @@ defmodule Shuttle.Poller do
   # starting fresh on an open session meant the costly resume →
   # reload-stale-transcript → handoff dance.
   #
-  # Gated strictly on `force` + `resume_mode:"fresh"`: the autonomous poll never
-  # carries `resume_mode`, so it can NEVER cut a live worker — only an explicit
-  # human New-session can. A non-fresh force-dispatch (Resume, `"previous"`) is
-  # untouched and still resumes the in-flight transcript.
+  # Manual replacement requires `force` + `resume_mode:"fresh"`.
+  # Windowed pulses use the same teardown after checking that the worker is idle.
+  # A non-fresh force-dispatch resumes the in-flight transcript.
   defp cut_open_session_for_fresh(%State{} = state, fiber_id, runtime_key, uid, opts) do
     forced_fresh? =
       Keyword.get(opts, :force, false) and Keyword.get(opts, :resume_mode) == "fresh"

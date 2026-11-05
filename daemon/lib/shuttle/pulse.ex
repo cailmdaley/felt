@@ -135,9 +135,15 @@ defmodule Shuttle.Pulse do
         %{"pending" => %{"activity_session" => session, "at" => sent}} ->
           case activity[session] do
             %{phase: "waiting", last_event_at: at} when at > sent ->
-              if pulse_key in sending_keys,
-                do: acc,
-                else: acc |> release(pulse_key) |> advance(fiber, now)
+              if pulse_key in sending_keys do
+                acc
+              else
+                released = release(acc, pulse_key)
+
+                if window_reset_due?(fiber, released[pulse_key], now),
+                  do: released,
+                  else: advance(released, fiber, now)
+              end
 
             _ ->
               acc
@@ -184,6 +190,32 @@ defmodule Shuttle.Pulse do
   end
 
   def in_window?(_, _now), do: false
+
+  @doc "The first due tick in a new window replaces the previous window's conversation."
+  def window_reset_due?(fiber, row, now) do
+    with %{window: window} when is_map(window) <- config(fiber),
+         true <- due?(row, now),
+         true <- in_window?(window, now),
+         %DateTime{} = dispatched <- Continuation.dispatched_at(fiber) do
+      window_date(window, dispatched) != window_date(window, now)
+    else
+      _ -> false
+    end
+  end
+
+  # An overnight window belongs to the date on which it opens, including
+  # both occurrences of a repeated wall-clock hour at the autumn DST change.
+  defp window_date(window, at) do
+    if in_window?(window, at) do
+      local = DateTime.shift_zone!(at, window["tz"])
+      date = DateTime.to_date(local)
+      time = local |> DateTime.to_time() |> Time.to_iso8601()
+
+      if window["start"] >= window["end"] and time < window["end"],
+        do: Date.add(date, -1),
+        else: date
+    end
+  end
 
   def dormant_wait?(fiber, row, now) do
     not is_nil(config(fiber)) and is_map(row) and row["state"] == "scheduled" and

@@ -65,6 +65,23 @@ defmodule Shuttle.PollerPulseTest do
     end)
   end
 
+  defp windowed(uuid) do
+    yesterday = DateTime.utc_now() |> DateTime.add(-86400) |> DateTime.to_iso8601()
+
+    FeltStoreRunner.set_shuttle("watch", """
+    kind: oneshot
+    agent: claude-sonnet
+    pulse:
+      every: 1m
+      window: {start: "00:00", end: "23:59", tz: Etc/UTC}
+    resolved:
+      pulse_interval_ms: 60000
+    runtime:
+      session_uuid: #{uuid}
+      dispatched_at: #{yesterday}
+    """)
+  end
+
   defp await(fun, attempts \\ 3000)
 
   defp await(fun, attempts) when attempts > 0 do
@@ -165,6 +182,65 @@ defmodule Shuttle.PollerPulseTest do
     refute_receive {:pulse_sent, _, _}
     assert [%{"last_tick" => nil} = row] = Map.values(Pulse.load())
     refute Pulse.due?(row, DateTime.utc_now())
+  end
+
+  test "a window opening waits for idle then starts a fresh session without waking the old one",
+       %{
+         poller: poller,
+         phase: phase,
+         uuid: uuid
+       } do
+    windowed(uuid)
+
+    Agent.update(phase, fn _ -> %{uuid => %{phase: "working", last_event_at: 0}} end)
+    cycle(poller)
+    due(poller)
+    cycle(poller)
+    assert [%{session_uuid: ^uuid}] = Map.values(:sys.get_state(poller).running)
+    assert [row] = Map.values(:sys.get_state(poller).pulses)
+    assert Pulse.due?(row, DateTime.utc_now())
+    refute_receive {:pulse_sent, _, _}
+
+    Agent.update(phase, fn _ -> %{uuid => %{phase: "waiting", last_event_at: 0}} end)
+    cycle(poller)
+    assert [worker] = Map.values(:sys.get_state(poller).running)
+    refute worker.session_uuid == uuid
+    refute_receive {:pulse_sent, _, _}
+    assert [row] = Map.values(Pulse.load())
+    refute Pulse.due?(row, DateTime.utc_now())
+    assert is_binary(row["last_tick"])
+    cycle(poller)
+    assert [%{session_uuid: fresh}] = Map.values(:sys.get_state(poller).running)
+    assert fresh == worker.session_uuid
+  end
+
+  test "a failed window teardown preserves the old worker and retries when it can stop", %{
+    poller: poller,
+    uuid: uuid
+  } do
+    windowed(uuid)
+    cycle(poller)
+    FeltStoreRunner.set_kill_session_failure(true)
+    due(poller)
+    cycle(poller)
+    assert [%{session_uuid: ^uuid}] = Map.values(:sys.get_state(poller).running)
+    refute_receive {:pulse_sent, _, _}
+    FeltStoreRunner.set_kill_session_failure(false)
+    cycle(poller)
+    assert [worker] = Map.values(:sys.get_state(poller).running)
+    refute worker.session_uuid == uuid
+  end
+
+  test "an exited session starts fresh at the next window's tick", %{poller: poller, uuid: uuid} do
+    windowed(uuid)
+    cycle(poller)
+    [worker] = Map.values(:sys.get_state(poller).running)
+    FeltStoreRunner.remove_tmux_session(worker.session)
+    due(poller)
+    cycle(poller)
+    assert [fresh] = Map.values(:sys.get_state(poller).running)
+    refute fresh.session_uuid == uuid
+    refute_receive {:pulse_sent, _, _}
   end
 
   test "a known rejection releases the reservation without retrying the consumed deadline", %{
