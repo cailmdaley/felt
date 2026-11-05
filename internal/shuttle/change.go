@@ -45,6 +45,9 @@ type ChangeCommit struct {
 
 type ChangeFile struct {
 	Path      string       `json:"path"`
+	OldPath   string       `json:"old_path,omitempty"`
+	OldMode   string       `json:"old_mode"`
+	NewMode   string       `json:"new_mode"`
 	Status    string       `json:"status"`
 	Role      string       `json:"role"`
 	Additions int          `json:"additions"`
@@ -242,20 +245,21 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		args = append(args, format...)
 		return isolated(append(args, baseSHA, headSHA, "--")...)
 	}
-	names, err := diff("--name-status", "-z")
+	names, err := diff("--raw", "-z", "--no-abbrev")
 	if err != nil {
 		return nil, nil, err
 	}
 	tokens := strings.Split(strings.TrimSuffix(names, "\x00"), "\x00")
 	for len(tokens) >= 2 {
-		status, path := tokens[0], tokens[1]
+		fields, path := strings.Fields(tokens[0]), tokens[1]
+		status, oldPath := fields[4], ""
 		tokens = tokens[2:]
 		if strings.HasPrefix(status, "R") {
-			path = tokens[0]
+			oldPath, path = path, tokens[0]
 			tokens = tokens[1:]
 		}
 		label := map[byte]string{'A': "added", 'M': "modified", 'D': "deleted", 'R': "renamed", 'T': "modified"}[status[0]]
-		c.Files = append(c.Files, ChangeFile{Path: path, Status: label, Role: ChangeRole(path)})
+		c.Files = append(c.Files, ChangeFile{Path: path, OldPath: oldPath, OldMode: strings.TrimPrefix(fields[0], ":"), NewMode: fields[1], Status: label, Role: ChangeRole(path)})
 	}
 	c.Patch, err = diff("--patch", "--full-index", "--unified=3", "--src-prefix=a/", "--dst-prefix=b/")
 	if err != nil {

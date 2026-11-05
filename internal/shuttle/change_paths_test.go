@@ -51,6 +51,9 @@ func TestBuildChangePathsAndFileTypes(t *testing.T) {
 	if err := os.Symlink("destination", filepath.Join(repo, "subdir/type")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filepath.Join(repo, "sp ace"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	git("add", ".")
 	git("commit", "-m", "head")
 	// The caller's diff formatting and relative-path settings must not change the schema.
@@ -69,9 +72,15 @@ func TestBuildChangePathsAndFileTypes(t *testing.T) {
 		seen[h.File]++
 	}
 	for _, f := range c.Files {
-		want := 1
+		want, newMode := 1, "100644"
 		if f.Path == "subdir/type" {
-			want = 2
+			want, newMode = 2, "120000"
+		}
+		if f.Path == "sp ace" {
+			newMode = "100755"
+		}
+		if f.OldPath != "" || f.OldMode != "100644" || f.NewMode != newMode {
+			t.Errorf("file metadata: %+v", f)
 		}
 		if seen[f.Path] != want || f.Status != "modified" {
 			t.Errorf("file %+v has %d hunks, want %d", f, seen[f.Path], want)
@@ -86,7 +95,7 @@ func TestBuildChangePathsAndFileTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Files) != 1 || c.Files[0].Path != "renamed space" || c.Files[0].Status != "renamed" || len(hunks) != 1 || hunks[0].File != "renamed space" {
+	if len(c.Files) != 1 || c.Files[0].Path != "renamed space" || c.Files[0].OldPath != "sp ace" || c.Files[0].OldMode != "100755" || c.Files[0].NewMode != "100755" || c.Files[0].Status != "renamed" || len(hunks) != 1 || hunks[0].File != "renamed space" {
 		t.Fatalf("rename: %+v, hunks %+v", c.Files, hunks)
 	}
 }

@@ -84,12 +84,12 @@ func TestBuildChangeRealGit(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []ChangeFile{
-		{Path: "deleted.go", Status: "deleted", Role: "implementation", Deletions: 1},
-		{Path: "image.bin", Status: "modified", Role: "implementation"},
-		{Path: "line\nbreak.go", Status: "modified", Role: "implementation", Additions: 1, Deletions: 1},
-		{Path: "modified.go", Status: "modified", Role: "implementation", Additions: 2, Deletions: 2},
-		{Path: "new name\t.go", Status: "renamed", Role: "implementation"},
-		{Path: "tests/new_test.py", Status: "added", Role: "test", Additions: 1},
+		{Path: "deleted.go", OldMode: "100644", NewMode: "000000", Status: "deleted", Role: "implementation", Deletions: 1},
+		{Path: "image.bin", OldMode: "100644", NewMode: "100644", Status: "modified", Role: "implementation"},
+		{Path: "line\nbreak.go", OldMode: "100644", NewMode: "100644", Status: "modified", Role: "implementation", Additions: 1, Deletions: 1},
+		{Path: "modified.go", OldMode: "100644", NewMode: "100644", Status: "modified", Role: "implementation", Additions: 2, Deletions: 2},
+		{Path: "new name\t.go", OldPath: "old name\t.go", OldMode: "100644", NewMode: "100644", Status: "renamed", Role: "implementation"},
+		{Path: "tests/new_test.py", OldMode: "000000", NewMode: "100644", Status: "added", Role: "test", Additions: 1},
 	}
 	metadata := append([]ChangeFile{}, c.Files...)
 	for i := range metadata {

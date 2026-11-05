@@ -63,7 +63,10 @@ The bundle has these fields:
 | `files` | Repository-relative inventory, with destination paths for renames and old paths for deletions |
 | `story` | Resolved story object, or `null` |
 
-A file has `path`, `status`, `role`, `additions`, `deletions`, `header`, `hunks` and `remaining`.
+A file has `path`, `old_mode`, `new_mode`, `status`, `role`, `additions`, `deletions`, `header`, `hunks` and `remaining`, plus `old_path` for renames.
+`old_path` names the source path; `path` names the destination.
+Modes are six-digit octal strings from Git's raw inventory, with `000000` for an absent side.
+Different nonzero mode prefixes (the first three digits) identify file-type changes; other mode differences include executable-bit changes.
 Statuses are `modified`, `added`, `deleted` and `renamed`; a file-type change is `modified`.
 The header retains Git's metadata, including binary notices, rename paths and mode changes.
 Empty changes have empty `commits` and `files` arrays.
