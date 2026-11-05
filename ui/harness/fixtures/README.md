@@ -10,10 +10,13 @@ channel has a tapestry with relative links and header chips for three changes:
 - `plain.change.json`: the same inventory and patch, without a story.
 - `large.change.json`: a 5,000-line file with every line replaced.
 
-`node ui/scripts/bake-change-fixture.mjs` reproduces `dogfood.change.json` from
-its pinned repository revision. Its story and line references belong to that
-revision. Harness-only paths and contributor labels keep the fixture independent
-of an operator's checkout and identity.
+`nice -n 10 node ui/scripts/bake-change-fixture.mjs` builds `shuttle` and runs
+`shuttle change` against the pinned repository revision with `dogfood.story.json`.
+Only `repo.dir` is replaced with a portable harness path.
+`changeContract.test.ts` rebakes that fixture and compares it to the checked-in bundle.
+It also creates a disposable Git repository, bakes empty, minimal-story and full-story bundles,
+type-checks their JSON against `ChangeBundle`, and compares the reader's paths and hunk coverage
+with the CLI's report, including renames, spaced and quoted paths, binary and mode changes.
 
 ## Verification
 

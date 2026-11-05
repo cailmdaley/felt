@@ -4,7 +4,7 @@ import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REPORT, WORKSPACE_UID, type Wor
 
 /** Real repository snapshot plus no-story and long-file reading probes. */
 export function addChangeFixtures(fixture: WorkspaceExample, now: number): void {
-  const bundle = dogfood as ChangeBundle
+  const bundle = dogfood as ChangeBundle // changeContract.test checks the CLI's JSON against this type.
   const dir = WORKSPACE_REPORT.slice(0, WORKSPACE_REPORT.lastIndexOf('/'))
   const large: ChangeBundle = { ...bundle, title: 'A 5,000-line changed file', head: '5'.repeat(40), story: null,
     patch: `diff --git a/src/large.ts b/src/large.ts\n--- a/src/large.ts\n+++ b/src/large.ts\n@@ -1,5000 +1,5000 @@\n${Array.from({ length: 5000 }, (_, n) => `-export const value${n + 1} = ${n};\n+export const value${n + 1} = ${n + 1};`).join('\n')}\n`,

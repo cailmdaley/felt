@@ -7,6 +7,8 @@ func TestChangeRole(t *testing.T) {
 		"cmd/main.go": "implementation", "src/component.ts": "implementation",
 		"analysis/measure.py": "implementation", "lib/app.ex": "implementation",
 		"tests/catalog.py": "test", "test/test_helper.exs": "test",
+		"ui/e2e/workspace.mjs": "test", "ui/harness/example.ts": "test",
+		"ui/harness/fixtures/snapshot.json": "test", "tests/fixtures/data.bin": "test",
 		"analysis/test_shear.py": "test", "pkg/server_test.go": "test",
 		"src/a.test.ts": "test", "src/a.spec.tsx": "test", "test/app_test.exs": "test",
 		"package-lock.json": "config", "uv.lock": "config", "go.sum": "config",

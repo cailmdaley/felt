@@ -10,7 +10,7 @@ export interface ChangeBundle {
   commits: { sha: string; subject: string; author: string; time: string }[]
   patch: string
   files: { path: string; status: string; role: ChangeRole; additions: number; deletions: number }[]
-  story: null | { overview: string; flags: (ChangeRange & { text: string })[]; chapters: ChangeChapter[]; roles?: Record<string, ChangeRole> }
+  story: null | { title?: string; overview: string; flags: (ChangeRange & { text: string })[]; chapters: ChangeChapter[]; roles?: Record<string, ChangeRole> }
 }
 export interface PatchRow { text: string; old: number; new: number }
 export interface ChangeHunk { oldStart: number; oldCount: number; newStart: number; newCount: number; rows: PatchRow[] }
@@ -31,8 +31,8 @@ export function changeFiles(bundle: ChangeBundle): ChangeFile[] {
     const lines = patch.replace(/\n$/, '').split('\n')
     const first = lines.findIndex(line => line.startsWith('@@ '))
     const header = lines.slice(0, first < 0 ? lines.length : first).join('\n')
-    const destination = lines.find(line => line.startsWith('+++ '))?.slice(4)
-    const source = lines.find(line => line.startsWith('--- '))?.slice(4)
+    const destination = lines.find(line => line.startsWith('+++ '))?.slice(4).replace(/\t$/, '')
+    const source = lines.find(line => line.startsWith('--- '))?.slice(4).replace(/\t$/, '')
     const moved = lines.find(line => line.startsWith('rename to ') || line.startsWith('copy to '))?.replace(/^(?:rename|copy) to /, '')
     const names = lines[0].slice('diff --git '.length).replace(/"(?:\\.|[^"\\])*"/g, unquote)
     const path = destination && destination !== '/dev/null' ? unquote(destination).replace(/^b\//, '')
@@ -61,10 +61,11 @@ export function changeFiles(bundle: ChangeBundle): ChangeFile[] {
 }
 
 export function overlaps(hunk: ChangeHunk, stop: ChangeRange): boolean {
-  if (stop.from === undefined && stop.to === undefined) return true
   const start = stop.side === 'old' ? hunk.oldStart : hunk.newStart
   const count = stop.side === 'old' ? hunk.oldCount : hunk.newCount
-  return count > 0 && start <= (stop.to ?? stop.from ?? Infinity) && start + count - 1 >= (stop.from ?? 1)
+  if (count === 0) return false
+  if (stop.from === undefined && stop.to === undefined) return true
+  return start <= (stop.to ?? stop.from ?? Infinity) && start + count - 1 >= (stop.from ?? 1)
 }
 
 /** Tests stay together even when a chapter cites them; uncovered implementation cannot disappear. */

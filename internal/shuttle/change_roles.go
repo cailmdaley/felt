@@ -21,7 +21,7 @@ func ChangeRole(file string) string {
 	}
 	for _, part := range parts[:len(parts)-1] {
 		switch part {
-		case "test", "tests", "__tests__", "spec":
+		case "test", "tests", "__tests__", "spec", "e2e", "harness", "fixtures":
 			return "test"
 		}
 	}
