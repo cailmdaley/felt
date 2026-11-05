@@ -11,6 +11,14 @@ The command builds both bundles, runs every suite even when one fails, and exits
 It reuses the shared headless browser when available; `SHARED_BROWSER=1` starts or reuses it explicitly.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.
 
+`cd ui && npm run e2e:change` builds the change-reader ES-module harness and checks every virtual diff window, including open shadow DOM, against an independent parse of real `git diff` output.
+The fixtures cover story excerpts, tests, remaining hunks, folded generated files, hostile filenames and a blocked lazy Go grammar chunk, on desktop and phone.
+The source of truth is Git's changed side, line number and text, not the CLI bundle's hunks or the highlighting library's parser.
+The full `npm run e2e` recipe and CI include this gate.
+Set `CHROME_PATH` to a headless Chrome executable, or install Chromium with `npx playwright-core install chromium`; the browser helper also supports the shared headless browser.
+`CHANGE_DOM_INJECT_LOSS=1 npm run e2e:change` removes rendered changed rows before comparison and must exit nonzero.
+The unit contract test and browser gate create their own disposable Git histories; neither needs an origin remote or old commits in the source checkout.
+
 `scripts/check-codex-tui.sh` is an opt-in native Codex launch check for a host
 with Codex, tmux, and an existing Codex auth file. It launches the executable
 directly in a private tmux server and temporary `CODEX_HOME`, waits for both

@@ -151,6 +151,12 @@ jobs:
       - name: Check production dependency advisories
         run: npm audit --omit=dev
 
+      # CLI/reader contracts bake their own disposable two-commit repositories.
+      - name: Set up Go for change contract fixtures
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
       # npm test runs the board suite under a pinned America/Los_Angeles; the
       # civil-day properties inside it cover every other zone. A release gate.
       - name: Run board tests
@@ -158,6 +164,12 @@ jobs:
 
       - name: Build board bundle
         run: npm run build
+
+      - name: Install headless Chromium for change conservation
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Conserve real Git rows in the browser DOM
+        run: npm run e2e:change
 
   # Warm the EL8 OTP cache that release.yml's daemon legs restore from.
   #

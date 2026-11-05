@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, renameSync, symlinkSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, renameSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +17,7 @@ it('reads the public CLI bundles with the reader types, paths and changed-line c
   const put = (path: string, body: string | Uint8Array) => writeFileSync(join(repo, path), body)
   try {
     git('init', '-q'); git('config', 'user.name', 'Fixture Author'); git('config', 'user.email', 'fixture@example.invalid')
+    git('config', 'commit.gpgsign', 'false'); git('config', 'core.autocrlf', 'false'); git('config', 'core.filemode', 'true')
     for (const path of ['space name.ts', 'é.ts', 'deleted.ts', 'renamed.ts', 'pure.ts', 'mode.sh', 'app.test.ts', 'type.ts', 'tab\t.ts']) put(path, Array.from({ length: 30 }, (_, n) => `${path} line ${n + 1}\n`).join(''))
     put('image.bin', new Uint8Array([0, 1, 2])); put('cr.ts', 'before\r\ncontext\r\nlast')
     git('add', '.'); git('commit', '-qm', 'Base'); git('tag', 'base')
@@ -40,15 +41,13 @@ it('reads the public CLI bundles with the reader types, paths and changed-line c
       { file: 'space name.ts', from: 1, to: 1, importance: 'context', note: 'Context does not show a change.' },
       { file: 'é.ts', importance: 'supporting', note: 'A whole-file stop still selects its own side only.' },
     ] }, { id: 'next', title: 'Next', stops: [{ file: 'added.ts', from: 3, to: 4, importance: 'supporting', note: 'A second short excerpt, overlapping once.' }] }] })
-    const fixtureDir = new URL('../harness/fixtures/', import.meta.url)
-    const fixtureStory = JSON.parse(readFileSync(new URL('dogfood.story.json', fixtureDir), 'utf8'))
-    const fixture = JSON.parse(readFileSync(new URL('dogfood.change.json', fixtureDir), 'utf8'))
-    const dogfood = bakeChange(binary, fileURLToPath(new URL('../../', import.meta.url)), '0f3a0cdc', 'f629d29c417f20c16b8e4415ebd6e424235060d3', fixtureStory)
-    expect({ ...dogfood.bundle, commits: dogfood.bundle.commits.map((commit: object) => ({ ...commit, author: 'Repository contributor' })), repo: { ...dogfood.bundle.repo, dir: '/fixture-repo/felt' } }).toEqual(fixture)
-    const dogfoodPlain = bakeChange(binary, fileURLToPath(new URL('../../', import.meta.url)), '0f3a0cdc', 'f629d29c417f20c16b8e4415ebd6e424235060d3')
-    const plainFixture = JSON.parse(readFileSync(new URL('dogfood-plain.change.json', fixtureDir), 'utf8'))
-    expect({ ...dogfoodPlain.bundle, commits: dogfoodPlain.bundle.commits.map((commit: object) => ({ ...commit, author: 'Repository contributor' })), repo: { ...dogfoodPlain.bundle.repo, dir: '/fixture-repo/felt' } }).toEqual(plainFixture)
-    const samples = [plain, minimal, empty, story, dogfood, dogfoodPlain]
+    // All history belongs to this fixture; a shallow source checkout needs no origin.
+    expect(git('remote')).toBe('')
+    expect(plain.bundle.repo.forge_url).toBeNull()
+    expect(plain.bundle.base).toBe(git('rev-parse', 'base'))
+    expect(plain.bundle.head).toBe(git('rev-parse', 'HEAD'))
+    expect(plain.bundle.commits.map((commit: { subject: string }) => commit.subject)).toEqual(['Change'])
+    const samples = [plain, minimal, empty, story]
     // Type-check JSON literals, not a type assertion: field renames and null arrays must fail.
     const source = join(dir, 'contract.mts')
     writeFileSync(source, `import type { ChangeBundle } from ${JSON.stringify(fileURLToPath(new URL('../src/board/workspace/changeModel.js', import.meta.url)))};\n` + samples.map(({ bundle }, i) => `const bundle${i}: ChangeBundle = ${JSON.stringify(bundle)};`).join('\n'))
