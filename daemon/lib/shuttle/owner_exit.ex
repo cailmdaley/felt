@@ -35,15 +35,15 @@ defmodule Shuttle.OwnerExit do
     params = Map.merge(params, %{"fiber" => subject, "origin" => origin})
 
     case result do
-      {:error, {:forward_failed, _, {:not_sent, _} = cause}} when stale_before_request ->
-        mirror(params, cause, result)
+      {:error, {:forward_failed, _, {:not_sent, _}}} when stale_before_request ->
+        mirror(params, result)
 
       result ->
         result
     end
   end
 
-  defp mirror(params, cause, refusal) do
+  defp mirror(params, refusal) do
     {id, invocation} =
       case params do
         %{"target" => target} ->
@@ -62,8 +62,10 @@ defmodule Shuttle.OwnerExit do
           {nil, params}
       end
 
-    case exit(Map.merge(params, invocation), cause) do
-      nil -> refusal
+    params = Map.merge(params, invocation)
+
+    case action?(params) && Poller.mirror_exit(params) do
+      value when value in [nil, false] -> refusal
       {:ok, output} -> {:mirrored, id, output}
       result -> result
     end
@@ -127,13 +129,6 @@ defmodule Shuttle.OwnerExit do
          else: (_ -> nil)
   end
 
-  def exit(params, {:not_sent, _}) do
-    if action?(params) && local_copy(params["fiber"], params["origin"], params["fiber_path"]),
-      do: Poller.mirror_exit(params)
-  end
-
-  def exit(_, _), do: nil
-
   @doc false
   def write_exit(params, runner) do
     with true <- action?(params),
@@ -172,12 +167,10 @@ defmodule Shuttle.OwnerExit do
           _ -> false
         end)
 
-      updated_fm = FrontmatterEdit.apply(copy.raw_fm, changed)
+      prefix =
+        added |> Map.new(fn {:put, key, value} -> {key, value} end) |> FrontmatterEdit.render()
 
-      updated_fm =
-        if added == [],
-          do: updated_fm,
-          else: FrontmatterEdit.apply("", added) <> "\n" <> updated_fm
+      updated_fm = prefix <> FrontmatterEdit.apply(copy.raw_fm, changed)
 
       original = "---\n" <> copy.raw_fm <> "\n---" <> copy.body
       updated = "---\n" <> updated_fm <> "\n---" <> copy.body
@@ -191,8 +184,6 @@ defmodule Shuttle.OwnerExit do
         error ->
           error
       end
-    else
-      _ -> {:error, :owner_required}
     end
   end
 
@@ -205,59 +196,37 @@ defmodule Shuttle.OwnerExit do
       |> Enum.group_by(&uid/1)
       |> Map.filter(fn {id, rows} -> id != nil && length(rows) == 1 end)
 
-    owners =
-      Enum.map(owners, fn
-        %{"origin" => ^local} = row ->
-          row
-
-        row ->
-          copy =
-            case copies[uid(row)] do
-              [copy] -> if host(copy) == host(row), do: copy
-              _ -> nil
-            end
-
-          capable =
-            stale[row["origin"]] == true && copy != nil && eligible?(copy["fiber"], policy) &&
-              safe_owner?(row)
-
-          pending = copy != nil && eligible?(copy["fiber"], policy) && newer?(copy, row)
-
-          fiber =
-            if stale[row["origin"]] && pending && capable do
-              Map.drop(row["fiber"], @exit_fields)
-              |> Map.merge(Map.take(copy["fiber"], @exit_fields))
-            else
-              row["fiber"]
-            end
-
-          Map.merge(row, %{
-            "fiber" => fiber,
-            "local_exit" => capable,
-            "exit_copy_pending" =>
-              pending && !stale[row["origin"]] && row["document_stale"] != true &&
-                quiescent?(row["fiber"]) &&
-                is_nil(row["runtime"])
-          })
-      end)
-
-    seen = MapSet.new(owners, &uid/1)
-
-    missing =
-      Enum.filter(archives, fn row ->
-        owner = host(row)
-
-        row["document_stale"] != true && !MapSet.member?(seen, uid(row)) && is_binary(owner) &&
-          owner not in ["", local] &&
-          stale[owner] == true
-      end)
-
-    owners ++
-      Enum.map(missing, fn row ->
+    Enum.map(owners, fn
+      %{"origin" => ^local} = row ->
         row
-        |> Map.put("origin", host(row))
-        |> Map.put("local_exit", match?([_], copies[uid(row)]) && eligible?(row["fiber"], policy))
-      end)
+
+      row ->
+        copy =
+          case copies[uid(row)] do
+            [copy] -> if host(copy) == host(row), do: copy
+            _ -> nil
+          end
+
+        capable =
+          stale[row["origin"]] == true && copy != nil && eligible?(copy["fiber"], policy) &&
+            safe_owner?(row)
+
+        pending = copy != nil && eligible?(copy["fiber"], policy) && newer?(copy, row)
+
+        fiber =
+          if stale[row["origin"]] && pending && capable do
+            Map.drop(row["fiber"], @exit_fields)
+            |> Map.merge(Map.take(copy["fiber"], @exit_fields))
+          else
+            row["fiber"]
+          end
+
+        Map.merge(row, %{
+          "fiber" => fiber,
+          "local_exit" => capable,
+          "exit_copy_pending" => pending && !stale[row["origin"]] && safe_owner?(row)
+        })
+    end)
   end
 
   defp safe_owner?(row),
@@ -271,10 +240,7 @@ defmodule Shuttle.OwnerExit do
     if Shuttle.ULID.valid?(id), do: id
   end
 
-  defp mirror_stamp(%{"fiber" => %{"shuttle-exit-at" => stamp}}),
-    do: stamp
-
-  defp mirror_stamp(_), do: nil
+  defp mirror_stamp(row), do: get_in(row, ["fiber", "shuttle-exit-at"])
 
   defp newer?(copy, row) do
     stamp = mirror_stamp(copy)

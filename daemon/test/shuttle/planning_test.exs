@@ -153,6 +153,16 @@ defmodule Shuttle.OwnerExitTest do
     assert Enum.map(result, & &1["fiber"]["id"]) == Enum.map(owners, & &1["fiber"]["id"])
   end
 
+  test "a stale composite never invents an owner row from an archive" do
+    assert [] ==
+             OwnerExit.reconcile(
+               [],
+               [mirror(%{"horizon" => "stashed"})],
+               %{"worker" => true},
+               "hub"
+             )
+  end
+
   test "local owner rows remain native rather than gaining mirror metadata" do
     local = row() |> Map.put("origin", "hub") |> put_in(["fiber", "shuttle", "host"], "hub")
     assert [^local] = OwnerExit.reconcile([local], [local], %{}, "hub")
@@ -217,8 +227,7 @@ defmodule Shuttle.OwnerExitTest do
 
     copy = row(%{"uid" => nil, "id" => "task"})
 
-    assert [%{"local_exit" => false}] =
-             OwnerExit.reconcile([], [copy], %{"worker" => true}, "hub")
+    assert [] == OwnerExit.reconcile([], [copy], %{"worker" => true}, "hub")
   end
 
   test "an absent fleet entry never authorizes an exit, including active and standing copies" do

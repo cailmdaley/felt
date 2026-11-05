@@ -30,7 +30,7 @@ No user-facing flag authorizes a foreign write: `--local` refuses every foreign 
 An exit stamps top-level `shuttle-exit-at`, outside `shuttle:`. New exit fields are placed ahead of the document, leaving runtime bytes, comments and unchanged values untouched; no handoff or worker evidence is fabricated.
 Only a unique local copy with the same UID/host and a newer mirror stamp can project lifecycle/horizon fields over a stale owner row. Ordinary `updated-at` or body edits convey no exit intent.
 Owner content, configuration, addresses and runtime stay authoritative; `local_exit` is the daemon's exit capability, not a UI inference.
-Only a known stale foreign owner can contribute an archive card. A local-only document absent from a healthy owner is not presented as its live card.
+The composite uses only the retained owner row set. Archive documents never fabricate live cards or origins; archive file reads remain available.
 
 A healthy returning owner's row wins before Git sync. A quiescent owner row can say the local exit is waiting for Git sync; this label never blocks an action. Every request still reaches the healthy owner, including Rest when it has launched a worker.
 Git reconciles the documents, and the syncing agent resolves conflicts from context. A conflicted viewer copy cannot block a healthy owner: CLI exits address its indexed UID before parsing local content. An unreadable owner's last-known row remains visible and stale; Stop worker and `/kill` address its runtime by UID without parsing that document. Lifecycle changes wait for file repair. A merged `status: active` remains an explicit arm; no mirror authorizes execution.

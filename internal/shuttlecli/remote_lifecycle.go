@@ -28,10 +28,6 @@ const maxLaunchMessageBytes = 64 << 10
 // Under --local every foreign owner refuses rather than routing back through
 // the daemon. Only the daemon owns exit fallback.
 func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (string, error) {
-	return a.routeOwner(cmd, args, blockHost, localOnly(cmd))
-}
-
-func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, local bool) (string, error) {
 	owner := strings.TrimSpace(blockHost)
 	if owner == "" {
 		return "", nil
@@ -43,7 +39,7 @@ func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, lo
 	if owner == own {
 		return "", nil
 	}
-	if local {
+	if localOnly(cmd) {
 		return "", ownerMismatchError{fiber: args[0], owner: owner, own: own, source: source, hostFile: a.hostConfigFilePath()}
 	}
 
@@ -415,11 +411,11 @@ func (a *app) routeIndexedExit(cmd *cobra.Command, action, query string, fields 
 	}
 	block, _ := row.Fiber["shuttle"].(map[string]any)
 	host, _ := block["host"].(string)
-	own, err := a.resolveOwnHost("")
+	owner, err := a.routeOwnerForCommand(cmd, []string{query}, host)
 	if err != nil {
 		return true, err
 	}
-	if host == "" || host == own {
+	if owner == "" {
 		return false, nil
 	}
 	if host != row.Origin {
@@ -431,10 +427,6 @@ func (a *app) routeIndexedExit(cmd *cobra.Command, action, query string, fields 
 	}
 	if !felt.LooksLikeUID(uid) {
 		return true, fmt.Errorf("owner %q returned no intrinsic UID for %s", host, query)
-	}
-	owner, err := a.routeOwnerForCommand(cmd, []string{query}, host)
-	if err != nil {
-		return true, err
 	}
 	slug, _ := row.Fiber["slug"].(string)
 	fiber := &felt.Felt{ID: slug, UID: uid, Path: row.Path}

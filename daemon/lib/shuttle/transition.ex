@@ -198,9 +198,6 @@ defmodule Shuttle.Transition do
       {422,
        "routed request reached this host but the document names #{host}; not forwarded again"}
 
-  def http_error(:owner_required),
-    do: {409, "The execution owner must decide: the local copy is no longer safe for an exit."}
-
   def http_error(:unknown_target), do: {400, "unknown_target"}
   def http_error(:already_running), do: {409, "already_running"}
   def http_error(:not_found), do: {404, "not_found"}

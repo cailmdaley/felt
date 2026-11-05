@@ -275,7 +275,7 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 
 `GET /fibers/composite` can project exit fields from a unique matching UID/host copy with a newer top-level `shuttle-exit-at` over a stale owner row, preserving its addresses, content and runtime. Ordinary body edits do not project. Unreadable owner documents retain their last-known rows with `document_stale: true`; the owner feed remains reachable, and `/kill` stops their workers by UID independently of document parsing.
 `local_exit` is the daemon's safe-exit capability for a known owner and a quiescent non-standing document. Missing fleet entries and discovery reports never authorize an exit.
-Healthy owners remain authoritative. On a quiescent owner row, `exit_copy_pending: true` labels a local exit waiting for Git sync; it never blocks a request to that owner. Running owner rows do not carry this label. A document absent on its healthy owner is not manufactured as a live card.
+Healthy owners remain authoritative. On a quiescent owner row, `exit_copy_pending: true` labels a local exit waiting for Git sync; it never blocks a request to that owner. Running owner rows do not carry this label. The composite never manufactures missing owner rows from archive documents, even while their owner is stale; archive file reads remain available.
 A single-fiber read from an unavailable or removed owner may return its matching local document with `stale: true`, `source: local_archive`, the requested `origin` on its row, and a stale remote descriptor in `origins`. The reader retains that metadata and disables launching and resuming; this never substitutes local assets or execution.
 
 `GET /fibers/composite` and `/state/composite` return a weak `ETag` and
