@@ -38,6 +38,7 @@ it('reads the public CLI bundles with the reader types, paths and changed-line c
       { file: 'deleted.ts', side: 'old', importance: 'supporting', note: 'Whole deleted file.' },
       { file: 'added.ts', from: 1, to: 3, importance: 'important', note: 'The first idea.' },
       { file: 'space name.ts', from: 1, to: 1, importance: 'context', note: 'Context does not show a change.' },
+      { file: 'é.ts', importance: 'supporting', note: 'A whole-file stop still selects its own side only.' },
     ] }, { id: 'next', title: 'Next', stops: [{ file: 'added.ts', from: 3, to: 4, importance: 'supporting', note: 'A second short excerpt, overlapping once.' }] }] })
     const fixtureDir = new URL('../harness/fixtures/', import.meta.url)
     const fixtureStory = JSON.parse(readFileSync(new URL('dogfood.story.json', fixtureDir), 'utf8'))

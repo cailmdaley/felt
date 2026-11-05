@@ -166,16 +166,14 @@ func (h ChangeHunk) withRows(rows []changeRow) ChangeHunk {
 }
 
 func (h ChangeHunk) excerpts(r ChangeRange) []ChangeHunk {
-	if r.From == 0 && r.To == 0 {
-		return []ChangeHunk{h}
-	}
+	whole := r.From == 0 && r.To == 0
 	selected := make([]bool, len(h.rows))
 	for i, row := range h.rows {
 		line := row.new
 		if r.Side == "old" {
 			line = row.old
 		}
-		selected[i] = r.includes(row) || (row.text[0] == ' ' && line >= r.From && line <= r.To)
+		selected[i] = r.includes(row) || (row.text[0] == ' ' && (whole || (line >= r.From && line <= r.To)))
 	}
 	return h.selectRows(selected)
 }

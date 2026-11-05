@@ -27,14 +27,17 @@ export function checkChange(bundle) {
   const all = new Set(bundle.files.flatMap(file => [...changedRows(file.path, file.hunks)]))
   const remaining = new Set(bundle.files.flatMap(file => [...changedRows(file.path, file.remaining)]))
   const story = bundle.story?.chapters.flatMap(chapter => chapter.stops) ?? []
+  const shown = new Set(story.flatMap(stop => [...changedRows(stop.file, stop.hunks)]))
+  for (const key of shown) assert.ok(!remaining.has(key), 'a shown changed row must not reappear in Remaining')
   const visible = new Set([
-    ...story.flatMap(stop => [...changedRows(stop.file, stop.hunks)]),
+    ...shown,
     ...bundle.files.flatMap(file => [...changedRows(file.path, file.role === 'test' ? file.hunks : file.remaining)]),
   ])
   assert.equal(all.size, bundle.files.reduce((count, file) => count + file.additions + file.deletions, 0), 'renderer must retain the captured line count')
   assert.deepEqual(visible, all, 'Story, Tests and Remaining must retain every changed row and its coordinates')
   for (const key of remaining) assert.ok(all.has(key), 'Remaining must not invent a changed row')
-  return { total: all.size, shown: all.size - remaining.size, remaining: remaining.size }
+  assert.equal(shown.size + remaining.size, all.size, 'every changed row must be shown or remaining')
+  return { total: all.size, shown: shown.size, remaining: remaining.size }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
