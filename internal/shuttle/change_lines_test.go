@@ -117,7 +117,7 @@ func TestChangeLineCoverageRealGit(t *testing.T) {
 		for _, h := range append(append([]ChangeHunk{}, f.Hunks...), f.Remaining...) {
 			got := map[key]bool{}
 			for _, w := range h.Windows {
-				parsed := &Change{Files: []ChangeFile{{Path: f.Path}}, Patch: w.Patch}
+				parsed := &Change{Files: []ChangeFile{{Path: f.Path, OldPath: f.OldPath}}, Patch: w.Patch}
 				wh, err := parsed.parsePatch()
 				if err != nil {
 					t.Fatal(err)
