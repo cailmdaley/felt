@@ -24,7 +24,7 @@ func (a *app) changeCmd() *cobra.Command {
 		Long: `Snapshot the change since merge-base(base, head) into <name>.change.json beside
 the fiber, like a pull request's three-dot diff. No common ancestor is an error.
 Runs Git on this host; no daemon or model is needed.
-With --story, validate every stop and flag and report hunk coverage. Flags do not
+With --story, validate every stop and flag and report changed-line coverage. Flags do not
 count as coverage. --check validates and reports without writing a companion.
 --json emits the validation and coverage report, not the change bundle.`,
 		Args: cobra.ExactArgs(1),

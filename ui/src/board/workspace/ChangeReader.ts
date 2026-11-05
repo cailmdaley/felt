@@ -16,6 +16,10 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: s
 function prose(text: string): HTMLElement {
   const node = el('div', 'change-prose'); node.innerHTML = renderMarkdown(text, { untrusted: true }); return node
 }
+function revisionLabel(ref: string, sha: string): string {
+  const short = sha.slice(0, 8)
+  return sha.startsWith(ref) ? short : `${ref} ${short}`
+}
 function button(text: string, action: () => void): HTMLButtonElement {
   const node = el('button', '', text); node.type = 'button'; node.addEventListener('click', action); return node
 }
@@ -85,7 +89,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   }
   const heading = el('header', 'change-heading')
   heading.append(el('p', 'change-eyebrow', `${bundle.repo.name} / CHANGE`), el('h1', '', bundle.title))
-  heading.append(el('p', 'change-revisions', `${bundle.base_ref} ${bundle.base.slice(0, 8)} → ${bundle.head_ref} ${bundle.head.slice(0, 8)}`))
+  heading.append(el('p', 'change-revisions', `${revisionLabel(bundle.base_ref, bundle.base)} → ${revisionLabel(bundle.head_ref, bundle.head)}`))
   heading.append(el('p', 'change-summary', `${files.length} files · +${files.reduce((n, f) => n + f.additions, 0)} −${files.reduce((n, f) => n + f.deletions, 0)} · ${bundle.commits.length} commits`))
   main.append(heading)
   if (bundle.story) main.append(prose(bundle.story.overview))
