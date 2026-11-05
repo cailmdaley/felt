@@ -539,8 +539,13 @@ except (ValueError, TypeError, AttributeError):
 
 release_quarantine() {
   [ -n "${VERIFIED_RELEASE_RECEIPT:-}" ] || { echo 'missing verified daemon identity' >&2; return 1; }
-  local body="{\"expected\":$VERIFIED_RELEASE_RECEIPT}"
-  run_local "$(daemon_call "-f -X POST -H 'Content-Type: application/json' --data $(shell_quote "$body")" /api/v1/quarantine/release)" | grep -q '"ok":true'
+  local body="{\"expected\":$VERIFIED_RELEASE_RECEIPT}" attempt
+  # A Poller busy with its first poll answers 503; an expected release is safe to repeat.
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    run_local "$(daemon_call "-f -X POST -H 'Content-Type: application/json' --data $(shell_quote "$body")" /api/v1/quarantine/release)" | grep -q '"ok":true' && return 0
+    [ "$attempt" = 12 ] || sleep "${SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS:-5}"
+  done
+  return 1
 }
 
 wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.

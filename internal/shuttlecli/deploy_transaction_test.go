@@ -199,6 +199,7 @@ esac
 	write(filepath.Join(f.bin, "curl"), `#!/bin/sh
 case "$*" in *'/quarantine/release'*)
  case "$*" in *'"expected":{'*'"incarnation": "fixture-incarnation"'*) ;; *) echo missing-expected-incarnation >&2; exit 22;; esac
+ if [ "${RELEASE_BUSY_ONCE:-0}" = 1 ] && [ ! -f "$FLEET_ROOT/release-busy" ]; then touch "$FLEET_ROOT/release-busy"; exit 22; fi
  echo release >> "$EVENTS"
  printf '{"ok":true}'
  exit 0;;
@@ -744,6 +745,16 @@ func TestDeployRollbackDoesNotExposeLeasesToOldPruners(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.remote+".deploy", ".leases")); !os.IsNotExist(err) {
 		t.Fatalf("lease metadata exposed to old pruner: %v", err)
+	}
+}
+
+func TestDeployRetriesReleaseWhileThePollerIsBusy(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	cmd, log := f.start(t, "busy-release", "RELEASE_BUSY_ONCE=1", "SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS=0")
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("deploy with a busy Poller: %v %s", err, fleetRead(log))
 	}
 }
 
