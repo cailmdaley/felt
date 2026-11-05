@@ -2318,6 +2318,52 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert read_frontmatter(host, id)["tempered"] == false
   end
 
+  @tag :standing_stale_dead_row
+  test "a stale dead-role row cannot close a newer untracked run", %{host: host} do
+    id = seed_due_closed_standing(host)
+    path = fiber_file(host, id)
+    File.write!(path, String.replace(File.read!(path), "status: closed", "status: open"))
+
+    {:ok, poller} =
+      start_poller!(
+        runner: IntegrationRunner,
+        max_concurrent_workers: 0,
+        poll_interval_ms: 600_000,
+        felt_stores: [host]
+      )
+
+    await_boot_cycle!(poller)
+    state = :sys.get_state(poller)
+    assert state.running == %{}
+    File.write!(path, String.replace(File.read!(path), "status: open", "status: active"))
+
+    {_, 0} =
+      IntegrationRunner.cmd("shuttle", ["mark-runtime", id, "--run-id", "scheduled-old"], [])
+
+    {json, 0} = IntegrationRunner.cmd("shuttle", ["show", id, "--json"], [])
+    stale = Jason.decode!(json)
+    write_dispatch_marker(host, id, "successor-uuid")
+
+    {_, 0} =
+      IntegrationRunner.cmd("shuttle", ["mark-runtime", id, "--run-id", "scheduled-new"], [])
+
+    before = File.read!(path)
+
+    Shuttle.Poller.StandingRoles.reconcile_dead_standing_roles(state, [stale], {:ok, []})
+    assert File.read!(path) == before
+    assert read_frontmatter(host, id)["status"] == "active"
+
+    {json, 0} = IntegrationRunner.cmd("shuttle", ["show", id, "--json"], [])
+
+    Shuttle.Poller.StandingRoles.reconcile_dead_standing_roles(
+      state,
+      [Jason.decode!(json)],
+      {:ok, []}
+    )
+
+    assert read_frontmatter(host, id)["status"] == "closed"
+  end
+
   test "an active stashed standing schedule survives an unreviewed exit", %{host: host} do
     id = seed_due_closed_standing(host)
     path = fiber_file(host, id)

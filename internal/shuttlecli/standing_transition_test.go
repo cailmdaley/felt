@@ -81,7 +81,7 @@ func TestStandingExitLockedReloadPreservesConcurrentEdits(t *testing.T) {
 
 func TestStandingExitRejectsStaleRunAndHumanTransitions(t *testing.T) {
 	t.Parallel()
-	for _, change := range []string{"accept", "rest", "pause", "new-dispatch", "new-owner", "tempered"} {
+	for _, change := range []string{"accept", "rest", "pause", "new-dispatch", "new-uid", "new-run-id", "new-owner", "tempered"} {
 		t.Run(change, func(t *testing.T) {
 			st, req := seedStandingTransition(t)
 			_, err := st.Update("role", func(f *felt.Felt) error {
@@ -94,6 +94,10 @@ func TestStandingExitRejectsStaleRunAndHumanTransitions(t *testing.T) {
 					return unclose(f, felt.StatusOpen)
 				case "new-dispatch":
 					return shuttle.SetRuntimeField(f, "dispatched_at", "2026-01-03T00:00:00Z")
+				case "new-uid":
+					f.UID = "01K00000000000000000000001"
+				case "new-run-id":
+					return shuttle.SetRuntimeField(f, "run_id", "scheduled-successor")
 				case "new-owner":
 					node := felt.MappingValueNode(f.ExtraFields["shuttle"], "host")
 					node.Value = "another-host"
