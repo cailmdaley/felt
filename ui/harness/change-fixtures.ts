@@ -1,10 +1,13 @@
 import dogfood from './fixtures/dogfood.change.json'
+import plain from './fixtures/dogfood-plain.change.json'
 import type { ChangeBundle } from '../src/board/workspace/changeModel.js'
 import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REPORT, WORKSPACE_UID, type WorkspaceExample } from './workspace-fixtures.js'
 
 /** Real repository snapshot plus no-story and long-file reading probes. */
 export function addChangeFixtures(fixture: WorkspaceExample, now: number): void {
   const bundle = dogfood as ChangeBundle // changeContract.test checks the CLI's JSON against this type.
+  const owner = fixture.feed.fibers.find(row => (row.fiber as { id: string }).id === WORKSPACE_ID)!
+  owner.runtime = { state: 'running', phase: 'waiting', tmux_session: 'fixture-review-worker', started_at: now - 60_000 }
   const dir = WORKSPACE_REPORT.slice(0, WORKSPACE_REPORT.lastIndexOf('/'))
   const header = 'diff --git a/src/large.ts b/src/large.ts\n--- a/src/large.ts\n+++ b/src/large.ts\n'
   const windows = Array.from({ length: 84 }, (_, index) => {
@@ -16,7 +19,7 @@ export function addChangeFixtures(fixture: WorkspaceExample, now: number): void 
     files: [{ path: 'src/large.ts', role: 'implementation', status: 'modified', additions: 5000, deletions: 5000, header,
       hunks: [{ file: 'src/large.ts', old_from: 1, old_lines: 5000, new_from: 1, new_lines: 5000, covered: false, patch: '', windows }] }],
   }
-  for (const [name, change] of [['family', bundle], ['plain', { ...bundle, title: 'The same snapshot, without a story', story: null }], ['large', large]] as const) {
+  for (const [name, change] of [['family', bundle], ['plain', plain as ChangeBundle], ['large', large]] as const) {
     const path = `${dir}/${name}.change.json`
     fixture.files.push({ owner: WORKSPACE_HOST, path, mime: 'application/json', body: new Blob([JSON.stringify(change)], { type: 'application/json' }) })
     fixture.receipts.push({ ...fixture.receipts[0], uid: WORKSPACE_UID, fiber: WORKSPACE_ID, host: WORKSPACE_HOST, fullPath: path, basename: `${name}.change.json`, timestamp: now - 15_000 })

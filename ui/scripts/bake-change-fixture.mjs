@@ -33,11 +33,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     const fixture = new URL('../harness/fixtures/dogfood.change.json', import.meta.url)
     const story = JSON.parse(readFileSync(new URL('../harness/fixtures/dogfood.story.json', import.meta.url), 'utf8'))
-    const { bundle } = bakeChange(buildShuttle(dir), root, '0f3a0cdc', 'f629d29c417f20c16b8e4415ebd6e424235060d3', story)
-    // The harness is portable; the snapshot's Git data is otherwise the CLI's output.
-    bundle.repo.dir = '/fixture-repo/felt'
-    for (const commit of bundle.commits) commit.author = 'Repository contributor'
-    writeFileSync(fixture, JSON.stringify(bundle, null, 2) + '\n')
-    console.log(`Baked ${bundle.files.length} files with shuttle change into ${dirname(fileURLToPath(fixture))}`)
+    const binary = buildShuttle(dir)
+    for (const [target, input] of [[fixture, story], [new URL('../harness/fixtures/dogfood-plain.change.json', import.meta.url), undefined]]) {
+      const { bundle } = bakeChange(binary, root, '0f3a0cdc', 'f629d29c417f20c16b8e4415ebd6e424235060d3', input)
+      // The harness is portable and carries no operator identity.
+      bundle.repo.dir = '/fixture-repo/felt'
+      for (const commit of bundle.commits) commit.author = 'Repository contributor'
+      writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n')
+      console.log(`Baked ${bundle.files.length} files with shuttle change into ${dirname(fileURLToPath(target))}`)
+    }
   } finally { rmSync(dir, { recursive: true, force: true }) }
 }

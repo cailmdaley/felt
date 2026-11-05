@@ -39,7 +39,10 @@ it('reads the public CLI bundles with the reader types, paths and hunk coverage'
     const fixture = JSON.parse(readFileSync(new URL('dogfood.change.json', fixtureDir), 'utf8'))
     const dogfood = bakeChange(binary, fileURLToPath(new URL('../../', import.meta.url)), '0f3a0cdc', 'f629d29c417f20c16b8e4415ebd6e424235060d3', fixtureStory)
     expect({ ...dogfood.bundle, commits: dogfood.bundle.commits.map((commit: object) => ({ ...commit, author: 'Repository contributor' })), repo: { ...dogfood.bundle.repo, dir: '/fixture-repo/felt' } }).toEqual(fixture)
-    const samples = [plain, minimal, empty, story, dogfood]
+    const dogfoodPlain = bakeChange(binary, fileURLToPath(new URL('../../', import.meta.url)), '0f3a0cdc', 'f629d29c417f20c16b8e4415ebd6e424235060d3')
+    const plainFixture = JSON.parse(readFileSync(new URL('dogfood-plain.change.json', fixtureDir), 'utf8'))
+    expect({ ...dogfoodPlain.bundle, commits: dogfoodPlain.bundle.commits.map((commit: object) => ({ ...commit, author: 'Repository contributor' })), repo: { ...dogfoodPlain.bundle.repo, dir: '/fixture-repo/felt' } }).toEqual(plainFixture)
+    const samples = [plain, minimal, empty, story, dogfood, dogfoodPlain]
     // Type-check JSON literals, not a type assertion: field renames and null arrays must fail.
     const source = join(dir, 'contract.mts')
     writeFileSync(source, `import type { ChangeBundle } from ${JSON.stringify(fileURLToPath(new URL('../src/board/workspace/changeModel.js', import.meta.url)))};\n` + samples.map(({ bundle }, i) => `const bundle${i}: ChangeBundle = ${JSON.stringify(bundle)};`).join('\n'))
