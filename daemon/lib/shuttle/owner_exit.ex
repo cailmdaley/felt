@@ -25,7 +25,6 @@ defmodule Shuttle.OwnerExit do
     params = Map.merge(params, %{"fiber" => subject, "origin" => origin})
 
     case result do
-      {:error, {:unknown_origin, _} = cause} -> mirror(params, cause, result)
       {:error, {:forward_failed, _, {:not_sent, _} = cause}} -> mirror(params, cause, result)
       result -> result
     end
@@ -87,52 +86,12 @@ defmodule Shuttle.OwnerExit do
   end
 
   # One immutable fleet snapshot per view or exit authorization.
-  def policy do
-    doc = Remotes.fresh_document()
-    discovery = Shuttle.TailnetPeers.status()
-    configured = Shuttle.Env.app(:remotes)
-    policy(doc, discovery, configured, Remotes.configured())
-  end
-
-  @doc false
-  def policy(doc, discovery, configured, routes) do
-    entries =
-      cond do
-        is_list(configured) -> configured
-        is_list(doc) -> doc
-        is_map(doc) -> Map.get(doc, "remotes", [])
-        true -> []
-      end
-
-    known =
-      [nil, "", Poller.own_host_id()] ++
-        Enum.flat_map(entries ++ discovery.peers ++ discovery.rejected, &names/1)
-
-    complete =
-      is_list(configured) ||
-        (is_map(doc) &&
-           (get_in(doc, ["defaults", "discover"]) == false || discovery.state == "ok"))
-
-    %{known: MapSet.new(known), complete: complete, routable: MapSet.new(routes, & &1.name)}
-  end
-
-  defp names(entry) do
-    for key <- [:name, :dns_name, "name", "dns_name"],
-        value = Map.get(entry, key),
-        is_binary(value),
-        name <- [value, value |> String.trim_trailing(".") |> String.split(".") |> hd()],
-        do: name
-  end
-
-  def removed?(host, policy \\ policy()),
-    do: policy.complete && !MapSet.member?(policy.known, host)
+  def policy, do: MapSet.new(Remotes.configured(), & &1.name)
 
   def eligible?(fiber, policy \\ policy())
 
   def eligible?(%{"shuttle" => %{} = block} = fiber, policy) do
-    removed?(block["host"], policy) ||
-      (MapSet.member?(policy.routable, block["host"]) && block["kind"] != "standing" &&
-         quiescent?(fiber))
+    MapSet.member?(policy, block["host"]) && block["kind"] != "standing" && quiescent?(fiber)
   end
 
   def eligible?(_, _), do: false
@@ -154,7 +113,7 @@ defmodule Shuttle.OwnerExit do
 
   def exit(params, cause) do
     with true <- action?(params),
-         true <- match?({:not_sent, _}, cause) || removed?(params["origin"]),
+         true <- match?({:not_sent, _}, cause),
          %{} = copy <- local_copy(params["fiber"], params["origin"], params["fiber_path"]) do
       args =
         ["--mirror-owner", params["origin"] || ""] ++
@@ -234,8 +193,7 @@ defmodule Shuttle.OwnerExit do
       end)
   end
 
-  defp safe_owner?(row, policy),
-    do: removed?(host(row), policy) || (quiescent?(row["fiber"]) && is_nil(row["runtime"]))
+  defp safe_owner?(row, _policy), do: quiescent?(row["fiber"]) && is_nil(row["runtime"])
 
   defp host(%{"fiber" => %{"shuttle" => %{} = block}}), do: block["host"]
   defp host(_), do: nil

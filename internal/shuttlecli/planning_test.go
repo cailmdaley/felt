@@ -167,11 +167,7 @@ func TestExitExplicitLocalChecksStandingAndDiscovery(t *testing.T) {
 				defer server.Close()
 				out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, server.URL, remotes), "rest", "task", "--local")
 				after, _ := os.ReadFile(path)
-				if state == "closed-fleet" || state == "ok" {
-					if err != nil || !strings.Contains(out, "Git") {
-						t.Fatalf("removed owner retirement: %v %s", err, out)
-					}
-				} else if err == nil || string(before) != string(after) {
+				if err == nil || string(before) != string(after) {
 					t.Fatalf("unknown discovery treated as removal: %v %s", err, out)
 				}
 			})

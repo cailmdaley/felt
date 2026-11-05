@@ -19,8 +19,6 @@ import (
 
 const maxLaunchMessageBytes = 64 << 10
 
-type unknownOwnerError struct{ error }
-
 // routeOwnerForCommand returns a remote owner only when the fiber's explicit
 // shuttle.host differs from this host and names a remote in the resolved
 // fleet: remotes.json or a tailnet peer the local daemon discovered. An
@@ -31,12 +29,7 @@ type unknownOwnerError struct{ error }
 // back through the daemon. lifecycleOwner separately validates the daemon's
 // mirror exit after an owner cannot arbitrate.
 func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (string, error) {
-	owner, err := a.routeOwner(cmd, args, blockHost, localOnly(cmd))
-	var unknown unknownOwnerError
-	if !localOnly(cmd) && exitCommand(cmd) && errors.As(err, &unknown) {
-		return blockHost, nil // Only the daemon may authorize the absent-owner exit.
-	}
-	return owner, err
+	return a.routeOwner(cmd, args, blockHost, localOnly(cmd))
 }
 
 func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, local bool) (string, error) {
@@ -67,7 +60,6 @@ func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, lo
 	}
 	path, _ := a.shuttleRemotesPath()
 	reason := fmt.Sprintf("host %q is neither an enabled remote in %s nor a discovered tailnet peer", owner, path)
-	absent := !doc.discoverEnabled()
 	for _, entry := range doc.Remotes {
 		if entry.Name == owner {
 			return "", ownerRouteRefusal(cmd, args, owner, reason)
@@ -83,24 +75,9 @@ func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, lo
 					return owner, nil
 				}
 			}
-			absent = discovery.State == "ok"
-			for _, peer := range discovery.Peers {
-				if peer.Name == owner {
-					absent = false
-				}
-			}
-			for _, peer := range discovery.Rejected {
-				if peer.DNSName == owner || strings.SplitN(strings.TrimSuffix(peer.DNSName, "."), ".", 2)[0] == owner {
-					absent = false
-				}
-			}
 		}
 	}
-	refusal := ownerRouteRefusal(cmd, args, owner, reason)
-	if absent {
-		return "", unknownOwnerError{refusal}
-	}
-	return "", refusal
+	return "", ownerRouteRefusal(cmd, args, owner, reason)
 }
 
 // localFlagUsage is the one description of --local on every verb that can

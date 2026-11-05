@@ -522,7 +522,7 @@ defmodule ShuttleWeb.OwnerDownTest do
 
   for action <- ~w(rest pause close) do
     @tag :tmp_dir
-    test "removed-owner #{action} preserves run disposition against a late standing exit", %{
+    test "an unknown owner cannot authorize #{action} on an active standing copy", %{
       tmp_dir: tmp
     } do
       {store, path} = fixture(Path.expand(tmp))
@@ -533,6 +533,7 @@ defmodule ShuttleWeb.OwnerDownTest do
       )
 
       Env.put_app_env(:remotes, [])
+      before = File.read!(path)
 
       {:ok, poller} =
         start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
@@ -546,28 +547,8 @@ defmodule ShuttleWeb.OwnerDownTest do
           "action" => unquote(action)
         })
 
-      assert conn.status == 200, conn.resp_body
-      assert conn.resp_body =~ "no execution request was sent"
-
-      request = %{
-        path: path,
-        uid: @uid,
-        host: "worker",
-        dispatched_at: "2026-11-04T10:00:00Z",
-        run_id: "20261104T100000+0000",
-        action: "awaiting",
-        recovery: true
-      }
-
-      assert {:ok, output} =
-               Shuttle.CLI.run(["standing-transition", "--request-json", Jason.encode!(request)])
-
-      assert %{"changed" => false, "disposition" => "in_progress"} = Jason.decode!(output)
-      {:ok, _, _, fm, _} = Shuttle.FiberDoc.read_path(path)
-      assert fm["status"] == if(unquote(action) == "close", do: "closed", else: "open")
-      refute fm["shuttle"]["runtime"]["handed_off_at"]
-      refute fm["shuttle"]["runtime"]["thread_exit_verb"]
-      assert fm["shuttle"]["runtime"]["mirrored_at"]
+      assert conn.status == 400, conn.resp_body
+      assert File.read!(path) == before
     end
   end
 
@@ -580,7 +561,7 @@ defmodule ShuttleWeb.OwnerDownTest do
     Env.put_app_env(:remotes, nil)
     File.write!(Path.join(Path.expand(tmp), "remotes.json"), ~s({"version":1,"remotes":[]}))
     before = File.read!(path)
-    refute Shuttle.OwnerExit.removed?("worker")
+    refute Shuttle.OwnerExit.local_copy(@uid, "worker")
 
     conn =
       ShuttleWeb.LifecycleController.create(Plug.Test.conn(:post, "/"), %{
@@ -661,7 +642,7 @@ defmodule ShuttleWeb.OwnerDownTest do
     other = Path.join([store, ".felt", "elsewhere", "task", "task.md"])
     File.mkdir_p!(Path.dirname(other))
     File.write!(other, body)
-    Env.put_app_env(:remotes, [])
+    Env.put_app_env(:remotes, [%Remote{name: "worker", url: "http://127.0.0.1:1"}])
     Env.put_app_env(:felt_runner, VanishingTransitionRunner)
 
     conn =

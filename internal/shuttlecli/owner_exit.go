@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -52,10 +51,8 @@ func (a *app) lifecycleOwner(cmd *cobra.Command, args []string, f *felt.Felt, st
 		return a.routeOwnerForCommand(cmd, args, block.Host)
 	}
 	owner, err := a.routeOwner(cmd, args, block.Host, false)
-	var unknown unknownOwnerError
-	removed := errors.As(err, &unknown) && block.Host != ""
-	if exitCommand(cmd) && st != nil && (owner != "" || removed) {
-		if (!exitFiber(f) && !removed) || (block.Kind == "standing" && !removed) {
+	if err == nil && exitCommand(cmd) && st != nil && owner != "" {
+		if !exitFiber(f) || block.Kind == "standing" {
 			_, refusal := a.routeOwner(cmd, args, block.Host, true)
 			if refusal == nil {
 				refusal = fmt.Errorf("no execution host is assigned")

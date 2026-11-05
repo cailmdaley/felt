@@ -10,16 +10,14 @@ Foreign mutations ask the execution owner through the local daemon.
 Only the daemon can select an automatic mirror exit; the CLI never replays a daemon refusal or bypasses an unavailable local daemon to write a foreign copy.
 The owning host's existing local CLI writes remain available offline.
 
-| Operation | Owner unavailable before send or proven removed | Lost reply / HTTP gateway failure |
+| Operation | Owner unavailable before send | Lost reply / HTTP gateway failure |
 |---|---|---|
 | `rest`, `pause`, `close`, `close --tempered=false` | Mirror a safe local exit; explain Git synchronization and no execution request | Refuse without replay |
 | Temper, configuration, publication, placement, launch, resume or reopen | Refuse; the owner decides | Refuse without replay |
 
 A safe exit copy is not armed and has no inconclusive dispatch/session evidence or known owner worker.
 A dispatch needs a strictly later handoff; invalid or zone-less timestamps prove nothing.
-Standing work, with or without a schedule, cannot mirror an exit: its owner may still run it. A proven removed host can retire, including with unconcluded markers.
-Removal requires no configured entry for that owner and either an explicitly closed fleet or successful discovery listing it in neither peers nor rejected candidates. An offline tailnet node remains a rejected candidate, not a removed owner. Failed or incomplete discovery cannot prove removal.
-A missing host is not proof of removal and never permits execution.
+Standing work, with or without a schedule, cannot mirror an exit. An unknown or unconfigured owner never authorizes a local exit; absence from a fleet or discovery report proves nothing about execution.
 
 The mutation transport bounds connection establishment to five seconds and sends each POST once.
 Every forwarded mutation carries `x-shuttle-routed: 1`, outside its JSON payload. Updated receivers refuse an owner mismatch instead of forwarding again; older owners can consume their unchanged payloads.
@@ -32,7 +30,7 @@ Explicit CLI `--local` writes never route and retain the same foreign-exit safet
 An exit stamps `shuttle.runtime.mirrored_at`, without fabricating handoff or worker evidence.
 Only a unique local copy with the same UID/host and a newer mirror stamp can project lifecycle/horizon fields over a stale owner row. Ordinary `updated-at` or body edits convey no exit intent.
 Owner content, configuration, addresses and runtime stay authoritative; `local_exit` is the daemon's exit capability, not a UI inference.
-A removed host's archive stays visibly stale. A local-only document absent from a healthy owner is not presented as its live card.
+Only a known stale foreign owner can contribute an archive card. A local-only document absent from a healthy owner is not presented as its live card.
 
 A healthy returning owner's row wins before Git sync. A quiescent owner row can say the local exit is waiting for Git sync; this label never blocks an action. Every request still reaches the healthy owner, including Rest when it has launched a worker.
 Git reconciles the documents, and the syncing agent resolves conflicts from context. A conflicted active document needs that agent's resolution; `/kill` still stops its worker meanwhile. A merged `status: active` remains an explicit arm; no mirror authorizes execution.

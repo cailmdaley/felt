@@ -194,46 +194,23 @@ defmodule Shuttle.OwnerExitTest do
     assert [%{"local_exit" => false}] = OwnerExit.reconcile([], [copy], %{"worker" => true}, "hub")
   end
 
-  test "scheduled standing work needs its owner; a proven removed owner may retire" do
-    fiber =
-      row()["fiber"]
-      |> put_in(["shuttle", "kind"], "standing")
-      |> put_in(["shuttle", "schedule"], %{"expr" => "0 9 * * *"})
-
-    refute OwnerExit.eligible?(fiber)
-    refute OwnerExit.eligible?(update_in(fiber, ["shuttle"], &Map.delete(&1, "schedule")))
+  test "an absent fleet entry never authorizes an exit, including active and standing copies" do
     Env.put_app_env(:remotes, [])
-    assert OwnerExit.eligible?(fiber)
-    assert OwnerExit.eligible?(Map.put(fiber, "status", "active"))
 
-    for runtime <- [nil, [], "unknown"] do
-      assert OwnerExit.eligible?(put_in(fiber, ["shuttle", "runtime"], runtime))
+    for fields <- [
+          %{},
+          %{"status" => "active"},
+          %{"shuttle" => %{"host" => "worker", "kind" => "standing"}},
+          %{"shuttle" => %{"host" => "worker", "runtime" => %{"session_uuid" => "live"}}}
+        ] do
+      refute OwnerExit.eligible?(row(fields)["fiber"])
     end
   end
 
-  test "absence requires a complete fleet, no configured entry, and neither peers nor rejected candidates" do
-    doc = %{"remotes" => []}
-    report = %{state: "ok", peers: [], rejected: []}
-    policy = OwnerExit.policy(doc, report, nil, [])
-    assert OwnerExit.removed?("worker", policy)
-
-    for host <- [nil, "", Shuttle.Poller.own_host_id()],
-        do: refute(OwnerExit.removed?(host, policy))
-
-    assert OwnerExit.eligible?(row(%{"status" => "active"})["fiber"], policy)
-
-    for {doc, report} <- [
-          {%{"remotes" => [%{"name" => "worker", "enabled" => false}]}, report},
-          {doc, %{report | state: "pending"}},
-          {doc, %{report | state: "unavailable"}},
-          {doc, %{report | peers: [%{"name" => "worker"}]}},
-          {doc, %{report | rejected: [%{dns_name: "worker.example.ts.net.", reason: "offline"}]}},
-          {nil, report}
-        ] do
-      policy = OwnerExit.policy(doc, report, nil, [])
-      refute OwnerExit.removed?("worker", policy)
-      refute OwnerExit.eligible?(row()["fiber"], policy)
-    end
+  test "standing work always needs its owner, with or without a schedule" do
+    fiber = put_in(row()["fiber"], ["shuttle", "kind"], "standing")
+    refute OwnerExit.eligible?(fiber)
+    refute OwnerExit.eligible?(put_in(fiber, ["shuttle", "schedule"], %{"expr" => "0 9 * * *"}))
   end
 
   test "a running owner never labels an unacknowledged local copy as a pending exit" do
@@ -268,14 +245,4 @@ defmodule Shuttle.OwnerExitTest do
     assert result["fiber"] == owner["fiber"]
   end
 
-  @tag :tmp_dir
-  test "incomplete discovery is not removal; a closed fleet proves it", %{tmp_dir: tmp} do
-    path = Path.join(tmp, "remotes.json")
-    Env.delete_app_env(:remotes)
-    Env.put_env("SHUTTLE_REMOTES_FILE", path)
-    File.write!(path, ~s({"version":1,"remotes":[]}))
-    refute OwnerExit.removed?("worker")
-    File.write!(path, ~s({"version":1,"defaults":{"discover":false},"remotes":[]}))
-    assert OwnerExit.removed?("worker")
-  end
 end

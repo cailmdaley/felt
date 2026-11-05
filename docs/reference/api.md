@@ -274,9 +274,8 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /meeting/audio` | recorder-addressed | WebSocket: relay a phone's microphone through the serving hub to the selected recorder |
 
 `GET /fibers/composite` can project exit fields from a unique matching UID/host copy with a newer `shuttle.runtime.mirrored_at` over a stale owner row, preserving its addresses, content and runtime. Ordinary body edits do not project.
-`local_exit` is the daemon's safe-exit capability, including proven removed-host retirement but excluding standing work, with or without a schedule, whose owner can still run it.
+`local_exit` is the daemon's safe-exit capability for a known owner and a quiescent non-standing document. Missing fleet entries and discovery reports never authorize an exit.
 Healthy owners remain authoritative. On a quiescent owner row, `exit_copy_pending: true` labels a local exit waiting for Git sync; it never blocks a request to that owner. Running owner rows do not carry this label. A document absent on its healthy owner is not manufactured as a live card.
-Removed-host archive cards remain visibly stale.
 A single-fiber read from an unavailable or removed owner may return its matching local document with `stale: true`, `source: local_archive`, the requested `origin` on its row, and a stale remote descriptor in `origins`. The reader retains that metadata and disables launching and resuming; this never substitutes local assets or execution.
 
 `GET /fibers/composite` and `/state/composite` return a weak `ETag` and
