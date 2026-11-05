@@ -198,8 +198,8 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		c.Commits = append(c.Commits, ChangeCommit{SHA: strings.TrimLeft(fields[0], "\n"), Subject: fields[1], Author: fields[2], Time: fields[3]})
 		fields = fields[4:]
 	}
-	// An isolated index reads attributes from the captured head, not the worktree,
-	// info/attributes or global attributes. This also works on Git without --attr-source.
+	// A bare capture repository ignores tree and worktree attributes.
+	// Its empty info/attributes and disabled global attributes leave classification to Git.
 	capture, err := os.MkdirTemp("", "shuttle-change-")
 	if err != nil {
 		return nil, nil, err
@@ -214,9 +214,11 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 			"-c", "diff.suppressBlankEmpty=false", "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
 			"-c", "diff.renames=true", "-c", "diff.context=3", "-c", "diff.interHunkContext=0", "-c", "diff.algorithm=myers", "-c", "diff.indentHeuristic=false", "-c", "core.quotePath=true"}
 		cmd := env.Command("git", append(prefix, args...)...)
-		out, err := cmd.CombinedOutput()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
 		if err != nil {
-			return "", fmt.Errorf("git capture %v: %s: %w", args, out, err)
+			return "", fmt.Errorf("git capture %v: %s: %w", args, strings.TrimSpace(stderr.String()), err)
 		}
 		return string(out), nil
 	}
@@ -224,9 +226,6 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		return nil, nil, err
 	}
 	if err := os.WriteFile(filepath.Join(capture, "objects", "info", "alternates"), []byte(strings.TrimSpace(objects)+"\n"), 0600); err != nil {
-		return nil, nil, err
-	}
-	if _, err := isolated("read-tree", headSHA); err != nil {
 		return nil, nil, err
 	}
 	diff := func(format ...string) (string, error) {
@@ -253,51 +252,6 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 	if err != nil {
 		return nil, nil, err
 	}
-	// Read blob identities from binary headers, including a rename's old blob.
-	// Only attribute-marked text needs a forced text diff; real binary stays binary.
-	sections := changeSections.Split(c.Patch, -1)
-	var textSections []string
-	for i, section := range sections {
-		if !strings.Contains(section, "\nBinary files ") {
-			continue
-		}
-		text := true
-		for _, line := range strings.Split(section, "\n") {
-			if !strings.HasPrefix(line, "index ") {
-				continue
-			}
-			for _, oid := range strings.Split(strings.Fields(line)[1], "..") {
-				if strings.Trim(oid, "0") == "" {
-					continue
-				}
-				blob, err := git("cat-file", "blob", oid)
-				if err != nil {
-					return nil, nil, err
-				}
-				if strings.ContainsRune(blob, '\x00') {
-					text = false
-				}
-			}
-		}
-		if !text {
-			continue
-		}
-		if textSections == nil {
-			patch, err := diff("--text", "--patch", "--full-index", "--unified=3", "--src-prefix=a/", "--dst-prefix=b/")
-			if err != nil {
-				return nil, nil, err
-			}
-			textSections = changeSections.Split(patch, -1)
-		}
-		name, _, _ := strings.Cut(section, "\n")
-		for _, candidate := range textSections {
-			if strings.HasPrefix(candidate, name+"\n") {
-				sections[i] = candidate
-				break
-			}
-		}
-	}
-	c.Patch = strings.Join(sections, "diff --git ")
 	hunks, err := c.parsePatch()
 	return c, hunks, err
 }

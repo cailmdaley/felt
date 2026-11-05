@@ -1,6 +1,7 @@
 package shuttle
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,6 +56,11 @@ func TestChangeCaptureIgnoresDiffConfigAndWorktreeAttributes(t *testing.T) {
 	if !strings.Contains(before.Patch, "+new text") || !strings.Contains(before.Patch, "Binary files a/binary.bin") {
 		t.Fatal(before.Patch)
 	}
+	for _, f := range before.Files {
+		if f.Path == "marked.go" && (len(f.Hunks) != 1 || f.Additions != 1 || f.Deletions != 1) {
+			t.Fatalf("-diff text must have a counted patch: %+v", f)
+		}
+	}
 	for _, tc := range []struct{ from, to, covered int }{{2, 2, 0}, {1, 1, 1}, {1, 3, 1}} {
 		before.Story = &ChangeStory{Chapters: []ChangeChapter{{ID: "read", Stops: []ChangeStop{{ChangeRange: ChangeRange{File: "app.go", From: tc.from, To: tc.to}, Importance: "important"}}}}}
 		report := ValidateChange(before, bh)
@@ -81,5 +87,20 @@ func TestChangeCaptureIgnoresDiffConfigAndWorktreeAttributes(t *testing.T) {
 	ValidateChange(after, ah)
 	if before.Patch != after.Patch || !reflect.DeepEqual(bh, ah) || !reflect.DeepEqual(before.Files, after.Files) {
 		t.Fatalf("capture changed under config or dirty attributes:\n%s", after.Patch)
+	}
+	// Successful Git commands may warn on stderr; parsed bytes come only from stdout.
+	wrapper := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$1\" in --git-dir=*) printf 'capture warning\\n' >&2;; esac\nexec %q \"$@\"\n", gitPath)
+	if err := os.WriteFile(filepath.Join(wrapper, "git"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("PATH", wrapper+string(os.PathListSeparator)+filepath.Dir(gitPath))
+	warned, wh, err := BuildChange(env, repo, base, "HEAD", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ValidateChange(warned, wh)
+	if warned.Patch != after.Patch || !reflect.DeepEqual(wh, ah) || !reflect.DeepEqual(warned.Files, after.Files) {
+		t.Fatalf("stderr contaminated capture: %s", warned.Patch)
 	}
 }

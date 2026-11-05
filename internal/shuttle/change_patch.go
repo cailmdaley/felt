@@ -77,7 +77,7 @@ func (c *Change) parsePatch() ([]ChangeHunk, error) {
 		if f.Hunks == nil {
 			f.Hunks = []ChangeHunk{}
 		}
-		// Counts describe the captured text, including attribute-marked text.
+		// Counts describe only captured text hunks; binary notices have no lines.
 		f.Additions, f.Deletions = 0, 0
 		for j := range f.Hunks {
 			h := &f.Hunks[j]

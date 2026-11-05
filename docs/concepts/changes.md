@@ -43,10 +43,9 @@ No common ancestor is an error.
 Dirty and untracked files are excluded.
 
 Capture pins diff formatting, three context lines, Myers alignment and rename detection.
-An isolated Git index reads attributes from the captured head, independently of the worktree, repository-local attributes and the operator's diff configuration.
-This works without requiring Git's `--attr-source` option.
-A file marked `-diff` still gets a text patch when neither blob contains a NUL byte.
-Real binary files carry Git's binary notice rather than binary contents.
+An isolated bare Git repository ignores `.gitattributes` in both captured trees and the worktree, repository-local attributes and global attributes.
+A file marked `-diff` gets a text patch if Git classifies its contents as text.
+Files Git classifies as binary carry its binary notice rather than their contents.
 
 ## Version 1 bundle
 
