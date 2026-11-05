@@ -791,6 +791,9 @@ func (a *app) reconcileCodexInstallation(intent codexInstallationState, current 
 	if err != nil {
 		return err
 	}
+	// Orphaned bundles are installed without a registered marketplace. Preserve
+	// that native state during reconciliation; promotion separately verifies
+	// that every retained bundle matches the candidate's loaded bytes.
 	if observed.Configured == intent.Configured && observed.Installed == intent.Installed && observed.SkillsInstalled == intent.SkillsInstalled && !intent.Configured {
 		return nil
 	}
@@ -1021,7 +1024,9 @@ func (a *app) sealAndPromote(candidate string, identity pluginGenerationIdentity
 					if err := a.reconcileCodexInstallation(*codex, source); err != nil {
 						return err
 					}
-					break
+					if err := a.verifyCodexLoadedBundle(source, bundle.name); err != nil {
+						return err
+					}
 				}
 			}
 		}

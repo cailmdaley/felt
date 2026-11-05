@@ -247,7 +247,7 @@ if [ "$1" = plugin ] && [ "$2" = list ]; then
   printf '{"installed":['
   separator=''
   if [ -f "$installed_file" ]; then
-    source=$(cat "$source_file")
+    source=$(cat "$source_file" 2>/dev/null || true)
     printf '{"pluginId":"felt@cailmdaley-felt","version":"1.0.0","enabled":true,"source":{"path":"%s/claude-plugin"}}' "$source"
     separator=','
   fi

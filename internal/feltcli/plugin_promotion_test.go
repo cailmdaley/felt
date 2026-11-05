@@ -926,3 +926,68 @@ func TestPromotionRefusesUnrecoverableNativeSource(t *testing.T) {
 		})
 	}
 }
+
+func TestSharedPromotionRejectsStaleOrphanedCodexBundle(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "claude")
+	stateDir := t.TempDir()
+	f.env.Set("SECOND_NATIVE_STATE", stateDir)
+	fakeCommand(t, f.env, "codex", "FAKE_NATIVE_STATE=\"$SECOND_NATIVE_STATE\"\nFAKE_CODEX_CACHE=1\n"+codexSetupFake)
+	if err := f.a.installPluginViaCLI(f.source); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.installCodexPluginViaCLI(f.source); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(stateDir, "source")); err != nil {
+		t.Fatal(err)
+	}
+	f.setGeneration(t, "two")
+	if err := f.a.installPluginViaCLI(f.source); err == nil {
+		t.Fatal("stale orphaned Codex cache committed promotion")
+	}
+	if got := f.currentGeneration(t); got != "one" {
+		t.Fatalf("generation = %q, want rollback to one", got)
+	}
+	current := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)
+	if err := f.a.verifyCodexLoadedGeneration(current); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcileCodexUnconfiguredStateIsUntouched(t *testing.T) {
+	t.Parallel()
+	for _, installed := range []bool{false, true} {
+		t.Run(fmt.Sprint(installed), func(t *testing.T) {
+			f := newRemoteSetupFixture(t, "codex")
+			if installed {
+				if err := f.a.installCodexPluginViaCLI(f.source); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Remove(filepath.Join(f.stateDir, "source")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			intent, err := f.a.captureCodexInstallationRaw()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if intent.Configured || intent.Installed != installed || intent.SkillsInstalled != installed {
+				t.Fatalf("intent = %+v", intent)
+			}
+			if err := os.WriteFile(f.nativeLog, nil, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.a.reconcileCodexInstallation(intent, f.source); err != nil {
+				t.Fatal(err)
+			}
+			log, err := os.ReadFile(f.nativeLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(log), " remove ") || strings.Contains(string(log), " add ") {
+				t.Fatalf("matching unconfigured state was mutated: %s", log)
+			}
+		})
+	}
+}
