@@ -3,11 +3,12 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import { head, resetDocumentResources } from '../documentResources.js'
 import { Reader } from './Reader.js'
+import { declaredTitle } from './DocumentTitles.js'
 import { buildChannel, chatDocument } from './documents.js'
 
 const alpha = card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a', shuttleKind: 'oneshot' })
 let reader: Reader
-function setup(phone = false) {
+function setup(phone = false, sent = [{ path: '/plot.png', time: 1 }]) {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query.includes('max-width'), addEventListener: vi.fn(), removeEventListener: vi.fn() }))
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', vi.fn())
@@ -17,10 +18,17 @@ function setup(phone = false) {
   }, onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onOpenDocument: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
   document.body.append(reader.el)
   const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true, conversation: true,
-    embeds: [{ path: '/report.html' }, { path: '/detail.html' }], sent: [{ path: '/plot.png', time: 1 }] })
+    embeds: [{ path: '/report.html' }, { path: '/detail.html' }], sent })
   reader.show(channel, chatDocument(channel)!.key, 'Desk', alpha)
   return { channel, onReturn, onOrchestrator }
 }
+it('names a sent change from its head before it is opened', async () => {
+  const peeks: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => { peeks.push(String(url)); return new Response('{"version": 2, "title": "A readable change", "files": [', { status: 206, headers: { etag: 'W/"a"' } }) }))
+  setup(false, [{ path: '/review.change.json', time: 2 }])
+  await vi.waitFor(() => expect(declaredTitle('host-a:/review.change.json')?.title).toBe('A readable change'))
+  expect(peeks.some(url => url.includes('review.change.json'))).toBe(true)
+})
 afterEach(() => { reader?.dispose(); document.body.replaceChildren(); vi.unstubAllGlobals() })
 
 it('lands on chat with a persistent report chip and no inset, strip, tabs or bottom page chooser', () => {

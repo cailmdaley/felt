@@ -17,6 +17,7 @@ import { scrollHtmlViewer } from './DocumentBridge.js'
 import { channelLead, chatDocument, documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
+import { probeDocumentTitles } from './titleProbe.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import type { ChannelThemes } from './ChannelThemes.js'
 import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
@@ -327,6 +328,7 @@ export class Reader {
     this.channelReady = ready
     this.settleRun(settled)
     this.channel = channel
+    probeDocumentTitles(this.opts.shuttleBase, channel.documents)
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
     this.feedFamily()
