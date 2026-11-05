@@ -196,6 +196,7 @@
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip:disabled { cursor: default; }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip[hidden] { display: none; }
 /* The audio arrow occupies reserved space inside the meeting toggle. */
+.ws-dock .kbn-ctl-meet[hidden] { display: none; }
 .ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm {
   display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px;

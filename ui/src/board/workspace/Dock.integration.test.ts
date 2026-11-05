@@ -309,37 +309,29 @@ describe('anchored pickers', () => {
     meetingDock.syncMeeting()
     expect([toggle.getAttribute('aria-pressed'), toggle.disabled, toggle.title]).toEqual(['false', true, 'Recording: Standup'])
     expect(q('.kbn-ctl-meet-chip').hidden).toBe(false)
-    expect(q('.kbn-ctl-meet-chip').textContent).toBe('Meeting · Standup')
+    expect(q('.kbn-ctl-meet-chip').textContent).toBe('Recording · Standup')
     expect(q('.kbn-ctl-sends').hidden).toBe(false)
     meetingDock.reset()
   })
 
-  it('stops the recording this constitution hosts, by the shared stop path', async () => {
-    let recording: Record<string, unknown> | null = { title: 'Standup', state: 'live', fiber: 'a/task', tail: [] }
+  it('stops through the recording menu and disables repeated stops', () => {
+    const recording = { title: 'Standup', state: 'live', fiber: 'a/task', tail: [] }
     let requested = false
     const stop = vi.fn(() => { requested = true })
-    const control = { canJoin: () => false, modes: () => ['phone'], current: () => recording, join: vi.fn(), stop, stopRequested: () => requested }
+    const control = { canJoin: () => false, modes: () => ['call'], current: () => recording, join: vi.fn(), stop, stopRequested: () => requested }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const band = meetingDock.bandFor(task())
     document.body.append(band.el)
-    const button = band.el.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
-    expect([button.hidden, button.textContent, button.disabled]).toEqual([false, 'Stop', false])
-    button.click()
+    const chip = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
+    chip.click()
+    const stopItem = () => [...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Stop recording')!
+    stopItem().click()
     expect(stop).toHaveBeenCalledWith(recording)
     meetingDock.syncMeeting()
-    expect(button.disabled).toBe(true)
-    button.click()
+    chip.click()
+    expect(stopItem().disabled).toBe(true)
+    stopItem().click()
     expect(stop).toHaveBeenCalledTimes(1)
-
-    recording = { ...recording, state: 'failed' }
-    requested = false
-    meetingDock.syncMeeting()
-    expect([button.hidden, button.textContent]).toEqual([false, 'Dismiss'])
-
-    // A recording another constitution hosts shows no Stop here.
-    recording = { title: 'Standup', state: 'live', fiber: 'other', tail: [] }
-    meetingDock.syncMeeting()
-    expect(button.closest('section')!.hidden).toBe(true)
     meetingDock.reset()
   })
 
@@ -393,101 +385,59 @@ describe('anchored pickers', () => {
     meetingDock.reset()
   })
 
-  it('keeps Meeting as a visible accessible button and shows the hosted recording beside it', () => {
-    let recording: Record<string, unknown> | null = null
-    const control = { canJoin: () => true, modes: () => ['call'], current: () => recording, join: vi.fn(), stop: vi.fn() }
-    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
-    const band = meetingDock.bandFor(task())
-    document.body.append(band.el)
-    const foot = band.el.querySelector<HTMLElement>('.kbn-ctl-composer-foot')!
-    const arm = foot.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
-    expect([...foot.children].map(child => child.className)).toEqual(['kbn-ctl-btn kbn-ctl-meet-chip', 'kbn-ctl-btn kbn-detail-transcript-stop kbn-ctl-meet-stop', 'kbn-ctl-sends'])
-    const sends = foot.querySelector<HTMLElement>('.kbn-ctl-sends')!
-    expect(sends.firstElementChild).toBe(arm.closest('.kbn-ctl-meet'))
-    expect(sends.children[1]).toBe(sends.querySelector(':scope > .kbn-ctl-send:not(.kbn-ctl-resume)'))
-    expect(sends.children[2]).toBe(sends.querySelector(':scope > .kbn-ctl-resume'))
-    expect(arm.getAttribute('aria-label')).toBe('Meeting')
-    expect(arm.getAttribute('aria-pressed')).toBe('false')
-    expect(arm.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
-    expect(band.el.querySelector('.kbn-ctl-meet-overflow')).toBeNull()
-
-    recording = { title: 'Night sky', state: 'live', fiber: 'a/task', tail: [] }
-    meetingDock.syncMeeting()
-    const chip = foot.querySelector<HTMLElement>('.kbn-ctl-meet-chip')!
-    expect([chip.hidden, chip.textContent]).toEqual([false, 'Meeting · Night sky'])
-    expect((chip as HTMLButtonElement).disabled).toBe(false)
-    expect(chip.tagName).toBe('BUTTON')
-    expect(chip.classList.contains('kbn-ctl-btn')).toBe(true)
-    expect(band.el.querySelector('.kbn-detail-transcript')?.closest('.kbn-ctl-composer')).toBeNull()
-    expect(band.el.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')?.hidden).toBe(false)
-    expect(band.el.querySelector('.ws-chat-compose .kbn-detail-transcript')).not.toBeNull()
-    meetingDock.reset()
-  })
-
-  it('shows a foreign meeting chip and Stop in every chat, routes to its host, and toggles the host transcript', () => {
-    const recording = { title: 'Night sky', state: 'live', fiber: 'host/meeting', tail: [], started_at: '2026-10-29T00:00:00Z' }
+  it('shows one recording control and routes its menu to the host', () => {
+    const recording = { launch: 'L1', title: 'Night sky', state: 'live', fiber: 'host/meeting', tail: [] }
     const stop = vi.fn()
     const control = { canJoin: () => false, modes: () => ['call'], current: () => recording, join: vi.fn(), stop }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const openHost = vi.fn()
-    meetingDock.setMeetingHostOpen(openHost, () => 'Host meeting')
-    const host = meetingDock.bandFor(task({ id: 'host/meeting', uid: 'meeting', name: 'Host meeting' }))
-    const foreign = meetingDock.bandFor(task({ id: 'foreign/chat', uid: 'foreign', name: 'Foreign chat' }))
-    document.body.append(host.el, foreign.el)
-    meetingDock.syncMeeting()
-    const foreignChip = foreign.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
-    const globalStop = foreign.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-stop')!
-    expect([foreignChip.hidden, foreignChip.textContent, globalStop.hidden, globalStop.textContent]).toEqual([false, 'Recording · Host meeting', false, 'Stop'])
-    foreignChip.click()
+    meetingDock.setMeetingHostOpen(openHost, () => 'vizier')
+    const band = meetingDock.bandFor(task({ id: 'foreign/chat' }))
+    document.body.append(band.el)
+    const chip = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
+    expect(chip.textContent).toBe('Recording · vizier')
+    expect(band.el.querySelector<HTMLElement>('.kbn-ctl-meet')!.hidden).toBe(true)
+    expect(band.el.querySelector('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop')).toBeNull()
+    chip.click()
+    const open = [...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Open recording')!
+    open.click()
     expect(openHost).toHaveBeenCalledWith(recording)
-    globalStop.click()
-    expect(stop).toHaveBeenCalledWith(recording)
-
-    const hostChip = host.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
-    const pane = host.el.querySelector<HTMLElement>('.kbn-detail-transcript')!
-    expect(pane.hidden).toBe(false)
-    hostChip.click()
-    expect([pane.hidden, host.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-stop')!.hidden]).toEqual([true, false])
-    hostChip.click()
-    expect(pane.hidden).toBe(false)
     meetingDock.reset()
   })
 
-  it('keeps one Stop visible when the host chip collapses, polls, and expands the meeting pane', () => {
-    const recording = { title: 'Night sky', state: 'live', fiber: 'host/meeting', tail: [], started_at: '2026-10-29T00:00:00Z' }
-    const control = { canJoin: () => false, modes: () => ['call'], current: () => recording, join: vi.fn(), stop: vi.fn() }
+  it('moves recording here only after the old recording ends', async () => {
+    let recording: Record<string, unknown> | null = { launch: 'L1', title: 'Night sky', state: 'live', fiber: 'host/meeting', tail: [] }
+    const stop = vi.fn(async () => true)
+    const join = vi.fn(async () => ({ error: null, delivered: true }))
+    const control = { canJoin: () => !recording, modes: () => ['call'], current: () => recording, join, stop }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
-    const host = meetingDock.bandFor(task({ id: 'host/meeting', uid: 'meeting', name: 'Host meeting' }))
-    document.body.append(host.el)
+    const band = meetingDock.bandFor(task({ id: 'foreign/chat', sessionUuid: 'existing' }))
+    document.body.append(band.el)
+    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!.click()
+    ;[...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Start recording here')!.click()
+    await flush()
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(join).not.toHaveBeenCalled()
+    recording = null
     meetingDock.syncMeeting()
-    const chip = host.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
-    const visibleStops = (): HTMLButtonElement[] => [...host.el.querySelectorAll<HTMLButtonElement>('.kbn-detail-transcript-stop')]
-      .filter(button => !button.hidden && !button.closest('[hidden]'))
-
-    expect(visibleStops()).toHaveLength(1)
-    chip.click()
-    expect(visibleStops()).toHaveLength(1)
-    meetingDock.syncMeeting()
-    expect(visibleStops()).toHaveLength(1)
-    chip.click()
-    expect(visibleStops()).toHaveLength(1)
+    expect(join).toHaveBeenCalledWith(expect.objectContaining({ id: 'foreign/chat' }), 'call', expect.any(Function), { session: 'previous', systemAudio: true })
+    await flush()
     meetingDock.reset()
   })
 
-  it('does not reveal a dead Stop when the host chip collapses without a stop control', () => {
-    const recording = { title: 'Night sky', state: 'live', fiber: 'host/meeting', tail: [], started_at: '2026-10-29T00:00:00Z' }
-    const control = { canJoin: () => false, modes: () => ['call'], current: () => recording, join: vi.fn() }
+  it('cancels starting here when stopping fails', async () => {
+    let recording: Record<string, unknown> | null = { launch: 'L1', state: 'live', fiber: 'other', tail: [] }
+    const join = vi.fn()
+    const control = { canJoin: () => !recording, modes: () => ['call'], current: () => recording, join, stop: async () => false }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
-    const host = meetingDock.bandFor(task({ id: 'host/meeting', uid: 'meeting', name: 'Host meeting' }))
-    document.body.append(host.el)
+    const band = meetingDock.bandFor(task())
+    document.body.append(band.el)
+    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!.click()
+    ;[...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Start recording here')!.click()
+    await flush()
+    recording = null
     meetingDock.syncMeeting()
-    const chip = host.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
-    const paneStop = host.el.querySelector<HTMLButtonElement>('.kbn-detail-transcript-meta .kbn-detail-transcript-stop')!
-    const globalStop = host.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-stop')!
-
-    chip.click()
-    expect(paneStop.hidden).toBe(true)
-    expect(globalStop.hidden).toBe(true)
+    expect(join).not.toHaveBeenCalled()
     meetingDock.reset()
   })
 

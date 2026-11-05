@@ -66,96 +66,6 @@ async function captureMeetingState(page, scene, width, scheme) {
     animations: 'disabled',
   })
 }
-async function captureCurrentMeetingStates(page) {
-  if (!process.env.WORKSPACE_SHOTS) return
-  for (const scheme of ['light', 'dark']) {
-    await page.setViewportSize({ width: 1440, height: 900 })
-    if (scheme === 'dark' && await page.locator('.ws-selected .kbn-ctl-meet-chip').count()) {
-      await page.locator('.ws-selected .kbn-ctl-meet-chip').click()
-      await page.locator('.ws-selected .ws-chat-head').getByRole('heading', { name: title, exact: true }).waitFor()
-    }
-    await page.evaluate(scheme => {
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'false')
-      const stored = JSON.stringify({ mode: scheme, dark: 'night-chart' })
-      localStorage.setItem('shuttle.appearance', stored)
-      window.dispatchEvent(new StorageEvent('storage', { key: 'shuttle.appearance', newValue: stored }))
-    }, scheme)
-    await page.waitForFunction(scheme => {
-      const reader = document.querySelector('.ws-reader')
-      return document.documentElement.dataset.wsAppearance === scheme &&
-        reader?.dataset.wsThemeName === (scheme === 'dark' ? 'night-chart' : 'portolan')
-    }, scheme)
-    const composer = page.locator('.ws-selected .kbn-ctl-composer')
-    const chip = composer.locator('.kbn-ctl-meet-chip')
-    await chip.waitFor({ state: 'visible' })
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
-      await captureMeetingState(page, 'host-chip', width, scheme)
-      await chip.click()
-      await composer.locator('.kbn-ctl-meet-stop').waitFor({ state: 'visible' })
-      await page.waitForFunction(() => document.querySelector('.ws-selected .kbn-detail-transcript')?.hidden)
-      await captureMeetingState(page, 'collapsed-stop', width, scheme)
-      await chip.click()
-      await page.locator('.ws-selected .kbn-detail-transcript').waitFor({ state: 'visible' })
-    }
-
-    await page.setViewportSize({ width: 1440, height: 900 })
-    const rail = page.locator('.ws-thread-rail')
-    if (!await rail.isVisible()) {
-      await page.locator('.ws-rail-toggle').click()
-      await rail.waitFor({ state: 'visible' })
-    }
-    await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').filter({ hasText: 'Response analysis' }).click()
-    const header = page.locator('.ws-selected .ws-chat-head')
-    await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
-      await captureMeetingState(page, 'review-verbs', width, scheme)
-      if (width < 500) {
-        await header.evaluate(el => { el.style.maxWidth = '250px' })
-        await page.waitForFunction(() => {
-          const head = document.querySelector('.ws-selected .ws-chat-head')
-          return head?.querySelector('.ws-chat-settings')?.parentElement === head
-        })
-      } else {
-        const reader = page.locator('.ws-reader')
-        const sidebar = page.locator('.ws-sidebar')
-        const sidebarToggle = page.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)')
-        const rail = page.locator('.ws-thread-rail')
-        const originalSidebarWidth = await reader.evaluate(el => el.style.getPropertyValue('--ws-sidebar-width'))
-        const originalRailWidth = await rail.evaluate(el => el.style.getPropertyValue('--ws-thread-rail-width'))
-        if (!await sidebar.isVisible()) await sidebarToggle.click()
-        await sidebar.waitFor({ state: 'visible' })
-        await reader.evaluate(el => el.style.setProperty('--ws-sidebar-width', '460px'))
-        await rail.evaluate(el => el.style.setProperty('--ws-thread-rail-width', '460px'))
-        await page.waitForFunction(() => {
-          const head = document.querySelector('.ws-selected .ws-chat-head')
-          return head?.clientWidth <= 560 && head.querySelector('.ws-chat-settings')?.parentElement === head.querySelector('.ws-chat-acts')
-        })
-        await captureMeetingState(page, 'gear-moved', width, scheme)
-        await reader.evaluate((el, value) => value ? el.style.setProperty('--ws-sidebar-width', value) : el.style.removeProperty('--ws-sidebar-width'), originalSidebarWidth)
-        await rail.evaluate((el, value) => value ? el.style.setProperty('--ws-thread-rail-width', value) : el.style.removeProperty('--ws-thread-rail-width'), originalRailWidth)
-        await sidebarToggle.click()
-        await sidebar.waitFor({ state: 'hidden' })
-      }
-      if (width < 500) await captureMeetingState(page, 'gear-moved', width, scheme)
-      await header.evaluate(el => { el.style.maxWidth = '' })
-    }
-
-    await page.setViewportSize({ width: 1440, height: 900 })
-    await header.locator('.ws-chat-back').click()
-    await header.getByRole('heading', { name: title, exact: true }).waitFor()
-    await header.locator('.ws-chat-leave').click()
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-    const foreignChip = page.locator('.ws-selected .kbn-ctl-meet-chip')
-    await foreignChip.waitFor({ state: 'visible' })
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
-      await captureMeetingState(page, 'foreign-chip', width, scheme)
-    }
-  }
-}
 export function registerHeaderBarJourneys(test) {
   test('Lifecycle state selects the header verbs; only verdicts carry pigment', async page => {
     await page.addInitScript(() => {
@@ -468,76 +378,53 @@ export function registerHeaderBarJourneys(test) {
       assert.equal(await arm.getAttribute('aria-pressed'), 'false')
     }
   }, { width: 1440, height: 900 })
-  test('A meeting sent from a composer verb stays visible with Stop', async page => {
-    await page.addInitScript(() => {
-      if (window !== window.top) return
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'false')
-      localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
-    })
-    await page.goto(`${url}&meeting=idle`)
+  test('One recording button holds the actions in both its host and another chat', async page => {
+    await page.goto(`${url}&meeting=joined`)
     await openRoot(page)
     const composer = page.locator('.ws-selected .kbn-ctl-composer')
-    await composer.locator('.kbn-ctl-meet-arm').click()
-    page.once('dialog', dialog => dialog.accept())
-    await composer.locator('.kbn-ctl-sends .kbn-ctl-send').first().click()
-    await page.waitForFunction(() => document.querySelector('.kbn-detail-transcript-meta .kbn-detail-transcript-stop')?.checkVisibility())
-    const stop = page.locator('.ws-selected .kbn-detail-transcript-meta .kbn-detail-transcript-stop')
-    await stop.waitFor({ state: 'visible' })
-    assert.equal(await stop.innerText(), 'Stop')
-    assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible())
     const chip = composer.locator('.kbn-ctl-meet-chip')
+    await chip.waitFor({ state: 'visible' })
+    assert.match(await chip.innerText(), /^Recording · /)
+    assert.ok(await composer.locator('.kbn-ctl-meet-arm').isHidden())
+    assert.equal(await composer.locator('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop').count(), 0)
     await chip.click()
+    await page.getByRole('menuitem', { name: 'Hide transcript', exact: true }).click()
     assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isHidden())
-    const globalStop = composer.locator('.kbn-ctl-meet-stop')
-    await globalStop.waitFor({ state: 'visible' })
-    assert.equal(await globalStop.innerText(), 'Stop')
     await chip.click()
+    await page.getByRole('menuitem', { name: 'Show transcript', exact: true }).click()
     assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible())
-    for (const width of [1440, 701, 390]) {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-      const chipStyle = await chip.evaluate(el => {
-        const range = document.createRange()
-        range.selectNodeContents(el)
-        const style = getComputedStyle(el)
-        const fragments = [...range.getClientRects()].map(rect => ({ top: rect.top, height: rect.height, left: rect.left, right: rect.right }))
-        return {
-          lines: new Set(fragments.map(rect => Math.round(rect.top * 2) / 2)).size,
-          fragments,
-          whiteSpace: style.whiteSpace,
-          borderStyle: style.borderTopStyle,
-          borderWidth: style.borderTopWidth,
-          background: style.backgroundColor,
-        }
-      })
-      assert.equal(chipStyle.whiteSpace, 'nowrap', `the meeting chip stays on one line at ${width}`)
-      assert.ok(chipStyle.lines <= 1, `the meeting chip renders one line at ${width}: ${JSON.stringify(chipStyle)}`)
-      assert.ok((chipStyle.borderStyle !== 'none' && chipStyle.borderWidth !== '0px') || chipStyle.background !== 'rgba(0, 0, 0, 0)', `the meeting chip has a button surface at ${width}: ${JSON.stringify(chipStyle)}`)
-      const actions = page.locator('.ws-selected .ws-chat-acts')
-      const geometry = await actions.evaluate(el => {
-        const box = el.getBoundingClientRect()
-        const children = [...el.children].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
-        return { box: { left: box.left, right: box.right }, children }
-      })
-      assert.ok(geometry.children.every(box => box.left >= geometry.box.left - 1 && box.right <= geometry.box.right + 1), `actions fit at ${width}: ${JSON.stringify(geometry)}`)
-      if (process.env.WORKSPACE_SHOTS) {
-        await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
-        await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `meeting-live-${width}-light.png`) })
-      }
-    }
-    await page.setViewportSize({ width: 1440, height: 900 })
     await page.locator('.ws-chat-leave').click()
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-    const foreignHeader = page.locator('.ws-selected .ws-chat-head')
-    await foreignHeader.getByRole('heading', { name: 'Remote covariance review', exact: true }).waitFor()
-    const foreignChip = page.locator('.ws-selected .kbn-ctl-meet-chip')
-    await foreignChip.waitFor({ state: 'visible' })
-    assert.equal(await foreignChip.innerText(), 'Recording · calibration-report')
-    assert.equal(await page.locator('.ws-selected .kbn-ctl-meet-stop').innerText(), 'Stop')
-    await foreignChip.click()
-    await foreignHeader.getByRole('heading', { name: title, exact: true }).waitFor()
-    assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible(), 'the chip opens on the meeting host chat')
-    await captureCurrentMeetingStates(page)
+    const foreign = page.locator('.ws-selected .kbn-ctl-composer')
+    assert.ok(await foreign.locator('.kbn-ctl-meet-arm').isHidden())
+    await foreign.locator('.kbn-ctl-meet-chip').click()
+    assert.ok(await page.getByRole('menuitem', { name: 'Stop recording', exact: true }).isEnabled())
+    assert.ok(await page.getByRole('menuitem', { name: 'Start recording here', exact: true }).isEnabled())
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await captureMeetingState(page, 'single-recording-menu', width, 'light')
+    }
+    await page.getByRole('menuitem', { name: 'Open recording', exact: true }).click()
+    await page.locator('.ws-selected .ws-chat-head').getByRole('heading', { name: title, exact: true }).waitFor()
+    await chip.click()
+    await page.getByRole('menuitem', { name: 'Stop recording', exact: true }).click()
+    await page.waitForFunction(() => window.__harness.requests.some(r => r.url?.includes('/meeting/stop')))
+  }, { width: 1000, height: 900 })
+  test('Start recording here stops the old capture and joins the current chat', async page => {
+    await page.goto(`${url}&meeting=joined`)
+    await openRoot(page)
+    await page.locator('.ws-chat-leave').click()
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    await page.locator('.ws-selected .kbn-ctl-meet-chip').click()
+    page.once('dialog', dialog => dialog.accept())
+    await page.getByRole('menuitem', { name: 'Start recording here', exact: true }).click()
+    await page.waitForFunction(() => window.__harness.requests.some(r => r.url?.includes('/meeting/join')))
+    const calls = await page.evaluate(() => window.__harness.requests.filter(r => /meeting\/(stop|join)$/.test(r.url)))
+    assert.deepEqual(calls.map(r => r.url.split('/').at(-1)), ['stop', 'join'])
+    const request = JSON.parse(calls[1].body)
+    assert.equal(request.resume_mode, 'fresh')
+    assert.equal(request.fiber_id, 'pipeline/spin/remote-review')
+    assert.equal(await page.locator('.ws-selected .kbn-ctl-meet-arm').isVisible(), false)
   }, { width: 1000, height: 900 })
   test('× leaves the chat for the Desk and writes nothing', async page => {
     await page.addInitScript(() => {

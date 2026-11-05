@@ -56,13 +56,6 @@ function latestTarget(card: KanbanCard): TranscriptTarget | null {
 
 type SessionMode = 'fresh' | 'previous'
 
-function meetingStopVisibility(hasActions: boolean, collapsed: boolean, hosted: boolean): { global: boolean; pane: boolean } {
-  return {
-    global: hasActions && (!hosted || collapsed),
-    pane: hasActions && hosted && !collapsed,
-  }
-}
-
 /** How a meeting join ended: the error to show beside the control (null once
  *  recording began), and whether the constitution's worker received it. */
 export interface MeetingJoinResult {
@@ -91,7 +84,7 @@ export interface MeetingJoinControl {
   /** The meeting the board last observed, if any. */
   current(): MeetingRecord | null
   /** Stop (or dismiss, once failed) the recording: the board's one stop path. */
-  stop?(meeting: MeetingRecord): void | Promise<void>
+  stop?(meeting: MeetingRecord): void | boolean | Promise<void | boolean>
   /** Whether a stop for `meeting` has been asked and not yet observed. */
   stopRequested?(meeting: MeetingRecord): boolean
 }
@@ -499,7 +492,9 @@ export class Dock {
   private openConstitution: (() => void) | null = null
   private meetingPaint: (() => void) | null = null
   private meetingChip: HTMLButtonElement | null = null
-  private meetingGlobalStop: HTMLButtonElement | null = null
+  private dismissRecordingMenu: (() => void) | null = null
+  private meetingStartHere: (() => void) | null = null
+  private pendingMeetingHere: { launch: string | null; start: () => void } | null = null
   private meetingPaneCollapsed = false
   private meetingPaneIdentity: string | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
@@ -708,7 +703,9 @@ export class Dock {
     this.transcriptPane = null
     this.meetingPaint = this.composerBusy = null
     this.meetingChip = null
-    this.meetingGlobalStop = null
+    this.dismissRecordingMenu = null
+    this.meetingStartHere = null
+    this.pendingMeetingHere = null
     this.meetingPaneCollapsed = false
     this.meetingPaneIdentity = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -783,16 +780,7 @@ export class Dock {
     state.className = 'kbn-detail-transcript-state'
     const title = document.createElement('span')
     title.className = 'kbn-detail-transcript-title'
-    const stop = document.createElement('button')
-    stop.type = 'button'
-    stop.className = 'kbn-detail-transcript-stop'
-    stop.addEventListener('click', (e) => {
-      e.stopPropagation()
-      const current = this.meeting?.current()
-      if (!current || this.meeting?.stopRequested?.(current)) return
-      void this.meeting?.stop?.(current)
-    })
-    meta.append(dot, state, title, stop)
+    meta.append(dot, state, title)
     const list = document.createElement('ol')
     list.className = 'kbn-detail-transcript-lines'
     list.setAttribute('aria-label', 'Transcript')
@@ -813,6 +801,7 @@ export class Dock {
     const current = this.meeting?.current() ?? null
     const identity = current ? `${current.fiber ?? ''}\0${current.started_at ?? ''}\0${current.title ?? ''}` : null
     if (identity !== this.meetingPaneIdentity) {
+      this.dismissRecordingMenu?.()
       this.meetingPaneIdentity = identity
       this.meetingPaneCollapsed = false
     }
@@ -822,33 +811,24 @@ export class Dock {
         const title = current.title?.trim() || 'Meeting'
         this.meetingChip.hidden = current.state === 'failed'
         this.meetingChip.disabled = current.state === 'failed'
-        const host = chipHosted ? null : this.meetingHostName?.(current) ?? current.fiber?.split('/').at(-1)
-        this.meetingChip.textContent = host ? `Recording · ${host}` : `Meeting · ${title}`
-        this.meetingChip.title = host ? `Open meeting host: ${current.fiber}` : `Toggle meeting transcript: ${title}`
-        this.meetingChip.setAttribute('aria-label', this.meetingChip.title)
+        const host = this.meetingHostName?.(current) ?? (chipHosted ? this.transcriptCard?.name : current.fiber?.split('/').at(-1)) ?? title
+        this.meetingChip.textContent = `Recording · ${host}`
+        this.meetingChip.title = 'Recording controls'
+        this.meetingChip.setAttribute('aria-label', `Recording · ${host}`)
       } else this.meetingChip.hidden = true
     }
     const hosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
-    const actions = current && this.meeting?.stop ? meetingActions(current, this.meeting.stopRequested?.(current) ?? false) : null
-    const stops = meetingStopVisibility(!!actions, this.meetingPaneCollapsed, hosted)
-    if (this.meetingGlobalStop) {
-      this.meetingGlobalStop.hidden = !stops.global
-      if (actions) {
-        this.meetingGlobalStop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
-        this.meetingGlobalStop.disabled = actions.stopDisabled
-      }
+    const pending = this.pendingMeetingHere
+    if (pending && current && current.launch !== pending.launch) this.pendingMeetingHere = null
+    if (pending && !current && this.meeting?.canJoin()) {
+      this.pendingMeetingHere = null
+      pending.start()
     }
     const pane = this.transcriptPane
     const card = this.transcriptCard
     if (!pane || !card) return
     pane.hidden = !hosted || current === null || this.meetingPaneCollapsed
     if (!current || !hosted) return
-    const stop = pane.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
-    stop.hidden = !stops.pane
-    if (actions) {
-      stop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
-      stop.disabled = actions.stopDisabled
-    }
     pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')!.hidden = current.tail.length === 0
     for (const st of ['starting', 'loading', 'live', 'stopping', 'failed']) {
       pane.classList.toggle(`kbn-detail-transcript-${st}`, current.state === st)
@@ -1455,37 +1435,75 @@ export class Dock {
     meetChip.className = 'kbn-ctl-btn kbn-ctl-meet-chip'
     meetChip.hidden = true
     meetChip.disabled = true
+    meetChip.setAttribute('aria-haspopup', 'menu')
+    meetChip.setAttribute('aria-expanded', 'false')
+    let menu: HTMLElement | null = null
+    let release: Release | null = null
+    const closeMenu = (): void => {
+      release?.(); release = null
+      menu?.remove(); menu = null
+      meetChip.setAttribute('aria-expanded', 'false')
+      window.removeEventListener('pointerdown', outside, true)
+    }
+    const outside = (event: PointerEvent): void => {
+      if (!menu?.contains(event.target as Node) && !meetChip.contains(event.target as Node)) closeMenu()
+    }
+    this.dismissRecordingMenu = closeMenu
+    this.composerDisposers.push(closeMenu)
     meetChip.addEventListener('click', () => {
-      const pane = this.transcriptPane
+      if (menu) { closeMenu(); return }
       const current = this.meeting?.current()
       if (!current) return
-      if (this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) === null) {
-        this.onMeetingHostOpen?.(current)
-        return
+      menu = document.createElement('div')
+      menu.className = 'ws-select-picker'
+      menu.setAttribute('role', 'menu')
+      menu.setAttribute('aria-label', 'Recording controls')
+      const item = (label: string, act: () => void, disabled = false): void => {
+        const button = ctlButton(label, 'ws-select-option')
+        button.setAttribute('role', 'menuitem')
+        button.disabled = disabled
+        button.addEventListener('click', () => { closeMenu(); act() })
+        menu!.append(button)
       }
-      if (!pane) return
-      this.meetingPaneCollapsed = !pane.hidden
-      this.syncMeeting()
-      if (pane.hidden) return
-      pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')?.focus({ preventScroll: true })
-      pane.scrollIntoView?.({ block: 'nearest' })
+      const hosted = meetingHostCard(current, [card]) !== null
+      item(hosted ? (this.meetingPaneCollapsed ? 'Show transcript' : 'Hide transcript') : 'Open recording', () => {
+        if (!hosted) { this.onMeetingHostOpen?.(current); return }
+        this.meetingPaneCollapsed = !this.meetingPaneCollapsed
+        this.syncMeeting()
+      })
+      const held = !this.meeting?.stop || meetingActions(current, this.meeting?.stopRequested?.(current) ?? false).stopDisabled
+      item('Stop recording', () => { void this.meeting?.stop?.(current) }, held)
+      if (!hosted) item('Start recording here', () => {
+        const pending = { launch: current.launch, start: () => this.meetingStartHere?.() }
+        this.pendingMeetingHere = pending
+        void Promise.resolve(this.meeting?.stop?.(current)).then(ok => {
+          if (ok === false && this.pendingMeetingHere === pending) this.pendingMeetingHere = null
+          this.syncMeeting()
+        }).catch(() => { if (this.pendingMeetingHere === pending) this.pendingMeetingHere = null })
+      }, held || !this.meeting?.modes().includes(isMobileViewport() ? 'phone' : 'call'))
+      menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); meetChip.focus() }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          const items = [...menu!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+          const at = items.indexOf(document.activeElement as HTMLButtonElement)
+          items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
+        }
+        if (event.key === 'Tab') closeMenu()
+      })
+      meetChip.after(menu)
+      release = anchorPopover(menu, meetChip, { placement: 'above-start', matchWidth: true })
+      meetChip.setAttribute('aria-expanded', 'true')
+      menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+      window.addEventListener('pointerdown', outside, true)
     })
     this.meetingChip = meetChip
-    const meetingStop = ctlButton('Stop', 'kbn-detail-transcript-stop kbn-ctl-meet-stop')
-    meetingStop.hidden = true
-    meetingStop.addEventListener('click', event => {
-      event.stopPropagation()
-      const current = this.meeting?.current()
-      if (!current || this.meeting?.stopRequested?.(current)) return
-      void this.meeting?.stop?.(current)
-    })
-    this.meetingGlobalStop = meetingStop
     meetingControl = this.meeting ? this.buildMeeting(card, err, send, () => {
       this.composerPaint?.()
       fit()
     }) : undefined
     this.composerPaint()
-    foot.append(meetChip, meetingStop)
+    foot.append(meetChip)
     foot.append(sends)
 
     this.composerSend = send
@@ -1569,8 +1587,8 @@ export class Dock {
    *
    * A desktop call exposes its audio choice through an arrow inside the toggle while it is on.
    *
-   * One meeting records at a time. While any does, the toggle stays in its
-   * place, off and inert, naming the recording on hover. It is also disabled
+   * One meeting records at a time. While any does, one Recording button
+   * replaces the idle toggle and holds the recording actions in its menu. It is also disabled
    * when the device's required audio mode is unavailable. It follows the
    * board's meeting poll. `onArm` hears the toggle so the composer can repaint.
    */
@@ -1622,6 +1640,7 @@ export class Dock {
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
       const held = starting || send.busy() || recording || !canJoin()
+      wrap.hidden = recording
       armButton.disabled = held
       audio.disabled = held
       armButton.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : armed ? 'Sending starts recording' : 'Record a meeting with this message'
@@ -1665,6 +1684,10 @@ export class Dock {
         if (began && epoch === this.epoch) arm(false)
         send.setBusy(false)
       })
+    }
+    this.meetingStartHere = () => {
+      arm(true)
+      this.meetingStart?.(card.sessionUuid ? 'previous' : 'fresh', armButton)
     }
     wrap.append(armButton, audio)
     paint()

@@ -417,7 +417,7 @@ export class KanbanModal {
       getPhoneMeeting: () => this.phoneAudio,
       isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
       onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
-      onMeetingStop: (meeting) => this.stopCurrentMeeting(meeting),
+      onMeetingStop: async (meeting) => { await this.stopCurrentMeeting(meeting) },
       onMeetingSystemAudio: (meeting, enabled) => this.setCurrentMeetingSystemAudio(meeting, enabled),
     })
     this.phoneAudio = new PhoneMeeting(this.shuttleBase, () => this.presentMeeting(), () => this.surfaces.updatePhoneLevel())
@@ -517,16 +517,19 @@ export class KanbanModal {
     return { error: audioError, delivered: outcome.kind !== 'recording' }
   }
 
-  private async stopCurrentMeeting(meeting: MeetingRecord): Promise<void> {
-    if (!this.meetingStopGuard.request(meeting)) return
+  private async stopCurrentMeeting(meeting: MeetingRecord): Promise<boolean> {
+    if (!this.meetingStopGuard.request(meeting)) return false
     this.presentMeeting()
     try {
       await requestMeetingStop(this.shuttleBase, fetch, meeting)
       if (meeting.phone) this.phoneAudio.cancel()
     } catch (error) {
       this.showBanner(`Couldn't stop the meeting: ${errText(error)}`, 'error')
+      await this.refreshMeeting()
+      return false
     }
     await this.refreshMeeting()
+    return true
   }
 
   private async setCurrentMeetingSystemAudio(meeting: MeetingRecord, enabled: boolean): Promise<void> {
