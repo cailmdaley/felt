@@ -431,8 +431,10 @@ func (a *app) routeIndexedExit(cmd *cobra.Command, action, query string, fields 
 	slug, _ := row.Fiber["slug"].(string)
 	fiber := &felt.Felt{ID: slug, UID: uid, Path: row.Path}
 	routed, err := a.forwardLifecycleAction(cmd, []string{query}, owner, action, fiber, fields)
-	if routed && err == nil && action == "close" && a.isOwnFiber(fiber) {
-		a.endOwnTerminal()
+	if routed && err == nil && action == "close" {
+		if ref, lookupErr := a.localShuttleRef(query); lookupErr == nil && a.isOwnFiber(&felt.Felt{UID: uid, Path: ref.Storage.Path(ref.ID)}) {
+			a.endOwnTerminal()
+		}
 	}
 	return routed, err
 }

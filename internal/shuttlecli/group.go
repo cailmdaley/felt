@@ -19,18 +19,20 @@ func (a *app) shuttleResolveFiber(query string, full bool) (*felt.Felt, *felt.St
 	return f, storage, err
 }
 
-func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt.Storage, felt.Ref, error) {
+func (a *app) localShuttleRef(query string) (felt.Ref, error) {
 	root, err := felt.ProjectRoot(a.env, a.dir)
 	if err != nil {
-		return nil, nil, felt.Ref{}, err
+		return felt.Ref{}, err
 	}
 	storage := felt.NewStorage(root)
-	var ref felt.Ref
 	if a.fiberPathHint != "" {
-		ref, err = felt.ResolveAddressRefWithHint(storage, query, a.fiberPathHint)
-	} else {
-		ref, err = felt.ResolveRef(storage, felt.CommandScope(a.env, root, a.dir), query)
+		return felt.ResolveAddressRefWithHint(storage, query, a.fiberPathHint)
 	}
+	return felt.ResolveRef(storage, felt.CommandScope(a.env, root, a.dir), query)
+}
+
+func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt.Storage, felt.Ref, error) {
+	ref, err := a.localShuttleRef(query)
 	if err != nil {
 		// Interactive misses can ask an owner. Exact writer addresses remain
 		// local; ambiguity and read failures never become another lookup.

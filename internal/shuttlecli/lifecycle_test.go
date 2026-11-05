@@ -133,9 +133,12 @@ func TestShuttleClose_OwnSession(t *testing.T) {
 func TestShuttleClose_RoutedOwnSession(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name             string
-		succeeds, manual bool
-	}{{"own-success", true, false}, {"own-refused", false, false}, {"manual-success", true, true}} {
+		name                      string
+		succeeds, manual, indexed bool
+	}{
+		{"own-success", true, false, false}, {"own-refused", false, false, false}, {"manual-success", true, true, false},
+		{"indexed-own-success", true, false, true}, {"indexed-own-refused", false, false, true}, {"indexed-manual-success", true, true, true},
+	} {
 		for _, verdict := range []string{"", "true", "false"} {
 			t.Run(tc.name+"/tempered="+verdict, func(t *testing.T) {
 				t.Parallel()
@@ -152,6 +155,14 @@ func TestShuttleClose_RoutedOwnSession(t *testing.T) {
 				kills, _ := stubWorkerExitTmux(t, env, session, f.Path)
 				var bodies requestBodies
 				serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == http.MethodGet && r.URL.Path == "/api/v1/fibers/composite" {
+						rows := []map[string]any{}
+						if tc.indexed {
+							rows = append(rows, map[string]any{"origin": "worker", "path": "/peer/.felt/own/own.md", "fiber": map[string]any{"id": f.UID, "slug": f.ID, "shuttle": map[string]any{"host": "worker"}}})
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"fibers": rows})
+						return
+					}
 					bodies.record(t, r)
 					if !tc.succeeds {
 						http.Error(w, "refused", http.StatusConflict)
@@ -191,6 +202,10 @@ func TestShuttleClose_UsesLocalDaemon(t *testing.T) {
 	seedShuttleRole(t, storage, "f", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 	var bodies requestBodies
 	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/fibers/composite" {
+			fmt.Fprint(w, `{"fibers":[]}`)
+			return
+		}
 		bodies.record(t, r)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"output":"closed"}`)
@@ -1442,7 +1457,7 @@ func TestResumeLegacyRestSuppressesHandoffNotice(t *testing.T) {
 	}
 }
 
-func TestRemovedOwnerVerdictsRequireDaemonOrExplicitExit(t *testing.T) {
+func TestRemovedOwnerVerdictsNeverWriteForeignCopies(t *testing.T) {
 	env := testEnv(t)
 	ownHost(t, env, "hub")
 	writeRemotesIn(t, env, `{"version":1,"defaults":{"discover":false},"remotes":[]}`)
@@ -1450,18 +1465,18 @@ func TestRemovedOwnerVerdictsRequireDaemonOrExplicitExit(t *testing.T) {
 	seedShuttleRole(t, st, "archive", felt.StatusClosed, map[string]any{"kind": "oneshot", "host": "retired"}, nil)
 	before, _ := os.ReadFile(st.Path("archive"))
 	for _, verdict := range []string{"true", "false"} {
-		if out, err := runIn(t, env, dir, "close", "archive", "--tempered="+verdict); err == nil {
-			t.Fatalf("daemon down must not authorize %s: %s", verdict, out)
+		for _, local := range []bool{false, true} {
+			args := []string{"close", "archive", "--tempered=" + verdict}
+			if local {
+				args = append(args, "--local")
+			}
+			if out, err := runIn(t, env, dir, args...); err == nil {
+				t.Fatalf("absent owner must not authorize %s (local=%v): %s", verdict, local, out)
+			}
+			after, _ := os.ReadFile(st.Path("archive"))
+			if string(before) != string(after) {
+				t.Fatal("refused verdict changed the foreign copy")
+			}
 		}
-		after, _ := os.ReadFile(st.Path("archive"))
-		if string(before) != string(after) {
-			t.Fatal("daemon-down verdict changed the mirror")
-		}
-	}
-	if out, err := runIn(t, env, dir, "close", "archive", "--tempered=false", "--local"); err != nil {
-		t.Fatalf("%v: %s", err, out)
-	}
-	if v := readTempered(mustRead(t, st, "archive")); v == nil || *v {
-		t.Fatal("explicit retirement missing")
 	}
 }
