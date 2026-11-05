@@ -250,39 +250,55 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		label := map[byte]string{'A': "added", 'M': "modified", 'D': "deleted", 'R': "renamed", 'T': "modified"}[status[0]]
 		c.Files = append(c.Files, ChangeFile{Path: path, Status: label, Role: ChangeRole(path)})
 	}
-	c.Patch, err = diff("--patch", "--unified=3", "--src-prefix=a/", "--dst-prefix=b/")
+	c.Patch, err = diff("--patch", "--full-index", "--unified=3", "--src-prefix=a/", "--dst-prefix=b/")
 	if err != nil {
 		return nil, nil, err
 	}
-	// Attribute-marked text still needs a reviewable patch; real binary blobs stay binary.
-	for _, f := range c.Files {
-		if !strings.Contains(c.Patch, "Binary files ") {
-			break
+	// Read blob identities from binary headers, including a rename's old blob.
+	// Only attribute-marked text needs a forced text diff; real binary stays binary.
+	sections := changeSections.Split(c.Patch, -1)
+	var textSections []string
+	for i, section := range sections {
+		if !strings.Contains(section, "\nBinary files ") {
+			continue
 		}
-		var text bool = true
-		for _, sha := range []string{baseSHA, headSHA} {
-			blob, err := git("show", sha+":"+f.Path)
-			if err == nil && strings.ContainsRune(blob, '\x00') {
-				text = false
+		text := true
+		for _, line := range strings.Split(section, "\n") {
+			if !strings.HasPrefix(line, "index ") {
+				continue
+			}
+			for _, oid := range strings.Split(strings.Fields(line)[1], "..") {
+				if strings.Trim(oid, "0") == "" {
+					continue
+				}
+				blob, err := git("cat-file", "blob", oid)
+				if err != nil {
+					return nil, nil, err
+				}
+				if strings.ContainsRune(blob, '\x00') {
+					text = false
+				}
 			}
 		}
 		if !text {
 			continue
 		}
-		args := []string{"diff", "--text", "-O", os.DevNull, "--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--unified=3", baseSHA, headSHA, "--", f.Path}
-		textPatch, err := isolated(args...)
-		if err != nil {
-			return nil, nil, err
+		if textSections == nil {
+			patch, err := diff("--text", "--patch", "--full-index", "--unified=3", "--src-prefix=a/", "--dst-prefix=b/")
+			if err != nil {
+				return nil, nil, err
+			}
+			textSections = changeSections.Split(patch, -1)
 		}
-		// Replace only binary sections for this path; textual rename detection remains intact.
-		sections := strings.Split(c.Patch, "diff --git ")
-		for i := 1; i < len(sections); i++ {
-			if strings.Contains(sections[i], "Binary files ") && (strings.HasPrefix(textPatch, "diff --git "+strings.SplitN(sections[i], "\n", 2)[0]+"\n")) {
-				sections[i] = strings.TrimPrefix(textPatch, "diff --git ")
+		name, _, _ := strings.Cut(section, "\n")
+		for _, candidate := range textSections {
+			if strings.HasPrefix(candidate, name+"\n") {
+				sections[i] = candidate
+				break
 			}
 		}
-		c.Patch = strings.Join(sections, "diff --git ")
 	}
+	c.Patch = strings.Join(sections, "diff --git ")
 	hunks, err := c.parsePatch()
 	return c, hunks, err
 }

@@ -68,7 +68,7 @@ func TestChangeCaptureIgnoresDiffConfigAndWorktreeAttributes(t *testing.T) {
 	}
 	before.Story = nil
 	ValidateChange(before, bh)
-	for key, value := range map[string]string{"diff.suppressBlankEmpty": "true", "diff.noprefix": "true", "diff.mnemonicPrefix": "true", "diff.renames": "false", "diff.context": "0", "diff.interHunkContext": "100", "diff.algorithm": "histogram", "diff.external": "/nonexistent", "core.attributesFile": filepath.Join(repo, "global-attrs")} {
+	for key, value := range map[string]string{"diff.suppressBlankEmpty": "true", "diff.abbrev": "1", "diff.noprefix": "true", "diff.mnemonicPrefix": "true", "diff.renames": "false", "diff.context": "0", "diff.interHunkContext": "100", "diff.algorithm": "histogram", "diff.external": "/nonexistent", "core.attributesFile": filepath.Join(repo, "global-attrs")} {
 		git("config", key, value)
 	}
 	put(".gitattributes", "* -diff\n")
