@@ -100,6 +100,6 @@ export function readDOMWindow(window, index) {
       }
     }
     visit(host)
-    return { index, file: host.closest('.change-file')?.getAttribute('data-change-file'), lane: host.closest('.change-section')?.querySelector('h2')?.textContent, rows }
+    return { index, renderer: host.dataset.renderState, file: host.closest('.change-file')?.getAttribute('data-change-file'), lane: host.closest('.change-section')?.querySelector('h2')?.textContent, rows }
   }, index)
 }
