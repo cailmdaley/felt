@@ -3,6 +3,8 @@ defmodule Shuttle.ThreadOutbox.Corrupt do
 end
 
 defmodule Shuttle.ThreadOutbox do
+  require Logger
+
   @moduledoc "Host-local pending thread payloads and retained, payload-free acknowledgment IDs."
   @retention_ms 14 * 24 * 60 * 60 * 1_000
   @prune_interval_ms 60 * 60 * 1_000
@@ -212,6 +214,8 @@ defmodule Shuttle.ThreadOutbox do
 
     Shuttle.FS.wildcard(Path.join(acked, "*"))
     |> Enum.each(fn path ->
+      # An acknowledgment that outlives its retention is harmless, and the
+      # replay cutoff rejects it anyway, so an unreadable one waits for the next prune.
       case Shuttle.FS.stat(path, time: :posix) do
         {:ok, %{mtime: mtime}} ->
           if mtime < cutoff_seconds, do: Shuttle.FS.rm!(path)
@@ -220,7 +224,7 @@ defmodule Shuttle.ThreadOutbox do
           :ok
 
         {:error, reason} ->
-          raise File.Error, reason: reason, action: "stat", path: path
+          Logger.warning("thread outbox: leaving #{path} unpruned: #{inspect(reason)}")
       end
     end)
 

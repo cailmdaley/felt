@@ -11,6 +11,16 @@ defmodule Shuttle.ThreadOutboxTest do
     {:ok, data: data}
   end
 
+  test "boot survives an acknowledgment it cannot stat", %{data: data} do
+    root = Path.join(data, "thread-outbox")
+    unreadable = Path.join([root, "acked", "unreadable"])
+    File.ln_s!(unreadable, unreadable)
+    File.write!(Path.join(root, "last_pruned"), "0")
+
+    assert :ok = Shuttle.ThreadOutbox.boot_baseline()
+    assert {:ok, _} = File.read_link(unreadable)
+  end
+
   test "pruned acknowledgments cannot be replayed beyond the 14-day cutoff", %{data: data} do
     alias Shuttle.ThreadOutbox
 
