@@ -19,6 +19,7 @@ type changeRow struct {
 func (c *Change) parsePatch() ([]ChangeHunk, error) {
 	for i := range c.Files {
 		c.Files[i].Hunks = []ChangeHunk{}
+		c.Files[i].Remaining = []ChangeHunk{}
 	}
 	for _, section := range changeSections.Split(c.Patch, -1) {
 		if section == "" {
@@ -53,6 +54,12 @@ func (c *Change) parsePatch() ([]ChangeHunk, error) {
 				next, _ = strconv.Atoi(match[3])
 				file.Hunks = append(file.Hunks, ChangeHunk{File: file.Path, OldFrom: old, OldLines: count(match[2]), NewFrom: next, NewLines: count(match[4]), header: header})
 				current = &file.Hunks[len(file.Hunks)-1]
+				if current.OldLines == 0 {
+					old++
+				}
+				if current.NewLines == 0 {
+					next++
+				}
 			} else if current != nil && len(line) > 0 && strings.ContainsRune(" +-\\", rune(line[0])) {
 				current.rows = append(current.rows, changeRow{line, old, next})
 				if line[0] == ' ' || line[0] == '-' {
@@ -108,10 +115,10 @@ func (h ChangeHunk) render(rows []changeRow) string {
 	}
 	old, next := rows[0].old, rows[0].new
 	// Zero-side starts denote the preceding line, not the cursor for the next row.
-	if oldLines == 0 && h.OldLines != 0 {
+	if oldLines == 0 {
 		old--
 	}
-	if newLines == 0 && h.NewLines != 0 {
+	if newLines == 0 {
 		next--
 	}
 	return fmt.Sprintf("%s@@ -%d,%d +%d,%d @@\n%s", h.header, old, oldLines, next, newLines, body.String())
@@ -147,63 +154,83 @@ func (h ChangeHunk) withRows(rows []changeRow) ChangeHunk {
 			out.NewLines++
 		}
 	}
+	if out.OldLines == 0 {
+		out.OldFrom--
+	}
+	if out.NewLines == 0 {
+		out.NewFrom--
+	}
 	out.Patch = h.render(rows)
 	out.Windows = nil
 	return out
 }
 
-func (h ChangeHunk) excerpt(r ChangeRange) (ChangeHunk, bool) {
+func (h ChangeHunk) excerpts(r ChangeRange) []ChangeHunk {
 	if r.From == 0 && r.To == 0 {
-		return h, true
+		return []ChangeHunk{h}
 	}
-	rows := []changeRow{}
-	selected := false
-	for _, row := range h.rows {
-		if row.text[0] == '\\' {
-			if selected {
-				rows = append(rows, row)
-			}
-			continue
-		}
+	selected := make([]bool, len(h.rows))
+	for i, row := range h.rows {
 		line := row.new
 		if r.Side == "old" {
 			line = row.old
 		}
-		selected = line >= r.From && line <= r.To
-		if selected {
-			rows = append(rows, row)
-		}
+		selected[i] = r.includes(row) || (row.text[0] == ' ' && line >= r.From && line <= r.To)
 	}
-	if len(rows) == 0 {
-		return ChangeHunk{}, false
-	}
-	out := h.withRows(rows)
-	out.Windows = out.windows()
-	return out, true
+	return h.selectRows(selected)
 }
 
-// shown requires one stop to show all changed lines, never a union of partial stops.
-func (h ChangeHunk) shown(r ChangeRange) bool {
-	if r.From == 0 && r.To == 0 {
-		return true
-	}
-	kind := byte('+')
+// includes addresses changed lines on their own side; context never counts.
+func (r ChangeRange) includes(row changeRow) bool {
+	kind, line := byte('+'), row.new
 	if r.Side == "old" {
-		kind = '-'
+		kind, line = '-', row.old
 	}
-	changes := 0
-	for _, row := range h.rows {
-		if row.text[0] != kind {
+	return row.text[0] == kind && ((r.From == 0 && r.To == 0) || (line >= r.From && line <= r.To))
+}
+
+// remaining keeps unshown changes and up to three adjacent context lines.
+// A shown change is a boundary, never context for another excerpt.
+func (h ChangeHunk) remaining(shown []bool) []ChangeHunk {
+	selected := make([]bool, len(h.rows))
+	for i, row := range h.rows {
+		if shown[i] || (row.text[0] != '+' && row.text[0] != '-') {
 			continue
 		}
-		changes++
-		line := row.new
-		if r.Side == "old" {
-			line = row.old
-		}
-		if line < r.From || line > r.To {
-			return false
+		selected[i] = true
+		for _, direction := range []int{-1, 1} {
+			for n := 1; n <= 3; n++ {
+				j := i + direction*n
+				if j < 0 || j >= len(h.rows) || h.rows[j].text[0] != ' ' {
+					break
+				}
+				selected[j] = true
+			}
 		}
 	}
-	return changes > 0
+	return h.selectRows(selected)
+}
+
+func (h ChangeHunk) selectRows(selected []bool) []ChangeHunk {
+	for i, row := range h.rows {
+		if row.text[0] == '\\' && i > 0 && selected[i-1] {
+			selected[i] = true
+		}
+	}
+	excerpts := []ChangeHunk{}
+	for start := 0; start < len(h.rows); {
+		if !selected[start] {
+			start++
+			continue
+		}
+		end := start + 1
+		for end < len(h.rows) && selected[end] {
+			end++
+		}
+		excerpt := h.withRows(h.rows[start:end])
+		excerpt.Windows = excerpt.windows()
+		excerpts = append(excerpts, excerpt)
+		start = end
+	}
+	return excerpts
 }

@@ -95,6 +95,7 @@ func TestBuildChangeRealGit(t *testing.T) {
 	for i := range metadata {
 		metadata[i].Header = ""
 		metadata[i].Hunks = nil
+		metadata[i].Remaining = nil
 	}
 	if !reflect.DeepEqual(metadata, want) {
 		t.Fatalf("files:\n%+v\nwant:\n%+v", c.Files, want)
@@ -111,7 +112,7 @@ func TestBuildChangeRealGit(t *testing.T) {
 		t.Fatalf("dirty snapshot: %s", c.Patch)
 	}
 	report := ValidateChange(c, hunks)
-	if !report.Valid || report.Total != 5 || report.Covered != 0 || len(report.Uncovered) != 5 {
+	if !report.Valid || report.Total != 8 || report.Covered != 0 || len(report.Uncovered) != 5 {
 		t.Fatalf("report: %+v", report)
 	}
 	minimal, _, err := BuildChange(env, repo, base, "HEAD", &ChangeStory{Overview: "Overview"})
@@ -136,10 +137,11 @@ func TestBuildChangeRealGit(t *testing.T) {
 	if mergeBase != base {
 		t.Fatal("unexpected merge base")
 	}
-	merged, _, err := BuildChange(env, repo, mergeBase, "topic/change", nil)
+	merged, mergedHunks, err := BuildChange(env, repo, mergeBase, "topic/change", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	ValidateChange(merged, mergedHunks)
 	if merged.Base != base || merged.Head != head || merged.Patch != c.Patch || len(merged.Commits) != 1 {
 		t.Fatalf("merge-base snapshot: %+v", merged)
 	}
@@ -147,6 +149,7 @@ func TestBuildChangeRealGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ValidateChange(direct, directHunks)
 	if direct.Base != base || direct.BaseRef != "main" || direct.Patch != c.Patch || !reflect.DeepEqual(direct.Files, c.Files) || !reflect.DeepEqual(direct.Commits, c.Commits) || !reflect.DeepEqual(directHunks, hunks) {
 		t.Fatalf("diverged base changed the topic snapshot: %+v", direct)
 	}
@@ -205,13 +208,13 @@ func TestValidateChange(t *testing.T) {
 		fragments       []string
 	}{
 		{name: "null", story: `null`},
-		{name: "whole file", story: `{"chapters":[{"stops":[{"file":"main.go","importance":"important"}]}]}`, covered: 2},
-		{name: "overlap and duplicate", story: `{"chapters":[{"stops":[{"file":"main.go","from":15,"to":30,"importance":"critical"},{"file":"main.go","from":10,"to":10,"importance":"context"}]}]}`, covered: 0},
-		{name: "old deletion", story: `{"chapters":[{"stops":[{"file":"gone.go","from":1,"to":3,"side":"old","importance":"supporting"}]}]}`, covered: 1},
+		{name: "whole file", story: `{"chapters":[{"stops":[{"file":"main.go","importance":"important"}]}]}`, covered: 12},
+		{name: "overlap and duplicate", story: `{"chapters":[{"stops":[{"file":"main.go","from":15,"to":30,"importance":"critical"},{"file":"main.go","from":10,"to":10,"importance":"context"}]}]}`, covered: 2},
+		{name: "old deletion", story: `{"chapters":[{"stops":[{"file":"gone.go","from":1,"to":3,"side":"old","importance":"supporting"}]}]}`, covered: 3},
 		{name: "flags not coverage", story: `{"flags":[{"file":"main.go","from":10,"to":10}]}`},
 		{name: "metadata", story: `{"chapters":[{"stops":[{"file":"binary.bin","importance":"context"}]}],"roles":{"main.go":"generated"}}`},
 		{name: "every bad reference", story: `{"flags":[{"file":"unknown.go"},{"file":"main.go","from":99,"to":101}],"chapters":[{"stops":[{"file":"also-unknown.go","importance":"context"},{"file":"gone.go","from":1,"to":2,"importance":"context"},{"file":"added.go","from":1,"to":2,"side":"old","importance":"context"}]}]}`, errors: 5, fragments: []string{"flags[0]", "flags[1]", "chapters[0].stops[0]", "chapters[0].stops[1]", "chapters[0].stops[2]", "unknown.go", "new side", "old side"}},
-		{name: "bad shape", story: `{"flags":[{"file":"main.go","side":"both"},{"file":"main.go","from":10},{"file":"main.go","from":11,"to":10},{"file":"main.go","from":-1,"to":10}],"chapters":[{"stops":[{"file":"main.go","importance":"tiny"}]}],"roles":{"main.go":"other","unknown":"docs"}}`, covered: 2, errors: 7},
+		{name: "bad shape", story: `{"flags":[{"file":"main.go","side":"both"},{"file":"main.go","from":10},{"file":"main.go","from":11,"to":10},{"file":"main.go","from":-1,"to":10}],"chapters":[{"stops":[{"file":"main.go","importance":"tiny"}]}],"roles":{"main.go":"other","unknown":"docs"}}`, covered: 12, errors: 7},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -220,7 +223,7 @@ func TestValidateChange(t *testing.T) {
 				t.Fatal(err)
 			}
 			report := ValidateChange(c, hunks)
-			if report.Covered != tt.covered || len(report.Errors) != tt.errors || report.Total != 4 || len(report.Uncovered) != 4-tt.covered || report.Valid != (tt.errors == 0) {
+			if report.Covered != tt.covered || len(report.Errors) != tt.errors || report.Total != 27 || report.Valid != (tt.errors == 0) {
 				t.Fatalf("report: %+v", report)
 			}
 			for _, fragment := range tt.fragments {

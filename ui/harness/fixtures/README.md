@@ -7,7 +7,7 @@ channel has a tapestry with relative links and header chips for three changes:
 - `family.change.json`: a real five-commit felt snapshot,
   `0f3a0cdc..f629d29c`, with an authored story about family identity and navigation.
   Two stops deliberately visit the same file out of line order.
-- `plain.change.json`: a separate CLI bake of the same commits without a story or covered hunks.
+- `plain.change.json`: a separate CLI bake of the same commits without a story; every changed line remains unshown.
 - `large.change.json`: a 5,000-line file with every line replaced.
 
 `nice -n 10 node ui/scripts/bake-change-fixture.mjs` builds `shuttle` and runs
@@ -55,10 +55,11 @@ The output also includes the built reader, engine and TypeScript grammar gzip si
 ## Rendering boundary
 
 `ChangeReader` is a lazy production entry.
-Go parses Git's diff, resolves each stop's excerpt and supplies covered flags and bounded rendering windows.
+Go parses Git's diff, resolves each stop's excerpt and supplies Remaining excerpts and bounded rendering windows.
 Pierre's vanilla `FileDiff` renders those independent patches; the reader never splits Git output or recomputes coverage.
-One stop must show every changed line on its chosen side to cover a hunk.
-Partial and context-only stops leave the complete hunk visible in Remaining.
+Stop ranges combine across chapters to show individual changed lines on their own side.
+Go emits exactly the unshown changed lines, with context, for Remaining.
+Context-only stops cover nothing.
 Tests stay in their own lane even when the story cites them.
 Only the chosen grammar set is bundled; other languages use plain text.
 

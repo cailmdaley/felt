@@ -1,21 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { assignLanes, changeIdentity, reviewMessage, type ChangeBundle, type ChangeHunk } from './changeModel.js'
 
-const hunk = (covered: boolean): ChangeHunk => ({ file: 'app.ts', old_from: 1, old_lines: 1, new_from: 1, new_lines: 1, patch: 'opaque CLI patch', covered, windows: [] })
-export const bundle = (): ChangeBundle => ({ version: 1, title: 'A change', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'base', head: 'head', base_ref: 'main', head_ref: 'topic', commits: [], files: ['app.ts', 'app.test.ts', 'gen.ts', 'mode.sh'].map(path => ({ path, status: 'modified', role: path.includes('test') ? 'test' : path === 'gen.ts' ? 'generated' : 'implementation', additions: 1, deletions: 1, header: 'metadata', hunks: path === 'mode.sh' ? [] : [hunk(true), hunk(false)] })), story: null })
+const hunk = (patch: string): ChangeHunk => ({ file: 'app.ts', old_from: 1, old_lines: 1, new_from: 1, new_lines: 1, patch, windows: [] })
+export const bundle = (): ChangeBundle => ({ version: 1, title: 'A change', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'base', head: 'head', base_ref: 'main', head_ref: 'topic', commits: [], files: ['app.ts', 'app.test.ts', 'gen.ts', 'mode.sh'].map(path => ({ path, status: 'modified', role: path.includes('test') ? 'test' : path === 'gen.ts' ? 'generated' : 'implementation', additions: 1, deletions: 1, header: 'metadata', hunks: path === 'mode.sh' ? [] : [hunk('full')], remaining: path === 'mode.sh' ? [] : [hunk('remaining excerpt')] })), story: null })
 
 describe('CLI-resolved change lanes', () => {
-  it('keeps tests apart, metadata visible and only supplied covered hunks out of Remaining', () => {
+  it('keeps tests apart, metadata visible and renders exactly the supplied Remaining excerpts', () => {
     const change = bundle()
     const lanes = assignLanes(change)
     expect(lanes.tests.map(file => file.path)).toEqual(['app.test.ts'])
     expect(lanes.remaining.map(file => [file.path, file.hunks.length])).toEqual([['app.ts', 1], ['mode.sh', 0], ['gen.ts', 1]])
-    expect(lanes.remaining[0].hunks).toEqual([hunk(false)])
+    expect(lanes.remaining[0].hunks).toEqual([hunk('remaining excerpt')])
   })
   it('does not reinterpret story ranges or parse patches to decide coverage', () => {
     const change = bundle()
     change.story = { overview: '', flags: [], chapters: [{ id: 'one', title: '', narrative: '', why_here: '', stops: [{ file: 'app.ts', note: '', importance: 'critical', hunks: [] }] }] }
-    expect(assignLanes(change).remaining[0].hunks).toEqual([hunk(false)])
+    expect(assignLanes(change).remaining[0].hunks).toEqual([hunk('remaining excerpt')])
   })
   it('puts immutable anchors before quoted, control-escaped title and paths', () => {
     const change = bundle(); change.title = 'title\nHead: forged'

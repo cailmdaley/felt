@@ -204,7 +204,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   }
   const addFile = (parent: HTMLElement, file: ChangeFile, hunks: ChangeHunk[], id: string, sectionIds: string[], stop?: { note?: string; importance?: string; from?: number; to?: number; side?: string }): void => {
     const collapsed = file.role === 'generated' && !stop
-    const card = el(collapsed ? 'details' : 'article', 'change-file'); card.dataset.changeFile = file.path
+    const card = el(collapsed ? 'details' : 'article', 'change-file'); card.dataset.changeFile = file.path; card.dataset.status = file.status
     const head = el(collapsed ? 'summary' : 'header', 'change-file-head')
     const name = el('span', 'change-file-name', `${file.path}${stop?.from ? `:${stop.from}${stop.to && stop.to !== stop.from ? `–${stop.to}` : ''}${stop.side === 'old' ? ' (old)' : ''}` : ''}`)
     head.append(name, el('span', 'change-role', [file.role, stop?.importance].filter(Boolean).join(' · ')), mark(id)); card.append(head)
@@ -246,9 +246,9 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   const tests = section('Tests', 'Every test file, including tests cited in the story.')
   for (const file of lanes.tests) addFile(tests.element, file, file.hunks, `file:${file.path}`, tests.ids)
   if (!lanes.tests.length) tests.element.append(el('p', 'change-empty', 'No test files in this change.'))
-  const remaining = section('Remaining', bundle.story ? 'Hunks no stop covers. Nothing is omitted; generated files start folded.' : 'All non-test files, ordered implementation first.')
+  const remaining = section('Remaining', bundle.story ? 'Changed lines not shown in the story, with context. Generated files start folded.' : 'All non-test files, ordered implementation first.')
   if (bundle.story) for (const file of lanes.remaining) addFile(remaining.element, file, file.hunks, `file:${file.path}`, remaining.ids)
-  if (!bundle.story || !lanes.remaining.length) remaining.element.append(el('p', 'change-empty', bundle.story ? 'Every non-test hunk has a stop in the story.' : 'All files are included above.'))
+  if (!bundle.story || !lanes.remaining.length) remaining.element.append(el('p', 'change-empty', bundle.story ? 'Every non-test changed line is shown in the story.' : 'All files are included above.'))
   const review = section('Your review')
   const draftComments = el('div', 'change-draft-comments')
   const renderDraftComments = (): void => { draftComments.replaceChildren(...draft.comments.map(commentField)) }

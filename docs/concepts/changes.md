@@ -63,19 +63,21 @@ The bundle has these fields:
 | `files` | Repository-relative inventory, with destination paths for renames and old paths for deletions |
 | `story` | Resolved story object, or `null` |
 
-A file has `path`, `status`, `role`, `additions`, `deletions`, `header` and `hunks`.
+A file has `path`, `status`, `role`, `additions`, `deletions`, `header`, `hunks` and `remaining`.
 Statuses are `modified`, `added`, `deleted` and `renamed`; a file-type change is `modified`.
 The header retains Git's metadata, including binary notices, rename paths and mode changes.
 Empty changes have empty `commits` and `files` arrays.
 Files without textual changes have empty `hunks` arrays and zero line counts.
 
-Each hunk has `{file, old_from, old_lines, new_from, new_lines, patch, covered, windows}`.
+Each hunk has `{file, old_from, old_lines, new_from, new_lines, patch, windows}`.
 Its `patch` includes the file headers and complete hunk text needed by the renderer.
 Go alone reads Git's diff and decides coverage.
 The reader uses these supplied boundaries and flags rather than reconstructing them from a top-level patch.
 `windows` contains bounded rendering pieces, each with `{old_from, old_lines, new_from, new_lines, patch, rows}`.
 These let the reader mount long hunks a piece at a time without another diff parser.
 Story stops acquire their own `hunks` array containing just the selected excerpts.
+Each file’s `remaining` array contains the changed lines no stop shows, with up to three adjacent context lines and the same renderable shape.
+The reader renders these excerpts directly, without calculating coverage.
 All collection fields are arrays, including when empty.
 
 ## Write a story
@@ -136,21 +138,26 @@ shuttle change review-task --base origin/main --story story.json --check
 shuttle change review-task --base origin/main --story story.json --check --json
 ```
 
-Coverage counts **hunks**, not lines or files.
-A hunk is covered only when one stop includes every changed line on its selected side: additions for `new`, deletions for `old`.
-A context-only stop covers nothing.
-Several partial stops cannot combine to hide a hunk.
-A whole-file stop covers its hunks on that side.
-Partial stops render their chosen range, while the complete hunk remains under Remaining.
+Coverage counts **changed lines**: additions and deletions, each on its own side.
+A changed line is shown when any stop’s range on that side includes it.
+Stops combine across chapters; duplicates count once, and context-only stops count nothing.
+A whole-file stop includes all changed lines on its selected side.
+Go emits unshown changed lines as `remaining` excerpts with a little context, splitting around shown changes rather than repeating them.
+Remaining renders exactly those excerpts, not the complete original hunks.
 Tests stay in their own lane even when cited by the story.
 Files with no text hunks don't enter the denominator and remain visible in the inventory.
 
 `--check` never writes.
 Invalid references fail the command and leave an existing bundle untouched.
-Uncovered or partial hunks don't fail validation; partial stories are useful while authoring.
-Text output lists `Hunks covered: N of M`, `Partial: path:line` for stops needing wider ranges, and `Remaining: path:line` for every uncovered hunk.
-JSON output is a report with `valid`, `covered`, `total`, `uncovered`, `partial` and `errors`, plus `path` on a successful write.
+Unshown lines do not fail validation: a story selects what matters, rather than exhausting the diff.
+Text output lists `Changed lines shown: N of M` and `Remaining: path:line` for each remaining excerpt.
+JSON output is a report with `valid`, `covered`, `total`, `uncovered` and `errors`, plus `path` on a successful write.
+`covered` and `total` count changed lines; `uncovered` contains the resolved Remaining excerpts.
 An invalid story returns `valid: false` and a nonzero exit status.
+
+## Write a story worth reading
+
+Aim for a ten-minute reading, in plain language. Select the lines that carry the meaning, usually fewer than 40 per stop, and explain why the reader is here. Walk a new file through several short stops in reading order rather than beginning at its imports and printing everything. Leave supporting machinery to Remaining on purpose; coverage is an honesty check, not a target to maximize. Added and deleted files use neutral code backgrounds with change markers in the gutter, while tokens stay theme-aware.
 
 ## Review state and delivery
 

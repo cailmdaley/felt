@@ -142,10 +142,7 @@ count as coverage. --check validates and reports without writing a companion.
 					return err
 				}
 			} else {
-				fmt.Fprintf(a.env.Stdout, "Hunks covered: %d of %d\n", report.Covered, report.Total)
-				for _, h := range report.Partial {
-					fmt.Fprintf(a.env.Stdout, "Partial: %s:%d (widen one stop to show every changed line)\n", h.File, h.NewFrom)
-				}
+				fmt.Fprintf(a.env.Stdout, "Changed lines shown: %d of %d\n", report.Covered, report.Total)
 				for _, h := range report.Uncovered {
 					line := h.NewFrom
 					if h.NewLines == 0 {

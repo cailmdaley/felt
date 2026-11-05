@@ -55,10 +55,10 @@ func TestChangeCaptureIgnoresDiffConfigAndWorktreeAttributes(t *testing.T) {
 	if !strings.Contains(before.Patch, "+new text") || !strings.Contains(before.Patch, "Binary files a/binary.bin") {
 		t.Fatal(before.Patch)
 	}
-	for _, tc := range []struct{ from, to, covered, partial int }{{2, 2, 0, 1}, {1, 1, 1, 0}, {1, 3, 1, 0}} {
+	for _, tc := range []struct{ from, to, covered int }{{2, 2, 0}, {1, 1, 1}, {1, 3, 1}} {
 		before.Story = &ChangeStory{Chapters: []ChangeChapter{{ID: "read", Stops: []ChangeStop{{ChangeRange: ChangeRange{File: "app.go", From: tc.from, To: tc.to}, Importance: "important"}}}}}
 		report := ValidateChange(before, bh)
-		if !report.Valid || report.Covered != tc.covered || len(report.Partial) != tc.partial {
+		if !report.Valid || report.Covered != tc.covered {
 			t.Fatalf("coverage %+v: %+v", tc, report)
 		}
 		stop := before.Story.Chapters[0].Stops[0]
@@ -78,6 +78,7 @@ func TestChangeCaptureIgnoresDiffConfigAndWorktreeAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ValidateChange(after, ah)
 	if before.Patch != after.Patch || !reflect.DeepEqual(bh, ah) || !reflect.DeepEqual(before.Files, after.Files) {
 		t.Fatalf("capture changed under config or dirty attributes:\n%s", after.Patch)
 	}

@@ -291,9 +291,9 @@ No common ancestor is an error.
 Only committed content enters the snapshot; dirty and untracked files are excluded.
 `repo.name` comes from origin's repository path, falling back to the main worktree directory's basename.
 `repo.forge_url` normalizes HTTP(S) origins and scp-style GitHub/GitLab origins to HTTPS without credentials, query, fragment or `.git`; other origins produce `null`.
-The bundle contains commits and a file inventory with path-derived roles, complete renderable hunks, covered flags and bounded windows.
+The bundle contains commits and a file inventory with path-derived roles, complete renderable hunks, Remaining excerpts and bounded windows.
 Go resolves each story stop's excerpt; the reader does not parse Git output or calculate coverage.
-Without a story, `story` is `null` and every hunk is uncovered.
+Without a story, `story` is `null` and every changed line remains unshown.
 A successful bake emits a fiber-addressed file receipt, so the change appears among the fiber's sent files without an embed.
 The title comes from the story's optional `title`, otherwise the head commit subject.
 A fiber doesn't need a Shuttle block; a block naming another host requires running the command there.
@@ -302,11 +302,12 @@ The CLI invokes Git directly and makes no model calls.
 Story input rejects unknown JSON fields, duplicate chapter ids and control characters in the title.
 Validation reports every unknown file and every range that overlaps no hunk on the chosen side.
 Invalid stories exit nonzero and don't replace an existing bundle.
-One stop must include every changed line on its chosen side to cover a hunk; partial or context-only stops and flags cannot cover it.
-Text output lists hunks covered of total, uncovered hunks as `Remaining: path:line`, and partial hunks with a prompt to widen one stop.
-Uncovered hunks don't fail validation.
-`--json` emits `{valid, covered, total, uncovered, partial, errors}`, with `path` added after a successful write.
-Uncovered and partial entries include `file`, `old_from`, `old_lines`, `new_from`, `new_lines`, `patch`, `covered` and `windows`.
+Changed lines are shown by the union of stop ranges on their own side; context-only stops and flags do not count.
+Go resolves the unshown changed lines into Remaining excerpts with a little context.
+Text output lists changed lines shown of total and each remaining excerpt as `Remaining: path:line`.
+Unshown lines do not fail validation.
+`--json` emits `{valid, covered, total, uncovered, errors}`, with `path` added after a successful write.
+`covered` and `total` count changed lines. Uncovered excerpts include `file`, `old_from`, `old_lines`, `new_from`, `new_lines`, `patch` and `windows`.
 `--check` emits the same report without writing or adding `path`.
 See [Changes](../concepts/changes.md) for the full bundle schema and story-authoring format.
 

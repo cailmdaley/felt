@@ -51,6 +51,7 @@ type ChangeFile struct {
 	Deletions int          `json:"deletions"`
 	Header    string       `json:"header"`
 	Hunks     []ChangeHunk `json:"hunks"`
+	Remaining []ChangeHunk `json:"remaining"`
 }
 
 type ChangeStory struct {
@@ -96,7 +97,6 @@ type ChangeHunk struct {
 	NewFrom  int            `json:"new_from"`
 	NewLines int            `json:"new_lines"`
 	Patch    string         `json:"patch"`
-	Covered  bool           `json:"covered"`
 	Windows  []ChangeWindow `json:"windows"`
 	rows     []changeRow
 	header   string
@@ -118,7 +118,6 @@ type ChangeReport struct {
 	Covered   int          `json:"covered"`
 	Total     int          `json:"total"`
 	Uncovered []ChangeHunk `json:"uncovered"`
-	Partial   []ChangeHunk `json:"partial"`
 	Errors    []string     `json:"errors"`
 }
 
@@ -339,15 +338,14 @@ var changeHunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+
 // ValidateChange checks every story reference and counts coverage from stops only.
 // Flags direct attention but do not remove hunks from Remaining.
 func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
-	report := ChangeReport{Valid: true, Total: len(hunks), Uncovered: []ChangeHunk{}, Partial: []ChangeHunk{}, Errors: []string{}}
+	report := ChangeReport{Valid: true, Uncovered: []ChangeHunk{}, Errors: []string{}}
 	files := map[string]int{}
 	for i, f := range c.Files {
 		files[f.Path] = i
+		c.Files[i].Remaining = []ChangeHunk{}
 	}
-	covered := make([]bool, len(hunks))
-	partial := make([]bool, len(hunks))
 	bad := func(s string) { report.Errors = append(report.Errors, s) }
-	check := func(label string, r ChangeRange, stop bool) {
+	check := func(label string, r ChangeRange) {
 		if _, ok := files[r.File]; !ok {
 			bad(fmt.Sprintf("%s: unknown file %q", label, r.File))
 			return
@@ -363,7 +361,7 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 		}
 		overlaps := false
 		hasHunks := false
-		for i, h := range hunks {
+		for _, h := range hunks {
 			if h.File != r.File {
 				continue
 			}
@@ -374,13 +372,6 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 			}
 			if lines > 0 && (whole || (r.From <= from+lines-1 && r.To >= from)) {
 				overlaps = true
-				if stop {
-					if h.shown(r) {
-						covered[i] = true
-					} else {
-						partial[i] = true
-					}
-				}
 			}
 		}
 		if !overlaps && (!whole || hasHunks) {
@@ -397,7 +388,7 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 		}
 		ids := map[string]bool{}
 		for i, flag := range c.Story.Flags {
-			check(fmt.Sprintf("flags[%d]", i), flag.ChangeRange, false)
+			check(fmt.Sprintf("flags[%d]", i), flag.ChangeRange)
 		}
 		for i, chapter := range c.Story.Chapters {
 			if ids[chapter.ID] {
@@ -408,9 +399,7 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 				c.Story.Chapters[i].Stops[j].Hunks = []ChangeHunk{}
 				for _, h := range hunks {
 					if h.File == stop.File {
-						if excerpt, ok := h.excerpt(stop.ChangeRange); ok {
-							c.Story.Chapters[i].Stops[j].Hunks = append(c.Story.Chapters[i].Stops[j].Hunks, excerpt)
-						}
+						c.Story.Chapters[i].Stops[j].Hunks = append(c.Story.Chapters[i].Stops[j].Hunks, h.excerpts(stop.ChangeRange)...)
 					}
 				}
 				label := fmt.Sprintf("chapters[%d].stops[%d]", i, j)
@@ -419,7 +408,7 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 				default:
 					bad(fmt.Sprintf("%s: invalid importance %q", label, stop.Importance))
 				}
-				check(label, stop.ChangeRange, true)
+				check(label, stop.ChangeRange)
 			}
 		}
 		paths := make([]string, 0, len(c.Story.Roles))
@@ -442,23 +431,30 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 			}
 		}
 	}
-	for i, h := range hunks {
-		h.Covered = covered[i]
-		for fi := range c.Files {
-			for hi := range c.Files[fi].Hunks {
-				if c.Files[fi].Hunks[hi].File == h.File && c.Files[fi].Hunks[hi].OldFrom == h.OldFrom && c.Files[fi].Hunks[hi].NewFrom == h.NewFrom {
-					c.Files[fi].Hunks[hi].Covered = h.Covered
+	for _, h := range hunks {
+		shown := make([]bool, len(h.rows))
+		for i, row := range h.rows {
+			if row.text[0] != '+' && row.text[0] != '-' {
+				continue
+			}
+			report.Total++
+			if c.Story != nil {
+				for _, chapter := range c.Story.Chapters {
+					for _, stop := range chapter.Stops {
+						if stop.File == h.File && stop.includes(row) {
+							shown[i] = true
+						}
+					}
 				}
 			}
-		}
-		if covered[i] {
-			report.Covered++
-		} else {
-			report.Uncovered = append(report.Uncovered, h)
-			if partial[i] {
-				report.Partial = append(report.Partial, h)
+			if shown[i] {
+				report.Covered++
 			}
 		}
+		remaining := h.remaining(shown)
+		fi := files[h.File]
+		c.Files[fi].Remaining = append(c.Files[fi].Remaining, remaining...)
+		report.Uncovered = append(report.Uncovered, remaining...)
 	}
 	report.Valid = len(report.Errors) == 0
 	return report

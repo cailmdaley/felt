@@ -57,7 +57,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if !strings.Contains(out, "Hunks covered: 0 of 1") || !strings.Contains(out, "Remaining: main.go:1") || !strings.Contains(out, bundlePath) {
+	if !strings.Contains(out, "Changed lines shown: 0 of 2") || !strings.Contains(out, "Remaining: main.go:1") || !strings.Contains(out, bundlePath) {
 		t.Fatalf("stdout: %s", out)
 	}
 	original, err := os.ReadFile(bundlePath)
@@ -99,7 +99,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("JSON report: %s: %v", out, err)
 	}
-	if !report.Valid || report.Covered != 1 || report.Total != 1 || len(report.Uncovered) != 0 || report.Path != "" {
+	if !report.Valid || report.Covered != 1 || report.Total != 2 || len(report.Uncovered) != 1 || report.Path != "" {
 		t.Fatalf("report: %+v", report)
 	}
 	notWritten := filepath.Join(filepath.Dir(bundlePath), "not-written.change.json")
@@ -165,7 +165,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatal(err)
 	}
-	if !report.Valid || report.Total != 1 || report.Covered != 0 {
+	if !report.Valid || report.Total != 2 || report.Covered != 0 {
 		t.Fatalf("storyless check: %+v", report)
 	}
 	// Explicit repo overrides project_dir; a plain fiber falls back to cwd.

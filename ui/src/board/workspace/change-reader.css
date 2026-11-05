@@ -62,6 +62,8 @@
 .change-reader .change-viewed { font-size: var(--type-meta); white-space: nowrap; padding: 4px 7px; }
 .change-viewed[aria-pressed="true"] { color: var(--ws-verdict); }
 .change-file > .change-prose { padding: 14px 14px 0; font-size: var(--type-row); }
+.change-file[data-status='added'] { --diffs-bg-addition-override: var(--ws-paper); --diffs-bg-addition-emphasis-override: transparent; }
+.change-file[data-status='deleted'] { --diffs-bg-deletion-override: var(--ws-paper); --diffs-bg-deletion-emphasis-override: transparent; }
 .change-diff-window { min-width: 0; }
 .change-diff-window > diffs-container { display: block; }
 .change-metadata { white-space: pre-wrap; font: var(--type-meta)/var(--leading-prose) var(--font-mono); padding: 14px; overflow-wrap: anywhere; }

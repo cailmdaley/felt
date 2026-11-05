@@ -41,7 +41,7 @@ it('escapes hostile code info strings in untrusted Markdown', () => {
 })
 
 it('renders every story prose field through untrusted Markdown', () => {
-  const bundle: ChangeBundle = { version: 1, title: 'Review', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'base', head: 'head', base_ref: 'main', head_ref: 'topic', commits: [], files: [{ path: 'app.ts', role: 'generated', status: 'modified', additions: 0, deletions: 0, header: 'mode change', hunks: [] }], story: { overview: hostile, flags: [{ file: 'app.ts', text: hostile }], chapters: [{ id: 'one', title: 'One', narrative: hostile, why_here: hostile, stops: [{ file: 'app.ts', note: hostile, importance: 'important', hunks: [] }] }] } }
+  const bundle: ChangeBundle = { version: 1, title: 'Review', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'base', head: 'head', base_ref: 'main', head_ref: 'topic', commits: [], files: [{ path: 'app.ts', role: 'generated', status: 'modified', additions: 0, deletions: 0, header: 'mode change', hunks: [], remaining: [] }], story: { overview: hostile, flags: [{ file: 'app.ts', text: hostile }], chapters: [{ id: 'one', title: 'One', narrative: hostile, why_here: hostile, stops: [{ file: 'app.ts', note: hostile, importance: 'important', hunks: [] }] }] } }
   const root = document.createElement('div'); document.body.append(root)
   const mounted = mountChangeReader(root, bundle, 'test')
   expect(root.querySelectorAll('.change-prose code')).toHaveLength(4)

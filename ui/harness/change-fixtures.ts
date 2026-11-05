@@ -15,9 +15,10 @@ export function addChangeFixtures(fixture: WorkspaceExample, now: number): void 
     return { old_from: start, old_lines: count, new_from: start, new_lines: count, rows: count * 2,
       patch: `${header}@@ -${start},${count} +${start},${count} @@\n${Array.from({ length: count }, (_, n) => `-export const value${start + n} = ${start + n - 1};\n+export const value${start + n} = ${start + n};`).join('\n')}\n` }
   })
+  const hunks = [{ file: 'src/large.ts', old_from: 1, old_lines: 5000, new_from: 1, new_lines: 5000, patch: '', windows }]
   const large: ChangeBundle = { ...bundle, title: 'A 5,000-line changed file', head: '5'.repeat(40), story: null,
     files: [{ path: 'src/large.ts', role: 'implementation', status: 'modified', additions: 5000, deletions: 5000, header,
-      hunks: [{ file: 'src/large.ts', old_from: 1, old_lines: 5000, new_from: 1, new_lines: 5000, covered: false, patch: '', windows }] }],
+      hunks, remaining: hunks }],
   }
   for (const [name, change] of [['family', bundle], ['plain', plain as ChangeBundle], ['large', large]] as const) {
     const path = `${dir}/${name}.change.json`
