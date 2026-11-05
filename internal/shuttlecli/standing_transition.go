@@ -35,6 +35,16 @@ func runtimeString(f *felt.Felt, key string) string {
 	return node.Value
 }
 
+// Resolved YAML timestamps can omit trailing fractional zeros. Run identity
+// compares their instants while retaining exact matches for unrecorded runs.
+func sameDispatchInstant(observed, current string) bool {
+	if observed == current {
+		return true
+	}
+	at := shuttle.RuntimeTimestamp(observed)
+	return !at.IsZero() && at.Equal(shuttle.RuntimeTimestamp(current))
+}
+
 // The observation identifies the run, not a document image. The authoritative
 // status, owner, human conclusion and content are read under the felt lock.
 func applyStandingTransition(req standingTransitionRequest) (standingTransitionResult, error) {
@@ -51,7 +61,7 @@ func applyStandingTransition(req standingTransitionRequest) (standingTransitionR
 			return fmt.Errorf("only applies to standing constitutions")
 		}
 		result.Disposition = shuttle.StandingRunDisposition(shuttle.RunFacts{DispatchedAt: runtimeString(f, "dispatched_at"), HandedOffAt: runtimeString(f, "handed_off_at"), ExitVerb: runtimeString(f, "thread_exit_verb")})
-		if block.Host != req.Host || f.UID != req.UID || runtimeString(f, "dispatched_at") != req.DispatchedAt || runtimeString(f, "run_id") != req.RunID {
+		if block.Host != req.Host || f.UID != req.UID || !sameDispatchInstant(req.DispatchedAt, runtimeString(f, "dispatched_at")) || runtimeString(f, "run_id") != req.RunID {
 			if req.Action == "rearm" {
 				return fmt.Errorf("standing run changed before force rearm")
 			}

@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,6 +192,52 @@ func TestWorkerHandoffCannotEraseCurrentHumanRearm(t *testing.T) {
 	result, err := applyStandingTransition(req)
 	if err != nil || result.Changed || runtimeString(mustRead(t, st, "role"), "thread_exit_verb") != "rearmed" {
 		t.Fatalf("worker handoff erased human acceptance: %+v, %v", result, err)
+	}
+}
+
+func TestStandingExitMatchesResolvedYAMLDispatchInstant(t *testing.T) {
+	t.Parallel()
+	for _, quoted := range []bool{false, true} {
+		t.Run(fmt.Sprint(quoted), func(t *testing.T) {
+			t.Parallel()
+			st, req := seedStandingTransition(t)
+			const stamp = "2026-01-02T00:00:00.123450Z"
+			if _, err := st.Update("role", func(f *felt.Felt) error {
+				return shuttle.SetRuntimeField(f, "dispatched_at", stamp)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !quoted {
+				data, err := os.ReadFile(req.Path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(req.Path, []byte(strings.ReplaceAll(string(data), fmt.Sprintf("%q", stamp), stamp)), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env := testEnv(t)
+			ownHost(t, env, req.Host)
+			out, err := runIn(t, env, filepath.Dir(st.Root()), "show", "role", "--json")
+			if err != nil {
+				t.Fatalf("resolved read: %v: %s", err, out)
+			}
+			var resolved struct {
+				Shuttle struct {
+					Runtime struct {
+						DispatchedAt string `json:"dispatched_at"`
+					} `json:"runtime"`
+				} `json:"shuttle"`
+			}
+			if err := json.Unmarshal([]byte(out), &resolved); err != nil {
+				t.Fatal(err)
+			}
+			req.DispatchedAt = resolved.Shuttle.Runtime.DispatchedAt
+			result, err := applyStandingTransition(req)
+			if err != nil || !result.Changed {
+				t.Fatalf("same run's resolved timestamp %q refused (quoted=%t): %+v %v", req.DispatchedAt, quoted, result, err)
+			}
+		})
 	}
 }
 
