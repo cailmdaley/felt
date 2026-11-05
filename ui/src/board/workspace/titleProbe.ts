@@ -9,7 +9,7 @@ import type { WorkspaceDocument } from './documents.js'
  * Kinds whose first bytes can declare a title, most likely first: an HTML or
  * Markdown heading, then PDF Info, then ID3 or Vorbis tags.
  */
-const TITLED: Partial<Record<WorkspaceDocument['kind'], number>> = { html: 0, text: 1, pdf: 2, audio: 3 }
+const TITLED: Partial<Record<WorkspaceDocument['kind'], number>> = { html: 0, change: 0, text: 1, pdf: 2, audio: 3 }
 /** A peek that could not read waits this long before a render may try it again. */
 export const PROBE_RETRY_MS = 60_000
 /** The version each document was last peeked at; a changed file is peeked again. */
@@ -59,7 +59,7 @@ export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDoc
         read = true
         // A newer version's peek supersedes this one.
         if (probed.get(doc.key) !== entry) return
-        const text = doc.kind === 'html' || doc.kind === 'text'
+        const text = doc.kind === 'html' || doc.kind === 'text' || doc.kind === 'change'
         cacheDocumentTitle(doc.key, doc.path, text && typeof source !== 'string' ? new TextDecoder().decode(source) : source, etag)
       }, RESOURCE_PRIORITY.title, fresh)
       // A peek that could not read (an unreachable owner, a refused request) is tried again on a later render.

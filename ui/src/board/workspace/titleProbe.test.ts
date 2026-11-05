@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const reads: string[] = []
 const bodies = new Map<string, string>()
@@ -17,7 +17,16 @@ const { probeDocumentTitles, PROBE_RETRY_MS } = await import('./titleProbe.js')
 const { declaredTitle } = await import('./DocumentTitles.js')
 const { buildChannel } = await import('./documents.js')
 
+beforeEach(() => { reads.length = 0 })
+
 describe('title probe', () => {
+  it('names a sent change from its head before the reader is opened', async () => {
+    bodies.set('/new.change.json', '{"version":2,"title":"A conceptual map","files":[')
+    const channel = buildChannel({ uid: 'change-probe', owner: 'change-host', name: 'Change', path: '/f.md', fiberDir: '/', body: '', sent: [{ path: '/new.change.json', time: 1 }] })
+    const doc = channel.documents.find(d => d.kind === 'change')!
+    probeDocumentTitles('', channel.documents)
+    await vi.waitFor(() => expect(declaredTitle(doc.key)?.title).toBe('A conceptual map'))
+  })
   it('peeks each titled document once, reports before PDFs before audio, and names the index', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     const channel = buildChannel({ uid: 'probe', owner: 'probe-host', name: 'Probe', path: '/f.md', fiberDir: '/', body: '',
