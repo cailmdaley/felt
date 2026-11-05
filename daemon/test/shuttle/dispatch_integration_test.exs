@@ -1883,6 +1883,35 @@ defmodule Shuttle.DispatchIntegrationTest do
            end)
   end
 
+  @tag :standing_fresh_recovery
+  test "a scheduled occurrence after a dead ad-hoc run starts fresh in quarantine", %{host: host} do
+    id = seed_due_closed_standing(host)
+    path = fiber_file(host, id)
+    File.write!(path, String.replace(File.read!(path), "status: closed", "status: active"))
+    {_, 0} = IntegrationRunner.cmd("shuttle", ["mark-runtime", id, "--run-id", "adhoc-dead"], [])
+
+    {:ok, poller} =
+      start_poller!(
+        runner: IntegrationRunner,
+        boot_quarantine: true,
+        poll_interval_ms: 600_000,
+        felt_stores: [host]
+      )
+
+    await_boot_cycle!(poller)
+    script = read_run_script()
+    assert script =~ "Run:"
+    refute script =~ "--resume"
+    assert :sys.get_state(poller).boot_quarantine
+    runtime = read_frontmatter(host, id)["shuttle"]["runtime"]
+    refute runtime["run_id"] =~ "adhoc-"
+    sync_poll_cycle!(poller)
+
+    assert Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and "new-session" in args
+           end) == 1
+  end
+
   defp sync_poll_cycle!(poller) do
     assert eventually(fn -> not :sys.get_state(poller).poll_check_in_progress end)
     cycles = :sys.get_state(poller).poll_cycles

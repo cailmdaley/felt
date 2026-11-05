@@ -4040,7 +4040,8 @@ defmodule Shuttle.Poller do
       Enum.split_with(dispatchable, fn fiber ->
         MapSet.member?(state.was_running, runtime_key_for_fiber(fiber)) or
           (state.contract_check.ok and
-             (Shuttle.Continuation.restoration?(fiber) or StandingRoles.standing_role_due?(fiber)))
+             ((not standing?(fiber) and Shuttle.Continuation.restoration?(fiber)) or
+                StandingRoles.standing_role_due?(fiber)))
       end)
 
     parked =
@@ -4930,7 +4931,7 @@ defmodule Shuttle.Poller do
              not Keyword.get(opts, :force, false) and
                is_nil(Keyword.get(opts, :user_message)) and
                is_nil(Keyword.get(opts, :resume_mode)) and
-               Shuttle.Continuation.restoration?(fiber),
+               not standing?(fiber) and Shuttle.Continuation.restoration?(fiber),
            threads: cached_thread_inputs(state)
          ) do
       {:ok, session} ->
