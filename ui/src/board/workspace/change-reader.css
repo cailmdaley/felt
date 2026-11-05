@@ -34,7 +34,7 @@
 .change-contents > button { display: block; width: 100%; text-align: left; border: 0; margin: 3px 0; padding: 8px; font-size: var(--type-note); }
 .change-contents > button[aria-current="location"] { background: var(--ws-fill); color: var(--ws-machine); }
 .change-contents > .change-chapter-link { padding-left: 18px; color: var(--ws-ink-soft); }
-.change-scroll { overflow: auto; min-width: 0; height: 100%; overscroll-behavior-y: contain; }
+.change-scroll { container-type: size; overflow: auto; min-width: 0; height: 100%; overscroll-behavior-y: contain; }
 .change-main { max-width: 1080px; margin: 0 auto; padding: 36px clamp(18px, 4%, 56px) 100px; }
 .change-heading { margin-bottom: 28px; }
 .change-eyebrow { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); }
@@ -98,3 +98,16 @@
   .change-reader .change-viewed { min-height: 32px; }
   .change-send { align-items: start; flex-direction: column; }
 }
+
+.change-map { height: calc(100cqh - 100px); min-height: 280px; display: flex; flex-direction: column; margin-bottom: 40px; }
+.change-map h2 { font: var(--type-title)/var(--leading-prose) var(--font-serif); margin: 0 0 16px; }
+.change-map-canvas { position: relative; flex: 1; min-height: 0; }
+.change-reader .change-map-tile { position: absolute; box-sizing: border-box; border: 2px solid var(--ws-paper); border-radius: 0; background: color-mix(in srgb, var(--ws-machine) 18%, var(--ws-paper)); text-align: left; padding: 14px; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
+.change-map-tile strong { font-size: var(--type-title); }
+.change-map-tile span { font: var(--type-meta)/var(--leading-prose) var(--font-mono); }
+.change-map-tile p { margin: 8px 0 0; font-size: var(--type-note); }
+.change-reader .change-map-tile[data-role="test"], .change-reader .change-map-tile[data-role="generated"] { background: var(--ws-fill); color: var(--ws-ink-muted); }
+.change-map-tile[data-small="true"] p { display: none; }
+.change-reader .change-map-tile[data-small="true"] { padding: 6px; }
+.change-map-tile[data-small="true"] strong { font-size: var(--type-note); }
+.change-map-tile[data-tiny="true"] > * { display: none; }

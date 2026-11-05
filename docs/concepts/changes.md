@@ -63,6 +63,7 @@ The bundle has these fields:
 | `commits` | Oldest first, each with `sha`, `subject`, `author` and RFC3339 author `time` |
 | `files` | Repository-relative inventory, with destination paths for renames and old paths for deletions |
 | `story` | Resolved story object, or `null` |
+| `areas` | Conceptual groups with resolved `files`, changed `lines`, optional `what`, `chapter` and fallback `role` |
 
 A file has `path`, `old_mode`, `new_mode`, `status`, `role`, `additions`, `deletions`, `header`, `lines`, `hunks` and `remaining`, plus `old_path` for renames.
 `old_path` names the source path; `path` names the destination.
@@ -99,6 +100,9 @@ An inactive change chip doesn't parse or mount the bundle.
 {
   "title": "Capture a committed snapshot",
   "overview": "This change keeps **committed trees** and their reading order together.",
+  "areas": [
+    { "name": "Snapshot", "what": "Pin the trees before reading their diff.", "files": ["src/**"], "chapter": "snapshot" }
+  ],
   "flags": [],
   "chapters": [
     {
@@ -121,6 +125,15 @@ An inactive change chip doesn't parse or mount the bundle.
   "roles": { "src/protocol.generated.ts": "generated" }
 }
 ```
+
+Every change opens with a treemap above its title, sized by additions plus deletions, with the total changed lines and file count.
+Name optional `areas` by concept for someone who has never seen the code; `what` gives each a short explanation.
+`files` contains repository-relative globs (`*` within a directory, `**` across directories).
+The first matching area owns each file; unmatched files fall into Tests, Generated, Docs, Config or Other by role.
+Go resolves each area's paths and line count into the bundle; the reader only lays out those counts.
+Tests and Generated are quieter tiles.
+A tile's `chapter` jumps to that chapter; role tiles jump to their lane or first file.
+Files with no changed text lines remain in the area's inventory but add no rectangle area.
 
 `overview`, chapter `narrative` and stop `note` carry Markdown, rendered through the board's shared Markdown path, including math.
 Chapters have unique ids and are ordered; `why_here` explains that order.

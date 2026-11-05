@@ -27,6 +27,7 @@ type Change struct {
 	Patch   string         `json:"-"`
 	Files   []ChangeFile   `json:"files"`
 	Story   *ChangeStory   `json:"story"`
+	Areas   []ChangeArea   `json:"areas"`
 }
 
 type ChangeRepo struct {
@@ -57,7 +58,17 @@ type ChangeFile struct {
 	Remaining []ChangeHunk `json:"remaining"`
 }
 
+type ChangeArea struct {
+	Name    string   `json:"name"`
+	What    string   `json:"what,omitempty"`
+	Files   []string `json:"files"`
+	Chapter string   `json:"chapter,omitempty"`
+	Lines   int      `json:"lines"`
+	Role    string   `json:"role,omitempty"`
+}
+
 type ChangeStory struct {
+	Areas    []ChangeArea      `json:"areas,omitempty"`
 	Title    string            `json:"title,omitempty"`
 	Overview string            `json:"overview"`
 	Flags    []ChangeFlag      `json:"flags"`
@@ -417,6 +428,7 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 		c.Files[fi].Remaining = append(c.Files[fi].Remaining, remaining...)
 		report.Uncovered = append(report.Uncovered, remaining...)
 	}
+	c.Areas = resolveChangeAreas(c)
 	report.Valid = len(report.Errors) == 0
 	return report
 }

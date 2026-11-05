@@ -1,6 +1,6 @@
 {
-  "title": "Keep a family’s root visible, and its requests close",
-  "overview": "The Desk keeps a family’s root visible beside its most urgent thread. The reader carries the same family into a persistent sidebar: requests come first, quiet work stays folded, and the page you are reading remains reachable. Two small independent changes complete this snapshot: Pi’s Sol model is selectable, and the cache test locates the running application rather than assuming a build directory.",
+  "title": "Keep a family\u2019s root visible, and its requests close",
+  "overview": "The Desk keeps a family\u2019s root visible beside its most urgent thread. The reader carries the same family into a persistent sidebar: requests come first, quiet work stays folded, and the page you are reading remains reachable. Two small independent changes complete this snapshot: Pi\u2019s Sol model is selectable, and the cache test locates the running application rather than assuming a build directory.",
   "flags": [
     {
       "file": "ui/src/board/threads.ts",
@@ -35,7 +35,7 @@
     {
       "id": "outline",
       "title": "Make the family walkable",
-      "narrative": "The outline is a pure projection of the graph plus the viewer’s fold choices. Three requests are shown before “more”; working descendants retain the ancestors that make their nesting intelligible. A folded family still reveals the currently open page.",
+      "narrative": "The outline is a pure projection of the graph plus the viewer\u2019s fold choices. Three requests are shown before \u201cmore\u201d; working descendants retain the ancestors that make their nesting intelligible. A folded family still reveals the currently open page.",
       "why_here": "This is the behavioral core, independent of DOM layout and animation.",
       "stops": [
         {
@@ -57,7 +57,7 @@
     {
       "id": "reader",
       "title": "Join the reader to that outline",
-      "narrative": "The reader renders fold controls and nested rows from the outline. Workspace placement resolves through the root rather than treating the leading thread as the family’s identity. Tests remain below in their own lane; every other edit stays visible in Remaining.",
+      "narrative": "The reader renders fold controls and nested rows from the outline. Workspace placement resolves through the root rather than treating the leading thread as the family\u2019s identity. Tests remain below in their own lane; every other edit stays visible in Remaining.",
       "why_here": "With the projection understood, the rendering and placement glue can be checked against it.",
       "stops": [
         {
@@ -77,5 +77,23 @@
       ]
     }
   ],
-  "roles": {}
+  "roles": {},
+  "areas": [
+    {
+      "name": "Reader",
+      "what": "A persistent workspace for the family and its documents.",
+      "files": [
+        "ui/src/board/workspace/**"
+      ],
+      "chapter": "reader"
+    },
+    {
+      "name": "Desk",
+      "what": "Keep the family root beside its urgent work.",
+      "files": [
+        "ui/src/board/**"
+      ],
+      "chapter": "desk-roots"
+    }
+  ]
 }

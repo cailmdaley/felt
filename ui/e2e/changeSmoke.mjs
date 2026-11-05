@@ -55,6 +55,16 @@ try {
   await page.evaluate((bundle) => window.__mountChange(bundle), bundle)
   await page.locator('diffs-container [data-line-index]').first().waitFor()
   assert.equal(await page.locator('h1').textContent(), bundle.title)
+  assert.equal(await page.locator('.change-map').evaluate(map => {
+    const box = map.getBoundingClientRect(), scroll = map.closest('.change-scroll').getBoundingClientRect()
+    return box.top >= scroll.top && box.bottom <= scroll.bottom
+  }), true, 'the whole map fits the visible scroller')
+  await page.getByRole('button', { name: /^Tests:/ }).click()
+  assert.equal(await page.locator('.change-section').filter({ has: page.getByRole('heading', { name: 'Tests', exact: true }) }).evaluate(section => {
+    const box = section.getBoundingClientRect(), scroll = section.closest('.change-scroll').getBoundingClientRect()
+    return box.top >= scroll.top && box.top < scroll.bottom
+  }), true, 'a role tile reveals its lane')
+  await page.locator('.change-scroll').evaluate(scroll => { scroll.dispatchEvent(new Event('wheel', { bubbles: true })); scroll.scrollTop = 100 })
   assert.ok((await page.locator('diffs-container').count()) < 10, 'only nearby windows mount')
   assert.equal(await page.locator('textarea[aria-label="Overall review note"]').count(), 1)
   await page.evaluate(() => window.__disposeChange())
@@ -74,6 +84,7 @@ try {
   )
   await page.evaluate((bundle) => window.__mountChange(bundle), bundle)
   await page.locator('diffs-container [data-line-index]').first().waitFor()
+  assert.ok(Math.abs(await page.locator('.change-scroll').evaluate(scroll => scroll.scrollTop) - 100) < 2, 'reading position within the map survives remount')
   await page.evaluate(() => window.__disposeChange())
   if (process.env.MEASURE_MARKDOWN && bundle.story) {
     const texts = [

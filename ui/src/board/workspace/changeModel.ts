@@ -53,7 +53,16 @@ export interface ChangeFile {
   hunks: ChangeHunk[]
   remaining: ChangeHunk[]
 }
+export interface ChangeArea {
+  name: string
+  what?: string
+  files: string[]
+  lines: number
+  chapter?: string
+  role?: ChangeRole
+}
 export interface ChangeBundle {
+  areas?: ChangeArea[]
   version: 2
   title: string
   repo: { name: string; dir: string; forge_url: string | null }
@@ -65,6 +74,7 @@ export interface ChangeBundle {
   files: ChangeFile[]
   story: null | {
     title?: string
+    areas?: ChangeArea[]
     overview: string
     flags: (ChangeRange & { text: string })[]
     chapters: ChangeChapter[]

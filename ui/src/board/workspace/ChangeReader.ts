@@ -12,6 +12,7 @@ import { el, prose, button, stored, save, revisionLabel } from './changeElements
 import { createChangeReview } from './changeReview.js'
 import { createChangeNavigation } from './changeNavigation.js'
 import { mountChangeWindow } from './changeWindow.js'
+import { changeMap } from './changeMap.js'
 import { changeFileLabel } from './changeFileLabel.js'
 import { readingAnchor, windowRows, type ChangeReadingState } from './changePosition.js'
 
@@ -59,6 +60,18 @@ export function mountChangeReader(
   const deletions = files.reduce((count, file) => count + file.deletions, 0)
   const summary = `${files.length} files · +${additions} −${deletions} · ${bundle.commits.length} commits`
   heading.append(el('p', 'change-summary', summary))
+  const map = bundle.areas && changeMap(bundle.areas, area => {
+    const chapter = area.chapter && chapterHosts.get(area.chapter)
+    if (chapter) reveal(chapter)
+    else if (area.role === 'test') reveal(tests.element)
+    else {
+      const view = views.find(view => area.files.includes(view.file.path))
+      if (view) reveal(view.card)
+      else reveal(remaining.element)
+    }
+  })
+  const chapterHosts = new Map<string, HTMLElement>()
+  if (map) main.append(map)
   main.append(heading)
   if (bundle.story) main.append(prose(bundle.story.overview))
   else
@@ -275,6 +288,7 @@ export function mountChangeReader(
     part.append(prose(chapter.narrative))
     if (chapter.why_here) part.append(el('p', 'change-why', chapter.why_here))
     story.element.append(part)
+    chapterHosts.set(chapter.id, part)
     const link = button(chapter.title, () => reveal(part))
     link.className = 'change-chapter-link'
     rail.append(link)
@@ -315,6 +329,7 @@ export function mountChangeReader(
   updateProgress()
   const anchor = reading.anchor
   const anchorHosts = () => [
+    ...(map ? [map] : []),
     ...windows.keys(),
     ...sections.map((section) => section.element).reverse(),
   ]
@@ -341,6 +356,7 @@ export function mountChangeReader(
       } satisfies ChangeReadingState)
       io.disconnect()
       navigation.dispose()
+      map?.dispatchEvent(new Event('dispose'))
       for (const window of windows.values()) window.mounted?.dispose()
       shell.remove()
     },
