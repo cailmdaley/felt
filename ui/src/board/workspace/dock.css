@@ -223,6 +223,12 @@
 .ws-dock .kbn-ctl-meet-audio[hidden] { display: none; }
 .ws-dock .kbn-ctl-meet-audio:disabled { opacity: .6; cursor: default; }
 .ws-dock .kbn-ctl-meet .ws-select-option { font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  @container (max-width: 360px) {
+    .ws-chat .kbn-ctl-meet-arm { width: var(--ctl-h); padding-inline: 0; }
+    .ws-chat .kbn-ctl-meet-arm .kbn-ctl-meet-label { display: none; }
+  }
+}
 /* A finger leaves :hover behind on what it tapped; only a pointer hovers. */
 @media (hover: none) {
   .ws-dock .kbn-ctl-composer .kbn-ctl-secondary:hover { background-color: transparent; }
