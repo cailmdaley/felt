@@ -8,7 +8,7 @@ import { getBrowser } from './browser.mjs'
 const bundle = JSON.parse(
   await readFile(
     process.env.CHANGE_BUNDLE ??
-      new URL('../harness/fixtures/dogfood.change.json', import.meta.url),
+      new URL('../harness/generated/dogfood.change.json', import.meta.url),
     'utf8',
   ),
 )

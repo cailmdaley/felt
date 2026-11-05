@@ -9,6 +9,9 @@ import (
 func ChangeRole(file string) string {
 	p := strings.ToLower(strings.TrimPrefix(file, "./"))
 	name := path.Base(p)
+	if strings.HasSuffix(name, ".change.json") || name == "package-lock.json" || name == "go.sum" || strings.HasSuffix(name, ".lock") || name == "notice" || strings.Contains(name, "notices") || strings.Contains(name, "license") || strings.Contains(name, "licence") {
+		return "generated"
+	}
 	parts := strings.Split(p, "/")
 	for _, part := range parts[:len(parts)-1] {
 		switch part {
@@ -41,7 +44,7 @@ func ChangeRole(file string) string {
 			return "config"
 		}
 	}
-	if strings.HasSuffix(name, ".lock") || strings.HasSuffix(name, "-lock.json") || name == "go.sum" || name == "mix.lock" || name == "makefile" || strings.HasSuffix(name, ".toml") || strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
+	if name == "makefile" || strings.HasSuffix(name, ".toml") || strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
 		return "config"
 	}
 	return "implementation"

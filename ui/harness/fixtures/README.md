@@ -3,16 +3,17 @@
 Build with `cd ui && npm run harness:board`, then load `harness-board-dist/index.html?example=change` in a headless browser.
 The main channel has a tapestry with relative links and header chips for three changes:
 
-- `family.change.json` is a real five-commit felt snapshot, `0f3a0cdc..f629d29c`, with an authored story about family identity and navigation.
+- `family.change.json` is a small real Git diff from a throwaway repository, with an authored story about family identity and navigation.
   Two stops deliberately visit the same file out of line order.
-- `plain.change.json` captures the same commits without a story.
+- `plain.change.json` captures the same diff without a story.
 - `large.change.json` is a 5,000-line file with every line replaced.
 
-`node ui/scripts/bake-change-fixture.mjs` builds `shuttle` and runs `shuttle change` against the pinned revision, with and without `dogfood.story.json`.
+Both harness builds run `scripts/bake-change-fixture.mjs`, which builds `shuttle`, creates a tiny disposable Git repository and runs `shuttle change` with and without `dogfood.story.json`.
+The bundles land in gitignored `ui/harness/generated/`; no repository history or full CI checkout is needed.
 It replaces `repo.dir` with a portable harness path and commit authors with fixture labels.
 `go run scripts/rebake-change.go SOURCE DESTINATION REPO` rebakes a captured snapshot's commits and story with the current format, preserving its display metadata.
 
-To inspect a freshly baked bundle instead of the pinned story fixture, run from `ui/`:
+To inspect a freshly baked bundle instead of the small story fixture, run from `ui/`:
 
 ```sh
 CHANGE_BUNDLE=/absolute/path/review.change.json npm run harness:board

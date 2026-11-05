@@ -38,7 +38,7 @@ export default defineConfig({
   base: './',
   resolve: { alias: [
     ...changeAliases,
-    ...(process.env.CHANGE_BUNDLE ? [{ find: './fixtures/dogfood.change.json', replacement: resolve(process.env.CHANGE_BUNDLE) }] : []),
+    ...(process.env.CHANGE_BUNDLE ? [{ find: './generated/dogfood.change.json', replacement: resolve(process.env.CHANGE_BUNDLE) }] : []),
   ] },
   define: {
     'import.meta.env.VITE_SHUTTLE_BASE': '""',

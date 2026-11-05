@@ -67,7 +67,7 @@ export function registerChangeJourneys(test) {
     await page.goto(family.replace('family.change.json', 'plain.change.json'))
     await page.locator('.ws-selected .change-reader h1').waitFor()
     assert.match(await page.locator('.ws-selected .change-reader').innerText(), /No authored story/)
-    assert.equal(await page.locator('.ws-selected .change-file').count(), 25)
+    assert.equal(await page.locator('.ws-selected .change-file').count(), 5)
     await page.goto(family.replace('family.change.json', 'large.change.json'))
     await page.locator('.ws-selected .change-reader h1').filter({ hasText: '5,000-line' }).waitFor()
     await page.locator('.ws-selected diffs-container').first().waitFor()
