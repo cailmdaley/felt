@@ -13,7 +13,7 @@ afterEach(() => { document.body.replaceChildren(); storage.clear(); resized.leng
 it('holds a navigation target through diff-window resizing until the reader scrolls deliberately', () => {
   const bundle: ChangeBundle = { version: 2, title: 'Review', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'topic', commits: [], files: [], story: null }
   const root = document.createElement('div'); document.body.append(root)
-  const mounted = mountChangeReader(root, bundle, 'navigation')
+  const mounted = mountChangeReader(root, bundle, 'navigation', 'source-revision')
   const target = [...root.querySelectorAll<HTMLElement>('.change-section')].at(-1)!
   let absoluteTop = 1000
   vi.spyOn(target, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, absoluteTop - mounted.scroller.scrollTop, 100, 100))
@@ -34,7 +34,7 @@ it('renders the story prose and keeps metadata readable', () => {
   const prose = 'A **useful** reading order with `code`.'
   const bundle: ChangeBundle = { version: 2, title: 'Review', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'topic', commits: [], files: [{ path: 'app.ts', role: 'generated', status: 'modified', additions: 0, deletions: 0, header: 'mode change', lines: [], hunks: [], remaining: [] }], story: { overview: prose, flags: [{ file: 'app.ts', text: prose }], chapters: [{ id: 'one', title: 'One', narrative: prose, why_here: 'Read this first.', stops: [{ file: 'app.ts', note: prose, importance: 'important', hunks: [] }] }] } }
   const root = document.createElement('div'); document.body.append(root)
-  const mounted = mountChangeReader(root, bundle, 'test')
+  const mounted = mountChangeReader(root, bundle, 'test', 'source-revision')
   expect(root.querySelectorAll('.change-prose code')).toHaveLength(4)
   expect(root.querySelectorAll('.change-prose strong')).toHaveLength(4)
   expect(root.querySelector('.change-why')?.textContent).toBe('Read this first.')
@@ -62,7 +62,7 @@ it('opening a 103-file change never reads offscreen source rows', () => {
   }
   const root = document.createElement('div')
   document.body.append(root)
-  const mounted = mountChangeReader(root, bundle, 'large')
+  const mounted = mountChangeReader(root, bundle, 'large', 'source-revision')
   expect(root.querySelector('h1')?.textContent).toBe('Large change')
   expect(root.querySelectorAll('.change-diff-window')).toHaveLength(103)
   mounted.dispose()

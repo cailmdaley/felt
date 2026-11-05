@@ -9,7 +9,7 @@ const pdfRenderer = vi.hoisted(() => ({ mount: vi.fn() }))
 vi.mock('./pdfViewer.js', () => ({ mountPdfViewer: pdfRenderer.mount }))
 const changeRenderer = vi.hoisted(() => ({ mount: vi.fn(), release: vi.fn() }))
 vi.mock('./workspace/ChangeReader.js', () => ({ mountChangeReader: changeRenderer.mount, releaseChangeHighlighter: changeRenderer.release }))
-vi.mock('./workspace/changeModel.js', () => ({ changeIdentity: async (source: string) => source }))
+vi.mock('./workspace/changeModel.js', () => ({ changeIdentity: (source: string) => source }))
 afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals(); resetDocumentResources() })
 
 const watch = vi.hoisted(() => ({ content: null as null | ((value: string) => void), error: null as null | ((error: unknown) => void), recover: null as null | (() => void), stop: vi.fn() }))
@@ -46,7 +46,7 @@ describe('workspace file viewer hooks', () => {
     watch.content!(JSON.stringify({ version: 2, title: 'First', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'head', commits: [], files: [], story: null }))
     await vi.waitFor(() => expect(viewer.textContent).toBe('First'))
     const first = changeRenderer.mount.mock.calls.at(-1)!
-    const identity = first[2], revision = first[6]
+    const identity = first[2], revision = first[3]
     const reader = viewer.firstElementChild
     watch.error!(new Error('daemon restarting'))
     expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error', hasContent: true }))
@@ -59,7 +59,7 @@ describe('workspace file viewer hooks', () => {
     watch.content!(JSON.stringify({ version: 2, title: 'Rebaked', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'head', commits: [], files: [], story: null }))
     await vi.waitFor(() => expect(viewer.textContent).toBe('Rebaked'))
     expect(changeRenderer.mount.mock.calls.at(-1)![2]).toBe(identity)
-    expect(changeRenderer.mount.mock.calls.at(-1)![6]).not.toBe(revision)
+    expect(changeRenderer.mount.mock.calls.at(-1)![3]).not.toBe(revision)
     expect(dispose).toHaveBeenCalledTimes(1)
     expect(changeRenderer.release).not.toHaveBeenCalled()
     disposeFileViewer(viewer)

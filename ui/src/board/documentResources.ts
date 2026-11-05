@@ -411,7 +411,6 @@ function wholePeek(entry: Entry): TextBody | null {
   return entry.text!.value
 }
 
-/** The text held for a document, however old, without a request. */
 /** Large native readers release their source when the selected document closes. */
 export function forgetText(src: string): void {
   const entry = entries.get(resourceKey(src))
@@ -420,6 +419,7 @@ export function forgetText(src: string): void {
   entry.text = undefined
 }
 
+/** The text held for a document, however old, without a request. */
 export function recallText(src: string): TextBody | undefined {
   return entries.get(resourceKey(src))?.text?.value
 }

@@ -9,7 +9,7 @@ it('keeps a review draft readable but disables sending when no worker exists', (
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   const bundle: ChangeBundle = { version: 2, title: 'Review', repo: { name: 'test', dir: '/repo', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'topic', commits: [], files: [], story: null }
   const root = document.createElement('div'), send = vi.fn()
-  const mounted = mountChangeReader(root, bundle, 'test', send, () => false)
+  const mounted = mountChangeReader(root, bundle, 'test', 'source-revision', send, () => false)
   const field = root.querySelector('textarea')!
   field.value = 'Keep this note'; field.dispatchEvent(new Event('input'))
   const button = [...root.querySelectorAll('button')].find(button => button.textContent === 'Send review')!

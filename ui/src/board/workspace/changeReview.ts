@@ -229,9 +229,6 @@ export function createChangeReview(
   renderDraftComments()
   const foot = el('div', 'change-send')
   foot.append(sendButton, status)
-  if (!send || !canSend())
-    status.textContent =
-      'No live worker. Start or resume one from the composer before sending a review.'
   paintSend()
   return {
     content: [reviewAnchor, draftComments, note, foot],

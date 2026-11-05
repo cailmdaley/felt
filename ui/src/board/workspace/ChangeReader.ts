@@ -1,7 +1,6 @@
 import { disposeHighlighter, registerCustomCSSVariableTheme } from '@pierre/diffs'
 import {
   assignLanes,
-  changeIdentity,
   type ChangeRange,
   type ChangeBundle,
   type ChangeFile,
@@ -13,7 +12,6 @@ import { el, prose, button, stored, save, revisionLabel } from './changeElements
 import { createChangeReview } from './changeReview.js'
 import { createChangeNavigation } from './changeNavigation.js'
 import { mountChangeWindow } from './changeWindow.js'
-import { validateChangeBundle } from './changeValidation.js'
 import { changeFileLabel } from './changeFileLabel.js'
 import { readingAnchor, windowRows, type ChangeReadingState } from './changePosition.js'
 
@@ -24,32 +22,14 @@ export function mountChangeReader(
   root: HTMLElement,
   bundle: ChangeBundle,
   identity: string,
+  revision: string,
   send?: (message: string) => Promise<void>,
   canSend = () => true,
   reviewTarget = () => 'this fiber',
-  revision?: string,
 ) {
-  try {
-    validateChangeBundle(bundle)
-  } catch (error) {
-    const message = el(
-      'div',
-      'change-load-error',
-      error instanceof Error ? error.message : 'Invalid change bundle',
-    )
-    message.setAttribute('role', 'alert')
-    root.replaceChildren(message)
-    return {
-      scroller: message,
-      dispose() {
-        message.remove()
-      },
-    }
-  }
   const files = bundle.files
   const lanes = assignLanes(bundle)
-  const version = revision ?? changeIdentity(JSON.stringify(bundle.story) + bundle.title)
-  const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head, version])}`
+  const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head, revision])}`
   const reading = stored<ChangeReadingState>(`${prefix}:position`, { expanded: [], whole: [] })
   const wholeFiles = new Set(reading.whole)
   const shell = el('div', 'change-reader')
@@ -269,16 +249,15 @@ export function mountChangeReader(
     const box = el('aside', 'change-flags')
     box.setAttribute('aria-label', 'Look here first')
     box.append(el('h2', '', 'Look here first'))
-    const addFlag = (flag: ChangeRange, text: HTMLElement): void => {
+    for (const flag of flags) {
       const jump = button(
         `${flag.file}${flag.from ? `:${flag.from}${flag.side === 'old' ? ' (old)' : ''}` : ''}`,
         () => jumpToRange(flag),
       )
       const row = el('div', 'change-flag')
-      row.append(jump, text)
+      row.append(jump, prose(flag.text))
       box.append(row)
     }
-    for (const flag of flags) addFlag(flag, prose(flag.text))
     main.append(box)
   }
   const story = section(

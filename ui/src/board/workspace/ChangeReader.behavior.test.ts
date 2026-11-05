@@ -19,7 +19,7 @@ function bundle(head = 'b'.repeat(40)): ChangeBundle {
 }
 function mount(b: ChangeBundle, identity: string, send: (message: string) => Promise<void> = vi.fn(async (_message: string) => {})) {
   const root = document.createElement('div'); document.body.append(root)
-  const reader = mountChangeReader(root, b, identity, send, () => true, () => 'work/holding on host-b'); mounted.push(reader)
+  const reader = mountChangeReader(root, b, identity, 'source-revision', send, () => true, () => 'work/holding on host-b'); mounted.push(reader)
   return { root, reader, send: vi.mocked(send) }
 }
 function type(field: Element, text: string) { if (!(field instanceof HTMLTextAreaElement)) throw new Error('Expected a textarea'); field.value = text; field.dispatchEvent(new Event('input')) }

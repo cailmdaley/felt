@@ -1,5 +1,5 @@
 import { mountChangeReader } from '../../src/board/workspace/ChangeReader.js'
-import type { ChangeBundle } from '../../src/board/workspace/changeModel.js'
+import { changeIdentity, type ChangeBundle } from '../../src/board/workspace/changeModel.js'
 import { renderMarkdown } from '../../src/board/utils.js'
 import { isHighlighterLoaded, disposeHighlighter } from '@pierre/diffs'
 
@@ -24,5 +24,5 @@ window.__mountChange = bundle => {
   window.__disposeChange()
   const root = document.getElementById('root')!
   root.replaceChildren()
-  mounted = mountChangeReader(root, bundle, 'change-smoke')
+  mounted = mountChangeReader(root, bundle, 'change-smoke', changeIdentity(JSON.stringify(bundle)))
 }

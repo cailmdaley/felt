@@ -37,43 +37,41 @@ export function mountChangeWindow(
   const plain = document.createElement('div')
   plain.className = 'change-plain-window'
   const lines = file.lines.slice(window.start, window.start + window.rows)
-  {
-    for (const line of lines) {
-      const row = document.createElement('div')
-      row.className = 'change-plain-row'
-      row.dataset.lineType =
-        line.kind === 'addition'
-          ? 'change-addition'
-          : line.kind === 'deletion'
-            ? 'change-deletion'
-            : line.kind === 'note'
-              ? 'metadata'
-              : 'context'
-      row.dataset.oldLine = String(line.old)
-      row.dataset.newLine = String(line.new)
-      for (const [number, side] of [
-        [line.old, 'deletions'],
-        [line.new, 'additions'],
-      ] as const) {
-        const gutter = document.createElement('button')
-        gutter.type = 'button'
-        gutter.className = 'change-plain-number'
-        gutter.textContent = number ? String(number) : ''
-        gutter.disabled = !number
-        if (number)
-          gutter.setAttribute(
-            'aria-label',
-            `Comment on ${file.path}:${number} (${side === 'deletions' ? 'old' : 'new'})`,
-          )
-        gutter.addEventListener('click', () => comments.add(number, side))
-        row.append(gutter)
-      }
-      const text = document.createElement('span')
-      text.dataset.lineText = ''
-      text.textContent = line.text
-      row.append(text)
-      plain.append(row)
+  for (const line of lines) {
+    const row = document.createElement('div')
+    row.className = 'change-plain-row'
+    row.dataset.lineType =
+      line.kind === 'addition'
+        ? 'change-addition'
+        : line.kind === 'deletion'
+          ? 'change-deletion'
+          : line.kind === 'note'
+            ? 'metadata'
+            : 'context'
+    row.dataset.oldLine = String(line.old)
+    row.dataset.newLine = String(line.new)
+    for (const [number, side] of [
+      [line.old, 'deletions'],
+      [line.new, 'additions'],
+    ] as const) {
+      const gutter = document.createElement('button')
+      gutter.type = 'button'
+      gutter.className = 'change-plain-number'
+      gutter.textContent = number ? String(number) : ''
+      gutter.disabled = !number
+      if (number)
+        gutter.setAttribute(
+          'aria-label',
+          `Comment on ${file.path}:${number} (${side === 'deletions' ? 'old' : 'new'})`,
+        )
+      gutter.addEventListener('click', () => comments.add(number, side))
+      row.append(gutter)
     }
+    const text = document.createElement('span')
+    text.dataset.lineText = ''
+    text.textContent = line.text
+    row.append(text)
+    plain.append(row)
   }
   const enhanced = document.createElement('div')
   enhanced.className = 'change-highlighted-window'
@@ -84,13 +82,14 @@ export function mountChangeWindow(
   host.append(plain, enhanced)
   host.dataset.renderState = 'plain'
   let finish!: () => void
-  const ready = new Promise<void>(resolve => { finish = resolve })
-  const fallback = (reason?: string): void => {
+  const ready = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+  const fallback = (): void => {
     plain.hidden = false
     enhanced.hidden = true
     host.dataset.renderState = 'plain'
-    notice.textContent =
-      reason ?? `Syntax highlighting unavailable for ${file.path}; showing plain text.`
+    notice.textContent = `Syntax highlighting unavailable for ${file.path}; showing plain text.`
     host.prepend(notice)
     finish()
   }
@@ -99,7 +98,7 @@ export function mountChangeWindow(
       .querySelector('diffs-container')
       ?.shadowRoot?.querySelectorAll('[data-line]')
     const count = lines.filter((line) => line.kind !== 'note').length
-    if (!rows?.length || (count !== undefined && rows.length !== count)) {
+    if (!rows?.length || rows.length !== count) {
       fallback()
       return
     }

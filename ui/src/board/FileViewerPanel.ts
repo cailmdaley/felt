@@ -125,7 +125,7 @@ export function buildFileViewer(
         const bundle = parseChangeBundle(source)
         const digest = changeIdentity(source)
         dispose?.(); wrap.replaceChildren()
-        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}`, options.onReview, options.canReview, options.reviewTarget, digest)
+        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}`, digest, options.onReview, options.canReview, options.reviewTarget)
         dispose = mounted.dispose; scroller = mounted.scroller
         options.onThumbnailSource?.(source, recallText(src)?.etag)
         onTextPane?.(scroller)
