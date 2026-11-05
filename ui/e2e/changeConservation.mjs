@@ -23,10 +23,10 @@ const server = createServer(async (req, res) => {
 })
 let browser
 try {
-  const { repo, base, head, story, hostile } = createChangeGitFixture(dir)
+  const { repo, base, head, story, hostile, hidden } = createChangeGitFixture(dir)
   const truth = gitChangedRows(repo, base, head)
   assert.ok(truth.size > 300, 'The independent Git oracle must include the multi-window change')
-  for (const file of [...hostile, 'docs/guide.md', 'config/app.yaml']) assert.ok([...truth.keys()].some(key => JSON.parse(key)[0] === file), `No Git rows for ${JSON.stringify(file)}`)
+  for (const file of [...hostile, ...Object.keys(hidden), 'docs/guide.md', 'config/app.yaml']) assert.ok([...truth.keys()].some(key => JSON.parse(key)[0] === file), `No Git rows for ${JSON.stringify(file)}`)
   const binary = buildShuttle(dir)
   const plain = bakeChange(binary, repo, base, head).bundle
   const authored = bakeChange(binary, repo, base, head, story).bundle
@@ -70,6 +70,12 @@ try {
       }
       const result = assertDOMConservation(truth, windows)
       for (const file of ['docs/guide.md', 'config/app.yaml']) assert.ok(windows.some(window => window.file === file), `${file} must be inspected`)
+      for (const [file, codepoint] of Object.entries(hidden)) {
+        assert.ok(windows.filter(window => window.file === file).every(window => window.renderer === 'plain'), `${file} must keep its marked plain rows`)
+        assert.ok(windows.some(window => window.file === file && window.rows.some(row => row.marks?.includes(codepoint))), `${file} must mark ${codepoint}`)
+        const flag = await page.locator('.change-flag', { hasText: file }).innerText()
+        assert.ok(flag.includes(codepoint), `Look here first must name ${codepoint} in ${file}`)
+      }
       if (!bundle.story) {
         const index = windows.findLastIndex(window => window.renderer === 'highlighted')
         const target = page.locator('.change-diff-window').nth(index)

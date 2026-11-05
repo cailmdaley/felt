@@ -1,6 +1,6 @@
 import { registerCustomCSSVariableTheme, type AnnotationSide } from '@pierre/diffs'
 import { renderMarkdown } from '../utils.js'
-import { assignLanes, changeIdentity, reviewMessage, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeFile, type ChangeHunk, type ChangeWindow } from './changeModel.js'
+import { assignLanes, changeIdentity, hiddenCharacterFlags, reviewMessage, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeFile, type ChangeHunk, type ChangeWindow } from './changeModel.js'
 import './change-reader.css'
 import { mountChangeWindow } from './changeWindow.js'
 import { validateChangeBundle } from './changeValidation.js'
@@ -90,14 +90,16 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   main.append(heading)
   if (bundle.story) main.append(prose(bundle.story.overview))
   else main.append(el('p', 'change-section-note', 'No authored story. Read implementation first, then configuration and documentation; tests stay together.'))
-  const flags = bundle.story?.flags ?? []
-  if (flags.length) {
+  const systemFlags = hiddenCharacterFlags(bundle), flags = bundle.story?.flags ?? []
+  if (systemFlags.length || flags.length) {
     const box = el('aside', 'change-flags'); box.setAttribute('aria-label', 'Look here first')
     box.append(el('h2', '', 'Look here first'))
-    for (const flag of flags) {
+    const addFlag = (flag: ChangeRange, text: HTMLElement): void => {
       const jump = button(`${flag.file}${flag.from ? `:${flag.from}${flag.side === 'old' ? ' (old)' : ''}` : ''}`, () => jumpToRange(flag))
-      const row = el('div', 'change-flag'); row.append(jump, prose(flag.text)); box.append(row)
+      const row = el('div', 'change-flag'); row.append(jump, text); box.append(row)
     }
+    for (const flag of systemFlags) addFlag(flag, el('p', 'change-flag-system', flag.text))
+    for (const flag of flags) addFlag(flag, prose(flag.text))
     main.append(box)
   }
   const note = el('textarea', 'change-overall'); note.placeholder = 'Your overall note…'; note.setAttribute('aria-label', 'Overall review note'); note.value = draft.note

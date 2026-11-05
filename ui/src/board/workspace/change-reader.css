@@ -49,6 +49,9 @@
 .change-flags h2 { font-size: var(--type-label); font-weight: 600; margin: 0 0 12px; }
 .change-flag > button { border: 0; color: var(--ws-owed); font: var(--type-meta)/var(--leading-prose) var(--font-mono); padding: 0 0 5px; overflow-wrap: anywhere; text-align: left; }
 .change-flag .change-prose { font-size: var(--type-row); }
+.change-flag-system { font-size: var(--type-row); margin: 0 0 12px; }
+.change-hidden-char { unicode-bidi: isolate; }
+.change-hidden-char::before { content: attr(data-codepoint); margin: 0 2px; padding: 0 3px; border: 1px solid var(--ws-owed); border-radius: 3px; color: var(--ws-owed); font-size: 0.85em; }
 .change-section { padding-top: 28px; margin-top: 28px; border-top: 1px solid var(--ws-hairline); scroll-margin-top: 16px; }
 .change-section h2 { font-size: var(--type-title); font-weight: 500; margin: 0 0 8px; }
 .change-section-note, .change-empty { font-size: var(--type-note); color: var(--ws-ink-muted); }

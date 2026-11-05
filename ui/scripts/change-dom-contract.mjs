@@ -126,7 +126,7 @@ export function readDOMWindow(window, index) {
         const visible = row && painted(node)
         if (visible && node.matches('.change-plain-row')) {
           const type = node.getAttribute('data-line-type')
-          rows.push({ line: node.getAttribute(type === 'change-deletion' ? 'data-old-line' : 'data-new-line'), type, text: node.querySelector('[data-line-text]')?.textContent ?? '' })
+          rows.push({ line: node.getAttribute(type === 'change-deletion' ? 'data-old-line' : 'data-new-line'), type, text: node.querySelector('[data-line-text]')?.textContent ?? '', marks: [...node.querySelectorAll('.change-hidden-char')].map(mark => mark.dataset.codepoint) })
         } else if (visible && node.hasAttribute('data-line')) {
           rows.push({ line: node.getAttribute('data-line'), type: node.getAttribute('data-line-type'), text: node.textContent })
         }

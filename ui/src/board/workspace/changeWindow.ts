@@ -1,11 +1,23 @@
 import { FileDiff, getSharedHighlighter, parsePatchFiles, type AnnotationSide, type DiffLineAnnotation } from '@pierre/diffs'
-import type { ChangeComment, ChangeFile, ChangeWindow } from './changeModel.js'
+import { codePoint, hiddenCharacters, HIDDEN_CHARACTERS, type ChangeComment, type ChangeFile, type ChangeWindow } from './changeModel.js'
 import { changeLanguage } from './changeLanguages.js'
 
 interface WindowComments {
   annotations: () => DiffLineAnnotation<ChangeComment>[]
   add: (line: number, side: AnnotationSide) => void
   field: (comment: ChangeComment) => HTMLElement
+}
+
+/** Label each hidden character in place. Its own isolate confines any bidi override, so the
+ *  row reads in logical order, and the character stays in the text for copying and for the gate. */
+function markHiddenCharacters(node: HTMLElement): void {
+  const text = node.textContent ?? '', parts: (string | Node)[] = []
+  let end = 0
+  for (const match of text.matchAll(HIDDEN_CHARACTERS)) {
+    const mark = document.createElement('span'); mark.className = 'change-hidden-char'; mark.dataset.codepoint = codePoint(match[0]); mark.textContent = match[0]
+    parts.push(text.slice(end, match.index), mark); end = match.index + match[0].length
+  }
+  if (end) node.replaceChildren(...parts, text.slice(end))
 }
 
 /** Captured rows are readable without the optional parser, highlighter or grammar chunks. */
@@ -24,18 +36,18 @@ export function mountChangeWindow(host: HTMLElement, window: ChangeWindow, file:
         gutter.addEventListener('click', () => comments.add(number, side)); row.append(gutter)
       }
       const text = document.createElement('span'); text.dataset.lineText = ''; text.textContent = line.text
-      row.append(text); plain.append(row)
+      markHiddenCharacters(text); row.append(text); plain.append(row)
     }
   } else {
-    const raw = document.createElement('pre'); raw.textContent = window.patch; plain.append(raw)
+    const raw = document.createElement('pre'); raw.textContent = window.patch; markHiddenCharacters(raw); plain.append(raw)
   }
   const enhanced = document.createElement('div'); enhanced.className = 'change-highlighted-window'; enhanced.hidden = true
   const notice = document.createElement('p'); notice.className = 'change-window-notice'; notice.setAttribute('role', 'status')
   host.append(plain, enhanced); host.dataset.renderState = 'plain'
-  const fallback = (): void => {
+  const fallback = (reason?: string): void => {
     plain.hidden = false; enhanced.hidden = true
     host.dataset.renderState = window.lines ? 'plain' : 'error'
-    notice.textContent = window.lines ? `Syntax highlighting unavailable for ${file.path}; showing plain text.` : `Could not render ${file.path}; the captured patch is shown below.`
+    notice.textContent = reason ?? (window.lines ? `Syntax highlighting unavailable for ${file.path}; showing plain text.` : `Could not render ${file.path}; the captured patch is shown below.`)
     if (!window.lines) notice.setAttribute('role', 'alert')
     host.prepend(notice)
   }
@@ -46,6 +58,8 @@ export function mountChangeWindow(host: HTMLElement, window: ChangeWindow, file:
     plain.hidden = true; enhanced.hidden = false; notice.remove(); host.dataset.renderState = 'highlighted'
   }
   const ready = (async () => {
+    // The highlighter draws these invisibly, so these rows keep their marks.
+    if (hiddenCharacters(window.patch).length) { fallback(`Hidden characters in ${file.path}; highlighting is off so that each one is marked.`); return }
     try {
       const parsed = parsePatchFiles(window.patch)[0]?.files[0]
       if (!parsed) throw new Error('Patch did not parse')

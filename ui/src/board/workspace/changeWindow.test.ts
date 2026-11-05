@@ -35,3 +35,27 @@ it('names a file visibly when no structured rows or parse result can be rendered
   expect(host.querySelector('pre')?.textContent).toBe('patch')
   mounted.dispose()
 })
+
+it('marks hidden characters in place, keeps the text exact, and never hands them to the highlighter', async () => {
+  const text = '  /*\u202e } \u2066if (isAdmin)\u2069 \u2066 begin */ {'
+  const host = document.createElement('div'); document.body.append(host)
+  const patch = `@@ -1 +1 @@\n+${text}\n`
+  const mounted = mountChangeWindow(host, { ...window, patch, lines: [{ kind: 'addition', old: 0, new: 1, text }] }, file, { annotations: () => [], add() {}, field: () => document.createElement('div') })
+  await mounted.ready
+  expect(mocks.highlight).not.toHaveBeenCalled()
+  expect(mocks.parse).not.toHaveBeenCalled()
+  expect(host.dataset.renderState).toBe('plain')
+  const rows = [...host.querySelectorAll('[data-line-text]')]
+  expect(rows.map(row => row.textContent)).toEqual([text])
+  expect([...rows[0].querySelectorAll<HTMLElement>('.change-hidden-char')].map(mark => mark.dataset.codepoint)).toEqual(['U+202E', 'U+2066', 'U+2069', 'U+2066'])
+  expect(host.querySelector('[role="status"]')?.textContent).toContain('Hidden characters in evil.constructor')
+  mounted.dispose()
+})
+it('marks hidden characters in a window with no structured rows', async () => {
+  const host = document.createElement('div'); document.body.append(host)
+  const mounted = mountChangeWindow(host, { ...window, lines: undefined, patch: '+a\u202eb\n' }, file, { annotations: () => [], add() {}, field: () => document.createElement('div') })
+  await mounted.ready
+  expect(host.querySelector('pre')?.textContent).toBe('+a\u202eb\n')
+  expect([...host.querySelectorAll<HTMLElement>('pre .change-hidden-char')].map(mark => mark.dataset.codepoint)).toEqual(['U+202E'])
+  mounted.dispose()
+})

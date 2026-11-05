@@ -115,6 +115,22 @@ it('locks the draft through a slow send, including a rebake, then clears deliver
   expect(next.root.querySelectorAll('.change-draft-comments textarea')).toHaveLength(0)
   next.root.querySelector<HTMLButtonElement>('.change-send button')!.click(); expect(send).toHaveBeenCalledOnce()
 })
+it('puts hidden characters in Look here first as a flag no story can remove', () => {
+  const hostile = (story: ChangeBundle['story']): ChangeBundle => {
+    const change = bundle(), text = 'if (ok) \u202e{'
+    const window = { ...change.files[0].hunks[0].windows[0], patch: `+${text}\n`, lines: [{ kind: 'addition' as const, old: 0, new: 7, text }] }
+    change.files[0].hunks = [{ ...change.files[0].hunks[0], patch: `+${text}\n`, windows: [window] }]
+    change.files[0].remaining = []
+    return { ...change, story }
+  }
+  for (const story of [null, { overview: 'Nothing to see.', flags: [], chapters: [] }]) {
+    const { root } = mount(hostile(story), `flag-${story ? 'story' : 'plain'}`)
+    const box = root.querySelector('[aria-label="Look here first"]')!
+    expect(box.querySelector('button')?.textContent).toBe('app.ts:7')
+    expect(box.querySelector('.change-flag-system')?.textContent).toContain('1 row has hidden characters (U+202E)')
+  }
+  expect(mount(bundle(), 'clean').root.querySelector('[aria-label="Look here first"]')).toBeNull()
+})
 it('unlocks a refused send without dropping its draft', async () => {
   const state = mount(bundle(), 'refused', vi.fn(async () => { throw new Error('Worker went away') }))
   type(state.root.querySelector('.change-overall')!, 'Keep this draft')

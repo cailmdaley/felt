@@ -30,6 +30,25 @@ export function assignLanes(bundle: ChangeBundle): ChangeLanes {
   }
 }
 
+/** Characters that change how a row reads without appearing in it: Unicode format
+ *  characters: bidi controls, zero-width marks and tag characters. */
+export const HIDDEN_CHARACTERS = /\p{Cf}/gu
+export function hiddenCharacters(text: string): string[] { return text.match(HIDDEN_CHARACTERS) ?? [] }
+export function codePoint(char: string): string { return `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}` }
+
+/** Derived from the captured rows on every open, so a story cannot remove it. */
+export function hiddenCharacterFlags(bundle: ChangeBundle): (ChangeRange & { text: string })[] {
+  return bundle.files.flatMap(file => {
+    const windows = file.hunks.flatMap(hunk => hunk.windows)
+    const rows = windows.flatMap(window => window.lines ?? []).filter(line => line.kind !== 'note' && hiddenCharacters(line.text).length)
+    const found = new Set(windows.flatMap(window => hiddenCharacters(window.patch)).map(codePoint))
+    if (!found.size) return []
+    const first = rows[0], names = [...found].join(', ')
+    const where = rows.length ? (rows.length === 1 ? '1 row has' : `${rows.length} rows have`) : 'This patch has'
+    return [{ file: file.path, ...(first ? { from: first.new || first.old, side: first.new ? 'new' as const : 'old' as const } : {}), text: `${where} hidden characters (${names}). They can make code display differently from how it runs; each is marked in place.` }]
+  })
+}
+
 /** A non-cryptographic fingerprint resets viewed state when the bundle changes. */
 export function changeIdentity(source: string): string {
   let a = 2166136261, b = 0x9e3779b9

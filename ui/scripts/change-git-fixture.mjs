@@ -17,8 +17,10 @@ export function createChangeGitFixture(dir) {
   for (const path of [...hostile, ...ordinary]) put(path, body(path, false))
   put('large.txt', Array.from({ length: 160 }, (_, i) => `old large row ${i + 1}\n`).join(''))
   put('crlf.txt', 'before\r\nunchanged\r\nlast')
+  const hidden = { 'gate.js': 'U+202E' }
   mkdirSync(join(repo, 'docs')); mkdirSync(join(repo, 'config'))
   put('docs/guide.md', '# Guide\n\nOld guidance.\n'); put('config/app.yaml', 'mode: old\nretries: 3\n')
+  put('gate.js', 'function gate(isAdmin) {\n  log()\n  return secret()\n}\n')
   git('add', '.'); git('commit', '-qm', 'Fixture base')
   const base = git('rev-parse', 'HEAD')
   for (const path of [...hostile, ...ordinary.filter(path => path !== 'deleted.ts' && path !== 'before.ts')]) put(path, body(path, true))
@@ -28,6 +30,8 @@ export function createChangeGitFixture(dir) {
   put('added.txt', 'new first\n\nnew last without newline')
   put('crlf.txt', 'after\r\nunchanged\r\nchanged last')
   put('docs/guide.md', '# Guide\n\nNew guidance.\n'); put('config/app.yaml', 'mode: new\nretries: 3\n')
+  // CVE-2021-42574: the whole line is a comment that displays as a guard.
+  put('gate.js', 'function gate(isAdmin) {\n  /*\u202e } \u2066if (isAdmin)\u2069 \u2066 begin admins only */ {\n  return secret()\n}\n')
   put('large.txt', Array.from({ length: 160 }, (_, i) => `new large row ${i + 1}\n`).join(''))
   git('add', '.'); git('commit', '-qm', 'Fixture head')
   const head = git('rev-parse', 'HEAD')
@@ -41,5 +45,5 @@ export function createChangeGitFixture(dir) {
       { file: 'large.txt', from: 1, to: 3, side: 'new', importance: 'supporting', note: 'Remaining needs multiple virtual windows.' },
     ] }],
   }
-  return { repo, base, head, story, hostile }
+  return { repo, base, head, story, hostile, hidden }
 }

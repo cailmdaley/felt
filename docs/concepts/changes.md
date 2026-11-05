@@ -48,6 +48,7 @@ An isolated bare Git repository ignores `.gitattributes` in both captured trees 
 A file marked `-diff` gets a text patch if Git classifies its contents as text.
 Files Git classifies as binary carry its binary notice rather than their contents.
 NUL bytes and invalid UTF-8 render lossily; the reader isn't a byte-for-byte representation of arbitrary file contents.
+Unicode format characters are kept and marked in place; see [Review state and delivery](#review-state-and-delivery).
 
 ## Version 1 bundle
 
@@ -186,3 +187,5 @@ The draft is locked while sending, including across a live rebake. Successful de
 Worker-authored bundles are validated before rendering, storage or review: base and head are full hexadecimal SHA-1 or SHA-256 object IDs, and all reader-required fields have checked shapes.
 All Markdown passes through a final DOMPurify allowlist boundary shared with transcript rendering, and every link gets `rel="noopener noreferrer"` and `target="_blank"` after sanitizing.
 Captured structured lines are readable without syntax highlighting. A parser, highlighter or grammar-load failure retains plain text rows; a window without renderable rows names its file in a visible error.
+Rows containing Unicode format characters (bidi controls such as U+202E, zero-width marks, tag characters) stay plain, with each character labelled by its code point in logical order.
+The reader derives a **Look here first** entry for each such file from the captured rows, so no story can remove it.
