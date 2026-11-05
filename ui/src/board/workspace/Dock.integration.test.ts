@@ -551,6 +551,24 @@ describe('anchored pickers', () => {
       confirm.mockRestore()
     })
 
+    it('keeps the Meeting label and exposes audio only while selected', () => {
+      const join = vi.fn()
+      const control = { canJoin: () => true, modes: () => ['call'], current: () => null, recorder: () => 'recorder-host', join }
+      const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+      const band = meetingDock.bandFor(resting())
+      document.body.append(band.el)
+      const button = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
+      const audio = band.el.querySelector<HTMLSelectElement>('.kbn-ctl-meet-audio')!
+      expect(button.textContent).toBe('Meeting')
+      expect(audio.hidden).toBe(true)
+      button.click()
+      expect(button.textContent).toBe('Meeting')
+      expect(audio.hidden).toBe(false)
+      button.click()
+      expect(audio.hidden).toBe(true)
+      meetingDock.reset()
+    })
+
     it('records mic only when the audio dropdown says so', async () => {
       const { join, q, meetingDock } = mountMeeting(resting())
       const audio = q<HTMLSelectElement>('.kbn-ctl-meet-audio')

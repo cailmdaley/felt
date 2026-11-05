@@ -104,7 +104,7 @@ describe('board phone meeting card wiring', () => {
       : { available: true, modes: ['call', 'phone'], recorder: 'mac-recorder', meeting: current } }))
     const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'agent-owner' }), document.createElement('div'), sendWith(), () => {})
     document.body.append(menu)
-    expect(menu.textContent).toContain('Meeting · mac-recorder')
+    expect(menu.querySelector('.kbn-ctl-meet-arm')?.textContent).toBe('Meeting')
     expect(menu.querySelector('[role="radio"]')).toBeNull()
     arm(menu)
     state.dock.meetingStart('fresh', document.createElement('button'))

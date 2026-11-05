@@ -1567,7 +1567,7 @@ export class Dock {
    * the note. Nothing records before that press; mobile opens this tab's mic
    * in the press's gesture and keeps its controls on the board.
    *
-   * A desktop call shows its audio beside the toggle while it is on.
+   * A desktop call exposes its audio choice through an arrow inside the toggle while it is on.
    *
    * One meeting records at a time. While any does, the toggle stays in its
    * place, off and inert, naming the recording on hover. It is also disabled
@@ -1619,9 +1619,6 @@ export class Dock {
     const paint = (): void => {
       const control = this.meeting
       if (!control) return
-      const recorder = control.recorder?.()
-      const label = recorder ? `Meeting · ${recorder}` : 'Meeting'
-      if (word.textContent !== label) word.textContent = label
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
       const held = starting || send.busy() || recording || !canJoin()
