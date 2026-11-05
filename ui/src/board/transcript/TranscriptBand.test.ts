@@ -916,6 +916,22 @@ describe('TranscriptBand', () => {
     expect(band.el.querySelector('.ws-transcript-turn')).toBeNull()
   })
 
+  it('sanitizes hostile link labels and post-code HTML in prompts and answers', async () => {
+    const hostile = '[<img src=x onerror="alert(1)">](https://example.test)\n\nbefore <code>inside <img src=x onerror="alert(1)">'
+    const band = makeBand(fixtureFetch({ [latestId]: records(hostile, hostile) }))
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLElement>('.ws-transcript-preview')!.click()
+    await settle()
+    const pane = document.querySelector<HTMLElement>('.ws-transcript-pane')!
+    expect(pane.querySelector('.ws-transcript-prompt-text')?.textContent).toContain('before')
+    expect(pane.querySelector('.ws-transcript-msg-agent')?.textContent).toContain('before')
+    expect(pane.querySelector('img, svg, script, [onerror]')).toBeNull()
+    for (const node of pane.querySelectorAll('*')) {
+      expect([...node.attributes].some(attr => /^on/i.test(attr.name))).toBe(false)
+    }
+  })
+
   it('opens the whole session in a pane over the page content, with each run opening onto its tools and thinking', async () => {
     const output = Array.from({ length: 48 }, (_, index) => `response-bin-${index + 1}`).join('\n')
     const answer = `# Calibration\n\nThe null test is consistent with $\\chi^2$.\n\n[unsafe](javascript:alert(1)) <img src=x onerror=alert(1)>\n\n${output}`

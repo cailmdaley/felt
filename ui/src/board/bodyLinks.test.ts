@@ -1,10 +1,6 @@
-// Relative links in a fiber body must resolve the way the images beside them do.
-//
-// `renderMarkdown` is pure string work and needs no DOM — `escapeHtml` is a
-// regex escaper precisely so rendering stays testable headless. (It used to
-// round-trip through `document.createElement`, and this file used to carry a
-// fake-`document` shim to work around it. The shim is gone; the equivalence of
-// the regex escaper to the DOM path was checked against a real browser.)
+// @vitest-environment jsdom
+// Relative links in a fiber body resolve the way the images beside them do.
+// The final Markdown sanitizer uses the DOM before returning HTML.
 
 import { describe, expect, it } from 'vitest'
 import { renderMarkdown } from './utils.js'

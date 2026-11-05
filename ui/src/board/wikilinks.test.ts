@@ -1,7 +1,6 @@
-// `[[wikilinks]]` in a fiber body: what they render as, and what they resolve
-// to. Both halves are pure — the renderer is string work (bodyLinks.test.ts
-// explains why that matters) and the resolver takes its index as an argument —
-// so neither needs a DOM or a daemon.
+// @vitest-environment jsdom
+// `[[wikilinks]]` in a fiber body: their sanitized markup and resolution
+// against an index passed by the caller, without a daemon.
 
 import { describe, expect, it } from 'vitest'
 import { renderMarkdown } from './utils.js'

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { renderMarkdown } from './utils.js'
 
@@ -33,7 +34,7 @@ describe('untrusted markdown', () => {
     expect(html).not.toContain('map detail')
   })
 
-  it('leaves existing callers on the trusted rendering path', () => {
+  it('preserves safe HTML and images for ordinary consumers', () => {
     expect(renderMarkdown('<b>trusted</b>')).toContain('<b>trusted</b>')
     expect(renderMarkdown('![map](https://example.test/map.png)')).toContain('<img')
   })

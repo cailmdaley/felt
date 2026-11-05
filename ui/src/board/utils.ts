@@ -1,4 +1,5 @@
 import { marked } from 'marked'
+import createDOMPurify, { type Config } from 'dompurify'
 import { mathDollars } from './mathDollars.js'
 import 'katex/dist/katex.min.css'
 
@@ -124,24 +125,8 @@ marked.use({
   }],
 })
 
-/**
- * Escape HTML to prevent XSS.
- *
- * Pure string work, deliberately — this used to round-trip through
- * `document.createElement('div').textContent`, which quietly made every
- * function that escapes anything (and so `renderMarkdown` itself) require a
- * DOM. Headless tests of markdown rendering died on `document is not defined`,
- * and the only way to test them was to shim a fake `document`, which is a lot
- * of ceremony for four replacements.
- *
- * The output is byte-identical to the DOM path. Verified against a real browser
- * over 19 cases — quotes, tabs, newlines, emoji, backslashes, U+00A0, already-
- * escaped entities — with zero divergence. Two details carry that equivalence:
- * `&` MUST be replaced first or the entities introduced below get double-
- * escaped, and U+00A0 needs its own clause because HTML fragment serialization
- * emits `&nbsp;` for it where a naive escaper would pass the raw character
- * through. Quotes are deliberately NOT escaped here, matching the DOM — that is
- * what `escapeAttr` adds.
+/** Escape text for HTML content without requiring a DOM.
+ * Attribute values also need quote escaping; use `escapeAttr` for those.
  */
 export function escapeHtml(text: string): string {
   return String(text)
@@ -167,17 +152,14 @@ function safeTranscriptHref(href: string): boolean {
 }
 
 function renderLink(href: string, text: string): string {
-  if (untrustedEnabled) {
-    if (!safeTranscriptHref(href)) return text
-    return `<a href="${escapeAttr(href)}" class="md-link" target="_blank" rel="noopener">${text}</a>`
-  }
-  return `<a href="${escapeHtml(href)}" class="md-link" target="_blank" rel="noopener">${text}</a>`
+  if (untrustedEnabled && !safeTranscriptHref(href)) return text
+  return `<a href="${escapeAttr(href)}" class="md-link" target="_blank" rel="noopener">${text}</a>`
 }
 
 function renderImage(href: string, alt: string | undefined): string {
   const cleanAlt = (alt || '').replace(/<[^>]*>/g, '')
   if (untrustedEnabled) return ''
-  return `<img src="${escapeHtml(href)}" alt="${escapeHtml(cleanAlt)}" loading="lazy" />`
+  return `<img src="${escapeAttr(href)}" alt="${escapeAttr(cleanAlt)}" loading="lazy" />`
 }
 
 interface RenderMarkdownOptions {
@@ -203,13 +185,62 @@ interface RenderMarkdownOptions {
   untrusted?: boolean
 }
 
+// Only prose, code, tables and KaTeX's HTML spans belong in Markdown output.
+// No SVG/MathML, embedded documents, forms, arbitrary data attributes or handlers.
+// KaTeX uses inline styles to position its glyphs.
+const MARKDOWN_SANITIZER: Config = {
+  ALLOWED_TAGS: [
+    'a', 'b', 'blockquote', 'br', 'code', 'del', 'details', 'div', 'em',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'input', 'kbd',
+    'li', 'ol', 'p', 'pre', 's', 'span', 'strong', 'sub', 'summary', 'sup',
+    'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
+  ],
+  ALLOWED_ATTR: [
+    'alt', 'aria-hidden', 'checked', 'class', 'disabled', 'href', 'loading',
+    'rel', 'src', 'start', 'style', 'target', 'title', 'type', 'align',
+    'data-fiber', 'data-wikilink-raw', 'data-file-path', 'data-file-url-alt',
+    'data-file-path-alt', 'data-tex', 'data-display',
+  ],
+  ALLOW_DATA_ATTR: false,
+  ALLOW_ARIA_ATTR: false,
+}
+let markdownPurifier: ReturnType<typeof createDOMPurify> | undefined
+function sanitizeMarkdown(html: string, untrusted: boolean): string {
+  if (!markdownPurifier) {
+    markdownPurifier = createDOMPurify(window)
+    markdownPurifier.addHook('uponSanitizeAttribute', (_node, attr) => {
+      if (attr.attrName !== 'href' && attr.attrName !== 'src') return
+      // One URL policy for raw HTML and every renderer path. DOMPurify permits
+      // some data images by default; Markdown has no need for embedded data URLs.
+      try {
+        const protocol = new URL(attr.attrValue, 'https://markdown.invalid/').protocol
+        if (!['http:', 'https:', 'mailto:'].includes(protocol)) attr.keepAttr = false
+      } catch {
+        attr.keepAttr = false
+      }
+    })
+    markdownPurifier.addHook('afterSanitizeAttributes', (node) => {
+      // GFM task lists need inert checkboxes, not arbitrary interactive inputs.
+      if (node.nodeName === 'INPUT') {
+        node.setAttribute('type', 'checkbox')
+        node.setAttribute('disabled', '')
+      }
+    })
+  }
+  return markdownPurifier.sanitize(html, {
+    ...MARKDOWN_SANITIZER,
+    FORBID_TAGS: untrusted ? ['img'] : [],
+  })
+}
+
 /**
- * Render markdown to HTML with syntax highlighting.
+ * Render Markdown to sanitized HTML for every consumer, including transcripts.
  * Relative image paths resolve through the Shuttle /file route when basePath is provided.
  */
 export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): string {
   wikilinksEnabled = opts?.wikilinks === true
   untrustedEnabled = opts?.untrusted === true
+  let html: string
   try {
     // Use a per-call renderer to handle image path resolution
     if (opts?.basePath) {
@@ -265,16 +296,20 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
         const cleanAlt = (alt || '').replace(/<[^>]*>/g, '')
         return `<img src="${escapeAttr(src)}" alt="${escapeAttr(cleanAlt)}" loading="lazy" />`
       }
-      return marked.parse(text, { renderer: localRenderer }) as string
+      html = marked.parse(text, { renderer: localRenderer }) as string
+    } else {
+      html = marked.parse(text) as string
     }
-    return marked.parse(text) as string
   } catch (e) {
     console.error('Markdown render error:', e)
-    return escapeHtml(text)
+    html = escapeHtml(text)
   } finally {
     wikilinksEnabled = false
     untrustedEnabled = false
   }
+  // Last step: marked's HTML/text token state and renderer callbacks are not
+  // a security boundary. Nothing may add markup after this sanitization.
+  return sanitizeMarkdown(html, opts?.untrusted === true)
 }
 
 /**
