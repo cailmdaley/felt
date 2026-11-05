@@ -111,10 +111,11 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   })
   const sendButton = button('Send review', () => { void deliver() })
   const paintSend = (): void => {
-    const earlier = [...new Set([...(draft.note.trim() ? [draft.head] : []), ...draft.comments.filter(c => c.text.trim()).map(c => c.head ?? draft.head)].filter((head): head is string => !!head && head !== bundle.head))]
-    reviewAnchor.textContent = `To ${reviewTarget()}. Current head ${bundle.head.slice(0, 8)}. ${earlier.length ? `This draft also contains notes anchored to earlier head ${earlier.map(head => head.slice(0, 8)).join(', ')}; Send preserves those anchors.` : 'Drafts stay on this browser and keep their snapshot anchors across rebakes.'}`
+    const anchors = [...(draft.note.trim() ? [draft] : []), ...draft.comments.filter(c => c.text.trim())].map(value => ({ base: value.base ?? draft.base ?? bundle.base, head: value.head ?? draft.head ?? bundle.head }))
+    const earlier = [...new Map(anchors.filter(anchor => anchor.base !== bundle.base || anchor.head !== bundle.head).map(anchor => [JSON.stringify(anchor), anchor])).values()]
+    reviewAnchor.textContent = `To ${reviewTarget()}. Current base ${bundle.base.slice(0, 8)}, head ${bundle.head.slice(0, 8)}. ${earlier.length ? `This draft also contains notes anchored to earlier snapshots (${earlier.map(anchor => `base ${anchor.base.slice(0, 8)}, head ${anchor.head.slice(0, 8)}`).join('; ')}); Send preserves those anchors.` : 'Drafts stay on this browser and keep their snapshot anchors across rebakes.'}`
     sendButton.disabled = draftState.busy || !send || !canSend() || !(draft.note.trim() || draft.comments.some(c => c.text.trim()))
-    sendButton.textContent = draftState.busy ? 'Sending…' : earlier.length ? `Send review (includes ${earlier.map(head => head.slice(0, 8)).join(', ')})` : 'Send review'
+    sendButton.textContent = draftState.busy ? 'Sending…' : earlier.length ? `Send review (includes ${earlier.map(anchor => anchor.head.slice(0, 8)).join(', ')})` : 'Send review'
     for (const field of shell.querySelectorAll<HTMLTextAreaElement>('textarea')) field.disabled = draftState.busy
     for (const control of shell.querySelectorAll<HTMLButtonElement>('.change-comment-remove')) control.disabled = draftState.busy
     if ((!send || !canSend()) && !draftState.message) status.textContent = 'No live worker. Start or resume one from the composer before sending a review.'
@@ -139,15 +140,16 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   }
   const commentField = (comment: ChangeComment): HTMLElement => {
     const box = el('div', 'change-comment')
-    const head = comment.head ?? draft.head ?? bundle.head
-    const label = el('label', '', `${comment.file}:${comment.line}${comment.side === 'old' ? ' (old)' : ''} · head ${head.slice(0, 8)}${head !== bundle.head ? ' (earlier snapshot)' : ''}`)
-    const field = el('textarea', ''); field.value = comment.text; field.placeholder = 'What should the author look at?'; field.disabled = draftState.busy; field.dataset.commentHead = head
+    const head = comment.head ?? draft.head ?? bundle.head, base = comment.base ?? draft.base ?? bundle.base
+    const label = el('label', '', `${comment.file}:${comment.line}${comment.side === 'old' ? ' (old)' : ''} · base ${base.slice(0, 8)}, head ${head.slice(0, 8)}${head !== bundle.head || base !== bundle.base ? ' (earlier snapshot)' : ''}`)
+    const field = el('textarea', ''); field.value = comment.text; field.placeholder = 'What should the author look at?'; field.disabled = draftState.busy; field.dataset.commentKey = JSON.stringify([base, head, comment.file, comment.line, comment.side])
+    field.setAttribute('aria-description', `Anchored to base ${base}, head ${head}`)
     field.setAttribute('aria-label', `Comment on ${comment.file}:${comment.line} (${comment.side})`)
     field.addEventListener('input', () => {
       if (draftState.busy) return
       comment.text = field.value
       for (const mirror of shell.querySelectorAll<HTMLTextAreaElement>('textarea')) {
-        if (mirror !== field && mirror.getAttribute('aria-label') === field.getAttribute('aria-label') && mirror.dataset.commentHead === head) mirror.value = field.value
+        if (mirror !== field && mirror.dataset.commentKey === field.dataset.commentKey) mirror.value = field.value
       }
       persist(); paintSend()
     })
@@ -163,7 +165,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     let comment = draft.comments.find(c => c.file === file.path && c.line === line && c.side === sideOf(side) && (c.head ?? draft.head ?? bundle.head) === bundle.head && (c.base ?? draft.base ?? bundle.base) === bundle.base)
     if (!comment) { comment = { file: file.path, line, side: sideOf(side), text: '', base: bundle.base, head: bundle.head }; draft.comments.push(comment); persist(); refreshAnnotations(); renderDraftComments() }
     requestAnimationFrame(() => {
-      const field = [...shell.querySelectorAll<HTMLTextAreaElement>('.change-file textarea, .change-draft-comments textarea')].find(field => field.getAttribute('aria-label') === `Comment on ${file.path}:${line} (${sideOf(side)})` && field.dataset.commentHead === bundle.head)
+      const field = [...shell.querySelectorAll<HTMLTextAreaElement>('.change-file textarea, .change-draft-comments textarea')].find(field => field.dataset.commentKey === JSON.stringify([bundle.base, bundle.head, file.path, line, sideOf(side)]))
       field?.focus({ preventScroll: true })
       if (field && field.getBoundingClientRect().bottom > scroll.getBoundingClientRect().bottom) reveal(field, true)
     })

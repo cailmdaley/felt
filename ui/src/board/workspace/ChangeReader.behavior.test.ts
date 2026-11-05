@@ -6,12 +6,13 @@ import type { ChangeBundle } from './changeModel.js'
 vi.mock('@pierre/diffs', () => ({ registerCustomCSSVariableTheme() {}, parsePatchFiles: () => [], FileDiff: class {}, getSharedHighlighter: vi.fn() }))
 vi.stubGlobal('IntersectionObserver', class { callback: (entries: unknown[]) => void; constructor(callback: (entries: unknown[]) => void) { this.callback = callback } observe(target: Element) { this.callback([{ target, isIntersecting: true }]) } unobserve() {} disconnect() {} })
 vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
-vi.stubGlobal('requestAnimationFrame', () => 1)
+const frames: FrameRequestCallback[] = []
+vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length })
 vi.stubGlobal('cancelAnimationFrame', () => {})
 const storage = new Map<string, string>(), mounted: ReturnType<typeof mountChangeReader>[] = []
 vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) })
 beforeEach(() => storage.clear())
-afterEach(() => { mounted.splice(0).forEach(reader => reader.dispose()); document.body.replaceChildren() })
+afterEach(() => { mounted.splice(0).forEach(reader => reader.dispose()); document.body.replaceChildren(); frames.length = 0 })
 function bundle(head = 'b'.repeat(40)): ChangeBundle {
   const hunk = { file: 'app.ts', old_from: 0, old_lines: 0, new_from: 1, new_lines: 1, patch: 'captured patch', windows: [{ old_from: 0, old_lines: 0, new_from: 1, new_lines: 1, patch: 'captured patch', rows: 1, lines: [{ kind: 'addition' as const, old: 0, new: 1, text: 'text' }] }] }
   return { version: 1, title: 'Review', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head, base_ref: 'main', head_ref: 'head', commits: [], files: [{ path: 'app.ts', role: 'implementation', status: 'added', additions: 1, deletions: 0, old_mode: '000000', new_mode: '100644', header: '', hunks: [hunk], remaining: [hunk] }], story: null }
@@ -76,6 +77,24 @@ it('keeps old draft anchors across rebakes, adds new anchors without mixing them
   expect(message).toContain(`Earlier snapshot\nBase: ${'a'.repeat(40)}\nHead: ${'b'.repeat(40)}`)
   expect(message).toContain('An earlier line comment'); expect(message).toContain('A comment on the rebaked head')
   await vi.waitFor(() => expect(next.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toBe(''))
+})
+it('keeps different-base comments independent and focuses the new anchor even at the same head', async () => {
+  const first = mount(bundle(), 'new-base')
+  lineComment(first.root, 'Old base matters too'); first.reader.dispose()
+  const rebaked = bundle(); rebaked.base = 'd'.repeat(40)
+  const next = mount(rebaked, 'new-base')
+  expect(next.root.querySelector('.change-comment label')?.textContent).toContain('base aaaaaaaa, head bbbbbbbb (earlier snapshot)')
+  expect(next.root.querySelector('.change-send')?.parentElement?.textContent).toContain('earlier snapshots (base aaaaaaaa, head bbbbbbbb)')
+  lineComment(next.root, 'New base comment')
+  frames.splice(0).forEach(callback => callback(0))
+  const fields = [...next.root.querySelectorAll<HTMLTextAreaElement>('.change-draft-comments textarea')]
+  expect(document.activeElement).toBe(fields[1])
+  type(fields[0], 'Edited earlier-base comment'); expect(fields[1].value).toBe('New base comment')
+  type(fields[1], 'Edited current-base comment'); expect(fields[0].value).toBe('Edited earlier-base comment')
+  next.root.querySelector<HTMLButtonElement>('.change-send button')!.click()
+  await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce())
+  expect(next.send.mock.calls[0][0]).toContain(`Earlier snapshot\nBase: ${'a'.repeat(40)}\nHead: ${'b'.repeat(40)}\n"app.ts":1\nEdited earlier-base comment`)
+  expect(next.send.mock.calls[0][0]).toContain('"app.ts":1\nEdited current-base comment')
 })
 it('locks the draft through a slow send, including a rebake, then clears delivered text exactly once', async () => {
   let release!: () => void
