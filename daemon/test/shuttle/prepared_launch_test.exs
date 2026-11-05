@@ -185,6 +185,71 @@ defmodule Shuttle.PreparedLaunchTest do
     assert File.read!(Path.join(root, "effects")) == "effect\n"
   end
 
+  @tag :standing_unmirrored_exit
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "a first standing execution exiting before mirror retry retains its visible launch hold",
+       %{root: root} do
+    id = "prepared-first-exit"
+    FeltStoreRunner.set_fiber(id, make_fiber(id))
+
+    FeltStoreRunner.set_shuttle(
+      id,
+      "kind: standing\nhost: test-host\nagent: claude-sonnet\nschedule:\n  expr: '* * * * *'\n  tz: UTC\n"
+    )
+
+    now = DateTime.utc_now()
+
+    occurrences = %{
+      "prev_due" => DateTime.to_iso8601(DateTime.add(now, -60)),
+      "next_due" => DateTime.to_iso8601(DateTime.add(now, 60))
+    }
+
+    FeltStoreRunner.put_shuttle_fields(id, %{"resolved" => occurrences})
+    Env.put_app_env(:prepared_occurrences, occurrences)
+    Env.put_app_env(:prepared_effect_root, root)
+    Env.put_app_env(:prepared_fault, :marker_failure)
+    Env.put_app_env(:session_capture_retry_ms, 600_000)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        felt_stores: [root],
+        poll_interval_ms: 600_000,
+        heartbeat_interval_ms: 600_000,
+        boot_quarantine: true
+      )
+
+    await_boot_cycle!(poller)
+    assert_received :prepared_create
+    [{_, worker}] = Map.to_list(:sys.get_state(poller).running)
+    assert {:ok, %{"dispatch" => facts}} = Terminal.LaunchAttempts.get(worker.session)
+    refute get_in(FeltStoreRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"])
+
+    monitor = Process.monitor(worker.pid)
+    File.touch!(Path.join(root, "effect-go"))
+    eventually(fn -> Terminal.status(Runner, worker.session) == :gone end)
+    for _ <- 1..3, do: send(worker.pid, :heartbeat)
+    assert_receive {:DOWN, ^monitor, :process, _, :normal}
+    eventually(fn -> :sys.get_state(poller).running == %{} end)
+    assert FeltStoreRunner.fiber(id)["status"] == "active"
+
+    assert get_in(worker.run_observation, ["shuttle", "runtime", "dispatched_at"]) ==
+             facts["dispatched_at"]
+
+    assert get_in(worker.run_observation, ["shuttle", "runtime", "run_id"]) == facts["run_id"]
+
+    Env.put_app_env(:prepared_fault, nil)
+
+    for _ <- 1..3 do
+      cycles = :sys.get_state(poller).poll_cycles
+      send(poller, :run_poll_cycle)
+      eventually(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+      assert_unresolved(poller, id, worker.session, facts, root)
+    end
+
+    refute_received :prepared_create
+  end
+
   for conclusion <- [:review, :human_rearm, :accepted_close, :occurrence_rearm, :newer_run] do
     @tag :launch_record
     @tag skip: is_nil(System.find_executable("tmux"))

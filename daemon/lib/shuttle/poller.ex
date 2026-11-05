@@ -4941,6 +4941,23 @@ defmodule Shuttle.Poller do
             {:error, _} -> fiber
           end
 
+        # The successful launch identifies this run even when its document mirror
+        # failed. Keep those prepared facts in the observation used on exit.
+        dispatched_fiber =
+          case Shuttle.Terminal.LaunchAttempts.get(session) do
+            {:ok, %{"dispatch" => facts}} ->
+              runtime = get_in(dispatched_fiber, ["shuttle", "runtime"]) || %{}
+
+              put_in(
+                dispatched_fiber,
+                ["shuttle", "runtime"],
+                Map.merge(runtime, Map.take(facts, ["dispatched_at", "run_id", "session_uuid"]))
+              )
+
+            _ ->
+              dispatched_fiber
+          end
+
         running_meta =
           fiber_id
           |> new_running_meta(dispatched_fiber, session, agent_id_from_fiber(fiber), felt_store)

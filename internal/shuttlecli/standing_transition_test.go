@@ -184,11 +184,13 @@ func TestRecoveryCloseUsesLastServiceEvent(t *testing.T) {
 	}
 }
 
-func TestUnrecordedLaunchRequiresAnObservedExit(t *testing.T) {
+func TestUnrecordedLaunchRejectsRecoveryAndPreparedExit(t *testing.T) {
 	t.Parallel()
 	for _, recovery := range []bool{true, false} {
 		st, req := seedStandingTransition(t)
-		req.DispatchedAt = ""
+		if recovery {
+			req.DispatchedAt = ""
+		}
 		req.Recovery = recovery
 		_, err := st.Update("role", func(f *felt.Felt) error {
 			return shuttle.SetRuntimeField(f, "dispatched_at", "")
@@ -197,7 +199,7 @@ func TestUnrecordedLaunchRequiresAnObservedExit(t *testing.T) {
 			t.Fatal(err)
 		}
 		result, err := applyStandingTransition(req)
-		if err != nil || result.Changed == recovery {
+		if err != nil || result.Changed {
 			t.Fatalf("unrecorded launch (recovery=%t): %+v, %v", recovery, result, err)
 		}
 	}
