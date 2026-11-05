@@ -1,7 +1,7 @@
 import { mountChangeReader } from '../../src/board/workspace/ChangeReader.js'
 import type { ChangeBundle } from '../../src/board/workspace/changeModel.js'
 import { renderMarkdown } from '../../src/board/utils.js'
-import { isHighlighterLoaded } from '@pierre/diffs'
+import { isHighlighterLoaded, disposeHighlighter } from '@pierre/diffs'
 
 declare global {
   interface Window {
@@ -18,6 +18,7 @@ let mounted: ReturnType<typeof mountChangeReader> | undefined
 window.__disposeChange = () => {
   mounted?.dispose()
   mounted = undefined
+  void disposeHighlighter()
 }
 window.__mountChange = bundle => {
   window.__disposeChange()

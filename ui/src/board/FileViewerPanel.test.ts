@@ -7,8 +7,8 @@ const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEven
 const responseWithBlob = (content: string): Response => new Response(content)
 const pdfRenderer = vi.hoisted(() => ({ mount: vi.fn() }))
 vi.mock('./pdfViewer.js', () => ({ mountPdfViewer: pdfRenderer.mount }))
-const changeRenderer = vi.hoisted(() => ({ mount: vi.fn() }))
-vi.mock('./workspace/ChangeReader.js', () => ({ mountChangeReader: changeRenderer.mount }))
+const changeRenderer = vi.hoisted(() => ({ mount: vi.fn(), release: vi.fn() }))
+vi.mock('./workspace/ChangeReader.js', () => ({ mountChangeReader: changeRenderer.mount, releaseChangeHighlighter: changeRenderer.release }))
 vi.mock('./workspace/changeModel.js', () => ({ changeIdentity: async (source: string) => source }))
 afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals(); resetDocumentResources() })
 
@@ -61,7 +61,9 @@ describe('workspace file viewer hooks', () => {
     expect(changeRenderer.mount.mock.calls.at(-1)![2]).toBe(identity)
     expect(changeRenderer.mount.mock.calls.at(-1)![6]).not.toBe(revision)
     expect(dispose).toHaveBeenCalledTimes(1)
+    expect(changeRenderer.release).not.toHaveBeenCalled()
     disposeFileViewer(viewer)
+    expect(changeRenderer.release).toHaveBeenCalledOnce()
     expect(watch.stop).toHaveBeenCalled()
   })
   it('gives a live-arriving image its own full-resolution URL after the strip thumbnail', () => {

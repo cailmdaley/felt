@@ -103,6 +103,7 @@ export function buildFileViewer(
     const wrap = document.createElement('div')
     wrap.className = 'kbn-fileview-change'
     let dispose: (() => void) | undefined
+    let releaseHighlighter: (() => Promise<void>) | undefined
     let disposed = false, generation = 0
     let scroller: HTMLElement | undefined
     const failed = (error: unknown): void => {
@@ -118,8 +119,9 @@ export function buildFileViewer(
     }
     const stop = watchLiveFile(src, source => {
       const revision = ++generation
-      void Promise.all([import('./workspace/ChangeReader.js'), import('./workspace/changeValidation.js'), import('./workspace/changeModel.js')]).then(([{ mountChangeReader }, { parseChangeBundle }, { changeIdentity }]) => {
+      void Promise.all([import('./workspace/ChangeReader.js'), import('./workspace/changeValidation.js'), import('./workspace/changeModel.js')]).then(([{ mountChangeReader, releaseChangeHighlighter }, { parseChangeBundle }, { changeIdentity }]) => {
         if (disposed || revision !== generation) return
+        releaseHighlighter = releaseChangeHighlighter
         const bundle = parseChangeBundle(source)
         const digest = changeIdentity(source)
         dispose?.(); wrap.replaceChildren()
@@ -144,6 +146,7 @@ export function buildFileViewer(
       dispose = undefined
       scroller = undefined
       forgetText(src)
+      void releaseHighlighter?.()
     })
     return wrap
   }

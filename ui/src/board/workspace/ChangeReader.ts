@@ -23,6 +23,7 @@ import { changeFileLabel } from './changeFileLabel.js'
 import { readingAnchor, windowRows, type ChangeReadingState } from './changePosition.js'
 
 registerCustomCSSVariableTheme('shuttle-change', {})
+export { disposeHighlighter as releaseChangeHighlighter }
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   cls: string,
@@ -109,7 +110,7 @@ export function mountChangeReader(
   shell.append(rail, scroll)
   root.append(shell)
   const disposers: (() => void)[] = []
-  let destination: { element: () => Element | undefined; offset: number } | undefined
+  let destination: { element: () => Element | null | undefined; offset: number } | undefined
   const alignDestination = (): void => {
     const element = destination?.element()
     if (element?.isConnected)
@@ -480,14 +481,18 @@ export function mountChangeReader(
     const window = windows.get(host)!
     if (!window.mounted) window.mounted = mountWindow(host, window.hunk, window.file)
     reveal(host)
-    requestAnimationFrame(() => {
-      const excluded = range.side === 'old' ? 'change-addition' : 'change-deletion'
-      const line = host
-        .querySelector('diffs-container')
-        ?.shadowRoot?.querySelector(
+    const target = {
+      element: () => {
+        const excluded = range.side === 'old' ? 'change-addition' : 'change-deletion'
+        return host.querySelector('diffs-container')?.shadowRoot?.querySelector(
           `[data-column-number="${range.from}"]:not([data-line-type="${excluded}"])`,
-        )
-      if (line) reveal(line, true)
+        ) ?? host.querySelector(`.change-plain-row[data-${range.side === 'old' ? 'old' : 'new'}-line="${range.from}"]`)
+      },
+      offset: scroll.clientHeight / 2,
+    }
+    destination = target
+    void window.mounted.ready.then(() => {
+      if (destination === target) alignDestination()
     })
   }
   const addDiff = (parent: HTMLElement, file: ChangeFile, hunks: ChangeHunk[]): void => {
@@ -739,7 +744,6 @@ export function mountChangeReader(
       for (const dispose of disposers) dispose()
       for (const window of windows.values()) window.mounted?.dispose()
       shell.remove()
-      void disposeHighlighter()
     },
   }
 }

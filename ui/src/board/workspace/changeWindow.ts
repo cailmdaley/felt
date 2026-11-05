@@ -83,6 +83,8 @@ export function mountChangeWindow(
   notice.setAttribute('role', 'status')
   host.append(plain, enhanced)
   host.dataset.renderState = 'plain'
+  let finish!: () => void
+  const ready = new Promise<void>(resolve => { finish = resolve })
   const fallback = (reason?: string): void => {
     plain.hidden = false
     enhanced.hidden = true
@@ -90,6 +92,7 @@ export function mountChangeWindow(
     notice.textContent =
       reason ?? `Syntax highlighting unavailable for ${file.path}; showing plain text.`
     host.prepend(notice)
+    finish()
   }
   const display = (): void => {
     const rows = enhanced
@@ -104,10 +107,14 @@ export function mountChangeWindow(
     enhanced.hidden = false
     notice.remove()
     host.dataset.renderState = 'highlighted'
+    finish()
   }
-  const ready = (async () => {
+  void (async () => {
     // Minified and generated source stays readable without tokenizing megabytes on the UI thread.
-    if (lines.reduce((size, line) => size + line.text.length, 0) > 20_000) return
+    if (lines.reduce((size, line) => size + line.text.length, 0) > 20_000) {
+      finish()
+      return
+    }
     try {
       const parsed = parsePatchFiles(windowPatch(window, file))[0]?.files[0]
       if (!parsed) throw new Error('Patch did not parse')
@@ -141,7 +148,6 @@ export function mountChangeWindow(
         containerWrapper: enhanced,
         lineAnnotations: comments.annotations(),
       })
-      display()
     } catch {
       if (!disposed) fallback()
     }
@@ -157,6 +163,7 @@ export function mountChangeWindow(
     },
     dispose(): void {
       disposed = true
+      finish()
       diff?.cleanUp()
       host.replaceChildren()
     },

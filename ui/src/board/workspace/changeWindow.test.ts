@@ -3,13 +3,23 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mountChangeWindow, windowPatch } from './changeWindow.js'
 import type { ChangeFile, ChangeWindow } from './changeModel.js'
 
-const mocks = vi.hoisted(() => ({ parse: vi.fn(), highlight: vi.fn(), render: vi.fn(), cleanUp: vi.fn() }))
+const mocks = vi.hoisted(() => ({ parse: vi.fn(), highlight: vi.fn(), render: vi.fn(), cleanUp: vi.fn(), delayed: false, postRender: undefined as undefined | (() => void) }))
 vi.mock('@pierre/diffs', () => ({
   parsePatchFiles: mocks.parse,
   getSharedHighlighter: mocks.highlight,
-  FileDiff: class { render = mocks.render; cleanUp = mocks.cleanUp },
+  FileDiff: class {
+    constructor(options: { onPostRender: () => void }) {
+      mocks.postRender = options.onPostRender
+      this.render = (...args: unknown[]) => {
+        mocks.render(...args)
+        if (!mocks.delayed) options.onPostRender()
+      }
+    }
+    render: (...args: unknown[]) => void
+    cleanUp = mocks.cleanUp
+  },
 }))
-afterEach(() => { vi.resetAllMocks(); document.body.replaceChildren() })
+afterEach(() => { vi.resetAllMocks(); mocks.delayed = false; document.body.replaceChildren() })
 const window: ChangeWindow = { old_from: 1, old_lines: 1, new_from: 1, new_lines: 1, rows: 2, start: 0 }
 const file: ChangeFile = {
   path: 'app.ts', status: 'modified', role: 'implementation', additions: 1, deletions: 1,
@@ -66,4 +76,20 @@ it('does not render after disposal while a grammar loads', async () => {
   await mounted.ready
   expect(mocks.render).not.toHaveBeenCalled()
   expect(host.childNodes).toHaveLength(0)
+})
+
+it('waits for the rendered window, not just the grammar promise', async () => {
+  mocks.delayed = true
+  mocks.parse.mockReturnValue([{ files: [{}] }])
+  mocks.highlight.mockResolvedValue({})
+  const host = document.createElement('div')
+  const mounted = mountChangeWindow(host, window, file, comments())
+  let ready = false
+  void mounted.ready.then(() => { ready = true })
+  await vi.waitFor(() => expect(mocks.render).toHaveBeenCalled())
+  expect(ready).toBe(false)
+  mocks.postRender!()
+  await mounted.ready
+  expect(ready).toBe(true)
+  mounted.dispose()
 })

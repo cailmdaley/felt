@@ -104,3 +104,19 @@ it('unlocks a refused send without dropping its draft', async () => {
   expect(state.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toBe('Keep this draft')
   expect(state.root.querySelector<HTMLTextAreaElement>('.change-overall')?.disabled).toBe(false)
 })
+it('centers a flag on the requested plain row without syntax highlighting', async () => {
+  const b = bundle()
+  b.files[0].lines[0].text = 'x'.repeat(30_000)
+  b.story = { overview: '', chapters: [], roles: {}, flags: [{ file: 'app.ts', from: 1, side: 'new', text: 'Here' }] }
+  const { root, reader } = mount(b, 'plain-flag')
+  const scroll = reader.scroller
+  Object.defineProperty(scroll, 'clientHeight', { value: 600 })
+  const box = (top: number) => ({ top, bottom: top + 20, height: 20 } as DOMRect)
+  const host = root.querySelector<HTMLElement>('.change-diff-window')!
+  const row = root.querySelector<HTMLElement>('.change-plain-row')!
+  vi.spyOn(scroll, 'getBoundingClientRect').mockImplementation(() => box(0))
+  vi.spyOn(host, 'getBoundingClientRect').mockImplementation(() => box(1000 - scroll.scrollTop))
+  vi.spyOn(row, 'getBoundingClientRect').mockImplementation(() => box(1200 - scroll.scrollTop))
+  root.querySelector<HTMLButtonElement>('.change-flag button')!.click()
+  await vi.waitFor(() => expect(row.getBoundingClientRect().top).toBe(300))
+})
