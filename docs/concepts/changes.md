@@ -42,7 +42,8 @@ Work added to the base after divergence doesn't appear reversed in the change.
 No common ancestor is an error.
 Dirty and untracked files are excluded.
 
-Capture pins diff formatting, three context lines, Myers alignment and rename detection.
+Capture pins diff formatting, three context lines, Myers alignment, rename detection and `core.bigFileThreshold=512m`.
+A file-type change retains both Git sections, including a binary notice on either side.
 An isolated bare Git repository ignores `.gitattributes` in both captured trees and the worktree, repository-local attributes and global attributes.
 A file marked `-diff` gets a text patch if Git classifies its contents as text.
 Files Git classifies as binary carry its binary notice rather than their contents.

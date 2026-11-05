@@ -212,7 +212,7 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 	isolated := func(args ...string) (string, error) {
 		prefix := []string{"--git-dir=" + capture, "-c", "core.attributesFile=" + os.DevNull,
 			"-c", "diff.suppressBlankEmpty=false", "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
-			"-c", "diff.renames=true", "-c", "diff.context=3", "-c", "diff.interHunkContext=0", "-c", "diff.algorithm=myers", "-c", "diff.indentHeuristic=false", "-c", "core.quotePath=true"}
+			"-c", "core.bigFileThreshold=512m", "-c", "diff.renames=true", "-c", "diff.context=3", "-c", "diff.interHunkContext=0", "-c", "diff.algorithm=myers", "-c", "diff.indentHeuristic=false", "-c", "core.quotePath=true"}
 		cmd := env.Command("git", append(prefix, args...)...)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
