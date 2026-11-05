@@ -107,7 +107,10 @@ export function buildFileViewer(
     let scroller: HTMLElement | undefined
     const failed = (error: unknown): void => {
       if (disposed) return
-      dispose?.(); dispose = undefined; scroller = undefined
+      if (scroller) {
+        options.onState?.({ status: 'error', error, hasContent: true })
+        return
+      }
       const message = document.createElement('div'); message.className = 'change-load-error'; message.setAttribute('role', 'alert')
       message.textContent = `Could not load ${basename(fullPath)}: ${error instanceof Error ? error.message : 'Invalid change bundle'}`
       wrap.replaceChildren(message)
@@ -127,7 +130,13 @@ export function buildFileViewer(
         onTextPane?.(scroller)
         options.onState?.({ status: 'ready' })
       }).catch(error => { if (revision === generation) failed(error) })
-    }, failed, { active: options.active, loadOnce: options.active === false })
+    }, failed, {
+      active: options.active,
+      loadOnce: options.active === false,
+      onRecover: () => {
+        if (!disposed && scroller) options.onState?.({ status: 'ready' })
+      },
+    })
     liveViewSubscriptions.set(wrap, stop)
     viewerDisposers.set(wrap, () => {
       disposed = true

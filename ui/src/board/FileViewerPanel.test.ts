@@ -40,12 +40,22 @@ describe('workspace file viewer hooks', () => {
       const scroller = document.createElement('div'); scroller.textContent = bundle.title; root.replaceChildren(scroller)
       return { scroller, dispose }
     })
-    const viewer = buildFileViewer('', '/review.change.json', 'host-a')
+    const onState = vi.fn()
+    const viewer = buildFileViewer('', '/review.change.json', 'host-a', undefined, undefined, { onState })
     document.body.append(viewer)
     watch.content!(JSON.stringify({ version: 2, title: 'First', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'head', commits: [], files: [], story: null }))
     await vi.waitFor(() => expect(viewer.textContent).toBe('First'))
     const first = changeRenderer.mount.mock.calls.at(-1)!
     const identity = first[2], revision = first[6]
+    const reader = viewer.firstElementChild
+    watch.error!(new Error('daemon restarting'))
+    expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error', hasContent: true }))
+    expect(viewer.firstElementChild).toBe(reader)
+    expect(dispose).not.toHaveBeenCalled()
+    watch.recover!()
+    expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
+    expect(viewer.firstElementChild).toBe(reader)
+    expect(changeRenderer.mount).toHaveBeenCalledTimes(1)
     watch.content!(JSON.stringify({ version: 2, title: 'Rebaked', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'head', commits: [], files: [], story: null }))
     await vi.waitFor(() => expect(viewer.textContent).toBe('Rebaked'))
     expect(changeRenderer.mount.mock.calls.at(-1)![2]).toBe(identity)
