@@ -19,7 +19,7 @@ Name `areas` by concept, explaining where the change sits, its parts and what it
 - **Tell what the change is.** What it adds, how it's meant to be used, how the parts fit. A reader finishes knowing the feature, not the bugs you fixed on the way.
 - **Order by understanding, not by file tree.** Each chapter's `why_here` says why it comes at that point.
 - **Stops are short.** The lines that carry the meaning, usually under 40. A new file gets several stops in reading order, or one, never the whole file. Anything you leave out stays in Remaining, on purpose.
-- **The story should take ten minutes.** If it can't, the change may want splitting.
+- **Three to five chapters, a handful of stops.** The story should take five minutes. If it can't, the change may want splitting.
 - **Plain language.** Say what the code does and why.
 - **Leave tests out.** They have their own lane.
 

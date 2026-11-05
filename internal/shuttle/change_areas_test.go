@@ -13,6 +13,12 @@ func TestChangeAreas(t *testing.T) {
 	if a[0].Name != "Other" || a[1].Name != "Tests" || a[1].Role != "test" {
 		t.Fatalf("fallbacks: %#v", a)
 	}
+	c.Story = &ChangeStory{Areas: []ChangeArea{{Name: "Everything", Files: []string{"**"}}}}
+	c.Files = []ChangeFile{{Path: "a.go", Role: "implementation", Additions: 1}, {Path: "a_test.go", Role: "test", Additions: 2}, {Path: "go.sum", Role: "generated", Additions: 3}}
+	a = resolveChangeAreas(c)
+	if len(a) != 3 || a[0].Lines != 1 || a[1].Name != "Tests" || a[2].Name != "Generated" {
+		t.Fatalf("tests and generated files keep their role's area: %#v", a)
+	}
 	if !areaMatch("ui/**/a.ts", "ui/a.ts") || !areaMatch("ui/**/a.ts", "ui/src/a.ts") || areaMatch("ui/*.ts", "ui/src/a.ts") {
 		t.Fatal("glob semantics")
 	}

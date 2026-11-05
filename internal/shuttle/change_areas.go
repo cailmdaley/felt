@@ -30,6 +30,8 @@ func areaMatch(pattern, file string) bool {
 	return match(parts, names)
 }
 
+// resolveChangeAreas gives each file its authored area. Tests and generated files always
+// keep their role's area, so the map shows how much of a change they are.
 func resolveChangeAreas(c *Change) []ChangeArea {
 	areas := []ChangeArea{}
 	var authored []ChangeArea
@@ -46,6 +48,9 @@ func resolveChangeAreas(c *Change) []ChangeArea {
 	for _, file := range c.Files {
 		index := -1
 		for i, a := range authored {
+			if file.Role == "test" || file.Role == "generated" {
+				break
+			}
 			for _, pattern := range a.Files {
 				if areaMatch(pattern, file.Path) {
 					index = i
