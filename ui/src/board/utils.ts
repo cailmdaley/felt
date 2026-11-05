@@ -22,7 +22,7 @@ marked.use(mathDollars())
 // Custom renderer for code blocks to integrate with Prism
 const renderer = new marked.Renderer()
 renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
-  const language = lang || 'plaintext'
+  const language = lang?.split(/\s/)[0].replace(/[^\w+-]/g, '') || 'plaintext'
   // Prism will highlight after DOM insertion
   const escapedCode = escapeHtml(text)
   return `<pre class="md-code-block language-${language}"><code class="language-${language}">${escapedCode}</code></pre>`
