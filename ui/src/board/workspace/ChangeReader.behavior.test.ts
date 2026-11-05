@@ -49,6 +49,15 @@ it('folds viewed cards, remembers them on return, and opens them when unmarked',
   expect(restored.open).toBe(true)
 })
 
+it('keeps overall note and Send in the sidebar rather than after the diff', () => {
+  const { root } = mount(bundle(), 'review-dock')
+  expect(root.querySelector('.change-sidebar .change-overall')).not.toBeNull()
+  expect(root.querySelector('.change-sidebar .change-send')).not.toBeNull()
+  expect(root.querySelector('.change-main .change-overall')).toBeNull()
+  expect(root.querySelector('.change-review-count')?.textContent).toBe('0 comments')
+  expect(root.querySelector<HTMLElement>('.change-review-dock')?.dataset.empty).toBe('true')
+})
+
 it('keeps lists folded and shows comment counts on their rows', () => {
   const { root } = mount(bundle(), 'compact-comments')
   const card = root.querySelector<HTMLDetailsElement>('.change-file')!

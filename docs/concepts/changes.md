@@ -195,7 +195,9 @@ Marking a file or stop viewed folds it to its header, and it stays folded on ret
 Unmark it or click its header to open it again.
 Folded rows retain their comment counts; flag jumps open the file they need.
 A folded file must be opened before it can first be marked viewed.
-Click a diff line number to add an anchored comment, and add an overall note under Your review.
+Click a diff line number to add an anchored comment.
+The overall note, comment count and Send review stay at the foot of the rail on desktop and below the scroller on phone.
+This small review dock stays quiet while the draft is empty.
 
 Drafts stay in this browser by document owner/path. Every comment and the overall note keep their own base and head across rebakes.
 Earlier-snapshot comments appear in the review list, not on different code at the same line number.

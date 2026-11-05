@@ -118,3 +118,24 @@
 .change-file-counts { font: var(--type-meta)/var(--leading-prose) var(--font-mono); white-space: nowrap; color: var(--ws-ink-muted); }
 .change-file:not([open]) .change-file-head { padding: 7px 10px; }
 .change-file-comments { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-owed); white-space: nowrap; }
+
+.change-sidebar { display: flex; flex-direction: column; min-height: 0; }
+.change-sidebar .change-contents { flex: 1; min-height: 0; }
+.change-review-dock { flex: none; padding: 12px; border-top: 1px solid var(--ws-hairline-soft); background: var(--ws-paper); font-size: var(--type-meta); }
+.change-review-dock > .change-section-note { display: none; }
+.change-reader .change-review-dock textarea { min-height: 60px; height: 60px; font-size: var(--type-note); }
+.change-review-dock .change-send { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 6px; }
+.change-review-count { color: var(--ws-ink-muted); }
+.change-review-dock .change-send-status { flex-basis: 100%; font-size: var(--type-meta); }
+.change-review-dock[data-empty="true"] textarea { border-color: var(--ws-hairline-soft); }
+.change-review-dock .change-send-status:empty { display: none; }
+.change-review-dock[data-empty="true"] .change-send > button { background: transparent; color: var(--ws-ink-muted); }
+@container (max-width: 760px) {
+  .change-reader { grid-template-rows: auto minmax(0, 1fr) auto; }
+  .change-sidebar { display: contents; }
+  .change-sidebar .change-contents { grid-row: 1; }
+  .change-scroll { grid-row: 2; }
+  .change-review-dock { grid-row: 3; display: flex; align-items: center; gap: 10px; padding: 6px 12px; }
+  .change-reader .change-review-dock textarea { min-height: 40px; height: 40px; flex: 1; width: 0; }
+  .change-review-dock .change-send { padding: 0; max-width: 48%; }
+}

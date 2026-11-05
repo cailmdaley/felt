@@ -40,7 +40,9 @@ export function mountChangeReader(
   scroll.tabIndex = -1
   const main = el('main', 'change-main')
   scroll.append(main)
-  shell.append(rail, scroll)
+  const sidebar = el('div', 'change-sidebar')
+  sidebar.append(rail)
+  shell.append(sidebar, scroll)
   root.append(shell)
   const navigation = createChangeNavigation(shell, rail, scroll, main, prefix)
   const { section, mark, reveal, sections, updateProgress } = navigation
@@ -92,6 +94,7 @@ export function mountChangeReader(
     canSend,
     reviewTarget,
   )
+  sidebar.append(review.dock)
   // The slot wrapper lives in light DOM, so workspace typography and form controls apply to comments.
   const mountWindow = (host: HTMLElement, window: ChangeWindow, file: ChangeFile) => {
     return review.track(mountChangeWindow(host, window, file, review.windowComments(file)))
@@ -340,7 +343,7 @@ export function mountChangeReader(
           : 'All files are included above.',
       ),
     )
-  section('Your review').element.append(...review.content)
+  main.append(...review.content)
   updateProgress()
   const anchor = reading.anchor
   const anchorHosts = () => [

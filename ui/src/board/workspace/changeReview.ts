@@ -30,6 +30,9 @@ export function createChangeReview(
       element.hidden = !n
     }
   }
+  const dock = el('aside', 'change-review-dock')
+  dock.setAttribute('aria-label', 'Your review')
+  const count = el('span', 'change-review-count')
   const note = el('textarea', 'change-overall')
   note.placeholder = 'Your overall note…'
   note.setAttribute('aria-label', 'Overall review note')
@@ -56,6 +59,10 @@ export function createChangeReview(
   })
   const paintSend = (): void => {
     paintCounts()
+    const n = draft.comments.length
+    count.textContent = `${n} comment${n === 1 ? '' : 's'}`
+    dock.dataset.empty = String(!draft.note.trim() && !n)
+    draftComments.hidden = !n
     const anchors = [
       ...(draft.note.trim() ? [draft] : []),
       ...draft.comments.filter((c) => c.text.trim()),
@@ -78,6 +85,7 @@ export function createChangeReview(
       ? `This draft also contains notes anchored to earlier snapshots (${previous}); Send preserves those anchors.`
       : 'Drafts stay on this browser and keep their snapshot anchors across rebakes.'
     reviewAnchor.textContent = `To ${reviewTarget()}. ${current} ${explanation}`
+    dock.title = reviewAnchor.textContent
     sendButton.disabled =
       draftState.busy ||
       !send ||
@@ -238,10 +246,12 @@ export function createChangeReview(
   }
   renderDraftComments()
   const foot = el('div', 'change-send')
-  foot.append(sendButton, status)
+  foot.append(count, sendButton, status)
+  dock.append(reviewAnchor, note, foot)
   paintSend()
   return {
-    content: [reviewAnchor, draftComments, note, foot],
+    content: [draftComments],
+    dock,
     commentCount(file: ChangeFile, element: HTMLElement) {
       counts.push({ file, element })
       paintCounts()

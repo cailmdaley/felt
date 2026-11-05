@@ -17,7 +17,7 @@ it('holds a navigation target through diff-window resizing until the reader scro
   const target = [...root.querySelectorAll<HTMLElement>('.change-section')].at(-1)!
   let absoluteTop = 1000
   vi.spyOn(target, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, absoluteTop - mounted.scroller.scrollTop, 100, 100))
-  const link = [...root.querySelectorAll<HTMLButtonElement>('.change-contents button')].find(button => button.textContent === 'Your review')!
+  const link = [...root.querySelectorAll<HTMLButtonElement>('.change-contents button')].find(button => button.textContent === 'Remaining')!
   link.click()
   expect(mounted.scroller.scrollTop).toBe(984)
   absoluteTop = 2000
@@ -41,7 +41,7 @@ it('renders the story prose and keeps metadata readable', () => {
   expect(root.querySelector('.change-file-head .change-role')?.textContent).toBe('generated · important')
   expect(root.querySelector('.change-metadata')?.textContent).toContain('no text hunks')
   const navigation = [...root.querySelectorAll('.change-contents button')].map(button => button.textContent)
-  expect(navigation).toContain('Your review')
+  expect(root.querySelector('.change-review-dock .change-send')).not.toBeNull()
   expect(navigation).not.toContain('Your review  0/0')
   expect(navigation).toContain('Story  0/1')
   mounted.dispose()

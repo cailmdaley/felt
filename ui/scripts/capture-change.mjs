@@ -26,7 +26,7 @@ try {
       await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
       await page.locator('.ws-selected .ws-report-chip[data-document-key$="/family.change.json"]').click()
       const reader = page.locator('.ws-selected .change-reader')
-      await reader.locator('diffs-container [data-line-index]').first().waitFor()
+      await reader.locator('.change-map-tile').first().waitFor()
       await page.evaluate(() => document.fonts.ready)
       const settle = async () => {
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
@@ -47,12 +47,12 @@ try {
         await settle()
         await page.screenshot({ path: `${shots}/real-${device}-file-${index + 1}.png` })
       }
-      await reader.getByRole('button', { name: /^Your review/ }).click()
+      await reader.getByRole('textbox', { name: 'Overall review note' }).fill('A short note beside the change.')
       await settle()
-      assert.equal(await reader.getByRole('heading', { name: 'Your review', exact: true }).evaluate(heading => {
-        const box = heading.getBoundingClientRect(), viewport = heading.closest('.change-scroll').getBoundingClientRect()
-        return box.top >= viewport.top && box.bottom <= viewport.bottom
-      }), true, 'review navigation stays on its target after nearby windows finish rendering')
+      assert.equal(await reader.locator('.change-review-dock').evaluate(dock => {
+        const box = dock.getBoundingClientRect()
+        return box.top >= 0 && box.bottom <= innerHeight
+      }), true, 'review controls remain visible without scrolling to the end')
       await page.screenshot({ path: `${shots}/real-${device}-review.png` })
       const geometry = await reader.evaluate(root => {
         const scroll = root.querySelector('.change-scroll')
