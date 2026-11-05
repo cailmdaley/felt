@@ -9,7 +9,7 @@ import { getBrowser } from './browser.mjs'
 import { checkChangeSecurity } from './changeSecurity.mjs'
 import { buildShuttle, bakeChange } from '../scripts/bake-change-fixture.mjs'
 import { createChangeGitFixture } from '../scripts/change-git-fixture.mjs'
-import { gitChangedRows, collectDOMWindows, readDOMWindow, assertDOMConservation } from '../scripts/change-dom-contract.mjs'
+import { gitChangedRows, collectDOMWindows, readDOMWindow, assertDOMConservation, PAINT_FAULTS } from '../scripts/change-dom-contract.mjs'
 
 const dist = process.env.CHANGE_HARNESS_DIST || fileURLToPath(new URL('../harness-change-dist/', import.meta.url))
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2' }
@@ -69,6 +69,25 @@ try {
         assert.fail('Failure injection did not remove a conserved source row')
       }
       const result = assertDOMConservation(truth, windows)
+      if (!bundle.story) {
+        const index = windows.findLastIndex(window => window.renderer === 'highlighted')
+        const target = page.locator('.change-diff-window').nth(index)
+        for (const [fault, inject] of Object.entries(PAINT_FAULTS)) {
+          await target.evaluate((host, source) => {
+            const row = host.querySelector('diffs-container').shadowRoot.querySelector('[data-line][data-line-type="change-addition"]')
+            row.dataset.paintFaultRow = ''; (0, eval)(`(${source})`)(row, host)
+          }, inject.toString())
+          const damaged = [...windows]; damaged[index] = await readDOMWindow(target, index)
+          assert.throws(() => assertDOMConservation(truth, damaged), /Missing \d+\/\d+ Git rows|Blank diff window/, `The gate must see a ${fault} row`)
+          await target.evaluate(host => {
+            host.querySelector('[data-paint-fault]')?.remove()
+            const row = host.querySelector('diffs-container').shadowRoot.querySelector('[data-paint-fault-row]')
+            row.removeAttribute('style'); delete row.dataset.paintFaultRow
+          })
+          assert.deepEqual((await readDOMWindow(target, index)).rows, windows[index].rows, `The ${fault} fault must clear before the next one`)
+        }
+        console.log(`PASS paint gate: ${Object.keys(PAINT_FAULTS).join(', ')} rows are missing rows`)
+      }
       assert.ok(windows.some(window => window.renderer === 'highlighted'), 'The gate must inspect actual highlighted shadow-DOM rows')
       if (blockGrammar) assert.ok(windows.filter(window => window.file === 'main.go').every(window => window.renderer === 'plain'), 'Blocked Go grammar must retain plain rows')
       assert.ok(windows.some(window => window.file === 'large.txt'), 'The virtual large-file windows must be visited')

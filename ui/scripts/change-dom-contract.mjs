@@ -65,6 +65,18 @@ export function assertDOMConservation(truth, windows) {
   return { rows: seen.size, windows: windows.length }
 }
 
+/** Damage one rendered row so a gate run can prove it notices paint, not only the DOM. */
+export const PAINT_FAULTS = {
+  transparent: row => { row.style.setProperty('opacity', '0', 'important') },
+  'zero height': row => { for (const [name, value] of [['height', '0'], ['min-height', '0'], ['max-height', '0'], ['padding', '0'], ['overflow', 'hidden']]) row.style.setProperty(name, value, 'important') },
+  covered: (row, host) => {
+    const box = document.createElement('div')
+    box.dataset.paintFault = ''; box.textContent = 'return u.Admin'
+    box.style.cssText = 'position:absolute;inset:0;z-index:50;background:#e1f4e4'
+    host.style.position = 'relative'; host.append(box)
+  },
+}
+
 /** Visit each virtual window while mounted, traversing open shadow roots as well as light DOM. */
 export async function collectDOMWindows(page) {
   await page.locator('details.change-file').evaluateAll(cards => { for (const card of cards) card.open = true })
@@ -87,9 +99,31 @@ export async function collectDOMWindows(page) {
 export function readDOMWindow(window, index) {
   return window.evaluate((host, index) => {
     const rows = []
+    const up = node => node.parentElement ?? node.getRootNode().host
+    // elementFromPoint stops at a shadow host; descend to the element really on top.
+    const topmost = (x, y) => {
+      let top = document.elementFromPoint(x, y)
+      while (top?.shadowRoot) {
+        const inner = top.shadowRoot.elementFromPoint(x, y)
+        if (!inner || inner === top) break
+        top = inner
+      }
+      return top
+    }
+    // A row a reader can see: sized, not transparent, and on top where it sits.
+    const painted = node => {
+      if (!node.getClientRects().length || getComputedStyle(node).visibility === 'hidden') return false
+      node.scrollIntoView({ block: 'center', behavior: 'instant' })
+      const box = node.getBoundingClientRect()
+      if (!box.width || !box.height) return false
+      for (let at = node; at; at = up(at)) if (Number(getComputedStyle(at).opacity) === 0) return false
+      for (let at = topmost(Math.min(box.left + box.width / 2, innerWidth - 1), Math.min(box.top + box.height / 2, innerHeight - 1)); at; at = up(at)) if (at === node) return true
+      return false
+    }
     const visit = root => {
       for (const node of root.querySelectorAll('*')) {
-        const visible = node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden'
+        const row = node.matches('.change-plain-row, [data-line]')
+        const visible = row && painted(node)
         if (visible && node.matches('.change-plain-row')) {
           const type = node.getAttribute('data-line-type')
           rows.push({ line: node.getAttribute(type === 'change-deletion' ? 'data-old-line' : 'data-new-line'), type, text: node.querySelector('[data-line-text]')?.textContent ?? '' })
