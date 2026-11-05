@@ -50,10 +50,10 @@ LOG := $(HOME)/.shuttle/shuttle.log
 endif
 # The daemon is a Mix release: its beam process boots with an absolute
 # `-boot <release>/releases/<vsn>/start` argument, and the release lives at
-# bin/rel in a checkout (or a tarball root elsewhere). Matching the release's
-# boot script identifies the daemon beam without matching the Go CLI or
-# pgrep's own shell command (`[r]el`).
-PIDPATTERN := [b]in/rel/releases/.*/start
+# bin/rel or bin/rel.generation-* in a checkout. Matching the release's boot
+# script identifies the daemon beam without matching the Go CLI or pgrep's
+# own shell command (`[b]in`).
+PIDPATTERN := [b]in/rel[^/]*/releases/.*/start
 # mix, run against the host's own Erlang. A shell the daemon started (a worker,
 # a resumed session) can inherit the release's ERTS — bin/rel/erts-*/bin and
 # bin/rel/bin at the head of PATH, plus erl's ROOTDIR/BINDIR/PROGNAME/EMU — and

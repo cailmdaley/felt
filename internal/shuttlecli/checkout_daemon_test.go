@@ -6,11 +6,41 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
+
+func TestCheckoutDaemonPIDPatternRecognizesReleaseGenerations(t *testing.T) {
+	t.Parallel()
+	makefile, err := os.ReadFile("../../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration := regexp.MustCompile(`(?m)^PIDPATTERN := (.+)$`).FindSubmatch(makefile)
+	if len(declaration) != 2 {
+		t.Fatal("Makefile must declare PIDPATTERN")
+	}
+	pattern, err := regexp.Compile(string(declaration[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, release := range []string{"bin/rel", "bin/rel.generation-ABC123"} {
+		for _, prefix := range []string{"", "/checkout with spaces/"} {
+			command := "beam.smp -boot " + prefix + release + "/releases/0.1.0/start -mode embedded"
+			if !pattern.MatchString(command) {
+				t.Errorf("PIDPATTERN %q misses booting daemon %q", pattern, command)
+			}
+		}
+	}
+	for _, command := range []string{"shuttle daemon start", "pgrep -f " + string(declaration[1]), "beam.smp -boot /other/releases/0.1.0/start"} {
+		if pattern.MatchString(command) {
+			t.Errorf("PIDPATTERN %q matches non-daemon %q", pattern, command)
+		}
+	}
+}
 
 func TestSelectedCheckoutRootIsRefusedByBothReaders(t *testing.T) {
 	env := testEnv(t)
