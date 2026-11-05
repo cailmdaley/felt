@@ -49,5 +49,7 @@ describe('daemon-provided exit capability through the real composite read model'
     expect(card.originStale).toBeUndefined()
     expect(card.planningPending).toBe(true)
     expect(offlineExplanation(card)).toContain('waiting for Git sync')
+    expect(lifecycleVerbsFor(card, true)).toEqual([])
+    expect(moveDestinations(card, 'drafts')).toEqual([])
   })
 })

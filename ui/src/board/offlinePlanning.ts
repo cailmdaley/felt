@@ -6,6 +6,7 @@ export function canPlanOffline(card: KanbanCard): boolean {
 }
 
 export function exitRefusal(card: KanbanCard): string | undefined {
+  if (card.planningPending) return offlineExplanation(card)
   if ((card.originStale || (card.shuttleKind && !card.shuttleHost && card.localPlanning === false)) && !canPlanOffline(card)) return offlineExplanation(card)
 }
 

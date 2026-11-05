@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 
 const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
-const shots = await mkdtemp(join(tmpdir(), 'shuttle-offline-planning-'))
+const shots = await mkdtemp(join(process.env.SHUTTLE_OWNER_DOWN_ARTIFACT_DIR || tmpdir(), 'shuttle-offline-planning-'))
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
   const errors = []

@@ -1470,7 +1470,7 @@ export class KanbanModal {
     opts: { cold?: boolean; due?: string | null } = {},
   ): void {
     if (card.originStale || exitRefusal(card)) {
-      if (canPlanOffline(card) && horizon === 'stashed' && !opts.cold && opts.due === undefined) void this.commitRest(card, '')
+      if (!exitRefusal(card) && canPlanOffline(card) && horizon === 'stashed' && !opts.cold && opts.due === undefined) void this.commitRest(card, '')
       else this.showBanner(exitRefusal(card) ?? 'Configuration changes need the execution owner; no local write was made.', 'info')
       return
     }

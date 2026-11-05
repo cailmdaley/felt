@@ -734,7 +734,7 @@ export class KanbanSurfaceRenderer {
     el.append(dot, name, hint)
     const seat = card.shuttleSeat === true && card.shuttleRole ? `seat of roles/${card.shuttleRole}` : ''
     el.title = [card.name, seat, detail, card.outcome].filter(Boolean).join(' — ')
-    el.setAttribute('aria-label', `${card.name}${seat ? `, ${seat}` : ''}${isStale ? ` — ${offlineExplanation(card)}` : ''}`)
+    el.setAttribute('aria-label', `${card.name}${seat ? `, ${seat}` : ''}${isStale || card.planningPending ? ` — ${offlineExplanation(card)}` : ''}`)
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a')) return
@@ -1523,7 +1523,7 @@ export class KanbanSurfaceRenderer {
     if (lensState.dim) el.classList.add('kbn-card--lens-off')
     if (lensState.ghost) el.classList.add('kbn-card--lens-ghost')
     el.setAttribute('role', 'listitem')
-    const ariaSuffix = isStale
+    const ariaSuffix = isStale || card.planningPending
       ? ` — ${offlineExplanation(card)}`
       : ''
     const lensSuffix = lensState.ghost ? ' — resting, shown for this cycle' : ''

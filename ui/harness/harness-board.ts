@@ -261,6 +261,7 @@ interface MockFiber {
     role?: string
     seat?: boolean
     schedule?: { expr: string; tz: string }
+    runtime?: Record<string, string>
     pulse?: { every: string; window?: { start: string; end: string; tz: string } }
   }
 }
@@ -664,7 +665,7 @@ const MOCK_FEED = {
       { ...fiber({ id: 'fixtures/offline/armed', uid: 'offline-armed', name: 'Armed work — execution unknown', status: 'active',
         shuttle: { ...shuttleBlock(), host: 'kelvin' } }), origin: 'kelvin' },
       { ...fiber({ id: 'fixtures/offline/standing', uid: 'offline-standing', name: 'Standing run — ready for review', status: 'closed',
-        shuttle: { ...shuttleBlock(), kind: 'standing', host: 'kelvin', schedule: { expr: '0 9 * * *' } } }), origin: 'kelvin', local_planning: false },
+        shuttle: { ...shuttleBlock(), kind: 'standing', host: 'kelvin', schedule: { expr: '0 9 * * *', tz: 'UTC' } } }), origin: 'kelvin', local_planning: false },
       { ...fiber({ id: 'fixtures/offline/removed', uid: 'offline-removed', name: 'Removed host — retirement is available', status: 'active',
         shuttle: { ...shuttleBlock(), host: 'retired', runtime: { session_uuid: 'unconcluded' } } }), origin: 'retired', local_planning: true },
       { ...fiber({ id: 'fixtures/offline/unowned-inconclusive', uid: 'offline-unowned-inconclusive', name: 'Unowned — execution inconclusive', status: 'active',
