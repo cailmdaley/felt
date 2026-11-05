@@ -1,0 +1,27 @@
+/*
+ * A typeset formula paints only inside its own box. `\smash`, `\raisebox`, `\rule`
+ * and `\kern` can all put ink outside KaTeX's layout, and paint containment clips
+ * every one of them. Containment needs an atomic box, so an inline formula is an
+ * inline-block, and `max-width` keeps that box within the column. The padding is
+ * room for glyph overhang; the matching negative margin keeps the text spacing.
+ */
+.math-box {
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: -0.1em;
+  padding: 0.1em;
+  contain: paint;
+}
+
+/* A display formula wider than the column scrolls inside its box. */
+.math-box-display {
+  display: block;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.math-box-display > .katex-display {
+  margin: 0;
+}

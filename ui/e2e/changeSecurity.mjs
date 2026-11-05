@@ -10,7 +10,7 @@ export async function checkChangeSecurity(browser, url, modes = ['default', 'unt
     await page.goto(url); await page.waitForFunction(() => typeof window.__mountChange === 'function')
     const attack = `window.__pwn=(window.__pwn||0)+1;fetch('/api/v1/dispatch',{method:'POST',body:JSON.stringify({force:true})})`
     const image = `<img src=x onerror="${attack}">`
-    const corpus = [`[${image}](https://example.com)`, `before <code>inside ${image}`, `before <pre>inside ${image}\n\ntext`, `<kbd>a <svg onload="${attack}">`, '<http://x"onmouseover="alert(1)>', '[x](javascript:alert(1))', '[x](data:text/html,evil)', '[**<svg onload="alert(1)">**](https://example.com)'].join('\n\n')
+    const corpus = [`[${image}](https://example.com)`, `before <code>inside ${image}`, `before <pre>inside ${image}\n\ntext`, `<kbd>a <svg onload="${attack}">`, '<http://x"onmouseover="alert(1)>', '[x](javascript:alert(1))', '[x](data:text/html,evil)', '[**<svg onload="alert(1)">**](https://example.com)', '$x$'].join('\n\n')
     const snapshot = { version: 1, title: 'Security corpus', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'head', commits: [], files: [], story: { overview: corpus, flags: [], chapters: [] } }
     for (const mode of modes) {
       await page.evaluate(({ snapshot, corpus, mode }) => {
@@ -35,14 +35,21 @@ export async function checkChangeSecurity(browser, url, modes = ['default', 'unt
       label('<div style="position:fixed;inset:0;z-index:9;background:url(https://evil.test/note.png)" class="change-diff-window">No changes to review.</div>'),
       label('<a href="https://evil.test/x" target="_self" rel="opener">read</a>'),
       '$\\smash{\\raisebox{-20em}{\\colorbox{#fff}{covered}}}$',
+      '$\\href{https://evil.test/href}{x}$ $\\url{https://evil.test/url}$ $\\includegraphics{https://evil.test/math.png}$',
+      '$\\htmlClass{change-diff-window}{x}$ $\\htmlId{root}{x}$ $\\htmlStyle{position:fixed}{x}$ $\\htmlData{fiber=x}{x}$',
     ].join('\n\n')
     await page.evaluate(snapshot => window.__mountChange(snapshot), { ...snapshot, story: { ...snapshot.story, overview: prose } })
+    await page.locator('.change-prose .math-box').first().waitFor({ state: 'attached' })
     await page.waitForTimeout(150)
     const painted = await page.locator('.change-prose').first().evaluate(root => ({
-      styled: root.querySelectorAll('[style], .katex, .change-diff-window').length,
+      styled: [...root.querySelectorAll('[style], .katex, .change-diff-window')].filter(node => !node.closest('.math-box')).length,
+      formulas: root.querySelectorAll('.math-box').length,
+      active: root.querySelectorAll('.math-box :is(a, img, [href], [src], [id], [data-fiber], .change-diff-window)').length,
       links: [...root.querySelectorAll('a[href]')].map(link => [link.rel, link.target]),
     }))
-    assert.equal(painted.styled, 0, 'Story prose must carry no style, typeset math or board classes')
+    assert.equal(painted.styled, 0, 'Story prose must carry no style or board classes outside a formula box')
+    assert.equal(painted.formulas, 8, 'Every story formula must be typeset')
+    assert.equal(painted.active, 0, 'Math commands must produce nothing active')
     assert.ok(painted.links.length > 0 && painted.links.every(([rel, target]) => rel === 'noopener noreferrer' && target === '_blank'), 'Every story link must be noopener noreferrer in a new tab')
     assert.deepEqual(outside, [], 'Opening a story must not reach the network')
     // A forged head must not become a review prompt, even through a direct mount.

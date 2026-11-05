@@ -82,18 +82,43 @@ export async function collectDOMWindows(page) {
   await page.locator('details.change-file').evaluateAll(cards => { for (const card of cards) card.open = true })
   // Opening a generated-file card creates its windows on the toggle event.
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-  const windows = page.locator('.change-diff-window'), out = []
-  for (let index = 0; index < await windows.count(); index++) {
-    const window = windows.nth(index)
-    await window.evaluate(host => host.scrollIntoView({ block: 'start' }))
-    // Let optional grammar imports finish (or fail) before inspecting the visible result.
-    await page.waitForLoadState('networkidle')
-    // Playwright's CSS engine pierces open shadow roots. An empty window is a failure,
-    // not a reason to skip the file or to count Go's serialized patch as rendered.
-    await window.locator('[data-line]:visible, .change-plain-row:visible').first().waitFor({ state: 'attached', timeout: 15_000 }).catch(() => {})
-    out.push(await readDOMWindow(window, index))
-  }
+  const out = []
+  for (let index = 0; index < await page.locator('.change-diff-window').count(); index++) out.push(await visitDOMWindow(page, index))
   return out
+}
+
+/** Bring one window into its mounted range and read what it paints. */
+export async function visitDOMWindow(page, index) {
+  const window = page.locator('.change-diff-window').nth(index)
+  await window.evaluate(host => host.scrollIntoView({ block: 'start' }))
+  // Let optional grammar imports finish (or fail) before inspecting the visible result.
+  await page.waitForLoadState('networkidle')
+  // Playwright's CSS engine pierces open shadow roots. An empty window is a failure,
+  // not a reason to skip the file or to count Go's serialized patch as rendered.
+  await window.locator('[data-line]:visible, .change-plain-row:visible').first().waitFor({ state: 'attached', timeout: 15_000 }).catch(() => {})
+  return readDOMWindow(window, index)
+}
+
+/** Formulas stay in boxes that fit the page, and only those boxes keep the payloads off the rows they can reach. */
+export async function assertMathContained(page, windows, payloads) {
+  await page.waitForFunction(() => document.querySelector('.katex') && !document.querySelector('.math-pending'))
+  const shape = await page.evaluate(() => {
+    const display = document.querySelector('.math-box-display')
+    return {
+      unboxed: [...document.querySelectorAll('.katex')].filter(formula => !formula.closest('.math-box')).length,
+      pageOverflow: document.documentElement.scrollWidth - innerWidth,
+      displayScrolls: display.scrollWidth > display.clientWidth,
+      displayFits: display.getBoundingClientRect().right <= innerWidth,
+    }
+  })
+  assert.deepEqual(shape, { unboxed: 0, pageOverflow: 0, displayScrolls: true, displayFits: true }, 'Formulas must stay in boxes that fit the page')
+  const uncontained = await page.addStyleTag({ content: '.math-box { contain: none !important; }' })
+  for (const file of Object.keys(payloads)) {
+    const index = windows.findIndex(window => window.file === file && window.lane === 'Story')
+    const { rows } = await visitDOMWindow(page, index)
+    assert.ok(rows.length < windows[index].rows.length, `The payload for ${file} must cover its rows once uncontained, or this gate proves nothing`)
+  }
+  await uncontained.evaluate(style => style.remove())
 }
 
 export function readDOMWindow(window, index) {

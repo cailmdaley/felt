@@ -142,6 +142,7 @@ describe('Markdown final DOM boundary', () => {
     it('keeps only tags and attributes Markdown produces', () => {
       const root = renderDOM(`${STRICT_CORPUS}\n\n3. item\n\n| a |\n|:-|\n| b |\n\n- [x] done\n\n\`\`\`js\nx\n\`\`\``, { untrusted: true })
       for (const node of root.querySelectorAll('*')) {
+        if (node.closest('.math-box')) continue
         expect(TAGS).toContain(node.tagName)
         for (const attr of node.attributes) expect(ATTRS[node.tagName] ?? []).toContain(attr.name)
         for (const name of node.classList) expect(name).toMatch(/^(md-link|md-inline-code|md-code-block|language-js)$/)
@@ -163,10 +164,66 @@ describe('Markdown final DOM boundary', () => {
       }
     })
 
-    it('keeps untrusted math as literal source, because KaTeX can paint over code', () => {
-      const root = renderDOM('$\\smash{\\raisebox{-20em}{\\colorbox{#fff}{x}}}$ and $C_\\ell$', { untrusted: true })
-      expect(root.querySelectorAll('.katex, .math-pending, [style]')).toHaveLength(0)
-      expect([...root.querySelectorAll('code.md-inline-code')].map(node => node.textContent)).toContain('$C_\\ell$')
+    it('typesets math only inside its box', () => {
+      const root = renderDOM('$C_\\ell$ then\n\n$$\n\\frac{1}{2}\n$$\n\n$\\smash{\\raisebox{-20em}{\\colorbox{#fff}{x}}}$ $\\rule{5em}{5em}$ $\\kern-500em x$', { untrusted: true })
+      expect(root.querySelectorAll('.math-box')).toHaveLength(4 + 1)
+      expect(root.querySelectorAll('.math-box-display .katex-display')).toHaveLength(1)
+      expect(root.querySelector('.math-pending')).toBeNull()
+      for (const node of root.querySelectorAll('.katex, [style]')) expect(node.closest('.math-box')).not.toBeNull()
+    })
+
+    it('forges nothing through a hand-written placeholder', () => {
+      const root = renderDOM(label('<span class="math-pending kbn-wikilink" style="position:fixed" title="t" href="https://evil.test" data-tex="y" data-file-path="/etc/passwd">z</span><span class="kbn-wikilink" data-tex="n">plain</span><b class="math-pending" data-tex="b">bold</b>'), { untrusted: true })
+      expect(root.querySelectorAll('.math-box')).toHaveLength(1)
+      expect(root.querySelector('.math-box')?.textContent).toBe('y')
+      expect(root.innerHTML).not.toMatch(/position:fixed|evil\.test|etc\/passwd|kbn-wikilink|data-tex/)
+      expect(root.textContent).toContain('plain')
+    })
+
+    const ACTIVE = [
+      '\\href{https://evil.test}{x}', '\\href{javascript:alert(1)}{x}', '\\url{https://evil.test}',
+      '\\includegraphics{https://evil.test/a.png}', '\\htmlClass{change-diff-window}{x}', '\\htmlId{root}{x}',
+      '\\htmlStyle{position:fixed}{x}', '\\htmlData{fiber=x}{x}',
+    ]
+    for (const opts of [{ untrusted: true }, undefined]) {
+      it.each(ACTIVE)(`makes %s inert with ${opts ? 'untrusted' : 'trusted'} text`, tex => {
+        const box = renderDOM(`$${tex}$`, opts).querySelector('.math-box')!
+        expect(box.querySelectorAll('a, img, [href], [src], [id], .change-diff-window')).toHaveLength(0)
+        for (const node of box.querySelectorAll('*')) {
+          expect([...node.attributes].map(attr => attr.name).filter(name => name.startsWith('data-'))).toEqual([])
+          expect(node.getAttribute('style') ?? '').not.toContain('position')
+        }
+      })
+    }
+
+    it('caps sizes and macro expansion', () => {
+      expect(renderMarkdown('$\\rule{2000em}{2000em}$', { untrusted: true })).toContain('border-right-width:20em')
+      const bomb = `$\\def\\a{\\b\\b}\\def\\b{\\c\\c}\\def\\c{\\d\\d}\\def\\d{\\e\\e}\\def\\e{\\f\\f}\\def\\f{\\g\\g}\\def\\g{xxxxxxxx}${'\\a'.repeat(16)}$`
+      expect(renderDOM(bomb, { untrusted: true }).querySelector('.math-box .katex-error')?.getAttribute('title')).toContain('Too many expansions')
+    })
+
+    it('keeps the source of a formula KaTeX cannot finish', () => {
+      const tex = `${'{'.repeat(50_000)}x${'}'.repeat(50_000)}`
+      for (const opts of [{ untrusted: true }, undefined]) {
+        const root = renderDOM(`before $${tex}$ after`, opts)
+        expect(root.querySelector('.math-box')).toBeNull()
+        expect(root.textContent).toContain('before')
+        expect(root.textContent).toContain(tex)
+      }
+    })
+
+    it('typesets TeX that DOMPurify would read as a URL', () => {
+      for (const opts of [{ untrusted: true }, undefined]) {
+        expect(renderDOM('$f:X\\to Y$ and $a<b$', opts).querySelectorAll('.math-box')).toHaveLength(2)
+      }
+    })
+
+    it('keeps the source readable where the sanitizer drops data-tex', () => {
+      for (const opts of [{ untrusted: true }, undefined]) {
+        const root = renderDOM('$[x]>0$ and $a-->b$', opts)
+        expect(root.querySelector('.math-box')).toBeNull()
+        expect(root.textContent).toContain('$[x]>0$ and $a-->b$')
+      }
     })
 
     it('does not leak the strict mode into a following trusted render', () => {

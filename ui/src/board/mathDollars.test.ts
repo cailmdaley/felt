@@ -55,6 +55,18 @@ describe('dollar-delimited math', () => {
 })
 
 describe('math before KaTeX has loaded', () => {
+  it('passes an untrusted placeholder with exactly its class and source', async () => {
+    vi.resetModules()
+    const { renderMarkdown: render } = await import('./utils.js')
+    const root = document.createElement('div')
+    root.innerHTML = render('[<span class="math-pending other" style="color:red" title="t" data-tex="y" data-display="true" data-fiber="f">z</span>](https://ok.test) $x$', { untrusted: true })
+    const placeholders = [...root.querySelectorAll('span')]
+    expect(placeholders.map(node => [...node.attributes].map(attr => [attr.name, attr.value]))).toEqual([
+      [['class', 'math-pending'], ['data-tex', 'y'], ['data-display', 'true']],
+      [['class', 'math-pending'], ['data-tex', 'x'], ['data-display', 'false']],
+    ])
+  })
+
   it('draws the source in a placeholder and typesets it when KaTeX arrives', async () => {
     vi.resetModules()
     const fresh = await import('./mathDollars.js')

@@ -117,7 +117,7 @@ All collection fields are arrays, including when empty.
 }
 ```
 
-`overview`, chapter `narrative` and stop `note` carry untrusted Markdown: only the tags Markdown itself produces, no images, styles or board classes, and `$...$` math stays literal source because KaTeX's styled output could paint over a diff.
+`overview`, chapter `narrative` and stop `note` carry untrusted Markdown: only the tags Markdown itself produces, no images, styles or board classes. `$...$` math is typeset after sanitizing, with KaTeX's `trust` off and its sizes capped, inside a paint-contained box, so a formula paints nothing outside that box and a wide display formula scrolls within it.
 Chapters have unique ids and are ordered; `why_here` explains that order.
 Stop importance is `critical`, `important`, `supporting` or `context`.
 A flag uses the same file and range fields, plus `text` explaining what to inspect first.

@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url'
 import { getBrowser } from './browser.mjs'
 import { checkChangeSecurity } from './changeSecurity.mjs'
 import { buildShuttle, bakeChange } from '../scripts/bake-change-fixture.mjs'
-import { createChangeGitFixture } from '../scripts/change-git-fixture.mjs'
-import { gitChangedRows, collectDOMWindows, readDOMWindow, assertDOMConservation, PAINT_FAULTS } from '../scripts/change-dom-contract.mjs'
+import { createChangeGitFixture, MATH_PAYLOADS } from '../scripts/change-git-fixture.mjs'
+import { gitChangedRows, collectDOMWindows, readDOMWindow, assertDOMConservation, assertMathContained, PAINT_FAULTS } from '../scripts/change-dom-contract.mjs'
 
 const dist = process.env.CHANGE_HARNESS_DIST || fileURLToPath(new URL('../harness-change-dist/', import.meta.url))
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2' }
@@ -101,6 +101,8 @@ try {
       if (bundle.story) {
         for (const lane of ['Story', 'Tests', 'Remaining']) assert.ok(windows.some(window => window.lane === lane), `${lane} must be inspected`)
         assert.ok(windows.some(window => window.file === 'generated.ts'), 'Folded generated files must be opened and inspected')
+        await assertMathContained(page, windows, MATH_PAYLOADS)
+        console.log(`PASS math paint containment: ${name} (${Object.keys(MATH_PAYLOADS).length} escaping payloads held off their rows)`)
       }
       console.log(`PASS change DOM conservation: ${name} (${result.rows} Git rows, ${result.windows} rendered windows${blocked ? `, ${blocked} grammar requests blocked` : ''})`)
     } finally { await context.close() }

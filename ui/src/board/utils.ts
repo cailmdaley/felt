@@ -1,7 +1,8 @@
 import { marked } from 'marked'
 import createDOMPurify, { type Config } from 'dompurify'
-import { mathDollars } from './mathDollars.js'
+import { mathDollars, typesetSanitized } from './mathDollars.js'
 import 'katex/dist/katex.min.css'
+import './math.css'
 
 // Configure marked for safe rendering with KaTeX math support.
 // `breaks` stays OFF (CommonMark): a fiber's outcome/body is real markdown —
@@ -17,7 +18,7 @@ marked.setOptions({
 
 // $..$ inline math, $$..$$ display math — Pandoc's dollar rules, so prices
 // ("$5 … $1,232") stay prose. See mathDollars.ts.
-marked.use(mathDollars(() => untrustedEnabled))
+marked.use(mathDollars())
 
 // Custom renderer for code blocks to integrate with Prism
 const renderer = new marked.Renderer()
@@ -35,7 +36,7 @@ renderer.codespan = ({ text }: { text: string }) => {
 renderer.link = ({ href, text }: { href: string; text: string }) => renderLink(href, text)
 renderer.html = ({ text }: { text: string }) => untrustedEnabled ? escapeHtml(text) : text
 
-// Strip KaTeX HTML from image alt text (the math extension renders $…$ inside alt)
+// Strip math placeholders from image alt text (the math extension renders $…$ inside alt)
 renderer.image = ({ href, text: alt }: { href: string; text?: string }) => renderImage(href, alt)
 
 marked.use({ renderer })
@@ -181,13 +182,13 @@ interface RenderMarkdownOptions {
    * that cannot open a reference must not dress one up as a link.
    */
   wikilinks?: boolean
-  /** Treat content as worker-authored: Markdown's own output, safe links, no images and no typeset math. */
+  /** Treat content as worker-authored: Markdown's own output, safe links, no images, and math only through its contained box. */
   untrusted?: boolean
 }
 
-// Only prose, code, tables and KaTeX's HTML spans belong in Markdown output.
+// Only prose, code, tables and math placeholders belong in Markdown output.
 // No SVG/MathML, embedded documents, forms, arbitrary data attributes or handlers.
-// KaTeX uses inline styles to position its glyphs.
+// A placeholder's `data-tex` is TeX, never a URL, so URI rules do not apply to it.
 const MARKDOWN_SANITIZER: Config = {
   ALLOWED_TAGS: [
     'a', 'b', 'blockquote', 'br', 'code', 'del', 'details', 'div', 'em',
@@ -201,6 +202,7 @@ const MARKDOWN_SANITIZER: Config = {
     'data-fiber', 'data-wikilink-raw', 'data-file-path', 'data-file-url-alt',
     'data-file-path-alt', 'data-tex', 'data-display',
   ],
+  ADD_URI_SAFE_ATTR: ['data-tex'],
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 }
@@ -208,26 +210,38 @@ const MARKDOWN_SANITIZER: Config = {
 // layout, and only the classes this renderer writes, so it can neither paint over
 // code, load a URL nor pose as board UI. `align`, `start` and `checked` carry table
 // alignment, list numbering and task state, and affect nothing outside their element.
-// KaTeX needs inline styles and its own classes, the same channel that paints
-// over a diff, so math stays literal source in this mode.
+// The one addition is the math placeholder, a span carrying exactly its class and
+// `data-tex`/`data-display`: KaTeX's styles come after sanitizing, with `trust: false`,
+// inside a box that clips what the formula paints (mathDollars.ts, math.css).
 const UNTRUSTED_MARKDOWN_SANITIZER: Config = {
   ALLOWED_TAGS: [
     'a', 'blockquote', 'br', 'code', 'del', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'hr', 'input', 'li', 'ol', 'p', 'pre', 'strong', 'table', 'tbody', 'td', 'th',
     'thead', 'tr', 'ul',
   ],
-  ALLOWED_ATTR: ['align', 'checked', 'class', 'href', 'start'],
+  ALLOWED_ATTR: ['align', 'checked', 'class', 'data-tex', 'data-display', 'href', 'start'],
+  ADD_URI_SAFE_ATTR: ['data-tex'],
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 }
 const UNTRUSTED_CLASS = /^(?:md-link|md-inline-code|md-code-block|language-[\w+-]+)$/
+const PLACEHOLDER_CLASS = 'math-pending'
+const PLACEHOLDER_ATTR = new Set(['class', 'data-tex', 'data-display'])
 let markdownPurifier: ReturnType<typeof createDOMPurify> | undefined
 function sanitizeMarkdown(html: string, untrusted: boolean): string {
   if (!markdownPurifier) {
     markdownPurifier = createDOMPurify(window)
-    markdownPurifier.addHook('uponSanitizeAttribute', (_node, attr) => {
+    markdownPurifier.addHook('uponSanitizeElement', (node, data) => {
+      if (untrustedEnabled && data.tagName === 'span') data.allowedTags.span = (node as Element).classList.contains(PLACEHOLDER_CLASS)
+    })
+    markdownPurifier.addHook('uponSanitizeAttribute', (node, attr) => {
+      const placeholder = node.nodeName === 'SPAN'
+      if (untrustedEnabled && (placeholder ? !PLACEHOLDER_ATTR.has(attr.attrName) : attr.attrName.startsWith('data-'))) {
+        attr.keepAttr = false
+        return
+      }
       if (untrustedEnabled && attr.attrName === 'class') {
-        attr.attrValue = attr.attrValue.split(/\s+/).filter(name => UNTRUSTED_CLASS.test(name)).join(' ')
+        attr.attrValue = attr.attrValue.split(/\s+/).filter(name => placeholder ? name === PLACEHOLDER_CLASS : UNTRUSTED_CLASS.test(name)).join(' ')
         attr.keepAttr = attr.attrValue !== ''
         return
       }
@@ -340,8 +354,9 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
     untrustedEnabled = false
   }
   // Last step: marked's HTML/text token state and renderer callbacks are not
-  // a security boundary. Nothing may add markup after this sanitization.
-  return sanitizeMarkdown(html, opts?.untrusted === true)
+  // a security boundary. Only KaTeX's output, built from a placeholder's TeX,
+  // may add markup after this sanitization.
+  return typesetSanitized(sanitizeMarkdown(html, opts?.untrusted === true))
 }
 
 /**
