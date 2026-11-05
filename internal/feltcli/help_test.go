@@ -528,6 +528,7 @@ var rootHelpOmits = map[string]string{
 	"init":         "one-time store creation",
 	"migrate":      "one-time layout conversion",
 	"backfill-ids": "one-time identity plumbing for a store's owner",
+	"recover-move": "recovery plumbing for an interrupted subtree move",
 	"setup":        "installation",
 	"update":       "installation",
 	"uninstall":    "installation",
