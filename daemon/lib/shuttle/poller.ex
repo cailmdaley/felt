@@ -5295,7 +5295,10 @@ defmodule Shuttle.Poller do
               case fetch_fiber_full(fiber_id, state) do
                 {:ok, current} ->
                   key = running_key(state, fiber_id)
-                  running = Map.update!(state.running, key, &Map.put(&1, :run_observation, current))
+
+                  running =
+                    Map.update!(state.running, key, &Map.put(&1, :run_observation, current))
+
                   %{state | running: running}
 
                 {:error, _} ->

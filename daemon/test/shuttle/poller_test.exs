@@ -134,18 +134,39 @@ defmodule Shuttle.PollerTest do
         do: {"simulated arm failure", 1},
         else: MockRunner.cmd("shuttle", args, opts)
     end
+
     def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
   end
 
   test "force start refuses a failed standing rearm before terminal launch" do
     id = "tests/refused-arm"
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-    MockRunner.set_shuttle(id, "kind: standing\nhost: test-host\nagent: claude-sonnet\nproject_dir: #{MockRunner.felt_root()}\n", "closed")
-    {:ok, poller} = start_poller!(runner: RefusedArmRunner, felt_stores: [MockRunner.felt_root()], boot_quarantine: true, poll_interval_ms: 600_000)
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: standing\nhost: test-host\nagent: claude-sonnet\nproject_dir: #{MockRunner.felt_root()}\n",
+      "closed"
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        runner: RefusedArmRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      )
+
     await_boot_cycle!(poller)
-    assert {:error, {:arm_refused, %{message: message}}} = Poller.dispatch_fiber(poller, id, force: true)
+
+    assert {:error, {:arm_refused, %{message: message}}} =
+             Poller.dispatch_fiber(poller, id, force: true)
+
     assert message =~ "simulated arm failure"
-    refute Enum.any?(MockRunner.commands(), fn {command, args} -> command == "tmux" and "new-session" in args end)
+
+    refute Enum.any?(MockRunner.commands(), fn {command, args} ->
+             command == "tmux" and "new-session" in args
+           end)
+
     assert MockRunner.fiber(id)["status"] == "closed"
   end
 
@@ -4730,6 +4751,7 @@ defmodule Shuttle.PollerTest do
     # the doc on the way (the re-arm itself is exercised in
     # dispatch_integration_test against a real store).
     fiber_id = "tests/standing-awaiting-refuses-adhoc"
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     fiber =
       make_fiber(fiber_id, %{
@@ -7453,12 +7475,33 @@ defmodule Shuttle.PollerTest do
   test "claimed standing worker exit observes its claim dispatch stamp" do
     id = "tests/claim-standing"
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-    MockRunner.set_shuttle(id, "kind: standing\nhost: test-host\nagent: claude-sonnet\nruntime:\n  dispatched_at: 2026-01-02T00:00:00Z\n  run_id: adhoc-123\n", "active")
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: standing\nhost: test-host\nagent: claude-sonnet\nruntime:\n  dispatched_at: 2026-01-02T00:00:00Z\n  run_id: adhoc-123\n",
+      "active"
+    )
+
     MockRunner.add_tmux_session("capture-standing")
-    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()], boot_quarantine: true, poll_interval_ms: 600_000)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      )
+
     await_boot_cycle!(poller)
-    assert {:ok, _} = Poller.claim_session(poller, id, "capture-standing", session_uuid: "claimed-standing-uuid")
-    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) != "2026-01-02T00:00:00Z"
+
+    assert {:ok, _} =
+             Poller.claim_session(poller, id, "capture-standing",
+               session_uuid: "claimed-standing-uuid"
+             )
+
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) !=
+             "2026-01-02T00:00:00Z"
+
     notify_worker_exit(poller, id)
     :sys.get_state(poller, @state_timeout)
     assert MockRunner.fiber(id)["status"] == "closed"
@@ -7467,12 +7510,40 @@ defmodule Shuttle.PollerTest do
   test "watcher exit cannot conclude a newer dispatch than its observation" do
     id = "tests/superseded-standing"
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-    MockRunner.set_shuttle(id, "kind: standing\nhost: test-host\nagent: claude-sonnet\nruntime:\n  run_id: adhoc-123\n", "active")
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: standing\nhost: test-host\nagent: claude-sonnet\nruntime:\n  run_id: adhoc-123\n",
+      "active"
+    )
+
     MockRunner.add_tmux_session("capture-superseded")
-    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()], boot_quarantine: true, poll_interval_ms: 600_000)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      )
+
     await_boot_cycle!(poller)
-    assert {:ok, _} = Poller.claim_session(poller, id, "capture-superseded", session_uuid: "old-run")
-    assert {:ok, _} = Shuttle.CLI.run(["-C", MockRunner.felt_root(), "mark-runtime", id, "--dispatched-at", "2099-01-01T00:00:00Z", "--run-id", "scheduled-new"])
+
+    assert {:ok, _} =
+             Poller.claim_session(poller, id, "capture-superseded", session_uuid: "old-run")
+
+    assert {:ok, _} =
+             Shuttle.CLI.run([
+               "-C",
+               MockRunner.felt_root(),
+               "mark-runtime",
+               id,
+               "--dispatched-at",
+               "2099-01-01T00:00:00Z",
+               "--run-id",
+               "scheduled-new"
+             ])
+
     path = MockRunner.fiber(id)["path"]
     before = File.read!(path)
     notify_worker_exit(poller, id)

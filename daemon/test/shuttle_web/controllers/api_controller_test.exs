@@ -299,6 +299,7 @@ defmodule ShuttleWeb.APIControllerTest do
     # dispatch is the human go-ahead: it bypasses the awaiting gate, re-arms the
     # document, and spawns without a separate `shuttle accept/resume`.
     fiber_id = "tests/api-awaiting-refuses-adhoc"
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     fiber =
       make_fiber(fiber_id, %{

@@ -76,6 +76,7 @@ defmodule Shuttle.FiberDoc do
     new_fm = raw_fm |> FrontmatterEdit.apply(ops) |> ensure_single_trailing_newline()
 
     updated = "---\n" <> new_fm <> "---" <> body <> ensure_trailing_newline(body)
+
     case replace(path, original, updated) do
       :ok -> :ok
       {:error, reason} -> raise reason
@@ -89,7 +90,11 @@ defmodule Shuttle.FiberDoc do
       "before_sha256" => :crypto.hash(:sha256, original) |> Base.encode16(case: :lower),
       "after" => IO.iodata_to_binary(updated)
     }
-    case Shuttle.CLI.run(["patch-document"], input: Jason.encode!(request) <> "\n", timeout_ms: :infinity) do
+
+    case Shuttle.CLI.run(["patch-document"],
+           input: Jason.encode!(request) <> "\n",
+           timeout_ms: :infinity
+         ) do
       {:ok, _} -> :ok
       failure -> {:error, "conditional document patch failed: #{inspect(failure)}"}
     end
