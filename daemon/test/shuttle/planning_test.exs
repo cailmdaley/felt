@@ -113,6 +113,11 @@ defmodule Shuttle.OwnerExitTest do
     assert fiber == owner["fiber"]
   end
 
+  test "local owner rows remain native rather than gaining mirror metadata" do
+    local = row() |> Map.put("origin", "hub") |> put_in(["fiber", "shuttle", "host"], "hub")
+    assert [^local] = OwnerExit.reconcile([local], [local], %{}, "hub")
+  end
+
   test "a returning healthy owner wins before Git sync and exposes the waiting copy" do
     owner = row()
 
@@ -195,6 +200,10 @@ defmodule Shuttle.OwnerExitTest do
     report = %{state: "ok", peers: [], rejected: []}
     policy = OwnerExit.policy(doc, report, nil, [])
     assert OwnerExit.removed?("worker", policy)
+
+    for host <- [nil, "", Shuttle.Poller.own_host_id()],
+        do: refute(OwnerExit.removed?(host, policy))
+
     assert OwnerExit.eligible?(row(%{"status" => "active"})["fiber"], policy)
 
     for {doc, report} <- [

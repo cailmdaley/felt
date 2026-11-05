@@ -38,7 +38,9 @@ try {
     await page.keyboard.press('n')
     const applied = await applying
     assert.equal(applied.status(), 200, await applied.text())
-    assert.notEqual((await applied.json()).saved_locally, true)
+    const output = await applied.text()
+    assert.match(output, /worker: stopped/)
+    assert.doesNotMatch(output, /Saved a local exit copy/)
     await page.reload()
     await page.locator(selector).first().waitFor()
     const feed = await page.evaluate(async () => (await fetch('/api/v1/fibers/composite')).json())

@@ -140,7 +140,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
   end
 
   test "rejects unsupported document mutations before writing or forwarding" do
-    for origin <- [nil, "candide"], value <- [nil, %{"vizier" => ["fable"]}] do
+    for origin <- [nil, "candide"],
+        field <- ["collaboration", "routed"],
+        value <- [nil, true, %{"vizier" => ["fable"]}] do
       conn =
         post(
           api_conn(),
@@ -148,12 +150,12 @@ defmodule ShuttleWeb.FeltEditControllerTest do
           Jason.encode!(%{
             "fiber_id" => "tests/remote-tags",
             "origin" => origin,
-            "collaboration" => value
+            field => value
           })
         )
 
       assert conn.status == 400
-      assert conn.resp_body =~ "unsupported edit fields: collaboration"
+      assert conn.resp_body =~ "unsupported edit fields: #{field}"
     end
   end
 

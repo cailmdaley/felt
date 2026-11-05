@@ -104,7 +104,9 @@ defmodule Shuttle.OwnerExit do
         true -> []
       end
 
-    known = Enum.flat_map(entries ++ discovery.peers ++ discovery.rejected, &names/1)
+    known =
+      [nil, "", Poller.own_host_id()] ++
+        Enum.flat_map(entries ++ discovery.peers ++ discovery.rejected, &names/1)
 
     complete =
       is_list(configured) ||
@@ -123,9 +125,7 @@ defmodule Shuttle.OwnerExit do
   end
 
   def removed?(host, policy \\ policy()),
-    do:
-      host not in [nil, "", Poller.own_host_id()] && policy.complete &&
-        !MapSet.member?(policy.known, host)
+    do: policy.complete && !MapSet.member?(policy.known, host)
 
   def eligible?(fiber, policy \\ policy())
 
@@ -186,30 +186,35 @@ defmodule Shuttle.OwnerExit do
       |> Map.filter(fn {id, rows} -> id != nil && length(rows) == 1 end)
 
     owners =
-      Enum.map(owners, fn row ->
-        copy =
-          case copies[uid(row)] do
-            [copy] -> if host(copy) == host(row), do: copy
-            _ -> nil
-          end
+      Enum.map(owners, fn
+        %{"origin" => ^local} = row ->
+          row
 
-        capable = copy != nil && eligible?(copy["fiber"], policy) && safe_owner?(row, policy)
-        pending = copy != nil && eligible?(copy["fiber"], policy) && newer?(copy, row)
+        row ->
+          copy =
+            case copies[uid(row)] do
+              [copy] -> if host(copy) == host(row), do: copy
+              _ -> nil
+            end
 
-        fiber =
-          if stale[row["origin"]] && pending && capable do
-            Map.drop(row["fiber"], @exit_fields)
-            |> Map.merge(Map.take(copy["fiber"], @exit_fields))
-          else
-            row["fiber"]
-          end
+          capable = copy != nil && eligible?(copy["fiber"], policy) && safe_owner?(row, policy)
+          pending = copy != nil && eligible?(copy["fiber"], policy) && newer?(copy, row)
 
-        Map.merge(row, %{
-          "fiber" => fiber,
-          "local_exit" => capable,
-          "exit_copy_pending" =>
-            pending && !stale[row["origin"]] && quiescent?(row["fiber"]) && is_nil(row["runtime"])
-        })
+          fiber =
+            if stale[row["origin"]] && pending && capable do
+              Map.drop(row["fiber"], @exit_fields)
+              |> Map.merge(Map.take(copy["fiber"], @exit_fields))
+            else
+              row["fiber"]
+            end
+
+          Map.merge(row, %{
+            "fiber" => fiber,
+            "local_exit" => capable,
+            "exit_copy_pending" =>
+              pending && !stale[row["origin"]] && quiescent?(row["fiber"]) &&
+                is_nil(row["runtime"])
+          })
       end)
 
     seen = MapSet.new(owners, &uid/1)

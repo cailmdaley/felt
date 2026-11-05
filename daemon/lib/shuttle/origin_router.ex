@@ -139,7 +139,7 @@ defmodule Shuttle.OriginRouter do
     timeout = Keyword.get(opts, :forward_timeout_ms, default_forward_timeout_ms())
     url = Remote.url_for(remote, path)
 
-    body = payload |> Map.drop(["origin", :origin, "routed", :routed]) |> Jason.encode!()
+    body = payload |> Map.drop(["origin", :origin]) |> Jason.encode!()
     result = client.post_once(url, body, "application/json", timeout, [{"x-shuttle-routed", "1"}])
 
     case result do

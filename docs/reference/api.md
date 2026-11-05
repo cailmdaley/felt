@@ -24,6 +24,8 @@ behaviour on a multi-host setup.
 | **host-scoped** | The route answers for *this* machine only, because what it reads (a transcript, an event stream, a ledger) lives on the machine that wrote it. |
 | **fan-in** | A `/composite` sibling that merges this host's live read with each configured remote's cached read, reporting per-origin freshness. |
 
+Lifecycle, transition and felt-edit infer a synchronized document's owner when `origin` is absent or local. Healthy owners receive every request; safe-exit mirrors are the explicit owner-away exception. Forwarded POSTs carry `x-shuttle-routed: 1` rather than adding JSON fields. Updated receivers return 422 on a routed owner mismatch instead of forwarding again.
+
 There is no shared routing plug: each controller decides for itself. The
 per-controller `@moduledoc` says which, and is the thing to read when this table
 is not enough.

@@ -42,7 +42,7 @@ defmodule ShuttleWeb.FeltEditController do
 
   alias Shuttle.{Felt, Poller}
 
-  @edit_fields ~w(fiber_id origin routed add remove set unset due name body)
+  @edit_fields ~w(fiber_id origin add remove set unset due name body)
 
   def create(conn, %{"fiber_id" => fiber_id} = params) when is_binary(fiber_id) do
     case Map.keys(params) -- @edit_fields do
