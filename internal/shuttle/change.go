@@ -104,12 +104,21 @@ type ChangeHunk struct {
 
 // ChangeWindow is an independently renderable, bounded piece of a hunk.
 type ChangeWindow struct {
-	OldFrom  int    `json:"old_from"`
-	OldLines int    `json:"old_lines"`
-	NewFrom  int    `json:"new_from"`
-	NewLines int    `json:"new_lines"`
-	Patch    string `json:"patch"`
-	Rows     int    `json:"rows"`
+	OldFrom  int          `json:"old_from"`
+	OldLines int          `json:"old_lines"`
+	NewFrom  int          `json:"new_from"`
+	NewLines int          `json:"new_lines"`
+	Patch    string       `json:"patch"`
+	Rows     int          `json:"rows"`
+	Lines    []ChangeLine `json:"lines"`
+}
+
+// ChangeLine is a display row with zero for an absent side's line number.
+type ChangeLine struct {
+	Kind string `json:"kind"`
+	Old  int    `json:"old"`
+	New  int    `json:"new"`
+	Text string `json:"text"`
 }
 
 type ChangeReport struct {

@@ -73,7 +73,10 @@ Each hunk has `{file, old_from, old_lines, new_from, new_lines, patch, windows}`
 Its `patch` includes the file headers and complete hunk text needed by the renderer.
 Go alone reads Git's diff and decides coverage.
 The reader uses these supplied boundaries and flags rather than reconstructing them from a top-level patch.
-`windows` contains bounded rendering pieces, each with `{old_from, old_lines, new_from, new_lines, patch, rows}`.
+`windows` contains bounded rendering pieces, each with `{old_from, old_lines, new_from, new_lines, patch, rows, lines}`.
+Each `lines` entry has `{kind, old, new, text}` for plain-text rendering without parsing the patch.
+`kind` is `addition`, `deletion`, `context` or `note`; absent-side line numbers are zero.
+`text` omits the patch row's leading marker, and `rows` counts all entries, including no-newline notes.
 These let the reader mount long hunks a piece at a time without another diff parser.
 Story stops acquire their own `hunks` array containing just the selected excerpts.
 Each file’s `remaining` array contains the changed lines no stop shows, with up to three adjacent context lines and the same renderable shape.

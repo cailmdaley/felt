@@ -133,7 +133,22 @@ func (h ChangeHunk) windows() []ChangeWindow {
 		}
 		rows := h.rows[start:end]
 		slice := h.withRows(rows)
-		windows = append(windows, ChangeWindow{OldFrom: slice.OldFrom, OldLines: slice.OldLines, NewFrom: slice.NewFrom, NewLines: slice.NewLines, Patch: slice.Patch, Rows: len(rows)})
+		lines := make([]ChangeLine, 0, len(rows))
+		for _, row := range rows {
+			line := ChangeLine{Text: row.text[1:]}
+			switch row.text[0] {
+			case '+':
+				line.Kind, line.New = "addition", row.new
+			case '-':
+				line.Kind, line.Old = "deletion", row.old
+			case ' ':
+				line.Kind, line.Old, line.New = "context", row.old, row.new
+			case '\\':
+				line.Kind = "note"
+			}
+			lines = append(lines, line)
+		}
+		windows = append(windows, ChangeWindow{OldFrom: slice.OldFrom, OldLines: slice.OldLines, NewFrom: slice.NewFrom, NewLines: slice.NewLines, Patch: slice.Patch, Rows: len(rows), Lines: lines})
 		start = end
 	}
 	return windows
