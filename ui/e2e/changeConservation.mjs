@@ -26,7 +26,7 @@ try {
   const { repo, base, head, story, hostile } = createChangeGitFixture(dir)
   const truth = gitChangedRows(repo, base, head)
   assert.ok(truth.size > 300, 'The independent Git oracle must include the multi-window change')
-  for (const file of hostile) assert.ok([...truth.keys()].some(key => JSON.parse(key)[0] === file), `No Git rows for ${JSON.stringify(file)}`)
+  for (const file of [...hostile, 'docs/guide.md', 'config/app.yaml']) assert.ok([...truth.keys()].some(key => JSON.parse(key)[0] === file), `No Git rows for ${JSON.stringify(file)}`)
   const binary = buildShuttle(dir)
   const plain = bakeChange(binary, repo, base, head).bundle
   const authored = bakeChange(binary, repo, base, head, story).bundle
@@ -69,6 +69,7 @@ try {
         assert.fail('Failure injection did not remove a conserved source row')
       }
       const result = assertDOMConservation(truth, windows)
+      for (const file of ['docs/guide.md', 'config/app.yaml']) assert.ok(windows.some(window => window.file === file), `${file} must be inspected`)
       if (!bundle.story) {
         const index = windows.findLastIndex(window => window.renderer === 'highlighted')
         const target = page.locator('.change-diff-window').nth(index)
