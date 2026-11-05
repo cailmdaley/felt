@@ -47,6 +47,7 @@ A file-type change retains both Git sections, including a binary notice on eithe
 An isolated bare Git repository ignores `.gitattributes` in both captured trees and the worktree, repository-local attributes and global attributes.
 A file marked `-diff` gets a text patch if Git classifies its contents as text.
 Files Git classifies as binary carry its binary notice rather than their contents.
+NUL bytes and invalid UTF-8 render lossily; the reader isn't a byte-for-byte representation of arbitrary file contents.
 
 ## Version 1 bundle
 
@@ -151,7 +152,8 @@ A whole-file stop includes all changed lines on its selected side.
 Go emits unshown changed lines as `remaining` excerpts with a little context, splitting around shown changes rather than repeating them.
 Remaining renders exactly those excerpts, not the complete original hunks.
 Tests stay in their own lane even when cited by the story.
-Files with no text hunks don't enter the denominator and remain visible in the inventory.
+Line counts and coverage exclude every file Git classifies as binary, including textual files above the pinned big-file threshold.
+Binary, mode-only and pure-rename files have no text hunks, don't enter the denominator and remain visible in the inventory.
 
 `--check` never writes.
 Invalid references fail the command and leave an existing bundle untouched.
