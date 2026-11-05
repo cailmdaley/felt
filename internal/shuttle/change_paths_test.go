@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,7 @@ func TestBuildChangePathsAndFileTypes(t *testing.T) {
 	for _, name := range []string{"sp ace", "tab\tpath", "line\npath", "unicodé", "subdir/type"} {
 		put(name, "-- before\n++ before\n")
 	}
+	put("binary", "\x00"+strings.Repeat("unchanged binary data\n", 100)+"old\n")
 	git("add", ".")
 	git("commit", "-m", "base")
 	for _, name := range []string{"sp ace", "tab\tpath", "line\npath", "unicodé"} {
@@ -89,13 +91,19 @@ func TestBuildChangePathsAndFileTypes(t *testing.T) {
 	// A renamed text file's hunk uses the destination path, including spaces.
 	git("mv", "sp ace", "renamed space")
 	put("renamed space", "-- after\n++ after\nextra\n")
+	git("mv", "binary", "z renamed binary")
+	put("z renamed binary", "\x00"+strings.Repeat("unchanged binary data\n", 100)+"new\n")
 	git("add", ".")
 	git("commit", "-m", "rename with edit")
 	c, hunks, err = BuildChange(env, repo, "HEAD~", "HEAD", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Files) != 1 || c.Files[0].Path != "renamed space" || c.Files[0].OldPath != "sp ace" || c.Files[0].OldMode != "100755" || c.Files[0].NewMode != "100755" || c.Files[0].Status != "renamed" || len(hunks) != 1 || hunks[0].File != "renamed space" {
+	if len(c.Files) != 2 || c.Files[0].Path != "renamed space" || c.Files[0].OldPath != "sp ace" || c.Files[0].OldMode != "100755" || c.Files[0].NewMode != "100755" || c.Files[0].Status != "renamed" || len(hunks) != 1 || hunks[0].File != "renamed space" {
 		t.Fatalf("rename: %+v, hunks %+v", c.Files, hunks)
+	}
+	binary := c.Files[1]
+	if binary.Path != "z renamed binary" || binary.OldPath != "binary" || binary.Status != "renamed" || len(binary.Hunks) != 0 || !strings.Contains(binary.Header, "Binary files ") || strings.Contains(binary.Header, "--- ") || strings.Contains(binary.Header, "+++ ") {
+		t.Fatalf("binary rename: %+v", binary)
 	}
 }
