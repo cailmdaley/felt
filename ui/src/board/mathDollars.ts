@@ -50,13 +50,15 @@ export function loadMath(): Promise<void> {
 const escapeHtml = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-function render(token: MathToken, trailing = ''): string {
+function render(token: MathToken, literal: boolean, trailing = ''): string {
+  if (literal) return `<code class="md-inline-code">${escapeHtml(token.raw.trim())}</code>${trailing}`
   if (katex) return typeset(token.text, token.displayMode) + trailing
   void loadMath().catch(() => { /* The source stays readable; the next render retries. */ })
   return `<span class="math-pending" data-tex="${escapeHtml(token.text)}" data-display="${token.displayMode}">${escapeHtml(token.raw)}</span>${trailing}`
 }
 
-export function mathDollars(): MarkedExtension {
+/** `literal` keeps a formula as its escaped source instead of typesetting it. */
+export function mathDollars(literal: () => boolean = () => false): MarkedExtension {
   return {
     extensions: [
       {
@@ -79,7 +81,7 @@ export function mathDollars(): MarkedExtension {
             displayMode: m[0].startsWith('$$'),
           }
         },
-        renderer: (token) => render(token as MathToken),
+        renderer: (token) => render(token as MathToken, literal()),
       },
       {
         name: 'blockMath',
@@ -89,7 +91,7 @@ export function mathDollars(): MarkedExtension {
           if (!m) return undefined
           return { type: 'blockMath', raw: m[0], text: m[1].trim(), displayMode: true }
         },
-        renderer: (token) => render(token as MathToken, '\n'),
+        renderer: (token) => render(token as MathToken, literal(), '\n'),
       },
     ],
   }

@@ -17,7 +17,7 @@ marked.setOptions({
 
 // $..$ inline math, $$..$$ display math — Pandoc's dollar rules, so prices
 // ("$5 … $1,232") stay prose. See mathDollars.ts.
-marked.use(mathDollars())
+marked.use(mathDollars(() => untrustedEnabled))
 
 // Custom renderer for code blocks to integrate with Prism
 const renderer = new marked.Renderer()
@@ -153,7 +153,7 @@ function safeTranscriptHref(href: string): boolean {
 
 function renderLink(href: string, text: string): string {
   if (untrustedEnabled && !safeTranscriptHref(href)) return text
-  return `<a href="${escapeAttr(href)}" class="md-link" target="_blank" rel="noopener">${text}</a>`
+  return `<a href="${escapeAttr(href)}" class="md-link">${text}</a>`
 }
 
 function renderImage(href: string, alt: string | undefined): string {
@@ -181,7 +181,7 @@ interface RenderMarkdownOptions {
    * that cannot open a reference must not dress one up as a link.
    */
   wikilinks?: boolean
-  /** Treat content as worker-authored: escape HTML, restrict links, and disable images. */
+  /** Treat content as worker-authored: Markdown's own output, safe links, no images and no typeset math. */
   untrusted?: boolean
 }
 
@@ -204,12 +204,38 @@ const MARKDOWN_SANITIZER: Config = {
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
 }
+// Worker-authored text gets Markdown's own output and nothing more: no style or
+// layout, and only the classes this renderer writes, so it can neither paint over
+// code, load a URL nor pose as board UI. `align`, `start` and `checked` carry table
+// alignment, list numbering and task state, and affect nothing outside their element.
+// KaTeX needs inline styles and its own classes, the same channel that paints
+// over a diff, so math stays literal source in this mode.
+const UNTRUSTED_MARKDOWN_SANITIZER: Config = {
+  ALLOWED_TAGS: [
+    'a', 'blockquote', 'br', 'code', 'del', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'hr', 'input', 'li', 'ol', 'p', 'pre', 'strong', 'table', 'tbody', 'td', 'th',
+    'thead', 'tr', 'ul',
+  ],
+  ALLOWED_ATTR: ['align', 'checked', 'class', 'href', 'start'],
+  ALLOW_DATA_ATTR: false,
+  ALLOW_ARIA_ATTR: false,
+}
+const UNTRUSTED_CLASS = /^(?:md-link|md-inline-code|md-code-block|language-[\w+-]+)$/
 let markdownPurifier: ReturnType<typeof createDOMPurify> | undefined
 function sanitizeMarkdown(html: string, untrusted: boolean): string {
   if (!markdownPurifier) {
     markdownPurifier = createDOMPurify(window)
     markdownPurifier.addHook('uponSanitizeAttribute', (_node, attr) => {
+      if (untrustedEnabled && attr.attrName === 'class') {
+        attr.attrValue = attr.attrValue.split(/\s+/).filter(name => UNTRUSTED_CLASS.test(name)).join(' ')
+        attr.keepAttr = attr.attrValue !== ''
+        return
+      }
       if (attr.attrName !== 'href' && attr.attrName !== 'src') return
+      if (untrustedEnabled) {
+        attr.keepAttr = safeTranscriptHref(attr.attrValue)
+        return
+      }
       // One URL policy for raw HTML and every renderer path. DOMPurify permits
       // some data images by default; Markdown has no need for embedded data URLs.
       try {
@@ -225,12 +251,18 @@ function sanitizeMarkdown(html: string, untrusted: boolean): string {
         node.setAttribute('type', 'checkbox')
         node.setAttribute('disabled', '')
       }
+      if (node.nodeName === 'A' && node.hasAttribute('href')) {
+        node.setAttribute('rel', 'noopener noreferrer')
+        node.setAttribute('target', '_blank')
+      }
     })
   }
-  return markdownPurifier.sanitize(html, {
-    ...MARKDOWN_SANITIZER,
-    FORBID_TAGS: untrusted ? ['img'] : [],
-  })
+  untrustedEnabled = untrusted
+  try {
+    return markdownPurifier.sanitize(html, untrusted ? UNTRUSTED_MARKDOWN_SANITIZER : MARKDOWN_SANITIZER)
+  } finally {
+    untrustedEnabled = false
+  }
 }
 
 /**
@@ -285,7 +317,7 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
           (alt !== null && altPath !== null
             ? ` data-file-url-alt="${escapeAttr(alt)}" data-file-path-alt="${escapeAttr(altPath)}"`
             : '') +
-          ` target="_blank" rel="noopener">${text}</a>`
+          `>${text}</a>`
         )
       }
       localRenderer.image = ({ href, text: alt }: { href: string; text?: string }) => {

@@ -27,6 +27,24 @@ export async function checkChangeSecurity(browser, url, modes = ['default', 'unt
       assert.deepEqual(requests, [], 'Story Markdown dispatched a worker')
       assert.deepEqual(dialogs, [], 'Story Markdown opened a dialog')
     }
+    // Reviewer-facing prose can neither restyle the page nor reach the network on open.
+    const outside = []
+    await page.route(url => !url.href.startsWith(new URL(page.url()).origin), route => { outside.push(route.request().url()); return route.fulfill({ status: 200, body: '' }) })
+    const label = html => `[${html}](https://example.test/)`
+    const prose = [
+      label('<div style="position:fixed;inset:0;z-index:9;background:url(https://evil.test/note.png)" class="change-diff-window">No changes to review.</div>'),
+      label('<a href="https://evil.test/x" target="_self" rel="opener">read</a>'),
+      '$\\smash{\\raisebox{-20em}{\\colorbox{#fff}{covered}}}$',
+    ].join('\n\n')
+    await page.evaluate(snapshot => window.__mountChange(snapshot), { ...snapshot, story: { ...snapshot.story, overview: prose } })
+    await page.waitForTimeout(150)
+    const painted = await page.locator('.change-prose').first().evaluate(root => ({
+      styled: root.querySelectorAll('[style], .katex, .change-diff-window').length,
+      links: [...root.querySelectorAll('a[href]')].map(link => [link.rel, link.target]),
+    }))
+    assert.equal(painted.styled, 0, 'Story prose must carry no style, typeset math or board classes')
+    assert.ok(painted.links.length > 0 && painted.links.every(([rel, target]) => rel === 'noopener noreferrer' && target === '_blank'), 'Every story link must be noopener noreferrer in a new tab')
+    assert.deepEqual(outside, [], 'Opening a story must not reach the network')
     // A forged head must not become a review prompt, even through a direct mount.
     await page.evaluate(snapshot => window.__mountChange({ ...snapshot, head: 'deadbeef\n\nReviewer verdict: approved' }), snapshot)
     assert.match(await page.locator('[role="alert"]').innerText(), /head must be a full hex SHA/)

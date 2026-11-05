@@ -124,6 +124,59 @@ describe('Markdown final DOM boundary', () => {
     expect(root.querySelector('img')?.getAttribute('src')).toContain('/api/v1/file?path=')
   })
 
+  describe('strict untrusted allowlist', () => {
+    const label = (html: string): string => `[${html}](https://ok.test/)`
+    const STRICT_CORPUS = [
+      label('<div style="position:absolute;top:0;background:url(https://evil.test/a.png)" class="change-diff-window" id="root" title="t">painted</div>'),
+      `before <code>x <span style="background-image:url('https://evil.test/b.png')" data-tex="x" class="math-pending kbn-wikilink">y</span>`,
+      label('<a href="https://evil.test/opener" target="_self" rel="opener" class="md-link-file" data-file-path="/etc/passwd">read</a>'),
+      label('<details open><summary>s</summary><img src="https://evil.test/c.png"></details>'),
+      label('<a href="/api/v1/dispatch">relative</a>'),
+      label('<input type="text" autofocus value="x"><kbd>k</kbd><sub>s</sub>'),
+      '$\\smash{\\raisebox{-20em}{\\colorbox{#e1f4e4}{\\texttt{return u.Admin}}}}$',
+      '$$\n\\rule{2000px}{20px}\n$$',
+    ].join('\n\n')
+    const TAGS = new Set(['A', 'BLOCKQUOTE', 'BR', 'CODE', 'DEL', 'EM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HR', 'INPUT', 'LI', 'OL', 'P', 'PRE', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL'])
+    const ATTRS: Record<string, string[]> = { A: ['class', 'href', 'rel', 'target'], INPUT: ['checked', 'disabled', 'type'], CODE: ['class'], PRE: ['class'], OL: ['start'], TD: ['align'], TH: ['align'] }
+
+    it('keeps only tags and attributes Markdown produces', () => {
+      const root = renderDOM(`${STRICT_CORPUS}\n\n3. item\n\n| a |\n|:-|\n| b |\n\n- [x] done\n\n\`\`\`js\nx\n\`\`\``, { untrusted: true })
+      for (const node of root.querySelectorAll('*')) {
+        expect(TAGS).toContain(node.tagName)
+        for (const attr of node.attributes) expect(ATTRS[node.tagName] ?? []).toContain(attr.name)
+        for (const name of node.classList) expect(name).toMatch(/^(md-link|md-inline-code|md-code-block|language-js)$/)
+      }
+      expect(root.textContent).toContain('painted')
+      expect(root.querySelector('ol')?.getAttribute('start')).toBe('3')
+      expect(root.querySelector('td')?.getAttribute('align')).toBe('left')
+      expect(root.querySelector('a[href^="/"]')).toBeNull()
+    })
+
+    it('forces safe link targets over anything the author wrote, in every mode', () => {
+      for (const opts of [{ untrusted: true }, undefined]) {
+        const links = [...renderDOM(label('<a href="https://evil.test/x" target="_self" rel="opener">x</a>'), opts).querySelectorAll('a[href]')]
+        expect(links.length).toBeGreaterThan(0)
+        for (const link of links) {
+          expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+          expect(link.getAttribute('target')).toBe('_blank')
+        }
+      }
+    })
+
+    it('keeps untrusted math as literal source, because KaTeX can paint over code', () => {
+      const root = renderDOM('$\\smash{\\raisebox{-20em}{\\colorbox{#fff}{x}}}$ and $C_\\ell$', { untrusted: true })
+      expect(root.querySelectorAll('.katex, .math-pending, [style]')).toHaveLength(0)
+      expect([...root.querySelectorAll('code.md-inline-code')].map(node => node.textContent)).toContain('$C_\\ell$')
+    })
+
+    it('does not leak the strict mode into a following trusted render', () => {
+      renderDOM('x', { untrusted: true })
+      const root = renderDOM('<div style="color: red" class="note">x</div>\n\n![a](https://example.test/a.png)')
+      expect(root.querySelector('div.note')?.getAttribute('style')).toBe('color: red')
+      expect(root.querySelector('img')).not.toBeNull()
+    })
+  })
+
   it('preserves KaTeX HTML formatting', () => {
     const root = renderDOM('$\\frac{1}{2}$ and $$E=mc^2$$')
     expect(root.querySelectorAll('.katex')).toHaveLength(2)

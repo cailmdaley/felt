@@ -116,7 +116,7 @@ All collection fields are arrays, including when empty.
 }
 ```
 
-`overview`, chapter `narrative` and stop `note` carry untrusted Markdown.
+`overview`, chapter `narrative` and stop `note` carry untrusted Markdown: only the tags Markdown itself produces, no images, styles or board classes, and `$...$` math stays literal source because KaTeX's styled output could paint over a diff.
 Chapters have unique ids and are ordered; `why_here` explains that order.
 Stop importance is `critical`, `important`, `supporting` or `context`.
 A flag uses the same file and range fields, plus `text` explaining what to inspect first.
@@ -184,5 +184,5 @@ A missing worker route disables sending; reading a change never authorizes a fre
 The draft is locked while sending, including across a live rebake. Successful delivery clears the delivered text once; a failed send keeps it available to retry.
 
 Worker-authored bundles are validated before rendering, storage or review: base and head are full hexadecimal SHA-1 or SHA-256 object IDs, and all reader-required fields have checked shapes.
-All Markdown passes through a final DOMPurify allowlist boundary shared with transcript rendering.
+All Markdown passes through a final DOMPurify allowlist boundary shared with transcript rendering, and every link gets `rel="noopener noreferrer"` and `target="_blank"` after sanitizing.
 Captured structured lines are readable without syntax highlighting. A parser, highlighter or grammar-load failure retains plain text rows; a window without renderable rows names its file in a visible error.
