@@ -2,6 +2,7 @@ import { FileDiff, parsePatchFiles, registerCustomCSSVariableTheme, type Annotat
 import { renderMarkdown } from '../utils.js'
 import { assignLanes, reviewMessage, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeDraft, type ChangeFile, type ChangeHunk, type ChangeWindow } from './changeModel.js'
 import './change-reader.css'
+import { changeLanguage } from './changeLanguages.js'
 
 registerCustomCSSVariableTheme('shuttle-change', {})
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -140,6 +141,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   const mountWindow = (host: HTMLElement, patch: string, file: ChangeFile): (() => void) => {
     const parsed = parsePatchFiles(patch)[0]?.files[0]
     if (!parsed) return () => {}
+    parsed.lang = changeLanguage(file.path)
     const diff = new FileDiff<ChangeComment>({ theme: 'shuttle-change', themeType: 'dark', diffStyle: 'unified', overflow: 'wrap',
       disableFileHeader: true, disableVirtualizationBuffers: true, hunkSeparators: 'metadata',
       lineHoverHighlight: 'both', onLineNumberClick: props => addComment(file, props.lineNumber, props.annotationSide),

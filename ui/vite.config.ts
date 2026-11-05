@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { changeAliases } from './change-build.js'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -53,6 +54,7 @@ function precompress(): Plugin {
 
 export default defineConfig({
   base: '',
+  resolve: { alias: changeAliases },
   plugins: [react(), precompress()],
   server: {
     port: 5174,

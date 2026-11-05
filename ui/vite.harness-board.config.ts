@@ -1,4 +1,5 @@
 import { defineConfig, type Plugin } from 'vite'
+import { changeAliases } from './change-build.js'
 import { copyFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -35,6 +36,7 @@ function harnessPage(from: string): Plugin {
 
 export default defineConfig({
   base: './',
+  resolve: { alias: changeAliases },
   define: {
     'import.meta.env.VITE_SHUTTLE_BASE': '""',
     // React reads `process.env.NODE_ENV` at module scope and there is no
