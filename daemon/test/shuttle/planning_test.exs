@@ -113,6 +113,22 @@ defmodule Shuttle.OwnerExitTest do
     assert fiber == owner["fiber"]
   end
 
+  test "a healthy composite has main's owner row set, not hostless or retired archive cards" do
+    local = row() |> Map.put("origin", "hub") |> put_in(["fiber", "shuttle", "host"], "hub")
+    remote = row(%{"id" => "01ARZ3NDEKTSV4RRFFQ69G5FA0", "uid" => "01ARZ3NDEKTSV4RRFFQ69G5FA0"})
+    owners = [local, remote]
+
+    archives =
+      Enum.with_index([nil, "", "hub", "retired"])
+      |> Enum.map(fn {host, index} ->
+        id = "01ARZ3NDEKTSV4RRFFQ69G5FB#{index}"
+        row(%{"id" => id, "uid" => id, "shuttle" => %{"host" => host, "kind" => "oneshot"}})
+      end)
+
+    result = OwnerExit.reconcile(owners, owners ++ archives, %{"worker" => false}, "hub")
+    assert Enum.map(result, & &1["fiber"]["id"]) == Enum.map(owners, & &1["fiber"]["id"])
+  end
+
   test "local owner rows remain native rather than gaining mirror metadata" do
     local = row() |> Map.put("origin", "hub") |> put_in(["fiber", "shuttle", "host"], "hub")
     assert [^local] = OwnerExit.reconcile([local], [local], %{}, "hub")
@@ -175,7 +191,7 @@ defmodule Shuttle.OwnerExitTest do
     end
 
     copy = row(%{"uid" => nil, "id" => "task"})
-    assert [%{"local_exit" => false}] = OwnerExit.reconcile([], [copy], %{}, "hub")
+    assert [%{"local_exit" => false}] = OwnerExit.reconcile([], [copy], %{"worker" => true}, "hub")
   end
 
   test "scheduled standing work needs its owner; a proven removed owner may retire" do

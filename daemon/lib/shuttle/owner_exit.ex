@@ -221,8 +221,9 @@ defmodule Shuttle.OwnerExit do
 
     missing =
       Enum.filter(archives, fn row ->
-        !MapSet.member?(seen, uid(row)) && is_map(row["fiber"]["shuttle"]) &&
-          stale[host(row)] != false
+        owner = host(row)
+        !MapSet.member?(seen, uid(row)) && is_binary(owner) && owner not in ["", local] &&
+          stale[owner] == true
       end)
 
     owners ++
