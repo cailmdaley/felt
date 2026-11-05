@@ -2708,8 +2708,8 @@ defmodule Shuttle.Poller do
     # `{:refresh_document, …}` patch that landed on the live cache mid-poll must
     # NOT be reverted by installing the Task build wholesale: merge per key,
     # preferring the live entry when its `modified_at` is strictly newer. Only
-    # keys the Task build carries survive — a fiber the Task evicted (deleted /
-    # uninstalled) is not resurrected.
+    # keys the Task build carries reach this merge. Cache installation separately
+    # retains unreadable physical files, never deleted or unmanaged documents.
     document_cache = merge_document_cache(state.document_cache, document_cache)
 
     # A partial tick — at least one store's listing FAILED (its rows came from
@@ -2727,6 +2727,7 @@ defmodule Shuttle.Poller do
     state = %{
       state
       | felt_stores: felt_stores,
+        document_cache_stats: document_cache_stats,
         last_known_listings:
           state.last_known_listings |> Map.merge(store_listings) |> Map.take(felt_stores),
         last_full_listings:
@@ -2754,7 +2755,6 @@ defmodule Shuttle.Poller do
         # Rebuilt (not merged) each poll so a rename or delete can't leave a
         # stale uid→slug entry; an as-yet-unseen uid falls through to felt.
         uid_slug_index: build_uid_slug_index(candidates),
-        document_cache_stats: document_cache_stats,
         document_cache_ready: true,
         document_cache_refreshed_at: refreshed_at,
         document_cache_last_refresh_ms: document_cache_refresh_ms,
@@ -3523,6 +3523,13 @@ defmodule Shuttle.Poller do
 
   @doc false
   def install_document_cache(%State{} = state, document_cache) do
+    document_cache =
+      Shuttle.Poller.DocumentCache.retain_unreadable(
+        state.document_cache,
+        document_cache,
+        state.felt_stores
+      )
+
     {document_fiber_index, collisions} =
       Shuttle.Poller.DocumentCache.index_with_collisions(document_cache)
 
@@ -3546,7 +3553,9 @@ defmodule Shuttle.Poller do
       state
       | document_cache: document_cache,
         document_fiber_index: document_fiber_index,
-        document_slug_collisions: document_slug_collisions
+        document_slug_collisions: document_slug_collisions,
+        document_cache_stats:
+          Map.put(state.document_cache_stats, :entries, map_size(document_cache))
     }
   end
 
@@ -3949,14 +3958,7 @@ defmodule Shuttle.Poller do
         |> install_document_cache(Map.put(without_fiber, key, cached))
 
       {:ok, %{fibers: []}} ->
-        cache =
-          Shuttle.Poller.DocumentCache.retain_unreadable(
-            state.document_cache,
-            without_fiber,
-            state.felt_stores
-          )
-
-        install_document_cache(state, cache)
+        install_document_cache(state, without_fiber)
 
       {:error, reason} ->
         Logger.warning("refresh_document #{fiber_id} skipped: #{inspect(reason)}")
@@ -6842,11 +6844,11 @@ defmodule Shuttle.Poller do
         Shuttle.FiberAddresses.put_polled(polled_addresses(candidates, stores))
 
         state
+        |> Map.put(:document_cache_stats, stats)
         |> install_document_cache(cache)
         |> Map.put(:last_known_listings, listings)
         |> Map.put(:uid_slug_index, build_uid_slug_index(candidates))
         |> Map.put(:fiber_store_cache, Map.merge(stores, state.fiber_store_cache))
-        |> Map.put(:document_cache_stats, stats)
         |> Map.put(:discovery_overrides, overrides)
       end
     end

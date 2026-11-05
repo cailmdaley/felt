@@ -2730,6 +2730,70 @@ defmodule Shuttle.DispatchIntegrationTest do
   end
 
   @tag :change_discovery
+  test "unreadable owner addresses survive incremental discovery and an older full poll", %{
+    host: host
+  } do
+    gate = start_supervised!({Agent, fn -> false end})
+    Shuttle.Test.Env.put_app_env(:discovery_listing_gate, {gate, self()})
+
+    write_fiber(
+      host,
+      "unreadable",
+      "---\nname: Original\nstatus: open\nshuttle:\n  host: test-host\n  kind: oneshot\n---\nBody.\n"
+    )
+
+    path = Path.join([host, ".felt", "unreadable", "unreadable.md"])
+    original = File.read!(path)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: PausedListingRunner,
+        own_host_id: "test-host",
+        felt_stores: [host],
+        max_concurrent_workers: 0,
+        poll_interval_ms: 600_000,
+        full_scan_budget_ms: 0,
+        change_interval_ms: 20
+      )
+
+    await_boot_cycle!(poller)
+    assert eventually(fn -> Map.has_key?(:sys.get_state(poller).change_indexes, host) end)
+
+    entry = fn ->
+      {:ok, body} = Poller.cached_fiber_documents(poller)
+      Enum.find(body.fibers, &(&1.fiber["slug"] == "unreadable"))
+    end
+
+    stale? = fn ->
+      row = entry.()
+      row != nil && row[:document_stale] == true
+    end
+
+    uid = entry.().fiber["uid"]
+    cycles = :sys.get_state(poller).poll_cycles
+    Agent.update(gate, fn _ -> true end)
+    send(poller, :run_poll_cycle)
+    assert_receive {:listing_observed, reader}, 5_000
+    File.write!(path, "---\n<<<<<<< HEAD\nbad\n---\n")
+    assert eventually(stale?)
+    assert entry.().fiber["uid"] == uid
+    send(reader, :continue_listing)
+    assert eventually(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+    assert stale?.()
+    File.write!(path, String.replace(original, "Original", "Repaired"))
+
+    assert eventually(fn ->
+             row = entry.()
+             row != nil && row.fiber["name"] == "Repaired" && row[:document_stale] != true
+           end)
+
+    File.write!(path, "---\n<<<<<<< HEAD\nbad\n---\n")
+    assert eventually(stale?)
+    File.rm!(path)
+    assert eventually(fn -> entry.() == nil end)
+  end
+
+  @tag :change_discovery
   test "a slow ordinary poll cannot overwrite a newer incremental edit or deletion", %{host: host} do
     gate = start_supervised!({Agent, fn -> false end})
     Shuttle.Test.Env.put_app_env(:discovery_listing_gate, {gate, self()})
