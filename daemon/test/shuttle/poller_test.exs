@@ -7713,7 +7713,7 @@ defmodule Shuttle.PollerTest do
   test "a predecessor claim retry cannot fill a successor's pending identity" do
     id = "tests/stale-claim"
     MockRunner.set_fiber(id, make_fiber(id))
-    MockRunner.set_shuttle(id, "kind: oneshot\nhost: other-host\n", "open")
+    MockRunner.set_shuttle(id, "kind: oneshot\nhost: test-host\n", "open")
     MockRunner.add_tmux_session("capture-predecessor")
     {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()])
     await_boot_cycle!(poller)
@@ -7749,7 +7749,7 @@ defmodule Shuttle.PollerTest do
   test "a claim interrupted after alias persistence completes its source rename on retry" do
     id = "tests/interrupted-claim"
     MockRunner.set_fiber(id, make_fiber(id))
-    MockRunner.set_shuttle(id, "kind: oneshot\nhost: other-host\n", "open")
+    MockRunner.set_shuttle(id, "kind: oneshot\nhost: test-host\n", "open")
     MockRunner.add_tmux_session("capture-interrupted")
     MockRunner.set_ps_result({"812 1 bash -l /tmp/shuttle-run-capture-interrupted.42.sh\n", 0})
     canonical = FiberUid.session(id)
@@ -7790,7 +7790,7 @@ defmodule Shuttle.PollerTest do
   test "claim binds the immutable capture script for liveness" do
     id = "tests/claim-process-alias"
     MockRunner.set_fiber(id, make_fiber(id))
-    MockRunner.set_shuttle(id, "kind: oneshot\nhost: other-host\n", "open")
+    MockRunner.set_shuttle(id, "kind: oneshot\nhost: test-host\n", "open")
     MockRunner.add_tmux_session("capture-alias")
     MockRunner.set_ps_result({"812 1 bash -l /tmp/shuttle-run-capture-alias.42.sh\n", 0})
     {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()])
