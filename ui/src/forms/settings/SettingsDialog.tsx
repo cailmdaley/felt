@@ -9,6 +9,7 @@ import { AppearanceSection } from './AppearanceSection'
 import { ConversationsSection } from './ConversationsSection'
 import { FleetSection } from './FleetSection'
 import { HostClassSection } from './HostClassSection'
+import { VoiceSection } from './VoiceSection'
 import { HostSection } from './HostSection'
 import { PathListSection } from './PathListSection'
 import { injectSettingsStyles } from './settingsStyles'
@@ -19,7 +20,7 @@ import {
   type SettingsHost,
 } from './settingsApi'
 
-type SectionId = 'appearance' | 'stores' | 'projects' | 'agents' | 'fleet' | 'hostClass' | 'host' | 'conversations'
+type SectionId = 'appearance' | 'stores' | 'projects' | 'agents' | 'fleet' | 'hostClass' | 'host' | 'conversations' | 'voice'
 
 /** Preferences this browser keeps; every other section configures a worker host. */
 const BROWSER_SECTIONS: ReadonlySet<SectionId> = new Set(['conversations', 'appearance'])
@@ -31,6 +32,7 @@ const SECTIONS: Array<{ id: SectionId; label: string; description: string }> = [
   { id: 'projects', label: 'Project folders', description: 'Where you can create and capture work' },
   { id: 'agents', label: 'Worker agents', description: 'Models and their default effort' },
   { id: 'fleet', label: 'Connected hosts', description: 'Other daemons and SSH routes' },
+  { id: 'voice', label: 'Voice', description: 'Speech delivery and meeting timing' },
   { id: 'hostClass', label: 'Access & listening', description: 'Who can reach this daemon' },
   { id: 'host', label: 'Daemon status', description: 'Health, version and launch quarantine' },
 ]
@@ -276,6 +278,7 @@ export function SettingsDialog({
                 onChanged={changed}
               />
             )}
+            {host && section === 'voice' && <VoiceSection shuttleBase={shuttleBase} host={host} onChanged={changed} />}
             {host && section === 'fleet' && (
               <FleetSection shuttleBase={shuttleBase} host={host} onChanged={changed} />
             )}

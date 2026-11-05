@@ -44,6 +44,7 @@ export interface WorkspaceOptions {
   deskPlacement?(card: KanbanCard): DeskPlacement | undefined
   origin(): string
   onVisibility(active: boolean): void
+  onVoiceCard?(card: KanbanCard | null): void
   deskColumn?(card: KanbanCard): SidebarEntry[]
   onReturnCard?(card: KanbanCard): void
   onEscapeHome?(): void
@@ -657,6 +658,7 @@ export class Workspace {
       this.overview.setVisible(view === 'board')
       this.depth.setActive(view === 'board')
       this.opts.onVisibility(false)
+      this.opts.onVoiceCard?.(null)
       this.stopTimer()
       return
     }
@@ -683,6 +685,7 @@ export class Workspace {
       return
     }
     this.current = state
+    this.opts.onVoiceCard?.(state.card)
     for (const key of route.doc ? [route.doc] : []) {
       const file = parseDocKey(key)
       if (file && !state.links.some(link => link.path === file.path && (link.owner ?? state.card.originId) === file.owner)) state.links.push(file)
@@ -832,7 +835,7 @@ export class Workspace {
       if (this.current === state && this.isActive && !this.disposed) { this.rebuild(state); this.show(state, false) }
     })
   }
-  private async openFiber(id: string, owner: string): Promise<void> {
+  async openFiber(id: string, owner: string): Promise<void> {
     this.column = null
     this.reader.captureSidebar([])
     const epoch = this.routeEpoch
@@ -916,6 +919,7 @@ export class Workspace {
           }
           if (live.workerState) metadata.sessionUuid = live.sessionUuid
           state.card = metadata
+          if (this.current === state && this.isActive) this.opts.onVoiceCard?.(metadata)
           state.metadataKnown = true
           this.overview.resolved(metadata)
         }

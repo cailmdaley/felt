@@ -1644,7 +1644,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const host = settingsOrigin(url)
     return json({
       host,
-      files: ['stores', 'projects', 'agents', 'remotes', 'host'].map((id) => settingsSummary(host, id)),
+      files: ['stores', 'projects', 'agents', 'remotes', 'host', 'voice'].map((id) => settingsSummary(host, id)),
     })
   }
   if (url.includes('/api/v1/fleet')) {
