@@ -34,18 +34,18 @@ A synthetic Tailscale CLI drives sixteen probes against reserved `.invalid` name
 The healthy case reaches ready; the FIFO case keeps HTTP diagnostics live beyond sixteen seconds, refuses dispatch, and recovers in the same daemon after an external writer replaces the registry.
 The realistic case uses 3,000 managed fibers and real tmux on a private socket, delays inventory eighteen seconds, then requires ready and all documents cached.
 Codex is an external executable stub. These gates require tmux, preserve production quarantine and read the dirty-I/O scheduler count from release VM arguments.
-Diagnostic requests share the gate's 50-second readiness budget and cap each request at four seconds. The subprocess guard leaves time for fixture setup, and the ExUnit guard outlives subprocess cleanup. Delayed-response regressions check healthy replies, deadline exhaustion, and a wedged version endpoint that must return within six seconds.
+Diagnostic requests share the gate's 50-second readiness budget and cap each request at two seconds. Delayed-response regressions distinguish a healthy reply from deadline exhaustion and a wedged version endpoint.
 A new production child belongs in the independent manifest in `test/support/production_boot.exs`.
 
-## Offline planning probes
+## Owner-away exit probes
 
-`internal/shuttlecli/planning_test.go` builds a real Shuttle binary and checks every planning verb against reachable and unavailable owner endpoints, including remote-only documents with no writable local storage. It also reads quoted and unquoted YAML timestamps and performs a real Git merge of an offline Rest with an explicit owner arm.
+`internal/shuttlecli/planning_test.go` builds a real Shuttle binary and checks daemon refusals, drained stdin, discovery uncertainty, standing schedules, timestamp zones and locked mirror ownership. Configuration never falls back.
 Set `SHUTTLE_PLANNING_PROBE_BINARY` to run those public probes against a saved binary as a negative control.
 
 `daemon/test/shuttle_web/controllers/owner_down_test.exs` uses private stores and loopback APIs. It warms a real owner feed, stops that owner, applies a real CLI Rest and observes the real composite projection; the identical healthy owner row remains authoritative.
 The browser extension is opt-in: build `ui/dist`, put privately built Go CLIs first on `PATH`, then run `cd daemon && SHUTTLE_OWNER_DOWN_BROWSER=1 mix test test/shuttle_web/controllers/owner_down_test.exs --max-cases 4`.
 It serves that bundle through the isolated fixture daemon and runs `ui/e2e/offlinePlanningReal.mjs`, checking the Rest reply, removal from Drafts after a page reload, stale archive reading and screenshots. It never uses the operator's daemon or browser.
-The ordinary `ui/e2e/offlinePlanning.mjs` harness journey separately stages stale draft, armed, standing, unowned and remote-only menus.
+The ordinary `ui/e2e/offlinePlanning.mjs` harness journey separately stages stale draft, armed, standing, unowned and remote-only menus. The API suite exercises all three forwarded mutation routes through a real HTTP listener and stops mismatched owners after one hop.
 
 ## Native filesystem I/O
 

@@ -1,4 +1,4 @@
-import { canPlanOffline, offlineExplanation } from './offlinePlanning.js'
+import { canPlanOffline, exitRefusal, offlineExplanation } from './offlinePlanning.js'
 import { installFrontierDetails } from './DeskFrontier.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
@@ -708,8 +708,8 @@ export class KanbanSurfaceRenderer {
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
     el.setAttribute('role', 'listitem')
-    el.draggable = (!isStale || canPlanOffline(card)) && !coarsePointer()
-    if (!isStale || canPlanOffline(card)) this.installDraggable(el, card, true)
+    el.draggable = (!isStale || canPlanOffline(card)) && !exitRefusal(card) && !coarsePointer()
+    if ((!isStale || canPlanOffline(card)) && !exitRefusal(card)) this.installDraggable(el, card, true)
     this.installLongPressMove(el, card)
 
     const dot = document.createElement('span')
@@ -1073,7 +1073,7 @@ export class KanbanSurfaceRenderer {
     const el = document.createElement('div')
     el.className = isAgentCard(card) ? 'kbn-cluster-item kbn-cluster-item-agent' : 'kbn-cluster-item kbn-cluster-item-human'
     if (sleeping) el.classList.add('kbn-cluster-item-standing')
-    el.draggable = (!isStale || canPlanOffline(card)) && !coarsePointer()
+    el.draggable = (!isStale || canPlanOffline(card)) && !exitRefusal(card) && !coarsePointer()
     el.dataset.fiberId = card.id
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
@@ -1084,7 +1084,7 @@ export class KanbanSurfaceRenderer {
     el.setAttribute('aria-label', `${card.name}${who}`)
     el.title = `${card.name}${who}`
 
-    if (!isStale || canPlanOffline(card)) this.installDraggable(el, card, false)
+    if ((!isStale || canPlanOffline(card)) && !exitRefusal(card)) this.installDraggable(el, card, false)
 
     const glyph = stateDot(card, this.o.openDetail)
     const title = document.createElement('span')
@@ -1531,17 +1531,22 @@ export class KanbanSurfaceRenderer {
     // Touch has no drag-and-drop backend, and a draggable card fights the
     // finger that is trying to scroll past it. Holding the card still opens
     // its menu, whose Move… is the touch path to the same transitions.
-    el.draggable = (!isStale || canPlanOffline(card)) && !coarsePointer()
+    el.draggable = (!isStale || canPlanOffline(card)) && !exitRefusal(card) && !coarsePointer()
     el.dataset.fiberId = card.id
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
 
-    if (!isStale || canPlanOffline(card)) this.installDraggable(el, card, true)
+    if ((!isStale || canPlanOffline(card)) && !exitRefusal(card)) this.installDraggable(el, card, true)
 
     const glyph = stateDot(card, this.o.openDetail)
     const name = document.createElement('span')
     name.className = 'kbn-card-name'
     name.textContent = card.name
+    if (card.planningPending) {
+      const note = document.createElement('small')
+      note.textContent = ' — local exit waiting for Git sync'
+      name.append(note)
+    }
     el.append(glyph, name)
 
     // The row's right end. A verdict given from the Desk waits out its undo
@@ -1610,8 +1615,8 @@ export class KanbanSurfaceRenderer {
       actions.push({ label: 'Open terminal', run: () => this.o.openWorker!(card.tmuxSession!, card.shuttleHost) })
     }
     const move = this.o.onCardLongPress
-    if ((!stale || canPlanOffline(card)) && move) actions.push({ label: 'Move…', run: () => move(card, anchor) })
-    if (stale) actions.push({ label: offlineExplanation(card), disabled: true,
+    if ((!stale || canPlanOffline(card)) && !exitRefusal(card) && move) actions.push({ label: 'Move…', run: () => move(card, anchor) })
+    if (stale || exitRefusal(card) || card.planningPending) actions.push({ label: offlineExplanation(card), disabled: true,
       dress: item => {
         item.classList.add('kbn-verb-menu-plain')
         Object.assign(item.style, { whiteSpace: 'normal', maxWidth: '320px', height: 'auto', padding: '8px 10px', lineHeight: 'var(--leading-ui)', cursor: 'default' })

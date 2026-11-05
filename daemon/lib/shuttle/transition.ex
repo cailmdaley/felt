@@ -1,41 +1,15 @@
 defmodule Shuttle.Transition do
   @moduledoc """
-  The unified write-plane for kanban transitions — one call that hides the
-  resolve / invoke / owner-routing dance the kanban used to orchestrate itself.
+  Resolves a board target to its lifecycle action and invokes its owner.
 
-  A kanban drag is `{fiber_id, target, origin}`: move this fiber to that column,
-  and the fiber is owned by that host. `transition/3` turns it into a lifecycle
-  mutation:
+  `ActionQueries` resolves the current document; `LifecycleService` serializes
+  the locked writer with polling. `OriginRouter` forwards once, carrying the
+  routed marker so a disagreement about ownership cannot bounce the request.
+  Only safe exits after a definite pre-send failure or proven removal can use
+  the daemon's local mirror policy. Those replies explicitly describe Git
+  synchronization and no execution request; configuration and execution refuse.
 
-    1. **Route by origin.** The composite board (`GET /api/v1/fibers/composite`)
-       stamps every fiber with the host that OWNS it. An `origin` that is this
-       daemon (or absent / `"local"`) routes to the local branch; an `origin`
-       matching a configured remote forwards over the tunnel; an unknown origin
-       falls through to local, where the daemon's own ownership + availability
-       gates are the final arbiter (mirroring Portolan's prior
-       `resolveShuttleDaemonUrl` fallback).
-
-    2. **Local branch** = resolve + invoke, in one process, on ONE read.
-       `ActionQueries` reads the live felt document and tmux liveness outside
-       the Poller mailbox to map `target` → a canonical action id. Nothing
-       re-checks availability afterward: the resolved action is in the
-       availability set by construction (the `resolve ⊆ availability` invariant
-       — see `gotcha-shuttle-resolve-invoke-daemon-split`), so a second read
-       could only disagree with the first by racing it. Then the mutation:
-       pause/reopen/close shell the Shuttle CLI's frontmatter writer,
-       accept-run runs Shuttle's `accept` inside the Poller, and dispatch-ad-hoc
-       force-dispatches through it.
-
-    3. **Forward branch** = `POST <remote>/api/v1/transition` with `origin`
-       omitted, so the owning daemon runs its OWN local branch against its
-       authoritative state. The owner-routing (route + forward) is
-       `Shuttle.OriginRouter`, the one forwarder every write endpoint shares;
-       this service only adds the resolve+invoke local branch and re-stamps the
-       relayed response's `origin`. Terminating in one hop: a fiber has exactly
-       one owner, and the owner never re-forwards.
-
-  This service's `/transition` endpoint uses `http_error/1`, so the write-plane's
-  status mapping has a single implementation.
+  `http_error/1` supplies the endpoint's status mapping.
   """
 
   alias Shuttle.{
@@ -70,40 +44,46 @@ defmodule Shuttle.Transition do
     origin = Shuttle.Planning.origin(fiber_id, origin)
 
     case OriginRouter.route(origin, opts) do
-      {:error, {:unknown_origin, _}} = error ->
-        if offline_target?(fiber_id, target, origin),
-          do: transition_local(fiber_id, target),
-          else: error
+      {:error, {:unknown_origin, _} = reason} = error ->
+        fallback(fiber_id, target, origin, reason, error)
+
+      {:error, _} = error ->
+        error
 
       :local ->
         transition_local(fiber_id, target)
 
       {:remote, %Remote{} = remote} ->
-        result = forward(remote, fiber_id, target, origin, opts)
+        if target in ~w(drafts awaitingReview composted) &&
+             Shuttle.Planning.pending?(fiber_id, origin) do
+          {:error, :planning_pending}
+        else
+          case forward(remote, fiber_id, target, origin, opts) do
+            {:error, {:forward_failed, _, {:not_sent, _} = reason}} = error ->
+              fallback(fiber_id, target, origin, reason, error)
 
-        case result do
-          {:error, {:forward_failed, _, {:not_sent, _}}} ->
-            if offline_target?(fiber_id, target, origin),
-              do: transition_local(fiber_id, target),
-              else: result
-
-          _ ->
-            result
+            result ->
+              result
+          end
         end
     end
   end
 
-  defp offline_target?(fiber_id, target, origin) do
-    case resolve(fiber_id, target) do
-      {:ok, %{id: id}} ->
-        action = if String.starts_with?(id, "close-"), do: "close", else: "pause"
-        params = %{"action" => action, "tempered" => id == "close-tempered"}
+  defp fallback(fiber_id, target, origin, reason, error) do
+    with {:ok, %{id: id, invocation: invocation}} <- resolve(fiber_id, target) do
+      params = invocation |> Map.new(fn {k, v} -> {to_string(k), v} end)
 
-        id in ~w(pause reopen-draft close-awaiting-review close-tempered close-composted) &&
-          Shuttle.Planning.local?(fiber_id, origin, nil, params)
+      params =
+        Map.merge(params, %{"fiber" => fiber_id, "origin" => origin, "action" => invocation.verb})
 
-      _ ->
-        false
+      case Shuttle.Planning.exit(params, reason) do
+        nil -> error
+        {:ok, output} -> {:mirrored, id, output}
+        {:command_error, code, output} -> {:error, {:command_error, code, output}}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      _ -> error
     end
   end
 
@@ -197,13 +177,13 @@ defmodule Shuttle.Transition do
   # that would hang this Phoenix request forever against a wedged shuttle on a
   # loaded node. `felt_store` may be `nil` (no store resolved); the helper then
   # omits `-C <store>`.
-  defp run_shuttle(verb, fiber_id, args, _felt_store) do
+  defp run_shuttle(verb, fiber_id, args, felt_store) do
     with {:ok, resolved} <- FeltStores.resolve_request(fiber_id) do
       verb
       |> Shuttle.CLI.run_lifecycle(
         resolved.uid || resolved.fiber_id,
         args ++ LifecycleService.hint_args(resolved),
-        felt_store: resolved.store
+        felt_store: felt_store
       )
       |> invoke_result()
     end
@@ -265,6 +245,16 @@ defmodule Shuttle.Transition do
     do:
       {422,
        "A standing verdict stays in place on close. Reopen to clear it and start work again."}
+
+  def http_error({:routed_owner_mismatch, host}),
+    do:
+      {422,
+       "routed request reached this host but the document names #{host}; not forwarded again"}
+
+  def http_error(:planning_pending),
+    do:
+      {409,
+       "The local exit copy is waiting for Git sync. The healthy owner remains authoritative; no second write was requested."}
 
   def http_error(:unknown_target), do: {400, "unknown_target"}
   def http_error(:already_running), do: {409, "already_running"}

@@ -50,8 +50,8 @@ time.
 | Route | Routing | Purpose |
 |---|---|---|
 | `POST /dispatch` | owner-routed | Launch a worker for a fiber now, bypassing the poll |
-| `POST /transition` | planning / owner-routed | The unified kanban write: move a fiber to a column, one call per drag |
-| `POST /lifecycle` | planning / owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
+| `POST /transition` | owner-routed / safe exit mirror | The unified kanban write: move a fiber to a column, one call per drag |
+| `POST /lifecycle` | owner-routed / safe exit mirror | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
 | `POST /claim` | owner-routed | Associate a terminal worker or a verified native app conversation with a fiber |
 | `POST /migrate` | local owner | Move a live worker from one installed fiber to another on the same host, without ending its conversation |
@@ -62,7 +62,7 @@ time.
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /attachments` | owner-routed | Store files attached in the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
-| `POST /felt-edit` | planning / owner-routed | Patch quiescent planning locally, or shell `felt edit` on the execution host |
+| `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
 | `POST /fiber/create` | owner-routed | Create a fiber |
 | `POST /project-dir/resolve` | host-addressed | Validate `{path, origin?}` on the named host with `shuttle resolve-dir`; return `{path}` with the expanded absolute directory, or 422 for an invalid directory. Does not create or arm a fiber |
@@ -102,10 +102,9 @@ An unavailable owner fails the request, and a duplicate document is refused rath
 
 ### Lifecycle actions
 
-Planning asks the execution owner first, including when a local draft exists.
-Only a definite pre-send failure or an absent/removed owner permits a quiescent local planning copy; lost replies never permit replay or mirror writes.
-Fallback lifecycle writes pin the UID, physical path and owner; document edits use an exact target and locked revision precondition. A disappearing UID-less document cannot redirect a write to a same-leaf document elsewhere.
-The [planning and execution contract](../dev/dispatch.md#planning-execution-and-unavailable-hosts) defines the state × verb × availability rules, including merge conflicts and lost replies.
+Mutations ask the execution owner first. Only safe `rest`, `pause`, `close` or Discard exits can mirror after a definite pre-send failure or proven removal; configuration, Temper and execution require the owner.
+Mirror writes pin UID, physical path and owner under the document lock. Lost replies never authorize fallback or replay.
+The [owner-away exit contract](../dev/dispatch.md#owner-away-exits) defines safety, standing schedules and Git reconciliation. A mirrored `/transition` reply includes `saved_locally: true`, `execution_requested: false` and a Git/no-execution `message`.
 A known pre-send failure returns HTTP 502 with `reason: "owner_unreachable_before_send"`; other transport failures don't establish whether the owner applied the request.
 
 `POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
@@ -272,12 +271,10 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
 | `GET /meeting/audio` | recorder-addressed | WebSocket: relay a phone's microphone through the serving hub to the selected recorder |
 
-`GET /fibers/composite` can project strictly newer local planning fields over a stale owner row with the same intrinsic UID.
-Healthy owner rows remain authoritative regardless of the local document's version.
-The row retains its owner's `origin`, addresses, content and runtime, and `origins[origin].stale` remains unchanged.
-An armed status or possible worker observed by the owner wins over the archive's status and verdict.
-A local-only constitution whose host is removed remains visible under an archive origin marked stale.
-`local_planning` is true only when the composer has a quiescent local document and the owner row has no possible execution; the UI does not promise offline saves from a remote-only card.
+`GET /fibers/composite` can project exit fields from a unique matching UID/host copy with a newer `shuttle.runtime.mirrored_at` over a stale owner row, preserving its addresses, content and runtime. Ordinary body edits do not project.
+`local_planning` is the daemon's safe-exit capability, including proven removed-host retirement but excluding scheduled standing work whose owner can still run it.
+Healthy owners remain authoritative; `planning_pending: true` explains a local exit waiting for Git sync. Repeated exits return 409 without another write. A document absent on its healthy owner is not manufactured as a live card.
+Removed-host archive cards remain visibly stale.
 A single-fiber read from an unavailable or removed owner may return its matching local document with `stale: true`, `source: local_archive`, the requested `origin` on its row, and a stale remote descriptor in `origins`. The reader retains that metadata and disables launching and resuming; this never substitutes local assets or execution.
 
 `GET /fibers/composite` and `/state/composite` return a weak `ETag` and

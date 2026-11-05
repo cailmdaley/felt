@@ -23,6 +23,7 @@ defmodule Shuttle.OpenerTest do
   end
 
   defmodule Forward do
+    def post_mutation(url, body, type, timeout), do: post(url, body, type, timeout)
     def post(url, body, _, _) do
       send(Shuttle.Env.app(:opener_test), {:reveal, url, Jason.decode!(body)})
       Shuttle.Env.app(:reveal_response, {:ok, 200, ~s({"revealed":true})})

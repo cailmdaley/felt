@@ -117,6 +117,13 @@ defmodule Shuttle.FiberDoc do
     end
   end
 
+  defp split_frontmatter("---\r\n" <> rest) do
+    case :binary.split(rest, "\r\n---", []) do
+      [frontmatter, body] -> {:ok, frontmatter, body}
+      _ -> {:error, "missing closing frontmatter delimiter"}
+    end
+  end
+
   defp split_frontmatter(_), do: {:error, "missing opening frontmatter delimiter"}
 
   defp ensure_single_trailing_newline(text), do: String.trim_trailing(text, "\n") <> "\n"

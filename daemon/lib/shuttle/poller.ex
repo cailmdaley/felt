@@ -2409,8 +2409,8 @@ defmodule Shuttle.Poller do
                   do: stop_tracked_worker(state, address),
                   else: {{:ok, :no_session}, state}
 
-              _ ->
-                {{:ok, :no_session}, state}
+              error ->
+                {{:error, {:fiber_read_failed, error}}, state}
             end
 
           case stop do

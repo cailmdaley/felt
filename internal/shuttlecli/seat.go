@@ -22,7 +22,7 @@ without changing its role, lifecycle or runtime state.`,
 				return err
 			}
 			defer unlock()
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
@@ -30,7 +30,7 @@ without changing its role, lifecycle or runtime state.`,
 			if clear {
 				fields["clear"] = true
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "seat", f, st, fields); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "seat", f, fields); routed || err != nil {
 				return err
 			}
 			if !clear && !shuttle.ValidRole(block.Role) {

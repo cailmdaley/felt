@@ -1,4 +1,4 @@
-import { canPlanOffline, temperNeedsOwner } from '../offlinePlanning.js'
+import { exitRefusal } from '../offlinePlanning.js'
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { onDesk, restReachable, reviewReachable, verdictsFor } from './fiberPageState.js'
@@ -28,10 +28,13 @@ export const verbSpec = (verb: LifecycleVerb): LifecycleVerbSpec => LIFECYCLE_VE
 
 /** The verbs a card offers, in header order; Rest only where a rest can be taken. */
 export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): LifecycleVerb[] {
-  if (!onDesk(card) || (card.originStale && !canPlanOffline(card))) return []
+  if (!onDesk(card) || exitRefusal(card)) return []
+  if (card.originStale) return [
+    ...(reviewReachable(card) ? ['review' as const] : []),
+    ...(canRest ? ['rest' as const] : []), 'discard',
+  ]
   const verdicts = verdictsFor(card)
   return LIFECYCLE_VERBS.map(spec => spec.verb).filter(verb => {
-    if (verb === 'temper' && card.originStale && temperNeedsOwner(card)) return false
     return verb === 'review' ? reviewReachable(card) : verb === 'rest' ? canRest && restReachable(card) : verdicts.includes(verb)
   })
 }

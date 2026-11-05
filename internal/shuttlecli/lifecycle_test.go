@@ -257,7 +257,7 @@ func TestShuttleClose_FromResting(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
 			dir, storage := newStore(t)
-			seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+			seedShuttleRole(t, storage, "f", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 			if out, err := runIn(t, env, dir, "rest", "f", "--local"); err != nil {
 				t.Fatalf("rest: %v\n%s", err, out)
 			}
@@ -1124,7 +1124,7 @@ func TestShuttleRest_LegacyPinnedRests(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "hub", felt.StatusActive, map[string]any{"kind": "pinned", "agent": "claude-opus"}, nil)
+	seedShuttleRole(t, storage, "hub", felt.StatusActive, ownedOn(t, env, map[string]any{"kind": "pinned", "agent": "claude-opus"}), nil)
 	if out, err := runIn(t, env, dir, "rest", "hub", "--local"); err != nil {
 		t.Fatalf("rest: %v\n%s", err, out)
 	}
@@ -1173,7 +1173,7 @@ func TestShuttleRest_ClearsArrivedDue(t *testing.T) {
 	for id, due := range map[string]time.Time{"past": past, "future": future} {
 		d := due
 		f := &felt.Felt{ID: id, Name: id, Status: felt.StatusActive, Due: &d}
-		if err := f.SetExtraField("shuttle", oneshot()); err != nil {
+		if err := f.SetExtraField("shuttle", ownedOn(t, env, oneshot())); err != nil {
 			t.Fatal(err)
 		}
 		if err := storage.Write(f); err != nil {
@@ -1442,16 +1442,26 @@ func TestResumeLegacyRestSuppressesHandoffNotice(t *testing.T) {
 	}
 }
 
-func TestClosedUnknownOwnerVerdict(t *testing.T) {
+func TestRemovedOwnerVerdictsRequireDaemonOrExplicitExit(t *testing.T) {
 	env := testEnv(t)
 	ownHost(t, env, "hub")
 	writeRemotesIn(t, env, `{"version":1,"defaults":{"discover":false},"remotes":[]}`)
 	dir, st := newStore(t)
 	seedShuttleRole(t, st, "archive", felt.StatusClosed, map[string]any{"kind": "oneshot", "host": "retired"}, nil)
-	if out, err := runIn(t, env, dir, "close", "archive", "--tempered=true"); err != nil {
+	before, _ := os.ReadFile(st.Path("archive"))
+	for _, verdict := range []string{"true", "false"} {
+		if out, err := runIn(t, env, dir, "close", "archive", "--tempered="+verdict); err == nil {
+			t.Fatalf("daemon down must not authorize %s: %s", verdict, out)
+		}
+		after, _ := os.ReadFile(st.Path("archive"))
+		if string(before) != string(after) {
+			t.Fatal("daemon-down verdict changed the mirror")
+		}
+	}
+	if out, err := runIn(t, env, dir, "close", "archive", "--tempered=false", "--local"); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if v := readTempered(mustRead(t, st, "archive")); v == nil || !*v {
-		t.Fatal("missing verdict")
+	if v := readTempered(mustRead(t, st, "archive")); v == nil || *v {
+		t.Fatal("explicit retirement missing")
 	}
 }

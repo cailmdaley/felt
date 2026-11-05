@@ -623,8 +623,6 @@ var nativeFields = map[string]nativeFieldSpec{
 	"tags":           {accessor: func(f *felt.Felt) (any, bool) { return f.Tags, len(f.Tags) > 0 }, prefilterKey: "tags", prefilterable: true},
 	"created_at":     {accessor: feltCreatedAtValue, prefilterKey: "created-at", prefilterable: true},
 	"created-at":     {accessor: feltCreatedAtValue, prefilterKey: "created-at", prefilterable: true},
-	"updated_at":     {accessor: feltUpdatedAtValue, prefilterKey: "updated-at", prefilterable: true},
-	"updated-at":     {accessor: feltUpdatedAtValue, prefilterKey: "updated-at", prefilterable: true},
 	"closed_at":      {accessor: feltClosedAtValue, prefilterKey: "closed-at", prefilterable: true},
 	"closed-at":      {accessor: feltClosedAtValue, prefilterKey: "closed-at", prefilterable: true},
 	"outcome":        {accessor: func(f *felt.Felt) (any, bool) { return f.Outcome, f.Outcome != "" }, prefilterKey: "outcome", prefilterable: true},
@@ -642,7 +640,6 @@ var nativeFields = map[string]nativeFieldSpec{
 
 func feltUIDValue(f *felt.Felt) (any, bool)        { return f.UID, f.UID != "" }
 func feltCreatedAtValue(f *felt.Felt) (any, bool)  { return f.CreatedAt, !f.CreatedAt.IsZero() }
-func feltUpdatedAtValue(f *felt.Felt) (any, bool)  { return f.UpdatedAt, f.UpdatedAt != nil }
 func feltClosedAtValue(f *felt.Felt) (any, bool)   { return f.ClosedAt, f.ClosedAt != nil }
 func feltModifiedAtValue(f *felt.Felt) (any, bool) { return f.ModifiedAt, !f.ModifiedAt.IsZero() }
 

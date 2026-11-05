@@ -87,6 +87,7 @@ export interface CompositeEntry {
    * `origin`. */
   origin: string;
   localPlanning?: boolean;
+  planningPending?: boolean;
   originStale?: { since?: string };
   /** Nearest ancestor constitution, owner-resolved; null is a root. */
   orchestrator?: string | null;
@@ -179,7 +180,7 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     const orchestrator = typeof item.orchestrator === 'string' && item.orchestrator ? item.orchestrator : null;
     const pendingResults = typeof item.pending_results === 'number' && item.pending_results > 0 ? item.pending_results : undefined;
     const dispatchError = typeof item.dispatch_error === 'string' && item.dispatch_error ? item.dispatch_error : undefined;
-    entries.push({ origin, localPlanning: item.local_planning === true, orchestrator, pendingResults, feltStore, path, fiber, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
+    entries.push({ origin, localPlanning: item.local_planning === true, planningPending: item.planning_pending === true, orchestrator, pendingResults, feltStore, path, fiber, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};

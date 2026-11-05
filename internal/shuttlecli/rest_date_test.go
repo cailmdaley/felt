@@ -10,7 +10,7 @@ func TestRestUntil(t *testing.T) {
 	env := testEnv(t)
 	dir, storage := newStore(t)
 	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusActive}
-	if err := f.SetExtraField("shuttle", oneshot()); err != nil {
+	if err := f.SetExtraField("shuttle", ownedOn(t, env, oneshot())); err != nil {
 		t.Fatal(err)
 	}
 	if err := storage.Write(f); err != nil {

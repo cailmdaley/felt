@@ -98,7 +98,7 @@ func TestStatusShowsTheWait(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedFiber(t, storage, "hub/a", "01JTHREAD00000000000000000", felt.StatusActive, oneshot(), nil)
+	seedFiber(t, storage, "hub/a", "01JTHREAD00000000000000000", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 	seedFiber(t, storage, "hub/blocker", blockerUID, felt.StatusActive, nil, nil)
 	if out, err := runIn(t, env, dir, "rest", "hub/a", "--until", "hub/blocker", "--local"); err != nil {
 		t.Fatalf("%v: %s", err, out)

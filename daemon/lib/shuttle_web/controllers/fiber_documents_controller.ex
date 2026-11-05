@@ -241,7 +241,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
         Enum.map(body.fibers, fn entry ->
           entry
           |> Map.put(:origin, origin)
-          |> Map.put(:local_planning, Shuttle.Planning.quiescent?(entry.fiber))
+          |> Map.put(:local_planning, !is_nil(Shuttle.Planning.local_copy(id, origin)))
         end)
 
       json(

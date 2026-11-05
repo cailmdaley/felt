@@ -664,7 +664,11 @@ const MOCK_FEED = {
       { ...fiber({ id: 'fixtures/offline/armed', uid: 'offline-armed', name: 'Armed work — execution unknown', status: 'active',
         shuttle: { ...shuttleBlock(), host: 'kelvin' } }), origin: 'kelvin' },
       { ...fiber({ id: 'fixtures/offline/standing', uid: 'offline-standing', name: 'Standing run — ready for review', status: 'closed',
-        shuttle: { ...shuttleBlock(), kind: 'standing', host: 'kelvin' } }), origin: 'kelvin', local_planning: true },
+        shuttle: { ...shuttleBlock(), kind: 'standing', host: 'kelvin', schedule: { expr: '0 9 * * *' } } }), origin: 'kelvin', local_planning: false },
+      { ...fiber({ id: 'fixtures/offline/removed', uid: 'offline-removed', name: 'Removed host — retirement is available', status: 'active',
+        shuttle: { ...shuttleBlock(), host: 'retired', runtime: { session_uuid: 'unconcluded' } } }), origin: 'retired', local_planning: true },
+      { ...fiber({ id: 'fixtures/offline/unowned-inconclusive', uid: 'offline-unowned-inconclusive', name: 'Unowned — execution inconclusive', status: 'active',
+        shuttle: { ...shuttleBlock(), host: '', runtime: { session_uuid: 'unconcluded' } } }), origin: 'local', local_planning: false },
       { ...fiber({ id: 'fixtures/offline/unowned', uid: 'offline-unowned', name: 'Unowned draft — planning still works', status: 'open',
         shuttle: { ...shuttleBlock(), host: '' } }), origin: 'local', local_planning: true },
       { ...fiber({ id: 'fixtures/offline/resting', uid: 'offline-resting', name: 'Rested thread — execution host offline', status: 'open', horizon: 'stashed',
@@ -811,6 +815,7 @@ const MOCK_FEED = {
   origins: {
     local: { kind: 'local', stale: false, last_polled_at: iso(0), fiber_count: 12 },
     kelvin: { kind: 'remote', stale: true, last_polled_at: iso(-3_600_000), fiber_count: 1 },
+    ...(search.get('offline') === 'planning' ? { retired: { kind: 'archive', stale: true, fiber_count: 1 } } : {}),
   },
 }
 

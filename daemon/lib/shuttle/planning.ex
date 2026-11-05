@@ -1,219 +1,187 @@
 defmodule Shuttle.Planning do
-  @moduledoc "Planning belongs to synchronized documents; execution belongs to its host."
-
-  alias Shuttle.{FeltStores, FiberDoc, Poller}
+  @moduledoc "Owner-away exits on synchronized copies; configuration and execution stay with the owner."
+  alias Shuttle.{FeltStores, FiberDoc, OriginRouter, Poller, RemoteFiberRegistry, Remotes}
+  @exit_fields ~w(status tempered closed_at closed-at horizon)
 
   def quiescent?(%{"status" => "active"}), do: false
+  def quiescent?(%{"shuttle" => block}) when not is_map(block), do: false
 
   def quiescent?(fiber) do
-    runtime = get_in(fiber, ["shuttle", "runtime"]) || %{}
-
-    case runtime do
-      %{"dispatched_at" => start, "handed_off_at" => finish}
-      when is_binary(start) and is_binary(finish) ->
-        with {:ok, start, _} <- DateTime.from_iso8601(start),
-             {:ok, finish, _} <- DateTime.from_iso8601(finish) do
-          DateTime.compare(finish, start) == :gt
-        else
-          _ -> false
-        end
-
-      %{"dispatched_at" => _} ->
-        false
-
-      %{"session_uuid" => session} when session not in [nil, ""] ->
-        false
-
-      runtime when is_map(runtime) ->
-        true
-
-      _ ->
-        false
+    case get_in(fiber, ["shuttle", "runtime"]) || %{} do
+      %{"dispatched_at" => start, "handed_off_at" => finish} -> after?(finish, start)
+      %{"dispatched_at" => _} -> false
+      %{"session_uuid" => session} when session not in [nil, ""] -> false
+      %{} -> true
+      _ -> false
     end
   end
 
-  def action?(%{"action" => "reopen", "as_draft" => true}), do: true
-
-  def action?(%{"action" => action}),
-    do: action in ~w(pause rest close set-agent set-model set-outcome role seat reshape)
-
+  def action?(%{"action" => "close", "tempered" => true}), do: false
+  def action?(%{"action" => action}), do: action in ~w(rest close pause)
   def action?(_), do: false
 
-  def patch?(params) do
-    not Map.has_key?(params, "name") && not Map.has_key?(params, "body") &&
-      is_map(Map.get(params, "set", %{})) && is_list(Map.get(params, "unset", [])) &&
-      Enum.all?(
-        Map.keys(Map.get(params, "set", %{})) ++ Map.get(params, "unset", []),
-        &(&1 in ~w(horizon cold))
-      )
-  end
-
-  # An unaddressed request still belongs to its document's execution owner.
   def origin(identifier, supplied, hint \\ nil) do
     if supplied in [nil, "", "local", Poller.own_host_id()] do
       with {:ok, %{path: path}} <- FeltStores.resolve_request(identifier, hint),
-           {:ok, _, _, fiber, _} <- FiberDoc.read_path(path),
-           host when is_binary(host) and host != "" <- get_in(fiber, ["shuttle", "host"]) do
-        host
-      else
-        _ -> supplied
-      end
+           {:ok, _, _, %{"shuttle" => %{"host" => host}}, _} <- FiberDoc.read_path(path),
+           true <- is_binary(host) && host != "",
+           do: host,
+           else: (_ -> supplied)
     else
       supplied
     end
   end
 
-  # Called only after a definite pre-send failure or an unknown owner.
-  # The CLI rechecks under the document lock; the feed must be stale or absent.
-  def local?(identifier, origin, hint \\ nil, action \\ %{}),
-    do: !is_nil(local_copy(identifier, origin, hint, action))
+  # Failed or incomplete discovery cannot prove removal. A configured closed fleet can.
+  def removed?(host) when host in [nil, ""], do: false
 
-  def local_copy(identifier, origin, hint \\ nil, action \\ %{}) do
+  def removed?(host) do
+    report = Shuttle.TailnetPeers.status()
+
+    complete =
+      (report.state == "ok" && report.rejected == []) ||
+        is_list(Shuttle.Env.app(:remotes)) ||
+        match?(
+          %{"defaults" => %{"discover" => false}, "remotes" => entries} when is_list(entries),
+          Remotes.document()
+        )
+
+    complete && match?({:error, {:unknown_origin, _}}, OriginRouter.route(host))
+  end
+
+  def eligible?(%{"shuttle" => %{} = block} = fiber) do
+    removed = removed?(block["host"])
+    scheduled = block["kind"] == "standing" && !is_nil(block["schedule"])
+    removed || (!scheduled && quiescent?(fiber))
+  end
+
+  def eligible?(_), do: false
+
+  # The CLI rechecks the exact resolved document under its advisory lock.
+  def local_copy(identifier, origin, hint \\ nil) do
     with {:ok, %{path: path} = resolved} <- FeltStores.resolve_request(identifier, hint),
-         {:ok, _, raw, fiber, body} <- FiberDoc.read_path(path),
+         {:ok, _, _, %{"shuttle" => %{} = block} = fiber, _} <- FiberDoc.read_path(path),
          true <- is_nil(resolved.uid) || fiber["id"] == resolved.uid,
-         true <- is_map(fiber["shuttle"]),
-         host = get_in(fiber, ["shuttle", "host"]),
-         true <- origin in [nil, "", "local", host, Poller.own_host_id()] do
-      offline =
-        case Shuttle.RemoteFiberRegistry.feeds()[host] do
-          %{stale: false} -> false
-          _ -> true
-        end
+         true <- origin in [nil, "", "local", block["host"], Poller.own_host_id()],
+         true <- eligible?(fiber),
+         rows = (RemoteFiberRegistry.feeds()[block["host"]] || %{})[:fibers] || [],
+         true <- Enum.all?(rows, &(uid(&1) != fiber["id"] || safe_owner?(&1))),
+         do: resolved,
+         else: (_ -> nil)
+  end
 
-      removed =
-        host in [nil, ""] ||
-          match?({:error, {:unknown_origin, _}}, Shuttle.OriginRouter.route(host))
+  def exit(params, cause) do
+    with true <- action?(params),
+         true <- match?({:not_sent, _}, cause) || removed?(params["origin"]),
+         %{} = copy <- local_copy(params["fiber"], params["origin"], params["fiber_path"]) do
+      args =
+        ["--mirror-owner", params["origin"] || ""] ++
+          Enum.flat_map(~w(tempered quiet until actor), fn key ->
+            case Map.fetch(params, key) do
+              {:ok, value} when is_boolean(value) -> ["--#{key}=#{value}"]
+              {:ok, value} when is_binary(value) -> ["--#{key}", value]
+              _ -> []
+            end
+          end)
 
-      retiring = removed && action["action"] in ~w(close rest)
-
-      rearming =
-        action["action"] == "close" && action["tempered"] == true &&
-          get_in(fiber, ["shuttle", "kind"]) == "standing"
-
-      if offline && !rearming && (quiescent?(fiber) || retiring) do
-        revision =
-          :crypto.hash(:sha256, "---\n" <> raw <> "\n---" <> body) |> Base.encode16(case: :lower)
-
-        %{resolved: resolved, revision: revision}
+      case Shuttle.LifecycleService.transition(
+             String.to_existing_atom(params["action"]),
+             copy.uid || copy.fiber_id,
+             args,
+             copy.fiber_id
+           ) do
+        {:ok, output} -> {:ok, "Owner unavailable (#{inspect(cause)}).\n#{output}"}
+        other -> other
       end
     else
       _ -> nil
     end
   end
 
-  # Keep owner addresses and execution observations, including unknown liveness.
-  # Only a strictly newer archive document may replace stale planning fields.
-  def reconcile(owners, archives, stale, local) do
-    unique_archives =
-      archives
-      |> Enum.group_by(&identity/1)
-      |> Enum.flat_map(fn
-        {key, [row]} -> [{key, row}]
-        _ -> []
-      end)
-      |> Map.new()
-
-    owners =
-      Enum.map(owners, fn row ->
-        origin = row["origin"]
-        candidate = if uid(row), do: unique_archives[uid(row)]
-
-        archive =
-          if candidate &&
-               get_in(candidate, ["fiber", "shuttle", "host"]) ==
-                 get_in(row, ["fiber", "shuttle", "host"]),
-             do: candidate
-
-        available =
-          if origin == local,
-            do: quiescent?(row["fiber"]),
-            else: archive != nil && quiescent?(archive["fiber"])
-
-        projected =
-          if archive && stale[origin] && newer?(archive["fiber"], row["fiber"]),
-            do: project(row, archive),
-            else: row
-
-        Map.put(
-          projected,
-          "local_planning",
-          available && quiescent?(row["fiber"]) && is_nil(row["runtime"])
-        )
-      end)
-
-    seen = MapSet.new(owners, &identity/1)
-
-    missing =
-      Enum.filter(archives, fn row ->
-        fiber = row["fiber"]
-        is_map(fiber["shuttle"]) && !MapSet.member?(seen, identity(row))
-      end)
-
-    owners ++
-      Enum.map(missing, fn row ->
-        host = get_in(row, ["fiber", "shuttle", "host"])
-
-        row
-        |> Map.put("origin", if(host in [nil, ""], do: local, else: host))
-        |> Map.put(
-          "local_planning",
-          Map.has_key?(unique_archives, identity(row)) && quiescent?(row["fiber"])
-        )
-      end)
-  end
-
-  @planning_fields ~w(status tempered closed_at closed-at horizon cold due tags outcome role seat updated_at)
-  @planning_shuttle ~w(kind project_dir agent effort chrome schedule pulse role seat blocked_on)
-
-  defp project(owner, archive) do
-    original = owner["fiber"]
-
-    planned =
-      Map.merge(
-        Map.drop(original, @planning_fields),
-        Map.take(archive["fiber"], @planning_fields)
+  def pending?(identifier, origin, hint \\ nil) do
+    with {:ok, %{path: path}} <- FeltStores.resolve_request(identifier, hint),
+         {:ok, _, _, fiber, _} <- FiberDoc.read_path(path),
+         true <- eligible?(fiber),
+         %{stale: false, fibers: rows} <- RemoteFiberRegistry.feeds()[origin] do
+      Enum.any?(
+        rows,
+        &(uid(&1) == fiber["id"] && host(&1) == origin && newer?(%{"fiber" => fiber}, &1))
       )
-
-    # An armed or possibly live owner wins over an offline status edit.
-    planned =
-      if quiescent?(original) && is_nil(owner["runtime"]),
-        do: planned,
-        else:
-          Map.merge(
-            Map.drop(planned, ~w(status tempered closed_at closed-at)),
-            Map.take(original, ~w(status tempered closed_at closed-at))
-          )
-
-    shuttle =
-      Map.merge(
-        Map.drop(original["shuttle"] || %{}, @planning_shuttle),
-        Map.take(archive["fiber"]["shuttle"] || %{}, @planning_shuttle)
-      )
-
-    fiber =
-      planned
-      |> Map.put("shuttle", shuttle)
-      |> Map.merge(Map.take(original, ["id", "uid", "slug", "path"]))
-
-    Map.put(owner, "fiber", fiber)
-  end
-
-  defp uid(row) do
-    value = get_in(row, ["fiber", "uid"]) || get_in(row, ["fiber", "id"])
-    if Shuttle.ULID.valid?(value), do: value
-  end
-
-  defp identity(row),
-    do: uid(row) || {get_in(row, ["fiber", "shuttle", "host"]), get_in(row, ["fiber", "id"])}
-
-  defp newer?(a, b) do
-    with {:ok, a, _} <- DateTime.from_iso8601(a["updated_at"] || a["updated-at"] || ""),
-         {:ok, b, _} <-
-           DateTime.from_iso8601(b["updated_at"] || b["updated-at"] || b["modified_at"] || "") do
-      DateTime.compare(a, b) == :gt
     else
       _ -> false
     end
   end
+
+  def reconcile(owners, archives, stale, local) do
+    copies =
+      archives
+      |> Enum.group_by(&uid/1)
+      |> Map.filter(fn {id, rows} -> id != nil && length(rows) == 1 end)
+
+    owners =
+      Enum.map(owners, fn row ->
+        copy =
+          case copies[uid(row)] do
+            [copy] -> if host(copy) == host(row), do: copy
+            _ -> nil
+          end
+
+        capable = copy != nil && eligible?(copy["fiber"]) && safe_owner?(row)
+        pending = copy != nil && eligible?(copy["fiber"]) && newer?(copy, row)
+
+        fiber =
+          if stale[row["origin"]] && pending && capable do
+            Map.drop(row["fiber"], @exit_fields)
+            |> Map.merge(Map.take(copy["fiber"], @exit_fields))
+          else
+            row["fiber"]
+          end
+
+        Map.merge(row, %{
+          "fiber" => fiber,
+          "local_planning" => capable,
+          "planning_pending" => pending && !stale[row["origin"]]
+        })
+      end)
+
+    seen = MapSet.new(owners, &uid/1)
+
+    missing =
+      Enum.filter(archives, fn row ->
+        !MapSet.member?(seen, uid(row)) && is_map(row["fiber"]["shuttle"]) &&
+          stale[host(row)] != false
+      end)
+
+    owners ++
+      Enum.map(missing, fn row ->
+        row
+        |> Map.put("origin", if(host(row) in [nil, ""], do: local, else: host(row)))
+        |> Map.put("local_planning", match?([_], copies[uid(row)]) && eligible?(row["fiber"]))
+      end)
+  end
+
+  defp safe_owner?(row),
+    do: removed?(host(row)) || (quiescent?(row["fiber"]) && is_nil(row["runtime"]))
+
+  defp host(%{"fiber" => %{"shuttle" => %{} = block}}), do: block["host"]
+  defp host(_), do: nil
+
+  defp uid(row) do
+    id = get_in(row, ["fiber", "uid"]) || get_in(row, ["fiber", "id"])
+    if Shuttle.ULID.valid?(id), do: id
+  end
+
+  defp newer?(%{"fiber" => %{"shuttle" => %{"runtime" => %{"mirrored_at" => stamp}}}}, row),
+    do: after?(stamp, row["fiber"]["modified_at"] || row["fiber"]["updated_at"])
+
+  defp newer?(_, _), do: false
+
+  defp after?(a, b) when is_binary(a) and is_binary(b) do
+    with {:ok, a, _} <- DateTime.from_iso8601(a),
+         {:ok, b, _} <- DateTime.from_iso8601(b),
+         do: DateTime.compare(a, b) == :gt,
+         else: (_ -> false)
+  end
+
+  defp after?(_, _), do: false
 end

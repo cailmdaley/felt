@@ -20,7 +20,21 @@ defmodule ShuttleWeb.TransitionController do
   def create(conn, %{"fiber_id" => fiber_id, "target" => target} = params) do
     origin = Map.get(params, "origin")
 
-    case Transition.transition(fiber_id, target, origin) do
+    case Transition.transition(fiber_id, target, origin,
+           routed: params["routed"] in [true, "1", "true"]
+         ) do
+      {:mirrored, action, output} ->
+        json(conn, %{
+          fiber_id: fiber_id,
+          target: target,
+          origin: origin,
+          action: action,
+          invoked: true,
+          saved_locally: true,
+          execution_requested: false,
+          message: output
+        })
+
       {:ok, action} ->
         json(conn, %{
           fiber_id: fiber_id,

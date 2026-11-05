@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
-	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -30,9 +29,14 @@ type unknownOwnerError struct{ error }
 //
 // Under --local execution changes refuse a foreign owner rather than routing
 // back through the daemon. lifecycleOwner separately validates the daemon's
-// offline planning write after an owner cannot arbitrate.
+// mirror exit after an owner cannot arbitrate.
 func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (string, error) {
-	return a.routeOwner(cmd, args, blockHost, localOnly(cmd))
+	owner, err := a.routeOwner(cmd, args, blockHost, localOnly(cmd))
+	var unknown unknownOwnerError
+	if !localOnly(cmd) && exitCommand(cmd) && errors.As(err, &unknown) {
+		return blockHost, nil // Only the daemon may authorize the absent-owner exit.
+	}
+	return owner, err
 }
 
 func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, local bool) (string, error) {
@@ -70,6 +74,7 @@ func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, lo
 			discoveryFailed = true
 			reason += fmt.Sprintf(" (discovered peers unknown: %v)", err)
 		} else {
+			discoveryFailed = discovery.State != "ok" || len(discovery.Rejected) != 0
 			for _, remote := range a.admitDiscovered(doc, discovery.Peers) {
 				if remote.Name == owner {
 					return owner, nil
@@ -86,7 +91,7 @@ func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, lo
 
 // localFlagUsage is the one description of --local on every verb that can
 // route to an owning daemon.
-const localFlagUsage = "Write here without routing; foreign execution is refused, quiescent planning is Git-synchronized"
+const localFlagUsage = "Write here without routing; only safe foreign exits can travel by Git"
 
 // localOnly reports whether cmd runs with --local set.
 func localOnly(cmd *cobra.Command) bool {
@@ -188,7 +193,7 @@ func remoteRouteError(cmd *cobra.Command, args []string, owner string, err error
 
 	if !requestCouldHaveReachedDaemon(err) {
 		return ownerRouteRefusal(cmd, args, owner,
-			fmt.Sprintf("the local shuttle daemon is unreachable: %v; it did not receive the request", err))
+			fmt.Sprintf("the local shuttle daemon is unreachable: %v; it did not receive the request. Start it, or use --local for an explicit local exit", err))
 	}
 	return fmt.Errorf("could not confirm routing to owning host %q through the local shuttle daemon: %v; the action may have been applied. Check the fiber on %q before retrying. Run `%s` there if needed", owner, err, owner, command)
 }
@@ -390,7 +395,7 @@ func (a *app) postRouted(owner, endpoint string, body []byte) ([]byte, error) {
 // is waiting for. Ordinary routed writes answer well within it.
 const routedWaitNotice = 3 * time.Second
 
-func (a *app) forwardLifecycleAction(cmd *cobra.Command, args []string, owner, action string, fiber *felt.Felt, st *felt.Storage, fields map[string]any) (bool, error) {
+func (a *app) forwardLifecycleAction(cmd *cobra.Command, args []string, owner, action string, fiber *felt.Felt, fields map[string]any) (bool, error) {
 	if owner == "" {
 		return false, nil
 	}
@@ -400,12 +405,6 @@ func (a *app) forwardLifecycleAction(cmd *cobra.Command, args []string, owner, a
 	}
 	output, err := a.postOwnerLifecycle(action, owner, fiber, fields)
 	if err != nil {
-		block, _, _ := shuttle.BlockOf(fiber)
-		if block != nil && definitelyUnsent(err) && a.allowPlanningFallback(cmd, fiber, st, block, err) {
-			// Re-enter once, reading and validating the offline document under
-			// its lock. The failed arbitration prevents a second owner request.
-			return true, cmd.RunE(cmd, args)
-		}
 		return true, remoteRouteError(cmd, args, owner, err)
 	}
 	a.printDaemonBody([]byte(output))

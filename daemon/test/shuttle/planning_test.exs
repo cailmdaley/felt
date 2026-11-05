@@ -1,10 +1,15 @@
 defmodule Shuttle.PlanningTest do
   use ExUnit.Case, async: true
   alias Shuttle.Planning
-
+  alias Shuttle.Test.Env
   @uid "01ARZ3NDEKTSV4RRFFQ69G5FAX"
 
-  test "the shared state table distinguishes planning from possible execution" do
+  setup do
+    Env.put_app_env(:remotes, [%Shuttle.Remote{name: "worker", url: "http://127.0.0.1:1"}])
+    :ok
+  end
+
+  test "the shared state table distinguishes quiescence from execution evidence" do
     cases =
       Path.join([__DIR__, "..", "fixtures", "planning", "states.json"])
       |> File.read!()
@@ -13,12 +18,20 @@ defmodule Shuttle.PlanningTest do
     for %{"name" => name, "fiber" => fiber, "quiescent" => expected} <- cases do
       assert Planning.quiescent?(fiber) == expected, name
     end
+
+    refute Planning.quiescent?(%{
+             "shuttle" => %{
+               "runtime" => %{
+                 "dispatched_at" => "2026-11-04T10:00:00",
+                 "handed_off_at" => "2026-11-04T11:00:00"
+               }
+             }
+           })
   end
 
-  defp row(fields) do
+  defp row(fields \\ %{}) do
     %{
       "origin" => "worker",
-      "local_planning" => true,
       "felt_store" => "/owner",
       "path" => "team/task/task.md",
       "fiber" =>
@@ -28,6 +41,7 @@ defmodule Shuttle.PlanningTest do
             "uid" => @uid,
             "status" => "open",
             "name" => "Owner content",
+            "outcome" => "Owner result",
             "updated_at" => "2026-11-04T10:00:00Z",
             "shuttle" => %{"host" => "worker", "kind" => "oneshot"}
           },
@@ -36,120 +50,125 @@ defmodule Shuttle.PlanningTest do
     }
   end
 
-  test "newer planning replaces fields including removals, not owner addresses or content" do
-    owner = row(%{"due" => "2026-12-01", "cold" => true})
+  defp mirror(fields \\ %{}) do
+    row(
+      Map.merge(
+        %{
+          "shuttle" => %{
+            "host" => "worker",
+            "kind" => "oneshot",
+            "runtime" => %{"mirrored_at" => "2026-11-04T11:00:00Z"}
+          }
+        },
+        fields
+      )
+    )
+    |> Map.put("felt_store", "/archive")
+  end
+
+  test "only a newer mirror stamp projects exit fields, preserving owner addresses, content and configuration" do
+    owner =
+      row(%{"tempered" => true, "status" => "closed", "due" => "2026-12-01", "cold" => true})
 
     archive =
-      row(%{
-        "name" => "Archive content",
+      mirror(%{
         "horizon" => "stashed",
-        "status" => "closed",
-        "tempered" => false,
-        "updated_at" => "2026-11-04T11:00:00Z",
-        "shuttle" => %{"host" => "worker", "kind" => "oneshot", "role" => "editor"}
+        "status" => "open",
+        "name" => "Archive body",
+        "outcome" => "Local result"
       })
-      |> Map.put("felt_store", "/archive")
 
     assert [
              %{
                "origin" => "worker",
                "felt_store" => "/owner",
-               "fiber" => fiber
+               "fiber" => fiber,
+               "local_planning" => true
              }
            ] =
              Planning.reconcile([owner], [archive], %{"worker" => true}, "hub")
 
-    assert %{
-             "name" => "Owner content",
-             "horizon" => "stashed",
-             "status" => "closed",
-             "tempered" => false,
-             "shuttle" => %{"host" => "worker", "role" => "editor"}
-           } = fiber
-
-    refute Map.has_key?(fiber, "due")
-    refute Map.has_key?(fiber, "cold")
+    assert fiber["status"] == "open"
+    assert fiber["horizon"] == "stashed"
+    refute Map.has_key?(fiber, "tempered")
+    assert fiber["outcome"] == "Owner result"
+    assert fiber["name"] == "Owner content"
+    assert fiber["due"] == "2026-12-01"
+    assert fiber["cold"] == true
   end
 
-  test "fresh owners, equal versions and missing version evidence retain the owner row" do
-    owner = row(%{})
+  test "a body-only edit cannot reopen owner review or replace its outcome" do
+    owner = row(%{"status" => "closed"})
 
-    for {archive, stale} <- [
-          {row(%{"horizon" => "stashed", "updated_at" => "2026-11-04T11:00:00Z"}), false},
-          {row(%{"horizon" => "stashed"}), true},
-          {row(%{"horizon" => "stashed", "updated_at" => nil}), true}
+    archive =
+      row(%{
+        "status" => "open",
+        "outcome" => "Not authoritative",
+        "updated_at" => "2026-11-04T12:00:00Z"
+      })
+
+    assert [%{"fiber" => fiber, "planning_pending" => false}] =
+             Planning.reconcile([owner], [archive], %{"worker" => true}, "hub")
+
+    assert fiber == owner["fiber"]
+  end
+
+  test "a returning healthy owner wins before Git sync and exposes the waiting copy" do
+    owner = row()
+
+    assert [%{"fiber" => fiber, "planning_pending" => true}] =
+             Planning.reconcile(
+               [owner],
+               [mirror(%{"horizon" => "stashed"})],
+               %{"worker" => false},
+               "hub"
+             )
+
+    assert fiber == owner["fiber"]
+    # A local-only document absent on that healthy owner is not a live phantom.
+    assert [] == Planning.reconcile([], [mirror()], %{"worker" => false}, "hub")
+  end
+
+  test "equal or older mirror stamps, armed copies and known owner workers do not project" do
+    for {owner, copy} <- [
+          {row(%{"modified_at" => "2026-11-04T11:00:00Z"}), mirror(%{"horizon" => "stashed"})},
+          {row(), mirror(%{"status" => "active", "horizon" => "stashed"})},
+          {row(%{"status" => "active"}), mirror(%{"horizon" => "stashed"})},
+          {Map.put(row(), "runtime", %{"state" => "running"}), mirror(%{"horizon" => "stashed"})}
         ] do
-      assert [^owner] = Planning.reconcile([owner], [archive], %{"worker" => stale}, "hub")
+      assert [%{"fiber" => fiber}] =
+               Planning.reconcile([owner], [copy], %{"worker" => true}, "hub")
+
+      assert fiber == owner["fiber"]
     end
   end
 
-  test "a known owner worker or armed status wins over a newer offline verdict" do
-    archive =
-      row(%{
-        "status" => "closed",
-        "tempered" => false,
-        "horizon" => "stashed",
-        "updated_at" => "2026-11-04T11:00:00Z"
-      })
+  test "UID, execution host and unique physical copy constrain the capability" do
+    owner = row()
 
-    for owner <- [
-          row(%{"status" => "active"}),
-          Map.put(row(%{}), "runtime", %{"state" => "running"})
+    for copies <- [
+          [mirror(%{"uid" => nil, "id" => "task"})],
+          [mirror(%{"shuttle" => %{"host" => "replacement", "kind" => "oneshot"}})],
+          [mirror(), Map.put(mirror(), "felt_store", "/duplicate")]
         ] do
-      assert [%{"fiber" => fiber} = projected] =
-               Planning.reconcile([owner], [archive], %{"worker" => true}, "hub")
-
-      assert fiber["status"] == owner["fiber"]["status"]
-      refute Map.has_key?(fiber, "tempered")
-      assert projected["runtime"] == owner["runtime"]
-      assert fiber["horizon"] == "stashed"
+      [projected | _] = Planning.reconcile([owner], copies, %{"worker" => true}, "hub")
+      assert projected["fiber"] == owner["fiber"]
+      refute projected["local_planning"]
     end
+
+    copy = row(%{"uid" => nil, "id" => "task"})
+    assert [%{"local_planning" => false}] = Planning.reconcile([], [copy], %{}, "hub")
   end
 
-  test "projection requires intrinsic identity and cannot merge UID-less same-slug documents" do
-    owner = row(%{"id" => "task", "uid" => nil})
+  test "scheduled standing work needs its owner; a proven removed owner may retire" do
+    fiber =
+      row()["fiber"]
+      |> put_in(["shuttle", "kind"], "standing")
+      |> put_in(["shuttle", "schedule"], %{"expr" => "0 9 * * *"})
 
-    archive =
-      row(%{
-        "id" => "task",
-        "uid" => nil,
-        "horizon" => "stashed",
-        "updated_at" => "2026-11-04T11:00:00Z"
-      })
-
-    assert [projected] = Planning.reconcile([owner], [archive], %{"worker" => true}, "hub")
-    assert projected == Map.put(owner, "local_planning", false)
-  end
-
-  test "a changed execution owner cannot supply an old owner's projection or planning capability" do
-    owner = row(%{})
-
-    archive =
-      row(%{
-        "horizon" => "stashed",
-        "updated_at" => "2026-11-04T11:00:00Z",
-        "shuttle" => %{"host" => "replacement", "kind" => "oneshot"}
-      })
-
-    assert [projected] = Planning.reconcile([owner], [archive], %{"worker" => true}, "hub")
-    assert projected == Map.put(owner, "local_planning", false)
-  end
-
-  test "ambiguous local-only archives cannot promise an offline save" do
-    for fields <- [%{}, %{"id" => "task", "uid" => nil}] do
-      first = row(fields) |> Map.put("felt_store", "/first")
-      second = row(fields) |> Map.put("felt_store", "/second")
-      projected = Planning.reconcile([], [first, second], %{}, "hub")
-      assert length(projected) == 2
-      assert Enum.all?(projected, &(&1["local_planning"] == false))
-      assert [%{"local_planning" => true}] = Planning.reconcile([], [first], %{}, "hub")
-    end
-  end
-
-  test "a removed owner's local-only document remains addressed to that owner" do
-    archive = row(%{"horizon" => "stashed"})
-
-    assert [%{"origin" => "worker"}] =
-             Planning.reconcile([], [archive], %{}, "hub")
+    refute Planning.eligible?(fiber)
+    Env.put_app_env(:remotes, [])
+    assert Planning.eligible?(fiber)
+    assert Planning.eligible?(Map.put(fiber, "status", "active"))
   end
 end

@@ -5,8 +5,9 @@ defmodule ShuttleWeb.LifecycleController do
 
   Owner-routed via `Shuttle.OriginRouter`: a local-owned card's mutation runs
   here; a remote-owned card's request is forwarded to the owning daemon's
-  identical `/lifecycle` (origin stripped) and relayed verbatim. The local
-  branch delegates to Shuttle CLI verbs, so the validated offline frontmatter
+  identical `/lifecycle` (origin stripped, routed marker set) and relayed verbatim.
+  Only the daemon authorizes safe mirror exits. The local branch delegates to
+  Shuttle CLI verbs, so the validated frontmatter
   writer remains the single implementation of
   install/pause/rest/resume/repeat/accept/close/reopen/set-model/set-agent/role/seat/set-outcome/uninstall.
 
@@ -33,42 +34,53 @@ defmodule ShuttleWeb.LifecycleController do
     origin = Shuttle.Planning.origin(params["fiber"], params["origin"], params["fiber_path"])
     params = Map.put(params, "origin", origin)
 
-    case OriginRouter.route(origin) do
+    case OriginRouter.route(origin, routed: params["routed"] in [true, "1", "true"]) do
+      {:error, {:routed_owner_mismatch, origin}} ->
+        conn
+        |> put_status(422)
+        |> json(%{
+          error:
+            "routed request reached this host but the document names #{origin}; not forwarded again"
+        })
+
       {:error, {:unknown_origin, origin}} ->
-        if offline?(params),
-          do: create_local(conn, params, "owner #{origin} is not in the fleet"),
-          else: ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+        fallback(conn, params, {:unknown_origin, origin}, fn ->
+          ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+        end)
 
       {:remote, remote} ->
-        result = OriginRouter.forward(remote, "/api/v1/lifecycle", params)
-        # The forwarded verb (rest/uninstall/…) mutated the remote's loom mirror;
-        # invalidate the RemoteFiberRegistry feed cache so the board reflects it
-        # before the next remote poll — otherwise resting a remote-owned card
-        # snaps back until a manual refresh.
-        RemoteFiberRegistry.refresh_after_forward(remote.name, result)
+        if Shuttle.Planning.action?(params) &&
+             Shuttle.Planning.pending?(params["fiber"], origin, params["fiber_path"]) do
+          conn
+          |> put_status(409)
+          |> json(%{
+            error:
+              "The local exit copy is waiting for Git sync. The healthy owner remains authoritative; no second write was requested."
+          })
+        else
+          result = OriginRouter.forward(remote, "/api/v1/lifecycle", params)
+          # The forwarded verb (rest/uninstall/…) mutated the remote's loom mirror;
+          # invalidate the RemoteFiberRegistry feed cache so the board reflects it
+          # before the next remote poll — otherwise resting a remote-owned card
+          # snaps back until a manual refresh.
+          RemoteFiberRegistry.refresh_after_forward(remote.name, result)
 
-        case result do
-          {:error, {:forward_failed, _, {:not_sent, reason}}} ->
-            if offline?(params),
-              do:
-                create_local(
-                  conn,
-                  params,
-                  "owner #{remote.name} unavailable before send: #{inspect(reason)}"
-                ),
-              else: relay_text(conn, result)
+          case result do
+            {:error, {:forward_failed, _, {:not_sent, reason}}} ->
+              fallback(conn, params, {:not_sent, reason}, fn -> relay_text(conn, result) end)
 
-          {:forwarded, 503, body} ->
-            case Jason.decode(body) do
-              {:ok, %{"retryable" => true}} ->
-                conn |> put_resp_content_type("application/json") |> send_resp(503, body)
+            {:forwarded, 503, body} ->
+              case Jason.decode(body) do
+                {:ok, %{"retryable" => true}} ->
+                  conn |> put_resp_content_type("application/json") |> send_resp(503, body)
 
-              _ ->
-                relay_text(conn, result)
-            end
+                _ ->
+                  relay_text(conn, result)
+              end
 
-          _ ->
-            relay_text(conn, result)
+            _ ->
+              relay_text(conn, result)
+          end
         end
 
       :local ->
@@ -76,19 +88,27 @@ defmodule ShuttleWeb.LifecycleController do
     end
   end
 
-  defp offline?(params),
-    do:
-      Shuttle.Planning.action?(params) &&
-        Shuttle.Planning.local?(params["fiber"], params["origin"], params["fiber_path"], params)
+  defp fallback(conn, params, cause, refuse) do
+    case Shuttle.Planning.exit(params, cause) do
+      nil ->
+        refuse.()
 
-  defp create_local(conn, params, unavailable \\ nil) do
+      {:ok, _} = result ->
+        refresh_card(params)
+        send_cli_result(conn, "shuttle", result)
+
+      result ->
+        send_cli_result(conn, "shuttle", result)
+    end
+  end
+
+  defp create_local(conn, params) do
     with {:ok, action} <- action(params),
          {:ok, output} <- execute(action, params) do
       # Every lifecycle verb here mutates the fiber doc (status/outcome/model/
       # shuttle block). Re-read it into the document cache so the kanban's
       # post-action refetch reflects the change now, not after the next poll.
       refresh_card(params)
-      output = if unavailable, do: unavailable <> "\n" <> output, else: output
 
       conn
       |> put_resp_content_type("text/plain")

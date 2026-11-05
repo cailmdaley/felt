@@ -28,11 +28,13 @@ export interface KanbanCard {
    * Origin that contributed this fiber — the composite row's `origin`: the
    * serving daemon's own host id, or the name of the remote it came from.
    * Routes owner-addressed writes and drives the "waiting on `<hostname>`"
-   * stale badge and the drag-disable when that origin is disconnected.
+   * stale badge when that origin is disconnected.
    */
   originId: string
-  /** The composer has a quiescent local document and no owner execution evidence blocks planning. */
+  /** The daemon permits an exit on a local copy after a definite pre-send failure or proven absence. */
   localPlanning?: boolean
+  /** A local exit is waiting for Git sync; the healthy owner's placement still wins. */
+  planningPending?: boolean
   /**
    * The owning host's felt store path (the feed row's `felt_store`, e.g.
    * `/home/user/store` for a remote-host card). Threaded into owner-routed

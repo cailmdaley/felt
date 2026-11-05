@@ -58,7 +58,7 @@ defmodule Shuttle.ApplicationBootTest do
     def init(opts), do: opts
 
     def call(conn, opts) do
-      Process.sleep(Keyword.get(opts, :delay, 2_100))
+      Process.sleep(Keyword.get(opts, :delay, 1_500))
       Plug.Conn.send_resp(conn, 200, ~s({"ready":true}))
     end
   end
@@ -121,7 +121,7 @@ defmodule Shuttle.ApplicationBootTest do
 
       {output, status} =
         Shuttle.Runner.Default.cmd("elixir", args,
-          timeout_ms: 110_000,
+          timeout_ms: 60_000,
           stderr_to_stdout: true,
           env: [
             {"BOOT_ROOT", root},

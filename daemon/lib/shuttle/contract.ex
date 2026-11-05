@@ -20,8 +20,8 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Standing transitions use the locked, conditional run-disposition writer.
-  @expected_level 33
+  # Mirror exits use a locked owner check and a dedicated local-intent stamp.
+  @expected_level 34
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -53,7 +53,9 @@ defmodule Shuttle.Contract do
         "resolved lifecycle reads remain exact for UID-less documents",
     32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)",
     33 =>
-      "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)"
+      "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)",
+    34 =>
+      "rest/pause/close --mirror-owner (locked exit-only owner check and runtime.mirrored_at stamp)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

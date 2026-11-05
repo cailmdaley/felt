@@ -1263,7 +1263,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert body["origins"]["candide"]["fiber_count"] == 1
   end
 
-  test "stale composite planning yields to the newer local UID without inventing execution", %{
+  test "stale composite placement uses a newer mirror stamp without inventing execution", %{
     store: store
   } do
     uid = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
@@ -1273,16 +1273,18 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     id: #{uid}
     name: Rested locally
     status: open
-    updated-at: 2026-11-04T22:00:00Z
     horizon: stashed
     shuttle:
       kind: oneshot
       host: worker
+      runtime:
+        mirrored_at: 2026-11-04T22:00:00Z
     ---
     Body.
     """)
 
     remote = %Remote{name: "worker", url: "http://localhost:4001"}
+    Shuttle.Test.Env.put_app_env(:remotes, [remote])
 
     entry = %{
       "felt_store" => "/owner",
@@ -1322,7 +1324,16 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     fresh = get(api_conn(), "/api/v1/fibers/composite") |> json_response(200)
     assert [%{"fiber" => %{"name" => "Old draft"}}] = fresh["fibers"]
 
-    assert {:ok, %{fibers: [%{fiber: %{"updated_at" => "2026-11-04T22:00:00Z"}}]}} =
+    assert {:ok,
+            %{
+              fibers: [
+                %{
+                  fiber: %{
+                    "shuttle" => %{"runtime" => %{"mirrored_at" => "2026-11-04T22:00:00Z"}}
+                  }
+                }
+              ]
+            }} =
              Shuttle.Poller.cached_fiber_documents(include_mirrors: true)
 
     Agent.update(clock, fn _ -> ~U[2026-11-04 22:01:00Z] end)

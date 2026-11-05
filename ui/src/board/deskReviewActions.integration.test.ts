@@ -26,13 +26,13 @@ describe('verdict actions ride cards awaiting review and in flight', () => {
     const surfaces = renderer()
     const actions = surfaces.rowActions(draft, true, document.createElement('div'))
     expect(actions.filter(action => !action.disabled).map(action => action.label)).toContain('Discard')
-    expect(actions.find(action => action.disabled)?.label).toContain('Git sync')
+    expect(actions.find(action => action.disabled)?.label).toContain('travels by Git')
     expect(sessionVerbsFor(draft)).toEqual([])
     expect(moveDestinations(draft, 'drafts').map(dest => dest.id)).not.toContain('inFlight')
     const root = surfaces.renderNowSection({ drafts: [draft], inFlight: [], awaitingReview: [] }, { worker: { status: 'stale' } })
     const row = root.querySelector<HTMLElement>('[data-fiber-id="offline"]')!
     expect(row.draggable).toBe(true)
-    expect(row.getAttribute('aria-label')).toContain('Planning changes are saved here')
+    expect(row.getAttribute('aria-label')).toContain('An exit can be saved')
     expect(row.classList.contains('kbn-card--stale')).toBe(true)
   })
 
@@ -52,7 +52,7 @@ describe('verdict actions ride cards awaiting review and in flight', () => {
       expect(canPlanOffline(unsafe)).toBe(false)
       const actions = renderer().rowActions(unsafe, true, document.createElement('div'))
       expect(actions.filter(action => !action.disabled)).toEqual([])
-      expect(actions[0].label).toContain('may have a live worker')
+      expect(actions[0].label).toContain('The owner decides')
       expect(moveDestinations(unsafe, null)).toEqual([])
     }
   })

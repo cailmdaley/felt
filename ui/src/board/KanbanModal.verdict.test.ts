@@ -39,7 +39,7 @@ describe('verdict transition authorization', () => {
     vi.advanceTimersByTime(6000)
     expect(board.workspace.queueVerdict).not.toHaveBeenCalled()
     expect(board.commitTransition).not.toHaveBeenCalled()
-    expect(board.showBanner).toHaveBeenCalledWith(expect.stringContaining('launching needs the host'), 'info')
+    expect(board.showBanner).toHaveBeenCalledWith(expect.stringContaining('needs execution owner'), 'info')
   })
   it.each(['tempered', 'composted'] as const)('does not queue a same-column %s verdict that could write after reopening', target => {
     const fiber = card({ id: 'work/review', status: 'closed', tempered: target === 'tempered' })

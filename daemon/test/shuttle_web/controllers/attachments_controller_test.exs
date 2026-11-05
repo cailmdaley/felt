@@ -19,6 +19,8 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
 
     def last, do: Agent.get(__MODULE__, & &1.last)
 
+    def post_mutation(url, body, type, timeout), do: post(url, body, type, timeout)
+
     def post(url, body, _content_type, timeout_ms) do
       Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body, timeout: timeout_ms}))
       Agent.get(__MODULE__, & &1.response)

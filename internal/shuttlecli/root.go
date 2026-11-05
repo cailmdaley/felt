@@ -98,7 +98,7 @@ Common paths:
 // executables and the standard streams through a.env, never through package
 // os; tests replace a probe on their own app.
 type app struct {
-	planningFallback *offlinePlanning // This invocation's failed arbitration, never document state.
+	localMirror      bool // An explicit foreign --local exit, never an automatic CLI fallback.
 	documentUnlock   func() error
 	// messageResolveWait bounds how long fiber-addressed messages wait for a
 	// restarting host's session ledger to become trustworthy again.

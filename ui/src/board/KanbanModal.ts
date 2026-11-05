@@ -59,7 +59,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
-import { offlineExplanation, temperNeedsOwner } from './offlinePlanning.js'
+import { canPlanOffline, exitRefusal, offlineExplanation } from './offlinePlanning.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
@@ -1229,8 +1229,8 @@ export class KanbanModal {
      */
     opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean; verdictCommitted?: boolean } = {},
   ): void {
-    if (card.originStale && (target === 'inFlight' || (target === 'tempered' && temperNeedsOwner(card)))) {
-      this.showBanner(offlineExplanation(card), 'info')
+    if (exitRefusal(card) || (card.originStale && !['awaitingReview', 'composted', ...(card.status !== 'closed' ? ['drafts'] : [])].includes(target))) {
+      this.showBanner(exitRefusal(card) ?? `This action needs execution owner ${card.shuttleHost ?? card.originId}; no local write was made.`, 'info')
       return
     }
     const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
@@ -1270,7 +1270,7 @@ export class KanbanModal {
     // closed→drafts reopen-as-draft made this reachable: a card stashed
     // while open, closed, then dragged back to Drafts carries both.)
     const needSurfaceShift =
-      isNowColumn &&
+      !card.originStale && isNowColumn &&
       ((fromKind === null && onTimelineOrStash) ||
         card.storedHorizon !== undefined ||
         (target === 'drafts' && card.due !== undefined))
@@ -1469,7 +1469,11 @@ export class KanbanModal {
     horizon: HorizonKind,
     opts: { cold?: boolean; due?: string | null } = {},
   ): void {
-
+    if (card.originStale || exitRefusal(card)) {
+      if (canPlanOffline(card) && horizon === 'stashed' && !opts.cold && opts.due === undefined) void this.commitRest(card, '')
+      else this.showBanner(exitRefusal(card) ?? 'Configuration changes need the execution owner; no local write was made.', 'info')
+      return
+    }
     // A standing constitution is placed on the timeline by its schedule
     // (`nextStandingLaunch`), not by hand — a horizon/due write here is
     // silently ignored by the read model and just leaves dead frontmatter.
@@ -2300,16 +2304,19 @@ export class KanbanModal {
 
   private openRestPopover(card: KanbanCard): void {
     this.closeRestPopover?.()
-    this.closeRestPopover = restPopover(card, async until => {
-      try {
-        await this.postJson('/api/v1/lifecycle', {
-          action: 'rest', fiber: card.id, origin: card.originId, until,
-        }, 'Rest failed')
-        await this.fetchAndRender()
-      } catch (error) {
-        this.showBanner(`Rest failed: ${errText(error)}`, 'error')
-      }
-    })
+    if (exitRefusal(card)) { this.showBanner(offlineExplanation(card), 'info'); return }
+    this.closeRestPopover = restPopover(card, until => this.commitRest(card, until))
+  }
+
+  private async commitRest(card: KanbanCard, until: string): Promise<void> {
+    try {
+      await this.postJson('/api/v1/lifecycle', {
+        action: 'rest', fiber: card.id, origin: card.originId, until,
+      }, 'Rest failed')
+      await this.fetchAndRender()
+    } catch (error) {
+      this.showBanner(`Rest failed: ${errText(error)}`, 'error')
+    }
   }
 
   private handleKanbanKeyDown(e: KeyboardEvent): void {

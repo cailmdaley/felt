@@ -155,12 +155,14 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
   defmodule TimeoutClient do
     @behaviour Shuttle.RemoteRegistry.Client
+    def post_mutation(url, body, type, timeout), do: post(url, body, type, timeout)
     def get(_url, _timeout), do: {:error, :timeout}
     def post(_url, _body, _content_type, _timeout), do: {:error, :timeout}
   end
 
   defmodule Client do
     @behaviour Shuttle.RemoteRegistry.Client
+    def post_mutation(url, body, type, timeout), do: post(url, body, type, timeout)
     def get("http://remote.test/api/v1/peers?local=true", _timeout) do
       {:ok,
        Jason.encode!(%{

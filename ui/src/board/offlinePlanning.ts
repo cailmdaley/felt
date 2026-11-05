@@ -1,16 +1,12 @@
-import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
-import { instantMs } from './civilDay.js'
+import type { KanbanCard } from './KanbanTypes.js'
 
-/** A cached absence of a worker is insufficient while dispatch remains armed. */
+/** Only the daemon decides whether a synchronized copy is safe for an exit. */
 export function canPlanOffline(card: KanbanCard): boolean {
-  return card.localPlanning === true && quiescent(card)
+  return card.localPlanning === true
 }
 
-function quiescent(card: KanbanCard): boolean {
-  if (card.status === 'active' || hasLiveWorker(card) || card.held) return false
-  if (!card.dispatchedAt) return !card.sessionUuid
-  const start = instantMs(card.dispatchedAt), end = card.handedOffAt ? instantMs(card.handedOffAt) : NaN
-  return start !== undefined && end !== undefined && Number.isFinite(start) && Number.isFinite(end) && end > start
+export function exitRefusal(card: KanbanCard): string | undefined {
+  if ((card.originStale || (card.shuttleKind && !card.shuttleHost && card.localPlanning === false)) && !canPlanOffline(card)) return offlineExplanation(card)
 }
 
 export function executionRefusal(card: KanbanCard): string | undefined {
@@ -18,16 +14,9 @@ export function executionRefusal(card: KanbanCard): string | undefined {
   if (card.originStale) return `Execution host ${card.shuttleHost} is unreachable; reconnect it before launching or resuming a worker.`
 }
 
-/** A standing Temper is an owner-routed accepted verdict. */
-export function temperNeedsOwner(card: KanbanCard): boolean {
-  return card.shuttleKind === 'standing'
-}
-
 export function offlineExplanation(card: KanbanCard): string {
-  if (quiescent(card) && card.localPlanning !== true) {
-    return `Execution host ${card.shuttleHost ?? card.originId} is unreachable. No quiescent local planning copy is available; reconnect the host or sync its document before saving changes.`
-  }
+  if (card.planningPending) return 'The local exit copy is waiting for Git sync. The healthy owner remains authoritative.'
   return canPlanOffline(card)
-    ? `Execution host ${card.shuttleHost ?? card.originId} is unreachable. Planning changes are saved here and reach it through Git sync; launching needs the host.`
-    : `Execution host ${card.shuttleHost ?? card.originId} is unreachable. This fiber is armed or may have a live worker. Reconnect the host before changing its lifecycle.`
+    ? 'An exit can be saved on the local copy after a definite pre-send failure or proven owner removal. It travels by Git; configuration and execution still need the owner.'
+    : 'The owner decides: no safe local exit is available. Reconnect it before changing this lifecycle.'
 }

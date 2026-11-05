@@ -66,6 +66,8 @@ defmodule Shuttle.Test.StubPostClient do
     end
   end
 
+  def post_mutation(url, body, type, timeout), do: post(url, body, type, timeout)
+
   def post(url, body, _content_type, _timeout_ms) do
     Agent.update(server(), fn state ->
       request = %{url: url, body: body}

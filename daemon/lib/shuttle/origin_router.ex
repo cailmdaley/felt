@@ -18,16 +18,14 @@ defmodule Shuttle.OriginRouter do
       `origin` omitted, returning the remote's verbatim `{:forwarded, status,
       body}` so the caller can relay it.
 
-  Terminating in one hop: a fiber has exactly one owner, and the owner runs the
-  forwarded request as local (its origin is `nil` after stripping), so it never
-  re-forwards. No felt-store registration is needed in the forward — a remote
-  only serves a fiber in its owner feed when it already owns the store, so the
-  store is configured by construction by the time the kanban can route to it.
+  Every forwarded mutation carries `routed: true` and omits `origin`.
+  An endpoint resolving its document's owner passes that marker to `route/2`;
+  a mismatch is refused instead of forwarding again. Host-addressed routes use
+  `route_host/2` without inferring ownership from synchronized documents.
 
-  Explicit origins are authoritative: an unknown origin is refused before any
-  local lookup, read or write. Git mirrors and host-local paths can exist on
-  multiple hosts, so local resolution cannot establish the intended destination.
-  An absent origin means this daemon. `route_host/2` shares the same decision.
+  Unknown destinations refuse owner-local assets and execution. Only the
+  daemon's safe-exit policy can authorize a local mirror after proven removal.
+  An archive read is explicitly stale; it does not transfer ownership.
   """
 
   alias Shuttle.{Poller, RegistryCommon, Remote}
@@ -45,7 +43,10 @@ defmodule Shuttle.OriginRouter do
   Where a write should execute: `:local` runs the endpoint's own handler here;
   `{:remote, remote}` forwards to the owning daemon.
   """
-  @type route_decision :: :local | {:remote, Remote.t()} | {:error, {:unknown_origin, String.t()}}
+  @type route_decision ::
+          :local
+          | {:remote, Remote.t()}
+          | {:error, {:unknown_origin | :routed_owner_mismatch, String.t()}}
 
   @typedoc """
   Host-addressed requests use the same fail-closed decision as fiber requests.
@@ -60,10 +61,15 @@ defmodule Shuttle.OriginRouter do
   A configured remote → `{:remote, remote}`.
   Every other explicit origin → `{:error, {:unknown_origin, origin}}`.
 
-  Opts (for tests / explicit wiring): `:own_host_id`, `:remotes`.
+  Opts: `:own_host_id`, `:remotes`, and `:routed` to refuse another forward.
   """
   @spec route(String.t() | nil, keyword()) :: route_decision()
-  def route(origin, opts \\ []), do: route_host(origin, opts)
+  def route(origin, opts \\ []) do
+    case route_host(origin, opts) do
+      :local -> :local
+      decision -> if opts[:routed], do: {:error, {:routed_owner_mismatch, origin}}, else: decision
+    end
+  end
 
   @doc """
   Route a host-addressed request, refusing an origin outside this daemon's fleet.
@@ -130,12 +136,15 @@ defmodule Shuttle.OriginRouter do
     client = forward_client()
     timeout = Keyword.get(opts, :forward_timeout_ms, default_forward_timeout_ms())
     url = Remote.url_for(remote, path)
-    body = payload |> Map.delete("origin") |> Map.delete(:origin) |> Jason.encode!()
 
-    result =
-      if Code.ensure_loaded?(client) and function_exported?(client, :post_mutation, 4),
-        do: client.post_mutation(url, body, "application/json", timeout),
-        else: client.post(url, body, "application/json", timeout)
+    body =
+      payload
+      |> Map.delete("origin")
+      |> Map.delete(:origin)
+      |> Map.put("routed", true)
+      |> Jason.encode!()
+
+    result = client.post_mutation(url, body, "application/json", timeout)
 
     case result do
       {:ok, status, resp} -> {:forwarded, status, resp}

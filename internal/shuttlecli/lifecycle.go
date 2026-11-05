@@ -142,7 +142,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 			if pauseNoKill {
 				fields["no_kill"] = true
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "pause", f, st, fields); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "pause", f, fields); routed || err != nil {
 				return err
 			}
 
@@ -166,7 +166,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 			}
 
 			// The owning Poller stops the backend after its serialized local write.
-			if pauseLocal || a.planningFallback != nil {
+			if pauseLocal {
 				return nil
 			}
 			session, _, err := a.liveWorkerSession(f)
@@ -186,6 +186,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 	}
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	pauseCmd.Flags().BoolVar(&pauseLocal, "local", false, localFlagUsage)
+	addMirrorOwnerFlag(pauseCmd)
 	return pauseCmd
 }
 
@@ -264,7 +265,7 @@ this host is killed.` + workerExitIdentityHelp,
 			if err != nil {
 				return err
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "rest", f, st, fields); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "rest", f, fields); routed || err != nil {
 				return err
 			}
 
@@ -319,16 +320,16 @@ this host is killed.` + workerExitIdentityHelp,
 				f.Due = nil
 			}
 			restedAt := time.Now().UTC().Format(time.RFC3339Nano)
-			if a.planningFallback == nil {
+			if !a.localMirror {
 				if err := shuttle.SetRuntimeField(f, "handed_off_at", restedAt); err != nil {
 					return fmt.Errorf("stamping handed_off_at: %w", err)
 				}
-			}
-			if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "rested"); err != nil {
-				return fmt.Errorf("stamping thread_exit_verb: %w", err)
-			}
-			if err := markOrchestratorAct(st, f, restedAt, actor); err != nil {
-				return err
+				if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "rested"); err != nil {
+					return fmt.Errorf("stamping thread_exit_verb: %w", err)
+				}
+				if err := markOrchestratorAct(st, f, restedAt, actor); err != nil {
+					return err
+				}
 			}
 			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
@@ -355,7 +356,7 @@ this host is killed.` + workerExitIdentityHelp,
 				untilLine()
 			}
 
-			if restLocal || a.planningFallback != nil {
+			if restLocal {
 				return nil
 			}
 			session, _, err := a.liveWorkerSession(f)
@@ -373,6 +374,7 @@ this host is killed.` + workerExitIdentityHelp,
 		},
 	}
 	restCmd.Flags().BoolVar(&restLocal, "local", false, localFlagUsage)
+	addMirrorOwnerFlag(restCmd)
 	restCmd.Flags().StringVar(&until, "until", "", "What the rest lasts until: a return date (YYYY-MM-DD), a fiber or free text; empty for neither")
 	restCmd.Flags().StringVar(&restActor, "actor", "", actorFlagUsage)
 	_ = restCmd.Flags().MarkHidden("actor")
@@ -423,7 +425,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				return err
 			}
 			defer unlock()
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
@@ -575,7 +577,7 @@ func (a *app) routeLocalReopen(cmd *cobra.Command, query string, asDraft bool, r
 	if localOnly(cmd) {
 		return false, nil
 	}
-	f, st, _, err := a.shuttleResolveFiberRef(query, true)
+	f, _, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return false, nil
 	}
@@ -583,11 +585,11 @@ func (a *app) routeLocalReopen(cmd *cobra.Command, query string, asDraft bool, r
 	if err != nil || !ok {
 		return false, nil
 	}
-	owner, err := a.lifecycleOwner(cmd, []string{query}, f, st, block)
+	owner, err := a.routeOwnerForCommand(cmd, []string{query}, block.Host)
 	if err != nil {
 		return true, err
 	}
-	if owner != "" || a.planningFallback != nil {
+	if owner != "" {
 		return false, nil
 	}
 	fields := map[string]any{}
@@ -610,14 +612,14 @@ func (a *app) routeLocalReopen(cmd *cobra.Command, query string, asDraft bool, r
 // --local serialized with its Poller's state changes, so its document cache
 // sees the write at once. The lookup takes no fiber lock — the daemon's writer
 // needs it. routed is false when the fiber does not qualify (or cannot be
-// read) or no connection to the local owner's daemon could be made; the caller
-// then writes locally, where every refusal is reported. Remote owners always
-// route, regardless of qualifies, and never fall back to a mirror write. A daemon refusal, an owner-check
+// read), or no connection to this fiber's local owner daemon could be made.
+// Foreign owners always route; only the daemon selects foreign mirror exits.
+// A daemon refusal, an owner-check
 // failure, or a request the daemon received but did not answer is routed, with
 // its error — the last because the transition may still apply there. Remote
 // resume uses its locked command path, posting before any local arming gates.
 func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool, fields ...map[string]any) (routed bool, err error) {
-	f, st, _, err := a.shuttleResolveFiberRef(query, true)
+	f, _, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return false, nil
 	}
@@ -625,12 +627,9 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 	if err != nil || !ok {
 		return false, nil
 	}
-	owner, err := a.lifecycleOwner(cmd, []string{query}, f, st, block)
+	owner, err := a.routeOwnerForCommand(cmd, []string{query}, block.Host)
 	if err != nil {
 		return true, err
-	}
-	if a.planningFallback != nil {
-		return false, nil
 	}
 	// Resolve ownership before the local fast path's qualification. A remote
 	// request always carries origin and never consults the hub's snapshot.
@@ -645,7 +644,7 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 				payload[key] = value
 			}
 		}
-		routed, err := a.forwardLifecycleAction(cmd, []string{query}, owner, verb, f, st, payload)
+		routed, err := a.forwardLifecycleAction(cmd, []string{query}, owner, verb, f, payload)
 		if err == nil && verb == "resume" && a.ownerBootQuarantine(owner) {
 			a.printResumeHold(owner, f.ID)
 		}
@@ -812,7 +811,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					}
 					anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
 					if routed, err := a.routeLifecycle(cmd, "close", args[0], anyBlock, fields); routed || err != nil {
-						if routed && err == nil && a.isOwnFiber(candidate) && a.planningFallback == nil {
+						if routed && err == nil && a.isOwnFiber(candidate) && !a.localMirror {
 							a.endOwnTerminal()
 						}
 						return err
@@ -840,8 +839,8 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				if actor := a.actorSession(closeActor); actor != "" {
 					fields["actor"] = actor
 				}
-				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, st, fields); routed || err != nil {
-					if routed && err == nil && a.isOwnFiber(f) && a.planningFallback == nil {
+				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
+					if routed && err == nil && a.isOwnFiber(f) && !a.localMirror {
 						a.endOwnTerminal()
 					}
 					return err
@@ -892,11 +891,13 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
 				return err
 			}
-			if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "closed"); err != nil {
-				return err
-			}
-			if err := markOrchestratorAct(st, f, f.ClosedAt.Format(time.RFC3339Nano), a.actorSession(closeActor)); err != nil {
-				return err
+			if !a.localMirror {
+				if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "closed"); err != nil {
+					return err
+				}
+				if err := markOrchestratorAct(st, f, f.ClosedAt.Format(time.RFC3339Nano), a.actorSession(closeActor)); err != nil {
+					return err
+				}
 			}
 			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
@@ -927,7 +928,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			default:
 				fmt.Fprintln(a.env.Stdout, "  tempered: false")
 			}
-			if a.isOwnFiber(f) && a.planningFallback == nil {
+			if a.isOwnFiber(f) && !a.localMirror {
 				a.endOwnTerminal()
 			}
 			return nil
@@ -936,6 +937,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 	closeCmd.Flags().BoolVar(&closeQuiet, "quiet", false, "Deliver the outcome as context without waking the nearest orchestrator")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to keep a standing verdict or clear a oneshot's")
 	closeCmd.Flags().Bool("local", false, localFlagUsage)
+	addMirrorOwnerFlag(closeCmd)
 	closeCmd.Flags().StringVar(&closeActor, "actor", "", actorFlagUsage)
 	_ = closeCmd.Flags().MarkHidden("actor")
 	return closeCmd
@@ -983,7 +985,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			if reopenOccurrence {
 				return a.reopenOccurrence(args[0], f, st, block, ref)
 			}
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
@@ -1025,7 +1027,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 					if cmd.Flags().Changed("project-dir") {
 						fields["project_dir"] = block.ProjectDir
 					}
-					routed, err := a.forwardLifecycleAction(cmd, args, owner, "reopen", f, st, fields)
+					routed, err := a.forwardLifecycleAction(cmd, args, owner, "reopen", f, fields)
 					if routed || err != nil {
 						return err
 					}
@@ -1185,11 +1187,11 @@ Examples:
 			if err != nil {
 				return err
 			}
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-outcome", f, st, map[string]any{"outcome": outcome}); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-outcome", f, map[string]any{"outcome": outcome}); routed || err != nil {
 				return err
 			}
 
@@ -1272,7 +1274,7 @@ bypassed: the accept may still apply there.`,
 			if err != nil {
 				return err
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "accept", f, st, nil); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "accept", f, nil); routed || err != nil {
 				return err
 			}
 
@@ -1366,11 +1368,11 @@ agent without starting or replacing a worker.`,
 				return err
 			}
 			defer unlock()
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-model", f, st, map[string]any{"agent": args[1]}); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-model", f, map[string]any{"agent": args[1]}); routed || err != nil {
 				return err
 			}
 			reg, err := shuttle.LoadAgentRegistry(a.env)
@@ -1423,7 +1425,7 @@ or replace a worker.`,
 				return err
 			}
 			defer unlock()
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
@@ -1465,7 +1467,7 @@ or replace a worker.`,
 				if cmd.Flags().Changed("project-dir") {
 					fields["project_dir"] = block.ProjectDir
 				}
-				routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-agent", f, st, fields)
+				routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-agent", f, fields)
 				if routed || err != nil {
 					return err
 				}
@@ -1596,7 +1598,7 @@ pause / resume / close / reopen for that.`,
 				return err
 			}
 			defer unlock()
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
@@ -1611,7 +1613,7 @@ pause / resume / close / reopen for that.`,
 				if cmd.Flags().Changed("tz") {
 					fields["tz"] = reshapeTZ
 				}
-				routed, err := a.forwardLifecycleAction(cmd, args, owner, "reshape", f, st, fields)
+				routed, err := a.forwardLifecycleAction(cmd, args, owner, "reshape", f, fields)
 				if routed || err != nil {
 					return err
 				}
@@ -1762,7 +1764,7 @@ and a live worker is left running.`,
 			if err != nil {
 				return err
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "uninstall", f, st, nil); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "uninstall", f, nil); routed || err != nil {
 				return err
 			}
 			if err := a.ensureOwnedHere(f, args[0]); err != nil {
