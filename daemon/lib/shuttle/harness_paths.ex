@@ -103,8 +103,29 @@ defmodule Shuttle.HarnessPaths do
   @doc "The pi directory for a working directory's encoded session files."
   @spec pi_sessions_dir(String.t(), keyword()) :: String.t()
   def pi_sessions_dir(work_dir, opts \\ []) when is_binary(work_dir) do
-    encoded = "--" <> (work_dir |> String.trim_leading("/") |> String.replace("/", "-")) <> "--"
+    encoded =
+      "--" <>
+        (work_dir |> real_path() |> String.trim_leading("/") |> String.replace("/", "-")) <> "--"
+
     Path.join(pi_sessions_root(opts), encoded)
+  end
+
+  # pi encodes its process cwd, which the kernel reports with symlinks resolved,
+  # so /project/group/x -> /project/1234/x files sessions under the real path.
+  defp real_path(path, hops \\ 40)
+  defp real_path(path, 0), do: path
+
+  defp real_path(path, hops) do
+    path
+    |> Path.split()
+    |> Enum.reduce(fn segment, resolved ->
+      joined = Path.join(resolved, segment)
+
+      case Shuttle.FS.read_link(joined) do
+        {:ok, target} -> target |> Path.expand(resolved) |> real_path(hops - 1)
+        {:error, _} -> joined
+      end
+    end)
   end
 
   @doc "The local civil date used by Codex's YYYY/MM/DD fan-out."

@@ -16,6 +16,25 @@ defmodule Shuttle.HarnessPathsTest do
     :ok
   end
 
+  @tag :tmp_dir
+  test "a symlinked working directory finds pi's real-path sessions", %{tmp_dir: tmp} do
+    real = Path.join(tmp, "real/analyses")
+    File.mkdir_p!(real)
+    File.ln_s!("real", Path.join(tmp, "group"))
+    link = Path.join(tmp, "group/analyses")
+
+    assert HarnessPaths.pi_sessions_dir(link) == HarnessPaths.pi_sessions_dir(real)
+    assert HarnessPaths.pi_sessions_dir(link) =~ "real-analyses--"
+  end
+
+  @tag :tmp_dir
+  test "a symlink loop in a working directory terminates", %{tmp_dir: tmp} do
+    loop = Path.join(tmp, "loop")
+    File.ln_s!("loop", loop)
+
+    assert is_binary(HarnessPaths.pi_sessions_dir(Path.join(loop, "x")))
+  end
+
   test "empty environment values do not erase the harness defaults" do
     Shuttle.Test.Env.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", "")
     Shuttle.Test.Env.put_env("SHUTTLE_PI_SESSIONS_DIR", "")
