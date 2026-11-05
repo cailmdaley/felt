@@ -69,7 +69,7 @@ export function registerChangeJourneys(test) {
     assert.equal(await page.locator('.ws-selected .change-diff-window').count(), 84)
     assert.ok(await page.locator('.ws-selected diffs-container').count() < 10)
   })
-  test('A tapestry relative link opens the change and Back returns to the tapestry', async page => {
+  test('A tapestry relative link opens by keyboard and Back returns to the tapestry', async page => {
     page.setDefaultTimeout(30_000)
     await page.addInitScript(() => {
       window.addEventListener('message', event => {
@@ -85,7 +85,7 @@ export function registerChangeJourneys(test) {
     const frame = await (await page.locator('.ws-selected iframe').elementHandle()).contentFrame()
     await frame.waitForFunction(() => window.__changeBridgeActive === true)
     const popups = []; page.on('popup', popup => popups.push(popup))
-    await link.click()
+    await link.press('Enter')
     await page.locator('.ws-selected .change-reader').waitFor()
     assert.equal(popups.length, 0, 'relative change links stay in the workspace after the report bridge is ready')
     await page.locator('.ws-selected .ws-document-back').click()

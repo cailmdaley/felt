@@ -28,14 +28,31 @@ try {
       const reader = page.locator('.ws-selected .change-reader')
       await reader.locator('diffs-container [data-line-index]').first().waitFor()
       await page.evaluate(() => document.fonts.ready)
+      const settle = async () => {
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+        await page.waitForFunction(root => {
+          const viewport = root.querySelector('.change-scroll').getBoundingClientRect()
+          const visible = [...root.querySelectorAll('.change-diff-window')].filter(window => {
+            const box = window.getBoundingClientRect()
+            return box.width > 0 && box.bottom > viewport.top && box.top < viewport.bottom
+          })
+          return visible.every(window => window.querySelector('diffs-container')?.shadowRoot?.querySelector('[data-line-index]'))
+        }, await reader.elementHandle())
+      }
+      await settle()
       await page.screenshot({ path: `${shots}/real-${device}-overview.png` })
       for (const [index, file] of process.argv.slice(2).entries()) {
         const target = reader.locator(`[data-change-file=${JSON.stringify(file)}]`).first()
         await target.locator('.change-diff-window').last().scrollIntoViewIfNeeded()
-        await target.locator('diffs-container [data-line-index]').first().waitFor()
+        await settle()
         await page.screenshot({ path: `${shots}/real-${device}-file-${index + 1}.png` })
       }
       await reader.getByRole('button', { name: /^Your review/ }).click()
+      await settle()
+      assert.equal(await reader.getByRole('heading', { name: 'Your review', exact: true }).evaluate(heading => {
+        const box = heading.getBoundingClientRect(), viewport = heading.closest('.change-scroll').getBoundingClientRect()
+        return box.top >= viewport.top && box.bottom <= viewport.bottom
+      }), true, 'review navigation stays on its target after nearby windows finish rendering')
       await page.screenshot({ path: `${shots}/real-${device}-review.png` })
       const geometry = await reader.evaluate(root => {
         const scroll = root.querySelector('.change-scroll')

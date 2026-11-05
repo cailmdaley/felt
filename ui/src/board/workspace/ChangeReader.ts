@@ -34,10 +34,19 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   const scroll = el('div', 'change-scroll'); scroll.tabIndex = -1
   const main = el('main', 'change-main')
   scroll.append(main); shell.append(rail, scroll); root.append(shell)
-  const reveal = (element: Element, center = false): void => {
-    scroll.scrollTop += element.getBoundingClientRect().top - scroll.getBoundingClientRect().top - (center ? scroll.clientHeight / 2 : 16)
-  }
   const disposers: (() => void)[] = []
+  let destination: { element: Element; center: boolean } | undefined
+  const alignDestination = (): void => {
+    if (destination?.element.isConnected) scroll.scrollTop += destination.element.getBoundingClientRect().top - scroll.getBoundingClientRect().top - (destination.center ? scroll.clientHeight / 2 : 16)
+  }
+  const reveal = (element: Element, center = false): void => {
+    destination = { element, center }; alignDestination()
+  }
+  const releaseDestination = (): void => { destination = undefined }
+  for (const type of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+    shell.addEventListener(type, releaseDestination, { passive: true })
+    disposers.push(() => shell.removeEventListener(type, releaseDestination))
+  }
   const progress = el('span', 'change-progress')
   const railTitle = el('div', 'change-contents-title', 'Read the change'); railTitle.append(progress); rail.append(railTitle)
   const sections: { element: HTMLElement; link: HTMLButtonElement; ids: string[]; label: string }[] = []
@@ -49,7 +58,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
       control.setAttribute('aria-pressed', String(viewed.has(id))); control.textContent = viewed.has(id) ? '✓ Viewed' : 'Mark viewed'
     }
     for (const section of sections) {
-      section.link.textContent = `${section.label}  ${section.ids.filter(id => viewed.has(id)).length}/${section.ids.length}`
+      section.link.textContent = section.ids.length ? `${section.label}  ${section.ids.filter(id => viewed.has(id)).length}/${section.ids.length}` : section.label
     }
     save(`${prefix}:viewed`, [...viewed])
   }
@@ -259,7 +268,8 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     }
   }
   const scheduleLocation = (): void => { if (!railFrame) railFrame = requestAnimationFrame(paintLocation) }
-  const locationResize = new ResizeObserver(scheduleLocation)
+  // Keep explicit navigation anchored while nearby diff windows acquire their wrapped height.
+  const locationResize = new ResizeObserver(() => { alignDestination(); scheduleLocation() })
   locationResize.observe(scroll); locationResize.observe(main)
   scroll.addEventListener('scroll', scheduleLocation, { passive: true }); scheduleLocation()
   disposers.push(() => io.disconnect(), () => { locationResize.disconnect(); cancelAnimationFrame(railFrame); scroll.removeEventListener('scroll', scheduleLocation) })
