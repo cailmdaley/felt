@@ -791,7 +791,7 @@ func (a *app) reconcileCodexInstallation(intent codexInstallationState, current 
 	if err != nil {
 		return err
 	}
-	if observed.Configured == intent.Configured && observed.Installed == intent.Installed && !intent.Configured {
+	if observed.Configured == intent.Configured && observed.Installed == intent.Installed && observed.SkillsInstalled == intent.SkillsInstalled && !intent.Configured {
 		return nil
 	}
 	if !intent.Configured {
@@ -1012,9 +1012,17 @@ func (a *app) sealAndPromote(candidate string, identity pluginGenerationIdentity
 				return err
 			}
 		}
-		if intent.Codex != nil && intent.Codex.Installed && a.verifyCodexLoadedGeneration(source) != nil {
-			if err := a.installCodexPluginAtSource(source); err != nil {
-				return err
+		if codex := intent.Codex; codex != nil {
+			for _, bundle := range []struct {
+				name      string
+				installed bool
+			}{{"felt", codex.Installed}, {"felt-skills", codex.SkillsInstalled}} {
+				if bundle.installed && a.verifyCodexLoadedBundle(source, bundle.name) != nil {
+					if err := a.reconcileCodexInstallation(*codex, source); err != nil {
+						return err
+					}
+					break
+				}
 			}
 		}
 		return nil

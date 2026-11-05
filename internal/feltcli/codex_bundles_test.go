@@ -295,12 +295,15 @@ func TestCodexRollbackVerifiesSkillsCache(t *testing.T) {
 	if err := f.a.installCodexPluginViaCLI(f.remote); err != nil {
 		t.Fatal(err)
 	}
-	state := f.a.captureCodexInstallation()
+	state, err := f.a.captureCodexInstallation()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !state.Installed || !state.SkillsInstalled {
 		t.Fatalf("incomplete native capture: %+v", state)
 	}
 	f.env.Set("FAKE_NATIVE_TAMPER", "alter-skills")
-	err := f.a.restoreCodexInstallation(state)
+	err = f.a.restoreCodexInstallation(state)
 	if err == nil || !strings.Contains(err.Error(), "verifying restored Codex felt-skills") {
 		t.Fatalf("unverified skills rollback was accepted: %v", err)
 	}

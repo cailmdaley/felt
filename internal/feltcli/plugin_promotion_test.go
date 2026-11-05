@@ -747,6 +747,42 @@ func TestSingleHarnessSetupRefreshesBothEnabledCaches(t *testing.T) {
 	}
 }
 
+func TestSharedPromotionPreservesIndependentCodexBundles(t *testing.T) {
+	t.Parallel()
+	for _, retained := range []string{codexPluginRef, codexSkillsPluginRef} {
+		t.Run(retained, func(t *testing.T) {
+			f := newRemoteSetupFixture(t, "claude")
+			f.env.Set("SECOND_NATIVE_STATE", t.TempDir())
+			fakeCommand(t, f.env, "codex", "FAKE_NATIVE_STATE=\"$SECOND_NATIVE_STATE\"\nFAKE_CODEX_CACHE=1\n"+codexSetupFake)
+			if err := f.a.installPluginViaCLI(f.source); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.a.installCodexPluginViaCLI(f.source); err != nil {
+				t.Fatal(err)
+			}
+			absent := codexPluginRef
+			if retained == codexPluginRef {
+				absent = codexSkillsPluginRef
+			}
+			if _, err := f.a.runCodexCLIQuiet("plugin", "remove", absent); err != nil {
+				t.Fatal(err)
+			}
+			f.setGeneration(t, "two")
+			if err := f.a.installPluginViaCLI(f.source); err != nil {
+				t.Fatal(err)
+			}
+			current := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)
+			name := strings.SplitN(retained, "@", 2)[0]
+			if err := f.a.verifyCodexLoadedBundle(current, name); err != nil {
+				t.Errorf("retained Codex bundle is stale: %v", err)
+			}
+			if installed, err := f.a.inspectCodexPluginRef(absent); err != nil || installed {
+				t.Errorf("absent Codex bundle was reinstalled: installed=%t error=%v", installed, err)
+			}
+		})
+	}
+}
+
 func TestSharedPromotionRestoresBothCachesWhenSecondHarnessFails(t *testing.T) {
 	t.Parallel()
 	f := newRemoteSetupFixture(t, "claude")
@@ -829,6 +865,7 @@ func TestExternalClaudeRollbackRetainsUnverifiedCacheJournal(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				var candidateDigest string
 				func() {
 					defer func() {
 						if r := recover(); r != nil && !interrupted {
@@ -837,6 +874,11 @@ func TestExternalClaudeRollbackRetainsUnverifiedCacheJournal(t *testing.T) {
 					}()
 					err := f.a.withStagedPluginCandidateWithRestore(f.source, func(current string) error {
 						if err := f.a.installClaudePluginAtSource(current); err != nil {
+							t.Fatal(err)
+						}
+						var err error
+						candidateDigest, err = pluginPayloadDigest(filepath.Join(f.stateDir, "cache"))
+						if err != nil {
 							t.Fatal(err)
 						}
 						// The update reports success but leaves the rejected candidate cached.
@@ -858,8 +900,8 @@ func TestExternalClaudeRollbackRetainsUnverifiedCacheJournal(t *testing.T) {
 				if err != nil || journal.Phase != "pending_reconciliation" || journal.Native == nil {
 					t.Fatalf("unverified rollback lost retry intent: %#v, %v", journal, err)
 				}
-				if _, err := validatePluginGeneration(filepath.Join(f.stateDir, "cache")); err != nil {
-					t.Fatalf("expected rejected candidate still cached: %v", err)
+				if digest, err := pluginPayloadDigest(filepath.Join(f.stateDir, "cache")); err != nil || candidateDigest == "" || digest != candidateDigest {
+					t.Fatalf("expected rejected candidate still cached: digest=%q want=%q error=%v", digest, candidateDigest, err)
 				}
 			})
 		}

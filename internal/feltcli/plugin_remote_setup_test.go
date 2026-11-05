@@ -244,14 +244,17 @@ if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = list ]; then
   exit 0
 fi
 if [ "$1" = plugin ] && [ "$2" = list ]; then
+  printf '{"installed":['
+  separator=''
   if [ -f "$installed_file" ]; then
     source=$(cat "$source_file")
-    printf '{"installed":[{"pluginId":"felt@cailmdaley-felt","version":"1.0.0","enabled":true,"source":{"path":"%s/claude-plugin"}}' "$source"
-    if [ -f "$FAKE_NATIVE_STATE/installed-felt-skills" ]; then printf ',{"pluginId":"felt-skills@cailmdaley-felt","version":"1.0.0","enabled":true}'; fi
-    printf ']}\n'
-  else
-    printf '%s\n' '{"installed":[]}'
+    printf '{"pluginId":"felt@cailmdaley-felt","version":"1.0.0","enabled":true,"source":{"path":"%s/claude-plugin"}}' "$source"
+    separator=','
   fi
+  if [ -f "$FAKE_NATIVE_STATE/installed-felt-skills" ]; then
+    printf '%s{"pluginId":"felt-skills@cailmdaley-felt","version":"1.0.0","enabled":true}' "$separator"
+  fi
+  printf ']}\n'
   exit 0
 fi
 if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = add ]; then
