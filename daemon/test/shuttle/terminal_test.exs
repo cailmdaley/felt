@@ -314,6 +314,68 @@ defmodule Shuttle.TerminalTest do
     end
   end
 
+  @tag :launch_record
+  @tag :tmp_dir
+  test "an unmirrored exited attempt is gone but still refuses dispatch", %{tmp_dir: dir} do
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_app_env(:terminal_backend, Tmux)
+    name = "unmirrored-#{System.unique_integer([:positive])}"
+    script = Shuttle.WorkerProcess.script_path(name)
+    File.write!(script, "exit 0\n")
+    facts = %{"dispatched_at" => "2026-01-01T00:00:00Z", "session_uuid" => nil}
+    assert :ok = Terminal.LaunchAttempts.record(name, script, %{"dispatch" => facts})
+    assert Terminal.status(stub(@absent), name) == :gone
+    assert {:error, {:launch_reserved, _}} = Terminal.check_available(StubRunner, name)
+    assert File.exists?(script)
+    File.rm!(script)
+
+    assert Terminal.status(stub(@absent), name) == :gone
+    refute Terminal.present?(StubRunner, name)
+    assert {:ok, %{"dispatch" => ^facts}} = Terminal.LaunchAttempts.get(name)
+
+    for opts <- [[], [force: true], [force: true, resume_mode: "fresh", launch_evidence: false]] do
+      assert {:error, {:launch_reserved, info}} =
+               Terminal.launch(StubRunner, name, dir, "exit 0\n", opts)
+
+      assert info["dispatch"] == facts
+      assert Terminal.LaunchAttempts.message(info) =~ "may already have run and exited"
+    end
+
+    refute_received {:tmux_args, ["new-session" | _]}
+    assert :ok = Terminal.release_reservation(name)
+    assert :ok = Terminal.launch(StubRunner, name, dir, "exit 0\n")
+    assert_received {:tmux_args, ["new-session" | args]}
+    on_exit(fn -> File.rm(List.last(args)) end)
+  end
+
+  @tag :launch_record
+  @tag :tmp_dir
+  test "script exit retires mirrored and non-dispatch attempts, and definite refusal clears intent",
+       %{tmp_dir: dir} do
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_app_env(:terminal_backend, Tmux)
+    facts = %{"dispatched_at" => "2026-01-01T00:00:00Z", "session_uuid" => nil}
+
+    for metadata <- [%{}, %{"dispatch" => facts, "dispatch_mirrored" => facts["dispatched_at"]}] do
+      name = "resolved-#{System.unique_integer([:positive])}"
+      script = Shuttle.WorkerProcess.script_path(name)
+      File.write!(script, "exit 0\n")
+      assert :ok = Terminal.LaunchAttempts.record(name, script, metadata)
+      File.rm!(script)
+      assert :none = Terminal.LaunchAttempts.get(name)
+      assert :ok = Terminal.check_available(stub(@absent), name)
+    end
+
+    name = "refused-prepared-#{System.unique_integer([:positive])}"
+    Process.put(:launch_result, {"refused", 1})
+
+    assert {:error, "tmux failed: refused"} =
+             Terminal.launch(stub(@absent), name, dir, "exit 0\n", prepared_launch: facts)
+
+    assert :none = Terminal.LaunchAttempts.get(name)
+    assert :ok = Terminal.check_available(StubRunner, name)
+  end
+
   describe "stop/2" do
     @worker_ps """
       700     1 tmux new-session -d -s elsewhere

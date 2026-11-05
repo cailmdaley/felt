@@ -3577,6 +3577,7 @@ defmodule Shuttle.Poller do
       {:ok, fiber, facts} ->
         worker =
           prepared_worker_identity(worker, facts)
+          |> Map.put(:run_observation, fiber)
           |> Map.delete(:identity_error)
           |> Map.delete(:dispatch_mirror_pending)
 
@@ -3588,6 +3589,7 @@ defmodule Shuttle.Poller do
 
         worker =
           prepared_worker_identity(worker, facts)
+          |> Map.put(:run_observation, fiber)
           |> Map.put(:identity_error, inspect(reason))
           |> Map.put(:dispatch_mirror_pending, true)
 

@@ -116,27 +116,38 @@ defmodule Shuttle.Terminal do
 
   @doc "Unknown liveness holds an existing assignment, never invents a first launch."
   def present?(runner, name, opts \\ []) do
-    check_available(runner, name, opts) != :ok
+    case status(runner, name) do
+      :gone -> false
+      observation -> availability(observation, name, opts) != :ok
+    end
   end
 
-  def check_available(runner, name, opts \\ []) do
-    case status(runner, name) do
-      :alive ->
-        {:error, :already_running}
+  def check_available(runner, name, opts \\ []),
+    do: availability(status(runner, name), name, opts)
 
-      :gone ->
+  defp availability(:alive, _name, _opts), do: {:error, :already_running}
+
+  defp availability(:gone, name, _opts) do
+    case LaunchAttempts.get(name) do
+      {:ok, info} ->
+        if LaunchAttempts.dispatch_pending?(info),
+          do: {:error, {:launch_reserved, info}},
+          else: :ok
+
+      :none ->
         :ok
+    end
+  end
 
-      :unknown ->
-        case LaunchAttempts.get(name) do
-          {:ok, info} ->
-            {:error, {:launch_reserved, info}}
+  defp availability(:unknown, name, opts) do
+    case LaunchAttempts.get(name) do
+      {:ok, info} ->
+        {:error, {:launch_reserved, info}}
 
-          :none ->
-            if Keyword.get(opts, :launch_evidence, true) or rex_bound?(name),
-              do: {:error, :already_running},
-              else: :ok
-        end
+      :none ->
+        if Keyword.get(opts, :launch_evidence, true) or rex_bound?(name),
+          do: {:error, :already_running},
+          else: :ok
     end
   end
 

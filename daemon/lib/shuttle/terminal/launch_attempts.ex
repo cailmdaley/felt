@@ -1,5 +1,5 @@
 defmodule Shuttle.Terminal.LaunchAttempts do
-  @moduledoc "Durable launch reservations, retired by exit evidence, confirmed absence, or explicit operator release."
+  @moduledoc "Durable launch reservations; unmirrored dispatch attempts hold until repaired, refused, or explicitly released."
   alias Shuttle.FS
   require Logger
 
@@ -19,7 +19,8 @@ defmodule Shuttle.Terminal.LaunchAttempts do
           info = decode(name, raw)
           script = info["script"]
 
-          if script_path?(script) and FS.stat(script) == {:error, :enoent} do
+          if not dispatch_pending?(info) and script_path?(script) and
+               FS.stat(script) == {:error, :enoent} do
             FS.rm(path(name))
             :none
           else
@@ -34,6 +35,11 @@ defmodule Shuttle.Terminal.LaunchAttempts do
       end
     end)
   end
+
+  def dispatch_pending?(%{"dispatch" => %{"dispatched_at" => stamp}} = info),
+    do: info["dispatch_mirrored"] != stamp
+
+  def dispatch_pending?(_), do: false
 
   # This lands before the backend mutation; a lost reply or daemon crash keeps it.
   def record(name, script, facts \\ %{}) do
@@ -182,7 +188,7 @@ defmodule Shuttle.Terminal.LaunchAttempts do
     end)
   end
 
-  # Confirmed absence/refusal authorizes record removal even with corrupt metadata.
+  # A definite backend refusal or an available new launch clears the old record.
   def clear(name) do
     locked(name, fn ->
       case FS.read(path(name)) do
@@ -210,8 +216,14 @@ defmodule Shuttle.Terminal.LaunchAttempts do
 
     id = Shuttle.ULID.from_tmux(info["worker"]) || info["worker"]
 
-    "Launch reserved for #{info["worker"]} (#{age}): #{info["reason"]} " <>
-      "No running worker is confirmed. Releasing may create a duplicate worker. " <>
+    reason =
+      if dispatch_pending?(info),
+        do:
+          "The attempt's dispatch record is unresolved; the work may already have run and exited.",
+        else: info["reason"]
+
+    "Launch reserved for #{info["worker"]} (#{age}): #{reason} " <>
+      "No running worker is confirmed. Releasing may repeat work or create a duplicate worker. " <>
       "To accept that risk, run shuttle dispatch '#{id}' --release-launch-reservation on the owning host."
   end
 
