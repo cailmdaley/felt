@@ -1,8 +1,8 @@
-import { FileDiff, parsePatchFiles, registerCustomCSSVariableTheme, type AnnotationSide } from '@pierre/diffs'
+import { registerCustomCSSVariableTheme, type AnnotationSide } from '@pierre/diffs'
 import { renderMarkdown } from '../utils.js'
 import { assignLanes, reviewMessage, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeDraft, type ChangeFile, type ChangeHunk, type ChangeWindow } from './changeModel.js'
 import './change-reader.css'
-import { changeLanguage } from './changeLanguages.js'
+import { mountChangeWindow } from './changeWindow.js'
 import { validateChangeBundle } from './changeValidation.js'
 
 registerCustomCSSVariableTheme('shuttle-change', {})
@@ -120,11 +120,11 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     } catch (error) { status.textContent = error instanceof Error ? error.message : 'Could not send review. Your draft is saved.' }
     finally { busy = false; sendButton.textContent = 'Send review'; paintSend() }
   }
-  const annotations = new Set<{ file: ChangeFile; diff: FileDiff<ChangeComment> }>()
+  const annotations = new Set<ReturnType<typeof mountChangeWindow>>()
   const sideOf = (side: AnnotationSide): 'new' | 'old' => side === 'deletions' ? 'old' : 'new'
   const lineAnnotations = (file: ChangeFile) => draft.comments.filter(c => c.file === file.path).map(c => ({ side: c.side === 'old' ? 'deletions' as const : 'additions' as const, lineNumber: c.line, metadata: c }))
   const refreshAnnotations = (): void => {
-    for (const entry of annotations) entry.diff.render({ lineAnnotations: lineAnnotations(entry.file) })
+    for (const entry of annotations) entry.update()
   }
   const commentField = (comment: ChangeComment): HTMLElement => {
     const box = el('div', 'change-comment')
@@ -147,32 +147,24 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     let comment = draft.comments.find(c => c.file === file.path && c.line === line && c.side === sideOf(side))
     if (!comment) { comment = { file: file.path, line, side: sideOf(side), text: '' }; draft.comments.push(comment); persist(); refreshAnnotations(); renderDraftComments() }
     requestAnimationFrame(() => {
-      const field = [...shell.querySelectorAll<HTMLTextAreaElement>('.change-file textarea')].find(field => field.getAttribute('aria-label') === `Comment on ${file.path}:${line} (${sideOf(side)})`)
+      const field = [...shell.querySelectorAll<HTMLTextAreaElement>('.change-file textarea, .change-draft-comments textarea')].find(field => field.getAttribute('aria-label') === `Comment on ${file.path}:${line} (${sideOf(side)})`)
       field?.focus({ preventScroll: true })
       if (field && field.getBoundingClientRect().bottom > scroll.getBoundingClientRect().bottom) reveal(field, true)
     })
   }
   // The slot wrapper lives in light DOM, so workspace typography and form controls apply to comments.
-  const mountWindow = (host: HTMLElement, patch: string, file: ChangeFile): (() => void) => {
-    const parsed = parsePatchFiles(patch)[0]?.files[0]
-    if (!parsed) return () => {}
-    parsed.lang = changeLanguage(file.path)
-    const diff = new FileDiff<ChangeComment>({ theme: 'shuttle-change', themeType: 'dark', diffStyle: 'unified', overflow: 'wrap',
-      disableFileHeader: true, disableVirtualizationBuffers: true, hunkSeparators: 'metadata',
-      lineHoverHighlight: 'both', onLineNumberClick: props => addComment(file, props.lineNumber, props.annotationSide),
-      enableGutterUtility: true, onGutterUtilityClick: range => addComment(file, range.start, range.side ?? 'additions'),
-      renderAnnotation: annotation => commentField(annotation.metadata),
-      unsafeCSS: ':host { --diffs-font-family: var(--font-mono); --diffs-font-size: var(--type-code-block); --diffs-line-height: 20px; }',
+  const mountWindow = (host: HTMLElement, window: ChangeWindow, file: ChangeFile): (() => void) => {
+    const entry = mountChangeWindow(host, window, file, {
+      annotations: () => lineAnnotations(file), add: (line, side) => addComment(file, line, side), field: commentField,
     })
-    diff.render({ fileDiff: parsed, containerWrapper: host, lineAnnotations: lineAnnotations(file) })
-    const entry = { file, diff }; annotations.add(entry)
-    return () => { annotations.delete(entry); diff.cleanUp(); host.replaceChildren() }
+    annotations.add(entry)
+    return () => { annotations.delete(entry); entry.dispose() }
   }
   const io = new IntersectionObserver(entries => {
     for (const entry of entries) {
       const host = entry.target as HTMLElement, window = windows.get(host)
       if (!window) continue
-      if (entry.isIntersecting && !window.dispose) window.dispose = mountWindow(host, window.patch, window.file)
+      if (entry.isIntersecting && !window.dispose) window.dispose = mountWindow(host, window.hunk, window.file)
       else if (!entry.isIntersecting && window.dispose) { host.style.minHeight = `${host.offsetHeight}px`; window.dispose(); window.dispose = undefined }
     }
   }, { root: scroll, rootMargin: '800px 0px' })
@@ -192,7 +184,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     const host = matchingWindow(view.card)
     if (!host) { reveal(view.card); return }
     const window = windows.get(host)!
-    if (!window.dispose) window.dispose = mountWindow(host, window.patch, window.file)
+    if (!window.dispose) window.dispose = mountWindow(host, window.hunk, window.file)
     reveal(host)
     requestAnimationFrame(() => {
       const excluded = range.side === 'old' ? 'change-addition' : 'change-deletion'

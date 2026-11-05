@@ -65,7 +65,14 @@
 .change-file[data-status='added'] { --diffs-bg-addition-override: var(--ws-paper); --diffs-bg-addition-emphasis-override: transparent; }
 .change-file[data-status='deleted'] { --diffs-bg-deletion-override: var(--ws-paper); --diffs-bg-deletion-emphasis-override: transparent; }
 .change-diff-window { min-width: 0; }
-.change-diff-window > diffs-container { display: block; }
+.change-highlighted-window > diffs-container { display: block; }
+.change-plain-row { display: grid; grid-template-columns: 4ch 4ch minmax(0, 1fr); font: var(--type-code-block)/var(--leading-prose) var(--font-mono); }
+.change-plain-row > [data-line-text] { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 10px; }
+.change-reader .change-plain-number { border: 0; border-radius: 0; padding: 0 3px; text-align: right; font: inherit; }
+.change-plain-row[data-line-type='change-addition'] { border-left: 3px solid var(--ws-verdict); }
+.change-plain-row[data-line-type='change-deletion'] { border-left: 3px solid var(--ws-stop); }
+.change-plain-window pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.change-window-notice, .change-load-error { color: var(--ws-stop); padding: 12px; font-size: var(--type-note); }
 .change-metadata { white-space: pre-wrap; font: var(--type-meta)/var(--leading-prose) var(--font-mono); padding: 14px; overflow-wrap: anywhere; }
 .change-reader textarea { box-sizing: border-box; width: 100%; color: var(--ws-ink); background: var(--ws-sheet); border: 1px solid var(--ws-hairline); border-radius: 4px; font: var(--type-row)/var(--leading-prose) var(--font-serif); padding: 10px; resize: vertical; min-height: 80px; }
 .change-comment { padding: 12px; background: var(--ws-fill); font: var(--type-meta)/var(--leading-prose) var(--font-mono); }

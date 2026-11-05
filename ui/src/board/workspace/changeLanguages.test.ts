@@ -8,5 +8,6 @@ it('ships only the chosen grammars and renders all other extensions as text', as
   expect(changeLanguage('src/header.h')).toBe('c')
   expect(changeLanguage('src/source.rb')).toBe('text')
   expect(changeLanguage('Makefile')).toBe('text')
+  for (const name of ['evil.constructor', 'evil.__proto__', 'evil.toString', '.constructor', '.__proto__']) expect(changeLanguage(name)).toBe('text')
   for (const loader of Object.values(bundledLanguages)) expect((await loader()).default.length).toBeGreaterThan(0)
 })

@@ -27,5 +27,6 @@ const extensions: Record<string, keyof typeof bundledLanguages> = {
   c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp', rs: 'rust', sql: 'sql', tex: 'latex',
 }
 export function changeLanguage(path: string): keyof typeof bundledLanguages | 'text' {
-  return extensions[path.split('.').at(-1) ?? ''] ?? 'text'
+  const extension = path.split('.').at(-1) ?? ''
+  return Object.hasOwn(extensions, extension) ? extensions[extension] : 'text'
 }
