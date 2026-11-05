@@ -29,6 +29,21 @@ defmodule Shuttle.OwnerExitTest do
            })
   end
 
+  test "mirror exits are plain Rest, Close and Discard, never Pause or rest --until" do
+    for params <- [%{"action" => "rest"}, %{"action" => "close"}, %{"action" => "close", "tempered" => false}],
+        do: assert(OwnerExit.action?(params))
+
+    for params <- [
+          %{"action" => "pause"},
+          %{"action" => "pause", "no_kill" => true},
+          %{"action" => "pause", "until" => ""},
+          %{"action" => "rest", "until" => ""},
+          %{"action" => "rest", "until" => "2026-12-01"},
+          %{"action" => "rest", "until" => "work/blocker"},
+          %{"action" => "close", "tempered" => true}
+        ], do: refute(OwnerExit.action?(params))
+  end
+
   defp row(fields \\ %{}) do
     %{
       "origin" => "worker",

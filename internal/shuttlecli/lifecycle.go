@@ -186,7 +186,6 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 	}
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	pauseCmd.Flags().BoolVar(&pauseLocal, "local", false, localFlagUsage)
-	addMirrorOwnerFlag(pauseCmd)
 	return pauseCmd
 }
 

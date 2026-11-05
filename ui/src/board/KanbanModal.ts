@@ -1471,7 +1471,7 @@ export class KanbanModal {
     opts: { cold?: boolean; due?: string | null } = {},
   ): void {
     if (card.originStale || exitRefusal(card)) {
-      if (!exitRefusal(card) && canExitOffline(card) && horizon === 'stashed' && !opts.cold && opts.due === undefined) void this.commitRest(card, '')
+      if (!exitRefusal(card) && canExitOffline(card) && horizon === 'stashed' && !opts.cold && opts.due === undefined) void this.commitRest(card)
       else this.showBanner(exitRefusal(card) ?? 'Configuration changes need the execution owner; no local write was made.', 'info')
       return
     }
@@ -2309,13 +2309,18 @@ export class KanbanModal {
   private openRestPopover(card: KanbanCard): void {
     this.closeRestPopover?.()
     if (exitRefusal(card)) { this.showBanner(offlineExplanation(card), 'info'); return }
+    if (card.originStale) { void this.commitRest(card); return }
     this.closeRestPopover = restPopover(card, until => this.commitRest(card, until))
   }
 
-  private async commitRest(card: KanbanCard, until: string): Promise<void> {
+  private async commitRest(card: KanbanCard, until?: string): Promise<void> {
+    if (card.originStale && until !== undefined) {
+      this.showBanner('Waiting conditions need the execution owner; no local write was made.', 'info')
+      return
+    }
     try {
       await this.postJson('/api/v1/lifecycle', {
-        action: 'rest', fiber: card.id, origin: card.originId, until,
+        action: 'rest', fiber: card.id, origin: card.originId, ...(until === undefined ? {} : { until }),
       }, 'Rest failed')
       await this.fetchAndRender()
     } catch (error) {

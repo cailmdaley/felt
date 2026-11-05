@@ -60,14 +60,7 @@ try {
   await page.screenshot({ path: join(shots, 'remote-only-explanation.png') })
   await page.keyboard.press('Escape')
 
-  const removed = page.locator('[data-fiber-id="fixtures/offline/removed"]').first()
-  await removed.scrollIntoViewIfNeeded()
-  assert.equal(await removed.getAttribute('draggable'), 'true')
-  await removed.click({ button: 'right' })
-  await page.getByRole('menuitem', { name: 'Rest', exact: true }).waitFor()
-  await page.getByRole('menuitem', { name: 'Discard', exact: true }).waitFor()
-  await page.screenshot({ path: join(shots, 'removed-exits.png') })
-  await page.keyboard.press('Escape')
+  assert.equal(await page.locator('[data-fiber-id="fixtures/offline/removed"]').count(), 0)
 
   const inconclusive = page.locator('[data-fiber-id="fixtures/offline/unowned-inconclusive"]').first()
   await inconclusive.scrollIntoViewIfNeeded()

@@ -91,6 +91,21 @@ func exitFixture(t *testing.T, content, fleet string) (string, string, string, s
 const foreignDraft = "status: open\nshuttle:\n  kind: oneshot\n  host: worker"
 const configuredWorker = `{"version":1,"defaults":{"discover":false},"remotes":[{"name":"worker","port":4001}]}`
 
+func TestMirrorExitRejectsPauseAndRestUntil(t *testing.T) {
+	binary := planningProbeBinary(t)
+	for _, args := range [][]string{{"pause", "task", "--local"}, {"pause", "task", "--local", "--no-kill"}, {"rest", "task", "--local", "--until", ""}, {"rest", "task", "--local", "--until", "2026-12-01"}} {
+		t.Run(strings.Join(args, "/"), func(t *testing.T) {
+			dir, path, home, remotes := exitFixture(t, foreignDraft, configuredWorker)
+			before, _ := os.ReadFile(path)
+			out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), args...)
+			after, _ := os.ReadFile(path)
+			if err == nil || string(after) != string(before) {
+				t.Fatalf("non-exit mirrored: %v %s\n%s", err, out, after)
+			}
+		})
+	}
+}
+
 func TestExitCLINeverReplaysDaemonRefusal(t *testing.T) {
 	binary := planningProbeBinary(t)
 	for _, verb := range [][]string{{"rest"}, {"pause"}, {"close"}, {"close", "--tempered=false"}, {"close", "--tempered=true"}, {"set-agent", "claude-sonnet"}, {"set-model", "claude-sonnet"}, {"set-outcome", "--outcome", "Planned"}, {"reshape", "standing", "--schedule", "0 9 * * *"}, {"role", "editor", "--new", "Editor"}, {"seat"}} {
@@ -186,7 +201,7 @@ func TestExitExplicitLocalChecksStandingAndDiscovery(t *testing.T) {
 
 func TestMirrorExitPreservesRunAndPublicationEvidence(t *testing.T) {
 	binary := planningProbeBinary(t)
-	for _, verb := range [][]string{{"rest"}, {"pause"}, {"close", "--quiet", "--tempered=false"}} {
+	for _, verb := range [][]string{{"rest"}, {"close", "--quiet", "--tempered=false"}} {
 		t.Run(verb[0], func(t *testing.T) {
 			content := "status: closed\nshuttle:\n  kind: oneshot\n  host: worker\n  runtime:\n    thread_exit_verb: rearmed\n    quiet_closed_at: '2026-11-04T11:00:00Z'"
 			dir, path, home, remotes := exitFixture(t, content, configuredWorker)

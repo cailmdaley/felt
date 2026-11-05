@@ -12,8 +12,8 @@ The owning host's existing local CLI writes remain available offline.
 
 | Operation | Owner unavailable before send | Lost reply / HTTP gateway failure |
 |---|---|---|
-| `rest`, `pause`, `close`, `close --tempered=false` | Mirror a safe local exit; explain Git synchronization and no execution request | Refuse without replay |
-| Temper, configuration, publication, placement, launch, resume or reopen | Refuse; the owner decides | Refuse without replay |
+| Plain `rest`, `close`, `close --tempered=false` | Mirror a safe local exit; explain Git synchronization and no execution request | Refuse without replay |
+| `pause`, `rest --until`, Temper, configuration, publication, placement, launch, resume or reopen | Refuse; the owner decides | Refuse without replay |
 
 A safe exit copy is not armed and has no inconclusive dispatch/session evidence or known owner worker.
 A dispatch needs a strictly later handoff; invalid or zone-less timestamps prove nothing.

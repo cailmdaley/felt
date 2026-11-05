@@ -67,7 +67,7 @@ On the Desk's focused card or a constitution page, press **s** to open a small d
 Press **n** to rest undated, or choose a future day and press Enter to rest until that day.
 The same operation is `shuttle rest <fiber> --until YYYY-MM-DD` (or `--until ''` for no date).
 It asks the owner first and stops a live worker through that daemon's serialized rest lifecycle.
-After a definite pre-send failure to a known owner, the daemon can mirror a safe oneshot exit for Git synchronization without claiming to stop a worker. Standing work always requires its owner.
+After a definite pre-send failure to a known owner, the daemon can mirror a safe oneshot exit for Git synchronization without claiming to stop a worker. Standing work always requires its owner. Mirrored exits are plain Rest, Close and Discard; Pause and `rest --until` require the owner, even when `--until` is empty.
 
 **4. More work, not blocked?** Leave the fiber active and just hand off. The
 daemon starts a fresh worker next eligible tick, and it lands on your `## Status`.

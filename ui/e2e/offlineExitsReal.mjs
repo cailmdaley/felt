@@ -55,11 +55,10 @@ try {
     await drafts.first().click({ button: 'right' })
     await page.getByRole('menuitem', { name: /An exit can be saved/ }).waitFor()
     await page.screenshot({ path: join(shots, 'before-rest.png') })
-    await page.getByRole('menuitem', { name: 'Rest', exact: true }).click()
-    await page.locator('.kbn-rest-popover').waitFor()
     const applying = page.waitForResponse(reply => reply.url().endsWith('/api/v1/lifecycle') && reply.request().method() === 'POST')
-    await page.keyboard.press('n')
+    await page.getByRole('menuitem', { name: 'Rest', exact: true }).click()
     const applied = await applying
+    assert.equal(Object.hasOwn(applied.request().postDataJSON(), 'until'), false)
 
     if (mode === 'refuse') {
       assert.equal(applied.status(), 502, await applied.text())

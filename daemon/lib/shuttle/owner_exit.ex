@@ -69,8 +69,8 @@ defmodule Shuttle.OwnerExit do
     end
   end
 
-  def action?(%{"action" => "close", "tempered" => true}), do: false
-  def action?(%{"action" => action}), do: action in ~w(rest close pause)
+  def action?(%{"action" => "rest"} = params), do: !Map.has_key?(params, "until")
+  def action?(%{"action" => "close"} = params), do: params["tempered"] != true
   def action?(_), do: false
 
   def origin(identifier, supplied, hint \\ nil) do
@@ -117,7 +117,7 @@ defmodule Shuttle.OwnerExit do
          %{} = copy <- local_copy(params["fiber"], params["origin"], params["fiber_path"]) do
       args =
         ["--mirror-owner", params["origin"] || ""] ++
-          Enum.flat_map(~w(tempered quiet until actor), fn key ->
+          Enum.flat_map(~w(tempered quiet actor), fn key ->
             case Map.fetch(params, key) do
               {:ok, value} when is_boolean(value) -> ["--#{key}=#{value}"]
               {:ok, value} when is_binary(value) -> ["--#{key}", value]

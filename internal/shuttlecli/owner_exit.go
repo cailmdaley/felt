@@ -15,7 +15,7 @@ func addMirrorOwnerFlag(cmd *cobra.Command) {
 }
 
 func exitCommand(cmd *cobra.Command) bool {
-	return cmd.Name() == "rest" || cmd.Name() == "pause" || cmd.Name() == "close" && cmd.Flag("tempered").Value.String() != "true"
+	return cmd.Name() == "rest" && !cmd.Flags().Changed("until") || cmd.Name() == "close" && cmd.Flag("tempered").Value.String() != "true"
 }
 
 // Quoted and bare YAML timestamps follow the same RFC3339 rule.

@@ -104,7 +104,7 @@ An unavailable owner fails the request, and a duplicate document is refused rath
 
 ### Lifecycle actions
 
-Mutations ask the execution owner first. Only safe `rest`, `pause`, `close` or Discard exits can mirror after a definite pre-send failure or proven removal; configuration, Temper and execution require the owner.
+Mutations ask the execution owner first. Only safe plain `rest`, `close` or Discard exits can mirror after a definite pre-send failure to a known owner. `pause` and every explicit `rest --until` require the owner, including an empty waiting condition. Configuration, Temper and execution require the owner.
 Mirror writes pin UID, physical path and owner under the document lock. Lost replies never authorize fallback or replay.
 The [owner-away exit contract](../dev/dispatch.md#owner-away-exits) defines safety, standing schedules and Git reconciliation. A mirrored `/transition` reply includes `saved_locally: true`, `execution_requested: false` and a Git/no-execution `message`.
 A known pre-send failure returns HTTP 502 with `reason: "owner_unreachable_before_send"`; other transport failures don't establish whether the owner applied the request.
