@@ -5401,20 +5401,20 @@ defmodule Shuttle.Poller do
     slug = fiber_address(fiber)
     uid = metadata_uid(fiber)
 
-    entry =
-      case Map.get(state.dispatch_failures, runtime_key) do
-        %{reason: ^reason, attempts: n} = e ->
-          %{e | attempts: n + 1, attempted_at: now}
+    previous = Map.get(state.dispatch_failures, runtime_key)
 
-        _ ->
-          %{
-            reason: reason,
-            attempts: 1,
-            attempted_at: now,
-            first_attempted_at: now,
-            fiber_id: slug,
-            uid: uid
-          }
+    entry =
+      if previous && dispatch_failure_key(previous.reason) == dispatch_failure_key(reason) do
+        %{previous | reason: reason, attempts: previous.attempts + 1, attempted_at: now}
+      else
+        %{
+          reason: reason,
+          attempts: 1,
+          attempted_at: now,
+          first_attempted_at: now,
+          fiber_id: slug,
+          uid: uid
+        }
       end
 
     # Dependency readiness is a retryable wait, not a failed launch. It is
@@ -5433,6 +5433,12 @@ defmodule Shuttle.Poller do
 
     %{state | dispatch_failures: Map.put(state.dispatch_failures, runtime_key, entry)}
   end
+
+  # Display age changes between polls; durable reservation facts identify the hold.
+  defp dispatch_failure_key({:launch_reserved, info}),
+    do: {:launch_reserved, Map.delete(info, "age_seconds")}
+
+  defp dispatch_failure_key(reason), do: reason
 
   # ── Reconciliation ──
 

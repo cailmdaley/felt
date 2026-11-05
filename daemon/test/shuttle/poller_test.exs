@@ -7377,6 +7377,76 @@ defmodule Shuttle.PollerTest do
     assert File.exists?(script)
   end
 
+  defmodule HeldLaunchRunner do
+    def cmd("tmux", ["has-session" | _] = args, opts) do
+      send(Shuttle.Env.app(:held_launch_test_pid), :held_launch_probe)
+      MockRunner.cmd("tmux", args, opts)
+    end
+
+    def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
+  end
+
+  @tag :reservation_cooldown
+  test "an aging durable hold accumulates failures and stops probing during cooldown" do
+    id = "tests/reservation-cooldown"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+    session = FiberUid.session(id)
+    script = Shuttle.WorkerProcess.script_path(session)
+    File.write!(script, "sleep 1000\n")
+    on_exit(fn -> File.rm(script) end)
+    assert :ok = Shuttle.Terminal.LaunchAttempts.record(session, script)
+    MockRunner.set_ps_result({"ps timed out", :timeout})
+    Env.put_app_env(:held_launch_test_pid, self())
+
+    {:ok, poller} =
+      start_poller!(
+        runner: HeldLaunchRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: false,
+        max_concurrent_workers: 0,
+        poll_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(poller)
+    flush_held_launch_probes()
+    assert {:error, {:launch_reserved, info}} = Poller.dispatch_fiber(poller, id, [])
+    assert_receive :held_launch_probe
+    state = :sys.get_state(poller, @state_timeout)
+    [{key, first}] = Map.to_list(state.dispatch_failures)
+
+    # Cross an age boundary without waiting on the wall clock. All durable
+    # reservation facts stay unchanged; only the remembered display age differs.
+    :sys.replace_state(poller, fn state ->
+      reason = {:launch_reserved, Map.put(info, "age_seconds", info["age_seconds"] - 1)}
+      put_in(state.dispatch_failures[key].reason, reason)
+    end)
+
+    assert {:error, {:launch_reserved, _}} = Poller.dispatch_fiber(poller, id, [])
+    assert_receive :held_launch_probe
+    assert [%{attempts: 2, reason: message}] = Poller.snapshot(poller).blocked
+    assert message =~ ~r/\(\d+s old\)/
+    assert message =~ "duplicate"
+    state = :sys.get_state(poller, @state_timeout)
+    assert state.dispatch_failures[key].first_attempted_at == first.first_attempted_at
+    flush_held_launch_probes()
+
+    :sys.replace_state(poller, &%{&1 | max_concurrent_workers: 1})
+    sync_poll_cycle!(poller)
+    refute_receive :held_launch_probe, 50
+    assert [%{attempts: 2}] = Poller.snapshot(poller).blocked
+    assert Poller.worker_status(poller, id) == nil
+    assert new_session_scripts() == []
+  end
+
+  defp flush_held_launch_probes do
+    receive do
+      :held_launch_probe -> flush_held_launch_probes()
+    after
+      0 -> :ok
+    end
+  end
+
   @tag :reservation_visibility
   test "a crash after reserving self-heals on confirmed absence" do
     id = "tests/reservation-crash"
