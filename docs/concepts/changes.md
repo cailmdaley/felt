@@ -169,11 +169,20 @@ Aim for a ten-minute reading, in plain language. Select the lines that carry the
 
 ## Review state and delivery
 
-Mark a stop or file viewed to track progress.
+File headers show status, a rename’s old path, mode or type changes, changed line counts, and explicit role overrides.
+Generated files start folded and must be opened before they can be marked viewed.
 Click a diff line number to add an anchored comment, and add an overall note under Your review.
-Drafts and viewed marks stay in this browser, bound to the document's owner/path, base, head and exact bundle digest.
-Rebaking with a different story or hunk set starts a separate review state.
 
-Send review uses the fiber composer's worker route and sends one message with Base and Head SHAs before quoted title and path data.
+Drafts stay in this browser by document owner/path. Every comment and the overall note keep their own base and head across rebakes.
+Earlier-snapshot comments appear in the review list, not on different code at the same line number.
+The reader and Send button name earlier anchors; the delivered message preserves them alongside the current snapshot.
+Viewed marks are separate: they reset when the base, head or bundle’s non-cryptographic fingerprint changes.
+
+Send review names and targets the fiber whose directory holds the bundle, on the file’s owner host, even when another fiber links to it.
+It uses that fiber composer’s existing-worker route and sends one message with Base and Head SHAs before quoted title and path data.
 A missing worker route disables sending; reading a change never authorizes a fresh worker launch.
-Successful delivery clears the sent draft, while a failed send leaves it available to retry.
+The draft is locked while sending, including across a live rebake. Successful delivery clears the delivered text once; a failed send keeps it available to retry.
+
+Worker-authored bundles are validated before rendering, storage or review: base and head are full hexadecimal SHA-1 or SHA-256 object IDs, and all reader-required fields have checked shapes.
+All Markdown passes through a final DOMPurify allowlist boundary shared with transcript rendering.
+Captured structured lines are readable without syntax highlighting. A parser, highlighter or grammar-load failure retains plain text rows; a window without renderable rows names its file in a visible error.
