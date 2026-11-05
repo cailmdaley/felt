@@ -403,7 +403,12 @@ defmodule Shuttle.Meeting do
         :ok
 
       receipt ->
-        state = if status < 300, do: "reported-success", else: "reported-failure"
+        state =
+          cond do
+            status == :unconfirmed -> "unconfirmed"
+            status < 300 -> "reported-success"
+            true -> "reported-failure"
+          end
 
         case write_handoff(launch, Map.put(receipt, "status", state), []) do
           :ok ->

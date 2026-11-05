@@ -168,7 +168,7 @@ defmodule ShuttleWeb.CaptureController do
 
   defp relay_capture(conn, {:error, {:forward_failed, name, reason}}, meeting_row) do
     outcome = capture_failed(name, reason)
-    meeting_row = Meeting.log_delivery(meeting_row, 502, outcome)
+    meeting_row = Meeting.log_delivery(meeting_row, :unconfirmed, outcome)
 
     payload =
       outcome

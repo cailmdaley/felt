@@ -704,7 +704,8 @@ defmodule Shuttle.MeetingTest do
              "meeting" => %{
                "state" => "live",
                "fiber" => "cosmo/shear-bmodes",
-               "mirror_host" => "project-host"
+               "mirror_host" => "project-host",
+               "handoff" => %{"status" => "reported-success"}
              }
            } = Jason.decode!(conn.resp_body)
 
@@ -1295,7 +1296,9 @@ defmodule Shuttle.MeetingTest do
       )
 
     assert conn.status == 200
-    assert %{"meeting" => %{"state" => "live"}} = Jason.decode!(conn.resp_body)
+
+    assert %{"meeting" => %{"state" => "live", "handoff" => %{"status" => "reported-success"}}} =
+             Jason.decode!(conn.resp_body)
 
     forwarded = Shuttle.Test.MeetingCaptureForwardClient.last()
     assert forwarded.url == "http://127.0.0.1:4001/api/v1/capture"
@@ -1448,8 +1451,76 @@ defmodule Shuttle.MeetingTest do
     assert %{
              "error" => "project_dir is required",
              "recording" => true,
-             "meeting" => %{"state" => "live"}
+             "meeting" => %{"state" => "live", "handoff" => %{"status" => "reported-failure"}}
            } = Jason.decode!(conn.resp_body)
+  end
+
+  for {label, result, status, handoff} <- [
+        {"lost response", {:error, :timeout}, 502, "unconfirmed"},
+        {"owner refusal", {:ok, 503, ~s({"spawned":false})}, 503, "reported-failure"}
+      ] do
+    @tag capture_receipt: true
+    test "meeting capture #{label} returns its updated receipt", %{hark_dir: dir} do
+      Env.put_app_env(:remotes, [
+        %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
+      ])
+
+      start_supervised!({Shuttle.Test.MeetingCaptureForwardClient, unquote(Macro.escape(result))})
+      Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+      set_starting_meeting_handler(dir)
+
+      conn =
+        api_conn()
+        |> post(
+          "/api/v1/capture",
+          Jason.encode!(%{
+            "meeting" => %{"mode" => "call"},
+            "origin" => "project-host",
+            "project_dir" => "/remote/project",
+            "prompt" => "review"
+          })
+        )
+
+      assert conn.status == unquote(status)
+
+      assert %{"recording" => true, "meeting" => %{"handoff" => %{"status" => unquote(handoff)}}} =
+               Jason.decode!(conn.resp_body)
+
+      assert {:ok, %{meeting: %{handoff: %{"status" => unquote(handoff)}}}} = Meeting.show()
+    end
+  end
+
+  @tag capture_receipt: true
+  test "local meeting capture returns the successful receipt", %{hark_dir: dir, tmp_dir: project} do
+    set_starting_meeting_handler(dir)
+
+    poller =
+      Task.async(fn ->
+        receive do
+          {:"$gen_call", from, {:capture, _prompt, _opts}} ->
+            GenServer.reply(from, {:ok, %{session: "capture-test", agent_id: "claude-opus"}})
+        end
+      end)
+
+    Env.put_server(Shuttle.Poller, poller.pid)
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/capture",
+        Jason.encode!(%{
+          "meeting" => %{"mode" => "call"},
+          "project_dir" => project,
+          "prompt" => "review"
+        })
+      )
+
+    assert conn.status == 200
+
+    assert %{"spawned" => true, "meeting" => %{"handoff" => %{"status" => "reported-success"}}} =
+             Jason.decode!(conn.resp_body)
+
+    Task.await(poller)
   end
 
   test "meeting capture reports hark availability before attempting to start", %{
