@@ -12,8 +12,10 @@ describe('CLI-resolved change lanes', () => {
     expect(lanes.remaining.map(file => [file.path, file.hunks.length])).toEqual([['app.ts', 1], ['mode.sh', 0], ['gen.ts', 1]])
     expect(lanes.remaining[0].hunks).toEqual([hunk('remaining excerpt')])
   })
-  it('finds bidi controls and invisible format characters', () => {
+  it('finds bidi controls, invisible format characters and a mid-line CR, but not a line ending', () => {
     for (const char of ['\u202a', '\u202e', '\u2066', '\u2069', '\u200b', '\u00ad', '\ufeff', '\u{e0041}']) expect(hiddenCharacters(`a${char}b`)).toEqual([char])
+    expect(hiddenCharacters('alpha\rbeta')).toEqual(['\r'])
+    expect(hiddenCharacters('crlf\r\nnext\r')).toEqual([])
     expect(hiddenCharacters('plain \t text é 😀')).toEqual([])
   })
   it('flags hidden characters per file, on the side that has them, regardless of any story', () => {

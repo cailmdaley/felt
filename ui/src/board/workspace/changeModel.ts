@@ -31,8 +31,8 @@ export function assignLanes(bundle: ChangeBundle): ChangeLanes {
 }
 
 /** Characters that change how a row reads without appearing in it: Unicode format
- *  characters: bidi controls, zero-width marks and tag characters. */
-export const HIDDEN_CHARACTERS = /\p{Cf}/gu
+ *  characters (bidi controls, zero-width marks, tag characters) and a mid-line CR. */
+export const HIDDEN_CHARACTERS = /\p{Cf}|\r(?=[^\n])/gu
 export function hiddenCharacters(text: string): string[] { return text.match(HIDDEN_CHARACTERS) ?? [] }
 export function codePoint(char: string): string { return `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}` }
 
