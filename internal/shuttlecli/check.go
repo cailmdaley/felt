@@ -14,7 +14,7 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 	shuttleCheckCmd := &cobra.Command{
 		Use:   "check",
 		Short: "Validate Shuttle blocks and host identity in this store",
-		Long:  "Checks every mapping-valued shuttle: block against Shuttle's schema and reports local host-name drift.",
+		Long:  "Checks shuttle: blocks against Shuttle's schema and reports local host-name drift.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			storage, _, err := felt.RequireStore(a.env, a.dir)
@@ -35,6 +35,12 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 					})
 				}
 				if !shuttle.HasFacet(fiber) {
+					if _, exists := fiber.ExtraFields[shuttle.FacetKey]; exists {
+						issues = append(issues, felt.CheckIssue{
+							Level: felt.CheckLevelWarning, FiberID: fiber.ID, Path: shuttle.FacetKey,
+							Message: "shuttle must be a mapping; this fiber is treated as ordinary",
+						})
+					}
 					continue
 				}
 				if seat := felt.MappingValueNode(fiber.ExtraFields[shuttle.FacetKey], "seat"); seat != nil && seat.Kind == yaml.ScalarNode && seat.Tag == "!!str" {

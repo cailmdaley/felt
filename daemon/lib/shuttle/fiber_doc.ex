@@ -57,8 +57,11 @@ defmodule Shuttle.FiberDoc do
   # loudly, not masquerade as YAML corruption.
   defp parse_frontmatter(frontmatter_yaml, path) do
     case YamlElixir.read_from_string(frontmatter_yaml) do
-      {:ok, frontmatter} -> {:ok, stringify_keys(frontmatter || %{})}
-      {:error, _} = error -> error
+      {:ok, frontmatter} ->
+        {:ok, (frontmatter || %{}) |> stringify_keys() |> Shuttle.FiberDocuments.normalize()}
+
+      {:error, _} = error ->
+        error
     end
   rescue
     error -> {:error, "malformed fiber document #{path}: #{Exception.message(error)}"}

@@ -544,7 +544,7 @@ defmodule Shuttle.FeltStores do
 
     case runner().cmd("felt", args, stderr_to_stdout: false) do
       {output, 0} ->
-        Jason.decode(output)
+        Shuttle.FiberDocuments.decode(output)
 
       {_output, :timeout} ->
         {:error, :timeout}

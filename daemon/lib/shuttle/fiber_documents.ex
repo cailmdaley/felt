@@ -29,6 +29,19 @@ defmodule Shuttle.FiberDocuments do
                     outcome due horizon cold kind priority tempered
                     shuttle start theme path report_path)
 
+  @doc "Decode fiber JSON, treating a non-mapping shuttle field as absent."
+  def decode(json) do
+    with {:ok, value} <- Jason.decode(json), do: {:ok, normalize(value)}
+  end
+
+  @doc false
+  def normalize(rows) when is_list(rows), do: Enum.map(rows, &normalize/1)
+
+  def normalize(%{"shuttle" => block} = fiber) when not is_map(block),
+    do: Map.delete(fiber, "shuttle")
+
+  def normalize(value), do: value
+
   @doc "The kanban metadata field names the owner feed projects from felt JSON."
   @spec kanban_fields() :: [String.t()]
   def kanban_fields, do: @kanban_fields
@@ -296,7 +309,7 @@ defmodule Shuttle.FiberDocuments do
     # resolves the fiber first. A timeout is never reported as "fiber absent".
     case runner().cmd(cli, ["show", id, "-j"], cd: store) do
       {output, 0} ->
-        case Jason.decode(output) do
+        case decode(output) do
           {:ok, %{} = fiber} ->
             learn_address(store, fiber)
             fiber = if with_body?, do: fiber, else: Map.delete(fiber, "body")
@@ -399,7 +412,7 @@ defmodule Shuttle.FiberDocuments do
     # request.
     case runner().cmd(cli, args, cd: store) do
       {output, 0} ->
-        case Jason.decode(output) do
+        case decode(output) do
           {:ok, rows} when is_list(rows) -> {:ok, rows}
           {:ok, _} -> {:error, %{felt_store: store, error: "#{cli} ls returned non-list JSON"}}
           {:error, error} -> {:error, %{felt_store: store, error: Exception.message(error)}}

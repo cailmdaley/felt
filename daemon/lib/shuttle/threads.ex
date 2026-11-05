@@ -387,7 +387,7 @@ defmodule Shuttle.Threads do
                    ["show", fiber_id, "--json"],
                    Keyword.take(opts, [:runner])
                  ),
-               {:ok, fiber} <- Jason.decode(output),
+               {:ok, fiber} <- FiberDocuments.decode(output),
                %{"uid" => uid, "host" => host} <-
                  get_in(fiber, ["shuttle", "thread_parent"]) do
             case fetch_authoritative(

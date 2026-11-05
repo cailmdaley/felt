@@ -1812,6 +1812,63 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
   end
 
+  test "a scalar shuttle field remains an ordinary fiber without stopping dispatch", %{host: host} do
+    write_fiber(host, "tests/malformed", """
+    ---
+    name: Malformed
+    status: active
+    due: 2026-12-01
+    shuttle: oops
+    ---
+    Body.
+    """)
+
+    write_fiber(host, "tests/valid", """
+    ---
+    name: Valid
+    status: active
+    shuttle:
+      kind: oneshot
+      host: test-host
+      project_dir: #{host}
+    ---
+    Work.
+    """)
+
+    {:ok, poller} =
+      start_poller!(runner: IntegrationRunner, poll_interval_ms: 600_000, felt_stores: [host])
+
+    await_boot_cycle!(poller)
+
+    assert eventually(fn ->
+             Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and "new-session" in args
+             end)
+           end)
+
+    assert {:ok, %{fibers: [%{fiber: fiber}]}} =
+             Shuttle.FiberDocuments.get("tests/malformed", felt_stores: [host])
+
+    assert fiber["name"] == "Malformed"
+    refute Map.has_key?(fiber, "shuttle")
+
+    assert {:ok, %{fibers: entries}} = Poller.cached_fiber_documents(poller)
+    assert %{fiber: cached} = Enum.find(entries, &(&1.fiber["name"] == "Malformed"))
+    refute Map.has_key?(cached, "shuttle")
+
+    assert {:ok, %{fibers: [%{fiber: shown}]}} =
+             Shuttle.FiberDocuments.get_shuttle("tests/malformed", felt_stores: [host])
+
+    refute Map.has_key?(shown, "shuttle")
+
+    assert {:ok, _, _, frontmatter, _} =
+             Shuttle.FiberDoc.read_path(fiber_file(host, "tests/malformed"))
+
+    refute Map.has_key?(frontmatter, "shuttle")
+    assert File.read!(fiber_file(host, "tests/malformed")) =~ "shuttle: oops"
+    assert Process.alive?(poller)
+  end
+
   test "a due closed standing run reopens through the CLI and launches in quarantine", %{
     host: host
   } do

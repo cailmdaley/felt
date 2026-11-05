@@ -726,7 +726,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   defp decode_fiber(output) do
-    case Jason.decode(output) do
+    case Shuttle.FiberDocuments.decode(output) do
       {:ok, fiber} -> {:ok, fiber}
       {:error, _} -> {:error, "invalid fiber JSON"}
     end

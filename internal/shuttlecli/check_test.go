@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -34,6 +35,38 @@ func TestShuttleCheckValidatesBlocksAndReportsHostDrift(t *testing.T) {
 	}
 	if issues[1].Level != felt.CheckLevelWarning || issues[1].Path != "shuttle.host" {
 		t.Fatalf("host-drift issue = %#v", issues[1])
+	}
+}
+
+func TestShuttleCheckWarnsOnNonMappingFacet(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	for index, value := range []any{"oops", []string{"oops"}} {
+		id := fmt.Sprintf("bad-%d", index)
+		fiber := &felt.Felt{ID: id, Name: id, Status: felt.StatusActive}
+		if err := fiber.SetExtraField("shuttle", value); err != nil {
+			t.Fatal(err)
+		}
+		if err := storage.Write(fiber); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := runIn(t, env, dir, "check", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issues []felt.CheckIssue
+	if err := json.Unmarshal([]byte(out), &issues); err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("issues = %#v", issues)
+	}
+	for _, issue := range issues {
+		if issue.Level != felt.CheckLevelWarning || issue.Path != "shuttle" || !strings.Contains(issue.Message, "mapping") {
+			t.Fatalf("issue = %#v", issue)
+		}
 	}
 }
 

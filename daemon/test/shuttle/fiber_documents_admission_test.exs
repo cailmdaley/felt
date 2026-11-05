@@ -24,6 +24,17 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
     end
   end
 
+  test "fiber JSON normalizes every non-map shuttle value and preserves maps" do
+    for value <- ["oops", 42, false, nil, ["oops"]] do
+      json = Jason.encode!(%{"id" => "bad", "shuttle" => value})
+      assert {:ok, %{"id" => "bad"} = fiber} = FiberDocuments.decode(json)
+      refute Map.has_key?(fiber, "shuttle")
+    end
+
+    assert {:ok, [%{"shuttle" => %{"host" => "host"}}, %{"id" => "plain"}]} =
+             FiberDocuments.decode(~s([{"shuttle":{"host":"host"}},{"id":"plain"}]))
+  end
+
   describe "office projection" do
     test "reads the office and boolean seat only from shuttle fields" do
       fiber = %{

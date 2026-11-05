@@ -3952,7 +3952,7 @@ defmodule Shuttle.Poller do
   defp run_shuttle_listing(store, state, ids_from, timeout_ms, slow_scan?) do
     case run_shuttle_ls_for_shuttle(store, state, ids_from, timeout_ms, slow_scan?) do
       {:ok, output} ->
-        with {:ok, fibers} when is_list(fibers) <- Jason.decode(output) do
+        with {:ok, fibers} when is_list(fibers) <- Shuttle.FiberDocuments.decode(output) do
           owned_prefix = Shuttle.FeltStores.store_felt_realpath(store) <> "/"
 
           rows = Enum.filter(fibers, &is_map/1)
@@ -6473,7 +6473,7 @@ defmodule Shuttle.Poller do
     host = owning_store(fiber_id, state)
 
     with {:ok, output} <- run_shuttle(host, state.runner, ["show", fiber_id, "--json"]) do
-      case Jason.decode(output) do
+      case Shuttle.FiberDocuments.decode(output) do
         {:ok, fiber} -> {:ok, fiber}
         {:error, _} -> {:error, :invalid_json}
       end
@@ -6489,7 +6489,7 @@ defmodule Shuttle.Poller do
         case Shuttle.FeltStores.resolve_fiber(fiber_id, state.felt_stores) do
           {:ok, %{store: store, fiber_id: address}} ->
             with {:ok, output} <- run_shuttle(store, state.runner, ["show", address, "--json"]),
-                 {:ok, fiber} <- Jason.decode(output),
+                 {:ok, fiber} <- Shuttle.FiberDocuments.decode(output),
                  do: {:ok, fiber}
 
           {:error, :not_found} ->
