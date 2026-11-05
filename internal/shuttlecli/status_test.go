@@ -529,14 +529,14 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			status:       felt.StatusClosed,
 			own:          "testhost",
 			noProjectDir: true,
-			want:         []string{"→ To review — closed, awaiting a verdict", "shuttle reopen role --project-dir <dir>"},
+			want:         []string{"→ To review — the next occurrence", "project_dir is missing", "shuttle resume role --project-dir <dir>"},
 		},
 		{
 			name:   "closed",
 			status: felt.StatusClosed,
 			own:    "testhost",
 			want: []string{
-				"status:      closed (NOT armed", "→ To review — closed, awaiting a verdict", "shuttle reopen role",
+				"status:      closed (NOT armed", "→ To review — the owner attempts to re-arm", "shuttle accept role",
 			},
 		},
 	} {

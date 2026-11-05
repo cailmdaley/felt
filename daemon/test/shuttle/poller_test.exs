@@ -4343,7 +4343,7 @@ defmodule Shuttle.PollerTest do
     serviced = DateTime.add(now, -120, :second)
     occurrence = DateTime.add(now, if(scenario == :not_yet_due, do: -180, else: -60), :second)
     status = if scenario == :rested, do: "open", else: "closed"
-    attrs = %{"status" => status, "closed_at" => DateTime.to_iso8601(now)}
+    attrs = %{"status" => status, "closed_at" => DateTime.to_iso8601(serviced)}
     attrs = if scenario == :tempered_false, do: Map.put(attrs, "tempered", false), else: attrs
     attrs = if scenario == :tempered_true, do: Map.put(attrs, "tempered", true), else: attrs
 
@@ -4389,7 +4389,9 @@ defmodule Shuttle.PollerTest do
 
     if fires? do
       # The tick's re-arm must not consume the occurrence with a handoff stamp.
-      assert is_nil(get_in(MockRunner.fiber(fiber_id), ["shuttle", "runtime", "handed_off_at"]))
+      assert get_in(MockRunner.fiber(fiber_id), ["shuttle", "runtime", "handed_off_at"]) ==
+               DateTime.to_iso8601(serviced)
+
       assert [%{fiber_id: ^fiber_id, state: "running"}] = Poller.snapshot(poller).eligible
       sync_poll_cycle!(poller)
 

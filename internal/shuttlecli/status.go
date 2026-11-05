@@ -462,6 +462,12 @@ func (a *app) dispatchAssessment(f *felt.Felt, block *shuttle.Block, column, unt
 		case "tempered", "discarded":
 			return fmt.Sprintf("→ %s — reviewed and archived; daemon will NOT dispatch. Use `%s` to clear the verdict and arm it.", columnTitle(column), arm("reopen"))
 		default:
+			if block.Kind == "standing" && !horizonStashed(f) {
+				if noProjectDir {
+					return fmt.Sprintf("→ To review — the next occurrence after its last service and close needs an owner-side re-arm, but project_dir is missing. Use `%s` to accept and arm it.", arm("resume"))
+				}
+				return fmt.Sprintf("→ To review — the owner attempts to re-arm at the next occurrence after its last service and close. `shuttle accept %s` accepts it and rests it until the next tick; `shuttle close %s --tempered=false` ends its schedule.", f.ID, f.ID)
+			}
 			return fmt.Sprintf("→ To review — closed, awaiting a verdict; daemon will NOT dispatch. `shuttle close %s --tempered=true|false` records one; `%s` arms it again.", f.ID, arm("reopen"))
 		}
 	case felt.StatusOpen:

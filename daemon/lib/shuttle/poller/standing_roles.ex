@@ -268,13 +268,13 @@ defmodule Shuttle.Poller.StandingRoles do
   end
 
   # Standing dispatch requires `status: active`, no verdict, and an occurrence
-  # after the last service. The Poller reopens an awaiting run when that next
-  # occurrence arrives, without advancing the service anchor.
+  # after both the last service and close. The Poller reopens an awaiting run
+  # when that occurrence arrives, without advancing the service anchor.
   # The one standing-role dispatch rule: an active role is due when a scheduled
   # occurrence has elapsed since it was last serviced. "Last serviced" is the most
-  # recent of — the latest dispatch/handoff marker timestamp (durable across
-  # restarts; a human re-arm stamps the handoff marker too), the in-memory re-arm
-  # stamp, or the role's creation if it has never run. Expressed against the cron
+  # recent of the dispatch/handoff markers, close timestamp, and creation.
+  # A human accept advances the handoff marker; an occurrence re-arm cleans
+  # dirty markers at the dispatch timestamp instead. Expressed against the cron
   # primitive as the lookback `now -
   # last_serviced`: `due_by_cron?` then asks "did a tick fire after the last
   # service, at or before now?" — i.e. is there an unrun occurrence. (A
@@ -302,12 +302,13 @@ defmodule Shuttle.Poller.StandingRoles do
     end
   end
 
-  # Unix-ms the role was last serviced — the most recent of its marker
-  # timestamps and its creation. Defaults to `now_ms` (⇒ zero lookback ⇒ not
+  # Unix-ms lookback anchor: latest service, close, or creation. A close must
+  # wait for a subsequent occurrence. Defaults to `now_ms` (⇒ zero lookback ⇒ not
   # due) only in the impossible case that none are known.
   defp last_serviced_at_ms(fiber, now_ms) do
     [
       last_service_event_ms(fiber),
+      Poller.iso_to_unix_ms(Map.get(fiber, "closed_at")),
       Poller.iso_to_unix_ms(Map.get(fiber, "created_at"))
     ]
     |> Enum.reject(&is_nil/1)

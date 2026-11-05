@@ -2924,7 +2924,7 @@ defmodule Shuttle.Poller do
   # ── Orphan Resurrection ──
 
   # Drops dispatch_failures / resume_loop entries for fibers shuttle no longer
-  # intends to dispatch — closed, paused (status not in {open, active}), shuttle
+  # intends to dispatch — verdicts, non-standing closes, shuttle
   # block removed, or absent from the felt store entirely. Without this, the
   # `blocked` snapshot would carry stale entries the user has no remaining
   # handle on, and a config fix or pause would not clear a paused resume loop
@@ -2937,7 +2937,9 @@ defmodule Shuttle.Poller do
   defp evict_stale_by_candidates(map, candidates) do
     active_keys =
       candidates
-      |> Enum.filter(fn fiber -> Map.get(fiber, "status") in ["open", "active"] end)
+      |> Enum.filter(fn fiber ->
+        Map.get(fiber, "status") in ["open", "active"] or awaiting_standing?(fiber)
+      end)
       |> Enum.map(&runtime_key_for_fiber/1)
       |> MapSet.new()
 
@@ -3866,8 +3868,8 @@ defmodule Shuttle.Poller do
     # from its candidate row (no per-miss `show`, no stat), so a poll tick costs
     # one `shuttle ls` per store. A failure degrades `discover_candidates/1` to
     # the store's last-known rows; the boot contract probe checks CLI parity.
-    # Closed standing runs remain visible so their next occurrence can re-arm
-    # them without requiring a human verdict. Eligibility still requires active.
+    # Status scope is explicit: awaiting standing runs must remain visible for
+    # conditional scheduled re-arming. Eligibility still requires active.
     args = [
       "ls",
       "--status",
@@ -3929,9 +3931,8 @@ defmodule Shuttle.Poller do
   end
 
   # Does this constitution's worker exit close it to awaiting-review? Only a
-  # STANDING (cron-driven) one does. Marking it awaiting on exit is an
-  # anti-re-fire gate — `status: closed` is what stops the cron from
-  # re-dispatching it again this cycle.
+  # STANDING (cron-driven) one does, unless its run was accepted and concluded.
+  # Awaiting review lasts until acceptance or an occurrence after the close.
   defp standing?(fiber), do: fiber_kind(fiber) == "standing"
 
   # PURE — fiber frontmatter and in-memory runtime maps only. Every gate that
@@ -4648,33 +4649,37 @@ defmodule Shuttle.Poller do
     :ok
   end
 
-  # The next occurrence supersedes an unreviewed standing run. Reopen inside
-  # the Poller's serialized tick without concluding: a new handed_off_at would
-  # consume the occurrence that is authorizing this launch.
+  defp awaiting_standing?(fiber) do
+    standing?(fiber) and fiber["status"] == "closed" and is_nil(fiber["tempered"]) and
+      fiber["horizon"] != "stashed"
+  end
+
+  # The locked CLI operation checks the current document, cleans dirty markers
+  # at their dispatch timestamp, and arms without consuming the due occurrence.
   defp rearm_due_awaiting_standing(state, candidates) do
     Enum.map_reduce(candidates, state, fn fiber, state ->
-      shuttle = Map.get(fiber, "shuttle") || %{}
-      armed = Map.put(fiber, "status", "active")
-
-      if state.contract_check.ok and Map.get(fiber, "status") == "closed" and
-           is_nil(Map.get(fiber, "tempered")) and Map.get(fiber, "horizon") != "stashed" and
-           host_owned?(shuttle, state.own_host_id) and
-           StandingRoles.standing_role_due?(armed) do
+      if state.contract_check.ok and awaiting_standing?(fiber) and
+           host_owned?(fiber["shuttle"], state.own_host_id) and
+           not preflight_cooldown_open?(state, runtime_key_for_fiber(fiber)) and
+           StandingRoles.standing_role_due?(Map.put(fiber, "status", "active")) do
         slug = Map.fetch!(fiber, "id")
         store = owning_store(slug, state)
 
         case LifecycleService.write(:reopen, slug,
                runner: state.runner,
                felt_store: store,
-               args: []
+               args: ["--occurrence"]
              ) do
           {:ok, _} ->
             state = refresh_document_entry(state, slug, [store])
-            {Map.delete(armed, "closed_at"), state}
+            current = cached_fiber(state, slug) || fiber
+            current = current |> Map.put("id", slug) |> Map.put("uid", Map.get(fiber, "uid"))
+            {current, state}
 
-          {:error, reason} ->
-            Logger.warning("Scheduled re-arm #{slug} failed: #{inspect(reason)}")
-            {fiber, state}
+          failure ->
+            reason = {:occurrence_rearm_failed, inspect(failure)}
+            Logger.warning("Scheduled re-arm #{slug} failed: #{inspect(failure)}")
+            {fiber, record_dispatch_failure(state, fiber, reason)}
         end
       else
         {fiber, state}
@@ -5288,7 +5293,8 @@ defmodule Shuttle.Poller do
          true <- host_owned?(shuttle, state.own_host_id),
          true <- standing?(fiber),
          "active" <- Map.get(fiber, "status", ""),
-         true <- is_nil(Map.get(fiber, "tempered")) do
+         true <- is_nil(Map.get(fiber, "tempered")),
+         false <- standing_run_rearmed?(fiber) do
       Logger.info(
         "Standing constitution #{fiber_id} worker died unobserved (daemon-down or unwatched " <>
           "exit); marking awaiting (status:closed) so the armed document does not re-fire"
@@ -5436,13 +5442,13 @@ defmodule Shuttle.Poller do
               status == "closed" ->
                 state
 
-              standing?(fiber) ->
-                # A STANDING (cron) worker's exit makes the role awaiting
-                # review by writing `status: closed` (untempered) to the felt
-                # document — the don't-re-fire gate and the human's accept
-                # anchor, both doc-representable. Written on the exit path
-                # itself, so a re-poll racing this exit reads `status: closed`
-                # and skips re-dispatch.
+              standing?(fiber) and status == "active" and standing_run_rearmed?(fiber) ->
+                state
+
+              standing?(fiber) and status == "active" ->
+                # An active standing run that has not been accepted publishes
+                # Awaiting review on exit. The next occurrence after this close
+                # may supersede its unreviewed result.
                 StandingRoles.mark_standing_awaiting(fiber_id)
 
                 state
@@ -5462,6 +5468,11 @@ defmodule Shuttle.Poller do
             state
         end
     end
+  end
+
+  defp standing_run_rearmed?(fiber) do
+    get_in(fiber, ["shuttle", "runtime", "thread_exit_verb"]) in ["rearmed", "tempered"] and
+      Shuttle.Continuation.clean_handoff_since_dispatch?(fiber)
   end
 
   # ── Resume-loop circuit breaker ──
@@ -5573,7 +5584,8 @@ defmodule Shuttle.Poller do
              :work_dir_missing,
              :project_dir_missing,
              :tmux_server_unavailable,
-             :transcript_held
+             :transcript_held,
+             :occurrence_rearm_failed
            ] ->
         DateTime.diff(DateTime.utc_now(), at, :millisecond) < @preflight_cooldown_ms
 

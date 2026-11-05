@@ -32,11 +32,10 @@ defmodule Shuttle.ActionsTest do
     # Drag-safety invariant: the resolved action is in the available set.
     assert Enum.any?(Actions.actions_for(running, true), &(&1.id == "accept-run"))
 
-    # A DRAFT standing role (status: open) does not accept — tempering a parked
-    # draft would arm it; it falls through to the generic close.
+    # Tempering a parked standing draft would arm it, so no Temper is offered.
     draft = Map.put(armed_standing(), "status", "open")
 
-    assert {:ok, %{id: "close-tempered"}} = Actions.resolve_transition(draft, "tempered")
+    assert {:error, :standing_temper_unavailable} = Actions.resolve_transition(draft, "tempered")
 
     # Oneshots keep the terminus: running + tempered = close-tempered.
     oneshot = %{"id" => "work/once", "status" => "active", "shuttle" => %{"kind" => "oneshot"}}
@@ -45,16 +44,15 @@ defmodule Shuttle.ActionsTest do
   end
 
   test "closed + composted standing role (tempered:false) is a terminus, reopen to revive" do
-    # A rejected standing role carries a verdict (`tempered: false`), so it is
-    # NOT awaiting — it falls through to the generic closed clauses: reopen to
-    # revive, close columns re-close with a verdict.
+    # A rejected standing role requires explicit reopen to revive; accepting
+    # a run cannot clear its existing verdict.
     fiber = Map.merge(armed_standing(), %{"status" => "closed", "tempered" => false})
 
     assert {:ok, %{id: "reopen", invocation: %{verb: "reopen"}}} =
              Actions.resolve_transition(fiber, "inFlight")
 
-    assert {:ok, %{id: "close-tempered", invocation: %{verb: "close", tempered: true}}} =
-             Actions.resolve_transition(fiber, "tempered")
+    assert {:error, :standing_temper_unavailable} = Actions.resolve_transition(fiber, "tempered")
+    refute Enum.any?(Actions.actions_for(fiber), &(&1.id in ["accept-run", "close-tempered"]))
   end
 
   test "oneshot transition vocabulary stays lifecycle-shaped" do
@@ -197,7 +195,20 @@ defmodule Shuttle.ActionsTest do
           fiber = if is_nil(tempered), do: base, else: Map.put(base, "tempered", tempered)
 
           available = Actions.actions_for(fiber, running?) |> Enum.map(& &1.id)
-          {:ok, %{id: resolved}} = Actions.resolve_transition(fiber, target, running?)
+
+          resolved =
+            case Actions.resolve_transition(fiber, target, running?) do
+              {:ok, %{id: id}} ->
+                id
+
+              {:error, :standing_temper_unavailable} ->
+                assert kind == "standing" and target == "tempered" and
+                         (status == "open" or not is_nil(tempered))
+
+                refute "accept-run" in available
+                refute "close-tempered" in available
+                nil
+            end
 
           {%{
              status: status,
@@ -207,7 +218,7 @@ defmodule Shuttle.ActionsTest do
              target: target,
              resolved: resolved,
              available: available
-           }, resolved in available}
+           }, is_nil(resolved) or resolved in available}
         end
 
       violations =
@@ -238,7 +249,7 @@ defmodule Shuttle.ActionsTest do
         "shuttle" => %{"kind" => "standing"}
       }
 
-      assert {:ok, %{id: "close-tempered", invocation: %{verb: "close", tempered: true}}} =
+      assert {:error, :standing_temper_unavailable} =
                Actions.resolve_transition(fiber, "tempered")
 
       assert {:ok, %{id: "close-composted", invocation: %{verb: "close", tempered: false}}} =
@@ -274,10 +285,12 @@ defmodule Shuttle.ActionsTest do
       actions = Actions.actions_for(fiber) |> Enum.map(& &1.id)
       assert "reopen" in actions
       assert "close-composted" in actions
-      assert "close-tempered" in actions
+      refute "close-tempered" in actions
 
       assert {:ok, %{id: "close-composted"}} = Actions.resolve_transition(fiber, "composted")
-      assert {:ok, %{id: "close-tempered"}} = Actions.resolve_transition(fiber, "tempered")
+
+      assert {:error, :standing_temper_unavailable} =
+               Actions.resolve_transition(fiber, "tempered")
     end
   end
 

@@ -545,6 +545,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
               _ ->
                 apply_lifecycle_write("reopen", id, "--conclude-run" in flags)
+
+                if "--occurrence" in flags do
+                  runtime = get_in(fiber(id), ["shuttle", "runtime"]) || %{}
+
+                  if runtime["dispatched_at"] && is_nil(runtime["handed_off_at"]),
+                    do: put_shuttle_fields(id, %{"handed_off_at" => runtime["dispatched_at"]})
+                end
+
                 {"", 0}
             end
 
@@ -849,7 +857,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
     Agent.update(server(), fn state ->
       update_in(state.fibers[id], fn fiber ->
-        fiber |> Map.put("status", status) |> Map.drop(["tempered", "closed-at"])
+        fiber |> Map.put("status", status) |> Map.drop(["tempered", "closed-at", "closed_at"])
       end)
     end)
 

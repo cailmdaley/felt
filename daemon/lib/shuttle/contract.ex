@@ -21,7 +21,7 @@ defmodule Shuttle.Contract do
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
   # Fiber reads and creation use exact enclosing-store namespace paths.
-  @expected_level 31
+  @expected_level 32
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -50,7 +50,8 @@ defmodule Shuttle.Contract do
     30 => "scan-changes (newline-framed opaque metadata index)",
     31 =>
       "felt show --exact and felt add --namespace; lifecycle --fiber-path (verified UID path hints); " <>
-        "resolved lifecycle reads remain exact for UID-less documents"
+        "resolved lifecycle reads remain exact for UID-less documents",
+    32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

@@ -17,12 +17,16 @@ defmodule Shuttle.Actions do
   end
 
   @spec resolve_transition(map(), String.t(), boolean()) ::
-          {:ok, map()} | {:error, :unknown_target}
+          {:ok, map()} | {:error, :unknown_target | :standing_temper_unavailable}
   def resolve_transition(fiber, target, running? \\ false)
 
   def resolve_transition(fiber, target, running?) when target in @transition_targets do
     target = normalize_target(target)
-    {:ok, render_action(action_for_target(fiber, target, running?))}
+
+    case action_for_target(fiber, target, running?) do
+      nil -> {:error, :standing_temper_unavailable}
+      action -> {:ok, render_action(action)}
+    end
   end
 
   def resolve_transition(_fiber, _target, _running?), do: {:error, :unknown_target}
@@ -54,7 +58,7 @@ defmodule Shuttle.Actions do
 
     extras = if running?, do: [:pause], else: []
 
-    (derived ++ extras) |> Enum.uniq()
+    (derived ++ extras) |> Enum.reject(&is_nil/1) |> Enum.uniq()
   end
 
   defp action_for_target(fiber, target, running?) do
@@ -62,6 +66,10 @@ defmodule Shuttle.Actions do
     status = Map.get(fiber, "status")
 
     cond do
+      standing?(shuttle) and target == "tempered" and
+          (not untempered?(fiber) or status not in ["active", "closed"]) ->
+        nil
+
       # Temper on a STANDING constitution with no verdict is ACCEPT in every non-draft
       # state — running (an interactive run just wrapped, worker alive or freshly
       # killed), armed (`status: active`, exit not yet marked awaiting), or

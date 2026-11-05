@@ -96,7 +96,11 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   Nothing due is stored: an armed (`active`, untempered) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
   Scheduled run IDs name that most recent occurrence (`prev_due`); manual dispatch is ad-hoc (`adhoc-<ms>`).
   Worker exit or an untempered close puts the run on Awaiting review without ending its schedule.
-  At the next occurrence after its last service, the owning Poller serially reopens it without stamping `handed_off_at`, then dispatches that occurrence, even in boot quarantine.
+  At the next occurrence after both its last service and close, the owning Poller runs `reopen --occurrence` inside its serialized tick, even in boot quarantine.
+  Under the document lock, the CLI checks current ownership, standing kind, closed status, absence of a verdict or stash, and that the occurrence is still due.
+  It atomically arms the document and cleans dirty markers with `handed_off_at = dispatched_at`, preserving the service anchor so the occurrence stays due and launches fresh.
+  A capacity or backend wait leaves it armed; a failed re-arm is visible in the ordinary blocked state and retries on the failure cooldown.
+  A changed state quietly skips the write.
   Until then it stays closed; `status: active` remains the dispatch gate.
   `shuttle accept`, `close --tempered=true`, or `resume` re-arms and concludes the run by stamping `handed_off_at` in the same write, resting it until the next tick.
   Existing verdicts (true or false), a stashed horizon, paused/rested constitutions and another host's fibers are never automatically re-armed.

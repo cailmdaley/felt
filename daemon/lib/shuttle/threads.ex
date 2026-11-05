@@ -1422,6 +1422,9 @@ defmodule Shuttle.Threads do
         fiber["status"] == "open" && fiber["horizon"] == "stashed" && handed ->
           [{"rested", handed, fiber["outcome"] || "", false}]
 
+        fiber["status"] == "active" && exit_verb == "tempered" && handed ->
+          [{"tempered", handed, fiber["outcome"] || "", false}]
+
         fiber["status"] == "active" && handoff_current? ->
           [{"handed off", handed, fiber["outcome"] || "", false}]
 

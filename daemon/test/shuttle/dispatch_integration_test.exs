@@ -47,6 +47,9 @@ defmodule Shuttle.DispatchIntegrationTest do
       do:
         Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
 
+    def before_occurrence(fun),
+      do: Agent.update(__MODULE__, &Map.put(&1, :before_occurrence, fun))
+
     def commands, do: Agent.get(__MODULE__, & &1.commands)
     def tmux_sessions, do: Agent.get(__MODULE__, & &1.tmux_sessions)
 
@@ -62,6 +65,11 @@ defmodule Shuttle.DispatchIntegrationTest do
       Agent.update(__MODULE__, fn s ->
         %{s | commands: s.commands ++ [{command, args}]}
       end)
+
+      if command == "shuttle" and "reopen" in args do
+        hook = Agent.get_and_update(__MODULE__, &Map.pop(&1, :before_occurrence))
+        if hook, do: hook.()
+      end
 
       # Scope unqualified commands to the test store; -C is already part of
       # Shuttle lifecycle calls that need an explicit store root.
@@ -1621,7 +1629,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     ---
     name: Standing awaiting, force-dispatched
     status: closed
-    closed-at: "2026-05-24T10:00:00Z"
+    closed-at: "#{DateTime.to_iso8601(DateTime.utc_now())}"
     tags:
       - constitution
       - standing
@@ -1814,7 +1822,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     ---
     name: Standing next occurrence
     status: closed
-    closed-at: "#{DateTime.to_iso8601(now)}"
+    closed-at: "#{DateTime.to_iso8601(DateTime.add(now, -120, :second))}"
     outcome: Unreviewed digest
     shuttle:
       kind: standing
@@ -1828,7 +1836,14 @@ defmodule Shuttle.DispatchIntegrationTest do
     A standing run awaiting review when the next occurrence arrives.
     """)
 
-    write_dispatch_marker(host, id, "prior-run", DateTime.add(now, -600, :second))
+    write_dispatch_marker(
+      host,
+      id,
+      "12345678-1234-4000-8000-123456789abc",
+      DateTime.add(now, -600, :second)
+    )
+
+    write_transcript("12345678-1234-4000-8000-123456789abc", 60)
     Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
 
     {:ok, poller} =
@@ -1848,14 +1863,232 @@ defmodule Shuttle.DispatchIntegrationTest do
     fm = read_frontmatter(host, id)
     assert fm["status"] == "active"
     refute Map.has_key?(fm, "closed-at")
-    assert is_nil(get_in(fm, ["shuttle", "runtime", "handed_off_at"]))
+
+    assert get_in(fm, ["shuttle", "runtime", "handed_off_at"]) ==
+             DateTime.to_iso8601(DateTime.add(now, -600, :second))
+
     assert fm["outcome"] == "Unreviewed digest"
+    script = read_run_script()
+    refute script =~ "--resume"
+    assert script =~ "Run:"
+    assert script =~ "standing-next-occurrence"
     assert :sys.get_state(poller).boot_quarantine
 
     assert Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
              cmd == "shuttle" and "reopen" in args and "--local" in args and
                "--conclude-run" not in args
            end)
+  end
+
+  defp sync_poll_cycle!(poller) do
+    assert eventually(fn -> not :sys.get_state(poller).poll_check_in_progress end)
+    cycles = :sys.get_state(poller).poll_cycles
+    send(poller, :run_poll_cycle)
+    assert eventually(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+  end
+
+  defp seed_due_closed_standing(host, opts \\ []) do
+    id = "tests/standing-due"
+    now = DateTime.utc_now()
+
+    write_fiber(host, id, """
+    ---
+    name: Standing due
+    status: closed
+    closed-at: "#{DateTime.to_iso8601(DateTime.add(now, -120, :second))}"
+    shuttle:
+      kind: standing
+      host: test-host
+      agent: claude-sonnet
+      project_dir: "#{if Keyword.get(opts, :armable, true), do: host, else: ""}"
+      schedule:
+        expr: "#{now.minute} #{now.hour} * * *"
+        tz: UTC
+    ---
+    A standing responsibility.
+    """)
+
+    write_dispatch_marker(
+      host,
+      id,
+      "12345678-1234-4000-8000-123456789abc",
+      DateTime.add(now, -600, :second)
+    )
+
+    write_transcript("12345678-1234-4000-8000-123456789abc", 60)
+
+    if Keyword.get(opts, :older_handoff) do
+      {_, 0} =
+        IntegrationRunner.cmd(
+          "shuttle",
+          [
+            "mark-runtime",
+            id,
+            "--handed-off-at",
+            DateTime.to_iso8601(DateTime.add(now, -1200, :second))
+          ],
+          []
+        )
+    end
+
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
+    id
+  end
+
+  test "an unarmable standing occurrence stays visible in cooldown without crashing the poller",
+       %{host: host} do
+    id = seed_due_closed_standing(host, armable: false)
+
+    {:ok, poller} =
+      start_poller!(runner: IntegrationRunner, poll_interval_ms: 600_000, felt_stores: [host])
+
+    for _ <- 1..5, do: sync_poll_cycle!(poller)
+    assert Process.alive?(poller)
+    assert read_frontmatter(host, id)["status"] == "closed"
+
+    assert eventually(fn -> match?([%{attempts: 1}], Poller.snapshot(poller).blocked) end)
+    assert [%{reason: detail, attempts: 1}] = Poller.snapshot(poller).blocked
+    assert detail =~ "project_dir"
+
+    assert Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
+             cmd == "shuttle" and "--occurrence" in args
+           end) == 1
+  end
+
+  for older_handoff <- [false, true] do
+    test "a due standing occurrence stays armed at zero capacity, older handoff #{older_handoff}",
+         %{host: host} do
+      id = seed_due_closed_standing(host, older_handoff: unquote(older_handoff))
+
+      {:ok, poller} =
+        start_poller!(
+          runner: IntegrationRunner,
+          max_concurrent_workers: 0,
+          poll_interval_ms: 600_000,
+          felt_stores: [host]
+        )
+
+      for _ <- 1..5, do: sync_poll_cycle!(poller)
+      fm = read_frontmatter(host, id)
+      assert fm["status"] == "active"
+
+      assert get_in(fm, ["shuttle", "runtime", "dispatched_at"]) ==
+               get_in(fm, ["shuttle", "runtime", "handed_off_at"])
+
+      refute Map.has_key?(fm, "closed-at")
+
+      assert Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
+               cmd == "shuttle" and "--occurrence" in args
+             end) == 1
+
+      :sys.replace_state(poller, &%{&1 | max_concurrent_workers: 1})
+      sync_poll_cycle!(poller)
+
+      assert Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and "new-session" in args
+             end) == 1
+
+      refute read_run_script() =~ "--resume"
+      assert read_run_script() =~ "Run:"
+      sync_poll_cycle!(poller)
+
+      assert Enum.count(IntegrationRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and "new-session" in args
+             end) == 1
+    end
+  end
+
+  for verdict <- [:discard, :accept, :rest, :close] do
+    test "a #{verdict} between tick read and locked occurrence write wins", %{host: host} do
+      check_occurrence_race(host, unquote(verdict))
+    end
+  end
+
+  defp check_occurrence_race(host, verdict) do
+    id = seed_due_closed_standing(host)
+
+    args =
+      case verdict do
+        :discard -> ["close", id, "--tempered=false", "--local"]
+        :accept -> ["accept", id, "--local"]
+        :rest -> ["rest", id, "--local"]
+        :close -> ["close", id, "--local"]
+      end
+
+    IntegrationRunner.before_occurrence(fn ->
+      {_, 0} = IntegrationRunner.cmd("shuttle", args, [])
+    end)
+
+    {:ok, poller} =
+      start_poller!(runner: IntegrationRunner, poll_interval_ms: 600_000, felt_stores: [host])
+
+    for _ <- 1..3, do: sync_poll_cycle!(poller)
+    fm = read_frontmatter(host, id)
+
+    expected = %{accept: "active", rest: "open", discard: "closed", close: "closed"}
+    assert fm["status"] == expected[verdict]
+
+    if verdict == :discard, do: assert(fm["tempered"] == false)
+    if verdict == :rest, do: assert(fm["horizon"] == "stashed")
+
+    refute Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and "new-session" in args
+           end)
+
+    assert Poller.snapshot(poller).blocked == []
+  end
+
+  test "closing a paused standing constitution waits for an occurrence after the close", %{
+    host: host
+  } do
+    id = seed_due_closed_standing(host)
+    {_, 0} = IntegrationRunner.cmd("shuttle", ["reopen", id, "--as-draft", "--local"], [])
+    {_, 0} = IntegrationRunner.cmd("shuttle", ["close", id, "--local"], [])
+
+    {:ok, poller} =
+      start_poller!(runner: IntegrationRunner, poll_interval_ms: 600_000, felt_stores: [host])
+
+    for _ <- 1..3, do: sync_poll_cycle!(poller)
+    assert read_frontmatter(host, id)["status"] == "closed"
+
+    refute Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and "new-session" in args
+           end)
+  end
+
+  for observed <- [true, false] do
+    test "a standing worker's close-as-accept remains armed after exit, observed #{observed}", %{
+      host: host
+    } do
+      check_standing_temper_exit(host, unquote(observed))
+    end
+  end
+
+  defp check_standing_temper_exit(host, observed) do
+    id = seed_due_closed_standing(host)
+
+    {:ok, poller} =
+      start_poller!(runner: IntegrationRunner, poll_interval_ms: 600_000, felt_stores: [host])
+
+    sync_poll_cycle!(poller)
+    state = :sys.get_state(poller)
+    %{pid: watcher, session: session} = state.running[Poller.running_key(state, id)]
+
+    {output, 0} =
+      IntegrationRunner.cmd(
+        "shuttle",
+        ["close", id, "--tempered=true", "--quiet", "--actor", "reviewer", "--local"],
+        []
+      )
+
+    assert output =~ "accepted run"
+    IntegrationRunner.remove_tmux_session(session)
+    if observed, do: send(poller, {:worker_exited, id, watcher, session, :normal_exit})
+    # The system call is a mailbox barrier behind the exit notification.
+    :sys.get_state(poller)
+    assert read_frontmatter(host, id)["status"] == "active"
+    sync_poll_cycle!(poller)
+    assert read_frontmatter(host, id)["status"] == "active"
   end
 
   # refresh_document/2 is the shared post-mutation seam every board action calls.

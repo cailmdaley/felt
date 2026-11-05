@@ -207,13 +207,11 @@ export function lensCycles(
  * card's `hasLiveWorker`). There is no `enabled` and no
  * `review.state`: lifecycle is `status + tempered`, uniform across kinds.
  *
- *   1. A closed fiber is a human verdict, terminal regardless of tags or
- *      liveness: `tempered:true` → tempered, `tempered:false` → composted,
- *      tempered absent → awaitingReview (worker exited; the agent handed off
- *      and the human hasn't ruled yet). This closed-state IS the
- *      don't-re-fire / anti-oscillation gate, and it is awaiting-review for
- *      BOTH kinds — a standing constitution's awaiting run is `status:closed`, not an
- *      `active` role carrying a review field.
+ *   1. A closed fiber takes its column from the verdict regardless of liveness:
+ *      `tempered:true` → tempered, `tempered:false` → composted,
+ *      tempered absent → awaitingReview. A standing run stays here until
+ *      accepted or the owner conditionally re-arms the next occurrence after
+ *      its last service and close. Existing verdicts are never auto-cleared.
  *
  *   2. A live worker overrides the open/active branch — the user dragging a
  *      card and seeing it stay in drafts is the dissonance we're avoiding.

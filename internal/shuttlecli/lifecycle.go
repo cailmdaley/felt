@@ -800,7 +800,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				var unknown unknownOwnerError
-				if !(f.Status == felt.StatusClosed && tempered != nil && errors.As(err, &unknown)) {
+				if !(f.Status == felt.StatusClosed && tempered != nil && !(block.Kind == "standing" && *tempered) && errors.As(err, &unknown)) {
 					return err
 				}
 			}
@@ -824,9 +824,35 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			}
 
 			if block.Kind == "standing" && tempered != nil && *tempered {
-				if err := a.acceptStandingRun(args[0], f, st, block, ref); err != nil {
+				actor := a.actorSession(closeActor)
+				publish := func() error {
+					stamp := time.Now().UTC().Format(time.RFC3339Nano)
+					quietStamp := ""
+					if closeQuiet {
+						quietStamp = stamp
+					}
+					if err := shuttle.SetRuntimeField(f, "handed_off_at", stamp); err != nil {
+						return err
+					}
+					if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
+						return err
+					}
+					if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "tempered"); err != nil {
+						return err
+					}
+					return markOrchestratorAct(st, f, stamp, actor)
+				}
+				if err := a.acceptStandingRun(args[0], f, st, block, ref, publish); err != nil {
 					return err
 				}
+				by := a.boardWorkerParty()
+				if actor != "" {
+					if by == nil {
+						by = &boardParty{}
+					}
+					by.Session = actor
+				}
+				a.recordBoard(boardRecord{Kind: "closed", Fiber: f.UID, By: by, Verdict: "tempered"})
 				if a.isOwnFiber(f) {
 					a.endOwnTerminal()
 				}
@@ -840,7 +866,12 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			if err := clearBlockedOn(f); err != nil {
 				return err
 			}
-			setClosedAtIfMissing(f)
+			if block.Kind == "standing" {
+				now := time.Now()
+				f.ClosedAt = &now
+			} else {
+				setClosedAtIfMissing(f)
+			}
 			// Bind quiet to this publication stamp; an ordinary close clears it.
 			quietStamp := ""
 			if closeQuiet {
@@ -902,7 +933,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 
 func (a *app) reopenCmd() *cobra.Command {
 	var reopenAsDraft bool
-	var reopenConcludeRun bool
+	var reopenConcludeRun, reopenOccurrence bool
 	var reopenProjectDir string
 	var reopenMessage string
 	var reopenMessageFile string
@@ -926,7 +957,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !localOnly(cmd) && !reopenConcludeRun && !cmd.Flags().Changed("message") && !cmd.Flags().Changed("message-file") {
+			if !localOnly(cmd) && !reopenConcludeRun && !reopenOccurrence && !cmd.Flags().Changed("message") && !cmd.Flags().Changed("message-file") {
 				if routed, err := a.routeLocalReopen(cmd, args[0], reopenAsDraft, reopenProjectDir); routed || err != nil {
 					return err
 				}
@@ -937,6 +968,9 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			}
 			defer unlock()
 
+			if reopenOccurrence {
+				return a.reopenOccurrence(args[0], f, st, block, ref)
+			}
 			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
@@ -1028,12 +1062,82 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 	}
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
 	reopenCmd.Flags().StringVar(&reopenProjectDir, "project-dir", "", "Set the worker cwd as it reopens (required to arm when the block has none)")
+	reopenCmd.Flags().BoolVar(&reopenOccurrence, "occurrence", false, "Conditionally arm a due standing occurrence on its owner, preserving the service anchor")
+	_ = reopenCmd.Flags().MarkHidden("occurrence")
 	reopenCmd.Flags().BoolVar(&reopenConcludeRun, "conclude-run", false, "Conclude a standing constitution's run (shuttle.runtime.handed_off_at = now) in the same write")
 	_ = reopenCmd.Flags().MarkHidden("conclude-run")
 	reopenCmd.Flags().StringVar(&reopenMessage, "message", "", "Launch directive for a remote worker (the From User prompt block)")
 	reopenCmd.Flags().StringVar(&reopenMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")
 	reopenCmd.Flags().Bool("local", false, localFlagUsage)
 	return reopenCmd
+}
+
+// reopenOccurrence runs under the document lock. A stale poll row grants no
+// authority: review, rest, ownership and due-ness are checked
+// against the current document before a single atomic write.
+func (a *app) reopenOccurrence(query string, f *felt.Felt, st *felt.Storage, block *shuttle.Block, ref felt.Ref) error {
+	own, _, err := a.resolveOwnHostSourced("")
+	if err != nil {
+		return err
+	}
+	skipped := func() error {
+		fmt.Fprintf(a.env.Stdout, "skipped occurrence for %s%s (state changed or not due)\n", query, ref.Location())
+		return nil
+	}
+	if block.Kind != "standing" || f.Status != felt.StatusClosed || readTempered(f) != nil || horizonStashed(f) || block.Host != own || block.Host == "" {
+		return skipped()
+	}
+	if block.Schedule == nil {
+		return fmt.Errorf("fiber %s has no schedule", query)
+	}
+	prev, err := shuttle.PrevOccurrence(block.Schedule, time.Now())
+	if err != nil {
+		return err
+	}
+	runtime := felt.MappingValueNode(f.ExtraFields[shuttle.FacetKey], shuttle.RuntimeKey)
+	var markers map[string]any
+	if runtime != nil {
+		if err := runtime.Decode(&markers); err != nil {
+			return err
+		}
+	}
+	dispatchedAt, _ := markers["dispatched_at"].(string)
+	handedOffAt, _ := markers["handed_off_at"].(string)
+	dispatch, _ := time.Parse(time.RFC3339Nano, dispatchedAt)
+	handoff, _ := time.Parse(time.RFC3339Nano, handedOffAt)
+	anchor := f.CreatedAt
+	for _, stamp := range []time.Time{dispatch, handoff} {
+		if stamp.After(anchor) {
+			anchor = stamp
+		}
+	}
+	if f.ClosedAt != nil && f.ClosedAt.After(anchor) {
+		anchor = *f.ClosedAt
+	}
+	if !prev.After(anchor) {
+		return skipped()
+	}
+	if err := a.checkArmable(query, "resume", block); err != nil {
+		return err
+	}
+	if err := unclose(f, felt.StatusActive); err != nil {
+		return err
+	}
+	// Equality reads as clean without consuming this occurrence. A delayed
+	// launch remains armed, and the next worker starts fresh rather than restoring.
+	if !dispatch.IsZero() && handoff.Before(dispatch) {
+		if err := shuttle.SetRuntimeField(f, "handed_off_at", dispatchedAt); err != nil {
+			return err
+		}
+	}
+	if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "rearmed"); err != nil {
+		return err
+	}
+	if err := a.writeFiber(st, f); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.env.Stdout, "armed occurrence for %s%s\n", query, ref.Location())
+	return nil
 }
 
 // ---- set-outcome -----------------------------------------------------------
@@ -1162,7 +1266,7 @@ bypassed: the accept may still apply there.`,
 
 // acceptStandingRun resolves an untempered run and rests it until the next tick.
 // Both accept and close --tempered=true use this gate and atomic write.
-func (a *app) acceptStandingRun(query string, f *felt.Felt, st *felt.Storage, block *shuttle.Block, ref felt.Ref) error {
+func (a *app) acceptStandingRun(query string, f *felt.Felt, st *felt.Storage, block *shuttle.Block, ref felt.Ref, beforeWrite ...func() error) error {
 	if readTempered(f) != nil || (f.Status != felt.StatusClosed && f.Status != felt.StatusActive) {
 		return fmt.Errorf("fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=%v)", query, f.Status, readTempered(f))
 	}
@@ -1181,6 +1285,11 @@ func (a *app) acceptStandingRun(query string, f *felt.Felt, st *felt.Storage, bl
 	}
 	if err := rearmStanding(f); err != nil {
 		return err
+	}
+	for _, prepare := range beforeWrite {
+		if err := prepare(); err != nil {
+			return err
+		}
 	}
 	if err := a.writeFiber(st, f); err != nil {
 		return fmt.Errorf("writing fiber: %w", err)

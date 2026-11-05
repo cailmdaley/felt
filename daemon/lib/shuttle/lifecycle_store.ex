@@ -26,9 +26,9 @@ defmodule Shuttle.LifecycleStore do
   Standing-worker exit writer: mark a role awaiting review by writing
   `status: closed` (untempered) straight to the felt document — the awaiting
   signal, recognized by Shuttle's `accept`/`resume`, the poller's `eligible?` gate,
-  and the kanban classifier. It is also the don't-re-fire gate: a closed role
-  is never dispatch-eligible, so the `active → closed → active` cycle encodes
-  "already ran this occurrence."
+  and the kanban classifier. A closed role is not dispatch-eligible; the owner
+  re-arms it when an occurrence arrives after both its last service and close,
+  unless a verdict or stash ends automatic scheduling.
 
   Awaiting is fully doc-representable: there is no review axis and no
   runtime row, so this is a single document write — the mirror of the accept re-arm,

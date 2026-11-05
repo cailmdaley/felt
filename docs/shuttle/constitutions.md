@@ -148,11 +148,11 @@ shuttle computes due-ness from the cron expression against now, and stores
 nothing. So no dispatch can silently consume a slot. The
 `active → closed → active` document transition records that an occurrence ran.
 
-A standing constitution carries at most one unaccepted work product. While a run waits
-for review, scheduled runs do not fire and ad-hoc dispatch refuses. Accepting it
-(`shuttle accept`) re-arms it for the schedule's next tick and
-keeps the outcome, which stays the card's headline until the next run writes
-its own.
+A closed standing run stays on Awaiting review until accepted or its next occurrence arrives.
+The next occurrence after both its last service and its close supersedes the unreviewed result and starts fresh work.
+Accepting it (`shuttle accept` or `close --tempered=true`) concludes the run and re-arms it for the schedule's next tick.
+The outcome stays the card's headline until the next run writes its own.
+Discard (`close --tempered=false`), Rest and a stashed horizon prevent automatic re-arming.
 
 Oneshots alone make a coherent system. Ignore standing until you want it.
 

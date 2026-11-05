@@ -106,8 +106,8 @@ defmodule Shuttle.Transition do
       {:ok, action} ->
         {:ok, action}
 
-      {:error, :unknown_target} ->
-        {:error, :unknown_target}
+      {:error, reason} when reason in [:unknown_target, :standing_temper_unavailable] ->
+        {:error, reason}
 
       # Any other resolve failure is an unresolvable fiber (unknown id,
       # unreadable frontmatter, foreign store) — the read paths 404 it, so match
@@ -215,6 +215,11 @@ defmodule Shuttle.Transition do
   @spec http_error(term()) :: {non_neg_integer(), String.t()}
   def http_error({:unknown_origin, origin}),
     do: {400, OriginRouter.unknown_origin_message(origin)}
+
+  def http_error(:standing_temper_unavailable),
+    do:
+      {422,
+       "Accept applies only to an untempered active or closed standing run. Reopen to revive a paused or reviewed constitution, or Rest to put it down."}
 
   def http_error(:unknown_target), do: {400, "unknown_target"}
   def http_error(:already_running), do: {409, "already_running"}

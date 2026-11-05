@@ -124,11 +124,11 @@ defmodule Shuttle.StandingRole do
   self-catches a fire the daemon slept through, however late, rather than
   skipping it.
 
-  A single catch-up fires, not a backlog: once a role fires its document flips
-  `active -> closed`, `eligible?` excludes closed, and the run advances the
-  anchor to ~now — so the `active -> closed -> accept` transition is the
-  per-cycle gate, not a timestamp, and an awaiting role never re-fires until a
-  human tempers it.
+  A single catch-up fires, not a backlog: dispatch advances the service anchor
+  to now. A close also advances the lookback baseline, so an awaiting run can
+  only be superseded by an occurrence after both its last service and its close.
+  The owner atomically re-arms that occurrence with clean markers at the old
+  dispatch timestamp, preserving due-ness without restoring the old conversation.
 
   It does NOT consult `review.state` — the dispatch gate is the felt document's
   `status`/`tempered` (the poller checks those before calling this).

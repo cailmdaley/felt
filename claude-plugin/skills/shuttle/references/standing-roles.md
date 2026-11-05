@@ -44,7 +44,7 @@ service (`shuttle.runtime.dispatched_at` or `handed_off_at`) — nothing due is
 stored, so a manual ad-hoc dispatch **cannot consume the next
 scheduled slot** (the slot is computed, never a stored timestamp a dispatch
 could spend). While a run awaits review (`status: closed` + untempered),
-the card remains on Awaiting review until accepted or the next occurrence after its last service arrives.
+the card remains on Awaiting review until accepted or the next occurrence after both its last service and close arrives.
 At that occurrence the owning daemon reopens it without concluding the run, then launches fresh work, superseding the unreviewed result.
 A just-closed run cannot re-fire its served occurrence, including after a daemon restart.
 
@@ -72,9 +72,11 @@ there; the daemon owns the runtime block.
 
 Write the run's work product into `outcome`, rewrite `## Status`, and exit
 with `shuttle handoff` — always, never by setting `status: closed`
-yourself. On exit the daemon writes `status: closed` (untempered): the
-awaiting-review marker, the don't-re-fire gate, and the human's accept anchor.
-It closes because the run is over, not because you asked to stop.
+yourself.
+On exit the daemon writes `status: closed` (untempered) for review, unless the run was already accepted and re-armed.
+A scheduled occurrence must be after both the last service and the close to supersede that result.
+The owner's conditional re-arm cleans dirty markers at the old dispatch timestamp, so delayed launches stay armed and always start fresh.
+A verdict or stash prevents automatic re-arming.
 
 ---
 
