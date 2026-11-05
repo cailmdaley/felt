@@ -23,7 +23,7 @@ export function bakeChange(binary, repo, base, head, story) {
       writeFileSync(join(dir, 'story.json'), JSON.stringify(story))
       args.push('--story', join(dir, 'story.json'))
     }
-    const report = JSON.parse(execFileSync(binary, args, { encoding: 'utf8' }))
+    const report = JSON.parse(execFileSync(binary, args, { encoding: 'utf8', env: { ...process.env, SHUTTLE_EVENTS_FILE: join(dir, 'events.jsonl'), SHUTTLE_HOST: 'fixture-host' } }))
     return { bundle: JSON.parse(readFileSync(report.path, 'utf8')), report }
   } finally { rmSync(dir, { recursive: true, force: true }) }
 }
@@ -36,6 +36,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const { bundle } = bakeChange(buildShuttle(dir), root, '0f3a0cdc', 'f629d29c417f20c16b8e4415ebd6e424235060d3', story)
     // The harness is portable; the snapshot's Git data is otherwise the CLI's output.
     bundle.repo.dir = '/fixture-repo/felt'
+    for (const commit of bundle.commits) commit.author = 'Repository contributor'
     writeFileSync(fixture, JSON.stringify(bundle, null, 2) + '\n')
     console.log(`Baked ${bundle.files.length} files with shuttle change into ${dirname(fileURLToPath(fixture))}`)
   } finally { rmSync(dir, { recursive: true, force: true }) }

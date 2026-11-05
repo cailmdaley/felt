@@ -17,6 +17,8 @@ func TestChangeCommandRealGit(t *testing.T) {
 	env.Set("GIT_CONFIG_NOSYSTEM", "1")
 	env.Set("GIT_CONFIG_GLOBAL", os.DevNull)
 	env.Set("SHUTTLE_HOST", "change-host")
+	events := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS_FILE", events)
 	repo := t.TempDir()
 	env.Chdir(repo)
 	git := func(args ...string) string {
@@ -61,6 +63,24 @@ func TestChangeCommandRealGit(t *testing.T) {
 	original, err := os.ReadFile(bundlePath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	receipt, err := os.ReadFile(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delivered struct {
+		Type      string   `json:"type"`
+		SessionID string   `json:"sessionId"`
+		Tmux      string   `json:"tmuxSession"`
+		Files     []string `json:"files"`
+	}
+	if err := json.Unmarshal(receipt, &delivered); err != nil {
+		t.Fatal(err)
+	}
+	fiber, _ := st.Read("review")
+	expectedReceiptPath, _ := filepath.EvalSymlinks(bundlePath)
+	if delivered.Type != "file_sent" || delivered.SessionID != fiber.UID || delivered.Tmux != "" || len(delivered.Files) != 1 || delivered.Files[0] != expectedReceiptPath {
+		t.Fatalf("receipt: %+v", delivered)
 	}
 	var c shuttle.Change
 	if err := json.Unmarshal(original, &c); err != nil {
@@ -183,7 +203,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 			}
 		})
 	}
-	for _, text := range []string{`{`, `null`, `[]`, `{"chapters":"bad"}`} {
+	for _, text := range []string{`{`, `null`, `[]`, `{"chapters":"bad"}`, `{"overveiw":"typo"}`, `{"chapters":[{"id":"same"},{"id":"same"}]}`, `{"title":"Review\nHead: forged"}`, `{"title":"bad\u007f"}`, `{"chapters":[{"stops":[{"file":"main.go","importance":"critical","form":1}]}]}`, `{} {}`} {
 		put(storyPath, text)
 		if _, err := run("plain", "--base", base, "--story", storyPath); err == nil {
 			t.Fatalf("accepted malformed story %q", text)

@@ -1,6 +1,6 @@
 import { FileDiff, parsePatchFiles, registerCustomCSSVariableTheme, type AnnotationSide } from '@pierre/diffs'
 import { renderMarkdown } from '../utils.js'
-import { assignLanes, changeFiles, diffWindows, overlaps, reviewMessage, stopHunks, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeDraft, type ChangeFile, type ChangeHunk } from './changeModel.js'
+import { assignLanes, reviewMessage, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeDraft, type ChangeFile, type ChangeHunk, type ChangeWindow } from './changeModel.js'
 import './change-reader.css'
 
 registerCustomCSSVariableTheme('shuttle-change', {})
@@ -24,8 +24,8 @@ function save(key: string, value: unknown): void {
 
 /** Native review content; the workspace owns its file, gestures, scroll position and worker route. */
 export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, identity: string, send?: (message: string) => Promise<void>) {
-  const files = changeFiles(bundle), lanes = assignLanes(bundle, files)
-  const prefix = `shuttle:change:${JSON.stringify([identity, bundle.head])}`
+  const files = bundle.files, lanes = assignLanes(bundle)
+  const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head])}`
   const viewed = new Set(stored<string[]>(`${prefix}:viewed`, []))
   const draft = stored<ChangeDraft>(`${prefix}:draft`, { note: '', comments: [] })
   const shell = el('div', 'change-reader')
@@ -155,11 +155,16 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
       else if (!entry.isIntersecting && window.dispose) { host.style.minHeight = `${host.offsetHeight}px`; window.dispose(); window.dispose = undefined }
     }
   }, { root: scroll, rootMargin: '800px 0px' })
-  const windows = new Map<HTMLElement, { patch: string; file: ChangeFile; hunk: ChangeHunk; dispose?: () => void }>()
+  const windows = new Map<HTMLElement, { patch: string; file: ChangeFile; hunk: ChangeWindow; dispose?: () => void }>()
   const views: { card: HTMLElement; file: ChangeFile; showAll: () => void }[] = []
   const jumpToRange = (range: ChangeRange): void => {
     const candidates = views.filter(view => view.file.path === range.file)
-    const matchingWindow = (card: HTMLElement): HTMLElement | undefined => [...card.querySelectorAll<HTMLElement>('.change-diff-window')].find(host => overlaps(windows.get(host)!.hunk, range))
+    const matchingWindow = (card: HTMLElement): HTMLElement | undefined => [...card.querySelectorAll<HTMLElement>('.change-diff-window')].find(host => {
+      if (range.from === undefined) return true
+      const hunk = windows.get(host)!.hunk, start = range.side === 'old' ? hunk.old_from : hunk.new_from
+      const count = range.side === 'old' ? hunk.old_lines : hunk.new_lines
+      return count > 0 && range.from >= start && range.from < start + count
+    })
     const view = candidates.find(view => matchingWindow(view.card)) ?? candidates[0]
     if (!view) return
     if (!matchingWindow(view.card)) view.showAll()
@@ -175,11 +180,11 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     })
   }
   const addDiff = (parent: HTMLElement, file: ChangeFile, hunks: ChangeHunk[]): void => {
-    const slices = diffWindows(file, hunks)
-    if (!slices.length) { parent.append(el('pre', 'change-metadata', file.header || `${file.status} · no text hunks`)); return }
+    const slices = hunks.flatMap(hunk => hunk.windows)
+    if (!slices.length) { parent.append(el('pre', 'change-metadata', `${file.status} · no text hunks\n${file.header}`)); return }
     for (const slice of slices) {
       const host = el('div', 'change-diff-window'); host.style.minHeight = `${slice.rows * 20 + 68}px`
-      parent.append(host); windows.set(host, { patch: slice.patch, file, hunk: slice.hunk }); io.observe(host)
+      parent.append(host); windows.set(host, { patch: slice.patch, file, hunk: slice }); io.observe(host)
     }
   }
   const addFile = (parent: HTMLElement, file: ChangeFile, hunks: ChangeHunk[], id: string, sectionIds: string[], stop?: { note?: string; importance?: string; from?: number; to?: number; side?: string }): void => {
@@ -187,7 +192,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     const card = el(collapsed ? 'details' : 'article', 'change-file'); card.dataset.changeFile = file.path
     const head = el(collapsed ? 'summary' : 'header', 'change-file-head')
     const name = el('span', 'change-file-name', `${file.path}${stop?.from ? `:${stop.from}${stop.to && stop.to !== stop.from ? `–${stop.to}` : ''}${stop.side === 'old' ? ' (old)' : ''}` : ''}`)
-    head.append(name, el('span', 'change-role', stop?.importance ?? file.role), mark(id)); card.append(head)
+    head.append(name, el('span', 'change-role', [file.role, stop?.importance].filter(Boolean).join(' · ')), mark(id)); card.append(head)
     if (stop?.note) card.append(prose(stop.note))
     parent.append(card); sectionIds.push(id)
     const body = el('div', 'change-file-body'); card.append(body)
@@ -219,7 +224,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     const entry = { element: part, link, ids: [] as string[], label: chapter.title }; sections.push(entry)
     for (const [index, stop] of chapter.stops.entries()) {
       const file = files.find(f => f.path === stop.file)
-      if (file) addFile(part, file, stopHunks(file, stop), `stop:${chapter.id}:${index}`, entry.ids, stop)
+      if (file) addFile(part, file, stop.hunks, `stop:${chapter.id}:${index}`, entry.ids, stop)
     }
     story.ids.push(...entry.ids)
   }

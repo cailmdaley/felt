@@ -7,6 +7,9 @@ const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEven
 const responseWithBlob = (content: string): Response => new Response(content)
 const pdfRenderer = vi.hoisted(() => ({ mount: vi.fn() }))
 vi.mock('./pdfViewer.js', () => ({ mountPdfViewer: pdfRenderer.mount }))
+const changeRenderer = vi.hoisted(() => ({ mount: vi.fn() }))
+vi.mock('./workspace/ChangeReader.js', () => ({ mountChangeReader: changeRenderer.mount }))
+vi.mock('./workspace/changeModel.js', () => ({ changeIdentity: async (source: string) => source }))
 afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals(); resetDocumentResources() })
 
 const watch = vi.hoisted(() => ({ content: null as null | ((value: string) => void), error: null as null | ((error: unknown) => void), recover: null as null | (() => void), stop: vi.fn() }))
@@ -31,6 +34,24 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('reloads a rewritten change through the live watcher with a new review identity', async () => {
+    const dispose = vi.fn()
+    changeRenderer.mount.mockImplementation((root: HTMLElement, bundle: { title: string }) => {
+      const scroller = document.createElement('div'); scroller.textContent = bundle.title; root.replaceChildren(scroller)
+      return { scroller, dispose }
+    })
+    const viewer = buildFileViewer('', '/review.change.json', 'host-a')
+    document.body.append(viewer)
+    watch.content!(JSON.stringify({ version: 1, title: 'First' }))
+    await vi.waitFor(() => expect(viewer.textContent).toBe('First'))
+    const first = changeRenderer.mount.mock.calls.at(-1)![2]
+    watch.content!(JSON.stringify({ version: 1, title: 'Rebaked' }))
+    await vi.waitFor(() => expect(viewer.textContent).toBe('Rebaked'))
+    expect(changeRenderer.mount.mock.calls.at(-1)![2]).not.toBe(first)
+    expect(dispose).toHaveBeenCalledTimes(1)
+    disposeFileViewer(viewer)
+    expect(watch.stop).toHaveBeenCalled()
+  })
   it('gives a live-arriving image its own full-resolution URL after the strip thumbnail', () => {
     const thumbnail = buildFileViewer('', '/growth.png', 'host-a', undefined, undefined, { thumbnail: true })
     const reader = buildFileViewer('', '/growth.png', 'host-a')

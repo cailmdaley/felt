@@ -1,10 +1,13 @@
 package shuttlecli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
@@ -71,8 +74,13 @@ count as coverage. --check validates and reports without writing a companion.
 				if err != nil {
 					return err
 				}
-				if err := json.Unmarshal(data, &story); err != nil {
+				decoder := json.NewDecoder(bytes.NewReader(data))
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&story); err != nil {
 					return fmt.Errorf("read story %s: %w", path, err)
+				}
+				if err := decoder.Decode(new(any)); err != io.EOF {
+					return fmt.Errorf("story %s must contain one JSON object", path)
 				}
 				if story == nil {
 					return fmt.Errorf("story %s must be a JSON object", path)
@@ -105,6 +113,26 @@ count as coverage. --check validates and reports without writing a companion.
 				if err := atomicfile.Write(path, append(data, '\n'), 0644); err != nil {
 					return fmt.Errorf("write change: %w", err)
 				}
+				// A fiber-addressed receipt needs no native session or worker attribution.
+				// SentFiles resolves a raw sessionId equal to the fiber UID directly.
+				if sink, enabled := a.eventsSink(); enabled {
+					origin, err := a.resolveOwnHost("")
+					if err != nil {
+						return err
+					}
+					now := a.eventNow().UnixMilli()
+					event := struct {
+						eventLine
+						Files []string `json:"files"`
+					}{eventLine: eventLine{ID: f.UID + "-" + strconv.FormatInt(now, 10) + "-" + strconv.Itoa(a.eventRand()), Timestamp: now, Type: "file_sent", SessionID: f.UID, CWD: repo, OriginName: origin}, Files: []string{path}}
+					line, err := encodeJSONLine(event)
+					if err != nil {
+						return err
+					}
+					if err := a.appendEventLine(sink, line); err != nil {
+						return fmt.Errorf("bundle saved but delivery receipt failed: %w", err)
+					}
+				}
 				report.Path = path
 			}
 			if a.json {
@@ -115,6 +143,9 @@ count as coverage. --check validates and reports without writing a companion.
 				}
 			} else {
 				fmt.Fprintf(a.env.Stdout, "Hunks covered: %d of %d\n", report.Covered, report.Total)
+				for _, h := range report.Partial {
+					fmt.Fprintf(a.env.Stdout, "Partial: %s:%d (widen one stop to show every changed line)\n", h.File, h.NewFrom)
+				}
 				for _, h := range report.Uncovered {
 					line := h.NewFrom
 					if h.NewLines == 0 {

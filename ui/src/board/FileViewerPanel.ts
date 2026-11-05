@@ -100,25 +100,27 @@ export function buildFileViewer(
   if (kind === 'change') {
     const wrap = document.createElement('div')
     wrap.className = 'kbn-fileview-change'
-    const controller = new AbortController()
     let dispose: (() => void) | undefined
-    void Promise.all([
-      documentText(src, RESOURCE_PRIORITY.selected, { signal: controller.signal }),
-      import('./workspace/ChangeReader.js'),
-    ]).then(([body, { mountChangeReader }]) => {
-      if (controller.signal.aborted) return
-      if (!body) throw new Error('file request failed: 404')
-      const bundle = JSON.parse(body.text)
-      options.onThumbnailSource?.(body.text, body.etag)
-      if (bundle.version !== 1) throw new Error(`Unsupported change version: ${bundle.version}`)
-      const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}`, options.onReview)
-      dispose = mounted.dispose
-      onTextPane?.(mounted.scroller)
-      options.onState?.({ status: 'ready' })
-    }).catch(error => {
-      if (!controller.signal.aborted) options.onState?.({ status: 'error', error, hasContent: false })
-    })
-    viewerDisposers.set(wrap, () => { controller.abort(); dispose?.() })
+    let disposed = false, generation = 0
+    let scroller: HTMLElement | undefined
+    const failed = (error: unknown): void => { if (!disposed) options.onState?.({ status: 'error', error, hasContent: !!dispose }) }
+    const stop = watchLiveFile(src, source => {
+      const revision = ++generation
+      void Promise.all([import('./workspace/ChangeReader.js'), import('./workspace/changeModel.js').then(module => module.changeIdentity(source))]).then(([{ mountChangeReader }, digest]) => {
+        if (disposed || revision !== generation) return
+        const bundle = JSON.parse(source)
+        if (bundle.version !== 1) throw new Error(`Unsupported change version: ${bundle.version}`)
+        const position = scroller?.scrollTop ?? 0
+        dispose?.()
+        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}:${digest}`, options.onReview)
+        dispose = mounted.dispose; scroller = mounted.scroller; scroller.scrollTop = position
+        options.onThumbnailSource?.(source, recallText(src)?.etag)
+        onTextPane?.(scroller)
+        options.onState?.({ status: 'ready' })
+      }).catch(failed)
+    }, failed, { active: options.active, loadOnce: options.active === false })
+    liveViewSubscriptions.set(wrap, stop)
+    viewerDisposers.set(wrap, () => { disposed = true; stop(); dispose?.() })
     return wrap
   }
 

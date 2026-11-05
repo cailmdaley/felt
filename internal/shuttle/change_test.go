@@ -91,7 +91,12 @@ func TestBuildChangeRealGit(t *testing.T) {
 		{Path: "new name\t.go", Status: "renamed", Role: "implementation"},
 		{Path: "tests/new_test.py", Status: "added", Role: "test", Additions: 1},
 	}
-	if !reflect.DeepEqual(c.Files, want) {
+	metadata := append([]ChangeFile{}, c.Files...)
+	for i := range metadata {
+		metadata[i].Header = ""
+		metadata[i].Hunks = nil
+	}
+	if !reflect.DeepEqual(metadata, want) {
 		t.Fatalf("files:\n%+v\nwant:\n%+v", c.Files, want)
 	}
 	if len(hunks) != 5 {
@@ -185,6 +190,15 @@ func TestValidateChange(t *testing.T) {
 		{File: "gone.go", OldFrom: 1, OldLines: 3, NewFrom: 0, NewLines: 0},
 		{File: "added.go", OldFrom: 0, OldLines: 0, NewFrom: 1, NewLines: 2},
 	}
+	for i := range hunks {
+		h := &hunks[i]
+		for n := 0; n < h.OldLines; n++ {
+			h.rows = append(h.rows, changeRow{"-old", h.OldFrom + n, h.NewFrom})
+		}
+		for n := 0; n < h.NewLines; n++ {
+			h.rows = append(h.rows, changeRow{"+new", h.OldFrom + h.OldLines, h.NewFrom + n})
+		}
+	}
 	tests := []struct {
 		name, story     string
 		covered, errors int
@@ -192,7 +206,7 @@ func TestValidateChange(t *testing.T) {
 	}{
 		{name: "null", story: `null`},
 		{name: "whole file", story: `{"chapters":[{"stops":[{"file":"main.go","importance":"important"}]}]}`, covered: 2},
-		{name: "overlap and duplicate", story: `{"chapters":[{"stops":[{"file":"main.go","from":15,"to":30,"importance":"critical"},{"file":"main.go","from":10,"to":10,"importance":"context"}]}]}`, covered: 1},
+		{name: "overlap and duplicate", story: `{"chapters":[{"stops":[{"file":"main.go","from":15,"to":30,"importance":"critical"},{"file":"main.go","from":10,"to":10,"importance":"context"}]}]}`, covered: 0},
 		{name: "old deletion", story: `{"chapters":[{"stops":[{"file":"gone.go","from":1,"to":3,"side":"old","importance":"supporting"}]}]}`, covered: 1},
 		{name: "flags not coverage", story: `{"flags":[{"file":"main.go","from":10,"to":10}]}`},
 		{name: "metadata", story: `{"chapters":[{"stops":[{"file":"binary.bin","importance":"context"}]}],"roles":{"main.go":"generated"}}`},

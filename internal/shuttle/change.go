@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -25,7 +25,7 @@ type Change struct {
 	BaseRef string         `json:"base_ref"`
 	HeadRef string         `json:"head_ref"`
 	Commits []ChangeCommit `json:"commits"`
-	Patch   string         `json:"patch"`
+	Patch   string         `json:"-"`
 	Files   []ChangeFile   `json:"files"`
 	Story   *ChangeStory   `json:"story"`
 }
@@ -44,11 +44,13 @@ type ChangeCommit struct {
 }
 
 type ChangeFile struct {
-	Path      string `json:"path"`
-	Status    string `json:"status"`
-	Role      string `json:"role"`
-	Additions int    `json:"additions"`
-	Deletions int    `json:"deletions"`
+	Path      string       `json:"path"`
+	Status    string       `json:"status"`
+	Role      string       `json:"role"`
+	Additions int          `json:"additions"`
+	Deletions int          `json:"deletions"`
+	Header    string       `json:"header"`
+	Hunks     []ChangeHunk `json:"hunks"`
 }
 
 type ChangeStory struct {
@@ -81,17 +83,33 @@ type ChangeChapter struct {
 
 type ChangeStop struct {
 	ChangeRange
-	Note       string `json:"note"`
-	Importance string `json:"importance"`
+	Note       string       `json:"note"`
+	Importance string       `json:"importance"`
+	Hunks      []ChangeHunk `json:"hunks"`
 }
 
 // ChangeHunk identifies a unified-diff hunk on both sides. Zero counts have no lines.
 type ChangeHunk struct {
-	File     string `json:"file"`
+	File     string         `json:"file"`
+	OldFrom  int            `json:"old_from"`
+	OldLines int            `json:"old_lines"`
+	NewFrom  int            `json:"new_from"`
+	NewLines int            `json:"new_lines"`
+	Patch    string         `json:"patch"`
+	Covered  bool           `json:"covered"`
+	Windows  []ChangeWindow `json:"windows"`
+	rows     []changeRow
+	header   string
+}
+
+// ChangeWindow is an independently renderable, bounded piece of a hunk.
+type ChangeWindow struct {
 	OldFrom  int    `json:"old_from"`
 	OldLines int    `json:"old_lines"`
 	NewFrom  int    `json:"new_from"`
 	NewLines int    `json:"new_lines"`
+	Patch    string `json:"patch"`
+	Rows     int    `json:"rows"`
 }
 
 type ChangeReport struct {
@@ -100,6 +118,7 @@ type ChangeReport struct {
 	Covered   int          `json:"covered"`
 	Total     int          `json:"total"`
 	Uncovered []ChangeHunk `json:"uncovered"`
+	Partial   []ChangeHunk `json:"partial"`
 	Errors    []string     `json:"errors"`
 }
 
@@ -231,20 +250,6 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		label := map[byte]string{'A': "added", 'M': "modified", 'D': "deleted", 'R': "renamed", 'T': "modified"}[status[0]]
 		c.Files = append(c.Files, ChangeFile{Path: path, Status: label, Role: ChangeRole(path)})
 	}
-	stats, err := diff("--numstat", "-z")
-	if err != nil {
-		return nil, nil, err
-	}
-	tokens = strings.Split(strings.TrimSuffix(stats, "\x00"), "\x00")
-	for i := 0; len(tokens) > 0 && tokens[0] != ""; i++ {
-		parts := strings.SplitN(tokens[0], "\t", 3)
-		tokens = tokens[1:]
-		if parts[2] == "" {
-			tokens = tokens[2:]
-		} // Rename records carry two NUL-delimited paths.
-		c.Files[i].Additions, _ = strconv.Atoi(parts[0])
-		c.Files[i].Deletions, _ = strconv.Atoi(parts[1])
-	}
 	c.Patch, err = diff("--patch", "--unified=3", "--src-prefix=a/", "--dst-prefix=b/")
 	if err != nil {
 		return nil, nil, err
@@ -278,44 +283,8 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		}
 		c.Patch = strings.Join(sections, "diff --git ")
 	}
-	hunks := []ChangeHunk{}
-	file := ""
-	inHunk := false
-	for _, line := range strings.Split(c.Patch, "\n") {
-		if strings.HasPrefix(line, "diff --git ") {
-			file, inHunk = "", false
-			continue
-		}
-		if !inHunk && (strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ")) {
-			path := strings.TrimSuffix(line[4:], "\t")
-			if strings.HasPrefix(path, "\"") {
-				path, err = strconv.Unquote(path)
-				if err != nil {
-					return nil, nil, fmt.Errorf("decode Git patch path: %w", err)
-				}
-			}
-			if path != "/dev/null" {
-				file = path[2:]
-			}
-			continue
-		}
-		match := changeHunkHeader.FindStringSubmatch(line)
-		if match == nil {
-			continue
-		}
-		inHunk = true
-		count := func(s string) int {
-			if s == "" {
-				return 1
-			}
-			n, _ := strconv.Atoi(s)
-			return n
-		}
-		oldFrom, _ := strconv.Atoi(match[1])
-		newFrom, _ := strconv.Atoi(match[3])
-		hunks = append(hunks, ChangeHunk{File: file, OldFrom: oldFrom, OldLines: count(match[2]), NewFrom: newFrom, NewLines: count(match[4])})
-	}
-	return c, hunks, nil
+	hunks, err := c.parsePatch()
+	return c, hunks, err
 }
 
 // changeOrigin extracts repository identity without contacting the remote.
@@ -354,12 +323,13 @@ var changeHunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+
 // ValidateChange checks every story reference and counts coverage from stops only.
 // Flags direct attention but do not remove hunks from Remaining.
 func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
-	report := ChangeReport{Valid: true, Total: len(hunks), Uncovered: []ChangeHunk{}, Errors: []string{}}
+	report := ChangeReport{Valid: true, Total: len(hunks), Uncovered: []ChangeHunk{}, Partial: []ChangeHunk{}, Errors: []string{}}
 	files := map[string]int{}
 	for i, f := range c.Files {
 		files[f.Path] = i
 	}
 	covered := make([]bool, len(hunks))
+	partial := make([]bool, len(hunks))
 	bad := func(s string) { report.Errors = append(report.Errors, s) }
 	check := func(label string, r ChangeRange, stop bool) {
 		if _, ok := files[r.File]; !ok {
@@ -389,7 +359,11 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 			if lines > 0 && (whole || (r.From <= from+lines-1 && r.To >= from)) {
 				overlaps = true
 				if stop {
-					covered[i] = true
+					if h.shown(r) {
+						covered[i] = true
+					} else {
+						partial[i] = true
+					}
 				}
 			}
 		}
@@ -402,11 +376,27 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 		}
 	}
 	if c.Story != nil {
+		if strings.IndexFunc(c.Story.Title, unicode.IsControl) >= 0 {
+			bad("title: control characters are not allowed")
+		}
+		ids := map[string]bool{}
 		for i, flag := range c.Story.Flags {
 			check(fmt.Sprintf("flags[%d]", i), flag.ChangeRange, false)
 		}
 		for i, chapter := range c.Story.Chapters {
+			if ids[chapter.ID] {
+				bad(fmt.Sprintf("chapters[%d]: duplicate id %q", i, chapter.ID))
+			}
+			ids[chapter.ID] = true
 			for j, stop := range chapter.Stops {
+				c.Story.Chapters[i].Stops[j].Hunks = []ChangeHunk{}
+				for _, h := range hunks {
+					if h.File == stop.File {
+						if excerpt, ok := h.excerpt(stop.ChangeRange); ok {
+							c.Story.Chapters[i].Stops[j].Hunks = append(c.Story.Chapters[i].Stops[j].Hunks, excerpt)
+						}
+					}
+				}
 				label := fmt.Sprintf("chapters[%d].stops[%d]", i, j)
 				switch stop.Importance {
 				case "critical", "important", "supporting", "context":
@@ -437,10 +427,21 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 		}
 	}
 	for i, h := range hunks {
+		h.Covered = covered[i]
+		for fi := range c.Files {
+			for hi := range c.Files[fi].Hunks {
+				if c.Files[fi].Hunks[hi].File == h.File && c.Files[fi].Hunks[hi].OldFrom == h.OldFrom && c.Files[fi].Hunks[hi].NewFrom == h.NewFrom {
+					c.Files[fi].Hunks[hi].Covered = h.Covered
+				}
+			}
+		}
 		if covered[i] {
 			report.Covered++
 		} else {
 			report.Uncovered = append(report.Uncovered, h)
+			if partial[i] {
+				report.Partial = append(report.Partial, h)
+			}
 		}
 	}
 	report.Valid = len(report.Errors) == 0

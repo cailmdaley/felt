@@ -55,6 +55,19 @@ func TestChangeCaptureIgnoresDiffConfigAndWorktreeAttributes(t *testing.T) {
 	if !strings.Contains(before.Patch, "+new text") || !strings.Contains(before.Patch, "Binary files a/binary.bin") {
 		t.Fatal(before.Patch)
 	}
+	for _, tc := range []struct{ from, to, covered, partial int }{{2, 2, 0, 1}, {1, 1, 1, 0}, {1, 3, 1, 0}} {
+		before.Story = &ChangeStory{Chapters: []ChangeChapter{{ID: "read", Stops: []ChangeStop{{ChangeRange: ChangeRange{File: "app.go", From: tc.from, To: tc.to}, Importance: "important"}}}}}
+		report := ValidateChange(before, bh)
+		if !report.Valid || report.Covered != tc.covered || len(report.Partial) != tc.partial {
+			t.Fatalf("coverage %+v: %+v", tc, report)
+		}
+		stop := before.Story.Chapters[0].Stops[0]
+		if len(stop.Hunks) != 1 || !strings.Contains(stop.Hunks[0].Patch, "@@") {
+			t.Fatalf("missing resolved excerpt: %+v", stop)
+		}
+	}
+	before.Story = nil
+	ValidateChange(before, bh)
 	for key, value := range map[string]string{"diff.suppressBlankEmpty": "true", "diff.noprefix": "true", "diff.mnemonicPrefix": "true", "diff.renames": "false", "diff.context": "0", "diff.interHunkContext": "100", "diff.algorithm": "histogram", "diff.external": "/nonexistent", "core.attributesFile": filepath.Join(repo, "global-attrs")} {
 		git("config", key, value)
 	}
