@@ -883,15 +883,15 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			} else {
 				setClosedAtIfMissing(f)
 			}
-			// Bind quiet to this publication stamp; an ordinary close clears it.
-			quietStamp := ""
-			if closeQuiet {
-				quietStamp = f.ClosedAt.Format(time.RFC3339Nano)
-			}
-			if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
-				return err
-			}
 			if !a.localMirror {
+				// Bind quiet to this publication stamp; an ordinary close clears it.
+				quietStamp := ""
+				if closeQuiet {
+					quietStamp = f.ClosedAt.Format(time.RFC3339Nano)
+				}
+				if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
+					return err
+				}
 				if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "closed"); err != nil {
 					return err
 				}

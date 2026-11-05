@@ -78,7 +78,7 @@ func TestResumeAndCloseClearTheWait(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
 			dir, storage := newStore(t)
-			seedFiber(t, storage, "f", "01JTHREAD00000000000000000", felt.StatusActive, oneshot(), nil)
+			seedFiber(t, storage, "f", "01JTHREAD00000000000000000", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 			if out, err := runIn(t, env, dir, "rest", "f", "--until", "the mocks", "--local"); err != nil {
 				t.Fatalf("%v: %s", err, out)
 			}

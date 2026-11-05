@@ -16,5 +16,7 @@
   {"name":"invalid dispatch", "fiber":{"status":"closed","shuttle":{"runtime":{"dispatched_at":"invalid","handed_off_at":"2026-11-04T12:00:01Z"}}}, "quiescent":false},
   {"name":"invalid handoff", "fiber":{"status":"closed","shuttle":{"runtime":{"dispatched_at":"2026-11-04T12:00:00Z","handed_off_at":"invalid"}}}, "quiescent":false},
   {"name":"null dispatch marker", "fiber":{"status":"open","shuttle":{"runtime":{"dispatched_at":null}}}, "quiescent":false},
+  {"name":"null runtime", "fiber":{"status":"open","shuttle":{"runtime":null}}, "quiescent":false},
+  {"name":"list runtime", "fiber":{"status":"open","shuttle":{"runtime":[]}}, "quiescent":false},
   {"name":"malformed runtime", "fiber":{"status":"open","shuttle":{"runtime":"unknown"}}, "quiescent":false}
 ]

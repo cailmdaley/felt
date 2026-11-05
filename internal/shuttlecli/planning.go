@@ -3,7 +3,6 @@ package shuttlecli
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -34,16 +33,11 @@ func planningFiber(f *felt.Felt) bool {
 	}
 	start := felt.MappingValueNode(runtime, "dispatched_at")
 	if start == nil {
-		session := felt.MappingValueNode(runtime, "session_uuid")
-		return session == nil || session.Value == ""
+		return runtimeString(f, "session_uuid") == ""
 	}
-	finish := felt.MappingValueNode(runtime, "handed_off_at")
-	if finish == nil {
-		return false
-	}
-	a, err := time.Parse(time.RFC3339Nano, start.Value)
-	b, endErr := time.Parse(time.RFC3339Nano, finish.Value)
-	return err == nil && endErr == nil && b.After(a)
+	a := shuttle.RuntimeTimestamp(start.Value)
+	b := shuttle.RuntimeTimestamp(runtimeString(f, "handed_off_at"))
+	return !a.IsZero() && b.After(a)
 }
 
 // The daemon alone selects automatic fallback. --local is an explicit write;
@@ -67,6 +61,10 @@ func (a *app) lifecycleOwner(cmd *cobra.Command, args []string, f *felt.Felt, st
 				refusal = fmt.Errorf("no execution host is assigned")
 			}
 			return "", fmt.Errorf("execution owner decides: no safe local exit for %s: %w", args[0], refusal)
+		}
+		runtime := felt.MappingValueNode(f.ExtraFields[shuttle.FacetKey], shuttle.RuntimeKey)
+		if runtime != nil && runtime.Kind != yaml.MappingNode {
+			return "", fmt.Errorf("malformed runtime; no mirror write")
 		}
 		a.localMirror = true
 		return "", nil

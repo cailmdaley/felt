@@ -74,7 +74,8 @@ func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, lo
 			discoveryFailed = true
 			reason += fmt.Sprintf(" (discovered peers unknown: %v)", err)
 		} else {
-			discoveryFailed = discovery.State != "ok" || len(discovery.Rejected) != 0
+			// A successful discovery can still omit an aged-out unreachable peer.
+			discoveryFailed = true
 			for _, remote := range a.admitDiscovered(doc, discovery.Peers) {
 				if remote.Name == owner {
 					return owner, nil

@@ -136,14 +136,18 @@ func TestExitCLIDaemonDownPreservesStdinOutcome(t *testing.T) {
 
 func TestExitExplicitLocalChecksStandingAndDiscovery(t *testing.T) {
 	binary := planningProbeBinary(t)
-	for _, state := range []string{"pending", "unavailable", "ok"} {
+	for _, state := range []string{"pending", "unavailable", "ok", "closed-fleet"} {
 		for _, standing := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/standing=%t", state, standing), func(t *testing.T) {
 				content := "status: active\nshuttle:\n  kind: oneshot\n  host: worker\n  runtime:\n    session_uuid: live"
 				if standing {
 					content = "status: closed\nshuttle:\n  kind: standing\n  schedule:\n    expr: '0 9 * * *'\n  host: worker"
 				}
-				dir, path, home, remotes := exitFixture(t, content, `{"version":1,"remotes":[]}`)
+				fleet := `{"version":1,"remotes":[]}`
+				if state == "closed-fleet" {
+					fleet = `{"version":1,"defaults":{"discover":false},"remotes":[]}`
+				}
+				dir, path, home, remotes := exitFixture(t, content, fleet)
 				before, _ := os.ReadFile(path)
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					fmt.Fprintf(w, `{"discovery":{"state":%q,"peers":[]}}`, state)
@@ -151,7 +155,7 @@ func TestExitExplicitLocalChecksStandingAndDiscovery(t *testing.T) {
 				defer server.Close()
 				out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, server.URL, remotes), "rest", "task", "--local")
 				after, _ := os.ReadFile(path)
-				if state == "ok" {
+				if state == "closed-fleet" {
 					if err != nil || !strings.Contains(out, "Git") {
 						t.Fatalf("removed owner retirement: %v %s", err, out)
 					}
@@ -170,6 +174,35 @@ func TestExitExplicitLocalChecksStandingAndDiscovery(t *testing.T) {
 			t.Fatalf("standing schedule was locally parked: %v %s", err, out)
 		}
 	})
+}
+
+func TestMirrorExitPreservesRunAndPublicationEvidence(t *testing.T) {
+	binary := planningProbeBinary(t)
+	for _, verb := range [][]string{{"rest"}, {"pause"}, {"close", "--quiet", "--tempered=false"}} {
+		t.Run(verb[0], func(t *testing.T) {
+			content := "status: closed\nshuttle:\n  kind: oneshot\n  host: worker\n  runtime:\n    thread_exit_verb: rearmed\n    quiet_closed_at: '2026-11-04T11:00:00Z'"
+			dir, path, home, remotes := exitFixture(t, content, configuredWorker)
+			args := append([]string{verb[0], "task", "--local", "--mirror-owner", "worker"}, verb[1:]...)
+			out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), args...)
+			after, _ := os.ReadFile(path)
+			if err != nil || !strings.Contains(string(after), "thread_exit_verb: rearmed") || !strings.Contains(string(after), "quiet_closed_at: '2026-11-04T11:00:00Z'") || strings.Contains(string(after), "handed_off_at:") {
+				t.Fatalf("mirror manufactured run/publication evidence: %v %s\n%s", err, out, after)
+			}
+		})
+	}
+}
+
+func TestRemovedOwnerDoesNotAuthorizeMalformedRuntime(t *testing.T) {
+	binary := planningProbeBinary(t)
+	for _, runtime := range []string{"null", "[]", "unknown"} {
+		dir, path, home, remotes := exitFixture(t, "status: active\nshuttle:\n  kind: oneshot\n  host: worker\n  runtime: "+runtime, `{"version":1,"defaults":{"discover":false},"remotes":[]}`)
+		before, _ := os.ReadFile(path)
+		out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), "rest", "task", "--local")
+		after, _ := os.ReadFile(path)
+		if err == nil || string(before) != string(after) {
+			t.Fatalf("malformed runtime was replaced: %v %s", err, out)
+		}
+	}
 }
 
 func TestExitMirrorChecksOwnerAndDoesNotInventExecution(t *testing.T) {
