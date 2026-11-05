@@ -421,6 +421,16 @@ describe('Reader channel sidebar', () => {
     } finally { channels.splice(2, 1, gamma) }
   })
 
+  it('reveals an externally selected page that does not match Find', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const reader = makeReader(alpha)
+    const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar input')!
+    find.value = 'Alpha'; find.dispatchEvent(new Event('input'))
+    reader.show(channel(gamma), fiberKey(gamma), 'Board', gamma)
+    expect(find.value).toBe('')
+    expect(reader.el.querySelector<HTMLElement>('.ws-sidebar [aria-current="true"]')?.dataset.channelUid).toBe(gamma.uid)
+  })
+
   it('refreshes sidebar rows without clearing the find text', () => {
     const reader = makeReader()
     reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
@@ -443,6 +453,10 @@ describe('Reader channel sidebar', () => {
     onChannel.mockImplementation(next => reader.show(channel(next), fiberKey(next), 'Board', next))
     const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar input')!
     find.value = 'Alpha'; find.dispatchEvent(new Event('input'))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
+    expect(onChannel).not.toHaveBeenCalled()
+    expect(find.value).toBe('Alpha')
+    find.value = ''; find.dispatchEvent(new Event('input'))
     scrollCurrent.mockClear()
     const steps: Array<[string, boolean, KanbanCard]> = [['j', false, gamma], ['k', false, alpha], ['k', false, beta], ['ArrowDown', true, alpha], ['ArrowDown', true, gamma], ['ArrowUp', true, alpha]]
     for (const [key, altKey, expected] of steps) {

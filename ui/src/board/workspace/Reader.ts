@@ -224,7 +224,7 @@ export class Reader {
       onOpen: (card: KanbanCard) => { this.closeMenu(); this.opts.onChannel(card) },
     }
     this.sidebarPicker = new ConstitutionPicker({
-      ...pickerOptions, cards: () => this.sidebarCards(), revealCurrent: true,
+      ...pickerOptions, cards: () => this.sidebarFamilies().flatMap(family => family.rows), revealCurrent: true,
       decorate: el => this.decorateSidebar(el),
       files: card => [...(opts.files?.(card) ?? []), ...(this.opts.threadIndex?.()?.ancestry(card).map(part => part.name) ?? [])],
       onOpen: card => this.scan(card),
@@ -772,24 +772,32 @@ export class Reader {
   /** The source column is captured before the live Desk starts receding. */
   captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
   private readonly sidebarPreferences = new SidebarPreferences((() => { try { return localStorage } catch { return null } })())
-  private sidebarFamilies() {
+  private sidebarFamilies(query = this.sidebarPicker?.find.value.trim() ?? '') {
     const desk = this.opts.switcherCards?.() ?? this.opts.cards()
     const index = this.opts.threadIndex?.() ?? new ThreadIndex([...desk, ...this.opts.cards()])
-    return sidebarOutline(index, desk, this.currentCard ?? undefined, this.sidebarPreferences.folds, this.sidebarPicker?.find.value.trim() ?? '')
+    return sidebarOutline(index, desk, this.currentCard ?? undefined, this.sidebarPreferences.folds, query)
   }
+  private readonly sidebarControls = new Map<string, HTMLButtonElement>()
   private decorateSidebar(list: HTMLElement): void {
     list.querySelectorAll('.ws-sidebar-fold, .ws-sidebar-crumb, .ws-sidebar-count').forEach(el => el.remove())
+    const liveControls = new Set<string>()
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
     const rows = [...list.querySelectorAll<HTMLElement>('.ws-channel-row')]
     const byIdentity = new Map(rows.map(row => [JSON.stringify([row.dataset.channelOwner, row.dataset.channelUid]), row]))
     const rowFor = (card: KanbanCard) => byIdentity.get(cardIdentity(card))
     const query = !!this.sidebarPicker.find.value.trim()
     const toggle = (root: KanbanCard, fold: Fold, label: string, expanded: boolean): HTMLButtonElement => {
-      const control = button('ws-sidebar-fold', label, () => {
-        const focused = document.activeElement === control
-        this.sidebarPreferences.toggle(root, fold); this.sidebarPicker.refresh(false)
-        if (focused) [...list.querySelectorAll<HTMLElement>('.ws-sidebar-fold')].find(el => el.dataset.fold === fold && el.dataset.root === rootIdentity(root))?.focus({ preventScroll: true })
-      })
+      const key = JSON.stringify([rootIdentity(root), fold])
+      liveControls.add(key)
+      let control = this.sidebarControls.get(key)
+      if (!control) {
+        control = button('ws-sidebar-fold', label, () => {
+          this.sidebarPreferences.toggle(root, fold)
+          this.sidebarPicker.refresh(false)
+        })
+        this.sidebarControls.set(key, control)
+      }
+      control.textContent = label
       control.dataset.fold = fold; control.dataset.root = rootIdentity(root)
       control.setAttribute('aria-expanded', String(expanded))
       return control
@@ -804,26 +812,34 @@ export class Reader {
         rootRow.prepend(fold)
       }
       if (rootRow && family.folded && (asks.length || workingCount)) rootRow.append(element('span', 'ws-sidebar-count', asks.length ? `${asks.length} ${asks.length === 1 ? 'needs' : 'need'} you` : `${workingCount} working`))
-      const workingDepth = new Map(working.map(item => [cardIdentity(item.card), item.depth]))
+      const workingRows = new Set(working.map(item => cardIdentity(item.card)))
+      const drawnPath = [root]
       for (const card of family.rows) {
         if (rootIdentity(card) === rootIdentity(root)) continue
         const row = rowFor(card)
         if (!row) continue
-        const depth = !query && this.sidebarPreferences.folds[rootIdentity(root)]?.working ? workingDepth.get(cardIdentity(card)) ?? 1 : 1
+        const inWorkingTree = !query && (this.sidebarPreferences.folds[rootIdentity(root)]?.working || workingCount === 1) && workingRows.has(cardIdentity(card))
+        const parent = index.parentOf(card)
+        const parentDepth = parent ? drawnPath.indexOf(parent) : -1
+        const parentDrawn = inWorkingTree && parentDepth >= 0
+        const depth = parentDrawn ? parentDepth + 1 : 1
+        drawnPath.length = depth
+        drawnPath[depth] = card
         row.setAttribute('aria-level', String(depth + 1))
         row.style.setProperty('--sidebar-depth', String(depth))
-        const ancestors = index.ancestry(card).filter(part => part.card && (query || rootIdentity(part.card) !== rootIdentity(root)))
+        const ancestors = parentDrawn ? [] : index.ancestry(card).filter(part => part.card && (query || rootIdentity(part.card) !== rootIdentity(root)))
         if (ancestors.length) row.querySelector('.ws-channel-name')?.prepend(element('span', 'ws-sidebar-crumb kbn-card-crumb', `${ancestors.map(part => part.name).join(' / ')} / `))
       }
       if (query || family.folded || !rootRow) continue
-      let anchor = [...(this.sidebarPreferences.folds[rootIdentity(root)]?.more ? asks : asks.slice(0, 3))].reverse().map(rowFor).find(Boolean) ?? rootRow
+      let anchor = [...(this.sidebarPreferences.folds[rootIdentity(root)]?.more || asks.length === 4 ? asks : asks.slice(0, 3))].reverse().map(rowFor).find(Boolean) ?? rootRow
       if (family.more) {
         const open = this.sidebarPreferences.folds[rootIdentity(root)]?.more ?? false
         const more = toggle(root, 'more', open ? 'Show fewer' : `+${family.more} more`, open)
         anchor.after(more); anchor = more
       }
-      if (workingCount) anchor.after(toggle(root, 'working', `Working ${workingCount}`, this.sidebarPreferences.folds[rootIdentity(root)]?.working ?? false))
+      if (workingCount > 1) anchor.after(toggle(root, 'working', `Working ${workingCount}`, this.sidebarPreferences.folds[rootIdentity(root)]?.working ?? false))
     }
+    for (const key of this.sidebarControls.keys()) if (!liveControls.has(key)) this.sidebarControls.delete(key)
   }
   /** One state dot and the name; details belong to the open page. */
   private sidebarCard(card: KanbanCard): HTMLElement {
@@ -1151,12 +1167,14 @@ export class Reader {
   }
   /** The sidebar's visible rows, which j/k and J/K walk whether or not it is shown. */
   private sidebarCards(): KanbanCard[] {
-    return this.sidebarFamilies().flatMap(family => family.rows)
+    const query = this.sidebarPicker?.find.value.trim().toLowerCase() ?? ''
+    return this.sidebarFamilies().flatMap(family => family.rows).filter(card => !query || [card.name, card.path, ...(this.opts.files?.(card) ?? []), ...(this.opts.threadIndex?.()?.ancestry(card).map(part => part.name) ?? [])].some(value => value.toLowerCase().includes(query)))
   }
   /** The index strip names every column, unfiltered by Find, and marks the open constitution's. */
   private renderIndex(): void {
-    const stops = (this.opts.sidebarColumn ?? this.opts.sidebarBand) ? groupStops(this.sidebarCards(), this.stopOf).filter(stop => stop.caption) : []
-    const current = this.currentCard && cardIdentity(this.currentCard)
+    const stops = (this.opts.sidebarColumn ?? this.opts.sidebarBand) ? groupStops(this.sidebarFamilies('').map(family => family.root), this.stopOf).filter(stop => stop.caption) : []
+    const index = this.opts.threadIndex?.()
+    const current = this.currentCard && cardIdentity(index?.family(this.currentCard).root ?? this.currentCard)
     const keys = new Set(stops.map(stop => stop.key))
     for (const [key, entry] of this.indexEntries) if (!keys.has(key)) { entry.remove(); this.indexEntries.delete(key) }
     stops.forEach((stop, i) => {

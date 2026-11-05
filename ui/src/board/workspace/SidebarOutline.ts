@@ -45,11 +45,13 @@ export class SidebarPreferences {
 /** Roots retain Desk order; each expanded family exposes asks before its folded work. */
 export function sidebarOutline(index: ThreadIndex, desk: KanbanCard[], current: KanbanCard | undefined, folds: SidebarFolds, query = ''): SidebarFamily[] {
   const roots = new Map<string, KanbanCard>()
-  for (const card of [...desk, ...(current ? [current] : [])]) {
+  const positions = new Map(desk.map((card, n) => [cardIdentity(card), n]))
+  for (const card of [...desk, ...(query ? index.frontier().filter(card => index.children(card).length > 0) : []), ...(current ? [current] : [])]) {
     const root = index.family(index.card(card)).root
     roots.set(rootIdentity(root), root)
   }
-  return [...roots.values()].map(root => {
+  const position = (root: KanbanCard) => positions.get(cardIdentity(root)) ?? positions.get(cardIdentity(index.family(root).lead)) ?? desk.length
+  return [...roots.values()].sort((a, b) => position(a) - position(b)).map(root => {
     const descendants = index.subtree(root)
     const asks = descendants.filter(card => ['waiting', 'to-review'].includes(index.state(card))).sort(index.compare)
     const nodes: TreeNode[] = [], pending = [threadTree(index, root)]
@@ -68,14 +70,14 @@ export function sidebarOutline(index: ThreadIndex, desk: KanbanCard[], current: 
     let rows = [root]
     if (query) rows.push(...descendants.filter(card => index.state(card) !== 'archived'))
     else if (!folded) {
-      rows.push(...(state.more ? asks : asks.slice(0, 3)))
-      if (state.working) rows.push(...working.map(row => row.card))
+      rows.push(...(state.more || asks.length === 4 ? asks : asks.slice(0, 3)))
+      if (state.working || working.filter(row => index.state(row.card) === 'working').length === 1) rows.push(...working.map(row => row.card))
     }
     if (current && rootIdentity(index.family(current).root) === rootIdentity(root) && !rows.some(card => cardIdentity(card) === cardIdentity(current))) {
       const live = index.card(current)
       rows.push(cardIdentity(live) === cardIdentity(current) ? live : current)
     }
     rows = [...new Map(rows.map(card => [cardIdentity(card), card])).values()]
-    return { root, asks, working, rows, folded, expandable: !!(asks.length || working.length), more: Math.max(0, asks.length - 3) }
+    return { root, asks, working, rows, folded, expandable: !!(asks.length || working.length), more: asks.length > 4 ? asks.length - 3 : 0 }
   })
 }

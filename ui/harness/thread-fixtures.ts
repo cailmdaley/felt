@@ -117,19 +117,26 @@ export function addSidebarFixtures(example: WorkspaceExample, now: number): void
   const rows = [
     { id: 'chair', name: 'CMB cross-correlations chair', status: 'active', phase: 'working', seat: true },
     { id: 'hub', name: 'Shear survey hub', status: 'active', phase: 'working', seat: true },
-    { id: 'rest', name: 'Resting research chair', status: 'open', horizon: 'stashed', seat: true },
+    { id: 'rest', name: 'Resting research chair', status: 'open', horizon: 'stashed' },
+    { id: 'role', name: 'Archive chair seat', status: 'open', horizon: 'stashed', seat: true },
     { id: 'rest/review', parent: 'rest', name: 'Review the rotation model', status: 'closed' },
+    { id: 'rest/ask', parent: 'rest', name: 'Choose the rotation prior', status: 'active', phase: 'attention' },
+    { id: 'lone', name: 'Choose the observation window', status: 'active', phase: 'attention' },
+    { id: 'settled', name: 'Completed instrument chair', status: 'closed', tempered: true },
+    { id: 'settled/ask', parent: 'settled', name: 'Choose the calibration release', status: 'active', phase: 'attention' },
+    { id: 'quiet', name: 'Completed archive chair', status: 'closed', tempered: true },
+    { id: 'quiet/draft', parent: 'quiet', name: 'Draft archive inventory', status: 'open' },
     ...['chair', 'hub'].flatMap(root => [
       ...Array.from({ length: 5 }, (_, n) => ({ id: `${root}/review-${n}`, parent: root, name: `Review ${root === 'chair' ? 'cross-spectrum' : 'shear'} ${n + 1}`, status: 'closed' })),
       { id: `${root}/question`, parent: root, name: `Choose the ${root === 'chair' ? 'overlap cut' : 'leakage model'}`, status: 'active', phase: 'attention' },
       { id: `${root}/analysis`, parent: root, name: 'Response analysis', status: 'active', phase: 'working' },
       { id: `${root}/analysis/deep`, parent: `${root}/analysis`, name: 'Check the response kernel', status: 'active', phase: 'working' },
     ]),
-  ] as Array<{ id: string; name: string; parent?: string; status: string; phase?: string; seat?: boolean; horizon?: string }>
+  ] as Array<{ id: string; name: string; parent?: string; status: string; phase?: string; seat?: boolean; horizon?: string; tempered?: boolean }>
   for (const row of rows) {
     example.feed.fibers.push({
       origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/constitution.md`, orchestrator: row.parent,
-      fiber: { id: row.id, uid: row.id, name: row.name, status: row.status, horizon: row.horizon,
+      fiber: { id: row.id, uid: row.id, name: row.name, status: row.status, horizon: row.horizon, tempered: row.tempered,
         created_at: new Date(now - 3600000).toISOString(), closed_at: row.status === 'closed' ? new Date(now - 60000).toISOString() : undefined,
         shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'codex-sol', role: row.seat ? 'chair' : undefined, seat: row.seat,
           ask: row.phase === 'attention' ? { text: 'Which model?', at: new Date(now - 120000).toISOString() } : undefined } },

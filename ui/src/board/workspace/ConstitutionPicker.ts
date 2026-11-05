@@ -87,11 +87,16 @@ export class ConstitutionPicker {
   }
   refresh(reveal = true): void {
     if (this.listening) this.opts.supplement?.refresh(this.find.value)
-    try { this.placeRows(reveal) } finally { this.opts.onRefresh?.() }
+    const focused = this.el.contains(document.activeElement) ? document.activeElement as HTMLElement : null
+    try {
+      this.placeRows(reveal)
+      if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true })
+    } finally { this.opts.onRefresh?.() }
   }
   private placeRows(reveal: boolean): void {
     const identity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])
-    const cards = [...new Map(this.opts.cards().map(card => [identity(card), card])).values()]
+    const collect = () => [...new Map(this.opts.cards().map(card => [identity(card), card])).values()]
+    let cards = collect()
     const current = cards.find(card => this.opts.current?.(card))
     const selected = current ? identity(current) : null
     let query = this.find.value.trim().toLowerCase()
@@ -99,7 +104,7 @@ export class ConstitutionPicker {
     // A navigation choice supersedes sidebar Find only when it hides that choice;
     // the visible indicator and Enter's first filtered match must agree.
     if (selected !== this.selected && current && this.opts.revealCurrent && !matches(current)) {
-      this.find.value = ''; query = ''
+      this.find.value = ''; query = ''; cards = collect()
     }
     if (selected !== this.selected) { cancelAnimationFrame(this.revealFrame); this.revealFrame = 0 }
     this.selected = selected

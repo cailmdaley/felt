@@ -722,22 +722,78 @@ describe('workspace reader integration', () => {
       thread({ id: 'resting', status: 'open', effectiveHorizon: 'stashed' }),
       thread({ id: 'resting/done', orchestrator: 'resting', status: 'closed' }),
       thread({ id: 'review', status: 'closed' }),
+      thread({ id: 'lone', status: 'active', ask: { text: 'Choose?', at: '' } }),
+      thread({ id: 'resting/ask', orchestrator: 'resting', status: 'active', ask: { text: 'Choose?', at: '' } }),
+      thread({ id: 'quiet', status: 'closed', tempered: true }),
+      thread({ id: 'quiet/draft', orchestrator: 'quiet', status: 'open' }),
     ]
     const index = new ThreadIndex(raw)
     const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c) }))
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[4], feed[1], feed[6], feed[7]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[4], feed[9], feed[8], feed[1], feed[7], feed[5]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const rows = (): (string | undefined)[] => [...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)
     const strip = (): (string | null)[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')].map(entry => entry.getAttribute('aria-label'))
     workspace.open(feed[0], 'Desk'); await flush()
-    expect(rows()).toEqual(['draft', 'settled', 'settled-ask', 'hub', 'resting', 'resting-done', 'review'])
-    expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 3'])
+    expect(rows()).toEqual(['draft', 'settled', 'settled-ask', 'lone', 'hub', 'hub-sub', 'review', 'resting', 'resting-ask', 'resting-done'])
+    expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 1', 'Resting, 1'])
     workspace.open(feed[2], 'Desk'); await flush()
-    expect(rows()).toEqual(['draft', 'settled', 'settled-ask', 'hub', 'hub-sub', 'resting', 'resting-done', 'review'])
-    expect(strip()).toEqual(['Drafts, 1', 'In flight, 4', 'Awaiting review, 3'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
+    expect(rows()).toEqual(['draft', 'settled', 'settled-ask', 'lone', 'hub', 'hub-sub', 'review', 'resting', 'resting-ask', 'resting-done'])
+    expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 1', 'Resting, 1'])
+    const captions = () => [...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)
+    expect(captions()).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review', 'Resting'])
+    expect(new Set(captions()).size).toBe(captions().length)
+    const toggle = document.querySelector<HTMLButtonElement>('.ws-sidebar [data-root="hub"][data-fold="collapsed"]')!
+    toggle.focus(); workspace.reader.refreshChannels()
+    expect(document.activeElement).toBe(toggle)
+    toggle.click()
+    expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 1', 'Resting, 1'])
     workspace.open(feed[3], 'Desk'); await flush()
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
+    expect(captions()).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review', 'Resting'])
     expect(document.querySelector('.ws-sidebar [data-channel-uid="settled"]')?.getAttribute('aria-current')).toBe('true')
+    const find = document.querySelector<HTMLInputElement>('.ws-sidebar .ws-channel-find')!
+    find.value = 'quiet/draft'; find.dispatchEvent(new Event('input'))
+    expect(rows()).toEqual(['quiet-draft'])
+    expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 1', 'Resting, 1'])
+    find.value = '/ask'; find.dispatchEvent(new Event('input'))
+    workspace.open(feed[4], 'Desk'); await flush()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
+    expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('resting-ask')
+    expect(find.value).toBe('/ask')
+  })
+  it('restores folded rows immediately when external navigation clears Find', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    localStorage.setItem('shuttle.sidebar.tree', JSON.stringify({ hub: { collapsed: true } }))
+    const feed = [
+      card({ id: 'hub', uid: 'hub', name: 'Hub', status: 'active' }),
+      card({ id: 'child', uid: 'child', name: 'Child', orchestrator: 'hub', status: 'active' }),
+      card({ id: 'other', uid: 'other', name: 'Other', status: 'active' }),
+    ]
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[2]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.open(feed[0], 'Desk'); await flush()
+    const find = document.querySelector<HTMLInputElement>('.ws-sidebar .ws-channel-find')!
+    find.value = 'Child'; find.dispatchEvent(new Event('input'))
+    expect(document.querySelector('.ws-sidebar [data-channel-uid="child"]')).not.toBeNull()
+    workspace.open(feed[2], 'Desk'); await flush()
+    expect(find.value).toBe('')
+    expect(document.querySelector('.ws-sidebar [data-channel-uid="child"]')).toBeNull()
+    expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('other')
+  })
+  it('shows a crumb when a Working parent was separated from its child by another ask', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    localStorage.setItem('shuttle.sidebar.tree', JSON.stringify({ hub: { working: true } }))
+    const feed = [
+      card({ id: 'hub', uid: 'hub', status: 'active' }),
+      card({ id: 'a', uid: 'a', name: 'A', orchestrator: 'hub', status: 'active', ask: { text: 'Choose', at: '' } }),
+      card({ id: 'b', uid: 'b', name: 'B', orchestrator: 'a', status: 'active' }),
+      card({ id: 'z', uid: 'z', name: 'Z', orchestrator: 'hub', status: 'active', ask: { text: 'Choose', at: '' } }),
+      card({ id: 'c', uid: 'c', name: 'C', orchestrator: 'hub', status: 'active' }),
+    ]
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[1], feed[0]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.open(feed[0], 'Desk'); await flush()
+    const row = document.querySelector('.ws-sidebar [data-channel-uid="b"]')!
+    expect(row.getAttribute('aria-level')).toBe('2')
+    expect(row.querySelector('.ws-sidebar-crumb')?.textContent).toBe('A / ')
   })
   it("leads a thread's chat up its ancestry, by the header's trail and by b", async () => {
     workspace.dispose()
