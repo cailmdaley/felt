@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { it, expect } from 'vitest'
-import { parsePatchFiles } from '@pierre/diffs'
+import { changedRows, checkChange } from '../scripts/check-change.mjs'
 import { buildShuttle, bakeChange } from '../scripts/bake-change-fixture.mjs'
 import { assignLanes, type ChangeBundle } from '../src/board/workspace/changeModel.js'
 
@@ -54,22 +54,6 @@ it('reads the public CLI bundles with the reader types, paths and changed-line c
     execFileSync(resolve('node_modules/.bin/tsc'), ['--noEmit', '--strict', '--skipLibCheck', '--target', 'es2022', '--module', 'nodenext', source], { encoding: 'utf8', stdio: 'inherit' })
     for (const { bundle, report } of samples as { bundle: ChangeBundle; report: { total: number; covered: number; uncovered: { file: string; old_from: number; old_lines: number; new_from: number; new_lines: number }[] } }[]) {
       const files = bundle.files
-      const changedRows = (file: string, hunks: ChangeBundle['files'][number]['hunks']) => {
-        const keys = new Set<string>()
-        for (const window of hunks.flatMap(hunk => hunk.windows)) {
-          const parsed = parsePatchFiles(window.patch)[0]?.files[0]
-          expect(parsed, file).toBeDefined()
-          for (const hunk of parsed!.hunks) {
-            let old = hunk.deletionStart, next = hunk.additionStart
-            for (const content of hunk.hunkContent) {
-              if (content.type === 'context') { old += content.lines; next += content.lines; continue }
-              for (let i = 0; i < content.deletions; i++) keys.add(JSON.stringify([file, 'old', old++, parsed!.deletionLines[content.deletionLineIndex + i]]))
-              for (let i = 0; i < content.additions; i++) keys.add(JSON.stringify([file, 'new', next++, parsed!.additionLines[content.additionLineIndex + i]]))
-            }
-          }
-        }
-        return keys
-      }
       const all = new Set(files.flatMap(file => [...changedRows(file.path, file.hunks)]))
       expect(all.size).toBe(report.total)
       expect(files.reduce((count, file) => count + changedRows(file.path, file.remaining).size, 0) + report.covered).toBe(report.total)
@@ -84,6 +68,10 @@ it('reads the public CLI bundles with the reader types, paths and changed-line c
       const remaining = assignLanes(bundle).remaining.flatMap(file => file.hunks.map(hunk => ({ file: file.path, old_from: hunk.old_from, old_lines: hunk.old_lines, new_from: hunk.new_from, new_lines: hunk.new_lines })))
       expect(remaining).toEqual(report.uncovered.filter(hunk => bundle.files.find(file => file.path === hunk.file)?.role !== 'test').map(({ file, old_from, old_lines, new_from, new_lines }) => ({ file, old_from, old_lines, new_from, new_lines })))
     }
+    expect(() => checkChange(story.bundle)).not.toThrow()
+    const lostRow = structuredClone(story.bundle)
+    lostRow.files.find((file: { path: string }) => file.path === 'added.ts').remaining[0].windows = []
+    expect(() => checkChange(lostRow)).toThrow(/retain every changed row/)
     const files = (plain.bundle as ChangeBundle).files
     expect(files.find(file => file.path === 'new name.ts')?.status).toBe('renamed')
     expect(files.find(file => file.path === 'new name.ts')?.hunks).toHaveLength(1)

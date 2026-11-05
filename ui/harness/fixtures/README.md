@@ -32,6 +32,12 @@ The plain and stress fixtures remain independent of the supplied story bundle.
 
 ## Verification
 
+`nice -n 10 node scripts/check-change.mjs /absolute/path/review.change.json`
+checks the actual renderer’s decoded rows: every captured changed row, with its side,
+line number and text, must survive in Story, Tests or Remaining.
+It reports changed lines shown and remaining. The contract suite also mutates away a
+Remaining window and requires this check to fail.
+
 From `ui/`:
 
 ```sh
