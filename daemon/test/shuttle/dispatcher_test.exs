@@ -1948,6 +1948,35 @@ defmodule Shuttle.DispatcherTest do
                "--Users-cd280747-dev-felt--"
     end
 
+    @tag :tmp_dir
+    test "a symlinked project directory captures the session pi records", %{tmp_dir: tmp} do
+      Shuttle.Test.Env.put_env("SHUTTLE_PI_SESSIONS_DIR", Path.join(tmp, "pi"))
+      real = Path.join(tmp, "real/analyses")
+      File.mkdir_p!(real)
+      File.ln_s!("real", Path.join(tmp, "group"))
+      sessions = Shuttle.HarnessPaths.pi_sessions_dir(real)
+      File.mkdir_p!(sessions)
+      now = DateTime.utc_now()
+
+      header = %{
+        "type" => "session",
+        "id" => "pi-session",
+        "cwd" => real,
+        "timestamp" => DateTime.to_iso8601(now)
+      }
+
+      path = Path.join(sessions, "session.jsonl")
+      File.write!(path, Jason.encode!(header) <> "\nFiber: tests/linked\n")
+
+      assert {:ok, ^path} =
+               Dispatcher.find_session_file(
+                 "pi",
+                 Path.join(tmp, "group/analyses"),
+                 "tests/linked",
+                 now
+               )
+    end
+
     @prev %{uuid: "11111111-2222-3333-4444-555555555555", harness: "claude-code"}
 
     test "a pi dispatch refuses to resume a claude-code session" do

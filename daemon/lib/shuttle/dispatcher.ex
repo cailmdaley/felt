@@ -1901,7 +1901,8 @@ defmodule Shuttle.Dispatcher do
 
   defp candidate_session_files(_cli, _work_dir, _dispatched_after), do: []
 
-  defp find_session_file(cli, work_dir, fiber_id, dispatched_after) do
+  @doc false
+  def find_session_file(cli, work_dir, fiber_id, dispatched_after) do
     cli
     |> candidate_session_files(work_dir, dispatched_after)
     |> Enum.find(&session_matches?(cli, &1, work_dir, fiber_id, dispatched_after))
@@ -1940,12 +1941,17 @@ defmodule Shuttle.Dispatcher do
          cwd when is_binary(cwd) <- Map.get(header, "cwd"),
          timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
          {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
-      Shuttle.Env.expand(cwd) == Shuttle.Env.expand(work_dir) and
+      same_directory?(cwd, work_dir) and
         DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
         String.contains?(content, "Fiber: #{fiber_id}")
     else
       _ -> false
     end
+  end
+
+  defp same_directory?(left, right) do
+    Shuttle.HarnessPaths.real_path(Shuttle.Env.expand(left)) ==
+      Shuttle.HarnessPaths.real_path(Shuttle.Env.expand(right))
   end
 
   # No cwd re-check here: the only caller hands us the path

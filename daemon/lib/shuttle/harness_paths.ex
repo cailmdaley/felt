@@ -110,12 +110,16 @@ defmodule Shuttle.HarnessPaths do
     Path.join(pi_sessions_root(opts), encoded)
   end
 
-  # pi encodes its process cwd, which the kernel reports with symlinks resolved,
-  # so /project/group/x -> /project/1234/x files sessions under the real path.
-  defp real_path(path, hops \\ 40)
-  defp real_path(path, 0), do: path
+  @doc """
+  An absolute path with its symlinks resolved. A harness records its process
+  cwd, which the kernel reports resolved, so a worker started in
+  /project/group/x records /project/1234/x.
+  """
+  @spec real_path(String.t(), non_neg_integer()) :: String.t()
+  def real_path(path, hops \\ 40)
+  def real_path(path, 0), do: path
 
-  defp real_path(path, hops) do
+  def real_path(path, hops) do
     path
     |> Path.split()
     |> Enum.reduce(fn segment, resolved ->
