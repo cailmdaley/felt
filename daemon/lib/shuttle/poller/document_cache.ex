@@ -15,7 +15,7 @@ defmodule Shuttle.Poller.DocumentCache do
   candidate row via `Shuttle.FiberDocuments.entries_for_fiber/2` — no per-miss
   `felt show`. The mtime predicate stays as a cheap "reuse the already-built
   entry map" optimization; on a slow Lustre login node with 726 Shuttle
-  fibers, the tick costs one `shuttle ls` per store and zero stats.
+  fibers, an unchanged row set costs one `shuttle ls` per store and zero per-fiber stats.
 
   The cache itself — `document_cache`, `document_cache_stats`,
   `document_cache_ready` — lives on `Shuttle.Poller.State`; the GenServer owns
@@ -25,7 +25,7 @@ defmodule Shuttle.Poller.DocumentCache do
 
   require Logger
 
-  alias Shuttle.{FeltStores, FiberDocuments}
+  alias Shuttle.{FeltStores, FiberDocuments, FS}
 
   @doc """
   Rebuild the document cache from `candidates`, reusing unchanged entries by
@@ -82,6 +82,8 @@ defmodule Shuttle.Poller.DocumentCache do
   end
 
   @doc "Retain last-known addresses of unreadable files in configured stores, marked stale."
+  def retain_unreadable(_previous, cache, stores) when stores in [nil, []], do: cache
+
   def retain_unreadable(previous, cache, stores) do
     stores = Enum.map(stores, &FeltStores.store_felt_realpath/1)
 
@@ -90,7 +92,7 @@ defmodule Shuttle.Poller.DocumentCache do
 
       if !Map.has_key?(acc, key) && FeltStores.store_felt_realpath(entry.felt_store) in stores &&
            is_binary(path) &&
-           File.regular?(path) && match?({:error, _}, Shuttle.FiberDoc.read_path(path)) do
+           FS.regular?(path) && match?({:error, _}, Shuttle.FiberDoc.read_path(path)) do
         Map.put(acc, key, %{cached | entry: Map.put(entry, :document_stale, true)})
       else
         acc
