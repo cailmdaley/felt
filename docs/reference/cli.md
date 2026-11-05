@@ -172,7 +172,7 @@ in time … may still apply"), never bypassed with a local write, since the
 transition may still land there. Foreign mutations require the local daemon; when it is down, start it rather than bypassing its policy. `--local` refuses every foreign owner, including exits.
 The daemon alone may mirror safe plain Rest, Close or Discard exits after a definite pre-send failure to a known owner already marked stale by the registry. A timeout alone never authorizes fallback. Pause and every explicit `rest --until` wait for the owner, including `--until ''`. Configuration, publication, Temper and execution require the owner; standing work, scheduled or not, cannot mirror.
 CLI Rest, Pause and Close resolve a remote's indexed UID before parsing a viewer's Git copy, so a conflicted viewer document cannot block a healthy owner. An unreadable owner's last-known card is stale; Stop worker or `POST /api/v1/kill` with the UID still reaches its runtime while lifecycle changes wait for file repair.
-Mirror exits travel by Git and send no execution request. A remote-only card is not writable, and lost replies never permit fallback or replay.
+Close or Discard carrying an outcome edit also requires the owner; an exit copy never drops or rewrites report text. Mirror exits travel by Git and send no execution request. A remote-only card is not writable, and lost replies never permit fallback or replay.
 For what the daemon speaks directly, see the [HTTP API](api.md).
 
 Owner routing uses the local document's `shuttle.host`, not the local daemon's snapshot.

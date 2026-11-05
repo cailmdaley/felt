@@ -51,7 +51,9 @@ defmodule Shuttle.OwnerExitTest do
           %{"action" => "rest", "until" => ""},
           %{"action" => "rest", "until" => "2026-12-01"},
           %{"action" => "rest", "until" => "work/blocker"},
-          %{"action" => "close", "tempered" => true}
+          %{"action" => "close", "tempered" => true},
+          %{"action" => "close", "outcome" => "Do not drop this report"},
+          %{"action" => "close", "tempered" => false, "outcome" => ""}
         ],
         do: refute(OwnerExit.action?(params))
   end

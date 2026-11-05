@@ -85,7 +85,10 @@ defmodule Shuttle.OwnerExit do
   end
 
   def action?(%{"action" => "rest"} = params), do: !Map.has_key?(params, "until")
-  def action?(%{"action" => "close"} = params), do: params["tempered"] != true
+
+  def action?(%{"action" => "close"} = params),
+    do: params["tempered"] != true && !Map.has_key?(params, "outcome")
+
   def action?(_), do: false
 
   def origin(identifier, supplied, hint \\ nil) do
