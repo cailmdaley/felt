@@ -115,6 +115,7 @@ Messaging a fiber reaches its current worker, or queues for the next one. Anothe
 | Dispatch rules, board columns, all verbs, claiming a fiber, remote hosts, messaging detail, transcript search | [references/operating.md](references/operating.md) |
 | Writing `tapestry.html` | [references/tapestry.md](references/tapestry.md) |
 | A standing constitution's runs | [references/standing-roles.md](references/standing-roles.md) |
+| Getting a branch ready for the human to read before a PR | [references/change-review.md](references/change-review.md) |
 | Capturing an idea into a fiber | [references/capture.md](references/capture.md) |
 | A meeting, a transcript, or a predecessor's session | [references/meeting.md](references/meeting.md) |
 | Installing Shuttle or adding a remote | [references/setup.md](references/setup.md) |
