@@ -976,6 +976,7 @@ export class Workspace {
       const info = await head(fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
       // An unreachable owner keeps its last known metadata.
       if (!info || this.disposed) return
+      if (!info.exists) changed = true
       const before = state.fileModifiedAt.get(doc.key)
       if (info.modifiedAt) state.fileModifiedAt.set(doc.key, info.modifiedAt)
       else state.fileModifiedAt.delete(doc.key)

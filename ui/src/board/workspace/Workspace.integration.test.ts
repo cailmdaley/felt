@@ -477,6 +477,9 @@ describe('workspace reader integration', () => {
     expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
   })
   it('a Question opens its chat with the report chip rather than a remembered file', async () => {
+    const request = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/api/v1/file-info?')
+      ? Response.json({ exists: true }) : request(input, init))
     const original = cards[0]; cards[0] = { ...original, shuttleKind: 'oneshot' }
     onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0]); await flush(); await flush()

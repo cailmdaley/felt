@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
+import { head, resetDocumentResources } from '../documentResources.js'
 import { Reader } from './Reader.js'
 import { buildChannel, chatDocument } from './documents.js'
 
@@ -48,6 +49,21 @@ for (const phone of [false, true]) it(`delegates Back and Escape to navigation w
   expect(onOrchestrator).not.toHaveBeenCalled()
 })
 
+
+it('omits missing sent files from header chips using cached metadata only', async () => {
+  setup()
+  resetDocumentResources()
+  const fetch = vi.fn(async () => Response.json({ exists: false }))
+  vi.stubGlobal('fetch', fetch)
+  await head('/api/v1/file?path=%2Fgone.change.json&origin=host-a')
+  const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', conversation: true,
+    sent: [{ path: '/gone.change.json', time: 2 }, { path: '/kept.change.json', time: 1 }] })
+  reader.show(channel, chatDocument(channel)!.key, 'Board', alpha)
+  expect(reader.el.querySelector('[data-document-key="host-a:/gone.change.json"].ws-report-chip')).toBeNull()
+  expect(reader.el.querySelectorAll('.ws-report-chip')).toHaveLength(1)
+  expect(fetch.mock.calls.filter(call => String((call as unknown[])[0]).includes('/file-info?'))).toHaveLength(1)
+  resetDocumentResources()
+})
 
 it('opens the fiber artifact instead of a newer nested artifact', () => {
   setup()

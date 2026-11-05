@@ -219,6 +219,9 @@ export function peekVersion(value: Peek): string {
  * Whether a document exists, with its size and modification time, from the
  * owner's metadata route. Null when the owner cannot answer.
  */
+/** The last metadata answer, without scheduling a request. */
+export function cachedHead(src: string): Head | undefined { return entries.get(resourceKey(src))?.head?.value }
+
 export function head(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.title, options: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<Head | null> {
   const entry = entryFor(src)
   if (!options.fresh && isFresh(entry.head)) return Promise.resolve(entry.head!.value)

@@ -9,6 +9,7 @@ import { constitutionAction } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
+import { cachedHead } from '../documentResources.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
@@ -532,7 +533,8 @@ export class Reader {
     this.fresh = fresh
     this.feedFiles()
     const chat = chatDocument(ch)
-    const report = channelLead(ch)
+    const present = (doc: WorkspaceDocument) => cachedHead(fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner))?.exists !== false
+    const report = channelLead({ ...ch, documents: ch.documents.filter(present) })
     const chatFrame = chat && this.host.get(chat.key)
     const chipKey = this.selected === chat?.key && report && chatFrame ? report.key : null
     if (this.reportChip?.key !== chipKey) {
@@ -542,7 +544,7 @@ export class Reader {
     const head = chatFrame?.content.querySelector('.ws-chat-head')
     const refs = head?.querySelector('.ws-chat-refs')
     if (refs && this.reportChip && this.reportChip.view.el.parentElement !== refs) refs.append(this.reportChip.view.el)
-    const changes = ch.documents.filter(doc => doc.kind === 'change' && doc.key !== chipKey)
+    const changes = ch.documents.filter(doc => doc.kind === 'change' && doc.key !== chipKey && present(doc))
     for (const [key, chip] of this.changeChips) if (!changes.some(doc => doc.key === key) || this.selected !== chat?.key) { chip.dispose(); this.changeChips.delete(key) }
     if (refs && this.selected === chat?.key) for (const doc of changes) {
       let chip = this.changeChips.get(doc.key)
