@@ -44,10 +44,12 @@ describe('workspace file viewer hooks', () => {
     document.body.append(viewer)
     watch.content!(JSON.stringify({ version: 1, title: 'First', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'head', commits: [], files: [], story: null }))
     await vi.waitFor(() => expect(viewer.textContent).toBe('First'))
-    const first = changeRenderer.mount.mock.calls.at(-1)![2]
+    const first = changeRenderer.mount.mock.calls.at(-1)!
+    const identity = first[2], revision = first[6]
     watch.content!(JSON.stringify({ version: 1, title: 'Rebaked', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head: 'b'.repeat(40), base_ref: 'main', head_ref: 'head', commits: [], files: [], story: null }))
     await vi.waitFor(() => expect(viewer.textContent).toBe('Rebaked'))
-    expect(changeRenderer.mount.mock.calls.at(-1)![2]).not.toBe(first)
+    expect(changeRenderer.mount.mock.calls.at(-1)![2]).toBe(identity)
+    expect(changeRenderer.mount.mock.calls.at(-1)![6]).not.toBe(revision)
     expect(dispose).toHaveBeenCalledTimes(1)
     disposeFileViewer(viewer)
     expect(watch.stop).toHaveBeenCalled()

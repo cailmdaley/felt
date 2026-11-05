@@ -21,6 +21,13 @@ function mount(b: ChangeBundle, identity: string, send: (message: string) => Pro
   const reader = mountChangeReader(root, b, identity, send, () => true, () => 'work/holding on host-b'); mounted.push(reader)
   return { root, reader, send: vi.mocked(send) }
 }
+function type(field: Element, text: string) { if (!(field instanceof HTMLTextAreaElement)) throw new Error('Expected a textarea'); field.value = text; field.dispatchEvent(new Event('input')) }
+function lineComment(root: HTMLElement, text: string) {
+  root.querySelector<HTMLButtonElement>('.change-plain-row [aria-label$="(new)"]')!.click()
+  const field = [...root.querySelectorAll<HTMLTextAreaElement>('.change-draft-comments textarea')].at(-1)!
+  type(field, text)
+}
+
 it('shows statuses, old paths, modes and type changes even for files with text hunks', () => {
   const b = bundle(), original = b.files[0]
   b.files = [
@@ -47,4 +54,53 @@ it('counts and marks a role override but cannot mark a folded file viewed before
   expect(control.disabled).toBe(true); control.click(); expect(control.getAttribute('aria-pressed')).toBe('false')
   details.open = true; details.dispatchEvent(new Event('toggle'))
   expect(control.disabled).toBe(false); control.click(); expect(control.getAttribute('aria-pressed')).toBe('true')
+})
+it('keeps old draft anchors across rebakes, adds new anchors without mixing them, and resets viewed state', async () => {
+  const first = mount(bundle(), 'rebake')
+  type(first.root.querySelector('.change-overall')!, 'An overall note from the earlier head')
+  lineComment(first.root, 'An earlier line comment')
+  first.root.querySelector<HTMLButtonElement>('.change-viewed')!.click()
+  first.reader.dispose()
+  const next = mount(bundle('c'.repeat(40)), 'rebake')
+  expect(next.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toContain('earlier head')
+  expect(next.root.querySelector('.change-comment label')?.textContent).toContain('head bbbbbbbb (earlier snapshot)')
+  expect(next.root.querySelector('.change-viewed')?.getAttribute('aria-pressed')).toBe('false')
+  lineComment(next.root, 'A comment on the rebaked head')
+  expect(next.root.querySelectorAll('.change-draft-comments textarea')).toHaveLength(2)
+  expect(next.root.querySelector('.change-send button')?.textContent).toContain('bbbbbbbb')
+  expect(next.root.querySelector('.change-send')?.parentElement?.textContent).toContain('work/holding on host-b')
+  next.root.querySelector<HTMLButtonElement>('.change-send button')!.click()
+  await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce())
+  const message = next.send.mock.calls[0][0]
+  expect(message).toContain(`Head: ${'c'.repeat(40)}`)
+  expect(message).toContain(`Earlier snapshot\nBase: ${'a'.repeat(40)}\nHead: ${'b'.repeat(40)}`)
+  expect(message).toContain('An earlier line comment'); expect(message).toContain('A comment on the rebaked head')
+  await vi.waitFor(() => expect(next.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toBe(''))
+})
+it('locks the draft through a slow send, including a rebake, then clears delivered text exactly once', async () => {
+  let release!: () => void
+  const send = vi.fn(() => new Promise<void>(resolve => { release = resolve }))
+  const first = mount(bundle(), 'slow', send)
+  type(first.root.querySelector('.change-overall')!, 'Deliver this once')
+  lineComment(first.root, 'This comment too')
+  first.root.querySelector<HTMLButtonElement>('.change-send button')!.click()
+  expect(first.root.querySelector<HTMLTextAreaElement>('.change-overall')?.disabled).toBe(true)
+  expect(first.root.querySelector<HTMLButtonElement>('.change-comment-remove')?.disabled).toBe(true)
+  first.reader.dispose()
+  const next = mount(bundle('c'.repeat(40)), 'slow', send)
+  expect(next.root.querySelector<HTMLTextAreaElement>('.change-overall')?.disabled).toBe(true)
+  expect(next.root.querySelector<HTMLButtonElement>('.change-send button')?.disabled).toBe(true)
+  release()
+  await vi.waitFor(() => expect(next.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toBe(''))
+  expect(next.root.querySelector('.change-send-status')?.textContent).toBe('Review sent to the worker')
+  expect(next.root.querySelectorAll('.change-draft-comments textarea')).toHaveLength(0)
+  next.root.querySelector<HTMLButtonElement>('.change-send button')!.click(); expect(send).toHaveBeenCalledOnce()
+})
+it('unlocks a refused send without dropping its draft', async () => {
+  const state = mount(bundle(), 'refused', vi.fn(async () => { throw new Error('Worker went away') }))
+  type(state.root.querySelector('.change-overall')!, 'Keep this draft')
+  state.root.querySelector<HTMLButtonElement>('.change-send button')!.click()
+  await vi.waitFor(() => expect(state.root.querySelector('.change-send-status')?.textContent).toBe('Worker went away'))
+  expect(state.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toBe('Keep this draft')
+  expect(state.root.querySelector<HTMLTextAreaElement>('.change-overall')?.disabled).toBe(false)
 })

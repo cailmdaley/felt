@@ -1,9 +1,10 @@
 import { registerCustomCSSVariableTheme, type AnnotationSide } from '@pierre/diffs'
 import { renderMarkdown } from '../utils.js'
-import { assignLanes, reviewMessage, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeDraft, type ChangeFile, type ChangeHunk, type ChangeWindow } from './changeModel.js'
+import { assignLanes, changeIdentity, reviewMessage, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeFile, type ChangeHunk, type ChangeWindow } from './changeModel.js'
 import './change-reader.css'
 import { mountChangeWindow } from './changeWindow.js'
 import { validateChangeBundle } from './changeValidation.js'
+import { acquireChangeDraft } from './changeDraft.js'
 import { changeFileLabel } from './changeFileLabel.js'
 
 registerCustomCSSVariableTheme('shuttle-change', {})
@@ -26,16 +27,16 @@ function save(key: string, value: unknown): void {
 }
 
 /** Native review content; the workspace owns its file, gestures, scroll position and worker route. */
-export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, identity: string, send?: (message: string) => Promise<void>, canSend = () => true, reviewTarget = () => 'this fiber') {
+export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, identity: string, send?: (message: string) => Promise<void>, canSend = () => true, reviewTarget = () => 'this fiber', revision?: string) {
   try { validateChangeBundle(bundle) } catch (error) {
     const message = el('div', 'change-load-error', error instanceof Error ? error.message : 'Invalid change bundle')
     message.setAttribute('role', 'alert'); root.replaceChildren(message)
     return { scroller: message, dispose() { message.remove() } }
   }
   const files = bundle.files, lanes = assignLanes(bundle)
-  const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head])}`
+  const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head, revision ?? changeIdentity(JSON.stringify(bundle))])}`
   const viewed = new Set(stored<string[]>(`${prefix}:viewed`, []))
-  const draft = stored<ChangeDraft>(`${prefix}:draft`, { note: '', comments: [] })
+  const draftState = acquireChangeDraft(identity, bundle.base, bundle.head), draft = draftState.value
   const shell = el('div', 'change-reader')
   const rail = el('nav', 'change-contents'); rail.setAttribute('aria-label', 'Change contents')
   const scroll = el('div', 'change-scroll'); scroll.tabIndex = -1
@@ -101,54 +102,68 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   }
   const note = el('textarea', 'change-overall'); note.placeholder = 'Your overall note…'; note.setAttribute('aria-label', 'Overall review note'); note.value = draft.note
   const status = el('span', 'change-send-status'); status.setAttribute('role', 'status')
-  let busy = false
-  const persist = (): void => { save(`${prefix}:draft`, draft); status.textContent = 'Draft saved on this browser' }
-  note.addEventListener('input', () => { draft.note = note.value; persist(); paintSend() })
+  const reviewAnchor = el('p', 'change-section-note')
+  const persist = (): void => { draftState.save(); status.textContent = 'Draft saved on this browser' }
+  note.addEventListener('input', () => {
+    if (draftState.busy) return
+    if (!draft.note) { draft.base = bundle.base; draft.head = bundle.head }
+    draft.note = note.value; persist(); paintSend()
+  })
   const sendButton = button('Send review', () => { void deliver() })
   const paintSend = (): void => {
-    sendButton.disabled = busy || !send || !canSend() || !(draft.note.trim() || draft.comments.some(c => c.text.trim()))
-    if (!send || !canSend()) status.textContent = 'No live worker. Start or resume one from the composer before sending a review.'
+    const earlier = [...new Set([...(draft.note.trim() ? [draft.head] : []), ...draft.comments.filter(c => c.text.trim()).map(c => c.head ?? draft.head)].filter((head): head is string => !!head && head !== bundle.head))]
+    reviewAnchor.textContent = `To ${reviewTarget()}. Current head ${bundle.head.slice(0, 8)}. ${earlier.length ? `This draft also contains notes anchored to earlier head ${earlier.map(head => head.slice(0, 8)).join(', ')}; Send preserves those anchors.` : 'Drafts stay on this browser and keep their snapshot anchors across rebakes.'}`
+    sendButton.disabled = draftState.busy || !send || !canSend() || !(draft.note.trim() || draft.comments.some(c => c.text.trim()))
+    sendButton.textContent = draftState.busy ? 'Sending…' : earlier.length ? `Send review (includes ${earlier.map(head => head.slice(0, 8)).join(', ')})` : 'Send review'
+    for (const field of shell.querySelectorAll<HTMLTextAreaElement>('textarea')) field.disabled = draftState.busy
+    for (const control of shell.querySelectorAll<HTMLButtonElement>('.change-comment-remove')) control.disabled = draftState.busy
+    if ((!send || !canSend()) && !draftState.message) status.textContent = 'No live worker. Start or resume one from the composer before sending a review.'
   }
   const deliver = async (): Promise<void> => {
     paintSend()
     if (sendButton.disabled || !send) return
-    busy = true; paintSend(); sendButton.textContent = 'Sending…'
-    const snapshot = JSON.stringify(draft)
+    draftState.lock(true); paintSend()
     try {
       await send(reviewMessage(bundle, draft))
-      if (JSON.stringify(draft) === snapshot) { draft.note = ''; draft.comments = []; note.value = ''; persist(); refreshAnnotations(); renderDraftComments() }
-      status.textContent = 'Review sent to the worker'
-    } catch (error) { status.textContent = error instanceof Error ? error.message : 'Could not send review. Your draft is saved.' }
-    finally { busy = false; sendButton.textContent = 'Send review'; paintSend() }
+      draft.note = ''; draft.comments = []; draft.base = bundle.base; draft.head = bundle.head
+      note.value = ''; persist(); refreshAnnotations(); renderDraftComments()
+      draftState.report('Review sent to the worker')
+    } catch (error) { draftState.report(error instanceof Error ? error.message : 'Could not send review. Your draft is saved.') }
+    finally { draftState.lock(false); paintSend() }
   }
   const annotations = new Set<ReturnType<typeof mountChangeWindow>>()
   const sideOf = (side: AnnotationSide): 'new' | 'old' => side === 'deletions' ? 'old' : 'new'
-  const lineAnnotations = (file: ChangeFile) => draft.comments.filter(c => c.file === file.path).map(c => ({ side: c.side === 'old' ? 'deletions' as const : 'additions' as const, lineNumber: c.line, metadata: c }))
+  const lineAnnotations = (file: ChangeFile) => draft.comments.filter(c => c.file === file.path && (c.head ?? draft.head ?? bundle.head) === bundle.head && (c.base ?? draft.base ?? bundle.base) === bundle.base).map(c => ({ side: c.side === 'old' ? 'deletions' as const : 'additions' as const, lineNumber: c.line, metadata: c }))
   const refreshAnnotations = (): void => {
     for (const entry of annotations) entry.update()
   }
   const commentField = (comment: ChangeComment): HTMLElement => {
     const box = el('div', 'change-comment')
-    const label = el('label', '', `${comment.file}:${comment.line}${comment.side === 'old' ? ' (old)' : ''}`)
-    const field = el('textarea', ''); field.value = comment.text; field.placeholder = 'What should the author look at?'
+    const head = comment.head ?? draft.head ?? bundle.head
+    const label = el('label', '', `${comment.file}:${comment.line}${comment.side === 'old' ? ' (old)' : ''} · head ${head.slice(0, 8)}${head !== bundle.head ? ' (earlier snapshot)' : ''}`)
+    const field = el('textarea', ''); field.value = comment.text; field.placeholder = 'What should the author look at?'; field.disabled = draftState.busy; field.dataset.commentHead = head
     field.setAttribute('aria-label', `Comment on ${comment.file}:${comment.line} (${comment.side})`)
     field.addEventListener('input', () => {
+      if (draftState.busy) return
       comment.text = field.value
       for (const mirror of shell.querySelectorAll<HTMLTextAreaElement>('textarea')) {
-        if (mirror !== field && mirror.getAttribute('aria-label') === field.getAttribute('aria-label')) mirror.value = field.value
+        if (mirror !== field && mirror.getAttribute('aria-label') === field.getAttribute('aria-label') && mirror.dataset.commentHead === head) mirror.value = field.value
       }
       persist(); paintSend()
     })
     field.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); field.blur() } })
     label.append(field)
-    box.append(label, button('Remove', () => { draft.comments = draft.comments.filter(c => c !== comment); persist(); refreshAnnotations(); renderDraftComments(); paintSend() }))
+    const remove = button('Remove', () => { if (draftState.busy) return; draft.comments = draft.comments.filter(c => c !== comment); persist(); refreshAnnotations(); renderDraftComments(); paintSend() })
+    remove.className = 'change-comment-remove'; remove.disabled = draftState.busy
+    box.append(label, remove)
     return box
   }
   const addComment = (file: ChangeFile, line: number, side: AnnotationSide): void => {
-    let comment = draft.comments.find(c => c.file === file.path && c.line === line && c.side === sideOf(side))
-    if (!comment) { comment = { file: file.path, line, side: sideOf(side), text: '' }; draft.comments.push(comment); persist(); refreshAnnotations(); renderDraftComments() }
+    if (draftState.busy) return
+    let comment = draft.comments.find(c => c.file === file.path && c.line === line && c.side === sideOf(side) && (c.head ?? draft.head ?? bundle.head) === bundle.head && (c.base ?? draft.base ?? bundle.base) === bundle.base)
+    if (!comment) { comment = { file: file.path, line, side: sideOf(side), text: '', base: bundle.base, head: bundle.head }; draft.comments.push(comment); persist(); refreshAnnotations(); renderDraftComments() }
     requestAnimationFrame(() => {
-      const field = [...shell.querySelectorAll<HTMLTextAreaElement>('.change-file textarea, .change-draft-comments textarea')].find(field => field.getAttribute('aria-label') === `Comment on ${file.path}:${line} (${sideOf(side)})`)
+      const field = [...shell.querySelectorAll<HTMLTextAreaElement>('.change-file textarea, .change-draft-comments textarea')].find(field => field.getAttribute('aria-label') === `Comment on ${file.path}:${line} (${sideOf(side)})` && field.dataset.commentHead === bundle.head)
       field?.focus({ preventScroll: true })
       if (field && field.getBoundingClientRect().bottom > scroll.getBoundingClientRect().bottom) reveal(field, true)
     })
@@ -258,7 +273,8 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   const renderDraftComments = (): void => { draftComments.replaceChildren(...draft.comments.map(commentField)) }
   renderDraftComments()
   const foot = el('div', 'change-send'); foot.append(sendButton, status)
-  review.element.append(el('p', 'change-section-note', `One message to ${reviewTarget()}, anchored to head ${bundle.head.slice(0, 8)}. Drafts stay on this browser.`), draftComments, note, foot)
+  review.element.append(reviewAnchor, draftComments, note, foot)
+  disposers.push(draftState.subscribe(() => { note.value = draft.note; status.textContent = draftState.message; refreshAnnotations(); renderDraftComments(); paintSend() }))
   if (!send || !canSend()) status.textContent = 'No live worker. Start or resume one from the composer before sending a review.'
   paintSend(); updateProgress()
   let railFrame = 0

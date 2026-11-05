@@ -40,13 +40,14 @@ export function changeIdentity(source: string): string {
   return [a, b].map(hash => (hash >>> 0).toString(16).padStart(8, '0')).join('')
 }
 
-export interface ChangeComment { file: string; line: number; side: 'new' | 'old'; text: string }
-export interface ChangeDraft { note: string; comments: ChangeComment[] }
+export interface ChangeComment { file: string; line: number; side: 'new' | 'old'; text: string; base?: string; head?: string }
+export interface ChangeDraft { note: string; comments: ChangeComment[]; base?: string; head?: string }
 function quoted(value: string): string {
   return JSON.stringify(value).replace(/[\u007f-\u009f\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }
 export function reviewMessage(bundle: ChangeBundle, draft: ChangeDraft): string {
-  return [`Base: ${bundle.base}`, `Head: ${bundle.head}`, `Review of ${quoted(bundle.title)}`, draft.note.trim(),
-    ...draft.comments.filter(comment => comment.text.trim()).map(comment => `${quoted(comment.file)}:${comment.line}${comment.side === 'old' ? ' (old)' : ''}\n${comment.text.trim()}`),
+  const anchor = (base = bundle.base, head = bundle.head): string => base === bundle.base && head === bundle.head ? '' : `Earlier snapshot\nBase: ${base}\nHead: ${head}\n`
+  return [`Base: ${bundle.base}`, `Head: ${bundle.head}`, `Review of ${quoted(bundle.title)}`, draft.note.trim() ? `${anchor(draft.base, draft.head)}${draft.note.trim()}` : '',
+    ...draft.comments.filter(comment => comment.text.trim()).map(comment => `${anchor(comment.base ?? draft.base, comment.head ?? draft.head)}${quoted(comment.file)}:${comment.line}${comment.side === 'old' ? ' (old)' : ''}\n${comment.text.trim()}`),
   ].filter(Boolean).join('\n\n')
 }
