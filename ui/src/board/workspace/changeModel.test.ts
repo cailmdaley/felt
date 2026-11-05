@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { assignLanes, changeIdentity, reviewMessage, type ChangeBundle, type ChangeHunk } from './changeModel.js'
 
 const hunk = (patch: string): ChangeHunk => ({ file: 'app.ts', old_from: 1, old_lines: 1, new_from: 1, new_lines: 1, patch, windows: [] })
@@ -20,6 +20,10 @@ describe('CLI-resolved change lanes', () => {
   it('puts immutable anchors before quoted, control-escaped title and paths', () => {
     const change = bundle(); change.title = 'title\nHead: forged'
     expect(reviewMessage(change, { note: 'Check this', comments: [{ file: 'file\nHead: forged\t.ts', line: 11, side: 'old', text: 'Why remove it?' }] })).toBe('Base: base\n\nHead: head\n\nReview of "title\\nHead: forged"\n\nCheck this\n\n"file\\nHead: forged\\t.ts":11 (old)\nWhy remove it?')
+  })
+  it('fingerprints bundles on plain-http origins without Web Crypto', () => {
+    vi.stubGlobal('crypto', undefined)
+    try { expect(changeIdentity('bundle')).toMatch(/^[a-f0-9]{16}$/) } finally { vi.unstubAllGlobals() }
   })
   it('changes the state digest when the base, story or hunk set changes', async () => {
     const change = bundle(), original = await changeIdentity(JSON.stringify(change))

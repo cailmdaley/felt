@@ -29,10 +29,14 @@ export function assignLanes(bundle: ChangeBundle): ChangeLanes {
   }
 }
 
-/** A bundle's exact bytes bind drafts to base, head, story and the captured hunk set. */
-export async function changeIdentity(source: string): Promise<string> {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))
-  return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('')
+/** A non-cryptographic fingerprint resets viewed state when the bundle changes. */
+export function changeIdentity(source: string): string {
+  let a = 2166136261, b = 0x9e3779b9
+  for (let i = 0; i < source.length; i++) {
+    const char = source.charCodeAt(i)
+    a = Math.imul(a ^ char, 16777619); b = Math.imul(b ^ char, 2246822519)
+  }
+  return [a, b].map(hash => (hash >>> 0).toString(16).padStart(8, '0')).join('')
 }
 
 export interface ChangeComment { file: string; line: number; side: 'new' | 'old'; text: string }

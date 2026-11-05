@@ -2219,6 +2219,15 @@ export class Dock {
     this.open(card)
   }
 
+  /** Reviews use the composer's delivery and refusal handling, without start authority. */
+  async sendReview(card: KanbanCard, message: string): Promise<void> {
+    if (!hasLiveWorker(card)) throw new Error('No live worker. Start or resume one from the composer before sending a review.')
+    const button = document.createElement('button'), error = document.createElement('div')
+    if (!await this.sendRequeue(card, message, 'previous', button, error, undefined, true)) {
+      throw new Error(error.textContent || 'The review was not delivered. Your draft is saved.')
+    }
+  }
+
   /**
    * Manual requeue: one force dispatch ({@link postForceDispatch}) carrying the
    * message and the resume intent inline. The daemon resolves the session to
@@ -2231,15 +2240,6 @@ export class Dock {
    * confirmed, and a rejection is shown and sends nothing. Resolves true once
    * a worker runs for the card.
    */
-  /** Reviews use the composer's delivery and refusal handling, without start authority. */
-  async sendReview(card: KanbanCard, message: string): Promise<void> {
-    if (!hasLiveWorker(card)) throw new Error('No live worker. Start or resume one from the composer before sending a review.')
-    const button = document.createElement('button'), error = document.createElement('div')
-    if (!await this.sendRequeue(card, message, 'previous', button, error, undefined, true)) {
-      throw new Error(error.textContent || 'The review was not delivered. Your draft is saved.')
-    }
-  }
-
   private async runRequeue(
     card: KanbanCard,
     directive: Directive,
