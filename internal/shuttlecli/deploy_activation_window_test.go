@@ -10,6 +10,98 @@ import (
 	"time"
 )
 
+func TestDeployCoalescedReleaseDefersCancellation(t *testing.T) {
+	t.Parallel()
+	for _, host := range []string{"fake", "local"} {
+		t.Run(host, func(t *testing.T) {
+			t.Parallel()
+			f := newDeployFleet(t)
+			fleetTouch(t, f.gate)
+			first, log := f.startHost(t, "coalesced-base", host)
+			if err := first.Wait(); err != nil {
+				t.Fatalf("base: %v %s", err, fleetRead(log))
+			}
+
+			// Pause the release request itself: cancellation must not kill it,
+			// even when no pointer selection or daemon restart was necessary.
+			curl := filepath.Join(f.bin, "curl")
+			if err := os.Rename(curl, curl+"-ungated"); err != nil {
+				t.Fatal(err)
+			}
+			gate := `#!/bin/sh
+case "$*" in *'/quarantine/release'*)
+ touch "$FLEET_ROOT/coalesced-release-entered"
+ while [ ! -f "$FLEET_ROOT/coalesced-release-go" ]; do sleep .02; done;;
+esac
+exec "$FAKE_BIN/curl-ungated" "$@"
+`
+			if err := os.WriteFile(curl, []byte(gate), 0755); err != nil {
+				t.Fatal(err)
+			}
+			defer fleetTouch(t, filepath.Join(f.root, "coalesced-release-go"))
+			if err := os.WriteFile(f.events, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			receipt := filepath.Join(f.home, ".shuttle/deploy/previous")
+			previous := filepath.Join(f.root, "rollback") + "\n"
+			if err := os.WriteFile(receipt, []byte(previous), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			cmd, log := f.startHost(t, "coalesced-cancel", host)
+			deployAwait(t, "coalesced release: "+log, func() bool {
+				_, err := os.Stat(filepath.Join(f.root, "coalesced-release-entered"))
+				return err == nil
+			})
+			if !strings.Contains(fleetRead(log), "coalescing without a daemon cycle") {
+				t.Fatalf("did not reach coalesced release: %s", fleetRead(log))
+			}
+			if host == "local" {
+				if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				pid, err := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "ssh.pid"))))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			last := filepath.Join(f.home, ".shuttle/deploy/last-run.log")
+			deployAwait(t, "deferred coalesced cancellation: "+last, func() bool {
+				select {
+				case err := <-done:
+					t.Fatalf("cancellation interrupted coalesced release: %v\n%s", err, fleetRead(last))
+				default:
+				}
+				return strings.Contains(fleetRead(last), "deferred through activation")
+			})
+			fleetTouch(t, filepath.Join(f.root, "coalesced-release-go"))
+			deployAwait(t, "completed coalesced release: "+last, func() bool {
+				return strings.Contains(fleetRead(f.events), "release\n")
+			})
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatalf("cancelled deploy reported success: %s", fleetRead(log))
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("cancellation did not finish: %s", fleetRead(last))
+			}
+			if events := fleetRead(f.events); strings.Count(events, "release\n") != 1 || strings.Contains(events, "cycle\n") || strings.Contains(events, "prune\n") || strings.Contains(events, "build ") {
+				t.Fatalf("coalesced cancellation must finish only release: %s", events)
+			}
+			if got := fleetRead(receipt); got != previous {
+				t.Fatalf("lost rollback receipt: got %q want %q", got, previous)
+			}
+		})
+	}
+}
+
 func TestDeployCancelledActivationRetainsRollbackBeforeAcknowledgement(t *testing.T) {
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
