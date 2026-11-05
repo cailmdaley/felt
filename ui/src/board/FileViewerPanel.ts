@@ -44,6 +44,7 @@ export interface FileViewerOptions {
   /** The document host binds this to its fiber, not to the currently selected page. */
   onReview?: (message: string) => Promise<void>
   canReview?: () => boolean
+  reviewTarget?: () => string
   /** Inert previews use the same kind dispatch within their host's load budget. */
   thumbnail?: boolean
   /** Captioned previews keep the filename outside the miniature page. */
@@ -120,7 +121,7 @@ export function buildFileViewer(
         const digest = changeIdentity(source)
         const position = scroller?.scrollTop ?? 0
         dispose?.(); wrap.replaceChildren()
-        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}:${digest}`, options.onReview, options.canReview)
+        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}:${digest}`, options.onReview, options.canReview, options.reviewTarget)
         dispose = mounted.dispose; scroller = mounted.scroller; scroller.scrollTop = position
         options.onThumbnailSource?.(source, recallText(src)?.etag)
         onTextPane?.(scroller)

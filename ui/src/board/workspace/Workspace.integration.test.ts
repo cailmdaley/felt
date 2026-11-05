@@ -12,6 +12,7 @@ import { TranscriptBand } from '../transcript/TranscriptBand.js'
 import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
 import * as FiberProse from './FiberProse.js'
+import { buildFileViewer } from '../FileViewerPanel.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
@@ -130,6 +131,26 @@ beforeEach(() => {
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('routes a linked change to the fiber holding its file on its own host, not the report channel', async () => {
+  boardCards = bodyCards = cards.map(c => ({ ...c, workerState: 'running' as const }))
+  const send = vi.spyOn(Dock.prototype, 'sendReview').mockResolvedValue(undefined)
+  workspace.open(boardCards[0], 'Desk'); await flush()
+  const report = vi.mocked(buildFileViewer).mock.calls.filter(call => call[1] === '/notes/alpha/report.html').at(-1)![5]!
+  report.onNavigate!('/api/v1/file?path=%2Fnotes%2Fbeta%2Freview.change.json&origin=host-b')
+  await flush()
+  const review = vi.mocked(buildFileViewer).mock.calls.filter(call => call[1] === '/notes/beta/review.change.json').at(-1)![5]!
+  expect(review.reviewTarget!()).toBe('work/beta on host-b')
+  expect(review.canReview!()).toBe(true)
+  await review.onReview!('Review anchored to the linked snapshot')
+  expect(send).toHaveBeenCalledWith(boardCards[1], 'Review anchored to the linked snapshot')
+  boardCards = [boardCards[0], { ...boardCards[1], workerState: undefined }]
+  expect(review.canReview!()).toBe(false)
+  boardCards = [boardCards[0]]
+  expect(review.canReview!()).toBe(false)
+  await expect(review.onReview!('Do not fall back to Alpha')).rejects.toThrow('fiber holding this bundle')
+  expect(send).toHaveBeenCalledTimes(1)
+})
 
 it('releases transcript models and listeners when chat documents leave the live budget, restoring drafts on return', async () => {
   bodyCards = boardCards = Array.from({ length: 8 }, (_, i) => card({

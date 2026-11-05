@@ -41,6 +41,7 @@ export interface ReaderOptions {
   onNavigate?(source: WorkspaceDocument, href: string): void
   onReview?(source: WorkspaceDocument, message: string): Promise<void>
   canReview?(source: WorkspaceDocument): boolean
+  reviewTarget?(source: WorkspaceDocument): string
   onCrossing?(travel: number): void
   onReturn(): void
   onOpenDocument(key: DocKey): void
@@ -269,6 +270,7 @@ export class Reader {
       disposeProse: opts.disposeProse,
       onReview: opts.onReview,
       canReview: opts.canReview,
+      reviewTarget: opts.reviewTarget,
       onRefreshProse: opts.onRefreshProse,
       onSelect: key => this.openDocument(key),
       onNavigate: (source, href) => this.opts.onNavigate?.(source, href),

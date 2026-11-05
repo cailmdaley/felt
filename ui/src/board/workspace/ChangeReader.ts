@@ -25,7 +25,7 @@ function save(key: string, value: unknown): void {
 }
 
 /** Native review content; the workspace owns its file, gestures, scroll position and worker route. */
-export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, identity: string, send?: (message: string) => Promise<void>, canSend = () => true) {
+export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, identity: string, send?: (message: string) => Promise<void>, canSend = () => true, reviewTarget = () => 'this fiber') {
   try { validateChangeBundle(bundle) } catch (error) {
     const message = el('div', 'change-load-error', error instanceof Error ? error.message : 'Invalid change bundle')
     message.setAttribute('role', 'alert'); root.replaceChildren(message)
@@ -252,7 +252,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   const renderDraftComments = (): void => { draftComments.replaceChildren(...draft.comments.map(commentField)) }
   renderDraftComments()
   const foot = el('div', 'change-send'); foot.append(sendButton, status)
-  review.element.append(el('p', 'change-section-note', `One message to this fiber’s worker, anchored to head ${bundle.head.slice(0, 8)}. Drafts stay on this browser.`), draftComments, note, foot)
+  review.element.append(el('p', 'change-section-note', `One message to ${reviewTarget()}, anchored to head ${bundle.head.slice(0, 8)}. Drafts stay on this browser.`), draftComments, note, foot)
   if (!send || !canSend()) status.textContent = 'No live worker. Start or resume one from the composer before sending a review.'
   paintSend(); updateProgress()
   let railFrame = 0

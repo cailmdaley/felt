@@ -1,5 +1,5 @@
 import { ThreadIndex } from '../threads.js'
-import { hasLiveWorker, hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
+import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
@@ -29,6 +29,7 @@ import type { TranscriptHit } from '../transcript/find.js'
 import { Overview } from './Overview.js'
 import { parseRoute, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
+import { changeReviewTarget } from './changeReviewTarget.js'
 
 export interface WorkspaceOptions {
   /** The current response's thread graph, built once per response. */
@@ -180,6 +181,7 @@ export class Workspace {
       }) : undefined,
       onEscape: () => { this.clearFind(); opts.find?.blur(); (document.activeElement as HTMLElement | null)?.blur?.() },
     })
+    const reviewTarget = (source: WorkspaceDocument) => changeReviewTarget(source, opts.cards())
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       themes: this.themes,
@@ -195,15 +197,12 @@ export class Workspace {
       onExpand: expanded => opts.onExpand?.(expanded),
       onSelect: key => this.visit(key),
       onNavigate: (source, href) => this.openRelative(source, href),
-      canReview: source => {
-        const state = [...this.channels.values()].find(state => state.channel.documents.some(doc => doc.key === source.key))
-        return !!state && hasLiveWorker(state.card)
-      },
+      canReview: source => reviewTarget(source)?.live ?? false,
+      reviewTarget: source => reviewTarget(source)?.label ?? 'no known fiber holding this bundle',
       onReview: async (source, message) => {
-        const owns = (state: ChannelState): boolean => state.channel.documents.some(doc => doc.key === source.key)
-        const state = this.current && owns(this.current) ? this.current : [...this.channels.values()].find(owns)
-        if (!state) throw new Error('The document’s fiber is no longer available. Your draft is saved.')
-        await this.dock.sendReview(state.card, message)
+        const target = reviewTarget(source)
+        if (!target) throw new Error('The fiber holding this bundle is no longer available. Your draft is saved.')
+        await this.dock.sendReview(target.card, message)
       },
       onCrossing: travel => this.depth.cross(travel),
       onReturn: () => this.history.back(),
