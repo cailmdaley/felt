@@ -50,6 +50,7 @@ defmodule Shuttle.DaemonHeartbeat do
        "at":1764500000000,         # wall clock of THIS write, epoch ms
        "booted_at":1764499000000,  # when the writing incarnation booted
        "host":"…", "node":"…",     # its own_host_id and OS node name
+       "listen":"127.0.0.1:4000",  # the daemon's listener identity
        "os_pid":"12345",           # the beam's OS pid
        "held":false,               # was it still quarantined (or skewed)?
        "workers":["fiber-uid", …], # runtime keys it had live at this write
@@ -80,7 +81,7 @@ defmodule Shuttle.DaemonHeartbeat do
 
   1. **Same daemon, same machine, another VM** — the record's `host` equals
      this daemon's `own_host_id`, its `node` equals this machine's node name,
-     and its `os_pid` is not this VM's. `~/.shuttle` can sit on a `$HOME`
+     its `listen` matches this daemon's listener identity, and its `os_pid` is not this VM's. `~/.shuttle` can sit on a `$HOME`
      shared by several login nodes that all carry the same fleet host id; an
      idle daemon on another node keeps a fresh heartbeat with no workers,
      which says nothing about this node's restart. The same pid means the

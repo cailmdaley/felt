@@ -152,20 +152,22 @@ func (a *app) shuttleMessageCmd() *cobra.Command { return a.messageCmd(&messageO
 func (a *app) messageCmd(messageOpts *messageOptions) *cobra.Command {
 	shuttleMessageCmd := &cobra.Command{
 		Use:   "message <address|session-id|fiber> [text|-]",
-		Short: "Send a message and files to an existing session",
-		Long: `Resolves a shuttle:// address, a unique native session ID, or a fiber's
-current worker session, then routes text (and --attach files) through the local
-daemon to the owning host. The text is the second argument, '-' for stdin, or
+		Short: "Send a message and files to a session or fiber",
+		Long: `Resolves a shuttle:// address, a unique native session ID, or a fiber,
+then routes text (and --attach files) through the local daemon to the owning host.
+The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
 By default the addressed session is woken; --context-only (or --wake=false)
 adds the message as context without starting or steering a model turn.
 
-A fiber with no live worker (a seat at rest, an unarmed thread, a closed
-constitution) takes the message into its durable mailbox instead: it is not
-delivered, and the fiber's next worker reads it as context when it starts.
-The receipt says "queued for <fiber>'s next worker" (JSON status
-queued_for_next_worker); retrying with the same --message-id queues it once.
+An attachment-free --context-only fiber send uses its durable mailbox regardless
+of worker liveness, except that --notify-when-idle uses session routing while a
+worker is live. Its receipt says queued as fiber context (JSON status queued).
+A wake send messages the live worker; with no live worker, it queues as context
+for the next worker (JSON status queued_for_next_worker). Queued is not delivered.
+Retrying with the same --message-id queues identical content once; conflicting
+fiber-mailbox content is rejected through /deliver with HTTP 422.
 Attachments cannot wait, so a message carrying them needs a live worker. A
 fiber with no shuttle: block is refused.
 

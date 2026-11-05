@@ -154,7 +154,11 @@ shuttle message <target> "…" --attach results.csv   # files travel on their ow
 shuttle message <target> "…" --message-id <id>      # retry an interrupted send; never delivers twice
 ```
 
-A target is an address, a session id, or a fiber (its current worker). A fiber with no live worker queues the message for its next worker. Delivered headers carry the sending session in `from` and, for a worker, `reply to <fiber>`: reply to the fiber so the answer follows the work across handoffs; a session address stays pinned to that one session. Sender labels are self-reported. The receipt says how far delivery got (`accepted`: the harness took the input), never that the model replied. A plain message starts or steers a turn; `--context-only` doesn't. `--notify-when-idle` (with or without text) sends you one notice, as context, when the receiver next ends a turn with nothing queued or running, or exits. Idle is not done. A hook-only embedded Codex session cannot be woken, and Shuttle never pastes into its terminal. Without a route to a host, leave a note in the fiber and `felt sync --push`.
+A target is an address, a session id, or a fiber.
+An attachment-free context-only fiber send goes to its durable mailbox regardless of worker liveness; a live-worker idle-notification request uses session routing instead.
+A wake send messages the live worker or queues for its next worker when dormant.
+Mailbox receipts are `queued` for context-only sends and `queued_for_next_worker` for dormant wake sends; neither means delivered.
+Delivered headers carry the sending session in `from` and, for a worker, `reply to <fiber>`: reply to the fiber so the answer follows the work across handoffs; a session address stays pinned to that one session. Sender labels are self-reported. The receipt says how far delivery got (`accepted`: the harness took the input), never that the model replied. A plain message starts or steers a turn; `--context-only` doesn't. `--notify-when-idle` (with or without text) sends you one notice, as context, when the receiver next ends a turn with nothing queued or running, or exits. Idle is not done. A hook-only embedded Codex session cannot be woken, and Shuttle never pastes into its terminal. Without a route to a host, leave a note in the fiber and `felt sync --push`.
 
 ## Past conversations
 

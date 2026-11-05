@@ -95,6 +95,9 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `schedule:`.
   Nothing due is stored: an armed (`active`, untempered) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at`, `closed-at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
   Scheduled run IDs name that most recent occurrence (`prev_due`); manual dispatch is ad-hoc (`adhoc-<ms>`).
+  The locked exit write checks the current owner, UID, run id, dispatch timestamp and human lifecycle state, preserving newer runs and human decisions.
+  Recovery publishes a recorded scheduled handoff for review; ad-hoc and unrecorded absences do not supply that conclusion.
+  Human resume and reopen, including from an open pause, record a rearm distinct from a worker handoff.
   Worker exit or an untempered close puts the run on Awaiting review without ending its schedule.
   At the next occurrence after both its last service and close, the owning Poller runs `reopen --occurrence` inside its serialized tick, even in boot quarantine.
   Under the document lock, the CLI checks current ownership, standing kind, closed status, absence of a verdict, a dispatch on record, and that the occurrence is still due.
@@ -148,11 +151,18 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 ## Uncertain launch reservations
 
 Before requesting a worker launch from a terminal backend, Shuttle writes a host-local reservation under `$SHUTTLE_DATA_DIR/terminals/launch-attempts/`.
-The record carries the worker name, script path, UTC timestamp and uncertainty reason.
+The record carries the worker name, script path, UTC timestamp and uncertainty reason, plus any conversation UUID and prepared dispatch facts (fresh/resume intent, harness, dispatch timestamp, session UUID and standing run id).
+Launches acquire both worker-name and known-conversation locks; a live process or unresolved acquisition can refuse a second opener of the same conversation.
+Conversation scans skip atomic temporaries and log undecodable unrelated entries without imposing a host-wide hold.
+Prepared facts can repair a missing runtime mirror only when the exact recorded script proves the live execution.
+They are cleared only after the matching mirror and durable receiver registration succeed.
+Rex also records an awaiting-binding intent before terminal creation; recovery requires matching server and script ownership before committing its session, window and block binding.
 Read-only preparation failures retire the reservation; an unanswered create or new-window request, an unconfirmed cleanup, or a daemon crash keeps it.
 A successful launch keeps its reservation to cover a failed runtime write.
-The script's exit trap deletes the script, which retires the reservation without needing a successful process scan.
-Confirmed absence of every terminal backend and of the run-script process also permits retirement and retry.
+The script's exit trap deletes the script, which permits retirement only when no prepared dispatch remains unmirrored.
+Confirmed absence of every terminal backend and of the run-script process also permits retirement and retry under that condition.
+An unmirrored prepared dispatch holds even after positive absence or script deletion: the work may already have run and exited.
+It remains blocked through polling, restart, force and force-plus-fresh until repaired, definitely refused or explicitly released; terminal liveness can still report `gone`.
 There is no TTL: a killed worker can leave its script behind, so age alone never authorizes another launch.
 Reservations follow the full terminal worker name, not the fiber UID alone.
 Before renaming a fiber with an outstanding reservation, stop or otherwise reconcile its old named worker; renaming does not transfer this launch ownership.

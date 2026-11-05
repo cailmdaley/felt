@@ -10,8 +10,8 @@ defmodule Shuttle.TailnetPeers do
   the peer's name, never its MagicDNS label. A peer is rejected when it
   reports this daemon's own host id, reports no host id (not a Shuttle daemon,
   or one too old to say), or two peers report the same one. A peer that times
-  out, refuses the connection or is not ready yet is simply not discovered
-  this round: phones and tablets drop out that way.
+  out, refuses the connection or is not ready yet is not newly discovered
+  this round; a verified peer can remain within the retention window below.
 
   The status comes from tailscaled's LocalAPI when a socket is in effect
   (`Shuttle.Remotes.tailscale_socket_source/0`: configured, or
@@ -30,11 +30,11 @@ defmodule Shuttle.TailnetPeers do
   can take that long to enter the token. `status/0` is the report
   `/api/v1/version` and `shuttle doctor` show.
 
-  When Tailscale is absent, stopped or failing, the round discovers nothing
-  and records why: the fleet is the configured entries alone. A peer that
-  answered once is kept for up to ten minutes while it is offline, unreachable
-  or not ready, so a daemon restarting for a deploy goes stale in the
-  registries rather than vanishing from them. A peer that answers as another
+  When Tailscale is absent, stopped or failing, the round records why and
+  retains verified peers for up to ten minutes after their last successful probe,
+  alongside configured entries. The same window retains peers that are offline,
+  unreachable or not ready, so a daemon restarting for a deploy goes stale in
+  the registries rather than vanishing from them. A peer that answers as another
   host, or not as Shuttle, is dropped at once.
 
   `discover/5` is the pure core: tailnet status, probe results, own host id and

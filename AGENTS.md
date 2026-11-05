@@ -90,9 +90,8 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   Migration applies two locked document patches through `shuttle migrate-documents`
   and journals resource ownership before changing the backend; unresolved recovery
   holds every launch, including force, cron and previously observed workers.
-  At boot, `shuttle contract`
-  checks the Go CLI against `daemon/lib/shuttle/contract.ex`; the daemon holds
-  on a skew.
+  The CLI's locked `standing-transition` checks the current run and human lifecycle state; `patch-document` refuses a stale source digest.
+  At boot, `shuttle contract` checks level 33 against `daemon/lib/shuttle/contract.ex`; the daemon holds on a skew.
 - **Live host-addressed content and control use `Shuttle.OriginRouter`.**
   The composite board carries each row's `origin` back to the daemon for
   requests such as `/api/v1/fibers/:id?body=true` and `/file`, so it can display
@@ -120,8 +119,8 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   directories from `$HOME`, else the `tailscale` CLI; `"system"` forces the
   CLI),
   probes each same-user peer's `/api/v1/version`, and names every Shuttle daemon
-  by the `host` id it reports; it refreshes every minute and falls back to the
-  file alone when Tailscale is absent or failing. The file adds hosts outside
+  by the `host` id it reports; it refreshes every minute.
+  When Tailscale is absent or failing, it retains recently verified peers for up to ten minutes after their last successful probe, then uses the file alone. The file adds hosts outside
   the tailnet and overrides discovered ones: a configured entry wins over a
   discovered peer of the same name or URL, `"enabled": false` suppresses one,
   and `defaults.discover: false` turns discovery off. The daemon
@@ -215,7 +214,8 @@ harness:board` builds a self-contained bundle with a mocked daemon that opens
 over `file://`, which is the only way to see the board where `:4000` is
 unreachable — and the only way to stage states a live fleet will not hold
 still for.
-Source builds require Go, Elixir/OTP, and Node/npm on each host.
+Source builds require Go, Elixir/OTP, Node/npm, and Python 3 on each host.
+Python 3 publishes the release symlink atomically.
 To cycle a supervised daemon directly, use
 `launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon` or
 `systemctl --user restart shuttle-daemon`.
@@ -256,9 +256,12 @@ An autonomous worker that has built and verified a change SHOULD deploy it.
 resolve one commit → push → preflight origin availability and default-branch freshness
 → on each host, under its deploy lock and tree lease: prepare the detached SHA root
 → make build + make cli-install → activate through the selected supervisor
-→ verify SHA, fresh boot, release_path and ready → release quarantine
+→ verify SHA, fresh boot, canonical release_path, ready, contract.ok=true,
+  reconciliation_hold=null and incarnation → release quarantine for that incarnation
 → fast-forward the clean regular checkout → refresh harnesses → prune
 ```
+
+Automated quarantine release posts the verified `{incarnation, release_path}` as `expected` to `/api/v1/quarantine/release`; a replacement incarnation returns HTTP 409 and needs verification.
 
 `bin/shuttle-deploy` uses the fleet in `~/.config/shuttle/remotes.json` and each host's login environment.
 Every run builds the resolved commit in `<main-worktree>.deploy/<sha>`, including default and linked-worktree invocations.

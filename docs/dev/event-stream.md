@@ -174,7 +174,7 @@ The phase is derived from those facts: a pending request is `attention`; an open
 - `user_prompt_submit` opens the turn and clears background work and pending requests, preserving the Codex child count.
 - `stop` closes the turn, restates the background count, and clears pending requests.
 - Permission, elicitation, and untyped notifications set a pending request.
-  `idle_prompt` closes the turn without clearing an existing request.
+  `idle_prompt` closes a started turn without clearing an existing request; an unstarted session remains unstarted.
 - Tool progress clears pending requests and opens the turn, except for Codex child activity on an already-closed parent turn with live children.
 - `session_end` ends the turn and clears counts and pending requests.
   Only a new `session_start` can reopen the conversation.

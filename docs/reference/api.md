@@ -96,7 +96,8 @@ Before cross-host creation or `resume --project-dir`, the CLI reads the owner's 
 `path` is the owner's Markdown filename, `uid` is the intrinsic fiber identity, and `host` and `status` confirm the owning host and persisted status.
 A resumed local draft is retained unless the response confirms the requested identity and armed status.
 A supplied `uid` preserves an existing document's identity during transfer.
-Transferred native metadata and custom frontmatter are written with the Shuttle block before that constitution becomes eligible for dispatch.
+Metadata injection uses a locked source-digest check.
+A concurrent edit is retained and reported as a create error; the initially created fiber remains present, so inspect it before retrying.
 An unavailable owner fails the request, and a duplicate document is refused rather than overwritten.
 
 ### Lifecycle actions
@@ -716,8 +717,8 @@ commits:
 
 A refusal is a 400 carrying that tool's own sentence verbatim. Empty text
 removes the file, which is the same vocabulary the structured writers already
-speak (saving an empty list deletes `stores.json`; dropping the last remote
-deletes `remotes.json`).
+speak for stores (saving an empty list deletes `stores.json`).
+Dropping the last configured remote retains `remotes.json` and its discovery and transport policy.
 
 A read serves a `digest` — a hash of the bytes as sent, and of *those* bytes
 rather than of a second read of the file. Send it back as `expected_digest` and
@@ -751,10 +752,10 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
+| `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers require matching `git_short_sha`, fresh `booted_at`, canonical `release_path`, `ready: true`, `contract.ok: true`, explicit `reconciliation_hold: null` and a nonempty `incarnation`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
 | `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing constitutions, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
-| `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`) |
+| `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`); optional `expected: {incarnation, release_path}` binds authorization to a verified daemon, with HTTP 409 `incarnation_mismatch` if it changed |
 | `POST /remotes/:name/reset` | Restart recovery for a tripped, degraded or unreachable remote; one reset buys one attempt, and it 409s when no recovery action is waiting |
 
 `release_path` is the absolute root of the release the running VM booted from, or `"unknown"` when running under Mix.

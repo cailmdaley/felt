@@ -190,7 +190,8 @@ machine crash-looping, for example) would otherwise treat every restart as
 license to relaunch every armed, workerless fiber it can see — a burst of
 redundant, token-burning launches on each crash.
 
-Release is manual — no timeout — with one narrow exception below.
+Quarantine has no timeout; explicit release uses the command below or the host-addressed API.
+The fast-bounce exception below can release it automatically.
 
 ```bash
 shuttle daemon release
@@ -246,15 +247,13 @@ every boot holds and logs `automatic release is off for this host`.
 
 On every host the daemon rewrites `$SHUTTLE_DATA_DIR/heartbeat.json` (default
 `~/.shuttle/heartbeat.json`) every 10 seconds, and at once when the hold is
-released: the time of the write, when this incarnation booted, its host id, the
+released: the time of the write, when this incarnation booted, its host id, listener identity (`listen`), the
 machine's node name and the daemon's OS pid, whether it was still held, the
 workers it has live, and a short ring of recent boot times. On an opted-in host
 the next boot reads the file before adoption and judges it after adoption. The
 hold lifts by itself only when all of these hold:
 
-1. the heartbeat was written by this host id on this machine (a `$HOME` shared
-   across login nodes can hold another node's heartbeat), by a different
-   daemon process (a restart inside the running daemon is not a hard kill);
+1. the heartbeat has a matching listener identity and was written by this host id on this machine (a `$HOME` shared across login nodes can hold another node's heartbeat), by a different daemon process (a restart inside the running daemon is not a hard kill);
 2. no stop marker is as new as that incarnation's boot;
 3. that incarnation had been released: an unreleased hold survives hard kills,
    so a daemon that booted held after an outage or a deploy stays held;
@@ -318,14 +317,46 @@ curl -s http://127.0.0.1:4000/api/v1/agents | jq
 ## When to uninstall
 
 Closing a fiber leaves its block in place, and that is deliberate. Uninstall
-earns its keep in four cases:
+earns its keep in three cases:
 
 1. **Mistake recovery** — wrong slug, immediate undo.
-2. **Full rebuild** — though `shuttle reshape` now covers most of the "change the kind or schedule" case in place, without a rebuild.
+2. **Full rebuild** — though `shuttle reshape` covers most of the "change the kind or schedule" case in place, without a rebuild.
 3. **Archiving** — a closed fiber's card leaves the board entirely.
-4. **Handing ownership** to a different dispatcher.
+
+To move a constitution between hosts, keep its block and follow [Moving a constitution between hosts](#moving-a-constitution-between-hosts).
 
 Never uninstall to end a worker session. Use the ordinary exit — `shuttle handoff` to continue, `shuttle close` to stop for review, `shuttle rest` to put it down.
+
+## Moving a constitution between hosts
+
+A host move is an ordered procedure, not an atomic handover.
+`shuttle.host` selects an owner; it is not a fleet-wide lease, and Git replication does not stop terminal-owned work.
+Use a store containing the constitution and a CLI that can route to both owners.
+
+1. Run `shuttle rest <fiber>` through the current owner and wait for confirmed success.
+   This disarms the document and stops its live worker.
+   Obtain the owner's rested document before editing an archive copy.
+2. On that disarmed document, set `shuttle.host` to the destination's host id and `shuttle.project_dir` to the destination's absolute worker directory.
+   Keep `status: open` and preserve the intrinsic `id:` UID.
+3. Run `shuttle resume <fiber>` through the destination.
+   If the destination authoritatively reports the draft missing, the CLI transfers it through the create API, preserving its UID.
+   It removes the local draft only after the response confirms the identity, owner, armed status and destination path.
+   A separate Git sync is unnecessary for that path; if the destination already has a copy, synchronize the disarmed document there before resuming it.
+   A duplicate UID is refused rather than overwritten.
+4. Confirm the destination's persisted document and execution state, then commit and sync the archive so every copy records the destination owner.
+   A normal resume can remain pending in the destination's boot quarantine.
+
+If a create or resume response is lost, inspect the destination before retrying: the document may already be armed.
+A failure between steps needs inspection; do not assume the transfer rolled back.
+
+### Unreachable old owner
+
+Daemon downtime does not prove its terminal worker has stopped.
+Before takeover, have a human confirm that the old execution is gone, or explicitly accept the risk of duplicate execution.
+Keep the local document disarmed (`status: open`), then follow steps 2–4.
+Reconcile the old owner's copy and any surviving worker before it returns to service.
+Do not use `uninstall` followed by `install` as a transfer: uninstall leaves the worker running.
+The board can collapse rows sharing a UID, so one visible card does not prove there is only one execution.
 
 ## Diagnosing a missing card
 

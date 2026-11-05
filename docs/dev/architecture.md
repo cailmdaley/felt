@@ -252,8 +252,9 @@ The Go CLI does not probe the tailnet. `shuttle remotes list` and every verb
 that routes by host name read the local daemon's discovered peers from
 `/api/v1/version` and merge them with the file through `resolveRemotes`, the Go
 mirror of the Elixir resolver. `daemon/test/fixtures/tailnet_peers/` holds the
-shared cases. When Tailscale is absent, stopped, or failing, the daemon uses
-the file alone and records why, and `shuttle doctor` reports the reason.
+shared cases.
+When Tailscale is absent, stopped, or failing, the daemon retains verified peers for up to ten minutes after their last successful probe, then uses the file alone.
+It records the reason, and `shuttle doctor` reports it.
 
 The daemon shares one-second snapshots of small local documents: fleet config,
 Rex bindings, worker migration aliases, and store/project path lists.

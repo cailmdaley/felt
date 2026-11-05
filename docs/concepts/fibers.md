@@ -155,7 +155,7 @@ felt init
 ```
 
 `felt init` creates or repairs `.felt/` and writes a `.gitignore` that ignores
-`*.md.lock`, felt's per-fiber write locks.
+`*.md.lock` (per-fiber write locks), `.*.tmp` (atomic-write temporaries), and `.move-pending.json*` (move recovery journal and lock).
 
 Re-running it is safe. It leaves existing files alone.
 
@@ -169,6 +169,15 @@ felt add covariance-estimation "Covariance estimation" \
 
 Commit your fibers. Git versions the text like any source file, so the log
 tracks how the thinking moved.
+
+## Recovering a move
+
+A subtree move records pending reference repairs in `.move-pending.json`.
+After an interruption, repeat the same `felt nest` or `felt unnest` command; either the source or destination spelling of the child works.
+Alternatively, run `felt recover-move` in the store holding the journal.
+Recovery refuses a reference document that differs from both its recorded source and intended result, preserving the conflicting edit.
+Resolve the conflict before retrying, or run `felt recover-move --abandon` to drop the journal and repair remaining references by hand.
+Abandoning leaves the moved subtree in place; it does not undo the move.
 
 ## Checking the store
 

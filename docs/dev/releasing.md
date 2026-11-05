@@ -117,8 +117,9 @@ hook manifest, executable hook files, and the installed Shuttle CLI contract
 must all validate before the native CLI sees the candidate. Native
 harness CLIs receive only the stable promoted `current` path and remain the
 sole writers of their caches and configuration. If native installation reports
-failure, setup restores both the last known-good staged generation and the
-harness's previous marketplace/plugin state. A zero exit status alone never
+failure, setup restores the last known-good staged generation and reconciles the harness's marketplace/plugin state against it.
+An unsealed prior Claude source cannot prove cache restoration; setup reports that limitation and retains the reconciliation journal.
+A zero exit status alone never
 commits a promotion: before the journal records `committed` and `previous` is
 discarded, setup reads the cache path each native CLI reports as loaded
 (`plugin list --json`), and verifies its bytes directly against the promoted
@@ -127,8 +128,8 @@ native caches are located and verified independently. A failed verify first gets
 reinstall (uninstall+install / remove+add), because `plugin update` on an
 unchanged manifest version legitimately keeps the old versioned cache; a
 cache that still cannot prove the promoted generation after that is a
-rejected candidate — the filesystem rolls back and the prior native state is
-restored. The journal also records native
+rejected candidate — the filesystem rolls back and native reconciliation must verify the restored state before its journal is removed.
+The journal also records native
 activation intent: after an interruption, the next setup restores `current`
 first, reinstalls each affected harness from that path, verifies the restored
 state, and retains the journal until reconciliation succeeds.

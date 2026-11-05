@@ -43,6 +43,12 @@ running daemon's version when reachable, otherwise the local Mix release version
 |---|---|
 | `felt nest <child> <parent>` | Move a fiber subtree under a parent, rewriting every reference the move would break (wikilinks, markdown links, `inputs.from`), across the enclosing store too from a view; refuses a guessed id |
 | `felt unnest <child>` | Move a nested fiber subtree to the top level, rewriting and refusing as `nest` does |
+| `felt recover-move [--abandon]` | Finish an interrupted subtree move's reference repairs; `--abandon` drops the journal without undoing the move or repairing remaining references |
+
+Interrupted moves retain `.move-pending.json` in the store.
+Repeat the same `nest` or `unnest` command with either endpoint spelling of the child, or use `recover-move` there.
+A divergent reference document is refused rather than overwritten; resolve it before retrying, or abandon recovery and repair it by hand.
+Store support files `*.md.lock`, `.*.tmp` and `.move-pending.json*` belong in `.felt/.gitignore`; `felt init` repairs those entries.
 
 ## Maintenance
 
@@ -349,10 +355,11 @@ shuttle message <address> "Background for your next task" --context-only
 ```
 
 `shuttle message` accepts that address, a unique native session ID, or a
-Shuttle fiber path, slug, or UID with a recorded worker. Fiber targets require
-one exact match across configured stores; they refuse guesses and duplicate
-matches, and a slug naming several fibers is refused with their full paths. A fiber resolves to the worker in its newest dispatch, resume, or
-claim ledger row, which the owning host writes. When the fiber's
+Shuttle fiber path, slug, or UID.
+Fiber targets require one exact match across configured stores; they refuse guesses and duplicate matches, and a slug naming several fibers is refused with their full paths.
+An attachment-free `--context-only` fiber send uses the durable fiber mailbox regardless of worker liveness, except that `--notify-when-idle` uses session routing while a worker is live.
+A wake send to a live worker, an idle subscription or a send with attachments resolves to the worker in its newest dispatch, resume, or claim ledger row, which the owning host writes.
+When the fiber's
 `shuttle.runtime.session_uuid` or another live session registered for the
 fiber differs, the command notes it on stderr and still uses the ledger's
 worker.
@@ -407,8 +414,9 @@ Receipts describe delivery evidence, not task completion. HTTP 200 carries a
 processed delivery receipt, including `rejected` and `unknown`. HTTP 400 reports
 `invalid_address`, `wrong_host`, `invalid_request`, `unsupported_harness`, or
 `preflight_failed`; preflight refusals may include a rejection receipt. HTTP 409
-reports `message_id_conflict` when an ID is reused for changed content. Other
-rejected receipts—including `session_unavailable`, `session_not_found`,
+reports `message_id_conflict` when a session-message ID is reused for changed content.
+Conflicting fiber-mailbox content is rejected by `/deliver` with HTTP 422.
+Other rejected receipts—including `session_unavailable`, `session_not_found`,
 `wake_required`, and `wake_refused`—return 200. HTTP 5xx means the Shuttle CLI did not
 provide a valid receipt or the owner could not be reached; the daemon may
 include a synthetic `unknown` receipt. `shuttle message` exits 0 for
@@ -419,14 +427,14 @@ command error.
 A fiber target with no live worker (a seat at rest, an unarmed thread, a
 closed constitution) is not rejected: its owning daemon queues the text in the
 fiber's durable context mailbox, the same one thread results wait in, and the
-receipt reads `queued for <fiber>'s next worker` (`status:
-queued_for_next_worker` in `--json`). It is not delivered; the fiber's next
-worker reads it as context when it starts, and a plain message wakes a worker
-that appeared in the meantime. Retrying with the same `--message-id` queues it
-once. Attachments cannot wait in the mailbox, so a message carrying them needs
+receipt for a wake send reads `queued for <fiber>'s next worker` (`status: queued_for_next_worker` in `--json`).
+A context-only send returns `queued` with a fiber-context receipt, whether or not a worker is live.
+Queued text is not delivered; a worker reads it through the fiber's context mailbox.
+A wake send messages a worker that appeared before the enqueue check.
+Retrying with the same `--message-id` queues it once. Attachments cannot wait in the mailbox, so a message carrying them needs
 a live worker, and a fiber with no `shuttle:` block is still refused. A target that does not
-resolve, is ambiguous, or has no session-ledger worker fails before any
-request is sent, with exit 1 and no receipt. Once resolved, it prints
+resolve or is ambiguous fails with exit 1 and no receipt.
+Session routing also requires a recorded worker or one exact live peer; a missing session address fails before the session-message request. Once resolved, it prints
 `sending <id> to <resolved address>` to stderr before delivery; if interrupted,
 retry with `--message-id <printed id>`.
 

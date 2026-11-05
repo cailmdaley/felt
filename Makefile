@@ -4,7 +4,8 @@
 #   - shuttle      (Go binary)      — orchestration CLI (`shuttle …`).
 #                                     `make cli` builds both; `make cli-install`
 #                                     installs both to ~/.local/bin.
-#   - bin/rel      (Elixir Mix release) — the dispatcher daemon, launched by the
+#   - bin/rel-built (Mix release symlink) — an immutable bin/rel.generation-* assembly,
+#                                     launched by the
 #                                     Go `shuttle daemon` command. The release
 #                                     loads its BEAMs at boot, so `make restart`
 #                                     rebuilds + bounces it (the load-bearing dev target).
@@ -93,7 +94,7 @@ help:
 	@echo "  make ui          — build the board bundle (npm ci on a lockfile change, then npm run build)"
 	@echo "  make cli         — build felt and shuttle (go build ./cmd/felt ./cmd/shuttle)"
 	@echo "  make cli-install — install felt and shuttle → $(INSTALL_DIR)"
-	@echo "  make daemon      — build the daemon release → bin/rel (MIX_ENV=prod)"
+	@echo "  make daemon      — build the daemon release → bin/rel-built (MIX_ENV=prod)"
 	@echo "  make test        — go test ./...  AND  mix test  AND  the ui suite  AND  the plugin hooks"
 	@echo "  make plugin-hooks-test — exercise harness hooks and the native Pi extension"
 	@echo "  make lint-personal — fail on maintainer host/account names in tracked source"

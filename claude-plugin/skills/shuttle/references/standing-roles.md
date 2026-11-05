@@ -75,6 +75,9 @@ there; the daemon owns the runtime block.
 Write the run's work product into `outcome`, rewrite `## Status`, and exit
 with `shuttle handoff` — always, never by setting `status: closed`
 yourself.
+The locked exit write checks the current owner, UID, run id, dispatch timestamp and human lifecycle state, preserving newer runs and human decisions.
+Recovery publishes a recorded scheduled handoff for review; ad-hoc and unrecorded absences do not supply that conclusion.
+Human resume and reopen, including from an open pause, record a rearm distinct from a worker handoff.
 On exit the daemon writes `status: closed` (untempered) for review, unless the run was already accepted and re-armed.
 A scheduled occurrence must be after both the last service and the close to supersede that result.
 The owner's conditional re-arm cleans dirty markers at the old dispatch timestamp, so delayed launches stay armed and always start fresh.

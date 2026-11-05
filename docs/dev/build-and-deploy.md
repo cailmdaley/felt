@@ -12,7 +12,7 @@ make build SKIP_UI=1   # same, but leave ui/dist alone (host gets its bundle els
 make cli          # build felt and shuttle
 make cli-install  # install both Go CLIs → ~/.local/bin
 make ui           # install UI dependencies and build ui/dist
-make daemon       # daemon release only → bin/rel (MIX_ENV=prod)
+make daemon       # daemon release only → bin/rel-built (MIX_ENV=prod)
 make daemon SKIP_CLI=1 # same, trusting felt and shuttle on PATH
 make test         # go test ./...  +  mix test  +  the board's vitest suite  +  the plugin hooks  +  the bootstrap shims
 make go-test / mix-test / js-test / plugin-hooks-test / bootstrap-test   # one suite each
@@ -31,17 +31,19 @@ make install-agent / uninstall-agent   # durable keep-alive: launchd (macOS) / s
 `make ui` and `make daemon` take the checkout's build lock (`scripts/build-lock.sh`,
 a `bin/.build.lock` directory holding the builder's pid), so two builds started in
 one checkout at once — two agents deploying together — run one after the other
-instead of overwriting each other's `ui/dist` and `bin/rel.next`. A lock whose
-holder has exited is broken automatically.
+instead of overwriting each other's `ui/dist` or interleaving release assembly.
+A lock whose holder has exited is broken automatically.
 
-Source builds require Go, Elixir/OTP, Node 22+, and npm on every build host.
+Source builds require Go, Elixir/OTP, Node 22+, npm, and Python 3 on every build host.
+Python 3 publishes the release symlink atomically.
 `make build` compiles both Go CLIs, the UI, and daemon release; `make daemon` builds only the daemon release.
 The fleet helper builds in each host's login shell, where its toolchain is configured.
 Fetched releases include the runtime and UI, so users need none of these build tools;
 the target must match the release's OS and CPU architecture.
 
-**`bin/rel` is a Mix release** — an ERTS-bundled directory with compiled
-modules, assembled by `make daemon` and managed by `shuttle daemon` commands.
+**`bin/rel-built` points to the latest completed Mix release** — an ERTS-bundled directory with compiled modules, managed by `shuttle daemon` commands.
+`make daemon` assembles a unique immutable `bin/rel.generation-*` directory and atomically publishes that symlink.
+Selection resolves the symlink to its canonical generation, so another build cannot overwrite a selected or running assembly.
 The release's BEAM launcher is `shuttled`. A running BEAM keeps using the
 release it booted, so a restart without `make daemon` picks up no source edit:
 use `make restart`, then verify both `booted_at` and `git_short_sha` on
@@ -68,9 +70,9 @@ Supervisor definitions invoke the installed Go CLI and use the user's home as th
 `shuttle daemon status` includes the same field.
 An explicit `SHUTTLE_RELEASE` still selects a release for a direct CLI invocation.
 A missing selected release fails with its path and instructions to deploy locally or restart from the main checkout; the tmux loop retries with exponential backoff.
-`make stop` uses the running daemon's release receipt, but a supervisor immediately
-respawns a process that it owns, so `make stop` is not a durable stop while the
-supervisor is enabled. Use the supervisor for an explicit cycle:
+`make stop` identifies the process through endpoint ownership.
+A linked worktree also requires a release receipt within that worktree (`--within`).
+A supervisor immediately respawns a process that it owns, so `make stop` is not a durable stop while the supervisor is enabled. Use the supervisor for an explicit cycle:
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   # macOS
@@ -96,6 +98,9 @@ expected level differs holds at boot with a skew reported on `/api/v1/version`
 and `/api/v1/state`. `make daemon` therefore builds both Go CLIs first
 (`SKIP_CLI=1` trusts both on `PATH`). The Elixir suite shells both CLIs too, so
 run `make cli-install` before `make mix-test` after changing either boundary.
+Contract level 32 includes the CLI-owned locked writers `standing-transition` and `patch-document`.
+The former checks the current owner, UID, run and human lifecycle state under the fiber lock; a changed run refuses force rearm.
+The latter compares the source document's SHA-256 under that lock and refuses a stale snapshot rather than overwriting a concurrent edit.
 
 `shuttle scan-changes` reads the previous metadata index as JSON on stdin.
 Its output has a small JSON header (`ids` and `indexed_paths`), a newline,
@@ -105,7 +110,7 @@ the Go CLI owns its paths and nanosecond timestamps.
 
 ### The release's runtime stays out of workers and builds
 
-A daemon started from `bin/rel` runs with the release's ERTS first on `PATH`
+A daemon started from an assembled release runs with the release's ERTS first on `PATH`
 and `ROOTDIR`, `BINDIR`, `PROGNAME` and `EMU` set. Nothing it launches should
 inherit them: a worker's `mix`, `erl` or `elixir` resolved from that ERTS dies
 with `cannot get bootfile …/bin/rel/bin/start.boot`, and `bash -l` does not
@@ -160,6 +165,8 @@ An explicit commit object has no ref to push; branches and tags are pushed unles
 The caller executes an in-memory copy of its entrypoint, so refreshing or editing its checkout cannot replace script bytes Bash has yet to read.
 When a remote is targeted, preflight fetches origin and verifies that the target is reachable from an advertised origin ref before building or cycling any host.
 An implicit target must also descend from the checkout's fetched upstream; `--ref` explicitly authorizes a rollback or divergent revision.
+Automated rollback targets must support incarnation-bound quarantine release (`e8fc948a` or a descendant); otherwise release stays held.
+Directory-layout `bin/rel` assemblies are supported when they meet that protocol requirement.
 A local-only deployment can use an unpublished commit.
 Each host uses exactly that object in a detached Git worktree under `<main-worktree>.deploy/<commit>`; no host pulls a moving branch.
 Git's common directory selects the main worktree, so linked checkouts share one deploy root.
@@ -213,6 +220,8 @@ Before retargeting the launcher, the helper reads the live daemon's commit from 
 After a fresh ready boot, quarantine release, advisory checkout refresh and successful harness setup, the helper removes obsolete worktrees with `git worktree remove --force`, then runs `git worktree prune`.
 It keeps the new tree, the previous live tree, any tree referenced by `pi list`, the current pointer target, and the running daemon's reported `release_path`.
 The previous release is recorded at `~/.shuttle/deploy/previous` after release; a coalesced run reuses that record instead of treating its own target as the rollback root.
+Pruning also collects completed `bin/rel.generation-*` assemblies in the regular checkout.
+It retains generations referenced by `bin/rel-built`, the selected pointer, the running release or explicit keep paths, and skips assemblies carrying `.assembling`.
 Pruning observes and removes under the same release lock as activation and selection, so it cannot delete a selected or running release.
 Each transaction also holds a kernel lease at `~/.shuttle/deploy/leases/<commit>.lock` before creating or using its tree.
 Lease metadata stays outside deploy roots so rollback targets with older pruning code do not try to remove it as a worktree.
@@ -245,9 +254,11 @@ Push the verified revision, then deploy it on each host:
    A service-owned daemon is cycled once through that manager, without a separate listener kill.
    A loaded supervisor's pin migration counts as that cycle; the activation callback does not restart it again.
    An unsupervised listener is stopped before installing the respawn launcher.
-4. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances, `release_path` equals the selected release, and `ready` is `true`.
+4. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances, `release_path` equals the selected canonical release, and `ready` is `true`.
+   Require `contract.ok: true`, an explicit `reconciliation_hold: null`, and a nonempty `incarnation`.
    `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` defaults to 900 and `SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS` to 5; both overrides are forwarded explicitly to remote transactions.
-5. Run `shuttle daemon release` to release the boot quarantine and record the previous release.
+5. Post to `/api/v1/quarantine/release` with `expected: {incarnation, release_path}` from that verified response, then record the previous release.
+   HTTP 409 means the daemon incarnation changed; verify the replacement before releasing it.
 6. Fast-forward the clean regular checkout when possible, then run `felt setup <harness>` for each harness carrying felt's plugin and check `felt setup receipt` (see [harness plugins](#harness-plugins)).
 7. Prune obsolete deploy roots after the harness checks succeed.
 8. Check the changed behavior through the live API or board.

@@ -2,10 +2,12 @@ defmodule ShuttleWeb.QuarantineController do
   @moduledoc """
   Agent-API endpoint: POST /api/v1/quarantine/release
 
-  Releases the Poller's boot quarantine — the human "go" that restores fresh
-  launch authority to a restarted daemon. A restart parks fresh autonomous
-  launches (`pending_launch` in the state snapshot) while dirty-death resumes
-  stay automatic; release is pure manual, and this is the release. Idempotent.
+  Releases the Poller's boot quarantine, restoring fresh launch authority to a
+  restarted daemon. A restart parks fresh autonomous launches (`pending_launch`
+  in the state snapshot) while dirty-death resumes stay automatic.
+  Explicit release is idempotent; a proven fast bounce can also release an opted-in host automatically.
+  Optional `expected: {incarnation, release_path}` binds this request to a verified daemon;
+  a replacement incarnation is refused rather than inheriting that authority.
 
   **Owner-routed.** A held card is served by the daemon that OWNS it, and the
   quarantine lives in that daemon's Poller — so the release must land there.
@@ -17,6 +19,7 @@ defmodule ShuttleWeb.QuarantineController do
   launches, not just the local board's.
 
   Returns: 200  %{ok: true, boot_quarantine: false}
+           409  %{ok: false, error: "incarnation_mismatch"} on expected-identity mismatch
            502  %{ok: false, error: "forward_failed"} on a tunnel failure
            503  %{ok: false, error: "poller_unavailable"} when no Poller runs
   """

@@ -334,7 +334,7 @@ Six steps run in order.
    the run before anything is built.
 2. **Go CLIs.** `make cli-install` builds and installs `felt` and `shuttle`
    from *this* checkout, so the daemon and its CLIs share one source revision.
-3. **Daemon release.** `make daemon` assembles the Mix release into `bin/rel`.
+3. **Daemon release.** `make daemon` assembles an immutable `bin/rel.generation-*` Mix release and atomically publishes `bin/rel-built` pointing to it.
    Building does not select a release or touch the host daemon; keep-alive installation selects it.
 4. **`ui/dist`.** Builds the served board bundle with Node and npm on this host.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
@@ -350,7 +350,7 @@ Useful flags: `--dry-run`, `--skip-hook`,
 `--skip-cli`, `--with-tunnels`.
 
 Editing daemon source means rebuilding: the release runs the compiled modules
-under `bin/rel`, so a restart alone picks up nothing. `make restart` rebuilds
+in its selected generation, so a restart alone picks up nothing. `make restart` rebuilds
 and bounces in one step from the main checkout. In a linked worktree it only builds;
 use `bin/shuttle-deploy --hosts local --ref <commit>` to activate that revision.
 
@@ -761,7 +761,8 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 
 `~/.shuttle/repo` selects the release for both supervisors and the respawn loop.
 The loop rereads it between daemon starts, so deployment can select a different checkout without replacing the loop.
-The pointer also accepts a checkout root containing `bin/rel`.
+The pointer requires an assembled release path, not a checkout root.
+Selecting `bin/rel-built` records its canonical generation.
 If you move the release manually, select its new absolute path with `shuttle daemon select-release <path>`.
 
 ## Rex terminal backend
@@ -1220,10 +1221,9 @@ where it speaks:
 - an entry with `"enabled": false` keeps a discovered host out of the fleet;
 - `"defaults": {"discover": false}` turns discovery off for this host.
 
-When Tailscale is absent, stopped, or failing, the daemon falls back to the
-file alone. `/api/v1/version` reports the discovery state (`discovery`), and
-`shuttle doctor` prints a warning naming the reason and stating that the host
-is running on `remotes.json` alone. A peer whose daemon is too old to report
+When Tailscale is absent, stopped, or failing, the daemon retains verified peers for up to ten minutes after their last successful probe, alongside configured entries.
+After that window it uses `remotes.json` alone.
+`/api/v1/version` reports the discovery state (`discovery`), and `shuttle doctor` prints the reason and retained-peer count. A peer whose daemon is too old to report
 its host id is not discovered; configure it by hand or upgrade it.
 
 ### The remotes.json entry
@@ -1542,7 +1542,8 @@ subset it can run — see [Configuring agents](#configuring-agents).
 
 **Source builds compile all four artifacts on each host.** `make build` builds
 both CLIs, the UI, and the daemon release; `make daemon` builds only the release.
-Go, Elixir/OTP, and Node/npm must be available in the build shell.
+Go, Elixir/OTP, Node/npm, and Python 3 must be available in the build shell.
+Python 3 publishes the release symlink atomically.
 The fleet deploy helper uses each host's login shell to load its toolchain.
 Fetched releases need none of these build tools.
 
@@ -1590,9 +1591,8 @@ window, not the daemon failing. Answer it and the board fills; warm, the same
 walk is instant. So after pointing the daemon at a store in iCloud or any other
 location macOS guards, go find the prompt before you judge an empty board.
 
-**A supervisor respawns the daemon after `make stop`.** The Makefile's release
-pattern matches `bin/rel` in both relative and absolute paths, so `make restart`
-can rebuild and cycle a supervisor-owned checkout. Use the supervisor directly
+**A supervisor respawns the daemon after `make stop`.** Endpoint ownership identifies the process to stop; a linked worktree also checks its reported release path with `--within`.
+`make restart` in the main checkout rebuilds, selects the canonical generation and cycles a supervisor-owned daemon. Use the supervisor directly
 when you want its service state to be explicit:
 
 ```bash
