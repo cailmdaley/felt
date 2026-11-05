@@ -60,3 +60,10 @@ it('marks hidden characters in a window with no structured rows', async () => {
   expect([...host.querySelectorAll<HTMLElement>('pre .change-hidden-char')].map(mark => mark.dataset.codepoint)).toEqual(['U+202E', 'U+000D'])
   mounted.dispose()
 })
+it('keeps context rows in the plain window', () => {
+  const host = document.createElement('div'); document.body.append(host)
+  const lines = [{ kind: 'context' as const, old: 1, new: 1, text: 'before' }, { kind: 'addition' as const, old: 0, new: 2, text: 'added' }, { kind: 'context' as const, old: 2, new: 3, text: 'after' }]
+  const mounted = mountChangeWindow(host, { ...window, lines }, file, { annotations: () => [], add() {}, field: () => document.createElement('div') })
+  expect([...host.querySelectorAll<HTMLElement>('.change-plain-row')].map(row => [row.dataset.lineType, row.querySelector('[data-line-text]')?.textContent])).toEqual([['context', 'before'], ['change-addition', 'added'], ['context', 'after']])
+  mounted.dispose()
+})
