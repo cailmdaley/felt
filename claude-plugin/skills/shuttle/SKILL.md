@@ -44,7 +44,7 @@ Diagonal agrees to 3%. `validate/offdiag.py` loads the mocks; plotting is unfini
 - **`## Desired State`** — the contract: checkable done-conditions and what to leave alone, never steps. Workers choose the path.
 - **`## Status`** — the handoff to the next worker: what landed, what's stuck, what to know. Rewritten, never appended.
 - **`role`** — the office this work belongs to. Its charter, the fiber `roles/<role>` in the shared store, holds the office's playbooks, human gates and the people it serves.
-- **`tapestry.html`** — beside the fiber: one page describing the whole constitution as it stands, never the latest stretch. It opens on a one-screen map drawn in code, with depth a click below. Its form follows the work: findings with their figures, the talk's slides themselves, embedded PDFs for a paper review. Rewritten whole, never appended ([references/tapestry.md](references/tapestry.md)).
+- **`tapestry.html`** — beside the fiber: one page describing the whole constitution as it stands, never the latest stretch. Its first thing, above any title, is a screen-filling map drawn in code; everything else sits below. Its form follows the work: findings with their figures, the talk's slides themselves, embedded PDFs for a paper review. Rewritten whole, never appended ([references/tapestry.md](references/tapestry.md)).
 
 Armed cross-host creation and control go through the owning daemon's existing routes.
 The owner writes its store directly; an unreachable owner fails without a local half-copy.

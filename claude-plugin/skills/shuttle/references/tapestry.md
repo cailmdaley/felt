@@ -4,17 +4,11 @@ The tapestry is the constitution's one page: what this work is, whole, as it sta
 
 ## Start with the map
 
-**Design the structure and draw it before writing any prose.** The page opens on one visual that fits on one screen and carries the whole mental model: the parts, how they connect, how someone uses them, what state each is in. Draw it in code: inline SVG, canvas, a watercolor or ink sketch, whatever expression suits the work. If you can't draw it, you don't yet understand the shape.
+**Every tapestry opens on a map, and the map is the very first thing on the page.** No title, stamp or status above it: it largely fills the screen, and everything else comes below. Design it before writing any prose: one visual that carries the whole mental model, meaning the parts, how they connect, how someone uses them and what state each is in. Draw it in code: inline SVG, canvas, a watercolor or ink sketch, whatever expression suits the work. If you can't draw it, you don't yet understand the shape.
 
-**Everything hangs from the map.** Each region of the map is a section of the page, and a reader sees the whole, then chooses where to dig. Disclose in layers: map, a short paragraph per region, then `<details>`, nested pages and sub-fibers. Keep the open page to a few screens.
+**Everything hangs from the map.** Each region of the map is a section of the page, and a reader sees the whole, then chooses where to dig. Disclose in layers: map, a short paragraph per region, then `<details>`, nested pages and sub-fibers. Keep the page short: two or three screens below the map.
 
 A PR description is this page at the scale of one change.
-
-## Before the human reviews
-
-The page is due whenever you stop for the human: before `shuttle close`, before `shuttle ask`, and before waiting in chat for them to review what you built. Rewrite it then, even if the session was short or the human was present, because they will open it later with the conversation gone. `close` and `ask` refuse on a top-level oneshot whose `tapestry.html` predates the current dispatch.
-
-A thread reviewed by its orchestrator owes the orchestrator its outcome; its page is optional. When nothing needs review, `shuttle rest` leaves it alone.
 
 ## Who reads it
 
@@ -46,12 +40,12 @@ Concrete shapes this forbids:
 
 The second is shorter, tells the reader what to do, and stays true next month. The first is a story about you.
 
-**Exception: content whose subject *is* chronology** — a postmortem, a decision log, a change history. There the sequence is the finding. That is a different genre, and rare for a constitution report.
+**Exception:** a postmortem or decision log, where the sequence is the finding.
 
 ## Shape
 
-**Before `shuttle ask`, rewrite `tapestry.html` to lead with the question.**
-Nothing goes above this opening, including a title, as-of stamp, status panel or executive summary:
+**Before `shuttle ask`, rewrite `tapestry.html` to lead with the question, directly below the map.**
+Only the map goes above this opening:
 
 1. **Short background** — pitched at what the human knows since their last engagement, only enough to frame the question.
 2. **Question and options/tradeoffs** — what their view would help with, the alternatives and their costs when there are alternatives.
@@ -63,7 +57,7 @@ Keep working after raising the ask, and clear it when it becomes moot.
 
 Without an outstanding ask, the default skeleton is:
 
-1. **What this is** — the title and a sentence or two that would make sense to a stranger, then the map.
+1. **The map, then what this is** — a title and a sentence or two that would make sense to a stranger.
 2. **Where it stands** — a few verdict-bearing sentences, and the action the human takes next if any. Not "we worked on the covariance" but "the cut-sky Gaussian covariance under-covers by 20–35% at low z, so every σ below uses the 200-seed ensemble instead. Nothing needs your decision."
 3. **One section per region of the map** — what it is, how it works, why it is that way. Named for the claim, grouped by meaning, never by when it landed. Every claim carries its receipt — the number, the plot, the command, the sub-fiber — so the reader can challenge it cheaply. A part with its own sub-fiber carries the verdict, the number and the link, **not the argument**.
 4. **Open questions** — short, each one actionable.

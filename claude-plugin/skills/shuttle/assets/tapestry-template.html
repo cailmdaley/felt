@@ -3,8 +3,8 @@
   Starter template for a fiber's tapestry.html companion. This file is a
   VISUAL PALETTE — typography, colors, classes. It is not a content
   model to fill in. The tapestry describes the whole constitution as it
-  stands, and opens on a one-screen map drawn in code; every section hangs
-  from a region of that map. The guidance lives in references/tapestry.md;
+  stands. Its very first thing, above any title, is a screen-filling map
+  drawn in code, and every section hangs from a region of that map. The guidance lives in references/tapestry.md;
   read that first. The three that bite hardest:
 
     1. REWRITE, DON'T APPEND. Each session restates the whole tapestry
@@ -130,6 +130,8 @@
      iframe sizes it full-width; a standalone tab fills the window) rather
      than capping at a fixed reading column. Generous side padding keeps a
      gutter when wide. */
+  .map { margin: 0; height: 100vh; min-height: 420px; display: flex; align-items: center; justify-content: center; }
+  .map svg { width: 100%; height: 100%; }
   .page { max-width: none; margin: 0; padding: 48px clamp(28px, 4vw, 72px) 64px; }
   .stamp { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 20px; display: flex; gap: 14px; align-items: center; }
   .stamp .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cinnabar); }
@@ -175,6 +177,13 @@
 </style>
 </head>
 <body>
+<!-- THE MAP. The first thing on the page, above any title, largely filling
+     the screen. Design it before any prose: one visual, the whole mental
+     model. Inline SVG or canvas, drawn in code, in whatever hand suits the
+     work. Each region links to its section below. -->
+<figure class="map">
+  <svg viewBox="0 0 1200 780" role="img" aria-label="The map of this work"></svg>
+</figure>
 <main class="page">
 
   <!-- PRIMITIVES KIT — copy a block, replace every sample claim, delete unused blocks.
@@ -216,13 +225,6 @@
   </div>
 
   <h1>What this work is, as a sentence a stranger could follow.</h1>
-
-  <!-- THE MAP. Design it before any prose: one visual, one screen, the
-       whole mental model. Inline SVG or canvas, drawn in code, in whatever
-       hand suits the work. Each region links to its section below. -->
-  <figure>
-    <svg viewBox="0 0 960 540" role="img" aria-label="The map of this work"></svg>
-  </figure>
 
   <hr>
 
