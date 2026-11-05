@@ -33,6 +33,11 @@ it.each(['parse', 'grammar', 'render', 'empty render'])('retains readable rows a
   expect(host.querySelectorAll('.change-plain-row')).toHaveLength(2)
   await mounted.ready
   expect(host.dataset.renderState).toBe('plain')
+  if (failure !== 'parse') {
+    expect(mocks.highlight).toHaveBeenCalledWith({
+      langs: ['typescript'], themes: ['shuttle-change'], preferredHighlighter: 'shiki-wasm',
+    })
+  }
   expect([...host.querySelectorAll('[data-line-text]')].map(row => row.textContent)).toEqual(['old', 'new'])
   ;(host.querySelector('[aria-label="Comment on app.ts:1 (new)"]') as HTMLButtonElement).click()
   expect(controls.add).toHaveBeenCalledWith(1, 'additions')
