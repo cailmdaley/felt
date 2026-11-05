@@ -67,11 +67,18 @@ it('mounts a change only when selected and disposes it on returning to the conve
   host.refresh(change.key)
   await vi.waitFor(() => expect(render.refresh).toHaveBeenCalledOnce())
   expect(render.calls.filter(call => call.options.kind === 'change')).toHaveLength(1)
+  render.dispose.mockImplementationOnce((viewer: HTMLElement) => {
+    expect(viewer.closest('.ws-selected')).not.toBeNull()
+  })
   host.select(docs[0].key)
   expect(render.dispose).toHaveBeenCalledWith(call.viewer)
   expect(host.get(change.key)?.viewer).toBeNull()
   host.select(change.key)
   expect(render.calls.filter(call => call.options.kind === 'change')).toHaveLength(2)
+  render.dispose.mockImplementationOnce((viewer: HTMLElement) => {
+    expect(viewer.closest('.ws-selected')).not.toBeNull()
+    expect(viewer.closest('.ws-parked')).toBeNull()
+  })
   host.parkAll()
   expect(host.get(change.key)?.viewer).toBeNull()
 })

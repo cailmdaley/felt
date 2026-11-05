@@ -148,13 +148,13 @@ export class DocumentHost {
     for (const [id, state] of this.frames) {
       const parked = !current.has(id)
       const selected = !parked && id === key
+      this.setActive(state, selected)
       state.frame.el.classList.toggle('ws-parked', parked)
       state.frame.el.classList.toggle('ws-receded', !parked && !selected)
       state.frame.el.classList.toggle('ws-selected', selected)
       state.frame.el.inert = parked
       state.frame.sheet.inert = !selected
       state.frame.el.setAttribute('aria-hidden', String(!selected))
-      this.setActive(state, selected)
       // A neighbour's initial load is allowed only while its channel is visible.
       if (parked) {
         state.initialSuspended = !state.loaded && !!state.frame.viewer
@@ -247,12 +247,12 @@ export class DocumentHost {
     this.selected = null
     this.documents = []
     for (const state of this.frames.values()) {
+      this.setActive(state, false)
       state.frame.el.classList.add('ws-parked')
       state.frame.el.classList.remove('ws-selected', 'ws-receded')
       state.frame.el.inert = true
       state.frame.sheet.inert = true
       state.frame.el.setAttribute('aria-hidden', 'true')
-      this.setActive(state, false)
       state.initialSuspended = !state.loaded && !!state.frame.viewer
       suspendFileViewer(state.frame.viewer)
       suspendFileViewer(state.pending)
@@ -603,7 +603,7 @@ export class DocumentHost {
     // first time already sits at the origin, so a page opening at the top skips it.
     const restore = state.scroll.x !== 0 || state.scroll.y !== 0 || boundScrollers.has(scroller)
     boundScrollers.add(scroller)
-    if (restore) {
+    if (restore && state.frame.doc.kind !== 'change') {
       scroller.scrollTop = state.scroll.y
       scroller.scrollLeft = state.scroll.x
       // A fresh prose frame receives its reading geometry later in the same turn.

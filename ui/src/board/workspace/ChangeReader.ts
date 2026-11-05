@@ -20,6 +20,7 @@ import { mountChangeWindow } from './changeWindow.js'
 import { validateChangeBundle } from './changeValidation.js'
 import { acquireChangeDraft } from './changeDraft.js'
 import { changeFileLabel } from './changeFileLabel.js'
+import { readingAnchor, windowRows, type ChangeReadingState } from './changePosition.js'
 
 registerCustomCSSVariableTheme('shuttle-change', {})
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -94,6 +95,8 @@ export function mountChangeReader(
   const version = revision ?? changeIdentity(JSON.stringify(bundle.story) + bundle.title)
   const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head, version])}`
   const viewed = new Set(stored<string[]>(`${prefix}:viewed`, []))
+  const reading = stored<ChangeReadingState>(`${prefix}:position`, { expanded: [], whole: [] })
+  const wholeFiles = new Set(reading.whole)
   const draftState = acquireChangeDraft(identity, bundle.base, bundle.head),
     draft = draftState.value
   const shell = el('div', 'change-reader')
@@ -106,16 +109,14 @@ export function mountChangeReader(
   shell.append(rail, scroll)
   root.append(shell)
   const disposers: (() => void)[] = []
-  let destination: { element: Element; center: boolean } | undefined
+  let destination: { element: () => Element | undefined; offset: number } | undefined
   const alignDestination = (): void => {
-    if (destination?.element.isConnected)
-      scroll.scrollTop +=
-        destination.element.getBoundingClientRect().top -
-        scroll.getBoundingClientRect().top -
-        (destination.center ? scroll.clientHeight / 2 : 16)
+    const element = destination?.element()
+    if (element?.isConnected)
+      scroll.scrollTop += element.getBoundingClientRect().top - scroll.getBoundingClientRect().top - destination!.offset
   }
   const reveal = (element: Element, center = false): void => {
-    destination = { element, center }
+    destination = { element: () => element, offset: center ? scroll.clientHeight / 2 : 16 }
     alignDestination()
   }
   const releaseDestination = (): void => {
@@ -173,6 +174,7 @@ export function mountChangeReader(
     rail.append(link)
     main.append(element)
     const entry = { element, link, ids: [] as string[], label: title }
+    element.dataset.windowId = `section:${sections.length}`
     sections.push(entry)
     return entry
   }
@@ -420,16 +422,19 @@ export function mountChangeReader(
     })
   }
   // The slot wrapper lives in light DOM, so workspace typography and form controls apply to comments.
-  const mountWindow = (host: HTMLElement, window: ChangeWindow, file: ChangeFile): (() => void) => {
+  const mountWindow = (host: HTMLElement, window: ChangeWindow, file: ChangeFile) => {
     const entry = mountChangeWindow(host, window, file, {
       annotations: () => lineAnnotations(file),
       add: (line, side) => addComment(file, line, side),
       field: commentField,
     })
     annotations.add(entry)
-    return () => {
-      annotations.delete(entry)
-      entry.dispose()
+    return {
+      ready: entry.ready,
+      dispose() {
+        annotations.delete(entry)
+        entry.dispose()
+      },
     }
   }
   const io = new IntersectionObserver(
@@ -438,12 +443,12 @@ export function mountChangeReader(
         const host = entry.target as HTMLElement,
           window = windows.get(host)
         if (!window) continue
-        if (entry.isIntersecting && !window.dispose)
-          window.dispose = mountWindow(host, window.hunk, window.file)
-        else if (!entry.isIntersecting && window.dispose) {
+        if (entry.isIntersecting && !window.mounted)
+          window.mounted = mountWindow(host, window.hunk, window.file)
+        else if (!entry.isIntersecting && window.mounted) {
           host.style.minHeight = `${host.offsetHeight}px`
-          window.dispose()
-          window.dispose = undefined
+          window.mounted.dispose()
+          window.mounted = undefined
         }
       }
     },
@@ -451,7 +456,7 @@ export function mountChangeReader(
   )
   const windows = new Map<
     HTMLElement,
-    { file: ChangeFile; hunk: ChangeWindow; dispose?: () => void }
+    { file: ChangeFile; hunk: ChangeWindow; mounted?: ReturnType<typeof mountWindow> }
   >()
   const views: { card: HTMLElement; file: ChangeFile; showAll: () => void }[] = []
   const jumpToRange = (range: ChangeRange): void => {
@@ -473,7 +478,7 @@ export function mountChangeReader(
       return
     }
     const window = windows.get(host)!
-    if (!window.dispose) window.dispose = mountWindow(host, window.hunk, window.file)
+    if (!window.mounted) window.mounted = mountWindow(host, window.hunk, window.file)
     reveal(host)
     requestAnimationFrame(() => {
       const excluded = range.side === 'old' ? 'change-addition' : 'change-deletion'
@@ -493,6 +498,7 @@ export function mountChangeReader(
     }
     for (const slice of slices) {
       const host = el('div', 'change-diff-window')
+      host.dataset.windowId = JSON.stringify([parent.closest<HTMLElement>('.change-file')!.dataset.viewId, slice.start])
       host.style.minHeight = `${slice.rows * 20 + 68}px`
       parent.append(host)
       windows.set(host, { file, hunk: slice })
@@ -510,6 +516,7 @@ export function mountChangeReader(
     const collapsed = file.role === 'generated' && !stop
     const card = el(collapsed ? 'details' : 'article', 'change-file')
     card.dataset.changeFile = file.path
+    card.dataset.viewId = id
     card.dataset.status = file.status
     const head = el(collapsed ? 'summary' : 'header', 'change-file-head')
     const end = stop?.to && stop.to !== stop.from ? `–${stop.to}` : ''
@@ -551,20 +558,27 @@ export function mountChangeReader(
           if (!body.childNodes.length) addDiff(body, file, hunks)
         }
       })
-    else addDiff(body, file, hunks)
+    else addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
+    if (collapsed && reading.expanded.includes(id)) {
+      ;(card as HTMLDetailsElement).open = true
+      view.showAll()
+    }
     if (stop && (stop.from !== undefined || stop.to !== undefined)) {
-      let whole = false
+      let whole = wholeFiles.has(id)
       const toggle = button('Show file diff', () => {
         whole = !whole
+        if (whole) wholeFiles.add(id)
+        else wholeFiles.delete(id)
         toggle.textContent = whole ? 'Show chosen range' : 'Show file diff'
         for (const host of body.querySelectorAll<HTMLElement>('.change-diff-window')) {
           io.unobserve(host)
-          windows.get(host)?.dispose?.()
+          windows.get(host)?.mounted?.dispose()
           windows.delete(host)
         }
         body.replaceChildren()
         addDiff(body, file, whole ? file.hunks : hunks)
       })
+      toggle.textContent = whole ? 'Show chosen range' : 'Show file diff'
       toggle.className = 'change-range-toggle'
       card.insertBefore(toggle, body)
       view.showAll = () => {
@@ -591,6 +605,7 @@ export function mountChangeReader(
     link.className = 'change-chapter-link'
     rail.append(link)
     const entry = { element: part, link, ids: [] as string[], label: chapter.title }
+    part.dataset.windowId = `section:${sections.length}`
     sections.push(entry)
     for (const [index, stop] of chapter.stops.entries()) {
       const file = files.find((f) => f.path === stop.file)
@@ -703,11 +718,26 @@ export function mountChangeReader(
     }
   }
   shell.addEventListener('keydown', stopKeys)
+  const anchor = reading.anchor
+  const anchorHosts = () => [...windows.keys(), ...sections.map(section => section.element).reverse()]
+  const anchorHost = anchor && anchorHosts().find(host => host.dataset.windowId === anchor.window)
+  if (anchorHost && anchor) {
+    const window = windows.get(anchorHost)
+    if (window) window.mounted = mountWindow(anchorHost, window.hunk, window.file)
+    destination = { element: () => windowRows(anchorHost)[anchor.row] ?? anchorHost, offset: anchor.offset }
+    alignDestination()
+    void window?.mounted?.ready.then(alignDestination)
+  }
   return {
     scroller: scroll,
     dispose() {
+      save(`${prefix}:position`, {
+        expanded: [...shell.querySelectorAll<HTMLDetailsElement>('details[open][data-view-id]')].map(card => card.dataset.viewId!),
+        whole: [...wholeFiles],
+        anchor: readingAnchor(scroll, anchorHosts()),
+      } satisfies ChangeReadingState)
       for (const dispose of disposers) dispose()
-      for (const window of windows.values()) window.dispose?.()
+      for (const window of windows.values()) window.mounted?.dispose()
       shell.remove()
       void disposeHighlighter()
     },
