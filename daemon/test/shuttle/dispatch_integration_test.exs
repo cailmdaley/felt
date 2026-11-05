@@ -2199,6 +2199,7 @@ defmodule Shuttle.DispatchIntegrationTest do
   # wait to the next occurrence without changing any runtime marker.
   defp through_exit_writer(host, id) do
     path = fiber_file(host, id)
+    original = read_frontmatter(host, id)
     File.write!(path, String.replace(File.read!(path), "status: closed", "status: active"))
     {:ok, _} = Shuttle.LifecycleStore.mark_awaiting(id)
     back = DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -120, :second))
@@ -2208,7 +2209,16 @@ defmodule Shuttle.DispatchIntegrationTest do
       Regex.replace(~r/^closed-at: .*$/m, File.read!(path), ~s(closed-at: "#{back}"))
     )
 
-    assert File.read!(path) =~ ~r/^ +dispatched_at: \d/m
+    written = read_frontmatter(host, id)
+    assert written["status"] == "closed"
+
+    assert_same_instant(
+      get_in(written, ["shuttle", "runtime", "dispatched_at"]),
+      get_in(original, ["shuttle", "runtime", "dispatched_at"])
+    )
+
+    assert get_in(written, ["shuttle", "runtime", "handed_off_at"]) ==
+             get_in(original, ["shuttle", "runtime", "handed_off_at"])
   end
 
   defp fiber_file(host, id) do

@@ -2,9 +2,8 @@ package shuttle
 
 import "time"
 
-// RunFacts are the durable facts that distinguish a worker's conclusion from
-// a human rearm. An exit verb belongs to its handoff timestamp, not to a later
-// dispatch that retained it.
+// RunFacts distinguish a worker's conclusion from an owner rearm. An exit verb
+// belongs to its handoff timestamp, not to a later dispatch that retained it.
 type RunFacts struct {
 	DispatchedAt string
 	HandedOffAt  string
@@ -20,8 +19,10 @@ const (
 	RunRearmed    RunDisposition = "rearmed"
 )
 
-// StandingRunDisposition derives the current run without inventing a conclusion
-// for a dispatch newer than the preceding run's handoff.
+// StandingRunDisposition distinguishes an unfinished run, a worker's reviewable
+// result, and a rearm by the owner (acceptance or the next scheduled occurrence).
+// Rearm markers at the dispatch instant keep an occurrence due without letting
+// a late exit close it again. A prior run's handoff cannot conclude a newer one.
 func StandingRunDisposition(f RunFacts) RunDisposition {
 	dispatch, err := time.Parse(time.RFC3339Nano, f.DispatchedAt)
 	if err != nil {
@@ -31,7 +32,7 @@ func StandingRunDisposition(f RunFacts) RunDisposition {
 	if err != nil || handoff.Before(dispatch) {
 		return RunInProgress
 	}
-	if f.ExitVerb == "rearmed" {
+	if f.ExitVerb == "rearmed" || f.ExitVerb == "tempered" {
 		return RunRearmed
 	}
 	return RunHandedOff

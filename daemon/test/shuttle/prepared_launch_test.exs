@@ -185,7 +185,7 @@ defmodule Shuttle.PreparedLaunchTest do
     assert File.read!(Path.join(root, "effects")) == "effect\n"
   end
 
-  for conclusion <- [:review, :human_rearm, :newer_run] do
+  for conclusion <- [:review, :human_rearm, :accepted_close, :occurrence_rearm, :newer_run] do
     @tag :launch_record
     @tag skip: is_nil(System.find_executable("tmux"))
     test "recovered ad-hoc observed exit respects #{conclusion}", %{root: root} do
@@ -249,6 +249,18 @@ defmodule Shuttle.PreparedLaunchTest do
         :human_rearm ->
           FeltStoreRunner.put_shuttle_fields(id, %{
             "handed_off_at" => "2099-01-01T00:00:00Z",
+            "thread_exit_verb" => "rearmed"
+          })
+
+        :accepted_close ->
+          FeltStoreRunner.put_shuttle_fields(id, %{
+            "handed_off_at" => "2099-01-01T00:00:00Z",
+            "thread_exit_verb" => "tempered"
+          })
+
+        :occurrence_rearm ->
+          FeltStoreRunner.put_shuttle_fields(id, %{
+            "handed_off_at" => facts["dispatched_at"],
             "thread_exit_verb" => "rearmed"
           })
 

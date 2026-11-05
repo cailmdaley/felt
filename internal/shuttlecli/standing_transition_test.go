@@ -86,7 +86,7 @@ func TestStandingExitRejectsStaleRunAndHumanTransitions(t *testing.T) {
 			_, err := st.Update("role", func(f *felt.Felt) error {
 				switch change {
 				case "accept":
-					return rearmStanding(f)
+					return rearmStanding(f, time.Now().UTC().Format(time.RFC3339Nano))
 				case "rest":
 					return f.SetStatus(felt.StatusOpen, time.Now())
 				case "pause":
@@ -127,6 +127,10 @@ func TestStandingRunDispositionAndRecoveryPolicy(t *testing.T) {
 		{"second dirty", "2026-01-01T00:00:00Z", "rearmed", "scheduled-2", true, true},
 		{"worker handoff during downtime", "2026-01-03T00:00:00Z", "handed off", "scheduled-2", true, true},
 		{"human rearm", "2026-01-03T00:00:00Z", "rearmed", "scheduled-2", true, false},
+		{"accepted close", "2026-01-03T00:00:00Z", "tempered", "scheduled-2", false, false},
+		{"occurrence rearm", "2026-01-02T00:00:00Z", "rearmed", "scheduled-2", true, false},
+		{"late exit after occurrence rearm", "2026-01-02T00:00:00Z", "rearmed", "scheduled-2", false, false},
+		{"new dirty run after accepted close", "2026-01-01T00:00:00Z", "tempered", "scheduled-2", true, true},
 		{"dirty ad hoc recovery", "", "", "adhoc-123", true, false},
 		{"clean ad hoc recovery", "2026-01-03T00:00:00Z", "handed off", "adhoc-123", true, false},
 		{"observed ad hoc exit", "", "", "adhoc-123", false, true},
@@ -176,7 +180,9 @@ func TestUnrecordedLaunchRequiresAnObservedExit(t *testing.T) {
 func TestWorkerHandoffCannotEraseCurrentHumanRearm(t *testing.T) {
 	t.Parallel()
 	st, req := seedStandingTransition(t)
-	if _, err := st.Update("role", rearmStanding); err != nil {
+	if _, err := st.Update("role", func(f *felt.Felt) error {
+		return rearmStanding(f, time.Now().UTC().Format(time.RFC3339Nano))
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := stampHandedOff(req.Path, nil); err != nil {
@@ -185,6 +191,53 @@ func TestWorkerHandoffCannotEraseCurrentHumanRearm(t *testing.T) {
 	result, err := applyStandingTransition(req)
 	if err != nil || result.Changed || runtimeString(mustRead(t, st, "role"), "thread_exit_verb") != "rearmed" {
 		t.Fatalf("worker handoff erased human acceptance: %+v, %v", result, err)
+	}
+}
+
+func TestStandingOwnerRearmSurvivesLateHandoffAndExit(t *testing.T) {
+	t.Parallel()
+	for _, verb := range []string{"occurrence", "accepted-close"} {
+		t.Run(verb, func(t *testing.T) {
+			t.Parallel()
+			st, req := seedStandingTransition(t)
+			env := testEnv(t)
+			ownHost(t, env, req.Host)
+			_, err := st.Update("role", func(f *felt.Felt) error {
+				f.CreatedAt = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+				if err := f.SetStatus(felt.StatusClosed, time.Date(2026, 1, 2, 0, 1, 0, 0, time.UTC)); err != nil {
+					return err
+				}
+				if err := shuttle.SetNodeField(f, "schedule", map[string]any{"expr": "0 0 * * *", "tz": "UTC"}); err != nil {
+					return err
+				}
+				return shuttle.SetField(f, "project_dir", filepath.Dir(st.Root()))
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"reopen", "role", "--occurrence", "--local"}
+			if verb == "accepted-close" {
+				args = []string{"close", "role", "--tempered=true", "--local"}
+			}
+			if out, err := runIn(t, env, filepath.Dir(st.Root()), args...); err != nil {
+				t.Fatalf("rearm: %v: %s", err, out)
+			}
+			before, _ := os.ReadFile(req.Path)
+			for _, recovery := range []bool{false, true} {
+				req.Recovery = recovery
+				if _, err := stampHandedOff(req.Path, nil); err != nil {
+					t.Fatal(err)
+				}
+				result, err := applyStandingTransition(req)
+				after, _ := os.ReadFile(req.Path)
+				if err != nil || result.Changed || string(after) != string(before) {
+					t.Fatalf("late exit (recovery=%t) undid %s: %+v %v", recovery, verb, result, err)
+				}
+			}
+			if verb == "occurrence" && runtimeString(mustRead(t, st, "role"), "handed_off_at") != req.DispatchedAt {
+				t.Fatal("occurrence rearm consumed its due occurrence")
+			}
+		})
 	}
 }
 

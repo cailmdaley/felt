@@ -63,7 +63,7 @@ func applyStandingTransition(req standingTransitionRequest) (standingTransitionR
 			}
 			// Force-start is an explicit verdict. It preserves ask/blocked_on and
 			// does not impose reopen's additional armability policy.
-			if err := rearmStanding(f); err != nil {
+			if err := rearmStanding(f, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 				return err
 			}
 			evictStandingRuntimeKeys(f)

@@ -34,7 +34,7 @@ defmodule Shuttle.LifecycleStore do
                "marked #{fiber_id} #{if action == "awaiting", do: "awaiting review", else: "rearmed"}\n"}
 
             {:ok, %{"changed" => false}} ->
-              {:ok, "#{fiber_id} unchanged\n"}
+              {:ok, "skipped #{action} for #{fiber_id} (state changed or run rearmed)\n"}
 
             _ ->
               {:error, "invalid standing-transition reply: #{output}"}
