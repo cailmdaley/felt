@@ -208,7 +208,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
     const name = el('span', 'change-file-name', `${file.path}${stop?.from ? `:${stop.from}${stop.to && stop.to !== stop.from ? `–${stop.to}` : ''}${stop.side === 'old' ? ' (old)' : ''}` : ''}`)
     const identity = el('div', 'change-file-identity'); identity.append(name, el('span', 'change-file-status', changeFileLabel(file)))
     const role = `${file.role}${Object.hasOwn(bundle.story?.roles ?? {}, file.path) ? ' (role override)' : ''}`
-    const viewedControl = mark(id)
+    const viewedControl = mark(id); viewedControl.disabled = collapsed && !viewed.has(id)
     head.append(identity, el('span', 'change-role', [role, stop?.importance].filter(Boolean).join(' · ')), viewedControl); card.append(head)
     if (stop?.note) card.append(prose(stop.note))
     parent.append(card); sectionIds.push(id)

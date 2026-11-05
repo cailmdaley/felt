@@ -38,3 +38,13 @@ it('shows statuses, old paths, modes and type changes even for files with text h
   expect(statuses[3]).toContain('mode change 100644 → 100755')
   expect(statuses[4]).toContain('type change 100644 → 120000')
 })
+it('counts and marks a role override but cannot mark a folded file viewed before opening it', () => {
+  const b = bundle(); b.files[0].role = 'generated'; b.story = { overview: '', flags: [], chapters: [], roles: { 'app.ts': 'generated' } }
+  const { root } = mount(b, 'folded')
+  const details = root.querySelector<HTMLDetailsElement>('details.change-file')!, control = details.querySelector<HTMLButtonElement>('.change-viewed')!
+  expect(details.querySelector('summary')?.textContent).toContain('1 changed line in file')
+  expect(details.querySelector('.change-role')?.textContent).toBe('generated (role override)')
+  expect(control.disabled).toBe(true); control.click(); expect(control.getAttribute('aria-pressed')).toBe('false')
+  details.open = true; details.dispatchEvent(new Event('toggle'))
+  expect(control.disabled).toBe(false); control.click(); expect(control.getAttribute('aria-pressed')).toBe('true')
+})
