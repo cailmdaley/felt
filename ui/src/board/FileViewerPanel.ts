@@ -43,6 +43,7 @@ export interface FileViewerOptions {
   kind?: 'html' | 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'other' | 'change'
   /** The document host binds this to its fiber, not to the currently selected page. */
   onReview?: (message: string) => Promise<void>
+  canReview?: () => boolean
   /** Inert previews use the same kind dispatch within their host's load budget. */
   thumbnail?: boolean
   /** Captioned previews keep the filename outside the miniature page. */
@@ -112,7 +113,7 @@ export function buildFileViewer(
         if (bundle.version !== 1) throw new Error(`Unsupported change version: ${bundle.version}`)
         const position = scroller?.scrollTop ?? 0
         dispose?.()
-        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}:${digest}`, options.onReview)
+        const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}:${digest}`, options.onReview, options.canReview)
         dispose = mounted.dispose; scroller = mounted.scroller; scroller.scrollTop = position
         options.onThumbnailSource?.(source, recallText(src)?.etag)
         onTextPane?.(scroller)

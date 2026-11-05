@@ -2689,6 +2689,21 @@ defmodule Shuttle.PollerTest do
 
     Shuttle.Test.Env.put_app_env(:paste_submit_delay_ms, 0)
 
+    assert {:error, :no_live_worker} =
+             Poller.dispatch_fiber(poller, fiber_id,
+               force: true,
+               ad_hoc: true,
+               existing_only: true,
+               resume_mode: "previous",
+               user_message: "Review"
+             )
+
+    refute Enum.any?(MockRunner.commands(), fn
+             {"tmux", ["new-session" | _]} -> true
+             {"shuttle", [verb | _]} -> verb in ["reopen", "rearm", "install"]
+             _ -> false
+           end)
+
     assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
     before = length(MockRunner.commands())
 
@@ -2697,7 +2712,8 @@ defmodule Shuttle.PollerTest do
                force: true,
                ad_hoc: true,
                resume_mode: "previous",
-               user_message: "line one\nline two"
+               user_message: "line one\nline two",
+               existing_only: true
              )
 
     commands = MockRunner.commands() |> Enum.drop(before)

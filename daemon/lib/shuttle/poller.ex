@@ -4411,7 +4411,18 @@ defmodule Shuttle.Poller do
     state = reconcile_running_fiber(state, fiber_id)
     uid = resolved_uid(state, fiber_id, runtime_key)
 
-    case prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts) do
+    preparation =
+      if Keyword.get(opts, :existing_only, false) do
+        if Keyword.get(opts, :resume_mode) == "previous" and
+             is_binary(Keyword.get(opts, :user_message)) and
+             is_binary(live_tmux_session(state, fiber_id, uid)),
+           do: {:ok, state},
+           else: {:error, :no_live_worker, state}
+      else
+        prepare_dispatch_start(state, fiber_id, runtime_key, uid, opts)
+      end
+
+    case preparation do
       {:ok, state} ->
         case dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
           {:reply, {:ok, _} = result, state} ->
@@ -4481,6 +4492,9 @@ defmodule Shuttle.Poller do
           :ok -> {:reply, {:ok, paste_into}, state}
           {:error, reason} -> {:reply, {:error, {:paste_failed, reason}}, state}
         end
+
+      Keyword.get(opts, :existing_only, false) ->
+        {:reply, {:error, :no_live_worker}, state}
 
       worker_check != :ok ->
         state =

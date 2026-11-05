@@ -23,7 +23,7 @@ function save(key: string, value: unknown): void {
 }
 
 /** Native review content; the workspace owns its file, gestures, scroll position and worker route. */
-export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, identity: string, send?: (message: string) => Promise<void>) {
+export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, identity: string, send?: (message: string) => Promise<void>, canSend = () => true) {
   const files = bundle.files, lanes = assignLanes(bundle)
   const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head])}`
   const viewed = new Set(stored<string[]>(`${prefix}:viewed`, []))
@@ -88,8 +88,12 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   const persist = (): void => { save(`${prefix}:draft`, draft); status.textContent = 'Draft saved on this browser' }
   note.addEventListener('input', () => { draft.note = note.value; persist(); paintSend() })
   const sendButton = button('Send review', () => { void deliver() })
-  const paintSend = (): void => { sendButton.disabled = busy || !send || !(draft.note.trim() || draft.comments.some(c => c.text.trim())) }
+  const paintSend = (): void => {
+    sendButton.disabled = busy || !send || !canSend() || !(draft.note.trim() || draft.comments.some(c => c.text.trim()))
+    if (!send || !canSend()) status.textContent = 'No live worker. Start or resume one from the composer before sending a review.'
+  }
   const deliver = async (): Promise<void> => {
+    paintSend()
     if (sendButton.disabled || !send) return
     busy = true; paintSend(); sendButton.textContent = 'Sending…'
     const snapshot = JSON.stringify(draft)
@@ -240,7 +244,7 @@ export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, ident
   renderDraftComments()
   const foot = el('div', 'change-send'); foot.append(sendButton, status)
   review.element.append(el('p', 'change-section-note', `One message to this fiber’s worker, anchored to head ${bundle.head.slice(0, 8)}. Drafts stay on this browser.`), draftComments, note, foot)
-  if (!send) status.textContent = 'No worker route for this document'
+  if (!send || !canSend()) status.textContent = 'No live worker. Start or resume one from the composer before sending a review.'
   paintSend(); updateProgress()
   let railFrame = 0
   const paintLocation = (): void => {

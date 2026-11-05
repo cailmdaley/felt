@@ -1,10 +1,10 @@
 import { ThreadIndex } from '../threads.js'
-import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker, hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
-import { dispatchFailureMessage, postForceDispatch, isAgentCard, type DispatchFailureBody } from '../KanbanModalShared.js'
+import { isAgentCard, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry, IN_FLIGHT_BANDS, inFlightBand } from '../KanbanReadModel.js'
@@ -195,13 +195,15 @@ export class Workspace {
       onExpand: expanded => opts.onExpand?.(expanded),
       onSelect: key => this.visit(key),
       onNavigate: (source, href) => this.openRelative(source, href),
+      canReview: source => {
+        const state = [...this.channels.values()].find(state => state.channel.documents.some(doc => doc.key === source.key))
+        return !!state && hasLiveWorker(state.card)
+      },
       onReview: async (source, message) => {
         const owns = (state: ChannelState): boolean => state.channel.documents.some(doc => doc.key === source.key)
         const state = this.current && owns(this.current) ? this.current : [...this.channels.values()].find(owns)
         if (!state) throw new Error('The document’s fiber is no longer available. Your draft is saved.')
-        const response = await postForceDispatch(this.opts.shuttleBase, state.card, { user_message: message, resume_mode: 'previous' })
-        const body = await response.json() as DispatchFailureBody
-        if (!response.ok) throw new Error(dispatchFailureMessage(body, `Review could not be sent (${response.status})`, response.status))
+        await this.dock.sendReview(state.card, message)
       },
       onCrossing: travel => this.depth.cross(travel),
       onReturn: () => this.history.back(),

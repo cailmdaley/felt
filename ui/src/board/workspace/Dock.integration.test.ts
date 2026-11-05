@@ -41,6 +41,27 @@ beforeEach(async () => {
 })
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+describe('change review delivery', () => {
+  it('does not send or start a worker when none exists', async () => {
+    await expect(dock.sendReview(task(), 'Review')).rejects.toThrow('No live worker')
+    expect(writes()).toEqual([])
+  })
+  it('uses composer delivery, accepts a non-JSON 200, and preserves 409 refusal', async () => {
+    const live = task({ workerState: 'running' })
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('delivered'))
+    await dock.sendReview(live, 'Review')
+    expect(writes().at(-1)).toMatchObject({ fiber_id: live.id, origin: live.originId, resume_mode: 'previous', existing_only: true, user_message: 'Review' })
+    vi.mocked(fetch).mockResolvedValueOnce(response({ tmux_session: 'busy' }, 409))
+    await expect(dock.sendReview(live, 'Keep this draft')).rejects.toThrow('already running')
+  })
+  it('does not turn a review refusal into permission to arm a fiber', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response({ reason: 'arm_refused', needs: 'project_dir', message: 'Missing project directory' }, 422))
+    await expect(dock.sendReview(task({ workerState: 'running' }), 'Review')).rejects.toThrow('Missing project directory')
+    expect(writes()).toHaveLength(1)
+    expect(writes()[0].project_dir).toBeUndefined()
+  })
+})
+
 describe('composer input budget', () => {
   it('preserves labels and header nodes and does not synchronously measure layout on input', async () => {
     const field = band.el.querySelector<HTMLTextAreaElement>('textarea')!

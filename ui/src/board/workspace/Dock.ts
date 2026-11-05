@@ -2231,6 +2231,15 @@ export class Dock {
    * confirmed, and a rejection is shown and sends nothing. Resolves true once
    * a worker runs for the card.
    */
+  /** Reviews use the composer's delivery and refusal handling, without start authority. */
+  async sendReview(card: KanbanCard, message: string): Promise<void> {
+    if (!hasLiveWorker(card)) throw new Error('No live worker. Start or resume one from the composer before sending a review.')
+    const button = document.createElement('button'), error = document.createElement('div')
+    if (!await this.sendRequeue(card, message, 'previous', button, error, undefined, true)) {
+      throw new Error(error.textContent || 'The review was not delivered. Your draft is saved.')
+    }
+  }
+
   private async runRequeue(
     card: KanbanCard,
     directive: Directive,
@@ -2277,6 +2286,7 @@ export class Dock {
     btn: HTMLButtonElement,
     errorEl: HTMLElement,
     projectDir?: string,
+    existingOnly = false,
   ): Promise<boolean> {
     const epoch = this.epoch
     const original = btn.textContent ?? ''
@@ -2300,6 +2310,7 @@ export class Dock {
         user_message: text,
         resume_mode: mode,
         ...(projectDir ? { project_dir: projectDir } : {}),
+        ...(existingOnly ? { existing_only: true } : {}),
       })
     } catch (err: unknown) {
       const detail = (err as { message?: string })?.message ?? String(err)
@@ -2332,7 +2343,7 @@ export class Dock {
     if (!res.ok) {
       btn.disabled = false
       btn.textContent = original
-      if (needsProjectDir(body)) {
+      if (needsProjectDir(body) && !existingOnly) {
         this.showStartPrompt(errorEl, card, body, directive, mode, btn)
         return false
       }

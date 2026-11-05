@@ -61,6 +61,7 @@ defmodule ShuttleWeb.DispatchController do
       result =
         Shuttle.Poller.dispatch_fiber(fiber_id,
           force: force or ad_hoc,
+          existing_only: truthy?(Map.get(params, "existing_only", false)),
           ad_hoc: ad_hoc,
           release_launch_reservation:
             truthy?(Map.get(params, "release_launch_reservation", false)),

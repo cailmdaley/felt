@@ -466,7 +466,11 @@ stays `~/`-relative. Start errors are the same as meeting capture's, including
 `recording_unknown` after an unconfirmed forwarded start.
 
 `POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
-user_message?, project_dir?, release_launch_reservation?}` (plus `origin` to forward). A forced start
+user_message?, project_dir?, release_launch_reservation?, existing_only?}` (plus `origin` to forward).
+With `existing_only: true`, only a `previous` message to a live worker is allowed.
+A missing worker returns 422 `no_live_worker` without arming, reopening or launching anything.
+The change reader uses this form; start authority stays with the composer.
+A forced start
 (`force` or `ad_hoc`) never runs a worker in the felt store. Every check runs
 before a session is cut or a document written: the owning daemon needs a
 `project_dir` that is a directory on its host. It then arms the fiber in one

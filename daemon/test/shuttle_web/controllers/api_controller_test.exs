@@ -90,6 +90,34 @@ defmodule ShuttleWeb.APIControllerTest do
 
   # ── POST /api/v1/dispatch ──
 
+  test "existing-only review delivery cannot arm or launch a missing worker" do
+    id = "tests/review-no-worker"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, oneshot_shuttle())
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/dispatch",
+        Jason.encode!(%{
+          fiber_id: id,
+          force: true,
+          ad_hoc: true,
+          resume_mode: "previous",
+          user_message: "Review",
+          existing_only: true
+        })
+      )
+
+    assert %{"reason" => "no_live_worker", "dispatched" => false} = json_response(conn, 422)
+
+    refute Enum.any?(MockRunner.commands(), fn
+             {"tmux", ["new-session" | _]} -> true
+             {"shuttle", [verb | _]} -> verb in ["reopen", "rearm", "install"]
+             _ -> false
+           end)
+  end
+
   @tag :reservation_visibility
   test "dispatch reports an unconfirmed reservation and forwards explicit release to the poller" do
     id = "tests/api-reservation"

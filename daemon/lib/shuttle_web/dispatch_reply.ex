@@ -59,6 +59,16 @@ defmodule ShuttleWeb.DispatchReply do
      }}
   end
 
+  def render(fiber_id, {:error, :no_live_worker}),
+    do:
+      {422,
+       %{
+         dispatched: false,
+         reason: "no_live_worker",
+         fiber_id: fiber_id,
+         message: "No live worker. Start or resume one from the composer before sending a review."
+       }}
+
   def render(fiber_id, {:error, :already_running}), do: {409, already_running_body(fiber_id)}
 
   def render(fiber_id, {:error, reason}) when reason in [:closed, :not_active],
