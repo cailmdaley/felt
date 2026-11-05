@@ -2314,12 +2314,13 @@ export class Dock {
       })
     } catch (err: unknown) {
       const detail = (err as { message?: string })?.message ?? String(err)
-      this.showDispatchError(errorEl, btn, original, `Couldn't reach Shuttle: ${detail}`)
+      this.showDispatchError(errorEl, btn, original, `Shuttle did not answer (${detail}), so this may still arrive. Check the worker's conversation before sending again.`)
       return false
     }
 
     const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string }
-    if (epoch !== this.epoch) {
+    // A review reports to its reader, which outlives the composer this card had open.
+    if (epoch !== this.epoch && !existingOnly) {
       if (res.ok || (res.status === 409 && body.tmux_session)) this.onSaved()
       return false
     }

@@ -183,6 +183,7 @@ Send review names and targets the fiber whose directory holds the bundle, on the
 It uses that fiber composer’s existing-worker route and sends one message with Base and Head SHAs before quoted title and path data.
 A missing worker route disables sending; reading a change never authorizes a fresh worker launch.
 The draft is locked while sending, including across a live rebake. Successful delivery clears the delivered text once; a failed send keeps it available to retry.
+A busy owner or a lost answer doesn't prove a failure, so Send then says the review may still arrive and asks you to check the worker's conversation before sending again.
 
 Worker-authored bundles are validated before rendering, storage or review: base and head are full hexadecimal SHA-1 or SHA-256 object IDs, and all reader-required fields have checked shapes.
 All Markdown passes through a final DOMPurify allowlist boundary shared with transcript rendering, and every link gets `rel="noopener noreferrer"` and `target="_blank"` after sanitizing.

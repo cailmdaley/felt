@@ -54,6 +54,35 @@ describe('change review delivery', () => {
     vi.mocked(fetch).mockResolvedValueOnce(response({ tmux_session: 'busy' }, 409))
     await expect(dock.sendReview(live, 'Keep this draft')).rejects.toThrow('already running')
   })
+  it('reports a delivered review as delivered after the composer moves on', async () => {
+    const live = task({ workerState: 'running' }), answer = deferred<Response>()
+    vi.mocked(fetch).mockReturnValueOnce(answer.promise)
+    const sent = dock.sendReview(live, 'Review')
+    await flush()
+    dock.reset()
+    answer.resolve(response({ tmux_session: 'worker' }))
+    await expect(sent).resolves.toBeUndefined()
+  })
+  it('keeps a review refused after the composer moves on as a refusal', async () => {
+    const live = task({ workerState: 'running' }), answer = deferred<Response>()
+    vi.mocked(fetch).mockReturnValueOnce(answer.promise)
+    const sent = dock.sendReview(live, 'Review')
+    await flush()
+    dock.reset()
+    answer.resolve(response({ reason: 'closed' }, 422))
+    await expect(sent).rejects.toThrow('Fiber is closed')
+  })
+  it.each([
+    ['a busy poller', { dispatched: false, reason: 'poller_busy', message: 'The request is still queued' }, 504],
+    ['a lost forward', { dispatched: false, reason: 'forward_failed', error: ':timeout' }, 502],
+  ])('never calls a review undelivered after %s', async (_name, body, status) => {
+    vi.mocked(fetch).mockResolvedValueOnce(response(body, status))
+    await expect(dock.sendReview(task({ workerState: 'running' }), 'Review')).rejects.toThrow('could not confirm this was delivered, and it may still arrive')
+  })
+  it('does not claim an unanswered review never arrived', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('connection reset'))
+    await expect(dock.sendReview(task({ workerState: 'running' }), 'Review')).rejects.toThrow('may still arrive')
+  })
   it('does not turn a review refusal into permission to arm a fiber', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(response({ reason: 'arm_refused', needs: 'project_dir', message: 'Missing project directory' }, 422))
     await expect(dock.sendReview(task({ workerState: 'running' }), 'Review')).rejects.toThrow('Missing project directory')
