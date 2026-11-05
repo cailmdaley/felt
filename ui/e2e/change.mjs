@@ -8,8 +8,9 @@ export function registerChangeJourneys(test) {
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
     await page.locator('.ws-selected .ws-report-chip[data-document-key$="/family.change.json"]').first().click()
     await page.locator('.ws-selected .change-reader').waitFor()
+    await page.locator('.ws-selected .change-map').waitFor()
+    await page.locator('.ws-selected .change-chapter-link').first().click()
     await page.locator('.ws-selected diffs-container [data-line-index]').first().waitFor()
-    await page.waitForFunction(() => document.querySelector('.ws-selected .change-reader') && !document.querySelector('.ws-selected .change-contents [aria-current="location"]'))
   }
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) test(`A change opens, persists a review, and sends one owner-routed message (${viewport.width}px)`, async page => {
     await open(page)
@@ -20,6 +21,8 @@ export function registerChangeJourneys(test) {
     })
     assert.equal(neutral[0], neutral[1], 'added files read on paper, with change color confined to the gutter')
     await reader.getByRole('button', { name: 'Mark viewed', exact: true }).first().click()
+    assert.equal(await reader.locator('.change-file').first().getAttribute('open'), null)
+    await reader.locator('.change-file-head').first().click()
     const note = reader.getByRole('textbox', { name: 'Overall review note' })
     await note.fill('Check the root-relative count before landing.')
     if (viewport.width <= 700) {
@@ -70,6 +73,8 @@ export function registerChangeJourneys(test) {
     assert.equal(await page.locator('.ws-selected .change-file').count(), 5)
     await page.goto(family.replace('family.change.json', 'large.change.json'))
     await page.locator('.ws-selected .change-reader h1').filter({ hasText: '5,000-line' }).waitFor()
+    assert.equal(await page.locator('.ws-selected .change-diff-window').count(), 0)
+    await page.locator('.ws-selected .change-file-head').click()
     await page.locator('.ws-selected diffs-container').first().waitFor()
     assert.equal(await page.locator('.ws-selected .change-diff-window').count(), 84)
     assert.ok(await page.locator('.ws-selected diffs-container').count() < 10)

@@ -23,7 +23,13 @@ function mount(b: ChangeBundle, identity: string, send: (message: string) => Pro
   return { root, reader, send: vi.mocked(send) }
 }
 function type(field: Element, text: string) { if (!(field instanceof HTMLTextAreaElement)) throw new Error('Expected a textarea'); field.value = text; field.dispatchEvent(new Event('input')) }
+function openFile(root: HTMLElement) {
+  const card = root.querySelector<HTMLDetailsElement>('.change-file')!
+  card.open = true; card.dispatchEvent(new Event('toggle'))
+  return card
+}
 function lineComment(root: HTMLElement, text: string) {
+  openFile(root)
   root.querySelector<HTMLButtonElement>('.change-plain-row [aria-label$="(new)"]')!.click()
   const field = [...root.querySelectorAll<HTMLTextAreaElement>('.change-draft-comments textarea')].at(-1)!
   type(field, text)
@@ -31,7 +37,7 @@ function lineComment(root: HTMLElement, text: string) {
 
 it('folds viewed cards, remembers them on return, and opens them when unmarked', () => {
   const first = mount(bundle(), 'viewed-fold')
-  const card = first.root.querySelector<HTMLDetailsElement>('.change-file')!
+  const card = openFile(first.root)
   expect(card.open).toBe(true)
   card.querySelector<HTMLButtonElement>('.change-viewed')!.click()
   expect(card.open).toBe(false)
@@ -41,6 +47,17 @@ it('folds viewed cards, remembers them on return, and opens them when unmarked',
   expect(restored.open).toBe(false)
   restored.querySelector<HTMLButtonElement>('.change-viewed')!.click()
   expect(restored.open).toBe(true)
+})
+
+it('keeps lists folded and shows comment counts on their rows', () => {
+  const { root } = mount(bundle(), 'compact-comments')
+  const card = root.querySelector<HTMLDetailsElement>('.change-file')!
+  expect(card.open).toBe(false)
+  expect(card.querySelector('.change-diff-window')).toBeNull()
+  lineComment(root, 'Keep this visible')
+  card.open = false; card.dispatchEvent(new Event('toggle'))
+  expect(card.querySelector('.change-diff-window')).toBeNull()
+  expect(card.querySelector('summary .change-file-comments')?.textContent).toBe('1 comment')
 })
 
 it('shows statuses, old paths, modes and type changes even for files with text hunks', () => {
@@ -123,6 +140,9 @@ it('centers a flag on the requested plain row without syntax highlighting', asyn
   b.files[0].lines[0].text = 'x'.repeat(30_000)
   b.story = { overview: '', chapters: [], roles: {}, flags: [{ file: 'app.ts', from: 1, side: 'new', text: 'Here' }] }
   const { root, reader } = mount(b, 'plain-flag')
+  expect(root.querySelector<HTMLDetailsElement>('.change-file')!.open).toBe(false)
+  root.querySelector<HTMLButtonElement>('.change-flag button')!.click()
+  expect(root.querySelector<HTMLDetailsElement>('.change-file')!.open).toBe(true)
   const scroll = reader.scroller
   Object.defineProperty(scroll, 'clientHeight', { value: 600 })
   const box = (top: number) => ({ top, bottom: top + 20, height: 20 } as DOMRect)

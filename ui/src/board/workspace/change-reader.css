@@ -111,3 +111,10 @@
 .change-reader .change-map-tile[data-small="true"] { padding: 6px; }
 .change-map-tile[data-small="true"] strong { font-size: var(--type-note); }
 .change-map-tile[data-tiny="true"] > * { display: none; }
+
+.change-file:not([open]) { margin: 4px 0; }
+.change-file:not([open]) .change-file-status { display: none; }
+.change-file:not([open]) .change-file-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.change-file-counts { font: var(--type-meta)/var(--leading-prose) var(--font-mono); white-space: nowrap; color: var(--ws-ink-muted); }
+.change-file:not([open]) .change-file-head { padding: 7px 10px; }
+.change-file-comments { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-owed); white-space: nowrap; }

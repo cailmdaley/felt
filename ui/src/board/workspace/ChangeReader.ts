@@ -185,11 +185,12 @@ export function mountChangeReader(
     sectionIds: string[],
     stop?: { note?: string; importance?: string; from?: number; to?: number; side?: string },
   ): void => {
-    const collapsed = file.role === 'generated' && !stop
+    const collapsed = !stop
     const card = el('details', 'change-file') as HTMLDetailsElement
     card.open = !collapsed && !navigation.isViewed(id)
     card.dataset.changeFile = file.path
     card.dataset.viewId = id
+    card.dataset.windowId = `card:${id}`
     card.dataset.status = file.status
     const head = el('summary', 'change-file-head')
     const end = stop?.to && stop.to !== stop.from ? `–${stop.to}` : ''
@@ -199,16 +200,21 @@ export function mountChangeReader(
     const identity = el('div', 'change-file-identity')
     identity.append(name, el('span', 'change-file-status', changeFileLabel(file)))
     const role = `${file.role}${Object.hasOwn(bundle.story?.roles ?? {}, file.path) ? ' (role override)' : ''}`
+    const comments = el('span', 'change-file-comments')
+    review.commentCount(file, comments)
     const viewedControl = mark(id)
     viewedControl.disabled = collapsed && !navigation.isViewed(id)
     viewedControl.addEventListener('click', event => {
       event.preventDefault()
       card.open = !navigation.isViewed(id)
-      if (card.open) view.showAll()
+      if (card.open && !body.childNodes.length) addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
     })
+    head.title = `${file.path} · ${changeFileLabel(file)}`
     head.append(
       identity,
+      el('span', 'change-file-counts', `+${file.additions} −${file.deletions}`),
       el('span', 'change-role', [role, stop?.importance].filter(Boolean).join(' · ')),
+      comments,
       viewedControl,
     )
     card.append(head)
@@ -230,7 +236,14 @@ export function mountChangeReader(
     card.addEventListener('toggle', () => {
         if ((card as HTMLDetailsElement).open) {
           viewedControl.disabled = false
-          if (!body.childNodes.length) addDiff(body, file, hunks)
+          if (!body.childNodes.length) addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
+        } else {
+          for (const host of body.querySelectorAll<HTMLElement>('.change-diff-window')) {
+            io.unobserve(host)
+            windows.get(host)?.mounted?.dispose()
+            windows.delete(host)
+          }
+          body.replaceChildren()
         }
       })
     if (card.open) addDiff(body, file, wholeFiles.has(id) ? file.hunks : hunks)
@@ -285,9 +298,6 @@ export function mountChangeReader(
       ? 'The author’s reading order. Line numbers open a comment.'
       : 'No authored chapters. Read implementation first, then configuration and documentation.',
   )
-  if (!bundle.story)
-    for (const file of lanes.remaining)
-      addFile(story.element, file, file.hunks, `file:${file.path}`, story.ids)
   for (const [chapterIndex, chapter] of lanes.chapters.entries()) {
     const part = el('section', 'change-chapter')
     part.append(el('h3', '', `${String(chapterIndex + 1).padStart(2, '0')}  ${chapter.title}`))
@@ -318,10 +328,9 @@ export function mountChangeReader(
       ? 'Changed lines not shown in the story, with context. Generated files start folded.'
       : 'All non-test files, ordered implementation first.',
   )
-  if (bundle.story)
-    for (const file of lanes.remaining)
-      addFile(remaining.element, file, file.hunks, `file:${file.path}`, remaining.ids)
-  if (!bundle.story || !lanes.remaining.length)
+  for (const file of lanes.remaining)
+    addFile(remaining.element, file, file.hunks, `file:${file.path}`, remaining.ids)
+  if (!lanes.remaining.length)
     remaining.element.append(
       el(
         'p',
@@ -337,6 +346,7 @@ export function mountChangeReader(
   const anchorHosts = () => [
     ...(map ? [map] : []),
     ...windows.keys(),
+    ...views.map(view => view.card),
     ...sections.map((section) => section.element).reverse(),
   ]
   const anchorHost = anchor && anchorHosts().find((host) => host.dataset.windowId === anchor.window)

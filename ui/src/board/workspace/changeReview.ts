@@ -22,6 +22,14 @@ export function createChangeReview(
 ) {
   const draftState = acquireChangeDraft(identity, bundle.base, bundle.head)
   const draft = draftState.value
+  const counts: { file: ChangeFile; element: HTMLElement }[] = []
+  const paintCounts = () => {
+    for (const { file, element } of counts) {
+      const n = draft.comments.filter(c => c.file === file.path).length
+      element.textContent = n ? `${n} comment${n === 1 ? '' : 's'}` : ''
+      element.hidden = !n
+    }
+  }
   const note = el('textarea', 'change-overall')
   note.placeholder = 'Your overall note…'
   note.setAttribute('aria-label', 'Overall review note')
@@ -47,6 +55,7 @@ export function createChangeReview(
     void deliver()
   })
   const paintSend = (): void => {
+    paintCounts()
     const anchors = [
       ...(draft.note.trim() ? [draft] : []),
       ...draft.comments.filter((c) => c.text.trim()),
@@ -206,6 +215,7 @@ export function createChangeReview(
       persist()
       refreshAnnotations()
       renderDraftComments()
+      paintSend()
     }
     requestAnimationFrame(() => {
       const field = [
@@ -232,6 +242,10 @@ export function createChangeReview(
   paintSend()
   return {
     content: [reviewAnchor, draftComments, note, foot],
+    commentCount(file: ChangeFile, element: HTMLElement) {
+      counts.push({ file, element })
+      paintCounts()
+    },
     windowComments(file: ChangeFile) {
       return {
         annotations: () => lineAnnotations(file),

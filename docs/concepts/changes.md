@@ -189,7 +189,12 @@ Aim for a ten-minute reading, in plain language. Select the lines that carry the
 ## Review state and delivery
 
 File headers show status, a rename’s old path, mode or type changes, changed line counts, and explicit role overrides.
-Generated files start folded and must be opened before they can be marked viewed.
+Tests and Remaining start as compact file lists; opening a row mounts its diff lazily.
+Story stops start open.
+Marking a file or stop viewed folds it to its header, and it stays folded on return.
+Unmark it or click its header to open it again.
+Folded rows retain their comment counts; flag jumps open the file they need.
+A folded file must be opened before it can first be marked viewed.
 Click a diff line number to add an anchored comment, and add an overall note under Your review.
 
 Drafts stay in this browser by document owner/path. Every comment and the overall note keep their own base and head across rebakes.
