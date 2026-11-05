@@ -37,7 +37,7 @@ func TestPlanningStateTable(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if got := planningFiber(f); got != tc.Quiescent {
+			if got := exitFiber(f); got != tc.Quiescent {
 				t.Fatalf("quiescent=%v want %v", got, tc.Quiescent)
 			}
 		})
@@ -129,14 +129,14 @@ func TestExitCLIDaemonDownPreservesStdinOutcome(t *testing.T) {
 	if err == nil || string(before) != string(after) {
 		t.Fatalf("drained stdin changed the mirror: %v %s\n%s", err, out, after)
 	}
-	if !strings.Contains(string(out), "--local") {
-		t.Fatalf("missing explicit recovery advice: %s", out)
+	if strings.Contains(string(out), "--local") || !strings.Contains(string(out), "Start it") {
+		t.Fatalf("configuration recovery advice offers a refused local write: %s", out)
 	}
 }
 
 func TestExitExplicitLocalChecksStandingAndDiscovery(t *testing.T) {
 	binary := planningProbeBinary(t)
-	for _, state := range []string{"pending", "unavailable", "ok", "closed-fleet"} {
+	for _, state := range []string{"pending", "unavailable", "ok", "closed-fleet", "rejected", "peer", "disabled-entry"} {
 		for _, standing := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/standing=%t", state, standing), func(t *testing.T) {
 				content := "status: active\nshuttle:\n  kind: oneshot\n  host: worker\n  runtime:\n    session_uuid: live"
@@ -147,15 +147,27 @@ func TestExitExplicitLocalChecksStandingAndDiscovery(t *testing.T) {
 				if state == "closed-fleet" {
 					fleet = `{"version":1,"defaults":{"discover":false},"remotes":[]}`
 				}
+				if state == "disabled-entry" {
+					fleet = `{"version":1,"remotes":[{"name":"worker","port":4001,"enabled":false}]}`
+				}
 				dir, path, home, remotes := exitFixture(t, content, fleet)
 				before, _ := os.ReadFile(path)
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					fmt.Fprintf(w, `{"discovery":{"state":%q,"peers":[]}}`, state)
+					switch state {
+					case "rejected":
+						fmt.Fprint(w, `{"discovery":{"state":"ok","peers":[],"rejected":[{"dns_name":"worker.example.ts.net.","reason":"offline"}]}}`)
+					case "peer":
+						fmt.Fprint(w, `{"discovery":{"state":"ok","peers":[{"name":"worker","url":"http://127.0.0.1:1"}]}}`)
+					case "disabled-entry":
+						fmt.Fprint(w, `{"discovery":{"state":"ok","peers":[]}}`)
+					default:
+						fmt.Fprintf(w, `{"discovery":{"state":%q,"peers":[]}}`, state)
+					}
 				}))
 				defer server.Close()
 				out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, server.URL, remotes), "rest", "task", "--local")
 				after, _ := os.ReadFile(path)
-				if state == "closed-fleet" {
+				if state == "closed-fleet" || state == "ok" {
 					if err != nil || !strings.Contains(out, "Git") {
 						t.Fatalf("removed owner retirement: %v %s", err, out)
 					}
@@ -192,16 +204,28 @@ func TestMirrorExitPreservesRunAndPublicationEvidence(t *testing.T) {
 	}
 }
 
-func TestRemovedOwnerDoesNotAuthorizeMalformedRuntime(t *testing.T) {
+func TestExitUnownedActiveAndDispatchedParity(t *testing.T) {
 	binary := planningProbeBinary(t)
-	for _, runtime := range []string{"null", "[]", "unknown"} {
-		dir, path, home, remotes := exitFixture(t, "status: active\nshuttle:\n  kind: oneshot\n  host: worker\n  runtime: "+runtime, `{"version":1,"defaults":{"discover":false},"remotes":[]}`)
-		before, _ := os.ReadFile(path)
-		out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), "rest", "task", "--local")
-		after, _ := os.ReadFile(path)
-		if err == nil || string(before) != string(after) {
-			t.Fatalf("malformed runtime was replaced: %v %s", err, out)
+	for _, state := range []string{"status: active", "status: open"} {
+		for _, verb := range []string{"rest", "close"} {
+			dir, path, home, remotes := exitFixture(t, state+"\nshuttle:\n  kind: oneshot\n  runtime:\n    dispatched_at: '2026-11-04T10:00:00Z'", configuredWorker)
+			out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), verb, "task")
+			after, _ := os.ReadFile(path)
+			if err != nil || strings.Contains(out, "Git") || strings.Contains(string(after), "mirrored_at:") {
+				t.Fatalf("unowned native exit became a mirror refusal: %v %s\n%s", err, out, after)
+			}
 		}
+	}
+}
+
+func TestExitUnscheduledStandingRequiresOwner(t *testing.T) {
+	binary := planningProbeBinary(t)
+	dir, path, home, remotes := exitFixture(t, "status: open\nshuttle:\n  kind: standing\n  host: worker", configuredWorker)
+	before, _ := os.ReadFile(path)
+	out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), "rest", "task", "--local")
+	after, _ := os.ReadFile(path)
+	if err == nil || string(before) != string(after) {
+		t.Fatalf("unscheduled standing mirrored: %v %s", err, out)
 	}
 }
 

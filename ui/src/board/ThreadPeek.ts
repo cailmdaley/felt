@@ -46,6 +46,8 @@ export function threadItem(card: KanbanCard, index: ThreadIndex, open: (card: Ka
   row.querySelector<HTMLElement>('.constitution-state-dot')!.dataset.threadFocus = JSON.stringify([focus, 'dot'])
   const pinned = isPinned(card)
   const pin = document.createElement('button'); pin.type = 'button'; pin.className = 'kbn-thread-pin'
+  pin.hidden = Boolean(card.originStale)
+  pin.disabled = Boolean(card.originStale)
   pin.dataset.threadFocus = JSON.stringify([focus, 'pin'])
   pin.setAttribute('aria-pressed', String(pinned))
   pin.title = pinned ? `Unpin ${card.name}` : `Pin ${card.name}`

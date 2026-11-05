@@ -1,6 +1,6 @@
-defmodule Shuttle.PlanningTest do
+defmodule Shuttle.OwnerExitTest do
   use ExUnit.Case, async: true
-  alias Shuttle.Planning
+  alias Shuttle.OwnerExit
   alias Shuttle.Test.Env
   @uid "01ARZ3NDEKTSV4RRFFQ69G5FAX"
 
@@ -16,10 +16,10 @@ defmodule Shuttle.PlanningTest do
       |> Jason.decode!()
 
     for %{"name" => name, "fiber" => fiber, "quiescent" => expected} <- cases do
-      assert Planning.quiescent?(fiber) == expected, name
+      assert OwnerExit.quiescent?(fiber) == expected, name
     end
 
-    refute Planning.quiescent?(%{
+    refute OwnerExit.quiescent?(%{
              "shuttle" => %{
                "runtime" => %{
                  "dispatched_at" => "2026-11-04T10:00:00",
@@ -83,10 +83,10 @@ defmodule Shuttle.PlanningTest do
                "origin" => "worker",
                "felt_store" => "/owner",
                "fiber" => fiber,
-               "local_planning" => true
+               "local_exit" => true
              }
            ] =
-             Planning.reconcile([owner], [archive], %{"worker" => true}, "hub")
+             OwnerExit.reconcile([owner], [archive], %{"worker" => true}, "hub")
 
     assert fiber["status"] == "open"
     assert fiber["horizon"] == "stashed"
@@ -107,8 +107,8 @@ defmodule Shuttle.PlanningTest do
         "updated_at" => "2026-11-04T12:00:00Z"
       })
 
-    assert [%{"fiber" => fiber, "planning_pending" => false}] =
-             Planning.reconcile([owner], [archive], %{"worker" => true}, "hub")
+    assert [%{"fiber" => fiber, "exit_copy_pending" => false}] =
+             OwnerExit.reconcile([owner], [archive], %{"worker" => true}, "hub")
 
     assert fiber == owner["fiber"]
   end
@@ -116,8 +116,8 @@ defmodule Shuttle.PlanningTest do
   test "a returning healthy owner wins before Git sync and exposes the waiting copy" do
     owner = row()
 
-    assert [%{"fiber" => fiber, "planning_pending" => true}] =
-             Planning.reconcile(
+    assert [%{"fiber" => fiber, "exit_copy_pending" => true}] =
+             OwnerExit.reconcile(
                [owner],
                [mirror(%{"horizon" => "stashed"})],
                %{"worker" => false},
@@ -126,19 +126,19 @@ defmodule Shuttle.PlanningTest do
 
     assert fiber == owner["fiber"]
     # A local-only document absent on that healthy owner is not a live phantom.
-    assert [] == Planning.reconcile([], [mirror()], %{"worker" => false}, "hub")
+    assert [] == OwnerExit.reconcile([], [mirror()], %{"worker" => false}, "hub")
   end
 
   test "Git synchronization acknowledges the same mirror stamp even with an older document date" do
     [row] =
-      Planning.reconcile(
+      OwnerExit.reconcile(
         [mirror()],
         [mirror(%{"horizon" => "stashed"})],
         %{"worker" => false},
         "hub"
       )
 
-    refute row["planning_pending"]
+    refute row["exit_copy_pending"]
     refute Map.has_key?(row["fiber"], "horizon")
   end
 
@@ -150,7 +150,7 @@ defmodule Shuttle.PlanningTest do
           {Map.put(row(), "runtime", %{"state" => "running"}), mirror(%{"horizon" => "stashed"})}
         ] do
       assert [%{"fiber" => fiber}] =
-               Planning.reconcile([owner], [copy], %{"worker" => true}, "hub")
+               OwnerExit.reconcile([owner], [copy], %{"worker" => true}, "hub")
 
       assert fiber == owner["fiber"]
     end
@@ -164,13 +164,13 @@ defmodule Shuttle.PlanningTest do
           [mirror(%{"shuttle" => %{"host" => "replacement", "kind" => "oneshot"}})],
           [mirror(), Map.put(mirror(), "felt_store", "/duplicate")]
         ] do
-      [projected | _] = Planning.reconcile([owner], copies, %{"worker" => true}, "hub")
+      [projected | _] = OwnerExit.reconcile([owner], copies, %{"worker" => true}, "hub")
       assert projected["fiber"] == owner["fiber"]
-      refute projected["local_planning"]
+      refute projected["local_exit"]
     end
 
     copy = row(%{"uid" => nil, "id" => "task"})
-    assert [%{"local_planning" => false}] = Planning.reconcile([], [copy], %{}, "hub")
+    assert [%{"local_exit" => false}] = OwnerExit.reconcile([], [copy], %{}, "hub")
   end
 
   test "scheduled standing work needs its owner; a proven removed owner may retire" do
@@ -179,24 +179,78 @@ defmodule Shuttle.PlanningTest do
       |> put_in(["shuttle", "kind"], "standing")
       |> put_in(["shuttle", "schedule"], %{"expr" => "0 9 * * *"})
 
-    refute Planning.eligible?(fiber)
+    refute OwnerExit.eligible?(fiber)
+    refute OwnerExit.eligible?(update_in(fiber, ["shuttle"], &Map.delete(&1, "schedule")))
     Env.put_app_env(:remotes, [])
-    assert Planning.eligible?(fiber)
-    assert Planning.eligible?(Map.put(fiber, "status", "active"))
+    assert OwnerExit.eligible?(fiber)
+    assert OwnerExit.eligible?(Map.put(fiber, "status", "active"))
 
     for runtime <- [nil, [], "unknown"] do
-      refute Planning.eligible?(put_in(fiber, ["shuttle", "runtime"], runtime))
+      assert OwnerExit.eligible?(put_in(fiber, ["shuttle", "runtime"], runtime))
     end
   end
 
+  test "absence requires a complete fleet, no configured entry, and neither peers nor rejected candidates" do
+    doc = %{"remotes" => []}
+    report = %{state: "ok", peers: [], rejected: []}
+    policy = OwnerExit.policy(doc, report, nil, [])
+    assert OwnerExit.removed?("worker", policy)
+    assert OwnerExit.eligible?(row(%{"status" => "active"})["fiber"], policy)
+
+    for {doc, report} <- [
+          {%{"remotes" => [%{"name" => "worker", "enabled" => false}]}, report},
+          {doc, %{report | state: "pending"}},
+          {doc, %{report | state: "unavailable"}},
+          {doc, %{report | peers: [%{"name" => "worker"}]}},
+          {doc, %{report | rejected: [%{dns_name: "worker.example.ts.net.", reason: "offline"}]}},
+          {nil, report}
+        ] do
+      policy = OwnerExit.policy(doc, report, nil, [])
+      refute OwnerExit.removed?("worker", policy)
+      refute OwnerExit.eligible?(row()["fiber"], policy)
+    end
+  end
+
+  test "a running owner never labels an unacknowledged local copy as a pending exit" do
+    for owner <- [
+          row(%{"status" => "active"}),
+          Map.put(row(), "runtime", %{"state" => "running"})
+        ] do
+      [result] =
+        OwnerExit.reconcile(
+          [owner],
+          [mirror(%{"horizon" => "stashed"})],
+          %{"worker" => false},
+          "hub"
+        )
+
+      refute result["exit_copy_pending"]
+      assert result["fiber"] == owner["fiber"]
+    end
+  end
+
+  test "a zero owner document time cannot acknowledge a newer local intent" do
+    owner = row(%{"modified_at" => "0001-01-01T00:00:00Z"})
+
+    [result] =
+      OwnerExit.reconcile(
+        [owner],
+        [mirror(%{"horizon" => "stashed"})],
+        %{"worker" => true},
+        "hub"
+      )
+
+    assert result["fiber"] == owner["fiber"]
+  end
+
   @tag :tmp_dir
-  test "discovery absence is not removal; only a closed fleet proves it", %{tmp_dir: tmp} do
+  test "incomplete discovery is not removal; a closed fleet proves it", %{tmp_dir: tmp} do
     path = Path.join(tmp, "remotes.json")
     Env.delete_app_env(:remotes)
     Env.put_env("SHUTTLE_REMOTES_FILE", path)
     File.write!(path, ~s({"version":1,"remotes":[]}))
-    refute Planning.removed?("worker")
+    refute OwnerExit.removed?("worker")
     File.write!(path, ~s({"version":1,"defaults":{"discover":false},"remotes":[]}))
-    assert Planning.removed?("worker")
+    assert OwnerExit.removed?("worker")
   end
 end

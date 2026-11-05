@@ -1342,7 +1342,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert [
              %{
                "origin" => "worker",
-               "local_planning" => true,
+               "local_exit" => true,
                "felt_store" => "/owner",
                "fiber" => %{
                  "name" => "Old draft",

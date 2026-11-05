@@ -20,7 +20,7 @@ func exitCommand(cmd *cobra.Command) bool {
 }
 
 // Quoted and bare YAML timestamps follow the same RFC3339 rule.
-func planningFiber(f *felt.Felt) bool {
+func exitFiber(f *felt.Felt) bool {
 	if f.Status == felt.StatusActive {
 		return false
 	}
@@ -54,17 +54,13 @@ func (a *app) lifecycleOwner(cmd *cobra.Command, args []string, f *felt.Felt, st
 	owner, err := a.routeOwner(cmd, args, block.Host, false)
 	var unknown unknownOwnerError
 	removed := errors.As(err, &unknown) && block.Host != ""
-	if exitCommand(cmd) && st != nil && (owner != "" || removed || block.Host == "") {
-		if (!planningFiber(f) && !removed) || (block.Kind == "standing" && block.Schedule != nil && !removed) {
+	if exitCommand(cmd) && st != nil && (owner != "" || removed) {
+		if (!exitFiber(f) && !removed) || (block.Kind == "standing" && !removed) {
 			_, refusal := a.routeOwner(cmd, args, block.Host, true)
 			if refusal == nil {
 				refusal = fmt.Errorf("no execution host is assigned")
 			}
 			return "", fmt.Errorf("execution owner decides: no safe local exit for %s: %w", args[0], refusal)
-		}
-		runtime := felt.MappingValueNode(f.ExtraFields[shuttle.FacetKey], shuttle.RuntimeKey)
-		if runtime != nil && runtime.Kind != yaml.MappingNode {
-			return "", fmt.Errorf("malformed runtime; no mirror write")
 		}
 		a.localMirror = true
 		return "", nil

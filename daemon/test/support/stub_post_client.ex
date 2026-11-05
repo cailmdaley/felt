@@ -31,6 +31,7 @@ defmodule Shuttle.Test.StubPostClient do
           get_response: {:error, :not_set},
           get_responses: [],
           last: nil,
+          last_headers: nil,
           last_get: nil,
           gets: [],
           posts: []
@@ -46,6 +47,7 @@ defmodule Shuttle.Test.StubPostClient do
     do: Agent.update(server(), &Map.put(&1, :get_responses, responses))
 
   def last, do: Agent.get(server(), & &1.last)
+  def last_headers, do: Agent.get(server(), & &1.last_headers)
   def posts, do: Agent.get(server(), &Enum.reverse(&1.posts))
   def last_get, do: Agent.get(server(), & &1.last_get)
   def gets, do: Agent.get(server(), &Enum.reverse(&1.gets))
@@ -66,7 +68,10 @@ defmodule Shuttle.Test.StubPostClient do
     end
   end
 
-  def post_mutation(url, body, type, timeout), do: post(url, body, type, timeout)
+  def post_once(url, body, type, timeout, headers) do
+    Agent.update(server(), &Map.put(&1, :last_headers, headers))
+    post(url, body, type, timeout)
+  end
 
   def post(url, body, _content_type, _timeout_ms) do
     Agent.update(server(), fn state ->

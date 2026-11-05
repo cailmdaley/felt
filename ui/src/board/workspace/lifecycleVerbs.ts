@@ -1,4 +1,4 @@
-import { exitRefusal } from '../offlinePlanning.js'
+import { exitRefusal } from '../offlineExits.js'
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { onDesk, restReachable, reviewReachable, verdictsFor } from './fiberPageState.js'

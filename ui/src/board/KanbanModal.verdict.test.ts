@@ -32,7 +32,7 @@ afterEach(() => { verdicts?.dispose(); verdicts = undefined; vi.useRealTimers();
 describe('verdict transition authorization', () => {
   it.each(['open', 'closed'])('refuses an offline standing Temper from %s because accepting requires its owner', status => {
     const fiber = card({ id: 'work/offline-standing', status, shuttleKind: 'standing',
-      originStale: { since: '2026-11-04T19:00:00Z' }, shuttleHost: 'worker', localPlanning: true })
+      originStale: { since: '2026-11-04T19:00:00Z' }, shuttleHost: 'worker', localExit: true })
     const board = setup(fiber)
     board.lastResponse = response({ now: { drafts: status === 'open' ? [fiber] : [], inFlight: [], awaitingReview: status === 'closed' ? [fiber] : [] } })
     board.transition(fiber, 'tempered')

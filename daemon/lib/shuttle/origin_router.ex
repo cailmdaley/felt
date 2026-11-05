@@ -18,7 +18,7 @@ defmodule Shuttle.OriginRouter do
       `origin` omitted, returning the remote's verbatim `{:forwarded, status,
       body}` so the caller can relay it.
 
-  Every forwarded mutation carries `routed: true` and omits `origin`.
+  Every forwarded mutation carries the `x-shuttle-routed` header and omits `origin`.
   An endpoint resolving its document's owner passes that marker to `route/2`;
   a mismatch is refused instead of forwarding again. Host-addressed routes use
   `route_host/2` without inferring ownership from synchronized documents.
@@ -63,6 +63,8 @@ defmodule Shuttle.OriginRouter do
 
   Opts: `:own_host_id`, `:remotes`, and `:routed` to refuse another forward.
   """
+  def routed?(conn), do: Plug.Conn.get_req_header(conn, "x-shuttle-routed") == ["1"]
+
   @spec route(String.t() | nil, keyword()) :: route_decision()
   def route(origin, opts \\ []) do
     case route_host(origin, opts) do
@@ -137,16 +139,8 @@ defmodule Shuttle.OriginRouter do
     timeout = Keyword.get(opts, :forward_timeout_ms, default_forward_timeout_ms())
     url = Remote.url_for(remote, path)
 
-    payload = Map.drop(payload, ["origin", :origin])
-
-    payload =
-      if path in ~w(/api/v1/lifecycle /api/v1/transition /api/v1/felt-edit),
-        do: Map.put(payload, "routed", true),
-        else: payload
-
-    body = Jason.encode!(payload)
-
-    result = client.post_mutation(url, body, "application/json", timeout)
+    body = payload |> Map.drop(["origin", :origin, "routed", :routed]) |> Jason.encode!()
+    result = client.post_once(url, body, "application/json", timeout, [{"x-shuttle-routed", "1"}])
 
     case result do
       {:ok, status, resp} -> {:forwarded, status, resp}

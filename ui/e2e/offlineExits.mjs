@@ -71,10 +71,10 @@ try {
 
   const inconclusive = page.locator('[data-fiber-id="fixtures/offline/unowned-inconclusive"]').first()
   await inconclusive.scrollIntoViewIfNeeded()
-  assert.equal(await inconclusive.getAttribute('draggable'), 'false')
+  assert.equal(await inconclusive.getAttribute('draggable'), 'true')
   await inconclusive.click({ button: 'right' })
-  assert.equal(await page.getByRole('menuitem', { name: 'Rest', exact: true }).count(), 0)
-  assert.equal(await page.getByRole('menuitem', { name: 'Move…', exact: true }).count(), 0)
+  await page.getByRole('menuitem', { name: 'Rest', exact: true }).waitFor()
+  await page.getByRole('menuitem', { name: 'Move…', exact: true }).waitFor()
   await page.keyboard.press('Escape')
 
   const unowned = page.locator('[data-fiber-id="fixtures/offline/unowned"]').first()
@@ -84,7 +84,7 @@ try {
   assert.equal(await page.getByRole('menuitem', { name: 'In flight', exact: true }).count(), 0)
   await page.screenshot({ path: join(shots, 'unowned-move.png') })
   assert.deepEqual(errors, [])
-  console.log(`Offline planning browser checks passed; screenshots: ${shots}`)
+  console.log(`Offline exit browser checks passed; screenshots: ${shots}`)
 } finally {
   await browser.close()
 }

@@ -65,7 +65,9 @@ defmodule ShuttleWeb.FeltEditController do
   end
 
   defp route_edit(conn, fiber_id, params) do
-    case Shuttle.Planning.mutate("/api/v1/felt-edit", params) do
+    case Shuttle.OwnerExit.mutate("/api/v1/felt-edit", params,
+           routed: Shuttle.OriginRouter.routed?(conn)
+         ) do
       :local -> create_local(conn, fiber_id, params)
       result -> relay_text(conn, result)
     end

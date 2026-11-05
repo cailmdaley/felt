@@ -1568,17 +1568,8 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   end
 
   @doc "A non-replayable POST without redirects or connection reuse."
-  def post_once(url, body, content_type, timeout_ms) do
-    request_once(url, body, content_type, timeout_ms)
-  rescue
-    e -> {:error, {:exception, Exception.message(e)}}
-  catch
-    :exit, reason -> {:error, {:exit, reason}}
-  end
-
-  @doc "One non-replayable mutation with a bounded connection phase and explicit pre-send failures."
-  def post_mutation(url, body, content_type, timeout_ms) do
-    request_once(url, body, content_type, timeout_ms, true)
+  def post_once(url, body, content_type, timeout_ms, headers \\ []) do
+    request_once(url, body, content_type, timeout_ms, headers)
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
   catch
@@ -1781,10 +1772,10 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # effects, so use one fresh Mint connection and consume its single response.
   # `prepare/1` keeps the same direct, proxy, and private Tailnet routes as the
   # buffered client; Mint adds neither redirect handling nor status retries.
-  defp request_once(url, body, content_type, timeout_ms, guarded? \\ false) do
+  defp request_once(url, body, content_type, timeout_ms, headers) do
     task =
       Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
-        request_once_inner(url, body, content_type, timeout_ms, guarded?)
+        request_once_inner(url, body, content_type, timeout_ms, headers)
       end)
 
     case Task.yield(task, timeout_ms) do
@@ -1800,19 +1791,20 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
-  defp request_once_inner(url, body, content_type, timeout_ms, guarded?) do
+  defp request_once_inner(url, body, content_type, timeout_ms, extra_headers) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 
     with {:ok, {_profile, request_url, private_dial?}} <- prepare(url),
          {:ok, remaining} <- remaining_time(deadline),
-         connect_timeout = if(guarded?, do: min(remaining, 2_000), else: remaining),
+         connect_timeout = min(remaining, 5_000),
          {:ok, conn} <- connect_once(url, request_url, private_dial?, connect_timeout) do
       try do
-        headers = [
-          {"host", request_authority(url)},
-          {"content-type", content_type},
-          {"connection", "close"}
-        ]
+        headers =
+          [
+            {"host", request_authority(url)},
+            {"content-type", content_type},
+            {"connection", "close"}
+          ] ++ extra_headers
 
         case Mint.HTTP.request(conn, "POST", request_target(url), headers, body) do
           {:ok, conn, request_ref} ->
@@ -1828,7 +1820,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
         Mint.HTTP.close(conn)
       end
     else
-      {:error, reason} -> if guarded?, do: {:error, {:not_sent, reason}}, else: {:error, reason}
+      {:error, reason} -> {:error, {:not_sent, reason}}
     end
   end
 

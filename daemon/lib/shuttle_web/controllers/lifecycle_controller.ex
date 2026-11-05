@@ -31,7 +31,9 @@ defmodule ShuttleWeb.LifecycleController do
   @kinds ~w(oneshot standing)
 
   def create(conn, params) do
-    case Shuttle.Planning.mutate("/api/v1/lifecycle", params) do
+    case Shuttle.OwnerExit.mutate("/api/v1/lifecycle", params,
+           routed: Shuttle.OriginRouter.routed?(conn)
+         ) do
       :local ->
         create_local(conn, params)
 
@@ -39,7 +41,7 @@ defmodule ShuttleWeb.LifecycleController do
         refresh_card(params)
         send_cli_result(conn, "shuttle", {:ok, output})
 
-      {:forwarded, 503, body} = result ->
+      {:forwarded, 503, body, _owner} = result ->
         case Jason.decode(body) do
           {:ok, %{"retryable" => true}} ->
             conn |> put_resp_content_type("application/json") |> send_resp(503, body)

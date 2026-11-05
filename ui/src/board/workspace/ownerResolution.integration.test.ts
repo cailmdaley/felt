@@ -83,7 +83,7 @@ afterEach(() => {
 describe('fiber source selection', () => {
   it('keeps a local archive stale and owner-addressed in pinned and discovery reads', async () => {
     reads.mockImplementation(async()=>json({
-      ...envelope('alpha','hub',{origin:'owner',local_planning:true,fiber:{id:'work/alpha',uid:'alpha',name:'Archive',status:'open',horizon:'stashed',shuttle:{kind:'oneshot',host:'owner'}}}),
+      ...envelope('alpha','hub',{origin:'owner',local_exit:true,fiber:{id:'work/alpha',uid:'alpha',name:'Archive',status:'open',horizon:'stashed',shuttle:{kind:'oneshot',host:'owner'}}}),
       origin:'owner',stale:true,source:'local_archive',origins:{owner:{kind:'remote',stale:true}},
     }))
     for (const mode of ['pinned','discover'] as const) {
@@ -91,7 +91,7 @@ describe('fiber source selection', () => {
       const archived=cardFromCompositeEntry(entry)
       expect(archived.originId).toBe('owner')
       expect(archived.originStale).toBeDefined()
-      expect(archived.localPlanning).toBe(true)
+      expect(archived.localExit).toBe(true)
       expect(sessionVerbsFor(archived)).toEqual([])
     }
   })

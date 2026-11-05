@@ -21,7 +21,7 @@ defmodule ShuttleWeb.TransitionController do
     origin = Map.get(params, "origin")
 
     case Transition.transition(fiber_id, target, origin,
-           routed: params["routed"] in [true, "1", "true"]
+           routed: Shuttle.OriginRouter.routed?(conn)
          ) do
       {:mirrored, action, output} ->
         json(conn, %{

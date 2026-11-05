@@ -39,18 +39,17 @@ defmodule Shuttle.Transition do
   """
   @spec transition(String.t(), String.t(), String.t() | nil, keyword()) :: result()
   def transition(fiber_id, target, origin, opts \\ []) do
-    origin = Shuttle.Planning.origin(fiber_id, origin)
     params = %{"fiber_id" => fiber_id, "target" => target, "origin" => origin}
 
-    case Shuttle.Planning.mutate("/api/v1/transition", params, opts) do
+    case Shuttle.OwnerExit.mutate("/api/v1/transition", params, opts) do
       :local ->
         transition_local(fiber_id, target)
 
       {:mirrored, _, _} = result ->
         result
 
-      {:forwarded, status, body} ->
-        {:forwarded, status, Map.put(decode_body(body), "origin", origin)}
+      {:forwarded, status, body, owner} ->
+        {:forwarded, status, Map.put(decode_body(body), "origin", owner)}
 
       result ->
         invoke_result(result)
@@ -198,11 +197,6 @@ defmodule Shuttle.Transition do
     do:
       {422,
        "routed request reached this host but the document names #{host}; not forwarded again"}
-
-  def http_error(:planning_pending),
-    do:
-      {409,
-       "The local exit copy is waiting for Git sync. The healthy owner remains authoritative; no second write was requested."}
 
   def http_error(:unknown_target), do: {400, "unknown_target"}
   def http_error(:already_running), do: {409, "already_running"}

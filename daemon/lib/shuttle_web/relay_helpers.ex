@@ -114,6 +114,9 @@ defmodule ShuttleWeb.RelayHelpers do
   Identical across the felt-edit / felt-nest / lifecycle endpoints, whose
   owning daemon returns `text/plain`.
   """
+  def relay_text(conn, {:forwarded, status, body, _owner}),
+    do: relay_text(conn, {:forwarded, status, body})
+
   def relay_text(conn, {:forwarded, status, body}) do
     conn |> put_resp_content_type("text/plain") |> send_resp(status, body)
   end

@@ -851,12 +851,8 @@ defmodule ShuttleWeb.APIControllerTest do
       last = StubPostClient.last()
       assert last.url == "http://localhost:4001" <> path, label
 
-      expected =
-        if path in ~w(/api/v1/felt-edit /api/v1/lifecycle /api/v1/transition),
-          do: Map.put(payload, "routed", true),
-          else: payload
-
-      assert Jason.decode!(last.body) == expected, label
+      assert Jason.decode!(last.body) == payload, label
+      assert StubPostClient.last_headers() == [{"x-shuttle-routed", "1"}], label
     end
   end
 

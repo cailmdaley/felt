@@ -274,7 +274,7 @@ defmodule Shuttle.Test.MeetingCaptureForwardClient do
   def last, do: Agent.get(__MODULE__, & &1.last)
   def get(_url, _timeout), do: {:error, :unavailable}
 
-  def post_mutation(url, body, type, timeout), do: post(url, body, type, timeout)
+  def post_once(url, body, type, timeout, _headers), do: post(url, body, type, timeout)
 
   def post(url, body, _content_type, _timeout_ms) do
     Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))

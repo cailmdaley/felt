@@ -59,7 +59,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
-import { canPlanOffline, exitRefusal, offlineExplanation } from './offlinePlanning.js'
+import { canExitOffline, exitRefusal, offlineExplanation } from './offlineExits.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
@@ -320,6 +320,7 @@ export class KanbanModal {
 
   /** Pin or unpin a thread: its `pinned` tag, drawn at once and written through the owner's felt-edit. */
   private async pinThread(card: KanbanCard, pinned: boolean): Promise<void> {
+    if (card.originStale) return
     const key = threadKey(card)
     const mark = (on: boolean): void => {
       for (const c of boardCards(this.lastResponse)) {
@@ -1470,7 +1471,7 @@ export class KanbanModal {
     opts: { cold?: boolean; due?: string | null } = {},
   ): void {
     if (card.originStale || exitRefusal(card)) {
-      if (!exitRefusal(card) && canPlanOffline(card) && horizon === 'stashed' && !opts.cold && opts.due === undefined) void this.commitRest(card, '')
+      if (!exitRefusal(card) && canExitOffline(card) && horizon === 'stashed' && !opts.cold && opts.due === undefined) void this.commitRest(card, '')
       else this.showBanner(exitRefusal(card) ?? 'Configuration changes need the execution owner; no local write was made.', 'info')
       return
     }
@@ -1526,6 +1527,7 @@ export class KanbanModal {
   }
 
   private async scheduleDue(card: KanbanCard, due: string): Promise<void> {
+    if (card.originStale) return
     try {
       await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, due }, 'Date edit failed')
       this.announce(`“${card.name}” is due ${formatDue(due)}.`)
@@ -2255,6 +2257,7 @@ export class KanbanModal {
   private closeRolePopover?: () => void
 
   private makeSeat(card: KanbanCard, anchor: HTMLElement): void {
+    if (card.originStale) return
     this.closeRolePopover?.()
     if (card.shuttleRole) {
       void this.commitSeat(card)
@@ -2270,6 +2273,7 @@ export class KanbanModal {
   /** Office assignment and seat marking precede the ordinary Resting drop.
    * Standing seats keep their schedule and their current run untouched. */
   private async commitSeat(card: KanbanCard, choice?: RoleChoice): Promise<void> {
+    if (card.originStale) return
     try {
       if (choice) {
         await this.postJson('/api/v1/lifecycle', {

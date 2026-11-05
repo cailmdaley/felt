@@ -2403,15 +2403,9 @@ defmodule Shuttle.Poller do
       case {verb == :rest or (verb == :pause and "--no-kill" not in args), result} do
         {true, {:ok, output}} ->
           stop =
-            case fetch_fiber_full(slug, state) do
-              {:ok, fiber} ->
-                if host_owned?(Map.get(fiber, "shuttle"), state.own_host_id),
-                  do: stop_tracked_worker(state, address),
-                  else: {{:ok, :no_session}, state}
-
-              error ->
-                {{:error, {:fiber_read_failed, error}}, state}
-            end
+            if "--mirror-owner" in args,
+              do: {{:ok, :no_session}, state},
+              else: stop_tracked_worker(state, address)
 
           case stop do
             {{:ok, :no_session}, state} -> {{:ok, output}, state}

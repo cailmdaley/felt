@@ -32,9 +32,9 @@ export interface KanbanCard {
    */
   originId: string
   /** The daemon permits an exit on a local copy after a definite pre-send failure or proven absence. */
-  localPlanning?: boolean
+  localExit?: boolean
   /** A local exit is waiting for Git sync; the healthy owner's placement still wins. */
-  planningPending?: boolean
+  exitCopyPending?: boolean
   /**
    * The owning host's felt store path (the feed row's `felt_store`, e.g.
    * `/home/user/store` for a remote-host card). Threaded into owner-routed

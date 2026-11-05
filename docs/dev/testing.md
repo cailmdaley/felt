@@ -44,8 +44,8 @@ Set `SHUTTLE_PLANNING_PROBE_BINARY` to run those public probes against a saved b
 
 `daemon/test/shuttle_web/controllers/owner_down_test.exs` uses private stores and loopback APIs. It warms a real owner feed, stops that owner, applies a real CLI Rest and observes the real composite projection; the identical healthy owner row remains authoritative.
 The browser extension is opt-in: build `ui/dist`, put privately built Go CLIs first on `PATH`, then run `cd daemon && SHUTTLE_OWNER_DOWN_BROWSER=1 mix test test/shuttle_web/controllers/owner_down_test.exs --max-cases 4`.
-It serves that bundle through the isolated fixture daemon and runs `ui/e2e/offlinePlanningReal.mjs`, checking the Rest reply, removal from Drafts after a page reload, stale archive reading and screenshots. It never uses the operator's daemon or browser.
-The ordinary `ui/e2e/offlinePlanning.mjs` harness journey separately stages stale draft, armed, standing, unowned and remote-only menus. The API suite exercises all three forwarded mutation routes through a real HTTP listener and stops mismatched owners after one hop.
+It serves that bundle through the isolated fixture daemon and runs `ui/e2e/offlineExitsReal.mjs`, checking the Rest reply, removal from Drafts after a page reload, stale archive reading and screenshots. It never uses the operator's daemon or browser.
+The ordinary `ui/e2e/offlineExits.mjs` harness journey separately stages stale draft, armed, standing, unowned and remote-only menus. The API suite exercises all three forwarded mutation routes through a real HTTP listener and stops mismatched owners after one hop.
 
 ## Native filesystem I/O
 

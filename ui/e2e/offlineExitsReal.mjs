@@ -6,7 +6,7 @@ import { getBrowser } from './browser.mjs'
 
 const [base, uid, slug, owner = 'worker', mode = 'rest'] = process.argv.slice(2)
 assert(base && uid && slug, 'Pass the isolated fixture daemon URL, UID and namespace path')
-assert(['rest', 'refuse', 'pending'].includes(mode), 'Mode must be rest, refuse or pending')
+assert(['rest', 'refuse', 'pending', 'running'].includes(mode), 'Mode must be rest, refuse, pending or running')
 const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
 const shots = await mkdtemp(join(process.env.SHUTTLE_OWNER_DOWN_ARTIFACT_DIR || tmpdir(), 'shuttle-owner-down-real-'))
 try {
@@ -17,16 +17,36 @@ try {
   await page.goto(base)
   const selector = `[data-fiber-id="${uid}"], [data-fiber-id="${slug}"]`
   const drafts = page.locator('[data-column="drafts"]').locator(selector)
-  await drafts.first().waitFor()
+  await (mode === 'running' ? page.locator(selector).first() : drafts.first()).waitFor()
 
   if (mode === 'pending') {
-    assert.equal(await drafts.first().getAttribute('draggable'), 'false')
+    assert.equal(await drafts.first().getAttribute('draggable'), 'true')
     assert.match(await drafts.first().getAttribute('aria-label'), /waiting for Git sync/)
     await drafts.first().click({ button: 'right' })
     await page.getByRole('menuitem', { name: /waiting for Git sync/ }).waitFor()
-    assert.equal(await page.getByRole('menuitem', { name: 'Rest', exact: true }).count(), 0)
-    assert.equal(await page.getByRole('menuitem', { name: 'Discard', exact: true }).count(), 0)
+    await page.getByRole('menuitem', { name: 'Rest', exact: true }).waitFor()
+    await page.getByRole('menuitem', { name: 'Discard', exact: true }).waitFor()
     await page.screenshot({ path: join(shots, 'healthy-owner-waiting-for-git.png') })
+  } else if (mode === 'running') {
+    const card = page.locator(selector).first()
+    assert.doesNotMatch(await card.getAttribute('aria-label'), /waiting for Git sync/)
+    await card.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Rest', exact: true }).click()
+    await page.locator('.kbn-rest-popover').waitFor()
+    page.on('dialog', dialog => dialog.accept())
+    const applying = page.waitForResponse(reply => reply.url().endsWith('/api/v1/lifecycle') && reply.request().method() === 'POST')
+    await page.keyboard.press('n')
+    const applied = await applying
+    assert.equal(applied.status(), 200, await applied.text())
+    assert.notEqual((await applied.json()).saved_locally, true)
+    await page.reload()
+    await page.locator(selector).first().waitFor()
+    const feed = await page.evaluate(async () => (await fetch('/api/v1/fibers/composite')).json())
+    const row = feed.fibers.find(row => row.fiber.id === uid || row.fiber.uid === uid)
+    assert.equal(row.fiber.horizon, 'stashed')
+    assert.notEqual(row.exit_copy_pending, true)
+    assert.equal(feed.origins[owner].stale, false)
+    await page.screenshot({ path: join(shots, 'healthy-owner-running-rest.png') })
   } else {
     assert.equal(await drafts.first().getAttribute('draggable'), 'true')
     assert.match(await drafts.first().getAttribute('aria-label'), /An exit can be saved/)

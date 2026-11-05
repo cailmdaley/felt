@@ -31,7 +31,7 @@
  * changes whether a move is a no-op — `cold` is the one — it is read here too.
  */
 
-import { exitRefusal } from './offlinePlanning.js'
+import { exitRefusal } from './offlineExits.js'
 import type { KanbanCard, ColumnKind } from './KanbanTypes.js'
 import { hasLiveWorker } from './KanbanTypes.js'
 import { COLUMN_TITLES, SURFACE_TITLE } from './KanbanSurfaces.js'

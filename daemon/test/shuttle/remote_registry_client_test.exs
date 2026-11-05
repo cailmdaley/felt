@@ -67,7 +67,7 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
     :ok = :gen_tcp.close(listener)
 
     assert {:error, {:not_sent, _}} =
-             Default.post_mutation(
+             Default.post_once(
                "http://127.0.0.1:#{port}/action",
                "{}",
                "application/json",
@@ -87,7 +87,7 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       end)
 
     result =
-      Default.post_mutation(
+      Default.post_once(
         "http://127.0.0.1:#{port}/action",
         "{}",
         "application/json",
@@ -755,7 +755,7 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
                "{}",
                "application/json",
                @http_timeout_ms
-             ) == {:error, "https_proxy refused: host class shared-multi-user"}
+             ) == {:error, {:not_sent, "https_proxy refused: host class shared-multi-user"}}
     end
 
     test "single-attempt POST applies its timeout while waiting for proxy CONNECT" do

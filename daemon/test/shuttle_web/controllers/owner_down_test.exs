@@ -27,7 +27,13 @@ defmodule ShuttleWeb.OwnerDownTest do
     def call(conn, opts) do
       if conn.method == "POST" do
         send(opts[:test], {:owner_post, conn.request_path})
-        Plug.Conn.send_resp(conn, 200, ~s({"invoked":true}))
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        if conn.request_path == "/api/v1/felt-edit" && Map.has_key?(Jason.decode!(body), "routed") do
+          Plug.Conn.send_resp(conn, 400, ~s({"error":"unsupported edit fields: routed"}))
+        else
+          Plug.Conn.send_resp(conn, 200, ~s({"invoked":true}))
+        end
       else
         Plug.Conn.send_resp(conn, 200, Jason.encode!(%{host: "worker", fibers: [opts[:row]]}))
       end
@@ -46,7 +52,12 @@ defmodule ShuttleWeb.OwnerDownTest do
       else
         Shuttle.Env.adopt_callers([opts[:test]])
         reply = ShuttleWeb.Endpoint.call(conn, ShuttleWeb.Endpoint.init([]))
-        send(opts[:test], {:hop, reply.body_params})
+
+        send(
+          opts[:test],
+          {:hop, reply.body_params, Plug.Conn.get_req_header(conn, "x-shuttle-routed")}
+        )
+
         reply
       end
     end
@@ -218,7 +229,7 @@ defmodule ShuttleWeb.OwnerDownTest do
     assert [^store] = Shuttle.FeltStores.configured_stores()
     assert {_, 0} = DocumentRunner.cmd("felt", ["-C", store, "show", @uid, "-j", "--exact"], [])
     assert {:ok, %{uid: @uid}} = Shuttle.FeltStores.resolve_request(@uid, slug)
-    assert Shuttle.Planning.local_copy(@uid, "worker", slug)
+    assert Shuttle.OwnerExit.local_copy(@uid, "worker", slug)
 
     api =
       start_supervised!(
@@ -293,17 +304,17 @@ defmodule ShuttleWeb.OwnerDownTest do
         body_format: :binary
       )
 
-    assert [%{"fiber" => fiber, "planning_pending" => true}] = Jason.decode!(body)["fibers"]
+    assert [%{"fiber" => fiber, "exit_copy_pending" => true}] = Jason.decode!(body)["fibers"]
     assert fiber["status"] == "open"
     refute Map.has_key?(fiber, "horizon")
     before_retry = File.read!(path)
 
-    {:ok, {{_, 409, _}, _, retry}} =
+    {:ok, {{_, 200, _}, _, retry}} =
       request(base, "/api/v1/lifecycle", %{action: "rest", fiber: @uid, origin: "worker"})
 
-    assert retry =~ "waiting for Git sync"
+    assert retry =~ "invoked"
     assert File.read!(path) == before_retry
-    refute_receive {:owner_post, _}
+    assert_receive {:owner_post, "/api/v1/lifecycle"}
 
     # Stale cache is not proof that an owner cannot receive a mutation.
     Agent.update(clock, &DateTime.add(&1, 300_000, :millisecond))
@@ -319,6 +330,11 @@ defmodule ShuttleWeb.OwnerDownTest do
       assert_receive {:owner_post, ^endpoint}
     end
 
+    {:ok, {{_, 200, _}, _, inferred}} =
+      request(base, "/api/v1/transition", %{fiber_id: @uid, target: "composted"})
+
+    assert Jason.decode!(inferred)["origin"] == "worker"
+    assert_receive {:owner_post, "/api/v1/transition"}
     refute File.read!(path) =~ "cold: true"
 
     stop_supervised!(:owner)
@@ -359,7 +375,7 @@ defmodule ShuttleWeb.OwnerDownTest do
       Poller.refresh_document(@uid)
 
       {output, status} =
-        Shuttle.Env.cmd("node", ["e2e/offlinePlanningReal.mjs", base, @uid, slug],
+        Shuttle.Env.cmd("node", ["e2e/offlineExitsReal.mjs", base, @uid, slug],
           cd: Path.expand("../../../../ui", __DIR__),
           stderr_to_stdout: true
         )
@@ -468,10 +484,40 @@ defmodule ShuttleWeb.OwnerDownTest do
 
       assert conn.status == 422, conn.resp_body
       assert Agent.get(counter, & &1) == 1
-      assert_receive {:hop, %{"routed" => true}}
-      refute_receive {:hop, _}, 30
+      assert_receive {:hop, payload, ["1"]}
+      refute Map.has_key?(payload, "routed")
+      refute_receive {:hop, _, _}, 30
       assert File.read!(path) == before
     end
+  end
+
+  @tag :tmp_dir
+  test "terminal forwarding strips the host selector on a misnamed remote", %{tmp_dir: tmp} do
+    fixture(Path.expand(tmp))
+    counter = start_supervised!({Agent, fn -> 0 end})
+
+    api =
+      start_supervised!(
+        {Bandit,
+         plug: {HopAPI, [test: self(), counter: counter]},
+         port: 0,
+         ip: {127, 0, 0, 1},
+         startup_log: false}
+      )
+
+    {:ok, {_, port}} = ThousandIsland.listener_info(api)
+    Env.put_app_env(:remotes, [%Remote{name: "worker", url: "http://127.0.0.1:#{port}"}])
+
+    conn =
+      ShuttleWeb.TerminalController.create(Plug.Test.conn(:post, "/"), %{
+        "fiber" => @uid,
+        "shuttle_host" => "worker"
+      })
+
+    assert conn.status == 404, conn.resp_body
+    assert Agent.get(counter, & &1) == 1
+    assert_receive {:hop, payload, ["1"]}
+    refute Map.has_key?(payload, "shuttle_host")
   end
 
   for action <- ~w(rest pause close) do
@@ -534,7 +580,7 @@ defmodule ShuttleWeb.OwnerDownTest do
     Env.put_app_env(:remotes, nil)
     File.write!(Path.join(Path.expand(tmp), "remotes.json"), ~s({"version":1,"remotes":[]}))
     before = File.read!(path)
-    refute Shuttle.Planning.removed?("worker")
+    refute Shuttle.OwnerExit.removed?("worker")
 
     conn =
       ShuttleWeb.LifecycleController.create(Plug.Test.conn(:post, "/"), %{
@@ -564,16 +610,15 @@ defmodule ShuttleWeb.OwnerDownTest do
 
       assert conn.status == 502
       assert File.read!(path) == before
-      refute Shuttle.Planning.local_copy(@uid, "worker")
+      refute Shuttle.OwnerExit.local_copy(@uid, "worker")
     end
   end
 
   @tag :tmp_dir
-  test "CRLF exit copies and transition replies preserve the Git/no-execution contract", %{
+  test "exit copies and transition replies preserve the Git/no-execution contract", %{
     tmp_dir: tmp
   } do
     {store, path} = fixture(Path.expand(tmp))
-    File.write!(path, String.replace(File.read!(path), "\n", "\r\n"))
     Env.put_app_env(:remotes, [%Remote{name: "worker", url: "http://127.0.0.1:1"}])
 
     File.write!(
@@ -585,7 +630,7 @@ defmodule ShuttleWeb.OwnerDownTest do
       start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
 
     await_boot_cycle!(poller)
-    assert Shuttle.Planning.local_copy(@uid, "worker")
+    assert Shuttle.OwnerExit.local_copy(@uid, "worker")
 
     conn =
       Shuttle.Test.ApiConn.local_conn(

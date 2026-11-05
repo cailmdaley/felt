@@ -7,12 +7,18 @@ defmodule ShuttleWeb.TerminalController do
   alias Shuttle.{OriginRouter, SessionLedger, Terminal}
 
   def create(conn, params) do
-    case OriginRouter.route_host(params["origin"] || params["shuttle_host"]) do
+    case OriginRouter.route(params["origin"] || params["shuttle_host"],
+           routed: OriginRouter.routed?(conn)
+         ) do
       :local ->
         create_local(conn, params)
 
       {:remote, remote} ->
-        case OriginRouter.forward(remote, "/api/v1/sessions/prepare-terminal", params) do
+        case OriginRouter.forward(
+               remote,
+               "/api/v1/sessions/prepare-terminal",
+               Map.delete(params, "shuttle_host")
+             ) do
           {:forwarded, status, body} ->
             conn |> put_resp_content_type("application/json") |> send_resp(status, body)
 
@@ -20,8 +26,9 @@ defmodule ShuttleWeb.TerminalController do
             conn |> put_status(502) |> json(%{error: "#{remote.name}: #{inspect(reason)}"})
         end
 
-      {:error, {:unknown_origin, origin}} ->
-        conn |> put_status(422) |> json(%{error: OriginRouter.unknown_origin_message(origin)})
+      {:error, reason} ->
+        {status, message} = Shuttle.Transition.http_error(reason)
+        conn |> put_status(status) |> json(%{error: message})
     end
   end
 

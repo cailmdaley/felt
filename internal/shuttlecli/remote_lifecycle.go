@@ -67,24 +67,37 @@ func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, lo
 	}
 	path, _ := a.shuttleRemotesPath()
 	reason := fmt.Sprintf("host %q is neither an enabled remote in %s nor a discovered tailnet peer", owner, path)
-	discoveryFailed := false
+	absent := !doc.discoverEnabled()
+	for _, entry := range doc.Remotes {
+		if entry.Name == owner {
+			return "", ownerRouteRefusal(cmd, args, owner, reason)
+		}
+	}
 	if doc.discoverEnabled() {
 		discovery, err := a.fetchDaemonDiscovery()
 		if err != nil {
-			discoveryFailed = true
 			reason += fmt.Sprintf(" (discovered peers unknown: %v)", err)
 		} else {
-			// A successful discovery can still omit an aged-out unreachable peer.
-			discoveryFailed = true
 			for _, remote := range a.admitDiscovered(doc, discovery.Peers) {
 				if remote.Name == owner {
 					return owner, nil
 				}
 			}
+			absent = discovery.State == "ok"
+			for _, peer := range discovery.Peers {
+				if peer.Name == owner {
+					absent = false
+				}
+			}
+			for _, peer := range discovery.Rejected {
+				if peer.DNSName == owner || strings.SplitN(strings.TrimSuffix(peer.DNSName, "."), ".", 2)[0] == owner {
+					absent = false
+				}
+			}
 		}
 	}
 	refusal := ownerRouteRefusal(cmd, args, owner, reason)
-	if !discoveryFailed {
+	if absent {
 		return "", unknownOwnerError{refusal}
 	}
 	return "", refusal
@@ -193,8 +206,12 @@ func remoteRouteError(cmd *cobra.Command, args []string, owner string, err error
 	}
 
 	if !requestCouldHaveReachedDaemon(err) {
+		hint := "Start it before retrying"
+		if exitCommand(cmd) {
+			hint += ", or use --local for an explicit local exit"
+		}
 		return ownerRouteRefusal(cmd, args, owner,
-			fmt.Sprintf("the local shuttle daemon is unreachable: %v; it did not receive the request. Start it, or use --local for an explicit local exit", err))
+			fmt.Sprintf("the local shuttle daemon is unreachable: %v; it did not receive the request. %s", err, hint))
 	}
 	return fmt.Errorf("could not confirm routing to owning host %q through the local shuttle daemon: %v; the action may have been applied. Check the fiber on %q before retrying. Run `%s` there if needed", owner, err, owner, command)
 }

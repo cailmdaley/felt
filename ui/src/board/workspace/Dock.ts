@@ -1,5 +1,5 @@
 import { turnOf } from '../turn.js'
-import { executionRefusal } from '../offlinePlanning.js'
+import { executionRefusal } from '../offlineExits.js'
 import { THREAD_LABEL, threadState } from '../threads.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
@@ -903,7 +903,7 @@ export class Dock {
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'localPlanning', 'planningPending', 'tags'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'localExit', 'exitCopyPending', 'tags'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
@@ -1721,6 +1721,10 @@ export class Dock {
   ): HTMLElement {
     const col = document.createElement('div')
     col.className = 'kbn-ctl-fields'
+    if (card.originStale) {
+      col.textContent = 'Configuration needs a reachable execution owner.'
+      return col
+    }
 
     const agentSelect = document.createElement('select')
     agentSelect.id = 'kbn-detail-agent'
@@ -1999,6 +2003,7 @@ export class Dock {
   ): HTMLElement {
     const col = document.createElement('div')
     col.className = 'kbn-ctl-fields'
+    if (card.originStale) return col
     const livePatch = (changes: { parentId?: string | null; due?: string | null }, onCommitted: () => void, onFailed?: () => void): void => {
       void this.livePatch(card, changes, statusEl, errorEl).then((ok) => {
         if (ok) onCommitted()
@@ -2627,6 +2632,7 @@ export class Dock {
     statusEl: HTMLElement,
     errorEl: HTMLElement,
   ): Promise<boolean> {
+    if (card.originStale) return false
     if ('agent' in axes && !axes.agent) return false
     return this.withSaveStatus(statusEl, errorEl, () =>
       this.postJson('/api/v1/lifecycle', {

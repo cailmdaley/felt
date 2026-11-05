@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { card, response } from './testFixtures.js'
 import { Verdicts } from './workspace/Verdicts.js'
-import { canPlanOffline } from './offlinePlanning.js'
+import { canExitOffline } from './offlineExits.js'
 import { moveDestinations } from './MoveDestinations.js'
 import { sessionVerbsFor } from './workspace/lifecycleVerbs.js'
 
@@ -22,7 +22,7 @@ function renderer(): KanbanSurfaceRenderer {
 describe('verdict actions ride cards awaiting review and in flight', () => {
   it('keeps exits and planning drag on an offline draft, but never offers a launch', () => {
     const draft = card({ id: 'offline', status: 'open', shuttleKind: 'oneshot', originId: 'worker',
-      shuttleHost: 'worker', localPlanning: true, originStale: { since: '2026-11-04T19:00:00Z' } })
+      shuttleHost: 'worker', localExit: true, originStale: { since: '2026-11-04T19:00:00Z' } })
     const surfaces = renderer()
     const actions = surfaces.rowActions(draft, true, document.createElement('div'))
     expect(actions.filter(action => !action.disabled).map(action => action.label)).toContain('Discard')
@@ -40,8 +40,8 @@ describe('verdict actions ride cards awaiting review and in flight', () => {
     const archived = card({ id: 'archive', status: 'closed', tempered: true, shuttleKind: 'oneshot', shuttleHost: '' })
     expect(sessionVerbsFor(archived)).toEqual([])
     expect(moveDestinations(archived, 'tempered').map(dest => dest.id)).not.toContain('inFlight')
-    const remoteOnly = { ...archived, originStale: { since: '2026-11-04T19:00:00Z' }, shuttleHost: 'worker', localPlanning: false }
-    expect(canPlanOffline(remoteOnly)).toBe(false)
+    const remoteOnly = { ...archived, originStale: { since: '2026-11-04T19:00:00Z' }, shuttleHost: 'worker', localExit: false }
+    expect(canExitOffline(remoteOnly)).toBe(false)
     expect(renderer().rowActions(remoteOnly, true, document.createElement('div')).filter(action => !action.disabled)).toEqual([])
     expect(moveDestinations(remoteOnly, 'tempered')).toEqual([])
   })
@@ -49,7 +49,7 @@ describe('verdict actions ride cards awaiting review and in flight', () => {
   it('names why armed or possibly live stale cards cannot mutate execution', () => {
     for (const changes of [{ status: 'active' }, { dispatchedAt: '2026-11-04T19:00:00Z' }, { sessionUuid: 'possibly-live' }, { workerState: 'running' as const }]) {
       const unsafe = card({ id: 'unsafe', shuttleKind: 'oneshot', originStale: { since: '2026-11-04T19:00:00Z' }, ...changes })
-      expect(canPlanOffline(unsafe)).toBe(false)
+      expect(canExitOffline(unsafe)).toBe(false)
       const actions = renderer().rowActions(unsafe, true, document.createElement('div'))
       expect(actions.filter(action => !action.disabled)).toEqual([])
       expect(actions[0].label).toContain('The owner decides')

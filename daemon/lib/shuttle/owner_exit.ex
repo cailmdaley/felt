@@ -1,4 +1,4 @@
-defmodule Shuttle.Planning do
+defmodule Shuttle.OwnerExit do
   @moduledoc "Owner-away exits on synchronized copies; configuration and execution stay with the owner."
   alias Shuttle.{FeltStores, FiberDoc, OriginRouter, Poller, RemoteFiberRegistry, Remotes}
   @exit_fields ~w(status tempered closed_at closed-at horizon)
@@ -6,18 +6,16 @@ defmodule Shuttle.Planning do
   def mutate(path, params, opts \\ []) do
     subject = params["fiber"] || params["fiber_id"]
     origin = origin(subject, params["origin"], params["fiber_path"])
-    opts = Keyword.put_new(opts, :routed, params["routed"] in [true, "1", "true"])
 
     result =
       case OriginRouter.route(origin, opts) do
         {:remote, remote} ->
-          if (action?(params) || params["target"] in ~w(drafts awaitingReview composted)) &&
-               pending?(subject, origin, params["fiber_path"]) do
-            {:error, :planning_pending}
-          else
-            result = OriginRouter.forward(remote, path, params, opts)
-            RemoteFiberRegistry.refresh_after_forward(remote.name, result)
-            result
+          result = OriginRouter.forward(remote, path, params, opts)
+          RemoteFiberRegistry.refresh_after_forward(remote.name, result)
+
+          case result do
+            {:forwarded, status, body} -> {:forwarded, status, body, remote.name}
+            error -> error
           end
 
         result ->
@@ -88,37 +86,68 @@ defmodule Shuttle.Planning do
     end
   end
 
-  # Failed or incomplete discovery cannot prove removal. A configured closed fleet can.
-  def removed?(host) when host in [nil, ""], do: false
+  # One immutable fleet snapshot per view or exit authorization.
+  def policy do
+    doc = Remotes.fresh_document()
+    discovery = Shuttle.TailnetPeers.status()
+    configured = Shuttle.Env.app(:remotes)
+    policy(doc, discovery, configured, Remotes.configured())
+  end
 
-  def removed?(host) do
+  @doc false
+  def policy(doc, discovery, configured, routes) do
+    entries =
+      cond do
+        is_list(configured) -> configured
+        is_list(doc) -> doc
+        is_map(doc) -> Map.get(doc, "remotes", [])
+        true -> []
+      end
+
+    known = Enum.flat_map(entries ++ discovery.peers ++ discovery.rejected, &names/1)
+
     complete =
-      is_list(Shuttle.Env.app(:remotes)) ||
-        match?(
-          %{"defaults" => %{"discover" => false}, "remotes" => entries} when is_list(entries),
-          Remotes.fresh_document()
-        )
+      is_list(configured) ||
+        (is_map(doc) &&
+           (get_in(doc, ["defaults", "discover"]) == false || discovery.state == "ok"))
 
-    complete && match?({:error, {:unknown_origin, _}}, OriginRouter.route(host))
+    %{known: MapSet.new(known), complete: complete, routable: MapSet.new(routes, & &1.name)}
   end
 
-  def eligible?(%{"shuttle" => %{} = block} = fiber) do
-    removed = removed?(block["host"])
-    scheduled = block["kind"] == "standing" && !is_nil(block["schedule"])
-    is_map(Map.get(block, "runtime", %{})) && (removed || (!scheduled && quiescent?(fiber)))
+  defp names(entry) do
+    for key <- [:name, :dns_name, "name", "dns_name"],
+        value = Map.get(entry, key),
+        is_binary(value),
+        name <- [value, value |> String.trim_trailing(".") |> String.split(".") |> hd()],
+        do: name
   end
 
-  def eligible?(_), do: false
+  def removed?(host, policy \\ policy()),
+    do:
+      host not in [nil, "", Poller.own_host_id()] && policy.complete &&
+        !MapSet.member?(policy.known, host)
+
+  def eligible?(fiber, policy \\ policy())
+
+  def eligible?(%{"shuttle" => %{} = block} = fiber, policy) do
+    removed?(block["host"], policy) ||
+      (MapSet.member?(policy.routable, block["host"]) && block["kind"] != "standing" &&
+         quiescent?(fiber))
+  end
+
+  def eligible?(_, _), do: false
 
   # The CLI rechecks the exact resolved document under its advisory lock.
   def local_copy(identifier, origin, hint \\ nil) do
+    policy = policy()
+
     with {:ok, %{path: path} = resolved} <- FeltStores.resolve_request(identifier, hint),
          {:ok, _, _, %{"shuttle" => %{} = block} = fiber, _} <- FiberDoc.read_path(path),
          true <- is_nil(resolved.uid) || fiber["id"] == resolved.uid,
          true <- origin in [nil, "", "local", block["host"], Poller.own_host_id()],
-         true <- eligible?(fiber),
+         true <- eligible?(fiber, policy),
          rows = (RemoteFiberRegistry.feeds()[block["host"]] || %{})[:fibers] || [],
-         true <- Enum.all?(rows, &(uid(&1) != fiber["id"] || safe_owner?(&1))),
+         true <- Enum.all?(rows, &(uid(&1) != fiber["id"] || safe_owner?(&1, policy))),
          do: resolved,
          else: (_ -> nil)
   end
@@ -148,21 +177,9 @@ defmodule Shuttle.Planning do
     end
   end
 
-  def pending?(identifier, origin, hint \\ nil) do
-    with {:ok, %{path: path}} <- FeltStores.resolve_request(identifier, hint),
-         {:ok, _, _, fiber, _} <- FiberDoc.read_path(path),
-         true <- eligible?(fiber),
-         %{stale: false, fibers: rows} <- RemoteFiberRegistry.feeds()[origin] do
-      Enum.any?(
-        rows,
-        &(uid(&1) == fiber["id"] && host(&1) == origin && newer?(%{"fiber" => fiber}, &1))
-      )
-    else
-      _ -> false
-    end
-  end
-
   def reconcile(owners, archives, stale, local) do
+    policy = policy()
+
     copies =
       archives
       |> Enum.group_by(&uid/1)
@@ -176,8 +193,8 @@ defmodule Shuttle.Planning do
             _ -> nil
           end
 
-        capable = copy != nil && eligible?(copy["fiber"]) && safe_owner?(row)
-        pending = copy != nil && eligible?(copy["fiber"]) && newer?(copy, row)
+        capable = copy != nil && eligible?(copy["fiber"], policy) && safe_owner?(row, policy)
+        pending = copy != nil && eligible?(copy["fiber"], policy) && newer?(copy, row)
 
         fiber =
           if stale[row["origin"]] && pending && capable do
@@ -189,8 +206,9 @@ defmodule Shuttle.Planning do
 
         Map.merge(row, %{
           "fiber" => fiber,
-          "local_planning" => capable,
-          "planning_pending" => pending && !stale[row["origin"]]
+          "local_exit" => capable,
+          "exit_copy_pending" =>
+            pending && !stale[row["origin"]] && quiescent?(row["fiber"]) && is_nil(row["runtime"])
         })
       end)
 
@@ -206,12 +224,12 @@ defmodule Shuttle.Planning do
       Enum.map(missing, fn row ->
         row
         |> Map.put("origin", if(host(row) in [nil, ""], do: local, else: host(row)))
-        |> Map.put("local_planning", match?([_], copies[uid(row)]) && eligible?(row["fiber"]))
+        |> Map.put("local_exit", match?([_], copies[uid(row)]) && eligible?(row["fiber"], policy))
       end)
   end
 
-  defp safe_owner?(row),
-    do: removed?(host(row)) || (quiescent?(row["fiber"]) && is_nil(row["runtime"]))
+  defp safe_owner?(row, policy),
+    do: removed?(host(row), policy) || (quiescent?(row["fiber"]) && is_nil(row["runtime"]))
 
   defp host(%{"fiber" => %{"shuttle" => %{} = block}}), do: block["host"]
   defp host(_), do: nil
@@ -229,7 +247,9 @@ defmodule Shuttle.Planning do
   defp newer?(copy, row) do
     stamp = mirror_stamp(copy)
 
-    after?(stamp, row["fiber"]["modified_at"] || row["fiber"]["updated_at"]) &&
+    owner_time = row["fiber"]["modified_at"] || row["fiber"]["updated_at"]
+
+    after?(stamp, owner_time) && after?(owner_time, "0001-01-01T00:00:00Z") &&
       (is_nil(mirror_stamp(row)) || after?(stamp, mirror_stamp(row)))
   end
 

@@ -512,8 +512,8 @@ function toCard(
     name: f.name,
     path: entry.path,
     originId: entry.origin,
-    localPlanning: entry.localPlanning,
-    planningPending: entry.planningPending,
+    localExit: entry.localExit,
+    exitCopyPending: entry.exitCopyPending,
     originStale: entry.originStale,
     feltStore: entry.feltStore,
     // Prefer the fiber's own dir; fall back to the report.html sibling's dir

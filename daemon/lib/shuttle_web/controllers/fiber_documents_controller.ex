@@ -241,7 +241,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
         Enum.map(body.fibers, fn entry ->
           entry
           |> Map.put(:origin, origin)
-          |> Map.put(:local_planning, !is_nil(Shuttle.Planning.local_copy(id, origin)))
+          |> Map.put(:local_exit, !is_nil(Shuttle.OwnerExit.local_copy(id, origin)))
         end)
 
       json(
@@ -366,7 +366,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
     fibers =
       fibers
-      |> Shuttle.Planning.reconcile(archives, stale, local_origin)
+      |> Shuttle.OwnerExit.reconcile(archives, stale, local_origin)
       |> Shuttle.Threads.put_board_orchestrators(Shuttle.Poller.fiber_stores())
 
     origins =
