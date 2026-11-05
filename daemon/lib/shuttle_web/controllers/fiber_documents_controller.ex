@@ -396,7 +396,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
       fibers
       |> Enum.frequencies_by(& &1["origin"])
       |> Enum.reduce(origins, fn {origin, count}, acc ->
-        Map.update(acc, origin, %{kind: "archive", stale: true, fiber_count: count}, fn info ->
+        Map.update!(acc, origin, fn info ->
           Map.put(info, :fiber_count, count)
         end)
       end)

@@ -1376,7 +1376,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = running["fibers"]
   end
 
-  test "composite retains unowned and removed-host planning documents", %{store: store} do
+  test "healthy composite matches the owner feed row set despite hostless and retired documents", %{store: store} do
     for {id, host} <- [{"tests/removed", "  host: removed\n"}, {"tests/unowned", ""}] do
       write_fiber!(store, id, """
       ---
@@ -1392,19 +1392,11 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     warm_poller!(store)
     body = get(api_conn(), "/api/v1/fibers/composite") |> json_response(200)
-    removed = Enum.find(body["fibers"], &(&1["fiber"]["name"] == "tests/removed"))
-    unowned = Enum.find(body["fibers"], &(&1["fiber"]["name"] == "tests/unowned"))
-    assert removed["origin"] == "removed"
-    assert removed["fiber"]["horizon"] == "stashed"
-
-    assert body["origins"]["removed"] == %{
-             "kind" => "archive",
-             "stale" => true,
-             "fiber_count" => 1
-           }
-
-    assert unowned["origin"] == "test-host"
-    assert unowned["fiber"]["status"] == "open"
+    authoritative = get(api_conn(), "/api/v1/fibers?shuttle=true") |> json_response(200)
+    row_set = fn rows -> rows |> Enum.map(& &1["fiber"]["id"]) |> Enum.sort() end
+    assert row_set.(body["fibers"]) == row_set.(authoritative["fibers"])
+    refute Enum.any?(body["fibers"], &(&1["fiber"]["name"] in ["tests/removed", "tests/unowned"]))
+    refute Map.has_key?(body["origins"], "removed")
   end
 
   test "GET /api/v1/fibers/composite stamps a remote thread with its hub on this host",
