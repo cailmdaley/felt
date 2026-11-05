@@ -20,7 +20,7 @@
     "video:docs": "node scripts/render-tour.mjs"
   },
   "dependencies": {
-    "@pierre/diffs": "1.6.4",
+    "@pierre/diffs": "1.6.2",
     "@radix-ui/react-dialog": "1.1.15",
     "cron-parser": "^5.5.0",
     "dompurify": "3.4.17",
