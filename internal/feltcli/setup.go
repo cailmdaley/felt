@@ -127,7 +127,8 @@ and codex plugin add. Felt then records trust for its own plugin hooks using
 Codex's App Server hashes and config API (Codex 0.166.0 or newer), only after
 verifying that Codex's cache holds the promoted generation; other hooks' trust
 is untouched. --trust-hooks repairs trust without reinstalling the plugin.
---uninstall removes the plugin and its marketplace.`,
+--uninstall removes the plugin and its marketplace.
+--source refreshes only installed bundles; omit it to restore both bundles.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			source, _ := cmd.Flags().GetString("source")
 			uninstall, _ := cmd.Flags().GetBool("uninstall")
@@ -145,7 +146,7 @@ is untouched. --trust-hooks repairs trust without reinstalling the plugin.
 				return err
 			}
 
-			if err := a.installCodexPluginViaCLI(marketplaceSource); err != nil {
+			if err := a.setupCodexBundlesViaCLI(marketplaceSource, cmd.Flags().Changed("source")); err != nil {
 				return err
 			}
 
@@ -872,6 +873,10 @@ func isLocalPath(source string) bool {
 // plugin commands. Codex owns cache/config writes; Felt owns the promoted
 // source and external provenance. Matching caches are left untouched.
 func (a *app) installCodexPluginViaCLI(marketplaceSource string) error {
+	return a.setupCodexBundlesViaCLI(marketplaceSource, false)
+}
+
+func (a *app) setupCodexBundlesViaCLI(marketplaceSource string, refreshOnly bool) error {
 	if _, err := a.env.LookPath("codex"); err != nil {
 		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
 	}
@@ -880,13 +885,29 @@ func (a *app) installCodexPluginViaCLI(marketplaceSource string) error {
 		if err != nil {
 			return err
 		}
-		return a.withStagedPluginCandidateWithRestore(marketplaceSource, a.installCodexPluginAtSource, func() error {
+		names := codexBundleNames
+		if refreshOnly {
+			names = nil
+			if previous.Installed {
+				names = append(names, "felt")
+			}
+			if previous.SkillsInstalled {
+				names = append(names, "felt-skills")
+			}
+		}
+		return a.withStagedPluginCandidateWithRestore(marketplaceSource, func(source string) error {
+			return a.installCodexBundlesAtSource(source, names)
+		}, func() error {
 			return a.restoreCodexInstallation(previous)
 		})
 	})
 }
 
 func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
+	return a.installCodexBundlesAtSource(marketplaceSource, codexBundleNames)
+}
+
+func (a *app) installCodexBundlesAtSource(marketplaceSource string, names []string) error {
 	hooksInstalled := a.codexPluginInstalled()
 	if err := a.repointCodexMarketplace(codexMarketplaceSource(marketplaceSource)); err != nil {
 		return err
@@ -897,11 +918,10 @@ func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
 	if err != nil {
 		return err
 	}
-	names := codexBundleNames
-	if expected.CodexPayloadSHA256 == nil {
-		names = []string{"felt"}
-	}
 	for _, name := range names {
+		if expected.CodexPayloadSHA256 == nil && name != "felt" {
+			continue
+		}
 		ref := name + "@" + marketplaceName
 		if present && a.verifyCodexLoadedBundle(marketplaceSource, name) == nil {
 			fmt.Fprintf(a.env.Stdout, "✓ Codex %s payload unchanged; left installed bytes intact\n", name)

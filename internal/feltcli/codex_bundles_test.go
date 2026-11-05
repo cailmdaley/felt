@@ -323,3 +323,50 @@ func TestPluginPayloadRejectsReleaseMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexSourceSetupRefreshesOnlyInstalledBundles(t *testing.T) {
+	t.Parallel()
+	for _, retained := range []string{"felt", "felt-skills", ""} {
+		t.Run(retained, func(t *testing.T) {
+			f := newRemoteSetupFixture(t, "codex")
+			if err := f.a.installCodexPluginViaCLI(f.remote); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range codexBundleNames {
+				if name != retained {
+					if _, err := f.a.runCodexCLIQuiet("plugin", "remove", name+"@"+marketplaceName); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			f.setGeneration(t, "two")
+			cmd := f.a.setupCodexCmd()
+			cmd.SetArgs([]string{"--source", f.source})
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			current := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)
+			for _, name := range codexBundleNames {
+				installed, err := f.a.inspectCodexPluginRef(name + "@" + marketplaceName)
+				if err != nil || installed != (name == retained) {
+					t.Errorf("source setup %s installed=%t err=%v, retained=%q", name, installed, err, retained)
+				}
+				if name == retained {
+					if err := f.a.verifyCodexLoadedBundle(current, name); err != nil {
+						t.Error(err)
+					}
+				}
+			}
+			cmd = f.a.setupCodexCmd()
+			cmd.SetArgs(nil)
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range codexBundleNames {
+				if err := f.a.verifyCodexLoadedBundle(current, name); err != nil {
+					t.Errorf("explicit setup did not restore %s: %v", name, err)
+				}
+			}
+		})
+	}
+}
