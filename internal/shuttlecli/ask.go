@@ -18,7 +18,9 @@ func (a *app) askCmd() *cobra.Command {
 The fiber must carry a shuttle: block owned by this host. --clear removes the
 question. Status, outcome and configuration remain unchanged. A question
 asked by the thread's own orchestrator is marked so that it is not delivered
-back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
+back to that orchestrator (shuttle.runtime.orchestrator_acted_at). A worker
+asking on its own top-level oneshot must have written the fiber's tapestry.html
+since it was dispatched.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if answeredBy != "" && !askClear {
 				return fmt.Errorf("--answered-by requires --clear")
@@ -36,6 +38,11 @@ back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 			defer unlock()
 			if err := a.ensureOwnedHere(f, args[0]); err != nil {
 				return err
+			}
+			if !askClear {
+				if err := a.requireReviewReport(f); err != nil {
+					return err
+				}
 			}
 			var value any
 			oldAsk := block.Ask

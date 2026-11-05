@@ -10,6 +10,12 @@ The tapestry is the constitution's one page: what this work is, whole, as it sta
 
 A PR description is this page at the scale of one change.
 
+## Before the human reviews
+
+The page is due whenever you stop for the human: before `shuttle close`, before `shuttle ask`, and before waiting in chat for them to review what you built. Rewrite it then, even if the session was short or the human was present, because they will open it later with the conversation gone. `close` and `ask` refuse on a top-level oneshot whose `tapestry.html` predates the current dispatch.
+
+A thread reviewed by its orchestrator owes the orchestrator its outcome; its page is optional. When nothing needs review, `shuttle rest` leaves it alone.
+
 ## Who reads it
 
 **Primary reader: the human,** who may have been anywhere since this began. Never lean on the conversation you just had.

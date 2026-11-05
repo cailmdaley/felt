@@ -59,6 +59,8 @@ The owner writes its store directly; an unreachable owner fails without a local 
 
 ## Leaving
 
+**A stop the human will review starts with the tapestry.** Before you leave work for the human, whether by `close`, `ask` or waiting in chat for them to look, rewrite `tapestry.html` so it is true and useful right now; outcome and Status don't stand in for it. `close` and `ask` refuse on a top-level oneshot whose page predates your dispatch. A thread whose orchestrator reviews it needs only its outcome, and a standing run keeps its own record.
+
 Commit, `felt -C <store> sync --push`, then pick one. `close`, `handoff` and `rest` find your own fiber when you omit the id (after a `migrate`, name it if they can't) and end your session, so make the verb your last command.
 
 - **`shuttle close`** — the Desired State is met. The card goes to Awaiting review. Have a fresh-context subagent review substantive changes first.

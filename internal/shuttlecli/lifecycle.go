@@ -757,6 +757,10 @@ A never-run draft stays closed. --tempered=false ends the schedule; rest pauses
 it by writing status: open. A stashed horizon alone does not stop scheduling.
 Plain close keeps an existing standing verdict; reopen explicitly clears it.
 
+A worker closing its own top-level oneshot for review must have written the
+fiber's tapestry.html since it was dispatched; 'shuttle rest' leaves when
+nothing needs review. Threads, standing runs and verdicts are exempt.
+
 The shuttle block stays installed. Closed oneshots wait for reopen.
 When closing your own fiber from tmux, this command ends your
 session after the close succeeds; make it your final action. Closing another
@@ -770,6 +774,13 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			tempered, err := parseOptionalBool(closeTempered)
 			if err != nil {
 				return fmt.Errorf("parsing --tempered: %w", err)
+			}
+			if tempered == nil {
+				if f, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true); lookupErr == nil {
+					if err := a.requireReviewReport(f); err != nil {
+						return err
+					}
+				}
 			}
 			if !localOnly(cmd) {
 				candidate, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true)
