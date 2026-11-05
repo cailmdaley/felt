@@ -1066,8 +1066,9 @@ trap 'exit 130' INT
 tmp=\$SHUTTLE_DEPLOY_TMP
 export SHUTTLE_DEPLOY_LOG_FILE=\"\$tmp/log\"
 printf '%s' $(shell_quote "$LOCK_SOURCE") > \"\$tmp/main.go\"
+printf '%s\\n' $(shell_quote "$LOCK_MOD") > \"\$tmp/go.mod\"
 deploy_step 'compile lock helper'
-GOMAXPROCS=2 GOFLAGS=-p=2 go build -o \"\$tmp/lock\" \"\$tmp/main.go\" &
+GOMAXPROCS=2 GOFLAGS=-p=2 go build -C \"\$tmp\" -o lock . &
 child=\$!
 wait \"\$child\"
 child=''
@@ -1117,6 +1118,10 @@ deploy_remote() {
 }
 
 LOCK_SOURCE="$(<"$REPO/scripts/deploy-lock/main.go")"
+# The helper builds in its own module with the repository's Go toolchain, so a
+# host's older default Go selects the same toolchain as the build it guards.
+LOCK_MOD="module shuttle-deploy-lock
+$(grep -E '^(go|toolchain) ' "$REPO/go.mod")"
 RUN_SOURCE="$(<"$REPO/scripts/deploy-run.sh")"
 DEPLOYER="$(hostname):$$"
 RUN_DIR="$(mktemp -d)" || exit 1
@@ -1135,7 +1140,8 @@ trap 'cancel_deploy 130' INT
 mkdir -p "$HOME/.shuttle/deploy/tools" || exit 1
 LOCAL_TOOL=$(mktemp -d "$HOME/.shuttle/deploy/tools/lock.XXXXXX") || exit 1
 printf '%s' "$LOCK_SOURCE" > "$LOCAL_TOOL/main.go"
-GOMAXPROCS=2 GOFLAGS=-p=2 go build -o "$LOCAL_TOOL/lock" "$LOCAL_TOOL/main.go" || exit 1
+printf '%s\n' "$LOCK_MOD" > "$LOCAL_TOOL/go.mod"
+GOMAXPROCS=2 GOFLAGS=-p=2 go build -C "$LOCAL_TOOL" -o lock . || exit 1
 UI_SNAPSHOT="$RUN_DIR/ui"
 mkdir -p "$UI_SNAPSHOT"
 

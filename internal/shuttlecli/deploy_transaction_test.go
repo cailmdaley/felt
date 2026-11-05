@@ -51,7 +51,7 @@ func newDeployFleet(t *testing.T) *deployFleet {
 			t.Fatal(err)
 		}
 	}
-	for _, relative := range []string{"bin/shuttle-deploy", "scripts/deploy-lock/main.go", "scripts/deploy-run.sh"} {
+	for _, relative := range []string{"bin/shuttle-deploy", "go.mod", "scripts/deploy-lock/main.go", "scripts/deploy-run.sh"} {
 		data, err := os.ReadFile(filepath.Join("../..", relative))
 		if err != nil {
 			t.Fatal(err)
@@ -104,7 +104,7 @@ exec `+shellQuote(realRm)+` "$@"
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*/lock) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\nfi\nexec '"+realGo+"' \"$@\"\n")
+	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n [ \"$2\" = -C ] || { echo 'lock helper builds outside its module' >&2; exit 33; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\n grep -q '^toolchain ' \"$3/go.mod\" || { echo 'lock helper has no pinned toolchain' >&2; exit 34; }\nfi\nexec '"+realGo+"' \"$@\"\n")
 	realSleep, err := exec.LookPath("sleep")
 	if err != nil {
 		t.Fatal(err)
