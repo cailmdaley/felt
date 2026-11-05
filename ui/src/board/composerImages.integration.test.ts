@@ -58,7 +58,7 @@ function mount(opts: { meeting?: MeetingJoinControl; pendingStart?: boolean } = 
       body: { dispatched: false, reason: 'arm_refused', needs: 'project_dir', host: 'cluster', message: 'no project_dir' },
     }
   }
-  composer = internals.buildComposer.call(panel, card({ id: 'work/task', originId: 'cluster', sessionUuid: 'previous-session' }))
+  composer = internals.buildComposer.call(panel, card({ id: 'work/task', originId: 'cluster', shuttleHost: 'cluster', sessionUuid: 'previous-session' }))
   document.body.append(composer)
 }
 
@@ -248,7 +248,7 @@ describe('the composer takes pasted images', () => {
   })
 
   it.each([false, true])('a refused Desk drag sends a parked draft only after an edit (%s)', async edited => {
-    const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
+    const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster', shuttleHost: 'cluster', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
     const band = panel.bandFor(task)
     composer = band.el
     document.body.append(composer)

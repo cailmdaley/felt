@@ -132,7 +132,12 @@ defmodule Shuttle.OriginRouter do
     url = Remote.url_for(remote, path)
     body = payload |> Map.delete("origin") |> Map.delete(:origin) |> Jason.encode!()
 
-    case client.post(url, body, "application/json", timeout) do
+    result =
+      if Code.ensure_loaded?(client) and function_exported?(client, :post_mutation, 4),
+        do: client.post_mutation(url, body, "application/json", timeout),
+        else: client.post(url, body, "application/json", timeout)
+
+    case result do
       {:ok, status, resp} -> {:forwarded, status, resp}
       {:error, reason} -> {:error, {:forward_failed, remote.name, reason}}
     end

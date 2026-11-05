@@ -318,7 +318,7 @@ describe('the fiber controls answer a refused start with the prompt', () => {
         btn: HTMLButtonElement, error: HTMLElement) => Promise<void>
     }
     const errorEl = new FakeEl('div')
-    await requeue.runRequeue(card({ id: 'work/task' }), '', 'fresh',
+    await requeue.runRequeue(card({ id: 'work/task', shuttleHost: 'owner-host' }), '', 'fresh',
       new FakeEl('button') as unknown as HTMLButtonElement, errorEl as unknown as HTMLElement)
     expect(errorEl.find('kbn-start-prompt')).toBeUndefined()
     expect(errorEl.textContent).toBe(`On owner-host: ${other.message}`)

@@ -1,0 +1,20 @@
+[
+  {"name":"never launched draft", "fiber":{"status":"open"}, "quiescent":true},
+  {"name":"resting draft", "fiber":{"status":"open","horizon":"stashed"}, "quiescent":true},
+  {"name":"awaiting review without execution", "fiber":{"status":"closed"}, "quiescent":true},
+  {"name":"discarded draft", "fiber":{"status":"closed","tempered":false}, "quiescent":true},
+  {"name":"armed waiting", "fiber":{"status":"active"}, "quiescent":false},
+  {"name":"standing waiting", "fiber":{"status":"active","shuttle":{"kind":"standing"}}, "quiescent":false},
+  {"name":"publication metadata alone", "fiber":{"status":"closed","shuttle":{"runtime":{"thread_exit_verb":"closed","quiet_closed_at":"2026-11-04T12:00:00Z"}}}, "quiescent":true},
+  {"name":"session without dispatch", "fiber":{"status":"open","shuttle":{"runtime":{"session_uuid":"possible-worker"}}}, "quiescent":false},
+  {"name":"unconcluded dispatch", "fiber":{"status":"open","shuttle":{"runtime":{"dispatched_at":"2026-11-04T12:00:00Z"}}}, "quiescent":false},
+  {"name":"closed is not proof of exit", "fiber":{"status":"closed","shuttle":{"runtime":{"dispatched_at":"2026-11-04T12:00:00Z"}}}, "quiescent":false},
+  {"name":"handoff predates dispatch", "fiber":{"status":"closed","shuttle":{"runtime":{"dispatched_at":"2026-11-04T12:00:00Z","handed_off_at":"2026-11-04T11:59:59Z"}}}, "quiescent":false},
+  {"name":"equal timestamps are not proof", "fiber":{"status":"closed","shuttle":{"runtime":{"dispatched_at":"2026-11-04T12:00:00Z","handed_off_at":"2026-11-04T12:00:00Z"}}}, "quiescent":false},
+  {"name":"clean handoff retains session identity", "fiber":{"status":"closed","shuttle":{"runtime":{"dispatched_at":"2026-11-04T12:00:00Z","handed_off_at":"2026-11-04T12:00:00.001Z","session_uuid":"finished-worker"}}}, "quiescent":true},
+  {"name":"handoff does not disarm", "fiber":{"status":"active","shuttle":{"runtime":{"dispatched_at":"2026-11-04T12:00:00Z","handed_off_at":"2026-11-04T12:00:01Z"}}}, "quiescent":false},
+  {"name":"invalid dispatch", "fiber":{"status":"closed","shuttle":{"runtime":{"dispatched_at":"invalid","handed_off_at":"2026-11-04T12:00:01Z"}}}, "quiescent":false},
+  {"name":"invalid handoff", "fiber":{"status":"closed","shuttle":{"runtime":{"dispatched_at":"2026-11-04T12:00:00Z","handed_off_at":"invalid"}}}, "quiescent":false},
+  {"name":"null dispatch marker", "fiber":{"status":"open","shuttle":{"runtime":{"dispatched_at":null}}}, "quiescent":false},
+  {"name":"malformed runtime", "fiber":{"status":"open","shuttle":{"runtime":"unknown"}}, "quiescent":false}
+]

@@ -67,10 +67,43 @@ defmodule Shuttle.Transition do
   """
   @spec transition(String.t(), String.t(), String.t() | nil, keyword()) :: result()
   def transition(fiber_id, target, origin, opts \\ []) do
+    origin = Shuttle.Planning.origin(fiber_id, origin)
+
     case OriginRouter.route(origin, opts) do
-      {:error, _} = error -> error
-      :local -> transition_local(fiber_id, target)
-      {:remote, %Remote{} = remote} -> forward(remote, fiber_id, target, origin, opts)
+      {:error, {:unknown_origin, _}} = error ->
+        if offline_target?(fiber_id, target, origin),
+          do: transition_local(fiber_id, target),
+          else: error
+
+      :local ->
+        transition_local(fiber_id, target)
+
+      {:remote, %Remote{} = remote} ->
+        result = forward(remote, fiber_id, target, origin, opts)
+
+        case result do
+          {:error, {:forward_failed, _, {:not_sent, _}}} ->
+            if offline_target?(fiber_id, target, origin),
+              do: transition_local(fiber_id, target),
+              else: result
+
+          _ ->
+            result
+        end
+    end
+  end
+
+  defp offline_target?(fiber_id, target, origin) do
+    case resolve(fiber_id, target) do
+      {:ok, %{id: id}} ->
+        action = if String.starts_with?(id, "close-"), do: "close", else: "pause"
+        params = %{"action" => action, "tempered" => id == "close-tempered"}
+
+        id in ~w(pause reopen-draft close-awaiting-review close-tempered close-composted) &&
+          Shuttle.Planning.local?(fiber_id, origin, nil, params)
+
+      _ ->
+        false
     end
   end
 
@@ -164,10 +197,16 @@ defmodule Shuttle.Transition do
   # that would hang this Phoenix request forever against a wedged shuttle on a
   # loaded node. `felt_store` may be `nil` (no store resolved); the helper then
   # omits `-C <store>`.
-  defp run_shuttle(verb, fiber_id, args, felt_store) do
-    verb
-    |> Shuttle.CLI.run_lifecycle(fiber_id, args, felt_store: felt_store)
-    |> invoke_result()
+  defp run_shuttle(verb, fiber_id, args, _felt_store) do
+    with {:ok, resolved} <- FeltStores.resolve_request(fiber_id) do
+      verb
+      |> Shuttle.CLI.run_lifecycle(
+        resolved.uid || resolved.fiber_id,
+        args ++ LifecycleService.hint_args(resolved),
+        felt_store: resolved.store
+      )
+      |> invoke_result()
+    end
   end
 
   defp invoke_result({:ok, _output}), do: :ok
@@ -234,8 +273,15 @@ defmodule Shuttle.Transition do
   def http_error({:command_error, status, output}),
     do: {422, "shuttle exited #{status}: #{String.trim(output)}"}
 
+  def http_error({:forward_failed, remote, {:not_sent, reason}}),
+    do:
+      {502,
+       "execution host #{inspect(remote)} is unreachable; no action request was sent; nothing was applied (#{render_error(reason)})"}
+
   def http_error({:forward_failed, remote, reason}),
-    do: {502, "forward to #{remote} failed: #{render_error(reason)}"}
+    do:
+      {502,
+       "forward to #{remote} failed: #{render_error(reason)}; the action may have been applied; inspect the fiber on #{inspect(remote)} before retrying"}
 
   def http_error(reason), do: {500, render_error(reason)}
 

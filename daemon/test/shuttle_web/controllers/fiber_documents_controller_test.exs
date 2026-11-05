@@ -1263,6 +1263,139 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert body["origins"]["candide"]["fiber_count"] == 1
   end
 
+  test "stale composite planning yields to the newer local UID without inventing execution", %{
+    store: store
+  } do
+    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+
+    write_fiber!(store, "tests/remote", """
+    ---
+    id: #{uid}
+    name: Rested locally
+    status: open
+    updated-at: 2026-11-04T22:00:00Z
+    horizon: stashed
+    shuttle:
+      kind: oneshot
+      host: worker
+    ---
+    Body.
+    """)
+
+    remote = %Remote{name: "worker", url: "http://localhost:4001"}
+
+    entry = %{
+      "felt_store" => "/owner",
+      "path" => "tests/remote/remote.md",
+      "fiber" => %{
+        "id" => uid,
+        "uid" => uid,
+        "name" => "Old draft",
+        "status" => "open",
+        "updated_at" => "2026-11-04T19:00:00Z",
+        "shuttle" => %{"kind" => "oneshot", "host" => "worker"}
+      }
+    }
+
+    start_supervised!(StubFiberClient)
+
+    StubFiberClient.set(
+      Remote.fibers_url(remote),
+      {:ok, Jason.encode!(%{host: "worker", fibers: [entry]})}
+    )
+
+    {:ok, clock} = Agent.start_link(fn -> ~U[2026-11-04 19:01:00Z] end)
+
+    Shuttle.Test.Env.start_scoped!(
+      {RemoteFiberRegistry,
+       name: nil,
+       remotes: [remote],
+       client: StubFiberClient,
+       auto_poll: false,
+       store_dir: nil,
+       clock: fn -> Agent.get(clock, & &1) end},
+      RemoteFiberRegistry
+    )
+
+    :ok = RemoteFiberRegistry.refresh_now()
+    warm_poller!(store)
+    fresh = get(api_conn(), "/api/v1/fibers/composite") |> json_response(200)
+    assert [%{"fiber" => %{"name" => "Old draft"}}] = fresh["fibers"]
+
+    assert {:ok, %{fibers: [%{fiber: %{"updated_at" => "2026-11-04T22:00:00Z"}}]}} =
+             Shuttle.Poller.cached_fiber_documents(include_mirrors: true)
+
+    Agent.update(clock, fn _ -> ~U[2026-11-04 22:01:00Z] end)
+    stale = get(api_conn(), "/api/v1/fibers/composite") |> json_response(200)
+
+    assert [
+             %{
+               "origin" => "worker",
+               "local_planning" => true,
+               "felt_store" => "/owner",
+               "fiber" => %{
+                 "name" => "Old draft",
+                 "horizon" => "stashed",
+                 "status" => "open"
+               }
+             } = row
+           ] = stale["fibers"]
+
+    refute Map.has_key?(row, "runtime")
+    assert stale["origins"]["worker"]["stale"]
+    # Owner execution wins even when its document predates the archive's plan.
+    active =
+      put_in(entry, ["fiber", "status"], "active")
+      |> Map.put("runtime", %{"state" => "running", "tmux_session" => "owner-worker"})
+
+    StubFiberClient.set(
+      Remote.fibers_url(remote),
+      {:ok, Jason.encode!(%{host: "worker", fibers: [active]})}
+    )
+
+    :ok = RemoteFiberRegistry.refresh_now()
+    Agent.update(clock, fn _ -> ~U[2026-11-05 22:01:00Z] end)
+    running = get(api_conn(), "/api/v1/fibers/composite") |> json_response(200)
+
+    assert [
+             %{
+               "fiber" => %{"status" => "active"},
+               "runtime" => %{"tmux_session" => "owner-worker"}
+             }
+           ] = running["fibers"]
+  end
+
+  test "composite retains unowned and removed-host planning documents", %{store: store} do
+    for {id, host} <- [{"tests/removed", "  host: removed\n"}, {"tests/unowned", ""}] do
+      write_fiber!(store, id, """
+      ---
+      name: #{id}
+      status: open
+      horizon: stashed
+      shuttle:
+        kind: pinned
+      #{host}---
+      Body.
+      """)
+    end
+
+    warm_poller!(store)
+    body = get(api_conn(), "/api/v1/fibers/composite") |> json_response(200)
+    removed = Enum.find(body["fibers"], &(&1["fiber"]["name"] == "tests/removed"))
+    unowned = Enum.find(body["fibers"], &(&1["fiber"]["name"] == "tests/unowned"))
+    assert removed["origin"] == "removed"
+    assert removed["fiber"]["horizon"] == "stashed"
+
+    assert body["origins"]["removed"] == %{
+             "kind" => "archive",
+             "stale" => true,
+             "fiber_count" => 1
+           }
+
+    assert unowned["origin"] == "test-host"
+    assert unowned["fiber"]["status"] == "open"
+  end
+
   test "GET /api/v1/fibers/composite stamps a remote thread with its hub on this host",
        %{store: store} do
     write_fiber!(store, "tests/hub", """

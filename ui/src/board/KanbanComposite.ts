@@ -86,6 +86,8 @@ export interface CompositeEntry {
    * transition writes; this is the value to pass back as the `/transition`
    * `origin`. */
   origin: string;
+  localPlanning?: boolean;
+  originStale?: { since?: string };
   /** Nearest ancestor constitution, owner-resolved; null is a root. */
   orchestrator?: string | null;
   /** Thread results and messages waiting for this constitution's next worker
@@ -177,7 +179,7 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     const orchestrator = typeof item.orchestrator === 'string' && item.orchestrator ? item.orchestrator : null;
     const pendingResults = typeof item.pending_results === 'number' && item.pending_results > 0 ? item.pending_results : undefined;
     const dispatchError = typeof item.dispatch_error === 'string' && item.dispatch_error ? item.dispatch_error : undefined;
-    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
+    entries.push({ origin, localPlanning: item.local_planning === true, orchestrator, pendingResults, feltStore, path, fiber, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};
@@ -194,6 +196,10 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     }
   }
 
+  for (const entry of entries) {
+    const origin = origins[entry.origin];
+    if (origin?.kind === 'remote' && origin.stale) entry.originStale = { since: origin.lastPolledAt };
+  }
   return { host, generatedAt, entries, origins };
 }
 

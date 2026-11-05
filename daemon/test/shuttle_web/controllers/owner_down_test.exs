@@ -1,0 +1,411 @@
+defmodule ShuttleWeb.OwnerDownTest do
+  use ExUnit.Case, async: true
+  import Shuttle.Test.PollerHelpers
+  alias Shuttle.Test.Env
+  alias Shuttle.{Poller, Remote, RemoteFiberRegistry}
+  @uid "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+
+  defmodule ScopedAPI do
+    @behaviour Plug
+    def init(owner), do: owner
+
+    def call(conn, owner) do
+      Shuttle.Env.adopt_callers([owner])
+      reply = ShuttleWeb.Endpoint.call(conn, ShuttleWeb.Endpoint.init([]))
+
+      if conn.method == "POST" && conn.request_path == "/api/v1/lifecycle",
+        do: send(owner, {:viewer_lifecycle, reply.status})
+
+      reply
+    end
+  end
+
+  defmodule OwnerAPI do
+    @behaviour Plug
+    def init(opts), do: opts
+
+    def call(conn, opts) do
+      if conn.method == "POST" do
+        send(opts[:test], {:owner_post, conn.request_path})
+        Plug.Conn.send_resp(conn, 200, ~s({"invoked":true}))
+      else
+        Plug.Conn.send_resp(conn, 200, Jason.encode!(%{host: "worker", fibers: [opts[:row]]}))
+      end
+    end
+  end
+
+  defmodule DocumentRunner do
+    @behaviour Shuttle.Runner
+    def cmd("tmux", _, _), do: {"no private test workers", 1}
+    def cmd("ps", _, _), do: {"", 0}
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
+
+  defmodule VanishingTransitionRunner do
+    @behaviour Shuttle.Runner
+    def cmd("shuttle", ["-C", store, "close" | _] = args, opts) do
+      File.rm!(Path.join([store, ".felt", "task", "task.md"]))
+      DocumentRunner.cmd("shuttle", args, opts)
+    end
+
+    def cmd(command, args, opts), do: DocumentRunner.cmd(command, args, opts)
+  end
+
+  defmodule RacingEditRunner do
+    @behaviour Shuttle.Runner
+    def cmd("felt", ["-C", store, "edit", "task" | _] = args, opts) do
+      path = Path.join(store, ".felt/task/task.md")
+      raw = File.read!(path)
+
+      case Shuttle.Env.app(:owner_down_edit_race) do
+        :arm ->
+          File.write!(path, String.replace(raw, "status: open", "status: active"))
+
+        :owner ->
+          File.write!(path, String.replace(raw, "host: worker", "host: replacement"))
+
+        :vanish ->
+          other = Path.join(store, ".felt/elsewhere/task/task.md")
+          File.mkdir_p!(Path.dirname(other))
+          File.rename!(path, other)
+      end
+
+      DocumentRunner.cmd("felt", args, opts)
+    end
+
+    def cmd(command, args, opts), do: DocumentRunner.cmd(command, args, opts)
+  end
+
+  defp fixture(tmp, id \\ "task") do
+    store = Path.join(tmp, "loom")
+    path = Path.join(store, ".felt/#{id}/#{Path.basename(id)}.md")
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      "---\nid: #{@uid}\nname: Task\nstatus: open\nupdated-at: 2020-01-01T00:00:00Z\nshuttle:\n  kind: oneshot\n  host: worker\n---\nBody\n"
+    )
+
+    for key <-
+          ~w(SHUTTLE_FIBER_PATH SHUTTLE_TERMINAL_SESSION TMUX TMUX_PANE REX_SESSION REX_BLOCK REX_SERVER SHUTTLE_REX_SERVER PI_SESSION_ID CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID AI_AGENT),
+        do: Env.delete_env(key)
+
+    Env.put_env("HOME", tmp)
+    host_config = Path.join(tmp, "host.json")
+    File.write!(host_config, ~s({"terminal":"tmux"}))
+    Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host_config)
+    Env.put_app_env(:terminal_backend, Shuttle.Terminal.Tmux)
+    Env.put_env("SHUTTLE_HOST", "test-host")
+    stores_file = Path.join(tmp, "stores.json")
+    File.write!(stores_file, Jason.encode!(%{felt_stores: [store]}))
+    Env.delete_env("SHUTTLE_STORES")
+    Env.put_env("SHUTTLE_STORES_FILE", stores_file)
+    Env.put_app_env(:felt_runner, DocumentRunner)
+    {store, path}
+  end
+
+  defp owner(row, port \\ 0) do
+    api =
+      start_supervised!(
+        Supervisor.child_spec(
+          {Bandit,
+           plug: {OwnerAPI, [row: row, test: self()]},
+           port: port,
+           ip: {127, 0, 0, 1},
+           startup_log: false},
+          id: :owner
+        )
+      )
+
+    {:ok, {_, port}} = ThousandIsland.listener_info(api)
+    {api, port}
+  end
+
+  defp request(base, endpoint, payload) do
+    :httpc.request(
+      :post,
+      {String.to_charlist(base <> endpoint), [], ~c"application/json", Jason.encode!(payload)},
+      [],
+      body_format: :binary
+    )
+  end
+
+  @tag :tmp_dir
+  @tag timeout: 120_000
+  test "real CLI rest projects over a cached stale owner row, never a healthy row", %{
+    tmp_dir: tmp
+  } do
+    tmp = Path.expand(tmp)
+    slug = "work/events/2611-ade"
+    {store, path} = fixture(tmp, slug)
+    draft_document = File.read!(path)
+
+    row = %{
+      "felt_store" => "/owner",
+      "path" => "#{slug}/2611-ade.md",
+      "fiber" => %{
+        "id" => @uid,
+        "uid" => @uid,
+        "slug" => slug,
+        "name" => "Task",
+        "status" => "open",
+        "updated_at" => "2020-01-01T00:00:00Z",
+        "shuttle" => %{"kind" => "oneshot", "host" => "worker"}
+      }
+    }
+
+    {_, port} = owner(row)
+    remote = %Remote{name: "worker", url: "http://127.0.0.1:#{port}"}
+    remotes = Path.join(tmp, "remotes.json")
+
+    File.write!(
+      remotes,
+      Jason.encode!(%{
+        version: 1,
+        defaults: %{discover: false},
+        remotes: [%{name: "worker", port: port}]
+      })
+    )
+
+    Env.put_env("SHUTTLE_REMOTES_FILE", remotes)
+    Env.put_app_env(:remotes, [remote])
+
+    {:ok, poller} =
+      start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
+
+    await_boot_cycle!(poller)
+    clock = start_supervised!({Agent, fn -> DateTime.utc_now() end})
+
+    Env.start_scoped!(
+      {RemoteFiberRegistry,
+       name: nil,
+       remotes: [remote],
+       auto_poll: false,
+       store_dir: nil,
+       request_timeout_ms: 1000,
+       clock: fn -> Agent.get(clock, & &1) end}
+    )
+
+    :ok = RemoteFiberRegistry.refresh_now()
+    assert [%{"fiber" => %{"status" => "open"}}] = RemoteFiberRegistry.feeds()["worker"].fibers
+    refute RemoteFiberRegistry.feeds()["worker"].stale
+    stop_supervised!(:owner)
+    Agent.update(clock, &DateTime.add(&1, 300_000, :millisecond))
+    :ok = RemoteFiberRegistry.refresh_now()
+    assert RemoteFiberRegistry.feeds()["worker"].stale
+    assert File.dir?(Path.join(store, ".felt"))
+    assert [^store] = Shuttle.FeltStores.configured_stores()
+    assert {_, 0} = DocumentRunner.cmd("felt", ["-C", store, "show", @uid, "-j", "--exact"], [])
+    assert {:ok, %{uid: @uid}} = Shuttle.FeltStores.resolve_request(@uid, slug)
+    assert Shuttle.Planning.local?(@uid, "worker", slug)
+
+    api =
+      start_supervised!(
+        Supervisor.child_spec(
+          {Bandit, plug: {ScopedAPI, self()}, port: 0, ip: {127, 0, 0, 1}, startup_log: false},
+          id: :viewer
+        )
+      )
+
+    {:ok, {_, viewer_port}} = ThousandIsland.listener_info(api)
+    base = "http://127.0.0.1:#{viewer_port}"
+    Env.put_env("SHUTTLE_DAEMON_URL", base)
+
+    env = [
+      {"SHUTTLE_HOST", "sender"},
+      {"SHUTTLE_DAEMON_URL", base},
+      {"SHUTTLE_REMOTES_FILE", remotes},
+      {"SHUTTLE_STORES", store}
+    ]
+
+    {output, 0} =
+      Shuttle.Env.cmd("shuttle", ["-C", store, "rest", @uid], stderr_to_stdout: true, env: env)
+
+    assert_receive {:viewer_lifecycle, 200}
+    assert output =~ "Git"
+    assert output =~ "no execution request"
+    assert File.read!(path) =~ "horizon: stashed"
+
+    {:ok, {{_, 200, _}, _, body}} =
+      :httpc.request(:get, {String.to_charlist(base <> "/api/v1/fibers/composite"), []}, [],
+        body_format: :binary
+      )
+
+    assert [
+             %{
+               "origin" => "worker",
+               "felt_store" => "/owner",
+               "fiber" => %{"horizon" => "stashed"}
+             }
+           ] = Jason.decode!(body)["fibers"]
+
+    # A config command reaches the same offline writer without holding its lock across the POST.
+    {output, 0} =
+      Shuttle.Env.cmd("shuttle", ["-C", store, "set-agent", @uid, "claude-sonnet"],
+        stderr_to_stdout: true,
+        env: env
+      )
+
+    assert output =~ "Git"
+    assert File.read!(path) =~ "agent: claude-sonnet"
+
+    {:ok, {{_, 200, _}, _, _}} =
+      request(base, "/api/v1/lifecycle", %{
+        action: "close",
+        fiber: @uid,
+        origin: "worker",
+        tempered: false
+      })
+
+    assert File.read!(path) =~ "tempered: false"
+
+    # The exact same owner row wins again as soon as its feed is healthy.
+    owner(row, port)
+    :ok = RemoteFiberRegistry.refresh_now()
+    refute RemoteFiberRegistry.feeds()["worker"].stale
+
+    {:ok, {{_, 200, _}, _, body}} =
+      :httpc.request(:get, {String.to_charlist(base <> "/api/v1/fibers/composite"), []}, [],
+        body_format: :binary
+      )
+
+    assert [%{"fiber" => fiber}] = Jason.decode!(body)["fibers"]
+    assert fiber["status"] == "open"
+    refute Map.has_key?(fiber, "horizon")
+
+    # Stale cache is not proof that an owner cannot receive a mutation.
+    Agent.update(clock, &DateTime.add(&1, 300_000, :millisecond))
+    assert RemoteFiberRegistry.feeds()["worker"].stale
+
+    for {endpoint, payload} <- [
+          {"/api/v1/lifecycle", %{action: "rest", fiber: @uid, origin: "worker"}},
+          {"/api/v1/felt-edit", %{fiber_id: @uid, origin: "worker", set: %{cold: true}}},
+          {"/api/v1/transition", %{fiber_id: @uid, origin: "worker", target: "composted"}}
+        ] do
+      {:ok, {{_, 200, _}, _, _}} = request(base, endpoint, payload)
+      assert_receive {:owner_post, ^endpoint}
+    end
+
+    refute File.read!(path) =~ "cold: true"
+
+    stop_supervised!(:owner)
+    Agent.update(clock, &DateTime.add(&1, 300_000, :millisecond))
+    File.write!(path, String.replace(File.read!(path), "status: closed", "status: active"))
+    Poller.refresh_document(@uid)
+    started = System.monotonic_time(:millisecond)
+
+    {output, code} =
+      Shuttle.Env.cmd("shuttle", ["-C", store, "rest", @uid], stderr_to_stdout: true, env: env)
+
+    assert System.monotonic_time(:millisecond) - started < 10_000
+    assert code != 0
+    assert output =~ "no action request was sent"
+    assert output =~ "nothing was applied"
+    refute output =~ "may have been applied"
+    assert File.read!(path) =~ "status: active"
+
+    Env.put_app_env(:remotes, [])
+
+    {:ok, {{_, 200, _}, _, body}} =
+      :httpc.request(
+        :get,
+        {String.to_charlist(base <> "/api/v1/fibers/" <> @uid <> "?body=true&origin=worker"), []},
+        [],
+        body_format: :binary
+      )
+
+    assert %{"origin" => "worker", "stale" => true, "source" => "local_archive"} =
+             Jason.decode!(body)
+
+    assert get_in(Jason.decode!(body), ["fibers", Access.at(0), "fiber", "body"]) =~ "Body"
+
+    if System.get_env("SHUTTLE_OWNER_DOWN_BROWSER") == "1" do
+      Env.put_app_env(:remotes, [remote])
+      Env.put_env("SHUTTLE_UI_DIST", Path.expand("../../../../ui/dist", __DIR__))
+      File.write!(path, draft_document)
+      Poller.refresh_document(@uid)
+
+      {output, status} =
+        Shuttle.Env.cmd("node", ["e2e/offlinePlanningReal.mjs", base, @uid, slug],
+          cd: Path.expand("../../../../ui", __DIR__),
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, output
+      IO.puts(output)
+      assert File.read!(path) =~ "horizon: stashed"
+    end
+
+    {:ok, {{_, 400, _}, _, _}} =
+      :httpc.request(
+        :get,
+        {String.to_charlist(base <> "/api/v1/fibers/" <> @uid <> "?body=true&origin=not-worker"),
+         []},
+        [],
+        body_format: :binary
+      )
+  end
+
+  @tag :tmp_dir
+  test "offline surface edits refuse a new arm, owner or vanished UID-less address", %{
+    tmp_dir: tmp
+  } do
+    tmp = Path.expand(tmp)
+
+    for race <- [:arm, :owner, :vanish] do
+      {store, path} = fixture(Path.join(tmp, to_string(race)))
+      raw = File.read!(path) |> String.replace(~r/^id:.*\n/m, "")
+      File.write!(path, raw)
+      Env.put_app_env(:remotes, [])
+      Env.put_app_env(:felt_runner, RacingEditRunner)
+      Env.put_app_env(:owner_down_edit_race, race)
+
+      conn =
+        ShuttleWeb.FeltEditController.create(Plug.Test.conn(:post, "/"), %{
+          "fiber_id" => "task",
+          "origin" => "worker",
+          "set" => %{"cold" => true}
+        })
+
+      assert conn.status == 422, conn.resp_body
+
+      target =
+        if race == :vanish, do: Path.join(store, ".felt/elsewhere/task/task.md"), else: path
+
+      after_edit = File.read!(target)
+      refute after_edit =~ "cold:"
+
+      case race do
+        :arm -> assert after_edit =~ "status: active"
+        :owner -> assert after_edit =~ "host: replacement"
+        :vanish -> assert after_edit == raw
+      end
+    end
+  end
+
+  @tag :tmp_dir
+  test "a vanished UID-less transition cannot target a same-leaf document", %{tmp_dir: tmp} do
+    tmp = Path.expand(tmp)
+    {store, path} = fixture(tmp)
+    body = File.read!(path) |> String.replace("id: #{@uid}\n", "")
+    File.write!(path, body)
+    other = Path.join([store, ".felt", "elsewhere", "task", "task.md"])
+    File.mkdir_p!(Path.dirname(other))
+    File.write!(other, body)
+    Env.put_app_env(:remotes, [])
+    Env.put_app_env(:felt_runner, VanishingTransitionRunner)
+
+    conn =
+      Shuttle.Test.ApiConn.local_conn(
+        :post,
+        "/api/v1/transition",
+        Jason.encode!(%{fiber_id: "task", origin: "worker", target: "composted"})
+      )
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> ShuttleWeb.Endpoint.call(ShuttleWeb.Endpoint.init([]))
+
+    assert conn.status == 422
+    refute File.exists?(path)
+    assert File.read!(other) == body
+  end
+end

@@ -9,13 +9,14 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // seedOrchestrated writes hub, whose live worker is session "chair-session",
 // and its thread hub/t.
-func seedOrchestrated(t *testing.T, storage *felt.Storage) {
+func seedOrchestrated(t *testing.T, env *sysenv.Env, storage *felt.Storage) {
 	t.Helper()
-	seedShuttleRole(t, storage, "hub", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "hub", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 	hub := mustRead(t, storage, "hub")
 	if err := shuttle.SetRuntimeField(hub, "session_uuid", "chair-session"); err != nil {
 		t.Fatal(err)
@@ -23,7 +24,7 @@ func seedOrchestrated(t *testing.T, storage *felt.Storage) {
 	if err := storage.Write(hub); err != nil {
 		t.Fatal(err)
 	}
-	seedShuttleRole(t, storage, "hub/t", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "hub/t", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 }
 
 func orchestratorActed(t *testing.T, storage *felt.Storage, id string) string {
@@ -68,7 +69,7 @@ func TestOrchestratorActsOnItsThreadAreMarked(t *testing.T) {
 				args = []string{"ask", "hub/t", "which one?"}
 			}
 			dir, storage := newStore(t)
-			seedOrchestrated(t, storage)
+			seedOrchestrated(t, env, storage)
 			if out, err := runIn(t, env, dir, args...); err != nil {
 				t.Fatalf("%s by %q: %v\n%s", verb, actor, err, out)
 			}

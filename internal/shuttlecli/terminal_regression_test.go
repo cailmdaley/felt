@@ -68,7 +68,7 @@ func TestTerminalObservationErrorsReachEveryCLICaller(t *testing.T) {
 		t.Run(strings.Join(args, "-"), func(t *testing.T) {
 			env := testEnv(t)
 			dir, st := newStore(t)
-			seedShuttleRole(t, st, "task", "active", oneshot(), nil)
+			seedShuttleRole(t, st, "task", "active", ownedOn(t, env, oneshot()), nil)
 			f := mustRead(t, st, "task")
 			name := shuttleTmuxSessionName(f.ID, f.UID)
 			writeRexBindings(t, env, map[string]rexBinding{name: {SessionID: "session:worker", BlockID: "block:worker", CreatedAt: "stamp"}})

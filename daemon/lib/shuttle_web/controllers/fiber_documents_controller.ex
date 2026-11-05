@@ -185,10 +185,20 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
     case OriginRouter.route(Map.get(params, "origin")) do
       {:error, {:unknown_origin, origin}} ->
-        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+        show_archive(conn, id, with_body?, origin, fn ->
+          ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+        end)
 
       {:remote, remote} ->
-        relay_bytes(conn, forward_show(remote, id, with_body?))
+        case forward_show(remote, id, with_body?) do
+          {:error, _} = unavailable ->
+            show_archive(conn, id, with_body?, remote.name, fn ->
+              relay_bytes(conn, unavailable)
+            end)
+
+          reply ->
+            relay_bytes(conn, reply)
+        end
 
       :local ->
         show_local(conn, id, with_body?, routed?)
@@ -223,6 +233,32 @@ defmodule ShuttleWeb.FiberDocumentsController do
     end
   end
 
+  defp show_archive(conn, id, with_body?, origin, unavailable) do
+    with {:ok, body} <- get_local(id, with_body?),
+         %{"fibers" => [%{"fiber" => %{"shuttle" => %{"host" => ^origin}}}]} <-
+           Shuttle.FiberDoc.stringify_keys(body) do
+      entries =
+        Enum.map(body.fibers, fn entry ->
+          entry
+          |> Map.put(:origin, origin)
+          |> Map.put(:local_planning, Shuttle.Planning.quiescent?(entry.fiber))
+        end)
+
+      json(
+        conn,
+        Map.merge(body, %{
+          fibers: entries,
+          origin: origin,
+          stale: true,
+          source: "local_archive",
+          origins: %{origin => %{kind: "remote", stale: true, fiber_count: length(entries)}}
+        })
+      )
+    else
+      _ -> unavailable.()
+    end
+  end
+
   defp get_local(id, with_body?) do
     opts = [with_body: with_body?, address: Shuttle.FiberAddresses.lookup(id)]
 
@@ -247,8 +283,8 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # nil covers every case where this daemon IS the right answer: an already-
   # routed request, a fiber we own, an ownerless one, a miss, and a `host:`
   # naming no configured remote when inferred from a local document without
-  # an explicit origin. This read-only mirror fallback never overrides an
-  # explicit origin: show/2 refuses an unknown one before reading here.
+  # an explicit origin. An unavailable explicit owner can serve only a matching,
+  # explicitly stale archive; it never substitutes live assets or execution.
   defp owning_remote(_body, true), do: nil
 
   defp owning_remote(%{fibers: [entry | _]}, _routed?), do: entry_owner(entry)
@@ -318,6 +354,19 @@ defmodule ShuttleWeb.FiberDocumentsController do
          Enum.flat_map(remote_feeds, fn {name, feed} ->
            Enum.map(feed.fibers, &stamp_origin(&1, name))
          end))
+      |> Enum.map(&Shuttle.FiberDoc.stringify_keys/1)
+
+    archives =
+      case Shuttle.Poller.cached_fiber_documents(include_mirrors: true) do
+        {:ok, %{fibers: rows}} -> Enum.map(rows, &Shuttle.FiberDoc.stringify_keys/1)
+        _ -> []
+      end
+
+    stale = Map.new(remote_feeds, fn {name, feed} -> {name, feed.stale} end)
+
+    fibers =
+      fibers
+      |> Shuttle.Planning.reconcile(archives, stale, local_origin)
       |> Shuttle.Threads.put_board_orchestrators(Shuttle.Poller.fiber_stores())
 
     origins =
@@ -342,6 +391,15 @@ defmodule ShuttleWeb.FiberDocumentsController do
         fiber_count: length(local_owner_entries),
         cache: local_cache
       })
+
+    origins =
+      fibers
+      |> Enum.frequencies_by(& &1["origin"])
+      |> Enum.reduce(origins, fn {origin, count}, acc ->
+        Map.update(acc, origin, %{kind: "archive", stale: true, fiber_count: count}, fn info ->
+          Map.put(info, :fiber_count, count)
+        end)
+      end)
 
     ShuttleWeb.ConditionalJSON.send(conn, %{
       host: local_origin,

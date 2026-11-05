@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -10,8 +11,17 @@ import (
 
 // writeFiber announces successful local writes without making the daemon a dependency.
 func (a *app) writeFiber(st *felt.Storage, f *felt.Felt) error {
+	if st == nil {
+		return fmt.Errorf("fiber %s has no local storage; route the write to its execution owner", f.ID)
+	}
+	if a.planningFallback != nil {
+		f.Touch(time.Now())
+	}
 	if err := st.Write(f); err != nil {
 		return err
+	}
+	if a.planningFallback != nil {
+		fmt.Fprintf(a.env.Stdout, "saved a local planning copy (%v). This write travels by Git; no execution request was sent.\n", a.planningFallback)
 	}
 	endpoint, err := a.daemonEndpoint("/api/v1/document-changed")
 	if err != nil {

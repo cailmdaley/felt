@@ -3,6 +3,108 @@
 How the daemon decides what to run, and what the worker's prompt looks like.
 The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 
+## Planning, execution, and unavailable hosts
+
+A fiber is a Git-synchronized document.
+`shuttle.host` selects the daemon allowed to execute it; it doesn't own a draft's planning state.
+Planning verbs ask the execution owner first, even when the local document is an open draft.
+Only a definite pre-send failure, an absent/removed owner, or explicit CLI `--local` planning permits an offline planning write; a lost reply never does.
+Offline planning never authorizes or stops execution.
+The CLI re-reads and validates the document under its lock before writing, without holding that lock across an owner request.
+The board uses the same CLI writer, including for remote or removed execution hosts.
+An offline planning write explains why its owner could not arbitrate, that the document travels through Git, and that no execution request was sent.
+It needs a local copy of the document; a cached remote card alone is not writable offline.
+
+### States and evidence
+
+Lifecycle state is `status`, `tempered`, and runtime evidence, rather than a single enum.
+The board additionally projects dates, horizon, seats, and live owner observations into places.
+`pinned` reads as `oneshot`; an absent host never grants execution to this daemon.
+
+| State | Document and owner evidence | Offline planning |
+|---|---|---|
+| Draft, never launched | `status: open`; no dispatch or session identity | Yes |
+| Resting | `status: open`, `horizon: stashed`; a future due date may wake its display, not arm execution | Yes, unless an unconcluded dispatch remains |
+| Armed-waiting | `status: active`, no positively observed worker; includes boot-held work and waiting standing schedules | No; the owner may launch it |
+| Running | Owner reports a worker, or a dispatch/session marker has no later clean handoff | No; a failed observation isn't proof of exit |
+| Handed off | `runtime.handed_off_at` is strictly later than `dispatched_at`; status remains a separate gate | Only when status isn't `active` and no owner-observed worker remains |
+| Awaiting review | `status: closed`, `tempered` absent | Yes if no unconcluded execution remains; closed alone doesn't prove exit |
+| Tempered / discarded | `status: closed`, `tempered: true` / `false` | Same evidence rule as Awaiting review |
+| Standing | `shuttle.kind: standing`, with a cron schedule; overlays every state above | Same evidence rule; accepting a run re-arms it |
+| Unowned / removed host | Missing `shuttle.host`, or host absent from the fleet | Rest, Close and Discard remain available with unconcluded runtime; other planning changes require quiescence |
+
+A runtime containing only planning/publication metadata isn't launch evidence.
+A session identity without a dispatch timestamp is possible execution and refuses offline planning.
+Invalid dispatch/handoff timestamps don't establish a clean exit.
+A stale owner-observed worker remains unknown, not dead, and the board withholds offline lifecycle gestures for it.
+The CLI cannot discover a worker launched since its archive copy; an offline edit describes local planning, not the owner's current execution.
+
+### Verbs and gestures
+
+**P** is a planning operation: ask the owner first, with a quiescent local-document fallback only when it cannot arbitrate.
+The same operation on armed or possible execution is **E**: ask the execution owner.
+**E** always stays owner-routed, even when the archive looks quiescent.
+**F** changes owner-addressed file placement or execution identity and stays on the owner; it has no offline mirror fallback.
+These classes, the state table above, and the transport table below specify each state × verb × availability combination.
+
+| Verb or board gesture | Class and resulting state |
+|---|---|
+| `rest`, drop in Resting, snooze through `rest --until` | P/E; open + stashed, verdict cleared; an owner-side rest concludes and stops the run |
+| `pause`, drop in Drafts from an open card | P/E; open, schedule preserved; owner-side pause stops a worker unless `--no-kill` |
+| `close`, Close for review, drop in Awaiting review | P/E; closed, oneshot verdict cleared and standing verdict preserved; closing another fiber doesn't itself kill its worker |
+| `close --tempered=false`, Discard | P/E; closed + false |
+| `close --tempered=true`, oneshot Temper | P/E; closed + true |
+| Standing Temper or `close --tempered=true` | E; the owner resolves acceptance, stamps its serviced occurrence and re-arms eligible work |
+| `accept` | E; an untempered active/closed standing run re-arms; oneshots are refused and use `close --tempered=true` |
+| `resume`, `reopen` without `--as-draft`, Launch, Resume, New session, drop in In flight | E; arm/dispatch through the existing owner lifecycle and arming gates |
+| `reopen --as-draft`, closed card dropped in Drafts | P/E; open, verdict and closed-at cleared, never arms |
+| `set-agent`, `set-model`, role/seat assignment, `reshape`, `set-outcome` | P/E; configuration/publication edit only; runtime identity preserved |
+| Due/date drop, horizon, cold, tag changes on a quiescent constitution | P; the existing document-edit path stamps `updated-at` |
+| Those document edits on armed or possibly live work | E; no offline fallback |
+| Move/rename/reparent the document (`felt-nest`), uninstall, physical archive/removal | F; owner namespace/identity operation, not an offline planning exit |
+| Archive as a board verdict | P/E; the corresponding closed + tempered/discarded transition, not a file move |
+
+The board offers offline planning actions on stale drafts, resting cards, and completed work with clean-exit evidence.
+Its Move menu omits In flight while the host is stale; stale planning cards remain draggable.
+Trying an execution drop explains that launching needs the execution host.
+A stale armed or possibly live card explains why lifecycle controls need reconnection rather than presenting an empty menu.
+An offline standing run offers Discard and Rest, not Temper's implicit re-arm.
+Missing/removed hosts don't make quiescent archive documents disappear from the composite board.
+
+### Transport outcomes
+
+| Operation class | Owner healthy | Owner unavailable before send | Owner lost mid-request | Owner has a newer version |
+|---|---|---|---|---|
+| P | Owner validates and applies its current document | Quiescent local copy only; explain Git synchronization and no execution request | Refuse without replay or mirror fallback; the owner may have applied it | Owner's current document wins while reachable; Git reconciles offline changes |
+| E | Owner validates its current document and runtime; local planning copy isn't execution authority | Refuse; say no action request was sent and nothing was applied | Refuse without replay or mirror fallback; say the action may have been applied and inspect the owner before retrying | Owner's current state and execution gates win |
+| F | Owner validates its current namespace and document | Refuse without local mutation | Preserve uncertainty; never repeat a placement/removal automatically | Owner's current namespace and identity win |
+
+A stale feed does not prove that an owner cannot receive a request: attempt the guarded connection.
+The mutation transport gives connection establishment at most two seconds, distinguishes a pre-send connection refusal from a lost reply, and sends a POST only once.
+The board permits local planning fallback only while its owner feed is stale or absent.
+Once sending starts, an error remains ambiguous even if the connection closes before the response.
+An unknown/removed origin refuses execution before forwarding.
+An unanswered local-daemon request also remains ambiguous; it is never a reason to fall back to a planning write.
+The existing same-host offline lifecycle path remains available when no local daemon connection was made.
+
+### Git reconciliation
+
+Git reconciles the document; the syncing agent resolves textual conflicts from the work's context.
+A merged `status: active` runs because someone explicitly armed it.
+
+### Composite planning projection
+
+Owner feeds remain owner-only and serve owner-addressed content and runtime.
+The composite board also reads the local document cache, keyed by intrinsic UID.
+When an owner feed is stale, a strictly newer local `updated_at` supplies planning fields (status/verdict subject to the execution rule, horizon, due, tags, next-launch configuration, and role/seat).
+For a peer without `updated_at`, its reported `modified_at` is the comparison fallback.
+Equal or missing version evidence doesn't replace an owner row.
+Owner-observed armed status, possible execution, and live runtime win over an offline status/verdict edit.
+The archive must match both intrinsic identity and execution host. The projection preserves owner file addresses, host, runtime, and non-planning content such as the name.
+Healthy owner rows remain authoritative, and projected rows retain the owner's stale marking.
+The composite's `local_planning` capability requires a quiescent local document and no possible execution in the owner row; cached remote-only cards do not promise offline saves.
+A local-only row for a removed owner is marked stale too; it doesn't manufacture live host content or liveness.
+
 ## How dispatch works
 
 - **Poller** (`daemon/lib/shuttle/poller.ex`) owns the tick. It walks each

@@ -7,6 +7,8 @@ import { Dock } from './Dock.js'
 import { Overview } from './Overview.js'
 import { Workspace } from './Workspace.js'
 import { readFiber } from './fiberSource.js'
+import { cardFromCompositeEntry } from '../KanbanReadModel.js'
+import { sessionVerbsFor } from './lifecycleVerbs.js'
 
 const settle = async (): Promise<void> => { for (let i = 0; i < 50; i++) await Promise.resolve() }
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
@@ -79,6 +81,21 @@ afterEach(() => {
 })
 
 describe('fiber source selection', () => {
+  it('keeps a local archive stale and owner-addressed in pinned and discovery reads', async () => {
+    reads.mockImplementation(async()=>json({
+      ...envelope('alpha','hub',{origin:'owner',local_planning:true,fiber:{id:'work/alpha',uid:'alpha',name:'Archive',status:'open',horizon:'stashed',shuttle:{kind:'oneshot',host:'owner'}}}),
+      origin:'owner',stale:true,source:'local_archive',origins:{owner:{kind:'remote',stale:true}},
+    }))
+    for (const mode of ['pinned','discover'] as const) {
+      const entry=await readFiber('','alpha','owner',undefined,mode)
+      const archived=cardFromCompositeEntry(entry)
+      expect(archived.originId).toBe('owner')
+      expect(archived.originStale).toBeDefined()
+      expect(archived.localPlanning).toBe(true)
+      expect(sessionVerbsFor(archived)).toEqual([])
+    }
+  })
+
   it('pins body reads, suppressing local self-routing and ignoring the hub envelope', async () => {
     reads.mockResolvedValue(json({ ...envelope('alpha', 'hub'), origins: { hub: {}, owner: {} } }))
     const entry = await readFiber('', 'alpha', 'owner')

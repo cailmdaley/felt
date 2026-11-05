@@ -1,3 +1,4 @@
+import { canPlanOffline, temperNeedsOwner } from '../offlinePlanning.js'
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { onDesk, restReachable, reviewReachable, verdictsFor } from './fiberPageState.js'
@@ -27,10 +28,12 @@ export const verbSpec = (verb: LifecycleVerb): LifecycleVerbSpec => LIFECYCLE_VE
 
 /** The verbs a card offers, in header order; Rest only where a rest can be taken. */
 export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): LifecycleVerb[] {
-  if (!onDesk(card)) return []
+  if (!onDesk(card) || (card.originStale && !canPlanOffline(card))) return []
   const verdicts = verdictsFor(card)
-  return LIFECYCLE_VERBS.map(spec => spec.verb).filter(verb =>
-    verb === 'review' ? reviewReachable(card) : verb === 'rest' ? canRest && restReachable(card) : verdicts.includes(verb))
+  return LIFECYCLE_VERBS.map(spec => spec.verb).filter(verb => {
+    if (verb === 'temper' && card.originStale && temperNeedsOwner(card)) return false
+    return verb === 'review' ? reviewReachable(card) : verb === 'rest' ? canRest && restReachable(card) : verdicts.includes(verb)
+  })
 }
 
 /** The header keeps only the actions called for by the card's current state. */
@@ -46,7 +49,7 @@ export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lif
 
 /** Session actions paired with the lifecycle verbs in the chat header. */
 export function sessionVerbsFor(card: KanbanCard): SessionVerb[] {
-  if (!onDesk(card)) return []
+  if (!onDesk(card) || !card.shuttleHost || card.originStale) return []
   const column = deskColumn(card)
   if (column === 'drafts') return ['launch']
   if (column === 'roles' || column === 'resting' || column === 'scheduled' || column === 'tempered' || column === 'composted') return ['resume', 'newSession']

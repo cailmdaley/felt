@@ -14,12 +14,12 @@ import (
 const blockerUID = "01JB0CKER00000000000000000"
 
 // A rest --until naming a fiber stores its uid; a text naming nothing is kept
-// as text; a date is a return day and clears the wait; '' clears both.
+// as text; a date is a return day and clears the wait; ” clears both.
 func TestRestUntilNamesWhatItWaitsFor(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedFiber(t, storage, "hub/a", "01JTHREAD00000000000000000", felt.StatusActive, oneshot(), nil)
+	seedFiber(t, storage, "hub/a", "01JTHREAD00000000000000000", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 	seedFiber(t, storage, "hub/blocker", blockerUID, felt.StatusActive, nil, nil)
 
 	out, err := runIn(t, env, dir, "rest", "hub/a", "--until", "blocker", "--local")

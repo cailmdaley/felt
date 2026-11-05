@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { card, response } from './testFixtures.js'
 import { Verdicts } from './workspace/Verdicts.js'
+import { canPlanOffline } from './offlinePlanning.js'
+import { moveDestinations } from './MoveDestinations.js'
+import { sessionVerbsFor } from './workspace/lifecycleVerbs.js'
 
 function renderer(): KanbanSurfaceRenderer {
   return new KanbanSurfaceRenderer({
@@ -17,6 +20,43 @@ function renderer(): KanbanSurfaceRenderer {
 }
 
 describe('verdict actions ride cards awaiting review and in flight', () => {
+  it('keeps exits and planning drag on an offline draft, but never offers a launch', () => {
+    const draft = card({ id: 'offline', status: 'open', shuttleKind: 'oneshot', originId: 'worker',
+      shuttleHost: 'worker', localPlanning: true, originStale: { since: '2026-11-04T19:00:00Z' } })
+    const surfaces = renderer()
+    const actions = surfaces.rowActions(draft, true, document.createElement('div'))
+    expect(actions.filter(action => !action.disabled).map(action => action.label)).toContain('Discard')
+    expect(actions.find(action => action.disabled)?.label).toContain('Git sync')
+    expect(sessionVerbsFor(draft)).toEqual([])
+    expect(moveDestinations(draft, 'drafts').map(dest => dest.id)).not.toContain('inFlight')
+    const root = surfaces.renderNowSection({ drafts: [draft], inFlight: [], awaitingReview: [] }, { worker: { status: 'stale' } })
+    const row = root.querySelector<HTMLElement>('[data-fiber-id="offline"]')!
+    expect(row.draggable).toBe(true)
+    expect(row.getAttribute('aria-label')).toContain('Planning changes are saved here')
+    expect(row.classList.contains('kbn-card--stale')).toBe(true)
+  })
+
+  it('does not promise planning saves without a quiescent local copy, or launch an unowned archive', () => {
+    const archived = card({ id: 'archive', status: 'closed', tempered: true, shuttleKind: 'oneshot', shuttleHost: '' })
+    expect(sessionVerbsFor(archived)).toEqual([])
+    expect(moveDestinations(archived, 'tempered').map(dest => dest.id)).not.toContain('inFlight')
+    const remoteOnly = { ...archived, originStale: { since: '2026-11-04T19:00:00Z' }, shuttleHost: 'worker', localPlanning: false }
+    expect(canPlanOffline(remoteOnly)).toBe(false)
+    expect(renderer().rowActions(remoteOnly, true, document.createElement('div')).filter(action => !action.disabled)).toEqual([])
+    expect(moveDestinations(remoteOnly, 'tempered')).toEqual([])
+  })
+
+  it('names why armed or possibly live stale cards cannot mutate execution', () => {
+    for (const changes of [{ status: 'active' }, { dispatchedAt: '2026-11-04T19:00:00Z' }, { sessionUuid: 'possibly-live' }, { workerState: 'running' as const }]) {
+      const unsafe = card({ id: 'unsafe', shuttleKind: 'oneshot', originStale: { since: '2026-11-04T19:00:00Z' }, ...changes })
+      expect(canPlanOffline(unsafe)).toBe(false)
+      const actions = renderer().rowActions(unsafe, true, document.createElement('div'))
+      expect(actions.filter(action => !action.disabled)).toEqual([])
+      expect(actions[0].label).toContain('may have a live worker')
+      expect(moveDestinations(unsafe, null)).toEqual([])
+    }
+  })
+
   it('offers the header verbs on review and in-flight cards, none on a plain note', () => {
     const data = response({ now: {
       drafts: [card({ id: 'draft' })],

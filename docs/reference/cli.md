@@ -23,7 +23,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 |---|---|
 | `felt init` | Create or repair the local `.felt/` directory and support files |
 | `felt add <slug> <name>` | Create a fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level` to skip placing `<slug>` under an existing fiber of the same leading name; `--namespace` to create an exact path in the enclosing store, independent of the project view) |
-| `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
+| `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars). `--exact` accepts only an intrinsic UID or exact enclosing-store path; `--if-match <sha256>` checks the complete file revision under the document lock before editing |
 | `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`; `--citations` and `--consumers` search the whole store; `--exact` accepts only a ULID or an exact enclosing-store path; `--path-hint <path>` verifies a UID at that exact path before walking for it) |
 | `felt rm <id>` | Delete a fiber's file; nested fibers stay where they are. Refuses a guessed id (one resolving only by its last segment or as a prefix completion) and names the fiber it would have reached |
 | `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and never stages, stashes, or force-pushes; a diverged upstream makes a merge commit. `--fetch-timeout <duration>` bounds the network fetch (default: 2m); local merge has no hard deadline |
@@ -157,8 +157,8 @@ offline and validate before they touch disk. When a fiber's
 `shuttle.host` names a remote in the resolved fleet (an enabled entry in
 `~/.config/shuttle/remotes.json`, or a tailnet peer the local daemon
 discovered),
-`pause`, `resume`, `close`, `reopen`, `accept`, `set-agent`, `set-model`,
-`set-outcome`, `reshape`, and `uninstall` route through the local daemon to the
+`pause`, `rest`, `resume`, `close`, `reopen`, `accept`, `set-agent`, `set-model`,
+`set-outcome`, `reshape`, `role`, `seat`, and `uninstall` route through the local daemon to the
 owner; `dispatch` does the same. `snapshot`, `dispatch`, `status --all`/`--remote`,
 `sessions`, `transcript`, `message`, and
 `validate-identity` talk to the local daemon (127.0.0.1:4000 or a unix socket,
@@ -169,14 +169,16 @@ sees the old document or the new one, written in one atomic step); a daemon
 that cannot be reached means the document is written directly. A daemon that
 takes the request but does not answer within 5 s is reported ("did not answer
 in time … may still apply"), never bypassed with a local write, since the
-transition may still land there. `--local` writes the document here and never
-routes; on a fiber another host owns it is refused. If routing to an owner is
-impossible, the CLI explains why and names the command to run there. For what
+transition may still land there. Planning verbs also ask a reachable owner even when the local copy is an open draft.
+After a definite pre-send failure, a quiescent local copy permits a planning write, with an explanation that it travels by Git and sends no execution request.
+Unknown/removed hosts also permit Rest, Close and Discard with unconcluded runtime; they do not permit execution.
+A remote-only fetched document is not a writable mirror, and a lost reply never permits fallback or replay.
+`--local` never routes: execution changes require this host's ownership; the daemon's offline planning path validates and edits a local document without stopping a remote worker. For what
 the daemon speaks directly, see the [HTTP API](api.md).
 
 Owner routing uses the local document's `shuttle.host`, not the local daemon's snapshot.
 The owner need not have polled the fiber yet.
-The daemon refuses an explicit origin outside its own fleet with 400 naming that origin; it never substitutes a local Git mirror or local file for an unknown destination.
+An explicit origin outside the fleet refuses execution and owner-local assets with 400 naming that origin; eligible planning writes can use a local document, and archive reads are explicitly marked stale.
 A missing lifecycle, dispatch or single-fiber read returns 404 naming the fiber and owning host.
 The daemon never runs Git or `felt sync`.
 Armed remote creation transfers the document directly through `/fiber/create`; lifecycle changes use the owner's existing routes.
@@ -213,7 +215,7 @@ untouched by any of this.
 | `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
 | `shuttle resume <fiber>` | Set status to `active`; a standing constitution awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one; remote paths are validated and saved by the owner, without changing the local Git mirror. `--local` skips the daemon |
 | `shuttle accept <fiber>` | Resolve the human verdict on an untempered standing constitution, closed or still active: it re-arms and its run concludes (`handed_off_at`). The outcome is kept. A oneshot is refused. `--local` skips the daemon |
-| `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works in any state, including standing and tempered/discarded. `--until` says what the rest lasts until: a `YYYY-MM-DD` return day, or a fiber or free text it waits for (`shuttle.blocked_on`, a fiber stored by uid, whose close reaches the thread's orchestrator as context and arms nothing); `--until ''` rests undated and waiting for nothing. On a constitution already at rest, `--until` changes only that; `resume` and `close` clear the wait. Routes through the owning daemon, which writes it inside its Poller and stops the worker through its backend (tmux or an app interrupt); `--local` writes here and stops nothing, and an unreachable daemon is bypassed with a local write and tmux kill |
+| `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works in any state, including standing and tempered/discarded. `--until` says what the rest lasts until: a `YYYY-MM-DD` return day, or a fiber or free text it waits for (`shuttle.blocked_on`, a fiber stored by uid, whose close reaches the thread's orchestrator as context and arms nothing); `--until ''` rests undated and waiting for nothing. On a constitution already at rest, `--until` changes only that; `resume` and `close` clear the wait. Asks the owning daemon first, which writes it inside its Poller and stops the worker through its backend. An unavailable remote owner permits a quiescent local planning write that travels by Git, preserves execution runtime and stops no worker; a removed/absent host also permits retirement with unconcluded markers. `--local` writes here and stops nothing; on this host, a definitely unreachable daemon permits the ordinary local write and tmux stop |
 | `shuttle reopen <fiber>` | Reopen a closed/reviewed fiber for active work (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `shuttle close <fiber>` | Set status to `closed`; `--tempered=true\|false` records a verdict. Without the flag, a standing verdict stays in place and a oneshot's is cleared. For standing constitutions with a dispatch on record, `--tempered=true` is `accept` (same gate and next-due message); without one it records an ordinary verdict and leaves the fiber closed; an untempered closed run with a dispatch on record stays on Awaiting review until accepted or the next occurrence after both its last service and close re-arms it. A never-run closed draft stays closed. `--tempered=false` ends the schedule; `rest` pauses it. A stashed horizon alone does not stop scheduling. Reopen explicitly clears an existing standing verdict. A thread wakes only its nearest orchestrator by default; `--quiet` sends its outcome as context without waking. The next ordinary close wakes again; ask always wakes. Results never automatically propagate further. A worker closing its own top-level oneshot for review must have written `tapestry.html` since its dispatch |
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--project-dir`); leaves the current session running. The agent is a registry id or alias: any other name, a model name included, is refused with `<id> is not an agent; \`shuttle agents\` lists them`, as `set-model`, `install -m`, `repeat -m` and `thread --agent` refuse it |

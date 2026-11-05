@@ -34,7 +34,18 @@ A synthetic Tailscale CLI drives sixteen probes against reserved `.invalid` name
 The healthy case reaches ready; the FIFO case keeps HTTP diagnostics live beyond sixteen seconds, refuses dispatch, and recovers in the same daemon after an external writer replaces the registry.
 The realistic case uses 3,000 managed fibers and real tmux on a private socket, delays inventory eighteen seconds, then requires ready and all documents cached.
 Codex is an external executable stub. These gates require tmux, preserve production quarantine and read the dirty-I/O scheduler count from release VM arguments.
+Diagnostic requests share the gate's 50-second readiness budget and cap each request at four seconds. The subprocess guard leaves time for fixture setup, and the ExUnit guard outlives subprocess cleanup. Delayed-response regressions check healthy replies, deadline exhaustion, and a wedged version endpoint that must return within six seconds.
 A new production child belongs in the independent manifest in `test/support/production_boot.exs`.
+
+## Offline planning probes
+
+`internal/shuttlecli/planning_test.go` builds a real Shuttle binary and checks every planning verb against reachable and unavailable owner endpoints, including remote-only documents with no writable local storage. It also reads quoted and unquoted YAML timestamps and performs a real Git merge of an offline Rest with an explicit owner arm.
+Set `SHUTTLE_PLANNING_PROBE_BINARY` to run those public probes against a saved binary as a negative control.
+
+`daemon/test/shuttle_web/controllers/owner_down_test.exs` uses private stores and loopback APIs. It warms a real owner feed, stops that owner, applies a real CLI Rest and observes the real composite projection; the identical healthy owner row remains authoritative.
+The browser extension is opt-in: build `ui/dist`, put privately built Go CLIs first on `PATH`, then run `cd daemon && SHUTTLE_OWNER_DOWN_BROWSER=1 mix test test/shuttle_web/controllers/owner_down_test.exs --max-cases 4`.
+It serves that bundle through the isolated fixture daemon and runs `ui/e2e/offlinePlanningReal.mjs`, checking the Rest reply, removal from Drafts after a page reload, stale archive reading and screenshots. It never uses the operator's daemon or browser.
+The ordinary `ui/e2e/offlinePlanning.mjs` harness journey separately stages stale draft, armed, standing, unowned and remote-only menus.
 
 ## Native filesystem I/O
 
@@ -65,6 +76,7 @@ They run when Rex is installed and skip when it is absent.
 The daemon suite launches sibling workers without a live family root, checks one session with ordered, labelled windows, then stops both and checks that the owned session is gone.
 `terminal/rex_families_test.exs` covers family resolution, concurrent sibling launches, window-local close, exact-window reveal, viewer tabs and human-window preservation with the fixture-backed runner.
 Point all test CLI calls at that socket, stop the isolated server in cleanup, and never create or destroy sessions on the operator's server.
+Server RPC readiness and restored-window reconciliation are separate observations: wait for the backend's reconciled inventory before asserting that restored workers are absent.
 
 `terminal/codex_rex_real_test.exs` is an opt-in native Codex messaging check.
 With the checkout's Go CLIs first on `PATH`, run it with

@@ -122,7 +122,14 @@ defmodule Shuttle.Terminal.RexRealTest do
     refute instance == before["instance"]
     assert {:ok, blocks} = Rex.blocks(@runner, before["bindings"][name]["session_id"])
     assert Enum.any?(blocks, &(&1["block_id"] == before["bindings"][name]["block_id"]))
-    assert {:ok, []} = Backend.list(@runner)
+
+    await(fn ->
+      case Backend.list(Shuttle.Runner.Default) do
+        {:error, :unknown} -> false
+        result -> assert result == {:ok, []}
+      end
+    end)
+
     assert :absent = Backend.probe(@runner, name)
     assert :ok = Backend.launch(@runner, name, root, script, [])
     assert :present = Backend.probe(@runner, name)

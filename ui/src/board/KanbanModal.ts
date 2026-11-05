@@ -59,6 +59,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
+import { offlineExplanation, temperNeedsOwner } from './offlinePlanning.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
@@ -1228,6 +1229,10 @@ export class KanbanModal {
      */
     opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean; verdictCommitted?: boolean } = {},
   ): void {
+    if (card.originStale && (target === 'inFlight' || (target === 'tempered' && temperNeedsOwner(card)))) {
+      this.showBanner(offlineExplanation(card), 'info')
+      return
+    }
     const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
     // Server placement, or the gesture's pre-paint basis, determines a no-op.
     // A same-column verdict must not authorize a delayed write after reopening.

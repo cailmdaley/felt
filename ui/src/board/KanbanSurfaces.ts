@@ -1,3 +1,4 @@
+import { canPlanOffline, offlineExplanation } from './offlinePlanning.js'
 import { installFrontierDetails } from './DeskFrontier.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
@@ -707,8 +708,8 @@ export class KanbanSurfaceRenderer {
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
     el.setAttribute('role', 'listitem')
-    el.draggable = !isStale && !coarsePointer()
-    if (!isStale) this.installDraggable(el, card, true)
+    el.draggable = (!isStale || canPlanOffline(card)) && !coarsePointer()
+    if (!isStale || canPlanOffline(card)) this.installDraggable(el, card, true)
     this.installLongPressMove(el, card)
 
     const dot = document.createElement('span')
@@ -733,7 +734,7 @@ export class KanbanSurfaceRenderer {
     el.append(dot, name, hint)
     const seat = card.shuttleSeat === true && card.shuttleRole ? `seat of roles/${card.shuttleRole}` : ''
     el.title = [card.name, seat, detail, card.outcome].filter(Boolean).join(' — ')
-    el.setAttribute('aria-label', `${card.name}${seat ? `, ${seat}` : ''}${isStale ? ' — waiting on origin, drag disabled' : ''}`)
+    el.setAttribute('aria-label', `${card.name}${seat ? `, ${seat}` : ''}${isStale ? ` — ${offlineExplanation(card)}` : ''}`)
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a')) return
@@ -1072,7 +1073,7 @@ export class KanbanSurfaceRenderer {
     const el = document.createElement('div')
     el.className = isAgentCard(card) ? 'kbn-cluster-item kbn-cluster-item-agent' : 'kbn-cluster-item kbn-cluster-item-human'
     if (sleeping) el.classList.add('kbn-cluster-item-standing')
-    el.draggable = !isStale && !coarsePointer()
+    el.draggable = (!isStale || canPlanOffline(card)) && !coarsePointer()
     el.dataset.fiberId = card.id
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
@@ -1083,7 +1084,7 @@ export class KanbanSurfaceRenderer {
     el.setAttribute('aria-label', `${card.name}${who}`)
     el.title = `${card.name}${who}`
 
-    if (!isStale) this.installDraggable(el, card, false)
+    if (!isStale || canPlanOffline(card)) this.installDraggable(el, card, false)
 
     const glyph = stateDot(card, this.o.openDetail)
     const title = document.createElement('span')
@@ -1523,19 +1524,19 @@ export class KanbanSurfaceRenderer {
     if (lensState.ghost) el.classList.add('kbn-card--lens-ghost')
     el.setAttribute('role', 'listitem')
     const ariaSuffix = isStale
-      ? ` — waiting on ${originStaleness.hostname ?? card.originId}, drag disabled`
+      ? ` — ${offlineExplanation(card)}`
       : ''
     const lensSuffix = lensState.ghost ? ' — resting, shown for this cycle' : ''
     el.setAttribute('aria-label', `${card.name}${agentName ? ` — ${agentName}` : ''} — ${COLUMN_TITLES[kind]}${lensSuffix}${ariaSuffix}`)
     // Touch has no drag-and-drop backend, and a draggable card fights the
     // finger that is trying to scroll past it. Holding the card still opens
     // its menu, whose Move… is the touch path to the same transitions.
-    el.draggable = !isStale && !coarsePointer()
+    el.draggable = (!isStale || canPlanOffline(card)) && !coarsePointer()
     el.dataset.fiberId = card.id
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
 
-    if (!isStale) this.installDraggable(el, card, true)
+    if (!isStale || canPlanOffline(card)) this.installDraggable(el, card, true)
 
     const glyph = stateDot(card, this.o.openDetail)
     const name = document.createElement('span')
@@ -1590,7 +1591,7 @@ export class KanbanSurfaceRenderer {
 
   /** The line's actions: the header's verbs for this card, then what only a live worker or a held launch offers. */
   rowActions(card: KanbanCard, stale: boolean, anchor: HTMLElement): ConversationAction[] {
-    const actions: ConversationAction[] = stale ? [] : lifecycleVerbsFor(card, !!this.o.onRest).map(verb => ({
+    const actions: ConversationAction[] = (stale && !canPlanOffline(card) ? [] : lifecycleVerbsFor(card, !!this.o.onRest)).map(verb => ({
       label: verbSpec(verb).label,
       dress: (item: HTMLButtonElement) => { dressVerb(item, verb) },
       run: () => {
@@ -1609,7 +1610,13 @@ export class KanbanSurfaceRenderer {
       actions.push({ label: 'Open terminal', run: () => this.o.openWorker!(card.tmuxSession!, card.shuttleHost) })
     }
     const move = this.o.onCardLongPress
-    if (!stale && move) actions.push({ label: 'Move…', run: () => move(card, anchor) })
+    if ((!stale || canPlanOffline(card)) && move) actions.push({ label: 'Move…', run: () => move(card, anchor) })
+    if (stale) actions.push({ label: offlineExplanation(card), disabled: true,
+      dress: item => {
+        item.classList.add('kbn-verb-menu-plain')
+        Object.assign(item.style, { whiteSpace: 'normal', maxWidth: '320px', height: 'auto', padding: '8px 10px', lineHeight: 'var(--leading-ui)', cursor: 'default' })
+      },
+    })
     return actions
   }
 

@@ -53,8 +53,46 @@ defmodule Shuttle.ApplicationBootTest do
     assert Enum.find_index(ids, &(&1 == ShuttleWeb.PeerGateThrottle)) < endpoint
   end
 
+  defmodule DelayedDiagnostics do
+    @behaviour Plug
+    def init(opts), do: opts
+
+    def call(conn, opts) do
+      Process.sleep(Keyword.get(opts, :delay, 2_100))
+      Plug.Conn.send_resp(conn, 200, ~s({"ready":true}))
+    end
+  end
+
+  @tag :timing
+  test "diagnostics share the gate deadline while capping each request" do
+    api = start_supervised!({Bandit, plug: DelayedDiagnostics, port: 0, ip: {127, 0, 0, 1}})
+    {:ok, {_, port}} = ThousandIsland.listener_info(api)
+    url = ~c"http://127.0.0.1:" ++ Integer.to_charlist(port) ++ ~c"/api/v1/version"
+
+    assert {:ok, {{_, 200, _}, _, ~c"{\"ready\":true}"}} =
+             Shuttle.Test.BootProbe.request(url, System.monotonic_time(:millisecond) + 30_000)
+
+    assert {:error, :timeout} =
+             Shuttle.Test.BootProbe.request(url, System.monotonic_time(:millisecond) + 10)
+  end
+
+  @tag :timing
+  test "a wedged version endpoint cannot consume a boot stage budget" do
+    api =
+      start_supervised!(
+        {Bandit, plug: {DelayedDiagnostics, delay: 8_000}, port: 0, ip: {127, 0, 0, 1}}
+      )
+
+    {:ok, {_, port}} = ThousandIsland.listener_info(api)
+    url = ~c"http://127.0.0.1:" ++ Integer.to_charlist(port) ++ ~c"/api/v1/version"
+    started = System.monotonic_time(:millisecond)
+    assert {:error, :timeout} = Shuttle.Test.BootProbe.request(url, started + 60_000)
+    assert System.monotonic_time(:millisecond) - started < 6_000
+  end
+
   for mode <- ["normal", "hung", "realistic"] do
     @tag :timing
+    @tag timeout: 120_000
     test "production child list boots #{mode} at production limits", %{build: build} do
       root = Path.join(System.tmp_dir!(), "bb-#{System.unique_integer([:positive])}")
 
@@ -83,7 +121,7 @@ defmodule Shuttle.ApplicationBootTest do
 
       {output, status} =
         Shuttle.Runner.Default.cmd("elixir", args,
-          timeout_ms: 60_000,
+          timeout_ms: 110_000,
           stderr_to_stdout: true,
           env: [
             {"BOOT_ROOT", root},

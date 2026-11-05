@@ -139,7 +139,7 @@ describe('the read model files seats on the roles surface', () => {
 
 describe('moveDestinations for a seat', () => {
   const seatCard = (over: Partial<KanbanCard> = {}): KanbanCard =>
-    baseCard({ id: 'science/cmbx', name: 'cmbx chair', status: 'open', shuttleKind: 'oneshot', shuttleRole: 'cmbx-chair', shuttleSeat: true, createdAt: at0, ...over })
+    baseCard({ id: 'science/cmbx', name: 'cmbx chair', status: 'open', shuttleKind: 'oneshot', shuttleHost: 'desk', shuttleRole: 'cmbx-chair', shuttleSeat: true, createdAt: at0, ...over })
 
   it('offers a seat at rest only what changes it: start it, or review it', () => {
     const c = seatCard()

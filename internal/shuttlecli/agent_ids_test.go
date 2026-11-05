@@ -26,7 +26,7 @@ func TestEveryAgentWriteRejectsAnIdTheRegistryDoesNotKnow(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
 			dir, storage := newStore(t)
-			seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+			seedShuttleRole(t, storage, "f", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 			seedPlainFiber(t, storage, "plain", "")
 			_, stderr, err := executeIn(t, env, dir, args...)
 			if err == nil {

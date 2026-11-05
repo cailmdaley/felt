@@ -7,9 +7,9 @@ defmodule ShuttleWeb.FeltEditController do
   composite board stamped. A local-owned card is edited here; a remote-owned
   card is forwarded to the owning daemon's identical `/felt-edit` over the SSH
   tunnel (origin stripped, so the owner edits its own loom mirror), and its
-  response is relayed verbatim. Single-writer at the document holds — the owner
-  daemon is the lone writer of a fiber it owns, and `felt edit` is the single
-  felt-native writer.
+  response is relayed verbatim. An unknown owner or definite pre-send failure
+  permits a quiescent local planning copy. That write uses `felt edit` with an
+  exact target and locked revision precondition; name and body remain owner-only.
 
   `POST /api/v1/felt-edit` body: `{ "fiber_id": "...", "origin": "...",
   "add": [...], "remove": [...], "set": {"key": scalar, ...}, "unset": [...],
@@ -65,24 +65,57 @@ defmodule ShuttleWeb.FeltEditController do
   end
 
   defp route_edit(conn, fiber_id, params) do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    origin = Shuttle.Planning.origin(fiber_id, params["origin"])
+    params = Map.put(params, "origin", origin)
+
+    case OriginRouter.route(origin) do
       {:error, {:unknown_origin, origin}} ->
-        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+        case offline_copy(fiber_id, params) do
+          nil ->
+            ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
+          copy ->
+            create_local(conn, fiber_id, params, {"owner #{origin} is not in the fleet", copy})
+        end
 
       {:remote, remote} ->
-        result = OriginRouter.forward(remote, "/api/v1/felt-edit", conn.body_params)
+        result = OriginRouter.forward(remote, "/api/v1/felt-edit", params)
         # The forwarded edit mutated the remote's loom mirror; invalidate the
         # RemoteFiberRegistry feed cache so the board reflects it before the next
         # remote poll.
         RemoteFiberRegistry.refresh_after_forward(remote.name, result)
-        relay_text(conn, result)
+
+        case result do
+          {:error, {:forward_failed, _, {:not_sent, reason}}} ->
+            case offline_copy(fiber_id, params) do
+              nil ->
+                relay_text(conn, result)
+
+              copy ->
+                create_local(
+                  conn,
+                  fiber_id,
+                  params,
+                  {"owner #{remote.name} unavailable before send: #{inspect(reason)}", copy}
+                )
+            end
+
+          _ ->
+            relay_text(conn, result)
+        end
 
       :local ->
         create_local(conn, fiber_id, params)
     end
   end
 
-  defp create_local(conn, fiber_id, params) do
+  defp offline_copy(fiber_id, params) do
+    if Shuttle.Planning.patch?(params),
+      do: Shuttle.Planning.local_copy(fiber_id, params["origin"])
+  end
+
+  defp create_local(conn, fiber_id, params, unavailable \\ nil) do
+    {unavailable, copy} = unavailable || {nil, nil}
     add = string_list(params["add"])
     remove = string_list(params["remove"])
     unset = string_list(params["unset"])
@@ -90,7 +123,7 @@ defmodule ShuttleWeb.FeltEditController do
     with {:ok, set_pairs} <- set_pairs(params["set"]),
          {:ok, due_args} <- due_args(params),
          {:ok, native_args} <- native_args(params),
-         {:ok, store, address} <- store_for_fiber(fiber_id),
+         {:ok, store, address, guard} <- edit_target(fiber_id, copy),
          {:ok, output} <-
            run(
              store,
@@ -99,12 +132,19 @@ defmodule ShuttleWeb.FeltEditController do
              remove,
              unset,
              set_pairs,
-             due_args ++ native_args
+             due_args ++ native_args,
+             guard
            ) do
       # The edit mutated the felt doc (tags / horizon / due); re-read it into the
       # document cache NOW so the kanban's post-edit refetch reflects the change
       # instead of snapping the card back until the next poll.
       Poller.refresh_document(address)
+
+      output =
+        if unavailable,
+          do:
+            "#{unavailable}\nLocal planning only: this document travels by Git; no execution request was sent.\n#{output}",
+          else: output
 
       conn
       |> put_resp_content_type("text/plain")
@@ -115,16 +155,23 @@ defmodule ShuttleWeb.FeltEditController do
     end
   end
 
-  # An empty diff is a no-op.
-  defp run(_store, _fiber_id, [], [], [], [], []), do: {:ok, ""}
+  defp edit_target(fiber_id, nil) do
+    with {:ok, store, address} <- store_for_fiber(fiber_id), do: {:ok, store, address, []}
+  end
 
-  defp run(store, fiber_id, add, remove, unset, set_pairs, due_args) do
+  defp edit_target(_fiber_id, %{resolved: resolved, revision: revision}),
+    do: {:ok, resolved.store, resolved.fiber_id, ["--exact", "--if-match", revision]}
+
+  # An empty diff is a no-op.
+  defp run(_store, _fiber_id, [], [], [], [], [], _guard), do: {:ok, ""}
+
+  defp run(store, fiber_id, add, remove, unset, set_pairs, due_args, guard) do
     args = ["-C", store, "edit", fiber_id]
     args = Enum.reduce(remove, args, fn tag, acc -> acc ++ ["--untag", tag] end)
     args = Enum.reduce(add, args, fn tag, acc -> acc ++ ["--tag", tag] end)
     args = Enum.reduce(unset, args, fn key, acc -> acc ++ ["--unset", key] end)
     args = Enum.reduce(set_pairs, args, fn pair, acc -> acc ++ ["--set", pair] end)
-    args = args ++ due_args
+    args = args ++ due_args ++ guard
 
     Felt.run(args)
   end

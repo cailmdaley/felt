@@ -44,7 +44,7 @@ func TestShuttleVerbsCrossTheBoundary(t *testing.T) {
 	env := testEnv(t)
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
-	seedShuttleRole(t, loom, "ai-futures/portolan/debug", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, loom, "ai-futures/portolan/debug", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 	a, _ := withStubbedTmux(t, env, map[string]bool{})
 
 	out, _, err := executeApp(t, a, subProj, "pause", "ai-futures/portolan/debug")

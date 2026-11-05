@@ -1903,12 +1903,8 @@
 .kbn-card-phase:is(.kbn-card-phase-retrying, .kbn-card-phase-attention, .kbn-card-phase-blocked) {
   color: color-mix(in srgb, var(--kbn-you) 75%, var(--kbn-ink));
 }
-/* Stale-origin card: the originating agent is disconnected. The
-   snapshot is preserved (last-known-good) so the card still reads
-   and opens in the workspace reader, but drag is disabled because
-   mutation has nowhere to land until reconnect. Visual signal
-   is a desaturated dim plus a not-allowed cursor on the drag
-   handle. */
+/* Stale execution observations remain dimmed. Quiescent cards still accept
+   planning gestures, whose writes land in the synchronized local document. */
 .kbn-card--stale {
   opacity: 0.62;
   background: var(--kbn-parchment);
@@ -1920,6 +1916,8 @@
   border-color: color-mix(in srgb, var(--kbn-ink) 18%, transparent);
 }
 .kbn-card--stale:active { cursor: default; }
+.kbn-card--stale[draggable="true"] { cursor: grab; }
+.kbn-card--stale[draggable="true"]:active { cursor: grabbing; }
 .kbn-card--stale .kbn-card-name { color: color-mix(in srgb, var(--kbn-ink) 34%, var(--kbn-ink-muted)); }
 /* The waiting badge sits in the same band as kbn-card-worker — runtime-state
    info that depends on connection, not on fiber content. Cool grey-blue

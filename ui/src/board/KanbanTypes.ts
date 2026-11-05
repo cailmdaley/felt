@@ -31,6 +31,8 @@ export interface KanbanCard {
    * stale badge and the drag-disable when that origin is disconnected.
    */
   originId: string
+  /** The composer has a quiescent local document and no owner execution evidence blocks planning. */
+  localPlanning?: boolean
   /**
    * The owning host's felt store path (the feed row's `felt_store`, e.g.
    * `/home/user/store` for a remote-host card). Threaded into owner-routed

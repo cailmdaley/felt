@@ -1,4 +1,5 @@
 import { turnOf } from '../turn.js'
+import { executionRefusal } from '../offlinePlanning.js'
 import { THREAD_LABEL, threadState } from '../threads.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
@@ -902,7 +903,7 @@ export class Dock {
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'localPlanning', 'tags'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
@@ -1354,7 +1355,10 @@ export class Dock {
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
       const idle = hasLiveWorker(card) && !armed && message.value.trim() === '' && images.list.length === 0
-      if (!busy && !this.blockedDispatches.has(resume)) resume.disabled = idle || !resumable
+      const refusal = executionRefusal(card)
+      if (!busy && !this.blockedDispatches.has(fresh)) fresh.disabled = Boolean(refusal)
+      if (!busy && !this.blockedDispatches.has(resume)) resume.disabled = Boolean(refusal) || idle || !resumable
+      if (refusal) { fresh.title = refusal; resume.title = refusal }
       message.placeholder = armed ? 'A note for the meeting (optional)'
         : ''
       this.actPaint?.()
@@ -1517,6 +1521,7 @@ export class Dock {
     }
     // Every composer verb goes through here; an armed meeting travels with it.
     const dispatch = (mode: SessionMode, verb: HTMLButtonElement): void => {
+      if (executionRefusal(card)) return
       if (this.meetingArmed()) {
         if (!this.blockedDispatches.has(verb)) this.meetingStart?.(mode, verb)
         return
@@ -2269,6 +2274,8 @@ export class Dock {
     projectDir?: string,
   ): Promise<boolean> {
     if (this.composerSend?.busy()) return false
+    const refusal = executionRefusal(card)
+    if (refusal) { errorEl.textContent = refusal; errorEl.style.display = ''; return false }
     if (mode === 'fresh' && !this.confirmCut(card)) return false
 
     // Every composer verb is held until this send lands or fails.

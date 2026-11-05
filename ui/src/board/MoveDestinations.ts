@@ -31,6 +31,7 @@
  * changes whether a move is a no-op — `cold` is the one — it is read here too.
  */
 
+import { canPlanOffline } from './offlinePlanning.js'
 import type { KanbanCard, ColumnKind } from './KanbanTypes.js'
 import { hasLiveWorker } from './KanbanTypes.js'
 import { COLUMN_TITLES, SURFACE_TITLE } from './KanbanSurfaces.js'
@@ -92,6 +93,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   const out: MoveDestination[] = []
   // A cycle is a band of time on the calendar, not work. Nothing here applies.
   if (card.isCycle) return out
+  if (card.originStale && !canPlanOffline(card)) return out
   // A seat at rest is already where every parking gesture would put it: a
   // draft, the desk or Resting all land it back among the Roles. What it can
   // do is start, or be sent for review.
@@ -105,7 +107,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   // status, schedule and review gates. Awaiting review is likewise a plain
   // drop — it closes the card with the verdict cleared and stops the worker.
   for (const target of ['drafts', 'inFlight', 'awaitingReview'] as const) {
-    if (column === target) continue
+    if (column === target || (target === 'inFlight' && (card.originStale || (card.shuttleKind && !card.shuttleHost)))) continue
     if (restingSeat && target === 'drafts') continue
     out.push({
       id: target,

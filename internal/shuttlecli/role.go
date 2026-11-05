@@ -36,7 +36,7 @@ roles namespace before assigning the role; existing charters are preserved.`,
 				return err
 			}
 			defer unlock()
-			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
 			if err != nil {
 				return err
 			}
@@ -49,7 +49,7 @@ roles namespace before assigning the role; existing charters are preserved.`,
 					fields["new_name"] = newName
 				}
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "role", f, fields); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "role", f, st, fields); routed || err != nil {
 				return err
 			}
 			if clear {

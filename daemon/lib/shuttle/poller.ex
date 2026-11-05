@@ -417,6 +417,7 @@ defmodule Shuttle.Poller do
 
       %{
         entries: base_entries,
+        archives: archives,
         cache: cache,
         felt_stores: default_stores,
         running: running,
@@ -425,6 +426,9 @@ defmodule Shuttle.Poller do
         pending_results: pending,
         pulses: pulses
       } ->
+        base_entries =
+          if Keyword.get(opts, :include_mirrors, false), do: archives, else: base_entries
+
         entries =
           base_entries
           |> Shuttle.Pulse.stamp(pulses)
@@ -1476,6 +1480,7 @@ defmodule Shuttle.Poller do
 
     feed_inputs = %{
       entries: base_entries,
+      archives: Enum.map(Map.values(state.document_cache), & &1.entry),
       cache: cache_meta,
       felt_stores: state.felt_stores,
       running: state.running,
@@ -2181,7 +2186,10 @@ defmodule Shuttle.Poller do
     # (`stamp_runtime/3`, a no-op when nothing is running) runs fresh every time.
     {entries, state} =
       if state.document_cache_ready do
-        {base, state} = owner_feed_base(state)
+        {base, state} =
+          if Keyword.get(opts, :include_mirrors, false),
+            do: {Enum.map(Map.values(state.document_cache), & &1.entry), state},
+            else: owner_feed_base(state)
 
         {base
          |> Shuttle.Pulse.stamp(pulse_rows(state))
@@ -2394,7 +2402,18 @@ defmodule Shuttle.Poller do
     {result, state} =
       case {verb == :rest or (verb == :pause and "--no-kill" not in args), result} do
         {true, {:ok, output}} ->
-          case stop_tracked_worker(state, address) do
+          stop =
+            case fetch_fiber_full(slug, state) do
+              {:ok, fiber} ->
+                if host_owned?(Map.get(fiber, "shuttle"), state.own_host_id),
+                  do: stop_tracked_worker(state, address),
+                  else: {{:ok, :no_session}, state}
+
+              _ ->
+                {{:ok, :no_session}, state}
+            end
+
+          case stop do
             {{:ok, :no_session}, state} -> {{:ok, output}, state}
             {{:ok, session}, state} -> {{:ok, output <> "  worker: stopped #{session}\n"}, state}
             {{:error, reason}, state} -> {{:error, reason}, state}

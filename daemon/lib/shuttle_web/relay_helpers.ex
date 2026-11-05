@@ -34,8 +34,17 @@ defmodule ShuttleWeb.RelayHelpers do
     conn |> put_resp_content_type("application/json") |> send_resp(status, body)
   end
 
+  def relay_json(conn, {:error, {:forward_failed, name, {:not_sent, reason}}}, on_failure) do
+    body = Map.merge(on_failure.(name, reason), not_sent_body(name, reason))
+    conn |> put_status(502) |> json(body)
+  end
+
   def relay_json(conn, {:error, {:forward_failed, name, reason}}, on_failure) do
-    conn |> put_status(502) |> json(on_failure.(name, reason))
+    body =
+      on_failure.(name, reason)
+      |> Map.update(:error, uncertain_message(name), &(&1 <> "; " <> uncertain_message(name)))
+
+    conn |> put_status(502) |> json(body)
   end
 
   @doc """
@@ -109,11 +118,26 @@ defmodule ShuttleWeb.RelayHelpers do
     conn |> put_resp_content_type("text/plain") |> send_resp(status, body)
   end
 
+  def relay_text(conn, {:error, {:forward_failed, name, {:not_sent, reason}}}) do
+    conn |> put_status(502) |> json(not_sent_body(name, reason))
+  end
+
   def relay_text(conn, {:error, {:forward_failed, name, reason}}) do
     conn
     |> put_resp_content_type("text/plain")
-    |> send_resp(502, "forward to #{name} failed: #{inspect(reason)}")
+    |> send_resp(502, "forward to #{name} failed: #{inspect(reason)}; #{uncertain_message(name)}")
   end
+
+  defp uncertain_message(name),
+    do: "the action may have been applied; inspect the fiber on #{inspect(name)} before retrying"
+
+  defp not_sent_body(name, reason),
+    do: %{
+      reason: "owner_unreachable_before_send",
+      origin: name,
+      error:
+        "execution host #{inspect(name)} is unreachable; no action request was sent; nothing was applied (#{inspect(reason)})"
+    }
 
   @doc """
   Render a local CLI-verb result as `text/plain`, mapping the shared error

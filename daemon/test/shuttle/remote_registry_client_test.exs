@@ -61,6 +61,44 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
     {:ok, url: "http://127.0.0.1:#{port}/api/v1/fibers"}
   end
 
+  test "mutation transport distinguishes a dead peer before send from a lost response" do
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(listener)
+    :ok = :gen_tcp.close(listener)
+
+    assert {:error, {:not_sent, _}} =
+             Default.post_mutation(
+               "http://127.0.0.1:#{port}/action",
+               "{}",
+               "application/json",
+               @http_timeout_ms
+             )
+
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    on_exit(fn -> :gen_tcp.close(listener) end)
+    {:ok, port} = :inet.port(listener)
+
+    receiver =
+      Task.async(fn ->
+        {:ok, socket} = :gen_tcp.accept(listener, @http_timeout_ms)
+        {:ok, request} = :gen_tcp.recv(socket, 0, @http_timeout_ms)
+        :gen_tcp.close(socket)
+        request
+      end)
+
+    result =
+      Default.post_mutation(
+        "http://127.0.0.1:#{port}/action",
+        "{}",
+        "application/json",
+        @http_timeout_ms
+      )
+
+    assert Task.await(receiver, @http_timeout_ms) =~ "POST /action"
+    assert {:error, _} = result
+    refute match?({:error, {:not_sent, _}}, result)
+  end
+
   test "get/2 returns the response body byte-for-byte (no double-encoding)", %{url: url} do
     assert {:ok, body} = Default.get(url, @http_timeout_ms)
     # Byte-identical to what the server sent: the em-dash stays \xe2\x80\x94,

@@ -91,6 +91,27 @@ describe('change review delivery', () => {
   })
 })
 
+describe('offline execution controls', () => {
+  it.each([{originStale:{}},{shuttleHost:undefined}])('does not launch an unreachable or unowned archive: %j',async patch=>{
+    dock.reset()
+    band=dock.bandFor(task({status:'open',effectiveHorizon:'stashed',sessionUuid:'previous',...patch}))
+    document.body.replaceChildren(band.el)
+    await flush()
+    vi.mocked(fetch).mockClear()
+    expect(button('New session').disabled).toBe(true)
+    expect(button('Resume').disabled).toBe(true)
+    const field=band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    field.value='Prepare this for when the owner returns'
+    field.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))
+    field.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',altKey:true,bubbles:true}))
+    await flush()
+    expect(writes()).toEqual([])
+    band.syncRuntime(task({status:'open',effectiveHorizon:'stashed',sessionUuid:'previous'}))
+    expect(button('New session').disabled).toBe(false)
+    expect(button('Resume').disabled).toBe(false)
+  })
+})
+
 describe('composer input budget', () => {
   it('preserves labels and header nodes and does not synchronously measure layout on input', async () => {
     const field = band.el.querySelector<HTMLTextAreaElement>('textarea')!

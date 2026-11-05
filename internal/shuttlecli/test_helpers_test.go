@@ -68,6 +68,16 @@ func mustRead(t *testing.T, storage *felt.Storage, id string) *felt.Felt {
 	return f
 }
 
+func ownedOn(t *testing.T, env *sysenv.Env, block map[string]any) map[string]any {
+	t.Helper()
+	host, err := newApp(env).resolveOwnHost("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	block["host"] = host
+	return block
+}
+
 func oneshot() map[string]any {
 	return map[string]any{"kind": "oneshot", "agent": "claude-opus", "project_dir": "/srv/work"}
 }

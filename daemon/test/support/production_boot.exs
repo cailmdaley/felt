@@ -111,12 +111,37 @@ try do
   {:ok, {_, port}} = ShuttleWeb.Endpoint.server_info(:http)
   url = ~c"http://127.0.0.1:" ++ Integer.to_charlist(port) ++ ~c"/api/v1/version"
 
-  request = fn ->
-    {:ok, {{_, 200, _}, _, body}} = :httpc.request(:get, {url, []}, [timeout: 2_000], [])
-    Jason.decode!(body)
-  end
-
+  Code.require_file("boot_probe.ex", __DIR__)
   deadline = System.monotonic_time(:millisecond) + 50_000
+
+  request = fn ->
+    started = System.monotonic_time(:millisecond)
+
+    case Shuttle.Test.BootProbe.request(url, deadline) do
+      {:ok, {{_, 200, _}, _, body}} ->
+        Jason.decode!(body)
+
+      error ->
+        IO.inspect(
+          %{
+            error: error,
+            elapsed_ms: System.monotonic_time(:millisecond) - started,
+            readiness: Shuttle.Readiness.status()
+          },
+          label: "Production boot HTTP failure"
+        )
+
+        for pid <- Process.list(),
+            {:current_stacktrace, stack} <- [Process.info(pid, :current_stacktrace)],
+            Enum.any?(stack, fn {module, _, _, _} ->
+              String.starts_with?(Atom.to_string(module), "Elixir.Shuttle")
+            end) do
+          IO.inspect({pid, stack}, label: "Production boot process", limit: :infinity)
+        end
+
+        raise "production diagnostics request failed: #{inspect(error)}"
+    end
+  end
 
   wait = fn wait, predicate ->
     version = request.()

@@ -208,7 +208,7 @@ describe('a send with images', () => {
     const panel = new Dock('http://daemon', vi.fn())
     const images = new PastedImages()
     images.add([file('a.png', 'image/png')])
-    const target = card({ id: 'work/task', originId: 'local' })
+    const target = card({ id: 'work/task', originId: 'local', shuttleHost: 'owner' })
     const compose = async (): Promise<string> =>
       composeDirective('see this', await uploadPastedImages('http://daemon', target, images.list))
 
@@ -230,7 +230,7 @@ describe('a send with images', () => {
     const panel = new Dock('http://daemon', vi.fn())
     const images = new PastedImages()
     images.add([file('a.png', 'image/png')])
-    const target = card({ id: 'work/task' })
+    const target = card({ id: 'work/task', shuttleHost: 'owner' })
     const compose = async (): Promise<string> =>
       composeDirective('', await uploadPastedImages('http://daemon', target, images.list))
     const button = btn()

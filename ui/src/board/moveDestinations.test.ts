@@ -13,7 +13,7 @@ import { card as baseCard } from './testFixtures.js'
 const at0 = '2026-01-01T00:00:00Z'
 
 const card = (over: Partial<KanbanCard> = {}): KanbanCard =>
-  baseCard({ id: 'work/a', name: 'A', path: 'work/a.md', originId: 'here', status: 'active', createdAt: at0, ...over })
+  baseCard({ id: 'work/a', name: 'A', path: 'work/a.md', originId: 'here', shuttleHost: over.shuttleKind ? 'here' : undefined, status: 'active', createdAt: at0, ...over })
 
 const ids = (c: KanbanCard, column: Parameters<typeof moveDestinations>[1] = null): string[] =>
   moveDestinations(c, column).map((d) => d.id)

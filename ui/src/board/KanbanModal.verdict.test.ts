@@ -30,6 +30,17 @@ function setup(fiber: KanbanCard): TransitionBoard {
 afterEach(() => { verdicts?.dispose(); verdicts = undefined; vi.useRealTimers(); vi.restoreAllMocks(); document.body.replaceChildren() })
 
 describe('verdict transition authorization', () => {
+  it.each(['open', 'closed'])('refuses an offline standing Temper from %s because accepting requires its owner', status => {
+    const fiber = card({ id: 'work/offline-standing', status, shuttleKind: 'standing',
+      originStale: { since: '2026-11-04T19:00:00Z' }, shuttleHost: 'worker', localPlanning: true })
+    const board = setup(fiber)
+    board.lastResponse = response({ now: { drafts: status === 'open' ? [fiber] : [], inFlight: [], awaitingReview: status === 'closed' ? [fiber] : [] } })
+    board.transition(fiber, 'tempered')
+    vi.advanceTimersByTime(6000)
+    expect(board.workspace.queueVerdict).not.toHaveBeenCalled()
+    expect(board.commitTransition).not.toHaveBeenCalled()
+    expect(board.showBanner).toHaveBeenCalledWith(expect.stringContaining('launching needs the host'), 'info')
+  })
   it.each(['tempered', 'composted'] as const)('does not queue a same-column %s verdict that could write after reopening', target => {
     const fiber = card({ id: 'work/review', status: 'closed', tempered: target === 'tempered' })
     const board = setup(fiber)

@@ -30,12 +30,17 @@ defmodule ShuttleWeb.LifecycleController do
   @kinds ~w(oneshot standing)
 
   def create(conn, params) do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    origin = Shuttle.Planning.origin(params["fiber"], params["origin"], params["fiber_path"])
+    params = Map.put(params, "origin", origin)
+
+    case OriginRouter.route(origin) do
       {:error, {:unknown_origin, origin}} ->
-        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+        if offline?(params),
+          do: create_local(conn, params, "owner #{origin} is not in the fleet"),
+          else: ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
 
       {:remote, remote} ->
-        result = OriginRouter.forward(remote, "/api/v1/lifecycle", conn.body_params)
+        result = OriginRouter.forward(remote, "/api/v1/lifecycle", params)
         # The forwarded verb (rest/uninstall/…) mutated the remote's loom mirror;
         # invalidate the RemoteFiberRegistry feed cache so the board reflects it
         # before the next remote poll — otherwise resting a remote-owned card
@@ -43,6 +48,16 @@ defmodule ShuttleWeb.LifecycleController do
         RemoteFiberRegistry.refresh_after_forward(remote.name, result)
 
         case result do
+          {:error, {:forward_failed, _, {:not_sent, reason}}} ->
+            if offline?(params),
+              do:
+                create_local(
+                  conn,
+                  params,
+                  "owner #{remote.name} unavailable before send: #{inspect(reason)}"
+                ),
+              else: relay_text(conn, result)
+
           {:forwarded, 503, body} ->
             case Jason.decode(body) do
               {:ok, %{"retryable" => true}} ->
@@ -61,13 +76,19 @@ defmodule ShuttleWeb.LifecycleController do
     end
   end
 
-  defp create_local(conn, params) do
+  defp offline?(params),
+    do:
+      Shuttle.Planning.action?(params) &&
+        Shuttle.Planning.local?(params["fiber"], params["origin"], params["fiber_path"], params)
+
+  defp create_local(conn, params, unavailable \\ nil) do
     with {:ok, action} <- action(params),
          {:ok, output} <- execute(action, params) do
       # Every lifecycle verb here mutates the fiber doc (status/outcome/model/
       # shuttle block). Re-read it into the document cache so the kanban's
       # post-action refetch reflects the change now, not after the next poll.
       refresh_card(params)
+      output = if unavailable, do: unavailable <> "\n" <> output, else: output
 
       conn
       |> put_resp_content_type("text/plain")

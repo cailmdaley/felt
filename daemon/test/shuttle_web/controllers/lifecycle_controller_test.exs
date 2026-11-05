@@ -652,7 +652,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     write_fiber!(
       store,
       "science/cmbx/explorations/spt-talk-push",
-      "---\nname: Road to the SPT Summer-2026 talk\nstatus: active\nshuttle:\n  kind: oneshot\n  host: cineca\n  agent: claude-opus\n---\n\n"
+      "---\nname: Road to the SPT Summer-2026 talk\nstatus: active\nshuttle:\n  kind: oneshot\n  host: #{Shuttle.Poller.own_host_id()}\n  agent: claude-opus\n---\n\n"
     )
 
     args_file = install_fake_cli!()
@@ -685,7 +685,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     write_fiber!(
       store,
       "science/cmbx/explorations/spt-talk-push",
-      "---\nname: Road to the SPT Summer-2026 talk\nstatus: active\nshuttle:\n  kind: oneshot\n  host: cineca\n  agent: claude-opus\n---\n\n"
+      "---\nname: Road to the SPT Summer-2026 talk\nstatus: active\nshuttle:\n  kind: oneshot\n  host: #{Shuttle.Poller.own_host_id()}\n  agent: claude-opus\n---\n\n"
     )
 
     install_fake_cli!("""

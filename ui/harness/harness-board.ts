@@ -243,6 +243,7 @@ interface MockFiber {
   uid?: string
   name: string
   status: string
+  tempered?: boolean
   outcome?: string
   tags?: string[]
   created_at?: string
@@ -274,6 +275,7 @@ const fiber = (f: MockFiber) => ({
     uid: f.uid,
     name: f.name,
     status: f.status,
+    tempered: f.tempered,
     outcome: f.outcome,
     tags: f.tags ?? [],
     created_at: f.created_at ?? iso(-3 * 86_400_000),
@@ -656,6 +658,22 @@ const MOCK_FEED = {
   generated_at: iso(0),
   fibers: [
     ...DRAFTS.map(fiber),
+    ...(search.get('offline') === 'planning' ? [
+      { ...fiber({ id: 'fixtures/offline/draft', uid: 'offline-draft', name: 'Colloquium draft — execution host offline', status: 'open',
+        shuttle: { ...shuttleBlock(), kind: 'pinned', host: 'kelvin' } }), origin: 'kelvin', local_planning: true },
+      { ...fiber({ id: 'fixtures/offline/armed', uid: 'offline-armed', name: 'Armed work — execution unknown', status: 'active',
+        shuttle: { ...shuttleBlock(), host: 'kelvin' } }), origin: 'kelvin' },
+      { ...fiber({ id: 'fixtures/offline/standing', uid: 'offline-standing', name: 'Standing run — ready for review', status: 'closed',
+        shuttle: { ...shuttleBlock(), kind: 'standing', host: 'kelvin' } }), origin: 'kelvin', local_planning: true },
+      { ...fiber({ id: 'fixtures/offline/unowned', uid: 'offline-unowned', name: 'Unowned draft — planning still works', status: 'open',
+        shuttle: { ...shuttleBlock(), host: '' } }), origin: 'local', local_planning: true },
+      { ...fiber({ id: 'fixtures/offline/resting', uid: 'offline-resting', name: 'Rested thread — execution host offline', status: 'open', horizon: 'stashed',
+        shuttle: { ...shuttleBlock(), host: 'kelvin' } }), origin: 'kelvin', local_planning: true },
+      { ...fiber({ id: 'fixtures/offline/remote-only', uid: 'offline-remote-only', name: 'Remote draft — no local planning copy', status: 'open',
+        shuttle: { ...shuttleBlock(), host: 'kelvin' } }), origin: 'kelvin', local_planning: false },
+      { ...fiber({ id: 'fixtures/offline/unowned-archive', uid: 'offline-unowned-archive', name: 'Unowned archive — assign a host before launching', status: 'closed', tempered: true,
+        shuttle: { ...shuttleBlock(), host: '' } }), origin: 'local', local_planning: true },
+    ] : []),
     ...denseRows,
     ...(search.get('identity') === 'all' ? ['identity_pending', 'identity_failed'].map((phase, i) => ({
       ...fiber({

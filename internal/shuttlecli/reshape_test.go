@@ -82,7 +82,7 @@ func TestShuttleReshapeVerb_ToStandingRequiresSchedule(t *testing.T) {
 	env := testEnv(t)
 	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "role", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 
 	out, err := runIn(t, env, dir, "reshape", "role", "standing")
 	if err == nil {
@@ -104,7 +104,7 @@ func TestShuttleReshapeVerb_ToStandingWithSchedule(t *testing.T) {
 	env := testEnv(t)
 	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "role", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 
 	out, err := runIn(t, env, dir, "reshape", "role", "standing", "--schedule", "0 9 * * 1-5")
 	if err != nil {
@@ -257,7 +257,7 @@ func TestShuttleReshapeVerb_InvalidKind(t *testing.T) {
 	env := testEnv(t)
 	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "role", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 
 	before, _ := os.ReadFile(storage.Path("role"))
 

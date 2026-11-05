@@ -106,8 +106,6 @@ export function buildKanbanResponseFromComposite(
     feed.entries.filter((e) => shouldIncludeInKanban(e.fiber)),
     feed,
   );
-  // A card owned by an unreachable daemon carries that fact, so its frozen
-  // runtime is not read as a turn.
   const staleOrigin = (origin: string): KanbanCard['originStale'] => {
     const o = feed.origins[origin];
     return o && o.kind !== 'local' && o.stale ? { since: o.lastPolledAt } : undefined;
@@ -514,6 +512,8 @@ function toCard(
     name: f.name,
     path: entry.path,
     originId: entry.origin,
+    localPlanning: entry.localPlanning,
+    originStale: entry.originStale,
     feltStore: entry.feltStore,
     // Prefer the fiber's own dir; fall back to the report.html sibling's dir
     // for rows from an older daemon that emits `report_path` but not `dir`.

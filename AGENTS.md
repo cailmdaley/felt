@@ -30,6 +30,8 @@ allowed to execute it; synchronizing its file does not transfer execution.
 Armed cross-host creation and control use the owner daemon's existing APIs; the owner writes its store directly, independently of Git archive state.
 The daemon never runs Git or `felt sync`; a missing document returns not-found with its host and identifier.
 Remote-owned live state comes from the owner daemon; an unreachable-owner fallback to an archive copy is explicitly marked stale.
+Planning asks the execution owner first; only an unavailable or absent owner permits a quiescent local-document fallback that travels by Git without requesting execution. `docs/dev/dispatch.md` specifies the state and transport contract.
+The composite feed can project newer local planning fields without replacing owner addresses or execution observations.
 The live board uses those same owner-routed APIs for host-local content and control.
 
 ## Where everything else lives

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -27,11 +28,14 @@ type unknownOwnerError struct{ error }
 // unknown or malformed fleet entry must fail before an origin-routed endpoint
 // can degrade the request to this daemon's local mirror.
 //
-// Under --local nothing routes: the daemon shells every routing verb with it,
-// so a daemon-run verb only ever writes a fiber this host owns, and a
-// remote-owned one is refused with ownerMismatchError rather than sent back
-// through the daemon.
+// Under --local execution changes refuse a foreign owner rather than routing
+// back through the daemon. lifecycleOwner separately validates the daemon's
+// offline planning write after an owner cannot arbitrate.
 func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (string, error) {
+	return a.routeOwner(cmd, args, blockHost, localOnly(cmd))
+}
+
+func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, local bool) (string, error) {
 	owner := strings.TrimSpace(blockHost)
 	if owner == "" {
 		return "", nil
@@ -43,7 +47,7 @@ func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost 
 	if owner == own {
 		return "", nil
 	}
-	if localOnly(cmd) {
+	if local {
 		return "", ownerMismatchError{fiber: args[0], owner: owner, own: own, source: source, hostFile: a.hostConfigFilePath()}
 	}
 
@@ -82,7 +86,7 @@ func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost 
 
 // localFlagUsage is the one description of --local on every verb that can
 // route to an owning daemon.
-const localFlagUsage = "Write the document here and never route through a daemon; a fiber another host owns is refused"
+const localFlagUsage = "Write here without routing; foreign execution is refused, quiescent planning is Git-synchronized"
 
 // localOnly reports whether cmd runs with --local set.
 func localOnly(cmd *cobra.Command) bool {
@@ -153,6 +157,16 @@ func remoteRouteError(cmd *cobra.Command, args []string, owner string, err error
 		return err
 	}
 	command := directOwnerCommand(cmd, args)
+	var notSent daemonStatusError
+	if errors.As(err, &notSent) {
+		var response struct {
+			Reason string `json:"reason"`
+			Error  string `json:"error"`
+		}
+		if json.Unmarshal([]byte(notSent.body), &response) == nil && response.Reason == "owner_unreachable_before_send" {
+			return fmt.Errorf("%s; retry when the owner is reachable", response.Error)
+		}
+	}
 	if detail, ok := ownerForwardFailure(err, owner); ok {
 		return fmt.Errorf("owning host %q is unreachable (forward failed: %s); the action may have been applied. Check the fiber on %q before retrying. Run `%s` there if needed", owner, detail, owner, command)
 	}
@@ -376,12 +390,22 @@ func (a *app) postRouted(owner, endpoint string, body []byte) ([]byte, error) {
 // is waiting for. Ordinary routed writes answer well within it.
 const routedWaitNotice = 3 * time.Second
 
-func (a *app) forwardLifecycleAction(cmd *cobra.Command, args []string, owner, action string, fiber *felt.Felt, fields map[string]any) (bool, error) {
+func (a *app) forwardLifecycleAction(cmd *cobra.Command, args []string, owner, action string, fiber *felt.Felt, st *felt.Storage, fields map[string]any) (bool, error) {
 	if owner == "" {
 		return false, nil
 	}
+	// The owner or the hub's offline writer may take this same document lock.
+	if err := a.unlockDocument(); err != nil {
+		return true, err
+	}
 	output, err := a.postOwnerLifecycle(action, owner, fiber, fields)
 	if err != nil {
+		block, _, _ := shuttle.BlockOf(fiber)
+		if block != nil && definitelyUnsent(err) && a.allowPlanningFallback(cmd, fiber, st, block, err) {
+			// Re-enter once, reading and validating the offline document under
+			// its lock. The failed arbitration prevents a second owner request.
+			return true, cmd.RunE(cmd, args)
+		}
 		return true, remoteRouteError(cmd, args, owner, err)
 	}
 	a.printDaemonBody([]byte(output))

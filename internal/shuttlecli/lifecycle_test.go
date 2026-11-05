@@ -76,8 +76,8 @@ func TestShuttleClose_OwnSession(t *testing.T) {
 				t.Parallel()
 				env := testEnv(t)
 				dir, storage := newStore(t)
-				seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
-				seedShuttleRole(t, storage, "other", felt.StatusActive, oneshot(), nil)
+				seedShuttleRole(t, storage, "own", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
+				seedShuttleRole(t, storage, "other", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 				own := mustRead(t, storage, "own")
 				session := shuttleTmuxSessionName(own.ID, own.UID)
 				target := "own"
@@ -188,7 +188,7 @@ func TestShuttleClose_UsesLocalDaemon(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 	var bodies requestBodies
 	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodies.record(t, r)
@@ -281,7 +281,7 @@ func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "proj/task", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "proj/task", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 	f0 := mustRead(t, storage, "proj/task")
 	live := shuttleTmuxSessionName(f0.ID, f0.UID)
 	a, killed := withStubbedTmux(t, env, map[string]bool{live: true})
@@ -304,7 +304,7 @@ func TestShuttlePause_WriteOnlyLeavesBackendStopToCaller(t *testing.T) {
 		t.Run(flag, func(t *testing.T) {
 			env := testEnv(t)
 			dir, storage := newStore(t)
-			seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
+			seedShuttleRole(t, storage, "task", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 			f := mustRead(t, storage, "task")
 			a, killed := withStubbedTmux(t, env, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
 			if out, _, err := executeApp(t, a, dir, "pause", "task", flag); err != nil {
@@ -419,7 +419,7 @@ func TestShuttleReopen_UsesLocalDaemon(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, ownedOn(t, env, oneshot()), nil)
 	var bodies requestBodies
 	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodies.record(t, r)
@@ -709,7 +709,7 @@ func TestShuttleSetOutcome(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, ownedOn(t, env, oneshot()), nil)
 
 	if out, err := runIn(t, env, dir, "set-outcome", "f", "--outcome", "Blocked: waiting on token"); err != nil {
 		t.Fatalf("set-outcome: %v\n%s", err, out)
@@ -1057,7 +1057,10 @@ func TestShuttleRest_FromEachState(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
 			dir, storage := newStore(t)
-			seedShuttleRole(t, storage, "f", status, oneshot(), nil)
+			env.Set("SHUTTLE_HOST", "owner")
+			block := oneshot()
+			block["host"] = "owner"
+			seedShuttleRole(t, storage, "f", status, block, nil)
 
 			if out, err := runIn(t, env, dir, "rest", "f", "--local"); err != nil {
 				t.Fatalf("rest: %v\n%s", err, out)
@@ -1085,8 +1088,11 @@ func TestShuttleRest_FromEachState(t *testing.T) {
 func TestShuttleRest_RoutesThroughDaemon(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "owner")
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+	block := oneshot()
+	block["host"] = "owner"
+	seedShuttleRole(t, storage, "f", felt.StatusActive, block, nil)
 
 	requests := make(chan map[string]any, 1)
 	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1226,10 +1232,10 @@ func TestShuttleSettingsPreserveLifecycle(t *testing.T) {
 				t.Parallel()
 				env := testEnv(t)
 				dir, storage := newStore(t)
-				seedShuttleRole(t, storage, "f", status, map[string]any{
+				seedShuttleRole(t, storage, "f", status, ownedOn(t, env, map[string]any{
 					"kind": "oneshot", "agent": "claude-opus",
 					"runtime": map[string]any{"session_uuid": "keep-conversation", "dispatched_at": "2026-06-21T00:00:00Z", "handed_off_at": "2026-06-21T01:00:00Z"},
-				}, nil)
+				}), nil)
 				before := mustRead(t, storage, "f")
 				args := []string{verb, "f", "claude-sonnet"}
 				if verb == "set-agent" {
@@ -1268,10 +1274,10 @@ func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+	seedShuttleRole(t, storage, "f", felt.StatusActive, ownedOn(t, env, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus",
 		"session_uuid": "keep-me",
-	}, nil)
+	}), nil)
 
 	if out, err := runIn(t, env, dir, "set-agent", "f", "claude-sonnet", "--effort", "high"); err != nil {
 		t.Fatalf("set-agent: %v\n%s", err, out)
@@ -1294,10 +1300,10 @@ func TestShuttleSetAgentPreservesLegacySurface(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+	seedShuttleRole(t, storage, "f", felt.StatusActive, ownedOn(t, env, map[string]any{
 		"kind": "oneshot", "agent": "codex-sol", "surface": "cli",
 		"session_uuid": "keep-me",
-	}, nil)
+	}), nil)
 
 	if out, err := runIn(t, env, dir, "set-agent", "f", "claude-opus"); err != nil {
 		t.Fatalf("set-agent: %v\n%s", err, out)
@@ -1314,9 +1320,9 @@ func TestShuttleSetModelIgnoresLegacySurface(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
+	seedShuttleRole(t, storage, "f", felt.StatusActive, ownedOn(t, env, map[string]any{
 		"kind": "oneshot", "agent": "codex-sol", "surface": "app",
-	}, nil)
+	}), nil)
 
 	if out, err := runIn(t, env, dir, "set-model", "f", "claude-opus"); err != nil {
 		t.Fatalf("set-model: %v\n%s", err, out)

@@ -201,7 +201,7 @@ describe('Reader Rest lifecycle', () => {
 
 describe('Rest controls', () => {
   it.each([true, false])('a reviewed constitution keeps Rest on its keyboard while its header offers session actions, tempered=%s', async tempered => {
-    const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot' })
+    const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', shuttleHost: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot' })
     draw(response({ timeline: { past: [finished], futureDated: [] } }))
     inside.setView('chronicle')
     inside.openDocumentChannel(finished)

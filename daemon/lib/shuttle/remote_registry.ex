@@ -1576,6 +1576,15 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     :exit, reason -> {:error, {:exit, reason}}
   end
 
+  @doc "One non-replayable mutation with a bounded connection phase and explicit pre-send failures."
+  def post_mutation(url, body, content_type, timeout_ms) do
+    request_once(url, body, content_type, timeout_ms, true)
+  rescue
+    e -> {:error, {:exception, Exception.message(e)}}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
   # File fetch used by owner-routed byte reads. The header-aware form carries
   # validators across the tunnel and returns the owner's response headers for
   # the local daemon to relay; non-200 statuses (including 304) stay intact.
@@ -1772,10 +1781,10 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # effects, so use one fresh Mint connection and consume its single response.
   # `prepare/1` keeps the same direct, proxy, and private Tailnet routes as the
   # buffered client; Mint adds neither redirect handling nor status retries.
-  defp request_once(url, body, content_type, timeout_ms) do
+  defp request_once(url, body, content_type, timeout_ms, guarded? \\ false) do
     task =
       Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
-        request_once_inner(url, body, content_type, timeout_ms)
+        request_once_inner(url, body, content_type, timeout_ms, guarded?)
       end)
 
     case Task.yield(task, timeout_ms) do
@@ -1791,11 +1800,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
-  defp request_once_inner(url, body, content_type, timeout_ms) do
+  defp request_once_inner(url, body, content_type, timeout_ms, guarded?) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 
     with {:ok, {_profile, request_url, private_dial?}} <- prepare(url),
-         {:ok, connect_timeout} <- remaining_time(deadline),
+         {:ok, remaining} <- remaining_time(deadline),
+         connect_timeout = if(guarded?, do: min(remaining, 2_000), else: remaining),
          {:ok, conn} <- connect_once(url, request_url, private_dial?, connect_timeout) do
       try do
         headers = [
@@ -1818,7 +1828,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
         Mint.HTTP.close(conn)
       end
     else
-      {:error, _reason} = error -> error
+      {:error, reason} -> if guarded?, do: {:error, {:not_sent, reason}}, else: {:error, reason}
     end
   end
 
