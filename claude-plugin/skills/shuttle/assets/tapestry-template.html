@@ -2,10 +2,10 @@
 <!--
   Starter template for a fiber's tapestry.html companion. This file is a
   VISUAL PALETTE — typography, colors, classes. It is not a content
-  model to fill in. The tapestry is one living, visual index to the fiber's
-  sub-fibers, sent files and findings. Use maps, figures or a two-dimensional
-  arrangement when they help the reader catch up. The guidance lives in
-  references/tapestry.md; read that first. The three that bite hardest:
+  model to fill in. The tapestry describes the whole constitution as it
+  stands, and opens on a one-screen map drawn in code; every section hangs
+  from a region of that map. The guidance lives in references/tapestry.md;
+  read that first. The three that bite hardest:
 
     1. REWRITE, DON'T APPEND. Each session restates the whole tapestry
        against current understanding. No session numbering, no dated
@@ -43,7 +43,7 @@
   The sections below are the default skeleton. Structure follows
   content — an idea fiber, a doc fiber or a vision sketch should take
   whatever shape its content wants — but for a constitution report the
-  reading order (state → findings → open → depth) is the default.
+  reading order (what this is + map → state → regions → open → depth) is the default.
 -->
 <html lang="en">
 <head>
@@ -215,7 +215,14 @@
     <span>fiber-slug</span>
   </div>
 
-  <h1>The verdict, as a sentence — not the topic.</h1>
+  <h1>What this work is, as a sentence a stranger could follow.</h1>
+
+  <!-- THE MAP. Design it before any prose: one visual, one screen, the
+       whole mental model. Inline SVG or canvas, drawn in code, in whatever
+       hand suits the work. Each region links to its section below. -->
+  <figure>
+    <svg viewBox="0 0 960 540" role="img" aria-label="The map of this work"></svg>
+  </figure>
 
   <hr>
 
@@ -226,8 +233,7 @@
          never seen this fiber. Where the work stands, what it means,
          and the action the human takes next — or explicitly that there
          is none. Name state as you use it ("run 04, the apodized-mask
-         one"). No account of how you got here. No h2 here: the h1
-         above is this section's verdict line. -->
+         one"). No account of how you got here. -->
 
     <!-- EXAMPLE — DELETE -->
     <p>The mock pipeline recovers every input spectrum inside the sampling window, so
@@ -241,8 +247,8 @@
   <hr class="short">
 
   <section>
-    <div class="section-mark">§ Standing findings</div>
-    <h2>What is true, and how firmly.</h2>
+    <div class="section-mark">§ One region of the map</div>
+    <h2>What this part is, and how firmly we know it.</h2>
 
     <!-- One h3 per claim, NAMED FOR THE CLAIM. Group by meaning — the
          covariance findings together, the recovery findings together —

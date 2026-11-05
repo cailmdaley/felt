@@ -1,32 +1,35 @@
 # Writing tapestry.html
 
-The tapestry is the constitution's one living page: the main visual surface for telling the human anything beyond chat. It's what they open when they come back after hours away, and it should catch them up. Its form follows the work. A visual index to sub-fibers and findings, a report, the slides of a talk being built, several PDFs embedded side by side for a paper review: whatever the human most needs to *see*. The constitution's chat header shows its thumbnail; clicking opens it full-size.
+The tapestry is the constitution's one page: what this work is, whole, as it stands. It says what was built or found, how the parts fit, how it is used and where it stands. It describes the work, never the latest stretch of it: a reader who has never seen the fiber should leave with the mental model, and one back after a week should find the same map with its present state. Its form follows the work: a visual index to sub-fibers and findings, the slides of a talk being built, PDFs side by side for a paper review. The constitution's chat header shows its thumbnail; clicking opens it full-size.
+
+## Start with the map
+
+**Design the structure and draw it before writing any prose.** The page opens on one visual that fits on one screen and carries the whole mental model: the parts, how they connect, how someone uses them, what state each is in. Draw it in code: inline SVG, canvas, a watercolor or ink sketch, whatever expression suits the work. If you can't draw it, you don't yet understand the shape.
+
+**Everything hangs from the map.** Each region of the map is a section of the page, and a reader sees the whole, then chooses where to dig. Disclose in layers: map, a short paragraph per region, then `<details>`, nested pages and sub-fibers. Keep the open page to a few screens.
+
+A PR description is this page at the scale of one change.
 
 ## Who reads it
 
-**Primary reader: the human.** Pitch background at what they know since their last engagement.
-If days have passed, bridge that gap; if you just discussed the work, don't re-explain the conversation.
+**Primary reader: the human,** who may have been anywhere since this began. Never lean on the conversation you just had.
 **Secondary: the next worker,** arriving with no context at all.
-Keep the supporting detail self-contained below the opening, rather than making the human reread what they already know.
 
-Neither wants the trench narrative. What you tried Tuesday and abandoned Wednesday is not a finding — the *conclusion* is, if it survived.
+Neither wants the trench narrative. What you tried Tuesday and abandoned Wednesday is not a finding, and neither is what a review caught last night, nor the last thing you did. The *conclusion* is, if it survived.
 
-**Name state as you use it.** "Run 04 (the apodized-mask one)" costs six words and saves a round trip. Never assume continuity of context across the gap.
+**Name state as you use it.** "Run 04 (the apodized-mask one)" costs six words and saves a round trip.
 
-`outcome:` is the kanban headline and `## Status` is the next worker's handoff — mechanics, blockers, where you stopped.
-The tapestry helps the human understand the work through meaning, evidence and visual structure.
+`outcome:` is the kanban headline and `## Status` is the next worker's handoff — mechanics, blockers, where you stopped. The tapestry is the understanding: meaning, evidence and visual structure.
 
 ## Rewrite, don't append
 
 **Each session rewrites the whole tapestry** against current understanding, with everything superseded removed.
 
-**Zero session numbering.** No "session 3", no "this dispatch", no "updated 2026-06-14", no per-section date stamps. One as-of stamp at the top of the document is the only time marker the report carries. Time-anchored phrasing anywhere else is the smell that says history is sedimenting where a correction belongs.
+**Zero session numbering.** No "session 3", no "this dispatch", no "updated 2026-06-14", no per-section date stamps. One as-of stamp at the top of the document is the only time marker the report carries.
 
 Concrete shapes this forbids:
 
 - `<h3>The lognormal-solver "excess" was a metric false alarm (session 3)</h3>`
-- "Session 1 blamed `partition(method='nnls')`; the lstsq run refuted that."
-- "Session 5 read the ensemble out; session 6 closed the pipeline-validation question."
 - Findings ordered by when they were found rather than by what they mean.
 
 **Cut resolved false alarms and superseded hypotheses.** A dead end that no longer constrains anything gets deleted, not archived in place. Keep a ruled-out line only when it prevents a *costly* re-investigation — and phrase it as current knowledge, never as an event:
@@ -54,18 +57,19 @@ Keep working after raising the ask, and clear it when it becomes moot.
 
 Without an outstanding ask, the default skeleton is:
 
-1. **Headline state** — a few sentences, verdict-bearing. Where the work stands, and the action the human takes next if any. Not "we worked on the covariance" but "the cut-sky Gaussian covariance under-covers by 20–35% at low z, so every σ below uses the 200-seed ensemble instead. Nothing needs your decision."
-2. **Standing findings, grouped by meaning** — one heading per thing that is true, named for the claim, evidence attached. Group by what they are about, never by when they landed. A finding without its evidence is an assertion. Every claim carries its receipt — the number, the plot, the command, the sub-fiber — so the reader can challenge it cheaply. A finding that has its own sub-fiber carries the verdict, the number and the link, **not the argument**. If a finding needs more than a short paragraph, that is the signal it wants a sub-fiber, not more report.
-3. **Open questions** — short, each one actionable.
-4. **Pointers to depth** — sub-fibers, stats files, the spec, the code. The report is a hub, not an archive; long derivations live where they were made.
+1. **What this is** — the title and a sentence or two that would make sense to a stranger, then the map.
+2. **Where it stands** — a few verdict-bearing sentences, and the action the human takes next if any. Not "we worked on the covariance" but "the cut-sky Gaussian covariance under-covers by 20–35% at low z, so every σ below uses the 200-seed ensemble instead. Nothing needs your decision."
+3. **One section per region of the map** — what it is, how it works, why it is that way. Named for the claim, grouped by meaning, never by when it landed. Every claim carries its receipt — the number, the plot, the command, the sub-fiber — so the reader can challenge it cheaply. A part with its own sub-fiber carries the verdict, the number and the link, **not the argument**.
+4. **Open questions** — short, each one actionable.
+5. **Pointers to depth** — sub-fibers, stats files, the spec, the code. Long derivations live where they were made.
 
 ## What earns its place
 
 **Differentiate confidence visibly.** "The bias looks small — m ≈ 2×10⁻³, one field only, treat it as a working number" is a complete and honest finding. An inferred-but-unverified claim says so inline. Never report a result you did not observe.
 
-**Length tracks surprise, not effort.** A session that confirmed the plan adds nothing but a refreshed headline.
+**Length tracks what it takes to hold the work, not effort.** A session that confirmed the plan changes the state on the map, nothing more.
 
-**Every element earns its place** by changing what the reader understands or decides next. Status badges, provenance panels, effort logs and considered-alternatives sections rarely do.
+**Every element earns its place** by changing what the reader understands or decides next. Status badges, provenance panels, effort logs, review histories and considered-alternatives sections rarely do.
 
 ## Open questions are worked, then written
 
@@ -85,7 +89,7 @@ Each surviving item **names what would resolve it**: the run, the check, the per
 <img src="data:image/png;base64,iVBORw0KGgoAAA…" alt="…">
 ```
 
-Never `<img src="recovery.png">`. **Why:** a report travels alone. It gets sent as a single file, opened straight off disk, and read from a checkout on another machine — and most fiber stores gitignore binaries as policy (the loom does), so the sibling PNG never even syncs. In all three cases a relative `src` renders broken, and those are the cases where the human actually reads it. Sibling PDFs and embedded reports are exceptions and must travel with the tapestry. The same rule covers every other asset: styles stay inline, fonts fall back to system stacks, no external fetches.
+Never `<img src="recovery.png">`. A report travels alone: sent as a file, opened off disk, read from another machine's checkout, where most fiber stores have gitignored the sibling PNG. Sibling PDFs and embedded reports are exceptions and must travel with the tapestry. The same rule covers every other asset: styles stay inline, fonts fall back to system stacks, no external fetches.
 
 Inline at write time — read the PNG, base64 it, write the tag. If a plot is too heavy to inline comfortably, shrink the plot, not the rule.
 
@@ -110,39 +114,11 @@ Reference a sibling page with `href="./name.mp3"` or its unique basename in `<co
 These blocks use the template's CSS.
 Replace sample claims and data; keep figures self-contained.
 
-### Figure and caption
-
-```html
-<figure>
-  <img src="data:image/png;base64,REPLACE_WITH_PLOT_BYTES" alt="Residuals with their uncertainty bands">
-  <figcaption>All five residuals lie within one standard deviation of zero.</figcaption>
-</figure>
-```
-
 ### Embedded PDF
 
 ```html
 <figure><iframe src="./paper.pdf" title="Draft v3" style="width:100%;height:80vh"></iframe>
   <figcaption>Section 4's covariance argument is where the referee will push.</figcaption></figure>
-```
-
-### Table
-
-```html
-<table>
-  <caption>Validation against independent patches</caption>
-  <thead><tr><th scope="col">Patch</th><th scope="col">Residual / σ</th></tr></thead>
-  <tbody><tr><th scope="row">North</th><td class="num">0.3</td></tr></tbody>
-</table>
-```
-
-### Status strip
-
-```html
-<div class="status-strip" role="status">
-  <strong>Validated</strong><span>Five independent patches pass.</span>
-  <span>Next: review the scale cut.</span>
-</div>
 ```
 
 ### Nested page
@@ -174,4 +150,4 @@ A live report embed is the deliberate exception to the no-fetch rule: it reads a
 Use a relative path from this report to that fiber's `tapestry.html` (for a sibling fiber, `../checks/tapestry.html`).
 The embed needs that companion to travel with it; for a portable single-file export, replace it with an inlined figure and retain the link to depth.
 
-The test before handoff: **give the report to someone who has never seen this fiber and ask what they'd do next.** If they have to reconstruct the present by diffing paragraphs, rewrite it.
+The test before handoff: **give the report to someone who has never seen this fiber and ask what was built, how it's used and what they'd do next.** If they can't say, or have to reconstruct the present by diffing paragraphs, rewrite it.
