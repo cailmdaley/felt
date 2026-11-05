@@ -660,6 +660,9 @@ const MOCK_FEED = {
   fibers: [
     ...DRAFTS.map(fiber),
     ...(search.get('offline') === 'planning' ? [
+      { ...fiber({ id: 'fixtures/offline/conflicted', uid: 'offline-conflicted', name: 'Unreadable owner document', status: 'active',
+        shuttle: { ...shuttleBlock(), host: 'local' } }), origin: 'local', document_stale: true,
+        runtime: { state: 'running', tmux_session: 'conflicted-worker' } },
       { ...fiber({ id: 'fixtures/offline/draft', uid: 'offline-draft', name: 'Colloquium draft — execution host offline', status: 'open',
         shuttle: { ...shuttleBlock(), kind: 'pinned', host: 'kelvin' } }), origin: 'kelvin', local_exit: true },
       { ...fiber({ id: 'fixtures/offline/armed', uid: 'offline-armed', name: 'Armed work — execution unknown', status: 'active',
@@ -1804,6 +1807,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         size: 0,
       })),
     })
+  }
+  if (url.endsWith('/api/v1/kill') && body().fiber_id === 'offline-conflicted') {
+    document.body.dataset.harnessLastKill = JSON.stringify(body())
+    return json({ killed: true })
   }
   if (url.endsWith('/api/v1/dispatch') && init?.method === 'POST') {
     document.body.dataset.harnessLastDirective = String(body().user_message ?? '')

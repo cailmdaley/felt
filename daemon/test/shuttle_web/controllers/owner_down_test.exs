@@ -523,7 +523,7 @@ defmodule ShuttleWeb.OwnerDownTest do
         if race == :vanish, do: Path.join(store, ".felt/elsewhere/task/task.md"), else: path
 
       after_edit = File.read!(target)
-      refute after_edit =~ "mirrored_at:"
+      refute after_edit =~ "shuttle-exit-at:"
       refute after_edit =~ "horizon: stashed"
 
       case race do
@@ -721,7 +721,39 @@ defmodule ShuttleWeb.OwnerDownTest do
     assert output =~ "Git"
     assert output =~ "no execution request was sent"
     refute output =~ "explicit local"
-    assert File.read!(path) =~ "mirrored_at:"
+    assert File.read!(path) =~ "shuttle-exit-at:"
+  end
+
+  @tag :tmp_dir
+  test "a mirror exit changes no runtime bytes and keeps its intent outside shuttle", %{
+    tmp_dir: tmp
+  } do
+    {store, path} = fixture(Path.expand(tmp))
+
+    source =
+      "---\nid: #{@uid}\nname: 'Task'\nstatus: 'open'\nhorizon: near\nshuttle:\n  kind: oneshot\n  host: worker\n  agent: 'sol'\n  runtime:\n    # durable owner evidence\n    dispatched_at: '2026-11-04T10:00:00Z'\n    handed_off_at: '2026-11-04T11:00:00Z'\n    thread_exit_verb: rearmed\n    quiet_closed_at: '2026-11-04T11:00:00Z'\n---\n\nBody with  spaces.\n"
+
+    File.write!(path, source)
+    stale_owner()
+
+    {:ok, poller} =
+      start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
+
+    await_boot_cycle!(poller)
+
+    conn =
+      ShuttleWeb.LifecycleController.create(Plug.Test.conn(:post, "/"), %{
+        "fiber" => @uid,
+        "origin" => "worker",
+        "action" => "rest"
+      })
+
+    assert conn.status == 200, conn.resp_body
+    after_exit = File.read!(path)
+    owner_bytes = fn text -> text |> String.split("shuttle:\n", parts: 2) |> List.last() end
+    assert owner_bytes.(after_exit) == owner_bytes.(source)
+    assert after_exit =~ "shuttle-exit-at:"
+    assert after_exit =~ "status: 'open'"
   end
 
   @tag :tmp_dir

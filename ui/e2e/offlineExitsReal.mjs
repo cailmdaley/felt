@@ -6,7 +6,8 @@ import { getBrowser } from './browser.mjs'
 
 const [base, uid, slug, owner = 'worker', mode = 'rest'] = process.argv.slice(2)
 assert(base && uid && slug, 'Pass the isolated fixture daemon URL, UID and namespace path')
-assert(['rest', 'refuse', 'pending', 'running'].includes(mode), 'Mode must be rest, refuse, pending or running')
+assert(new URL(base).port && new URL(base).port !== '4000', 'A private fixture port is required')
+assert(['rest', 'refuse', 'pending', 'running', 'conflicted'].includes(mode), 'Unknown fixture mode')
 const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
 const shots = await mkdtemp(join(process.env.SHUTTLE_OWNER_DOWN_ARTIFACT_DIR || tmpdir(), 'shuttle-owner-down-real-'))
 try {
@@ -17,9 +18,30 @@ try {
   await page.goto(base)
   const selector = `[data-fiber-id="${uid}"], [data-fiber-id="${slug}"]`
   const drafts = page.locator('[data-column="drafts"]').locator(selector)
-  await (mode === 'running' ? page.locator(selector).first() : drafts.first()).waitFor()
+  await (['running', 'conflicted'].includes(mode) ? page.locator(selector).first() : drafts.first()).waitFor()
 
-  if (mode === 'pending') {
+  if (mode === 'conflicted') {
+    const card = page.locator(selector).first()
+    assert.match(await card.getAttribute('class'), /kbn-card--stale/)
+    assert.equal(await card.getAttribute('draggable'), 'false')
+    await card.click({ button: 'right' })
+    assert.equal(await page.getByRole('menuitem', { name: 'Rest', exact: true }).count(), 0)
+    await page.screenshot({ path: join(shots, 'unreadable-owner-before-stop.png') })
+    const stopping = page.waitForResponse(reply => reply.url().endsWith('/api/v1/kill') && reply.request().method() === 'POST')
+    await page.getByRole('menuitem', { name: 'Stop worker', exact: true }).click()
+    const stopped = await stopping
+    assert.equal(stopped.status(), 200, await stopped.text())
+    assert.deepEqual(stopped.request().postDataJSON(), { fiber_id: uid, origin: owner })
+    assert.equal((await stopped.json()).killed, true)
+    await page.waitForFunction(async uid => {
+      const feed = await (await fetch('/api/v1/fibers/composite')).json()
+      const row = feed.fibers.find(row => row.fiber.id === uid || row.fiber.uid === uid)
+      return row?.document_stale === true && !row.runtime
+    }, uid)
+    await page.reload()
+    await page.locator(selector).first().waitFor()
+    await page.screenshot({ path: join(shots, 'unreadable-owner-after-stop.png') })
+  } else if (mode === 'pending') {
     assert.equal(await drafts.first().getAttribute('draggable'), 'true')
     assert.match(await drafts.first().getAttribute('aria-label'), /waiting for Git sync/)
     await drafts.first().click({ button: 'right' })

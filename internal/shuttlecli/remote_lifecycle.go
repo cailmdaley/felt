@@ -401,6 +401,50 @@ func (a *app) forwardLifecycleAction(cmd *cobra.Command, args []string, owner, a
 	return true, nil
 }
 
+// Owner metadata addresses an exit without opening a possibly conflicted Git copy.
+func (a *app) routeIndexedExit(cmd *cobra.Command, action, query string, fields map[string]any) (bool, error) {
+	if localOnly(cmd) || a.fiberPathHint != "" {
+		return false, nil
+	}
+	row, err := a.remoteFiberRow(query)
+	if err != nil {
+		if errors.Is(err, errAmbiguousOwner) {
+			return true, err
+		}
+		return false, nil
+	}
+	block, _ := row.Fiber["shuttle"].(map[string]any)
+	host, _ := block["host"].(string)
+	own, err := a.resolveOwnHost("")
+	if err != nil {
+		return true, err
+	}
+	if host == "" || host == own {
+		return false, nil
+	}
+	if host != row.Origin {
+		return true, fmt.Errorf("fiber %q has mismatched owner %q and origin %q", query, host, row.Origin)
+	}
+	uid, _ := row.Fiber["uid"].(string)
+	if uid == "" {
+		uid, _ = row.Fiber["id"].(string)
+	}
+	if !felt.LooksLikeUID(uid) {
+		return true, fmt.Errorf("owner %q returned no intrinsic UID for %s", host, query)
+	}
+	owner, err := a.routeOwnerForCommand(cmd, []string{query}, host)
+	if err != nil {
+		return true, err
+	}
+	slug, _ := row.Fiber["slug"].(string)
+	fiber := &felt.Felt{ID: slug, UID: uid, Path: row.Path}
+	routed, err := a.forwardLifecycleAction(cmd, []string{query}, owner, action, fiber, fields)
+	if routed && err == nil && action == "close" && a.isOwnFiber(fiber) {
+		a.endOwnTerminal()
+	}
+	return routed, err
+}
+
 func (a *app) forwardDispatch(cmd *cobra.Command, args []string, owner string, fiber *felt.Felt, fields map[string]any) (bool, error) {
 	if owner == "" {
 		return false, nil

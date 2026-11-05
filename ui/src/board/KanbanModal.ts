@@ -412,6 +412,7 @@ export class KanbanModal {
       getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
+      stopWorker: async card => { await this.killWorkerIfRunning(card); await this.fetchAndRender() },
       releaseQuarantine: (host) => this.releaseQuarantine(host),
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
@@ -2185,7 +2186,7 @@ export class KanbanModal {
     try {
       await this.postJson(
         '/api/v1/kill',
-        { fiber_id: card.id, origin: card.shuttleHost ?? card.originId },
+        { fiber_id: card.uid || card.id, origin: card.shuttleHost ?? card.originId },
         'kill failed',
       )
     } catch (err: unknown) {

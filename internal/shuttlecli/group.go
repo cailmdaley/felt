@@ -58,21 +58,20 @@ func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt
 }
 
 var errNoRemoteFiber = errors.New("no matching owner fiber")
+var errAmbiguousOwner = errors.New("ambiguous owner address")
 
-// remoteFiber resolves a fiber absent from the local Git view through the
-// daemon's composite owner index, then reads its current document from that
-// owner. The returned storage is nil: callers must route mutations to the
-// owner rather than treating the fetched document as a writable mirror.
-func (a *app) remoteFiber(query string, full bool) (*felt.Felt, felt.Ref, error) {
+// remoteFiberRow resolves an exact identifier from the owner's metadata,
+// without opening either host's document.
+func (a *app) remoteFiberRow(query string) (*compositeFiberRow, error) {
 	endpoint, err := a.daemonEndpoint("/api/v1/fibers/composite")
 	if err != nil {
-		return nil, felt.Ref{}, err
+		return nil, err
 	}
 	index, err := getDaemonJSON[struct {
 		Fibers []compositeFiberRow `json:"fibers"`
 	}](a, endpoint, "parsing composite fibers")
 	if err != nil {
-		return nil, felt.Ref{}, err
+		return nil, err
 	}
 	var row *compositeFiberRow
 	for _, candidate := range index.Fibers {
@@ -81,14 +80,24 @@ func (a *app) remoteFiber(query string, full bool) (*felt.Felt, felt.Ref, error)
 		uid, _ := candidate.Fiber["uid"].(string)
 		if candidate.Origin != "" && (candidate.Path == query || id == query || slug == query || uid == query) {
 			if row != nil {
-				return nil, felt.Ref{}, fmt.Errorf("fiber %q is ambiguous across owners %q and %q; use its intrinsic UID", query, row.Origin, candidate.Origin)
+				return nil, fmt.Errorf("%w: fiber %q is ambiguous across owners %q and %q; use its intrinsic UID", errAmbiguousOwner, query, row.Origin, candidate.Origin)
 			}
 			copy := candidate
 			row = &copy
 		}
 	}
 	if row == nil {
-		return nil, felt.Ref{}, errNoRemoteFiber
+		return nil, errNoRemoteFiber
+	}
+	return row, nil
+}
+
+// remoteFiber reads the current owner document. Its storage-less result is
+// addressable through the owner, never writable as a local mirror.
+func (a *app) remoteFiber(query string, full bool) (*felt.Felt, felt.Ref, error) {
+	row, err := a.remoteFiberRow(query)
+	if err != nil {
+		return nil, felt.Ref{}, err
 	}
 	id, _ := row.Fiber["slug"].(string)
 	if id == "" {
@@ -98,7 +107,7 @@ func (a *app) remoteFiber(query string, full bool) (*felt.Felt, felt.Ref, error)
 	for i := range segments {
 		segments[i] = url.PathEscape(segments[i])
 	}
-	endpoint, err = a.daemonEndpoint("/api/v1/fibers/" + strings.Join(segments, "/"))
+	endpoint, err := a.daemonEndpoint("/api/v1/fibers/" + strings.Join(segments, "/"))
 	if err != nil {
 		return nil, felt.Ref{}, err
 	}

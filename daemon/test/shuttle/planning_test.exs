@@ -81,11 +81,8 @@ defmodule Shuttle.OwnerExitTest do
     row(
       Map.merge(
         %{
-          "shuttle" => %{
-            "host" => "worker",
-            "kind" => "oneshot",
-            "runtime" => %{"mirrored_at" => "2026-11-04T11:00:00Z"}
-          }
+          "shuttle-exit-at" => "2026-11-04T11:00:00Z",
+          "shuttle" => %{"host" => "worker", "kind" => "oneshot"}
         },
         fields
       )
@@ -195,7 +192,8 @@ defmodule Shuttle.OwnerExitTest do
           {row(%{"modified_at" => "2026-11-04T11:00:00Z"}), mirror(%{"horizon" => "stashed"})},
           {row(), mirror(%{"status" => "active", "horizon" => "stashed"})},
           {row(%{"status" => "active"}), mirror(%{"horizon" => "stashed"})},
-          {Map.put(row(), "runtime", %{"state" => "running"}), mirror(%{"horizon" => "stashed"})}
+          {Map.put(row(), "runtime", %{"state" => "running"}), mirror(%{"horizon" => "stashed"})},
+          {Map.put(row(), "document_stale", true), mirror(%{"horizon" => "stashed"})}
         ] do
       assert [%{"fiber" => fiber}] =
                OwnerExit.reconcile([owner], [copy], %{"worker" => true}, "hub")

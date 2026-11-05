@@ -122,7 +122,7 @@ defmodule Shuttle.OwnerExit do
          true <- eligible?(fiber, policy),
          true <- get_in(policy, [block["host"], :stale]) == true,
          rows = policy[block["host"]][:fibers] || [],
-         true <- Enum.all?(rows, &(uid(&1) != fiber["id"] || safe_owner?(&1, policy))),
+         true <- Enum.all?(rows, &(uid(&1) != fiber["id"] || safe_owner?(&1))),
          do: Map.merge(resolved, %{raw_fm: raw_fm, frontmatter: fiber, body: body}),
          else: (_ -> nil)
   end
@@ -161,11 +161,23 @@ defmodule Shuttle.OwnerExit do
             ]
         end
 
-      runtime =
-        Map.get(copy.frontmatter["shuttle"], "runtime", %{}) |> Map.put("mirrored_at", now)
+      {added, changed} =
+        (ops ++ [{:put, "shuttle-exit-at", now}])
+        |> Enum.reject(fn
+          {:put, key, value} -> copy.frontmatter[key] == value
+          {:delete, key} -> !Map.has_key?(copy.frontmatter, key)
+        end)
+        |> Enum.split_with(fn
+          {:put, key, _} -> !Map.has_key?(copy.frontmatter, key)
+          _ -> false
+        end)
+
+      updated_fm = FrontmatterEdit.apply(copy.raw_fm, changed)
 
       updated_fm =
-        FrontmatterEdit.apply(copy.raw_fm, ops ++ [{:put_nested, "shuttle", "runtime", runtime}])
+        if added == [],
+          do: updated_fm,
+          else: FrontmatterEdit.apply("", added) <> "\n" <> updated_fm
 
       original = "---\n" <> copy.raw_fm <> "\n---" <> copy.body
       updated = "---\n" <> updated_fm <> "\n---" <> copy.body
@@ -189,6 +201,7 @@ defmodule Shuttle.OwnerExit do
 
     copies =
       archives
+      |> Enum.reject(& &1["document_stale"])
       |> Enum.group_by(&uid/1)
       |> Map.filter(fn {id, rows} -> id != nil && length(rows) == 1 end)
 
@@ -206,7 +219,7 @@ defmodule Shuttle.OwnerExit do
 
           capable =
             stale[row["origin"]] == true && copy != nil && eligible?(copy["fiber"], policy) &&
-              safe_owner?(row, policy)
+              safe_owner?(row)
 
           pending = copy != nil && eligible?(copy["fiber"], policy) && newer?(copy, row)
 
@@ -222,7 +235,8 @@ defmodule Shuttle.OwnerExit do
             "fiber" => fiber,
             "local_exit" => capable,
             "exit_copy_pending" =>
-              pending && !stale[row["origin"]] && quiescent?(row["fiber"]) &&
+              pending && !stale[row["origin"]] && row["document_stale"] != true &&
+                quiescent?(row["fiber"]) &&
                 is_nil(row["runtime"])
           })
       end)
@@ -233,19 +247,21 @@ defmodule Shuttle.OwnerExit do
       Enum.filter(archives, fn row ->
         owner = host(row)
 
-        !MapSet.member?(seen, uid(row)) && is_binary(owner) && owner not in ["", local] &&
+        row["document_stale"] != true && !MapSet.member?(seen, uid(row)) && is_binary(owner) &&
+          owner not in ["", local] &&
           stale[owner] == true
       end)
 
     owners ++
       Enum.map(missing, fn row ->
         row
-        |> Map.put("origin", if(host(row) in [nil, ""], do: local, else: host(row)))
+        |> Map.put("origin", host(row))
         |> Map.put("local_exit", match?([_], copies[uid(row)]) && eligible?(row["fiber"], policy))
       end)
   end
 
-  defp safe_owner?(row, _policy), do: quiescent?(row["fiber"]) && is_nil(row["runtime"])
+  defp safe_owner?(row),
+    do: row["document_stale"] != true && quiescent?(row["fiber"]) && is_nil(row["runtime"])
 
   defp host(%{"fiber" => %{"shuttle" => %{} = block}}), do: block["host"]
   defp host(_), do: nil
@@ -255,7 +271,7 @@ defmodule Shuttle.OwnerExit do
     if Shuttle.ULID.valid?(id), do: id
   end
 
-  defp mirror_stamp(%{"fiber" => %{"shuttle" => %{"runtime" => %{"mirrored_at" => stamp}}}}),
+  defp mirror_stamp(%{"fiber" => %{"shuttle-exit-at" => stamp}}),
     do: stamp
 
   defp mirror_stamp(_), do: nil

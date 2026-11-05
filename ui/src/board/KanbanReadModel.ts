@@ -513,8 +513,9 @@ function toCard(
     path: entry.path,
     originId: entry.origin,
     localExit: entry.localExit,
+    documentStale: entry.documentStale,
     exitCopyPending: entry.exitCopyPending,
-    originStale: entry.originStale,
+    originStale: entry.documentStale ? {} : entry.originStale,
     feltStore: entry.feltStore,
     // Prefer the fiber's own dir; fall back to the report.html sibling's dir
     // for rows from an older daemon that emits `report_path` but not `dir`.

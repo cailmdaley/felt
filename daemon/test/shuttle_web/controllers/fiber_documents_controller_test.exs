@@ -1277,8 +1277,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     shuttle:
       kind: oneshot
       host: worker
-      runtime:
-        mirrored_at: 2026-11-04T22:00:00Z
+    shuttle-exit-at: 2026-11-04T22:00:00Z
     ---
     Body.
     """)
@@ -1329,7 +1328,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
               fibers: [
                 %{
                   fiber: %{
-                    "shuttle" => %{"runtime" => %{"mirrored_at" => "2026-11-04T22:00:00Z"}}
+                    "shuttle-exit-at" => "2026-11-04T22:00:00Z"
                   }
                 }
               ]
@@ -1376,7 +1375,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = running["fibers"]
   end
 
-  test "healthy composite matches the owner feed row set despite hostless and retired documents", %{store: store} do
+  test "healthy composite matches the owner feed row set despite hostless and retired documents",
+       %{store: store} do
     for {id, host} <- [{"tests/removed", "  host: removed\n"}, {"tests/unowned", ""}] do
       write_fiber!(store, id, """
       ---

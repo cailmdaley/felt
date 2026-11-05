@@ -466,6 +466,10 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 			seedShuttleRole(t, storage, tc.id, tc.status, tc.block, nil)
 			var bodies requestBodies
 			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/fibers/composite" {
+					_, _ = w.Write([]byte(`{"fibers":[]}`))
+					return
+				}
 				if r.URL.Path == "/api/v1/state/composite" {
 					_, _ = w.Write([]byte(`{"remotes":{}}`))
 					return

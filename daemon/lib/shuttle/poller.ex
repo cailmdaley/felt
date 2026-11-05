@@ -3949,12 +3949,26 @@ defmodule Shuttle.Poller do
         |> install_document_cache(Map.put(without_fiber, key, cached))
 
       {:ok, %{fibers: []}} ->
-        # Fiber no longer resolves (uninstalled / deleted): drop it from the feed.
-        install_document_cache(state, without_fiber)
+        cache =
+          Shuttle.Poller.DocumentCache.retain_unreadable(
+            state.document_cache,
+            without_fiber,
+            state.felt_stores
+          )
+
+        install_document_cache(state, cache)
 
       {:error, reason} ->
         Logger.warning("refresh_document #{fiber_id} skipped: #{inspect(reason)}")
-        state
+
+        retained =
+          Shuttle.Poller.DocumentCache.retain_unreadable(
+            state.document_cache,
+            without_fiber,
+            state.felt_stores
+          )
+
+        install_document_cache(state, Map.merge(state.document_cache, retained))
     end
   end
 

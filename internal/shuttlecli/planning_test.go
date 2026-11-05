@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -58,6 +59,48 @@ func exitFixture(t *testing.T, content, fleet string) (string, string, string, s
 
 const foreignDraft = "status: open\nshuttle:\n  kind: oneshot\n  host: worker"
 const configuredWorker = `{"version":1,"defaults":{"discover":false},"remotes":[{"name":"worker","port":4001}]}`
+
+func TestExitRoutesConflictedViewerCopyBeforeParsing(t *testing.T) {
+	binary := planningProbeBinary(t)
+	const uid = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+	for _, query := range []string{uid, "task"} {
+		for _, verb := range []string{"rest", "pause", "close"} {
+			t.Run(query+"/"+verb, func(t *testing.T) {
+				dir, path, home, remotes := exitFixture(t, foreignDraft, configuredWorker)
+				conflicted := "---\nid: " + uid + "\n<<<<<<< HEAD\nstatus: open\n=======\nstatus: active\n>>>>>>> owner\nshuttle:\n  host: worker\n---\nBody\n"
+				if err := os.WriteFile(path, []byte(conflicted), 0644); err != nil {
+					t.Fatal(err)
+				}
+				var posts atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == "GET" && r.URL.Path == "/api/v1/fibers/composite" {
+						fmt.Fprintf(w, `{"fibers":[{"origin":"worker","path":"/owner/.felt/task/task.md","fiber":{"id":%q,"uid":%q,"slug":"task","status":"active","shuttle":{"host":"worker","kind":"oneshot"}}}]}`, uid, uid)
+						return
+					}
+					if r.Method != "POST" || r.URL.Path != "/api/v1/lifecycle" {
+						http.Error(w, "do not read a conflicted body to route a stop", 500)
+						return
+					}
+					posts.Add(1)
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if body["fiber"] != uid || body["origin"] != "worker" || body["action"] != verb {
+						t.Errorf("wrong stop target: %#v", body)
+					}
+					fmt.Fprint(w, "owner invoked")
+				}))
+				defer server.Close()
+				out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, server.URL, remotes), verb, query)
+				after, _ := os.ReadFile(path)
+				if err != nil || posts.Load() != 1 || !strings.Contains(out, "owner invoked") || string(after) != conflicted {
+					t.Fatalf("stop depended on parsing the viewer copy: %v posts=%d %s", err, posts.Load(), out)
+				}
+			})
+		}
+	}
+}
 
 func TestForeignLocalExitNeverMirrors(t *testing.T) {
 	binary := planningProbeBinary(t)
@@ -198,7 +241,7 @@ func TestExitUnownedActiveAndDispatchedParity(t *testing.T) {
 			dir, path, home, remotes := exitFixture(t, state+"\nshuttle:\n  kind: oneshot\n  runtime:\n    dispatched_at: '2026-11-04T10:00:00Z'", configuredWorker)
 			out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), verb, "task")
 			after, _ := os.ReadFile(path)
-			if err != nil || strings.Contains(out, "Git") || strings.Contains(string(after), "mirrored_at:") {
+			if err != nil || strings.Contains(out, "Git") || strings.Contains(string(after), "shuttle-exit-at:") {
 				t.Fatalf("unowned native exit became a mirror refusal: %v %s\n%s", err, out, after)
 			}
 		}

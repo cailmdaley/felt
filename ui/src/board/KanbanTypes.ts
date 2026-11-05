@@ -31,8 +31,10 @@ export interface KanbanCard {
    * stale badge when that origin is disconnected.
    */
   originId: string
-  /** The daemon permits an exit on a local copy after a definite pre-send failure or proven absence. */
+  /** The daemon permits an exit on a quiescent local copy for a known stale owner. */
   localExit?: boolean
+  /** Last-known metadata for an unreadable owner document; execution control still reaches the owner. */
+  documentStale?: boolean
   /** A local exit is waiting for Git sync; the healthy owner's placement still wins. */
   exitCopyPending?: boolean
   /**

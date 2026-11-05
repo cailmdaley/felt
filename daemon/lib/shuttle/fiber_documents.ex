@@ -27,7 +27,7 @@ defmodule Shuttle.FiberDocuments do
   # `kanban_fields/0`) so cache entries build directly from candidate rows.
   @kanban_fields ~w(id uid name status tags created_at closed_at modified_at
                     outcome due horizon cold kind priority tempered
-                    shuttle start theme path report_path)
+                    shuttle shuttle-exit-at start theme path report_path)
 
   @doc "Decode fiber JSON, treating a non-mapping shuttle field as absent."
   def decode(json) do

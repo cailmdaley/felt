@@ -71,12 +71,28 @@ defmodule Shuttle.Poller.DocumentCache do
         end
       end)
 
+    cache = retain_unreadable(previous, cache, Map.get(state, :felt_stores, []))
+
     stats =
       stats
       |> Map.put(:evictions, max(map_size(previous) - map_size(cache), 0))
       |> Map.put(:entries, map_size(cache))
 
     {cache, stats}
+  end
+
+  @doc "Retain last-known addresses of unreadable files in configured stores, marked stale."
+  def retain_unreadable(previous, cache, stores) do
+    Enum.reduce(previous, cache, fn {key, %{entry: entry} = cached}, acc ->
+      path = get_in(entry, [:fiber, "path"])
+
+      if !Map.has_key?(acc, key) && entry[:felt_store] in stores && is_binary(path) &&
+           File.regular?(path) && match?({:error, _}, Shuttle.FiberDoc.read_path(path)) do
+        Map.put(acc, key, %{cached | entry: Map.put(entry, :document_stale, true)})
+      else
+        acc
+      end
+    end)
   end
 
   @doc """
@@ -191,14 +207,15 @@ defmodule Shuttle.Poller.DocumentCache do
   @doc "Checks whether the stored mtime matches; cache refresh also checks resolved agent data."
   def reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at)
       when is_map(entry),
-      do: true
+      do: Map.get(entry, :document_stale) != true
 
   def reusable_entry?(_, _), do: false
 
   @doc "A cache hit requires matching mtimes, paths and resolved agent records."
   def reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at, candidate)
       when is_map(entry) and is_map(candidate) do
-    get_in(entry, [:fiber, "path"]) == candidate["path"] and
+    Map.get(entry, :document_stale) != true and
+      get_in(entry, [:fiber, "path"]) == candidate["path"] and
       get_in(entry, [:fiber, "shuttle", "resolved", "agent"]) ==
         get_in(candidate, ["shuttle", "resolved", "agent"])
   end

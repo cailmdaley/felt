@@ -19,6 +19,7 @@ import {
   shiftCivilDay,
   type Zone,
 } from './civilDay.js'
+import { hasWorkerToStop } from './KanbanTypes.js'
 import type {
   ColumnKind,
   HorizonKind,
@@ -149,8 +150,9 @@ interface KanbanSurfaceRendererOptions {
   openDetail: (card: KanbanCard, forceRail?: boolean) => void
   /** The newest report a card sent — the row's mark. */
   getLatestReport?: (card: KanbanCard) => FiberSend | undefined
-  /** Opens the Rest popover on the card's own Rest affordance. */
+  /** Invoke the card's Rest action. */
   onRest?: (card: KanbanCard) => void
+  stopWorker?: (card: KanbanCard) => void | Promise<void>
   /** A verdict through the same undo window the header and keys use. */
   verdict?: (card: KanbanCard, verdict: Verdict) => void
   /** Resolve the owning host's registry default for agent labels. */
@@ -705,7 +707,7 @@ export class KanbanSurfaceRenderer {
     card: KanbanCard,
     originStaleness: KanbanOriginStaleness | undefined,
   ): HTMLElement {
-    const isStale = originStaleness?.status === 'stale'
+    const isStale = card.documentStale || originStaleness?.status === 'stale'
     const el = document.createElement('button')
     el.type = 'button'
     el.className = `kbn-role-chip${isStale ? ' kbn-card--stale' : ''}`
@@ -1072,7 +1074,7 @@ export class KanbanSurfaceRenderer {
     card: KanbanCard,
     staleness: KanbanOriginStaleness | undefined,
   ): HTMLElement {
-    const isStale = staleness?.status === 'stale'
+    const isStale = card.documentStale || staleness?.status === 'stale'
     const sleeping = isSleepingOnSchedule(card)
     const agentName = this.agentName(card)
     const el = document.createElement('div')
@@ -1520,7 +1522,7 @@ export class KanbanSurfaceRenderer {
     originStaleness?: KanbanOriginStaleness,
     lensState: { dim?: boolean; ghost?: boolean } = {},
   ): HTMLElement {
-    const isStale = originStaleness?.status === 'stale'
+    const isStale = card.documentStale || originStaleness?.status === 'stale'
     const agentName = this.agentName(card)
 
     const el = document.createElement('div')
@@ -1613,7 +1615,10 @@ export class KanbanSurfaceRenderer {
         if (document.activeElement === anchor) anchor.querySelector<HTMLElement>('.ws-verdict-undo button')?.focus()
       },
     }))
-    if (card.held && this.o.releaseQuarantine) {
+    if (card.documentStale && hasWorkerToStop(card) && this.o.stopWorker) {
+      actions.push({ label: 'Stop worker', run: () => this.o.stopWorker!(card) })
+    }
+    if (!card.documentStale && card.held && this.o.releaseQuarantine) {
       actions.push({ label: 'Release boot quarantine', run: () => { void this.o.releaseQuarantine!(card.shuttleHost) } })
     }
     if (card.tmuxSession && this.o.openWorker) {

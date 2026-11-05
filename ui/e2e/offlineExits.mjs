@@ -62,6 +62,18 @@ try {
 
   assert.equal(await page.locator('[data-fiber-id="fixtures/offline/removed"]').count(), 0)
 
+  const conflicted = page.locator('[data-fiber-id="fixtures/offline/conflicted"]').first()
+  await conflicted.scrollIntoViewIfNeeded()
+  assert.equal(await conflicted.getAttribute('draggable'), 'false')
+  assert.ok((await conflicted.getAttribute('class')).includes('kbn-card--stale'))
+  await conflicted.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Stop worker', exact: true }).waitFor()
+  assert.equal(await page.getByRole('menuitem', { name: 'Discard', exact: true }).count(), 0)
+  await page.screenshot({ path: join(shots, 'unreadable-owner-stoppable.png') })
+  await page.getByRole('menuitem', { name: 'Stop worker', exact: true }).click()
+  await page.waitForFunction(() => document.body.dataset.harnessLastKill)
+  assert.deepEqual(JSON.parse(await page.evaluate(() => document.body.dataset.harnessLastKill)), { fiber_id: 'offline-conflicted', origin: 'local' })
+
   const inconclusive = page.locator('[data-fiber-id="fixtures/offline/unowned-inconclusive"]').first()
   await inconclusive.scrollIntoViewIfNeeded()
   assert.equal(await inconclusive.getAttribute('draggable'), 'true')

@@ -128,6 +128,13 @@ Use --no-kill to stop scheduling only and let a live worker finish naturally.
 status is the fiber's only dispatch switch; there is no enabled flag.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fields := map[string]any{}
+			if pauseNoKill {
+				fields["no_kill"] = true
+			}
+			if routed, err := a.routeIndexedExit(cmd, "pause", args[0], fields); routed {
+				return err
+			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
 			if err != nil {
 				return err
@@ -137,10 +144,6 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
-			}
-			fields := map[string]any{}
-			if pauseNoKill {
-				fields["no_kill"] = true
 			}
 			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "pause", f, fields); routed || err != nil {
 				return err
@@ -615,6 +618,17 @@ func (a *app) routeLocalReopen(cmd *cobra.Command, query string, asDraft bool, r
 // its error — the last because the transition may still apply there. Remote
 // resume uses its locked command path, posting before any local arming gates.
 func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool, fields ...map[string]any) (routed bool, err error) {
+	payload := map[string]any{}
+	for _, extra := range fields {
+		for key, value := range extra {
+			payload[key] = value
+		}
+	}
+	if verb == "rest" {
+		if routed, err := a.routeIndexedExit(cmd, verb, query, payload); routed {
+			return routed, err
+		}
+	}
 	f, _, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return false, nil
@@ -633,12 +647,6 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 		// Resume posts first and validates only a missing draft's transfer.
 		if verb == "resume" {
 			return false, nil
-		}
-		payload := map[string]any{}
-		for _, extra := range fields {
-			for key, value := range extra {
-				payload[key] = value
-			}
 		}
 		routed, err := a.forwardLifecycleAction(cmd, []string{query}, owner, verb, f, payload)
 		if err == nil && verb == "resume" && a.ownerBootQuarantine(owner) {
@@ -785,6 +793,19 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			if err != nil {
 				return fmt.Errorf("parsing --tempered: %w", err)
 			}
+			fields := map[string]any{}
+			if tempered != nil {
+				fields["tempered"] = *tempered
+			}
+			if closeQuiet {
+				fields["quiet"] = true
+			}
+			if actor := a.actorSession(closeActor); actor != "" {
+				fields["actor"] = actor
+			}
+			if routed, err := a.routeIndexedExit(cmd, "close", args[0], fields); routed {
+				return err
+			}
 			if tempered == nil {
 				if f, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true); lookupErr == nil {
 					if err := a.requireReviewReport(f); err != nil {
@@ -795,16 +816,6 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			if !localOnly(cmd) {
 				candidate, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true)
 				if lookupErr == nil {
-					fields := map[string]any{}
-					if tempered != nil {
-						fields["tempered"] = *tempered
-					}
-					if closeQuiet {
-						fields["quiet"] = true
-					}
-					if actor := a.actorSession(closeActor); actor != "" {
-						fields["actor"] = actor
-					}
 					anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
 					if routed, err := a.routeLifecycle(cmd, "close", args[0], anyBlock, fields); routed || err != nil {
 						if routed && err == nil && a.isOwnFiber(candidate) {
@@ -825,16 +836,6 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				return err
 			}
 			if owner != "" {
-				fields := map[string]any{}
-				if tempered != nil {
-					fields["tempered"] = *tempered
-				}
-				if closeQuiet {
-					fields["quiet"] = true
-				}
-				if actor := a.actorSession(closeActor); actor != "" {
-					fields["actor"] = actor
-				}
 				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
 					if routed && err == nil && a.isOwnFiber(f) {
 						a.endOwnTerminal()

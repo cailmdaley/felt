@@ -54,7 +54,7 @@ defmodule Shuttle.Contract do
     32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)",
     33 =>
       "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)",
-    34 => "patch-document (locked daemon-owned exit copies)"
+    34 => "patch-document (layout-preserving source-image CAS for daemon-owned exit copies)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

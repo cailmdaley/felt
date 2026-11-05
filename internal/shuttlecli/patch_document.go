@@ -20,23 +20,23 @@ type patchDocumentRequest struct {
 }
 
 func applyDocumentPatch(req patchDocumentRequest) error {
-	_, err := felt.UpdateFiberFile(req.Path, idFromPath(req.Path), func(current *felt.Felt) error {
-		data, err := os.ReadFile(req.Path)
-		if err != nil {
-			return err
-		}
-		digest := sha256.Sum256(data)
-		if hex.EncodeToString(digest[:]) != req.BeforeSHA256 {
-			return fmt.Errorf("document changed since the edit was prepared")
-		}
-		proposed, err := felt.Parse(current.ID, []byte(req.After))
-		if err != nil {
-			return err
-		}
-		*current = *proposed
-		return nil
-	})
-	return err
+	unlock, err := felt.LockFiberFile(req.Path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	data, err := os.ReadFile(req.Path)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(data)
+	if hex.EncodeToString(digest[:]) != req.BeforeSHA256 {
+		return fmt.Errorf("document changed since the edit was prepared")
+	}
+	if _, err := felt.Parse(idFromPath(req.Path), []byte(req.After)); err != nil {
+		return err
+	}
+	return felt.WriteFiberFile(req.Path, []byte(req.After))
 }
 
 func (a *app) patchDocumentCmd() *cobra.Command {

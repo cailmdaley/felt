@@ -6,8 +6,10 @@ import { Verdicts } from './workspace/Verdicts.js'
 import { canExitOffline } from './offlineExits.js'
 import { moveDestinations } from './MoveDestinations.js'
 import { sessionVerbsFor } from './workspace/lifecycleVerbs.js'
+import { parseCompositeFeed } from './KanbanComposite.js'
+import { cardFromCompositeEntry } from './KanbanReadModel.js'
 
-function renderer(): KanbanSurfaceRenderer {
+function renderer(stopWorker = vi.fn()): KanbanSurfaceRenderer {
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null,
     setDragSourceId: () => {},
@@ -16,10 +18,29 @@ function renderer(): KanbanSurfaceRenderer {
     transition: vi.fn(),
     setSurface: () => {},
     openDetail: () => {},
+    stopWorker,
   })
 }
 
 describe('verdict actions ride cards awaiting review and in flight', () => {
+  it('keeps an unreadable owner document visibly stale and its worker stoppable', async () => {
+    const feed = parseCompositeFeed({ host: 'hub', fibers: [{ origin: 'hub', document_stale: true, felt_store: '/store', path: 'work/task/task.md',
+      fiber: { id: 'work/task', uid: 'task-uid', status: 'active', name: 'Conflicted work', shuttle: { kind: 'oneshot', host: 'hub' } },
+      runtime: { state: 'running', tmux_session: 'known-worker' },
+    }], origins: { hub: { kind: 'local', stale: false } } })
+    const conflicted = cardFromCompositeEntry(feed.entries[0])
+    expect(conflicted.documentStale).toBe(true)
+    expect(conflicted.originStale).toBeDefined()
+    const stop = vi.fn(), surfaces = renderer(stop)
+    const actions = surfaces.rowActions(conflicted, true, document.createElement('div'))
+    expect(actions.filter(action => !action.disabled).map(action => action.label)).toEqual(['Stop worker'])
+    await actions.find(action => action.label === 'Stop worker')!.run!()
+    expect(stop).toHaveBeenCalledWith(conflicted)
+    const root = surfaces.renderNowSection({ drafts: [], inFlight: [conflicted], awaitingReview: [] }, { hub: { status: 'fresh' } })
+    const row = root.querySelector<HTMLElement>('[data-fiber-id="work/task"]')!
+    expect(row.classList.contains('kbn-card--stale')).toBe(true)
+    expect(row.draggable).toBe(false)
+  })
   it('keeps exits and planning drag on an offline draft, but never offers a launch', () => {
     const draft = card({ id: 'offline', status: 'open', shuttleKind: 'oneshot', originId: 'worker',
       shuttleHost: 'worker', localExit: true, originStale: { since: '2026-11-04T19:00:00Z' } })
