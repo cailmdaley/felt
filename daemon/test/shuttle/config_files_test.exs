@@ -1,6 +1,6 @@
 defmodule Shuttle.ConfigFilesTest do
   @moduledoc """
-  `Shuttle.ConfigFiles` — the five operator files as addressable bytes.
+  `Shuttle.ConfigFiles` — the six operator files as addressable bytes.
 
   Every test points ALL FIVE `*_FILE` env vars at throwaway paths and clears the
   two compact `SHUTTLE_STORES` / `SHUTTLE_PROJECTS` forms, so nothing here can read or
@@ -22,7 +22,8 @@ defmodule Shuttle.ConfigFilesTest do
     projects: "SHUTTLE_PROJECTS_FILE",
     agents: "SHUTTLE_AGENTS_FILE",
     remotes: "SHUTTLE_REMOTES_FILE",
-    host: "SHUTTLE_HOST_CONFIG_FILE"
+    host: "SHUTTLE_HOST_CONFIG_FILE",
+    voice: "SHUTTLE_VOICE_FILE"
   ]
 
   # The two compact comma-separated forms — the only ones that exist.
@@ -109,14 +110,15 @@ defmodule Shuttle.ConfigFilesTest do
   end
 
   describe "parse_id/1" do
-    test "accepts the five file stems, which are also `ids/0`" do
+    test "accepts the six file stems, which are also `ids/0`" do
       assert ConfigFiles.parse_id("stores") == {:ok, :stores}
       assert ConfigFiles.parse_id("projects") == {:ok, :projects}
       assert ConfigFiles.parse_id("agents") == {:ok, :agents}
       assert ConfigFiles.parse_id("remotes") == {:ok, :remotes}
       assert ConfigFiles.parse_id("host") == {:ok, :host}
 
-      assert ConfigFiles.ids() == [:stores, :projects, :agents, :remotes, :host]
+      assert ConfigFiles.parse_id("voice") == {:ok, :voice}
+      assert ConfigFiles.ids() == [:stores, :projects, :agents, :remotes, :host, :voice]
     end
 
     test "rejects anything it does not name" do
@@ -142,7 +144,8 @@ defmodule Shuttle.ConfigFilesTest do
                projects: Path.expand("~/.config/shuttle/projects.json"),
                agents: Path.expand("~/.config/shuttle/agents.json"),
                remotes: Path.expand("~/.config/shuttle/remotes.json"),
-               host: Path.expand("~/.config/shuttle/host.json")
+               host: Path.expand("~/.config/shuttle/host.json"),
+               voice: Path.expand("~/.config/shuttle/voice.json")
              }
     end
   end
@@ -511,7 +514,7 @@ defmodule Shuttle.ConfigFilesTest do
 
       assert Enum.map(rows, & &1.id) == ConfigFiles.ids()
       assert Enum.map(rows, & &1.path) == Enum.map(ConfigFiles.ids(), &paths[&1])
-      assert Enum.map(rows, & &1.exists) == [true, false, false, false, false]
+      assert Enum.map(rows, & &1.exists) == [true, false, false, false, false, false]
     end
   end
 end

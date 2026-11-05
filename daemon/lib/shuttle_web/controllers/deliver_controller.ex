@@ -41,6 +41,7 @@ defmodule ShuttleWeb.DeliverController do
           "context_only",
           "from_claim",
           "message_id",
+          "message_after_launch",
           "notify_address",
           "notify_when_idle",
           "notify_wake",
@@ -116,6 +117,7 @@ defmodule ShuttleWeb.DeliverController do
                 from: sender,
                 from_claim: claim,
                 message_id: context["message_id"],
+                message_after_launch: context["message_after_launch"] == true,
                 daemon_sender: context["daemon_sender"] == true,
                 resume_mode: resume_mode(context["resume_mode"])
               ]

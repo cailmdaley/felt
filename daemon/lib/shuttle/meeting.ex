@@ -122,7 +122,164 @@ defmodule Shuttle.Meeting do
   @doc "Current local hark availability and meeting state."
   @spec show(keyword()) :: {:ok, map()} | {:error, term()}
   def show(opts \\ []) do
+    with {:ok, snapshot, _context} <- inspect_current(opts) do
+      {:ok, if(voice_row?(snapshot.meeting), do: %{snapshot | meeting: nil}, else: snapshot)}
+    end
+  end
+
+  @doc false
+  def voice_capture(opts \\ []) do
     with {:ok, snapshot, _context} <- inspect_current(opts), do: {:ok, snapshot}
+  end
+
+  @doc false
+  def reconcile_voice(enabled, opts \\ []) do
+    with_meeting_lock(fn ->
+      with {:ok, snapshot, context} <- inspect_current(opts) do
+        if voice_row?(snapshot.meeting), do: sync_voice_mute(opts)
+
+        cond do
+          voice_row?(snapshot.meeting) and not enabled ->
+            with :ok <- end_voice(snapshot, context, opts), do: {:ok, %{snapshot | meeting: nil}}
+
+          voice_row?(snapshot.meeting) and snapshot.meeting.state == "failed" ->
+            with :ok <- kill_launch(context.tmux, opts), do: start_voice(opts)
+
+          voice_row?(snapshot.meeting) ->
+            {:ok, snapshot}
+
+          snapshot.meeting != nil ->
+            {:ok, snapshot}
+
+          enabled ->
+            start_voice(opts)
+
+          true ->
+            {:ok, snapshot}
+        end
+      end
+    end)
+  end
+
+  defp start_voice(opts) do
+    with executable when is_binary(executable) <- find_hark(opts),
+         launch <- "voice-" <> launch_id(),
+         transcript <- Path.join([hark_dir(opts), "voice", launch <> ".txt"]),
+         :ok <- Shuttle.FS.mkdir_p(Path.dirname(transcript)),
+         :ok <- apply_voice_mute(executable, opts),
+         :ok <-
+           create_session(
+             [
+               executable,
+               "--voice",
+               "-o",
+               transcript,
+               "--launch=" <> launch,
+               "--title=Live voice"
+             ],
+             launch,
+             nil,
+             opts
+           ) do
+      {:ok,
+       %{
+         available: true,
+         meeting: %{
+           kind: "voice",
+           launch: launch,
+           transcript: transcript,
+           title: "Live voice",
+           state: "starting",
+           error: nil
+         }
+       }}
+    else
+      nil -> {:error, :unavailable}
+      error -> error
+    end
+  end
+
+  @doc false
+  def voice_muted?(opts \\ []), do: Shuttle.FS.exists?(Path.join(hark_dir(opts), "voice-muted"))
+
+  @doc false
+  def mute_voice(muted, opts \\ []) do
+    with_meeting_lock(fn ->
+      path = Path.join(hark_dir(opts), "voice-muted")
+
+      with :ok <- Shuttle.FS.mkdir_p(hark_dir(opts)),
+           :ok <- if(muted, do: Shuttle.FS.write(path, ""), else: remove_flag(path)),
+           {:ok, snapshot, _context} <- inspect_current(opts) do
+        if voice_row?(snapshot.meeting), do: apply_voice_mute(find_hark(opts), opts), else: :ok
+      end
+    end)
+  end
+
+  defp sync_voice_mute(opts) do
+    path = Path.join(hark_dir(opts), "voice-muted")
+
+    if Shuttle.FS.exists?(Path.join(hark_dir(opts), "paused")),
+      do: Shuttle.FS.write(path, ""),
+      else: remove_flag(path)
+  end
+
+  defp remove_flag(path) do
+    case Shuttle.FS.rm(path) do
+      {:error, :enoent} -> :ok
+      result -> result
+    end
+  end
+
+  defp apply_voice_mute(nil, _opts), do: {:error, :unavailable}
+
+  defp apply_voice_mute(executable, opts) do
+    case run(opts, "env", [
+           "HARK_DIR=" <> hark_dir(opts),
+           executable,
+           if(voice_muted?(opts), do: "pause", else: "resume")
+         ]) do
+      {_, 0} -> :ok
+      {output, _} -> {:error, {:operation, "could not mute live voice: #{output}"}}
+    end
+  end
+
+  defp voice_row?(%{kind: "voice"}), do: true
+  defp voice_row?(_), do: false
+
+  defp yield_voice(opts) do
+    with {:ok, snapshot, context} <- inspect_current(opts) do
+      if voice_row?(snapshot.meeting) do
+        sync_voice_mute(opts)
+        end_voice(snapshot, context, opts)
+      else
+        :ok
+      end
+    end
+  end
+
+  defp end_voice(snapshot, context, opts) do
+    with {:ok, _} <- stop_current(snapshot, context, opts) do
+      await_voice_end(context.tmux, opts, System.monotonic_time(:millisecond) + 10_000)
+    end
+  end
+
+  defp await_voice_end(tmux, opts, deadline) do
+    with {:ok, snapshot, context} <- inspect_current(opts) do
+      cond do
+        not voice_row?(snapshot.meeting) ->
+          :ok
+
+        snapshot.meeting.state == "failed" ->
+          kill_launch(context.tmux, opts)
+
+        System.monotonic_time(:millisecond) >= deadline ->
+          kill_launch(tmux, opts)
+
+        true ->
+          Process.sleep(50)
+          await_voice_end(tmux, opts, deadline)
+      end
+    end
   end
 
   @doc """
@@ -153,7 +310,11 @@ defmodule Shuttle.Meeting do
     with_meeting_lock(fn ->
       with {:ok, snapshot, context} <- inspect_current(opts),
            :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
-           {:ok, result} <- stop_current(snapshot, context, opts) do
+           {:ok, result} <-
+             if(voice_row?(snapshot.meeting),
+               do: {:ok, %{snapshot | meeting: nil}},
+               else: stop_current(snapshot, context, opts)
+             ) do
         {:ok, result}
       end
     end)
@@ -228,7 +389,8 @@ defmodule Shuttle.Meeting do
   defp capture_scribe_instructions(:capture) do
     "Use the transcript and felt tree to infer the meeting's identity, topic, participants, " <>
       "and appropriate filing location. Do not ask the user for a title; use a provisional " <>
-      "date-based name if needed and rename it when the transcript clarifies the subject. "
+      "date-based name if needed and rename it when the transcript clarifies the subject. " <>
+      "After you claim the meeting fiber, Shuttle delivers transcript batches from the beginning and # ended here; don't run shuttle follow. "
   end
 
   defp capture_scribe_instructions({:fiber, _fiber_id}), do: ""
@@ -356,6 +518,7 @@ defmodule Shuttle.Meeting do
          :ok <- validate_origin(origin, opts),
          executable when is_binary(executable) <- find_hark(opts),
          :ok <- validate_supported_mode(mode, opts),
+         :ok <- yield_voice(opts),
          {:ok, snapshot, context} <- inspect_current(opts),
          :ok <- ensure_startable(snapshot),
          {name, title} <-
@@ -380,6 +543,10 @@ defmodule Shuttle.Meeting do
              "meeting start launch=#{launch_id} mode=#{mode} fiber=#{inspect(fiber)} transcript=#{inspect(paths.transcript)}"
            ),
          {:ok, row} <- await_launch(launch_id, paths, title, fiber, mode, opts) do
+      if target == :capture and Shuttle.Env.app(:start_meeting_transcript_relay, true) do
+        Shuttle.Meeting.TranscriptRelay.start(row, nil, origin)
+      end
+
       {:ok,
        %{
          meeting: row,
@@ -1139,6 +1306,12 @@ defmodule Shuttle.Meeting do
 
     %{
       state: state,
+      kind:
+        data["kind"] ||
+          if(String.starts_with?(launch_from(data) || tmux_launch(tmux) || "", "voice-"),
+            do: "voice",
+            else: "meeting"
+          ),
       title: data["title"],
       started_at: data["started"],
       tail: [],
@@ -1167,10 +1340,13 @@ defmodule Shuttle.Meeting do
     fiber =
       Enum.find_value(fibers.(), fn fiber ->
         if is_map(fiber) and get_in(fiber, ["shuttle", "runtime", "meeting"]) == launch,
-          do: fiber["slug"] || fiber["id"]
+          do: {fiber["slug"] || fiber["id"], get_in(fiber, ["shuttle", "host"])}
       end)
 
-    %{meeting | fiber: fiber}
+    case fiber do
+      {id, origin} -> meeting |> Map.put(:fiber, id) |> Map.put(:origin, origin)
+      nil -> meeting
+    end
   end
 
   defp find_scribe_fiber(meeting, _launch, _opts), do: meeting

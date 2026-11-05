@@ -26,7 +26,8 @@ defmodule ShuttleWeb.ConfigControllerTest do
     projects: "SHUTTLE_PROJECTS_FILE",
     agents: "SHUTTLE_AGENTS_FILE",
     remotes: "SHUTTLE_REMOTES_FILE",
-    host: "SHUTTLE_HOST_CONFIG_FILE"
+    host: "SHUTTLE_HOST_CONFIG_FILE",
+    voice: "SHUTTLE_VOICE_FILE"
   ]
 
   @compact_vars ["SHUTTLE_STORES", "SHUTTLE_PROJECTS"]
@@ -57,7 +58,7 @@ defmodule ShuttleWeb.ConfigControllerTest do
   end
 
   describe "GET /api/v1/config" do
-    test "lists the five files and the paths they resolve to", %{paths: paths} do
+    test "lists the six files and the paths they resolve to", %{paths: paths} do
       File.write!(paths[:stores], @stores_doc)
 
       conn = get(api_conn(), "/api/v1/config")
@@ -71,11 +72,12 @@ defmodule ShuttleWeb.ConfigControllerTest do
                "projects",
                "agents",
                "remotes",
-               "host"
+               "host",
+               "voice"
              ]
 
       assert Enum.map(body["files"], & &1["path"]) == Enum.map(ConfigFiles.ids(), &paths[&1])
-      assert Enum.map(body["files"], & &1["exists"]) == [true, false, false, false, false]
+      assert Enum.map(body["files"], & &1["exists"]) == [true, false, false, false, false, false]
 
       [stores | _] = body["files"]
       assert stores["size"] == byte_size(@stores_doc)

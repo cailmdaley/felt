@@ -2295,6 +2295,148 @@ defmodule Shuttle.MeetingTest do
            end)
   end
 
+  test "voice reuses its retained launch, recovers a crash and is hidden from meeting controls",
+       %{hark_dir: dir} do
+    set_voice_handler(dir)
+    assert {:ok, %{meeting: %{kind: "voice", launch: launch}}} = Meeting.reconcile_voice(true)
+
+    assert {:ok, %{meeting: %{kind: "voice", launch: ^launch, state: "live"}}} =
+             Meeting.reconcile_voice(true)
+
+    assert {:ok, %{meeting: nil}} = Meeting.show()
+    assert {:ok, %{meeting: nil}} = Meeting.stop()
+
+    assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end) == 1
+
+    Shuttle.Test.MeetingRunner.set_custom({launch, :crashed})
+    assert {:ok, %{meeting: %{kind: "voice", launch: next}}} = Meeting.reconcile_voice(true)
+    refute next == launch
+    assert {:ok, %{meeting: nil}} = Meeting.reconcile_voice(false)
+  end
+
+  test "every meeting target preempts voice before launching and voice returns after it ends", %{
+    hark_dir: dir
+  } do
+    for target <- [:record, :capture, {:fiber, "project/fiber"}] do
+      set_voice_handler(dir)
+      assert {:ok, %{meeting: %{launch: voice}}} = Meeting.reconcile_voice(true)
+
+      assert {:ok, %{meeting: %{kind: "meeting", launch: meeting}}} =
+               Meeting.start(%{"mode" => "call"}, target, "meeting", nil)
+
+      refute meeting == voice
+      calls = Shuttle.Test.MeetingRunner.calls()
+      signal = Enum.find_index(calls, fn {cmd, _, _} -> cmd == "kill" end)
+
+      last_launch =
+        calls
+        |> Enum.with_index()
+        |> Enum.filter(fn {{cmd, args, _}, _} ->
+          cmd == "tmux" and match?(["new-session" | _], args)
+        end)
+        |> List.last()
+        |> elem(1)
+
+      assert signal < last_launch
+      assert File.read!(Path.join([dir, "voice", voice <> ".txt"])) =~ "# ended"
+
+      assert {:ok, %{meeting: %{kind: "meeting", launch: ^meeting}}} =
+               Meeting.reconcile_voice(true)
+
+      assert {:ok, _} = Meeting.stop()
+      assert {:ok, %{meeting: %{kind: "voice", launch: returned}}} = Meeting.reconcile_voice(true)
+      refute returned in [voice, meeting]
+      assert {:ok, _} = Meeting.reconcile_voice(false)
+    end
+  end
+
+  test "mute uses hark pause and persists across a voice crash and a meeting", %{hark_dir: dir} do
+    set_voice_handler(dir)
+    assert :ok = Meeting.mute_voice(true)
+    assert Meeting.voice_muted?()
+    assert {:ok, %{meeting: %{launch: launch}}} = Meeting.reconcile_voice(true)
+
+    assert Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+             cmd == "env" and List.last(args) == "pause"
+           end)
+
+    Shuttle.Test.MeetingRunner.set_custom({launch, :crashed})
+    assert {:ok, _} = Meeting.reconcile_voice(true)
+    assert Meeting.voice_muted?()
+    assert {:ok, _} = Meeting.start(%{"mode" => "call"}, :record, "meeting", nil)
+    assert Meeting.voice_muted?()
+    assert {:ok, _} = Meeting.stop()
+    assert {:ok, _} = Meeting.reconcile_voice(true)
+    assert Meeting.voice_muted?()
+    assert :ok = Meeting.mute_voice(false)
+    refute Meeting.voice_muted?()
+    assert {:ok, _} = Meeting.reconcile_voice(false)
+  end
+
+  defp set_voice_handler(dir) do
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["has-session" | _], _opts, nil ->
+        {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["display-message" | _], _opts, nil ->
+        {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["display-message" | _], _opts, {launch, :live} = state ->
+        {{"0|0|1234|#{launch}|\n", 0}, state}
+
+      "tmux", ["display-message" | _], _opts, {launch, :ended} = state ->
+        {{"1|0|1234|#{launch}|\n", 0}, state}
+
+      "tmux", ["display-message" | _], _opts, {launch, :crashed} = state ->
+        {{"1|9|1234|#{launch}|\n", 0}, state}
+
+      "tmux", ["new-session" | args], _opts, _state ->
+        launch = launch_from_tmux_args(args)
+        voice = String.starts_with?(launch, "voice-")
+        path = Path.join([dir, if(voice, do: "voice", else: "meetings"), launch <> ".txt"])
+        File.mkdir_p!(Path.dirname(path))
+        File.write!(path, "")
+
+        write_meeting(dir, %{
+          "launch" => launch,
+          "kind" => if(voice, do: "voice", else: "meeting"),
+          "pid" => 321,
+          "phase" => "live",
+          "transcript" => path
+        })
+
+        {{"$4\n", 0}, {launch, :live}}
+
+      "tmux", ["kill-session" | _], _opts, _state ->
+        {{"", 0}, nil}
+
+      "ps", ["-p", "321", "-o", "command="], _opts, {_, :live} = state ->
+        {{"python hark capture", 0}, state}
+
+      "ps", ["-p", "321", "-o", "command="], _opts, state ->
+        {{"", 1}, state}
+
+      "kill", ["-INT", "321"], _opts, {launch, _} ->
+        row = File.read!(Path.join(dir, "meeting.json")) |> Jason.decode!()
+        File.write!(row["transcript"], "# ended\n", [:append])
+        write_meeting(dir, Map.put(row, "phase", "ended"))
+        {{"", 0}, {launch, :ended}}
+
+      "env", [_hark_dir, _executable, command], _opts, state
+      when command in ["pause", "resume"] ->
+        if command == "pause",
+          do: File.write!(Path.join(dir, "paused"), ""),
+          else: File.rm(Path.join(dir, "paused"))
+
+        {{"", 0}, state}
+
+      _command, _args, _opts, state ->
+        {{"", 0}, state}
+    end)
+  end
+
   defp set_current_meeting_handler(launch, pid) do
     pid_string = Integer.to_string(pid)
 

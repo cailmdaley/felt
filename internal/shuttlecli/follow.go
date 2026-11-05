@@ -33,7 +33,7 @@ complete lines are held pending until one of these flushes them:
     in the utterance text (after any leading HH:MM:SS timestamp or
     HH:MM:SS-HH:MM:SS range)
   - the pending utterance text reaching --words words
-  - --seconds elapsing since the first pending line arrived
+  - --seconds of quiet since the last utterance arrived
   - a line starting "# ended", which flushes and ends the follow (exit 0)
 
 Lines starting "#" ride along with the batch without counting words or
@@ -70,7 +70,7 @@ shrinks is read again from the start. The file is polled once per second.`,
 		},
 	}
 	shuttleFollowCmd.Flags().Int("words", 150, "Flush pending lines once their utterance text reaches this many words")
-	shuttleFollowCmd.Flags().Float64("seconds", 15, "Flush pending lines this long after the first one arrived")
+	shuttleFollowCmd.Flags().Float64("seconds", 30, "Flush pending lines after this many seconds without a new utterance")
 	shuttleFollowCmd.Flags().String("names", strings.Join(defaultFollowNames, ","), "Comma-separated words that address the agent (case-insensitive)")
 	return shuttleFollowCmd
 }
@@ -82,13 +82,13 @@ var followTimestamp = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(?:-\d{2}:\d{2}:\d{2
 // followBatcher holds transcript lines until a flush condition is met. It is
 // pure: callers supply every line and clock reading.
 type followBatcher struct {
-	words        int
-	seconds      time.Duration
-	pattern      *regexp.Regexp
-	pending      []string
-	wordCount    int
-	firstArrival time.Time
-	ended        bool
+	words       int
+	seconds     time.Duration
+	pattern     *regexp.Regexp
+	pending     []string
+	wordCount   int
+	lastArrival time.Time
+	ended       bool
 }
 
 func newFollowBatcher(words int, seconds time.Duration, names []string) *followBatcher {
@@ -105,9 +105,7 @@ func newFollowBatcher(words int, seconds time.Duration, names []string) *followB
 
 // Add records one line arriving at now and returns a batch to flush, or nil.
 func (b *followBatcher) Add(line string, now time.Time) []string {
-	if b.pending = append(b.pending, line); len(b.pending) == 1 {
-		b.firstArrival = now
-	}
+	b.pending = append(b.pending, line)
 	if strings.HasPrefix(line, "# ended") {
 		b.ended = true
 		return b.flush()
@@ -119,6 +117,7 @@ func (b *followBatcher) Add(line string, now time.Time) []string {
 	if match := followTimestamp.FindStringSubmatch(line); match != nil {
 		text = match[1]
 	}
+	b.lastArrival = now
 	b.wordCount += len(strings.Fields(text))
 	if b.pattern.MatchString(text) || b.wordCount >= b.words {
 		return b.flush()
@@ -126,9 +125,9 @@ func (b *followBatcher) Add(line string, now time.Time) []string {
 	return nil
 }
 
-// Tick returns the pending batch once seconds have elapsed since its first line, or nil.
+// Tick returns the pending batch once seconds of quiet have elapsed, or nil.
 func (b *followBatcher) Tick(now time.Time) []string {
-	if len(b.pending) > 0 && now.Sub(b.firstArrival) >= b.seconds {
+	if len(b.pending) > 0 && !b.lastArrival.IsZero() && now.Sub(b.lastArrival) >= b.seconds {
 		return b.flush()
 	}
 	return nil
@@ -139,7 +138,7 @@ func (b *followBatcher) Ended() bool { return b.ended }
 
 func (b *followBatcher) flush() []string {
 	batch := b.pending
-	b.pending, b.wordCount, b.firstArrival = nil, 0, time.Time{}
+	b.pending, b.wordCount, b.lastArrival = nil, 0, time.Time{}
 	return batch
 }
 

@@ -23,6 +23,8 @@ try do
         "SHUTTLE_HOST" => "production-boot",
         "SHUTTLE_DATA_DIR" => root <> "/data",
         "SHUTTLE_HOST_CONFIG_FILE" => root <> "/host.json",
+        "SHUTTLE_VOICE_FILE" => root <> "/voice.json",
+        "HARK_DIR" => root <> "/hark",
         "SHUTTLE_STORES_FILE" => root <> "/stores.json",
         "SHUTTLE_PROJECTS_FILE" => root <> "/projects.json",
         "SHUTTLE_REMOTES_FILE" => root <> "/remotes.json",
@@ -155,6 +157,7 @@ try do
   # application builder: disabling a production child turns this gate red.
   for module <- [
         Shuttle.EventStream,
+        Shuttle.Voice,
         Shuttle.Poller,
         Shuttle.InterruptWatcher,
         Shuttle.LogRotator,
@@ -242,13 +245,19 @@ try do
     :ok = Supervisor.terminate_child(Shuttle.Local, Shuttle.Poller)
     {:ok, _} = Supervisor.restart_child(Shuttle.Local, Shuttle.Poller)
     replacement = wait.(wait, &(&1["incarnation"] not in [nil, expected["incarnation"]]))
-    release_url = ~c"http://127.0.0.1:" ++ Integer.to_charlist(port) ++ ~c"/api/v1/quarantine/release"
+
+    release_url =
+      ~c"http://127.0.0.1:" ++ Integer.to_charlist(port) ++ ~c"/api/v1/quarantine/release"
+
     release = fn identity ->
       body = Jason.encode!(%{expected: identity})
+
       {:ok, {{_, status, _}, _, response}} =
         :httpc.request(:post, {release_url, [], ~c"application/json", body}, [timeout: 5_000], [])
+
       {status, Jason.decode!(response)}
     end
+
     {409, %{"error" => "incarnation_mismatch"}} = release.(expected)
     true = Shuttle.Poller.snapshot().boot_quarantine
     {200, %{"ok" => true}} = release.(Map.take(replacement, ["incarnation", "release_path"]))

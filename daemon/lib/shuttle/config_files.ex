@@ -3,7 +3,7 @@ defmodule Shuttle.ConfigFiles do
   The operator files, as one addressable set — so a surface that is not a shell
   can read and rewrite them.
 
-  Everything shuttle can be told about a host lives in five JSON files under
+  Everything shuttle can be told about a host lives in six JSON files under
   `~/.config/shuttle/`. The board is reachable from a phone and from a second hub,
   and the surface that steers the fleet has to be able to configure it, not
   only an editor on the machine that owns each file.
@@ -15,6 +15,7 @@ defmodule Shuttle.ConfigFiles do
   | `:agents` | `agents.json` | this host's layer over the shipped agent registry |
   | `:remotes` | `remotes.json` | the remote daemons this host aggregates |
   | `:host` | `host.json` | this host's class, and so where the daemon listens |
+  | `:voice` | `voice.json` | live voice and transcript batching thresholds |
 
   ## Text, not a model
 
@@ -77,9 +78,9 @@ defmodule Shuttle.ConfigFiles do
 
   require Logger
 
-  @type id :: :stores | :projects | :agents | :remotes | :host
+  @type id :: :stores | :projects | :agents | :remotes | :host | :voice
 
-  @ids [:stores, :projects, :agents, :remotes, :host]
+  @ids [:stores, :projects, :agents, :remotes, :host, :voice]
 
   @doc "Every writable operator file's id, in the order a settings page reads."
   @spec ids() :: [id()]
@@ -97,6 +98,7 @@ defmodule Shuttle.ConfigFiles do
   def parse_id("agents"), do: {:ok, :agents}
   def parse_id("remotes"), do: {:ok, :remotes}
   def parse_id("host"), do: {:ok, :host}
+  def parse_id("voice"), do: {:ok, :voice}
   def parse_id(_), do: :error
 
   @doc """
@@ -109,6 +111,7 @@ defmodule Shuttle.ConfigFiles do
   @spec path(id()) :: String.t()
   def path(:remotes), do: Remotes.config_path()
   def path(:host), do: Host.config_path()
+  def path(:voice), do: Shuttle.Voice.Config.path()
   def path(:stores), do: FeltStores.config_path()
   def path(:projects), do: Projects.config_path()
 
@@ -342,6 +345,8 @@ defmodule Shuttle.ConfigFiles do
 
   defp validate_decoded(:agents, text, _decoded),
     do: validate_via_shuttle(text, "SHUTTLE_AGENTS_FILE", ["agents", "--json"])
+
+  defp validate_decoded(:voice, _text, decoded), do: Shuttle.Voice.Config.validate(decoded)
 
   defp validate_decoded(:host, text, _decoded),
     do: validate_via_shuttle(text, "SHUTTLE_HOST_CONFIG_FILE", ["host", "--json"])

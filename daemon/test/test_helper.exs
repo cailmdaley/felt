@@ -54,6 +54,8 @@ System.put_env(
 )
 
 System.delete_env("SHUTTLE_PROJECTS")
+System.put_env("SHUTTLE_VOICE_FILE", Path.join(System.tmp_dir!(), "shuttle-test-voice.json"))
+System.put_env("HARK_DIR", Path.join(System.tmp_dir!(), "hark"))
 data_dir = Path.join(System.tmp_dir!(), "shuttle-test-data")
 File.mkdir_p!(data_dir)
 System.put_env("SHUTTLE_DATA_DIR", data_dir)

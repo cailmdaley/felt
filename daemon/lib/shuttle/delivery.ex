@@ -24,7 +24,55 @@ defmodule Shuttle.Delivery do
   @spec deliver(String.t(), String.t(), keyword()) :: result()
   def deliver(fiber_id, text, opts \\ []) do
     worker = if opts[:resume_mode] != "fresh", do: Poller.live_worker(fiber_id)
-    if worker, do: message(worker, text, opts), else: launch(fiber_id, text, opts)
+
+    cond do
+      worker && opts[:message_after_launch] -> await_message_address(fiber_id, text, opts)
+      worker -> message(worker, text, opts)
+      opts[:message_after_launch] -> launch_then_message(fiber_id, text, opts)
+      true -> launch(fiber_id, text, opts)
+    end
+  end
+
+  # A transcript batch is always a native message, including the first one to
+  # a dormant constitution. Its message_id therefore has the same durable
+  # receipt whether the daemon dies before or after the worker starts.
+  defp launch_then_message(fiber_id, text, opts) do
+    result =
+      Poller.dispatch_fiber(fiber_id,
+        force: true,
+        ad_hoc: true,
+        resume_mode: opts[:resume_mode] || "continue"
+      )
+
+    case result do
+      {:ok, _} -> await_message_address(fiber_id, text, opts)
+      {:error, :already_running} -> await_message_address(fiber_id, text, opts)
+      _ -> {:launch, "fresh", result}
+    end
+  end
+
+  defp await_message_address(fiber_id, text, opts) do
+    deadline =
+      System.monotonic_time(:millisecond) + Shuttle.Env.app(:delivery_address_wait_ms, 30_000)
+
+    await_message_address(fiber_id, text, opts, deadline)
+  end
+
+  defp await_message_address(fiber_id, text, opts, deadline) do
+    worker = Poller.live_worker(fiber_id)
+
+    cond do
+      worker && is_binary(worker[:session_uuid]) ->
+        message(worker, text, opts)
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        {:error, 503,
+         "the worker started but has no addressable conversation yet; the transcript retains this batch"}
+
+      true ->
+        Process.sleep(100)
+        await_message_address(fiber_id, text, opts, deadline)
+    end
   end
 
   defp launch(fiber_id, text, opts) do

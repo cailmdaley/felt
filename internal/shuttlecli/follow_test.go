@@ -79,7 +79,7 @@ func TestFollowWordCountSkipsTheStampOrRange(t *testing.T) {
 	}
 }
 
-func TestFollowTimeThresholdFlushesAfterSecondsSinceFirstPendingLine(t *testing.T) {
+func TestFollowTimeThresholdFlushesAfterQuietSinceLastUtterance(t *testing.T) {
 	t.Parallel()
 	b := newFollowBatcher(1000, 15*time.Second, defaultFollowNames)
 	if batch := b.Add("00:00:01 me   hi", followAt(100)); batch != nil {
@@ -88,8 +88,14 @@ func TestFollowTimeThresholdFlushesAfterSecondsSinceFirstPendingLine(t *testing.
 	if batch := b.Tick(followAt(114)); batch != nil {
 		t.Fatalf("flushed early: %q", batch)
 	}
-	if batch := b.Tick(followAt(115)); !reflect.DeepEqual(batch, []string{"00:00:01 me   hi"}) {
-		t.Fatalf("batch = %q", batch)
+	b.Add("00:00:02 me   still speaking", followAt(114))
+	b.Add("# S2 = Martin", followAt(120))
+	if batch := b.Tick(followAt(128)); batch != nil {
+		t.Fatalf("flushed while speech was still arriving: %q", batch)
+	}
+	want := []string{"00:00:01 me   hi", "00:00:02 me   still speaking", "# S2 = Martin"}
+	if batch := b.Tick(followAt(129)); !reflect.DeepEqual(batch, want) {
+		t.Fatalf("batch = %q, want %q", batch, want)
 	}
 }
 

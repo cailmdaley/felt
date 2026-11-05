@@ -1,257 +1,399 @@
 defmodule Shuttle.Meeting.TranscriptRelayTest do
-  use ExUnit.Case, async: false
-
+  use ExUnit.Case, async: true
+  alias Shuttle.Meeting.TranscriptRelay
+  alias Shuttle.Test.Env
   @moduletag :tmp_dir
 
-  test "sends bounded transcript batches and the end marker", %{tmp_dir: root} do
-    transcript = Path.join(root, "meeting.txt")
-    lines = Enum.map_join(1..34, "\n", &"turn #{&1}") <> "\n# ended 10:00:00\n"
-    File.write!(transcript, lines)
-    {:ok, sent} = Agent.start_link(fn -> [] end)
-    observe = fn -> {:ok, %{meeting: %{launch: "launch-1", state: "live", error: nil}}} end
+  setup %{tmp_dir: root} do
+    Env.put_env("SHUTTLE_DATA_DIR", root)
+    {:ok, now} = Agent.start_link(fn -> 1_000 end)
+
+    {:ok, observation} =
+      Agent.start_link(fn ->
+        {:ok, %{meeting: %{launch: "launch", state: "live", error: nil}}}
+      end)
+
+    name = Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}")
+    parent = self()
 
     deliver = fn message ->
-      Agent.update(sent, &[message | &1])
+      send(parent, {:delivery, message})
       {200, %{delivered: true}}
     end
 
-    name = String.to_atom("relay_test_#{System.unique_integer([:positive])}")
+    opts = [
+      name: name,
+      directory: Path.join(root, "relays"),
+      poll_ms: 60_000,
+      clock: fn -> Agent.get(now, & &1) end,
+      observe: fn -> Agent.get(observation, & &1) end,
+      thresholds: fn _ -> %{"words" => 10, "quiet_seconds" => 4} end,
+      deliver: deliver
+    ]
 
-    start_supervised!(
-      {Shuttle.Meeting.TranscriptRelay,
-       name: name,
-       directory: Path.join(root, "relays"),
-       poll_ms: 10,
-       observe: observe,
-       deliver: deliver}
-    )
-
-    assert :ok =
-             Shuttle.Meeting.TranscriptRelay.start(
-               %{launch: "launch-1", transcript: transcript, title: "Cube draft"},
-               "life/games/mtg",
-               "dapmcw68",
-               server: name
-             )
-
-    wait_for(fn -> length(Agent.get(sent, & &1)) == 2 end)
-    messages = Agent.get(sent, &Enum.reverse/1)
-    assert Enum.all?(messages, &(&1.fiber_id == "life/games/mtg"))
-    assert Enum.all?(messages, &(&1.text =~ "Cube draft"))
-    assert hd(messages).text =~ "turn 1"
-    assert hd(messages).text =~ "turn 30"
-    assert List.last(messages).text =~ "turn 34"
-    assert List.last(messages).text =~ "# ended 10:00:00"
-    assert hd(messages).message_id != List.last(messages).message_id
-    assert {:ok, []} = Shuttle.FS.ls(Path.join(root, "relays"))
+    {:ok,
+     name: name,
+     opts: opts,
+     now: now,
+     observation: observation,
+     path: Path.join(root, "meeting.txt"),
+     root: root}
   end
 
-  test "retries the same batch identity and closes a failed capture without a transcript",
-       %{tmp_dir: root} do
-    transcript = Path.join(root, "missing.txt")
-    {:ok, sent} = Agent.start_link(fn -> [] end)
+  test "word and name triggers preserve comments, ranges and the closing marker", c do
+    File.write!(
+      c.path,
+      "# S2 = Martin\n10:00:01-10:00:04 S2 one two three four five six seven eight nine\n10:00:05 me hey Klaud\n# ended 10:00:06\n"
+    )
+
+    start_monitor(c)
+    assert_receive {:delivery, %{text: words} = first}, 1_000
+    assert words =~ "Meeting transcript update (Weekly sync)"
+    assert words =~ "# S2 = Martin"
+    assert words =~ "10:00:01-10:00:04 S2 one two"
+    sync_tasks(c)
+    poll(c)
+    assert_receive {:delivery, %{text: name}}, 1_000
+    assert name =~ "hey Klaud"
+    sync_tasks(c)
+    poll(c)
+    assert_receive {:delivery, %{text: ended}}, 1_000
+    assert ended =~ "# ended"
+    assert first.fiber_id == "fiber-a"
+  end
+
+  test "quiet means since the last speech, not the first line or a comment", c do
+    File.write!(c.path, "10:00:01 me first words\n")
+    start_monitor(c)
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    Agent.update(c.now, fn _ -> 4_000 end)
+    File.write!(c.path, "10:00:02 me another phrase\n", [:append])
+    poll(c)
+    Agent.update(c.now, fn _ -> 7_000 end)
+    File.write!(c.path, "# S2 = Martin\n", [:append])
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    Agent.update(c.now, fn _ -> 8_000 end)
+    poll(c)
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "first words\n10:00:02 me another phrase\n# S2 = Martin"
+  end
+
+  test "a switch flushes the old buffer, and a late line spoken before it still reaches that target",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "first phrase")
+    start_monitor(c, kind: "voice", routes: routes)
+    poll(c)
+
+    assert %{pending: %{fiber_id: "fiber-a", text: "me first phrase"}} =
+             TranscriptRelay.status("launch", server: c.name)
+
+    route(routes, "2026-11-06T10:00:10Z", "fiber-b")
+    # This arrives after the switch, but started before it.
+    record(c.path, "2026-11-06T10:00:09Z", "late old words")
+    record(c.path, "2026-11-06T10:00:11Z", "new words Claude")
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: first}}, 1_000
+    sync_tasks(c)
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: late}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: new}}, 1_000
+    assert first =~ "first phrase"
+    assert late =~ "late old words"
+    assert new =~ "new words Claude"
+    assert new =~ "Live voice from Cail"
+    assert new =~ "room speech may be mixed in; speaker labels: me"
+    refute new =~ "10:00:11"
+    refute first =~ "new words"
+    refute new =~ "late old words"
+  end
+
+  test "subsecond spoken starts choose the route on their own side of a switch", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00.100000Z", "fiber-a")
+    route(routes, "2026-11-06T10:00:00.500000Z", "fiber-b")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:00.499999Z", "old Claude")
+    record(c.path, "2026-11-06T10:00:00.500000Z", "new Claude")
+    start_monitor(c, kind: "voice", routes: routes)
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: old}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: new}}, 1_000
+    assert old =~ "old Claude"
+    assert new =~ "new Claude"
+  end
+
+  test "voice batches stay FIFO within a target while other targets are independent", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "first Claude")
+    record(c.path, "2026-11-06T10:00:02Z", "second Claude")
+    parent = self()
+
+    deliver = fn msg ->
+      send(parent, {:attempt, self(), msg})
+
+      receive do
+        :accept -> {200, %{delivered: true}}
+      end
+    end
+
+    start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
+    assert_receive {:attempt, first, %{text: text}}, 1_000
+    assert text =~ "first Claude"
+    poll(c)
+    refute_receive {:attempt, _, _}, 20
+    send(first, :accept)
+    sync_tasks(c)
+    poll(c)
+    assert_receive {:attempt, second, %{text: text}}, 1_000
+    assert text =~ "second Claude"
+    send(second, :accept)
+    sync_tasks(c)
+  end
+
+  test "a final JSON utterance arriving during exit observation is drained before the footer",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "# ended\n")
 
     observe = fn ->
-      {:ok, %{meeting: %{launch: "launch-2", state: "failed", error: "audio source stopped"}}}
+      record(c.path, "2026-11-06T10:00:01Z", "last spoken words")
+      {:ok, %{meeting: nil}}
     end
 
-    deliver = fn message ->
-      Agent.get_and_update(sent, fn messages ->
-        next = [message | messages]
-
-        {if(length(next) == 1,
-           do: {202, %{delivered: nil, detail: "arrival is unconfirmed"}},
-           else: {200, %{"delivered" => true, "delivery" => "dispatch"}}
-         ), next}
-      end)
-    end
-
-    name = String.to_atom("relay_test_#{System.unique_integer([:positive])}")
-    state_directory = Path.join(root, "relays")
-
-    start_supervised!(
-      {Shuttle.Meeting.TranscriptRelay,
-       name: name, directory: state_directory, poll_ms: 10, observe: observe, deliver: deliver}
-    )
-
-    assert :ok =
-             Shuttle.Meeting.TranscriptRelay.start(
-               %{launch: "launch-2", transcript: transcript, title: "Weekly sync"},
-               "science/cmbx",
-               nil,
-               server: name
-             )
-
-    wait_for(fn -> length(Agent.get(sent, & &1)) == 2 end)
-    [retry, first] = Agent.get(sent, & &1)
-    assert first.message_id == retry.message_id
-    assert first.text == retry.text
-    assert retry.text =~ "Weekly sync"
-    assert retry.text =~ "audio source stopped"
-    assert retry.text =~ "# ended"
-    assert {:ok, []} = Shuttle.FS.ls(state_directory)
+    c = %{c | opts: Keyword.put(c.opts, :observe, observe)}
+    start_monitor(c, kind: "voice", routes: routes)
+    poll(c)
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "last spoken words\n# ended"
   end
 
-  test "keeps an unconfirmed live transcript batch pending", %{tmp_dir: root} do
-    transcript = Path.join(root, "meeting.txt")
-    File.write!(transcript, "speaker: keep this line\n")
-    {:ok, sent} = Agent.start_link(fn -> [] end)
-    observe = fn -> {:ok, %{meeting: %{launch: "launch-3", state: "live", error: nil}}} end
+  test "a slow or failed voice destination does not hold a later target or retry forever", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    route(routes, "2026-11-06T10:00:10Z", "fiber-b")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:09Z", "old Claude")
+    record(c.path, "2026-11-06T10:00:11Z", "new Claude")
+    parent = self()
 
     deliver = fn message ->
-      Agent.get_and_update(sent, fn messages ->
-        next = [message | messages]
+      send(parent, {:attempt, self(), message})
 
-        {if(length(next) == 1,
-           do: {202, %{delivered: nil, detail: "arrival is unconfirmed"}},
-           else: {200, %{delivered: true}}
-         ), next}
-      end)
-    end
-
-    name = String.to_atom("relay_test_#{System.unique_integer([:positive])}")
-
-    start_supervised!(
-      {Shuttle.Meeting.TranscriptRelay,
-       name: name,
-       directory: Path.join(root, "relays"),
-       poll_ms: 10,
-       observe: observe,
-       deliver: deliver}
-    )
-
-    assert :ok =
-             Shuttle.Meeting.TranscriptRelay.start(
-               %{launch: "launch-3", transcript: transcript, title: "Weekly sync"},
-               "science/cmbx",
-               nil,
-               server: name
-             )
-
-    wait_for(fn -> length(Agent.get(sent, & &1)) == 2 end)
-    [retry, first] = Agent.get(sent, & &1)
-    assert first.message_id == retry.message_id
-    assert first.text == retry.text
-    assert retry.text =~ "speaker: keep this line"
-  end
-
-  test "a second joined meeting does not replace an unconfirmed transcript", %{tmp_dir: root} do
-    transcript_a = Path.join(root, "first.txt")
-    transcript_b = Path.join(root, "second.txt")
-    File.write!(transcript_a, "first meeting line\n# ended\n")
-    File.write!(transcript_b, "second meeting line\n# ended\n")
-    {:ok, hold_first} = Agent.start_link(fn -> true end)
-    {:ok, sent} = Agent.start_link(fn -> [] end)
-    observe = fn -> {:ok, %{meeting: nil}} end
-
-    deliver = fn message ->
-      Agent.update(sent, &[message | &1])
-
-      if message.fiber_id == "fiber-a" and Agent.get(hold_first, & &1) do
-        {202, %{delivered: nil, detail: "arrival is unconfirmed"}}
+      if message.fiber_id == "fiber-a" do
+        receive do
+          :fail -> {503, %{delivered: false, error: "owner unavailable"}}
+        end
       else
         {200, %{delivered: true}}
       end
     end
 
-    name = String.to_atom("relay_test_#{System.unique_integer([:positive])}")
-    directory = Path.join(root, "relays")
+    start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
+    assert_receive {:attempt, stalled, %{fiber_id: "fiber-a"}}, 1_000
+    assert_receive {:attempt, _, %{fiber_id: "fiber-b"}}, 1_000
+    send(stalled, :fail)
+    sync_tasks(c)
+    poll(c)
+    refute_receive {:attempt, _, _}, 20
 
-    start_supervised!(
-      {Shuttle.Meeting.TranscriptRelay,
-       name: name, directory: directory, poll_ms: 10, observe: observe, deliver: deliver}
-    )
+    assert %{last: %{"status" => "failed", "fiber_id" => "fiber-a", "detail" => detail}} =
+             TranscriptRelay.status("launch", server: c.name)
 
-    assert :ok =
-             Shuttle.Meeting.TranscriptRelay.start(
-               %{launch: "launch-a", transcript: transcript_a, title: "First"},
-               "fiber-a",
-               nil,
-               server: name
-             )
-
-    wait_for(fn -> Agent.get(sent, &length/1) == 1 end)
-
-    assert :ok =
-             Shuttle.Meeting.TranscriptRelay.start(
-               %{launch: "launch-b", transcript: transcript_b, title: "Second"},
-               "fiber-b",
-               nil,
-               server: name
-             )
-
-    wait_for(fn -> Enum.any?(Agent.get(sent, & &1), &(&1.fiber_id == "fiber-b")) end)
-    assert {:ok, [_pending_first]} = Shuttle.FS.ls(directory)
-    Agent.update(hold_first, fn _ -> false end)
-    wait_for(fn -> Shuttle.FS.ls(directory) == {:ok, []} end)
-
-    first_messages = Agent.get(sent, &Enum.filter(&1, fn msg -> msg.fiber_id == "fiber-a" end))
-    assert length(first_messages) >= 2
-    assert Enum.uniq_by(first_messages, & &1.message_id) |> length() == 1
-    assert Enum.all?(first_messages, &(&1.text =~ "first meeting line"))
+    assert detail =~ "owner unavailable"
   end
 
-  test "a worker restart resumes its persisted pending message", %{tmp_dir: root} do
-    transcript = Path.join(root, "meeting.txt")
-    File.write!(transcript, "pending before crash\n# ended\n")
-    {:ok, hold_delivery} = Agent.start_link(fn -> true end)
-    {:ok, sent} = Agent.start_link(fn -> [] end)
-    observe = fn -> {:ok, %{meeting: nil}} end
+  test "capture waits for the claim and then delivers from byte zero even after recording ended",
+       c do
+    File.write!(c.path, "10:00:01 me early words\n# ended\n")
+    {:ok, claim} = Agent.start_link(fn -> nil end)
+    Agent.update(c.observation, fn _ -> {:ok, %{meeting: nil}} end)
+    opts = Keyword.put(c.opts, :claim, fn _ -> Agent.get(claim, & &1) end)
+    start_monitor(%{c | opts: opts}, fiber: nil)
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    Agent.update(claim, fn _ -> {"claimed/fiber", "owner"} end)
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "claimed/fiber", origin: "owner", text: text}}, 1_000
+    assert text =~ "early words"
+    assert text =~ "# ended"
+  end
 
-    deliver = fn message ->
-      Agent.update(sent, &[message | &1])
+  test "the scribe can rename its provisional fiber without changing the relay destination", c do
+    File.write!(c.path, "10:00:01 me early words\n")
+    uid = "01M6S8NKA5PKK6W95RW3R1FD8P"
 
-      if Agent.get(hold_delivery, & &1),
-        do: {202, %{delivered: nil, detail: "arrival is unconfirmed"}},
-        else: {200, %{delivered: true}}
-    end
+    {:ok, fiber} =
+      Agent.start_link(fn ->
+        %{
+          "uid" => uid,
+          "id" => uid,
+          "slug" => "meetings/provisional",
+          "shuttle" => %{"host" => "owner", "runtime" => %{"meeting" => "launch"}}
+        }
+      end)
 
-    name = String.to_atom("relay_test_#{System.unique_integer([:positive])}")
-    directory = Path.join(root, "relays")
-    dynamic = Module.concat(name, DynamicSupervisor)
+    Env.put_app_env(:meeting_fibers, fn -> [Agent.get(fiber, & &1)] end)
 
-    start_supervised!(
-      {Shuttle.Meeting.TranscriptRelay,
-       name: name, directory: directory, poll_ms: 10, observe: observe, deliver: deliver}
-    )
-
-    assert :ok =
-             Shuttle.Meeting.TranscriptRelay.start(
-               %{launch: "launch-restart", transcript: transcript, title: "Restart test"},
-               "fiber-restart",
-               nil,
-               server: name
-             )
-
-    wait_for(fn -> Agent.get(sent, &length/1) == 1 end)
-    [{_id, original_pid, _type, _modules}] = DynamicSupervisor.which_children(dynamic)
-    Process.exit(original_pid, :kill)
-    Agent.update(hold_delivery, fn _ -> false end)
-
-    wait_for(fn ->
-      case DynamicSupervisor.which_children(dynamic) do
-        [{_id, pid, _type, _modules}] -> pid != original_pid
-        _ -> false
-      end
+    Agent.update(c.observation, fn _ ->
+      {:ok,
+       %{meeting: %{launch: "launch", fiber: "meetings/provisional", state: "live", error: nil}}}
     end)
 
-    wait_for(fn -> Shuttle.FS.ls(directory) == {:ok, []} end)
-
-    [retry, first] = Agent.get(sent, &Enum.take(&1, 2))
-    assert first.message_id == retry.message_id
-    assert first.text == retry.text
+    start_monitor(c, fiber: nil)
+    poll(c)
+    Agent.update(fiber, &Map.put(&1, "slug", "meetings/real-title"))
+    File.write!(c.path, "10:00:02 me Claude\n", [:append])
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: ^uid, text: text}}, 1_000
+    assert text =~ "early words"
   end
 
-  defp wait_for(fun, attempts \\ 200)
-  defp wait_for(fun, 0), do: assert(fun.())
-
-  defp wait_for(fun, attempts) do
-    if fun.(),
-      do: :ok,
-      else:
-        (
-          Process.sleep(10)
-          wait_for(fun, attempts - 1)
-        )
+  test "restart recovers buffered words and reads only the appended suffix", c do
+    File.write!(c.path, "10:00:01 me before crash\n")
+    start_monitor(c)
+    poll(c)
+    stop_supervised!(TranscriptRelay)
+    File.write!(c.path, "10:00:02 me after restart Claude\n", [:append])
+    start_supervised!({TranscriptRelay, c.opts})
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "before crash"
+    assert text =~ "after restart Claude"
+    assert length(Regex.scan(~r/before crash/, text)) == 1
   end
+
+  test "unconfirmed meeting deliveries retain their message id across a monitor restart", c do
+    File.write!(c.path, "10:00:01 me Claude keep this\n# ended\n")
+    parent = self()
+
+    deliver = fn message ->
+      send(parent, {:delivery, message})
+      {202, %{delivered: nil}}
+    end
+
+    c = %{c | opts: Keyword.put(c.opts, :deliver, deliver)}
+    start_monitor(c)
+    assert_receive {:delivery, first}, 1_000
+    stop_supervised!(TranscriptRelay)
+    start_supervised!({TranscriptRelay, c.opts})
+    assert_receive {:delivery, retry}, 1_000
+    assert retry.message_id == first.message_id
+    assert retry.text == first.text
+  end
+
+  test "completed launches are not replayed when the recorder is still stopping or the daemon restarts",
+       c do
+    File.write!(c.path, "one line\n# ended\n")
+    start_monitor(c)
+    assert_receive {:delivery, _}, 1_000
+    sync_tasks(c)
+    worker = worker(c)
+    ref = Process.monitor(worker)
+    send(worker, :poll)
+    assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 1_000
+
+    assert :ok =
+             TranscriptRelay.start(%{launch: "launch", transcript: c.path}, "fiber-a", "owner",
+               server: c.name
+             )
+
+    stop_supervised!(TranscriptRelay)
+    start_supervised!({TranscriptRelay, c.opts})
+    :sys.get_state(Module.concat(c.name, Coordinator))
+    refute_receive {:delivery, _}, 20
+  end
+
+  test "partial lines stay unconsumed and the reader never rereads the consumed prefix", c do
+    File.write!(c.path, "10:00:01 me buffered\n10:00:02 me Cla")
+    start_monitor(c)
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    # Replace the consumed bytes with equally long junk. Offset reading must not see it.
+    {:ok, file} = :file.open(c.path, [:read, :write, :binary])
+    :ok = :file.pwrite(file, 0, String.duplicate("X", byte_size("10:00:01 me buffered")))
+    :ok = :file.close(file)
+    File.write!(c.path, "ude\n", [:append])
+    poll(c)
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "buffered\n10:00:02 me Claude"
+    refute text =~ "XXXXX"
+  end
+
+  defp start_monitor(c, extra \\ []) do
+    opts = Keyword.merge(c.opts, Keyword.take(extra, [:deliver]))
+    start_supervised!({TranscriptRelay, opts})
+
+    row = %{
+      launch: "launch",
+      transcript: c.path,
+      title: "Weekly sync",
+      kind: Keyword.get(extra, :kind, "meeting"),
+      routes_path: extra[:routes]
+    }
+
+    assert :ok =
+             TranscriptRelay.start(row, Keyword.get(extra, :fiber, "fiber-a"), "owner",
+               server: c.name
+             )
+  end
+
+  defp worker(c) do
+    [{_, pid, _, _}] = DynamicSupervisor.which_children(Module.concat(c.name, DynamicSupervisor))
+    pid
+  end
+
+  defp poll(c) do
+    pid = worker(c)
+    send(pid, :poll)
+    GenServer.call(pid, :status)
+  end
+
+  defp sync_tasks(c) do
+    pid = worker(c)
+    state = :sys.get_state(pid)
+
+    for {ref, _} <- state.tasks do
+      # Task result is sent before :DOWN; observing the task exit and then the
+      # worker mailbox gives the worker a deterministic completion barrier.
+      case Process.info(pid, :monitors) do
+        {:monitors, monitors} ->
+          for {:process, task} <- monitors, is_pid(task) do
+            task_ref = Process.monitor(task)
+
+            receive do
+              {:DOWN, ^task_ref, :process, ^task, _} -> :ok
+            after
+              1_000 -> flunk("delivery did not finish #{inspect(ref)}")
+            end
+          end
+
+        nil ->
+          :ok
+      end
+    end
+
+    GenServer.call(pid, :status)
+  end
+
+  defp route(path, at, fiber),
+    do:
+      File.write!(
+        path,
+        Jason.encode!(%{"t" => at, "fiber_id" => fiber, "origin" => "owner"}) <> "\n",
+        [:append]
+      )
+
+  defp record(path, at, text),
+    do:
+      File.write!(
+        Path.rootname(path) <> ".jsonl",
+        Jason.encode!(%{"wall" => at, "speaker" => "me", "text" => text}) <> "\n",
+        [:append]
+      )
 end

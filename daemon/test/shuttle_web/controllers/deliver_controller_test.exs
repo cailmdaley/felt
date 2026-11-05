@@ -82,6 +82,39 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert script =~ "Meeting mode (call)."
   end
 
+  test "a transcript wakes a dormant worker then uses the same deduplicated native message as a live delivery" do
+    fiber = "tests/transcript-first"
+    put_constitution(fiber)
+    Env.put_app_env(:felt_runner, MessageRunner)
+    Env.put_app_env(:deliver_test_pid, self())
+
+    request = %{
+      "fiber_id" => fiber,
+      "text" => "spoken words that must arrive once",
+      "message_id" => "transcript-stable-id",
+      "message_after_launch" => true
+    }
+
+    assert %{"delivered" => true, "delivery" => "message"} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+
+    refute run_script() =~ request["text"]
+    assert_receive {:message, first}
+    assert first["text"] == request["text"]
+    assert first["message_id"] == "transcript-stable-id"
+
+    assert %{"delivered" => true, "delivery" => "message"} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+
+    assert_receive {:message, retry}
+    assert retry["message_id"] == first["message_id"]
+    assert retry["address"] == first["address"]
+
+    assert Enum.count(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end) == 1
+  end
+
   # A previous run of `fiber_id` under `session`, dispatched a minute ago
   # unless `extra` says otherwise, with `extra` runtime fields (a handoff, say).
   defp put_previous_run(fiber_id, session, extra \\ %{}) do
