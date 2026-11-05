@@ -127,7 +127,7 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 	// select the tmux loop and cycle the listener through that loop.
 	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
 	cycle := shellFunction(t, string(script), "remote_host_cycle")
-	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "listen_prelude") + shellFunction(t, string(script), "daemon_listener_cmd") + shellFunction(t, string(script), "disable_competing_supervisors_cmd") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "respawn_launcher_restart_cmd") + probe + cycle + `run_local() { /bin/dash -c "$1"; }
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "listen_prelude") + shellFunction(t, string(script), "daemon_listener_cmd") + shellFunction(t, string(script), "disable_competing_supervisors_cmd") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "respawn_launcher_restart_cmd") + probe + shellFunction(t, string(script), "built_release") + cycle + `run_local() { /bin/dash -c "$1"; }
 activation_window() { run_local "$1"; }
 bad() { echo "$*" >&2; }
 remote_host_cycle "$SHUTTLE_DIR" ''
@@ -187,7 +187,7 @@ listen_prelude() { printf 'sock=; port=1; dd="$HOME/.shuttle"; '; }
 run_local() { bash -c "$1"; }
 activation_window() { run_local "$1"; }
 bad() { echo "$*" >&2; }
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "daemon_listener_cmd") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "disable_competing_supervisors_cmd") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle "$ROOT" ''`
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "daemon_listener_cmd") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "disable_competing_supervisors_cmd") + shellFunction(t, string(script), "built_release") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle "$ROOT" ''`
 	events := filepath.Join(root, "events")
 	cmd := exec.Command("bash", "-c", harness)
 	cmd.Env = append(os.Environ(), "ROOT="+root, "HOME="+home, "PIDS="+pids, "EVENTS="+events, "PATH="+bin+":"+os.Getenv("PATH"))

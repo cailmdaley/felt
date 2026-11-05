@@ -72,8 +72,8 @@ fi
 if (: >&3) 2>/dev/null || (: >&4) 2>/dev/null; then echo launcher-inherited-deploy-lock >&2; exit 92; fi
 bash -c 'trap -p TERM' > "$FLEET_ROOT/launcher-term-trap"
 if [ "${ACTIVATION_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/activation-entered"; while [ ! -f "$FLEET_ROOT/activation-go" ]; do sleep .02; done; fi
-sha=$(git -C "${TEST_RELEASE%/bin/rel}" rev-parse HEAD)
-printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
+sha=$(git -C "${TEST_RELEASE%/bin/*}" rev-parse HEAD)
+printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","incarnation":"fixture-incarnation","contract":{"ok":true},"reconciliation_hold":null,"ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
 echo cycle >> "$EVENTS"
 if [ "${BOOTING_LAUNCHER:-0}" = 1 ]; then sed 's/"ready":true/"ready":false/' "$STATE" > "$STATE.next"; mv "$STATE.next" "$STATE"; fi
 if [ "${BACKGROUND_LAUNCHER:-0}" = 1 ]; then
@@ -145,7 +145,8 @@ case "$1" in
   touch "$FLEET_ROOT/build-entered"
   while [ ! -f "$BUILD_GATE" ]; do sleep .02; done
   [ "${FAIL_BUILD:-0}" != 1 ] || exit 13
-  mkdir -p bin/rel
+  generation=$(mktemp -d "$PWD/bin/rel.generation-XXXXXXXX")
+  ln -s "${generation##*/}" bin/rel-built
   if [ "${2:-}" = SKIP_UI=1 ]; then
     [ -f ui/dist/index.html ] || exit 17
   else
@@ -196,6 +197,12 @@ case "$1 $2" in
 esac
 `)
 	write(filepath.Join(f.bin, "curl"), `#!/bin/sh
+case "$*" in *'/quarantine/release'*)
+ case "$*" in *'"expected":{'*'"incarnation": "fixture-incarnation"'*) ;; *) echo missing-expected-incarnation >&2; exit 22;; esac
+ echo release >> "$EVENTS"
+ printf '{"ok":true}'
+ exit 0;;
+esac
 if grep -q '"ready":false' "$STATE"; then touch "$FLEET_ROOT/readiness-observed"; fi
 cat "$STATE"
 `)
@@ -284,6 +291,37 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployTransactionLaunchHoldsRefuseReleaseAndPruning(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, before, after, diagnostic string }{
+		{"contract", `"contract":{"ok":true}`, `"contract":{"ok":false,"reason":"CLI skew"}`, "CLI skew"},
+		{"migration", `"reconciliation_hold":null`, `"reconciliation_hold":{"reason":"backend conflict"}`, "backend conflict"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDeployFleet(t)
+			launcher := filepath.Join(f.repo, "bin/shuttle-launch")
+			if err := os.WriteFile(launcher, []byte(strings.ReplaceAll(fleetRead(launcher), tc.before, tc.after)), 0755); err != nil {
+				t.Fatal(err)
+			}
+			f.git(t, f.repo, "add", "bin/shuttle-launch")
+			f.git(t, f.repo, "commit", "-m", "held launcher")
+			f.git(t, f.repo, "push", "origin", "main")
+			f.sha = f.git(t, f.repo, "rev-parse", "HEAD")
+			fleetTouch(t, f.gate)
+			cmd, log := f.start(t, "held-"+tc.name)
+			if err := cmd.Wait(); err == nil {
+				t.Fatalf("held deployment succeeded: %s", fleetRead(log))
+			}
+			if !strings.Contains(fleetRead(log), tc.diagnostic) {
+				t.Fatalf("missing launch-hold diagnostic: %s", fleetRead(log))
+			}
+			if events := fleetRead(f.events); strings.Contains(events, "release\n") || strings.Contains(events, "prune\n") {
+				t.Fatalf("held deployment authorized work or pruned rollback: %s", events)
+			}
+		})
 	}
 }
 
@@ -920,7 +958,7 @@ respawn_launcher_restart_cmd() { printf 'echo restart'; }
 run_local() { bash -c "$1"; }
 activation_window() { run_local "$1"; }
 bad() { echo "$*" >&2; }
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle "$ROOT" ''`
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "built_release") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle "$ROOT" ''`
 			cmd := exec.Command("bash", "-c", harness)
 			cmd.Env = append(os.Environ(), "ROOT="+root, "HOME="+filepath.Join(root, "home"), "OWNER="+owner)
 			if owner == "migrated" {

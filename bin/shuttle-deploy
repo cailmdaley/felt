@@ -668,7 +668,11 @@ verify_and_release() {
 activation_window() { # Prepared activation command, previous release root.
   local command="$1" previous="$2" status=0 ack
   printf B >&5 && IFS= read -r ack <&5 || return 1
-  run_local "$command" && verify_and_release "$previous" || status=$?
+  if [ "${3:-}" = coalesced ]; then
+    run_local "$command" && release_verified_deploy "$previous" || status=$?
+  else
+    run_local "$command" && verify_and_release "$previous" || status=$?
+  fi
   printf E >&5 && IFS= read -r ack <&5 || return 1
   return "$status"
 }
@@ -907,7 +911,7 @@ deploy_local() {
 remote_host_cycle() { # Deployed checkout, previous release root; runs on its owner.
   local checkout="$1" previous="$2" supervisor=""
   supervisor="$(run_local "$(supervisor_probe_cmd)")" || { bad "could not inspect the host's supervisor"; return 1; }
-  EXPECTED_RELEASE="$(run_local "if [ -d $(shell_quote "$checkout/bin/rel-built") ]; then cd $(shell_quote "$checkout/bin/rel-built"); else cd $(shell_quote "$checkout/bin/rel"); fi && pwd -P")" || return 1
+  EXPECTED_RELEASE="$(built_release "$checkout")" || return 1
   local cycle
   if [ "$supervisor" = tmux ]; then
     # Keep the live loop; only its listener needs a graceful cycle. Recreating
@@ -933,6 +937,12 @@ $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
     || { bad "could not activate, verify and release on ${HOST:-local}"; return 1; }
 }
 
+built_release() {
+  local path="$1/bin/rel"
+  [ ! -d "$1/bin/rel-built" ] || path="$1/bin/rel-built"
+  if [ -d "$path" ]; then (cd "$path" && pwd -P); else printf '%s\n' "$path"; fi
+}
+
 deploy_step() {
   printf '  %s: %s\n' "${HOST:-local}" "$1" >&2
   DEPLOY_STEP=$1
@@ -954,7 +964,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
     cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
     return 0
   fi
-  EXPECTED_RELEASE="$tree/bin/rel"
+  EXPECTED_RELEASE="$(built_release "$tree")" || return 1
   deploy_step 'inspect current release'
   before="$(version_json || true)"
   if target_is_live "$before"; then
@@ -987,18 +997,19 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
     remote_host_cycle "$tree" "$previous" || { bad 'activate/verify/release: failed'; return 1; }
   else
     deploy_step 'release coalesced daemon'
-    release_verified_deploy "$previous" || return 1
+    activation_window : "$previous" coalesced || return 1
   fi
   deploy_step 'checkout/harness/prune'
   finish_verified_deploy "$SOURCE"
 }
 
 target_is_live() {
-  version_ready "$1" &&
+  version_ready "$1" && [ -z "$(version_launch_health "$1")" ] &&
     [ "$(printf '%s' "$1" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')" = "$TARGET_SHA" ] &&
     [ "$(printf '%s' "$1" | sed -n 's/.*"release_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')" = "$EXPECTED_RELEASE" ] &&
     { [ -z "$DEPLOY_VERSION" ] ||
-      [ "$(printf '%s' "$1" | sed -n 's/.*"mix_vsn"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')" = "$DEPLOY_VERSION" ]; }
+      [ "$(printf '%s' "$1" | sed -n 's/.*"mix_vsn"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')" = "$DEPLOY_VERSION" ]; } &&
+    VERIFIED_RELEASE_RECEIPT="$(printf '%s' "$1" | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v.get("incarnation"),str) and v["incarnation"]; print(json.dumps({k:v[k] for k in ("incarnation","release_path")}))')"
 }
 
 transaction_script() {
@@ -1013,7 +1024,7 @@ transaction_script() {
     "$(shell_quote "$4")" "$(shell_quote "$5")" "$(shell_quote "$6")" "$(shell_quote "$7")"
   declare -f shell_quote ok bad run_local deploy_step deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
     build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
-    version_ready target_is_live wait_for_sha release_quarantine release_verified_deploy finish_verified_deploy verify_and_release activation_window prune_deploy_cmd \
+    version_ready version_launch_health built_release target_is_live wait_for_sha release_quarantine release_verified_deploy finish_verified_deploy verify_and_release activation_window prune_deploy_cmd \
     remember_previous_cmd refresh_checkout_cmd harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
     remote_host_cycle host_transaction
   # All subsequent commands are host-local and inherit this login shell's PATH.

@@ -70,7 +70,7 @@ func TestDeployReleaseCarriesVerifiedIncarnation(t *testing.T) {
 	harness := `VERIFIED_RELEASE_RECEIPT='{"incarnation":"verified-a","release_path":"/generation-a"}'
 shell_quote() { printf "'%s'" "$1"; }
 daemon_call() { printf '%s' "$1"; }
-run_on_visible() { printf '%s\\n' "$2" >&2; printf '{"ok":true}'; }
+run_local() { printf '%s\\n' "$1" >&2; printf '{"ok":true}'; }
 ` + shellFunction(t, string(script), "release_quarantine") + "\nrelease_quarantine ''\n"
 	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
 	if err != nil || !strings.Contains(string(out), `"expected":{"incarnation":"verified-a","release_path":"/generation-a"}`) {
@@ -913,7 +913,7 @@ remote_host_cycle() { printf 'cycle\n' >> "$EVENTS"; verify_and_release ''; }
 wait_for_sha() { printf 'verified\n' >> "$EVENTS"; }
 release_verified_deploy() { printf 'released\n' >> "$EVENTS"; }
 finish_verified_deploy() { :; }
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "verify_and_release") + shellFunction(t, string(script), "host_transaction") + `host_transaction`
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "verify_and_release") + shellFunction(t, string(script), "built_release") + shellFunction(t, string(script), "host_transaction") + `host_transaction`
 			for _, path := range []string{filepath.Join(dir, "sha", "ui", "dist"), filepath.Join(dir, "stage", "ui", "dist")} {
 				if err := os.MkdirAll(path, 0700); err != nil {
 					t.Fatal(err)
