@@ -544,6 +544,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
                 end
 
               _ ->
+                apply_lifecycle_write("reopen", id, "--conclude-run" in flags)
                 {"", 0}
             end
 

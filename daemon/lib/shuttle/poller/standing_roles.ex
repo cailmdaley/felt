@@ -5,7 +5,7 @@ defmodule Shuttle.Poller.StandingRoles do
   Standing constitutions carry a cron `schedule:` — they
   arm (`status: active`, no verdict), fire when a scheduled occurrence has
   elapsed since they were last serviced, run to `status: closed` awaiting
-  review, and re-arm on human accept. This module owns that lifecycle as the
+  review, and re-arm on accept or the next occurrence. This module owns that lifecycle as the
   poller sees it: the catch-up due rule, the awaiting/park transitions on
   worker exit, the daemon-down dead-orphan reconciliation, parsing roles from
   candidate documents, and the display snapshots.
@@ -26,14 +26,14 @@ defmodule Shuttle.Poller.StandingRoles do
   # standing constitution whose worker exited while the daemon was down never
   # fired `handle_worker_exit`, so its document stays `status:active` with no
   # live session. Scan tmux: an owned, active one with NO live session and NO
-  # live watcher is marked awaiting (status:closed) so the cron doesn't
-  # re-fire. Oneshots need no analog — a status:active
+  # live watcher is marked awaiting (status:closed) for review until accepted
+  # or the next occurrence. Oneshots need no analog — a status:active
   # oneshot with no live session is simply eligible again next tick (retries
   # collapsed into the poll loop).
   #
   # `adopt_orphans` (init) and `reconcile_orphaned_sessions` (per-poll) handle
   # the *live* analog: a tmux session exists, we just aren't watching it. This
-  # pass is the *dead* analog for the kind that must NOT re-fire on its own.
+  # pass is the *dead* analog for the kind that publishes each run for review.
   def reconcile_dead_standing_roles(%State{} = state, candidates, scan) do
     # This pass WRITES to fibers (status:closed/open) on the strength of "no
     # live session", so it may only act on POSITIVE evidence: `scan` (the
@@ -267,13 +267,9 @@ defmodule Shuttle.Poller.StandingRoles do
     end
   end
 
-  # Standing dispatch is gated entirely by the felt document.
-  # A role dispatches iff its document says `status: active` with no verdict
-  # (`tempered` unset) AND the cron schedule fired a tick inside the poll window
-  # ending at now. `status: closed` (untempered) is the awaiting-review /
-  # don't-re-fire signal — eligible?'s `status == "closed"` clause already
-  # excludes it before this is reached, and the `active → closed → active`
-  # document transition is the per-cycle "already ran this cycle" gate.
+  # Standing dispatch requires `status: active`, no verdict, and an occurrence
+  # after the last service. The Poller reopens an awaiting run when that next
+  # occurrence arrives, without advancing the service anchor.
   # The one standing-role dispatch rule: an active role is due when a scheduled
   # occurrence has elapsed since it was last serviced. "Last serviced" is the most
   # recent of — the latest dispatch/handoff marker timestamp (durable across
@@ -291,10 +287,8 @@ defmodule Shuttle.Poller.StandingRoles do
   # dispatch marker, advancing the anchor to ~now, so the next poll sees only the
   # next FUTURE occurrence.
   #
-  # Awaiting review can't relaunch: a role that ran is `status: closed` until a
-  # human tempers (accepts) it back to `active`, and `eligible?`'s status gate
-  # excludes closed before this is ever reached. So this rule only governs an
-  # already-armed role; it never resurrects one pending review.
+  # A just-served occurrence never fires twice, including while awaiting review.
+  # Accept concludes the run; a scheduled re-arm preserves the service anchor.
   def standing_role_due?(fiber) do
     with true <- Map.get(fiber, "status", "") == "active",
          true <- is_nil(Map.get(fiber, "tempered")),

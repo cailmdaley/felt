@@ -798,6 +798,8 @@ defmodule Shuttle.PollerTest do
                    "-C",
                    MockRunner.felt_root(),
                    "ls",
+                   "--status",
+                   "all",
                    "--json",
                    "--any",
                    "field:shuttle",
@@ -4320,44 +4322,81 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  test "an awaiting-review (status:closed) standing role is NOT relaunched even with an elapsed occurrence" do
-    # Cail's rule, the other half of catch-up: a role that ran is awaiting review
-    # (status:closed) until a human tempers (accepts) it. Catch-up must never
-    # resurrect it — eligible?'s status gate excludes closed before the due rule
-    # is ever consulted. Every-minute schedule ⇒ an occurrence has certainly
-    # elapsed since the fixed past created_at, so only the closed gate stops it.
-    fiber_id = "tests/standing-awaiting-no-relaunch"
+  for scenario <- [
+        :due,
+        :quarantine,
+        :not_yet_due,
+        :tempered_false,
+        :tempered_true,
+        :other_host,
+        :stashed,
+        :rested
+      ] do
+    test "awaiting standing schedule: #{scenario}" do
+      check_awaiting_standing_schedule(unquote(scenario))
+    end
+  end
 
-    MockRunner.set_fiber(
-      fiber_id,
-      make_fiber(fiber_id, %{"status" => "closed", "tags" => ["constitution", "standing"]})
-    )
+  defp check_awaiting_standing_schedule(scenario) do
+    fiber_id = "tests/standing-awaiting"
+    now = DateTime.utc_now()
+    serviced = DateTime.add(now, -120, :second)
+    occurrence = DateTime.add(now, if(scenario == :not_yet_due, do: -180, else: -60), :second)
+    status = if scenario == :rested, do: "open", else: "closed"
+    attrs = %{"status" => status, "closed_at" => DateTime.to_iso8601(now)}
+    attrs = if scenario == :tempered_false, do: Map.put(attrs, "tempered", false), else: attrs
+    attrs = if scenario == :tempered_true, do: Map.put(attrs, "tempered", true), else: attrs
+
+    attrs =
+      if scenario in [:stashed, :rested], do: Map.put(attrs, "horizon", "stashed"), else: attrs
+
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, attrs))
+    host = if scenario == :other_host, do: "other-host", else: "test-host"
 
     MockRunner.set_shuttle(
       fiber_id,
       """
       kind: standing
+      host: #{host}
       agent: claude-sonnet
       schedule:
         expr: "* * * * *"
-        tz: Europe/Paris
+        tz: UTC
       """,
-      "closed"
+      status
     )
+
+    MockRunner.put_shuttle_fields(fiber_id, %{"dispatched_at" => DateTime.to_iso8601(serviced)})
+    set_resolved_occurrences(fiber_id, occurrence, DateTime.add(now, 60, :second))
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_standing_awaiting_no_relaunch,
         runner: MockRunner,
+        boot_quarantine: scenario == :quarantine,
         poll_interval_ms: 60_000,
         felt_stores: [MockRunner.felt_root()]
       )
 
     sync_poll_cycle!(poller)
 
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+    fires? = scenario in [:due, :quarantine]
+
+    assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
-           end)
+           end) == fires?
+
+    assert MockRunner.fiber(fiber_id)["status"] == if(fires?, do: "active", else: status)
+
+    if fires? do
+      # The tick's re-arm must not consume the occurrence with a handoff stamp.
+      assert is_nil(get_in(MockRunner.fiber(fiber_id), ["shuttle", "runtime", "handed_off_at"]))
+      assert [%{fiber_id: ^fiber_id, state: "running"}] = Poller.snapshot(poller).eligible
+      sync_poll_cycle!(poller)
+
+      assert Enum.count(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end) == 1
+    end
   end
 
   # Awaiting is a DOCUMENT fact (status:closed + untempered), not a runtime-store
@@ -4735,13 +4774,14 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    set_resolved_occurrences(fiber_id, ~U[2026-11-02 08:00:00Z], ~U[2026-11-09 08:00:00Z])
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true)
 
     assert [%{fiber_id: ^fiber_id, state: "running", run_id: run_id}] =
              Poller.snapshot(poller).eligible
 
     refute String.starts_with?(run_id, "adhoc-")
-    assert String.starts_with?(run_id, "29990101T080000")
+    assert run_id == "20261102T080000+0000"
   end
 
   test "forced standing dispatch honors just-filed resume intent before next scheduled window" do
@@ -5769,8 +5809,6 @@ defmodule Shuttle.PollerTest do
       assert is_pid(watcher)
     end)
 
-    %{session: session} = Poller.worker_status(poller, fiber_id)
-
     dispatched_fiber = MockRunner.fiber(fiber_id)
     dispatched_at = get_in(dispatched_fiber, ["shuttle", "runtime", "dispatched_at"])
     assert is_binary(dispatched_at)
@@ -5783,15 +5821,11 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    # The reap here only stops the daemon's watcher (the closed-externally
-    # branch never kills the worker's own tmux session — a real worker ends
-    # its own session as its final act, same as a clean `shuttle
-    # handoff` exit); wait on the stamp itself rather than tmux teardown.
+    # Reaping stamps the clean exit before stale-session cleanup. Wait on the
+    # stamp rather than terminal teardown: it is the durable continuation fact.
     assert wait_until(fn ->
              get_in(MockRunner.fiber(fiber_id), ["shuttle", "runtime", "handed_off_at"]) != nil
            end)
-
-    assert Shuttle.Terminal.present?(MockRunner, session)
 
     closed_fiber = MockRunner.fiber(fiber_id)
     handed_off_at = get_in(closed_fiber, ["shuttle", "runtime", "handed_off_at"])

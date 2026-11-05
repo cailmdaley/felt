@@ -2698,6 +2698,7 @@ defmodule Shuttle.Poller do
     # simply eligible again on the next tick — retries collapsed into the poll
     # loop.
     state = StandingRoles.reconcile_dead_standing_roles(state, candidates, sessions)
+    {candidates, state} = rearm_due_awaiting_standing(state, candidates)
 
     # Parking is dispatch-authority bookkeeping, not capacity accounting: while
     # quarantined, the parked map is rebuilt from the current dispatchable set
@@ -3865,8 +3866,12 @@ defmodule Shuttle.Poller do
     # from its candidate row (no per-miss `show`, no stat), so a poll tick costs
     # one `shuttle ls` per store. A failure degrades `discover_candidates/1` to
     # the store's last-known rows; the boot contract probe checks CLI parity.
+    # Closed standing runs remain visible so their next occurrence can re-arm
+    # them without requiring a human verdict. Eligibility still requires active.
     args = [
       "ls",
+      "--status",
+      "all",
       "--json",
       "--any",
       "field:shuttle",
@@ -3952,12 +3957,10 @@ defmodule Shuttle.Poller do
       # `status: active` is the SOLE dispatch gate. A fiber is shuttle-managed
       # iff it carries a shuttle: block;
       # it dispatches iff status is active. `open` is a draft/paused (not
-      # dispatched); `closed` is the awaiting-review / anti-oscillation gate —
-      # a oneshot terminus, or a standing constitution that ran this cycle and is
-      # `status: closed` + untempered pending a human verdict. Re-arming is an
-      # explicit accept that writes `status: active`. This keeps tempered
-      # fibers from ever oscillating back to dispatching on a later poll (the
-      # citation-audit-skill tempered-never-reverts invariant).
+      # dispatched); `closed` is awaiting review or a verdict. A standing run
+      # stays closed until accepted or its next occurrence re-arms it through
+      # the serialized tick path. Only active documents reach dispatch; an
+      # existing tempered verdict is never automatically cleared.
       status != "active" ->
         false
 
@@ -4643,6 +4646,40 @@ defmodule Shuttle.Poller do
     end
 
     :ok
+  end
+
+  # The next occurrence supersedes an unreviewed standing run. Reopen inside
+  # the Poller's serialized tick without concluding: a new handed_off_at would
+  # consume the occurrence that is authorizing this launch.
+  defp rearm_due_awaiting_standing(state, candidates) do
+    Enum.map_reduce(candidates, state, fn fiber, state ->
+      shuttle = Map.get(fiber, "shuttle") || %{}
+      armed = Map.put(fiber, "status", "active")
+
+      if state.contract_check.ok and Map.get(fiber, "status") == "closed" and
+           is_nil(Map.get(fiber, "tempered")) and Map.get(fiber, "horizon") != "stashed" and
+           host_owned?(shuttle, state.own_host_id) and
+           StandingRoles.standing_role_due?(armed) do
+        slug = Map.fetch!(fiber, "id")
+        store = owning_store(slug, state)
+
+        case LifecycleService.write(:reopen, slug,
+               runner: state.runner,
+               felt_store: store,
+               args: []
+             ) do
+          {:ok, _} ->
+            state = refresh_document_entry(state, slug, [store])
+            {Map.delete(armed, "closed_at"), state}
+
+          {:error, reason} ->
+            Logger.warning("Scheduled re-arm #{slug} failed: #{inspect(reason)}")
+            {fiber, state}
+        end
+      else
+        {fiber, state}
+      end
+    end)
   end
 
   defp cli_reopen(state, fiber_id, args) do

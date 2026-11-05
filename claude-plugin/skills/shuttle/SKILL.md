@@ -81,7 +81,14 @@ shuttle resume <thread>                      # arm it
 shuttle threads <id>                         # their state
 ```
 
-A thread's close or ask wakes its orchestrator, and only that one; `close --quiet` delivers the outcome as context instead. Write a thread's outcome for that orchestrator. An orchestrator reads each result against the thread's Desired State and may temper (`shuttle close <thread> --tempered=true`) or discard (`--tempered=false`) it; review with the human first a thread they asked for. An orchestrator leaving with live threads hands off rather than closes. More in [references/operating.md](references/operating.md#threads-on-the-board).
+A thread's close or ask wakes its orchestrator, and only that one; `close --quiet` delivers the outcome as context instead.
+Write a thread's outcome for that orchestrator.
+An orchestrator reads each result against the thread's Desired State; review with the human first a thread they asked for.
+Temper a oneshot with `shuttle close <thread> --tempered=true`; accept a standing run with `shuttle accept <thread>` (`close --tempered=true` does the same).
+An untempered standing close stays on Awaiting review, but its next scheduled occurrence supersedes that verdict and runs.
+`close --tempered=false` discards the constitution and ends its schedule; `rest` pauses it.
+An orchestrator leaving with live threads hands off rather than closes.
+More in [references/operating.md](references/operating.md#threads-on-the-board).
 
 ## Talking to others
 

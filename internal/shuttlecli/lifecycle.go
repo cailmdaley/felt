@@ -746,9 +746,14 @@ its outcome as context without waking that conversation. Ask always wakes.
 Results never propagate automatically beyond that orchestrator, and a close the
 orchestrator's own session makes is not delivered back to it.
 
-The shuttle block stays installed; closed fibers are ignored by the daemon
-until reopen or accept moves them (resume also re-arms a standing constitution
-awaiting review). When closing your own fiber from tmux, this command ends your
+For a standing constitution, --tempered=true accepts and concludes the run,
+re-arming it for the schedule's next tick, with the same gate as 'accept'.
+Without a verdict it stays on Awaiting review until accepted or the next
+occurrence re-arms it. --tempered=false ends the schedule; rest pauses it.
+Existing verdicts are never automatically re-armed.
+
+The shuttle block stays installed. Closed oneshots wait for reopen.
+When closing your own fiber from tmux, this command ends your
 session after the close succeeds; make it your final action. Closing another
 fiber leaves your session running.` + workerExitIdentityHelp,
 		Args: cobra.MaximumNArgs(1),
@@ -816,6 +821,16 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					}
 					return err
 				}
+			}
+
+			if block.Kind == "standing" && tempered != nil && *tempered {
+				if err := a.acceptStandingRun(args[0], f, st, block, ref); err != nil {
+					return err
+				}
+				if a.isOwnFiber(f) {
+					a.endOwnTerminal()
+				}
+				return nil
 			}
 
 			f.Status = felt.StatusClosed
@@ -1130,14 +1145,6 @@ bypassed: the accept may still apply there.`,
 			if !standingBlock(f, block) {
 				return fmt.Errorf("accept only applies to standing constitutions (fiber has kind=%s); temper a oneshot with 'shuttle close %s --tempered=true' or put it down with 'shuttle rest %s'", block.Kind, args[0], args[0])
 			}
-			// Acceptable: untempered, and closed (awaiting review) or still active —
-			// the board's Temper gesture can land while the run is in flight, before
-			// the exit writer closes it. Drafts and verdicts are refused.
-			if readTempered(f) != nil || (f.Status != felt.StatusClosed && f.Status != felt.StatusActive) {
-				return fmt.Errorf(
-					"fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=%v)",
-					args[0], f.Status, readTempered(f))
-			}
 			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
@@ -1146,33 +1153,40 @@ bypassed: the accept may still apply there.`,
 				return err
 			}
 
-			if block.Schedule == nil {
-				return fmt.Errorf("fiber %s has no schedule", args[0])
-			}
-			// Arming a closed run holds it to the armed-install gate; accepting a
-			// run that is still active arms nothing.
-			if f.Status != felt.StatusActive {
-				if err := a.checkArmable(args[0], "resume", block); err != nil {
-					return err
-				}
-			}
-			computedNext, err := shuttle.NextOccurrence(block.Schedule, time.Now())
-			if err != nil {
-				return fmt.Errorf("computing next occurrence: %w", err)
-			}
-			if err := rearmStanding(f); err != nil {
-				return err
-			}
-			if err := a.writeFiber(st, f); err != nil {
-				return fmt.Errorf("writing fiber: %w", err)
-			}
-			fmt.Fprintf(a.env.Stdout, "accepted run for %s%s (re-armed; next run on the schedule's next tick)\n  next due: %s\n",
-				args[0], ref.Location(), computedNext.Format(time.RFC3339))
-			return nil
+			return a.acceptStandingRun(args[0], f, st, block, ref)
 		},
 	}
 	acceptCmd.Flags().BoolVar(&acceptLocal, "local", false, localFlagUsage)
 	return acceptCmd
+}
+
+// acceptStandingRun resolves an untempered run and rests it until the next tick.
+// Both accept and close --tempered=true use this gate and atomic write.
+func (a *app) acceptStandingRun(query string, f *felt.Felt, st *felt.Storage, block *shuttle.Block, ref felt.Ref) error {
+	if readTempered(f) != nil || (f.Status != felt.StatusClosed && f.Status != felt.StatusActive) {
+		return fmt.Errorf("fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=%v)", query, f.Status, readTempered(f))
+	}
+	if block.Schedule == nil {
+		return fmt.Errorf("fiber %s has no schedule", query)
+	}
+	// Accepting an active run arms nothing; a closed run passes the arming gate.
+	if f.Status != felt.StatusActive {
+		if err := a.checkArmable(query, "resume", block); err != nil {
+			return err
+		}
+	}
+	computedNext, err := shuttle.NextOccurrence(block.Schedule, time.Now())
+	if err != nil {
+		return fmt.Errorf("computing next occurrence: %w", err)
+	}
+	if err := rearmStanding(f); err != nil {
+		return err
+	}
+	if err := a.writeFiber(st, f); err != nil {
+		return fmt.Errorf("writing fiber: %w", err)
+	}
+	fmt.Fprintf(a.env.Stdout, "accepted run for %s%s (re-armed; next run on the schedule's next tick)\n  next due: %s\n", query, ref.Location(), computedNext.Format(time.RFC3339))
+	return nil
 }
 
 // standingBlock reports whether block is a standing constitution — the one

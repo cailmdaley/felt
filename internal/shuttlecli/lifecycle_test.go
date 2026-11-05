@@ -761,6 +761,14 @@ func TestShuttleAccept_RearmsAndKeepsOutcome(t *testing.T) {
 // on the very next poll — while this command just printed "next due: tomorrow
 // morning" to the user.
 func TestShuttleAccept_StampsHandedOffAt(t *testing.T) {
+	for _, args := range [][]string{{"accept", "f", "--local"}, {"close", "f", "--tempered=true", "--local"}} {
+		t.Run(args[0], func(t *testing.T) {
+			testStandingAcceptanceStampsHandedOff(t, args)
+		})
+	}
+}
+
+func testStandingAcceptanceStampsHandedOff(t *testing.T, args []string) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
@@ -782,12 +790,17 @@ func TestShuttleAccept_StampsHandedOffAt(t *testing.T) {
 	}
 
 	before := time.Now().UTC()
-	if out, err := runIn(t, env, dir, "accept", "f", "--local"); err != nil {
-		t.Fatalf("accept --local: %v\n%s", err, out)
+	if out, err := runIn(t, env, dir, args...); err != nil {
+		t.Fatalf("%v: %v\n%s", args, err, out)
+	} else if !strings.Contains(out, "accepted run for f") || !strings.Contains(out, "next due:") {
+		t.Fatalf("acceptance message missing: %s", out)
 	}
 	after := time.Now().UTC()
 
 	got := mustRead(t, storage, "f")
+	if got.Status != felt.StatusActive || got.ClosedAt != nil || readTempered(got) != nil {
+		t.Fatalf("acceptance did not re-arm: %#v", got)
+	}
 	rt := shuttleRuntimeMap(t, got)
 	raw, ok := rt["handed_off_at"].(string)
 	if !ok || raw == "" {
@@ -843,8 +856,10 @@ func TestShuttleAccept_RefusesDraftsAndVerdicts(t *testing.T) {
 			env := testEnv(t)
 			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "f", tc.status, standing, tc.tempered)
-			if _, err := runIn(t, env, dir, "accept", "f", "--local"); err == nil {
-				t.Fatal("accept must refuse")
+			for _, args := range [][]string{{"accept", "f", "--local"}, {"close", "f", "--tempered=true", "--local"}} {
+				if _, err := runIn(t, env, dir, args...); err == nil {
+					t.Fatalf("%v must refuse", args)
+				}
 			}
 			if got := mustRead(t, storage, "f").Status; got != tc.status {
 				t.Fatalf("refused accept wrote status %q", got)

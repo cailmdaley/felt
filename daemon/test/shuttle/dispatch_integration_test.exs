@@ -1736,14 +1736,13 @@ defmodule Shuttle.DispatchIntegrationTest do
     A standing role awaiting review; the human drags it to tempered (accept).
     """)
 
-    # The run under review was dispatched ten minutes ago, so the served
-    # minute's tick is newer than every service marker until accept concludes
-    # the run with a fresh handed_off_at.
+    # The run under review serviced this minute's occurrence. No new occurrence
+    # is due while the human accepts it, so it stays on Awaiting review.
     write_dispatch_marker(
       host,
       "tests/standing-temper-rest",
       "standing-temper-rest-uuid",
-      DateTime.add(DateTime.utc_now(), -600, :second)
+      DateTime.utc_now()
     )
 
     Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
@@ -1803,6 +1802,60 @@ defmodule Shuttle.DispatchIntegrationTest do
       # The scoped SHUTTLE_STORES is cleared when the test exits.
       :ok
     end
+  end
+
+  test "a due closed standing run reopens through the CLI and launches in quarantine", %{
+    host: host
+  } do
+    now = DateTime.utc_now()
+    id = "tests/standing-next-occurrence"
+
+    write_fiber(host, id, """
+    ---
+    name: Standing next occurrence
+    status: closed
+    closed-at: "#{DateTime.to_iso8601(now)}"
+    outcome: Unreviewed digest
+    shuttle:
+      kind: standing
+      agent: claude-sonnet
+      host: test-host
+      project_dir: #{host}
+      schedule:
+        expr: "#{now.minute} #{now.hour} * * *"
+        tz: UTC
+    ---
+    A standing run awaiting review when the next occurrence arrives.
+    """)
+
+    write_dispatch_marker(host, id, "prior-run", DateTime.add(now, -600, :second))
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: IntegrationRunner,
+        boot_quarantine: true,
+        poll_interval_ms: 600_000,
+        felt_stores: [host]
+      )
+
+    assert eventually(fn ->
+             Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and "new-session" in args
+             end)
+           end)
+
+    fm = read_frontmatter(host, id)
+    assert fm["status"] == "active"
+    refute Map.has_key?(fm, "closed-at")
+    assert is_nil(get_in(fm, ["shuttle", "runtime", "handed_off_at"]))
+    assert fm["outcome"] == "Unreviewed digest"
+    assert :sys.get_state(poller).boot_quarantine
+
+    assert Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
+             cmd == "shuttle" and "reopen" in args and "--local" in args and
+               "--conclude-run" not in args
+           end)
   end
 
   # refresh_document/2 is the shared post-mutation seam every board action calls.

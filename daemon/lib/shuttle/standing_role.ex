@@ -163,15 +163,15 @@ defmodule Shuttle.StandingRole do
 
   @doc """
   Run id for a *scheduled* (non-ad-hoc) standing dispatch — a display label for
-  the prompt's `Run:` line, minted from Shuttle's next_due (or now).
+  the prompt's `Run:` line, minted from Shuttle's most recent occurrence (or now).
 
   It is not load-bearing for resume continuity: continuation is decided from the
   fiber's `shuttle.dispatched_at`/`handed_off_at` (`Shuttle.Continuation`), not
   from this id. The id is therefore free to be a fresh timestamp every dispatch.
   """
   @spec dispatch_run_id(t(), DateTime.t()) :: String.t()
-  def dispatch_run_id(%__MODULE__{next_due_at: %DateTime{} = next_due_at}, _now) do
-    Calendar.strftime(next_due_at, "%Y%m%dT%H%M%S%z")
+  def dispatch_run_id(%__MODULE__{prev_due: %DateTime{} = prev_due}, _now) do
+    Calendar.strftime(prev_due, "%Y%m%dT%H%M%S%z")
   end
 
   def dispatch_run_id(%__MODULE__{}, now) do

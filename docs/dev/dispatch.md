@@ -92,13 +92,14 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   Resuming Codex uses the recorded native session UUID and never falls back to a fresh conversation.
   A fiber without a ULID `id:` is refused with `{:uid_missing, message}`, a preflight refusal like the others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
 - **Standing constitutions** — `shuttle.kind: standing` with a cron
-  `schedule:`. Nothing due is stored: an armed (`active`, untempered) one is due when a
-  cron occurrence has passed since it was last serviced — the later of
-  `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation
-  (`StandingRoles.standing_role_due?/1`). Manual dispatch is ad-hoc
-  (`adhoc-<ms>` run id). Worker exit closes it into Awaiting review, and
-  `shuttle accept` or `resume` re-arms it and stamps `handed_off_at` in
-  the same write, so the just-served occurrence never fires again.
+  `schedule:`.
+  Nothing due is stored: an armed (`active`, untempered) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
+  Scheduled run IDs name that most recent occurrence (`prev_due`); manual dispatch is ad-hoc (`adhoc-<ms>`).
+  Worker exit or an untempered close puts the run on Awaiting review without ending its schedule.
+  At the next occurrence after its last service, the owning Poller serially reopens it without stamping `handed_off_at`, then dispatches that occurrence, even in boot quarantine.
+  Until then it stays closed; `status: active` remains the dispatch gate.
+  `shuttle accept`, `close --tempered=true`, or `resume` re-arms and concludes the run by stamping `handed_off_at` in the same write, resting it until the next tick.
+  Existing verdicts (true or false), a stashed horizon, paused/rested constitutions and another host's fibers are never automatically re-armed.
 - **A finished run is finished — there is no reopen.** When a oneshot's
   worker is gone, `Dispatcher.check_resume_intent/2` decides between resuming
   its transcript and starting fresh. A `handed_off_at` newer than
