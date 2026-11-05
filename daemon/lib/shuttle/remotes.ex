@@ -495,7 +495,8 @@ defmodule Shuttle.Remotes do
     end
   end
 
-  defp fresh_document do
+  @doc "Read the persisted fleet through fresh filesystem IO for authorization checks."
+  def fresh_document do
     case read_document(&Shuttle.FS.read/1) do
       {:ok, doc} -> doc
       :error -> nil

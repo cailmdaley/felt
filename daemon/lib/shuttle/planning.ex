@@ -7,7 +7,7 @@ defmodule Shuttle.Planning do
   def quiescent?(%{"shuttle" => block}) when not is_map(block), do: false
 
   def quiescent?(fiber) do
-    case get_in(fiber, ["shuttle", "runtime"]) || %{} do
+    case Map.get(Map.get(fiber, "shuttle", %{}), "runtime", %{}) do
       %{"dispatched_at" => start, "handed_off_at" => finish} -> after?(finish, start)
       %{"dispatched_at" => _} -> false
       %{"session_uuid" => session} when session not in [nil, ""] -> false
@@ -36,14 +36,11 @@ defmodule Shuttle.Planning do
   def removed?(host) when host in [nil, ""], do: false
 
   def removed?(host) do
-    report = Shuttle.TailnetPeers.status()
-
     complete =
-      (report.state == "ok" && report.rejected == []) ||
-        is_list(Shuttle.Env.app(:remotes)) ||
+      is_list(Shuttle.Env.app(:remotes)) ||
         match?(
           %{"defaults" => %{"discover" => false}, "remotes" => entries} when is_list(entries),
-          Remotes.document()
+          Remotes.fresh_document()
         )
 
     complete && match?({:error, {:unknown_origin, _}}, OriginRouter.route(host))
@@ -52,7 +49,7 @@ defmodule Shuttle.Planning do
   def eligible?(%{"shuttle" => %{} = block} = fiber) do
     removed = removed?(block["host"])
     scheduled = block["kind"] == "standing" && !is_nil(block["schedule"])
-    removed || (!scheduled && quiescent?(fiber))
+    is_map(Map.get(block, "runtime", %{})) && (removed || (!scheduled && quiescent?(fiber)))
   end
 
   def eligible?(_), do: false
@@ -84,15 +81,12 @@ defmodule Shuttle.Planning do
             end
           end)
 
-      case Shuttle.LifecycleService.transition(
-             String.to_existing_atom(params["action"]),
-             copy.uid || copy.fiber_id,
-             args,
-             copy.fiber_id
-           ) do
-        {:ok, output} -> {:ok, "Owner unavailable (#{inspect(cause)}).\n#{output}"}
-        other -> other
-      end
+      Shuttle.LifecycleService.transition(
+        String.to_existing_atom(params["action"]),
+        copy.uid || copy.fiber_id,
+        args,
+        copy.fiber_id
+      )
     else
       _ -> nil
     end
@@ -171,10 +165,17 @@ defmodule Shuttle.Planning do
     if Shuttle.ULID.valid?(id), do: id
   end
 
-  defp newer?(%{"fiber" => %{"shuttle" => %{"runtime" => %{"mirrored_at" => stamp}}}}, row),
-    do: after?(stamp, row["fiber"]["modified_at"] || row["fiber"]["updated_at"])
+  defp mirror_stamp(%{"fiber" => %{"shuttle" => %{"runtime" => %{"mirrored_at" => stamp}}}}),
+    do: stamp
 
-  defp newer?(_, _), do: false
+  defp mirror_stamp(_), do: nil
+
+  defp newer?(copy, row) do
+    stamp = mirror_stamp(copy)
+
+    after?(stamp, row["fiber"]["modified_at"] || row["fiber"]["updated_at"]) &&
+      (is_nil(mirror_stamp(row)) || after?(stamp, mirror_stamp(row)))
+  end
 
   defp after?(a, b) when is_binary(a) and is_binary(b) do
     with {:ok, a, _} <- DateTime.from_iso8601(a),

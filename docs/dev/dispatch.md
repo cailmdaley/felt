@@ -6,7 +6,9 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 ## Owner-away exits
 
 A synchronized document can leave the board without granting execution to its viewer.
-All mutations ask the execution owner first. Only the daemon can select an automatic local fallback; the CLI never replays a daemon refusal or bypasses an unavailable local daemon.
+Foreign mutations ask the execution owner through the local daemon.
+Only the daemon can select an automatic mirror exit; the CLI never replays a daemon refusal or bypasses an unavailable local daemon to write a foreign copy.
+The owning host's existing local CLI writes remain available offline.
 
 | Operation | Owner unavailable before send or proven removed | Lost reply / HTTP gateway failure |
 |---|---|---|
@@ -16,11 +18,12 @@ All mutations ask the execution owner first. Only the daemon can select an autom
 A safe exit copy is not armed and has no inconclusive dispatch/session evidence or known owner worker.
 A dispatch needs a strictly later handoff; invalid or zone-less timestamps prove nothing.
 Scheduled standing work cannot mirror an exit: its owner may still run it. A proven removed host can retire, including with unconcluded markers.
-Absence requires a complete discovery report (`state: ok`, no rejected candidates), or an explicitly closed configured fleet. Pending/unavailable discovery and aged-out unreachable peers are unknown, not removed.
+Removal requires an explicitly closed configured fleet with no enabled entry for that owner.
+Discovery absence, including a successful round after an unreachable peer ages out, is unknown rather than proof of removal.
 A missing host is not proof of removal and never permits execution.
 
 The mutation transport bounds connection establishment to two seconds and sends each POST once.
-Every forwarded mutation carries `routed: true`; its receiver refuses an owner mismatch instead of forwarding again.
+Forwarded lifecycle, transition and felt-edit mutations carry `routed: true`; their receivers refuse an owner mismatch instead of forwarding again.
 A stale feed is not a failed request. A dead daemon behind `tailscale serve` returning HTTP 502 remains ambiguous and cannot authorize a mirror.
 The writer rechecks the exact UID/path and owner under the document lock. Contract 34 requires Shuttle's hidden `--mirror-owner` exit guard; Felt has no additional protocol.
 Explicit CLI `--local` writes never route and retain the same foreign-exit safety checks.
@@ -128,7 +131,7 @@ Git reconciles the documents, and the syncing agent resolves genuine conflicts f
   Nothing due is stored: an armed (`active`, untempered) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at`, `closed-at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
   Scheduled run IDs name that most recent occurrence (`prev_due`); manual dispatch is ad-hoc (`adhoc-<ms>`).
   The locked exit write checks the current owner, UID, run id, dispatch timestamp and human lifecycle state, preserving newer runs and human decisions.
-  Recovery publishes a recorded scheduled handoff for review; ad-hoc and unrecorded absences do not supply that conclusion.
+  Recovery publishes a recorded run for review after positive worker absence, except an `adhoc-` run; an unrecorded absence does not supply that conclusion.
   Human resume and reopen, including from an open pause, record a rearm distinct from a worker handoff.
   Worker exit or an untempered close puts the run on Awaiting review without ending its schedule.
   At the next occurrence after both its last service and close, the owning Poller runs `reopen --occurrence` inside its serialized tick, even in boot quarantine.
@@ -156,7 +159,9 @@ Git reconciles the documents, and the syncing agent resolves genuine conflicts f
   branch.
   A standing constitution starts fresh on the autonomous loop.
 
-  A dirty-death restoration is separate from launching another turn. The daemon
+  Only oneshots use dirty-death restoration, separately from launching another turn.
+  Standing runs conclude through their conditional exit writer instead.
+  The daemon
   classifies the last durable hook-event state for the session: a `stop` with no
   later turn activity reopens the same Claude or Pi session with an empty prompt,
   and reattaches to the same Codex thread without starting a turn. A recorded
@@ -179,6 +184,24 @@ Git reconciles the documents, and the syncing agent resolves genuine conflicts f
   attach`); a worker that wants a human's word before it ends stays alive at
   the checkpoint instead of handing off. This is
   the contract, not a gap.
+
+### Standing exit disposition
+
+`standing-transition` reads the current document under its lock and classifies its run through `StandingRunDisposition`.
+An exit observation must still match the owner, UID, run ID and dispatch instant; a newer run or human lifecycle decision is preserved.
+An awaiting write requires active status and no verdict.
+
+| Current disposition | Watched worker exit | Recovery after positive absence |
+|---|---|---|
+| `unrecorded` — no valid dispatch timestamp | Close for review | Leave unchanged |
+| `in_progress` — no handoff at or after this dispatch | Close for review | Close unless the run ID begins `adhoc-` |
+| `handed_off` — handoff at or after dispatch without an owner-rearm verb | Close for review | Close unless the run ID begins `adhoc-` |
+| `rearmed` — current handoff carries `rearmed` or `tempered` | Leave unchanged | Leave unchanged |
+
+Recovery anchors `closed-at` at the latest dispatch/handoff event, not the recovery time.
+An explicit force rearm uses the same conditional writer; a due occurrence uses locked `reopen --occurrence` and preserves its service anchor.
+Neither restores an old standing conversation.
+A mirror exit changes human lifecycle fields and stamps `mirrored_at`; it does not fabricate any of these run dispositions.
 
 ## Uncertain launch reservations
 

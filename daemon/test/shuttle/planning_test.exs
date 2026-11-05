@@ -129,6 +129,19 @@ defmodule Shuttle.PlanningTest do
     assert [] == Planning.reconcile([], [mirror()], %{"worker" => false}, "hub")
   end
 
+  test "Git synchronization acknowledges the same mirror stamp even with an older document date" do
+    [row] =
+      Planning.reconcile(
+        [mirror()],
+        [mirror(%{"horizon" => "stashed"})],
+        %{"worker" => false},
+        "hub"
+      )
+
+    refute row["planning_pending"]
+    refute Map.has_key?(row["fiber"], "horizon")
+  end
+
   test "equal or older mirror stamps, armed copies and known owner workers do not project" do
     for {owner, copy} <- [
           {row(%{"modified_at" => "2026-11-04T11:00:00Z"}), mirror(%{"horizon" => "stashed"})},
@@ -170,5 +183,20 @@ defmodule Shuttle.PlanningTest do
     Env.put_app_env(:remotes, [])
     assert Planning.eligible?(fiber)
     assert Planning.eligible?(Map.put(fiber, "status", "active"))
+
+    for runtime <- [nil, [], "unknown"] do
+      refute Planning.eligible?(put_in(fiber, ["shuttle", "runtime"], runtime))
+    end
+  end
+
+  @tag :tmp_dir
+  test "discovery absence is not removal; only a closed fleet proves it", %{tmp_dir: tmp} do
+    path = Path.join(tmp, "remotes.json")
+    Env.delete_app_env(:remotes)
+    Env.put_env("SHUTTLE_REMOTES_FILE", path)
+    File.write!(path, ~s({"version":1,"remotes":[]}))
+    refute Planning.removed?("worker")
+    File.write!(path, ~s({"version":1,"defaults":{"discover":false},"remotes":[]}))
+    assert Planning.removed?("worker")
   end
 end

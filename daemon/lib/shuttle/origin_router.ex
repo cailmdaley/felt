@@ -137,12 +137,14 @@ defmodule Shuttle.OriginRouter do
     timeout = Keyword.get(opts, :forward_timeout_ms, default_forward_timeout_ms())
     url = Remote.url_for(remote, path)
 
-    body =
-      payload
-      |> Map.delete("origin")
-      |> Map.delete(:origin)
-      |> Map.put("routed", true)
-      |> Jason.encode!()
+    payload = Map.drop(payload, ["origin", :origin])
+
+    payload =
+      if path in ~w(/api/v1/lifecycle /api/v1/transition /api/v1/felt-edit),
+        do: Map.put(payload, "routed", true),
+        else: payload
+
+    body = Jason.encode!(payload)
 
     result = client.post_mutation(url, body, "application/json", timeout)
 

@@ -474,6 +474,57 @@ defmodule ShuttleWeb.OwnerDownTest do
     end
   end
 
+  for action <- ~w(rest pause close) do
+    @tag :tmp_dir
+    test "removed-owner #{action} preserves run disposition against a late standing exit", %{
+      tmp_dir: tmp
+    } do
+      {store, path} = fixture(Path.expand(tmp))
+
+      File.write!(
+        path,
+        "---\nid: #{@uid}\nname: Task\nstatus: active\nshuttle:\n  kind: standing\n  host: worker\n  schedule:\n    expr: '0 9 * * *'\n  runtime:\n    dispatched_at: '2026-11-04T10:00:00Z'\n    run_id: '20261104T100000+0000'\n---\nBody\n"
+      )
+
+      Env.put_app_env(:remotes, [])
+
+      {:ok, poller} =
+        start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
+
+      await_boot_cycle!(poller)
+
+      conn =
+        ShuttleWeb.LifecycleController.create(Plug.Test.conn(:post, "/"), %{
+          "fiber" => @uid,
+          "origin" => "worker",
+          "action" => unquote(action)
+        })
+
+      assert conn.status == 200, conn.resp_body
+      assert conn.resp_body =~ "no execution request was sent"
+
+      request = %{
+        path: path,
+        uid: @uid,
+        host: "worker",
+        dispatched_at: "2026-11-04T10:00:00Z",
+        run_id: "20261104T100000+0000",
+        action: "awaiting",
+        recovery: true
+      }
+
+      assert {:ok, output} =
+               Shuttle.CLI.run(["standing-transition", "--request-json", Jason.encode!(request)])
+
+      assert %{"changed" => false, "disposition" => "in_progress"} = Jason.decode!(output)
+      {:ok, _, _, fm, _} = Shuttle.FiberDoc.read_path(path)
+      assert fm["status"] == if(unquote(action) == "close", do: "closed", else: "open")
+      refute fm["shuttle"]["runtime"]["handed_off_at"]
+      refute fm["shuttle"]["runtime"]["thread_exit_verb"]
+      assert fm["shuttle"]["runtime"]["mirrored_at"]
+    end
+  end
+
   @tag :tmp_dir
   test "unknown discovery and scheduled standing work cannot authorize mirror exits", %{
     tmp_dir: tmp
