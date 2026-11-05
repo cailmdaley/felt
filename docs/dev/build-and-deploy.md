@@ -98,9 +98,9 @@ expected level differs holds at boot with a skew reported on `/api/v1/version`
 and `/api/v1/state`. `make daemon` therefore builds both Go CLIs first
 (`SKIP_CLI=1` trusts both on `PATH`). The Elixir suite shells both CLIs too, so
 run `make cli-install` before `make mix-test` after changing either boundary.
-Contract level 33 includes the CLI-owned locked writers `standing-transition` and `patch-document`.
+Contract level 34 covers the CLI-owned locked writers `standing-transition` and `patch-document`, including daemon-owned exit copies.
 The former checks the current owner, UID, run and human lifecycle state under the fiber lock; a changed run refuses force rearm.
-The latter compares the source document's SHA-256 under that lock and refuses a stale snapshot rather than overwriting a concurrent edit.
+The latter compares the source document's SHA-256 under that lock, validates the proposed YAML and writes its exact layout. A stale snapshot cannot overwrite a concurrent edit.
 
 `shuttle scan-changes` reads the previous metadata index as JSON on stdin.
 Its output has a small JSON header (`ids` and `indexed_paths`), a newline,

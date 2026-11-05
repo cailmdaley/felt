@@ -370,7 +370,7 @@ a block, is `status: active`, does `shuttle.host` match, and is the quarantine
 released?
 
 For multi-host setups, live execution state comes from the owning daemon over the configured connection.
-When it is unavailable, synchronized local documents can supply explicitly stale archive cards and safe exit copies; those writes travel through Git, not an execution request.
+An unavailable known owner's retained rows stay visible and stale. A unique, quiescent synchronized copy can carry a safe exit through Git, not an execution request. Archive reads remain available, but archive documents never manufacture missing live cards.
 For a missing live card, check the owner connection; for a missing local exit copy, also check the local store and Git synchronization.
 
 !!! note "Remotes come from one config file"
