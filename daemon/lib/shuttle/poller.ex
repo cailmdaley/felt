@@ -748,6 +748,17 @@ defmodule Shuttle.Poller do
       lifecycle_uncertain(verb, fiber_id)
   end
 
+  @doc false
+  def mirror_exit(params) do
+    GenServer.call(
+      Shuttle.Env.server(__MODULE__),
+      {:mirror_exit, params},
+      dispatch_call_timeout_ms()
+    )
+  catch
+    :exit, _ -> lifecycle_uncertain("local exit", params["fiber"])
+  end
+
   defp lifecycle_uncertain(verb, %{fiber_id: id}), do: lifecycle_uncertain(verb, id)
 
   defp lifecycle_uncertain(verb, fiber_id) do
@@ -1344,6 +1355,7 @@ defmodule Shuttle.Poller do
       {:refresh_document, _} -> true
       {:refresh_created_document, _, _} -> true
       {:lifecycle_transition, _, _, _} -> true
+      {:mirror_exit, _} -> true
       {:dispatch, _, _} -> true
       {:claim_session, _, _, _} -> true
       {:migrate, _, _, _} -> true
@@ -2374,6 +2386,21 @@ defmodule Shuttle.Poller do
     end
   end
 
+  defp transition_call({:mirror_exit, params}, _from, state) do
+    case Shuttle.OwnerExit.write_exit(params, state.runner) do
+      {:ok, output, copy} ->
+        state =
+          if state.document_cache_ready,
+            do: refresh_document_entry(state, copy.fiber_id, [copy.store]),
+            else: state
+
+        {:reply, {:ok, output}, state}
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
   defp transition_call({:lifecycle_transition, verb, target, args}, _from, state) do
     {store, slug, uid} =
       case target do
@@ -2402,12 +2429,7 @@ defmodule Shuttle.Poller do
     {result, state} =
       case {verb == :rest or (verb == :pause and "--no-kill" not in args), result} do
         {true, {:ok, output}} ->
-          stop =
-            if "--mirror-owner" in args,
-              do: {{:ok, :no_session}, state},
-              else: stop_tracked_worker(state, address)
-
-          case stop do
+          case stop_tracked_worker(state, address) do
             {{:ok, :no_session}, state} -> {{:ok, output}, state}
             {{:ok, session}, state} -> {{:ok, output <> "  worker: stopped #{session}\n"}, state}
             {{:error, reason}, state} -> {{:error, reason}, state}

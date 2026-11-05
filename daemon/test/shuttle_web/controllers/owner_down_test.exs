@@ -68,7 +68,15 @@ defmodule ShuttleWeb.OwnerDownTest do
       {:ok,
        Jason.encode!(%{
          host: "worker",
-         fibers: [%{fiber: %{id: "01ARZ3NDEKTSV4RRFFQ69G5FAX", status: "open", shuttle: %{host: "worker", kind: "oneshot"}}}]
+         fibers: [
+           %{
+             fiber: %{
+               id: "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+               status: "open",
+               shuttle: %{host: "worker", kind: "oneshot"}
+             }
+           }
+         ]
        })}
     end
   end
@@ -82,8 +90,8 @@ defmodule ShuttleWeb.OwnerDownTest do
 
   defmodule VanishingTransitionRunner do
     @behaviour Shuttle.Runner
-    def cmd("shuttle", ["-C", store, "close" | _] = args, opts) do
-      File.rm!(Path.join([store, ".felt", "task", "task.md"]))
+    def cmd("shuttle", ["patch-document"] = args, opts) do
+      File.rm!(Jason.decode!(opts[:input])["path"])
       DocumentRunner.cmd("shuttle", args, opts)
     end
 
@@ -92,8 +100,8 @@ defmodule ShuttleWeb.OwnerDownTest do
 
   defmodule RacingExitRunner do
     @behaviour Shuttle.Runner
-    def cmd("shuttle", ["-C", store, "rest" | _] = args, opts) do
-      path = Path.join(store, ".felt/task/task.md")
+    def cmd("shuttle", ["patch-document"] = args, opts) do
+      path = Jason.decode!(opts[:input])["path"]
       raw = File.read!(path)
 
       case Shuttle.Env.app(:owner_down_edit_race) do
@@ -104,7 +112,7 @@ defmodule ShuttleWeb.OwnerDownTest do
           File.write!(path, String.replace(raw, "host: worker", "host: replacement"))
 
         :vanish ->
-          other = Path.join(store, ".felt/elsewhere/task/task.md")
+          other = Path.join(Path.dirname(Path.dirname(path)), "elsewhere/task/task.md")
           File.mkdir_p!(Path.dirname(other))
           File.rename!(path, other)
       end
@@ -149,7 +157,10 @@ defmodule ShuttleWeb.OwnerDownTest do
   defp stale_owner do
     remote = %Remote{name: "worker", url: "http://127.0.0.1:1"}
     Env.put_app_env(:remotes, [remote])
-    Env.start_scoped!({RemoteFiberRegistry, name: nil, remotes: [remote], auto_poll: false, store_dir: nil})
+
+    Env.start_scoped!(
+      {RemoteFiberRegistry, name: nil, remotes: [remote], auto_poll: false, store_dir: nil}
+    )
   end
 
   defp owner(row, port \\ 0) do
@@ -185,26 +196,56 @@ defmodule ShuttleWeb.OwnerDownTest do
     on_exit(fn -> :gen_tcp.close(listener) end)
     {:ok, port} = :inet.port(listener)
     test = self()
-    start_supervised!({Task, fn ->
-      {:ok, socket} = :gen_tcp.accept(listener, 15_000)
-      send(test, :tls_accepted)
-      receive do
-        :finish -> :ok
-      after
-        15_000 -> :ok
-      end
-      :gen_tcp.close(socket)
-    end})
+
+    start_supervised!(
+      {Task,
+       fn ->
+         {:ok, socket} = :gen_tcp.accept(listener, 15_000)
+         send(test, :tls_accepted)
+
+         receive do
+           :finish -> :ok
+         after
+           15_000 -> :ok
+         end
+
+         :gen_tcp.close(socket)
+       end}
+    )
+
     remote = %Remote{name: "worker", url: "https://127.0.0.1:#{port}"}
     Env.put_app_env(:remotes, [remote])
-    File.write!(Path.join(Path.expand(tmp), "remotes.json"), Jason.encode!(%{version: 1, defaults: %{discover: false}, remotes: [%{name: "worker", url: remote.url}]}))
-    {:ok, poller} = start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
+
+    File.write!(
+      Path.join(Path.expand(tmp), "remotes.json"),
+      Jason.encode!(%{
+        version: 1,
+        defaults: %{discover: false},
+        remotes: [%{name: "worker", url: remote.url}]
+      })
+    )
+
+    {:ok, poller} =
+      start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
+
     await_boot_cycle!(poller)
-    Env.start_scoped!({RemoteFiberRegistry, name: nil, remotes: [remote], client: WarmFeed, auto_poll: false, store_dir: nil})
+
+    Env.start_scoped!(
+      {RemoteFiberRegistry,
+       name: nil, remotes: [remote], client: WarmFeed, auto_poll: false, store_dir: nil}
+    )
+
     :ok = RemoteFiberRegistry.refresh_now()
     refute RemoteFiberRegistry.feeds()["worker"].stale
     before = File.read!(path)
-    conn = ShuttleWeb.LifecycleController.create(Plug.Test.conn(:post, "/"), %{"fiber" => @uid, "origin" => "worker", "action" => "rest"})
+
+    conn =
+      ShuttleWeb.LifecycleController.create(Plug.Test.conn(:post, "/"), %{
+        "fiber" => @uid,
+        "origin" => "worker",
+        "action" => "rest"
+      })
+
     assert_receive :tls_accepted
     assert conn.status == 502, conn.resp_body
     assert File.read!(path) == before
@@ -693,7 +734,15 @@ defmodule ShuttleWeb.OwnerDownTest do
     File.mkdir_p!(Path.dirname(other))
     File.write!(other, body)
     stale_owner()
-    Env.put_app_env(:felt_runner, VanishingTransitionRunner)
+
+    {:ok, poller} =
+      start_poller!(
+        felt_stores: [store],
+        runner: VanishingTransitionRunner,
+        poll_interval_ms: 3_600_000
+      )
+
+    await_boot_cycle!(poller)
 
     conn =
       Shuttle.Test.ApiConn.local_conn(
@@ -704,7 +753,7 @@ defmodule ShuttleWeb.OwnerDownTest do
       |> Plug.Conn.put_req_header("content-type", "application/json")
       |> ShuttleWeb.Endpoint.call(ShuttleWeb.Endpoint.init([]))
 
-    assert conn.status == 422
+    assert conn.status == 422, conn.resp_body
     refute File.exists?(path)
     assert File.read!(other) == body
   end

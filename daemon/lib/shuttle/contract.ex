@@ -20,7 +20,7 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Mirror exits use a locked owner check and a dedicated local-intent stamp.
+  # Daemon exit copies use a locked exact-source patch.
   @expected_level 34
 
   # The daemon-shelled surface each recent level introduced. A skew reason
@@ -54,8 +54,7 @@ defmodule Shuttle.Contract do
     32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)",
     33 =>
       "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)",
-    34 =>
-      "rest/pause/close --mirror-owner (locked exit-only owner check and runtime.mirrored_at stamp)"
+    34 => "patch-document (locked daemon-owned exit copies)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

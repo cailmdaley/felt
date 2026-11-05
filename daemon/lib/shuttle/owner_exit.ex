@@ -1,6 +1,15 @@
 defmodule Shuttle.OwnerExit do
   @moduledoc "Owner-away exits on synchronized copies; configuration and execution stay with the owner."
-  alias Shuttle.{FeltStores, FiberDoc, OriginRouter, Poller, RemoteFiberRegistry, Remotes}
+  alias Shuttle.{
+    FeltStores,
+    FiberDoc,
+    FrontmatterEdit,
+    OriginRouter,
+    Poller,
+    RemoteFiberRegistry,
+    Remotes
+  }
+
   @exit_fields ~w(status tempered closed_at closed-at horizon)
 
   def mutate(path, params, opts \\ []) do
@@ -28,7 +37,9 @@ defmodule Shuttle.OwnerExit do
     case result do
       {:error, {:forward_failed, _, {:not_sent, _} = cause}} when stale_before_request ->
         mirror(params, cause, result)
-      result -> result
+
+      result ->
+        result
     end
   end
 
@@ -100,44 +111,76 @@ defmodule Shuttle.OwnerExit do
 
   def eligible?(_, _), do: false
 
-  # The CLI rechecks the exact resolved document under its advisory lock.
+  # Authorization carries the exact source image into the locked writer.
   def local_copy(identifier, origin, hint \\ nil) do
     policy = policy()
 
     with {:ok, %{path: path} = resolved} <- FeltStores.resolve_request(identifier, hint),
-         {:ok, _, _, %{"shuttle" => %{} = block} = fiber, _} <- FiberDoc.read_path(path),
+         {:ok, _, raw_fm, %{"shuttle" => %{} = block} = fiber, body} <- FiberDoc.read_path(path),
          true <- is_nil(resolved.uid) || fiber["id"] == resolved.uid,
          true <- origin in [nil, "", "local", block["host"], Poller.own_host_id()],
          true <- eligible?(fiber, policy),
          true <- get_in(policy, [block["host"], :stale]) == true,
          rows = policy[block["host"]][:fibers] || [],
          true <- Enum.all?(rows, &(uid(&1) != fiber["id"] || safe_owner?(&1, policy))),
-         do: resolved,
+         do: Map.merge(resolved, %{raw_fm: raw_fm, frontmatter: fiber, body: body}),
          else: (_ -> nil)
   end
 
-  def exit(params, cause) do
-    with true <- action?(params),
-         true <- match?({:not_sent, _}, cause),
-         %{} = copy <- local_copy(params["fiber"], params["origin"], params["fiber_path"]) do
-      args =
-        ["--mirror-owner", params["origin"] || ""] ++
-          Enum.flat_map(~w(tempered quiet actor), fn key ->
-            case Map.fetch(params, key) do
-              {:ok, value} when is_boolean(value) -> ["--#{key}=#{value}"]
-              {:ok, value} when is_binary(value) -> ["--#{key}", value]
-              _ -> []
-            end
-          end)
+  def exit(params, {:not_sent, _}) do
+    if action?(params) && local_copy(params["fiber"], params["origin"], params["fiber_path"]),
+      do: Poller.mirror_exit(params)
+  end
 
-      Shuttle.LifecycleService.transition(
-        String.to_existing_atom(params["action"]),
-        copy.uid || copy.fiber_id,
-        args,
-        copy.fiber_id
-      )
+  def exit(_, _), do: nil
+
+  @doc false
+  def write_exit(params, runner) do
+    with true <- action?(params),
+         %{} = copy <- local_copy(params["fiber"], params["origin"], params["fiber_path"]) do
+      now = DateTime.utc_now() |> DateTime.to_iso8601()
+
+      ops =
+        case params["action"] do
+          "rest" ->
+            [
+              {:put, "status", "open"},
+              {:put, "horizon", "stashed"},
+              {:delete, "tempered"},
+              {:delete, "closed-at"}
+            ]
+
+          "close" ->
+            [
+              {:put, "status", "closed"},
+              {:put, "closed-at", copy.frontmatter["closed-at"] || now},
+              if(params["tempered"] == false,
+                do: {:put, "tempered", false},
+                else: {:delete, "tempered"}
+              )
+            ]
+        end
+
+      runtime =
+        Map.get(copy.frontmatter["shuttle"], "runtime", %{}) |> Map.put("mirrored_at", now)
+
+      updated_fm =
+        FrontmatterEdit.apply(copy.raw_fm, ops ++ [{:put_nested, "shuttle", "runtime", runtime}])
+
+      original = "---\n" <> copy.raw_fm <> "\n---" <> copy.body
+      updated = "---\n" <> updated_fm <> "\n---" <> copy.body
+
+      case FiberDoc.replace_result(copy.path, original, updated, runner: runner) do
+        {:ok, _} ->
+          {:ok,
+           "Saved a local exit copy. This write travels by Git; no execution request was sent.\n",
+           copy}
+
+        error ->
+          error
+      end
     else
-      _ -> nil
+      _ -> {:error, :owner_required}
     end
   end
 
@@ -161,7 +204,10 @@ defmodule Shuttle.OwnerExit do
               _ -> nil
             end
 
-          capable = stale[row["origin"]] == true && copy != nil && eligible?(copy["fiber"], policy) && safe_owner?(row, policy)
+          capable =
+            stale[row["origin"]] == true && copy != nil && eligible?(copy["fiber"], policy) &&
+              safe_owner?(row, policy)
+
           pending = copy != nil && eligible?(copy["fiber"], policy) && newer?(copy, row)
 
           fiber =
@@ -186,6 +232,7 @@ defmodule Shuttle.OwnerExit do
     missing =
       Enum.filter(archives, fn row ->
         owner = host(row)
+
         !MapSet.member?(seen, uid(row)) && is_binary(owner) && owner not in ["", local] &&
           stale[owner] == true
       end)

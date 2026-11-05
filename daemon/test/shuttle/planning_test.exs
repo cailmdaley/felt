@@ -7,7 +7,12 @@ defmodule Shuttle.OwnerExitTest do
   setup do
     remote = %Shuttle.Remote{name: "worker", url: "http://127.0.0.1:1"}
     Env.put_app_env(:remotes, [remote])
-    Env.start_scoped!({Shuttle.RemoteFiberRegistry, name: nil, remotes: [remote], auto_poll: false, store_dir: nil})
+
+    Env.start_scoped!(
+      {Shuttle.RemoteFiberRegistry,
+       name: nil, remotes: [remote], auto_poll: false, store_dir: nil}
+    )
+
     :ok
   end
 
@@ -32,7 +37,11 @@ defmodule Shuttle.OwnerExitTest do
   end
 
   test "mirror exits are plain Rest, Close and Discard, never Pause or rest --until" do
-    for params <- [%{"action" => "rest"}, %{"action" => "close"}, %{"action" => "close", "tempered" => false}],
+    for params <- [
+          %{"action" => "rest"},
+          %{"action" => "close"},
+          %{"action" => "close", "tempered" => false}
+        ],
         do: assert(OwnerExit.action?(params))
 
     for params <- [
@@ -43,7 +52,8 @@ defmodule Shuttle.OwnerExitTest do
           %{"action" => "rest", "until" => "2026-12-01"},
           %{"action" => "rest", "until" => "work/blocker"},
           %{"action" => "close", "tempered" => true}
-        ], do: refute(OwnerExit.action?(params))
+        ],
+        do: refute(OwnerExit.action?(params))
   end
 
   defp row(fields \\ %{}) do
@@ -208,7 +218,9 @@ defmodule Shuttle.OwnerExitTest do
     end
 
     copy = row(%{"uid" => nil, "id" => "task"})
-    assert [%{"local_exit" => false}] = OwnerExit.reconcile([], [copy], %{"worker" => true}, "hub")
+
+    assert [%{"local_exit" => false}] =
+             OwnerExit.reconcile([], [copy], %{"worker" => true}, "hub")
   end
 
   test "an absent fleet entry never authorizes an exit, including active and standing copies" do
@@ -261,5 +273,4 @@ defmodule Shuttle.OwnerExitTest do
 
     assert result["fiber"] == owner["fiber"]
   end
-
 end

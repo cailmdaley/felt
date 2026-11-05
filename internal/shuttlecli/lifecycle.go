@@ -134,7 +134,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 			}
 			defer unlock()
 
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
@@ -260,7 +260,7 @@ this host is killed.` + workerExitIdentityHelp,
 			}
 			defer unlock()
 
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
@@ -319,16 +319,14 @@ this host is killed.` + workerExitIdentityHelp,
 				f.Due = nil
 			}
 			restedAt := time.Now().UTC().Format(time.RFC3339Nano)
-			if !a.localMirror {
-				if err := shuttle.SetRuntimeField(f, "handed_off_at", restedAt); err != nil {
-					return fmt.Errorf("stamping handed_off_at: %w", err)
-				}
-				if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "rested"); err != nil {
-					return fmt.Errorf("stamping thread_exit_verb: %w", err)
-				}
-				if err := markOrchestratorAct(st, f, restedAt, actor); err != nil {
-					return err
-				}
+			if err := shuttle.SetRuntimeField(f, "handed_off_at", restedAt); err != nil {
+				return fmt.Errorf("stamping handed_off_at: %w", err)
+			}
+			if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "rested"); err != nil {
+				return fmt.Errorf("stamping thread_exit_verb: %w", err)
+			}
+			if err := markOrchestratorAct(st, f, restedAt, actor); err != nil {
+				return err
 			}
 			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
@@ -373,7 +371,6 @@ this host is killed.` + workerExitIdentityHelp,
 		},
 	}
 	restCmd.Flags().BoolVar(&restLocal, "local", false, localFlagUsage)
-	addMirrorOwnerFlag(restCmd)
 	restCmd.Flags().StringVar(&until, "until", "", "What the rest lasts until: a return date (YYYY-MM-DD), a fiber or free text; empty for neither")
 	restCmd.Flags().StringVar(&restActor, "actor", "", actorFlagUsage)
 	_ = restCmd.Flags().MarkHidden("actor")
@@ -810,7 +807,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					}
 					anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
 					if routed, err := a.routeLifecycle(cmd, "close", args[0], anyBlock, fields); routed || err != nil {
-						if routed && err == nil && a.isOwnFiber(candidate) && !a.localMirror {
+						if routed && err == nil && a.isOwnFiber(candidate) {
 							a.endOwnTerminal()
 						}
 						return err
@@ -823,7 +820,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			}
 			defer unlock()
 
-			owner, err := a.lifecycleOwner(cmd, args, f, st, block)
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
 			}
@@ -839,7 +836,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					fields["actor"] = actor
 				}
 				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
-					if routed && err == nil && a.isOwnFiber(f) && !a.localMirror {
+					if routed && err == nil && a.isOwnFiber(f) {
 						a.endOwnTerminal()
 					}
 					return err
@@ -882,21 +879,19 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			} else {
 				setClosedAtIfMissing(f)
 			}
-			if !a.localMirror {
-				// Bind quiet to this publication stamp; an ordinary close clears it.
-				quietStamp := ""
-				if closeQuiet {
-					quietStamp = f.ClosedAt.Format(time.RFC3339Nano)
-				}
-				if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
-					return err
-				}
-				if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "closed"); err != nil {
-					return err
-				}
-				if err := markOrchestratorAct(st, f, f.ClosedAt.Format(time.RFC3339Nano), a.actorSession(closeActor)); err != nil {
-					return err
-				}
+			// Bind quiet to this publication stamp; an ordinary close clears it.
+			quietStamp := ""
+			if closeQuiet {
+				quietStamp = f.ClosedAt.Format(time.RFC3339Nano)
+			}
+			if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
+				return err
+			}
+			if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "closed"); err != nil {
+				return err
+			}
+			if err := markOrchestratorAct(st, f, f.ClosedAt.Format(time.RFC3339Nano), a.actorSession(closeActor)); err != nil {
+				return err
 			}
 			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
@@ -927,7 +922,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			default:
 				fmt.Fprintln(a.env.Stdout, "  tempered: false")
 			}
-			if a.isOwnFiber(f) && !a.localMirror {
+			if a.isOwnFiber(f) {
 				a.endOwnTerminal()
 			}
 			return nil
@@ -936,7 +931,6 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 	closeCmd.Flags().BoolVar(&closeQuiet, "quiet", false, "Deliver the outcome as context without waking the nearest orchestrator")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to keep a standing verdict or clear a oneshot's")
 	closeCmd.Flags().Bool("local", false, localFlagUsage)
-	addMirrorOwnerFlag(closeCmd)
 	closeCmd.Flags().StringVar(&closeActor, "actor", "", actorFlagUsage)
 	_ = closeCmd.Flags().MarkHidden("actor")
 	return closeCmd

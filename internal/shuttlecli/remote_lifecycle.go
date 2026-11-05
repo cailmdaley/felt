@@ -25,9 +25,8 @@ const maxLaunchMessageBytes = 64 << 10
 // unknown or malformed fleet entry must fail before an origin-routed endpoint
 // can degrade the request to this daemon's local mirror.
 //
-// Under --local execution changes refuse a foreign owner rather than routing
-// back through the daemon. lifecycleOwner separately validates the daemon's
-// mirror exit after an owner cannot arbitrate.
+// Under --local every foreign owner refuses rather than routing back through
+// the daemon. Only the daemon owns exit fallback.
 func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (string, error) {
 	return a.routeOwner(cmd, args, blockHost, localOnly(cmd))
 }
@@ -82,7 +81,7 @@ func (a *app) routeOwner(cmd *cobra.Command, args []string, blockHost string, lo
 
 // localFlagUsage is the one description of --local on every verb that can
 // route to an owning daemon.
-const localFlagUsage = "Write here without routing; only safe foreign exits can travel by Git"
+const localFlagUsage = "Write here without routing; refuse foreign-owned fibers"
 
 // localOnly reports whether cmd runs with --local set.
 func localOnly(cmd *cobra.Command) bool {
@@ -183,12 +182,8 @@ func remoteRouteError(cmd *cobra.Command, args []string, owner string, err error
 	}
 
 	if !requestCouldHaveReachedDaemon(err) {
-		hint := "Start it before retrying"
-		if exitCommand(cmd) {
-			hint += ", or use --local for an explicit local exit"
-		}
 		return ownerRouteRefusal(cmd, args, owner,
-			fmt.Sprintf("the local shuttle daemon is unreachable: %v; it did not receive the request. %s", err, hint))
+			fmt.Sprintf("the local shuttle daemon is unreachable: %v; it did not receive the request. Start it before retrying", err))
 	}
 	return fmt.Errorf("could not confirm routing to owning host %q through the local shuttle daemon: %v; the action may have been applied. Check the fiber on %q before retrying. Run `%s` there if needed", owner, err, owner, command)
 }

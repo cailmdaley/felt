@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,38 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/cailmdaley/felt/internal/felt"
 )
-
-func TestPlanningStateTable(t *testing.T) {
-	data, err := os.ReadFile("../../daemon/test/fixtures/planning/states.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cases []struct {
-		Name      string
-		Fiber     map[string]any
-		Quiescent bool
-	}
-	if err := json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range cases {
-		t.Run(tc.Name, func(t *testing.T) {
-			f, _ := felt.New("task", "Task")
-			f.Status, _ = tc.Fiber["status"].(string)
-			if block, ok := tc.Fiber["shuttle"]; ok {
-				if err := f.SetExtraField("shuttle", block); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if got := exitFiber(f); got != tc.Quiescent {
-				t.Fatalf("quiescent=%v want %v", got, tc.Quiescent)
-			}
-		})
-	}
-}
 
 // An override runs the same public probes against a preserved pre-fix binary.
 func planningProbeBinary(t *testing.T) string {
@@ -90,6 +58,30 @@ func exitFixture(t *testing.T, content, fleet string) (string, string, string, s
 
 const foreignDraft = "status: open\nshuttle:\n  kind: oneshot\n  host: worker"
 const configuredWorker = `{"version":1,"defaults":{"discover":false},"remotes":[{"name":"worker","port":4001}]}`
+
+func TestForeignLocalExitNeverMirrors(t *testing.T) {
+	binary := planningProbeBinary(t)
+	for _, args := range [][]string{{"rest", "task", "--local"}, {"close", "task", "--local"}, {"close", "task", "--local", "--tempered=false"}, {"rest", "task", "--local", "--mirror-owner", "worker"}, {"close", "task", "--local", "--mirror-owner", "worker"}} {
+		t.Run(strings.Join(args, "/"), func(t *testing.T) {
+			dir, path, home, remotes := exitFixture(t, foreignDraft, configuredWorker)
+			before, _ := os.ReadFile(path)
+			out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), args...)
+			after, _ := os.ReadFile(path)
+			if err == nil || string(after) != string(before) {
+				t.Fatalf("user-reachable mirror path: %v %s\n%s", err, out, after)
+			}
+		})
+	}
+}
+
+func TestDaemonDownExitNeverSuggestsForeignLocalWrite(t *testing.T) {
+	binary := planningProbeBinary(t)
+	dir, _, home, remotes := exitFixture(t, foreignDraft, configuredWorker)
+	out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), "rest", "task")
+	if err == nil || strings.Contains(out, "--local") || !strings.Contains(out, "Start it") {
+		t.Fatalf("daemon-down recovery bypasses owner policy: %v %s", err, out)
+	}
+}
 
 func TestMirrorExitRejectsPauseAndRestUntil(t *testing.T) {
 	binary := planningProbeBinary(t)
@@ -193,26 +185,10 @@ func TestExitExplicitLocalChecksStandingAndDiscovery(t *testing.T) {
 		before, _ := os.ReadFile(path)
 		out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), "rest", "task", "--local")
 		after, _ := os.ReadFile(path)
-		if err == nil || string(before) != string(after) || !strings.Contains(out, "owner decides") {
+		if err == nil || string(before) != string(after) || !strings.Contains(out, "is owned by host") {
 			t.Fatalf("standing schedule was locally parked: %v %s", err, out)
 		}
 	})
-}
-
-func TestMirrorExitPreservesRunAndPublicationEvidence(t *testing.T) {
-	binary := planningProbeBinary(t)
-	for _, verb := range [][]string{{"rest"}, {"close", "--quiet", "--tempered=false"}} {
-		t.Run(verb[0], func(t *testing.T) {
-			content := "status: closed\nshuttle:\n  kind: oneshot\n  host: worker\n  runtime:\n    thread_exit_verb: rearmed\n    quiet_closed_at: '2026-11-04T11:00:00Z'"
-			dir, path, home, remotes := exitFixture(t, content, configuredWorker)
-			args := append([]string{verb[0], "task", "--local", "--mirror-owner", "worker"}, verb[1:]...)
-			out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), args...)
-			after, _ := os.ReadFile(path)
-			if err != nil || !strings.Contains(string(after), "thread_exit_verb: rearmed") || !strings.Contains(string(after), "quiet_closed_at: '2026-11-04T11:00:00Z'") || strings.Contains(string(after), "handed_off_at:") {
-				t.Fatalf("mirror manufactured run/publication evidence: %v %s\n%s", err, out, after)
-			}
-		})
-	}
 }
 
 func TestExitUnownedActiveAndDispatchedParity(t *testing.T) {
@@ -237,32 +213,5 @@ func TestExitUnscheduledStandingRequiresOwner(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	if err == nil || string(before) != string(after) {
 		t.Fatalf("unscheduled standing mirrored: %v %s", err, out)
-	}
-}
-
-func TestExitMirrorChecksOwnerAndDoesNotInventExecution(t *testing.T) {
-	binary := planningProbeBinary(t)
-	for _, ending := range []string{"Z", ""} {
-		t.Run("zone="+ending, func(t *testing.T) {
-			dir, path, home, remotes := exitFixture(t, "status: closed\nshuttle:\n  kind: oneshot\n  host: worker\n  runtime:\n    dispatched_at: '2026-11-04T10:00:00"+ending+"'\n    handed_off_at: '2026-11-04T11:00:00"+ending+"'", configuredWorker)
-			before, _ := os.ReadFile(path)
-			out, err := runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), "rest", "task", "--local", "--mirror-owner", "worker")
-			after, _ := os.ReadFile(path)
-			if ending == "" {
-				if err == nil || string(before) != string(after) {
-					t.Fatalf("zone-less evidence accepted: %v %s", err, out)
-				}
-				return
-			}
-			if err != nil || !strings.Contains(string(after), "mirrored_at:") || !strings.Contains(out, "no execution request was sent") || strings.Contains(string(after), "session_uuid:") {
-				t.Fatalf("mirror write: %v %s\n%s", err, out, after)
-			}
-			before = after
-			out, err = runPlanningProbe(binary, dir, planningProbeEnv(home, "http://127.0.0.1:1", remotes), "rest", "task", "--local", "--mirror-owner", "different")
-			after, _ = os.ReadFile(path)
-			if err == nil || string(before) != string(after) {
-				t.Fatalf("changed owner accepted: %v %s", err, out)
-			}
-		})
 	}
 }
