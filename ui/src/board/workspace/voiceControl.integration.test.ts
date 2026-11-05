@@ -10,11 +10,14 @@ it('shows pending words only on their card and replaces them when sent', () => {
   const voice = new Voice('')
   voice.status = status
   const here = voiceControl(voice, card({ id: 'a' }), vi.fn())
-  const away = voiceControl(voice, card({ id: 'b' }), vi.fn())
+  const open = vi.fn()
+  const away = voiceControl(voice, card({ id: 'b' }), open)
   document.body.append(here.chip, here.pending, away.chip, away.pending)
   expect(here.chip.textContent).toBe('Voice · Here')
   expect(here.pending.textContent).toBe('hello there')
   expect(away.chip.textContent).toBe('Voice · Alpha')
+  ;(away.chip as HTMLButtonElement).click()
+  expect(open).toHaveBeenCalledWith('a', 'local')
   expect(away.pending.textContent).toBe('')
   voice.status = { ...status, pending: null, state: 'yielded' }
   // Simulate the controller's update notification.

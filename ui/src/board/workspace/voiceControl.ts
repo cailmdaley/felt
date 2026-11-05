@@ -39,6 +39,12 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
     if (menu) { close(); return }
     const state = voice.status
     if (!state) return
+    const target = state.target
+    const elsewhere = target && (!matches(target.fiber_id) || (!!target.origin && target.origin !== card.originId))
+    if (elsewhere && state.enabled && !state.muted && state.state === 'listening') {
+      open(target.fiber_id, target.origin)
+      return
+    }
     menu = document.createElement('div')
     menu.className = 'ws-select-picker'
     menu.setAttribute('role', 'menu')
