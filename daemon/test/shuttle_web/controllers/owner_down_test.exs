@@ -63,6 +63,16 @@ defmodule ShuttleWeb.OwnerDownTest do
     end
   end
 
+  defmodule WarmFeed do
+    def get(_url, _timeout) do
+      {:ok,
+       Jason.encode!(%{
+         host: "worker",
+         fibers: [%{fiber: %{id: "01ARZ3NDEKTSV4RRFFQ69G5FAX", status: "open", shuttle: %{host: "worker", kind: "oneshot"}}}]
+       })}
+    end
+  end
+
   defmodule DocumentRunner do
     @behaviour Shuttle.Runner
     def cmd("tmux", _, _), do: {"no private test workers", 1}
@@ -136,6 +146,12 @@ defmodule ShuttleWeb.OwnerDownTest do
     {store, path}
   end
 
+  defp stale_owner do
+    remote = %Remote{name: "worker", url: "http://127.0.0.1:1"}
+    Env.put_app_env(:remotes, [remote])
+    Env.start_scoped!({RemoteFiberRegistry, name: nil, remotes: [remote], auto_poll: false, store_dir: nil})
+  end
+
   defp owner(row, port \\ 0) do
     api =
       start_supervised!(
@@ -160,6 +176,38 @@ defmodule ShuttleWeb.OwnerDownTest do
       [],
       body_format: :binary
     )
+  end
+
+  @tag :tmp_dir
+  test "a fresh owner accepting and stalling TLS cannot authorize a mirror exit", %{tmp_dir: tmp} do
+    {store, path} = fixture(Path.expand(tmp))
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    on_exit(fn -> :gen_tcp.close(listener) end)
+    {:ok, port} = :inet.port(listener)
+    test = self()
+    start_supervised!({Task, fn ->
+      {:ok, socket} = :gen_tcp.accept(listener, 15_000)
+      send(test, :tls_accepted)
+      receive do
+        :finish -> :ok
+      after
+        15_000 -> :ok
+      end
+      :gen_tcp.close(socket)
+    end})
+    remote = %Remote{name: "worker", url: "https://127.0.0.1:#{port}"}
+    Env.put_app_env(:remotes, [remote])
+    File.write!(Path.join(Path.expand(tmp), "remotes.json"), Jason.encode!(%{version: 1, defaults: %{discover: false}, remotes: [%{name: "worker", url: remote.url}]}))
+    {:ok, poller} = start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
+    await_boot_cycle!(poller)
+    Env.start_scoped!({RemoteFiberRegistry, name: nil, remotes: [remote], client: WarmFeed, auto_poll: false, store_dir: nil})
+    :ok = RemoteFiberRegistry.refresh_now()
+    refute RemoteFiberRegistry.feeds()["worker"].stale
+    before = File.read!(path)
+    conn = ShuttleWeb.LifecycleController.create(Plug.Test.conn(:post, "/"), %{"fiber" => @uid, "origin" => "worker", "action" => "rest"})
+    assert_receive :tls_accepted
+    assert conn.status == 502, conn.resp_body
+    assert File.read!(path) == before
   end
 
   @tag :tmp_dir
@@ -400,6 +448,7 @@ defmodule ShuttleWeb.OwnerDownTest do
     tmp_dir: tmp
   } do
     tmp = Path.expand(tmp)
+    stale_owner()
 
     for race <- [:arm, :owner, :vanish] do
       {store, path} = fixture(Path.join(tmp, to_string(race)))
@@ -611,6 +660,7 @@ defmodule ShuttleWeb.OwnerDownTest do
       start_poller!(felt_stores: [store], runner: DocumentRunner, poll_interval_ms: 3_600_000)
 
     await_boot_cycle!(poller)
+    stale_owner()
     assert Shuttle.OwnerExit.local_copy(@uid, "worker")
 
     conn =
@@ -642,7 +692,7 @@ defmodule ShuttleWeb.OwnerDownTest do
     other = Path.join([store, ".felt", "elsewhere", "task", "task.md"])
     File.mkdir_p!(Path.dirname(other))
     File.write!(other, body)
-    Env.put_app_env(:remotes, [%Remote{name: "worker", url: "http://127.0.0.1:1"}])
+    stale_owner()
     Env.put_app_env(:felt_runner, VanishingTransitionRunner)
 
     conn =

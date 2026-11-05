@@ -10,7 +10,7 @@ Foreign mutations ask the execution owner through the local daemon.
 Only the daemon can select an automatic mirror exit; the CLI never replays a daemon refusal or bypasses an unavailable local daemon to write a foreign copy.
 The owning host's existing local CLI writes remain available offline.
 
-| Operation | Owner unavailable before send | Lost reply / HTTP gateway failure |
+| Operation | Known owner already stale, request fails before send | Lost reply / HTTP gateway failure |
 |---|---|---|
 | Plain `rest`, `close`, `close --tempered=false` | Mirror a safe local exit; explain Git synchronization and no execution request | Refuse without replay |
 | `pause`, `rest --until`, Temper, configuration, publication, placement, launch, resume or reopen | Refuse; the owner decides | Refuse without replay |
@@ -21,7 +21,7 @@ Standing work, with or without a schedule, cannot mirror an exit. An unknown or 
 
 The mutation transport bounds connection establishment to five seconds and sends each POST once.
 Every forwarded mutation carries `x-shuttle-routed: 1`, outside its JSON payload. Updated receivers refuse an owner mismatch instead of forwarding again; older owners can consume their unchanged payloads.
-A stale feed is not a failed request. A dead daemon behind `tailscale serve` returning HTTP 502 remains ambiguous and cannot authorize a mirror.
+A stale feed is not a failed request: both are required. A timeout or failed TLS handshake on a fresh owner cannot authorize fallback. The registry must already hold that known owner as stale before the request starts. A dead daemon behind `tailscale serve` returning HTTP 502 remains ambiguous and cannot authorize a mirror.
 The writer rechecks the exact UID/path and owner under the document lock. Contract 34 requires Shuttle's hidden `--mirror-owner` exit guard; Felt has no additional protocol.
 Explicit CLI `--local` writes never route and retain the same foreign-exit safety checks.
 

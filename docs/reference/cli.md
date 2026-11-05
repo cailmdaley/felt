@@ -170,7 +170,7 @@ that cannot be reached means the document is written directly. A daemon that
 takes the request but does not answer within 5 s is reported ("did not answer
 in time … may still apply"), never bypassed with a local write, since the
 transition may still land there. Foreign mutations require the local daemon; when it is down, start it or explicitly request `--local` rather than bypassing its policy.
-The daemon alone may mirror safe plain Rest, Close or Discard exits after a definite pre-send failure to a known owner. Pause and every explicit `rest --until` wait for the owner, including `--until ''`. Configuration, publication, Temper and execution require the owner; standing work, scheduled or not, cannot mirror.
+The daemon alone may mirror safe plain Rest, Close or Discard exits after a definite pre-send failure to a known owner already marked stale by the registry. A timeout alone never authorizes fallback. Pause and every explicit `rest --until` wait for the owner, including `--until ''`. Configuration, publication, Temper and execution require the owner; standing work, scheduled or not, cannot mirror.
 Mirror exits travel by Git and send no execution request. A remote-only card is not writable, and lost replies never permit fallback or replay.
 `--local` never routes and retains foreign-exit safety checks. For what
 the daemon speaks directly, see the [HTTP API](api.md).

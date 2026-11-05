@@ -5,7 +5,9 @@ defmodule Shuttle.OwnerExitTest do
   @uid "01ARZ3NDEKTSV4RRFFQ69G5FAX"
 
   setup do
-    Env.put_app_env(:remotes, [%Shuttle.Remote{name: "worker", url: "http://127.0.0.1:1"}])
+    remote = %Shuttle.Remote{name: "worker", url: "http://127.0.0.1:1"}
+    Env.put_app_env(:remotes, [remote])
+    Env.start_scoped!({Shuttle.RemoteFiberRegistry, name: nil, remotes: [remote], auto_poll: false, store_dir: nil})
     :ok
   end
 

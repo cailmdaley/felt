@@ -17,6 +17,6 @@ export function executionRefusal(card: KanbanCard): string | undefined {
 export function offlineExplanation(card: KanbanCard): string {
   if (card.exitCopyPending) return 'The local exit copy is waiting for Git sync. The healthy owner remains authoritative.'
   return canExitOffline(card)
-    ? 'An exit can be saved on the local copy after a definite pre-send failure to a known owner. It travels by Git; configuration and execution still need the owner.'
+    ? 'An exit can be saved on the local copy after a definite pre-send failure to a known, already stale owner. It travels by Git; configuration and execution still need the owner.'
     : 'The owner decides: no safe local exit is available. Reconnect it before changing this lifecycle.'
 }

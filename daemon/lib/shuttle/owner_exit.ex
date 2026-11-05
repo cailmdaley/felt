@@ -6,6 +6,7 @@ defmodule Shuttle.OwnerExit do
   def mutate(path, params, opts \\ []) do
     subject = params["fiber"] || params["fiber_id"]
     origin = origin(subject, params["origin"], params["fiber_path"])
+    stale_before_request = get_in(policy(), [origin, :stale]) == true
 
     result =
       case OriginRouter.route(origin, opts) do
@@ -25,7 +26,8 @@ defmodule Shuttle.OwnerExit do
     params = Map.merge(params, %{"fiber" => subject, "origin" => origin})
 
     case result do
-      {:error, {:forward_failed, _, {:not_sent, _} = cause}} -> mirror(params, cause, result)
+      {:error, {:forward_failed, _, {:not_sent, _} = cause}} when stale_before_request ->
+        mirror(params, cause, result)
       result -> result
     end
   end
@@ -86,12 +88,14 @@ defmodule Shuttle.OwnerExit do
   end
 
   # One immutable fleet snapshot per view or exit authorization.
-  def policy, do: MapSet.new(Remotes.configured(), & &1.name)
+  def policy do
+    Map.take(RemoteFiberRegistry.feeds(), Enum.map(Remotes.configured(), & &1.name))
+  end
 
   def eligible?(fiber, policy \\ policy())
 
   def eligible?(%{"shuttle" => %{} = block} = fiber, policy) do
-    MapSet.member?(policy, block["host"]) && block["kind"] != "standing" && quiescent?(fiber)
+    Map.has_key?(policy, block["host"]) && block["kind"] != "standing" && quiescent?(fiber)
   end
 
   def eligible?(_, _), do: false
@@ -105,7 +109,8 @@ defmodule Shuttle.OwnerExit do
          true <- is_nil(resolved.uid) || fiber["id"] == resolved.uid,
          true <- origin in [nil, "", "local", block["host"], Poller.own_host_id()],
          true <- eligible?(fiber, policy),
-         rows = (RemoteFiberRegistry.feeds()[block["host"]] || %{})[:fibers] || [],
+         true <- get_in(policy, [block["host"], :stale]) == true,
+         rows = policy[block["host"]][:fibers] || [],
          true <- Enum.all?(rows, &(uid(&1) != fiber["id"] || safe_owner?(&1, policy))),
          do: resolved,
          else: (_ -> nil)
@@ -156,7 +161,7 @@ defmodule Shuttle.OwnerExit do
               _ -> nil
             end
 
-          capable = copy != nil && eligible?(copy["fiber"], policy) && safe_owner?(row, policy)
+          capable = stale[row["origin"]] == true && copy != nil && eligible?(copy["fiber"], policy) && safe_owner?(row, policy)
           pending = copy != nil && eligible?(copy["fiber"], policy) && newer?(copy, row)
 
           fiber =
