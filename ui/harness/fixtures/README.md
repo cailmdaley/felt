@@ -7,16 +7,28 @@ channel has a tapestry with relative links and header chips for three changes:
 - `family.change.json`: a real five-commit felt snapshot,
   `0f3a0cdc..f629d29c`, with an authored story about family identity and navigation.
   Two stops deliberately visit the same file out of line order.
-- `plain.change.json`: the same inventory and patch, without a story.
+- `plain.change.json`: a separate CLI bake of the same commits without a story or covered hunks.
 - `large.change.json`: a 5,000-line file with every line replaced.
 
 `nice -n 10 node ui/scripts/bake-change-fixture.mjs` builds `shuttle` and runs
-`shuttle change` against the pinned repository revision with `dogfood.story.json`.
-Only `repo.dir` is replaced with a portable harness path.
+`shuttle change` against the pinned repository revision, with and without `dogfood.story.json`.
+`repo.dir` becomes a portable harness path and commit authors become fixture labels.
 `changeContract.test.ts` rebakes that fixture and compares it to the checked-in bundle.
 It also creates a disposable Git repository, bakes empty, minimal-story and full-story bundles,
 type-checks their JSON against `ChangeBundle`, and compares the reader's paths and hunk coverage
 with the CLI's report, including renames, spaced and quoted paths, binary and mode changes.
+
+To inspect a freshly baked bundle instead of the pinned story fixture:
+
+```sh
+CHANGE_BUNDLE=/absolute/path/review.change.json nice -n 10 npm run harness:board
+SHOTS_DIR=/tmp/real-change nice -n 10 node scripts/capture-change.mjs \
+  internal/shuttle/change_patch.go ui/src/board/workspace/ChangeReader.ts
+```
+
+The capture script launches and closes its own headless Chrome.
+It captures desktop and phone overviews, the named files, and the review form.
+The plain and stress fixtures remain independent of the supplied story bundle.
 
 ## Verification
 
@@ -42,11 +54,13 @@ The output also includes the built reader, engine and TypeScript grammar gzip si
 
 ## Rendering boundary
 
-`ChangeReader` is a lazy production entry. Pierre's vanilla `FileDiff` renders
-independent, line-number-preserving partial patches; syntax grammars are dynamic
-imports. A stop selects an exact file-side interval. Hunk overlap, not the selected
-row count, determines coverage in Remaining. Tests stay in their own lane even
-when the story cites them.
+`ChangeReader` is a lazy production entry.
+Go parses Git's diff, resolves each stop's excerpt and supplies covered flags and bounded rendering windows.
+Pierre's vanilla `FileDiff` renders those independent patches; the reader never splits Git output or recomputes coverage.
+One stop must show every changed line on its chosen side to cover a hunk.
+Partial and context-only stops leave the complete hunk visible in Remaining.
+Tests stay in their own lane even when the story cites them.
+Only the chosen grammar set is bundled; other languages use plain text.
 
 The workspace owns the outer scrollbar. Intersection-observed 120-row windows
 bound the mounted diff DOM and retain measured heights when parked. Pierre's
@@ -59,5 +73,6 @@ Theme colors map workspace paper/ink/verdict/stop/machine tokens to Pierre's
 CSS-variable theme. Both widths use unified, wrapped diffs. Phone reviews keep
 their navigation visible, with the contents control inside the top bar rather
 than floating over the chapter tabs. Drafts and viewed
-marks are browser-local and keyed by owner/path and head. Sending uses the same
-force-dispatch worker route as the composer, with previous-session intent.
+marks are browser-local and keyed by owner/path, base, head and a digest of the exact bundle.
+Live-file polling reloads a rebake without reusing its review state.
+Sending uses the composer's previous-session route with `existing_only` authority; a missing worker cannot be launched by a review.

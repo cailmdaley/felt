@@ -36,7 +36,10 @@ function harnessPage(from: string): Plugin {
 
 export default defineConfig({
   base: './',
-  resolve: { alias: changeAliases },
+  resolve: { alias: [
+    ...changeAliases,
+    ...(process.env.CHANGE_BUNDLE ? [{ find: './fixtures/dogfood.change.json', replacement: resolve(process.env.CHANGE_BUNDLE) }] : []),
+  ] },
   define: {
     'import.meta.env.VITE_SHUTTLE_BASE': '""',
     // React reads `process.env.NODE_ENV` at module scope and there is no

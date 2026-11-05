@@ -18,6 +18,7 @@ export function registerChangeJourneys(test) {
     const note = reader.getByRole('textbox', { name: 'Overall review note' })
     await note.fill('Check the root-relative count before landing.')
     if (viewport.width <= 700) {
+      assert.equal(await reader.locator('.change-file-head .change-role').first().isVisible(), true, 'file roles stay visible on phones too')
       assert.equal(await page.locator('.ws-reader').evaluate(node => node.classList.contains('ws-topbar-hidden')), false, 'review navigation stays visible while virtual windows resize')
       const [icon, tabs] = await Promise.all([page.locator('.ws-navbar .ws-rail-toggle').boundingBox(), reader.locator('.change-contents').boundingBox()])
       assert.ok(icon && tabs && icon.y + icon.height <= tabs.y + 1, 'the contents control belongs above the chapter tabs, not on top of them')
@@ -70,12 +71,19 @@ export function registerChangeJourneys(test) {
   })
   test('A tapestry relative link opens the change and Back returns to the tapestry', async page => {
     page.setDefaultTimeout(30_000)
+    await page.addInitScript(() => {
+      window.addEventListener('message', event => {
+        if (event.source === window.parent && event.data?.protocol === 'shuttle-document' && event.data?.type === 'active') window.__changeBridgeActive = event.data.payload.active
+      })
+    })
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
     await page.locator('.ws-selected .ws-report-chip[aria-label^="Read artifact:"]').click()
     const link = page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' })
     await link.waitFor()
     await page.locator('.ws-selected .kbn-fileview-loading').waitFor({ state: 'detached' })
+    const frame = await (await page.locator('.ws-selected iframe').elementHandle()).contentFrame()
+    await frame.waitForFunction(() => window.__changeBridgeActive === true)
     const popups = []; page.on('popup', popup => popups.push(popup))
     await link.click()
     await page.locator('.ws-selected .change-reader').waitFor()

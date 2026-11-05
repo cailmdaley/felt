@@ -84,7 +84,6 @@
   .change-main { padding: 24px 16px 80px; }
   .change-heading h1 { font-size: var(--type-title); }
   .change-file-head { flex-wrap: wrap; gap: 6px; padding: 10px; }
-  .change-role { display: none; }
   .change-reader .change-viewed { min-height: 32px; }
   .change-send { align-items: start; flex-direction: column; }
 }
