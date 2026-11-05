@@ -29,13 +29,16 @@ function hunk(value: unknown, at: string, file: string): void {
   coordinates(h, at)
   array(h.windows, `${at}.windows`, (value, at) => {
     const window = object(value, at); coordinates(window, at); integer(window.rows, `${at}.rows`)
+    require((window.rows as number) > 0, `${at}.rows must be positive`)
     if (window.lines !== undefined) {
       array(window.lines, `${at}.lines`, (value, at) => {
         const line = object(value, at)
         require(['addition', 'deletion', 'context', 'note'].includes(line.kind as string), `${at}.kind is unknown`)
         strings(line, ['text'], at); integer(line.old, `${at}.old`); integer(line.new, `${at}.new`)
+        require(line.kind === 'addition' ? line.old === 0 && (line.new as number) > 0 : line.kind === 'deletion' ? line.new === 0 && (line.old as number) > 0 : line.kind === 'context' ? (line.old as number) > 0 && (line.new as number) > 0 : line.old === 0 && line.new === 0, `${at} must use its own side’s coordinates`)
       })
       require((window.lines as unknown[]).length === window.rows, `${at}.lines must match rows`)
+      require((window.lines as { kind: string }[]).some(line => line.kind !== 'note'), `${at} must contain source rows`)
     }
   })
 }
@@ -58,6 +61,7 @@ export function validateChangeBundle(value: unknown): ChangeBundle {
     const path = file.path as string
     require(path.length && !paths.has(path), `${at}.path must be nonempty and unique`); paths.add(path)
     require(roles.includes(file.role as string), `${at}.role is unknown`)
+    require(['added', 'deleted', 'modified', 'renamed'].includes(file.status as string), `${at}.status is unknown`)
     integer(file.additions, `${at}.additions`); integer(file.deletions, `${at}.deletions`)
     if (file.old_path !== undefined) strings(file, ['old_path'], at)
     for (const mode of ['old_mode', 'new_mode']) if (file[mode] !== undefined) require(typeof file[mode] === 'string' && /^[0-7]{6}$/.test(file[mode]), `${at}.${mode} must be an octal mode`)
