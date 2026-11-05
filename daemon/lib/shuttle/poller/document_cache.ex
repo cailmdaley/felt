@@ -25,7 +25,7 @@ defmodule Shuttle.Poller.DocumentCache do
 
   require Logger
 
-  alias Shuttle.FiberDocuments
+  alias Shuttle.{FeltStores, FiberDocuments}
 
   @doc """
   Rebuild the document cache from `candidates`, reusing unchanged entries by
@@ -83,10 +83,13 @@ defmodule Shuttle.Poller.DocumentCache do
 
   @doc "Retain last-known addresses of unreadable files in configured stores, marked stale."
   def retain_unreadable(previous, cache, stores) do
+    stores = Enum.map(stores, &FeltStores.store_felt_realpath/1)
+
     Enum.reduce(previous, cache, fn {key, %{entry: entry} = cached}, acc ->
       path = get_in(entry, [:fiber, "path"])
 
-      if !Map.has_key?(acc, key) && entry[:felt_store] in stores && is_binary(path) &&
+      if !Map.has_key?(acc, key) && FeltStores.store_felt_realpath(entry.felt_store) in stores &&
+           is_binary(path) &&
            File.regular?(path) && match?({:error, _}, Shuttle.FiberDoc.read_path(path)) do
         Map.put(acc, key, %{cached | entry: Map.put(entry, :document_stale, true)})
       else

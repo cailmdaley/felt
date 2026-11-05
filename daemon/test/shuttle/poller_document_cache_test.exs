@@ -75,6 +75,23 @@ defmodule Shuttle.Poller.DocumentCacheTest do
     assert unconfigured == %{}
   end
 
+  @tag :tmp_dir
+  test "unreadable addresses survive a configured store's symlink spelling", %{tmp_dir: tmp} do
+    store = Path.join(tmp, "store")
+    alias = Path.join(tmp, "alias")
+    path = Path.join([store, ".felt", "hub", "hub.md"])
+    File.mkdir_p!(Path.dirname(path))
+    File.ln_s!(store, alias)
+    File.write!(path, "---\n<<<<<<< HEAD\nbad\n---\n")
+    row = candidate("claude") |> Map.put("path", path)
+    state = %{document_cache: %{}, felt_stores: [alias]}
+    {cache, _} = DocumentCache.refresh(state, [row], %{"hub" => store})
+    {retained, _} = DocumentCache.refresh(%{state | document_cache: cache}, [], %{})
+    assert Map.has_key?(retained, "hub")
+    assert retained["hub"].entry.document_stale
+    assert retained["hub"].entry.fiber["path"] == path
+  end
+
   defp candidate(cli) do
     resolved_agent = if cli == "unresolved", do: nil, else: %{"id" => "receiver", "cli" => cli}
 
