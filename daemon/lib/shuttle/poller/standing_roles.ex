@@ -105,35 +105,6 @@ defmodule Shuttle.Poller.StandingRoles do
       not standing_role_dispatched_unexited?(fiber) ->
         state
 
-      # SELF-HEAL, don't close, on inverted markers. An
-      # inverted pair (`handed_off_at` earlier than `dispatched_at`) is NOT
-      # physically impossible: it is the ordinary shape of any re-dispatched
-      # role, because the PREVIOUS run's handoff stamp persists while the new
-      # dispatch writes a newer `dispatched_at` (the re-arm-then-dispatch write
-      # ordering alone produces a ~100ms inversion). For a STANDING constitution, the
-      # safe reading of that shape with no live session is "conclude the
-      # phantom run and stay armed" — stamping `handed_off_at = now` is
-      # harmless because the CRON gates the next fire, and it avoids the
-      # re-close-every-poll oscillation (a corrupt-marker inference must never
-      # override the file's `status: active`).
-      standing_role_markers_inverted?(fiber) ->
-        Logger.info(
-          "Standing constitution #{fiber_id} has inverted runtime markers (handed_off_at earlier than " <>
-            "dispatched_at) — corrupt, not genuinely in-flight; self-healing (stamping " <>
-            "handed_off_at=now) and leaving armed instead of closing"
-        )
-
-        # Self-heal by concluding the run — the same `handed_off_at = now` stamp
-        # a human accept or resume writes. Best-effort:
-        # a stamp miss just means the next poll self-heals again, still without
-        # closing.
-        LifecycleStore.conclude_run(fiber_id,
-          runner: state.runner,
-          felt_stores: state.felt_stores
-        )
-
-        state
-
       # A dead ADHOC extra-run must not close the SCHEDULED standing constitution. An
       # ad-hoc (force-dispatched) run carries an `adhoc-<ms>` run_id; its dirty
       # death (daemon down across the exit) is caught here. Closing the scheduled
@@ -184,24 +155,6 @@ defmodule Shuttle.Poller.StandingRoles do
   # Exactly the negation of `Continuation.clean_handoff_since_dispatch?/1`.
   defp standing_role_dispatched_unexited?(fiber),
     do: not Shuttle.Continuation.clean_handoff_since_dispatch?(fiber)
-
-  # True iff the fiber's markers are TIME-INVERTED: BOTH `dispatched_at` and
-  # `handed_off_at` are present and `handed_off_at` is strictly EARLIER than
-  # `dispatched_at`. This is the corrupt-marker subset of
-  # `standing_role_dispatched_unexited?` (which also fires on the legitimate
-  # "dispatched, no handoff at all" orphan, where `handed_off_at` is nil). Only
-  # the inverted subset is impossible in a real run, so only it self-heals; a
-  # genuine handoff-less orphan still closes.
-  defp standing_role_markers_inverted?(fiber) do
-    with %DateTime{} = dispatched <- Shuttle.Continuation.dispatched_at(fiber),
-         %DateTime{} = handed_off <- Shuttle.Continuation.handed_off_at(fiber) do
-      DateTime.compare(handed_off, dispatched) == :lt
-    else
-      _ -> false
-    end
-  rescue
-    _ -> false
-  end
 
   # True iff the dead run's `run_id` marks it an ad-hoc (force-dispatched extra)
   # run — `StandingRole.ad_hoc_run_id/1`'s `adhoc-<ms>` form.

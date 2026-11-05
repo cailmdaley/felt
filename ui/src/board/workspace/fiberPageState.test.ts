@@ -14,6 +14,14 @@ it('does not offer Temper for open standing cards on any planning surface', () =
     expect(verdictsFor(card({ id: 'run', status, shuttleKind: 'standing', workerState: status === 'active' ? 'running' : undefined }))).toEqual(['temper', 'discard'])
 })
 
+it('offers no verdicts for an idle standing seat, whether paused or armed', () => {
+  for (const status of ['open', 'active']) {
+    const seat = card({ id: 'seat', status, shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'warden' })
+    expect(verdictsFor(seat)).toEqual([])
+  }
+  expect(verdictsFor(card({ id: 'seat', status: 'active', shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'warden', workerState: 'running' }))).toEqual(['temper', 'discard'])
+})
+
 describe('Rest eligibility', () => {
   it('reaches constitutions regardless of status, verdict, horizon or kind', () => {
     for (const shuttleKind of ['oneshot', 'standing'] as const)

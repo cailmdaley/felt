@@ -81,7 +81,7 @@ func TestStandingCloseAcceptUnknownOwnerRefuses(t *testing.T) {
 	ownHost(t, env, "hub")
 	writeRemotesIn(t, env, `{"version":1,"defaults":{"discover":false},"remotes":[]}`)
 	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{"kind": "standing", "host": "retired", "project_dir": dir, "schedule": map[string]any{"expr": "* * * * *", "tz": "UTC"}}, nil)
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{"kind": "standing", "host": "retired", "runtime": map[string]any{"dispatched_at": "2026-01-01T00:00:00Z"}, "project_dir": dir, "schedule": map[string]any{"expr": "* * * * *", "tz": "UTC"}}, nil)
 	if out, err := runIn(t, env, dir, "close", "f", "--tempered=true"); err == nil {
 		t.Fatalf("standing acceptance must stay owner-routed: %s", out)
 	}
@@ -95,7 +95,7 @@ func TestStandingCloseAcceptPublication(t *testing.T) {
 	env, sink, _ := sendFileTestEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "parent", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "test-host", "runtime": map[string]any{"session_uuid": "reviewer"}}, nil)
-	seedShuttleRole(t, storage, "parent/thread", felt.StatusActive, map[string]any{"kind": "standing", "host": "test-host", "project_dir": dir, "schedule": map[string]any{"expr": "* * * * *", "tz": "UTC"}}, nil)
+	seedShuttleRole(t, storage, "parent/thread", felt.StatusActive, map[string]any{"kind": "standing", "host": "test-host", "runtime": map[string]any{"dispatched_at": "2026-01-01T00:00:00Z"}, "project_dir": dir, "schedule": map[string]any{"expr": "* * * * *", "tz": "UTC"}}, nil)
 	if out, err := runIn(t, env, dir, "close", "parent/thread", "--tempered=true", "--quiet", "--actor", "reviewer", "--local"); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}

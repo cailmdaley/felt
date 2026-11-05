@@ -93,7 +93,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   A fiber without a ULID `id:` is refused with `{:uid_missing, message}`, a preflight refusal like the others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
 - **Standing constitutions** — `shuttle.kind: standing` with a cron
   `schedule:`.
-  Nothing due is stored: an armed (`active`, untempered) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
+  Nothing due is stored: an armed (`active`, untempered) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at`, `closed-at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
   Scheduled run IDs name that most recent occurrence (`prev_due`); manual dispatch is ad-hoc (`adhoc-<ms>`).
   Worker exit or an untempered close puts the run on Awaiting review without ending its schedule.
   At the next occurrence after both its last service and close, the owning Poller runs `reopen --occurrence` inside its serialized tick, even in boot quarantine.
@@ -102,7 +102,8 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   A capacity or backend wait leaves it armed; a failed re-arm is visible in the ordinary blocked state and retries on the failure cooldown.
   A changed state quietly skips the write.
   Until then it stays closed; `status: active` remains the dispatch gate.
-  `shuttle accept`, `close --tempered=true`, or `resume` re-arms and concludes the run by stamping `handed_off_at` in the same write, resting it until the next tick.
+  `shuttle accept`, `close --tempered=true` on a recorded run, or `resume` re-arms and concludes the run by stamping `handed_off_at` in the same write, resting it until the next tick.
+  Without a dispatch on record, `close --tempered=true` records a verdict and leaves the fiber closed.
   Existing verdicts (true or false), never-run closed drafts, paused/rested constitutions and another host's fibers are never automatically re-armed.
   A stashed horizon alone does not stop a schedule; Rest pauses it by writing `status: open`.
   Plain close preserves a standing verdict; only an explicit reopen clears it.

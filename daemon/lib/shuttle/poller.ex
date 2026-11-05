@@ -2950,7 +2950,7 @@ defmodule Shuttle.Poller do
               awaiting_standing?(fiber) and occurrence_rearm_state(fiber) == original
 
             _ ->
-              Map.get(fiber, "status") in ["open", "active"] or awaiting_standing?(fiber)
+              Map.get(fiber, "status") in ["open", "active"]
           end
       end
     end)
@@ -5320,8 +5320,7 @@ defmodule Shuttle.Poller do
          true <- host_owned?(shuttle, state.own_host_id),
          true <- standing?(fiber),
          "active" <- Map.get(fiber, "status", ""),
-         true <- is_nil(Map.get(fiber, "tempered")),
-         false <- Shuttle.Continuation.run_rearmed?(fiber) do
+         true <- is_nil(Map.get(fiber, "tempered")) do
       Logger.info(
         "Standing constitution #{fiber_id} worker died unobserved (daemon-down or unwatched " <>
           "exit); marking awaiting review (status:closed) until acceptance or the next occurrence"
@@ -5467,9 +5466,6 @@ defmodule Shuttle.Poller do
 
             cond do
               status == "closed" ->
-                state
-
-              standing?(fiber) and status == "active" and Shuttle.Continuation.run_rearmed?(fiber) ->
                 state
 
               standing?(fiber) and status == "active" ->

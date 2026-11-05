@@ -840,6 +840,7 @@ func TestShuttleAccept_RefusesDraftsAndVerdicts(t *testing.T) {
 	standing := map[string]any{
 		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
+		"runtime":  map[string]any{"dispatched_at": "2026-01-01T00:00:00Z"},
 	}
 	yes, no := true, false
 	for _, tc := range []struct {
@@ -859,6 +860,8 @@ func TestShuttleAccept_RefusesDraftsAndVerdicts(t *testing.T) {
 			for _, args := range [][]string{{"accept", "f", "--local"}, {"close", "f", "--tempered=true", "--local"}} {
 				if _, err := runIn(t, env, dir, args...); err == nil {
 					t.Fatalf("%v must refuse", args)
+				} else if tc.tempered != nil && !strings.Contains(err.Error(), fmt.Sprintf("tempered=%t", *tc.tempered)) {
+					t.Fatalf("verdict error must print the value: %v", err)
 				}
 			}
 			if got := mustRead(t, storage, "f").Status; got != tc.status {

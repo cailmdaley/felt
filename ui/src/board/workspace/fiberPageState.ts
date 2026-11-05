@@ -22,9 +22,10 @@ export function restReachable(card: KanbanCard): boolean {
 export function verdictsFor(card: KanbanCard): Array<'temper' | 'discard'> {
   if (!onDesk(card)) return []
   const column = deskColumn(card)
+  if (column === 'roles') return []
   if (card.shuttleKind === 'standing' && card.status === 'open')
     return card.shuttleSeat === true || card.tempered != null ? [] : ['discard']
-  if (column === 'drafts' || column === 'roles' || column === 'inFlight' || column === 'awaitingReview') return ['temper', 'discard']
+  if (column === 'drafts' || column === 'inFlight' || column === 'awaitingReview') return ['temper', 'discard']
   if ((column !== 'resting' && column !== 'scheduled') || !isAgentCard(card) || card.shuttleSeat === true) return []
   return card.shuttleKind === 'standing' ? ['discard'] : ['temper', 'discard']
 }

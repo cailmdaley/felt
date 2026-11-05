@@ -477,7 +477,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
 					return err
 				}
-				if err := rearmStanding(f); err != nil {
+				if err := rearmStanding(f, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 					return err
 				}
 				if err := a.writeFiber(st, f); err != nil {
@@ -543,11 +543,11 @@ func standingAwaiting(f *felt.Felt, block *shuttle.Block) bool {
 // rests the role until its next occurrence instead of re-firing the one that
 // just ran. Status and stamp land in one write, so no reader sees the role
 // armed without the stamp. UTC, in the wire format stampHandedOff uses.
-func rearmStanding(f *felt.Felt) error {
+func rearmStanding(f *felt.Felt, stamp string) error {
 	if err := unclose(f, felt.StatusActive); err != nil {
 		return err
 	}
-	if err := shuttle.SetRuntimeField(f, "handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := shuttle.SetRuntimeField(f, "handed_off_at", stamp); err != nil {
 		return fmt.Errorf("stamping handed_off_at: %w", err)
 	}
 	if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "rearmed"); err != nil {
@@ -747,8 +747,10 @@ its outcome as context without waking that conversation. Ask always wakes.
 Results never propagate automatically beyond that orchestrator, and a close the
 orchestrator's own session makes is not delivered back to it.
 
-For a standing constitution, --tempered=true accepts and concludes the run,
-re-arming it for the schedule's next tick, with the same gate as 'accept'.
+For a standing constitution with a dispatch on record, --tempered=true accepts
+and concludes the run, re-arming it for the schedule's next tick with the same
+gate as 'accept'. Without a recorded dispatch it records an ordinary verdict
+and leaves the fiber closed.
 An untempered closed run with a dispatch on record waits on Awaiting review until
 accepted or an occurrence after both its last service and close re-arms it.
 A never-run draft stays closed. --tempered=false ends the schedule; rest pauses
@@ -826,26 +828,10 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				}
 			}
 
-			if block.Kind == "standing" && tempered != nil && *tempered {
+			if block.Kind == "standing" && tempered != nil && *tempered && hasDispatchedRun(f) {
 				actor := a.actorSession(closeActor)
-				publish := func() error {
-					stamp := time.Now().UTC().Format(time.RFC3339Nano)
-					quietStamp := ""
-					if closeQuiet {
-						quietStamp = stamp
-					}
-					if err := shuttle.SetRuntimeField(f, "handed_off_at", stamp); err != nil {
-						return err
-					}
-					if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
-						return err
-					}
-					if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "tempered"); err != nil {
-						return err
-					}
-					return markOrchestratorAct(st, f, stamp, actor)
-				}
-				if err := a.acceptStandingRun(args[0], f, st, block, ref, publish); err != nil {
+				publication := &standingRunPublication{quiet: closeQuiet, actor: actor}
+				if err := a.acceptStandingRun(args[0], f, st, block, ref, publication); err != nil {
 					return err
 				}
 				by := a.boardWorkerParty()
@@ -915,7 +901,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			fmt.Fprintf(a.env.Stdout, "closed %s%s\n", args[0], ref.Location())
 			switch {
 			case tempered == nil:
-				fmt.Fprintln(a.env.Stdout, "  tempered: cleared (awaiting review)")
+				fmt.Fprintln(a.env.Stdout, "  tempered: unset (awaiting review)")
 			case *tempered:
 				fmt.Fprintln(a.env.Stdout, "  tempered: true")
 			default:
@@ -1041,7 +1027,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			// the role armed rather than looking like a dirty exit.
 			arm := unclose
 			if reopenConcludeRun && block.Kind == "standing" && status == felt.StatusActive {
-				arm = func(f *felt.Felt, _ string) error { return rearmStanding(f) }
+				arm = func(f *felt.Felt, _ string) error { return rearmStanding(f, time.Now().UTC().Format(time.RFC3339Nano)) }
 			}
 			if err := arm(f, status); err != nil {
 				return err
@@ -1128,6 +1114,12 @@ func (a *app) reopenOccurrence(query string, f *felt.Felt, st *felt.Storage, blo
 		return err
 	}
 	if err := unclose(f, felt.StatusActive); err != nil {
+		return err
+	}
+	if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
+		return err
+	}
+	if err := clearBlockedOn(f); err != nil {
 		return err
 	}
 	// Equality reads as clean without consuming this occurrence. A delayed
@@ -1264,18 +1256,26 @@ bypassed: the accept may still apply there.`,
 				return err
 			}
 
-			return a.acceptStandingRun(args[0], f, st, block, ref)
+			return a.acceptStandingRun(args[0], f, st, block, ref, nil)
 		},
 	}
 	acceptCmd.Flags().BoolVar(&acceptLocal, "local", false, localFlagUsage)
 	return acceptCmd
 }
 
+type standingRunPublication struct {
+	quiet bool
+	actor string
+}
+
 // acceptStandingRun resolves an untempered run and rests it until the next tick.
 // Both accept and close --tempered=true use this gate and atomic write.
-func (a *app) acceptStandingRun(query string, f *felt.Felt, st *felt.Storage, block *shuttle.Block, ref felt.Ref, beforeWrite ...func() error) error {
-	if readTempered(f) != nil || (f.Status != felt.StatusClosed && f.Status != felt.StatusActive) {
-		return fmt.Errorf("fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=%v)", query, f.Status, readTempered(f))
+func (a *app) acceptStandingRun(query string, f *felt.Felt, st *felt.Storage, block *shuttle.Block, ref felt.Ref, publication *standingRunPublication) error {
+	if verdict := readTempered(f); verdict != nil {
+		return fmt.Errorf("fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=%t)", query, f.Status, *verdict)
+	}
+	if f.Status != felt.StatusClosed && f.Status != felt.StatusActive {
+		return fmt.Errorf("fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=unset)", query, f.Status)
 	}
 	if block.Schedule == nil {
 		return fmt.Errorf("fiber %s has no schedule", query)
@@ -1290,11 +1290,28 @@ func (a *app) acceptStandingRun(query string, f *felt.Felt, st *felt.Storage, bl
 	if err != nil {
 		return fmt.Errorf("computing next occurrence: %w", err)
 	}
-	if err := rearmStanding(f); err != nil {
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := rearmStanding(f, stamp); err != nil {
 		return err
 	}
-	for _, prepare := range beforeWrite {
-		if err := prepare(); err != nil {
+	if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
+		return err
+	}
+	if err := clearBlockedOn(f); err != nil {
+		return err
+	}
+	if publication != nil {
+		quietStamp := ""
+		if publication.quiet {
+			quietStamp = stamp
+		}
+		if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
+			return err
+		}
+		if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "tempered"); err != nil {
+			return err
+		}
+		if err := markOrchestratorAct(st, f, stamp, publication.actor); err != nil {
 			return err
 		}
 	}

@@ -49,7 +49,8 @@ At that occurrence the owning daemon reopens it without concluding the run, then
 A just-closed run cannot re-fire its served occurrence, including after a daemon restart.
 
 **`shuttle accept` accepts a run** (re-arms and stamps `handed_off_at`, so it rests until the next tick; the outcome is kept).
-**`shuttle close --tempered=true` does the same**, with the same acceptance gate and next-due message.
+**`shuttle close --tempered=true` does the same for a recorded run**, with the same acceptance gate and next-due message.
+Without a dispatch on record it records an ordinary verdict and leaves the fiber closed.
 **`shuttle close --tempered=false` ends the schedule**; `rest` pauses it.
 Existing verdicts are never automatically cleared; a plain close keeps them too (`reopen` can explicitly bring a retired role back).
 Automatic re-arming requires a dispatch on record, so a never-run closed draft stays closed.

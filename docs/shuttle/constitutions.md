@@ -151,7 +151,8 @@ nothing. So no dispatch can silently consume a slot. The
 An untempered closed standing run with a dispatch on record stays on Awaiting review until accepted or an occurrence after both its last service and close arrives.
 A never-run closed draft stays closed.
 The next occurrence after both its last service and its close supersedes the unreviewed result and starts fresh work.
-Accepting it (`shuttle accept` or `close --tempered=true`) concludes the run and re-arms it for the schedule's next tick.
+Accepting it (`shuttle accept` or `close --tempered=true` on a recorded run) concludes the run and re-arms it for the schedule's next tick.
+Without a dispatch on record, `close --tempered=true` records an ordinary verdict and leaves the fiber closed.
 The outcome stays the card's headline until the next run writes its own.
 Discard (`close --tempered=false`) ends automatic scheduling, and Rest pauses it by writing `status: open`.
 A stashed horizon alone does not stop a schedule.

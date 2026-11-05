@@ -6183,14 +6183,7 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  test "poller self-heals (does not close) a standing role whose markers are time-inverted" do
-    # Regression: a run whose `handed_off_at` is EARLIER than its `dispatched_at`
-    # is physically impossible (you can't hand off before you're dispatched), so
-    # the markers are corrupt — NOT a genuine "dispatched, never handed off"
-    # orphan. The dead-orphan predicate misreads the inversion as an orphan and,
-    # with no live tmux session, force-closes a healthy `status: active` role on
-    # every poll. The reconciler must instead SELF-HEAL: stamp handed_off_at=now
-    # (concluding the phantom run) and leave the role armed.
+  test "an older handoff belongs to the preceding run and a dirty dead run closes for review" do
     fiber_id = "tests/standing-inverted-markers"
 
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
@@ -6203,7 +6196,7 @@ defmodule Shuttle.PollerTest do
       tz: Europe/Paris
     """)
 
-    # Dispatch at T, handoff 94ms BEFORE T — the observed inversion.
+    # The preceding run's handoff is 94ms before this dispatch.
     dispatched = DateTime.utc_now()
     write_dispatch_marker(fiber_id, "inverted-session-uuid", dispatched)
     write_handoff_marker(fiber_id, DateTime.add(dispatched, -94, :millisecond))
@@ -6220,18 +6213,12 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    # Self-heal fired: a `shuttle mark-runtime --handed-off-at` write was
-    # issued to conclude the phantom run.
-    assert wait_until(fn ->
-             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
-                 "--handed-off-at" in args
-             end)
-           end)
+    assert File.read!(doc_path) =~ "status: closed"
 
-    # The document was NEVER closed — the role stays armed.
-    assert File.read!(doc_path) =~ "status: active"
-    refute File.read!(doc_path) =~ "status: closed"
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
+               "--handed-off-at" in args
+           end)
 
     # No worker was spawned.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
