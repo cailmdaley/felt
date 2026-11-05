@@ -24,81 +24,32 @@ defmodule ShuttleWeb.LifecycleController do
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3]
 
-  alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
+  alias Shuttle.{FeltStores, LifecycleService}
 
   @allowed ~w(install pause rest resume repeat reshape accept close reopen set-model set-agent role seat set-outcome uninstall)
 
   @kinds ~w(oneshot standing)
 
   def create(conn, params) do
-    origin = Shuttle.Planning.origin(params["fiber"], params["origin"], params["fiber_path"])
-    params = Map.put(params, "origin", origin)
-
-    case OriginRouter.route(origin, routed: params["routed"] in [true, "1", "true"]) do
-      {:error, {:routed_owner_mismatch, origin}} ->
-        conn
-        |> put_status(422)
-        |> json(%{
-          error:
-            "routed request reached this host but the document names #{origin}; not forwarded again"
-        })
-
-      {:error, {:unknown_origin, origin}} ->
-        fallback(conn, params, {:unknown_origin, origin}, fn ->
-          ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
-        end)
-
-      {:remote, remote} ->
-        if Shuttle.Planning.action?(params) &&
-             Shuttle.Planning.pending?(params["fiber"], origin, params["fiber_path"]) do
-          conn
-          |> put_status(409)
-          |> json(%{
-            error:
-              "The local exit copy is waiting for Git sync. The healthy owner remains authoritative; no second write was requested."
-          })
-        else
-          result = OriginRouter.forward(remote, "/api/v1/lifecycle", params)
-          # The forwarded verb (rest/uninstall/…) mutated the remote's loom mirror;
-          # invalidate the RemoteFiberRegistry feed cache so the board reflects it
-          # before the next remote poll — otherwise resting a remote-owned card
-          # snaps back until a manual refresh.
-          RemoteFiberRegistry.refresh_after_forward(remote.name, result)
-
-          case result do
-            {:error, {:forward_failed, _, {:not_sent, reason}}} ->
-              fallback(conn, params, {:not_sent, reason}, fn -> relay_text(conn, result) end)
-
-            {:forwarded, 503, body} ->
-              case Jason.decode(body) do
-                {:ok, %{"retryable" => true}} ->
-                  conn |> put_resp_content_type("application/json") |> send_resp(503, body)
-
-                _ ->
-                  relay_text(conn, result)
-              end
-
-            _ ->
-              relay_text(conn, result)
-          end
-        end
-
+    case Shuttle.Planning.mutate("/api/v1/lifecycle", params) do
       :local ->
         create_local(conn, params)
-    end
-  end
 
-  defp fallback(conn, params, cause, refuse) do
-    case Shuttle.Planning.exit(params, cause) do
-      nil ->
-        refuse.()
-
-      {:ok, _} = result ->
+      {:mirrored, _, output} ->
         refresh_card(params)
-        send_cli_result(conn, "shuttle", result)
+        send_cli_result(conn, "shuttle", {:ok, output})
+
+      {:forwarded, 503, body} = result ->
+        case Jason.decode(body) do
+          {:ok, %{"retryable" => true}} ->
+            conn |> put_resp_content_type("application/json") |> send_resp(503, body)
+
+          _ ->
+            relay_text(conn, result)
+        end
 
       result ->
-        send_cli_result(conn, "shuttle", result)
+        relay_text(conn, result)
     end
   end
 

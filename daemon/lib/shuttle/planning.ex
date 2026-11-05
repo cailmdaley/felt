@@ -3,6 +3,62 @@ defmodule Shuttle.Planning do
   alias Shuttle.{FeltStores, FiberDoc, OriginRouter, Poller, RemoteFiberRegistry, Remotes}
   @exit_fields ~w(status tempered closed_at closed-at horizon)
 
+  def mutate(path, params, opts \\ []) do
+    subject = params["fiber"] || params["fiber_id"]
+    origin = origin(subject, params["origin"], params["fiber_path"])
+    opts = Keyword.put_new(opts, :routed, params["routed"] in [true, "1", "true"])
+
+    result =
+      case OriginRouter.route(origin, opts) do
+        {:remote, remote} ->
+          if (action?(params) || params["target"] in ~w(drafts awaitingReview composted)) &&
+               pending?(subject, origin, params["fiber_path"]) do
+            {:error, :planning_pending}
+          else
+            result = OriginRouter.forward(remote, path, params, opts)
+            RemoteFiberRegistry.refresh_after_forward(remote.name, result)
+            result
+          end
+
+        result ->
+          result
+      end
+
+    params = Map.merge(params, %{"fiber" => subject, "origin" => origin})
+
+    case result do
+      {:error, {:unknown_origin, _} = cause} -> mirror(params, cause, result)
+      {:error, {:forward_failed, _, {:not_sent, _} = cause}} -> mirror(params, cause, result)
+      result -> result
+    end
+  end
+
+  defp mirror(params, cause, refusal) do
+    {id, invocation} =
+      case params do
+        %{"target" => target} ->
+          case Shuttle.ActionQueries.resolve_action(params["fiber"], target) do
+            {:ok, %{id: id, invocation: call}} ->
+              {id,
+               call
+               |> Map.new(fn {key, value} -> {to_string(key), value} end)
+               |> Map.put("action", call.verb)}
+
+            _ ->
+              {nil, %{}}
+          end
+
+        _ ->
+          {nil, params}
+      end
+
+    case exit(Map.merge(params, invocation), cause) do
+      nil -> refusal
+      {:ok, output} -> {:mirrored, id, output}
+      result -> result
+    end
+  end
+
   def quiescent?(%{"status" => "active"}), do: false
   def quiescent?(%{"shuttle" => block}) when not is_map(block), do: false
 

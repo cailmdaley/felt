@@ -128,6 +128,16 @@ defmodule ShuttleWeb.RelayHelpers do
     |> send_resp(502, "forward to #{name} failed: #{inspect(reason)}; #{uncertain_message(name)}")
   end
 
+  def relay_text(conn, {:error, reason}) when is_binary(reason),
+    do: send_cli_result(conn, "shuttle", {:error, reason})
+
+  def relay_text(conn, {:error, reason}) do
+    {status, message} = Shuttle.Transition.http_error(reason)
+    conn |> put_status(status) |> json(%{error: message})
+  end
+
+  def relay_text(conn, result), do: send_cli_result(conn, "shuttle", result)
+
   defp uncertain_message(name),
     do: "the action may have been applied; inspect the fiber on #{inspect(name)} before retrying"
 

@@ -40,7 +40,7 @@ defmodule ShuttleWeb.FeltEditController do
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, store_for_fiber: 1]
 
-  alias Shuttle.{Felt, OriginRouter, Poller, RemoteFiberRegistry}
+  alias Shuttle.{Felt, Poller}
 
   @edit_fields ~w(fiber_id origin routed add remove set unset due name body)
 
@@ -65,31 +65,9 @@ defmodule ShuttleWeb.FeltEditController do
   end
 
   defp route_edit(conn, fiber_id, params) do
-    origin = Shuttle.Planning.origin(fiber_id, params["origin"])
-    params = Map.put(params, "origin", origin)
-
-    case OriginRouter.route(origin, routed: params["routed"] in [true, "1", "true"]) do
-      {:error, {:routed_owner_mismatch, origin}} ->
-        conn
-        |> put_status(422)
-        |> json(%{
-          error:
-            "routed request reached this host but the document names #{origin}; not forwarded again"
-        })
-
-      {:error, {:unknown_origin, origin}} ->
-        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
-
-      {:remote, remote} ->
-        result = OriginRouter.forward(remote, "/api/v1/felt-edit", conn.body_params)
-        # The forwarded edit mutated the remote's loom mirror; invalidate the
-        # RemoteFiberRegistry feed cache so the board reflects it before the next
-        # remote poll.
-        RemoteFiberRegistry.refresh_after_forward(remote.name, result)
-        relay_text(conn, result)
-
-      :local ->
-        create_local(conn, fiber_id, params)
+    case Shuttle.Planning.mutate("/api/v1/felt-edit", params) do
+      :local -> create_local(conn, fiber_id, params)
+      result -> relay_text(conn, result)
     end
   end
 

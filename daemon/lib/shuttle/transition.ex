@@ -17,9 +17,7 @@ defmodule Shuttle.Transition do
     FeltStores,
     LifecycleService,
     OriginRouter,
-    Poller,
-    RemoteFiberRegistry,
-    Remote
+    Poller
   }
 
   @typedoc """
@@ -42,48 +40,20 @@ defmodule Shuttle.Transition do
   @spec transition(String.t(), String.t(), String.t() | nil, keyword()) :: result()
   def transition(fiber_id, target, origin, opts \\ []) do
     origin = Shuttle.Planning.origin(fiber_id, origin)
+    params = %{"fiber_id" => fiber_id, "target" => target, "origin" => origin}
 
-    case OriginRouter.route(origin, opts) do
-      {:error, {:unknown_origin, _} = reason} = error ->
-        fallback(fiber_id, target, origin, reason, error)
-
-      {:error, _} = error ->
-        error
-
+    case Shuttle.Planning.mutate("/api/v1/transition", params, opts) do
       :local ->
         transition_local(fiber_id, target)
 
-      {:remote, %Remote{} = remote} ->
-        if target in ~w(drafts awaitingReview composted) &&
-             Shuttle.Planning.pending?(fiber_id, origin) do
-          {:error, :planning_pending}
-        else
-          case forward(remote, fiber_id, target, origin, opts) do
-            {:error, {:forward_failed, _, {:not_sent, _} = reason}} = error ->
-              fallback(fiber_id, target, origin, reason, error)
+      {:mirrored, _, _} = result ->
+        result
 
-            result ->
-              result
-          end
-        end
-    end
-  end
+      {:forwarded, status, body} ->
+        {:forwarded, status, Map.put(decode_body(body), "origin", origin)}
 
-  defp fallback(fiber_id, target, origin, reason, error) do
-    with {:ok, %{id: id, invocation: invocation}} <- resolve(fiber_id, target) do
-      params = invocation |> Map.new(fn {k, v} -> {to_string(k), v} end)
-
-      params =
-        Map.merge(params, %{"fiber" => fiber_id, "origin" => origin, "action" => invocation.verb})
-
-      case Shuttle.Planning.exit(params, reason) do
-        nil -> error
-        {:ok, output} -> {:mirrored, id, output}
-        {:command_error, code, output} -> {:error, {:command_error, code, output}}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      _ -> error
+      result ->
+        invoke_result(result)
     end
   end
 
@@ -196,28 +166,6 @@ defmodule Shuttle.Transition do
 
   defp invoke_result({:error, :timeout, reason}), do: {:error, reason}
   defp invoke_result({:error, reason}), do: {:error, reason}
-
-  # ── Forward branch: relay to the owning remote daemon ──
-
-  # Delegate route+POST to OriginRouter (the shared forwarder), then re-stamp
-  # `origin` on the decoded body: the remote computed its response treating the
-  # fiber as local, so its `origin` would read "local"/its own id. The kanban
-  # always sees the origin it routed to.
-  defp forward(%Remote{} = remote, fiber_id, target, origin, opts) do
-    case OriginRouter.forward(
-           remote,
-           "/api/v1/transition",
-           %{fiber_id: fiber_id, target: target},
-           opts
-         ) do
-      {:forwarded, status, body} ->
-        RemoteFiberRegistry.refresh_after_forward(remote.name, status)
-        {:forwarded, status, Map.put(decode_body(body), "origin", origin)}
-
-      {:error, _reason} = error ->
-        error
-    end
-  end
 
   defp decode_body(body) when is_binary(body) do
     case Jason.decode(body) do
