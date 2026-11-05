@@ -16,3 +16,10 @@ work by Cail Daley.
 The board's PDF viewer includes PDF.js (https://mozilla.github.io/pdf.js/),
 Copyright Mozilla Foundation, under the Apache License, Version 2.0.
 Its license is distributed with the board as pdfjs-LICENSE.txt.
+
+The board's change reader includes @pierre/diffs 1.6.4
+(https://github.com/pierrecomputer/pierre), licensed under Apache-2.0.
+Its dependency licenses and upstream notices are distributed with the board
+as change-reader-NOTICES.txt, including the Pierre highlighter/theme packages,
+Shiki's MIT-licensed grammars and engines, jsdiff (BSD-3-Clause), and the
+HTML serialization and LRU helpers.
