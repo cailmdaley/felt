@@ -79,8 +79,19 @@ func TestPruneCheckoutGenerationsRetainsReferencesAndAssembly(t *testing.T) {
 
 func TestDaemonAssemblyOutputsAreIgnored(t *testing.T) {
 	env := testEnv(t)
+	root := t.TempDir()
+	ignore, err := os.ReadFile("../../.gitignore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), ignore, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := env.Command("git", "init", "--quiet", root).CombinedOutput(); err != nil {
+		t.Fatalf("initialize ignore fixture: %v %s", err, out)
+	}
 	for _, path := range []string{"bin/rel-built", "bin/rel.generation-fixture/bin/shuttled"} {
-		if out, err := env.Command("git", "-C", "../..", "check-ignore", path).CombinedOutput(); err != nil {
+		if out, err := env.Command("git", "-C", root, "check-ignore", path).CombinedOutput(); err != nil {
 			t.Errorf("assembly output %s is not ignored: %v %s", path, err, out)
 		}
 	}
