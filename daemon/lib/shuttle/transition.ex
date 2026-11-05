@@ -106,7 +106,8 @@ defmodule Shuttle.Transition do
       {:ok, action} ->
         {:ok, action}
 
-      {:error, reason} when reason in [:unknown_target, :standing_temper_unavailable] ->
+      {:error, reason}
+      when reason in [:unknown_target, :standing_temper_unavailable, :standing_review_unavailable] ->
         {:error, reason}
 
       # Any other resolve failure is an unresolvable fiber (unknown id,
@@ -220,6 +221,11 @@ defmodule Shuttle.Transition do
     do:
       {422,
        "Accept applies only to an untempered active or closed standing run. Reopen to revive a paused or reviewed constitution, or Rest to put it down."}
+
+  def http_error(:standing_review_unavailable),
+    do:
+      {422,
+       "A standing verdict stays in place on close. Reopen to clear it and start work again."}
 
   def http_error(:unknown_target), do: {400, "unknown_target"}
   def http_error(:already_running), do: {409, "already_running"}

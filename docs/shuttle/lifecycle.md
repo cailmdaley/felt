@@ -42,7 +42,11 @@ The worker asks four questions, in order. The answer sets `status`, and
 `status` decides what happens next.
 
 **1. Is the desired state realized?** Run `shuttle close <fiber>` and exit.
-The card lands in Awaiting review. A human accepts it or resumes it.
+The card lands in Awaiting review.
+A human accepts it or resumes it.
+For a standing constitution with a dispatch on record, an occurrence after both its last service and close can supersede the unreviewed result and start fresh work.
+A plain close preserves an existing standing verdict; `reopen` explicitly clears it.
+A never-run closed standing draft stays closed.
 
 Substantive work needs independent fresh-eyes review before the session that
 produced it closes — a subagent reviewer in-session, or leave the fiber `active`
@@ -65,22 +69,26 @@ The same operation is `shuttle rest <fiber> --until YYYY-MM-DD` (or `--until ''`
 It works in any state and stops a live worker through the owning daemon's serialized rest lifecycle.
 
 **4. More work, not blocked?** Leave the fiber active and just hand off. The
-daemon starts a fresh worker next tick, and it lands on your `## Status`.
+daemon starts a fresh worker next eligible tick, and it lands on your `## Status`.
+A standing run that has not been accepted is published for review on worker exit and waits for acceptance or a subsequent scheduled occurrence.
+Acceptance keeps that run armed through its worker's handoff and exit.
 
-### Closing parks the work
+### Close, handoff and rest
 
 shuttle obeys the vocabulary literally. Know which word does what.
 
 | You say | The worker does | Next |
 |---|---|---|
-| "hand off" | case 3 — `status` stays `active`, then handoff | Daemon redispatches |
-| "close it out" | Run `shuttle close <fiber>`; it sets `status: closed` — never handoff | Card waits for you; no new worker |
+| "hand off" | Continue with `shuttle handoff <fiber>` | Daemon redispatches when eligible; a standing run follows its schedule and review lifecycle |
+| "close it out" | Run `shuttle close <fiber>`; it sets `status: closed` — never handoff | Card waits for review; an untempered standing run can re-arm at a subsequent occurrence |
 | "put it to rest" | Run `shuttle rest <fiber>`; `status: open`, `horizon: stashed` | Card goes to Resting; no new worker |
 
 Closing puts the work back on a human's desk. It claims nothing about
 completion. A worker should never upgrade a close-out into a continuation
 because the work looks unfinished — unfinished is often exactly why you want it
 back.
+For a standing responsibility, Rest (`status: open`) pauses the schedule and a verdict ends it.
+A stashed horizon alone does neither.
 
 ### Tempered — human only
 

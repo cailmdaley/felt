@@ -4379,7 +4379,7 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    fires? = scenario in [:due, :quarantine]
+    fires? = scenario in [:due, :quarantine, :stashed]
 
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"

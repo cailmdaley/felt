@@ -97,13 +97,15 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   Scheduled run IDs name that most recent occurrence (`prev_due`); manual dispatch is ad-hoc (`adhoc-<ms>`).
   Worker exit or an untempered close puts the run on Awaiting review without ending its schedule.
   At the next occurrence after both its last service and close, the owning Poller runs `reopen --occurrence` inside its serialized tick, even in boot quarantine.
-  Under the document lock, the CLI checks current ownership, standing kind, closed status, absence of a verdict or stash, and that the occurrence is still due.
+  Under the document lock, the CLI checks current ownership, standing kind, closed status, absence of a verdict, a dispatch on record, and that the occurrence is still due.
   It atomically arms the document and cleans dirty markers with `handed_off_at = dispatched_at`, preserving the service anchor so the occurrence stays due and launches fresh.
   A capacity or backend wait leaves it armed; a failed re-arm is visible in the ordinary blocked state and retries on the failure cooldown.
   A changed state quietly skips the write.
   Until then it stays closed; `status: active` remains the dispatch gate.
   `shuttle accept`, `close --tempered=true`, or `resume` re-arms and concludes the run by stamping `handed_off_at` in the same write, resting it until the next tick.
-  Existing verdicts (true or false), a stashed horizon, paused/rested constitutions and another host's fibers are never automatically re-armed.
+  Existing verdicts (true or false), never-run closed drafts, paused/rested constitutions and another host's fibers are never automatically re-armed.
+  A stashed horizon alone does not stop a schedule; Rest pauses it by writing `status: open`.
+  Plain close preserves a standing verdict; only an explicit reopen clears it.
 - **A finished run is finished — there is no reopen.** When a oneshot's
   worker is gone, `Dispatcher.check_resume_intent/2` decides between resuming
   its transcript and starting fresh. A `handed_off_at` newer than

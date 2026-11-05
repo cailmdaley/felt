@@ -15,14 +15,15 @@ export function onDesk(card: KanbanCard): boolean {
 export function restReachable(card: KanbanCard): boolean {
   return isAgentCard(card)
 }
-/** The verdicts a card takes: every fiber on the Desk's lifecycle with no
- *  verdict yet (a draft, work in flight or awaiting review) takes both. A
- *  constitution at rest takes both too, since putting it down was not a
- *  verdict, except a standing one, whose Temper would accept a run it has not
- *  made: it can only be discarded. A seat at rest takes none. */
+/** Unreviewed work in flight or awaiting review takes both verdicts, as do
+ *  oneshot drafts. Open standing constitutions and idle scheduled standing
+ *  cards take Discard alone: Temper accepts a standing run, not a paused or
+ *  idle responsibility. A seat at rest takes none. */
 export function verdictsFor(card: KanbanCard): Array<'temper' | 'discard'> {
   if (!onDesk(card)) return []
   const column = deskColumn(card)
+  if (card.shuttleKind === 'standing' && card.status === 'open')
+    return card.shuttleSeat === true || card.tempered != null ? [] : ['discard']
   if (column === 'drafts' || column === 'roles' || column === 'inFlight' || column === 'awaitingReview') return ['temper', 'discard']
   if ((column !== 'resting' && column !== 'scheduled') || !isAgentCard(card) || card.shuttleSeat === true) return []
   return card.shuttleKind === 'standing' ? ['discard'] : ['temper', 'discard']

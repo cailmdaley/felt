@@ -28,33 +28,38 @@ defmodule Shuttle.LifecycleStore do
   signal, recognized by Shuttle's `accept`/`resume`, the poller's `eligible?` gate,
   and the kanban classifier. A closed role is not dispatch-eligible; the owner
   re-arms it when an occurrence arrives after both its last service and close,
-  unless a verdict or stash ends automatic scheduling.
+  if a dispatch is on record. A verdict ends automatic scheduling; rest pauses
+  it through `status: open`, not through its horizon.
 
   Awaiting is fully doc-representable: there is no review axis and no
   runtime row, so this is a single document write — the mirror of the accept re-arm,
   setting `status: closed` where accept sets `status: active`. Atomic via
   `FiberDoc.write!` (tmp + rename). A no-op-shaped error (not standing /
   unreadable) returns `{:error, _}` so the caller can log without crashing the
-  exit path.
+  exit path. A current paused, closed, reviewed or cleanly re-armed document
+  is left untouched, even when the caller held a stale active row.
   """
   @spec mark_awaiting(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def mark_awaiting(fiber_id) when is_binary(fiber_id) do
     with {:ok, path, raw_fm, frontmatter, body} <- FiberDoc.read(fiber_id),
          {:ok, shuttle} <- shuttle_block(frontmatter),
          :ok <- require_standing(shuttle) do
-      runtime = get_in(frontmatter, ["shuttle", "runtime"]) || %{}
+      if frontmatter["status"] == "active" and is_nil(frontmatter["tempered"]) and
+           not Continuation.run_rearmed?(frontmatter) do
+        runtime = get_in(frontmatter, ["shuttle", "runtime"]) || %{}
 
-      ops =
-        [
-          {:put, "status", "closed"},
-          {:put, "closed-at", DateTime.to_iso8601(DateTime.utc_now())},
-          {:put_nested, "shuttle", "runtime", Map.put(runtime, "thread_exit_verb", "closed")},
-          {:delete, "tempered"}
-        ] ++ evict_runtime_ops()
+        ops =
+          [
+            {:put, "status", "closed"},
+            {:put, "closed-at", DateTime.to_iso8601(DateTime.utc_now())},
+            {:put_nested, "shuttle", "runtime", Map.put(runtime, "thread_exit_verb", "closed")}
+          ] ++ evict_runtime_ops()
 
-      FiberDoc.write!(path, raw_fm, body, ops)
-
-      {:ok, "marked #{fiber_id} awaiting review (status: closed, untempered)\n"}
+        FiberDoc.write!(path, raw_fm, body, ops)
+        {:ok, "marked #{fiber_id} awaiting review (status: closed, untempered)\n"}
+      else
+        {:ok, "skipped awaiting review for #{fiber_id} (state changed or run re-armed)\n"}
+      end
     end
   end
 

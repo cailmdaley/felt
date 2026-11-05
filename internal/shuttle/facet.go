@@ -15,6 +15,21 @@ const FacetKey = "shuttle"
 // RuntimeKey names machine-managed continuation state inside the Shuttle facet.
 const RuntimeKey = "runtime"
 
+// RuntimeTimestamp reads a runtime instant from decoded YAML or JSON. YAML
+// timestamps decode as time.Time when bare and as strings when quoted.
+// Missing or invalid timestamps return the zero time.
+func RuntimeTimestamp(value any) time.Time {
+	switch value := value.(type) {
+	case time.Time:
+		return value
+	case string:
+		stamp, _ := time.Parse(time.RFC3339Nano, value)
+		return stamp
+	default:
+		return time.Time{}
+	}
+}
+
 func facetNode(f *felt.Felt) (*yaml.Node, bool) {
 	node, ok := f.ExtraFields[FacetKey]
 	if !ok || node == nil || node.Kind != yaml.MappingNode {

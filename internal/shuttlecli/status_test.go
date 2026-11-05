@@ -498,6 +498,7 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 		status       string
 		own          string // this machine's host id; the block's is testhost
 		noProjectDir bool
+		neverRun     bool
 		want         []string
 	}{
 		{
@@ -532,11 +533,18 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			want:         []string{"→ To review — the next occurrence", "project_dir is missing", "shuttle resume role --project-dir <dir>"},
 		},
 		{
+			name:     "closed never-run draft",
+			status:   felt.StatusClosed,
+			own:      "testhost",
+			neverRun: true,
+			want:     []string{"closed (NOT armed", "→ To review — closed, awaiting a verdict", "shuttle reopen role"},
+		},
+		{
 			name:   "closed",
 			status: felt.StatusClosed,
 			own:    "testhost",
 			want: []string{
-				"status:      closed (NOT armed", "→ To review — the owner attempts to re-arm", "shuttle accept role",
+				"status:      closed (awaiting review", "→ To review — the owner attempts to re-arm", "shuttle accept role",
 			},
 		},
 	} {
@@ -552,6 +560,9 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			}
 			if tc.noProjectDir {
 				delete(block, "project_dir")
+			}
+			if !tc.neverRun {
+				block["runtime"] = map[string]any{"dispatched_at": "2026-01-01T00:00:00Z"}
 			}
 			seedShuttleRole(t, storage, "role", tc.status, block, nil)
 

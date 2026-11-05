@@ -23,6 +23,7 @@ import (
 	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -292,9 +293,9 @@ func (a *app) compositeFiberRows() []compositeFiberRow {
 // the nested shuttle.runtime sub-map every writer emits.
 func identityPending(block map[string]any) bool {
 	runtime, _ := block["runtime"].(map[string]any)
-	dispatched, _ := runtime["dispatched_at"].(string)
+	dispatched := shuttle.RuntimeTimestamp(runtime["dispatched_at"])
 	session, _ := runtime["session_uuid"].(string)
-	return strings.TrimSpace(dispatched) != "" && strings.TrimSpace(session) == ""
+	return !dispatched.IsZero() && strings.TrimSpace(session) == ""
 }
 
 func (a *app) compositeFiberUID(query string) string {

@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { card } from '../testFixtures.js'
-import { restReachable } from './fiberPageState.js'
+import { restReachable, verdictsFor } from './fiberPageState.js'
+
+it('does not offer Temper for open standing cards on any planning surface', () => {
+  for (const effectiveHorizon of ['now', 'stashed'] as const)
+    for (const tempered of [undefined, true, false])
+      for (const workerState of [undefined, 'running'] as const) {
+        const draft = card({ id: 'draft', status: 'open', shuttleKind: 'standing', effectiveHorizon, tempered, workerState })
+        expect(verdictsFor(draft)).toEqual(tempered == null ? ['discard'] : [])
+      }
+  expect(verdictsFor(card({ id: 'oneshot', status: 'open', shuttleKind: 'oneshot' }))).toEqual(['temper', 'discard'])
+  for (const status of ['active', 'closed'])
+    expect(verdictsFor(card({ id: 'run', status, shuttleKind: 'standing', workerState: status === 'active' ? 'running' : undefined }))).toEqual(['temper', 'discard'])
+})
 
 describe('Rest eligibility', () => {
   it('reaches constitutions regardless of status, verdict, horizon or kind', () => {

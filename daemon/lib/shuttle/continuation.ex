@@ -153,6 +153,13 @@ defmodule Shuttle.Continuation do
     end
   end
 
+  @doc "A clean run re-armed by acceptance or a scheduled occurrence, not a new dispatch."
+  @spec run_rearmed?(map()) :: boolean()
+  def run_rearmed?(fiber) do
+    get_in(fiber, ["shuttle", "runtime", "thread_exit_verb"]) in ["rearmed", "tempered"] and
+      clean_handoff_since_dispatch?(fiber)
+  end
+
   @doc """
   True iff the worker handed off cleanly since the last dispatch: `handed_off_at`
   exists and is `>= dispatched_at`. The autonomous fresh signal.

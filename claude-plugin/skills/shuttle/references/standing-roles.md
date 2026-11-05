@@ -51,7 +51,8 @@ A just-closed run cannot re-fire its served occurrence, including after a daemon
 **`shuttle accept` accepts a run** (re-arms and stamps `handed_off_at`, so it rests until the next tick; the outcome is kept).
 **`shuttle close --tempered=true` does the same**, with the same acceptance gate and next-due message.
 **`shuttle close --tempered=false` ends the schedule**; `rest` pauses it.
-Existing verdicts and stashed horizons are never automatically cleared (`reopen` can explicitly bring a retired role back).
+Existing verdicts are never automatically cleared; a plain close keeps them too (`reopen` can explicitly bring a retired role back).
+Automatic re-arming requires a dispatch on record, so a never-run closed draft stays closed.
 
 ---
 
@@ -76,7 +77,8 @@ yourself.
 On exit the daemon writes `status: closed` (untempered) for review, unless the run was already accepted and re-armed.
 A scheduled occurrence must be after both the last service and the close to supersede that result.
 The owner's conditional re-arm cleans dirty markers at the old dispatch timestamp, so delayed launches stay armed and always start fresh.
-A verdict or stash prevents automatic re-arming.
+A verdict prevents automatic re-arming; Rest pauses it by writing `status: open`.
+A stashed horizon alone does not stop scheduling.
 
 ---
 

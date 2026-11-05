@@ -411,7 +411,7 @@ func (a *app) runStatusOneFiber(query string) error {
 	} else if read.Source == "owner" && !read.RuntimeKnown {
 		fmt.Fprintln(a.env.Stdout, "! owner document read; worker observation unavailable")
 	}
-	writeBlockSummary(a.env.Stdout, block, statusNow, armed, column)
+	writeBlockSummary(a.env.Stdout, block, f, armed, column)
 	if block.Pulse != nil {
 		fmt.Fprintf(a.env.Stdout, "  pulse:      every %s", block.Pulse.Every)
 		if read.PulseRuntime != nil {
@@ -439,6 +439,12 @@ func (a *app) runStatusOneFiber(query string) error {
 	return nil
 }
 
+func hasDispatchedRun(f *felt.Felt) bool {
+	runtime := felt.MappingValueNode(f.ExtraFields[shuttle.FacetKey], shuttle.RuntimeKey)
+	stamp := felt.MappingValueNode(runtime, "dispatched_at")
+	return stamp != nil && !shuttle.RuntimeTimestamp(stamp.Value).IsZero()
+}
+
 // dispatchAssessment renders the one line a single-fiber report is really for:
 // where the board files the fiber (its Desk column, as --json reports it),
 // whether it is eligible for dispatch and on which host, and the verb that
@@ -462,7 +468,7 @@ func (a *app) dispatchAssessment(f *felt.Felt, block *shuttle.Block, column, unt
 		case "tempered", "discarded":
 			return fmt.Sprintf("→ %s — reviewed and archived; daemon will NOT dispatch. Use `%s` to clear the verdict and arm it.", columnTitle(column), arm("reopen"))
 		default:
-			if block.Kind == "standing" && !horizonStashed(f) {
+			if block.Kind == "standing" && hasDispatchedRun(f) {
 				if noProjectDir {
 					return fmt.Sprintf("→ To review — the next occurrence after its last service and close needs an owner-side re-arm, but project_dir is missing. Use `%s` to accept and arm it.", arm("resume"))
 				}
@@ -550,7 +556,8 @@ func (a *app) liveWorkerSession(f *felt.Felt) (string, bool, error) {
 
 // writeBlockSummary writes the human-readable "Current block:" report. Dispatch
 // eligibility is the felt-native status alone (status:active = armed).
-func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed bool, column string) {
+func writeBlockSummary(out io.Writer, b *shuttle.Block, f *felt.Felt, armed bool, column string) {
+	statusNow := f.Status
 	fmt.Fprintln(out, "Current block:")
 	fmt.Fprintf(out, "  kind:        %s\n", shuttleNonEmpty(b.Kind, "(unset)"))
 	fmt.Fprintf(out, "  host:        %s\n", shuttleNonEmpty(b.Host, "(unset — NOT eligible on any daemon)"))
@@ -567,8 +574,10 @@ func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed 
 	switch {
 	case statusNow == "":
 		fmt.Fprintln(out, "  status:      (missing — NOT armed; resume or set status: active in the markdown)")
+	case statusNow == felt.StatusClosed && b.Kind == "standing" && readTempered(f) == nil && hasDispatchedRun(f):
+		fmt.Fprintln(out, "  status:      closed (awaiting review — the next occurrence may re-arm it)")
 	case statusNow == felt.StatusClosed:
-		fmt.Fprintln(out, "  status:      closed (NOT armed — daemon ignores closed fibers)")
+		fmt.Fprintln(out, "  status:      closed (NOT armed — reopen to dispatch)")
 	case statusNow == felt.StatusOpen && column == "resting":
 		fmt.Fprintln(out, "  status:      open (resting — NOT armed; resume to dispatch)")
 	case statusNow == felt.StatusOpen && column == "roles":

@@ -6,6 +6,16 @@ defmodule Shuttle.ActionsTest do
   # Lifecycle is status + tempered, uniform across kinds (slice 5: no enabled
   # flag, no review axis). Awaiting review is `status: closed` + untempered.
 
+  test "a standing verdict cannot be revoked by an Awaiting review drop" do
+    for verdict <- [true, false], running <- [true, false] do
+      fiber = %{"status" => "closed", "tempered" => verdict, "shuttle" => %{"kind" => "standing"}}
+      refute Enum.any?(Actions.actions_for(fiber, running), &(&1.id == "close-awaiting-review"))
+
+      assert {:error, :standing_review_unavailable} =
+               Actions.resolve_transition(fiber, "awaitingReview", running)
+    end
+  end
+
   test "armed standing-role in-flight transition resolves to ad-hoc dispatch" do
     fiber = armed_standing()
 
@@ -208,6 +218,11 @@ defmodule Shuttle.ActionsTest do
                 refute "accept-run" in available
                 refute "close-tempered" in available
                 nil
+
+              {:error, :standing_review_unavailable} ->
+                assert kind == "standing" and target == "awaitingReview" and not is_nil(tempered)
+                refute "close-awaiting-review" in available
+                nil
             end
 
           {%{
@@ -257,15 +272,15 @@ defmodule Shuttle.ActionsTest do
 
       # The open-lifecycle columns clear the verdict, each with the meaning of
       # its own column: inFlight arms (reopen → active), drafts parks as a
-      # paused draft (reopen-draft → open), awaitingReview re-closes with the
-      # verdict cleared (back to review). accept-run must NOT appear for a
+      # paused draft (reopen-draft → open). Awaiting review cannot clear the
+      # verdict. accept-run must NOT appear for a
       # closed role that already has a verdict.
       assert {:ok, %{id: "reopen"}} = Actions.resolve_transition(fiber, "inFlight")
 
       assert {:ok, %{id: "reopen-draft", invocation: %{verb: "reopen", as_draft: true}}} =
                Actions.resolve_transition(fiber, "drafts")
 
-      assert {:ok, %{id: "close-awaiting-review"}} =
+      assert {:error, :standing_review_unavailable} =
                Actions.resolve_transition(fiber, "awaitingReview")
 
       available = Actions.actions_for(fiber) |> Enum.map(& &1.id)

@@ -136,13 +136,11 @@ defmodule Shuttle.Poller.StandingRoles do
 
       # A dead ADHOC extra-run must not close the SCHEDULED standing constitution. An
       # ad-hoc (force-dispatched) run carries an `adhoc-<ms>` run_id; its dirty
-      # death (daemon down across the exit) is caught here, but concluding the
-      # standing constitution to awaiting-review on the strength of a crashed EXTRA run
-      # would disrupt the cron cadence and demand a human temper. A completed
-      # ad-hoc run reaches awaiting-review through `handle_worker_exit` instead
-      # (worker exit → mark_standing_awaiting), so this reconciler only ever fires
-      # on genuinely dead runs — leaving a crashed ad-hoc run's role simply armed
-      # for its next scheduled tick is safe.
+      # death (daemon down across the exit) is caught here. Closing the scheduled
+      # constitution on the strength of a crashed EXTRA run would postpone it
+      # until acceptance or an occurrence after that close. An observed ad-hoc
+      # exit publishes review through `handle_worker_exit` unless accepted;
+      # this reconciler leaves a crashed extra run's schedule armed.
       dead_run_is_adhoc?(fiber) ->
         Logger.info(
           "Standing constitution #{fiber_id} has a dead ADHOC extra-run (daemon down across its exit) — " <>
@@ -153,8 +151,8 @@ defmodule Shuttle.Poller.StandingRoles do
 
       # Daemon-down analog of handle_worker_exit. Only reached for a DIRTY
       # exit — the `standing_role_dispatched_unexited?` gate above already
-      # skipped any run that handed off cleanly: awaiting (status:closed) so
-      # the cron doesn't re-fire.
+      # skipped any run that handed off cleanly. Publish Awaiting review until
+      # acceptance or a scheduled occurrence after the close.
       true ->
         Logger.info(
           "Standing constitution #{fiber_id} armed with an un-exited dispatch but no live tmux " <>

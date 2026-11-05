@@ -17,13 +17,16 @@ defmodule Shuttle.Actions do
   end
 
   @spec resolve_transition(map(), String.t(), boolean()) ::
-          {:ok, map()} | {:error, :unknown_target | :standing_temper_unavailable}
+          {:ok, map()}
+          | {:error,
+             :unknown_target | :standing_temper_unavailable | :standing_review_unavailable}
   def resolve_transition(fiber, target, running? \\ false)
 
   def resolve_transition(fiber, target, running?) when target in @transition_targets do
     target = normalize_target(target)
 
     case action_for_target(fiber, target, running?) do
+      nil when target == "awaitingReview" -> {:error, :standing_review_unavailable}
       nil -> {:error, :standing_temper_unavailable}
       action -> {:ok, render_action(action)}
     end
@@ -66,6 +69,9 @@ defmodule Shuttle.Actions do
     status = Map.get(fiber, "status")
 
     cond do
+      standing?(shuttle) and target == "awaitingReview" and not untempered?(fiber) ->
+        nil
+
       standing?(shuttle) and target == "tempered" and
           (not untempered?(fiber) or status not in ["active", "closed"]) ->
         nil
@@ -140,10 +146,8 @@ defmodule Shuttle.Actions do
       status == "closed" and target == "inFlight" ->
         :reopen
 
-      # Dragging a tempered/composted card back to Awaiting review revokes the
-      # verdict but keeps the card closed: re-close with tempered cleared.
-      # (Resolving this to reopen — as it once did — armed the card and
-      # snapped it to In flight instead of Awaiting review.)
+      # A oneshot can return to Awaiting review by clearing its verdict.
+      # A standing verdict needs an explicit reopen instead.
       status == "closed" and target == "awaitingReview" ->
         :close_awaiting_review
 

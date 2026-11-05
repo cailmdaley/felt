@@ -21,6 +21,28 @@ defmodule Shuttle.LifecycleStoreTest do
     end
   end
 
+  test "the exit writer leaves paused, closed and reviewed documents byte-identical" do
+    for {status, verdict} <- [
+          {"open", nil},
+          {"closed", nil},
+          {"active", false},
+          {"active", true},
+          {"closed", false},
+          {"closed", true}
+        ] do
+      with_doc_awaiting_role(
+        fn id, path ->
+          before = File.read!(path)
+          assert {:ok, message} = LifecycleStore.mark_awaiting(id)
+          assert message =~ "skipped"
+          assert File.read!(path) == before
+        end,
+        status: status,
+        tempered: verdict
+      )
+    end
+  end
+
   describe "the standing-only writers refuse a oneshot" do
     # mark_awaiting (the standing worker-exit closer) and rearm (the
     # force-dispatch re-arm) belong to the cron lifecycle. A oneshot — and a
@@ -84,14 +106,14 @@ defmodule Shuttle.LifecycleStoreTest do
           refute written =~ ~s(outcome: ")
 
           # Surgical: only the intended keys changed. Every other authored line is
-          # byte-identical to the original; status flipped open → closed.
+          # byte-identical to the original; status flips active → closed.
           assert_only_keys_changed(original, written, %{
             "status" => "closed",
             "closed-at" => :added,
             "tempered" => :removed
           })
         end,
-        status: "open"
+        status: "active"
       )
     end
 
@@ -101,15 +123,14 @@ defmodule Shuttle.LifecycleStoreTest do
           assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
           first = File.read!(path)
 
-          # A second mark_awaiting re-stamps closed-at (a timestamp), so compare the
-          # parts that must be byte-stable: everything except the closed-at value.
+          # An already-closed document is not another worker exit.
           assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
           second = File.read!(path)
 
-          assert strip_closed_at(first) == strip_closed_at(second),
+          assert first == second,
                  "repeated writes churned the file:\n#{first}\n--- vs ---\n#{second}"
         end,
-        status: "open"
+        status: "active"
       )
     end
 
@@ -132,7 +153,7 @@ defmodule Shuttle.LifecycleStoreTest do
           refute Map.has_key?(parsed["shuttle"], "next_due_at")
           refute Map.has_key?(parsed["shuttle"], "last_run_at")
         end,
-        status: "open"
+        status: "active"
       )
     end
   end
@@ -248,20 +269,11 @@ defmodule Shuttle.LifecycleStoreTest do
     String.match?(line, ~r{^#{Regex.escape(key)}:(?:\s|$)})
   end
 
-  # Drop the closed-at line (its value is a fresh timestamp each write) so two
-  # writes can be compared for structural byte-stability.
-  defp strip_closed_at(text) do
-    text
-    |> String.split("\n")
-    |> Enum.reject(&String.starts_with?(&1, "closed-at:"))
-    |> Enum.join("\n")
-  end
-
   # Builds a real on-disk felt fiber (resolvable by the felt CLI) in the
   # new-model awaiting shape, points SHUTTLE_STORES at the fixture, and runs
   # `fun.(fiber_id, path)`. There is no runtime store anymore (slice 6): the
   # felt document carries the entire lifecycle.
-  defp with_doc_awaiting_role(fun, opts \\ []) do
+  defp with_doc_awaiting_role(fun, opts) do
     status = Keyword.get(opts, :status, "closed")
     tempered = Keyword.get(opts, :tempered, nil)
 

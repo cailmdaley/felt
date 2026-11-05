@@ -733,10 +733,11 @@ func (a *app) closeCmd() *cobra.Command {
 	closeCmd := &cobra.Command{
 		Use:   "close [fiber]",
 		Short: "Close a shuttle-managed fiber and optionally set the human verdict",
-		Long: `Sets status: closed, sets/clears tempered, and stamps closed-at when the
-field is missing. Use:
+		Long: `Sets status: closed and stamps closed-at. --tempered records a verdict.
+Without that flag, a standing verdict stays in place; a oneshot's is cleared.
+Standing closes refresh closed-at; oneshots stamp it when missing. Use:
 
-  shuttle close <fiber>                   # awaiting review (tempered cleared)
+  shuttle close <fiber>                   # close for review (keeps a standing verdict)
   shuttle close <fiber> --tempered=true   # human-accepted
   shuttle close <fiber> --tempered=false  # discarded
   shuttle close <fiber> --quiet           # context-only result for its orchestrator
@@ -748,9 +749,11 @@ orchestrator's own session makes is not delivered back to it.
 
 For a standing constitution, --tempered=true accepts and concludes the run,
 re-arming it for the schedule's next tick, with the same gate as 'accept'.
-Without a verdict it stays on Awaiting review until accepted or the next
-occurrence re-arms it. --tempered=false ends the schedule; rest pauses it.
-Existing verdicts are never automatically re-armed.
+An untempered closed run with a dispatch on record waits on Awaiting review until
+accepted or an occurrence after both its last service and close re-arms it.
+A never-run draft stays closed. --tempered=false ends the schedule; rest pauses
+it by writing status: open. A stashed horizon alone does not stop scheduling.
+Plain close keeps an existing standing verdict; reopen explicitly clears it.
 
 The shuttle block stays installed. Closed oneshots wait for reopen.
 When closing your own fiber from tmux, this command ends your
@@ -860,6 +863,9 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			}
 
 			f.Status = felt.StatusClosed
+			if block.Kind == "standing" && tempered == nil {
+				tempered = readTempered(f)
+			}
 			if err := setTempered(f, tempered); err != nil {
 				return err
 			}
@@ -922,7 +928,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 		},
 	}
 	closeCmd.Flags().BoolVar(&closeQuiet, "quiet", false, "Deliver the outcome as context without waking the nearest orchestrator")
-	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
+	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to keep a standing verdict or clear a oneshot's")
 	closeCmd.Flags().Bool("local", false, localFlagUsage)
 	closeCmd.Flags().StringVar(&closeActor, "actor", "", actorFlagUsage)
 	_ = closeCmd.Flags().MarkHidden("actor")
@@ -1084,7 +1090,7 @@ func (a *app) reopenOccurrence(query string, f *felt.Felt, st *felt.Storage, blo
 		fmt.Fprintf(a.env.Stdout, "skipped occurrence for %s%s (state changed or not due)\n", query, ref.Location())
 		return nil
 	}
-	if block.Kind != "standing" || f.Status != felt.StatusClosed || readTempered(f) != nil || horizonStashed(f) || block.Host != own || block.Host == "" {
+	if block.Kind != "standing" || f.Status != felt.StatusClosed || readTempered(f) != nil || block.Host != own || block.Host == "" {
 		return skipped()
 	}
 	if block.Schedule == nil {
@@ -1101,10 +1107,11 @@ func (a *app) reopenOccurrence(query string, f *felt.Felt, st *felt.Storage, blo
 			return err
 		}
 	}
-	dispatchedAt, _ := markers["dispatched_at"].(string)
-	handedOffAt, _ := markers["handed_off_at"].(string)
-	dispatch, _ := time.Parse(time.RFC3339Nano, dispatchedAt)
-	handoff, _ := time.Parse(time.RFC3339Nano, handedOffAt)
+	dispatch := shuttle.RuntimeTimestamp(markers["dispatched_at"])
+	handoff := shuttle.RuntimeTimestamp(markers["handed_off_at"])
+	if dispatch.IsZero() {
+		return skipped()
+	}
 	anchor := f.CreatedAt
 	for _, stamp := range []time.Time{dispatch, handoff} {
 		if stamp.After(anchor) {
@@ -1125,8 +1132,8 @@ func (a *app) reopenOccurrence(query string, f *felt.Felt, st *felt.Storage, blo
 	}
 	// Equality reads as clean without consuming this occurrence. A delayed
 	// launch remains armed, and the next worker starts fresh rather than restoring.
-	if !dispatch.IsZero() && handoff.Before(dispatch) {
-		if err := shuttle.SetRuntimeField(f, "handed_off_at", dispatchedAt); err != nil {
+	if handoff.Before(dispatch) {
+		if err := shuttle.SetRuntimeField(f, "handed_off_at", dispatch.UTC().Format(time.RFC3339Nano)); err != nil {
 			return err
 		}
 	}

@@ -174,12 +174,26 @@ func stampHandedOff(path string, check func(*felt.Felt) error) (string, error) {
 			return "", err
 		}
 	}
+	var markers map[string]any
+	if runtime := felt.MappingValueNode(f.ExtraFields[shuttle.FacetKey], shuttle.RuntimeKey); runtime != nil {
+		if err := runtime.Decode(&markers); err != nil {
+			return "", err
+		}
+	}
+	// A handoff after acceptance keeps that run's re-arm. A later dispatch
+	// makes its previous handoff older, so a new run publishes its own result.
+	dispatch := shuttle.RuntimeTimestamp(markers["dispatched_at"])
+	handoff := shuttle.RuntimeTimestamp(markers["handed_off_at"])
+	accepted := !handoff.IsZero() && !handoff.Before(dispatch) &&
+		(markers["thread_exit_verb"] == "tempered" || markers["thread_exit_verb"] == "rearmed")
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {
 		return "", err
 	}
-	if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "handed off"); err != nil {
-		return "", err
+	if !accepted {
+		if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "handed off"); err != nil {
+			return "", err
+		}
 	}
 	data, err := f.Marshal()
 	if err != nil {
