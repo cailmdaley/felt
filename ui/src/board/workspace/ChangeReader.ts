@@ -3,6 +3,7 @@ import { renderMarkdown } from '../utils.js'
 import { assignLanes, reviewMessage, type ChangeRange, type ChangeBundle, type ChangeComment, type ChangeDraft, type ChangeFile, type ChangeHunk, type ChangeWindow } from './changeModel.js'
 import './change-reader.css'
 import { changeLanguage } from './changeLanguages.js'
+import { validateChangeBundle } from './changeValidation.js'
 
 registerCustomCSSVariableTheme('shuttle-change', {})
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -25,6 +26,11 @@ function save(key: string, value: unknown): void {
 
 /** Native review content; the workspace owns its file, gestures, scroll position and worker route. */
 export function mountChangeReader(root: HTMLElement, bundle: ChangeBundle, identity: string, send?: (message: string) => Promise<void>, canSend = () => true) {
+  try { validateChangeBundle(bundle) } catch (error) {
+    const message = el('div', 'change-load-error', error instanceof Error ? error.message : 'Invalid change bundle')
+    message.setAttribute('role', 'alert'); root.replaceChildren(message)
+    return { scroller: message, dispose() { message.remove() } }
+  }
   const files = bundle.files, lanes = assignLanes(bundle)
   const prefix = `shuttle:change:${JSON.stringify([identity, bundle.base, bundle.head])}`
   const viewed = new Set(stored<string[]>(`${prefix}:viewed`, []))

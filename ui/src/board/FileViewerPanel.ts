@@ -104,21 +104,28 @@ export function buildFileViewer(
     let dispose: (() => void) | undefined
     let disposed = false, generation = 0
     let scroller: HTMLElement | undefined
-    const failed = (error: unknown): void => { if (!disposed) options.onState?.({ status: 'error', error, hasContent: !!dispose }) }
+    const failed = (error: unknown): void => {
+      if (disposed) return
+      dispose?.(); dispose = undefined; scroller = undefined
+      const message = document.createElement('div'); message.className = 'change-load-error'; message.setAttribute('role', 'alert')
+      message.textContent = `Could not load ${basename(fullPath)}: ${error instanceof Error ? error.message : 'Invalid change bundle'}`
+      wrap.replaceChildren(message)
+      options.onState?.({ status: 'error', error, hasContent: false })
+    }
     const stop = watchLiveFile(src, source => {
       const revision = ++generation
-      void Promise.all([import('./workspace/ChangeReader.js'), import('./workspace/changeModel.js').then(module => module.changeIdentity(source))]).then(([{ mountChangeReader }, digest]) => {
+      void Promise.all([import('./workspace/ChangeReader.js'), import('./workspace/changeValidation.js'), import('./workspace/changeModel.js')]).then(([{ mountChangeReader }, { parseChangeBundle }, { changeIdentity }]) => {
         if (disposed || revision !== generation) return
-        const bundle = JSON.parse(source)
-        if (bundle.version !== 1) throw new Error(`Unsupported change version: ${bundle.version}`)
+        const bundle = parseChangeBundle(source)
+        const digest = changeIdentity(source)
         const position = scroller?.scrollTop ?? 0
-        dispose?.()
+        dispose?.(); wrap.replaceChildren()
         const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}:${digest}`, options.onReview, options.canReview)
         dispose = mounted.dispose; scroller = mounted.scroller; scroller.scrollTop = position
         options.onThumbnailSource?.(source, recallText(src)?.etag)
         onTextPane?.(scroller)
         options.onState?.({ status: 'ready' })
-      }).catch(failed)
+      }).catch(error => { if (revision === generation) failed(error) })
     }, failed, { active: options.active, loadOnce: options.active === false })
     liveViewSubscriptions.set(wrap, stop)
     viewerDisposers.set(wrap, () => { disposed = true; stop(); dispose?.() })

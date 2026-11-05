@@ -1,10 +1,11 @@
 export type ChangeRole = 'implementation' | 'test' | 'generated' | 'config' | 'docs'
 export interface ChangeRange { file: string; from?: number; to?: number; side?: 'new' | 'old' }
-export interface ChangeWindow { old_from: number; old_lines: number; new_from: number; new_lines: number; patch: string; rows: number }
+export interface ChangeLine { kind: 'addition' | 'deletion' | 'context' | 'note'; old: number; new: number; text: string }
+export interface ChangeWindow { old_from: number; old_lines: number; new_from: number; new_lines: number; patch: string; rows: number; lines?: ChangeLine[] }
 export interface ChangeHunk { file: string; old_from: number; old_lines: number; new_from: number; new_lines: number; patch: string; windows: ChangeWindow[] }
 export interface ChangeStop extends ChangeRange { note: string; importance: 'critical' | 'important' | 'supporting' | 'context'; hunks: ChangeHunk[] }
 export interface ChangeChapter { id: string; title: string; narrative: string; why_here: string; stops: ChangeStop[] }
-export interface ChangeFile { path: string; role: ChangeRole; status: string; additions: number; deletions: number; header: string; hunks: ChangeHunk[]; remaining: ChangeHunk[] }
+export interface ChangeFile { path: string; old_path?: string; old_mode?: string; new_mode?: string; role: ChangeRole; status: string; additions: number; deletions: number; header: string; hunks: ChangeHunk[]; remaining: ChangeHunk[] }
 export interface ChangeBundle {
   version: 1
   title: string
