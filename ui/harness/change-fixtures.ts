@@ -5,20 +5,22 @@ import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REPORT, WORKSPACE_UID, type Wor
 
 /** Real repository snapshot plus no-story and long-file reading probes. */
 export function addChangeFixtures(fixture: WorkspaceExample, now: number): void {
-  const bundle = dogfood as ChangeBundle // changeContract.test checks the CLI's JSON against this type.
+  const bundle = dogfood as ChangeBundle
   const owner = fixture.feed.fibers.find(row => (row.fiber as { id: string }).id === WORKSPACE_ID)!
   owner.runtime = { state: 'running', phase: 'waiting', tmux_session: 'fixture-review-worker', started_at: now - 60_000 }
   const dir = WORKSPACE_REPORT.slice(0, WORKSPACE_REPORT.lastIndexOf('/'))
   const header = 'diff --git a/src/large.ts b/src/large.ts\n--- a/src/large.ts\n+++ b/src/large.ts\n'
   const windows = Array.from({ length: 84 }, (_, index) => {
     const start = index * 60 + 1, count = Math.min(60, 5001 - start)
-    return { old_from: start, old_lines: count, new_from: start, new_lines: count, rows: count * 2,
-      patch: `${header}@@ -${start},${count} +${start},${count} @@\n${Array.from({ length: count }, (_, n) => `-export const value${start + n} = ${start + n - 1};\n+export const value${start + n} = ${start + n};`).join('\n')}\n` }
+    return { old_from: start, old_lines: count, new_from: start, new_lines: count, rows: count * 2, start: index * 120 }
   })
-  const hunks = [{ file: 'src/large.ts', old_from: 1, old_lines: 5000, new_from: 1, new_lines: 5000, patch: '', windows }]
+  const hunks = [{ file: 'src/large.ts', old_from: 1, old_lines: 5000, new_from: 1, new_lines: 5000, windows }]
   const large: ChangeBundle = { ...bundle, title: 'A 5,000-line changed file', head: '5'.repeat(40), story: null,
     files: [{ path: 'src/large.ts', role: 'implementation', status: 'modified', additions: 5000, deletions: 5000, header,
-      hunks, remaining: hunks }],
+      lines: Array.from({ length: 5000 }, (_, index) => [
+        { kind: 'deletion' as const, old: index + 1, new: 0, text: `export const value${index + 1} = ${index};` },
+        { kind: 'addition' as const, old: 0, new: index + 1, text: `export const value${index + 1} = ${index + 1};` },
+      ]).flat(), hunks, remaining: hunks }],
   }
   for (const [name, change] of [['family', bundle], ['plain', plain as ChangeBundle], ['large', large]] as const) {
     const path = `${dir}/${name}.change.json`

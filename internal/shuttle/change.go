@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -53,6 +52,7 @@ type ChangeFile struct {
 	Additions int          `json:"additions"`
 	Deletions int          `json:"deletions"`
 	Header    string       `json:"header"`
+	Lines     []ChangeLine `json:"lines"`
 	Hunks     []ChangeHunk `json:"hunks"`
 	Remaining []ChangeHunk `json:"remaining"`
 }
@@ -99,21 +99,18 @@ type ChangeHunk struct {
 	OldLines int            `json:"old_lines"`
 	NewFrom  int            `json:"new_from"`
 	NewLines int            `json:"new_lines"`
-	Patch    string         `json:"patch"`
 	Windows  []ChangeWindow `json:"windows"`
 	rows     []changeRow
-	header   string
 }
 
 // ChangeWindow is an independently renderable, bounded piece of a hunk.
 type ChangeWindow struct {
-	OldFrom  int          `json:"old_from"`
-	OldLines int          `json:"old_lines"`
-	NewFrom  int          `json:"new_from"`
-	NewLines int          `json:"new_lines"`
-	Patch    string       `json:"patch"`
-	Rows     int          `json:"rows"`
-	Lines    []ChangeLine `json:"lines"`
+	OldFrom  int `json:"old_from"`
+	OldLines int `json:"old_lines"`
+	NewFrom  int `json:"new_from"`
+	NewLines int `json:"new_lines"`
+	Start    int `json:"start"`
+	Rows     int `json:"rows"`
 }
 
 // ChangeLine is a display row with zero for an absent side's line number.
@@ -179,7 +176,7 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 			head = strings.TrimSpace(ref)
 		}
 	}
-	c := &Change{Version: 1, Repo: ChangeRepo{Name: name, Dir: repo, ForgeURL: forgeURL}, Base: baseSHA, Head: headSHA, BaseRef: base, HeadRef: head, Story: story, Files: []ChangeFile{}, Commits: []ChangeCommit{}}
+	c := &Change{Version: 2, Repo: ChangeRepo{Name: name, Dir: repo, ForgeURL: forgeURL}, Base: baseSHA, Head: headSHA, BaseRef: base, HeadRef: head, Story: story, Files: []ChangeFile{}, Commits: []ChangeCommit{}}
 	subject, err := git("show", "-s", "--format=%s", headSHA, "--")
 	if err != nil {
 		return nil, nil, err
@@ -350,9 +347,6 @@ func ValidateChange(c *Change, hunks []ChangeHunk) ChangeReport {
 		}
 	}
 	if c.Story != nil {
-		if strings.IndexFunc(c.Story.Title, unicode.IsControl) >= 0 {
-			bad("title: control characters are not allowed")
-		}
 		ids := map[string]bool{}
 		for i, flag := range c.Story.Flags {
 			check(fmt.Sprintf("flags[%d]", i), flag.ChangeRange)

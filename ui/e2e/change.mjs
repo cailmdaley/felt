@@ -55,7 +55,7 @@ export function registerChangeJourneys(test) {
     assert.equal(sends[0].fiber_id, 'research/workspace/calibration-report')
     assert.equal(sends[0].resume_mode, 'previous')
     assert.match(sends[0].user_message, /Head: [a-f0-9]{40}/)
-    assert.match(sends[0].user_message, /"ui\/src\/board\/threads.ts":\d+\n/)
+    assert.match(sends[0].user_message, /ui\/src\/board\/threads.ts:\d+\n/)
     assert.equal(sends[0].force, true)
     assert.equal(sends[0].existing_only, true)
     assert.match(sends[0].user_message, /Does the root exclude itself/)

@@ -48,15 +48,14 @@ An isolated bare Git repository ignores `.gitattributes` in both captured trees 
 A file marked `-diff` gets a text patch if Git classifies its contents as text.
 Files Git classifies as binary carry its binary notice rather than their contents.
 NUL bytes and invalid UTF-8 render lossily; the reader isn't a byte-for-byte representation of arbitrary file contents.
-Unicode format characters and a mid-line carriage return are kept and marked in place; see [Review state and delivery](#review-state-and-delivery).
 
-## Version 1 bundle
+## Version 2 bundle
 
 The bundle has these fields:
 
 | Field | Meaning |
 |---|---|
-| `version` | Schema version, `1` |
+| `version` | Schema version, `2`; other versions need a rebake |
 | `title` | The story's optional title, otherwise the head commit subject |
 | `repo` | `{name, dir, forge_url}`; `dir` is absolute and `forge_url` is an HTTPS forge address without credentials, query, fragment or `.git`, otherwise `null` |
 | `base`, `head` | Merge-base and resolved head SHAs |
@@ -65,7 +64,7 @@ The bundle has these fields:
 | `files` | Repository-relative inventory, with destination paths for renames and old paths for deletions |
 | `story` | Resolved story object, or `null` |
 
-A file has `path`, `old_mode`, `new_mode`, `status`, `role`, `additions`, `deletions`, `header`, `hunks` and `remaining`, plus `old_path` for renames.
+A file has `path`, `old_mode`, `new_mode`, `status`, `role`, `additions`, `deletions`, `header`, `lines`, `hunks` and `remaining`, plus `old_path` for renames.
 `old_path` names the source path; `path` names the destination.
 Modes are six-digit octal strings from Git's raw inventory, with `000000` for an absent side.
 Different nonzero mode prefixes (the first three digits) identify file-type changes; other mode differences include executable-bit changes.
@@ -74,19 +73,25 @@ The header retains Git's metadata, including binary notices, rename paths and mo
 Empty changes have empty `commits` and `files` arrays.
 Files without textual changes have empty `hunks` arrays and zero line counts.
 
-Each hunk has `{file, old_from, old_lines, new_from, new_lines, patch, windows}`.
-Its `patch` includes the file headers and complete hunk text needed by the renderer.
-Go alone reads Git's diff and decides coverage.
-The reader uses these supplied boundaries and flags rather than reconstructing them from a top-level patch.
-`windows` contains bounded rendering pieces, each with `{old_from, old_lines, new_from, new_lines, patch, rows, lines}`.
-Each `lines` entry has `{kind, old, new, text}` for plain-text rendering without parsing the patch.
-`kind` is `addition`, `deletion`, `context` or `note`; absent-side line numbers are zero.
-`text` omits the patch row's leading marker, and `rows` counts all entries, including no-newline notes.
-These let the reader mount long hunks a piece at a time without another diff parser.
-Story stops acquire their own `hunks` array containing just the selected excerpts.
-Each file’s `remaining` array contains the changed lines no stop shows, with up to three adjacent context lines and the same renderable shape.
-The reader renders these excerpts directly, without calculating coverage.
+Each file stores its source text once, in `lines`.
+Each entry has `{kind, old, new, text}`; `kind` is `addition`, `deletion`, `context` or `note`, and absent-side line numbers are zero.
+`text` omits the patch row's leading marker.
+
+Each hunk has `{file, old_from, old_lines, new_from, new_lines, windows}`.
+Each window has `{old_from, old_lines, new_from, new_lines, start, rows}`.
+`start` is a zero-based offset into that file's `lines`; `rows` counts entries, including no-newline notes.
+Windows hold at most 120 source rows plus an adjacent no-newline note.
+Story stops and each file's `remaining` use the same hunk and window references, without copying text.
+Remaining contains the changed lines no stop shows, with up to three adjacent context lines.
 All collection fields are arrays, including when empty.
+
+Go alone reads Git's diff and decides coverage.
+The reader mounts nearby windows from these references and builds a small patch only when highlighting a visible window.
+Large windows stay plain rather than tokenizing tens of thousands of characters on the UI thread.
+Highlighting uses Shiki's WebAssembly engine, with readable structured rows as its fallback.
+Generated files start folded.
+Only the selected change has a reader: returning to the conversation removes its code DOM, observers, highlighter and source body cache.
+An inactive change chip doesn't parse or mount the bundle.
 
 ## Write a story
 
@@ -117,13 +122,13 @@ All collection fields are arrays, including when empty.
 }
 ```
 
-`overview`, chapter `narrative` and stop `note` carry untrusted Markdown: only the tags Markdown itself produces, no images, styles or board classes. `$...$` math is typeset after sanitizing, with KaTeX's `trust` off and its sizes capped, inside a paint-contained box, so a formula paints nothing outside that box and a wide display formula scrolls within it.
+`overview`, chapter `narrative` and stop `note` carry Markdown, rendered through the board's shared Markdown path, including math.
 Chapters have unique ids and are ordered; `why_here` explains that order.
 Stop importance is `critical`, `important`, `supporting` or `context`.
 A flag uses the same file and range fields, plus `text` explaining what to inspect first.
 Flags don't count toward coverage.
 Omitted flags, chapters and role overrides are allowed and become empty collections.
-Unknown JSON keys, duplicate chapter ids and control characters in `story.title` fail validation.
+Unknown JSON keys and duplicate chapter ids fail validation.
 
 Stops and flags name inventory paths exactly, including the destination path on both sides of a rename.
 `from` and `to` are inclusive file line numbers, not patch positions.
@@ -180,13 +185,13 @@ The reader and Send button name earlier anchors; the delivered message preserves
 Viewed marks are separate: they reset when the base, head or bundle’s non-cryptographic fingerprint changes.
 
 Send review names and targets the fiber whose directory holds the bundle, on the file’s owner host, even when another fiber links to it.
-It uses that fiber composer’s existing-worker route and sends one message with Base and Head SHAs before quoted title and path data.
+It uses that fiber composer’s existing-worker route and sends one plain-text message with Base and Head SHAs, the title and the comments.
 A missing worker route disables sending; reading a change never authorizes a fresh worker launch.
-The draft is locked while sending, including across a live rebake. Successful delivery clears the delivered text once; a failed send keeps it available to retry.
+The Send button is disabled while delivering.
+Successful delivery clears the draft; a failed send keeps it available to retry.
 A busy owner or a lost answer doesn't prove a failure, so Send then says the review may still arrive and asks you to check the worker's conversation before sending again.
 
-Worker-authored bundles are validated before rendering, storage or review: base and head are full hexadecimal SHA-1 or SHA-256 object IDs, and all reader-required fields have checked shapes.
-All Markdown passes through a final DOMPurify allowlist boundary shared with transcript rendering, and every link gets `rel="noopener noreferrer"` and `target="_blank"` after sanitizing.
-Captured structured lines are readable without syntax highlighting. A parser, highlighter or grammar-load failure retains plain text rows; a window without renderable rows names its file in a visible error.
-Rows containing Unicode format characters (bidi controls such as U+202E, zero-width marks, tag characters) or a mid-line carriage return stay plain, with each character labelled by its code point in logical order.
-The reader derives a **Look here first** entry for each such file from the captured rows, so no story can remove it.
+The reader checks the bundle version and asks for a rebake when it differs.
+A plain Go test against real Git output enforces that every changed line appears in Story, Tests or Remaining.
+A browser smoke test checks that a real bundle renders and that disposal removes its windows and observers.
+Captured rows remain readable if the optional parser, highlighter or grammar load fails.

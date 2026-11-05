@@ -1,7 +1,7 @@
 import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  bytes, fact, fetchDocument, head, peek, peekVersion, recallText, resetDocumentResources, resourceKey, RESOURCE_DEADLINE_MS, RESOURCE_FRESH_MS, RESOURCE_TEXT_BUDGET,
+  bytes, fact, fetchDocument, forgetText, head, peek, peekVersion, recallText, resetDocumentResources, resourceKey, RESOURCE_DEADLINE_MS, RESOURCE_FRESH_MS, RESOURCE_TEXT_BUDGET,
   RESOURCE_PRIORITY, text, type ResourcePriority,
 } from './documentResources.js'
 import { resetLanes } from './requestLanes.js'
@@ -240,6 +240,18 @@ describe('shared reads', () => {
     expect(unchanged.status).toBe(304)
     expect((await thumbnail)!.text).toBe('<h1>Report</h1>')
     expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases a closed native reader body without losing its small metadata', async () => {
+    const src = '/api/v1/file?path=/review.change.json'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('bundle source', { headers: { ETag: 'W/"sha256-review"' } })))
+    await fetchDocument(src, { cache: 'no-cache' })
+    expect(recallText(src)?.text).toBe('bundle source')
+    const first = await peek(src)
+    forgetText(src)
+    expect(recallText(src)).toBeUndefined()
+    expect(await peek(src)).toBe(first)
+    forgetText(src)
   })
 
   it('does not hold a body larger than the whole text budget, nor evict others for it', async () => {

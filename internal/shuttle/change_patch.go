@@ -12,6 +12,7 @@ var changeSections = regexp.MustCompile(`(?m)^diff --git `)
 type changeRow struct {
 	text     string
 	old, new int
+	index    int
 }
 
 // parsePatch resolves headers against the NUL-delimited inventory.
@@ -20,6 +21,7 @@ func (c *Change) parsePatch() ([]ChangeHunk, error) {
 	for i := range c.Files {
 		c.Files[i].Hunks = []ChangeHunk{}
 		c.Files[i].Remaining = []ChangeHunk{}
+		c.Files[i].Lines = []ChangeLine{}
 	}
 	for _, section := range changeSections.Split(c.Patch, -1) {
 		if section == "" {
@@ -52,7 +54,7 @@ func (c *Change) parsePatch() ([]ChangeHunk, error) {
 				}
 				old, _ = strconv.Atoi(match[1])
 				next, _ = strconv.Atoi(match[3])
-				file.Hunks = append(file.Hunks, ChangeHunk{File: file.Path, OldFrom: old, OldLines: count(match[2]), NewFrom: next, NewLines: count(match[4]), header: header})
+				file.Hunks = append(file.Hunks, ChangeHunk{File: file.Path, OldFrom: old, OldLines: count(match[2]), NewFrom: next, NewLines: count(match[4])})
 				current = &file.Hunks[len(file.Hunks)-1]
 				if current.OldLines == 0 {
 					old++
@@ -61,7 +63,7 @@ func (c *Change) parsePatch() ([]ChangeHunk, error) {
 					next++
 				}
 			} else if current != nil && len(line) > 0 && strings.ContainsRune(" +-\\", rune(line[0])) {
-				current.rows = append(current.rows, changeRow{line, old, next})
+				current.rows = append(current.rows, changeRow{text: line, old: old, new: next})
 				if line[0] == ' ' || line[0] == '-' {
 					old++
 				}
@@ -81,7 +83,10 @@ func (c *Change) parsePatch() ([]ChangeHunk, error) {
 		f.Additions, f.Deletions = 0, 0
 		for j := range f.Hunks {
 			h := &f.Hunks[j]
-			h.Patch = h.render(h.rows)
+			for k := range h.rows {
+				h.rows[k].index = len(f.Lines)
+				f.Lines = append(f.Lines, h.rows[k].line())
+			}
 			h.Windows = h.windows()
 			for _, row := range h.rows {
 				if row.text[0] == '+' {
@@ -97,31 +102,19 @@ func (c *Change) parsePatch() ([]ChangeHunk, error) {
 	return hunks, nil
 }
 
-func (h ChangeHunk) render(rows []changeRow) string {
-	if len(rows) == 0 {
-		return ""
+func (row changeRow) line() ChangeLine {
+	line := ChangeLine{Text: row.text[1:]}
+	switch row.text[0] {
+	case '+':
+		line.Kind, line.New = "addition", row.new
+	case '-':
+		line.Kind, line.Old = "deletion", row.old
+	case ' ':
+		line.Kind, line.Old, line.New = "context", row.old, row.new
+	case '\\':
+		line.Kind = "note"
 	}
-	oldLines, newLines := 0, 0
-	var body strings.Builder
-	for _, row := range rows {
-		body.WriteString(row.text)
-		body.WriteByte('\n')
-		if row.text[0] == ' ' || row.text[0] == '-' {
-			oldLines++
-		}
-		if row.text[0] == ' ' || row.text[0] == '+' {
-			newLines++
-		}
-	}
-	old, next := rows[0].old, rows[0].new
-	// Zero-side starts denote the preceding line, not the cursor for the next row.
-	if oldLines == 0 {
-		old--
-	}
-	if newLines == 0 {
-		next--
-	}
-	return fmt.Sprintf("%s@@ -%d,%d +%d,%d @@\n%s", h.header, old, oldLines, next, newLines, body.String())
+	return line
 }
 
 func (h ChangeHunk) windows() []ChangeWindow {
@@ -133,22 +126,7 @@ func (h ChangeHunk) windows() []ChangeWindow {
 		}
 		rows := h.rows[start:end]
 		slice := h.withRows(rows)
-		lines := make([]ChangeLine, 0, len(rows))
-		for _, row := range rows {
-			line := ChangeLine{Text: row.text[1:]}
-			switch row.text[0] {
-			case '+':
-				line.Kind, line.New = "addition", row.new
-			case '-':
-				line.Kind, line.Old = "deletion", row.old
-			case ' ':
-				line.Kind, line.Old, line.New = "context", row.old, row.new
-			case '\\':
-				line.Kind = "note"
-			}
-			lines = append(lines, line)
-		}
-		windows = append(windows, ChangeWindow{OldFrom: slice.OldFrom, OldLines: slice.OldLines, NewFrom: slice.NewFrom, NewLines: slice.NewLines, Patch: slice.Patch, Rows: len(rows), Lines: lines})
+		windows = append(windows, ChangeWindow{OldFrom: slice.OldFrom, OldLines: slice.OldLines, NewFrom: slice.NewFrom, NewLines: slice.NewLines, Start: rows[0].index, Rows: len(rows)})
 		start = end
 	}
 	return windows
@@ -175,7 +153,6 @@ func (h ChangeHunk) withRows(rows []changeRow) ChangeHunk {
 	if out.NewLines == 0 {
 		out.NewFrom--
 	}
-	out.Patch = h.render(rows)
 	out.Windows = nil
 	return out
 }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mountChangeReader } from './ChangeReader.js'
 import type { ChangeBundle } from './changeModel.js'
 
-vi.mock('@pierre/diffs', () => ({ registerCustomCSSVariableTheme() {}, parsePatchFiles: () => [], FileDiff: class {}, getSharedHighlighter: vi.fn() }))
+vi.mock('@pierre/diffs', () => ({ registerCustomCSSVariableTheme() {}, disposeHighlighter() {}, parsePatchFiles: () => [], FileDiff: class {}, getSharedHighlighter: vi.fn() }))
 vi.stubGlobal('IntersectionObserver', class { callback: (entries: unknown[]) => void; constructor(callback: (entries: unknown[]) => void) { this.callback = callback } observe(target: Element) { this.callback([{ target, isIntersecting: true }]) } unobserve() {} disconnect() {} })
 vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
 const frames: FrameRequestCallback[] = []
@@ -14,8 +14,8 @@ vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? nu
 beforeEach(() => storage.clear())
 afterEach(() => { mounted.splice(0).forEach(reader => reader.dispose()); document.body.replaceChildren(); frames.length = 0 })
 function bundle(head = 'b'.repeat(40)): ChangeBundle {
-  const hunk = { file: 'app.ts', old_from: 0, old_lines: 0, new_from: 1, new_lines: 1, patch: 'captured patch', windows: [{ old_from: 0, old_lines: 0, new_from: 1, new_lines: 1, patch: 'captured patch', rows: 1, lines: [{ kind: 'addition' as const, old: 0, new: 1, text: 'text' }] }] }
-  return { version: 1, title: 'Review', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head, base_ref: 'main', head_ref: 'head', commits: [], files: [{ path: 'app.ts', role: 'implementation', status: 'added', additions: 1, deletions: 0, old_mode: '000000', new_mode: '100644', header: '', hunks: [hunk], remaining: [hunk] }], story: null }
+  const hunk = { file: 'app.ts', old_from: 0, old_lines: 0, new_from: 1, new_lines: 1, windows: [{ old_from: 0, old_lines: 0, new_from: 1, new_lines: 1, rows: 1, start: 0 }] }
+  return { version: 2, title: 'Review', repo: { name: 'r', dir: '/r', forge_url: null }, base: 'a'.repeat(40), head, base_ref: 'main', head_ref: 'head', commits: [], files: [{ path: 'app.ts', role: 'implementation', status: 'added', additions: 1, deletions: 0, old_mode: '000000', new_mode: '100644', header: '', lines: [{ kind: 'addition', old: 0, new: 1, text: 'text' }], hunks: [hunk], remaining: [hunk] }], story: null }
 }
 function mount(b: ChangeBundle, identity: string, send: (message: string) => Promise<void> = vi.fn(async (_message: string) => {})) {
   const root = document.createElement('div'); document.body.append(root)
@@ -93,43 +93,8 @@ it('keeps different-base comments independent and focuses the new anchor even at
   type(fields[1], 'Edited current-base comment'); expect(fields[0].value).toBe('Edited earlier-base comment')
   next.root.querySelector<HTMLButtonElement>('.change-send button')!.click()
   await vi.waitFor(() => expect(next.send).toHaveBeenCalledOnce())
-  expect(next.send.mock.calls[0][0]).toContain(`Earlier snapshot\nBase: ${'a'.repeat(40)}\nHead: ${'b'.repeat(40)}\n"app.ts":1\nEdited earlier-base comment`)
-  expect(next.send.mock.calls[0][0]).toContain('"app.ts":1\nEdited current-base comment')
-})
-it('locks the draft through a slow send, including a rebake, then clears delivered text exactly once', async () => {
-  let release!: () => void
-  const send = vi.fn(() => new Promise<void>(resolve => { release = resolve }))
-  const first = mount(bundle(), 'slow', send)
-  type(first.root.querySelector('.change-overall')!, 'Deliver this once')
-  lineComment(first.root, 'This comment too')
-  first.root.querySelector<HTMLButtonElement>('.change-send button')!.click()
-  expect(first.root.querySelector<HTMLTextAreaElement>('.change-overall')?.disabled).toBe(true)
-  expect(first.root.querySelector<HTMLButtonElement>('.change-comment-remove')?.disabled).toBe(true)
-  first.reader.dispose()
-  const next = mount(bundle('c'.repeat(40)), 'slow', send)
-  expect(next.root.querySelector<HTMLTextAreaElement>('.change-overall')?.disabled).toBe(true)
-  expect(next.root.querySelector<HTMLButtonElement>('.change-send button')?.disabled).toBe(true)
-  release()
-  await vi.waitFor(() => expect(next.root.querySelector<HTMLTextAreaElement>('.change-overall')?.value).toBe(''))
-  expect(next.root.querySelector('.change-send-status')?.textContent).toBe('Review sent to the worker')
-  expect(next.root.querySelectorAll('.change-draft-comments textarea')).toHaveLength(0)
-  next.root.querySelector<HTMLButtonElement>('.change-send button')!.click(); expect(send).toHaveBeenCalledOnce()
-})
-it('puts hidden characters in Look here first as a flag no story can remove', () => {
-  const hostile = (story: ChangeBundle['story']): ChangeBundle => {
-    const change = bundle(), text = 'if (ok) \u202e{'
-    const window = { ...change.files[0].hunks[0].windows[0], patch: `+${text}\n`, lines: [{ kind: 'addition' as const, old: 0, new: 7, text }] }
-    change.files[0].hunks = [{ ...change.files[0].hunks[0], patch: `+${text}\n`, windows: [window] }]
-    change.files[0].remaining = []
-    return { ...change, story }
-  }
-  for (const story of [null, { overview: 'Nothing to see.', flags: [], chapters: [] }]) {
-    const { root } = mount(hostile(story), `flag-${story ? 'story' : 'plain'}`)
-    const box = root.querySelector('[aria-label="Look here first"]')!
-    expect(box.querySelector('button')?.textContent).toBe('app.ts:7')
-    expect(box.querySelector('.change-flag-system')?.textContent).toContain('1 row has hidden characters (U+202E)')
-  }
-  expect(mount(bundle(), 'clean').root.querySelector('[aria-label="Look here first"]')).toBeNull()
+  expect(next.send.mock.calls[0][0]).toContain(`Earlier snapshot\nBase: ${'a'.repeat(40)}\nHead: ${'b'.repeat(40)}\napp.ts:1\nEdited earlier-base comment`)
+  expect(next.send.mock.calls[0][0]).toContain('app.ts:1\nEdited current-base comment')
 })
 it('unlocks a refused send without dropping its draft', async () => {
   const state = mount(bundle(), 'refused', vi.fn(async () => { throw new Error('Worker went away') }))

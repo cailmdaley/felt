@@ -23,4 +23,6 @@ Before a branch becomes a PR, bake it into a change the human can read on the bo
 
 `shuttle change` reports how many changed lines the story shows. A low number is fine, and a story that shows everything is usually a story that chose nothing. Nothing can hide: every changed line appears in Story, Tests or Remaining.
 
+The reader opens version 2 bundles; rebake an older companion with `shuttle change`.
+
 For a repo that lands directly on `main`, such as felt, the same pass works on commits already landed, or on a branch just before landing. A change never needs a PR.

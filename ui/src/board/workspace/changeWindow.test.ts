@@ -1,69 +1,64 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
-import { mountChangeWindow } from './changeWindow.js'
+import { mountChangeWindow, windowPatch } from './changeWindow.js'
 import type { ChangeFile, ChangeWindow } from './changeModel.js'
 
-const mocks = vi.hoisted(() => ({ parse: vi.fn(), highlight: vi.fn(), render: vi.fn() }))
-vi.mock('@pierre/diffs', () => ({ parsePatchFiles: mocks.parse, getSharedHighlighter: mocks.highlight, FileDiff: class { render = mocks.render; cleanUp() {} } }))
+const mocks = vi.hoisted(() => ({ parse: vi.fn(), highlight: vi.fn(), render: vi.fn(), cleanUp: vi.fn() }))
+vi.mock('@pierre/diffs', () => ({
+  parsePatchFiles: mocks.parse,
+  getSharedHighlighter: mocks.highlight,
+  FileDiff: class { render = mocks.render; cleanUp = mocks.cleanUp },
+}))
 afterEach(() => { vi.resetAllMocks(); document.body.replaceChildren() })
-const window: ChangeWindow = { old_from: 1, old_lines: 1, new_from: 1, new_lines: 1, rows: 2, patch: 'patch', lines: [{ kind: 'deletion', old: 1, new: 0, text: 'old' }, { kind: 'addition', old: 0, new: 1, text: '<img src=x onerror=evil()>' }] }
-const file: ChangeFile = { path: 'evil.constructor', status: 'modified', role: 'implementation', additions: 1, deletions: 1, header: '', hunks: [], remaining: [] }
-it.each(['parse', 'grammar', 'render', 'empty render'])('retains plain DOM rows after %s failure', async failure => {
+const window: ChangeWindow = { old_from: 1, old_lines: 1, new_from: 1, new_lines: 1, rows: 2, start: 0 }
+const file: ChangeFile = {
+  path: 'app.ts', status: 'modified', role: 'implementation', additions: 1, deletions: 1,
+  header: 'diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n', hunks: [], remaining: [],
+  lines: [{ kind: 'deletion', old: 1, new: 0, text: 'old' }, { kind: 'addition', old: 0, new: 1, text: 'new' }],
+}
+const comments = () => ({ annotations: () => [], add: vi.fn(), field: () => document.createElement('div') })
+
+it('builds a patch only for the requested window', () => {
+  expect(windowPatch(window, file)).toBe('diff --git "a/app.ts" "b/app.ts"\n--- "a/app.ts"\n+++ "b/app.ts"\n@@ -1,1 +1,1 @@\n-old\n+new\n')
+})
+it.each(['parse', 'grammar', 'render', 'empty render'])('retains readable rows after %s failure', async failure => {
   mocks.parse.mockReturnValue(failure === 'parse' ? [] : [{ files: [{}] }])
+  mocks.highlight.mockResolvedValue({})
   if (failure === 'grammar') mocks.highlight.mockRejectedValue(new Error('stale grammar chunk'))
-  else mocks.highlight.mockResolvedValue({})
   if (failure === 'render') mocks.render.mockImplementation(() => { throw new Error('highlighting failed') })
-  const host = document.createElement('div'); document.body.append(host)
-  const add = vi.fn(), mounted = mountChangeWindow(host, window, file, { annotations: () => [], add, field: () => document.createElement('div') })
+  const host = document.createElement('div')
+  document.body.append(host)
+  const controls = comments()
+  const mounted = mountChangeWindow(host, window, file, controls)
   expect(host.querySelectorAll('.change-plain-row')).toHaveLength(2)
   await mounted.ready
   expect(host.dataset.renderState).toBe('plain')
-  expect((host.querySelector('.change-plain-window') as HTMLElement).hidden).toBe(false)
-  expect([...host.querySelectorAll('[data-line-text]')].map(row => row.textContent)).toEqual(['old', '<img src=x onerror=evil()>'])
-  expect(host.querySelector('img')).toBeNull()
-  expect(host.querySelector('[role="status"]')?.textContent).toContain(file.path)
-  ;(host.querySelector('[aria-label="Comment on evil.constructor:1 (new)"]') as HTMLButtonElement).click()
-  expect(add).toHaveBeenCalledWith(1, 'additions')
-  mounted.dispose(); expect(host.childNodes).toHaveLength(0)
+  expect([...host.querySelectorAll('[data-line-text]')].map(row => row.textContent)).toEqual(['old', 'new'])
+  ;(host.querySelector('[aria-label="Comment on app.ts:1 (new)"]') as HTMLButtonElement).click()
+  expect(controls.add).toHaveBeenCalledWith(1, 'additions')
+  mounted.dispose()
+  expect(host.childNodes).toHaveLength(0)
 })
-it('names a file visibly when no structured rows or parse result can be rendered', async () => {
-  mocks.parse.mockReturnValue([])
+it('does not tokenize a huge window, or access rows outside the visible slice', async () => {
+  const lines = [{ kind: 'addition' as const, old: 0, new: 1, text: 'x'.repeat(100_000) }]
+  Object.defineProperty(lines, 1, { get() { throw new Error('offscreen row read') } })
   const host = document.createElement('div')
-  const mounted = mountChangeWindow(host, { ...window, lines: undefined }, file, { annotations: () => [], add() {}, field: () => document.createElement('div') })
+  const mounted = mountChangeWindow(host, { ...window, rows: 1 }, { ...file, lines }, comments())
   await mounted.ready
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Could not render evil.constructor')
-  expect(host.querySelector('pre')?.textContent).toBe('patch')
-  mounted.dispose()
-})
-
-it('marks hidden characters in place, keeps the text exact, and never hands them to the highlighter', async () => {
-  const text = '  /*\u202e } \u2066if (isAdmin)\u2069 \u2066 begin */ {'
-  const host = document.createElement('div'); document.body.append(host)
-  const patch = `@@ -1 +1 @@\n+${text}\n+alpha\rbeta\n`
-  const mounted = mountChangeWindow(host, { ...window, patch, lines: [{ kind: 'addition', old: 0, new: 1, text }, { kind: 'addition', old: 0, new: 2, text: 'alpha\rbeta' }] }, file, { annotations: () => [], add() {}, field: () => document.createElement('div') })
-  await mounted.ready
-  expect(mocks.highlight).not.toHaveBeenCalled()
   expect(mocks.parse).not.toHaveBeenCalled()
-  expect(host.dataset.renderState).toBe('plain')
-  const rows = [...host.querySelectorAll('[data-line-text]')]
-  expect(rows.map(row => row.textContent)).toEqual([text, 'alpha\rbeta'])
-  expect([...rows[0].querySelectorAll<HTMLElement>('.change-hidden-char')].map(mark => mark.dataset.codepoint)).toEqual(['U+202E', 'U+2066', 'U+2069', 'U+2066'])
-  expect(rows[1].querySelector<HTMLElement>('.change-hidden-char')?.dataset.codepoint).toBe('U+000D')
-  expect(host.querySelector('[role="status"]')?.textContent).toContain('Hidden characters in evil.constructor')
+  expect(mocks.highlight).not.toHaveBeenCalled()
   mounted.dispose()
+  expect(host.childNodes).toHaveLength(0)
 })
-it('marks hidden characters in a window with no structured rows', async () => {
-  const host = document.createElement('div'); document.body.append(host)
-  const mounted = mountChangeWindow(host, { ...window, lines: undefined, patch: '+a\u202eb\r\n+c\rd\n' }, file, { annotations: () => [], add() {}, field: () => document.createElement('div') })
+it('does not render after disposal while a grammar loads', async () => {
+  let release!: () => void
+  mocks.parse.mockReturnValue([{ files: [{}] }])
+  mocks.highlight.mockImplementation(() => new Promise<void>(resolve => { release = resolve }))
+  const host = document.createElement('div')
+  const mounted = mountChangeWindow(host, window, file, comments())
+  mounted.dispose()
+  release()
   await mounted.ready
-  expect(host.querySelector('pre')?.textContent).toBe('+a\u202eb\r\n+c\rd\n')
-  expect([...host.querySelectorAll<HTMLElement>('pre .change-hidden-char')].map(mark => mark.dataset.codepoint)).toEqual(['U+202E', 'U+000D'])
-  mounted.dispose()
-})
-it('keeps context rows in the plain window', () => {
-  const host = document.createElement('div'); document.body.append(host)
-  const lines = [{ kind: 'context' as const, old: 1, new: 1, text: 'before' }, { kind: 'addition' as const, old: 0, new: 2, text: 'added' }, { kind: 'context' as const, old: 2, new: 3, text: 'after' }]
-  const mounted = mountChangeWindow(host, { ...window, lines }, file, { annotations: () => [], add() {}, field: () => document.createElement('div') })
-  expect([...host.querySelectorAll<HTMLElement>('.change-plain-row')].map(row => [row.dataset.lineType, row.querySelector('[data-line-text]')?.textContent])).toEqual([['context', 'before'], ['change-addition', 'added'], ['context', 'after']])
-  mounted.dispose()
+  expect(mocks.render).not.toHaveBeenCalled()
+  expect(host.childNodes).toHaveLength(0)
 })

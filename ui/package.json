@@ -11,7 +11,7 @@
     "test": "TZ=America/Los_Angeles vitest run",
     "typecheck": "tsc --noEmit",
     "e2e": "npm run build && npm run harness:board && npm run harness:change && node e2e/run.mjs",
-    "e2e:change": "npm run harness:change && node e2e/changeConservation.mjs",
+    "e2e:change": "npm run harness:change && node e2e/changeSmoke.mjs",
     "harness:change": "vite build -c vite.harness-change.config.ts",
     "harness:board": "vite build -c vite.harness-board.config.ts",
     "perf": "npm run harness:board && node e2e/performance.mjs",

@@ -297,7 +297,8 @@ No common ancestor is an error.
 Only committed content enters the snapshot; dirty and untracked files are excluded.
 `repo.name` comes from origin's repository path, falling back to the main worktree directory's basename.
 `repo.forge_url` normalizes HTTP(S) origins and scp-style GitHub/GitLab origins to HTTPS without credentials, query, fragment or `.git`; other origins produce `null`.
-The bundle contains commits and a file inventory with path-derived roles, complete renderable hunks, Remaining excerpts and bounded windows.
+The version 2 bundle contains commits and a file inventory with path-derived roles, one source-row table per file, and hunk/window references for Story and Remaining.
+Other bundle versions need a rebake.
 Go resolves each story stop's excerpt; the reader does not parse Git output or calculate coverage.
 Without a story, `story` is `null` and every changed line remains unshown.
 A successful bake emits a fiber-addressed file receipt, so the change appears among the fiber's sent files without an embed.
@@ -305,7 +306,7 @@ The title comes from the story's optional `title`, otherwise the head commit sub
 A fiber doesn't need a Shuttle block; a block naming another host requires running the command there.
 The CLI invokes Git directly and makes no model calls.
 
-Story input rejects unknown JSON fields, duplicate chapter ids and control characters in the title.
+Story input rejects unknown JSON fields and duplicate chapter ids.
 Validation reports every unknown file and every range that overlaps no hunk on the chosen side.
 Invalid stories exit nonzero and don't replace an existing bundle.
 Changed lines are shown by the union of stop ranges on their own side; context-only stops and flags do not count.
@@ -313,7 +314,7 @@ Go resolves the unshown changed lines into Remaining excerpts with a little cont
 Text output lists changed lines shown of total and each remaining excerpt as `Remaining: path:line`.
 Unshown lines do not fail validation.
 `--json` emits `{valid, covered, total, uncovered, errors}`, with `path` added after a successful write.
-`covered` and `total` count changed lines. Uncovered excerpts include `file`, `old_from`, `old_lines`, `new_from`, `new_lines`, `patch` and `windows`.
+`covered` and `total` count changed lines. Uncovered excerpts include `file`, `old_from`, `old_lines`, `new_from`, `new_lines` and `windows`; each window references the bundle file's source-row table.
 `--check` emits the same report without writing or adding `path`.
 See [Changes](../concepts/changes.md) for the full bundle schema and story-authoring format.
 

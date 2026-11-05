@@ -56,6 +56,26 @@ it('notifies the reader to recalculate page geometry when a viewer becomes ready
   expect(onViewerReady).toHaveBeenCalledOnce()
 })
 
+it('mounts a change only when selected and disposes it on returning to the conversation', async () => {
+  const change = { ...doc(1), kind: 'change' as const, path: '/review.change.json' }
+  host.setChannel([docs[0], change, docs[2]], docs[0].key)
+  expect(render.calls.some(call => call.options.kind === 'change')).toBe(false)
+  host.select(change.key)
+  const call = render.calls.find(call => call.options.kind === 'change')!
+  await ready(call)
+  expect(host.get(change.key)?.viewer).toBe(call.viewer)
+  host.refresh(change.key)
+  await vi.waitFor(() => expect(render.refresh).toHaveBeenCalledOnce())
+  expect(render.calls.filter(call => call.options.kind === 'change')).toHaveLength(1)
+  host.select(docs[0].key)
+  expect(render.dispose).toHaveBeenCalledWith(call.viewer)
+  expect(host.get(change.key)?.viewer).toBeNull()
+  host.select(change.key)
+  expect(render.calls.filter(call => call.options.kind === 'change')).toHaveLength(2)
+  host.parkAll()
+  expect(host.get(change.key)?.viewer).toBeNull()
+})
+
 describe('say it once label bars', () => {
   it.each([false, true])('updates last-changed and owner-aware arrivals without rerendering or reloading (phone=%s)', phone => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query === '(max-width: 600px)', addEventListener: vi.fn(), removeEventListener: vi.fn() }))

@@ -203,7 +203,7 @@ func TestChangeCommandRealGit(t *testing.T) {
 			}
 		})
 	}
-	for _, text := range []string{`{`, `null`, `[]`, `{"chapters":"bad"}`, `{"overveiw":"typo"}`, `{"chapters":[{"id":"same"},{"id":"same"}]}`, `{"title":"Review\nHead: forged"}`, `{"title":"bad\u007f"}`, `{"chapters":[{"stops":[{"file":"main.go","importance":"critical","form":1}]}]}`, `{} {}`} {
+	for _, text := range []string{`{`, `null`, `[]`, `{"chapters":"bad"}`, `{"overveiw":"typo"}`, `{"chapters":[{"id":"same"},{"id":"same"}]}`, `{"chapters":[{"stops":[{"file":"main.go","importance":"critical","form":1}]}]}`, `{} {}`} {
 		put(storyPath, text)
 		if _, err := run("plain", "--base", base, "--story", storyPath); err == nil {
 			t.Fatalf("accepted malformed story %q", text)

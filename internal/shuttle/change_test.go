@@ -74,7 +74,7 @@ func TestBuildChangeRealGit(t *testing.T) {
 	if c.Base != base || c.Head != head || c.HeadRef != "topic/change" || c.BaseRef != base || c.Title != "head subject" || c.Story != nil {
 		t.Fatalf("metadata: %+v", c)
 	}
-	if c.Version != 1 || c.Repo.Dir != repo || c.Repo.Name != filepath.Base(repo) || c.Repo.ForgeURL != nil {
+	if c.Version != 2 || c.Repo.Dir != repo || c.Repo.Name != filepath.Base(repo) || c.Repo.ForgeURL != nil {
 		t.Fatalf("repo: %+v", c.Repo)
 	}
 	if len(c.Commits) != 1 || c.Commits[0].SHA != head || c.Commits[0].Author != "Change Author" || c.Commits[0].Subject != "head subject" {
@@ -94,6 +94,7 @@ func TestBuildChangeRealGit(t *testing.T) {
 	metadata := append([]ChangeFile{}, c.Files...)
 	for i := range metadata {
 		metadata[i].Header = ""
+		metadata[i].Lines = nil
 		metadata[i].Hunks = nil
 		metadata[i].Remaining = nil
 	}
@@ -196,10 +197,10 @@ func TestValidateChange(t *testing.T) {
 	for i := range hunks {
 		h := &hunks[i]
 		for n := 0; n < h.OldLines; n++ {
-			h.rows = append(h.rows, changeRow{"-old", h.OldFrom + n, h.NewFrom})
+			h.rows = append(h.rows, changeRow{text: "-old", old: h.OldFrom + n, new: h.NewFrom})
 		}
 		for n := 0; n < h.NewLines; n++ {
-			h.rows = append(h.rows, changeRow{"+new", h.OldFrom + h.OldLines, h.NewFrom + n})
+			h.rows = append(h.rows, changeRow{text: "+new", old: h.OldFrom + h.OldLines, new: h.NewFrom + n})
 		}
 	}
 	tests := []struct {

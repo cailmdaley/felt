@@ -68,7 +68,7 @@ func TestChangeCaptureIgnoresDiffConfigAndWorktreeAttributes(t *testing.T) {
 			t.Fatalf("coverage %+v: %+v", tc, report)
 		}
 		stop := before.Story.Chapters[0].Stops[0]
-		if len(stop.Hunks) != 1 || !strings.Contains(stop.Hunks[0].Patch, "@@") {
+		if len(stop.Hunks) != 1 || len(stop.Hunks[0].Windows) == 0 {
 			t.Fatalf("missing resolved excerpt: %+v", stop)
 		}
 	}

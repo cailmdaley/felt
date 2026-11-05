@@ -18,7 +18,7 @@ import { thumbnailPreviews } from './workspace/thumbnailPreview.js'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
-import { head, peek, recallText, RESOURCE_PRIORITY, text as documentText, type Head, type ResourcePriority } from './documentResources.js'
+import { forgetText, head, peek, recallText, RESOURCE_PRIORITY, text as documentText, type Head, type ResourcePriority } from './documentResources.js'
 import { loadDuration } from './workspace/audioWaveform.js'
 import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
 import type { SwipeSignal } from './workspace/PhoneGestures.js'
@@ -129,7 +129,14 @@ export function buildFileViewer(
       }).catch(error => { if (revision === generation) failed(error) })
     }, failed, { active: options.active, loadOnce: options.active === false })
     liveViewSubscriptions.set(wrap, stop)
-    viewerDisposers.set(wrap, () => { disposed = true; stop(); dispose?.() })
+    viewerDisposers.set(wrap, () => {
+      disposed = true
+      stop()
+      dispose?.()
+      dispose = undefined
+      scroller = undefined
+      forgetText(src)
+    })
     return wrap
   }
 

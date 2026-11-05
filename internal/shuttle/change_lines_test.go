@@ -1,6 +1,8 @@
 package shuttle
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -113,23 +115,6 @@ func TestChangeLineCoverageRealGit(t *testing.T) {
 		for k := range keys(f.Path, f.Remaining) {
 			actualRemaining[k] = true
 		}
-		// Every independently rendered window must preserve the exact side, coordinates and bytes.
-		for _, h := range append(append([]ChangeHunk{}, f.Hunks...), f.Remaining...) {
-			got := map[key]bool{}
-			for _, w := range h.Windows {
-				parsed := &Change{Files: []ChangeFile{{Path: f.Path, OldPath: f.OldPath}}, Patch: w.Patch}
-				wh, err := parsed.parsePatch()
-				if err != nil {
-					t.Fatal(err)
-				}
-				for k := range keys(f.Path, wh) {
-					got[k] = true
-				}
-			}
-			if !reflect.DeepEqual(got, keys(f.Path, []ChangeHunk{h})) {
-				t.Fatalf("window lost or moved rows in %s: %s", f.Path, h.Patch)
-			}
-		}
 		lane := f.Remaining
 		if f.Role == "test" {
 			lane = f.Hunks
@@ -144,6 +129,37 @@ func TestChangeLineCoverageRealGit(t *testing.T) {
 				rendered[k] = true
 			}
 		}
+	}
+	// The wire format stores source once; every lane references that same row table.
+	for _, f := range c.Files {
+		allHunks := append(append([]ChangeHunk{}, f.Hunks...), f.Remaining...)
+		for _, chapter := range c.Story.Chapters {
+			for _, stop := range chapter.Stops {
+				if stop.File == f.Path {
+					allHunks = append(allHunks, stop.Hunks...)
+				}
+			}
+		}
+		for _, h := range allHunks {
+			actual := []ChangeLine{}
+			for _, window := range h.Windows {
+				actual = append(actual, f.Lines[window.Start:window.Start+window.Rows]...)
+			}
+			want := []ChangeLine{}
+			for _, row := range h.rows {
+				want = append(want, row.line())
+			}
+			if !reflect.DeepEqual(actual, want) {
+				t.Fatalf("window references different rows in %s", f.Path)
+			}
+		}
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(`"patch":`)) || bytes.Count(data, []byte(`"text":"five"`)) != 1 {
+		t.Fatal("bundle duplicates its source text")
 	}
 	expectedRemaining := map[key]bool{}
 	for k := range original {
