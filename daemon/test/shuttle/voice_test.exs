@@ -86,6 +86,38 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{state: "listening"}} = Voice.update(%{})
   end
 
+  test "a relay status timeout preserves the last listening snapshot", c do
+    stop_supervised!(Voice)
+
+    {:ok, status} =
+      Agent.start_link(fn -> %{pending: %{text: "pending"}, last: %{status: "unconfirmed"}} end)
+
+    monitor = fn _ -> Agent.get(status, & &1) end
+
+    Agent.update(c.observed, fn _ ->
+      %{
+        available: true,
+        meeting: %{kind: "voice", launch: "voice", state: "live", error: nil, transcript: "file"}
+      }
+    end)
+
+    Env.start_scoped!({Voice, Keyword.put(c.opts, :monitor, monitor)})
+
+    assert {:ok,
+            %{state: "listening", pending: %{text: "pending"}, last: %{status: "unconfirmed"}}} =
+             Voice.update(%{"enabled" => true})
+
+    Agent.update(status, fn _ -> :timeout end)
+
+    assert {:ok,
+            %{
+              state: "listening",
+              pending: %{text: "pending"},
+              last: %{status: "unconfirmed"},
+              error: nil
+            }} = Voice.update(%{})
+  end
+
   test "persisted enable state stays visible through recorder failures and recovery", c do
     stop_supervised!(Voice)
     {:ok, result} = Agent.start_link(fn -> {:error, :unavailable} end)

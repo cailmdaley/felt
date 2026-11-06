@@ -26,11 +26,25 @@ defmodule Shuttle.Delivery do
     worker = if opts[:resume_mode] != "fresh", do: Poller.live_worker(fiber_id)
 
     cond do
+      worker && opts[:live_input] -> input(fiber_id, text)
       worker && opts[:message_after_launch] -> await_message_address(fiber_id, text, opts)
       worker -> message(worker, text, opts)
       opts[:message_after_launch] -> launch_then_message(fiber_id, text, opts)
       true -> launch(fiber_id, text, opts)
     end
+  end
+
+  defp input(fiber_id, text) do
+    result =
+      Poller.dispatch_fiber(fiber_id,
+        force: true,
+        ad_hoc: true,
+        existing_only: true,
+        resume_mode: "previous",
+        user_message: text
+      )
+
+    {:input, result}
   end
 
   # A transcript batch is always a native message, including the first one to

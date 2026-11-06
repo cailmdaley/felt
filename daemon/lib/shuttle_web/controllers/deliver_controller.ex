@@ -42,6 +42,7 @@ defmodule ShuttleWeb.DeliverController do
           "from_claim",
           "message_id",
           "message_after_launch",
+          "live_input",
           "notify_address",
           "notify_when_idle",
           "notify_wake",
@@ -118,6 +119,7 @@ defmodule ShuttleWeb.DeliverController do
                 from_claim: claim,
                 message_id: context["message_id"],
                 message_after_launch: context["message_after_launch"] == true,
+                live_input: context["live_input"] == true,
                 daemon_sender: context["daemon_sender"] == true,
                 resume_mode: resume_mode(context["resume_mode"])
               ]
@@ -208,6 +210,36 @@ defmodule ShuttleWeb.DeliverController do
 
   defp context_reply(_fiber_id, _text, _id, _opts),
     do: {400, %{error: "message_id is required for context"}}
+
+  defp reply({:input, {:ok, _}}, fiber_id),
+    do:
+      {202,
+       %{
+         delivery: "input",
+         fiber_id: fiber_id,
+         delivered: nil,
+         detail: "Input submitted to the terminal; its receipt is unconfirmed"
+       }}
+
+  defp reply({:input, {:error, :no_live_worker}}, fiber_id),
+    do:
+      {409,
+       %{
+         delivery: "input",
+         fiber_id: fiber_id,
+         delivered: false,
+         error: "the worker is no longer live"
+       }}
+
+  defp reply({:input, result}, fiber_id),
+    do:
+      {202,
+       %{
+         delivery: "input",
+         fiber_id: fiber_id,
+         delivered: nil,
+         detail: "Terminal input may have been submitted: #{inspect(result)}"
+       }}
 
   defp reply({:message, status, receipt}, fiber_id) do
     body = %{delivery: "message", fiber_id: fiber_id, receipt: receipt}

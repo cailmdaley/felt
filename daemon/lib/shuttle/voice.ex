@@ -126,6 +126,12 @@ defmodule Shuttle.Voice do
     finish_task(state, from, result)
   end
 
+  def handle_info(
+        {:DOWN, ref, :process, _pid, {:timeout, _}},
+        %{task: {%Task{ref: ref}, from}} = state
+      ),
+      do: finish_task(state, from, :timeout)
+
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: {%Task{ref: ref}, from}} = state),
     do: finish_task(state, from, {:error, "voice reconciliation exited: #{inspect(reason)}"})
 
@@ -151,6 +157,9 @@ defmodule Shuttle.Voice do
         {:ok, next} ->
           snapshot = %{next.snapshot | target: state.target}
           {{:ok, snapshot}, snapshot}
+
+        :timeout ->
+          {{:error, "voice reconciliation timed out"}, state.snapshot}
 
         {:error, reason} ->
           enabled =
@@ -281,9 +290,17 @@ defmodule Shuttle.Voice do
 
         status =
           case relay_result do
-            {:error, reason} -> %{pending: nil, last: nil, error: inspect(reason)}
-            _ when voice -> state.monitor.(row.launch)
-            _ -> %{pending: nil, last: nil}
+            {:error, reason} ->
+              %{pending: nil, last: nil, error: inspect(reason)}
+
+            _ when voice ->
+              case state.monitor.(row.launch) do
+                :timeout -> Map.take(state.snapshot, [:pending, :last, :error])
+                status -> status
+              end
+
+            _ ->
+              %{pending: nil, last: nil}
           end
 
         relay_error = Map.get(status, :error)

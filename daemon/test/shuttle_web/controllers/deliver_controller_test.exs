@@ -115,6 +115,27 @@ defmodule ShuttleWeb.DeliverControllerTest do
            end) == 1
   end
 
+  test "voice to a dormant worker launches and still uses native messaging" do
+    fiber = "tests/voice-dormant"
+    put_constitution(fiber)
+    Env.put_app_env(:felt_runner, MessageRunner)
+    Env.put_app_env(:deliver_test_pid, self())
+
+    request = %{
+      "fiber_id" => fiber,
+      "text" => "me: Claude hello",
+      "message_id" => "voice-first",
+      "message_after_launch" => true,
+      "live_input" => true
+    }
+
+    assert %{"delivered" => true, "delivery" => "message"} =
+             api_conn() |> post("/api/v1/deliver", Jason.encode!(request)) |> json_response(200)
+
+    assert_receive {:message, %{"text" => "me: Claude hello", "message_id" => "voice-first"}}
+    refute run_script() =~ "me: Claude hello"
+  end
+
   # A previous run of `fiber_id` under `session`, dispatched a minute ago
   # unless `extra` says otherwise, with `extra` runtime fields (a handoff, say).
   defp put_previous_run(fiber_id, session, extra \\ %{}) do

@@ -55,6 +55,21 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert TranscriptRelay.Coordinator.handle_info(exit, state) == {:noreply, state}
   end
 
+  test "a blocked worker status does not block the coordinator", c do
+    File.write!(c.path, "")
+    start_monitor(c)
+    pid = worker(c)
+    :ok = :sys.suspend(pid)
+    on_exit(fn -> if Process.alive?(pid), do: :sys.resume(pid) end)
+    task = Task.async(fn -> TranscriptRelay.status("launch", server: c.name, timeout: 100) end)
+
+    assert %{pending: nil, last: nil, error: nil} =
+             TranscriptRelay.status("other", server: c.name, timeout: 50)
+
+    assert Task.await(task) == :timeout
+    :ok = :sys.resume(pid)
+  end
+
   test "word and name triggers preserve comments, ranges and the closing marker", c do
     File.write!(
       c.path,
@@ -75,6 +90,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert_receive {:delivery, %{text: ended}}, 1_000
     assert ended =~ "# ended"
     assert first.fiber_id == "fiber-a"
+    assert first.kind == "meeting"
   end
 
   test "quiet means since the last speech, not the first line or a comment", c do
@@ -120,7 +136,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert first =~ "first phrase"
     assert late =~ "late old words"
     assert new =~ "new words Claude"
-    assert new =~ "Live voice:\nme new words Claude"
+    assert new == "me: new words Claude\n"
     refute new =~ "room speech"
     refute new =~ "Cail's spoken words"
     refute new =~ "10:00:11"
@@ -297,7 +313,8 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     start_monitor(c, kind: "voice", routes: routes)
     poll(c)
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert text =~ "last spoken words\n# ended"
+    assert text =~ "last spoken words\n"
+    refute text =~ "# ended"
   end
 
   test "an incomplete final JSON row closes after recorder exit without losing complete words",
@@ -314,10 +331,8 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     Agent.update(c.observation, fn _ -> {:ok, %{meeting: nil}} end)
     poll(c)
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert text =~ "me complete words"
-    assert text =~ "# S2 = colleague"
-    assert text =~ "# incomplete final voice JSON row retained in transcript"
-    assert text =~ "# ended"
+    assert text =~ "complete words"
+    refute text =~ "#"
     assert File.read!(json) =~ "{\"wall\":"
     sync_tasks(c)
     pid = worker(c)
@@ -342,7 +357,39 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
 
     start_monitor(c, kind: "voice", routes: routes)
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert text == "Live voice:\nS2 Claude make this plot\n"
+    assert text == "S2: Claude make this plot\n"
+  end
+
+  test "voice groups consecutive speakers without headers or timestamps", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+
+    for {at, speaker, text} <- [
+          {"2026-11-06T10:00:01Z", "me", "one"},
+          {"2026-11-06T10:00:02Z", "me", "two"},
+          {"2026-11-06T10:00:03Z", "S2", "three"},
+          {"2026-11-06T10:00:04Z", "S2", "four"},
+          {"2026-11-06T10:00:05Z", "me", "Claude five"}
+        ] do
+      File.write!(
+        Path.rootname(c.path) <> ".jsonl",
+        Jason.encode!(%{wall: at, speaker: speaker, text: text}) <> "\n",
+        [:append]
+      )
+    end
+
+    start_monitor(c, kind: "voice", routes: routes)
+    assert_receive {:delivery, %{text: first}}, 1_000
+    assert first == "me: one two\nS2: three four\nme: Claude five\n"
+    sync_tasks(c)
+    record(c.path, "2026-11-06T10:10:05Z", "Claude no timestamp")
+    poll(c)
+    assert_receive {:delivery, %{text: "me: Claude no timestamp\n"}}, 1_000
+    sync_tasks(c)
+    record(c.path, "2026-11-06T10:20:06Z", "Claude after silence")
+    poll(c)
+    assert_receive {:delivery, %{text: "me: Claude after silence\n"}}, 1_000
   end
 
   test "a slow or failed voice destination does not hold a later target or retry forever", c do
@@ -707,7 +754,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert text =~ "buffered words\nClaude trigger"
   end
 
-  test "a failed acknowledgement write preserves the durable outbox and message identity", c do
+  test "a failed acknowledgement write does not replay voice after restart", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
@@ -724,8 +771,62 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     stop_supervised!(TranscriptRelay)
     File.rmdir!(Shuttle.Voice.last_path())
     start_supervised!({TranscriptRelay, c.opts})
-    assert_receive {:delivery, retry}, 1_000
-    assert retry == first
+
+    assert %{last: %{"status" => "unconfirmed", "fiber_id" => "fiber-a"}} =
+             TranscriptRelay.status("launch", server: c.name)
+
+    refute_receive {:delivery, _}, 100
+  end
+
+  test "a delivery task exiting after its side effect leaves voice unconfirmed and is not replayed",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "Claude once")
+    parent = self()
+
+    deliver = fn message ->
+      send(parent, {:delivered_side_effect, message})
+      exit(:lost_receipt)
+    end
+
+    start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
+    assert_receive {:delivered_side_effect, %{kind: "voice"}}, 1_000
+    sync_tasks(c)
+
+    assert %{last: %{"status" => "unconfirmed"}} =
+             TranscriptRelay.status("launch", server: c.name)
+
+    stop_supervised!(TranscriptRelay)
+    start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
+    refute_receive {:delivered_side_effect, _}, 100
+  end
+
+  test "an in-flight voice batch is not replayed after relay restart", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "Claude once")
+    parent = self()
+
+    deliver = fn message ->
+      send(parent, {:delivery, message})
+
+      receive do
+        :finish -> {200, %{delivered: true}}
+      end
+    end
+
+    start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
+    assert_receive {:delivery, %{kind: "voice"}}, 1_000
+    stop_supervised!(TranscriptRelay)
+    start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
+
+    assert %{last: %{"status" => "unconfirmed"}} =
+             TranscriptRelay.status("launch", server: c.name)
+
+    refute_receive {:delivery, _}, 100
   end
 
   test "a non-encodable start row returns an error without stopping existing relays", c do

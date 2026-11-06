@@ -20,7 +20,15 @@ defmodule Shuttle.Meeting.TranscriptRelay do
 
   def status(launch, opts \\ []) do
     server = Keyword.get(opts, :server, __MODULE__)
-    GenServer.call(Module.concat(server, Coordinator), {:status, launch})
+    timeout = Keyword.get(opts, :timeout, 5_000)
+
+    case GenServer.call(Module.concat(server, Coordinator), {:status, launch}, timeout) do
+      {:worker, pid} -> GenServer.call(pid, :status, timeout)
+      {:status, status} -> status
+    end
+  catch
+    :exit, {:timeout, _} -> :timeout
+    :exit, _ -> %{pending: nil, last: nil, error: "relay unavailable"}
   end
 
   @impl true
@@ -148,20 +156,13 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
   end
 
   def handle_call({:status, launch}, _from, state) do
-    status =
+    reply =
       case state.workers[launch] do
-        {pid, _ref} ->
-          try do
-            GenServer.call(pid, :status)
-          catch
-            :exit, _ -> %{pending: nil, last: nil, error: "relay unavailable"}
-          end
-
-        nil ->
-          %{pending: nil, last: nil, error: state.errors[digest(launch)]}
+        {pid, _ref} -> {:worker, pid}
+        nil -> {:status, %{pending: nil, last: nil, error: state.errors[digest(launch)]}}
       end
 
-    {:reply, status, state}
+    {:reply, reply, state}
   end
 
   def handle_call({:deliver, message}, from, state) do
@@ -197,8 +198,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     if Map.has_key?(state.deliveries, ref) do
-      {:noreply,
-       finish_delivery(state, ref, {503, %{error: "delivery task exited: #{inspect(reason)}"}})}
+      {:noreply, finish_delivery(state, ref, {:task_exit, reason})}
     else
       {:noreply,
        %{state | workers: Map.reject(state.workers, fn {_, {_, monitor}} -> monitor == ref end)}}
@@ -251,14 +251,18 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
 
   defp reserve_batches(config, state) do
     Enum.reduce(config["outbox"] || [], state, fn batch, acc ->
-      message = Map.new(~w(fiber_id origin text message_id)a, &{&1, batch[Atom.to_string(&1)]})
-      key = {message.fiber_id, message.origin}
+      if config["kind"] == "voice" and batch["attempted"] do
+        acc
+      else
+        message = Map.new(~w(fiber_id origin text message_id)a, &{&1, batch[Atom.to_string(&1)]})
+        key = {message.fiber_id, message.origin}
 
-      Map.update!(
-        acc,
-        :lanes,
-        &Map.update(&1, key, [{nil, message}], fn lane -> lane ++ [{nil, message}] end)
-      )
+        Map.update!(
+          acc,
+          :lanes,
+          &Map.update(&1, key, [{nil, message}], fn lane -> lane ++ [{nil, message}] end)
+        )
+      end
     end)
   end
 
@@ -402,6 +406,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       timer: nil
     }
 
+    state = recover_attempted(state)
     send(Keyword.fetch!(opts, :coordinator), {:worker_started, config["launch"], self()})
     send(self(), :poll)
     {:ok, state}
@@ -439,8 +444,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     protect(state, fn ->
-      {:noreply,
-       complete(state, ref, {503, %{error: "delivery task exited: #{inspect(reason)}"}})}
+      {:noreply, complete(state, ref, {:task_exit, reason})}
     end)
   end
 
@@ -692,7 +696,9 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
                         &(DateTime.compare(at, parse_time!(&1["t"])) != :lt)
                       )
 
-                    add_line(acc, target, "#{row["name"] || speaker} #{text}", state)
+                    name = row["name"] || speaker
+
+                    add_line(acc, target, "#{name} #{text}", state, %{speaker: name, text: text})
 
                   _ ->
                     raise ArgumentError, "voice utterance needs an absolute wall_start timestamp"
@@ -719,10 +725,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     at
   end
 
-  defp add_line(config, nil, line, _state),
+  defp add_line(config, target, line, state, voice \\ nil)
+
+  defp add_line(config, nil, line, _state, _voice),
     do: if(String.starts_with?(line, "# ended"), do: Map.put(config, "ended", true), else: config)
 
-  defp add_line(config, target, line, state) do
+  defp add_line(config, target, line, state, voice) do
     target = Map.take(target, ~w(fiber_id origin))
 
     buffer =
@@ -731,6 +739,19 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
     spoken = if String.starts_with?(line, "#"), do: "", else: Regex.replace(@stamp, line, "")
     words = length(String.split(spoken))
+
+    buffer =
+      if voice do
+        rows = Map.get(buffer, "voice_rows") || voice_rows(buffer["lines"])
+
+        Map.put(
+          buffer,
+          "voice_rows",
+          rows ++ [%{"speaker" => voice.speaker, "text" => voice.text}]
+        )
+      else
+        buffer
+      end
 
     buffer =
       buffer |> Map.update!("lines", &(&1 ++ [line])) |> Map.update!("words", &(&1 + words))
@@ -773,15 +794,16 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
   defp flush_all(config), do: Enum.reduce(config["buffers"], config, &flush_buffer(&2, &1))
 
+  defp flush_buffer(%{"kind" => "voice"} = config, %{"words" => 0} = buffer),
+    do: Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
+
   defp flush_buffer(config, buffer) do
     lines = buffer["lines"]
 
     header =
-      if config["kind"] == "voice" do
-        "Live voice:\n"
-      else
-        "Meeting transcript update (#{config["title"]}):\n"
-      end
+      if config["kind"] == "voice",
+        do: "",
+        else: "Meeting transcript update (#{config["title"]}):\n"
 
     id =
       :crypto.hash(
@@ -794,7 +816,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       buffer
       |> Map.take(~w(fiber_id origin))
       |> Map.merge(%{
-        "text" => header <> Enum.join(lines, "\n") <> "\n",
+        "text" => header <> render_lines(config["kind"], lines, buffer["voice_rows"]) <> "\n",
         "message_id" => "meeting-" <> id
       })
 
@@ -802,6 +824,30 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     |> Map.put("buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
     |> Map.update!("outbox", &(&1 ++ [batch]))
     |> Map.put("sequence", (config["sequence"] || 0) + 1)
+  end
+
+  defp render_lines("meeting", lines, _), do: Enum.join(lines, "\n")
+
+  defp render_lines("voice", lines, rows) do
+    rows = rows || voice_rows(lines)
+
+    {paragraphs, _} =
+      Enum.reduce(rows, {[], nil}, fn %{"speaker" => speaker, "text" => text},
+                                      {paragraphs, previous} ->
+        cond do
+          speaker == previous -> {List.update_at(paragraphs, -1, &(&1 <> " " <> text)), speaker}
+          true -> {paragraphs ++ [speaker <> ": " <> text], speaker}
+        end
+      end)
+
+    Enum.join(paragraphs, "\n")
+  end
+
+  defp voice_rows(lines) do
+    for line <- lines,
+        not String.starts_with?(line, "#"),
+        [speaker, text] <- [String.split(line, " ", parts: 2)],
+        do: %{"speaker" => speaker, "text" => text}
   end
 
   defp same_target?(nil, _), do: false
@@ -868,6 +914,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       if batch["message_id"] in busy do
         acc
       else
+        acc = mark_attempted(acc, batch)
         deliver = state.deliver
 
         task =
@@ -876,7 +923,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
               fiber_id: batch["fiber_id"],
               origin: batch["origin"],
               text: batch["text"],
-              message_id: batch["message_id"]
+              message_id: batch["message_id"],
+              kind: acc.config["kind"]
             })
           end)
 
@@ -889,6 +937,44 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end)
   end
 
+  # Persist before the side effect: a crash can lose a batch, but cannot paste it twice.
+  defp mark_attempted(%{config: %{"kind" => "voice"}} = state, batch) do
+    outbox =
+      Enum.map(state.config["outbox"], fn item ->
+        if item["message_id"] == batch["message_id"],
+          do: Map.put(item, "attempted", true),
+          else: item
+      end)
+
+    persist!(%{state | config: Map.put(state.config, "outbox", outbox)})
+  end
+
+  defp mark_attempted(state, _batch), do: state
+
+  defp recover_attempted(%{config: %{"kind" => "voice"}} = state) do
+    {attempted, remaining} = Enum.split_with(state.config["outbox"], & &1["attempted"])
+
+    case List.last(attempted) do
+      nil ->
+        state
+
+      batch ->
+        last = %{
+          "fiber_id" => batch["fiber_id"],
+          "at" => DateTime.to_iso8601(DateTime.utc_now()),
+          "status" => "unconfirmed",
+          "detail" => "The message may have arrived. The transcript retains the words."
+        }
+
+        :ok = Shuttle.FS.mkdir_p(Shuttle.data_dir())
+        :ok = Shuttle.FS.write_atomic(Shuttle.Voice.last_path(), Jason.encode!(last))
+        config = state.config |> Map.put("outbox", remaining) |> Map.put("last", last)
+        persist!(%{state | config: config})
+    end
+  end
+
+  defp recover_attempted(state), do: state
+
   defp complete(state, ref, result) do
     case Map.pop(state.tasks, ref) do
       {nil, _} ->
@@ -897,7 +983,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       {id, tasks} ->
         batch = Enum.find(state.config["outbox"], &(&1["message_id"] == id))
 
-        outcome = delivery_outcome(result)
+        outcome =
+          if state.config["kind"] == "voice" and match?({:task_exit, _}, result),
+            do: :unconfirmed,
+            else: delivery_outcome(result)
 
         config =
           if outcome != :failed or state.config["kind"] == "voice" do
@@ -973,11 +1062,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     %{state | persisted: state.config}
   end
 
-  def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: id}) do
+  def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: id, kind: kind}) do
     ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", %{
       "daemon_sender" => true,
       "message_id" => id,
-      "message_after_launch" => true
+      "message_after_launch" => true,
+      "live_input" => kind == "voice"
     })
   end
 end

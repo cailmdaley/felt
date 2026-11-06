@@ -56,6 +56,44 @@ defmodule ShuttleWeb.ClaimControllerTest do
       %{poller: poller, sid: sid, bid: bid, canonical: FiberUid.session("claimed")}
     end
 
+    test "live voice uses Rex paste and reports its receipt unconfirmed", ctx do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/claim",
+          Jason.encode!(%{
+            fiber_id: "claimed",
+            tmux_session: ctx.sid,
+            tmux_pane: ctx.bid,
+            session_uuid: "rex-native-claim"
+          })
+        )
+
+      assert conn.status == 200
+      Env.put_app_env(:paste_submit_delay_ms, 0)
+
+      response =
+        post(
+          api_conn(),
+          "/api/v1/deliver",
+          Jason.encode!(%{
+            fiber_id: "claimed",
+            text: "me: hello",
+            live_input: true,
+            message_after_launch: true
+          })
+        )
+
+      assert %{"delivered" => nil, "delivery" => "input"} = json_response(response, 202)
+      calls = FakeRex.calls()
+
+      assert Enum.any?(calls, fn {_bin, args, opts} ->
+               "block.event" in args and String.contains?(opts[:input] || "", "me: hello")
+             end)
+
+      assert Enum.any?(calls, fn {_bin, args, _opts} -> "send-key" in args and "enter" in args end)
+    end
+
     test "session refs become canonical bindings and native retries keep the watcher", ctx do
       body = %{
         fiber_id: "claimed",
