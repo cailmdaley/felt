@@ -21,6 +21,8 @@ defmodule Shuttle.SpeakerTest do
       end,
       stop: fn handle -> send(parent, {:stop, handle}) end,
       slice: fn wav, from -> {:ok, "#{wav}@#{from}"} end,
+      retarget: fn item -> send(parent, {:retarget, item.fiber_id, item.name}) end,
+      fibers: fn -> [] end,
       journal: Path.join(root, "outbox.bin")
     ]
 
@@ -75,7 +77,7 @@ defmodule Shuttle.SpeakerTest do
         )
     end
 
-    assert %{held: %{"a/two" => 2}, held_names: %{"a/two" => "Two card"}} = Speaker.show(server)
+    assert %{held: [%{fiber_id: "a/two", name: "Two card", n: 2}]} = Speaker.show(server)
   end
 
   test "holds while the user talks and resumes just before where it stopped",
@@ -167,7 +169,9 @@ defmodule Shuttle.SpeakerTest do
     {:ok, _} = say.("a/one", "one first")
     {:ok, _} = say.("a/two", "two second")
     assert_receive {:play, "jean:one first", one}
-    assert %{queued: 0, held: %{"a/two" => 2}} = Speaker.show(server)
+
+    assert %{queued: 0, held: [%{fiber_id: "a/two", n: 2, first: "two first"}]} =
+             Speaker.show(server)
 
     set(world, %{target: ["a/two"]})
     refute_receive {:play, _, _}, 50
@@ -180,7 +184,7 @@ defmodule Shuttle.SpeakerTest do
     set(world, %{target: nil})
     send(pid, {three, {:exit_status, 0}})
     assert_receive {:play, "jean:one again", _}
-    assert %{held: %{}} = Speaker.show(server)
+    assert %{held: []} = Speaker.show(server)
   end
 
   test "a fiber answers to all its ids, or the one given while the feed is unavailable" do
@@ -256,6 +260,111 @@ defmodule Shuttle.SpeakerTest do
     assert Speaker.skip("skip ahead to the end", nil) == nil
     assert Speaker.skip("I'd skip the intro", nil) == nil
     assert Speaker.skip(nil, nil) == nil
+  end
+
+  defp hold_for_cards(server, world) do
+    fibers = [
+      fibers: fn ->
+        [%{"id" => "a/one", "name" => "One card"}, %{"id" => "a/two", "name" => "Two card"}]
+      end
+    ]
+
+    set(world, %{target: ["elsewhere"]})
+
+    for {fiber, text} <- [{"a/two", "two first"}, {"a/one", "one first"}, {"a/two", "two second"}] do
+      {:ok, %{held: true}} =
+        Speaker.speak(
+          %{"fiber_id" => fiber, "text" => text, "voice" => "jean"},
+          Keyword.merge(server, fibers)
+        )
+    end
+  end
+
+  test "a spoken play opens the inbox: held lines oldest first, each card named and routed",
+       %{pid: pid, server: server, world: world} do
+    hold_for_cards(server, world)
+    refute_receive {:play, _, _}, 50
+
+    assert %{
+             inbox: %{playing: false},
+             held: [
+               %{fiber_id: "a/two", name: "Two card", n: 2, first: "two first"},
+               %{fiber_id: "a/one", name: "One card", n: 1, first: "one first"}
+             ]
+           } = Speaker.show(server)
+
+    set(world, %{partial: "Play."})
+    assert_receive {:play, "jean:Two card: two first", one}
+    assert_receive {:retarget, "a/two", "Two card"}
+    assert %{inbox: %{playing: true}} = Speaker.show(server)
+
+    send(pid, {one, {:exit_status, 0}})
+    assert_receive {:play, "jean:One card: one first", two}
+    assert_receive {:retarget, "a/one", "One card"}
+    send(pid, {two, {:exit_status, 0}})
+    assert_receive {:play, "jean:Two card: two second", three}
+    send(pid, {three, {:exit_status, 0}})
+    Process.sleep(30)
+    assert %{inbox: %{playing: false}, held: [], speaking: nil} = Speaker.show(server)
+  end
+
+  test "a card's consecutive lines are named once", %{pid: pid, server: server, world: world} do
+    set(world, %{target: ["elsewhere"]})
+    fibers = [fibers: fn -> [%{"id" => "a/one", "name" => "One card"}] end]
+
+    for text <- ["first", "second"] do
+      Speaker.speak(
+        %{"fiber_id" => "a/one", "text" => text, "voice" => "jean"},
+        Keyword.merge(server, fibers)
+      )
+    end
+
+    {:ok, %{inbox: %{playing: true}}} = Speaker.inbox(:play, server)
+    assert_receive {:play, "jean:One card: first", one}
+    send(pid, {one, {:exit_status, 0}})
+    assert_receive {:play, "jean:second", _}
+  end
+
+  test "stop closes the inbox and holds the rest, the line under way first",
+       %{server: server, world: world} do
+    hold_for_cards(server, world)
+    set(world, %{partial: "what's waiting"})
+    # Two words of command hold the first line until they are quiet.
+    set(world, %{now: 2_000})
+    assert_receive {:play, "jean:Two card: two first", one}
+
+    set(world, %{partial: "what's waiting stop"})
+    assert_receive {:stop, ^one}
+    refute_receive {:play, _, _}, 50
+
+    assert %{
+             inbox: %{playing: false},
+             speaking: nil,
+             held: [%{fiber_id: "a/two", n: 2, first: "two first"}, %{fiber_id: "a/one", n: 1}]
+           } = Speaker.show(server)
+  end
+
+  test "a restart mid-inbox carries on with the inbox",
+       %{server: server, world: world, opts: opts} do
+    hold_for_cards(server, world)
+    set(world, %{partial: "play them"})
+    set(world, %{now: 2_000})
+    assert_receive {:play, "jean:Two card: two first", _}
+
+    stop_supervised!(Speaker)
+    start_supervised!({Speaker, opts})
+    assert %{inbox: %{playing: true}} = Speaker.show(server)
+  end
+
+  test "inbox words are the new words alone" do
+    assert Speaker.inbox_word("Play!", nil) == :play
+    assert Speaker.inbox_word("play them", "") == :play
+    assert Speaker.inbox_word("So, what's waiting?", "So,") == :play
+    assert Speaker.inbox_word("ok stop", "ok") == :stop
+    assert Speaker.inbox_word("stop it.", nil) == :stop
+    assert Speaker.inbox_word("let's play a game", nil) == nil
+    assert Speaker.inbox_word("don't stop", nil) == nil
+    assert Speaker.inbox_word(nil, nil) == nil
   end
 
   test "words of the line being spoken are its echo, not the user" do

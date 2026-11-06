@@ -499,6 +499,17 @@ defmodule Shuttle.VoiceTest do
     assert %{enabled: true, error: ^warning} = Voice.show()
   end
 
+  test "a route records the source that moved it" do
+    assert {:ok, %{target: %{"fiber_id" => "a/card"}}} =
+             Voice.target(%{"fiber_id" => "a/card", "source" => "inbox"})
+
+    assert [%{"fiber_id" => "a/card", "source" => "inbox"}] =
+             Voice.routes_path()
+             |> File.read!()
+             |> String.split("\n", trim: true)
+             |> Enum.map(&Jason.decode!/1)
+  end
+
   test "Rex focus selects only while following and cannot move a fixed recording", c do
     params = %{"fiber_id" => "project/rex", "source" => "rex"}
     assert {:ok, %{target: nil}} = Voice.target(params)

@@ -1,7 +1,9 @@
 defmodule ShuttleWeb.SpeakController do
   @moduledoc """
   The spoken outbox. `POST {fiber_id, text, voice?}` queues a line on the host
-  that speaks; `POST {muted}` holds or releases it; `GET` shows what is spoken, and `GET /voices` the voices and the roles holding them.
+  that speaks; `POST {muted}` holds or releases it; `POST {inbox: "play" |
+  "stop"}` opens or closes the inbox. `GET` shows what is spoken and held, and
+  `GET /voices` the voices and the roles holding them.
   """
   use Phoenix.Controller, formats: [:json]
   alias Shuttle.{MeetingRouter, Speaker}
@@ -36,5 +38,7 @@ defmodule ShuttleWeb.SpeakController do
   defp local(:show, _params), do: {:ok, Speaker.show()}
   defp local(:voices, _params), do: {:ok, %{voices: Speaker.voices()}}
   defp local(:create, %{"muted" => muted}), do: Speaker.mute(muted)
+  defp local(:create, %{"inbox" => "play"}), do: Speaker.inbox(:play)
+  defp local(:create, %{"inbox" => "stop"}), do: Speaker.inbox(:stop)
   defp local(:create, params), do: Speaker.speak(params)
 end

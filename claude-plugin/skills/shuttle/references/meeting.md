@@ -21,7 +21,7 @@ Stop and follow me in the Listening menu ends the recording and hands the microp
 Shuttle delivers batches automatically; don't run `shuttle follow` for live voice.
 
 `shuttle say "<text>"` speaks a line aloud on the user's Mac, in your role's voice, after any lines already queued; playback holds while the user is talking, and "skip" drops the rest of the line.
-While Listening has a constitution in view, only its lines play; yours wait, in order, until the user opens your card again.
+While Listening has a constitution in view, only its lines play; yours wait, in order, until the user opens your card again or says "play", which plays every waiting line, each card named first, and routes the mic to the card speaking so the user can answer you aloud.
 Speak only inside a conversation the user is clearly having with you by voice: answer in one spoken line and put the rest on the card.
 Never speak unprompted, at a random point in the day, or to narrate replies to typed turns.
 

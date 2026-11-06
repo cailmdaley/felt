@@ -1564,10 +1564,14 @@ defmodule Shuttle.Meeting do
         :exit, _ -> []
       end
 
-    remote =
-      Enum.flat_map(Shuttle.RemoteFiberRegistry.feeds(), fn {_name, feed} -> feed.fibers end)
+    fiber = &(Map.get(&1, :fiber) || Map.get(&1, "fiber"))
 
-    Enum.map(local ++ remote, &(Map.get(&1, :fiber) || Map.get(&1, "fiber")))
+    remote =
+      Enum.flat_map(Shuttle.RemoteFiberRegistry.feeds(), fn {host, feed} ->
+        for entry <- feed.fibers, f = fiber.(entry), is_map(f), do: Map.put(f, "origin", host)
+      end)
+
+    Enum.map(local, fiber) ++ remote
   end
 
   defp first_error(error, _fallback) when is_binary(error) and error != "", do: error

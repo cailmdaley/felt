@@ -114,6 +114,7 @@ defmodule Shuttle.Voice do
         }
 
         row = Map.put(target, "t", DateTime.to_iso8601(received_at))
+        row = if params["source"], do: Map.put(row, "source", params["source"]), else: row
 
         case append_route(state.routes_path, state.route_bytes, row) do
           {:ok, route_bytes} ->

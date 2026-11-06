@@ -17,6 +17,12 @@ defmodule Shuttle.Speaker do
   Saying "skip" (or "skip it", "skip that") while a line is current drops the
   rest of it.
 
+  Saying "play" (or "play them", "what's waiting") opens the inbox: every
+  queued line plays, oldest first, whatever is in view. Each fiber's turn opens
+  with its card's name, and live voice is routed to the fiber whose line is
+  playing, so the human can answer by talking. "stop" closes the inbox and
+  leaves the rest held; an empty inbox closes itself.
+
   The queue, the current line and its offset are journaled, so a daemon restart
   resumes a held or playing line rather than losing it.
   """
@@ -35,6 +41,10 @@ defmodule Shuttle.Speaker do
 
   def show(opts \\ []), do: GenServer.call(server(opts), :show)
   def mute(muted, opts \\ []), do: GenServer.call(server(opts), {:mute, muted})
+
+  @doc "Open (`:play`) or close (`:stop`) the inbox, as the spoken words do."
+  def inbox(action, opts \\ []) when action in [:play, :stop],
+    do: GenServer.call(server(opts), {:inbox, action})
 
   @doc "Queue `text` from `fiber_id`, in `voice` when given, else its role's voice."
   def speak(params, opts \\ []) do
@@ -61,6 +71,7 @@ defmodule Shuttle.Speaker do
                %{
                  fiber_id: fiber_id,
                  name: fiber && fiber["name"],
+                 origin: fiber && fiber["origin"],
                  keys: keys,
                  text: text,
                  voice: voice
@@ -161,6 +172,9 @@ defmodule Shuttle.Speaker do
        current: saved.current,
        render: nil,
        muted: saved.muted,
+       inbox: saved.inbox,
+       last_fiber: saved.last_fiber,
+       command_seen: nil,
        journal: journal,
        saved: saved,
        heard: {nil, nil},
@@ -170,6 +184,8 @@ defmodule Shuttle.Speaker do
        poll_ms: Keyword.get(opts, :poll_ms, @poll_ms),
        partial: Keyword.get(opts, :partial, &partial/0),
        target: Keyword.get(opts, :target, &target/0),
+       retarget: Keyword.get(opts, :retarget, &retarget/1),
+       fibers: Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0),
        render_fun: Keyword.get(opts, :render, &render/2),
        play: Keyword.get(opts, :play, &play/1),
        stop: Keyword.get(opts, :stop, &stop/1),
@@ -182,6 +198,11 @@ defmodule Shuttle.Speaker do
 
   def handle_call({:mute, muted}, _from, state) when is_boolean(muted) do
     state = hold_or_play(%{state | muted: muted}) |> save()
+    {:reply, {:ok, snapshot(state)}, state}
+  end
+
+  def handle_call({:inbox, action}, _from, state) do
+    state = state |> command(action) |> advance() |> schedule() |> save()
     {:reply, {:ok, snapshot(state)}, state}
   end
 
@@ -218,7 +239,14 @@ defmodule Shuttle.Speaker do
   end
 
   def handle_info(:poll, state),
-    do: {:noreply, %{state | timer: nil} |> hold_or_play() |> advance() |> schedule() |> save()}
+    do:
+      {:noreply,
+       %{state | timer: nil}
+       |> listen()
+       |> hold_or_play()
+       |> advance()
+       |> schedule()
+       |> save()}
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -234,19 +262,21 @@ defmodule Shuttle.Speaker do
 
   defp journal_path, do: Path.join([Shuttle.data_dir(), "speaker", "outbox.bin"])
 
-  defp restore(nil), do: %{queue: [], current: nil, muted: false}
+  defp restore(nil), do: %{queue: [], current: nil, muted: false, inbox: false, last_fiber: nil}
 
   defp restore(path) do
     with {:ok, bytes} <- Shuttle.FS.read(path),
-         %{queue: queue, current: current, muted: muted} <- :erlang.binary_to_term(bytes) do
-      case current do
-        nil ->
-          %{queue: queue, current: nil, muted: muted}
+         %{queue: queue, current: current} = saved <- :erlang.binary_to_term(bytes) do
+      saved = Map.merge(restore(nil), saved)
 
+      case current do
         %{wav: wav} = current ->
           if match?({:ok, _}, Shuttle.FS.stat(wav)),
-            do: %{queue: queue, current: current, muted: muted},
-            else: %{queue: [current.item | queue], current: nil, muted: muted}
+            do: saved,
+            else: %{saved | queue: [current.item | queue], current: nil}
+
+        nil ->
+          saved
       end
     else
       _ -> restore(nil)
@@ -264,7 +294,9 @@ defmodule Shuttle.Speaker do
       current:
         state.current &&
           %{state.current | handle: nil, segment: nil, started: nil},
-      muted: state.muted
+      muted: state.muted,
+      inbox: state.inbox,
+      last_fiber: state.last_fiber
     }
 
     if saved == state.saved do
@@ -276,21 +308,29 @@ defmodule Shuttle.Speaker do
     end
   end
 
-  # The first queued line from the constitution in view, or the first of all
-  # when nothing is in view.
+  # The first queued line from the constitution in view, the first of all when
+  # nothing is in view or the inbox is open. An emptied inbox closes.
   defp advance(%{current: nil, render: nil} = state) do
-    target = state.target.()
+    target = if state.inbox, do: nil, else: state.target.()
 
     case Enum.split_while(:queue.to_list(state.queue), &(not in_view?(&1, target))) do
       {_, []} ->
-        state
+        if state.inbox, do: Logger.info("speaker: inbox empty")
+        %{state | inbox: false, last_fiber: if(state.inbox, do: nil, else: state.last_fiber)}
 
       {before, [item | rest]} ->
         render = state.render_fun
 
+        said =
+          if state.inbox and item.fiber_id != state.last_fiber,
+            do: "#{name_of(state, item)}: #{item.text}",
+            else: item.text
+
+        item = Map.put(item, :said, said)
+
         task =
           Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
-            render.(item.text, item.voice)
+            render.(said, item.voice)
           end)
 
         %{state | queue: :queue.from_list(before ++ rest), render: {task, item}}
@@ -312,6 +352,14 @@ defmodule Shuttle.Speaker do
       before: state.partial.()
     }
 
+    state =
+      if state.inbox do
+        state.retarget.(Map.put(item, :name, name_of(state, item)))
+        %{state | last_fiber: item.fiber_id}
+      else
+        state
+      end
+
     {:noreply,
      %{state | render: nil, current: current, error: nil}
      |> hold_or_play()
@@ -324,18 +372,24 @@ defmodule Shuttle.Speaker do
     {:noreply, advance(%{state | render: nil, error: reason}) |> save()}
   end
 
+  # When hark's pending words last changed.
+  defp hear(state, partial, now) do
+    if partial == elem(state.heard, 0), do: state, else: %{state | heard: {partial, now}}
+  end
+
   # Held: stop the player and keep the offset. Free: play from the offset.
   defp hold_or_play(%{current: nil} = state), do: state
 
   defp hold_or_play(%{current: current} = state) do
     partial = state.partial.()
     now = state.clock.()
-    heard = if partial == elem(state.heard, 0), do: state.heard, else: {partial, now}
-    state = %{state | heard: heard}
+    state = hear(state, partial, now)
+    heard = state.heard
 
     held =
       state.muted or
-        (talking?(partial, current.item.text) and now - elem(heard, 1) < @quiet_ms)
+        (talking?(partial, Map.get(current.item, :said, current.item.text)) and
+           now - elem(heard, 1) < @quiet_ms)
 
     skip = skip(partial, Map.get(current, :before))
 
@@ -388,6 +442,103 @@ defmodule Shuttle.Speaker do
     end
   end
 
+  # A spoken inbox word, once per change of hark's pending words: the words
+  # since the current line began, or all of them between lines.
+  defp listen(state) do
+    partial = state.partial.()
+    state = hear(state, partial, state.clock.())
+
+    if partial == state.command_seen do
+      state
+    else
+      before = state.current && Map.get(state.current, :before)
+      state = %{state | command_seen: partial}
+
+      case inbox_word(partial, before) do
+        :play when not state.inbox -> command(state, :play)
+        :stop when state.inbox -> command(state, :stop)
+        _ -> state
+      end
+    end
+  end
+
+  defp command(state, :play) do
+    Logger.info("speaker: inbox open with #{:queue.len(state.queue)} queued")
+    %{state | inbox: true, last_fiber: nil}
+  end
+
+  # Closing the inbox puts the line under way back at the head of the queue.
+  defp command(state, :stop) do
+    Logger.info("speaker: inbox closed")
+
+    back =
+      case {state.current, state.render} do
+        {%{} = current, _} ->
+          if current.handle, do: state.stop.(current.handle)
+          cleanup(current)
+          [current.item]
+
+        {nil, {task, item}} ->
+          Task.shutdown(task, :brutal_kill)
+          [item]
+
+        _ ->
+          []
+      end
+
+    back = Enum.map(back, &Map.delete(&1, :said))
+
+    %{
+      state
+      | inbox: false,
+        last_fiber: nil,
+        current: nil,
+        render: nil,
+        queue: :queue.from_list(back ++ :queue.to_list(state.queue))
+    }
+  end
+
+  @doc """
+  The inbox word in the pending words added since `before`: `:play` for "play",
+  "play them" or "what's waiting"; `:stop` for "stop", "stop it" or "stop
+  that"; else nil.
+  """
+  def inbox_word(nil, _before), do: nil
+
+  def inbox_word(partial, before) do
+    new =
+      if is_binary(before) and before != "" and String.starts_with?(partial, before),
+        do: String.replace_prefix(partial, before, ""),
+        else: partial
+
+    case Enum.join(words(new), " ") do
+      words when words in ["play", "play them", "what's waiting", "whats waiting"] -> :play
+      words when words in ["stop", "stop it", "stop that"] -> :stop
+      _ -> nil
+    end
+  end
+
+  defp name_of(state, item) do
+    item.name ||
+      case find_fiber(item.fiber_id, fibers: state.fibers) do
+        %{"name" => name} when is_binary(name) -> name
+        _ -> item.fiber_id || "a session"
+      end
+  end
+
+  # Route live voice to the fiber whose line is playing.
+  defp retarget(item) do
+    params = %{"fiber_id" => item.fiber_id, "name" => item.name, "source" => "inbox"}
+    params = if item[:origin], do: Map.put(params, "origin", item.origin), else: params
+
+    case Shuttle.Voice.target(params) do
+      {:ok, _} -> :ok
+      {:error, reason} -> Logger.warning("speaker: inbox could not route voice: #{reason}")
+    end
+  catch
+    :exit, reason -> Logger.warning("speaker: inbox could not route voice: #{inspect(reason)}")
+  end
+
   defp in_view?(_item, nil), do: true
   defp in_view?(item, target), do: Enum.any?(target, &(&1 in item.keys))
 
@@ -434,12 +585,24 @@ defmodule Shuttle.Speaker do
       available: available?(),
       speaking: speaking,
       queued: length(ready),
-      held: Enum.frequencies_by(held, & &1.fiber_id),
-      held_names: Map.new(held, &{&1.fiber_id, Map.get(&1, :name)}),
+      held: held_by_card(state, held),
+      inbox: %{playing: state.inbox},
       paused: not is_nil(state.current) and is_nil(state.current.handle),
       muted: state.muted,
       error: state.error
     }
+  end
+
+  # Held lines by fiber, in the order their oldest line arrived.
+  defp held_by_card(state, held) do
+    held
+    |> Enum.group_by(& &1.fiber_id)
+    |> Enum.map(fn {fiber_id, [first | _] = lines} ->
+      {Enum.find_index(held, &(&1 == first)),
+       %{fiber_id: fiber_id, name: name_of(state, first), n: length(lines), first: first.text}}
+    end)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(&elem(&1, 1))
   end
 
   @doc """

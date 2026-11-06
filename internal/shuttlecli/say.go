@@ -114,3 +114,79 @@ with the role whose charter names it in voice:. Unclaimed voices carry no role.`
 		},
 	}
 }
+
+func (a *app) shuttleInboxCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "inbox [--play | --stop]",
+		Short: "List spoken lines held for cards out of view, or play them",
+		Long: `List the lines the speaker holds because their card is not in view: each
+card's name, how many lines wait, and the first words of the oldest.
+
+--play opens the inbox, as saying "play" does: every held line plays, oldest
+first, each card's turn opening with its name, and live voice follows the card
+whose line is playing. --stop closes it and leaves the rest held.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			play, _ := cmd.Flags().GetBool("play")
+			stop, _ := cmd.Flags().GetBool("stop")
+			var body []byte
+			var err error
+			switch {
+			case play && stop:
+				return fmt.Errorf("--play and --stop are exclusive")
+			case play || stop:
+				action := "play"
+				if stop {
+					action = "stop"
+				}
+				body, err = a.postMeeting("/api/v1/speak", map[string]any{"inbox": action})
+			default:
+				var endpoint string
+				if endpoint, err = a.daemonEndpoint("/api/v1/speak"); err == nil {
+					body, err = a.getDaemon(endpoint, daemonRoutedPostTimeout)
+				}
+			}
+			if err != nil {
+				return err
+			}
+			if a.json {
+				a.printDaemonBody(body)
+				return nil
+			}
+			var answer struct {
+				Held []struct {
+					Name  string `json:"name"`
+					N     int    `json:"n"`
+					First string `json:"first"`
+				} `json:"held"`
+				Inbox struct {
+					Playing bool `json:"playing"`
+				} `json:"inbox"`
+			}
+			if err := json.Unmarshal(body, &answer); err != nil {
+				return fmt.Errorf("decoding speaker state: %w", err)
+			}
+			if answer.Inbox.Playing {
+				fmt.Fprintln(a.env.Stdout, "Inbox playing")
+			} else if len(answer.Held) == 0 {
+				fmt.Fprintln(a.env.Stdout, "Nothing held")
+			}
+			for _, card := range answer.Held {
+				fmt.Fprintf(a.env.Stdout, "%s (%d): %s\n", card.Name, card.N, firstWords(card.First, 8))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().Bool("play", false, "Play every held line, oldest first")
+	cmd.Flags().Bool("stop", false, "Stop playing held lines and leave the rest held")
+	return cmd
+}
+
+// firstWords is the first n words of text, marked when cut.
+func firstWords(text string, n int) string {
+	words := strings.Fields(text)
+	if len(words) <= n {
+		return strings.Join(words, " ")
+	}
+	return strings.Join(words[:n], " ") + " …"
+}
