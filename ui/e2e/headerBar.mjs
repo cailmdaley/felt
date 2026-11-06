@@ -347,7 +347,7 @@ export function registerHeaderBarJourneys(test) {
       const arm = composer.locator('.kbn-ctl-meet-arm')
       const geometry = await composer.evaluate(el => {
         const rect = el.getBoundingClientRect()
-        const controls = [...el.querySelectorAll('.kbn-ctl-meet-arm, .kbn-ctl-meet-audio, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => {
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => {
           const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, center: r.top + r.height / 2 }
         })
         return { left: rect.left, right: rect.right, controls }
@@ -368,10 +368,10 @@ export function registerHeaderBarJourneys(test) {
       assert.equal(await arm.getAttribute('aria-pressed'), 'true')
       const armed = await composer.evaluate(el => {
         const box = el.getBoundingClientRect()
-        const controls = [...el.querySelectorAll('.kbn-ctl-meet-arm, .kbn-ctl-meet-audio, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
-        return { fits: controls.every(r => r.left >= box.left && r.right <= box.right), centers: controls.map(r => r.top + r.height / 2), armedChipHidden: el.querySelector('.kbn-ctl-meet-chip').hidden }
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
+        return { fits: controls.every(r => r.left >= box.left && r.right <= box.right), centers: controls.map(r => r.top + r.height / 2), noChip: !el.querySelector('.kbn-ctl-meet-chip') }
       })
-      assert.ok(armed.armedChipHidden && armed.fits, `armed actions remain visible inside the composer at ${width}: ${JSON.stringify(armed)}`)
+      assert.ok(armed.noChip && armed.fits, `armed actions remain visible inside the composer at ${width}: ${JSON.stringify(armed)}`)
       const rows = new Set(armed.centers.map(center => Math.round(center)))
       assert.ok(rows.size <= 2, `armed footer uses at most two rows at ${width}: ${JSON.stringify(armed.centers)}`)
       await arm.click()
@@ -382,11 +382,10 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(`${url}&meeting=joined`)
     await openRoot(page)
     const composer = page.locator('.ws-selected .kbn-ctl-composer')
-    const chip = composer.locator('.kbn-ctl-meet-chip')
+    const chip = composer.locator('.kbn-ctl-meet-arm')
     await chip.waitFor({ state: 'visible' })
     assert.match(await chip.innerText(), /^Recording · /)
     assert.equal(await composer.locator('.kbn-ctl-meet-chip, .kbn-ctl-meet-arm, .kbn-ctl-meet-stop').evaluateAll(nodes => nodes.filter(el => el.checkVisibility()).length), 1)
-    assert.ok(await composer.locator('.kbn-ctl-meet-arm').isHidden())
     assert.equal(await composer.locator('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop').count(), 0)
     await chip.click()
     await page.getByRole('menuitem', { name: 'Hide transcript', exact: true }).click()
@@ -397,9 +396,9 @@ export function registerHeaderBarJourneys(test) {
     await page.locator('.ws-chat-leave').click()
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     const foreign = page.locator('.ws-selected .kbn-ctl-composer')
-    assert.ok(await foreign.locator('.kbn-ctl-meet-arm').isHidden())
+    assert.ok(await foreign.locator('.kbn-ctl-meet-arm').isVisible())
     assert.equal(await foreign.locator('.kbn-ctl-meet-chip, .kbn-ctl-meet-arm, .kbn-ctl-meet-stop').evaluateAll(nodes => nodes.filter(el => el.checkVisibility()).length), 1)
-    await foreign.locator('.kbn-ctl-meet-chip').click()
+    await foreign.locator('.kbn-ctl-meet-arm').click()
     assert.ok(await page.getByRole('menuitem', { name: 'Stop recording', exact: true }).isEnabled())
     assert.ok(await page.getByRole('menuitem', { name: 'Start recording here', exact: true }).isEnabled())
     for (const width of [1440, 390]) {
@@ -417,7 +416,7 @@ export function registerHeaderBarJourneys(test) {
     await openRoot(page)
     await page.locator('.ws-chat-leave').click()
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-    await page.locator('.ws-selected .kbn-ctl-meet-chip').click()
+    await page.locator('.ws-selected .kbn-ctl-meet-arm').click()
     page.once('dialog', dialog => dialog.accept())
     await page.getByRole('menuitem', { name: 'Start recording here', exact: true }).click()
     await page.waitForFunction(() => window.__harness.requests.some(r => r.url?.includes('/meeting/join')))
@@ -426,7 +425,7 @@ export function registerHeaderBarJourneys(test) {
     const request = JSON.parse(calls[1].body)
     assert.equal(request.resume_mode, 'fresh')
     assert.equal(request.fiber_id, 'pipeline/spin/remote-review')
-    assert.equal(await page.locator('.ws-selected .kbn-ctl-meet-arm').isVisible(), false)
+    assert.equal(await page.locator('.ws-selected .kbn-ctl-meet-arm').isVisible(), true)
   }, { width: 1000, height: 900 })
   test('× leaves the chat for the Desk and writes nothing', async page => {
     await page.addInitScript(() => {
