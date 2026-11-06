@@ -210,6 +210,30 @@ defmodule Shuttle.VoiceTest do
     assert %{error: ^capture_error} = Voice.show()
   end
 
+  test "a Voice-only restart restores the active Rex fallback warning", c do
+    watcher =
+      Env.start_scoped!(
+        {Shuttle.RexFocus,
+         name: nil,
+         poll_ms: 60_000,
+         active?: fn -> true end,
+         title: fn -> {:error, :accessibility} end,
+         command: fn -> nil end}
+      )
+
+    :sys.get_state(watcher)
+    assert %{error: warning} = Voice.show()
+    assert warning =~ "Accessibility"
+    stop_supervised!(Voice)
+    replacement = Env.start_scoped!({Voice, c.opts})
+    assert replacement != c.pid
+    assert {:ok, %{enabled: true}} = Voice.update(%{"enabled" => true})
+    assert %{error: nil} = Voice.show()
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    assert %{enabled: true, error: ^warning} = Voice.show()
+  end
+
   test "Rex focus selects only while following and cannot move a fixed recording", c do
     params = %{"fiber_id" => "project/rex", "source" => "rex"}
     assert {:ok, %{target: nil}} = Voice.target(params)

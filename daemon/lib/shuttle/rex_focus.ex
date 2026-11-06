@@ -37,7 +37,11 @@ defmodule Shuttle.RexFocus do
       last_bindings: nil,
       last_target: nil,
       title_ready: false,
-      warning: nil,
+      warning: :unset,
+      warning_receiver:
+        Keyword.get(opts, :warning_receiver, fn ->
+          GenServer.whereis(Shuttle.Env.server(Shuttle.Voice))
+        end),
       warn: Keyword.get(opts, :warn, &Shuttle.Voice.focus_error/1),
       poll_ms: Keyword.get(opts, :poll_ms, 1_000),
       active?: Keyword.get(opts, :active?, &following?/0),
@@ -47,9 +51,8 @@ defmodule Shuttle.RexFocus do
       target: Keyword.get(opts, :target, &Shuttle.Voice.target/1)
     }
 
-    state.warn.(nil)
     send(self(), :tick)
-    {:ok, state}
+    {:ok, warning(state, nil)}
   end
 
   @impl true
@@ -170,7 +173,8 @@ defmodule Shuttle.RexFocus do
         else
           case state.bindings.() do
             {:ok, bindings} ->
-              if title != state.last_title or bindings != state.last_bindings do
+              if title != state.last_title or bindings != state.last_bindings or
+                   is_nil(state.last_target) do
                 target = title_target(title, bindings, state.fibers.())
                 identity = target_identity(target)
 
@@ -206,11 +210,15 @@ defmodule Shuttle.RexFocus do
   defp target_identity(nil), do: nil
   defp target_identity(target), do: {target["fiber_id"], target["origin"]}
 
-  defp warning(%{warning: message} = state, message), do: state
-
   defp warning(state, message) do
-    state.warn.(message)
-    %{state | warning: message}
+    delivery = {message, state.warning_receiver.()}
+
+    if delivery == state.warning do
+      state
+    else
+      state.warn.(message)
+      %{state | warning: delivery}
+    end
   end
 
   @doc false

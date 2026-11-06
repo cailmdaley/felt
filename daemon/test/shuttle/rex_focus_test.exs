@@ -143,6 +143,26 @@ defmodule Shuttle.RexFocusTest do
     refute_receive {:selected, _}
   end
 
+  test "cold fiber inventory is retried without a title or binding change", c do
+    inventory = start_supervised!({Agent, fn -> [] end})
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, true,
+        poll_ms: 60_000,
+        title: fn -> {:ok, "task - project/task"} end,
+        fibers: fn -> Agent.get(inventory, & &1) end
+      )
+
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
+    Agent.update(inventory, fn _ -> fibers() end)
+    send(watcher, :tick)
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
+  end
+
   test "missing AX access warns once, falls back to events, and recovers without retaining the stream",
        c do
     parent = self()
