@@ -126,7 +126,7 @@ defmodule Shuttle.HarnessPaths do
       joined = Path.join(resolved, segment)
 
       case Shuttle.FS.read_link(joined) do
-        {:ok, target} -> target |> Path.expand(resolved) |> real_path(hops - 1)
+        {:ok, target} -> real_path(Path.expand(target, resolved), hops - 1)
         {:error, _} -> joined
       end
     end)
