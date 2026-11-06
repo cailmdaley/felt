@@ -21,6 +21,18 @@ export interface VoiceStatus {
   held?: VoiceHeld[]
 }
 
+/** The constitution a card's page speaks to: the card itself, or the nearest constitution above it by path on the same host. */
+export const constitutionFor = (card: KanbanCard, cards: readonly KanbanCard[]): KanbanCard => {
+  if (isAgentCard(card)) return card
+  const parts = card.id.split('/')
+  for (let n = parts.length - 1; n > 0; n--) {
+    const id = parts.slice(0, n).join('/')
+    const found = cards.find(c => c.id === id && c.originId === card.originId && isAgentCard(c))
+    if (found) return found
+  }
+  return card
+}
+
 export const voicePollDelay = (visible: boolean, success: boolean, status: VoiceStatus | null): number | null =>
   !visible ? null : success && status?.enabled && status.state !== 'failed' ? 2_000 : 15_000
 

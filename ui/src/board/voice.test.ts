@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { card } from './testFixtures.js'
-import { Voice, voicePollDelay, type VoiceStatus } from './voice'
+import { Voice, constitutionFor, voicePollDelay, type VoiceStatus } from './voice'
 
 const status = (changes: Partial<VoiceStatus> = {}): VoiceStatus => ({ available: true, enabled: true, muted: false, state: 'listening', target: null, last: null, error: null, ...changes })
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
@@ -68,6 +68,18 @@ describe('live voice', () => {
     expect(followed).toEqual(['project/b'])
     expect(posts).toEqual([])
     voice.dispose()
+  })
+  it('speaks to the nearest constitution above a plain fiber on the same host', () => {
+    const root = card({ id: 'project/root', shuttleKind: 'oneshot' })
+    const inner = card({ id: 'project/root/thread', shuttleKind: 'oneshot' })
+    const remote = card({ id: 'project/root/thread/notes', shuttleKind: 'oneshot', originId: 'remote' })
+    const cards = [root, inner, remote, card({ id: 'project/root/thread/notes' })]
+    expect(constitutionFor(card({ id: 'project/root/thread/notes/tapestry-page' }), cards)).toBe(inner)
+    expect(constitutionFor(card({ id: 'project/root/report' }), cards)).toBe(root)
+    expect(constitutionFor(inner, cards)).toBe(inner)
+    const loose = card({ id: 'elsewhere/note' })
+    expect(constitutionFor(loose, cards)).toBe(loose)
+    expect(constitutionFor(card({ id: 'project/root/x', originId: 'remote' }), cards).id).toBe('project/root/x')
   })
   it('reveals a hand-opened constitution in Rex once, never a followed card or a plain note', async () => {
     vi.useFakeTimers()

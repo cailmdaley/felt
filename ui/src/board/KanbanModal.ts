@@ -84,7 +84,7 @@ import { joinDeliveryPhrase, meetingStatusUrl, supportedMeetingModes, meetingJoi
 import { joinMeeting as requestMeetingJoin, setMeetingPaused as requestMeetingPaused, setMeetingSystemAudio as requestMeetingSystemAudio, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
 import { recordingStartHold } from '../forms/recordingStart'
 import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
-import { Voice } from './voice.js'
+import { Voice, constitutionFor } from './voice.js'
 import {
   collectCards,
   createTemporalFetchers,
@@ -568,7 +568,7 @@ export class KanbanModal {
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
-      onVoiceCard: card => this.voice.select(card),
+      onVoiceCard: card => this.voice.select(card && constitutionFor(card, boardCards(this.lastResponse))),
       deskColumn: card => this.workspaceColumn(card),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
