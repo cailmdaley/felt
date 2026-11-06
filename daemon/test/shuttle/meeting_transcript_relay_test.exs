@@ -164,7 +164,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     start_monitor(c, kind: "voice", routes: routes)
     poll(c)
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
-    assert text =~ "me still heard Claude"
+    assert text =~ "me: still heard Claude"
   end
 
   test "subsecond spoken starts choose the route on their own side of a switch", c do
