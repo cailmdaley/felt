@@ -42,12 +42,16 @@ test('the mic is here: the band is the words, cut at a word from the left', ABOV
   }
 })
 
-test('the level ticker leads the words, five readings at most', ABOVE, async ($, on) => {
+test('the level ticker leads the words and scrolls through twenty readings', ABOVE, async ($, on) => {
   const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, pending: { fiber_id: SELF, words: 2, text: 'hello there' }, level: { mic: -30, at: '' } }, SPEAK)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (let i = 0; i < 6; i++) await clock.advance(150)
-  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await label(ui, 'mic')).toBe('▃▃▃▃▃ hello there')
+  let ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'mic')).toBe('▃'.repeat(7) + ' hello there')
+  await ui.unmount()
+  for (let i = 0; i < 30; i++) await clock.advance(150)
+  ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'mic')).toBe('▃'.repeat(20) + ' hello there')
   await ui.unmount()
 })
 

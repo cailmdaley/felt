@@ -6,7 +6,7 @@
 //                                                              🔈 muted
 //
 // The words show while the voice target is this session, the mic level's last
-// five readings at their left; Listening off draws no mic side and an idle
+// last twenty readings at their left, scrolling; Listening off draws no mic side and an idle
 // speaker no speaker side. The mic text and the speaker text are buttons:
 // a click, or Enter once the band has the focus (ctrl+x tab), toggles that mute.
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
@@ -35,6 +35,7 @@ const LIVE = 150 // the mic is here: the level ticker moves
 const FAST = 500
 const SLOW = 5000
 const GLYPHS = '▁▂▃▅▇'
+const HISTORY = 20 // ticker readings kept: about 3 s at the live poll, so a phrase leaves a shape
 const PILLS = 40 // the hint row's mode pill and separators, which the engine draws around the hint
 
 // Module state: a reload starts it over and session.start fills it again.
@@ -79,7 +80,7 @@ async function poll($: EngineInterface): Promise<number> {
   const [v, s] = await Promise.all([get<Voice>($, '/api/v1/voice'), get<Speak>($, '/api/v1/speak')])
   voice = v
   speak = s
-  levels = here() && v?.level ? [...levels, v.level.mic].slice(-5) : []
+  levels = here() && v?.level ? [...levels, v.level.mic].slice(-HISTORY) : []
   const key = JSON.stringify([v, s, levels])
   if (key !== seen) {
     seen = key

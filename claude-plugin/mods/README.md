@@ -26,7 +26,7 @@ Mic side, at the left:
 
 | State | Text |
 | --- | --- |
-| target is this session | `▁▂▅▇▃ …the live words` (the last five mic levels, then hark's words, replaced by Aqua's, cleared once delivered; cut at a word from the left) |
+| target is this session | `▁▁▂▅▇▅▃▂▁▁ …the live words` (the last twenty mic levels, about 3 s, scrolling left, then hark's words, replaced by Aqua's, cleared once delivered; cut at a word from the left) |
 | target is another card (a meeting holds the mic, or Listen here elsewhere) | `🎤 → <card name>` |
 | muted | `🎤 muted` |
 | Listening off | nothing |
