@@ -67,7 +67,8 @@ try {
       const cold = voice.card
       const live = modal.workspaceCards().find(card => card.name === 'Calibrate the shear response')
       window.__coldVoiceCards = { cold, live }
-      const held = { id: 'held-music', fiber_id: cold.uid ?? cold.id, origin: cold.originId, after: 0, through: 1, text: 'S1: Keep this thought here until I decide to send it.' }
+      const text = 'S1: Keep this thought here until I decide to send it.'
+      const held = { id: 'held-music', fiber_id: cold.uid ?? cold.id, origin: cold.originId, after: 0, through: 1, text, segments: [{ through: 1, text }] }
       window.__coldVoiceState = { available: true, enabled: true, muted: false, state: 'listening', cold: true, held: [held], target: { fiber_id: held.fiber_id, origin: held.origin, name: cold.name }, preview: { fiber_id: held.fiber_id, origin: held.origin, text: 'S1: A few words still being recognized…' }, pending: null, last: null, error: null }
       window.__coldVoiceRequests = []
       const fetch = window.fetch
@@ -82,7 +83,10 @@ try {
               return new Response('{}', { status: 409 })
             }
           }
-          if (path.endsWith('/draft')) state.held[0].text = body.text
+          if (path.endsWith('/draft')) {
+            state.held[0].segments = [{ through: body.through, text: body.text }]
+            state.held[0].text = body.text
+          }
           if (path.endsWith('/release')) {
             state.held = []
             if (window.__coldVoiceReleaseFailure) throw new TypeError('Release response lost')
@@ -101,6 +105,7 @@ try {
     await page.evaluate(() => {
       const state = window.__coldVoiceState
       state.held[0].through = 2; state.held[0].text += ' There is no rush.'
+      state.held[0].segments.push({ through: 2, text: ' There is no rush.' })
       window.__harness.modal.voice.status = structuredClone(state); window.__harness.modal.voice.notify()
     })
     assert.deepEqual(await field.evaluate(el => [el.selectionStart, el.selectionEnd]), [2, 7])
@@ -153,13 +158,14 @@ try {
     await page.evaluate(() => {
       const { cold } = window.__coldVoiceCards, state = window.__coldVoiceState, voice = window.__harness.modal.voice
       state.cold = true; state.target = { fiber_id: cold.uid ?? cold.id, origin: cold.originId, name: cold.name }
-      state.held = [{ id: 'held-remainder', fiber_id: cold.uid ?? cold.id, origin: cold.originId, after: 0, through: 2, text: 'S1: Already claimed. hello world' }]
+      state.held = [{ id: 'held-remainder', fiber_id: cold.uid ?? cold.id, origin: cold.originId, after: 0, through: 2, text: 'S1: Already claimed. hello world', segments: [{ through: 1, text: 'S1: Already claimed.' }, { through: 2, text: ' hello world' }] }]
       voice.status = structuredClone(state); voice.notify()
     })
     await field.fill((await field.inputValue()) + '\nA typed suffix.')
     await page.evaluate(() => {
       const state = window.__coldVoiceState, voice = window.__harness.modal.voice
       state.held[0].after = 1; state.held[0].text = 'S1: hello world'
+      state.held[0].segments = [{ through: 2, text: 'S1: hello world' }]
       voice.status = structuredClone(state); voice.notify()
     })
     assert.equal(await field.inputValue(), 'A second typed note.\n\nS1: hello world\nA typed suffix.')
@@ -169,6 +175,7 @@ try {
     await page.evaluate(() => {
       const state = window.__coldVoiceState, voice = window.__harness.modal.voice
       state.held[0].through = 3; state.held[0].text = 'S1: hello world'
+      state.held[0].segments.push({ through: 3, text: ' world' })
       voice.status = structuredClone(state); voice.notify()
     })
     const recovered = await field.inputValue()

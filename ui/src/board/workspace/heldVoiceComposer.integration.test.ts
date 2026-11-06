@@ -5,7 +5,8 @@ import { Voice, VoiceRequestError, type VoiceHeld, type VoiceStatus } from '../v
 import { HeldVoiceComposer } from './heldVoiceComposer.js'
 
 const target = card({ id: 'task', uid: 'uid', originId: 'owner' })
-const held = (patch: Partial<VoiceHeld> = {}): VoiceHeld => ({ id: 'held-1', fiber_id: 'uid', origin: 'owner', through: 1, text: 'me: first words', ...patch })
+const held = (patch: Partial<VoiceHeld> = {}): VoiceHeld => ({ id: 'held-1', fiber_id: 'uid', origin: 'owner', through: 1, text: 'me: first words', segments: [{ through: 1, text: patch.text ?? 'me: first words' }], ...patch })
+const growth = (prefix: string, suffix: string): VoiceHeld => held({ through: 2, text: prefix + suffix, segments: [{ through: 1, text: prefix }, { through: 2, text: suffix }] })
 const status = (rows: VoiceHeld[], patch: Partial<VoiceStatus> = {}): VoiceStatus => ({ available: true, enabled: true, muted: false, state: 'listening', target: { fiber_id: 'uid', origin: 'owner', name: 'Task' }, pending: null, last: null, error: null, cold: true, held: rows, ...patch })
 let voice: Voice, field: HTMLTextAreaElement, composer: HeldVoiceComposer
 const failed = vi.fn()
@@ -17,10 +18,6 @@ const mount = (text = ''): void => {
   composer = new HeldVoiceComposer(field, voice, target, 'draft', () => localStorage.setItem('draft', field.value), failed)
 }
 const input = (text: string): void => { field.value = text; field.dispatchEvent(new Event('input')) }
-const acknowledge = (): void => {
-  vi.mocked(voice.editHeld).mock.calls.at(-1)![2]!(voice.status!)
-  notify()
-}
 beforeEach(() => {
   const stored = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value), removeItem: (key: string) => void stored.delete(key) })
@@ -41,22 +38,22 @@ describe('held speech in the ordinary composer', () => {
     input(field.value + '\ntyped after')
     expect(voice.editHeld).not.toHaveBeenCalled()
     field.setSelectionRange(3, 3)
-    paint([held({ through: 2, text: 'me: first words more speech' })])
+    paint([growth('me: first words', ' more speech')])
     expect(field.value).toBe('typed before\n\nme: first words more speech\ntyped after')
     expect(field.selectionStart).toBe(3)
     paint([])
     expect(field.value).toBe('typed before\ntyped after')
   })
 
-  it('keeps edits authoritative while speech grows and sends only the held part to the draft endpoint', () => {
+  it('appends exact segments while an edit is pending and snapshots further edits at their displayed boundary', () => {
     paint([held()]); mount('typed before')
+    vi.mocked(voice.editHeld).mockReturnValue(new Promise(() => {}))
     input(field.value.replace('first words', 'edited words'))
-    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', through: 1 }), 'me: edited words', expect.any(Function))
-    // Growth waits for the edit's acknowledged prefix, even if a poll wins.
-    paint([held({ through: 2, text: 'me: edited words and more' })])
-    expect(field.value).toBe('typed before\n\nme: edited words')
-    acknowledge()
+    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', through: 1 }), 'me: edited words')
+    paint([growth('me: first words', ' and more')])
     expect(field.value).toBe('typed before\n\nme: edited words and more')
+    input(field.value.replace('and more', 'and corrected'))
+    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', after: 0, through: 2 }), 'me: edited words and corrected')
     input('a prefix\n' + field.value)
     paint([])
     expect(field.value).toBe('a prefix\ntyped before')
@@ -65,8 +62,7 @@ describe('held speech in the ordinary composer', () => {
   it('recognizes an edited prefix echoed with later speech, without inserting it twice', () => {
     paint([held()]); mount()
     input('me: correction')
-    paint([held({ through: 2, text: 'me: correction new words' })])
-    acknowledge()
+    paint([growth('me: correction', ' new words')])
     expect(field.value).toBe('me: correction new words')
     expect(field.selectionStart).toBe('me: correction'.length)
   })
@@ -74,12 +70,11 @@ describe('held speech in the ordinary composer', () => {
   it('retains held ownership after deleting all speech, so deleted words cannot return', () => {
     paint([held()]); mount()
     input('')
-    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', through: 1 }), '', expect.any(Function))
+    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', through: 1 }), '')
     paint([held({ text: '' })])
-    acknowledge()
     expect(composer.begin().held).toEqual({ id: 'held-1', after: 0, through: 1 })
     composer.finish()
-    paint([held({ through: 2, text: ' more' })])
+    paint([growth('', ' more')])
     expect(field.value).toBe(' more')
   })
 
@@ -92,10 +87,29 @@ describe('held speech in the ordinary composer', () => {
     expect(field.value).toBe('typed\n\nme: edited words')
     composer.dispose(); field.remove()
     mount(localStorage.getItem('draft')!)
-    paint([held({ through: 2, text: 'me: edited words more' })])
+    paint([growth('me: edited words', ' more')])
     expect(field.value).toBe('typed\n\nme: edited words more')
     paint([])
     expect(field.value).toBe('typed')
+  })
+
+  it('retains the edited copy and refuses claims across a missing segment boundary, including after reconstruction', () => {
+    paint([held()]); mount('typed')
+    input(field.value.replace('first words', 'my correction'))
+    paint([held({ through: 3, text: 'another composer coalesced the first three', segments: [{ through: 3, text: 'another composer coalesced the first three' }] })])
+    expect(field.value).toBe('typed\n\nme: my correction')
+    expect(failed).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('checkpoint') }))
+    expect(() => composer.begin()).toThrow('checkpoint')
+    // Reconstruction while status is unavailable retains both ownership and guard.
+    voice.status = null; composer.dispose(); field.remove()
+    mount(localStorage.getItem('draft')!)
+    expect(() => composer.begin()).toThrow('checkpoint')
+    paint([])
+    input(field.value + ' retained')
+    expect(field.value).toBe('typed\n\nme: my correction retained')
+    expect(() => composer.begin()).toThrow('checkpoint')
+    expect(voice.editHeld).toHaveBeenCalledTimes(1)
+    expect(voice.releaseHeld).not.toHaveBeenCalled()
   })
 
   it('does not attach a different host\'s held words to the same fiber identifier', () => {
@@ -106,9 +120,9 @@ describe('held speech in the ordinary composer', () => {
   it('releases exactly the composed checkpoint and preserves new speech received during a send', async () => {
     paint([held()]); mount('typed')
     const composed = composer.begin()
-    paint([held({ through: 2, text: 'me: first words newer words' })])
+    paint([growth('me: first words', ' newer words')])
     expect(field.value).toBe(composed.text)
-    vi.mocked(voice.releaseHeld).mockImplementation(async () => { paint([held({ through: 2, text: 'me: newer words' })]) })
+    vi.mocked(voice.releaseHeld).mockImplementation(async () => { paint([held({ after: 1, through: 2, text: 'me: newer words', segments: [{ through: 2, text: 'me: newer words' }] })]) })
     await composer.release(composed)
     composer.finish()
     expect(voice.releaseHeld).toHaveBeenCalledWith({ id: 'held-1', after: 0, through: 1 })
@@ -121,7 +135,7 @@ describe('held speech in the ordinary composer', () => {
 
   it('rebinds only the remaining suffix when a name consumes the prefix before the next poll', () => {
     paint([held()]); mount('typed')
-    paint([held({ through: 2, text: 'me: more after the name' })])
+    paint([held({ after: 1, through: 2, text: 'me: more after the name', segments: [{ through: 2, text: 'me: more after the name' }] })])
     expect(field.value).toBe('typed\n\nme: more after the name')
     paint([])
     expect(field.value).toBe('typed')

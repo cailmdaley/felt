@@ -6,7 +6,7 @@ interface HeldSpan {
   through: number
   after: number
   uncertain?: boolean
-  source: string
+  boundaryUncertain?: boolean
   start: number
   end: number
   join: string
@@ -16,12 +16,12 @@ export interface VoiceCompose {
   held: Pick<HeldSpan, 'id' | 'after' | 'through'> | null
 }
 
+const boundaryError = (): Error => new Error('The voice draft changed beyond its displayed checkpoint. Your edited copy is retained; check the worker’s conversation before sending it.')
+
 /** The held part of an ordinary composer draft, including edits made inside it. */
 export class HeldVoiceComposer {
   private span: HeldSpan | null = null
   private value: string
-  private sources = new Set<string>()
-  private edits = new Set<{ id: string; after: number; through: number; text: string }>()
   private frozen = false
   private consumed: VoiceCompose['held'] = null
   private unsubscribe: () => void
@@ -38,14 +38,17 @@ export class HeldVoiceComposer {
     this.changed = changed; this.failed = failed; this.value = field.value
     try {
       const saved = JSON.parse(localStorage.getItem(this.storageKey) ?? 'null') as HeldSpan | null
-      if (saved && typeof saved.id === 'string' && typeof saved.source === 'string' && typeof saved.join === 'string'
-        && Number.isInteger(saved.through) && Number.isInteger(saved.start) && Number.isInteger(saved.end)
-        && saved.start >= 0 && saved.end >= saved.start && saved.end <= field.value.length) this.span = { ...saved, after: saved.after ?? 0 }
+      if (saved && typeof saved.id === 'string' && typeof saved.join === 'string'
+        && Number.isInteger(saved.through) && Number.isInteger(saved.after ?? 0) && Number.isInteger(saved.start) && Number.isInteger(saved.end)
+        && saved.start >= 0 && saved.end >= saved.start && saved.end <= field.value.length) {
+        this.span = { id: saved.id, after: saved.after ?? 0, through: saved.through, start: saved.start, end: saved.end,
+          join: saved.join, uncertain: saved.uncertain, boundaryUncertain: saved.boundaryUncertain }
+      }
     } catch { /* storage unavailable */ }
-    if (this.span) this.sources = new Set([this.span.source, field.value.slice(this.span.start, this.span.end)])
     field.addEventListener('input', this.input)
     this.unsubscribe = voice.subscribe(this.paint)
     this.paint()
+    if (this.span?.boundaryUncertain) this.failed(boundaryError())
     try {
       const recovery = localStorage.getItem(`${this.storageKey}:recovery`)
       if (recovery) this.failed(new Error(recovery))
@@ -56,6 +59,7 @@ export class HeldVoiceComposer {
 
   /** Freeze the shown checkpoint while images upload and the claim is made. */
   begin(): VoiceCompose {
+    if (this.span?.boundaryUncertain) throw boundaryError()
     this.frozen = true
     return { text: this.field.value, held: this.span && { id: this.span.id, after: this.span.after, through: this.span.through } }
   }
@@ -67,7 +71,6 @@ export class HeldVoiceComposer {
       // The words remain an ordinary draft until delivery succeeds. Later
       // speech gets its own span and cannot be cleared by this send.
       this.span = null
-      this.sources.clear()
       this.save()
     } catch (error) {
       if (error instanceof VoiceRequestError && error.status === 409) {
@@ -107,23 +110,10 @@ export class HeldVoiceComposer {
     this.moveSpan(start, end, added)
     this.value = after
     this.save()
-    if (!this.span || this.frozen) return
+    if (!this.span || this.frozen || this.span.boundaryUncertain) return
     const text = after.slice(this.span.start, this.span.end)
     if (text === previousHeld) return
-    this.sources.add(text)
-    const edit = { id: this.span.id, after: this.span.after, through: this.span.through, text }
-    this.edits.add(edit)
-    void this.voice.editHeld(this.span, text, () => {
-      this.edits.delete(edit)
-      const span = this.span
-      if (!span || span.id !== edit.id || span.after !== edit.after || span.through !== edit.through) return
-      // Only acknowledged and still-pending prefixes can describe this range.
-      span.source = edit.text
-      this.sources = new Set([edit.text, this.field.value.slice(span.start, span.end),
-        ...[...this.edits].filter(row => row.id === span.id && row.after === span.after).map(row => row.text)])
-    }).catch(error => {
-      this.edits.delete(edit)
-      this.paint()
+    void this.voice.editHeld(this.span, text).catch(error => {
       if (!(error instanceof VoiceRequestError && error.status === 409)) this.failed(error as Error)
     })
   }
@@ -135,43 +125,45 @@ export class HeldVoiceComposer {
     const held = state.held.find(row => (row.fiber_id === this.card.id || row.fiber_id === this.card.uid) && row.origin === this.card.originId
       && !(row.id === this.consumed?.id && (row.after ?? 0) <= this.consumed.after && row.through <= this.consumed.through))
     if (this.span && this.span.id !== held?.id) {
+      if (this.span.boundaryUncertain) return
       if (this.span.uncertain) {
         this.span = null
-        this.sources.clear()
         this.save()
       } else this.remove()
     }
     if (!held) return
     const after = held.after ?? 0
     if (this.span && (after < this.span.after || held.through < this.span.through)) return
-    // An edit response tells us which prefix new speech extends. Wait for it
-    // before growing the range; a consumed-prefix change still wins at once.
-    if (this.span && after === this.span.after && [...this.edits].some(edit => edit.id === held.id && edit.after === after)) return
     if (!this.span) {
       const join = this.field.value ? '\n\n' : ''
       const start = this.field.value.length + join.length
       this.replace(this.field.value.length, this.field.value.length, join + held.text)
-      this.span = { id: held.id, after, through: held.through, source: held.text, start, end: start + held.text.length, join }
-      this.sources = new Set([held.text])
-    } else if (after > this.span.after || held.through > this.span.through) {
-      const prefix = after > this.span.after ? undefined : [...this.sources].filter(text => held.text.startsWith(text)).sort((a, b) => b.length - a.length)[0]
-      // A remaining suffix has no shown prefix after another path consumes
-      // that checkpoint. Replace only the voice span in that case.
-      const from = prefix === undefined ? this.span.start : this.span.end
-      const suffix = prefix === undefined ? held.text : held.text.slice(prefix.length)
-      const end = this.span.end
-      this.replace(from, end, suffix)
-      this.span.end = from + suffix.length
+      this.span = { id: held.id, after, through: held.through, start, end: start + held.text.length, join }
+    } else if (after > this.span.after) {
+      // Consumption restores a speaker label on the surviving prefix.
+      // Replace only the owned range, leaving typed text on either side.
+      const start = this.span.start
+      this.replace(start, this.span.end, held.text)
+      this.span.end = start + held.text.length
       this.span.through = held.through
       this.span.after = after
-      this.span.source = held.text
-      this.sources = new Set([held.text, this.field.value.slice(this.span.start, this.span.end)])
-    } else if (held.through === this.span.through) {
-      // A poll can confirm an edit whose response was lost. Keep the current
-      // local text as a candidate, but retire superseded server prefixes.
-      this.span.source = held.text
-      this.sources = new Set([held.text, this.field.value.slice(this.span.start, this.span.end)])
+      this.span.boundaryUncertain = false
+    } else if (held.through > this.span.through) {
+      // Edits coalesce only through their displayed checkpoint. Exact later
+      // segments therefore extend local edits even when an edit ACK is lost.
+      if (!held.segments.some(segment => segment.through === this.span!.through)) {
+        if (!this.span.boundaryUncertain) this.failed(boundaryError())
+        this.span.boundaryUncertain = true
+      } else {
+        const suffix = held.segments.filter(segment => segment.through > this.span!.through).map(segment => segment.text).join('')
+        const end = this.span.end
+        this.replace(end, end, suffix)
+        this.span.end = end + suffix.length
+        this.span.through = held.through
+        this.span.boundaryUncertain = false
+      }
     }
+    // An unchanged checkpoint never overwrites a local edit.
     this.save()
   }
 
@@ -180,7 +172,6 @@ export class HeldVoiceComposer {
     const { start, end, join } = this.span
     const from = join && this.field.value.slice(start - join.length, start) === join ? start - join.length : start
     this.span = null
-    this.sources.clear()
     this.replace(from, end, '')
   }
 

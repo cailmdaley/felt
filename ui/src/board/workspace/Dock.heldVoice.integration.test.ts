@@ -5,7 +5,9 @@ import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { Voice, type VoiceHeld, type VoiceStatus } from '../voice.js'
 
-const held: VoiceHeld = { id: 'held', fiber_id: 'uid', origin: 'owner', through: 1, text: 'me: original words' }
+const held: VoiceHeld = { id: 'held', fiber_id: 'uid', origin: 'owner', through: 1, text: 'me: original words', segments: [{ through: 1, text: 'me: original words' }] }
+const row = (patch: Partial<VoiceHeld> = {}): VoiceHeld => ({ ...held, ...patch, segments: patch.segments ?? [{ through: patch.through ?? 1, text: patch.text ?? held.text }] })
+const growth = (prefix: string, suffix: string): VoiceHeld => row({ through: 2, text: prefix + suffix, segments: [{ through: 1, text: prefix }, { through: 2, text: suffix }] })
 const initial = (): VoiceStatus => ({ available: true, enabled: true, muted: false, state: 'listening', target: { fiber_id: 'uid', origin: 'owner', name: 'Task' }, cold: true, held: [{ ...held }], pending: null, last: null, error: null })
 const flush = async (): Promise<void> => { for (let i = 0; i < 70; i++) await Promise.resolve() }
 const response = (body: unknown, code = 200): Response => new Response(JSON.stringify(body), { status: code })
@@ -30,7 +32,7 @@ beforeEach(() => {
     }
     if (url.endsWith('/voice/draft')) {
       const body = JSON.parse(String(init?.body))
-      server = { ...server, held: server.held!.map(row => ({ ...row, text: body.text })) }
+      server = { ...server, held: server.held!.map(held => ({ ...held, text: body.text, segments: [{ through: body.through, text: body.text }] })) }
       return response(server)
     }
     if (url.endsWith('/voice')) return response(server)
@@ -98,7 +100,7 @@ it('a failed claim does not dispatch or consume the composer draft', async () =>
 
 it('keeps later speech in the box after releasing and sending only the shown checkpoint', async () => {
   await mount()
-  releaseRows = [{ ...held, through: 2, text: 'me: more speech' }]
+  releaseRows = [row({ after: 1, through: 2, text: 'me: more speech' })]
   root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
   await flush()
   expect(requests().find(row => row.url.endsWith('/release'))!.body).toEqual({ id: 'held', after: 0, through: 1 })
@@ -129,7 +131,7 @@ it('acknowledged deletion does not swallow the same words when they are spoken a
   field().value = 'S1: hello'; field().dispatchEvent(new Event('input'))
   await flush()
   expect(server.held![0].text).toBe('S1: hello')
-  server.held = [{ ...held, through: 2, text: 'S1: hello world' }]
+  server.held = [growth('S1: hello', ' world')]
   voice.status = server; notify()
   expect(field().value).toBe('S1: hello world')
   root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
@@ -163,7 +165,7 @@ it.each(['fetch', 'json'])('retains the edited draft when release commits but it
   expect(dispatches()).toHaveLength(0)
 })
 
-it('retires the obsolete prefix before painting an edit acknowledgement that includes fresh speech', async () => {
+it('appends exact segments when an edit acknowledgement includes fresh speech', async () => {
   server.held = [{ ...held, text: 'S1: hello world' }]; voice.status = server
   await mount()
   const fetch = globalThis.fetch
@@ -171,7 +173,7 @@ it('retires the obsolete prefix before painting an edit acknowledgement that inc
     if (url.endsWith('/draft')) {
       // The edit is accepted, then another finalized segment arrives before
       // the response snapshot is read. The raw words happen to match.
-      server.held = [{ ...held, through: 2, text: 'S1: hello world' }]
+      server.held = [growth('S1: hello', ' world')]
       return response(server)
     }
     return fetch(url, init)
@@ -255,9 +257,9 @@ it('does not swallow repeated speech when a poll beats the deletion acknowledgem
   field().value = 'S1: hello'; field().dispatchEvent(new Event('input'))
   await flush()
   // The accepted deletion plus fresh words share the obsolete raw prefix.
-  server.held = [{ ...held, through: 2, text: 'S1: hello world again' }]
+  server.held = [growth('S1: hello', ' world again')]
   voice.status = server; notify()
-  expect(field().value).toBe('S1: hello')
+  expect(field().value).toBe('S1: hello world again')
   acknowledge(); await flush()
   expect(field().value).toBe('S1: hello world again')
   root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
@@ -271,7 +273,7 @@ it.each(['fetch', 'json'])('a poll confirms a committed deletion after its %s ed
   const fetch = globalThis.fetch
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/draft')) {
-      server.held = [{ ...held, text: JSON.parse(String(init?.body)).text }]
+      server.held = [row({ text: JSON.parse(String(init?.body)).text })]
       if (failure === 'fetch') throw new TypeError('edit response lost')
       return new Response('incomplete JSON')
     }
@@ -281,11 +283,35 @@ it.each(['fetch', 'json'])('a poll confirms a committed deletion after its %s ed
   await flush()
   expect(field().value).toBe('S1: hello')
   voice.status = server; notify()
-  server.held = [{ ...held, through: 2, text: 'S1: hello world' }]
+  server.held = [growth('S1: hello', ' world')]
   voice.status = server; notify()
   expect(field().value).toBe('S1: hello world')
   root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
   await flush()
+  expect(dispatches()[0].body.user_message).toBe('S1: hello world')
+})
+
+it.each(['fetch', 'json'])('appends repeated finalized words before the first poll after a lost %s edit response', async failure => {
+  server.held = [row({ text: 'S1: hello world' })]; voice.status = server
+  await mount()
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/draft')) {
+      server.held = [growth(JSON.parse(String(init?.body)).text, ' world')]
+      if (failure === 'fetch') throw new TypeError('edit response lost')
+      return new Response('incomplete JSON')
+    }
+    return fetch(url, init)
+  }))
+  field().value = 'S1: hello'; field().dispatchEvent(new Event('input'))
+  await flush()
+  expect(field().value).toBe('S1: hello')
+  // No same-through confirmation poll occurs between the lost ACK and growth.
+  voice.status = server; notify()
+  expect(field().value).toBe('S1: hello world')
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(requests().find(row => row.url.endsWith('/release'))!.body).toEqual({ id: 'held', after: 0, through: 2 })
   expect(dispatches()[0].body.user_message).toBe('S1: hello world')
 })
 
@@ -301,7 +327,7 @@ it('an authoritative poll does not overwrite a local edit whose failed request d
   await flush()
   voice.status = server; notify()
   expect(field().value).toBe('S1: local correction')
-  server.held = [{ ...held, through: 2, text: 'S1: hello world more words' }]
+  server.held = [growth('S1: hello world', ' more words')]
   voice.status = server; notify()
   expect(field().value).toBe('S1: local correction more words')
 })
