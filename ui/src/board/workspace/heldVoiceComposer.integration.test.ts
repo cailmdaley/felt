@@ -17,6 +17,10 @@ const mount = (text = ''): void => {
   composer = new HeldVoiceComposer(field, voice, target, 'draft', () => localStorage.setItem('draft', field.value), failed)
 }
 const input = (text: string): void => { field.value = text; field.dispatchEvent(new Event('input')) }
+const acknowledge = (): void => {
+  vi.mocked(voice.editHeld).mock.calls.at(-1)![2]!(voice.status!)
+  notify()
+}
 beforeEach(() => {
   const stored = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value), removeItem: (key: string) => void stored.delete(key) })
@@ -47,9 +51,11 @@ describe('held speech in the ordinary composer', () => {
   it('keeps edits authoritative while speech grows and sends only the held part to the draft endpoint', () => {
     paint([held()]); mount('typed before')
     input(field.value.replace('first words', 'edited words'))
-    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', through: 1 }), 'me: edited words')
-    // A poll can include the new line before the edit acknowledgement.
-    paint([held({ through: 2, text: 'me: first words and more' })])
+    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', through: 1 }), 'me: edited words', expect.any(Function))
+    // Growth waits for the edit's acknowledged prefix, even if a poll wins.
+    paint([held({ through: 2, text: 'me: edited words and more' })])
+    expect(field.value).toBe('typed before\n\nme: edited words')
+    acknowledge()
     expect(field.value).toBe('typed before\n\nme: edited words and more')
     input('a prefix\n' + field.value)
     paint([])
@@ -60,6 +66,7 @@ describe('held speech in the ordinary composer', () => {
     paint([held()]); mount()
     input('me: correction')
     paint([held({ through: 2, text: 'me: correction new words' })])
+    acknowledge()
     expect(field.value).toBe('me: correction new words')
     expect(field.selectionStart).toBe('me: correction'.length)
   })
@@ -67,9 +74,10 @@ describe('held speech in the ordinary composer', () => {
   it('retains held ownership after deleting all speech, so deleted words cannot return', () => {
     paint([held()]); mount()
     input('')
-    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', through: 1 }), '')
+    expect(voice.editHeld).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'held-1', through: 1 }), '', expect.any(Function))
     paint([held({ text: '' })])
-    expect(composer.begin().held).toEqual({ id: 'held-1', through: 1 })
+    acknowledge()
+    expect(composer.begin().held).toEqual({ id: 'held-1', after: 0, through: 1 })
     composer.finish()
     paint([held({ through: 2, text: ' more' })])
     expect(field.value).toBe(' more')
@@ -103,7 +111,7 @@ describe('held speech in the ordinary composer', () => {
     vi.mocked(voice.releaseHeld).mockImplementation(async () => { paint([held({ through: 2, text: 'me: newer words' })]) })
     await composer.release(composed)
     composer.finish()
-    expect(voice.releaseHeld).toHaveBeenCalledWith({ id: 'held-1', through: 1 })
+    expect(voice.releaseHeld).toHaveBeenCalledWith({ id: 'held-1', after: 0, through: 1 })
     expect(field.value).toBe('typed\n\nme: first words\n\nme: newer words')
     composer.sent(composed.text)
     expect(field.value).toBe('me: newer words')
@@ -126,7 +134,7 @@ describe('held speech in the ordinary composer', () => {
     await expect(composer.release(composed)).rejects.toThrow('503')
     composer.finish()
     expect(field.value).toBe('typed\n\nme: first words')
-    expect(composer.begin().held).toEqual({ id: 'held-1', through: 1 })
+    expect(composer.begin().held).toEqual({ id: 'held-1', after: 0, through: 1 })
   })
 
   it('removes just the voice text on a name/button claim conflict, even if the refresh fails', async () => {

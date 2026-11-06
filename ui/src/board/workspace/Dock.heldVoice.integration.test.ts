@@ -67,8 +67,8 @@ it.each([
   await flush()
   const posts = requests()
   expect(posts.map(row => row.url)).toEqual(['/api/v1/voice/draft', '/api/v1/voice/release', '/api/v1/dispatch'])
-  expect(posts[0].body).toEqual({ id: 'held', through: 1, text: 'me: edited words' })
-  expect(posts[1].body).toEqual({ id: 'held', through: 1 })
+  expect(posts[0].body).toEqual({ id: 'held', after: 0, through: 1, text: 'me: edited words' })
+  expect(posts[1].body).toEqual({ id: 'held', after: 0, through: 1 })
   expect(dispatches()[0].body).toMatchObject({ user_message: 'me: edited words', resume_mode: mode })
   expect(field().value).toBe('')
   voice.status = { ...server, held: [] }; notify()
@@ -101,9 +101,207 @@ it('keeps later speech in the box after releasing and sending only the shown che
   releaseRows = [{ ...held, through: 2, text: 'me: more speech' }]
   root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
   await flush()
-  expect(requests().find(row => row.url.endsWith('/release'))!.body).toEqual({ id: 'held', through: 1 })
+  expect(requests().find(row => row.url.endsWith('/release'))!.body).toEqual({ id: 'held', after: 0, through: 1 })
   expect(dispatches()[0].body.user_message).toBe('me: original words')
   expect(field().value).toBe('me: more speech')
   voice.status = { ...server, held: [] }; notify()
   expect(field().value).toBe('')
+})
+
+it('a same-through prefix claim removes only consumed voice words before the next button send', async () => {
+  server.held = []; voice.status = server
+  await mount()
+  field().value = 'typed before'; field().dispatchEvent(new Event('input'))
+  server.held = [{ ...held, after: 0, through: 2, text: 'S1: first words more words' }]
+  voice.status = server; notify()
+  field().value += '\ntyped after'; field().dispatchEvent(new Event('input'))
+  server.held = [{ ...held, after: 1, through: 2, text: 'S1: more words' }]
+  voice.status = server; notify()
+  expect(field().value).toBe('typed before\n\nS1: more words\ntyped after')
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(dispatches()[0].body.user_message).toBe('typed before\n\nS1: more words\ntyped after')
+})
+
+it('acknowledged deletion does not swallow the same words when they are spoken again', async () => {
+  server.held = [{ ...held, text: 'S1: hello world' }]; voice.status = server
+  await mount()
+  field().value = 'S1: hello'; field().dispatchEvent(new Event('input'))
+  await flush()
+  expect(server.held![0].text).toBe('S1: hello')
+  server.held = [{ ...held, through: 2, text: 'S1: hello world' }]
+  voice.status = server; notify()
+  expect(field().value).toBe('S1: hello world')
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(dispatches()[0].body.user_message).toBe('S1: hello world')
+})
+
+it.each(['fetch', 'json'])('retains the edited draft when release commits but its %s response is lost', async failure => {
+  await mount()
+  field().value = 'S1: an irreplaceable correction'; field().dispatchEvent(new Event('input'))
+  await flush()
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/release')) {
+      server = { ...server, held: [] }
+      if (failure === 'fetch') throw new TypeError('connection lost')
+      return new Response('incomplete JSON')
+    }
+    return fetch(url, init)
+  }))
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(dispatches()).toHaveLength(0)
+  voice.status = server; notify()
+  expect(field().value).toBe('S1: an irreplaceable correction')
+  expect(root.textContent).toContain('Check the worker')
+  // Rebuilding the composer must not turn the retained draft into an auto-send.
+  dock.reset(); root.remove(); await mount()
+  expect(field().value).toBe('S1: an irreplaceable correction')
+  voice.status = server; notify(); await flush()
+  expect(dispatches()).toHaveLength(0)
+})
+
+it('retires the obsolete prefix before painting an edit acknowledgement that includes fresh speech', async () => {
+  server.held = [{ ...held, text: 'S1: hello world' }]; voice.status = server
+  await mount()
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/draft')) {
+      // The edit is accepted, then another finalized segment arrives before
+      // the response snapshot is read. The raw words happen to match.
+      server.held = [{ ...held, through: 2, text: 'S1: hello world' }]
+      return response(server)
+    }
+    return fetch(url, init)
+  }))
+  field().value = 'S1: hello'; field().dispatchEvent(new Event('input'))
+  await flush()
+  expect(field().value).toBe('S1: hello world')
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(dispatches()[0].body.user_message).toBe('S1: hello world')
+})
+
+it('edits and releases the consumed-prefix boundary from the exact shown suffix', async () => {
+  server.held = [{ ...held, after: 1, through: 2, text: 'S1: remaining words' }]; voice.status = server
+  await mount()
+  field().value = 'S1: corrected remainder'; field().dispatchEvent(new Event('input'))
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(requests().find(row => row.url.endsWith('/draft'))!.body).toEqual({ id: 'held', after: 1, through: 2, text: 'S1: corrected remainder' })
+  expect(requests().find(row => row.url.endsWith('/release'))!.body).toEqual({ id: 'held', after: 1, through: 2 })
+  expect(dispatches()[0].body.user_message).toBe('S1: corrected remainder')
+})
+
+it('a partial name claim racing release fences the stale box, but leaves its suffix sendable', async () => {
+  server.held = [{ ...held, after: 0, through: 2, text: 'S1: first words more words' }]; voice.status = server
+  await mount()
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/release')) {
+      const body = JSON.parse(String(init?.body))
+      server.held = [{ ...held, after: 1, through: 2, text: 'S1: more words' }]
+      if (body.after !== 1) return response({}, 409)
+      server.held = []
+      return response(server)
+    }
+    return fetch(url, init)
+  }))
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(dispatches()).toHaveLength(0)
+  expect(field().value).toBe('S1: more words')
+  expect(requests().find(row => row.url.endsWith('/release'))!.body).toEqual({ id: 'held', after: 0, through: 2 })
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(dispatches()).toHaveLength(1)
+  expect(dispatches()[0].body.user_message).toBe('S1: more words')
+  expect(requests().filter(row => row.url.endsWith('/release')).at(-1)!.body).toEqual({ id: 'held', after: 1, through: 2 })
+})
+
+it('a partial name claim racing an edit rejects the stale full-box draft without replacing the suffix', async () => {
+  server.held = [{ ...held, after: 0, through: 2, text: 'S1: first words more words' }]; voice.status = server
+  await mount()
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/draft')) {
+      server.held = [{ ...held, after: 1, through: 2, text: 'S1: more words' }]
+      return response({}, 409)
+    }
+    return fetch(url, init)
+  }))
+  field().value = 'S1: edited first words more words'; field().dispatchEvent(new Event('input'))
+  await flush()
+  expect(requests().find(row => row.url.endsWith('/draft'))!.body).toEqual({ id: 'held', after: 0, through: 2, text: 'S1: edited first words more words' })
+  expect(field().value).toBe('S1: more words')
+  expect(server.held![0].text).toBe('S1: more words')
+  expect(dispatches()).toHaveLength(0)
+})
+
+it('does not swallow repeated speech when a poll beats the deletion acknowledgement', async () => {
+  server.held = [{ ...held, text: 'S1: hello world' }]; voice.status = server
+  await mount()
+  let acknowledge!: () => void
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/draft')) {
+      await new Promise<void>(resolve => { acknowledge = resolve })
+      return response(server)
+    }
+    return fetch(url, init)
+  }))
+  field().value = 'S1: hello'; field().dispatchEvent(new Event('input'))
+  await flush()
+  // The accepted deletion plus fresh words share the obsolete raw prefix.
+  server.held = [{ ...held, through: 2, text: 'S1: hello world again' }]
+  voice.status = server; notify()
+  expect(field().value).toBe('S1: hello')
+  acknowledge(); await flush()
+  expect(field().value).toBe('S1: hello world again')
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(dispatches()[0].body.user_message).toBe('S1: hello world again')
+})
+
+it.each(['fetch', 'json'])('a poll confirms a committed deletion after its %s edit response is lost', async failure => {
+  server.held = [{ ...held, text: 'S1: hello world' }]; voice.status = server
+  await mount()
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/draft')) {
+      server.held = [{ ...held, text: JSON.parse(String(init?.body)).text }]
+      if (failure === 'fetch') throw new TypeError('edit response lost')
+      return new Response('incomplete JSON')
+    }
+    return fetch(url, init)
+  }))
+  field().value = 'S1: hello'; field().dispatchEvent(new Event('input'))
+  await flush()
+  expect(field().value).toBe('S1: hello')
+  voice.status = server; notify()
+  server.held = [{ ...held, through: 2, text: 'S1: hello world' }]
+  voice.status = server; notify()
+  expect(field().value).toBe('S1: hello world')
+  root.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+  await flush()
+  expect(dispatches()[0].body.user_message).toBe('S1: hello world')
+})
+
+it('an authoritative poll does not overwrite a local edit whose failed request did not commit', async () => {
+  server.held = [{ ...held, text: 'S1: hello world' }]; voice.status = server
+  await mount()
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/draft')) throw new TypeError('edit did not reach the recorder')
+    return fetch(url, init)
+  }))
+  field().value = 'S1: local correction'; field().dispatchEvent(new Event('input'))
+  await flush()
+  voice.status = server; notify()
+  expect(field().value).toBe('S1: local correction')
+  server.held = [{ ...held, through: 2, text: 'S1: hello world more words' }]
+  voice.status = server; notify()
+  expect(field().value).toBe('S1: local correction more words')
 })

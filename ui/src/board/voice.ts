@@ -7,6 +7,8 @@ export interface VoiceHeld {
   fiber_id: string
   origin: string
   through: number
+  /** Last consumed segment; absent status fields default to zero. */
+  after?: number
   text: string
 }
 
@@ -121,13 +123,13 @@ export class Voice {
       if (values.enabled !== undefined && this.enabledIntent === values.enabled) this.enabledIntent = null
     }
   }
-  editHeld(held: Pick<VoiceHeld, 'id' | 'through'>, text: string): Promise<void> {
-    return this.post('/draft', { id: held.id, through: held.through, text })
+  editHeld(held: Pick<VoiceHeld, 'id' | 'after' | 'through'>, text: string, acknowledged?: (status: VoiceStatus) => void): Promise<void> {
+    return this.post('/draft', { id: held.id, after: held.after ?? 0, through: held.through, text }, () => true, acknowledged)
   }
-  releaseHeld(held: Pick<VoiceHeld, 'id' | 'through'>): Promise<void> {
-    return this.post('/release', { id: held.id, through: held.through })
+  releaseHeld(held: Pick<VoiceHeld, 'id' | 'after' | 'through'>): Promise<void> {
+    return this.post('/release', { id: held.id, after: held.after ?? 0, through: held.through })
   }
-  private async post(path: string, body: object, allowed: () => boolean = () => true): Promise<void> {
+  private async post(path: string, body: object, allowed: () => boolean = () => true, acknowledged?: (status: VoiceStatus) => void): Promise<void> {
     const task = this.writes.then(async () => {
       if (!allowed()) return
       const response = await fetch(`${this.base}/api/v1/voice${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -146,6 +148,9 @@ export class Voice {
       }
       this.revision++
       this.status = await response.json() as VoiceStatus
+      // Owners retire obsolete optimistic prefixes before the response paints
+      // any speech that finalized alongside the acknowledged edit.
+      acknowledged?.(this.status)
       this.notify()
     })
     this.writes = task.catch(() => {})

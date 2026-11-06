@@ -67,7 +67,7 @@ try {
       const cold = voice.card
       const live = modal.workspaceCards().find(card => card.name === 'Calibrate the shear response')
       window.__coldVoiceCards = { cold, live }
-      const held = { id: 'held-music', fiber_id: cold.uid ?? cold.id, origin: cold.originId, through: 1, text: 'S1: Keep this thought here until I decide to send it.' }
+      const held = { id: 'held-music', fiber_id: cold.uid ?? cold.id, origin: cold.originId, after: 0, through: 1, text: 'S1: Keep this thought here until I decide to send it.' }
       window.__coldVoiceState = { available: true, enabled: true, muted: false, state: 'listening', cold: true, held: [held], target: { fiber_id: held.fiber_id, origin: held.origin, name: cold.name }, preview: { fiber_id: held.fiber_id, origin: held.origin, text: 'S1: A few words still being recognized…' }, pending: null, last: null, error: null }
       window.__coldVoiceRequests = []
       const fetch = window.fetch
@@ -76,8 +76,17 @@ try {
         const body = init?.body ? JSON.parse(init.body) : null
         if (path.includes('/api/v1/voice')) {
           if (body) window.__coldVoiceRequests.push({ path, body })
+          if (path.endsWith('/draft') || path.endsWith('/release')) {
+            const held = state.held[0]
+            if (!held || body.id !== held.id || body.after !== held.after || body.through !== held.through) {
+              return new Response('{}', { status: 409 })
+            }
+          }
           if (path.endsWith('/draft')) state.held[0].text = body.text
-          if (path.endsWith('/release')) state.held = []
+          if (path.endsWith('/release')) {
+            state.held = []
+            if (window.__coldVoiceReleaseFailure) throw new TypeError('Release response lost')
+          }
           return new Response(JSON.stringify(state), { headers: { 'Content-Type': 'application/json' } })
         }
         if (path.includes('/api/v1/dispatch')) window.__coldVoiceRequests.push({ path, body })
@@ -120,7 +129,7 @@ try {
     await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected textarea')?.value === '')
     const sent = await page.evaluate(() => window.__coldVoiceRequests.filter(row => row.path.endsWith('/release') || row.path.includes('/dispatch')))
     assert.deepEqual(sent.map(row => row.path), ['/api/v1/voice/release', '/api/v1/dispatch'])
-    assert.deepEqual(sent[0].body, { id: 'held-music', through: 2 })
+    assert.deepEqual(sent[0].body, { id: 'held-music', after: 0, through: 2 })
     assert.equal(sent[1].body.user_message, edited)
     assert.ok(!sent[1].body.user_message.includes('still being recognized'), 'raw preview is never sent')
     await page.evaluate(() => {
@@ -136,7 +145,46 @@ try {
     assert.equal(liveSend.user_message, 'A direct message to the live worker.')
     assert.equal(liveSend.resume_mode, 'previous')
     assert.equal(await page.evaluate(() => window.__coldVoiceRequests.filter(row => row.path.endsWith('/release')).length), 1)
+
+    // A partial name claim keeps the same id and through; only after changes.
+    await page.evaluate(() => window.__harness.modal.openDocumentChannel(window.__coldVoiceCards.cold, true))
+    await selected.locator('.ws-chat-title').filter({ hasText: 'Music' }).waitFor()
+    await field.fill('A second typed note.')
+    await page.evaluate(() => {
+      const { cold } = window.__coldVoiceCards, state = window.__coldVoiceState, voice = window.__harness.modal.voice
+      state.cold = true; state.target = { fiber_id: cold.uid ?? cold.id, origin: cold.originId, name: cold.name }
+      state.held = [{ id: 'held-remainder', fiber_id: cold.uid ?? cold.id, origin: cold.originId, after: 0, through: 2, text: 'S1: Already claimed. hello world' }]
+      voice.status = structuredClone(state); voice.notify()
+    })
+    await field.fill((await field.inputValue()) + '\nA typed suffix.')
+    await page.evaluate(() => {
+      const state = window.__coldVoiceState, voice = window.__harness.modal.voice
+      state.held[0].after = 1; state.held[0].text = 'S1: hello world'
+      voice.status = structuredClone(state); voice.notify()
+    })
+    assert.equal(await field.inputValue(), 'A second typed note.\n\nS1: hello world\nA typed suffix.')
+    await field.fill((await field.inputValue()).replace('hello world', 'hello'))
+    await page.evaluate(() => window.__harness.modal.voice.writes)
+    assert.deepEqual(await page.evaluate(() => window.__coldVoiceRequests.filter(row => row.path.endsWith('/draft')).at(-1).body), { id: 'held-remainder', after: 1, through: 2, text: 'S1: hello' })
+    await page.evaluate(() => {
+      const state = window.__coldVoiceState, voice = window.__harness.modal.voice
+      state.held[0].through = 3; state.held[0].text = 'S1: hello world'
+      voice.status = structuredClone(state); voice.notify()
+    })
+    const recovered = await field.inputValue()
+    assert.equal(recovered, 'A second typed note.\n\nS1: hello world\nA typed suffix.', 'acknowledged deletion does not swallow repeated speech')
+    await page.evaluate(() => { window.__coldVoiceReleaseFailure = true })
+    await selected.locator('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)').click()
+    await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected')?.textContent.includes('Check the worker'))
+    await page.evaluate(() => {
+      const voice = window.__harness.modal.voice
+      voice.status = structuredClone(window.__coldVoiceState); voice.notify()
+    })
+    assert.equal(await field.inputValue(), recovered, 'lost release response retains the edited draft after an empty poll')
+    assert.equal(await page.evaluate(() => window.__coldVoiceRequests.filter(row => row.path.includes('/dispatch')).length), 2, 'uncertain release never dispatches or retries automatically')
+    assert.deepEqual(await page.evaluate(() => window.__coldVoiceRequests.filter(row => row.path.endsWith('/release')).at(-1).body), { id: 'held-remainder', after: 1, through: 3 })
+    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-recovery-${scheme}.png` })
     await context.close()
   }
-  console.log('voice layout, editable cold hold, dormant start and live send: ok (light + dark)')
+  console.log('voice layout, editable cold hold, dormant start, live send, partial consumption, repeated speech and uncertain-release recovery: ok (light + dark)')
 } finally { await browser.close() }

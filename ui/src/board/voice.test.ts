@@ -18,17 +18,18 @@ describe('live voice', () => {
       return { ok: !url.endsWith('/release'), status: url.endsWith('/release') ? 409 : 200, json: async () => status({ held: [] }) }
     }))
     const voice = new Voice('')
-    const held = { id: 'held-a', through: 3 }
+    const held = { id: 'held-a', after: 1, through: 3 }
     const edit = voice.editHeld(held, 'me: edited words')
     const release = voice.releaseHeld(held)
+    held.after = 2 // Queued writes retain the boundary that was shown.
     const rejected = expect(release).rejects.toBeInstanceOf(VoiceRequestError)
     await flush()
-    expect(calls).toEqual([{ url: '/api/v1/voice/draft', body: { id: 'held-a', through: 3, text: 'me: edited words' } }])
+    expect(calls).toEqual([{ url: '/api/v1/voice/draft', body: { id: 'held-a', after: 1, through: 3, text: 'me: edited words' } }])
     finishEdit()
     await edit; await rejected
     expect(calls).toEqual([
-      { url: '/api/v1/voice/draft', body: { id: 'held-a', through: 3, text: 'me: edited words' } },
-      { url: '/api/v1/voice/release', body: { id: 'held-a', through: 3 } },
+      { url: '/api/v1/voice/draft', body: { id: 'held-a', after: 1, through: 3, text: 'me: edited words' } },
+      { url: '/api/v1/voice/release', body: { id: 'held-a', after: 1, through: 3 } },
       { url: '/api/v1/voice', body: null },
     ])
     expect(voice.status?.held).toEqual([])
