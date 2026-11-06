@@ -2,6 +2,25 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import { isMobileViewport } from './mobile.js'
 
+export interface VoiceHeld {
+  id: string
+  fiber_id: string
+  origin: string
+  through: number
+  /** Last consumed segment; absent status fields default to zero. */
+  after?: number
+  text: string
+  segments: { through: number; text: string }[]
+}
+
+export class VoiceRequestError extends Error {
+  readonly status: number
+  constructor(status: number) {
+    super(status === 409 ? 'These voice words have already been sent. The composer has been refreshed.' : `Voice request failed (${status})`)
+    this.status = status
+  }
+}
+
 export interface VoiceStatus {
   available: boolean
   enabled: boolean
@@ -9,8 +28,11 @@ export interface VoiceStatus {
   state: 'off' | 'starting' | 'listening' | 'yielded' | 'failed'
   target: { fiber_id: string; origin: string; name: string } | null
   pending: { fiber_id: string; words: number; text: string } | null
+  preview?: { fiber_id: string; origin: string; text: string } | null
   last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string } | null
   error: string | null
+  cold?: boolean
+  held?: VoiceHeld[]
 }
 
 export const voicePollDelay = (visible: boolean, success: boolean, status: VoiceStatus | null): number | null =>
@@ -102,11 +124,29 @@ export class Voice {
       if (values.enabled !== undefined && this.enabledIntent === values.enabled) this.enabledIntent = null
     }
   }
+  editHeld(held: Pick<VoiceHeld, 'id' | 'after' | 'through'>, text: string): Promise<void> {
+    return this.post('/draft', { id: held.id, after: held.after ?? 0, through: held.through, text })
+  }
+  releaseHeld(held: Pick<VoiceHeld, 'id' | 'after' | 'through'>): Promise<void> {
+    return this.post('/release', { id: held.id, after: held.after ?? 0, through: held.through })
+  }
   private async post(path: string, body: object, allowed: () => boolean = () => true): Promise<void> {
     const task = this.writes.then(async () => {
       if (!allowed()) return
       const response = await fetch(`${this.base}/api/v1/voice${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!response.ok) throw new Error(`Voice request failed (${response.status})`)
+      if (!response.ok) {
+        if (response.status === 409 && (path === '/draft' || path === '/release')) {
+          try {
+            const fresh = await fetch(`${this.base}/api/v1/voice`)
+            if (fresh.ok) {
+              this.revision++
+              this.status = await fresh.json() as VoiceStatus
+              this.notify()
+            }
+          } catch { /* the claim conflict remains authoritative if refresh fails */ }
+        }
+        throw new VoiceRequestError(response.status)
+      }
       this.revision++
       this.status = await response.json() as VoiceStatus
       this.notify()

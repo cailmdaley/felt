@@ -39,6 +39,8 @@ defmodule ShuttleWeb.Router do
     get("/voice", VoiceController, :show)
     post("/voice", VoiceController, :update)
     post("/voice/target", VoiceController, :target)
+    post("/voice/draft", VoiceController, :draft)
+    post("/voice/release", VoiceController, :release)
     # The unified kanban write-plane: one call hides resolve + invoke +
     # owner-routing (local invoke, or forward to the owning remote daemon's
     # own /transition).

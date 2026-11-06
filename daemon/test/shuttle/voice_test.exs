@@ -38,6 +38,9 @@ defmodule Shuttle.VoiceTest do
       name: Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}"),
       poll_ms: 60_000,
       reconcile: reconcile,
+      held: fn -> [] end,
+      recovery: fn -> nil end,
+      cold: fn _ -> false end,
       relay: fn _, _ -> :ok end,
       monitor: fn _ -> %{pending: nil, last: nil} end
     ]
@@ -53,12 +56,16 @@ defmodule Shuttle.VoiceTest do
 
     assert {:ok,
             %{
+              "cold_minutes" => 5,
               "voice" => %{"words" => 200, "quiet_seconds" => 15},
               "meeting" => %{"quiet_seconds" => 10}
             }} = Config.read()
 
     for invalid <- [
           %{"enabled" => "yes"},
+          %{"cold_minutes" => 0},
+          %{"cold_minutes" => -1},
+          %{"cold_minutes" => "5"},
           %{"voice" => %{"words" => 0, "quiet_seconds" => 4}},
           %{"meeting" => %{"words" => 5, "quiet_seconds" => -1}},
           []
@@ -70,6 +77,201 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{"enabled" => true, "voice" => %{"words" => 200}}} = Config.read()
     assert {:error, _} = Voice.update(%{"muted" => "true"})
     assert File.exists?(Path.join(c.root, "voice.json"))
+  end
+
+  test "partial words are a display-only current-target preview, cleared by mute, pause and end",
+       c do
+    transcript = Path.join(c.root, "voice.txt")
+    partial = Path.rootname(transcript) <> ".partial"
+
+    Agent.update(c.observed, fn _ ->
+      %{
+        available: true,
+        meeting: %{kind: "voice", launch: "voice", state: "live", transcript: transcript}
+      }
+    end)
+
+    assert {:ok, _} = Voice.target(%{"fiber_id" => "a"})
+    assert {:ok, %{preview: nil}} = Voice.update(%{"enabled" => true})
+    File.write!(partial, "S1: Claude these are provisional\n")
+
+    assert {:ok,
+            %{
+              preview: %{"fiber_id" => "a", "text" => "S1: Claude these are provisional"},
+              pending: nil,
+              held: []
+            }} = Voice.update(%{})
+
+    assert {:ok, %{preview: %{"fiber_id" => "b"}}} = Voice.target(%{"fiber_id" => "b"})
+    assert {:ok, %{preview: nil}} = Voice.update(%{"muted" => true})
+
+    assert {:ok, %{preview: %{"text" => "S1: Claude these are provisional"}}} =
+             Voice.update(%{"muted" => false})
+
+    File.write!(partial, "")
+    assert {:ok, %{preview: nil}} = Voice.update(%{})
+    File.write!(partial, "S1: stale")
+    assert {:ok, %{preview: nil}} = Voice.update(%{"enabled" => false})
+    assert {:ok, %{preview: %{"text" => "S1: stale"}}} = Voice.update(%{"enabled" => true})
+    Agent.update(c.observed, fn _ -> %{available: true, meeting: nil} end)
+    assert {:ok, %{preview: nil}} = Voice.update(%{})
+  end
+
+  test "coldness follows owner runtime activity, with dormant and unknown targets held" do
+    alias Shuttle.Voice.Target
+    now = 1_000_000
+    assert Target.cold_runtime?(nil, 5, now)
+    assert Target.cold_runtime?(%{}, 5, now)
+    refute Target.cold_runtime?(%{phase: "working", last_activity_at: 0}, 5, now)
+    refute Target.cold_runtime?(%{phase: "waiting", last_activity_at: now - 299_999}, 5, now)
+    assert Target.cold_runtime?(%{phase: "waiting", last_activity_at: now - 300_000}, 5, now)
+    assert Target.cold_runtime?(%{"phase" => "attention", "last_activity_at" => 0}, 5, now)
+    refute Target.cold_runtime?(%{phase: "waiting", last_activity_at: now - 60_000}, 2, now)
+
+    entries = [
+      %{
+        fiber: %{"id" => "a", "uid" => "uid-a", "shuttle" => %{"host" => "owner"}},
+        runtime: %{phase: "working"}
+      }
+    ]
+
+    Env.put_app_env(:voice_target_entries, fn -> entries end)
+    refute Target.cold?(%{"fiber_id" => "uid-a", "origin" => "owner"})
+    assert Target.cold?(%{"fiber_id" => "a", "origin" => "other"})
+    assert Target.cold?(%{"fiber_id" => "dormant", "origin" => "owner"})
+  end
+
+  test "resolved edited-payload recovery is exposed instead of a generic failed delivery", c do
+    recovery = %{
+      "fiber_id" => "a",
+      "status" => "unconfirmed",
+      "at" => "2026-11-06T10:00:01Z",
+      "detail" => "Copy retained correction"
+    }
+
+    :sys.replace_state(c.pid, fn state ->
+      %{
+        state
+        | recovery: fn -> recovery end,
+          snapshot: %{
+            state.snapshot
+            | last: %{
+                "fiber_id" => "a",
+                "status" => "failed",
+                "at" => "2026-11-06T10:00:02Z",
+                "detail" => "generic"
+              }
+          }
+      }
+    end)
+
+    assert %{last: ^recovery} = Voice.show()
+    delivered = %{"fiber_id" => "a", "status" => "delivered", "at" => "2026-11-06T10:00:03Z"}
+
+    :sys.replace_state(c.pid, fn state ->
+      %{state | snapshot: %{state.snapshot | last: delivered}}
+    end)
+
+    assert %{last: ^delivered} = Voice.show()
+  end
+
+  test "corrupt held metadata fails visibly instead of losing drafts", c do
+    alias Shuttle.Voice.Held
+    file = Path.join(c.root, "held.json")
+
+    {state, _} =
+      Held.append(Held.load(file), "launch", 42, %{"fiber_id" => "a", "origin" => "owner"}, [
+        %{"speaker" => "S1", "text" => "words"}
+      ])
+
+    for offset <- [nil, -1, "42"] do
+      assert_raise ArgumentError, "invalid held source offset", fn ->
+        Held.append(state, "launch", offset, %{"fiber_id" => "a"}, [])
+      end
+
+      assert {:error, "invalid held source offset"} =
+               Held.lookup(state, "launch", offset, %{"fiber_id" => "a"})
+    end
+
+    for invalid <- [
+          put_in(state, ["cards", Access.at(0), "segments", Access.at(0), "speaker"], nil),
+          put_in(state, ["cards", Access.at(0), "checkpoints"], []),
+          put_in(state, ["cards", Access.at(0), "after"], 99),
+          Map.put(state, "attempts", %{"id" => %{"status" => "failed", "text" => "edits"}})
+        ] do
+      File.write!(file, Jason.encode!(invalid))
+      assert {:error, "invalid held voice state"} = Held.list(Held.load(file))
+    end
+  end
+
+  test "public held segments distinguish repeated speech from an edited prefix", c do
+    alias Shuttle.Voice.Held
+    target = %{"fiber_id" => "a", "origin" => "owner"}
+    state = Held.load(Path.join(c.root, "segments.json"))
+
+    {state, first} =
+      Held.append(state, "launch", 42, target, [%{"speaker" => "S1", "text" => "hello world"}])
+
+    assert first["segments"] == [%{"through" => 1, "text" => "S1: hello world"}]
+    assert {:ok, state} = Held.edit(state, first["id"], 1, "S1: hello")
+
+    {state, grown} =
+      Held.append(state, "launch", 84, target, [%{"speaker" => "S1", "text" => "world"}])
+
+    assert grown["segments"] == [
+             %{"through" => 1, "text" => "S1: hello"},
+             %{"through" => 2, "text" => " world"}
+           ]
+
+    assert grown["text"] == "S1: hello world"
+    assert {:ok, state} = Held.edit(state, first["id"], 2, "S1: replacement")
+    assert [%{"segments" => [%{"through" => 2, "text" => "S1: replacement"}]}] = Held.list(state)
+
+    {state, _} =
+      Held.append(state, "launch", 126, target, [%{"speaker" => "S1", "text" => "suffix"}])
+
+    assert {:ok, state, "S1: replacement"} = Held.take(state, first["id"], 2)
+
+    assert [
+             %{
+               "after" => 2,
+               "through" => 3,
+               "text" => "S1: suffix",
+               "segments" => [%{"through" => 3, "text" => "S1: suffix"}]
+             }
+           ] = Held.list(state)
+  end
+
+  test "held draft APIs consume once and report claim conflicts without launching", c do
+    alias Shuttle.Meeting.TranscriptRelay
+    name = Module.concat(__MODULE__, "Relay#{System.unique_integer([:positive])}")
+    start_supervised!({TranscriptRelay, name: name, directory: Path.join(c.root, "relays")})
+    Env.put_server(TranscriptRelay, name)
+    :sys.replace_state(c.pid, fn state -> %{state | held: fn -> TranscriptRelay.held() end} end)
+    coordinator = Module.concat(name, Coordinator)
+
+    held =
+      GenServer.call(
+        coordinator,
+        {:hold, "launch", 42, %{"fiber_id" => "a", "origin" => "owner"},
+         [%{"speaker" => "me", "text" => "first words"}]}
+      )
+
+    assert %{"held" => [^held]} = json_response(get(api_conn(), "/api/v1/voice"), 200)
+    edited = Map.put(held, "text", "me: edited")
+
+    assert %{"held" => [%{"text" => "me: edited"}]} =
+             json_response(post(api_conn(), "/api/v1/voice/draft", edited), 200)
+
+    assert %{"held" => []} = json_response(post(api_conn(), "/api/v1/voice/release", held), 200)
+    assert %{"error" => _} = json_response(post(api_conn(), "/api/v1/voice/release", held), 409)
+    assert %{"error" => _} = json_response(post(api_conn(), "/api/v1/voice/draft", %{}), 422)
+
+    assert %{"error" => _} =
+             json_response(
+               post(api_conn(), "/api/v1/voice/draft", Map.put(held, "text", nil)),
+               422
+             )
   end
 
   test "meeting ownership yields voice and it returns once the meeting ends", c do
@@ -397,7 +599,7 @@ defmodule Shuttle.VoiceTest do
       )
 
     pid = Env.start_scoped!({Voice, opts})
-    assert {:ok, %{state: "listening", error: error}} = Voice.update(%{"enabled" => true})
+    assert {:ok, %{state: "failed", error: error}} = Voice.update(%{"enabled" => true})
     assert error =~ "relay_write_failed"
     assert Process.alive?(pid)
     stop_supervised!(Voice)
@@ -408,7 +610,7 @@ defmodule Shuttle.VoiceTest do
       )
 
     Env.start_scoped!({Voice, opts})
-    assert {:ok, %{state: "listening", error: "delivery unavailable"}} = Voice.update(%{})
+    assert {:ok, %{state: "failed", error: "delivery unavailable"}} = Voice.update(%{})
   end
 
   test "crashes back off exponentially, keep one failed row and latch until an enabled toggle",

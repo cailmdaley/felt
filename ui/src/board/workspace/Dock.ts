@@ -25,6 +25,7 @@ import { dressVerb, headerLifecycleVerbsFor, SESSION_VERBS, sessionVerbsFor } fr
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
+import { HeldVoiceComposer } from './heldVoiceComposer.js'
 import './tokens.css'
 import './dock.css'
 import './chat.css'
@@ -1288,9 +1289,10 @@ export class Dock {
     const draftStore = `shuttle:composer-draft:${JSON.stringify([card.originId, card.uid ?? card.id])}`
     try { message.value = localStorage.getItem(draftStore) ?? '' } catch { /* storage unavailable */ }
     if (message.value && !nativeSizing) scheduleFit()
-    message.addEventListener('input', () => {
+    const saveDraft = (): void => {
       try { if (message.value) localStorage.setItem(draftStore, message.value); else localStorage.removeItem(draftStore) } catch { /* storage unavailable */ }
-    })
+    }
+    message.addEventListener('input', saveDraft)
     // Two lines under the box: a send's outcome (and the project-directory
     // prompt a refused start raises), and the images turned away. Neither
     // writes over the other.
@@ -1390,18 +1392,28 @@ export class Dock {
       admit(files)
     })
 
+    const heldVoice = this.voice ? new HeldVoiceComposer(message, this.voice.controller, card, draftStore, () => {
+      saveDraft(); scheduleFit(); this.composerPaint?.()
+    }, error => { err.textContent = error.message; err.style.display = '' }) : null
+    if (heldVoice) this.composerDisposers.push(() => heldVoice.dispose())
+
     // What the last compose took, so a send that lands clears exactly that.
     let composed: { text: string; ids: number[] } | null = null
     const draftKey = (): string => JSON.stringify([message.value, images.list.map(image => image.id)])
     const send: ComposerSend = {
       draftKey,
-      compose: (unlessUnchanged) => {
+      compose: async (unlessUnchanged) => {
         if (unlessUnchanged === draftKey()) {
           composed = null
-          return Promise.resolve('')
+          return ''
         }
+        const voiceCompose = heldVoice?.begin()
         composed = { text: message.value, ids: images.list.map((image) => image.id) }
-        return this.composeWithImages(card, images, message.value)
+        try {
+          const text = await this.composeWithImages(card, images, composed.text)
+          if (voiceCompose) await heldVoice!.release(voiceCompose)
+          return text
+        } finally { heldVoice?.finish() }
       },
       busy: () => busy,
       setBusy,
@@ -1410,7 +1422,8 @@ export class Dock {
         for (const id of composed.ids) images.remove(id)
         strip.paint()
         showImageError(null)
-        if (message.value === composed.text) {
+        if (heldVoice) heldVoice.sent(composed.text)
+        else if (message.value === composed.text) {
           message.value = ''
           message.dispatchEvent(new Event('input'))
         }
@@ -1583,12 +1596,14 @@ export class Dock {
         const host = this.meetingHostName?.(current) ?? (hosted ? card.name : current.fiber?.split('/').at(-1)) ?? current.title?.trim() ?? 'Meeting'
         label = `Recording · ${host}`
       } else if (voice?.available && (voice.enabled || localError || voice.state === 'failed')) {
-        label = localError || voice.state === 'failed' ? 'Failed' : voice.muted ? 'Muted' : voice.state === 'starting' ? 'Starting' : voice.state === 'yielded' ? 'Meeting' : voice.target ? (elsewhere(voice.target) ? voice.target.name : 'Here') : 'No target'
+        label = localError || voice.state === 'failed' ? 'Failed' : voice.muted ? 'Muted' : voice.state === 'starting' ? 'Starting' : voice.state === 'yielded' ? 'Meeting' : voice.cold && voice.target ? 'Voice · Held' : voice.target ? (elsewhere(voice.target) ? voice.target.name : 'Here') : 'No target'
       }
       word.textContent = label
       armButton.title = armed ? 'Sending starts recording' : label
       armButton.setAttribute('aria-label', label)
-      const text = voice && matches(voice.pending?.fiber_id) ? voice.pending!.text : ''
+      const preview = voice?.preview
+      const text = preview && matches(preview.fiber_id) && preview.origin === card.originId ? preview.text
+        : voice && matches(voice.pending?.fiber_id) ? voice.pending!.text : ''
       if (pending.textContent !== text) {
         pending.textContent = text
         pending.scrollTop = pending.scrollHeight

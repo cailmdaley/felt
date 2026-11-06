@@ -62,6 +62,8 @@ time.
 | `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
 | `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
 | `POST /voice/target` | recorder-routed | Append a timestamped speech destination `{fiber_id, origin?}` |
+| `POST /voice/draft` | recorder-routed | Edit held speech through a displayed checkpoint `{id, after, through, text}` |
+| `POST /voice/release` | recorder-routed | Consume a displayed checkpoint `{id, after, through}` before a composer send |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /attachments` | owner-routed | Store files attached in the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
@@ -396,12 +398,24 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 ### Live voice
 
-`GET /voice` returns `{available, enabled, muted, state, target, pending, last, error, recorder}`.
+`GET /voice` returns `{available, enabled, muted, state, target, cold, held, pending, preview, last, error, recorder}`.
 An optional `recorder` selects the recording daemon, independently of the receiving worker's `origin`.
 Without it, the receiving daemon is the recorder.
 `state` is `off`, `starting`, `listening`, `yielded` (a meeting owns the microphone), or `failed`.
 `target` is `{fiber_id, origin, name}` or `null`.
-`pending` is `{fiber_id, words, text}` or `null`; `last` is `{fiber_id, at, status, detail?}` or `null`, with `status` `delivered`, `unconfirmed` or `failed`.
+`cold` says whether the selected target is dormant or has been idle for at least `cold_minutes`.
+A working target is warm regardless of the age of its last event; unknown or stale owner activity is cold.
+`held` is a list of `{id, fiber_id, origin, after, through, text, segments}` drafts, retained across target switches, mute, recorder replacement and daemon restart.
+`after` is the last consumed segment (initially 0); it advances when an earlier prefix is released while later speech remains, even if `through` is unchanged.
+`segments` contains the current `{through, text}` pieces in order; their text concatenates to `text`.
+Editing a displayed prefix coalesces its segments at that prefix's ending checkpoint, preserving later segments.
+A composer appends only segments beyond its displayed checkpoint, so an edit response lost before more speech arrives cannot make repeated words disappear through ambiguous string-prefix matching.
+`through` identifies the last finalized speech segment included in that draft.
+`pending` is `{fiber_id, words, text}` or `null`, holding finalized warm speech before a delivery trigger.
+`preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.
+Missing or empty partials, mute, disabled voice and recorder exit clear the preview.
+Preview words never enter the relay, held drafts or delivery; only final transcript rows fill the composer.
+`last` is `{fiber_id, at, status, detail?}` or `null`, with `status` `delivered`, `unconfirmed` or `failed`.
 `enabled` reports the persisted intent even if recording fails. Invalid or unreadable `voice.json` fails off: `enabled: false`, `state: "failed"`, and `error` describes the configuration failure while the daemon stops any live voice recorder.
 
 `POST /voice` accepts `{enabled?, muted?, recorder?}` and returns the same state.
@@ -418,7 +432,7 @@ Disabled, idle voice checks lifecycle-file changes without polling the terminal;
 `t` is the recorder's UTC receipt time, not the time reconciliation finishes.
 Use a durable fiber UID so renaming doesn't change the destination.
 Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
-A target switch flushes pending words to the old target immediately.
+A target switch flushes warm pending words to the old target immediately; cold speech stays with its card.
 No selected target means no delivery; the recording still retains the words.
 An unreadable or malformed route journal, or a failed recovery truncation, leaves voice failed off with a visible `error`; repair the journal and restart the daemon before recording or selecting a target.
 
@@ -427,11 +441,12 @@ It defaults to:
 
 ```json
 {"enabled": false,
+ "cold_minutes": 5,
  "voice": {"words": 200, "quiet_seconds": 15},
  "meeting": {"words": 150, "quiet_seconds": 10}}
 ```
 
-Word limits are positive integers; quiet intervals are positive numbers of seconds.
+Word limits are positive integers; quiet intervals and `cold_minutes` are positive numbers.
 `POST /voice` with `enabled: false` can repair an invalid operator file by replacing it with disabled defaults. Valid files retain their thresholds and unknown keys.
 The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `klaud`, `clot`, `clod`, `claud`), or quiet since the last spoken line.
 Voice and meeting thresholds are independent; name detection is always on.
@@ -439,8 +454,20 @@ Comments travel with the next batch and `# ended` closes the monitor.
 An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.
 The monitor persists read offsets, buffers and stable message IDs before delivery, so restart recovery doesn't replay confirmed speech.
 
-Voice batches say `Live voice:` and preserve speaker labels, without meeting timestamps or a repeated room-speech warning.
-They use `/deliver` with `message_after_launch: true` and a stable `message_id`: a live worker is messaged, a dormant one is resumed and then messaged through the same deduplicated path.
+Cold speech doesn't deliver on word count, quiet, switching target or capture end.
+It fills an editable range in that card's composer without replacing typed text or moving the cursor.
+`POST /voice/draft` replaces only the held prefix through its checkpoint, preserving any later speech.
+Both mutations include the displayed `after` boundary and return 409 if another delivery has consumed any of that displayed prefix; later appends do not invalidate it.
+`POST /voice/release` consumes that prefix before Send, Resume or New session delivers the box's edited text.
+A consumed checkpoint returns **409**, so a button cannot repeat a name-triggered delivery.
+Saying a name consumes everything held through that utterance and uses the default delivery verb: paste to a live worker, resume a dormant conversation, or start a never-run card.
+The owning daemon resolves resume versus first start from its current document, independently of recorder caches.
+A failed or interrupted name delivery retains the resolved edited text in durable recovery state and exposes it in `last.detail` for an explicit retry; it never automatically resubmits an uncertain attempt.
+A worker warmed through any path gets ordinary triggers on its next speech.
+
+Voice batches contain speaker-labelled paragraphs, joining consecutive lines by one speaker, with no header or timestamp.
+Live workers take them as terminal input through `/deliver` with `live_input: true`; dormant targets receive the same text as their launch directive.
+A prior conversation uses `resume_mode: "previous"`; a never-run card starts fresh.
 Registered batches stay ordered per destination, while different destinations can proceed independently.
 A failed voice delivery is recorded in `last` and dropped from the delivery queue; it isn't retried indefinitely, and its words remain in the transcript.
 A **202** response with `delivered: null` is unconfirmed, not sent.

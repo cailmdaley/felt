@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Voice, voicePollDelay, type VoiceStatus } from './voice'
+import { Voice, VoiceRequestError, voicePollDelay, type VoiceStatus } from './voice'
 import { card } from './testFixtures'
 
 const status = (changes: Partial<VoiceStatus> = {}): VoiceStatus => ({ available: true, enabled: true, muted: false, state: 'listening', target: null, pending: null, last: null, error: null, ...changes })
@@ -9,6 +9,39 @@ const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve()
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('live voice', () => {
+  it('orders a held draft edit before its checkpoint release and refreshes a name conflict', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    let finishEdit!: () => void
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null })
+      if (url.endsWith('/draft')) await new Promise<void>(resolve => { finishEdit = resolve })
+      return { ok: !url.endsWith('/release'), status: url.endsWith('/release') ? 409 : 200, json: async () => status({ held: [] }) }
+    }))
+    const voice = new Voice('')
+    const held = { id: 'held-a', after: 1, through: 3 }
+    const edit = voice.editHeld(held, 'me: edited words')
+    const release = voice.releaseHeld(held)
+    held.after = 2 // Queued writes retain the boundary that was shown.
+    const rejected = expect(release).rejects.toBeInstanceOf(VoiceRequestError)
+    await flush()
+    expect(calls).toEqual([{ url: '/api/v1/voice/draft', body: { id: 'held-a', after: 1, through: 3, text: 'me: edited words' } }])
+    finishEdit()
+    await edit; await rejected
+    expect(calls).toEqual([
+      { url: '/api/v1/voice/draft', body: { id: 'held-a', after: 1, through: 3, text: 'me: edited words' } },
+      { url: '/api/v1/voice/release', body: { id: 'held-a', after: 1, through: 3 } },
+      { url: '/api/v1/voice', body: null },
+    ])
+    expect(voice.status?.held).toEqual([])
+  })
+  it('preserves a name claim conflict when the follow-up refresh is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/release')) return { ok: false, status: 409 }
+      throw new Error('recorder unreachable')
+    }))
+    const voice = new Voice('')
+    await expect(voice.releaseHeld({ id: 'held-a', through: 3 })).rejects.toMatchObject({ status: 409 })
+  })
   it('targets only changed constitutions and reasserts on focus, never a plain note', async () => {
     vi.useFakeTimers()
     const calls: Array<{ url: string; body: unknown }> = []

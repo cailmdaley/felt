@@ -7,6 +7,7 @@ defmodule Shuttle.Voice do
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
   def show(opts \\ []), do: GenServer.call(server(opts), :show)
+  def cold?(target), do: Shuttle.Voice.Target.cold?(target)
   def update(params, opts \\ []), do: GenServer.call(server(opts), {:update, params}, 30_000)
 
   def target(params, opts \\ []),
@@ -44,6 +45,9 @@ defmodule Shuttle.Voice do
       capture_opts: Keyword.get(opts, :capture_opts, []),
       relay: Keyword.get(opts, :relay, &start_relay/2),
       monitor: Keyword.get(opts, :monitor, &monitor/1),
+      held: Keyword.get(opts, :held, &Shuttle.Meeting.TranscriptRelay.held/0),
+      recovery: Keyword.get(opts, :recovery, &Shuttle.Meeting.TranscriptRelay.recovery/0),
+      cold: Keyword.get(opts, :cold, &cold?/1),
       snapshot: %{
         available: false,
         enabled: false,
@@ -51,6 +55,7 @@ defmodule Shuttle.Voice do
         state: if(route_error, do: "failed", else: "off"),
         target: target,
         pending: nil,
+        preview: nil,
         last: read_last(),
         error: route_error
       }
@@ -61,8 +66,10 @@ defmodule Shuttle.Voice do
   end
 
   @impl true
-  def handle_call(:show, _from, state),
-    do: {:reply, %{state.snapshot | error: state.snapshot.error || state.focus_error}, state}
+  def handle_call(:show, _from, state) do
+    snapshot = live_drafts(state.snapshot, state)
+    {:reply, %{snapshot | error: snapshot.error || state.focus_error}, state}
+  end
 
   def handle_call({:target, %{"source" => "rex"} = params, received_at}, from, state) do
     if state.snapshot.enabled and state.snapshot.state != "yielded" and
@@ -107,7 +114,7 @@ defmodule Shuttle.Voice do
                 snapshot: %{state.snapshot | target: target}
             }
 
-            {:reply, {:ok, state.snapshot}, state}
+            {:reply, {:ok, live_drafts(state.snapshot, state)}, state}
 
           {:error, reason} ->
             {:reply, {:error, inspect(reason)}, state}
@@ -127,6 +134,33 @@ defmodule Shuttle.Voice do
     else
       {:noreply, enqueue(state, {params, from})}
     end
+  end
+
+  defp live_drafts(snapshot, state) do
+    snapshot =
+      case state.held.() do
+        {:error, reason} -> Map.merge(snapshot, %{held: [], state: "failed", error: reason})
+        held -> Map.put(snapshot, :held, held)
+      end
+
+    preview =
+      if snapshot.enabled && not snapshot.muted && snapshot.state == "listening" &&
+           snapshot.preview && snapshot.target,
+         do: Map.merge(Map.take(snapshot.target, ~w(fiber_id origin)), snapshot.preview)
+
+    snapshot
+    |> Map.put(:last, recovery_last(snapshot.last, state.recovery.()))
+    |> Map.put(:preview, preview)
+    |> Map.put(:cold, not is_nil(snapshot.target) and state.cold.(snapshot.target))
+  end
+
+  defp recovery_last(last, nil), do: last
+  defp recovery_last(nil, recovery), do: recovery
+
+  defp recovery_last(last, recovery) do
+    if recovery["at"] > (last["at"] || last[:at] || "") or
+         (recovery["fiber_id"] == (last["fiber_id"] || last[:fiber_id]) and
+            (last["status"] || last[:status]) != "delivered"), do: recovery, else: last
   end
 
   @impl true
@@ -194,6 +228,12 @@ defmodule Shuttle.Voice do
           }
 
           {{:error, inspect(reason)}, snapshot}
+      end
+
+    reply =
+      case reply do
+        {:ok, snapshot} -> {:ok, live_drafts(snapshot, state)}
+        error -> error
       end
 
     if from, do: GenServer.reply(from, reply)
@@ -264,6 +304,7 @@ defmodule Shuttle.Voice do
       | snapshot: %{
           state.snapshot
           | muted: Meeting.voice_muted?(state.capture_opts),
+            preview: nil,
             last: read_last() || state.snapshot.last
         }
     }
@@ -328,6 +369,7 @@ defmodule Shuttle.Voice do
             row && not voice -> "yielded"
             row && row.state == "failed" -> "failed"
             retry.latched or not is_nil(retry.at) -> "failed"
+            relay_error -> "failed"
             row && row.state == "live" -> "listening"
             true -> "starting"
           end
@@ -347,6 +389,12 @@ defmodule Shuttle.Voice do
           state: phase,
           target: state.target,
           pending: status.pending,
+          preview:
+            if(
+              voice && enabled && row.state == "live" &&
+                not Meeting.voice_muted?(state.capture_opts),
+              do: read_preview(row[:transcript])
+            ),
           last: status.last || read_last() || state.snapshot.last,
           error: error
         }
@@ -384,6 +432,15 @@ defmodule Shuttle.Voice do
         }
     end
   end
+
+  defp read_preview(path) when is_binary(path) do
+    case Shuttle.FS.read(Path.rootname(path) <> ".partial") do
+      {:ok, text} -> if String.trim(text) != "", do: %{"text" => String.trim(text)}
+      _ -> nil
+    end
+  end
+
+  defp read_preview(_), do: nil
 
   defp new_retry,
     do: %{failures: 0, at: nil, latched: false, launch: nil, started: nil, failed: nil}
