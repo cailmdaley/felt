@@ -100,7 +100,7 @@ try {
     })
     assert.equal(await field.inputValue(), 'A typed note before the speech.\n\nS1: Keep this thought here until I decide to send it.')
     assert.deepEqual(await field.evaluate(el => [el.selectionStart, el.selectionEnd, el.selectionDirection]), [2, 7, 'backward'])
-    assert.equal(await selected.locator('.kbn-ctl-meet-arm').innerText(), 'Voice · Held')
+    assert.equal(await selected.locator('.kbn-ctl-meet-arm').innerText(), 'Listening · Music')
     assert.equal(await selected.locator('.voice-pending').innerText(), 'S1: A few words still being recognized…')
     await page.evaluate(() => {
       const state = window.__coldVoiceState
@@ -119,7 +119,7 @@ try {
     })
     await selected.locator('.ws-chat-title').filter({ hasText: 'Calibrate the shear response' }).waitFor()
     assert.equal(await selected.locator('textarea').inputValue(), '', 'the live card does not inherit the dormant card\'s speech')
-    assert.equal(await selected.locator('.kbn-ctl-meet-arm').innerText(), 'Here')
+    assert.equal(await selected.locator('.kbn-ctl-meet-arm').innerText(), 'Listening · Calibrate the shear response')
     await page.evaluate(() => {
       const { cold } = window.__coldVoiceCards, state = window.__coldVoiceState, modal = window.__harness.modal
       state.target = { fiber_id: cold.uid ?? cold.id, origin: cold.originId, name: cold.name }; state.cold = true
