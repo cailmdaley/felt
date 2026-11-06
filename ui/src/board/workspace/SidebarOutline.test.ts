@@ -60,6 +60,13 @@ describe('sidebar family outline', () => {
     const desk = [ask, lone, root]
     expect(sidebarOutline(new ThreadIndex([root, ask, lone]), desk, undefined, {}).map(f => f.root)).toEqual([lone, root])
   })
+  it('places a resting root at the thread working on its behalf', () => {
+    const seat = card({ id: 'seat', uid: 'seat', status: 'open', shuttleKind: 'oneshot', shuttleSeat: true, shuttleRole: 'desk' })
+    const paper = card({ id: 'paper', uid: 'paper', orchestrator: 'seat', status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'working' })
+    const lone = card({ id: 'lone', uid: 'lone', status: 'active' })
+    const desk = [paper, lone, seat]
+    expect(sidebarOutline(new ThreadIndex([seat, paper, lone]), desk, undefined, {}).map(f => f.root)).toEqual([seat, lone])
+  })
   it('Find includes a draft in a family absent from the Desk', () => {
     const quiet = card({ id: 'quiet', uid: 'quiet', status: 'closed', tempered: true })
     const draft = child('draft', { orchestrator: 'quiet', status: 'open' })

@@ -9,6 +9,7 @@ import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry, IN_FLIGHT_BANDS, inFlightBand } from '../KanbanReadModel.js'
 import { deskColumn } from '../deskColumn.js'
+import { sidebarAnchor } from './SidebarOutline.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
@@ -358,9 +359,12 @@ export class Workspace {
     return index ? index.family(index.card(card)).root : card
   }
   private sidebarCaptionCard(card: KanbanCard): KanbanCard {
-    const root = this.sidebarRoot(card)
-    if (this.opts.deskRows().some(row => cardIdentity(row) === cardIdentity(root))) return root
-    return this.opts.threadIndex?.().family(root).lead ?? root
+    const root = this.sidebarRoot(card), index = this.opts.threadIndex?.()
+    const onDesk = (candidate: KanbanCard) => this.opts.deskRows().some(row => cardIdentity(row) === cardIdentity(candidate))
+    const anchor = index ? sidebarAnchor(index, root) : root
+    if (onDesk(anchor)) return anchor
+    if (onDesk(root)) return root
+    return index?.family(root).lead ?? root
   }
   /** Resolve the root's Desk column, or its lead's when the root is absent. */
   private sidebarPlace(card: KanbanCard): string {

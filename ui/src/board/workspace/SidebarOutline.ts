@@ -1,4 +1,5 @@
 import type { KanbanCard } from '../KanbanTypes.js'
+import { ownColumn } from '../deskColumn.js'
 import type { ThreadIndex } from '../threads.js'
 import { cardIdentity } from './SidebarFlight.js'
 import { threadTree, type TreeNode } from './ThreadTree.js'
@@ -42,7 +43,12 @@ export class SidebarPreferences {
   }
 }
 
-/** Roots retain Desk order; each expanded family exposes asks before its folded work. */
+/** The Desk row a family sits at: its root's, or its lead's while the root itself rests. */
+export function sidebarAnchor(index: ThreadIndex, root: KanbanCard): KanbanCard {
+  return ownColumn(root) ? root : index.family(root).lead
+}
+
+/** Families retain Desk order; each expanded family exposes asks before its folded work. */
 export function sidebarOutline(index: ThreadIndex, desk: KanbanCard[], current: KanbanCard | undefined, folds: SidebarFolds, query = ''): SidebarFamily[] {
   const roots = new Map<string, KanbanCard>()
   const positions = new Map(desk.map((card, n) => [cardIdentity(card), n]))
@@ -50,7 +56,7 @@ export function sidebarOutline(index: ThreadIndex, desk: KanbanCard[], current: 
     const root = index.family(index.card(card)).root
     roots.set(rootIdentity(root), root)
   }
-  const position = (root: KanbanCard) => positions.get(cardIdentity(root)) ?? positions.get(cardIdentity(index.family(root).lead)) ?? desk.length
+  const position = (root: KanbanCard) => positions.get(cardIdentity(sidebarAnchor(index, root))) ?? positions.get(cardIdentity(root)) ?? positions.get(cardIdentity(index.family(root).lead)) ?? desk.length
   return [...roots.values()].sort((a, b) => position(a) - position(b)).map(root => {
     const descendants = index.subtree(root)
     const asks = descendants.filter(card => ['waiting', 'to-review'].includes(index.state(card))).sort(index.compare)
