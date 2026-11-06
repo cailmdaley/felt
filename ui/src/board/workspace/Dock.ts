@@ -1743,7 +1743,7 @@ export class Dock {
         }
       })
       menu.addEventListener('focusout', event => {
-        if (event.relatedTarget && !menu?.contains(event.relatedTarget as Node)) closeMenu()
+        if (event.relatedTarget && !wrap.contains(event.relatedTarget as Node)) closeMenu()
       })
       wrap.append(menu)
       release = anchorPopover(menu, wrap, { placement: 'above-start' })

@@ -168,6 +168,16 @@ it('keeps the menu open for Tab navigation through its inputs', async () => {
   v.dock.reset()
 })
 
+it('closes the open menu when focus and click return to the trigger', () => {
+  const v = mount()
+  v.dropdown().click()
+  expect(v.root.querySelector('[role=menu]')).not.toBeNull()
+  v.dropdown().focus()
+  v.dropdown().click()
+  expect(v.root.querySelector('[role=menu]')).toBeNull()
+  v.dock.reset()
+})
+
 it('closes the menu when the following recorder changes', () => {
   const v = mount()
   v.voice.status = { ...status, enabled: true, state: 'listening', recorder: 'first' }; notify(v.voice)
