@@ -109,13 +109,18 @@ func TestClaudeFallbackRefusalReachesSenderAndNeverRepeatsWrite(t *testing.T) {
 				t.Fatal(err)
 			}
 			notices := 0
+			var firstNotice Request
 			notify := func(_ context.Context, notice Request) error {
 				notices++
 				if notice.Address != req.From || notice.ContextIfBusy || !strings.Contains(notice.Text, req.MessageID) {
 					t.Fatalf("bad notice: %+v", notice)
 				}
 				if notices == 1 {
+					firstNotice = notice
 					return fmt.Errorf("sender temporarily unreachable")
+				}
+				if notice.Text != firstNotice.Text || notice.MessageID != firstNotice.MessageID {
+					t.Fatalf("notice retry changed the persisted result: first=%+v retry=%+v", firstNotice, notice)
 				}
 				return nil
 			}

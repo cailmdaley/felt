@@ -65,47 +65,20 @@ func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now ti
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	ctx, cancel := context.WithTimeout(ctx, reservationDeadlineCeiling)
 	defer cancel()
-	sessions, err := os.ReadDir(root)
-	if err != nil {
-		return err
-	}
 	var items []mailboxPendingItem
-	for _, session := range sessions {
-		if !session.IsDir() {
-			continue
+	if err := walkClaudeMail(env, func(item mailboxPendingItem) error {
+		a, err := ParseAddress(item.entry.Request.Address)
+		if err != nil || a.Harness != "claude" || a.Host != host {
+			return nil
 		}
-		dir := filepath.Join(root, session.Name())
-		for _, state := range []string{"pending", "fallback"} {
-			files, err := os.ReadDir(filepath.Join(dir, state))
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			for _, file := range files {
-				if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
-					continue
-				}
-				path := filepath.Join(dir, state, file.Name())
-				entry, err := readFiberMailboxEntry(path)
-				if errors.Is(err, os.ErrNotExist) {
-					continue
-				}
-				if err != nil {
-					return err
-				}
-				a, err := ParseAddress(entry.Request.Address)
-				if err != nil || a.Harness != "claude" || a.Host != host || !entry.Request.ContextIfBusy {
-					continue
-				}
-				turn, _ := MailboxState(env, "claude", a.ID, host)
-				if state == "pending" && turn == "working" && now.Sub(time.Unix(0, entry.QueuedAt)) < claudeHookOfferWindow {
-					continue
-				}
-				items = append(items, mailboxPendingItem{path, entry})
-			}
+		turn, _ := MailboxState(env, "claude", a.ID, host)
+		if filepath.Base(filepath.Dir(item.path)) == "pending" && turn == "working" && now.Sub(time.Unix(0, item.entry.QueuedAt)) < claudeHookOfferWindow {
+			return nil
 		}
+		items = append(items, item)
+		return nil
+	}); err != nil {
+		return err
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].entry.QueuedAt == items[j].entry.QueuedAt {
@@ -129,8 +102,17 @@ func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now ti
 // remains. Context-only mail never schedules a wake.
 func ClaudeMailPending(env *sysenv.Env) (bool, error) {
 	pending := false
+	err := walkClaudeMail(env, func(mailboxPendingItem) error {
+		pending = true
+		return fs.SkipAll
+	})
+	return pending, err
+}
+
+// Both recovery and scheduling inspect the same live automatic entries.
+func walkClaudeMail(env *sysenv.Env, visit func(mailboxPendingItem) error) error {
 	root := filepath.Join(dataDir(env), "mailboxes", "claude")
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
@@ -145,13 +127,17 @@ func ClaudeMailPending(env *sysenv.Env) (bool, error) {
 			return nil
 		}
 		entry, err := readFiberMailboxEntry(path)
-		if err == nil && entry.Request.ContextIfBusy {
-			pending = true
-			return fs.SkipAll
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // A hook can offer the entry during the scan.
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		if !entry.Request.ContextIfBusy {
+			return nil
+		}
+		return visit(mailboxPendingItem{path, entry})
 	})
-	return pending, err
 }
 
 func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPendingItem, notify func(context.Context, Request) error) error {

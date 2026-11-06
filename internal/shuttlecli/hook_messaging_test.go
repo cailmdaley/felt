@@ -41,6 +41,14 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	if receipt, err := messaging.Send(context.Background(), env, "host", r); err != nil || receipt.Transport != "claude-hook" {
 		t.Fatalf("send: %+v %v", receipt, err)
 	}
+	passive := r
+	passive.MessageID, passive.Text, passive.Wake, passive.ContextIfBusy = "passive", "passive message", false, false
+	if _, err := messaging.Send(context.Background(), env, "host", passive); err != nil {
+		t.Fatal(err)
+	}
+	if out := hook("SessionStart"); out != "" {
+		t.Fatalf("SessionStart cannot safely offer queued context: %s", out)
+	}
 	child, _ := json.Marshal(eventHookInput{HookEventName: "PostToolUse", SessionID: "s", AgentID: "subagent", TranscriptPath: filepath.Join(home, ".claude", "projects", "p", "s.jsonl")})
 	var childOut bytes.Buffer
 	if err := newApp(env).runEventAndMessageHook(bytes.NewReader(child), &childOut); err != nil || childOut.Len() != 0 {
@@ -53,7 +61,7 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	if err := json.Unmarshal([]byte(hook("PostToolUse")), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.HookSpecificOutput.HookEventName != "PostToolUse" || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("[Shuttle message 62c66a7a from work/fiber]\npeer message")) {
+	if got.HookSpecificOutput.HookEventName != "PostToolUse" || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("[Shuttle message 62c66a7a from work/fiber]\npeer message")) || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("passive message")) {
 		t.Fatalf("bad context: %+v", got)
 	}
 	if out := hook("PostToolUse"); out != "" {
@@ -100,14 +108,25 @@ func TestClaudeStopDoesNotContinueOrDrainMail(t *testing.T) {
 	}
 	send("context-only", false)
 	send("late-busy", true)
+	if out := hook("StopFailure"); out != "" {
+		t.Fatalf("StopFailure offered context without a continuing turn: %s", out)
+	}
+	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "idle" {
+		t.Fatalf("failed-turn state=%s %v", state, err)
+	}
+	lines, _ := os.ReadFile(events)
+	if bytes.Count(lines, []byte(`"type":"stop"`)) != 1 {
+		t.Fatalf("failed turn did not record Stop: %s", lines)
+	}
+	hook("PreToolUse") // A subsequent turn can still finish normally.
 	if out := hook("Stop"); out != "" {
 		t.Fatalf("Stop continued: %s", out)
 	}
 	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "idle" {
 		t.Fatalf("state=%s %v", state, err)
 	}
-	lines, _ := os.ReadFile(events)
-	if bytes.Count(lines, []byte(`"type":"stop"`)) != 1 {
+	lines, _ = os.ReadFile(events)
+	if bytes.Count(lines, []byte(`"type":"stop"`)) != 2 {
 		t.Fatalf("final Stop not recorded once: %s", lines)
 	}
 	if out := hook("UserPromptSubmit"); !bytes.Contains([]byte(out), []byte("context-only")) || !bytes.Contains([]byte(out), []byte("late-busy")) {

@@ -621,11 +621,10 @@ defmodule Shuttle.ThreadReceiverTest do
              ])
   end
 
-  # Stop registers the harness receiver without offering its mailbox. A
-  # SessionStart used only for setup can consume the result being asserted.
-  defp register_receiver!(store, uuid), do: hook!(store, uuid, "Stop")
+  # SessionStart registers the harness receiver without offering its mailbox.
+  defp register_receiver!(store, uuid), do: hook!(store, uuid, "SessionStart")
 
-  defp hook!(store, uuid, event \\ "SessionStart") do
+  defp hook!(store, uuid, event \\ "UserPromptSubmit") do
     cli = Shuttle.Env.find_executable("shuttle")
 
     frame =
