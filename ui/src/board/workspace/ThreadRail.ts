@@ -195,8 +195,8 @@ export class ThreadRail {
     }
   }
   /** The artifact the rail shows, or none. */
-  showArtifact(doc: WorkspaceDocument | null, openFull: (key: string) => void, onStage = false): void {
-    this.artifact.show(doc, openFull, onStage)
+  showArtifact(doc: WorkspaceDocument | null, openFull: (key: string) => void, onStage = false, closeFull?: () => void): void {
+    this.artifact.show(doc, openFull, onStage, closeFull)
     this.applyPresence()
   }
   /** Load the artifact while the rail stands open beside the stage; unload it otherwise. */

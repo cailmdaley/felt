@@ -207,6 +207,7 @@ export class Workspace {
       onCrossing: travel => this.depth.cross(travel),
       onReturn: () => this.history.back(),
       onOpenDocument: key => this.visit(key),
+      onRevisitDocument: key => this.revisit(key),
       workerPill: card => this.dock.workerPillFor(card),
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),

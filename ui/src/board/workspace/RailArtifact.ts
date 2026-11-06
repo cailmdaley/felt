@@ -30,7 +30,8 @@ export function railArtifactGeometry(width: number): RailArtifactGeometry {
 /**
  * The open constitution's artifact, live, beneath the rail's threads: scrollable
  * and clickable in place, reloaded in place when the worker rewrites it, with
- * a heading that folds it and a control that opens the full page.
+ * a heading that folds it and a control that opens the full page and, from
+ * there, minimizes it back.
  */
 export class RailArtifact {
   readonly el = document.createElement('section')
@@ -43,6 +44,7 @@ export class RailArtifact {
   private live = false
   private expanded = true
   private openFull: ((key: DocKey) => void) | null = null
+  private closeFull: () => void = () => {}
   private geometry: RailArtifactGeometry | null = null
   /** The artifact fills the stage: the section keeps its heading and stands down its page. */
   private onStage = false
@@ -67,10 +69,11 @@ export class RailArtifact {
     this.toggle.addEventListener('click', () => this.setExpanded(!this.expanded, true))
     this.full.type = 'button'
     this.full.className = 'ws-rail-artifact-full'
-    this.full.innerHTML = headerIcon('open')
-    this.full.title = 'Open the full artifact'
-    this.full.setAttribute('aria-label', 'Open the full artifact')
-    this.full.addEventListener('click', () => { if (this.doc) this.openFull?.(this.doc.key) })
+    this.paintFull()
+    this.full.addEventListener('click', () => {
+      if (this.onStage) this.closeFull()
+      else if (this.doc) this.openFull?.(this.doc.key)
+    })
     this.head.append(this.toggle, this.full)
     this.body.className = 'ws-rail-artifact-body'
     this.el.append(this.head, this.body)
@@ -87,14 +90,15 @@ export class RailArtifact {
   /**
    * The document the section stands for, or none; a different one replaces the
    * page. While it fills the stage (`onStage`) the heading stays, so the rail
-   * keeps its shape, and the page is not drawn twice.
+   * keeps its shape, the page is not drawn twice, and the control minimizes it
+   * through `closeFull`.
    */
-  show(doc: WorkspaceDocument | null, openFull: (key: DocKey) => void, onStage = false): void {
-    this.openFull = openFull
+  show(doc: WorkspaceDocument | null, openFull: (key: DocKey) => void, onStage = false, closeFull: () => void = () => {}): void {
+    this.openFull = openFull; this.closeFull = closeFull
     if (onStage !== this.onStage) {
       this.onStage = onStage
       this.el.classList.toggle('ws-rail-artifact-staged', onStage)
-      this.full.hidden = onStage
+      this.paintFull()
       this.toggle.disabled = onStage
       this.paintBody()
     }
@@ -135,6 +139,13 @@ export class RailArtifact {
     this.el.classList.toggle('ws-rail-artifact-folded', !expanded)
     this.paintBody()
     if (persist) try { localStorage.setItem(OPEN_STORAGE, String(expanded)) } catch { /* Storage is optional. */ }
+  }
+
+  private paintFull(): void {
+    const label = this.onStage ? 'Minimize the full artifact' : 'Open the full artifact'
+    this.full.innerHTML = headerIcon(this.onStage ? 'minimize' : 'open')
+    this.full.title = label
+    this.full.setAttribute('aria-label', label)
   }
 
   private paintBody(): void {

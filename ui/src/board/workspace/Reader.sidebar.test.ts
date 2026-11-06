@@ -40,7 +40,7 @@ function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerP
     buildProse: () => document.createElement('div'),
     onRefreshProse: vi.fn(),
     onSelect: key => reader.select(key),
-    onOpenDocument: key => reader.select(key),
+    onOpenDocument: key => reader.select(key), onRevisitDocument: key => reader.select(key),
     onReturn: vi.fn(),
     onChannel,
     cards: () => channels,

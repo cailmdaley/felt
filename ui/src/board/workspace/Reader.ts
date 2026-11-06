@@ -14,7 +14,7 @@ import { fileBytesUrl, showToast } from '../utils.js'
 import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
-import { channelLead, chatDocument, documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, chatDocument, documentLabels, documentLabelMetadata, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { probeDocumentTitles } from './titleProbe.js'
@@ -47,6 +47,7 @@ export interface ReaderOptions {
   onCrossing?(travel: number): void
   onReturn(): void
   onOpenDocument(key: DocKey): void
+  onRevisitDocument(key: DocKey): void
   workerPill?(card: KanbanCard): HTMLElement | null
   onVerdict?(verdict: Verdict): void
   onCompose?(): void
@@ -697,7 +698,10 @@ export class Reader {
     this.threadRail.showFiles(this.channel, this.selected ?? '', this.fresh, key => this.openDocument(key))
     // The rail leads with the artifact; while the artifact itself fills the stage it keeps only its heading.
     const lead = channelLead(this.channel) ?? null
-    this.threadRail.showArtifact(lead, key => this.openDocument(key), !!lead && lead.key === this.selected)
+    this.threadRail.showArtifact(lead, key => this.openDocument(key), !!lead && lead.key === this.selected, () => {
+      const home = chatDocument(this.channel!) ?? proseDocument(this.channel!)
+      if (home) this.opts.onRevisitDocument(home.key)
+    })
     this.paintRail()
     if (before !== [this.threadRail.present, this.threadRail.quiet, this.railShown].join()) this.layout(false)
   }

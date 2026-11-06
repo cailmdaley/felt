@@ -162,8 +162,8 @@ export function registerRailArtifactJourneys(test) {
     assert.equal(await section(page).isVisible(), true, 'the section keeps its heading while the artifact fills the stage')
     assert.equal(await section(page).locator('iframe').count(), 0, 'the rail does not draw the staged artifact twice')
 
-    // Back on the chat, the page's own relative links open their documents in the reader, as on the full page.
-    await page.locator('.ws-page.ws-selected').locator('.ws-document-back').click()
+    // The same control minimizes it: the page's own relative links then open their documents in the reader, as on the full page.
+    await section(page).getByRole('button', { name: 'Minimize the full artifact', exact: true }).click()
     await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
     await railFrame(page).locator('body').evaluate(el => el.ownerDocument.scrollingElement.scrollTo(0, 0))
     await railFrame(page).getByRole('link', { name: 'Read the independent validation →', exact: true }).click()

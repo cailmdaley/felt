@@ -105,4 +105,17 @@ describe('RailArtifact', () => {
     section.el.querySelector<HTMLButtonElement>('.ws-rail-artifact-full')!.click()
     expect(open).toHaveBeenCalledWith(d.key)
   })
+  it('minimizes from the same control while the page fills the stage', () => {
+    const section = new RailArtifact(''), open = vi.fn(), close = vi.fn(), d = doc('/notes/artifact.html')
+    section.show(d, open)
+    const full = section.el.querySelector<HTMLButtonElement>('.ws-rail-artifact-full')!
+    section.show(d, open, true, close)
+    expect(full.hidden).toBe(false)
+    expect(full.getAttribute('aria-label')).toBe('Minimize the full artifact')
+    full.click()
+    expect(close).toHaveBeenCalledOnce()
+    expect(open).not.toHaveBeenCalled()
+    section.show(d, open, false, close)
+    expect(full.getAttribute('aria-label')).toBe('Open the full artifact')
+  })
 })
