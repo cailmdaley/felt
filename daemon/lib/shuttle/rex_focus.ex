@@ -6,11 +6,12 @@ defmodule Shuttle.RexFocus do
   # running terminate/2. Rex events exits on server disconnect; wait then reaps
   # the reader too. This wrapper never starts or stops the Rex server.
   @stream """
-  exec 2>/dev/null
-  "$@" &
+  exec 2>/dev/null 3<&0
+  "$@" 3<&- &
   child=$!
-  (while read -r line; do :; done; kill -TERM "$child" 2>/dev/null) <&0 &
+  (while read -r line; do :; done; kill -TERM "$child" 2>/dev/null) <&3 3<&- &
   guard=$!
+  exec 3<&-
   trap 'kill -TERM "$child" "$guard" 2>/dev/null; wait' EXIT
   wait "$child"
   """
@@ -127,7 +128,7 @@ defmodule Shuttle.RexFocus do
 
       {bin, args} ->
         port =
-          Port.open({:spawn_executable, System.find_executable("sh")}, [
+          Port.open({:spawn_executable, Shuttle.Env.find_executable("sh")}, [
             :binary,
             :exit_status,
             :use_stdio,
