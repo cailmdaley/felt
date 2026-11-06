@@ -6100,6 +6100,51 @@ defmodule Shuttle.PollerTest do
     end
 
     @tag backend: backend
+    @tag :review_unknown_inventory
+    test "an unknown inventory defers closed #{inspect(backend)} teardown until a healthy scan",
+         %{backend: backend} do
+      Env.put_app_env(:terminal_backend, backend)
+
+      if backend == Shuttle.Terminal.Rex do
+        Env.put_app_env(:fake_rex, start_supervised!(Shuttle.Test.FakeRex))
+        Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      end
+
+      Env.put_app_env(:worker_stop_ladder, [{"TERM", 0}])
+      id = "tests/closed-unknown-inventory"
+      MockRunner.set_fiber(id, make_fiber(id))
+
+      MockRunner.set_shuttle(
+        id,
+        "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+        "active"
+      )
+
+      {:ok, poller} =
+        start_poller!(
+          runner: Shuttle.PollerTest.PhantomRunner,
+          own_host_id: "test-host",
+          poll_interval_ms: 60_000,
+          max_concurrent_workers: 0,
+          felt_stores: [MockRunner.felt_root()]
+        )
+
+      assert {:ok, session} = Poller.dispatch_fiber(poller, id, force: true, ad_hoc: true)
+      %{pid: watcher} = Poller.worker_status(poller, id)
+      MockRunner.set_fiber(id, Map.put(MockRunner.fiber(id), "status", "closed"))
+      MockRunner.set_ps_result({"ps timed out", :timeout})
+      sync_poll_cycle!(poller)
+      assert reap_stop_count(backend) == 0
+      assert %{pid: ^watcher, session: ^session} = Poller.worker_status(poller, id)
+      refute get_in(MockRunner.fiber(id), ["shuttle", "runtime", "handed_off_at"])
+
+      MockRunner.set_ps_result({"", 0})
+      sync_poll_cycle!(poller)
+      assert reap_stop_count(backend) == 1
+      assert Poller.worker_status(poller, id) == nil
+    end
+
+    @tag backend: backend
     test "a closed fiber keeps its #{inspect(backend)} worker visible until teardown succeeds", %{
       backend: backend
     } do

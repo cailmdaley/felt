@@ -5517,7 +5517,13 @@ defmodule Shuttle.Poller do
   defp reconcile(%State{} = state, sessions, listings_ok?) do
     state = %{state | orphans: []}
     before = state.running
-    state = reconcile_fiber_closures(state)
+
+    state =
+      case sessions do
+        {:ok, _names} -> reconcile_fiber_closures(state)
+        {:error, :unknown} -> state
+      end
+
     state = reconcile_missing_running_sessions(state)
 
     # The cycle's inventory predates these confirmed stops. Do not reap or
