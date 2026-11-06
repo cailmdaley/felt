@@ -53,7 +53,7 @@ defmodule Shuttle.VoiceTest do
 
     assert {:ok,
             %{
-              "voice" => %{"words" => 60, "quiet_seconds" => 4},
+              "voice" => %{"words" => 200, "quiet_seconds" => 15},
               "meeting" => %{"quiet_seconds" => 10}
             }} = Config.read()
 
@@ -67,7 +67,7 @@ defmodule Shuttle.VoiceTest do
     end
 
     assert {:ok, %{enabled: true, state: "starting"}} = Voice.update(%{"enabled" => true})
-    assert {:ok, %{"enabled" => true, "voice" => %{"words" => 60}}} = Config.read()
+    assert {:ok, %{"enabled" => true, "voice" => %{"words" => 200}}} = Config.read()
     assert {:error, _} = Voice.update(%{"muted" => "true"})
     assert File.exists?(Path.join(c.root, "voice.json"))
   end
