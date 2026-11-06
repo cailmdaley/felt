@@ -162,6 +162,41 @@ defmodule Shuttle.SpeakerTest do
     assert Speaker.fiber_keys("U1", fibers: fn -> [] end) == ["U1"]
   end
 
+  test "a spoken skip drops the rest of the line, for good",
+       %{server: server, world: world, opts: opts} do
+    set(world, %{partial: "earlier words"})
+    {:ok, _} = Speaker.speak(%{"text" => "first line", "voice" => "jean"}, server)
+    {:ok, _} = Speaker.speak(%{"text" => "second line", "voice" => "jean"}, server)
+    # The leftover pending words hold the line until they are quiet.
+    set(world, %{now: 2_000})
+    assert_receive {:play, "jean:first line", one}
+
+    set(world, %{now: 3_000, partial: "earlier words skip this one please"})
+    assert_receive {:stop, ^one}
+    refute_receive {:play, _, _}, 50
+
+    set(world, %{now: 3_500, partial: "earlier words Skip that."})
+    refute_receive {:play, _, _}, 50
+    # The next line starts once the skip itself is quiet.
+    set(world, %{now: 5_100})
+    assert_receive {:play, "jean:second line", _}
+    assert %{speaking: %{text: "second line"}, queued: 0} = Speaker.show(server)
+
+    stop_supervised!(Speaker)
+    start_supervised!({Speaker, opts})
+    assert %{speaking: %{text: "second line"}, queued: 0} = Speaker.show(server)
+  end
+
+  test "skip is the new words alone" do
+    assert Speaker.skip?("skip", nil)
+    assert Speaker.skip?("Skip it!", "")
+    assert Speaker.skip?("so then skip", "so then")
+    refute Speaker.skip?("so then", "so then")
+    refute Speaker.skip?("don't skip", nil)
+    refute Speaker.skip?("skip ahead to the end", nil)
+    refute Speaker.skip?(nil, nil)
+  end
+
   test "words of the line being spoken are its echo, not the user" do
     line = "Hello Ada, the outbox is live."
     refute Speaker.talking?(nil, line)

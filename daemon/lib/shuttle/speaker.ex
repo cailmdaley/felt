@@ -14,6 +14,9 @@ defmodule Shuttle.Speaker do
   file from the held offset. The human is quiet once their pending words have
   not changed for 1.5 s.
 
+  Saying "skip" (or "skip it", "skip that") while a line is current drops the
+  rest of it.
+
   The queue, the current line and its offset are journaled, so a daemon restart
   resumes a held or playing line rather than losing it.
   """
@@ -291,7 +294,16 @@ defmodule Shuttle.Speaker do
 
   defp rendered(state, item, {:ok, wav}) do
     Logger.info("speaker: rendered #{inspect(item.voice)} for #{item.fiber_id || "?"} to #{wav}")
-    current = %{item: item, wav: wav, segment: nil, handle: nil, offset: 0, started: nil}
+
+    current = %{
+      item: item,
+      wav: wav,
+      segment: nil,
+      handle: nil,
+      offset: 0,
+      started: nil,
+      before: state.partial.()
+    }
 
     {:noreply,
      %{state | render: nil, current: current, error: nil}
@@ -319,6 +331,12 @@ defmodule Shuttle.Speaker do
         (talking?(partial, current.item.text) and now - elem(heard, 1) < @quiet_ms)
 
     cond do
+      skip?(partial, Map.get(current, :before)) ->
+        Logger.info("speaker: skipped for #{current.item.fiber_id || "?"}")
+        if current.handle, do: state.stop.(current.handle)
+        cleanup(current)
+        advance(%{state | current: nil})
+
       held and current.handle ->
         state.stop.(current.handle)
         offset = current.offset + now - current.started
@@ -412,6 +430,21 @@ defmodule Shuttle.Speaker do
       muted: state.muted,
       error: state.error
     }
+  end
+
+  @doc """
+  Whether the pending words added since the line became current are a spoken
+  skip: "skip", "skip it" or "skip that".
+  """
+  def skip?(nil, _before), do: false
+
+  def skip?(partial, before) do
+    new =
+      if is_binary(before) and before != "" and String.starts_with?(partial, before),
+        do: String.replace_prefix(partial, before, ""),
+        else: partial
+
+    Enum.join(words(new), " ") in ["skip", "skip it", "skip that"]
   end
 
   @doc """
