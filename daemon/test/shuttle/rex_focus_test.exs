@@ -45,6 +45,24 @@ defmodule Shuttle.RexFocusTest do
     assert nil == RexFocus.target(%{"type" => "client_changed"}, bindings(), fibers())
   end
 
+  test "tmux hosts neither consult voice nor start a Rex stream" do
+    Shuttle.Test.Env.put_app_env(:terminal_backend, Shuttle.Terminal.Tmux)
+    parent = self()
+
+    watcher =
+      start_supervised!(
+        {RexFocus,
+         name: nil,
+         command: fn ->
+           send(parent, :stream_started)
+           nil
+         end}
+      )
+
+    assert :sys.get_state(watcher).port == nil
+    refute_receive :stream_started
+  end
+
   test "watcher reconnects after a stream exit and closes its CLI when following stops", c do
     {watcher, active, pids} = watcher(c.tmp_dir)
     assert_receive {:selected, %{"fiber_id" => "project/task", "source" => "rex"}}

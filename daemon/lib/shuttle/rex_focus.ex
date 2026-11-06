@@ -1,5 +1,11 @@
 defmodule Shuttle.RexFocus do
-  @moduledoc "Follows Rex worker-window selections into the spoken-time voice route journal."
+  @moduledoc """
+  Routes Rex active-window changes into the spoken-time voice journal.
+
+  Rex server events identify the active window within a session, but not which
+  session an app is displaying. Switching to an already-active window in a
+  different session therefore needs a client selection signal from Rex.
+  """
   use GenServer
 
   # The stdin reader owns the CLI's lifetime even if the BEAM exits without
