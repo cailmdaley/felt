@@ -484,6 +484,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   alias Shuttle.FileTail
 
   @names ~r/\b(?:claude|cloud|clawed|claw|klaud|clot|clock|clod|claud)\b/iu
+  @closing ~r/\bsend[.!?]*\s*$/iu
   @partial_stale_seconds 60
   @stamp ~r/^\d{2}:\d{2}:\d{2}(?:-\d{2}:\d{2}:\d{2})?\s+/
 
@@ -798,7 +799,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         add_line(config, target, line, state, voice)
 
       {:seen, checkpoint} ->
-        if checkpoint && Regex.match?(@names, voice.text) do
+        if checkpoint && summoned?(config, voice.text) do
           make_batch(
             config,
             Map.merge(target, %{"lines" => [], "voice_rows" => [], "held" => checkpoint})
@@ -979,9 +980,9 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         config |> Map.put("ended", true) |> flush_all(state)
 
       config["kind"] == "voice" and buffer["words"] > 0 and state.cold.(target) ->
-        hold_buffer(config, buffer, state, Regex.match?(@names, spoken))
+        hold_buffer(config, buffer, state, summoned?(config, spoken))
 
-      Regex.match?(@names, spoken) ->
+      summoned?(config, spoken) ->
         make_batch(config, buffer)
 
       buffer["words"] >= threshold["words"] ->
@@ -1007,6 +1008,11 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         do: flush_buffer(acc, buffer, state),
         else: acc
     end)
+  end
+
+  defp summoned?(config, spoken) do
+    Regex.match?(@names, spoken) or
+      (config["kind"] == "voice" and Regex.match?(@closing, spoken))
   end
 
   defp silence(_line, %{silent_ms: silent_ms}), do: silent_ms

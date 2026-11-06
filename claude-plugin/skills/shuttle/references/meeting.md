@@ -6,7 +6,7 @@ What people say in a conversation is a candidate, not a decision: propose promot
 
 ## Live voice
 
-Live voice sends microphone speech to the constitution most recently viewed on the board, and a switch cuts the speech at that moment. Aqua seconds of quiet send the words to Aqua, and Quiet seconds, counted from the last spoken word, send them to you.
+Live voice sends microphone speech to the constitution most recently viewed on the board, and a switch cuts the speech at that moment. Ending with the word `send` delivers at once. Aqua seconds of quiet send the words to Aqua, and Quiet seconds, counted from the last spoken word, send them to you.
 You stay that constitution's worker; this is conversational input, not a request to file a meeting.
 Each batch arrives as ordinary input, with a speaker label on every spoken line and no timestamps. The family board counts these turns per worker, like typed ones, and leaves the words to `shuttle board --turns`; meeting batches stay off it.
 `me` identifies a voiceprint match to the enrolled user; other labels may be the user or people in the room.
