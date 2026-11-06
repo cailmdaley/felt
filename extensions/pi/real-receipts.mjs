@@ -3,12 +3,14 @@
 // Uses a private daemon, tmux server, HOME and synthetic local model provider.
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const messageRef = (id) => createHash("sha256").update(id).digest("hex").slice(0, 8);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "felt-real-pi-receipts-"));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const agentDir = path.join(root, "agent");
@@ -307,7 +309,7 @@ try {
       entries().filter(
         (e) =>
           e.message?.role === "user" &&
-          text(e).startsWith(`[Shuttle message ${id} `),
+          text(e).startsWith(`[Shuttle message ${messageRef(id)} `),
       ).length,
       1,
       `one admitted row for ${id}`,

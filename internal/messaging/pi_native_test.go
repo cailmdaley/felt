@@ -307,7 +307,7 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 				case "idle", "wrong-session":
 					appendMessage(text, "user")
 				case "concurrent":
-					if strings.Contains(text, "message first]") {
+					if strings.Contains(text, messageRef("first")) {
 						appendMessage(text, "user")
 					}
 				case "unrelated":
