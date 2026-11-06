@@ -11,7 +11,8 @@
  * context and fiber stamps, while missing `shuttle` loses activity, commit,
  * and mailbox hooks. Neither fails the session. Activity hooks are
  * fire-and-forget; context hooks are awaited with a bounded timeout. Native
- * messaging reports acceptance or refusal without failing the receiving session.
+ * messaging exposes input and refusals without failing the receiving session;
+ * the sender confirms admission from the session transcript.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

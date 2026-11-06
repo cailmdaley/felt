@@ -68,7 +68,7 @@ func piNativeSocket(path string) (os.FileInfo, error) {
 
 // RegisterPiNative records the endpoint owned by a running Pi extension. The
 // extension owns the socket and calls pi.sendUserMessage after a request is
-// validated; felt only routes bytes and records the registration.
+// validated; Shuttle routes bytes and records the registration.
 func RegisterPiNative(env *sysenv.Env, id, host, cwd, socket, transcript string, pid int, active bool) error {
 	if _, err := FormatAddress(host, "pi", id); err != nil {
 		return err
