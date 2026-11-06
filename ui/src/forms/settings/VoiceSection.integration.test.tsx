@@ -11,7 +11,7 @@ afterEach(() => { document.body.replaceChildren(); vi.clearAllMocks(); vi.unstub
 it('saves changed voice settings on the selected host without dropping other keys', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   api.load.mockResolvedValue({ text: JSON.stringify({ enabled: false, voice: { words: 23, extra: 'kept' }, other: true }), digest: 'before' })
-  api.save.mockResolvedValue({})
+  api.save.mockResolvedValue({ digest: 'after' })
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container)
   await act(async () => { root.render(<VoiceSection shuttleBase="" host={host} onChanged={vi.fn()} />) })
@@ -19,10 +19,17 @@ it('saves changed voice settings on the selected host without dropping other key
   expect(checkbox.checked).toBe(false)
   expect(container.textContent).toContain('Quiet seconds')
   await act(async () => { checkbox.click() })
+  const quiet = container.querySelectorAll<HTMLInputElement>('input[type=number]')[1]
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(quiet, '0.5')
+    quiet.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(quiet.validity.valid).toBe(true)
   await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
   expect(api.save).toHaveBeenCalledOnce()
   const [, owner, id, text, digest] = api.save.mock.calls[0]
   expect(owner).toEqual(host); expect(id).toBe('voice'); expect(digest).toBe('before')
-  expect(JSON.parse(text)).toEqual({ enabled: true, voice: { words: 23, quiet_seconds: 4, extra: 'kept' }, meeting: { words: 150, quiet_seconds: 30 }, other: true })
+  expect(JSON.parse(text)).toEqual({ enabled: true, voice: { words: 23, quiet_seconds: 0.5, extra: 'kept' }, meeting: { words: 150, quiet_seconds: 30 }, other: true })
+  expect(api.load).toHaveBeenCalledTimes(1)
   act(() => root.unmount())
 })

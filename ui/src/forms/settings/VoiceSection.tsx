@@ -30,9 +30,9 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
     setBusy(true); setError(null)
     try {
       const next = { ...doc, enabled: values.enabled, voice: { ...doc.voice as object, ...values.voice }, meeting: { ...doc.meeting as object, ...values.meeting } }
-      await saveConfigFile(shuttleBase, host, 'voice', JSON.stringify(next, null, 2) + '\n', digest)
-      const file = await loadConfigFile(shuttleBase, host, 'voice')
+      const file = await saveConfigFile(shuttleBase, host, 'voice', JSON.stringify(next, null, 2) + '\n', digest)
       setDoc(next); setDigest(file.digest); setDirty(false); onChanged()
+      if (host.isLocal) window.dispatchEvent(new CustomEvent('shuttle-voice-settings-saved', { detail: values.enabled }))
     } catch (err) { setError((err as Error).message) }
     finally { setBusy(false) }
   }
@@ -46,7 +46,7 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
         <div className="set-section-label">{kind === 'voice' ? 'Voice' : 'Meetings'}</div>
         <ul className="set-list">{(['words', 'quiet_seconds'] as const).map(field => <li className="set-row" key={field}>
           <label className="set-row-main">{field === 'words' ? 'Words' : 'Quiet seconds'}{' '}
-            <input className="set-select" type="number" min="1" step={field === 'words' ? '1' : 'any'} required value={values[kind][field]} onChange={event => {
+            <input className="set-select" type="number" min={field === 'words' ? '1' : '0.001'} step={field === 'words' ? '1' : 'any'} required value={values[kind][field]} onChange={event => {
               setValues({ ...values, [kind]: { ...values[kind], [field]: Number(event.target.value) } }); setDirty(true)
             }} />
           </label>

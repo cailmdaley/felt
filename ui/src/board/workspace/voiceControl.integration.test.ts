@@ -14,6 +14,10 @@ it('shows pending words only on their card and replaces them when sent', () => {
   document.body.append(here.chip, here.pending, away.chip, away.pending)
   expect(here.chip.textContent).toBe('Voice · Here')
   expect(here.pending.textContent).toBe('hello there')
+  Object.defineProperty(here.pending, 'scrollHeight', { value: 300 })
+  voice.status = { ...status, pending: { fiber_id: 'a', words: 3, text: 'hello there again' } }
+  ;(voice as unknown as { notify: () => void }).notify()
+  expect(here.pending.scrollTop).toBe(300)
   expect(away.chip.textContent).toBe('Voice · Alpha')
   expect(away.pending.textContent).toBe('')
   voice.status = { ...status, pending: null, state: 'yielded' }
@@ -22,6 +26,15 @@ it('shows pending words only on their card and replaces them when sent', () => {
   expect(here.pending.textContent).toBe('')
   expect(here.chip.textContent).toBe('Voice · Meeting')
   here.dispose(); away.dispose()
+})
+it('scrolls already-pending speech to the newest words after the composer mounts', async () => {
+  const voice = new Voice(''); voice.status = status
+  const control = voiceControl(voice, card({ id: 'a' }), vi.fn())
+  Object.defineProperty(control.pending, 'scrollHeight', { value: 300 })
+  document.body.append(control.pending)
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(control.pending.scrollTop).toBe(300)
+  control.dispose()
 })
 it('shows a refused mute in the chip menu rather than silently losing it', async () => {
   const voice = new Voice('')
@@ -36,6 +49,16 @@ it('shows a refused mute in the chip menu rather than silently losing it', async
   expect(control.chip.textContent).toBe('Voice · Failed')
   ;(control.chip as HTMLButtonElement).click()
   expect(document.body.textContent).toContain('Recorder unavailable')
+  control.dispose()
+})
+it('does not open an empty menu on the phone when the target is here', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true }))
+  const voice = new Voice(''); voice.status = status
+  const control = voiceControl(voice, card({ id: 'a' }), vi.fn())
+  document.body.append(control.chip)
+  expect(control.chip.hasAttribute('aria-haspopup')).toBe(false)
+  ;(control.chip as HTMLButtonElement).click()
+  expect(document.querySelector('[role=menu]')).toBeNull()
   control.dispose()
 })
 it('keeps the mobile menu read-only while still allowing the destination to open', () => {

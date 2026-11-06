@@ -22,6 +22,9 @@ export class Voice {
   private card: KanbanCard | null = null
   private lastTarget = ''
   private timer: number | null = null
+  private focusTimer: number | null = null
+  private expectedEnabled: boolean | null = null
+  private settingsRetries = 0
   private read: AbortController | null = null
   private revision = 0
   private enabledIntent: boolean | null = null
@@ -36,13 +39,17 @@ export class Voice {
     this.mounted = true
     document.addEventListener('visibilitychange', this.visibility)
     window.addEventListener('focus', this.focus)
+    window.addEventListener('shuttle-voice-settings-saved', this.settingsSaved)
     void this.poll()
   }
   dispose(): void {
     this.mounted = false
     document.removeEventListener('visibilitychange', this.visibility)
     window.removeEventListener('focus', this.focus)
+    window.removeEventListener('shuttle-voice-settings-saved', this.settingsSaved)
     if (this.timer !== null) window.clearTimeout(this.timer)
+    if (this.focusTimer !== null) window.clearTimeout(this.focusTimer)
+    this.focusTimer = null
     this.read?.abort()
     this.read = null
   }
@@ -51,14 +58,26 @@ export class Voice {
     if (!this.card) this.lastTarget = ''
     this.target(false)
   }
-  private focus = (): void => { if (!document.hidden) this.target(true) }
+  private focus = (): void => {
+    if (document.hidden || this.focusTimer !== null) return
+    this.focusTimer = window.setTimeout(() => { this.focusTimer = null; this.target(true) }, 50)
+  }
+  private settingsSaved = (event: Event): void => {
+    this.expectedEnabled = (event as CustomEvent<boolean>).detail
+    this.settingsRetries = 10
+    this.read?.abort()
+    this.read = null
+    void this.poll()
+  }
   private visibility = (): void => {
     if (document.hidden) {
       if (this.timer !== null) window.clearTimeout(this.timer)
       this.timer = null
+      if (this.focusTimer !== null) window.clearTimeout(this.focusTimer)
+      this.focusTimer = null
       this.read?.abort()
     } else {
-      this.target(true)
+      this.focus()
       if (this.read) {
         this.read.abort()
         this.read = null
@@ -110,15 +129,24 @@ export class Voice {
       if (!controller.signal.aborted && revision === this.revision) {
         const wasEnabled = this.status?.enabled
         this.status = status
+        if (this.expectedEnabled === status.enabled) this.expectedEnabled = null
         this.notify()
-        if (!wasEnabled && status.enabled) this.target(false)
+        if (!wasEnabled && status.enabled) this.target(true)
       }
       success = true
-    } catch { /* The next visible poll retries. */ }
+    } catch {
+      if (!controller.signal.aborted && revision === this.revision) {
+        this.status = null
+        this.lastTarget = ''
+        this.notify()
+      }
+    }
     finally {
       if (this.read === controller) this.read = null
       if (!controller.signal.aborted) {
-        const delay = voicePollDelay(this.mounted && !document.hidden, success, this.status)
+        let delay = voicePollDelay(this.mounted && !document.hidden, success, this.status)
+        if (delay !== null && this.expectedEnabled !== null && this.settingsRetries-- > 0) delay = 2_000
+        else if (this.settingsRetries <= 0) this.expectedEnabled = null
         if (delay !== null) this.timer = window.setTimeout(() => { this.timer = null; void this.poll() }, delay)
       }
     }

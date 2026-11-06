@@ -16,6 +16,7 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
   pending.setAttribute('aria-live', 'polite')
   let menu: HTMLElement | null = null
   let localError: string | null = null
+  let scrollFrame = 0
   let release: (() => void) | null = null
   const close = (): void => {
     release?.(); release = null
@@ -25,21 +26,32 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
   }
   const outside = (event: PointerEvent): void => { if (!menu?.contains(event.target as Node) && !chip.contains(event.target as Node)) close() }
   const matches = (id: string | undefined): boolean => !!id && (id === card.id || id === card.uid)
+  const elsewhere = (target: NonNullable<Voice['status']>['target']): boolean =>
+    !!target && (!matches(target.fiber_id) || (!!target.origin && target.origin !== card.originId))
+  const hasMenu = (state: NonNullable<Voice['status']>): boolean => !isMobileViewport() || elsewhere(state.target) || !!localError || (state.state === 'failed' && !!state.error) || state.last?.status === 'failed'
   const paint = (): void => {
     const state = voice.status
     chip.hidden = !state?.available
     if (!state?.available) { close(); pending.textContent = ''; return }
-    const here = matches(state.target?.fiber_id) && (!state.target?.origin || state.target.origin === card.originId)
+    const here = !!state.target && !elsewhere(state.target)
     const label = localError ? 'Failed' : !state.enabled ? 'Off' : state.muted ? 'Muted' : state.state === 'yielded' ? 'Meeting' : state.state === 'failed' ? 'Failed' : state.state === 'starting' ? 'Starting' : here ? 'Here' : state.target?.name ?? 'No target'
     chip.textContent = `Voice · ${label}`
-    chip.title = 'Voice controls'
-    pending.textContent = matches(state.pending?.fiber_id) ? state.pending!.text : ''
-    pending.title = pending.textContent
+    chip.title = chip.textContent
+    if (hasMenu(state)) { chip.setAttribute('aria-haspopup', 'menu'); chip.setAttribute('aria-expanded', menu ? 'true' : 'false') }
+    else { close(); chip.removeAttribute('aria-haspopup'); chip.removeAttribute('aria-expanded') }
+    const text = matches(state.pending?.fiber_id) ? state.pending!.text : ''
+    if (pending.textContent !== text) {
+      pending.textContent = text
+      pending.scrollTop = pending.scrollHeight
+      cancelAnimationFrame(scrollFrame)
+      scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; pending.scrollTop = pending.scrollHeight })
+    }
+    pending.title = text
   }
   chip.addEventListener('click', () => {
     if (menu) { close(); return }
     const state = voice.status
-    if (!state) return
+    if (!state || !hasMenu(state)) return
     menu = document.createElement('div')
     menu.className = 'ws-select-picker'
     menu.setAttribute('role', 'menu')
@@ -51,7 +63,7 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
       button.addEventListener('click', () => { close(); action() })
       menu!.append(button)
     }
-    if (state.target && (!matches(state.target.fiber_id) || (!!state.target.origin && state.target.origin !== card.originId))) item(`Open ${state.target.name}`, () => open(state.target!.fiber_id, state.target!.origin))
+    if (state.target && elsewhere(state.target)) item(`Open ${state.target.name}`, () => open(state.target!.fiber_id, state.target!.origin))
     if (!isMobileViewport()) {
       const set = (values: { muted?: boolean; enabled?: boolean }): void => {
         void voice.set(values).then(() => { localError = null; paint() }).catch(showError)
@@ -73,5 +85,5 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
   })
   const unsubscribe = voice.subscribe(paint)
   paint()
-  return { chip, pending, dismiss: () => { if (!menu) return false; close(); chip.focus(); return true }, dispose: () => { close(); unsubscribe() } }
+  return { chip, pending, dismiss: () => { if (!menu) return false; close(); chip.focus(); return true }, dispose: () => { cancelAnimationFrame(scrollFrame); close(); unsubscribe() } }
 }
