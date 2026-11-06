@@ -422,7 +422,7 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 ### Live voice
 
-`GET /voice` returns `{available, enabled, muted, state, target, cold, held, pending, preview, last, error, recorder}`.
+`GET /voice` returns `{available, enabled, muted, state, target, cold, held, pending, preview, level, last, error, recorder}`.
 An optional `recorder` selects the recording daemon, independently of the receiving worker's `origin`.
 Without it, the receiving daemon is the recorder.
 `state` is `off`, `starting`, `listening`, `yielded` (a meeting owns the microphone), or `failed`.
@@ -439,6 +439,7 @@ A composer appends only segments beyond its displayed checkpoint, so an edit res
 `preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.
 Missing or empty partials, mute, disabled voice and recorder exit clear the preview.
 Preview words never enter the relay, held drafts or delivery; only final transcript rows fill the composer.
+`level` is `{mic, at}` or `null`: the recorder mic's peak over hark's newest 100 ms block in dBFS (`mic`, a float; about -90 is digital silence, 0 is full scale) and the ISO 8601 time that block arrived (`at`), read from hark's `level.json` on each request and `null` when that file is missing or more than a second old.
 `last` is `{fiber_id, at, status, detail?}` or `null`, with `status` `delivered`, `unconfirmed` or `failed`.
 `enabled` reports the persisted intent even if recording fails. Invalid or unreadable `voice.json` fails off: `enabled: false`, `state: "failed"`, and `error` describes the configuration failure while the daemon stops any live voice recorder.
 

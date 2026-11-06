@@ -140,6 +140,24 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{preview: nil}} = Voice.update(%{})
   end
 
+  test "the mic level is shown only while hark's level file is under a second old", c do
+    level = Path.join([c.root, "hark", "level.json"])
+    File.mkdir_p!(Path.dirname(level))
+    assert {:ok, %{level: nil}} = Voice.update(%{})
+
+    now = System.os_time(:millisecond) / 1000
+    File.write!(level, Jason.encode!(%{mic: -23.4, t: now}))
+    assert %{level: %{mic: -23.4, at: at}} = Voice.show()
+    assert {:ok, at_time, 0} = DateTime.from_iso8601(at)
+    assert_in_delta DateTime.to_unix(at_time, :millisecond), now * 1000, 1
+
+    assert %{"level" => %{"mic" => -23.4}} =
+             json_response(get(api_conn(), "/api/v1/voice"), 200)
+
+    File.write!(level, Jason.encode!(%{mic: -23.4, t: now - 5}))
+    assert %{level: nil} = Voice.show()
+  end
+
   test "coldness follows owner runtime activity, with dormant and unknown targets held" do
     alias Shuttle.Voice.Target
     now = 1_000_000

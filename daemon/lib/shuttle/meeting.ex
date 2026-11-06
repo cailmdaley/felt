@@ -249,6 +249,22 @@ defmodule Shuttle.Meeting do
     end
   end
 
+  @doc """
+  The live mic level hark publishes during capture, as `%{mic: dBFS, at: iso8601}`,
+  or nil when hark has written none within the last second.
+  """
+  def mic_level(opts \\ []) do
+    with {:ok, bytes} <- Shuttle.FS.read(Path.join(hark_dir(opts), "level.json")),
+         {:ok, %{"mic" => mic, "t" => t}} when is_number(mic) and is_number(t) <-
+           Jason.decode(bytes),
+         at_ms = round(t * 1000),
+         true <- System.os_time(:millisecond) - at_ms < 1000 do
+      %{mic: mic, at: at_ms |> DateTime.from_unix!(:millisecond) |> DateTime.to_iso8601()}
+    else
+      _ -> nil
+    end
+  end
+
   @doc false
   def voice_muted?(opts \\ []), do: Shuttle.FS.exists?(Path.join(hark_dir(opts), "voice-muted"))
 

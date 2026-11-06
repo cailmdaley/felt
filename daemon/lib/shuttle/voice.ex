@@ -152,6 +152,7 @@ defmodule Shuttle.Voice do
     |> Map.put(:last, recovery_last(snapshot.last, state.recovery.()))
     |> Map.put(:preview, preview)
     |> Map.put(:cold, not is_nil(snapshot.target) and state.cold.(snapshot.target))
+    |> Map.put(:level, Meeting.mic_level(state.capture_opts))
   end
 
   defp recovery_last(last, nil), do: last
