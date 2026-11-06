@@ -698,6 +698,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
                     raise ArgumentError, "voice utterance needs an absolute wall_start timestamp"
                 end
 
+              {:ok, %{"wall" => wall} = row}
+              when is_binary(wall) and not is_map_key(row, "text") ->
+                acc
+
               _ ->
                 raise ArgumentError, "malformed voice transcript row"
             end

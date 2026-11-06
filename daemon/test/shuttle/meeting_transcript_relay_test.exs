@@ -128,6 +128,29 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     refute new =~ "late old words"
   end
 
+  test "voice skips hark's name, pause and loss records and keeps delivering", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+
+    File.write!(
+      Path.rootname(c.path) <> ".jsonl",
+      [
+        ~s({"wall": "2026-11-06T10:00:01", "name": {"speaker": "S1", "as": "me"}}),
+        ~s({"wall": "2026-11-06T10:00:02", "pause": {"track": "mic", "state": "paused"}}),
+        ~s({"wall": "2026-11-06T10:00:03", "lost": {"track": "mic", "at": "10:00:02"}}),
+        ~s({"wall": "2026-11-06T10:00:04+00:00", "track": "mic", "speaker": "S1", "name": "me", "start": 4.0, "end": 5.0, "text": "still heard Claude"})
+      ]
+      |> Enum.join("\n")
+      |> Kernel.<>("\n")
+    )
+
+    start_monitor(c, kind: "voice", routes: routes)
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert text =~ "me still heard Claude"
+  end
+
   test "subsecond spoken starts choose the route on their own side of a switch", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00.100000Z", "fiber-a")
