@@ -203,7 +203,7 @@ defmodule Shuttle.RexFocus do
 
         state
         |> warning(message)
-        |> Map.merge(%{title_ready: false, last_title: nil, last_bindings: nil, last_target: nil})
+        |> Map.put(:title_ready, false)
     end
   end
 

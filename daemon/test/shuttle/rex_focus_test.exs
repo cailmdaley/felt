@@ -191,6 +191,26 @@ defmodule Shuttle.RexFocusTest do
     refute_receive {:warning, _}
   end
 
+  test "AX recovery cannot reselect an unchanged worker over a later board choice", c do
+    title = start_supervised!({Agent, fn -> {:ok, "task - project/task"} end})
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, true,
+        poll_ms: 60_000,
+        title: fn -> Agent.get(title, & &1) end,
+        command: fn -> nil end
+      )
+
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+    Agent.update(title, fn _ -> {:error, :unavailable} end)
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    Agent.update(title, fn _ -> {:ok, "task - project/task"} end)
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
+  end
+
   test "the bounded accessibility read classifies permission failure without exposing raw stderr" do
     Shuttle.Test.Env.put_app_env(:rex_title_observer, self())
     Shuttle.Test.Env.put_app_env(:rex_title_result, {"└ task - project/root\n", 0})
