@@ -53,6 +53,42 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 	}
 }
 
+func TestShuttleDeployRegistersARefusedLaunchdJobAgain(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered := filepath.Join(t.TempDir(), "registered")
+	harness := `TARGET_SHA=abc123
+DEPLOY_STARTED_AT=2026-01-01T00:00:00
+SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=2
+SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1
+REGISTERED='` + registered + `'
+launchctl() {
+  case "$1" in
+    print) [ -e "$REGISTERED" ] || printf '\tlast exit code = 78: EX_CONFIG\n' ;;
+    bootstrap) : > "$REGISTERED" ;;
+  esac
+}
+version_json() {
+  [ -e "$REGISTERED" ] || return 0
+  printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","release_path":"/expected/release","incarnation":"verified-a","ready":true,"contract":{"ok":true},"reconciliation_hold":null,"quarantine":null}'
+}
+sleep() { :; }
+EXPECTED_RELEASE=/expected/release
+` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "version_launch_health") + shellFunction(t, string(script), "wait_for_sha") + `
+wait_for_sha ""
+`
+	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
+	if err != nil {
+		t.Fatalf("wait_for_sha did not recover a refused job: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "registering its job again") {
+		t.Fatalf("recovery was silent: %s", out)
+	}
+}
+
 func TestDeployLaunchHealthShell(t *testing.T) {
 	t.Parallel()
 	out, err := exec.Command("bash", "../../scripts/test-shuttle-deploy.sh").CombinedOutput()

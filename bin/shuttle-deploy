@@ -563,6 +563,13 @@ wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
 
   while :; do
     version="$(version_json 2>/dev/null || true)"
+    # launchd can refuse a rebuilt binary with exit 78 until its job is registered again.
+    if [ -z "$version" ] && command -v launchctl >/dev/null 2>&1 &&
+       launchctl print "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null | grep -q 'last exit code = 78'; then
+      printf '  launchd refused the daemon on %s; registering its job again\n' "${host:-local}" >&2
+      launchctl bootout "gui/$(id -u)/io.shuttle.daemon" || true
+      launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/io.shuttle.daemon.plist" || true
+    fi
     sha="$(printf '%s\n' "$version" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
     booted="$(printf '%s\n' "$version" | sed -n 's/.*"booted_at"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
     mix_vsn="$(printf '%s\n' "$version" | sed -n 's/.*"mix_vsn"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
