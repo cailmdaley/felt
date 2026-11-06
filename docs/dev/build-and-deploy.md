@@ -386,6 +386,10 @@ receipt's top-level repair when no component reports one. A harness problem fail
 A failed build, activation, readiness check, quarantine release or prune also makes the invocation exit nonzero, with the host and failed step in its output. A pi clone that cannot fetch
 the deployed commit fails the host.
 
+### The Rex title helper
+
+On a Mac with Rex, `make cli-install` builds `scripts/shuttle-rex-title.c` into `~/.local/bin/shuttle-rex-title` if nothing is there, then asks macOS for Accessibility once. An ad-hoc-signed grant is bound to the binary's code hash, so deploys never rebuild it. Delete the file only to change the helper, and grant the new one. It disclaims responsibility on exec, so macOS checks its grant whichever process runs it, and the daemon spawns it each second while listening. `shuttle doctor` reports the state as `Rex session following`.
+
 ### The bundle on a host that does not build it
 
 The board bundle is identical on every host, and building it is expensive
