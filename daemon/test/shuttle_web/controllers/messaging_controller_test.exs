@@ -341,6 +341,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
           "queued",
           "submitted",
           "context_added",
+          "failure-notice",
           "unknown",
           "refused",
           "malformed-local"
@@ -349,12 +350,23 @@ defmodule ShuttleWeb.MessagingControllerTest do
         Shuttle.Messaging.send_message(%{
           "address" => "shuttle://local/codex/native%2Fid",
           "text" => "Use the conservative cut.",
-          "from" => if(id == "queued", do: "", else: "reviewer"),
+          "from" =>
+            if(id == "failure-notice",
+              do: "shuttle",
+              else: if(id == "queued", do: "", else: "reviewer")
+            ),
+          "sender_proof" => if(id == "failure-notice", do: "verified-test-proof", else: ""),
           "message_id" => id,
           "wake" => id != "context_added"
         })
 
       assert match?({:ok, _, _}, result)
+
+      if id == "failure-notice",
+        do:
+          assert_receive(
+            {:local_message_frame, %{"message_id" => "failure-notice", "from" => "shuttle"}}
+          )
 
       if id in ["accepted", "queued", "submitted", "context_added"] do
         expected_label = "unverified"
@@ -577,21 +589,6 @@ defmodule ShuttleWeb.MessagingControllerTest do
     request = Map.delete(request, "context_if_busy")
     assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(502)
     assert_receive {:local_message_frame, %{}}
-  end
-
-  test "context-only requests reject the automatic wake policy before delivery", %{host: host} do
-    for hint <- [true, "true", nil] do
-      request = %{
-        "address" => "shuttle://#{host}/claude/native",
-        "text" => "passive context",
-        "wake" => false,
-        "context_if_busy" => hint,
-        "message_id" => "passive-hint"
-      }
-
-      assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(400)
-      refute_received {:local_message_frame, _}
-    end
   end
 
   test "only a locally verified proof preserves a sender identity", %{host: host} do
@@ -884,6 +881,63 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert replayed["from"] == "unverified"
     assert replayed["from_claim"] == sender
     refute Map.has_key?(replayed, "attested_sender")
+  end
+
+  test "failure notices retain verified Shuttle attribution across a forward", %{host: host} do
+    text = "Shuttle could not confirm delivery"
+
+    api_conn()
+    |> post(
+      "/api/v1/messages",
+      Jason.encode!(%{
+        "address" => "shuttle://edge/pi/p%2F1",
+        "text" => text,
+        "from" => "shuttle",
+        "sender_proof" => "verified-test-proof",
+        "message_id" => "notice-out"
+      })
+    )
+    |> json_response(200)
+
+    assert_receive {:forwarded, %{"message_id" => "notice-out", "from_claim" => claim}}
+    assert claim == "shuttle://#{host}/shuttle/daemon"
+
+    assert Shuttle.Messaging.redeem_forward_attestation(%{
+             "message_id" => "notice-out",
+             "from" => claim,
+             "address" => "shuttle://edge/pi/p%2F1",
+             "digest" => Shuttle.Messaging.Attestations.digest(text, [])
+           })
+
+    sender = "shuttle://edge/shuttle/daemon"
+
+    :ok =
+      Shuttle.Messaging.Attestations.put("notice-in", %{
+        from: sender,
+        harness: "pi",
+        native: "p/1",
+        digest: Shuttle.Messaging.Attestations.digest(text, [])
+      })
+
+    forwarded = %{
+      "address" => "shuttle://local/pi/p%2F1",
+      "text" => text,
+      "from" => "unverified",
+      "from_claim" => sender,
+      "message_id" => "notice-in"
+    }
+
+    api_conn() |> post("/api/v1/messages", Jason.encode!(forwarded)) |> json_response(200)
+
+    assert_receive {:local_message_frame,
+                    %{"message_id" => "notice-in", "from" => "shuttle", "daemon_sender" => true}}
+
+    api_conn() |> post("/api/v1/messages", Jason.encode!(forwarded)) |> json_response(200)
+
+    assert_receive {:local_message_frame,
+                    %{"message_id" => "notice-in", "from" => "unverified"} = replay}
+
+    refute Map.has_key?(replay, "daemon_sender")
   end
 
   test "a forged attested sender field never reaches the CLI" do

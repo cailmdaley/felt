@@ -153,7 +153,7 @@ A launch prompt may name a `Previous session:`; read it for texture, never for i
 
 ```bash
 shuttle message <target> "…" --attach results.csv   # files travel on their own route
-shuttle message <target> "…" --message-id <id>      # retry an interrupted send; never delivers twice
+shuttle message <target> "…" --message-id <id>      # retry a send without another transport write
 ```
 
 A target is an address, a session id, or a fiber.
@@ -162,7 +162,13 @@ A wake send messages the live worker or queues for its next worker when dormant.
 Mailbox receipts are `queued` for context-only sends and `queued_for_next_worker` for dormant wake sends; neither means delivered.
 Delivered headers carry the sending session in `from` and, for a worker, `reply to <fiber>`: reply to the fiber so the answer follows the work across handoffs; a session address stays pinned to that one session. Sender labels are self-reported. The receipt says how far delivery got (`accepted`: the harness took the input), never that the model replied. A plain message to a busy Claude session waits for main-thread prompt submission or tool completion as context; if unoffered after 30 seconds, or the worker stops working sooner, the owning daemon claims it for native wake.
 A daemon restart resumes recovery from disk.
-Fallback failures produce a notice to the sender; native wake respects Claude's approval policy. Other sessions use their existing wake path. Use `--wake` to force a wake, or `--context-only` to add context without starting a turn. `--notify-when-idle` (with or without text) sends you one notice, as context, when the receiver next ends a turn with nothing queued or running, or exits. Idle is not done. A hook-only embedded Codex session cannot be woken, and Shuttle never pastes into its terminal. Without a route to a host, leave a note in the fiber and `felt sync --push`.
+A Claude turn parked on background tasks is idle for message routing.
+Retries return the original queue receipt rather than refreshing delivery progress.
+Fallback failures produce a verified Shuttle notice to the sender without clearing its outstanding question.
+Each notice gets five seconds and at most three attempts, spaced at least a minute apart; notice-only entries wait for the minute sweep, and the last failure retires with a diagnostic.
+Large context-only messages use a retained full-message file reference.
+Hook acknowledgment isn't transcript confirmation: a crash around acknowledgment can repeat an offer, and an interrupt during a slow sibling PostToolUse hook can discard acknowledged context.
+Native wake respects Claude's approval policy. Other sessions use their existing wake path. Use `--wake` to force a wake, or `--context-only` to add context without starting a turn. `--notify-when-idle` (with or without text) sends you one notice, as context, when the receiver next ends a turn with nothing queued or running, or exits. Idle is not done. A hook-only embedded Codex session cannot be woken, and Shuttle never pastes into its terminal. Without a route to a host, leave a note in the fiber and `felt sync --push`.
 
 ## Past conversations
 

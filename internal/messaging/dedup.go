@@ -153,7 +153,8 @@ func (o dedupOptions) run(ctx context.Context, env *sysenv.Env, req Request, sen
 	if err := ensureDir(dir, 0700); err != nil {
 		return Receipt{}, errCode("dedup_unavailable", "cannot create message store: %v", err)
 	}
-	path := dedupRecordPath(env, req.MessageID)
+	nameHash := sha256.Sum256([]byte(req.MessageID))
+	path := filepath.Join(dir, hex.EncodeToString(nameHash[:])+".json")
 	hash := requestHash(req)
 
 	ownerDeadline := time.Now().Add(reservationDeadlineCeiling)
@@ -308,7 +309,7 @@ func duplicateResult(ctx context.Context, env *sysenv.Env, req Request, path, ha
 		case old.Hash != hash:
 			receipt, err = rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request")
 		case old.State == "complete":
-			receipt, err = storedResult(refreshCompletedReceipt(ctx, env, req, path, hash, old))
+			receipt, err = storedResult(refreshCompletedNativeReceipt(ctx, env, req, path, hash, old))
 		case old.State != "reserved" || old.OwnerPID <= 0:
 			receipt, err = ownerlessRecord(req)
 		case !processAlive(old.OwnerPID, old.OwnerStart):
@@ -354,15 +355,7 @@ func readDedupRecord(path string) (record, error) {
 	return old, nil
 }
 
-func dedupRecordPath(env *sysenv.Env, key string) string {
-	nameHash := sha256.Sum256([]byte(key))
-	return filepath.Join(dataDir(env), "messages", hex.EncodeToString(nameHash[:])+".json")
-}
-
-func refreshCompletedReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
-	if old.Receipt.Transport == "claude-hook" && old.Receipt.Status == StatusQueued && req.ContextIfBusy {
-		return refreshClaudeHookReceipt(env, req, old)
-	}
+func refreshCompletedNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
 	if old.State != "complete" || old.Hash != hash || old.TranscriptOffset == nil || *old.TranscriptOffset < 0 || (old.Receipt.Status != StatusQueued && old.Receipt.Status != StatusSubmitted && old.Receipt.Status != StatusUnknown) {
 		return old
 	}

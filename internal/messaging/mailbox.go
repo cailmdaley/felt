@@ -322,9 +322,6 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if r.Wake {
 		return rejected(r, transport, "hook mailboxes cannot wake a session"), errCode("wake_required", "hook mailboxes cannot wake a session")
 	}
-	if a.Harness == "claude" && len(Labeled(r))+2 > claudeHookBatchBytes {
-		return rejected(r, transport, "message exceeds Claude's safe hook context limit; split it or use --wake"), errCode("invalid_request", "message exceeds Claude's safe hook context limit; split it or use --wake")
-	}
 	if requestExpired(r, time.Now()) {
 		return rejected(r, transport, "thread notice expired"), errCode("expired", "thread notice is outside the 14-day retention window")
 	}
@@ -393,14 +390,6 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 	}
 	// One output envelope per hook, with the same batch bounds as session mail.
 	return offerLinkedFiberContext(env, harness, id, host, emit)
-}
-
-func offerMailbox(dir string, accepts func(Request) bool, emit func([]Request) error) error {
-	return offerMailboxWithAck(dir, accepts, emit, false, nil, "")
-}
-
-func offerMailboxValidated(dir string, accepts func(Request) bool, current func(context.Context, Request) (bool, error), emit func([]Request) error) error {
-	return offerMailboxWithAck(dir, accepts, emit, false, current, "")
 }
 
 // offerMailboxEach acknowledges each request as soon as its individual
@@ -550,9 +539,6 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 				it.entry.Request.Text = "Full message JSON (read request.text before acting): " + filepath.Join(dir, "offered", filepath.Base(it.path))
 			}
 			cost = len(Labeled(it.entry.Request)) + 2
-		}
-		if cost > limit {
-			continue
 		}
 		if size+cost > limit {
 			break

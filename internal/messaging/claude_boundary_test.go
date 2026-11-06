@@ -109,13 +109,13 @@ func TestClaudeRecoveryPassesNeverOverlap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- RecoverClaudeMail(ctx, env, "host", time.Now().Add(time.Minute), nil) }()
+	go func() { _, err := RecoverClaudeMail(ctx, env, "host", time.Now().Add(time.Minute), nil); done <- err }()
 	select {
 	case <-received:
 	case <-time.After(5 * time.Second):
 		t.Fatal("native write never started")
 	}
-	if err := RecoverClaudeMail(context.Background(), env.Clone(), "host", time.Now().Add(time.Minute), nil); err != nil {
+	if _, err := RecoverClaudeMail(context.Background(), env.Clone(), "host", time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	if sent.Load() != 1 {

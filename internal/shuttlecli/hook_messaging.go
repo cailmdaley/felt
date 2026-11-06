@@ -90,6 +90,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		return nil
 	}
 	if harness == "codex" || harness == "claude" {
+		input.Harness = harness
 		state := turnMailboxState(input)
 		if state != "" {
 			_ = messaging.SetMailboxState(a.env, harness, input.SessionID, host, state)
@@ -140,7 +141,7 @@ func turnMailboxState(input eventHookInput) string {
 	case "StopFailure":
 		return "idle"
 	case "Stop":
-		if countBackgroundTasks(input.BackgroundTasks) > 0 {
+		if input.Harness != "claude" && countBackgroundTasks(input.BackgroundTasks) > 0 {
 			return "working"
 		}
 		return "idle"

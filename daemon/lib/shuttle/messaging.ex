@@ -437,7 +437,16 @@ defmodule Shuttle.Messaging do
 
       verified ->
         # The verified sender is the claim the receiver redeems.
-        request = %{request | raw: Map.put(request.raw, "from_claim", "")}
+        sender =
+          if request.raw["from"] == "shuttle",
+            do: address(Poller.own_host_id(), "shuttle", "daemon"),
+            else: request.raw["from"]
+
+        request = %{
+          request
+          | raw: request.raw |> Map.put("from", sender) |> Map.put("from_claim", "")
+        }
+
         attest_forward(request)
         unverified_sender(request, callback)
 
@@ -450,6 +459,18 @@ defmodule Shuttle.Messaging do
               |> Map.put("from", sender)
               |> Map.put("from_claim", "")
               |> Map.put("attested_sender", sender)
+
+            raw =
+              case parse_address(sender) do
+                {:ok, %{harness: "shuttle", native: "daemon"}} ->
+                  raw
+                  |> Map.delete("attested_sender")
+                  |> Map.put("from", "shuttle")
+                  |> Map.put("daemon_sender", true)
+
+                _ ->
+                  raw
+              end
 
             {:ok, %{request | raw: raw}}
 
@@ -633,12 +654,6 @@ defmodule Shuttle.Messaging do
       not is_boolean(wake) ->
         {:error, 400, "wake must be a boolean"}
 
-      not is_boolean(Map.get(payload, "context_if_busy", false)) ->
-        {:error, 400, "context_if_busy must be a boolean"}
-
-      Map.get(payload, "context_if_busy", false) and not wake ->
-        {:error, 400, "context_if_busy requires wake"}
-
       not is_binary(id) or id == "" or byte_size(id) > 256 or has_control?(id) ->
         {:error, 400, "message_id must be a non-empty bounded string without control characters"}
 
@@ -792,7 +807,8 @@ defmodule Shuttle.Messaging do
     else
       status = receipt_http_status(200, receipt)
 
-      if status in 200..299 and receipt["status"] in ~w(accepted context_added submitted queued) do
+      if status in 200..299 and receipt["status"] in ~w(accepted context_added submitted queued) and
+           request.raw["from"] != "shuttle" do
         clear_worker_question(request.address, Map.get(request.raw, "from", ""))
       end
 
@@ -875,8 +891,8 @@ defmodule Shuttle.Messaging do
   defp valid_wake_receipt?(receipt, request) do
     if Map.get(request.raw, "wake", false) do
       case {receipt["status"], receipt["transport"]} do
-        {"context_added", transport} ->
-          transport == "claude-hook" and request.raw["context_if_busy"] == true
+        {"context_added", _transport} ->
+          false
 
         {"queued", transport} ->
           transport in ["claude-native", "pi-native"] or

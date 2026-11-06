@@ -382,18 +382,23 @@ The main-thread hook records an offer by writing the message as context and ackn
 If no hook offers it within 30 seconds, or the worker stops working sooner, the owning daemon claims it exclusively for native wake.
 Recovery runs at boot, on queued receipts, once per second while mail is pending, and on a one-minute safety sweep.
 Queue age and transport ownership survive a daemon restart.
-Stop never drains or continues a turn; a final tool call, an interrupt or an API failure cannot strand automatic mail in the hook queue.
+Stop never drains or continues a turn; unoffered automatic mail remains eligible for fallback after a final tool call, an interrupt or an API failure.
+A Claude turn parked on background tasks is idle for message routing, so plain mail wakes it immediately.
 Subagent hooks neither receive their parent's mail nor change the parent's turn state.
-Retrying the same message ID reports `context_added` after a hook offer, or the native receipt after fallback.
+Retrying the same message ID returns the original queue receipt without another write; it doesn't refresh hook or fallback progress.
 Fallback waits briefly for native admission or refusal, not for a model response.
 A preflight failure returns the message to the hook queue; after three failed preflights, a receiver exit, or a refused or ambiguous write, Shuttle sends a failure notice to the sender's session return address.
-A failure notice that cannot reach its sender remains durable for later recovery.
+Each notice has a five-second timeout and at most three attempts, spaced by at least a minute; notice-only entries wait for the safety sweep rather than the fast tick.
+After the third failed attempt, Shuttle retires the entry and logs the undeliverable notice.
+Notices arrive as verified `from: shuttle` and don't answer a worker's outstanding question.
+Unreadable entries are skipped with a diagnostic so other mail can recover.
 Claude's receiver approval policy still applies; a held native message doesn't start a turn.
 An interrupted preflight can retry; a durable before-write mark without a recorded result is reported as ambiguous and never blindly resent.
 Claude hook batches stay below 8 KiB, including message labels.
-Oversized direct context-only messages are refused with instructions to split them or use `--wake`.
-Durable fiber context can be queued before its receiver's harness is known; a single oversized entry reaches Claude as a reference to its retained full-message JSON, never a truncated preview or a native wake.
+A direct context-only message or durable fiber entry larger than this batch budget reaches Claude as a reference to its retained full-message JSON, never a truncated preview or a native wake.
 Hook output and acknowledgment, like native delivery and receipt persistence, aren't atomic across a process crash; transport ownership prevents ordinary duplicate delivery but doesn't establish exactly-once delivery at those boundaries.
+An interrupt while a sibling PostToolUse hook is still running can also discard Shuttle's already-acknowledged context.
+The stock sibling hook is short, but a slow third-party hook widens this window; acknowledgment isn't transcript confirmation.
 `--wake` forces the native wake path, including during a turn.
 `--context-only` or `--wake=false` queues context without starting a turn, regardless of state.
 Pi and Codex retain their existing paths.

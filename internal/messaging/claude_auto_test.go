@@ -41,11 +41,11 @@ func TestClaudeContextIfBusy(t *testing.T) {
 				if len(delivered) != 1 || delivered[0].Text != req.Text {
 					t.Fatalf("offered=%+v", delivered)
 				}
-				if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
+				if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 					t.Fatal(err)
 				}
 				again, err := Send(context.Background(), env, "host", req)
-				if err != nil || again.Status != StatusContextAdded || sent.Load() != 0 {
+				if err != nil || again.Status != StatusQueued || sent.Load() != 0 {
 					t.Fatalf("retry=%+v native=%d err=%v", again, sent.Load(), err)
 				}
 			} else if sent.Load() != 1 {
@@ -65,8 +65,8 @@ func TestClaudeUnofferedMailFallsBackAtThirtySecondsOrTurnEnd(t *testing.T) {
 			if _, err := Send(context.Background(), env, "host", req); err != nil {
 				t.Fatal(err)
 			}
-			if err := RecoverClaudeMail(context.Background(), env.Clone(), "host", time.Now().Add(29*time.Second), nil); err != nil {
-				t.Fatal(err)
+			if pending, err := RecoverClaudeMail(context.Background(), env.Clone(), "host", time.Now().Add(29*time.Second), nil); err != nil || !pending {
+				t.Fatalf("pending=%v: %v", pending, err)
 			}
 			if sent.Load() != 0 {
 				t.Fatal("fell back before 30-second offer window")
@@ -77,16 +77,16 @@ func TestClaudeUnofferedMailFallsBackAtThirtySecondsOrTurnEnd(t *testing.T) {
 				at = time.Now()
 			}
 			for i := 0; i < 2; i++ {
-				if err := RecoverClaudeMail(context.Background(), env.Clone(), "host", at, nil); err != nil {
+				if _, err := RecoverClaudeMail(context.Background(), env.Clone(), "host", at, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if err := OfferMailbox(env, "claude", "session", "host", func([]Request) error { t.Error("native mail also offered by hook"); return nil }); err != nil {
 				t.Fatal(err)
 			}
-			receipt, err := Send(context.Background(), env, "host", req)
-			if err != nil || receipt.Transport != "claude-native" || sent.Load() != 1 {
-				t.Fatalf("receipt=%+v native=%d err=%v", receipt, sent.Load(), err)
+			entry, err := readFiberMailboxEntry(filepath.Join(mailboxDir(env, "claude", "session"), "offered", mailboxKey(req.MessageID)+".json"))
+			if err != nil || entry.Fallback == nil || entry.Fallback.Receipt.Transport != "claude-native" || sent.Load() != 1 {
+				t.Fatalf("entry=%+v native=%d err=%v", entry, sent.Load(), err)
 			}
 		})
 	}
@@ -110,7 +110,7 @@ func TestClaudeFallbackAndHookCannotBothDeliver(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
+			if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -132,10 +132,7 @@ func TestClaudePassiveContextNeverFallsBack(t *testing.T) {
 	if _, err := Send(context.Background(), env, "host", req); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
-		t.Fatal(err)
-	}
-	if pending, err := ClaudeMailPending(env); err != nil || pending {
+	if pending, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil || pending {
 		t.Fatalf("passive mail schedules recovery: %v %v", pending, err)
 	}
 	if sent.Load() != 0 || !pendingMailboxText(t, env, "claude", "session", req.Text) {
@@ -155,14 +152,14 @@ func TestClaudeFallbackPreflightReturnsMailToHook(t *testing.T) {
 	if err := os.Remove(native); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
-		t.Fatal(err)
+	if pending, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil || !pending {
+		t.Fatalf("preflight recovery pending=%v: %v", pending, err)
 	}
 	offered := 0
 	if err := OfferMailbox(env, "claude", "session", "host", func(requests []Request) error { offered += len(requests); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
+	if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	if sent.Load() != 0 || offered != 1 {

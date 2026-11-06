@@ -268,8 +268,11 @@ def probe(args, mode):
             child_requests = [r for r in json_lines(root / "requests.jsonl") if "CHILD_RUN" in "\n".join(text_of(m["content"]) for m in r["messages"] if m["role"] == "user") and "MODE_SUBAGENT" not in json.dumps(r["messages"])]
             assert child_requests and all(server.token not in json.dumps(r) for r in child_requests), "child received parent mail"
         final = send(server.token, "automatic")
-        if mode in ("mid-tool", "subagent", "mid-model"):
-            assert final["status"] == "context_added", final
+        if receipt["transport"] == "claude-hook":
+            assert final == receipt, final
+            if not offers:
+                saved = [json.loads(p.read_text())["fallback"]["receipt"] for p in (root / "data" / "mailboxes" / "claude").glob("*/offered/*.json") if json.loads(p.read_text()).get("fallback")]
+                assert len(saved) == 1 and saved[0]["transport"] == "claude-native", saved
         else:
             assert final["transport"] == "claude-native", final
         replies = [r for r in json_lines(root / "output.jsonl") if r.get("type") == "assistant" and server.token in text_of(r.get("message", {}).get("content")) and not r.get("parent_tool_use_id")]

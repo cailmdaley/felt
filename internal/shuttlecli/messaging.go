@@ -701,9 +701,7 @@ func (a *app) postMessageContext(ctx context.Context, request messaging.Request)
 	if request.Wake {
 		switch receipt.Status {
 		case messaging.StatusContextAdded:
-			if !request.ContextIfBusy || receipt.Transport != "claude-hook" {
-				return messaging.Receipt{}, fmt.Errorf("daemon returned context-only status %q for a wake request", receipt.Status)
-			}
+			return messaging.Receipt{}, fmt.Errorf("daemon returned context-only status %q for a wake request", receipt.Status)
 		case messaging.StatusQueued, messaging.StatusSubmitted:
 			supported := receipt.Transport == "claude-native" ||
 				(request.ContextIfBusy && receipt.Status == messaging.StatusQueued && receipt.Transport == "claude-hook") ||

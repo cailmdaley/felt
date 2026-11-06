@@ -19,7 +19,7 @@ func TestClaudeAutomaticContextOnlyRejectedBeforeDelivery(t *testing.T) {
 	if _, err := Send(context.Background(), env, "host", req); ErrorCode(err) != "invalid_request" {
 		t.Fatalf("context-only automatic hint accepted: %v", err)
 	}
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
+	if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	if sent.Load() != 0 || pendingMailboxText(t, env, "claude", "session", req.Text) {
@@ -73,17 +73,20 @@ func TestClaudeAbandonedFallbackRetriesOnlyBeforeWrite(t *testing.T) {
 				return nil
 			}
 			for i := 0; i < 2; i++ {
-				if err := RecoverClaudeMail(context.Background(), env.Clone(), "host", time.Now().Add(time.Minute), notify); err != nil {
+				if _, err := RecoverClaudeMail(context.Background(), env.Clone(), "host", time.Now().Add(time.Minute), notify); err != nil {
 					t.Fatal(err)
 				}
 			}
-			got, err := Send(context.Background(), env, "host", req)
+			entry, err = readFiberMailboxEntry(filepath.Join(dir, "offered", key))
+			if err != nil {
+				t.Fatal(err)
+			}
 			if started {
-				if sent.Load() != 0 || notices != 1 || got.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
-					t.Fatalf("started: %+v %v writes=%d notices=%d", got, err, sent.Load(), notices)
+				if sent.Load() != 0 || notices != 1 || entry.Fallback.Receipt.Status != StatusUnknown || entry.Fallback.ErrorCode != "ambiguous_delivery" {
+					t.Fatalf("started: %+v writes=%d notices=%d", entry.Fallback, sent.Load(), notices)
 				}
-			} else if sent.Load() != 1 || notices != 0 || err != nil {
-				t.Fatalf("unsent reservation lost: %+v %v writes=%d notices=%d", got, err, sent.Load(), notices)
+			} else if sent.Load() != 1 || notices != 0 {
+				t.Fatalf("unsent reservation lost: %+v writes=%d notices=%d", entry.Fallback, sent.Load(), notices)
 			}
 		})
 	}
@@ -124,11 +127,11 @@ func TestClaudeFallbackRefusalReachesSenderAndNeverRepeatsWrite(t *testing.T) {
 				}
 				return nil
 			}
-			if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), notify); err == nil {
+			if pending, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), notify); err == nil || pending {
 				t.Fatal("notification failure was hidden")
 			}
 			for i := 0; i < 2; i++ {
-				if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), notify); err != nil {
+				if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Duration(i+2)*time.Minute), notify); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -152,7 +155,7 @@ func TestClaudeMissingEndpointReturnsPendingThenReportsBoundedFailure(t *testing
 	}
 	notices := 0
 	for i := 0; i < 10; i++ {
-		if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), func(_ context.Context, notice Request) error {
+		if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), func(_ context.Context, notice Request) error {
 			notices++
 			return nil
 		}); err != nil {
@@ -165,7 +168,7 @@ func TestClaudeMissingEndpointReturnsPendingThenReportsBoundedFailure(t *testing
 	if sent.Load() != 0 || notices != 1 {
 		t.Fatalf("native=%d notices=%d", sent.Load(), notices)
 	}
-	if pending, err := ClaudeMailPending(env); err != nil || pending {
+	if pending, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil || pending {
 		t.Fatalf("terminal failure stranded: pending=%v %v", pending, err)
 	}
 }
@@ -182,7 +185,7 @@ func TestClaudeExitedReceiverNotifiesImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 	notices := 0
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now(), func(_ context.Context, notice Request) error {
+	if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now(), func(_ context.Context, notice Request) error {
 		notices++
 		if !strings.Contains(notice.Text, "receiver exited") {
 			t.Fatal(notice.Text)
@@ -211,7 +214,7 @@ func TestClaudeFallbackKeepsArrivalOrderAndSerializesPasses(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
+	if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	if sent.Load() != 8 || len(order) != 8 {
