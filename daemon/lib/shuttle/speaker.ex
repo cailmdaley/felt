@@ -435,6 +435,7 @@ defmodule Shuttle.Speaker do
       speaking: speaking,
       queued: length(ready),
       held: Enum.frequencies_by(held, & &1.fiber_id),
+      held_names: Map.new(held, &{&1.fiber_id, Map.get(&1, :name)}),
       paused: not is_nil(state.current) and is_nil(state.current.handle),
       muted: state.muted,
       error: state.error

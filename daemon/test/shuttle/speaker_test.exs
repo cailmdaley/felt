@@ -63,6 +63,21 @@ defmodule Shuttle.SpeakerTest do
     assert %{speaking: %{fiber_id: "01CARD", name: "The card"}} = Speaker.show(server)
   end
 
+  test "lines held for a card out of view are named", %{server: server, world: world} do
+    fibers = [fibers: fn -> [%{"id" => "a/two", "uid" => "U2", "name" => "Two card"}] end]
+    set(world, %{target: ["U1"]})
+
+    for text <- ["one", "two"] do
+      {:ok, %{held: true}} =
+        Speaker.speak(
+          %{"fiber_id" => "a/two", "text" => text, "voice" => "jean"},
+          Keyword.merge(server, fibers)
+        )
+    end
+
+    assert %{held: %{"a/two" => 2}, held_names: %{"a/two" => "Two card"}} = Speaker.show(server)
+  end
+
   test "holds while the user talks and resumes just before where it stopped",
        %{server: server, world: world} do
     {:ok, _} = Speaker.speak(%{"text" => "long", "voice" => "jean"}, server)
