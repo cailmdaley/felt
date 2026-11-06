@@ -291,11 +291,11 @@ defmodule Shuttle.RexFocusTest do
     assert :ok = reveal.(task, title: fn -> {:error, :unavailable} end)
     assert_receive {:select, "session:a", "window:a"}
 
-    assert :skip = reveal.(task, title: fn -> {:ok, "task - project/task"} end)
-    assert :skip = reveal.(task, active?: fn -> false end)
-    assert :skip = reveal.(%{task | "origin" => "elsewhere"}, [])
-    assert :skip = reveal.(%{"fiber_id" => "unbound", "origin" => "test-host"}, [])
-    assert :skip = reveal.(%{}, [])
+    assert {:skip, :shown} = reveal.(task, title: fn -> {:ok, "task - project/task"} end)
+    assert {:skip, :off} = reveal.(task, active?: fn -> false end)
+    assert {:skip, :unbound} = reveal.(%{task | "origin" => "elsewhere"}, [])
+    assert {:skip, :unbound} = reveal.(%{"fiber_id" => "unbound", "origin" => "test-host"}, [])
+    assert {:skip, :unbound} = reveal.(%{}, [])
     refute_receive {:select, _, _}
   end
 

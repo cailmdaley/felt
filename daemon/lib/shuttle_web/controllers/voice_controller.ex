@@ -51,7 +51,13 @@ defmodule ShuttleWeb.VoiceController do
 
   defp local(:show, _params), do: {:ok, Voice.show()}
   defp local(:transcript, _params), do: Meeting.voice_transcript()
-  defp local(:reveal, params), do: {:ok, %{revealed: Shuttle.RexFocus.reveal(params) == :ok}}
+
+  defp local(:reveal, params) do
+    case Shuttle.RexFocus.reveal(params) do
+      :ok -> {:ok, %{revealed: true}}
+      {:skip, reason} -> {:ok, %{revealed: false, skipped: reason}}
+    end
+  end
 
   defp local(action, params) when action in [:draft, :release] do
     case apply(Shuttle.Meeting.TranscriptRelay, action, [params]) do

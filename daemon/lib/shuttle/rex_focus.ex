@@ -139,9 +139,9 @@ defmodule Shuttle.RexFocus do
 
   @doc """
   Selects the local Rex worker bound to `fiber_id`, bringing Rex forward.
-  Returns `:ok` when Rex was asked to show it, `:skip` when following is off, a
-  meeting holds the mic, the fiber has no local worker, or Rex's front window
-  already shows it.
+  Returns `:ok` when Rex was asked to show it, otherwise `{:skip, reason}`:
+  `:off` when voice is off or a meeting holds the mic, `:unbound` when the
+  fiber has no local worker, `:shown` when Rex's front window already shows it.
   """
   def reveal(params, opts \\ []) do
     following? = Keyword.get(opts, :active?, &following?/0)
@@ -150,14 +150,18 @@ defmodule Shuttle.RexFocus do
     title = Keyword.get(opts, :title, &read_title/0)
     select = Keyword.get(opts, :select, &select/2)
 
-    with true <- following?.(),
+    with {:on, true} <- {:on, following?.()},
          {:ok, doc} <- bindings.(),
-         %{"session_id" => sid, "window_id" => wid} <- binding_for(params, doc, fibers.()),
-         false <- shows?(title.(), doc, wid) do
+         {:bound, %{"session_id" => sid, "window_id" => wid}} <-
+           {:bound, binding_for(params, doc, fibers.())},
+         {:shown, false} <- {:shown, shows?(title.(), doc, wid)} do
       select.(sid, wid)
       :ok
     else
-      _ -> :skip
+      {:on, _} -> {:skip, :off}
+      {:bound, _} -> {:skip, :unbound}
+      {:shown, _} -> {:skip, :shown}
+      {:error, _} -> {:skip, :unbound}
     end
   end
 
