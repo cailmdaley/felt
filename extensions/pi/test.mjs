@@ -66,12 +66,10 @@ const hasHook = (file, verb, eventName) => readCalls(file).some(({ args, payload
 const { default: install } = await import("./index.ts");
 const handlers = new Map();
 const sent = [];
-let acknowledgeNativeMessages = true;
 const pi = {
 	on(name, handler) { handlers.set(name, handler); },
 	sendUserMessage(message, options) {
 		sent.push({ message, options });
-		if (acknowledgeNativeMessages) queueMicrotask(() => handlers.get("message_start")({ message: { role: "user", content: [{ type: "text", text: message }] } }));
 	},
 };
 install(pi);
@@ -113,39 +111,30 @@ function request(payload, extra = "") {
 }
 
 let reply = await request({ type: "msg", requestId: "idle", sessionId, message: "idle message" });
-assert.deepEqual(reply, { ok: true, delivery: "follow_up", requestId: "idle", sessionId });
+assert.deepEqual(reply, { delivery: "follow_up", requestId: "idle", sessionId });
 assert.deepEqual(sent.at(-1), { message: "idle message", options: { deliverAs: "followUp" } });
 
-acknowledgeNativeMessages = false;
-const nativeSetTimeout = globalThis.setTimeout;
-globalThis.setTimeout = (callback, delay, ...args) => nativeSetTimeout(callback, delay === 14_000 ? 100 : delay, ...args);
-try {
-	reply = await request({ type: "msg", requestId: "unconfirmed", sessionId, message: "Pi may have refused this" });
-} finally {
-	globalThis.setTimeout = nativeSetTimeout;
-}
-assert.equal(reply.ok, undefined, "a void API return without matching message_start is ambiguous");
-assert.match(reply.error, /did not confirm/);
-acknowledgeNativeMessages = true;
+reply = await request({ type: "msg", requestId: "unconfirmed", sessionId, message: "Pi may have refused this" });
+assert.equal(reply.ok, undefined, "a void API return cannot confirm delivery");
 
 await handlers.get("agent_start")({}, ctx);
 reply = await request({ type: "msg", requestId: "active", sessionId, message: "active message" });
-assert.deepEqual(reply, { ok: true, delivery: "steer", requestId: "active", sessionId });
+assert.deepEqual(reply, { delivery: "steer", requestId: "active", sessionId });
 assert.deepEqual(sent.at(-1), { message: "active message", options: { deliverAs: "steer" } });
 
 reply = await request({ type: "msg", requestId: "wrong-session", sessionId: "other", message: "must reject" });
 assert.equal(reply.ok, false);
 const beforeDuplicate = sent.length;
 reply = await request({ type: "msg", requestId: "one-connection", sessionId, message: "first" }, JSON.stringify({ type: "msg", requestId: "second", sessionId, message: "second" }) + "\n");
-assert.equal(reply.ok, true);
+assert.equal(reply.ok, undefined);
 assert.equal(sent.length, beforeDuplicate + 1);
 
 const large = "x".repeat(70_000);
 reply = await request({ type: "msg", requestId: "large", sessionId, message: large });
-assert.equal(reply.ok, true);
+assert.equal(reply.ok, undefined);
 
 reply = await request({ type: "msg", requestId: "escaped-limit", sessionId, message: "<".repeat(64 << 10) });
-assert.equal(reply.ok, true, "a legal message must fit after JSON escaping");
+assert.equal(reply.ok, undefined, "a legal message must fit after JSON escaping");
 
 const beforeContext = sent.length;
 const context = await handlers.get("before_agent_start")({ prompt: "prompt" }, ctx);
@@ -194,7 +183,7 @@ assert.equal(fs.statSync(socketPath).mode & 0o777, 0o600);
 reply = await request({ type: "msg", requestId: "stale", sessionId: oldSession, message: "wrong conversation" });
 assert.equal(reply.ok, false);
 reply = await request({ type: "msg", requestId: "new", sessionId, message: "new conversation" });
-assert.equal(reply.ok, true);
+assert.equal(reply.ok, undefined);
 assert.equal(reply.delivery, "follow_up", "new idle session must not inherit the old session's streaming state");
 
 await handlers.get("agent_start")({}, ctx);

@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func FuzzPiNativeReply(f *testing.F) {
@@ -260,5 +262,87 @@ func TestPiMailboxSupportsPassiveContext(t *testing.T) {
 	}
 	if len(offered) != 1 || offered[0].Text != "context" || strings.Contains(offered[0].Text, "base64") {
 		t.Fatalf("offered: %#v", offered)
+	}
+}
+
+func TestPiNativeTranscriptReceipts(t *testing.T) {
+	for _, scenario := range []string{"idle", "mid-turn", "concurrent", "unrelated", "historical", "wrong-session", "assistant"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			transcript := filepath.Join(t.TempDir(), "session.jsonl")
+			id := "session"
+			if scenario == "wrong-session" {
+				id = "other"
+			}
+			header, _ := json.Marshal(map[string]any{"type": "session", "id": id})
+			os.WriteFile(transcript, append(header, '\n'), 0600)
+			req := Request{Address: "shuttle://host/pi/session", Text: "same body", MessageID: "first", Wake: true}
+			var mu sync.Mutex
+			appendMessage := func(text, role string) {
+				mu.Lock()
+				defer mu.Unlock()
+				row, _ := json.Marshal(map[string]any{"type": "message", "message": map[string]any{"role": role, "content": []map[string]string{{"type": "text", "text": text}}}})
+				f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer f.Close()
+				f.Write(append(row, '\n'))
+			}
+			if scenario == "historical" {
+				appendMessage(labeled(req), "user")
+			}
+			socket, closeFixture := piNativeFixture(t, func(frame map[string]any) any {
+				text := frame["message"].(string)
+				switch scenario {
+				case "mid-turn":
+					time.Sleep(75 * time.Millisecond)
+					appendMessage(text, "user")
+				case "idle", "wrong-session":
+					appendMessage(text, "user")
+				case "concurrent":
+					if strings.Contains(text, "message first]") {
+						appendMessage(text, "user")
+					}
+				case "unrelated":
+					appendMessage("other activity", "user")
+				case "assistant":
+					appendMessage(text, "assistant")
+				}
+				// The extension cannot establish admission from its void API call.
+				return map[string]any{"requestId": frame["requestId"], "sessionId": frame["sessionId"], "delivery": "steer"}
+			})
+			defer closeFixture()
+			if err := RegisterPiNative(env, "session", "host", "/project", socket, transcript, os.Getpid(), true); err != nil {
+				t.Fatal(err)
+			}
+			send := func(r Request) Receipt {
+				ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+				defer cancel()
+				receipt, _ := sendPiNative(ctx, env, Address{Host: "host", Harness: "pi", ID: "session"}, r)
+				return receipt
+			}
+			if scenario == "concurrent" {
+				other := req
+				other.MessageID = "second"
+				done := make(chan Receipt, 1)
+				go func() { done <- send(other) }()
+				first := send(req)
+				second := <-done
+				if first.Status != StatusAccepted || second.Status != StatusUnknown {
+					t.Fatalf("first=%+v second=%+v", first, second)
+				}
+				return
+			}
+			want := StatusUnknown
+			if scenario == "idle" || scenario == "mid-turn" {
+				want = StatusAccepted
+			}
+			if got := send(req); got.Status != want {
+				t.Fatalf("receipt=%+v want=%s", got, want)
+			}
+		})
 	}
 }

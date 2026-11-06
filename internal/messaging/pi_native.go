@@ -187,15 +187,26 @@ func sendPiNative(ctx context.Context, env *sysenv.Env, a Address, req Request) 
 		return rejected(req, piNativeTransport, "cannot persist delivery deadline"), errCode("preflight_failed", "cannot persist Pi native delivery deadline")
 	}
 	_ = conn.SetDeadline(deadline)
+	transcript := openPiReceiptTranscript(r.Transcript, a.ID)
+	if transcript != nil {
+		defer transcript.Close()
+	}
 	requestID := fmt.Sprintf("shuttle-pi-%d", time.Now().UnixNano())
 	if err := json.NewEncoder(conn).Encode(map[string]any{"type": "msg", "requestId": requestID, "sessionId": a.ID, "message": labeled(req)}); err != nil {
 		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native request write did not complete"}, errCode("ambiguous_delivery", "Pi native request may have reached the receiver: %v", err)
 	}
 	line, err := bufio.NewReaderSize(io.LimitReader(conn, (512<<10)+1), 4096).ReadBytes('\n')
 	if err != nil {
+		if observePiReceipt(ctx, transcript, r.Transcript, a.ID, labeled(req), deadline) {
+			return piTranscriptReceipt(req), nil
+		}
 		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native acknowledgement was not received"}, errCode("ambiguous_delivery", "Pi native acknowledgement was not received: %v", err)
 	}
-	return decodePiNativeReply(line, requestID, a.ID, req)
+	receipt, replyErr := decodePiNativeReply(line, requestID, a.ID, req)
+	if receipt.Status == StatusUnknown && observePiReceipt(ctx, transcript, r.Transcript, a.ID, labeled(req), deadline) {
+		return piTranscriptReceipt(req), nil
+	}
+	return receipt, replyErr
 }
 
 func decodePiNativeReply(line []byte, requestID, sessionID string, req Request) (Receipt, error) {
@@ -224,4 +235,114 @@ type piNativeReply struct {
 	Error     string `json:"error"`
 	RequestID string `json:"requestId"`
 	SessionID string `json:"sessionId"`
+}
+
+// Pi persists admitted user input as a message row. Only new rows containing
+// this exact labeled message in this session establish delivery.
+func openPiReceiptTranscript(path, sessionID string) *os.File {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	reader := bufio.NewReader(f)
+	line, err := reader.ReadBytes('\n')
+	var header struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	if err != nil || json.Unmarshal(line, &header) != nil || header.Type != "session" || header.ID != sessionID {
+		f.Close()
+		return nil
+	}
+	// Preserve the send boundary even when the reader buffered historical rows.
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		f.Close()
+		return nil
+	}
+	return f
+}
+
+func observePiReceipt(ctx context.Context, f *os.File, path, sessionID, text string, deadline time.Time) bool {
+	if path == "" {
+		return false
+	}
+	var reader *bufio.Reader
+	if f != nil {
+		reader = bufio.NewReader(f)
+	}
+	var partial []byte
+	for {
+		if reader == nil {
+			// A fresh Pi session writes its file on its first user turn.
+			opened, err := os.Open(path)
+			if err == nil {
+				defer opened.Close()
+				reader = bufio.NewReader(opened)
+				line, err := reader.ReadBytes('\n')
+				var header struct {
+					Type string `json:"type"`
+					ID   string `json:"id"`
+				}
+				if err != nil || json.Unmarshal(line, &header) != nil || header.Type != "session" || header.ID != sessionID {
+					return false
+				}
+			}
+		}
+		if reader != nil {
+			for {
+				line, err := reader.ReadSlice('\n')
+				partial = append(partial, line...)
+				if len(partial) > 2<<20 {
+					return false
+				}
+				if err == bufio.ErrBufferFull {
+					continue
+				}
+				if err == nil {
+					var row struct {
+						Type    string `json:"type"`
+						Message struct {
+							Role    string          `json:"role"`
+							Content json.RawMessage `json:"content"`
+						} `json:"message"`
+					}
+					if json.Unmarshal(partial, &row) == nil && row.Type == "message" && row.Message.Role == "user" {
+						var plain string
+						var parts []struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						}
+						if json.Unmarshal(row.Message.Content, &plain) != nil && json.Unmarshal(row.Message.Content, &parts) == nil {
+							for _, part := range parts {
+								if part.Type == "text" {
+									plain += part.Text
+								}
+							}
+						}
+						if plain == text {
+							return true
+						}
+					}
+					partial = nil
+					continue
+				}
+				if err != io.EOF {
+					return false
+				}
+				break
+			}
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+func piTranscriptReceipt(req Request) Receipt {
+	return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: piNativeTransport, Detail: "Pi transcript recorded this user message"}
 }

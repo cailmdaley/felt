@@ -173,8 +173,6 @@ export default function feltExtension(pi: ExtensionAPI) {
 	let nativeTranscript: string | null = null;
 	let streaming = false;
 	const nativeFrameLimit = 512 << 10;
-	const pendingNativeMessages = new Map<string, { sessionId: string; resolve: (confirmed: boolean) => void }>();
-	const nativeMessageAckTimeoutMs = 14_000;
 
 	function isFeltProject(cwd: string): boolean {
 		return fs.existsSync(path.join(cwd, ".felt"));
@@ -214,17 +212,6 @@ export default function feltExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	pi.on("message_start", (event) => {
-		if (event.message.role !== "user") return;
-		const content = event.message.content;
-		const text = typeof content === "string"
-			? content
-			: content.filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n");
-		const pending = pendingNativeMessages.get(text);
-		if (!pending || pending.sessionId !== nativeSessionId || !nativeAccepting) return;
-		pendingNativeMessages.delete(text);
-		pending.resolve(true);
-	});
 
 	async function startNative(ctx: any): Promise<void> {
 		if (nativeServer) return;
@@ -283,32 +270,13 @@ export default function feltExtension(pi: ExtensionAPI) {
 					return;
 				}
 				const delivery = streaming ? "steer" : "follow_up";
-				let timer: NodeJS.Timeout;
-				let resolveObserved: (confirmed: boolean) => void = () => {};
-				const observed = new Promise<boolean>((resolve) => {
-					resolveObserved = resolve;
-					pendingNativeMessages.set(request.message, { sessionId: sid, resolve });
-					timer = setTimeout(() => resolve(false), nativeMessageAckTimeoutMs);
-				});
 				try {
-					// Pi's extension API catches rejected prompt promises internally and
-					// returns void. Confirm only when Pi emits this exact user message.
+					// The void API return is not admission evidence. The sender confirms
+					// the exact user message in this session's transcript.
 					pi.sendUserMessage(request.message, { deliverAs: streaming ? "steer" : "followUp" });
+					writeNativeReply(socket, { ...replyBase, delivery });
 				} catch (error) {
-					if (pendingNativeMessages.get(request.message)?.resolve === resolveObserved) pendingNativeMessages.delete(request.message);
-					clearTimeout(timer!);
 					writeNativeReply(socket, { ...replyBase, ok: false, error: error instanceof Error ? error.message : String(error) });
-					return;
-				}
-				if (await observed) {
-					clearTimeout(timer!);
-					writeNativeReply(socket, { ...replyBase, ok: true, delivery });
-				} else {
-					clearTimeout(timer!);
-					if (pendingNativeMessages.get(request.message)?.resolve === resolveObserved) pendingNativeMessages.delete(request.message);
-					// Missing lifecycle evidence is ambiguous, not a rejection: Pi may
-					// have accepted the request but failed before starting its turn.
-					writeNativeReply(socket, { ...replyBase, error: "Pi did not confirm this message starting" });
 				}
 			});
 		});
@@ -341,8 +309,6 @@ export default function feltExtension(pi: ExtensionAPI) {
 
 	async function stopNative(ctx: any): Promise<void> {
 		nativeAccepting = false;
-		for (const pending of pendingNativeMessages.values()) pending.resolve(false);
-		pendingNativeMessages.clear();
 		if (!nativeServer || !nativeSocket) {
 			nativeServer = null;
 			nativeSocket = null;
