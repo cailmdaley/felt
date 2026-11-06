@@ -284,13 +284,11 @@ describe('anchored pickers', () => {
     const toggle = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
     const field = q<HTMLTextAreaElement>('textarea')
     expect([toggle.tagName, toggle.getAttribute('aria-pressed')]).toEqual(['BUTTON', 'false'])
-    expect(q('.kbn-ctl-meet-audio').hidden).toBe(true)
+    expect(meetingBand.el.querySelector('.kbn-ctl-meet-audio')).toBeNull()
 
     toggle.click()
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
-    expect(q('.kbn-ctl-meet-audio').hidden).toBe(false)
-    expect(q('.kbn-ctl-meet-chip').hidden).toBe(true)
-    expect((q('.kbn-ctl-meet-chip') as HTMLButtonElement).disabled).toBe(true)
+    expect(meetingBand.el.querySelector('.kbn-ctl-meet-chip')).toBeNull()
     expect(meetingBand.el.querySelector('[aria-label="Meeting kind"]')).toBeNull()
     expect(field.placeholder).toBe('A note for the meeting (optional)')
     vi.mocked(fetch).mockClear()
@@ -307,9 +305,8 @@ describe('anchored pickers', () => {
     recording = { title: 'Standup', state: 'live' }
     canJoin = false
     meetingDock.syncMeeting()
-    expect([toggle.getAttribute('aria-pressed'), toggle.disabled, toggle.title]).toEqual(['false', true, 'Recording: Standup'])
-    expect(q('.kbn-ctl-meet-chip').hidden).toBe(false)
-    expect(q('.kbn-ctl-meet-chip').textContent).toBe('Recording · Standup')
+    expect([toggle.getAttribute('aria-pressed'), toggle.disabled, toggle.title]).toEqual(['false', false, 'Recording · Standup'])
+    expect(toggle.textContent).toBe('Recording · Standup')
     expect(q('.kbn-ctl-sends').hidden).toBe(false)
     meetingDock.reset()
   })
@@ -322,7 +319,7 @@ describe('anchored pickers', () => {
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const band = meetingDock.bandFor(task())
     document.body.append(band.el)
-    const chip = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
+    const chip = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
     chip.click()
     const stopItem = () => [...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Stop recording')!
     stopItem().click()
@@ -394,9 +391,9 @@ describe('anchored pickers', () => {
     meetingDock.setMeetingHostOpen(openHost, () => 'vizier')
     const band = meetingDock.bandFor(task({ id: 'foreign/chat' }))
     document.body.append(band.el)
-    const chip = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
+    const chip = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
     expect(chip.textContent).toBe('Recording · vizier')
-    expect(band.el.querySelector<HTMLElement>('.kbn-ctl-meet')!.hidden).toBe(true)
+    expect(band.el.querySelector<HTMLElement>('.kbn-ctl-meet')!.hidden).toBe(false)
     expect(band.el.querySelector('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop')).toBeNull()
     chip.click()
     const open = [...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Open recording')!
@@ -413,7 +410,7 @@ describe('anchored pickers', () => {
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const band = meetingDock.bandFor(task({ id: 'foreign/chat', sessionUuid: 'existing' }))
     document.body.append(band.el)
-    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!.click()
+    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
     ;[...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Start recording here')!.click()
     await flush()
     expect(stop).toHaveBeenCalledTimes(1)
@@ -432,7 +429,7 @@ describe('anchored pickers', () => {
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const band = meetingDock.bandFor(task())
     document.body.append(band.el)
-    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!.click()
+    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
     ;[...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Start recording here')!.click()
     await flush()
     recording = null
@@ -501,26 +498,24 @@ describe('anchored pickers', () => {
       confirm.mockRestore()
     })
 
-    it('keeps the Meeting label and exposes audio only while selected', () => {
+    it('keeps the Meeting label and exposes audio in the shared menu', () => {
       const join = vi.fn()
       const control = { canJoin: () => true, modes: () => ['call'], current: () => null, recorder: () => 'recorder-host', join }
       const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
       const band = meetingDock.bandFor(resting())
       document.body.append(band.el)
       const button = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
-      const audio = band.el.querySelector<HTMLSelectElement>('.kbn-ctl-meet-audio')!
       expect(button.textContent).toBe('Meeting')
-      expect(audio.hidden).toBe(true)
+      band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-dropdown')!.click()
+      expect(band.el.querySelector('.kbn-ctl-meet-audio')).not.toBeNull()
       button.click()
       expect(button.textContent).toBe('Meeting')
-      expect(audio.hidden).toBe(false)
-      button.click()
-      expect(audio.hidden).toBe(true)
       meetingDock.reset()
     })
 
     it('records mic only when the audio dropdown says so', async () => {
       const { join, q, meetingDock } = mountMeeting(resting())
+      q<HTMLButtonElement>('.kbn-ctl-meet-dropdown').click()
       const audio = q<HTMLSelectElement>('.kbn-ctl-meet-audio')
       expect([...audio.options].map(option => option.text)).toEqual(['Mic + system audio', 'Mic only'])
       audio.value = 'mic'

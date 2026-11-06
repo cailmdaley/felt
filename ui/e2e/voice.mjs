@@ -22,11 +22,11 @@ try {
       voice.notify()
       window.__voiceCard = card
     })
-    const chip = selected.locator('.voice-chip')
-    const meeting = selected.getByRole('button', { name: 'Meeting', exact: true })
+    const chip = selected.locator('.kbn-ctl-meet-arm')
+    const meeting = selected.locator('.kbn-ctl-meet')
     const send = selected.getByRole('button', { name: 'Start ↵', exact: true })
     const geometry = await page.evaluate(() => {
-      const el = document.querySelector('.ws-page.ws-selected .voice-chip')
+      const el = document.querySelector('.ws-page.ws-selected .kbn-ctl-meet-label')
       return { width: el.getBoundingClientRect().width, scroll: el.scrollWidth, client: el.clientWidth }
     })
     assert.ok(geometry.scroll > geometry.client, 'long name is ellipsized')
@@ -43,9 +43,9 @@ try {
     assert.ok(await pending.evaluate(el => el.scrollHeight > el.clientHeight && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2), 'pending scrolls to newest words')
     const after = await selected.locator('.kbn-ctl-composer').boundingBox()
     assert.ok(Math.abs(after.y - before.y) < 1, 'pending speech does not move the composer')
-    await page.screenshot({ path: `/tmp/voice-${scheme}-review.png` })
-    await chip.click()
+    await selected.locator('.kbn-ctl-meet-dropdown').click()
     assert.ok(await page.getByRole('menuitem', { name: 'Mute', exact: true }).isVisible())
+    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-${scheme}.png` })
     await context.close()
   }
   console.log('voice layout: ok')

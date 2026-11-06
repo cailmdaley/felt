@@ -9,8 +9,7 @@ import { attachConversationPicker } from '../conversationMenu.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import type { MeetingMode } from '../../forms/meetingApi.js'
-import { voiceControl } from './voiceControl.js'
-import { meetingActions, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
+import { meetingActions, meetingHandoffWarning, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
@@ -493,9 +492,7 @@ export class Dock {
   private constitutionButton: HTMLButtonElement | null = null
   private openConstitution: (() => void) | null = null
   private meetingPaint: (() => void) | null = null
-  private meetingChip: HTMLButtonElement | null = null
-  private dismissRecordingMenu: (() => void) | null = null
-  private dismissVoiceMenu: (() => boolean) | null = null
+  private dismissRecordingMenu: (() => boolean) | null = null
   private meetingStartHere: (() => void) | null = null
   private pendingMeetingHere: { launch: string | null; start: () => void } | null = null
   private meetingPaneCollapsed = false
@@ -707,9 +704,7 @@ export class Dock {
     this.constitutionButton = this.openConstitution = null
     this.transcriptPane = null
     this.meetingPaint = this.composerBusy = null
-    this.meetingChip = null
     this.dismissRecordingMenu = null
-    this.dismissVoiceMenu = null
     this.meetingStartHere = null
     this.pendingMeetingHere = null
     this.meetingPaneCollapsed = false
@@ -766,7 +761,7 @@ export class Dock {
   }
 
   handleEscape(): boolean {
-    if (this.dismissVoiceMenu?.()) return true
+    if (this.dismissRecordingMenu?.()) return true
     if (dismissSelectPicker()) return true
     if (this.transcriptBand?.closeFull()) return true
     if (this.dismissConversation?.() || this.dismissParent?.()) return true
@@ -811,18 +806,6 @@ export class Dock {
       this.dismissRecordingMenu?.()
       this.meetingPaneIdentity = identity
       this.meetingPaneCollapsed = false
-    }
-    if (this.meetingChip) {
-      if (current) {
-        const chipHosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
-        const title = current.title?.trim() || 'Meeting'
-        this.meetingChip.hidden = current.state === 'failed'
-        this.meetingChip.disabled = current.state === 'failed'
-        const host = this.meetingHostName?.(current) ?? (chipHosted ? this.transcriptCard?.name : current.fiber?.split('/').at(-1)) ?? title
-        this.meetingChip.textContent = `Recording · ${host}`
-        this.meetingChip.title = 'Recording controls'
-        this.meetingChip.setAttribute('aria-label', `Recording · ${host}`)
-      } else this.meetingChip.hidden = true
     }
     const hosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
     const pending = this.pendingMeetingHere
@@ -1332,7 +1315,6 @@ export class Dock {
     const fresh = ctlButton('', 'kbn-ctl-send')
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     let meetingControl: HTMLElement | undefined
-    let voiceChip: HTMLElement | undefined
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
     this.composerPaint = () => {
@@ -1357,7 +1339,7 @@ export class Dock {
       if (warmUntil === undefined) delete resume.dataset.cache; else resume.dataset.cache = 'warm'
       resume.hidden = false
       const ordered = live ? [resume, fresh] : [fresh, resume]
-      const controls = [...(voiceChip ? [voiceChip] : []), ...(meetingControl ? [meetingControl] : []), ...ordered]
+      const controls = [...(meetingControl ? [meetingControl] : []), ...ordered]
       if (controls.some((control, index) => sends.children[index] !== control) || sends.children.length !== controls.length) sends.replaceChildren(...controls)
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
@@ -1435,89 +1417,12 @@ export class Dock {
       },
     }
 
-    // Meeting arming and session actions stay visible together in the footer.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-composer-foot'
-    const meetChip = document.createElement('button')
-    meetChip.type = 'button'
-    meetChip.className = 'kbn-ctl-btn kbn-ctl-meet-chip'
-    meetChip.hidden = true
-    meetChip.disabled = true
-    meetChip.setAttribute('aria-haspopup', 'menu')
-    meetChip.setAttribute('aria-expanded', 'false')
-    let menu: HTMLElement | null = null
-    let release: Release | null = null
-    const closeMenu = (): void => {
-      release?.(); release = null
-      menu?.remove(); menu = null
-      meetChip.setAttribute('aria-expanded', 'false')
-      window.removeEventListener('pointerdown', outside, true)
-    }
-    const outside = (event: PointerEvent): void => {
-      if (!menu?.contains(event.target as Node) && !meetChip.contains(event.target as Node)) closeMenu()
-    }
-    this.dismissRecordingMenu = closeMenu
-    this.composerDisposers.push(closeMenu)
-    meetChip.addEventListener('click', () => {
-      if (menu) { closeMenu(); return }
-      const current = this.meeting?.current()
-      if (!current) return
-      menu = document.createElement('div')
-      menu.className = 'ws-select-picker'
-      menu.setAttribute('role', 'menu')
-      menu.setAttribute('aria-label', 'Recording controls')
-      const item = (label: string, act: () => void, disabled = false): void => {
-        const button = ctlButton(label, 'ws-select-option')
-        button.setAttribute('role', 'menuitem')
-        button.disabled = disabled
-        button.addEventListener('click', () => { closeMenu(); act() })
-        menu!.append(button)
-      }
-      const hosted = meetingHostCard(current, [card]) !== null
-      item(hosted ? (this.meetingPaneCollapsed ? 'Show transcript' : 'Hide transcript') : 'Open recording', () => {
-        if (!hosted) { this.onMeetingHostOpen?.(current); return }
-        this.meetingPaneCollapsed = !this.meetingPaneCollapsed
-        this.syncMeeting()
-      })
-      const held = !this.meeting?.stop || meetingActions(current, this.meeting?.stopRequested?.(current) ?? false).stopDisabled
-      item('Stop recording', () => { void this.meeting?.stop?.(current) }, held)
-      if (!hosted) item('Start recording here', () => {
-        const pending = { launch: current.launch, start: () => this.meetingStartHere?.() }
-        this.pendingMeetingHere = pending
-        void Promise.resolve(this.meeting?.stop?.(current)).then(ok => {
-          if (ok === false && this.pendingMeetingHere === pending) this.pendingMeetingHere = null
-          this.syncMeeting()
-        }).catch(() => { if (this.pendingMeetingHere === pending) this.pendingMeetingHere = null })
-      }, held || !this.meeting?.modes().includes(isMobileViewport() ? 'phone' : 'call'))
-      menu.addEventListener('keydown', event => {
-        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); meetChip.focus() }
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-          event.preventDefault()
-          const items = [...menu!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
-          const at = items.indexOf(document.activeElement as HTMLButtonElement)
-          items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
-        }
-        if (event.key === 'Tab') closeMenu()
-      })
-      meetChip.after(menu)
-      release = anchorPopover(menu, meetChip, { placement: 'above-start', matchWidth: true })
-      meetChip.setAttribute('aria-expanded', 'true')
-      menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
-      window.addEventListener('pointerdown', outside, true)
-    })
-    this.meetingChip = meetChip
     meetingControl = this.meeting ? this.buildMeeting(card, err, send, () => {
       this.composerPaint?.()
       fit()
-    }) : undefined
-    foot.append(meetChip)
-    if (this.voice) {
-      const control = voiceControl(this.voice.controller, card, this.voice.open)
-      voiceChip = control.chip
-      this.dismissVoiceMenu = control.dismiss
-      box.append(control.pending)
-      this.composerDisposers.push(control.dispose)
-    }
+    }, box) : undefined
     this.composerPaint()
     foot.append(sends)
 
@@ -1607,7 +1512,7 @@ export class Dock {
    * when the device's required audio mode is unavailable. It follows the
    * board's meeting poll. `onArm` hears the toggle so the composer can repaint.
    */
-  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: () => void): HTMLElement {
+  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: () => void, box?: HTMLElement): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
     const armButton = ctlButton('Meeting', 'kbn-ctl-meet-arm')
@@ -1636,33 +1541,154 @@ export class Dock {
     audio.className = 'kbn-ctl-select kbn-ctl-meet-audio'
     audio.setAttribute('aria-label', 'Meeting audio')
     audio.append(new Option('Mic + system audio', 'system'), new Option('Mic only', 'mic'))
-    this.composerDisposers.push(anchorSelect(audio))
+    const dropdown = ctlButton('▾', 'kbn-ctl-meet-dropdown')
+    dropdown.setAttribute('aria-label', 'Hark controls')
+    dropdown.setAttribute('aria-haspopup', 'menu')
+    dropdown.setAttribute('aria-expanded', 'false')
+    const pending = document.createElement('div')
+    pending.className = 'voice-pending'
+    pending.setAttribute('aria-live', 'polite')
+    box?.append(pending)
+    let scrollFrame = 0
+    let menu: HTMLElement | null = null
+    let release: Release | null = null
+    let localError: string | null = null
+    const closeMenu = (): void => {
+      release?.(); release = null
+      menu?.remove(); menu = null
+      dropdown.setAttribute('aria-expanded', 'false')
+      window.removeEventListener('pointerdown', outside, true)
+    }
+    const outside = (event: PointerEvent): void => {
+      if (!menu?.contains(event.target as Node) && !wrap.contains(event.target as Node)) closeMenu()
+    }
+    const matches = (id: string | undefined): boolean => !!id && (id === card.id || id === card.uid)
+    const elsewhere = (target: NonNullable<NonNullable<typeof this.voice>['controller']['status']>['target']): boolean =>
+      !!target && (!matches(target.fiber_id) || (!!target.origin && target.origin !== card.originId))
     const arm = (on: boolean): void => {
       armed = on
       armButton.setAttribute('aria-pressed', String(on))
       armButton.classList.toggle('kbn-ctl-meet-on', on)
-      audio.hidden = !on || requiredMode() !== 'call'
       onArm()
     }
     arm(false)
-    armButton.addEventListener('click', () => arm(!armed))
     this.meetingArmed = () => armed
-
-
     const paint = (): void => {
       const control = this.meeting
       if (!control) return
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
-      const held = starting || send.busy() || recording || !canJoin()
-      wrap.hidden = recording
-      armButton.disabled = held
-      audio.disabled = held
-      armButton.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : armed ? 'Sending starts recording' : 'Record a meeting with this message'
-      if (recording) armButton.setAttribute('aria-label', `Meeting recording: ${current.title?.trim() || 'a meeting'}`)
-      else armButton.setAttribute('aria-label', 'Meeting')
+      const held = starting || send.busy() || !canJoin()
+      armButton.disabled = !recording && held
+      audio.disabled = held || recording
+      const voice = this.voice?.controller.status
+      let label = 'Meeting'
+      if (recording) {
+        const hosted = meetingHostCard(current, [card]) !== null
+        const host = this.meetingHostName?.(current) ?? (hosted ? card.name : current.fiber?.split('/').at(-1)) ?? current.title?.trim() ?? 'Meeting'
+        label = `Recording · ${host}`
+      } else if (voice?.available && voice.enabled) {
+        label = localError || voice.state === 'failed' ? 'Failed' : voice.muted ? 'Muted' : voice.state === 'starting' ? 'Starting' : voice.state === 'yielded' ? 'Meeting' : voice.target ? (elsewhere(voice.target) ? voice.target.name : 'Here') : 'No target'
+      }
+      word.textContent = label
+      armButton.title = label
+      armButton.setAttribute('aria-label', label)
+      const text = voice && matches(voice.pending?.fiber_id) ? voice.pending!.text : ''
+      if (pending.textContent !== text) {
+        pending.textContent = text
+        pending.scrollTop = pending.scrollHeight
+        cancelAnimationFrame(scrollFrame)
+        scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; pending.scrollTop = pending.scrollHeight })
+      }
+      pending.title = text
       if ((recording || !canJoin()) && armed && !starting) arm(false)
     }
+    const showMenu = (): void => {
+      if (menu) { closeMenu(); return }
+      menu = document.createElement('div')
+      menu.className = 'ws-select-picker'
+      menu.setAttribute('role', 'menu')
+      menu.setAttribute('aria-label', 'Hark controls')
+      const item = (label: string, act: () => void, disabled = false): void => {
+        const button = ctlButton(label, 'ws-select-option')
+        button.setAttribute('role', 'menuitem')
+        button.disabled = disabled
+        button.addEventListener('click', () => { closeMenu(); act() })
+        menu!.append(button)
+      }
+      const note = (text: string): void => { const el = document.createElement('div'); el.className = 'voice-error'; el.textContent = text; menu!.append(el) }
+      const current = this.meeting?.current()
+      if (current && current.state !== 'failed') {
+        const hosted = meetingHostCard(current, [card]) !== null
+        item(hosted ? (this.meetingPaneCollapsed ? 'Show transcript' : 'Hide transcript') : 'Open recording', () => {
+          if (!hosted) { this.onMeetingHostOpen?.(current); return }
+          this.meetingPaneCollapsed = !this.meetingPaneCollapsed
+          this.syncMeeting()
+        })
+        const held = !this.meeting?.stop || meetingActions(current, this.meeting?.stopRequested?.(current) ?? false).stopDisabled
+        item('Stop recording', () => { void this.meeting?.stop?.(current) }, held)
+        if (!hosted) item('Start recording here', () => {
+          const next = { launch: current.launch, start: () => this.meetingStartHere?.() }
+          this.pendingMeetingHere = next
+          void Promise.resolve(this.meeting?.stop?.(current)).then(ok => {
+            if (ok === false && this.pendingMeetingHere === next) this.pendingMeetingHere = null
+            this.syncMeeting()
+          }).catch(() => { if (this.pendingMeetingHere === next) this.pendingMeetingHere = null })
+        }, held || !this.meeting?.modes().includes(requiredMode()))
+      } else if (requiredMode() === 'call') {
+        const label = document.createElement('label')
+        label.className = 'kbn-ctl-meet-audio-label'
+        label.append('Meeting audio', audio)
+        menu.append(label)
+      }
+      if (current?.state === 'failed' && current.error) note(current.error)
+      if (current) {
+        const warning = meetingHandoffWarning(current)
+        if (warning) note(warning)
+      }
+      const voice = this.voice?.controller
+      const state = voice?.status
+      if (voice && state?.available) {
+        if (state.target && elsewhere(state.target)) item(`Open ${state.target.name}`, () => this.voice?.open(state.target!.fiber_id, state.target!.origin))
+        if (!isMobileViewport()) {
+          const set = (values: { muted?: boolean; enabled?: boolean }): void => {
+            void voice.set(values).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
+          }
+          item(state.muted ? 'Unmute' : 'Mute', () => set({ muted: !state.muted }))
+          item(state.enabled ? 'Turn voice off' : 'Turn voice on', () => set({ enabled: !state.enabled }))
+        }
+        if (localError) note(localError)
+        if (state.state === 'failed' && state.error) note(state.error)
+        if (state.last?.status === 'failed') note(`Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}`)
+        if (state.last?.status === 'unconfirmed') note(`Delivery unconfirmed${state.last.detail ? `: ${state.last.detail}` : '; the message may have arrived. The transcript retains the words.'}`)
+      }
+      menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); dropdown.focus() }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          const items = [...menu!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+          const at = items.indexOf(document.activeElement as HTMLButtonElement)
+          items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
+        }
+        if (event.key === 'Tab') closeMenu()
+      })
+      wrap.append(menu)
+      release = anchorPopover(menu, wrap, { placement: 'above-start' })
+      dropdown.setAttribute('aria-expanded', 'true')
+      menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+      window.addEventListener('pointerdown', outside, true)
+    }
+    dropdown.addEventListener('click', showMenu)
+    armButton.addEventListener('click', () => {
+      if (this.meeting?.current() && this.meeting.current()?.state !== 'failed') showMenu()
+      else arm(!armed)
+    })
+    this.dismissRecordingMenu = () => {
+      if (!menu) return false
+      closeMenu(); dropdown.focus(); return true
+    }
+    const unsubscribe = this.voice?.controller.subscribe(paint)
+    this.composerDisposers.push(() => { cancelAnimationFrame(scrollFrame); closeMenu(); unsubscribe?.() })
     this.meetingPaint = paint
 
     this.meetingStart = (mode, verb) => {
@@ -1704,7 +1730,7 @@ export class Dock {
       arm(true)
       this.meetingStart?.(card.sessionUuid ? 'previous' : 'fresh', armButton)
     }
-    wrap.append(armButton, audio)
+    wrap.append(armButton, dropdown)
     paint()
     return wrap
   }
