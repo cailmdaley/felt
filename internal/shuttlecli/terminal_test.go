@@ -67,6 +67,7 @@ case "$*" in
     cat >/dev/null
     if [ -n "$REX_TEST_FIBER" ]; then cp "$REX_TEST_FIBER" "$REX_TEST_SNAPSHOT" || exit 1; fi
     printf '{}\n' ;;
+  *'session.close_window -') cat >> "$REX_TEST_CALLS"; printf '\n{}\n' ;;
   *) exit 99 ;;
 esac
 `
@@ -303,6 +304,17 @@ func TestRexBindingReadAndTerminalObservations(t *testing.T) {
 	calls, _ = os.ReadFile(log)
 	if strings.Contains(string(calls), "session.destroy") {
 		t.Fatalf("destroyed surviving human pane: %s", calls)
+	}
+	if err := os.Remove(log); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound","window_id":"window:own"},{"block_id":"block:sibling","window_id":"window:sibling"}]}`)
+	if err := r.Kill(name); err != nil {
+		t.Fatal(err)
+	}
+	calls, _ = os.ReadFile(log)
+	if strings.Contains(string(calls), "session.destroy") || !strings.Contains(string(calls), `session.close_window -`) || !strings.Contains(string(calls), `{"window_id":"window:own"}`) {
+		t.Fatalf("a family member must close only its window: %s", calls)
 	}
 	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound"}]}`)
 	after, _ := os.ReadFile(path)

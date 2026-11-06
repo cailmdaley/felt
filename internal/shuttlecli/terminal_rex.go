@@ -196,8 +196,9 @@ func (r *rexTerminal) boundBlockPresent(binding rexBinding) (bool, error) {
 }
 
 type rexBlock struct {
-	BlockID string `json:"block_id"`
-	Label   string `json:"label"`
+	BlockID  string `json:"block_id"`
+	WindowID string `json:"window_id"`
+	Label    string `json:"label"`
 }
 
 func (r *rexTerminal) blocks(sid string) ([]rexBlock, error) {
@@ -232,15 +233,41 @@ func (r *rexTerminal) Kill(name string) error {
 	return r.closeBound(binding)
 }
 
+// closeBound ends one worker. A family shares a session, so a worker with other
+// windows beside it closes only its own window; the daemon retires an empty session.
 func (r *rexTerminal) closeBound(binding rexBinding) error {
-	present, err := r.boundBlockPresent(binding)
+	blocks, err := r.blocks(binding.SessionID)
 	if err != nil {
 		return err
+	}
+	window, present, shared := "", false, false
+	for _, block := range blocks {
+		if block.BlockID == binding.BlockID {
+			window, present = block.WindowID, true
+		}
 	}
 	if !present {
 		return nil
 	}
-	return r.destroy(binding.SessionID)
+	for _, block := range blocks {
+		shared = shared || block.WindowID != window
+	}
+	if !shared {
+		return r.destroy(binding.SessionID)
+	}
+	return r.closeWindow(binding.SessionID, window)
+}
+
+func (r *rexTerminal) closeWindow(sid, window string) error {
+	body, err := json.Marshal(map[string]string{"window_id": window})
+	if err != nil {
+		return err
+	}
+	_, err = r.command(string(body), "api", "call", "-s", sid, "session.close_window", "-")
+	if errors.Is(err, errRexAbsent) || errors.Is(err, errRexNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (r *rexTerminal) destroy(sid string) error {
