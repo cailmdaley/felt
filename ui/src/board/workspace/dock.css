@@ -1,6 +1,6 @@
 /* The band over a constitution's pages: its name and state, the way to its
    conversation, its verbs, and settings, on one line that wraps when it must. */
-.ws-stage-band { flex: none; min-width: 0; }
+.ws-stage-band { flex: none; min-width: 0; container: band / inline-size; }
 .ws-stage-band[hidden] { display: none; }
 .ws-band-head {
   display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; min-height: 44px; box-sizing: border-box;
@@ -71,6 +71,23 @@
 .kbn-verb-menu .kbn-verb-menu-rule { border: 0; border-top: 1px solid var(--ws-hairline); margin: 4px 2px; }
 .ws-header-facts { margin: 12px 0 0; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); overflow-wrap: anywhere; }
 .ws-header-facts[hidden] { display: none; }
+
+/* Beside open columns the band is two rows: the name with its icons, then the
+   actions. Where even those are tight the verbs keep their icons and titles. */
+@media (min-width: 701px) {
+  @container band (max-width: 980px) {
+    .ws-band-head { flex-wrap: wrap; gap: 0 4px; }
+    .ws-band-identity { flex: 1 1 0; }
+    .ws-band-title { font-size: var(--type-prose); }
+    .ws-band-acts { order: 1; flex: 1 0 100%; flex-wrap: nowrap; gap: 2px 6px; }
+    .ws-band-acts > .kbn-ctl-verdict { flex-wrap: nowrap; gap: 2px; padding-left: 6px; }
+    .ws-header-sessions { flex-wrap: nowrap; gap: 2px; }
+  }
+  @container band (max-width: 560px) {
+    .ws-band-acts .ws-header-word, .ws-band-acts .kbn-ctl-meet-label { display: none; }
+    :is(.ws-reader, .kbn-verb-menu) .ws-band-acts .ws-header-icon.ws-header-verb { padding: 0 6px; }
+  }
+}
 
 /* On the phone the top bar names the page; the band is one row of verbs that slides sideways. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
