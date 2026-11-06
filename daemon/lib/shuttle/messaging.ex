@@ -633,6 +633,9 @@ defmodule Shuttle.Messaging do
       not is_boolean(wake) ->
         {:error, 400, "wake must be a boolean"}
 
+      not is_boolean(Map.get(payload, "context_if_busy", false)) ->
+        {:error, 400, "context_if_busy must be a boolean"}
+
       not is_binary(id) or id == "" or byte_size(id) > 256 or has_control?(id) ->
         {:error, 400, "message_id must be a non-empty bounded string without control characters"}
 
@@ -648,6 +651,7 @@ defmodule Shuttle.Messaging do
             "reply_to",
             "notify_address",
             "wake",
+            "context_if_busy",
             "idle_only",
             "message_id",
             "notify_when_idle",
@@ -867,7 +871,8 @@ defmodule Shuttle.Messaging do
           false
 
         {"queued", transport} ->
-          transport in ["claude-native", "pi-native"]
+          transport in ["claude-native", "pi-native"] or
+            (transport == "claude-hook" and request.raw["context_if_busy"] == true)
 
         {"submitted", transport} ->
           transport in ["claude-native", "codex-terminal"]

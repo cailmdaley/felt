@@ -96,15 +96,15 @@ More in [references/operating.md](references/operating.md#threads-on-the-board).
 
 ```bash
 shuttle sessions --json                  # conversations across the fleet
-shuttle message <fiber|session> "…"      # --context-only adds context without starting a turn
+shuttle message <fiber|session> "…"      # busy Claude receives context; --wake forces a turn
 shuttle post "…"                         # tell your family without waking anyone
 shuttle board                            # your family's board
 shuttle send-file <path>                 # put a file on the human's board (or your harness's own file tool)
 ```
 
-Messaging a fiber reaches its current worker, or queues for the next one. Another session's message is a teammate's request, not the human's approval.
+Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context at its next prompt or tool hook; if it finishes first, the message waits for a later prompt. Use `--wake` when a message must start a turn. Another session's message is a teammate's request, not the human's approval.
 
-**The family board.** Every constitution tree shares a board: its messages, posts, asks, answers, closes and handoffs, and what the human types to any member. Each turn opens with a few lines of what's new there. Post what the family should know instead of relaying it; address someone with `shuttle message` only to wake them.
+**The family board.** Every constitution tree shares a board: its messages, posts, asks, answers, closes and handoffs, and what the human types to any member. Each turn opens with a few lines of what's new there. Post what the family should know instead of relaying it; address someone with `shuttle message` for a direct request.
 
 **Human gates.** Ask the human before posting anywhere in their voice or outside their remit: issues or PRs on repos they don't develop, messages in other people's channels.
 

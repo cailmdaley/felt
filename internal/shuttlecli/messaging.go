@@ -158,8 +158,9 @@ then routes text (and --attach files) through the local daemon to the owning hos
 The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
-By default the addressed session is woken; --context-only (or --wake=false)
-adds the message as context without starting or steering a model turn.
+By default a busy Claude session receives context at its next prompt or tool
+hook; other sessions use their native wake path. --wake forces a native wake;
+--context-only (or --wake=false) never starts a turn.
 
 An attachment-free --context-only fiber send uses its durable mailbox regardless
 of worker liveness, except that --notify-when-idle uses session routing while a
@@ -232,6 +233,8 @@ exit 1 means rejected, unknown, or another command error.`,
 				if err != nil {
 					return err
 				}
+				address, _ := messaging.ParseAddress(request.Address)
+				request.ContextIfBusy = address.Harness == "claude" && request.Wake && !cmd.Flags().Changed("wake")
 			}
 			id := request.MessageID
 			if !messageOpts.requestJSON {
@@ -319,7 +322,7 @@ exit 1 means rejected, unknown, or another command error.`,
 	}
 	shuttleMessageCmd.Flags().StringVar(&messageOpts.file, "file", "", "read message text from a file ('-' for stdin)")
 	shuttleMessageCmd.Flags().StringArrayVar(&messageOpts.attachments, "attach", nil, "copy a file to the recipient's host (repeat for multiple files)")
-	shuttleMessageCmd.Flags().BoolVar(&messageOpts.wake, "wake", true, "request that the native harness wake the addressed session (use --wake=false for context only)")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.wake, "wake", true, "force native wake (use --wake=false for context only)")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.contextOnly, "context-only", false, "deliver context without starting or steering a model turn")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.notifyIdle, "notify-when-idle", false, "get one notice (as context) when the receiver next goes idle or exits; text is optional")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.notifyWake, "notify-wake", false, "with --notify-when-idle, have the notice start a turn here")
@@ -686,6 +689,7 @@ func (a *app) postMessage(request messaging.Request) (messaging.Receipt, error) 
 			return messaging.Receipt{}, fmt.Errorf("daemon returned context-only status %q for a wake request", receipt.Status)
 		case messaging.StatusQueued, messaging.StatusSubmitted:
 			supported := receipt.Transport == "claude-native" ||
+				(request.ContextIfBusy && receipt.Status == messaging.StatusQueued && receipt.Transport == "claude-hook") ||
 				(receipt.Status == messaging.StatusSubmitted && receipt.Transport == "codex-terminal") ||
 				(receipt.Status == messaging.StatusQueued && receipt.Transport == "pi-native")
 			if !supported {

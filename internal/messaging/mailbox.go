@@ -35,6 +35,7 @@ type mailboxRegistration struct {
 	Host     string `json:"host"`
 	CWD      string `json:"cwd"`
 	State    string `json:"state,omitempty"`
+	StateAt  int64  `json:"state_at,omitempty"`
 	LastSeen int64  `json:"last_seen"`
 	PID      int    `json:"pid,omitempty"`
 	Start    string `json:"start,omitempty"`
@@ -158,7 +159,7 @@ func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int
 		if current.PID != pid || current.Start != candidateStart {
 			return errCode("unavailable", "mailbox session is already registered to a live receiver process")
 		}
-		reg.State = current.State
+		reg.State, reg.StateAt = current.State, current.StateAt
 	}
 	if active {
 		reg.CWD, reg.LastSeen, reg.PID, reg.Start = cwd, time.Now().UnixMilli(), pid, processStartToken(pid)
@@ -241,6 +242,11 @@ func mailboxRegistrationFor(env *sysenv.Env, harness, id string) (mailboxRegistr
 // SetMailboxState records the turn phase observed by a harness hook. Unknown
 // remains unknown until a lifecycle hook establishes a safe input boundary.
 func SetMailboxState(env *sysenv.Env, harness, id, host, state string) error {
+	return SetMailboxStateAt(env, harness, id, host, state, time.Now().UnixMilli())
+}
+
+// SetMailboxStateAt ignores delayed lifecycle observations from an older turn.
+func SetMailboxStateAt(env *sysenv.Env, harness, id, host, state string, at int64) error {
 	if state != "idle" && state != "working" {
 		return errCode("invalid_request", "invalid mailbox turn state")
 	}
@@ -258,7 +264,10 @@ func SetMailboxState(env *sysenv.Env, harness, id, host, state string) error {
 	if err != nil || r.ID != id || r.Host != host || !r.live() {
 		return errCode("unavailable", "mailbox session has no live receiver registration")
 	}
-	r.State = state
+	if at < r.StateAt {
+		return nil
+	}
+	r.State, r.StateAt = state, at
 	r.LastSeen = time.Now().UnixMilli()
 	b, err := json.Marshal(r)
 	if err != nil {

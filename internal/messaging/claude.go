@@ -86,6 +86,18 @@ func (claudeAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Req
 }
 
 func (claudeAdapter) sendWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Address, r Request) (Receipt, error, dedupMetadata) {
+	if r.Wake && r.ContextIfBusy {
+		state, unlock, err := lockMailboxSessionState(env, "claude", a.ID, a.Host)
+		if err == nil {
+			if state == "working" {
+				r.Wake = false
+				receipt, err := queueMailbox(env, a, r)
+				unlock()
+				return receipt, err, dedupMetadata{}
+			}
+			unlock()
+		}
+	}
 	if r.Wake {
 		return sendClaudeNativeWithMetadata(ctx, env, a, r)
 	}
