@@ -29,7 +29,16 @@ it('saves changed voice settings on the selected host without dropping other key
   expect(api.save).toHaveBeenCalledOnce()
   const [, owner, id, text, digest] = api.save.mock.calls[0]
   expect(owner).toEqual(host); expect(id).toBe('voice'); expect(digest).toBe('before')
-  expect(JSON.parse(text)).toEqual({ enabled: true, voice: { words: 23, quiet_seconds: 0.5, extra: 'kept' }, meeting: { words: 150, quiet_seconds: 10 }, other: true })
+  expect(JSON.parse(text)).toEqual({ enabled: true, cold_minutes: 5, voice: { words: 23, quiet_seconds: 0.5, extra: 'kept' }, meeting: { words: 150, quiet_seconds: 10 }, other: true })
   expect(api.load).toHaveBeenCalledTimes(1)
+  const cold = container.querySelector<HTMLInputElement>('input[aria-label="Cold minutes"]') ?? container.querySelectorAll<HTMLInputElement>('input[type=number]')[4]
+  expect(cold.value).toBe('5')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(cold, '2.5')
+    cold.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(cold.validity.valid).toBe(true)
+  await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+  expect(JSON.parse(api.save.mock.calls[1][3]).cold_minutes).toBe(2.5)
   act(() => root.unmount())
 })

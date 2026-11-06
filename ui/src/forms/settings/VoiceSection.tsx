@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { loadConfigFile, saveConfigFile, type SettingsHost } from './settingsApi'
 import { useSettingsDraft } from './SettingsDraftContext'
 
-type Values = { enabled: boolean; voice: { words: number; quiet_seconds: number }; meeting: { words: number; quiet_seconds: number } }
-const defaults: Values = { enabled: false, voice: { words: 200, quiet_seconds: 15 }, meeting: { words: 150, quiet_seconds: 10 } }
+type Values = { enabled: boolean; cold_minutes: number; voice: { words: number; quiet_seconds: number }; meeting: { words: number; quiet_seconds: number } }
+const defaults: Values = { enabled: false, cold_minutes: 5, voice: { words: 200, quiet_seconds: 15 }, meeting: { words: 150, quiet_seconds: 10 } }
 
 export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: string; host: SettingsHost; onChanged: () => void }): JSX.Element {
   const [doc, setDoc] = useState<Record<string, unknown> | null>(null)
@@ -21,7 +21,7 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
       const voice = (parsed.voice ?? {}) as Partial<Values['voice']>
       const meeting = (parsed.meeting ?? {}) as Partial<Values['meeting']>
       setDoc(parsed); setDigest(file.digest)
-      setValues({ enabled: parsed.enabled === true, voice: { ...defaults.voice, ...voice }, meeting: { ...defaults.meeting, ...meeting } })
+      setValues({ enabled: parsed.enabled === true, cold_minutes: typeof parsed.cold_minutes === 'number' ? parsed.cold_minutes : defaults.cold_minutes, voice: { ...defaults.voice, ...voice }, meeting: { ...defaults.meeting, ...meeting } })
     }).catch((err: Error) => { if (!cancelled) setError(err.message) })
     return () => { cancelled = true }
   }, [shuttleBase, host.origin])
@@ -29,7 +29,7 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
     if (!doc) return
     setBusy(true); setError(null)
     try {
-      const next = { ...doc, enabled: values.enabled, voice: { ...doc.voice as object, ...values.voice }, meeting: { ...doc.meeting as object, ...values.meeting } }
+      const next = { ...doc, enabled: values.enabled, cold_minutes: values.cold_minutes, voice: { ...doc.voice as object, ...values.voice }, meeting: { ...doc.meeting as object, ...values.meeting } }
       const file = await saveConfigFile(shuttleBase, host, 'voice', JSON.stringify(next, null, 2) + '\n', digest)
       setDoc(next); setDigest(file.digest); setDirty(false); onChanged()
       if (host.isLocal) window.dispatchEvent(new CustomEvent('shuttle-voice-settings-saved', { detail: values.enabled }))
@@ -52,6 +52,12 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
           </label>
         </li>)}</ul>
       </div>)}
+      <p className="set-lede">Dormant workers and workers idle this long hold speech in their composer until you send it or say a name.</p>
+      <label>Cold minutes{' '}
+        <input className="set-select" type="number" min="0.001" step="any" required value={values.cold_minutes} onChange={event => {
+          setValues({ ...values, cold_minutes: Number(event.target.value) }); setDirty(true)
+        }} />
+      </label>
       <button className="set-btn set-btn-primary" type="submit" disabled={!dirty || busy}>Save</button>
     </form>}
   </>
