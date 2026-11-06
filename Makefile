@@ -230,6 +230,7 @@ migrate-test:
 # touched in the caller's home or services.
 bootstrap-test:
 	bash scripts/test-bootstrap.sh
+	bash scripts/test-tailscaled-launch.sh
 	bash scripts/test-shuttle-ensure.sh
 	bash scripts/test-shuttle-login-install.sh
 

@@ -1,26 +1,22 @@
 #!/bin/sh
 # tailscaled-launch — keep an unprivileged (userspace-networking) tailscaled
-# alive in tmux session "tailscaled", mirroring shuttle-launch's respawn loop.
-#
-# No root, no TUN, no linger on this host: userspace-networking needs no
-# privileged capability to start, so tmux is the supervisor rather than a
-# system service. scripts/bootstrap.sh installs this to
-# ~/.local/bin/tailscaled-launch alongside shuttle-launch itself.
+# alive through systemd's user tailscaled.service or a tmux respawn loop.
+# An enabled or active user service owns launch and restart; otherwise tmux
+# session "tailscaled" is the supervisor. scripts/bootstrap.sh installs this
+# to ~/.local/bin/tailscaled-launch alongside shuttle-launch itself.
 #
 # Modes:
-#   tailscaled-launch            (re)create tmux session "tailscaled" running
-#                                `tailscaled-launch --loop`, but ONLY if no
-#                                such session already exists — see "Restart
-#                                is opt-in" below.
-#   tailscaled-launch --restart  same, but tears down and replaces a live
-#                                session first.
-#   tailscaled-launch --loop     the respawn loop itself (runs in the
-#                                foreground; unchanged by --restart, which
-#                                only governs how the outer invocation treats
-#                                an existing session).
+#   tailscaled-launch            start the selected user service, or create
+#                                tmux session "tailscaled" running
+#                                `tailscaled-launch --loop` if absent.
+#   tailscaled-launch --restart  restart the selected user service, or replace
+#                                the tmux session.
+#   tailscaled-launch --loop     run the tmux fallback's respawn loop in the
+#                                foreground, without selecting a service.
 #
-# State lives in $HOME/.local/state/tailscale (socket, statedir, log),
-# created if missing; override with $TAILSCALED_STATE.
+# The user service owns its configuration. For the tmux fallback, state lives
+# in $HOME/.local/state/tailscale (socket, statedir, log), created if missing;
+# override with $TAILSCALED_STATE.
 #
 # Leave that override alone on any host a hub may revive over ssh. The shuttle
 # daemon's recovery cascade decides whether this host ever joined a tailnet by
@@ -40,10 +36,9 @@
 # the very SSH-over-Tailscale session used to run this command. Re-running
 # tailscaled-launch to check on things, or because a bootstrap script called
 # it again, must not have that side effect. So the bare invocation is
-# idempotent: if session "tailscaled" already exists, it is left alone and we
-# exit 0 having done nothing. --restart is the explicit, deliberate force
-# path for when you actually want to bounce the daemon (new tailscaled
-# binary, wedged state, etc).
+# idempotent: an active service or existing tmux session is left running.
+# --restart is the explicit, deliberate force path for when you actually
+# want to bounce the daemon (new tailscaled binary, wedged state, etc).
 #
 # The outbound proxy is OFF unless you ask for it, and that default is a
 # security boundary, not a convenience.
@@ -89,6 +84,17 @@ if [ -s "$owner_file" ]; then
     echo "tailscaled-launch: this host belongs to login node '$owner'; leaving it alone"
     exit 0
   fi
+fi
+
+# A selected service owns failures too: never start a competing tmux daemon
+# when systemctl cannot start or restart it. --loop is the fallback itself.
+if [ "${1:-}" != "--loop" ] && command -v systemctl >/dev/null 2>&1 \
+  && { systemctl --user is-enabled --quiet tailscaled.service 2>/dev/null \
+    || systemctl --user is-active --quiet tailscaled.service 2>/dev/null; }; then
+  if [ "${1:-}" = "--restart" ]; then
+    exec systemctl --user restart tailscaled.service
+  fi
+  exec systemctl --user start tailscaled.service
 fi
 
 ST="${TAILSCALED_STATE:-$HOME/.local/state/tailscale}"
