@@ -360,6 +360,20 @@ defmodule Shuttle.SpeakerTest do
     assert %{inbox: %{playing: true, card: %{fiber_id: "a/two"}}} = Speaker.show(server)
   end
 
+  test "a card the feed cannot name yet is announced by its id's last part",
+       %{server: server, world: world} do
+    set(world, %{target: ["elsewhere"]})
+
+    Speaker.speak(
+      %{"fiber_id" => "loom/tools/holistic-hark", "text" => "hi", "voice" => "jean"},
+      server
+    )
+
+    {:ok, _} = Speaker.inbox(:play, server)
+    assert_receive {:retarget, "loom/tools/holistic-hark", "holistic hark"}
+    assert_receive {:play, "jean:holistic hark: hi", _}
+  end
+
   test "inbox words are the new words alone" do
     assert Speaker.inbox_word("Play!", nil) == :play
     assert Speaker.inbox_word("play them", "") == :play

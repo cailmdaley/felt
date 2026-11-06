@@ -516,11 +516,19 @@ defmodule Shuttle.Speaker do
     end
   end
 
+  # The card's name; while the fiber feed is unavailable, its id's last part
+  # read as words ("loom/tools/hark/holistic-hark" is "holistic hark").
   defp name_of(state, item) do
     item.name ||
       case find_fiber(item.fiber_id, fibers: state.fibers) do
-        %{"name" => name} when is_binary(name) -> name
-        _ -> item.fiber_id || "a session"
+        %{"name" => name} when is_binary(name) ->
+          name
+
+        _ when is_binary(item.fiber_id) ->
+          item.fiber_id |> Path.basename() |> String.replace(~r/[-_]+/, " ")
+
+        _ ->
+          "a session"
       end
   end
 
