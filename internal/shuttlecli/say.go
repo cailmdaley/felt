@@ -117,34 +117,35 @@ with the role whose charter names it in voice:. Unclaimed voices carry no role.`
 
 func (a *app) shuttleInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "inbox [--play | --stop]",
+		Use:   "inbox [--play | --next | --stop]",
 		Short: "List spoken lines held for cards out of view, or play them",
 		Long: `List the lines the speaker holds because their card is not in view: each
 card's name, how many lines wait, and the first words of the oldest.
 
---play opens the inbox, as saying "play" does: every held line plays, oldest
-first, each card's turn opening with its name, and live voice follows the card
-whose line is playing. --stop closes it and leaves the rest held.`,
+--play opens the inbox on the card whose held line is oldest, as saying "play"
+does: live voice is routed to it and Rex shows it, its lines play, the first
+opening with its name, and then it waits for an answer. --next moves to the
+next card the same way; --stop closes the inbox and leaves the rest held.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			play, _ := cmd.Flags().GetBool("play")
-			stop, _ := cmd.Flags().GetBool("stop")
+			var actions []string
+			for _, action := range []string{"play", "next", "stop"} {
+				if on, _ := cmd.Flags().GetBool(action); on {
+					actions = append(actions, action)
+				}
+			}
 			var body []byte
 			var err error
-			switch {
-			case play && stop:
-				return fmt.Errorf("--play and --stop are exclusive")
-			case play || stop:
-				action := "play"
-				if stop {
-					action = "stop"
-				}
-				body, err = a.postMeeting("/api/v1/speak", map[string]any{"inbox": action})
-			default:
+			switch len(actions) {
+			case 0:
 				var endpoint string
 				if endpoint, err = a.daemonEndpoint("/api/v1/speak"); err == nil {
 					body, err = a.getDaemon(endpoint, daemonRoutedPostTimeout)
 				}
+			case 1:
+				body, err = a.postMeeting("/api/v1/speak", map[string]any{"inbox": actions[0]})
+			default:
+				return fmt.Errorf("--play, --next and --stop are exclusive")
 			}
 			if err != nil {
 				return err
@@ -161,13 +162,16 @@ whose line is playing. --stop closes it and leaves the rest held.`,
 				} `json:"held"`
 				Inbox struct {
 					Playing bool `json:"playing"`
+					Card    *struct {
+						Name string `json:"name"`
+					} `json:"card"`
 				} `json:"inbox"`
 			}
 			if err := json.Unmarshal(body, &answer); err != nil {
 				return fmt.Errorf("decoding speaker state: %w", err)
 			}
-			if answer.Inbox.Playing {
-				fmt.Fprintln(a.env.Stdout, "Inbox playing")
+			if answer.Inbox.Playing && answer.Inbox.Card != nil {
+				fmt.Fprintf(a.env.Stdout, "Inbox on %s\n", answer.Inbox.Card.Name)
 			} else if len(answer.Held) == 0 {
 				fmt.Fprintln(a.env.Stdout, "Nothing held")
 			}
@@ -177,8 +181,9 @@ whose line is playing. --stop closes it and leaves the rest held.`,
 			return nil
 		},
 	}
-	cmd.Flags().Bool("play", false, "Play every held line, oldest first")
-	cmd.Flags().Bool("stop", false, "Stop playing held lines and leave the rest held")
+	cmd.Flags().Bool("play", false, "Play the held lines of the card waiting longest")
+	cmd.Flags().Bool("next", false, "Play the next card's held lines")
+	cmd.Flags().Bool("stop", false, "Close the inbox and leave the rest held")
 	return cmd
 }
 

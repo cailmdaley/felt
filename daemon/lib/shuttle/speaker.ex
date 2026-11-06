@@ -17,11 +17,12 @@ defmodule Shuttle.Speaker do
   Saying "skip" (or "skip it", "skip that") while a line is current drops the
   rest of it.
 
-  Saying "play" (or "play them", "what's waiting") opens the inbox: every
-  queued line plays, oldest first, whatever is in view. Each fiber's turn opens
-  with its card's name, and live voice is routed to the fiber whose line is
-  playing, so the human can answer by talking. "stop" closes the inbox and
-  leaves the rest held; an empty inbox closes itself.
+  Saying "play" (or "play them", "what's waiting") opens the inbox on the card
+  whose held line is oldest: live voice is routed to it and Rex reveals it, so
+  its lines play, the first opening with the card's name, and the human can
+  answer by talking. "next" moves to the next card the same way; "stop" closes
+  the inbox and leaves the rest held. The inbox closes itself once nothing is
+  held.
 
   The queue, the current line and its offset are journaled, so a daemon restart
   resumes a held or playing line rather than losing it.
@@ -42,8 +43,8 @@ defmodule Shuttle.Speaker do
   def show(opts \\ []), do: GenServer.call(server(opts), :show)
   def mute(muted, opts \\ []), do: GenServer.call(server(opts), {:mute, muted})
 
-  @doc "Open (`:play`) or close (`:stop`) the inbox, as the spoken words do."
-  def inbox(action, opts \\ []) when action in [:play, :stop],
+  @doc "Open (`:play`), move on (`:next`) or close (`:stop`) the inbox, as the spoken words do."
+  def inbox(action, opts \\ []) when action in [:play, :next, :stop],
     do: GenServer.call(server(opts), {:inbox, action})
 
   @doc "Queue `text` from `fiber_id`, in `voice` when given, else its role's voice."
@@ -173,7 +174,8 @@ defmodule Shuttle.Speaker do
        render: nil,
        muted: saved.muted,
        inbox: saved.inbox,
-       last_fiber: saved.last_fiber,
+       card: saved.card,
+       announce: saved.announce,
        command_seen: nil,
        journal: journal,
        saved: saved,
@@ -202,7 +204,7 @@ defmodule Shuttle.Speaker do
   end
 
   def handle_call({:inbox, action}, _from, state) do
-    state = state |> command(action) |> advance() |> schedule() |> save()
+    state = state |> command(action) |> advance() |> close_empty() |> schedule() |> save()
     {:reply, {:ok, snapshot(state)}, state}
   end
 
@@ -245,6 +247,7 @@ defmodule Shuttle.Speaker do
        |> listen()
        |> hold_or_play()
        |> advance()
+       |> close_empty()
        |> schedule()
        |> save()}
 
@@ -262,7 +265,8 @@ defmodule Shuttle.Speaker do
 
   defp journal_path, do: Path.join([Shuttle.data_dir(), "speaker", "outbox.bin"])
 
-  defp restore(nil), do: %{queue: [], current: nil, muted: false, inbox: false, last_fiber: nil}
+  defp restore(nil),
+    do: %{queue: [], current: nil, muted: false, inbox: false, card: nil, announce: nil}
 
   defp restore(path) do
     with {:ok, bytes} <- Shuttle.FS.read(path),
@@ -296,7 +300,8 @@ defmodule Shuttle.Speaker do
           %{state.current | handle: nil, segment: nil, started: nil},
       muted: state.muted,
       inbox: state.inbox,
-      last_fiber: state.last_fiber
+      card: state.card,
+      announce: state.announce
     }
 
     if saved == state.saved do
@@ -308,21 +313,21 @@ defmodule Shuttle.Speaker do
     end
   end
 
-  # The first queued line from the constitution in view, the first of all when
-  # nothing is in view or the inbox is open. An emptied inbox closes.
+  # The first queued line from the constitution in view, or the first of all
+  # when nothing is in view. The first line of a card the inbox opened opens
+  # with the card's name.
   defp advance(%{current: nil, render: nil} = state) do
-    target = if state.inbox, do: nil, else: state.target.()
+    target = state.target.()
 
     case Enum.split_while(:queue.to_list(state.queue), &(not in_view?(&1, target))) do
       {_, []} ->
-        if state.inbox, do: Logger.info("speaker: inbox empty")
-        %{state | inbox: false, last_fiber: if(state.inbox, do: nil, else: state.last_fiber)}
+        state
 
       {before, [item | rest]} ->
         render = state.render_fun
 
         said =
-          if state.inbox and item.fiber_id != state.last_fiber,
+          if state.announce && item.fiber_id == state.announce,
             do: "#{name_of(state, item)}: #{item.text}",
             else: item.text
 
@@ -353,12 +358,9 @@ defmodule Shuttle.Speaker do
     }
 
     state =
-      if state.inbox do
-        state.retarget.(Map.put(item, :name, name_of(state, item)))
-        %{state | last_fiber: item.fiber_id}
-      else
-        state
-      end
+      if state.announce && item.fiber_id == state.announce,
+        do: %{state | announce: nil},
+        else: state
 
     {:noreply,
      %{state | render: nil, current: current, error: nil}
@@ -454,54 +456,52 @@ defmodule Shuttle.Speaker do
       before = state.current && Map.get(state.current, :before)
       state = %{state | command_seen: partial}
 
-      case inbox_word(partial, before) do
-        :play when not state.inbox -> command(state, :play)
-        :stop when state.inbox -> command(state, :stop)
+      case {inbox_word(partial, before), state.inbox} do
+        {:play, false} -> command(state, :play)
+        {:next, true} -> command(state, :next)
+        {:stop, true} -> command(state, :stop)
         _ -> state
       end
     end
   end
 
-  defp command(state, :play) do
-    Logger.info("speaker: inbox open with #{:queue.len(state.queue)} queued")
-    %{state | inbox: true, last_fiber: nil}
+  # Open the inbox on, or move it to, the card with the oldest held line.
+  defp command(state, action) when action in [:play, :next] do
+    target = state.target.()
+
+    case Enum.find(:queue.to_list(state.queue), &(not in_view?(&1, target))) do
+      nil ->
+        Logger.info("speaker: inbox has nothing held")
+        %{state | inbox: false, card: nil}
+
+      item ->
+        card = %{fiber_id: item.fiber_id, name: name_of(state, item)}
+        Logger.info("speaker: inbox on #{card.name}")
+        state.retarget.(Map.merge(item, card))
+        %{state | inbox: true, card: card, announce: item.fiber_id}
+    end
   end
 
-  # Closing the inbox puts the line under way back at the head of the queue.
   defp command(state, :stop) do
     Logger.info("speaker: inbox closed")
-
-    back =
-      case {state.current, state.render} do
-        {%{} = current, _} ->
-          if current.handle, do: state.stop.(current.handle)
-          cleanup(current)
-          [current.item]
-
-        {nil, {task, item}} ->
-          Task.shutdown(task, :brutal_kill)
-          [item]
-
-        _ ->
-          []
-      end
-
-    back = Enum.map(back, &Map.delete(&1, :said))
-
-    %{
-      state
-      | inbox: false,
-        last_fiber: nil,
-        current: nil,
-        render: nil,
-        queue: :queue.from_list(back ++ :queue.to_list(state.queue))
-    }
+    %{state | inbox: false, card: nil}
   end
+
+  # The inbox closes itself once no line is held.
+  defp close_empty(%{inbox: true} = state) do
+    target = state.target.()
+
+    if Enum.any?(:queue.to_list(state.queue), &(not in_view?(&1, target))),
+      do: state,
+      else: %{state | inbox: false, card: nil}
+  end
+
+  defp close_empty(state), do: state
 
   @doc """
   The inbox word in the pending words added since `before`: `:play` for "play",
-  "play them" or "what's waiting"; `:stop` for "stop", "stop it" or "stop
-  that"; else nil.
+  "play them" or "what's waiting"; `:next` for "next", "next one" or "next
+  card"; `:stop` for "stop", "stop it" or "stop that"; else nil.
   """
   def inbox_word(nil, _before), do: nil
 
@@ -510,6 +510,7 @@ defmodule Shuttle.Speaker do
 
     case Enum.join(words(new), " ") do
       words when words in ["play", "play them", "what's waiting", "whats waiting"] -> :play
+      words when words in ["next", "next one", "next card"] -> :next
       words when words in ["stop", "stop it", "stop that"] -> :stop
       _ -> nil
     end
@@ -523,7 +524,9 @@ defmodule Shuttle.Speaker do
       end
   end
 
-  # Route live voice to the fiber whose line is playing.
+  # Route live voice to the card the inbox opened and reveal it in Rex, so the
+  # target, the board and Rex agree on it. Rex reveals nothing while a meeting
+  # holds the mic.
   defp retarget(item) do
     params = %{"fiber_id" => item.fiber_id, "name" => item.name, "source" => "inbox"}
     params = if item[:origin], do: Map.put(params, "origin", item.origin), else: params
@@ -531,6 +534,11 @@ defmodule Shuttle.Speaker do
     case Shuttle.Voice.target(params) do
       {:ok, _} -> :ok
       {:error, reason} -> Logger.warning("speaker: inbox could not route voice: #{reason}")
+    end
+
+    case Shuttle.RexFocus.reveal(params) do
+      :ok -> :ok
+      {:skip, reason} -> Logger.info("speaker: inbox did not reveal in Rex: #{reason}")
     end
   catch
     :exit, reason -> Logger.warning("speaker: inbox could not route voice: #{inspect(reason)}")
@@ -583,7 +591,7 @@ defmodule Shuttle.Speaker do
       speaking: speaking,
       queued: length(ready),
       held: held_by_card(state, held),
-      inbox: %{playing: state.inbox},
+      inbox: %{playing: state.inbox, card: state.card},
       paused: not is_nil(state.current) and is_nil(state.current.handle),
       muted: state.muted,
       error: state.error

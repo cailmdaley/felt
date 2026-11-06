@@ -92,7 +92,7 @@ func TestInboxPlayOpensTheInbox(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	var got map[string]any
-	serveDaemon(t, env, meetingDaemon(t, "/api/v1/speak", 200, `{"held":[],"inbox":{"playing":true}}`, &got))
+	serveDaemon(t, env, meetingDaemon(t, "/api/v1/speak", 200, `{"held":[],"inbox":{"playing":true,"card":{"fiber_id":"a/two","name":"Two card"}}}`, &got))
 	out, _, err := executeIn(t, env, "", "inbox", "--play")
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestInboxPlayOpensTheInbox(t *testing.T) {
 	if want := map[string]any{"inbox": "play"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("request %v, want %v", got, want)
 	}
-	if out != "Inbox playing\n" {
+	if out != "Inbox on Two card\n" {
 		t.Fatalf("stdout %q", out)
 	}
 }
