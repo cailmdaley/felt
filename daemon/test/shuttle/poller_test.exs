@@ -6265,6 +6265,7 @@ defmodule Shuttle.PollerTest do
     end
 
     @tag backend: backend
+    @tag :review_backoff
     test "closed reaping backs off a failing #{inspect(backend)} stop and retries after cooldown",
          %{backend: backend} do
       {state, session} = closed_reap_fixture(backend)
@@ -6273,9 +6274,19 @@ defmodule Shuttle.PollerTest do
         do: Shuttle.Test.FakeRex.reply("session.close_window", {"request timed out", :timeout}),
         else: MockRunner.set_kill_session_failure(true)
 
-      scan = {:ok, [session]}
-      reap = &Shuttle.Poller.SessionReconciliation.reconcile_orphaned_sessions(&1, scan, true)
-      state = reap.(state) |> reap.()
+      fiber = MockRunner.fiber("tests/closed-reap")
+
+      reap =
+        &Shuttle.Poller.SessionReconciliation.reap_closed_session(&1, fiber["id"], fiber, session)
+
+      state =
+        Shuttle.Poller.SessionReconciliation.reconcile_orphaned_sessions(
+          state,
+          {:ok, [session]},
+          true
+        )
+
+      state = reap.(state)
       assert [%{pid: watcher, session: ^session}] = Map.values(state.running)
       on_exit(fn -> if Process.alive?(watcher), do: Shuttle.WorkerWatcher.stop(watcher) end)
       assert reap_stop_count(backend) == 1
@@ -6289,16 +6300,7 @@ defmodule Shuttle.PollerTest do
         do: Shuttle.Test.FakeRex.clear_reply("session.close_window"),
         else: MockRunner.set_kill_session_failure(false)
 
-      fiber = MockRunner.fiber("tests/closed-reap")
-
-      state =
-        Shuttle.Poller.SessionReconciliation.reap_closed_session(
-          state,
-          fiber["id"],
-          fiber,
-          session
-        )
-
+      state = reap.(state)
       assert reap_stop_count(backend) == 2
       assert state.closed_session_retries == %{}
       assert :gone = Shuttle.Terminal.status(ReapRunner, session)
