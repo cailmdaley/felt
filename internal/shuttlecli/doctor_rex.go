@@ -170,9 +170,9 @@ func probeRexTitleHelper(env *sysenv.Env) string {
 func rexTitleHelperWarning(state string) string {
 	switch state {
 	case rexTitleHelperMissing:
-		return "Rex session following needs ~/.local/bin/shuttle-rex-title; run make cli-install in the felt repo"
+		return "Rex session following needs ~/.local/bin/shuttle-rex-title; run make cli-install in a felt checkout"
 	case rexTitleHelperNotGranted:
-		return "grant ~/.local/bin/shuttle-rex-title Accessibility in macOS System Settings so voice follows the Rex session in view"
+		return "run ~/.local/bin/shuttle-rex-title --prompt and allow it so voice follows the Rex session in view"
 	case rexTitleHelperFailed:
 		return "~/.local/bin/shuttle-rex-title failed; voice follows Rex tab changes only"
 	}

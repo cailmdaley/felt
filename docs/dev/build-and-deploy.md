@@ -388,7 +388,7 @@ the deployed commit fails the host.
 
 ### The Rex title helper
 
-On a Mac with Rex, `make cli-install` builds `scripts/shuttle-rex-title.c` into `~/.local/bin/shuttle-rex-title` if nothing is there, then asks macOS for Accessibility once. An ad-hoc-signed grant is bound to the binary's code hash, so deploys never rebuild it. Delete the file only to change the helper, and grant the new one. It disclaims responsibility on exec, so macOS checks its grant whichever process runs it, and the daemon spawns it each second while listening. `shuttle doctor` reports the state as `Rex session following`.
+On a Mac with Rex, `make cli-install` builds `scripts/shuttle-rex-title.c` into `~/.local/bin/shuttle-rex-title` if nothing is there, then asks macOS for Accessibility once. An ad-hoc-signed grant is bound to the binary's code hash, so deploys never rebuild it. To change the helper, delete the file, remove its entry from the Accessibility list, and grant the new one. It disclaims responsibility on exec, so macOS checks its grant whichever process runs it, and the daemon spawns it each second while listening. `shuttle doctor` reports the state as `Rex session following`.
 
 ### The bundle on a host that does not build it
 

@@ -196,10 +196,10 @@ defmodule Shuttle.RexFocus do
         message =
           case reason do
             :accessibility ->
-              "Rex session following needs macOS Accessibility for ~/.local/bin/shuttle-rex-title (System Settings > Privacy & Security > Accessibility); following tab changes only."
+              "Rex session following needs macOS Accessibility: run ~/.local/bin/shuttle-rex-title --prompt and allow it. Following tab changes only."
 
             :no_helper ->
-              "Rex session following needs ~/.local/bin/shuttle-rex-title; run make cli-install in the felt repo. Following tab changes only."
+              "Rex session following needs ~/.local/bin/shuttle-rex-title; run make cli-install in a felt checkout. Following tab changes only."
 
             :unavailable ->
               "Rex window title unavailable; following tab changes only."
