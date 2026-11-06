@@ -93,6 +93,55 @@ describe('live voice', () => {
     expect(calls.filter(url => url.endsWith('/target'))).toHaveLength(2)
     voice.dispose()
   })
+  it('follows a target set elsewhere once, without posting the card it opens', async () => {
+    vi.useFakeTimers()
+    let current = status()
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : null
+      calls.push({ url, body })
+      if (url.endsWith('/target')) current = status({ target: { ...body, name: body.fiber_id } })
+      return { ok: true, json: async () => current }
+    }))
+    const followed: string[] = []
+    const voice = new Voice('')
+    voice.onFollow = target => followed.push(target.fiber_id)
+    voice.mount(); await flush()
+    voice.select(card({ id: 'a', uid: 'durable-a', shuttleKind: 'oneshot' })); await flush()
+    await vi.advanceTimersByTimeAsync(2_000); await flush()
+    expect(followed).toEqual([])
+
+    current = status({ target: { fiber_id: 'project/b', origin: 'local', name: 'B' } })
+    await vi.advanceTimersByTimeAsync(2_000); await flush()
+    expect(followed).toEqual(['project/b'])
+    voice.select(card({ id: 'project/b', uid: 'durable-b', shuttleKind: 'oneshot' })); await flush()
+    await vi.advanceTimersByTimeAsync(2_000); await flush()
+    expect(followed).toEqual(['project/b'])
+    expect(calls.filter(c => c.url.endsWith('/target')).map(c => c.body)).toEqual([{ fiber_id: 'durable-a', origin: 'local' }])
+
+    voice.select(card({ id: 'a', uid: 'durable-a', shuttleKind: 'oneshot' })); await flush()
+    expect(calls.filter(c => c.url.endsWith('/target')).map(c => c.body).at(-1)).toEqual({ fiber_id: 'durable-a', origin: 'local' })
+    voice.dispose()
+  })
+  it('returning to the board follows a change made while away instead of re-asserting its card', async () => {
+    vi.useFakeTimers()
+    let current = status()
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { calls.push(url); return { ok: true, json: async () => current } }))
+    const followed: string[] = []
+    const voice = new Voice('')
+    voice.onFollow = target => followed.push(target.fiber_id)
+    voice.mount(); await flush()
+    voice.select(card({ id: 'a', shuttleKind: 'oneshot' })); await flush()
+    const posts = calls.filter(url => url.endsWith('/target')).length
+    current = status({ target: { fiber_id: 'rex/worker', origin: 'local', name: 'Worker' } })
+    window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(50); await flush()
+    expect(followed).toEqual(['rex/worker'])
+    expect(calls.filter(url => url.endsWith('/target'))).toHaveLength(posts)
+    window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(50); await flush()
+    expect(calls.filter(url => url.endsWith('/target'))).toHaveLength(posts + 1)
+    voice.dispose()
+  })
   it('clears stale state when the recorder cannot be read', async () => {
     vi.useFakeTimers()
     let ok = true

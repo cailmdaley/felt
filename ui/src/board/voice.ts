@@ -40,11 +40,24 @@ export interface VoiceStatus {
 export const voicePollDelay = (visible: boolean, success: boolean, status: VoiceStatus | null): number | null =>
   !visible ? null : success && status?.enabled && status.state !== 'failed' ? 2_000 : 15_000
 
-/** One visible-tab poll and one ordered write stream per board. */
+type VoiceTarget = NonNullable<VoiceStatus['target']>
+const targetKey = (target: VoiceStatus['target'] | undefined): string | null =>
+  target ? JSON.stringify([target.fiber_id, target.origin]) : null
+
+/**
+ * One visible-tab poll and one ordered write stream per board. A target the
+ * board did not post, such as Rex's, is handed to `onFollow` so the board shows
+ * it; the card that opens as a result is not posted back.
+ */
 export class Voice {
   status: VoiceStatus | null = null
+  onFollow: ((target: VoiceTarget) => void) | null = null
   private card: KanbanCard | null = null
   private lastTarget = ''
+  /** The target last read from the daemon; undefined until the first read. */
+  private seen: string | null | undefined = undefined
+  private followed: VoiceTarget | null = null
+  private reading: Promise<boolean> = Promise.resolve(false)
   private timer: number | null = null
   private focusTimer: number | null = null
   private expectedEnabled: boolean | null = null
@@ -79,6 +92,13 @@ export class Voice {
   }
   select(card: KanbanCard | null): void {
     this.card = card && isAgentCard(card) ? card : null
+    const followed = this.followed
+    if (this.card && followed && this.card.originId === followed.origin && [this.card.uid, this.card.id].includes(followed.fiber_id)) {
+      this.followed = null
+      this.lastTarget = JSON.stringify([this.card.uid ?? this.card.id, this.card.originId])
+      return
+    }
+    this.followed = null
     if (!this.card) this.lastTarget = ''
     this.target(false)
   }
@@ -95,7 +115,12 @@ export class Voice {
   }
   private focus = (): void => {
     if (document.hidden || this.focusTimer !== null) return
-    this.focusTimer = window.setTimeout(() => { this.focusTimer = null; this.target(true) }, 50)
+    // Returning to the board first follows a target set elsewhere, then
+    // re-asserts its own card only if nothing moved while it was away.
+    this.focusTimer = window.setTimeout(() => {
+      this.focusTimer = null
+      void this.poll().then(followed => { if (!followed) this.target(true) })
+    }, 50)
   }
   private settingsSaved = (event: Event): void => {
     this.expectedEnabled = (event as CustomEvent<boolean>).detail
@@ -162,19 +187,27 @@ export class Voice {
       }
       this.revision++
       this.status = await response.json() as VoiceStatus
+      this.seen = targetKey(this.status.target)
       this.notify()
     })
     this.writes = task.catch(() => {})
     return task
   }
-  private async poll(): Promise<void> {
-    if (!this.mounted || document.hidden || this.read) return
+  /** Resolves true when the read handed a new outside target to `onFollow`. */
+  private poll(): Promise<boolean> {
+    if (!this.mounted || document.hidden) return Promise.resolve(false)
+    if (this.read) return this.reading
+    this.reading = this.readStatus()
+    return this.reading
+  }
+  private async readStatus(): Promise<boolean> {
     if (this.timer !== null) window.clearTimeout(this.timer)
     this.timer = null
     const controller = new AbortController()
     this.read = controller
     const revision = this.revision
     let success = false
+    let followed = false
     try {
       const response = await fetch(`${this.base}/api/v1/voice`, { signal: controller.signal })
       if (!response.ok) throw new Error('voice unavailable')
@@ -185,6 +218,7 @@ export class Voice {
         if (this.expectedEnabled === status.enabled) this.expectedEnabled = null
         this.notify()
         if (!wasEnabled && status.enabled) this.target(true)
+        followed = this.follow(status)
       }
       success = true
     } catch {
@@ -203,5 +237,16 @@ export class Voice {
         if (delay !== null) this.timer = window.setTimeout(() => { this.timer = null; void this.poll() }, delay)
       }
     }
+    return followed
+  }
+  private follow(status: VoiceStatus): boolean {
+    const key = targetKey(status.target)
+    const known = this.seen
+    this.seen = key
+    if (known === undefined || key === known || key === this.lastTarget || !status.enabled || !status.target || !this.onFollow || isMobileViewport()) return false
+    this.lastTarget = key!
+    this.followed = status.target
+    this.onFollow(status.target)
+    return true
   }
 }

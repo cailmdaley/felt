@@ -840,6 +840,12 @@ export class Workspace {
       if (this.current === state && this.isActive && !this.disposed) { this.rebuild(state); this.show(state, false) }
     })
   }
+  /** Show a fiber unless the reader already shows it. */
+  follow(id: string, owner: string): void {
+    const card = this.current?.card
+    if (this.isActive && card && card.originId === owner && (card.uid === id || card.id === id)) return
+    void this.openFiber(id, owner)
+  }
   async openFiber(id: string, owner: string): Promise<void> {
     this.column = null
     this.reader.captureSidebar([])

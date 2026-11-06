@@ -594,6 +594,7 @@ export class KanbanModal {
       onRest: card => this.openRestPopover(card),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
+    this.voice.onFollow = target => this.workspace?.follow(target.fiber_id, target.origin)
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)

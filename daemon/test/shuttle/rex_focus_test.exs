@@ -257,6 +257,70 @@ defmodule Shuttle.RexFocusTest do
     assert_receive {:selected, %{"fiber_id" => "other/work"}}
   end
 
+  test "a new target behind another app becomes its Rex tab once, never routing back", c do
+    front = start_supervised!({Agent, fn -> false end}, id: :front)
+    voice = start_supervised!({Agent, fn -> nil end}, id: :voice)
+    title = start_supervised!({Agent, fn -> {:ok, "work - other/work"} end}, id: :title)
+
+    other = %{
+      "fiber" => "other/work",
+      "family" => "other/work",
+      "depth" => 0,
+      "session_id" => "session:b",
+      "window_id" => "window:b"
+    }
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, true,
+        poll_ms: 60_000,
+        front?: fn -> Agent.get(front, & &1) end,
+        voice_target: fn -> Agent.get(voice, & &1) end,
+        title: fn -> Agent.get(title, & &1) end,
+        bindings: fn -> {:ok, put_in(bindings(), ["bindings", "other"], other)} end,
+        fibers: fn ->
+          [
+            %{
+              "id" => "project/task",
+              "uid" => "01TASK",
+              "name" => "Task",
+              "shuttle" => %{"host" => "test-host"}
+            },
+            %{"id" => "other/work", "name" => "Work", "shuttle" => %{"host" => "test-host"}},
+            %{"id" => "remote/job", "name" => "Job", "shuttle" => %{"host" => "elsewhere"}}
+          ]
+        end
+      )
+
+    tick = fn ->
+      send(watcher, :tick)
+      :sys.get_state(watcher)
+    end
+
+    tick.()
+    Agent.update(voice, fn _ -> %{"fiber_id" => "01TASK", "origin" => "test-host"} end)
+    tick.()
+    assert_receive {:focused, "session:a", "window:a"}
+    Agent.update(title, fn _ -> {:ok, "task - project/task"} end)
+    tick.()
+    refute_receive {:focused, _, _}
+    refute_receive {:selected, _}
+
+    Agent.update(voice, fn _ -> %{"fiber_id" => "other/work", "origin" => "elsewhere"} end)
+    tick.()
+    Agent.update(voice, fn _ -> %{"fiber_id" => "remote/job", "origin" => "elsewhere"} end)
+    tick.()
+    refute_receive {:focused, _, _}
+
+    Agent.update(voice, fn _ -> %{"fiber_id" => "project/task", "origin" => "test-host"} end)
+    tick.()
+    refute_receive {:focused, _, _}
+
+    Agent.update(front, fn _ -> true end)
+    Agent.update(voice, fn _ -> %{"fiber_id" => "other/work", "origin" => "test-host"} end)
+    tick.()
+    refute_receive {:focused, _, _}
+  end
+
   test "the frontmost read recognises Rex by bundle and counts a failed read as Rex" do
     Shuttle.Test.Env.put_app_env(:rex_title_observer, self())
 
@@ -410,6 +474,8 @@ defmodule Shuttle.RexFocusTest do
              name: nil,
              title: nil,
              front?: fn -> true end,
+             voice_target: fn -> nil end,
+             focus_window: fn sid, wid -> send(parent, {:focused, sid, wid}) end,
              poll_ms: 25,
              active?: fn -> Agent.get(active, & &1) end,
              command: fn -> {script, [pids, event_file]} end,
