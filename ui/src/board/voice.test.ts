@@ -42,7 +42,25 @@ describe('live voice', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
     voice.dispose()
   })
-  it('pauses polling when hidden and uses idle cadence on errors', () => {
+  it('stops polling while hidden and resumes on visibility', async () => {
+    vi.useFakeTimers()
+    let hidden = false
+    vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+    const fetcher = vi.fn(async () => ({ ok: true, json: async () => status() }))
+    vi.stubGlobal('fetch', fetcher)
+    const voice = new Voice('')
+    voice.mount(); await flush()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    hidden = false
+    document.dispatchEvent(new Event('visibilitychange')); await flush()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    voice.dispose()
+  })
+  it('uses idle cadence on errors', () => {
     expect(voicePollDelay(false, true, status())).toBeNull()
     expect(voicePollDelay(true, false, status())).toBe(15_000)
     expect(voicePollDelay(true, true, status({ enabled: false }))).toBe(15_000)
