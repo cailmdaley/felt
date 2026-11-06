@@ -211,6 +211,69 @@ defmodule Shuttle.RexFocusTest do
     refute_receive {:selected, _}
   end
 
+  test "Rex coming to the front re-asserts its worker; titles behind another app never route",
+       c do
+    front = start_supervised!({Agent, fn -> true end}, id: :front)
+    title = start_supervised!({Agent, fn -> {:ok, "task - project/task"} end}, id: :title)
+    other = %{"fiber" => "other/work", "family" => "other/work", "depth" => 0}
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, true,
+        poll_ms: 60_000,
+        front?: fn -> Agent.get(front, & &1) end,
+        title: fn -> Agent.get(title, & &1) end,
+        bindings: fn -> {:ok, put_in(bindings(), ["bindings", "other"], other)} end,
+        fibers: fn ->
+          fibers() ++
+            [%{"id" => "other/work", "name" => "Work", "shuttle" => %{"host" => "test-host"}}]
+        end
+      )
+
+    tick = fn ->
+      send(watcher, :tick)
+      :sys.get_state(watcher)
+    end
+
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+    tick.()
+    refute_receive {:selected, _}
+
+    Agent.update(front, fn _ -> false end)
+    tick.()
+    Agent.update(title, fn _ -> {:ok, "work - other/work"} end)
+    tick.()
+    refute_receive {:selected, _}
+
+    Agent.update(front, fn _ -> true end)
+    tick.()
+    assert_receive {:selected, %{"fiber_id" => "other/work", "source" => "rex"}}
+    tick.()
+    refute_receive {:selected, _}
+
+    Agent.update(front, fn _ -> false end)
+    tick.()
+    Agent.update(front, fn _ -> true end)
+    tick.()
+    assert_receive {:selected, %{"fiber_id" => "other/work"}}
+  end
+
+  test "the frontmost read recognises Rex by bundle and counts a failed read as Rex" do
+    Shuttle.Test.Env.put_app_env(:rex_title_observer, self())
+
+    Shuttle.Test.Env.put_app_env(
+      :rex_title_result,
+      {~s([ NULL ]  ASN:0x0-0x19019: \n    bundleID="com.superlogical.rex"\n), 0}
+    )
+
+    assert RexFocus.rex_front?(Shuttle.Test.RexTitleRunner)
+    assert_receive {:title_command, "sh", ["-c", script], _}
+    assert script =~ "lsappinfo front"
+    Shuttle.Test.Env.put_app_env(:rex_title_result, {~s(    bundleID="com.apple.Safari"\n), 0})
+    refute RexFocus.rex_front?(Shuttle.Test.RexTitleRunner)
+    Shuttle.Test.Env.put_app_env(:rex_title_result, {"timed out", :timeout})
+    assert RexFocus.rex_front?(Shuttle.Test.RexTitleRunner)
+  end
+
   test "the bounded title read classifies a missing grant and a missing helper", %{
     tmp_dir: tmp_dir
   } do
@@ -346,6 +409,7 @@ defmodule Shuttle.RexFocusTest do
            [
              name: nil,
              title: nil,
+             front?: fn -> true end,
              poll_ms: 25,
              active?: fn -> Agent.get(active, & &1) end,
              command: fn -> {script, [pids, event_file]} end,

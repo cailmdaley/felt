@@ -4,8 +4,11 @@ defmodule Shuttle.RexFocus do
 
   macOS accessibility window titles identify the app's selected worker across
   sessions, read through `~/.local/bin/shuttle-rex-title`, which holds the
-  Accessibility grant so deploys can't invalidate it. Other hosts, and macOS
-  without that grant, use Rex's per-session active-window events.
+  Accessibility grant so deploys can't invalidate it. Titles route only while
+  Rex is the frontmost app, and Rex coming to the front re-asserts the worker
+  its title names; `lsappinfo` reports the frontmost app without a grant.
+  Other hosts, and macOS without that grant, use Rex's per-session
+  active-window events.
   """
   use GenServer
 
@@ -34,6 +37,8 @@ defmodule Shuttle.RexFocus do
       port: nil,
       discard: false,
       title: Keyword.get(opts, :title, if(Shuttle.Rex.macos?(), do: &read_title/0)),
+      front?: Keyword.get(opts, :front?, &rex_front?/0),
+      last_front: false,
       last_title: nil,
       last_bindings: nil,
       last_target: nil,
@@ -66,7 +71,13 @@ defmodule Shuttle.RexFocus do
         state
         |> stop_stream()
         |> warning(nil)
-        |> Map.merge(%{last_title: nil, last_bindings: nil, last_target: nil, title_ready: false})
+        |> Map.merge(%{
+          last_front: false,
+          last_title: nil,
+          last_bindings: nil,
+          last_target: nil,
+          title_ready: false
+        })
       end
 
     Process.send_after(self(), :tick, state.poll_ms)
@@ -169,18 +180,23 @@ defmodule Shuttle.RexFocus do
       {:ok, title} ->
         state = state |> warning(nil) |> Map.put(:title_ready, true)
 
-        if String.trim(title) == "" do
+        front = state.front?.()
+        raised = front and not state.last_front
+        state = %{state | last_front: front}
+
+        if not front or String.trim(title) == "" do
           state
         else
           case state.bindings.() do
             {:ok, bindings} ->
-              if title != state.last_title or bindings != state.last_bindings or
+              if raised or title != state.last_title or bindings != state.last_bindings or
                    is_nil(state.last_target) do
                 target = title_target(title, bindings, state.fibers.())
                 identity = target_identity(target)
 
-                if target && (title != state.last_title or identity != state.last_target),
-                  do: state.target.(Map.put(target, "source", "rex"))
+                if target &&
+                     (raised or title != state.last_title or identity != state.last_target),
+                   do: state.target.(Map.put(target, "source", "rex"))
 
                 %{state | last_title: title, last_bindings: bindings, last_target: identity}
               else
@@ -235,6 +251,18 @@ defmodule Shuttle.RexFocus do
       end
     else
       {:error, :no_helper}
+    end
+  end
+
+  # An unreadable frontmost app counts as Rex, so routing falls back to title changes.
+  @doc false
+  def rex_front?(runner \\ Shuttle.Runner.Default) do
+    case runner.cmd("sh", ["-c", ~s{lsappinfo info -only bundleid "$(lsappinfo front)"}],
+           timeout_ms: 1_500,
+           max_output_bytes: 4_096
+         ) do
+      {out, 0} -> out =~ ~s{bundleID="com.superlogical.rex}
+      _ -> true
     end
   end
 
