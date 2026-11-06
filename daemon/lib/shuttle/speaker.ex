@@ -3,8 +3,8 @@ defmodule Shuttle.Speaker do
   Speaks lines on this host, one at a time in arrival order, each in the voice of
   its fiber's role. Rendering is pocket-tts; playback is afplay.
 
-  Playback holds while Cail is talking (hark's live voice has pending words) or
-  while the speaker is muted, and resumes from just before where it stopped.
+  Playback holds while Cail is talking (hark's live voice has pending words
+  beyond an echo of the line being spoken) or while the speaker is muted, and resumes from just before where it stopped.
   afplay keeps its clock running under SIGSTOP, so a hold stops the player and a
   resume plays the rest of the file from the held offset.
   """
@@ -95,7 +95,7 @@ defmodule Shuttle.Speaker do
        timer: nil,
        clock: Keyword.get(opts, :clock, fn -> System.monotonic_time(:millisecond) end),
        poll_ms: Keyword.get(opts, :poll_ms, @poll_ms),
-       talking: Keyword.get(opts, :talking, &talking?/0),
+       partial: Keyword.get(opts, :partial, &partial/0),
        render_fun: Keyword.get(opts, :render, &render/2),
        play: Keyword.get(opts, :play, &play/1),
        stop: Keyword.get(opts, :stop, &stop/1),
@@ -189,7 +189,7 @@ defmodule Shuttle.Speaker do
   defp hold_or_play(%{current: nil} = state), do: state
 
   defp hold_or_play(%{current: current} = state) do
-    held = state.muted or state.talking.()
+    held = state.muted or talking?(state.partial.(), current.item.text)
 
     cond do
       held and current.handle ->
@@ -263,16 +263,31 @@ defmodule Shuttle.Speaker do
     }
   end
 
-  @doc "Whether hark's live voice holds pending words: Cail is mid-line."
-  def talking? do
+  @doc """
+  Whether hark's pending words say Cail is talking over `line`. Live voice hears
+  the speaker too, so words of the line itself are its echo; two other words
+  are Cail.
+  """
+  def talking?(nil, _line), do: false
+
+  def talking?(partial, line) do
+    spoken = MapSet.new(words(line))
+    Enum.count(words(partial), &(not MapSet.member?(spoken, &1))) >= 2
+  end
+
+  defp words(text),
+    do: text |> String.downcase() |> String.split(~r/[^\p{L}\p{N}']+/u, trim: true)
+
+  # The pending words of hark's live voice line, when one is under way.
+  defp partial do
     with {:ok, %{path: path}} <- Shuttle.Meeting.voice_transcript(),
          partial = Path.rootname(path) <> ".partial",
          {:ok, %{mtime: mtime}} <- Shuttle.FS.stat(partial, time: :posix),
          true <- System.os_time(:second) - mtime < @partial_stale_seconds,
          {:ok, text} <- Shuttle.FS.read(partial) do
-      String.trim(text) != ""
+      text
     else
-      _ -> false
+      _ -> nil
     end
   end
 

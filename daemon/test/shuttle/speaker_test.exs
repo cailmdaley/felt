@@ -4,14 +4,14 @@ defmodule Shuttle.SpeakerTest do
   @moduletag :tmp_dir
 
   setup do
-    {:ok, world} = Agent.start_link(fn -> %{talking: false, now: 0} end)
+    {:ok, world} = Agent.start_link(fn -> %{partial: nil, now: 0} end)
     parent = self()
 
     opts = [
       name: Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}"),
       poll_ms: 10,
       clock: fn -> Agent.get(world, & &1.now) end,
-      talking: fn -> Agent.get(world, & &1.talking) end,
+      partial: fn -> Agent.get(world, & &1.partial) end,
       render: fn text, voice -> {:ok, "#{voice}:#{text}"} end,
       play: fn path ->
         handle = make_ref()
@@ -49,11 +49,13 @@ defmodule Shuttle.SpeakerTest do
     {:ok, _} = Speaker.speak(%{"text" => "long", "voice" => "jean"}, server)
     assert_receive {:play, "jean:long", handle}
 
-    set(world, %{now: 2_000, talking: true})
+    set(world, %{now: 1_000, partial: "long, Kale"})
+    refute_receive {:stop, _}, 50
+    set(world, %{now: 2_000, partial: "wait, stop"})
     assert_receive {:stop, ^handle}
     assert %{paused: true} = Speaker.show(server)
 
-    set(world, %{now: 9_000, talking: false})
+    set(world, %{now: 9_000, partial: ""})
     assert_receive {:play, "jean:long@1500", _}
   end
 
@@ -71,6 +73,16 @@ defmodule Shuttle.SpeakerTest do
     assert_receive {:play, "jean:a", again}
     send(pid, {again, {:exit_status, 0}})
     assert_receive {:play, "jean:b", _}
+  end
+
+  test "words of the line being spoken are its echo, not Cail" do
+    line = "Hello Cail, the outbox is live."
+    refute Speaker.talking?(nil, line)
+    refute Speaker.talking?("", line)
+    refute Speaker.talking?("Hello, Kale. The outbox is live.", line)
+    refute Speaker.talking?("stop", line)
+    assert Speaker.talking?("hold on a second", line)
+    assert Speaker.talking?("the outbox, wait, stop", line)
   end
 
   test "resolves the voice from the fiber's role charter", %{tmp_dir: root} do
