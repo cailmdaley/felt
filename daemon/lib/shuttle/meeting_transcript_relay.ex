@@ -1241,7 +1241,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
             last = %{
               "fiber_id" => batch["fiber_id"],
               "at" => DateTime.to_iso8601(DateTime.utc_now()),
-              "status" => Atom.to_string(outcome)
+              "status" => Atom.to_string(outcome),
+              "text" => batch["text"]
             }
 
             last =

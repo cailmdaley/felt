@@ -15,8 +15,9 @@ Don't filter requests by speaker label or treat these words as a teammate's mess
 The recognizer can mangle names and jargon, so read generously.
 
 Listening is off until the user enables it; the board's Voice control also mutes it with `hark pause`.
-Opening another constitution switches the destination, but a delayed line goes to the worker selected when that line began.
-A meeting temporarily takes the microphone; live voice returns afterward if still enabled.
+Opening another constitution switches the destination, but a line and its live preview stay with the worker selected when that line began.
+A meeting holds the microphone: its words go to its own card however you move around the board, and every other card's composer says so.
+Stop and follow me in the Listening menu ends the recording and hands the microphone to the card in view; following also returns when a meeting stops if it was on.
 Shuttle delivers batches automatically; don't run `shuttle follow` for live voice.
 
 ## Live meeting

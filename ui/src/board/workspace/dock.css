@@ -180,7 +180,7 @@
   resize: none;
   font: var(--type-prose)/var(--leading-prose) var(--font-serif);
 }
-.ws-dock .kbn-ctl-composer .kbn-ctl-images { grid-column: 1 / -1; grid-row: 2; }
+.ws-dock .kbn-ctl-composer .kbn-ctl-images { grid-column: 1 / -1; grid-row: 3; }
 .ws-dock .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; display: flex; min-width: 0; align-items: center; gap: var(--ws-small-gap); }
 .ws-dock .kbn-ctl-sends { display: inline-flex; min-width: 0; gap: var(--ws-small-gap); }
 /* Verbs inside the field: the default one is a plate, the others are words. */
@@ -207,7 +207,9 @@
   .ws-chat .kbn-ctl-meet { flex-basis: 70px; }
   .ws-chat .kbn-ctl-meet-label { display: none; }
 }
-.voice-pending { position: absolute; inset: auto 8px 100% 8px; max-height: 5em; overflow-y: auto; color: var(--ws-ink-muted); background: var(--ws-paper); font-size: var(--type-note); white-space: pre-wrap; }
+.ws-dock .kbn-ctl-composer .voice-pending { grid-column: 1 / -1; grid-row: 2; max-height: 5em; overflow-y: auto; padding: 0 7px 4px 24px; color: var(--ws-ink-muted); font: var(--type-prose)/var(--leading-prose) var(--font-serif); white-space: pre-wrap; }
+.ws-dock .kbn-ctl-composer .voice-pending:empty { display: none; }
+.ws-dock .kbn-ctl-composer .voice-pending.voice-elsewhere { color: var(--ws-ink); }
 .voice-error { padding: 8px 10px; max-width: 260px; font-size: var(--type-note); color: var(--ws-ink-muted); white-space: normal; }
 /* A finger leaves :hover behind on what it tapped; only a pointer hovers. */
 @media (hover: none) {
@@ -293,7 +295,7 @@
   .ws-dock .kbn-ctl-foot { grid-column: 3; }
   /* The verbs wrap beneath the field, inside its border, on their own row. */
   .ws-dock .kbn-ctl-composer { grid-template-columns: minmax(0, 1fr); }
-  .ws-dock .kbn-ctl-composer-foot { grid-column: 1; grid-row: 3; flex-wrap: nowrap; justify-content: flex-start; justify-self: stretch; }
+  .ws-dock .kbn-ctl-composer-foot { grid-column: 1; grid-row: 4; flex-wrap: nowrap; justify-content: flex-start; justify-self: stretch; }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--type-label); }
   .ws-dock :is(.kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
   .ws-dock .kbn-ctl-image { width: 80px; height: 80px; }

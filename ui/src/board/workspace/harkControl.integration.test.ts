@@ -26,7 +26,7 @@ function mount() {
   const dropdown = () => root.querySelector<HTMLButtonElement>('.kbn-ctl-meet-dropdown')!
   const menuItems = () => [...root.querySelectorAll<HTMLButtonElement>('[role=menuitem]')]
   const follow = () => root.querySelector<HTMLButtonElement>('[role=menuitemcheckbox]')!
-  return { voice, meeting, dock, root, main, dropdown, menuItems, follow, open, setRecording(value: typeof recording) { recording = value; dock.syncMeeting() } }
+  return { voice, meeting, dock, band, root, main, dropdown, menuItems, follow, open, setRecording(value: typeof recording) { recording = value; dock.syncMeeting() } }
 }
 
 it('keeps one control and shows audio only when not following', () => {
@@ -55,12 +55,58 @@ it('keeps one control and shows audio only when not following', () => {
   v.voice.status = { ...v.voice.status, muted: true }; notify(v.voice); check('Paused · Alpha')
   v.setRecording({ state: 'live', title: 'Standup', fiber: 'other', tail: [] }); check('Listening · other')
   v.dropdown().click()
-  expect(v.menuItems().map(x => x.textContent)).toEqual(['Open transcript', 'Pause', 'Stop', 'Listen here'])
+  expect(v.menuItems().map(x => x.textContent)).toEqual(['Stop and follow me', 'Open transcript', 'Pause', 'Stop', 'Listen here'])
+  expect(v.follow()).toBeNull()
+  expect(v.root.textContent).toContain('Follow me returns when this recording stops.')
   expect(v.root.querySelector('[aria-label="Aqua seconds"]')).toBeNull()
   expect(v.root.querySelector('[aria-label="Listening audio"]')).toBeNull()
   v.menuItems().find(x => x.textContent === 'Pause')!.click()
   expect(v.meeting.pause).toHaveBeenCalledWith(expect.objectContaining({ fiber: 'other' }), true)
   v.setRecording({ state: 'live', title: 'Standup', fiber: 'other', tail: [], paused: true }); check('Paused · other')
+  v.dock.reset()
+})
+
+it('says plainly when a recording on another card holds the mic', () => {
+  const v = mount()
+  const elsewhere = () => v.root.querySelector('.voice-pending.voice-elsewhere')?.textContent
+  v.voice.status = { ...status, enabled: true, state: 'yielded', pending: null }; notify(v.voice)
+  expect(elsewhere()).toBe('Your voice is going to a recording, not this chat.')
+  v.setRecording({ state: 'live', title: 'Call', fiber: 'life/vizier', tail: [] })
+  expect(elsewhere()).toBe('Your voice is going to vizier, not this chat.')
+  v.setRecording({ state: 'live', title: 'Call', fiber: 'life/vizier', tail: [], paused: true })
+  expect(elsewhere()).toBe("The mic is paused for vizier. This chat can't hear you.")
+  v.setRecording({ state: 'live', title: 'Call', fiber: 'a', tail: [] })
+  expect(elsewhere()).toBeUndefined()
+  v.setRecording({ state: 'stopping', title: 'Call', fiber: 'life/vizier', tail: [] })
+  expect(elsewhere()).toBeUndefined()
+  v.dock.reset()
+})
+
+it('queues a delivered voice batch in its own chat only', () => {
+  const v = mount()
+  const pend = vi.fn()
+  ;(v.band as unknown as { transcriptBand: unknown }).transcriptBand = { pend, dispose: vi.fn() }
+  const last = { fiber_id: 'a', at: '2026-11-06T10:00:00Z', status: 'delivered' as const, text: 'me: hello' }
+  v.voice.status = { ...status, enabled: true, state: 'listening', last }; notify(v.voice)
+  notify(v.voice)
+  expect(pend.mock.calls).toEqual([['me: hello']])
+  v.voice.status = { ...v.voice.status!, last: { ...last, at: '2026-11-06T10:01:00Z', status: 'unconfirmed' } }; notify(v.voice)
+  v.voice.status = { ...v.voice.status!, last: { ...last, at: '2026-11-06T10:02:00Z', fiber_id: 'other' } }; notify(v.voice)
+  expect(pend).toHaveBeenCalledTimes(1)
+  v.dock.reset()
+})
+
+it('hands the mic from a recording to following with one action', async () => {
+  const v = mount()
+  const set = vi.spyOn(v.voice, 'set').mockResolvedValue()
+  const recording = { state: 'live' as const, title: 'Call', fiber: 'life/vizier', tail: [] as never[] }
+  v.setRecording(recording)
+  v.dropdown().click()
+  expect(v.follow()).toBeNull()
+  expect(v.root.textContent).not.toContain('Follow me returns')
+  v.menuItems().find(x => x.textContent === 'Stop and follow me')!.click()
+  expect(set).toHaveBeenCalledWith({ enabled: true })
+  await vi.waitFor(() => expect(v.meeting.stop).toHaveBeenCalledWith(expect.objectContaining({ fiber: 'life/vizier' })))
   v.dock.reset()
 })
 

@@ -96,7 +96,7 @@ defmodule Shuttle.VoiceTest do
     assert Config.thresholds("meeting") == Config.thresholds("voice")
   end
 
-  test "partial words are a display-only current-target preview, cleared by mute, pause and end",
+  test "partial words are a display-only preview pinned to the target they began under",
        c do
     transcript = Path.join(c.root, "voice.txt")
     partial = Path.rootname(transcript) <> ".partial"
@@ -119,7 +119,7 @@ defmodule Shuttle.VoiceTest do
               held: []
             }} = Voice.update(%{})
 
-    assert {:ok, %{preview: %{"fiber_id" => "b"}}} = Voice.target(%{"fiber_id" => "b"})
+    assert {:ok, %{preview: %{"fiber_id" => "a"}}} = Voice.target(%{"fiber_id" => "b"})
     assert {:ok, %{preview: nil}} = Voice.update(%{"muted" => true})
 
     assert {:ok, %{preview: %{"text" => "S1: Claude these are provisional"}}} =
@@ -127,6 +127,8 @@ defmodule Shuttle.VoiceTest do
 
     File.write!(partial, "")
     assert {:ok, %{preview: nil}} = Voice.update(%{})
+    File.write!(partial, "S1: next line")
+    assert {:ok, %{preview: %{"fiber_id" => "b"}}} = Voice.update(%{})
     File.write!(partial, "S1: stale")
     assert {:ok, %{preview: nil}} = Voice.update(%{"enabled" => false})
     assert {:ok, %{preview: %{"text" => "S1: stale"}}} = Voice.update(%{"enabled" => true})

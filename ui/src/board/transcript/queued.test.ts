@@ -38,7 +38,7 @@ describe('a message sent from the composer', () => {
     band.pend('merge and rerun is priority,\nthen the worktrees')
     const sending = band.el.querySelector<HTMLElement>('.ws-transcript-msg-sending')!
     expect(sending.textContent).toContain('merge and rerun is priority')
-    expect(sending.querySelector('.ws-transcript-sending')?.textContent).toBe('sent · not yet read')
+    expect(sending.querySelector('.ws-transcript-sending')?.textContent).toBe('queued · not yet read')
 
     items = [...items, { type: 'user', timestamp: new Date().toISOString(), message: { content: 'merge and rerun is priority, then the worktrees' } }]
     const read = (): Promise<boolean> => (band as unknown as { readNow(): Promise<boolean> }).readNow()

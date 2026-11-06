@@ -33,6 +33,7 @@ defmodule Shuttle.Voice do
       configured_enabled: nil,
       idle_key: nil,
       idle: false,
+      preview_target: nil,
       capture_error: nil,
       focus_error: nil,
       route_error: route_error,
@@ -144,9 +145,8 @@ defmodule Shuttle.Voice do
       end
 
     preview =
-      if snapshot.enabled && not snapshot.muted && snapshot.state == "listening" &&
-           snapshot.preview && snapshot.target,
-         do: Map.merge(Map.take(snapshot.target, ~w(fiber_id origin)), snapshot.preview)
+      if snapshot.enabled && not snapshot.muted && snapshot.state == "listening",
+        do: snapshot.preview
 
     snapshot
     |> Map.put(:last, recovery_last(snapshot.last, state.recovery.()))
@@ -196,7 +196,14 @@ defmodule Shuttle.Voice do
         {:ok, next} ->
           Map.merge(
             state,
-            Map.take(next, [:retry, :configured_enabled, :idle, :idle_key, :capture_error])
+            Map.take(next, [
+              :retry,
+              :configured_enabled,
+              :idle,
+              :idle_key,
+              :capture_error,
+              :preview_target
+            ])
           )
 
         _ ->
@@ -382,6 +389,14 @@ defmodule Shuttle.Voice do
             true -> relay_error
           end
 
+        words =
+          if voice && enabled && row.state == "live" &&
+               not Meeting.voice_muted?(state.capture_opts),
+             do: read_preview(row[:transcript])
+
+        # A line stays with the worker in view when its first words appeared.
+        preview_target = if words, do: state.preview_target || state.target
+
         snapshot = %{
           available: observed.available,
           enabled: enabled,
@@ -390,10 +405,8 @@ defmodule Shuttle.Voice do
           target: state.target,
           pending: status.pending,
           preview:
-            if(
-              voice && enabled && row.state == "live" &&
-                not Meeting.voice_muted?(state.capture_opts),
-              do: read_preview(row[:transcript])
+            if(words && preview_target,
+              do: Map.merge(Map.take(preview_target, ~w(fiber_id origin)), words)
             ),
           last: status.last || read_last() || state.snapshot.last,
           error: error
@@ -403,6 +416,7 @@ defmodule Shuttle.Voice do
           state
           | snapshot: snapshot,
             retry: retry,
+            preview_target: preview_target,
             idle: is_nil(row) or (not enabled and not voice),
             idle_key: key,
             capture_error: nil

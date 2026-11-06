@@ -31,7 +31,7 @@ export interface VoiceStatus {
   target: { fiber_id: string; origin: string; name: string } | null
   pending: { fiber_id: string; words: number; text: string } | null
   preview?: { fiber_id: string; origin: string; text: string } | null
-  last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string } | null
+  last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string; text?: string } | null
   error: string | null
   cold?: boolean
   held?: VoiceHeld[]

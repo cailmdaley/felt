@@ -1579,7 +1579,13 @@ export class Dock {
     }
     arm(false)
     this.meetingArmed = () => armed
+    let lastDelivery = this.voice?.controller.status?.last?.at
     const paint = (): void => {
+      const delivery = this.voice?.controller.status?.last
+      if (delivery?.at !== lastDelivery) {
+        lastDelivery = delivery?.at
+        if (delivery?.text && delivery.status === 'delivered' && matches(delivery.fiber_id)) this.transcriptBand?.pend(delivery.text)
+      }
       const control = this.meeting
       if (!control) return
       const current = control.current()
@@ -1594,6 +1600,7 @@ export class Dock {
       const signature = JSON.stringify([current?.launch, current?.state, current?.paused, current?.recorder, current?.handoff?.status, voice?.available, voice?.enabled, voice?.muted, voice?.state, voice?.target, voice?.recorder, localError])
       if (menu && signature !== menuState) closeMenu()
       let label = 'Listen'
+      let elsewhere: string | null = null
       if (localError || current?.state === 'failed' || current?.handoff?.status === 'reported-failure' || voice?.state === 'failed' || voice?.last?.status === 'failed') {
         label = 'Failed'
       } else if (recording) {
@@ -1603,19 +1610,25 @@ export class Dock {
       } else if (voice?.available && voice.enabled) {
         label = `${voice.muted ? 'Paused' : 'Listening'} · ${voice.target?.name ?? card.name}`
       }
+      if (recording && current.state !== 'stopping' && meetingHostCard(current, [card]) === null) {
+        const host = this.meetingHostName?.(current) ?? current.fiber?.split('/').at(-1) ?? current.title?.trim() ?? 'another card'
+        elsewhere = current.paused ? `The mic is paused for ${host}. This chat can't hear you.` : `Your voice is going to ${host}, not this chat.`
+      } else if (!recording && voice?.state === 'yielded') {
+        elsewhere = `Your voice is going to a recording, not this chat.`
+      }
       if (word.textContent !== label) word.textContent = label
       armButton.title = armed ? 'Sending starts listening' : label
       armButton.setAttribute('aria-label', label)
       const preview = voice?.preview
-      const text = preview && matches(preview.fiber_id) && preview.origin === card.originId ? preview.text
-        : voice && matches(voice.pending?.fiber_id) ? voice.pending!.text : ''
+      const text = elsewhere ?? (preview && matches(preview.fiber_id) && preview.origin === card.originId ? preview.text
+        : voice && matches(voice.pending?.fiber_id) ? voice.pending!.text : '')
+      pending.classList.toggle('voice-elsewhere', elsewhere !== null)
       if (pending.textContent !== text) {
         pending.textContent = text
         pending.scrollTop = pending.scrollHeight
         cancelAnimationFrame(scrollFrame)
         scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; pending.scrollTop = pending.scrollHeight })
       }
-      pending.title = text
       if ((recording || !canJoin()) && armed && !starting) arm(false)
     }
     const showMenu = (): void => {
@@ -1641,13 +1654,20 @@ export class Dock {
         if (!voice) return
         void voice.set(values).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
       }
-      const follow = ctlButton('Follow me', 'ws-select-option')
-      follow.setAttribute('role', 'menuitemcheckbox')
-      follow.setAttribute('aria-checked', String(!!state?.enabled))
-      follow.disabled = !state?.enabled && (!state?.available || isMobileViewport())
-      follow.addEventListener('click', () => { closeMenu(); set({ enabled: !state?.enabled }) })
-      menu.append(follow)
-      if (!state?.enabled && requiredMode() === 'call') {
+      const stopHeld = !recording || !this.meeting?.stop || meetingActions(current, this.meeting?.stopRequested?.(current) ?? false).stopDisabled
+      if (recording) {
+        if (state?.available && !isMobileViewport()) item('Stop and follow me', () => {
+          void voice?.set({ enabled: true }).then(() => this.meeting?.stop?.(current)).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
+        }, stopHeld)
+      } else {
+        const follow = ctlButton('Follow me', 'ws-select-option')
+        follow.setAttribute('role', 'menuitemcheckbox')
+        follow.setAttribute('aria-checked', String(!!state?.enabled))
+        follow.disabled = !state?.enabled && (!state?.available || isMobileViewport())
+        follow.addEventListener('click', () => { closeMenu(); set({ enabled: !state?.enabled }) })
+        menu.append(follow)
+      }
+      if (!state?.enabled && !recording && requiredMode() === 'call') {
         const label = document.createElement('label')
         label.className = 'kbn-ctl-meet-audio-label'
         label.append('Audio', audio)
@@ -1660,11 +1680,10 @@ export class Dock {
           this.meetingPaneCollapsed = false
           this.syncMeeting()
         })
-        const held = !this.meeting?.stop || meetingActions(current, this.meeting?.stopRequested?.(current) ?? false).stopDisabled
         if (!current.phone) item(current.paused ? 'Resume' : 'Pause', () => {
           void this.meeting?.pause?.(current, !current.paused).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
         }, !this.meeting?.pause || current.state !== 'live')
-        item('Stop', () => { void this.meeting?.stop?.(current) }, held)
+        item('Stop', () => { void this.meeting?.stop?.(current) }, stopHeld)
         if (!hosted) item('Listen here', () => {
           const next = { launch: current.launch, start: () => this.meetingStartHere?.() }
           this.pendingMeetingHere = next
@@ -1672,7 +1691,7 @@ export class Dock {
             if (ok === false && this.pendingMeetingHere === next) this.pendingMeetingHere = null
             this.syncMeeting()
           }).catch(() => { if (this.pendingMeetingHere === next) this.pendingMeetingHere = null })
-        }, held || !this.meeting?.modes().includes(requiredMode()))
+        }, stopHeld || !this.meeting?.modes().includes(requiredMode()))
       } else if (state?.available && state.enabled) {
         item('Open transcript', () => {
           if (!this.openFile) return
@@ -1734,6 +1753,7 @@ export class Dock {
         }
       }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
       const failure = localError || (current?.handoff?.status === 'reported-failure' ? 'Delivery failed' : null) || (current?.state === 'failed' ? current.error : null) || (state?.state === 'failed' ? state.error : null) || (state?.last?.status === 'failed' ? `Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}` : null)
+      if (recording && state?.enabled) note('Follow me returns when this recording stops.')
       if (failure) note(failure)
       menu.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); dropdown.focus() }

@@ -1277,7 +1277,7 @@ export class TranscriptBand {
   /**
    * Show a message the moment the composer sends it. A busy worker records it
    * only when it takes the message in, so until a prompt with its words
-   * appears the bubble stands after the last turn, marked as sent.
+   * appears the bubble stands after the last turn, marked as queued.
    */
   pend(text: string): void {
     const words = text.trim()
@@ -1289,7 +1289,7 @@ export class TranscriptBand {
     setKicker(message.kicker, 'you', 'you', at)
     const state = document.createElement('span')
     state.className = 'ws-transcript-sending'
-    state.textContent = 'sent · not yet read'
+    state.textContent = 'queued · not yet read'
     message.kicker.prepend(state)
     this.sent.push({ text: words, at, node: message.node, target: { ...(this.latest ?? this.target) } })
     this.paintSent()

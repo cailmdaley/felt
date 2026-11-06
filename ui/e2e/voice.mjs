@@ -42,11 +42,23 @@ try {
     })
     const pending = selected.locator('.voice-pending')
     assert.ok(await pending.evaluate(el => el.scrollHeight > el.clientHeight && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2), 'pending scrolls to newest words')
+    assert.ok(await pending.evaluate(el => el.closest('.kbn-ctl-composer') !== null), 'pending speech sits inside the composer')
     const after = await selected.locator('.kbn-ctl-composer').boundingBox()
-    assert.ok(Math.abs(after.y - before.y) < 1, 'pending speech does not move the composer')
+    assert.ok(Math.abs(after.y + after.height - before.y - before.height) < 1, 'pending speech grows the composer upward')
     await selected.locator('.kbn-ctl-meet-dropdown').click()
     assert.ok(await page.getByRole('menuitem', { name: 'Pause', exact: true }).isVisible())
     await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-${scheme}.png` })
+    await page.keyboard.press('Escape')
+    await page.evaluate(() => {
+      const voice = window.__harness.modal.voice
+      voice.status = { ...voice.status, state: 'yielded', pending: null, preview: null }
+      voice.notify()
+    })
+    const elsewhere = selected.locator('.voice-pending.voice-elsewhere')
+    await elsewhere.waitFor()
+    assert.equal(await elsewhere.textContent(), 'Your voice is going to a recording, not this chat.')
+    assert.ok(await elsewhere.isVisible(), 'the composer says where the mic is going')
+    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-elsewhere-${scheme}.png` })
     await context.close()
   }
   await mkdir(process.env.HARK_SCREENSHOT_DIR || '/tmp', { recursive: true })

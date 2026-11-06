@@ -193,7 +193,7 @@
 .ws-chat .ws-chat-compose .kbn-detail-directive { max-height: 30vh; }
 /* The field takes the whole width; Meeting and the verbs ride a row beneath it. */
 .ws-chat .ws-chat-compose .kbn-ctl-composer .kbn-detail-directive { grid-column: 1 / -1; min-height: calc(var(--ctl-h) + 8px); }
-.ws-chat .ws-chat-compose .kbn-ctl-composer .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; }
+.ws-chat .ws-chat-compose .kbn-ctl-composer .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 4; justify-self: stretch; }
 .ws-chat .ws-chat-compose .kbn-ctl-composer-foot { min-width: 0; max-width: 100%; box-sizing: border-box; flex-wrap: nowrap; justify-content: flex-start; container-type: inline-size; }
 .ws-chat .ws-chat-compose .kbn-ctl-sends { min-width: 0; max-width: 100%; flex: 0 1 auto; flex-wrap: nowrap; justify-content: flex-end; margin-left: auto; }
 .ws-chat .ws-chat-compose .kbn-ctl-sends > .kbn-ctl-btn { min-width: 0; max-width: 100%; }
@@ -273,7 +273,7 @@
   .ws-chat .ws-transcript-meter { font-size: var(--type-meta); }
   /* Keep the message and its one-row footer inside the phone field. */
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-detail-directive { grid-column: 1 / -1; grid-row: 1; min-height: 0; max-height: calc(var(--ctl-h) + 8px); }
-  .ws-chat .ws-chat-compose .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; }
+  .ws-chat .ws-chat-compose .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 4; justify-self: stretch; }
   .ws-chat .ws-transcript-inline .ws-transcript-scroll { padding-inline: 16px; }
   .ws-chat-compose { padding: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
   .ws-chat .ws-transcript-inline .ws-transcript-msg-you { max-width: 85%; }
