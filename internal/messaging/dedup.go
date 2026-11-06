@@ -310,7 +310,7 @@ func duplicateResult(ctx context.Context, env *sysenv.Env, req Request, path, ha
 		case old.Hash != hash:
 			receipt, err = rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request")
 		case old.State == "complete":
-			receipt, err = storedResult(refreshCompletedNativeReceipt(ctx, env, req, path, hash, old))
+			receipt, err = storedResult(refreshCompletedReceipt(ctx, env, req, path, hash, old))
 		case old.State != "reserved" || old.OwnerPID <= 0:
 			receipt, err = ownerlessRecord(req)
 		case !processAlive(old.OwnerPID, old.OwnerStart):
@@ -356,7 +356,19 @@ func readDedupRecord(path string) (record, error) {
 	return old, nil
 }
 
-func refreshCompletedNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
+func refreshCompletedReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
+	if old.Receipt.Transport == "claude-hook" && old.Receipt.Status == StatusQueued && req.ContextIfBusy {
+		a, err := ParseAddress(req.Address)
+		if err == nil && mailboxReceiverEnded(env, "claude", a.ID, a.Host) {
+			pending := filepath.Join(mailboxDir(env, "claude", a.ID), "pending", mailboxKey(req.MessageID)+".json")
+			if _, err := os.Stat(pending); err == nil {
+				old.Receipt.Status = StatusUnknown
+				old.Receipt.Detail = "receiver exited before its hook offered the queued message"
+				old.ErrorCode, old.ErrorMessage = "receiver_exited", old.Receipt.Detail
+			}
+		}
+		return old
+	}
 	if old.State != "complete" || old.Hash != hash || old.TranscriptOffset == nil || *old.TranscriptOffset < 0 || (old.Receipt.Status != StatusQueued && old.Receipt.Status != StatusSubmitted && old.Receipt.Status != StatusUnknown) {
 		return old
 	}

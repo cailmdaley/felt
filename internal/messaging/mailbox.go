@@ -276,6 +276,53 @@ func SetMailboxStateAt(env *sysenv.Env, harness, id, host, state string, at int6
 	return mailboxWrite(filepath.Join(dir, "receiver.json"), b, false)
 }
 
+// FinishClaudeMailbox serializes the final offer and idle transition with busy
+// senders. Mail sent after the empty check sees idle and uses native wake.
+// Only messages rerouted from wake can continue a turn.
+func FinishClaudeMailbox(env *sysenv.Env, id, host string, at int64, emit func([]Request) error) (bool, error) {
+	_, unlock, err := lockMailboxSessionState(env, "claude", id, host)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	continued := false
+	err = offerMailboxWithAck(mailboxDir(env, "claude", id), func(r Request) bool {
+		a, err := ParseAddress(r.Address)
+		return err == nil && a.Harness == "claude" && a.ID == id && a.Host == host && r.ContextIfBusy
+	}, func(batch []Request) error {
+		for _, r := range batch {
+			if err := recordEnvelope(env, id, r); err != nil {
+				return err
+			}
+		}
+		if err := emit(batch); err != nil {
+			return err
+		}
+		continued = true
+		return nil
+	}, false, nil, true)
+	if err != nil {
+		return continued, err
+	}
+	r, err := mailboxRegistrationFor(env, "claude", id)
+	if err != nil {
+		return continued, err
+	}
+	if at < r.StateAt {
+		return continued, nil
+	}
+	r.State, r.StateAt = "idle", at
+	if continued {
+		r.State = "working"
+	}
+	r.LastSeen = time.Now().UnixMilli()
+	b, err := json.Marshal(r)
+	if err != nil {
+		return continued, err
+	}
+	return continued, mailboxWrite(filepath.Join(mailboxDir(env, "claude", id), "receiver.json"), b, false)
+}
+
 func mailboxSessionState(env *sysenv.Env, harness, id, host string) (string, error) {
 	r, err := mailboxRegistrationFor(env, harness, id)
 	if err != nil || r.ID != id || r.Host != host || !r.live() {
@@ -335,7 +382,11 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if err := enqueueMailbox(mailboxDir(env, a.Harness, a.ID), r); err != nil {
 		return rejected(r, transport, err.Error()), err
 	}
-	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: "queued for the session's next prompt or tool hook; no turn started"}, nil
+	detail := "queued for the session's next prompt or tool hook; no turn started"
+	if a.Harness == "claude" && r.ContextIfBusy {
+		detail = "queued for the working session's next prompt, tool hook, or blocking Stop"
+	}
+	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: detail}, nil
 }
 
 func enqueueMailbox(root string, r Request) error {
@@ -396,11 +447,11 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 }
 
 func offerMailbox(dir string, accepts func(Request) bool, emit func([]Request) error) error {
-	return offerMailboxWithAck(dir, accepts, emit, false, nil)
+	return offerMailboxWithAck(dir, accepts, emit, false, nil, false)
 }
 
 func offerMailboxValidated(dir string, accepts func(Request) bool, current func(context.Context, Request) (bool, error), emit func([]Request) error) error {
-	return offerMailboxWithAck(dir, accepts, emit, false, current)
+	return offerMailboxWithAck(dir, accepts, emit, false, current, false)
 }
 
 // offerMailboxEach acknowledges each request as soon as its individual
@@ -415,16 +466,20 @@ func offerMailboxEachValidated(dir string, accepts func(Request) bool, current f
 			}
 		}
 		return nil
-	}, true, current)
+	}, true, current, false)
 }
 
-func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Request) error, each bool, current func(context.Context, Request) (bool, error)) error {
+func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Request) error, each bool, current func(context.Context, Request) (bool, error), wait bool) error {
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	flags := syscall.LOCK_EX | syscall.LOCK_NB
+	if wait {
+		flags = syscall.LOCK_EX
+	}
+	if err := syscall.Flock(int(lock.Fd()), flags); err != nil {
 		return nil
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
