@@ -727,7 +727,7 @@ defmodule Shuttle.TerminalTest do
              )
   end
 
-  test "worker listing holds on uncertainty and retains a positive list if ps fails" do
+  test "worker listing requires a successful process scan even with positive terminal names" do
     Process.put(:list_result, {"no server running", 1})
     stub(@absent)
     assert Terminal.list_workers(StubRunner) == {:ok, []}
@@ -735,8 +735,12 @@ defmodule Shuttle.TerminalTest do
     assert Terminal.list_workers(StubRunner) == {:error, :unknown}
     Process.put(:list_result, {"leaf-01KTHDNZS287ZSSG8X8V59XKWB-shuttle\nother\n", 0})
 
+    assert Terminal.list_workers(StubRunner) == {:error, :unknown}
+    hidden = "hidden-01KTHDNZS287ZSSG8X8V59XKWC-shuttle"
+    Process.put(:ps_result, {String.replace(@run_script_ps, "leaf-01ABC-shuttle", hidden), 0})
+
     assert Terminal.list_workers(StubRunner) ==
-             {:ok, ["leaf-01KTHDNZS287ZSSG8X8V59XKWB-shuttle"]}
+             {:ok, ["leaf-01KTHDNZS287ZSSG8X8V59XKWB-shuttle", hidden]}
 
     assert Terminal.list(StubRunner, "other") == {:ok, ["other"]}
     Process.put(:list_result, {"timed out", :timeout})

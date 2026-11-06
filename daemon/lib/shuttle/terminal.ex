@@ -358,8 +358,7 @@ defmodule Shuttle.Terminal do
 
       case WorkerProcess.scan(runner) do
         {:ok, procs} -> {:ok, Enum.uniq(listed ++ WorkerProcess.sessions(procs))}
-        {:error, :unknown} when listed == [] -> {:error, :unknown}
-        {:error, :unknown} -> {:ok, listed}
+        {:error, :unknown} -> {:error, :unknown}
       end
     end
   end

@@ -6657,6 +6657,61 @@ defmodule Shuttle.PollerTest do
     refute File.read!(doc_path) =~ "status: closed"
   end
 
+  for backend <- [Shuttle.Terminal.Tmux, Shuttle.Terminal.Rex] do
+    @tag backend: backend
+    test "a partial #{inspect(backend)} inventory and failed ps cannot close an invisible standing worker",
+         %{backend: backend} do
+      Env.put_app_env(:terminal_backend, backend)
+
+      if backend == Shuttle.Terminal.Rex do
+        Env.put_app_env(:fake_rex, start_supervised!(Shuttle.Test.FakeRex))
+        Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      end
+
+      runner = Shuttle.PollerTest.PhantomRunner
+
+      assert :ok =
+               Shuttle.Terminal.launch(
+                 runner,
+                 "visible-01KTHDNZS287ZSSG8X8V59XKWB-shuttle",
+                 MockRunner.felt_root(),
+                 "true\n",
+                 preflighted: true
+               )
+
+      id = "tests/standing-partial-inventory"
+      Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+
+      MockRunner.set_shuttle(id, """
+      kind: standing
+      agent: claude-sonnet
+      schedule:
+        expr: "0 9 1 1 *"
+        tz: Europe/Paris
+      """)
+
+      write_dispatch_marker(id, "invisible-conversation")
+      MockRunner.set_ps_result({"ps timed out", :timeout})
+
+      {:ok, poller} =
+        start_poller!(
+          runner: runner,
+          poll_interval_ms: 60_000,
+          max_concurrent_workers: 0,
+          felt_stores: [MockRunner.felt_root()]
+        )
+
+      sync_poll_cycle!(poller)
+      path = "#{MockRunner.felt_dir()}/#{id}/standing-partial-inventory.md"
+      assert File.read!(path) =~ "status: active"
+      refute File.read!(path) =~ "status: closed"
+
+      refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "shuttle" and "standing-transition" in args
+             end)
+    end
+  end
+
   test "poller does not re-dispatch a closed oneshot whose worker is dead" do
     fiber_id = "tests/closed-with-session"
 
