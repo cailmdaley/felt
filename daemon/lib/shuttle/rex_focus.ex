@@ -1,10 +1,10 @@
 defmodule Shuttle.RexFocus do
   @moduledoc """
-  Routes Rex active-window changes into the spoken-time voice journal.
+  Routes the Rex view into the spoken-time voice journal.
 
-  Rex server events identify the active window within a session, but not which
-  session an app is displaying. Switching to an already-active window in a
-  different session therefore needs a client selection signal from Rex.
+  macOS accessibility window titles identify the app's selected worker across
+  sessions. Other hosts, and macOS without accessibility access, use Rex's
+  per-session active-window events.
   """
   use GenServer
 
@@ -32,6 +32,12 @@ defmodule Shuttle.RexFocus do
     state = %{
       port: nil,
       discard: false,
+      title: Keyword.get(opts, :title, if(Shuttle.Rex.macos?(), do: &read_title/0)),
+      last_title: nil,
+      last_bindings: nil,
+      title_ready: false,
+      warning: nil,
+      warn: Keyword.get(opts, :warn, &Shuttle.Voice.focus_error/1),
       poll_ms: Keyword.get(opts, :poll_ms, 1_000),
       active?: Keyword.get(opts, :active?, &following?/0),
       command: Keyword.get(opts, :command, &command/0),
@@ -40,21 +46,25 @@ defmodule Shuttle.RexFocus do
       target: Keyword.get(opts, :target, &Shuttle.Voice.target/1)
     }
 
+    state.warn.(nil)
     send(self(), :tick)
     {:ok, state}
   end
 
   @impl true
   def handle_info(:tick, state) do
-    Process.send_after(self(), :tick, state.poll_ms)
-
     state =
-      case {state.active?.(), state.port} do
-        {true, nil} -> start_stream(state)
-        {false, port} when is_port(port) -> stop_stream(state)
-        _ -> state
+      if state.active?.() do
+        state = poll_title(state)
+        if state.title_ready, do: stop_stream(state), else: ensure_stream(state)
+      else
+        state
+        |> stop_stream()
+        |> warning(nil)
+        |> Map.merge(%{last_title: nil, last_bindings: nil, title_ready: false})
       end
 
+    Process.send_after(self(), :tick, state.poll_ms)
     {:noreply, state}
   end
 
@@ -62,7 +72,7 @@ defmodule Shuttle.RexFocus do
     do: {:noreply, %{state | discard: true}}
 
   def handle_info({port, {:data, {:eol, line}}}, %{port: port} = state) do
-    if not state.discard do
+    if not state.discard and not state.title_ready do
       with {:ok, %{"payload" => %{"event" => %{"type" => "active_window_changed"}}} = event} <-
              Jason.decode(line),
            true <- state.active?.(),
@@ -86,7 +96,7 @@ defmodule Shuttle.RexFocus do
   def handle_info({:EXIT, port, _}, state) when is_port(port), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, state), do: stop_stream(state)
+  def terminate(_reason, state), do: state |> stop_stream() |> warning(nil)
 
   @doc false
   def target(
@@ -100,17 +110,126 @@ defmodule Shuttle.RexFocus do
         %{"bindings" => bindings},
         fibers
       ) do
-    with {_, %{"fiber" => id}} <-
-           Enum.find(bindings, fn {_, b} -> b["session_id"] == sid and b["window_id"] == wid end),
-         %{"shuttle" => shuttle} = fiber when is_map(shuttle) and map_size(shuttle) > 0 <-
-           Enum.find(fibers, &(id in [&1["id"], &1["uid"], &1["slug"]])) do
-      %{"fiber_id" => id, "origin" => shuttle["host"], "name" => fiber["name"]}
-    else
+    case Enum.find(bindings, fn {_, b} -> b["session_id"] == sid and b["window_id"] == wid end) do
+      {_, %{"fiber" => id}} -> fiber_target(id, fibers)
       _ -> nil
     end
   end
 
   def target(_, _, _), do: nil
+
+  @doc false
+  def title_target(title, %{"bindings" => bindings}, fibers) do
+    alias Shuttle.Terminal.RexTree
+
+    matches =
+      bindings
+      |> Enum.flat_map(fn
+        {_, %{"fiber" => fiber, "family" => family} = binding}
+        when is_binary(fiber) and is_binary(family) ->
+          [%{fiber: fiber, family: family, depth: binding["depth"] || 0}]
+
+        _ ->
+          []
+      end)
+      |> RexTree.layout()
+      |> Enum.filter(fn entry ->
+        window = RexTree.display_label(entry.label)
+        session = RexTree.display_label(RexTree.session_label(entry.family))
+        normalize_title(title) == normalize_title(window <> " - " <> session)
+      end)
+
+    case matches do
+      [%{fiber: id}] -> fiber_target(id, fibers)
+      _ -> nil
+    end
+  end
+
+  defp normalize_title(title), do: title |> String.replace("\u2060", "") |> String.trim()
+
+  defp fiber_target(id, fibers) do
+    case Enum.find(fibers, &(id in [&1["id"], &1["uid"], &1["slug"]])) do
+      %{"shuttle" => shuttle} = fiber when is_map(shuttle) and map_size(shuttle) > 0 ->
+        %{"fiber_id" => id, "origin" => shuttle["host"], "name" => fiber["name"]}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp poll_title(%{title: nil} = state), do: state
+
+  defp poll_title(state) do
+    case state.title.() do
+      {:ok, title} ->
+        state = state |> warning(nil) |> Map.put(:title_ready, true)
+
+        if String.trim(title) == "" do
+          state
+        else
+          case state.bindings.() do
+            {:ok, bindings} ->
+              if title != state.last_title or bindings != state.last_bindings do
+                if target = title_target(title, bindings, state.fibers.()),
+                  do: state.target.(Map.put(target, "source", "rex"))
+              end
+
+              %{state | last_title: title, last_bindings: bindings}
+
+            {:error, _} ->
+              state
+          end
+        end
+
+      {:error, reason} ->
+        message =
+          case reason do
+            :accessibility ->
+              "Rex session following needs macOS Accessibility access for Shuttle; following tab changes only."
+
+            :unavailable ->
+              "Rex window title unavailable; following tab changes only."
+          end
+
+        state
+        |> warning(message)
+        |> Map.merge(%{title_ready: false, last_title: nil, last_bindings: nil})
+    end
+  end
+
+  defp warning(%{warning: message} = state, message), do: state
+
+  defp warning(state, message) do
+    state.warn.(message)
+    %{state | warning: message}
+  end
+
+  @doc false
+  def read_title(runner \\ Shuttle.Runner.Default) do
+    script = """
+    tell application "System Events"
+      if not (exists process "Rex") then return ""
+      tell process "Rex"
+        if (count of windows) is 0 then return ""
+        return title of front window
+      end tell
+    end tell
+    """
+
+    case runner.cmd("/usr/bin/osascript", ["-e", script],
+           stderr_to_stdout: true,
+           timeout_ms: 1_500,
+           max_output_bytes: 4_096
+         ) do
+      {title, 0} ->
+        {:ok, String.trim_trailing(title, "\n")}
+
+      {error, _} ->
+        if String.contains?(error, ["-1719", "-25211", "not authorized", "not allowed"]),
+          do: {:error, :accessibility},
+          else: {:error, :unavailable}
+    end
+  end
 
   defp following? do
     Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and
@@ -126,6 +245,9 @@ defmodule Shuttle.RexFocus do
       bin -> {bin, Shuttle.Rex.flags() ++ ["events", "--all", "--json"]}
     end
   end
+
+  defp ensure_stream(%{port: port} = state) when is_port(port), do: state
+  defp ensure_stream(state), do: start_stream(state)
 
   defp start_stream(state) do
     case state.command.() do

@@ -12,6 +12,9 @@ defmodule Shuttle.Voice do
   def target(params, opts \\ []),
     do: GenServer.call(server(opts), {:target, params, DateTime.utc_now()})
 
+  def focus_error(message, opts \\ []),
+    do: GenServer.cast(server(opts), {:focus_error, message})
+
   defp server(opts), do: Keyword.get(opts, :server, Shuttle.Env.server(__MODULE__))
   def routes_path, do: Path.join(Shuttle.data_dir(), "voice-routes.jsonl")
   def last_path, do: Path.join(Shuttle.data_dir(), "voice-last.json")
@@ -30,6 +33,7 @@ defmodule Shuttle.Voice do
       idle_key: nil,
       idle: false,
       capture_error: nil,
+      focus_error: nil,
       route_error: route_error,
       clock: Keyword.get(opts, :clock, fn -> System.monotonic_time(:millisecond) end),
       queue: [],
@@ -57,7 +61,8 @@ defmodule Shuttle.Voice do
   end
 
   @impl true
-  def handle_call(:show, _from, state), do: {:reply, state.snapshot, state}
+  def handle_call(:show, _from, state),
+    do: {:reply, %{state.snapshot | error: state.snapshot.error || state.focus_error}, state}
 
   def handle_call({:target, %{"source" => "rex"} = params, received_at}, from, state) do
     if state.snapshot.enabled and state.snapshot.state != "yielded" and
@@ -123,6 +128,9 @@ defmodule Shuttle.Voice do
       {:noreply, enqueue(state, {params, from})}
     end
   end
+
+  @impl true
+  def handle_cast({:focus_error, message}, state), do: {:noreply, %{state | focus_error: message}}
 
   @impl true
   def handle_info(:tick, state) do

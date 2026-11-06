@@ -190,6 +190,26 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{state: "off", muted: false}} = Voice.update(%{"muted" => false})
   end
 
+  test "Rex focus warnings appear in status, clear on recovery, and do not hide recorder failures",
+       c do
+    Voice.focus_error("Rex needs Accessibility access")
+    assert %{error: "Rex needs Accessibility access"} = Voice.show()
+    assert {:ok, _} = Voice.update(%{})
+    assert %{error: "Rex needs Accessibility access"} = Voice.show()
+    Voice.focus_error(nil)
+    assert %{error: nil} = Voice.show()
+
+    stop_supervised!(Voice)
+
+    Env.start_scoped!(
+      {Voice, Keyword.put(c.opts, :reconcile, fn _, _ -> {:error, :capture_failed} end)}
+    )
+
+    assert {:ok, %{error: capture_error}} = Voice.update(%{})
+    Voice.focus_error("Rex needs Accessibility access")
+    assert %{error: ^capture_error} = Voice.show()
+  end
+
   test "Rex focus selects only while following and cannot move a fixed recording", c do
     params = %{"fiber_id" => "project/rex", "source" => "rex"}
     assert {:ok, %{target: nil}} = Voice.target(params)

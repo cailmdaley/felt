@@ -1,3 +1,10 @@
+defmodule Shuttle.Test.RexTitleRunner do
+  def cmd(command, args, opts) do
+    send(Shuttle.Env.app(:rex_title_observer), {:title_command, command, args, opts})
+    Shuttle.Env.app(:rex_title_result)
+  end
+end
+
 defmodule Shuttle.RexFocusTest do
   use ExUnit.Case, async: true
   alias Shuttle.RexFocus
@@ -19,7 +26,9 @@ defmodule Shuttle.RexFocusTest do
         "worker" => %{
           "session_id" => "session:a",
           "window_id" => "window:a",
-          "fiber" => "project/task"
+          "fiber" => "project/task",
+          "family" => "project/task",
+          "depth" => 0
         }
       }
     }
@@ -43,6 +52,131 @@ defmodule Shuttle.RexFocusTest do
              RexFocus.target(event(), bindings(), [%{"id" => "project/task", "shuttle" => %{}}])
 
     assert nil == RexFocus.target(%{"type" => "client_changed"}, bindings(), fibers())
+  end
+
+  test "title mapping uses worker and session labels, rejects program titles and ambiguity" do
+    bindings = bindings()
+
+    assert %{"fiber_id" => "project/task"} =
+             RexFocus.title_target("task - project/task", bindings, fibers())
+
+    assert nil == RexFocus.title_target("", bindings, fibers())
+    assert nil == RexFocus.title_target("zsh ~ - project/task", bindings, fibers())
+    assert nil == RexFocus.title_target("task - another/session", bindings, fibers())
+
+    assert nil ==
+             RexFocus.title_target("task - project/task", bindings, [%{"id" => "project/task"}])
+
+    child = put_in(bindings, ["bindings", "worker", "depth"], 2)
+    child = put_in(child, ["bindings", "worker", "family"], "project/root")
+
+    assert %{"fiber_id" => "project/task"} =
+             RexFocus.title_target("\u2060\u2003└ task - project/root", child, fibers())
+
+    ambiguous = put_in(bindings, ["bindings", "another"], bindings["bindings"]["worker"])
+    assert nil == RexFocus.title_target("task - project/task", ambiguous, fibers())
+  end
+
+  test "accessibility polling routes across sessions, ignores blanks, and never overwrites later board selection",
+       c do
+    title = start_supervised!({Agent, fn -> {:ok, "task - project/task"} end})
+    other = %{"fiber" => "other/work", "family" => "other/work", "depth" => 0}
+    all_bindings = put_in(bindings(), ["bindings", "other"], other)
+
+    all_fibers =
+      fibers() ++
+        [%{"id" => "other/work", "name" => "Work", "shuttle" => %{"host" => "test-host"}}]
+
+    {watcher, active, pids} =
+      watcher(c.tmp_dir, true,
+        title: fn -> Agent.get(title, & &1) end,
+        bindings: fn -> {:ok, all_bindings} end,
+        fibers: fn -> all_fibers end
+      )
+
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+    refute File.exists?(pids)
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
+
+    Agent.update(title, fn _ -> {:ok, ""} end)
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
+    Agent.update(title, fn _ -> {:ok, "work - other/work"} end)
+    send(watcher, :tick)
+    assert_receive {:selected, %{"fiber_id" => "other/work"}}
+
+    Agent.update(title, fn _ -> {:ok, "zsh ~ - project/task"} end)
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
+    Agent.update(active, fn _ -> false end)
+    Agent.update(title, fn _ -> {:ok, "task - project/task"} end)
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
+    Agent.update(active, fn _ -> true end)
+    send(watcher, :tick)
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+  end
+
+  test "title observed before its binding is installed is retried when bindings change", c do
+    observed = start_supervised!({Agent, fn -> %{"bindings" => %{}} end})
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, true,
+        title: fn -> {:ok, "task - project/task"} end,
+        bindings: fn -> {:ok, Agent.get(observed, & &1)} end
+      )
+
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
+    Agent.update(observed, fn _ -> bindings() end)
+    send(watcher, :tick)
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+  end
+
+  test "missing AX access warns once, falls back to events, and recovers without retaining the stream",
+       c do
+    parent = self()
+    title = start_supervised!({Agent, fn -> {:error, :accessibility} end})
+
+    {watcher, _, pids} =
+      watcher(c.tmp_dir, true,
+        title: fn -> Agent.get(title, & &1) end,
+        warn: fn message -> send(parent, {:warning, message}) end
+      )
+
+    assert_receive {:warning, nil}
+    assert_receive {:warning, message}
+    assert message =~ "Accessibility"
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+    [pid] = read_pids(pids)
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive {:warning, _}
+    Agent.update(title, fn _ -> {:ok, "task - project/task"} end)
+    send(watcher, :tick)
+    assert_receive {:warning, nil}
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+    assert :sys.get_state(watcher).port == nil
+    eventually(fn -> not alive?(pid) end)
+    refute_receive {:warning, _}
+  end
+
+  test "the bounded accessibility read classifies permission failure without exposing raw stderr" do
+    Shuttle.Test.Env.put_app_env(:rex_title_observer, self())
+    Shuttle.Test.Env.put_app_env(:rex_title_result, {"└ task - project/root\n", 0})
+    assert {:ok, "└ task - project/root"} = RexFocus.read_title(Shuttle.Test.RexTitleRunner)
+    assert_receive {:title_command, "/usr/bin/osascript", ["-e", _], opts}
+    assert opts[:timeout_ms] == 1_500
+    assert opts[:max_output_bytes] == 4_096
+    Shuttle.Test.Env.put_app_env(:rex_title_result, {"not allowed assistive access (-1719)", 1})
+    assert {:error, :accessibility} = RexFocus.read_title(Shuttle.Test.RexTitleRunner)
+    Shuttle.Test.Env.put_app_env(:rex_title_result, {"timed out", :timeout})
+    assert {:error, :unavailable} = RexFocus.read_title(Shuttle.Test.RexTitleRunner)
   end
 
   test "tmux hosts neither consult voice nor start a Rex stream" do
@@ -133,7 +267,7 @@ defmodule Shuttle.RexFocusTest do
     refute_receive :inventoried
   end
 
-  defp watcher(root, enabled \\ true) do
+  defp watcher(root, enabled \\ true, overrides \\ []) do
     pids = Path.join(root, "pids")
     script = Path.join(root, "events.sh")
     event_file = Path.join(root, "event.json")
@@ -147,22 +281,28 @@ defmodule Shuttle.RexFocusTest do
     """)
 
     File.chmod!(script, 0o700)
-    {:ok, active} = Agent.start_link(fn -> enabled end)
+    active = start_supervised!({Agent, fn -> enabled end}, id: :active)
     parent = self()
 
     watcher =
       start_supervised!(
         {RexFocus,
-         name: nil,
-         poll_ms: 25,
-         active?: fn -> Agent.get(active, & &1) end,
-         command: fn -> {script, [pids, event_file]} end,
-         bindings: fn -> {:ok, bindings()} end,
-         fibers: &fibers/0,
-         target: fn target ->
-           send(parent, {:selected, target})
-           {:ok, %{}}
-         end}
+         Keyword.merge(
+           [
+             name: nil,
+             title: nil,
+             poll_ms: 25,
+             active?: fn -> Agent.get(active, & &1) end,
+             command: fn -> {script, [pids, event_file]} end,
+             bindings: fn -> {:ok, bindings()} end,
+             fibers: &fibers/0,
+             target: fn target ->
+               send(parent, {:selected, target})
+               {:ok, %{}}
+             end
+           ],
+           overrides
+         )}
       )
 
     {watcher, active, pids}
