@@ -49,7 +49,7 @@ func TestDeployStoppedObserverCannotLeaveRollbackWaiter(t *testing.T) {
 	newSHA := f.git(t, f.repo, "rev-parse", "HEAD")
 	f.git(t, f.repo, "push", "origin", "main")
 	first, firstLog := f.start(t, "heartbeat-holder")
-	defer fleetTouch(t, f.gate)
+	defer func() { fleetTouch(t, f.gate); first.Wait() }()
 	deployAwait(t, "holder build: "+firstLog, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
 	waiter, log := f.startArgs(t, "stopped-rollback", "fake", []string{"--ref", f.sha}, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(180*time.Second).Unix()))
 	deployAwait(t, "rollback waiter: "+log, func() bool { return strings.Contains(fleetRead(log), "waiting for") })
@@ -64,10 +64,10 @@ func TestDeployStoppedObserverCannotLeaveRollbackWaiter(t *testing.T) {
 	if observer <= 0 || remote <= 0 {
 		t.Fatal("missing observer/remote identity")
 	}
+	defer func() { syscall.Kill(observer, syscall.SIGKILL); waiter.Process.Kill(); waiter.Wait() }()
 	if e := syscall.Kill(observer, syscall.SIGSTOP); e != nil {
 		t.Fatal(e)
 	}
-	defer func() { syscall.Kill(observer, syscall.SIGCONT); waiter.Process.Kill() }()
 	until := time.Now().Add(75 * time.Second)
 	for syscall.Kill(remote, 0) == nil && time.Now().Before(until) {
 		time.Sleep(100 * time.Millisecond)
