@@ -1314,7 +1314,6 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
   def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: id, kind: kind}) do
     ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", %{
-      "daemon_sender" => true,
       "message_id" => id,
       "message_after_launch" => kind != "voice",
       "live_input" => kind == "voice"

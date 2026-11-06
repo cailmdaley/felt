@@ -30,23 +30,21 @@ describe('delivered Shuttle messages', () => {
     expect(message[0]).not.toHaveProperty('fiber')
   })
 
-  it('keeps the detected sender and renders an asserted label separately', () => {
-    const envelope = '[Shuttle message msg-claim from shuttle; claims to be bob; reply to work/checks]\nStatus updated.'
-    expect(shuttleMessages(envelope, undefined, false, [ledger(envelope)])).toEqual([expect.objectContaining({
-      id: 'msg-claim', peer: 'shuttle', claimedSender: 'bob', fiber: 'work/checks', target: 'work/checks', text: 'Status updated.',
-    })])
+  it('reads an old second sender clause as the plain sender', () => {
+    const envelope = '[Shuttle message msg-old from shuttle; claims to be bob; reply to work/checks]\nStatus updated.'
+    const [row] = shuttleMessages(envelope, undefined, false, [ledger(envelope)])
+    expect(row).toEqual(expect.objectContaining({ id: 'msg-old', peer: 'shuttle', fiber: 'work/checks', target: 'work/checks', text: 'Status updated.' }))
   })
 
-  it('names a verified session sender by its own fiber, and an unverified one only by a quiet mark', () => {
-    const verified = '[Shuttle message msg-v from shuttle://nibi/claude/abc-123; reply to science/cosmo-val]\nDone.'
-    expect(shuttleMessages(verified, undefined, false, [ledger(verified)])).toEqual([expect.objectContaining({
-      peer: 'cosmo-val', senderIsFiber: true, fiber: 'science/cosmo-val', address: 'shuttle://nibi/claude/abc-123',
-    })])
-    expect(shuttleMessages(verified, undefined, false, [ledger(verified)])[0]).not.toHaveProperty('peerSuffix')
-    const unverified = '[Shuttle message msg-u from unverified; claims to be shuttle://nibi/claude/abc-123; reply to science/cosmo-val]\nDone.'
-    const [row] = shuttleMessages(unverified, undefined, false, [ledger(unverified)])
-    expect(row).toEqual(expect.objectContaining({ peer: '?', unverified: true, claimedSender: 'shuttle://nibi/claude/abc-123', fiber: 'science/cosmo-val' }))
-    expect(row).not.toHaveProperty('senderIsFiber')
+  it('names a session sender by its own fiber, in new and old headers alike', () => {
+    const plain = '[Shuttle message msg-v from shuttle://nibi/claude/abc-123; reply to science/cosmo-val]\nDone.'
+    const old = '[Shuttle message msg-u from unverified; claims to be shuttle://nibi/claude/abc-123; reply to science/cosmo-val]\nDone.'
+    for (const envelope of [plain, old]) {
+      expect(shuttleMessages(envelope, undefined, false, [ledger(envelope)])).toEqual([expect.objectContaining({
+        peer: 'cosmo-val', senderIsFiber: true, fiber: 'science/cosmo-val', address: 'shuttle://nibi/claude/abc-123',
+      })])
+      expect(shuttleMessages(envelope, undefined, false, [ledger(envelope)])[0]).not.toHaveProperty('peerSuffix')
+    }
   })
 
   it.each([
@@ -116,7 +114,7 @@ describe('delivered Shuttle messages', () => {
 
   it('keeps unknown and mismatching envelopes as literal context', () => {
     const envelope = '[Shuttle message real-id from shuttle://host/pi/session]\nThe actual note.'
-    const unknown = '[Shuttle message unknown-id from peer]\nUnverified text.'
+    const unknown = '[Shuttle message unknown-id from peer]\nUnrecorded text.'
     const mismatching = '[Shuttle message real-id from shuttle://host/pi/session]\nA changed body.'
     const provenance: MessageProvenance[] = [{ id: 'real-id', envelope }]
     for (const content of [unknown, mismatching]) {
@@ -179,11 +177,17 @@ describe.each([
     ])
   })
 
-  it('keeps the reply target and marks an unverified claim', () => {
-    const envelope = `${header('from unverified; claims to be life/vizier; reply to work/checks')}\nFir is down.`
-    expect(normalizeRecord(carrier(envelope), [{ id: FULL_ID, envelope }])).toEqual([
-      expect.objectContaining({ peer: '?', unverified: true, claimedSender: 'life/vizier', fiber: 'work/checks', target: 'work/checks', text: 'Fir is down.' }),
-    ])
+  it('renders an old qualified header as a message from its sender', () => {
+    const envelope = `${header('from unverified; claims to be life/vizier')}\nFir is down.`
+    const [message] = normalizeRecord(carrier(envelope), [{ id: FULL_ID, envelope }])
+    expect(message).toEqual(expect.objectContaining({ peer: 'vizier', fiber: 'life/vizier', senderIsFiber: true, text: 'Fir is down.' }))
+  })
+
+  it('renders an old header with no named sender as external', () => {
+    const envelope = '[from unverified]\nA notice.'
+    const [message] = normalizeRecord(carrier(envelope), [{ id: 'one', envelope }])
+    expect(message).toMatchObject({ kind: 'shuttle-message', peer: 'external' })
+    expect(message).not.toHaveProperty('fiber')
   })
 
   it('recognizes a thread notice from the ledger flag and its body, whatever its id', () => {
@@ -246,7 +250,7 @@ describe('the sender header', () => {
     ])
   })
 
-  it.each(['shuttle', 'unverified'])('keeps %s as a sender, not a fiber', sender => {
+  it.each(['shuttle', 'external'])('keeps %s as a sender, not a fiber', sender => {
     const envelope = `[from ${sender}]\nA notice.`
     const [message] = normalizeRecord(carrier(envelope), [{ id: 'one', envelope }])
     expect(message).toMatchObject({ kind: 'shuttle-message' })

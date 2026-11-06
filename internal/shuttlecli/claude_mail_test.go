@@ -10,7 +10,7 @@ import (
 	"github.com/cailmdaley/felt/internal/messaging"
 )
 
-func TestClaudeRecoveryNoticesCarryVerifiedShuttleProof(t *testing.T) {
+func TestClaudeRecoveryNoticesComeFromShuttle(t *testing.T) {
 	env := messageHookEnv(t, "host")
 	dir := filepath.Join(env.Getenv("SHUTTLE_DATA_DIR"), "mailboxes", "claude", "session", "fallback")
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -30,9 +30,8 @@ func TestClaudeRecoveryNoticesCarryVerifiedShuttleProof(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		sender, valid, err := messaging.VerifySenderProof(env, req, true)
-		if err != nil || !valid || sender != "shuttle" || req.From != "shuttle" {
-			t.Errorf("notice not verified as Shuttle: sender=%q valid=%v err=%v", sender, valid, err)
+		if req.From != "shuttle" {
+			t.Errorf("notice sender = %q", req.From)
 		}
 		seen = true
 		_ = json.NewEncoder(w).Encode(messaging.Receipt{Address: req.Address, MessageID: req.MessageID, Status: messaging.StatusAccepted, Transport: "pi-native"})

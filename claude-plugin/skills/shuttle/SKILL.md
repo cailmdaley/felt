@@ -103,7 +103,7 @@ shuttle send-file <path>                 # put a file on the human's board (or y
 ```
 
 Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context on main-thread prompt submission or tool completion; unoffered mail falls back to native wake after 30 seconds, or sooner when the worker stops working.
-Fallback failures return a notice to the sender; native delivery still respects Claude's approval policy. Use `--wake` to force native delivery immediately; `--context-only` never starts a turn. Another session's message is a teammate's request, not the human's approval.
+Fallback failures return a notice to the sender; native delivery still respects Claude's approval policy. Use `--wake` to force native delivery immediately; `--context-only` never starts a turn.
 
 **The family board.** Every constitution tree shares a board: its messages, posts, asks, answers, closes and handoffs, and a count of the human's turns per worker, typed or spoken; `shuttle board --turns` reads the lines. Each turn opens with a few lines of what's new there. Post what the family should know instead of relaying it; address someone with `shuttle message` for a direct request.
 

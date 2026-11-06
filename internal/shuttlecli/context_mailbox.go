@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
-	"io"
 	"strconv"
 	"time"
 )
@@ -14,38 +13,19 @@ import (
 func (a *app) contextMailboxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "context-mailbox", Hidden: true, Short: "Owner-local durable fiber context"}
 	var wake bool
-	var proofWake bool
-	var daemonSender bool
 	var from string
-	var fromClaim string
 	var threadSignal string
 	var retainedAt string
-	var proofAddress string
-	var senderProofStdin bool
 	var replyTo string
 	var notifyAddress string
 	var notifyWhenIdle bool
 	var notifyWake bool
 	put := &cobra.Command{Use: "put <fiber-key> <message-id> <text>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
-		if daemonSender && !a.isLiveDaemonChild() {
-			return fmt.Errorf("daemon sender attribution requires a Shuttle daemon parent")
-		}
-		if err := messaging.ValidateSenderClaim(fromClaim); err != nil {
-			return err
-		}
-		detected := "unverified"
-		if daemonSender {
-			detected = "shuttle"
-		}
-		claim := fromClaim
-		if claim == "" && from != "" && from != detected {
-			claim = from
-		}
-		if err := messaging.ValidateSenderClaim(claim); err != nil {
+		if err := messaging.ValidateSender(from); err != nil {
 			return err
 		}
 		request := messaging.Request{
-			MessageID: args[1], Text: args[2], From: detected, FromClaim: claim,
+			MessageID: args[1], Text: args[2], From: from,
 			RetainedAt: retainedAt,
 			Wake:       wake, ReplyTo: replyTo, NotifyAddress: notifyAddress,
 			NotifyWhenIdle: notifyWhenIdle, NotifyWake: notifyWake,
@@ -57,44 +37,11 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 			}
 			request.ThreadSignal = &signal
 		}
-		var senderProof string
-		if senderProofStdin {
-			var proofInput struct {
-				SenderProof string `json:"sender_proof"`
-			}
-			if err := json.NewDecoder(io.LimitReader(cmd.InOrStdin(), 64<<10)).Decode(&proofInput); err != nil && err != io.EOF {
-				return fmt.Errorf("reading sender proof: %w", err)
-			}
-			senderProof = proofInput.SenderProof
-		}
-		if senderProof != "" {
-			if wake && !proofWake {
-				return fmt.Errorf("effective wake cannot exceed the sender proof")
-			}
-			candidate := request
-			candidate.Wake = proofWake
-			candidate.From = from
-			candidate.FromClaim = fromClaim
-			candidate.Address = proofAddress
-			candidate.SenderProof = senderProof
-			if sender, valid, err := messaging.VerifySenderProof(a.env, candidate, true); err != nil {
-				return err
-			} else if valid {
-				request.From = sender
-				request.FromClaim = fromClaim
-			}
-		}
-		request.SenderProof = ""
 		return messaging.QueueFiberContext(a.env, args[0], request)
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
-	put.Flags().BoolVar(&proofWake, "proof-wake", false, "Wake value included in the sender proof")
-	put.Flags().BoolVar(&daemonSender, "daemon-sender", false, "Mark a message produced by the Shuttle daemon")
-	put.Flags().StringVar(&from, "from", "", "Unverified sender claim")
-	put.Flags().StringVar(&fromClaim, "from-claim", "", "Unverified sender claim shown beside the sender")
-	put.Flags().StringVar(&proofAddress, "proof-address", "", "Address bound into the sender evidence")
-	put.Flags().BoolVar(&senderProofStdin, "sender-proof-stdin", false, "Read sender evidence from stdin")
-	put.Flags().StringVar(&replyTo, "reply-to", "", "Fiber reply target bound into the sender evidence")
+	put.Flags().StringVar(&from, "from", "", "Sender named in the message header")
+	put.Flags().StringVar(&replyTo, "reply-to", "", "Fiber reply target")
 	put.Flags().StringVar(&notifyAddress, "notify-address", "", "Idle callback address")
 	put.Flags().BoolVar(&notifyWhenIdle, "notify-when-idle", false, "Subscribe for idle notification")
 	put.Flags().BoolVar(&notifyWake, "notify-wake", false, "Wake on an idle notification")

@@ -1,7 +1,7 @@
 defmodule Shuttle.Messaging do
   @moduledoc "Fleet discovery and strictly host-addressed worker messaging."
 
-  alias Shuttle.Messaging.{Attestations, SessionFiberCache}
+  alias Shuttle.Messaging.SessionFiberCache
 
   require Logger
 
@@ -17,8 +17,6 @@ defmodule Shuttle.Messaging do
 
   @local_message_timeout_ms 32_000
   @remote_message_timeout_ms 42_000
-  # Redeemed inside the sender's remote forward, ahead of local delivery's own budget.
-  @attestation_timeout_ms 4_000
   @local_files_timeout_ms 60_000
   @remote_files_timeout_ms 90_000
   @local_discovery_timeout_ms 10_000
@@ -81,22 +79,24 @@ defmodule Shuttle.Messaging do
   def address(host, harness, native),
     do: build_address(host, %{harness: harness, native: native})
 
-  def send_message(payload) when is_map(payload), do: send_message(payload, :text, :external)
-
-  @doc "Send a message produced by a Shuttle daemon component."
-  def send_daemon_message(payload) when is_map(payload), do: send_message(payload, :text, :daemon)
+  def send_message(payload) when is_map(payload), do: send_message(payload, :text)
 
   def send_message_with_files(payload) when is_map(payload),
-    do: send_message(payload, :files, :external)
+    do: send_message(payload, :files)
 
-  defp send_message(payload, mode, source) do
+  @doc """
+  The sender a request names. An older peer forwards the sender in `from_claim`
+  under a placeholder `from`.
+  """
+  def sender(%{"from" => "unverified"} = payload), do: Map.get(payload, "from_claim", "")
+  def sender(payload), do: Map.get(payload, "from", "")
+
+  defp send_message(payload, mode) do
     with {:ok, request} <- validate_message(payload, mode),
          {:ok, address} <- parse_address(request.address),
          request <- normalize_message_address(request, address),
-         decision <- OriginRouter.route_host(address.host),
-         {:ok, request} <- authenticate_sender(request, decision, source),
-         result <- deliver(decision, request, address) do
-      result
+         decision <- OriginRouter.route_host(address.host) do
+      deliver(decision, request, address)
     end
   end
 
@@ -394,196 +394,10 @@ defmodule Shuttle.Messaging do
     end
   end
 
-  defp authenticate_sender(request, _decision, :daemon) do
-    raw =
-      request.raw
-      |> Map.put("from", "shuttle")
-      |> Map.put("from_claim", "")
-      |> Map.put("daemon_sender", true)
-      |> Map.delete("sender_proof")
-
-    {:ok, %{request | raw: raw}}
-  end
-
-  defp authenticate_sender(request, decision, :external) do
-    proof = Map.get(request.raw, "sender_proof", "")
-
-    callback =
-      Map.get(request.raw, "notify_address") ||
-        if Map.get(request.raw, "notify_when_idle", false), do: Map.get(request.raw, "from", "")
-
-    verified =
-      if is_binary(proof) and proof != "" do
-        proof_args =
-          if decision == :local, do: ["message-proof"], else: ["message-proof", "--consume"]
-
-        case CLI.run(proof_args, input: Jason.encode!(request.raw) <> "\n") do
-          {:ok, output} ->
-            case Jason.decode(output) do
-              {:ok, %{"valid" => true, "sender" => sender}} -> sender == request.raw["from"]
-              _ -> false
-            end
-
-          _ ->
-            false
-        end
-      else
-        false
-      end
-
-    cond do
-      verified and decision == :local ->
-        {:ok, request}
-
-      verified ->
-        # The verified sender is the claim the receiver redeems.
-        sender =
-          if request.raw["from"] == "shuttle",
-            do: address(Poller.own_host_id(), "shuttle", "daemon"),
-            else: request.raw["from"]
-
-        request = %{
-          request
-          | raw: request.raw |> Map.put("from", sender) |> Map.put("from_claim", "")
-        }
-
-        attest_forward(request)
-        unverified_sender(request, callback)
-
-      decision == :local ->
-        case redeem_attestation(request) do
-          {:ok, sender} ->
-            raw =
-              request.raw
-              |> Map.drop(["daemon_sender", "sender_proof"])
-              |> Map.put("from", sender)
-              |> Map.put("from_claim", "")
-              |> Map.put("attested_sender", sender)
-
-            raw =
-              case parse_address(sender) do
-                {:ok, %{harness: "shuttle", native: "daemon"}} ->
-                  raw
-                  |> Map.delete("attested_sender")
-                  |> Map.put("from", "shuttle")
-                  |> Map.put("daemon_sender", true)
-
-                _ ->
-                  raw
-              end
-
-            {:ok, %{request | raw: raw}}
-
-          :error ->
-            unverified_sender(request, callback)
-        end
-
-      true ->
-        unverified_sender(request, callback)
-    end
-  end
-
-  # A forward cannot carry a proof the receiving host can check. The sender is
-  # forwarded as a claim, and this host keeps the evidence for the receiver to
-  # redeem through its own route here.
-  defp attest_forward(request) do
-    with {:ok, sender} <- parse_address(request.raw["from"]),
-         true <- sender.host == Poller.own_host_id(),
-         {:ok, target} <- parse_address(request.address) do
-      Attestations.put(
-        request.raw["message_id"],
-        attestation(request.raw["from"], target, request)
-      )
-    end
-  end
-
-  defp redeem_attestation(request) do
-    claim = request.raw["from_claim"]
-
-    with "unverified" <- request.raw["from"],
-         true <- is_binary(claim),
-         {:ok, sender} <- parse_address(claim),
-         {:remote, remote} <- OriginRouter.route_host(sender.host),
-         {:ok, target} <- parse_address(request.address),
-         body = %{
-           "message_id" => request.raw["message_id"],
-           "from" => claim,
-           "address" => request.address,
-           "digest" => attestation(claim, target, request).digest
-         },
-         {:forwarded, 200, response} <-
-           OriginRouter.forward(remote, "/api/v1/messages/attestations", body,
-             forward_timeout_ms: @attestation_timeout_ms
-           ),
-         {:ok, %{"valid" => true}} <- Jason.decode(response) do
-      {:ok, claim}
-    else
-      _ -> :error
-    end
-  end
-
-  @doc "Redeem a forward's attestation held by this host: the receiving side's lookup."
-  def redeem_forward_attestation(%{
-        "message_id" => id,
-        "from" => from,
-        "address" => address,
-        "digest" => digest
-      })
-      when is_binary(id) and is_binary(from) and is_binary(digest) and is_binary(address) do
-    case parse_address(address) do
-      {:ok, target} ->
-        Attestations.consume(id, %{
-          from: from,
-          harness: Harnesses.normalize(target.harness),
-          native: target.native,
-          digest: digest
-        })
-
-      _ ->
-        false
-    end
-  end
-
-  def redeem_forward_attestation(_params), do: false
-
-  defp attestation(from, target, request) do
-    %{
-      from: from,
-      harness: Harnesses.normalize(target.harness),
-      native: target.native,
-      digest: Attestations.digest(request.raw["text"] || "", request.attachments)
-    }
-  end
-
-  defp unverified_sender(request, callback) do
-    claim =
-      case request.raw["from_claim"] do
-        value when is_binary(value) and value != "" -> value
-        _ -> request.raw["from"] || ""
-      end
-
-    claim = if claim in ["shuttle", "unverified"], do: "", else: claim
-
-    raw =
-      request.raw
-      |> Map.delete("daemon_sender")
-      |> Map.put("from", "unverified")
-      |> Map.put("from_claim", claim)
-      |> Map.delete("sender_proof")
-
-    raw =
-      if is_binary(callback) and callback != "",
-        do: Map.put(raw, "notify_address", callback),
-        else: raw
-
-    {:ok, %{request | raw: raw}}
-  end
-
   defp validate_message(payload, mode) do
     address = Map.get(payload, "address")
     text = Map.get(payload, "text", "")
-    from = Map.get(payload, "from", "")
-    from_claim = Map.get(payload, "from_claim", "")
+    from = sender(payload)
     reply_to = Map.get(payload, "reply_to", "")
     notify_address = Map.get(payload, "notify_address", "")
     # Ordinary messages are task requests. Context-only delivery is explicit
@@ -598,7 +412,6 @@ defmodule Shuttle.Messaging do
         address,
         text,
         from,
-        from_claim,
         reply_to,
         notify_address,
         wake,
@@ -613,7 +426,6 @@ defmodule Shuttle.Messaging do
          address,
          text,
          from,
-         from_claim,
          reply_to,
          notify_address,
          wake,
@@ -635,12 +447,9 @@ defmodule Shuttle.Messaging do
           not is_boolean(Map.get(payload, "notify_wake", false)) ->
         {:error, 400, "notify_when_idle and notify_wake must be booleans"}
 
-      not is_binary(from) or byte_size(from) > 1_024 or has_control?(from) ->
-        {:error, 400, "from must be a string of at most 1024 bytes without control characters"}
-
-      not is_binary(from_claim) or byte_size(from_claim) > 1_024 or has_control?(from_claim) or
-          String.contains?(from_claim, ["[", "]", ";"]) ->
-        {:error, 400, "from_claim must be a bounded single-line label without header delimiters"}
+      not is_binary(from) or byte_size(from) > 1_024 or has_control?(from) or
+          String.contains?(from, ["[", "]", ";"]) ->
+        {:error, 400, "from must be a bounded single-line label without header delimiters"}
 
       not is_binary(reply_to) or byte_size(reply_to) > 1_024 or has_control?(reply_to) ->
         {:error, 400,
@@ -663,9 +472,6 @@ defmodule Shuttle.Messaging do
           |> Map.take([
             "address",
             "text",
-            "from",
-            "from_claim",
-            "sender_proof",
             "reply_to",
             "notify_address",
             "wake",
@@ -675,6 +481,7 @@ defmodule Shuttle.Messaging do
             "notify_when_idle",
             "notify_wake"
           ])
+          |> Map.put("from", from)
           |> Map.put("wake", wake)
 
         raw = if attachments == [], do: raw, else: Map.put(raw, "attachments", attachments)

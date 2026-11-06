@@ -20,8 +20,8 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Automatic Claude mail has a durable native-wake recovery command.
-  @expected_level 34
+  # A message's sender is what its CLI or API caller names.
+  @expected_level 35
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -40,12 +40,8 @@ defmodule Shuttle.Contract do
     22 => "board append and ask --answered-by (family board)",
     23 =>
       "context-mailbox put --thread-signal and thread-signal-current (fresh lifecycle delivery)",
-    24 =>
-      "message-proof (one-shot sender evidence) and context-mailbox put --from-claim (neutral sender claim metadata)",
-    25 => "context-mailbox sender proof on stdin and process-checked daemon sender attribution",
     26 => "mark-runtime --thread-exit-verb (durable lifecycle signal supersession)",
     27 => "context-mailbox put --retained-at (bounded thread notice retention)",
-    28 => "message --request-json attested_sender (cross-host verified senders)",
     29 => "scan-changes (incremental physical-store metadata index)",
     30 => "scan-changes (newline-framed opaque metadata index)",
     31 =>
@@ -54,7 +50,8 @@ defmodule Shuttle.Contract do
     32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)",
     33 =>
       "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)",
-    34 => "claude-mail-recover (durable native wake for unoffered automatic Claude mail)"
+    34 => "claude-mail-recover (durable native wake for unoffered automatic Claude mail)",
+    35 => "context-mailbox put --from and message --request-json from (the sender as given)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

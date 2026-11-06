@@ -136,7 +136,7 @@ defmodule ShuttleWeb.MeetingController do
             prompt,
             origin,
             "shuttle",
-            params |> Map.take(["resume_mode"]) |> Map.put("daemon_sender", true)
+            Map.take(params, ["resume_mode"])
           )
 
         if Shuttle.Env.app(:start_meeting_transcript_relay, true) and status < 300 do

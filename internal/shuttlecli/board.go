@@ -19,7 +19,6 @@ type boardParty struct {
 	Fiber   string `json:"fiber,omitempty"`
 	Session string `json:"session,omitempty"`
 	Label   string `json:"label,omitempty"`
-	Claim   string `json:"claim,omitempty"`
 }
 
 type boardRecord struct {
@@ -83,11 +82,7 @@ func (a *app) boardWorkerParty() *boardParty {
 }
 
 func (a *app) boardMessageActor(from string) *boardParty {
-	return a.boardMessageActorClaim(from, "")
-}
-
-func (a *app) boardMessageActorClaim(from, claim string) *boardParty {
-	by := &boardParty{Claim: claim}
+	by := &boardParty{}
 	if _, err := messaging.ParseAddress(from); err != nil {
 		by.Label = from
 	} else {
@@ -104,7 +99,7 @@ func (a *app) boardMessageActorClaim(from, claim string) *boardParty {
 }
 
 func (a *app) recordBoardMessage(target string, request messaging.Request) {
-	by := a.boardMessageActorClaim(request.From, request.FromClaim)
+	by := a.boardMessageActor(request.From)
 	to := &boardParty{}
 	if _, err := messaging.ParseAddress(request.Address); err == nil {
 		to.Session = request.Address

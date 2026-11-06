@@ -387,8 +387,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert_received {:message, request}
     assert request["address"] == "shuttle://#{Poller.own_host_id()}/claude/#{session_uuid}"
     assert request["text"] == "Meeting mode (call)."
-    assert request["from"] == "unverified"
-    assert request["from_claim"] == "shuttle meeting"
+    assert request["from"] == "shuttle meeting"
     assert request["wake"] == true
 
     assert launches_before ==
@@ -581,8 +580,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
              "wake" => false,
              "message_id" => "thread-forwarded",
              "thread_signal" => signal,
-             "from" => "unverified",
-             "from_claim" => ""
+             "from" => "shuttle"
            }
 
     api_conn()
@@ -592,14 +590,17 @@ defmodule ShuttleWeb.DeliverControllerTest do
         "fiber_id" => "tests/remote",
         "text" => "hello",
         "origin" => "cineca",
-        "from" => "shuttle://sender/codex/thread",
-        "from_claim" => ""
+        "from" => "unverified",
+        "from_claim" => "shuttle://sender/codex/thread",
+        "sender_proof" => "old"
       })
     )
     |> json_response(200)
 
-    assert %{"from" => "unverified", "from_claim" => "shuttle://sender/codex/thread"} =
-             StubPostClient.last().body |> Jason.decode!()
+    forwarded = StubPostClient.last().body |> Jason.decode!()
+    assert forwarded["from"] == "shuttle://sender/codex/thread"
+    refute Map.has_key?(forwarded, "from_claim")
+    refute Map.has_key?(forwarded, "sender_proof")
   end
 
   # `shuttle message <fiber>`'s request: context unless a worker is live. The

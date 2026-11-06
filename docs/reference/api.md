@@ -382,9 +382,8 @@ A terminal failure, exited receiver or ambiguous interrupted write produces a du
 Claude's native approval policy applies to fallback; Shuttle cannot start a turn that Claude holds for approval.
 The routing hint isn't part of the message's retry identity, so adding or stripping it across a mixed-version fleet doesn't cause an ID conflict.
 
-The daemon records a session sender only with a valid, one-use local sender proof bound to the delivery fields.
-Public requests without that evidence are labelled `unverified`; `from` is retained as a neutral sender claim.
-Messages produced inside the daemon are attributed to Shuttle.
+`from` names the sender, as given; a request without one reads `[from external]`.
+Messages produced inside the daemon are `from: shuttle`.
 
 `notify_when_idle: true` subscribes `from`, which must be a `shuttle://`
 address, to one idle notice from the receiver; `notify_wake: true` makes that
@@ -719,7 +718,7 @@ When a remote owner does not support streaming, the hub returns 501 `stream_unsu
 It returns `{"messages":[{"id":"…","envelope":"[from …]\\n…","thread":true}],"cursor":"…"}` from the host's private message records.
 Pass the opaque `cursor` back as `since=<cursor>` to read changes; merge responses by message ID.
 Evidence is retained for fourteen days.
-The optional `thread` flag identifies a recorded lifecycle signal; a message id's spelling alone carries no lifecycle authority.
+The optional `thread` flag marks a lifecycle notice from the daemon, whose message id starts `thread-`.
 Each `envelope` includes its complete body, so a quoted message header cannot create a second attributed row.
 An envelope carries no message ID; two messages with the same sender and text have equal envelopes and separate records.
 Missing evidence returns an empty array; an unreadable store returns 503.

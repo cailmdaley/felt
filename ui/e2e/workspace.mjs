@@ -182,7 +182,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     for (let i = 0; i < 4; i++) {
       const text = await rows.nth(i).innerText()
       assert.ok(!text.includes('shuttle://'), `row ${i} hides raw session addresses`)
-      assert.ok(!/claims to be|unverified|Delivery unclear/i.test(text), `row ${i} spells out no trust or delivery prose: ${text}`)
+      assert.ok(!/claims to be|unverified|Delivery unclear/i.test(text), `row ${i} spells out no sender qualification or delivery prose: ${text}`)
     }
     assert.ok(!(await rows.nth(1).innerText()).includes('msg-abcdef'), 'the compact row hides the message id')
     // At rest a received message is a sender line, then its preview on a line of its own.
@@ -215,9 +215,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 
   const sent = transcript.locator('.ws-transcript-shuttle-message[data-direction="sent"]')
   const incoming = transcript.locator('.ws-transcript-shuttle-message[data-direction="received"]')
-  assert.equal(await incoming.count(), 3, 'the verified, unverified and session deliveries remain visible')
+  assert.equal(await incoming.count(), 3, 'the fiber, old-header and session deliveries remain visible')
   const received = incoming.nth(0)
-  const unverified = incoming.nth(1)
+  const oldHeader = incoming.nth(1)
   const sessionMessage = incoming.nth(2)
   assert.ok(!(await sent.evaluate(row => row.closest('.ws-transcript-steplist'))), 'the sent row sits outside tool groups')
   assert.ok(!(await received.evaluate(row => row.closest('.ws-transcript-steplist'))), 'the received row sits outside tool groups')
@@ -226,7 +226,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await sent.locator('.ws-transcript-message-direction').click()
   assert.match(await sent.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /north patch residual is in the new table/)
 
-  // A verified session sender is named by its own fiber, so no separate reply-to appears.
+  // A session sender is named by its own fiber, so no separate reply-to appears.
   const sender = received.locator('.ws-transcript-message-peer.ws-constitution-chip')
   await sender.waitFor()
   assert.equal(await sender.getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the sender chip links to its fiber')
@@ -243,14 +243,11 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     ?.querySelector('.ws-transcript-message-preview')?.textContent === '', receivedId)
   assert.equal(await received.locator('.ws-transcript-message-preview').textContent(), '', 'expanded rows do not retain a second copy of the preview text')
 
-  // An unverified sender is a quiet mark with its claim on hover; the reply-to it differs from stays.
-  const mark = unverified.locator('.ws-transcript-message-peer.ws-transcript-message-unverified')
-  assert.equal((await mark.innerText()).trim(), '?', 'the unverified sender is a single quiet glyph')
-  assert.match(await mark.getAttribute('title'), /^Sender not verified · claims to be shuttle:\/\/umber-workstation\/claude\//, 'the claim waits on hover')
-  const route = unverified.locator('.ws-transcript-message-route-link.ws-constitution-chip')
-  await route.waitFor()
-  assert.equal(await route.getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the reply-to route remains linked to its thread')
-  assert.equal((await unverified.locator('.ws-transcript-message-route').innerText()).startsWith('reply to'), true, 'the route is shown separately from sender identity')
+  // An old qualified header renders as a plain message from its sender.
+  const oldSender = oldHeader.locator('.ws-transcript-message-peer.ws-constitution-chip')
+  await oldSender.waitFor()
+  assert.equal(await oldSender.getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the old sender links to its fiber')
+  assert.equal(await oldSender.getAttribute('title'), null, 'the sender carries no qualification')
 
   const sessionChip = sessionMessage.locator('.ws-transcript-session-chip')
   await sessionChip.waitFor()

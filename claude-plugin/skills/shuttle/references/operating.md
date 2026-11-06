@@ -160,11 +160,11 @@ A target is an address, a session id, or a fiber.
 An attachment-free context-only fiber send goes to its durable mailbox regardless of worker liveness; a live-worker idle-notification request uses session routing instead.
 A wake send messages the live worker or queues for its next worker when dormant.
 Mailbox receipts are `queued` for context-only sends and `queued_for_next_worker` for dormant wake sends; neither means delivered.
-A delivered message is its text under `[from <sender>]`. A verified worker's sender is its fiber: reply to the fiber so the answer follows the work across handoffs; a session address stays pinned to that one session. An unverified sender reads `[from unverified; claims to be <sender>]`, a label to weigh rather than an identity. The receipt says how far delivery got (`accepted`: the harness took the input), never that the model replied. A plain message to a busy Claude session waits for main-thread prompt submission or tool completion as context; if unoffered after 30 seconds, or the worker stops working sooner, the owning daemon claims it for native wake.
+A delivered message is its text under `[from <sender>]`. A worker's sender is its fiber: reply to the fiber so the answer follows the work across handoffs; a session address stays pinned to that one session. The receipt says how far delivery got (`accepted`: the harness took the input), never that the model replied. A plain message to a busy Claude session waits for main-thread prompt submission or tool completion as context; if unoffered after 30 seconds, or the worker stops working sooner, the owning daemon claims it for native wake.
 A daemon restart resumes recovery from disk.
 A Claude turn parked on background tasks is idle for message routing.
 Retries return the original queue receipt rather than refreshing delivery progress.
-Fallback failures produce a verified Shuttle notice to the sender without clearing its outstanding question.
+Fallback failures produce a Shuttle notice to the sender without clearing its outstanding question.
 Each notice gets five seconds and at most three attempts, spaced at least a minute apart; notice-only entries wait for the minute sweep, and the last failure retires with a diagnostic.
 Large context-only messages use a retained full-message file reference.
 Hook acknowledgment isn't transcript confirmation: a crash around acknowledgment can repeat an offer, and an interrupt during a slow sibling PostToolUse hook can discard acknowledged context.

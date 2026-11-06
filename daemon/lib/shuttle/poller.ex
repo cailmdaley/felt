@@ -2929,7 +2929,7 @@ defmodule Shuttle.Poller do
 
                     case Shuttle.Env.app(:pulse_sender) do
                       sender when is_function(sender, 1) -> sender.(payload)
-                      _ -> Shuttle.Messaging.send_daemon_message(payload)
+                      _ -> Shuttle.Messaging.send_message(payload)
                     end
                   end)
 

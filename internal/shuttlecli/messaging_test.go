@@ -371,7 +371,7 @@ func TestPostMessageFilesUsesVersionSafeRoute(t *testing.T) {
 					t.Fatalf("attachment receipt: %+v %v", receipt, err)
 				}
 			} else if err == nil || !reflect.DeepEqual(receipt, messaging.Receipt{}) {
-				t.Fatalf("unverified file delivery claimed: %+v %v", receipt, err)
+				t.Fatalf("unconfirmed file delivery reported: %+v %v", receipt, err)
 			}
 		})
 	}
@@ -480,41 +480,41 @@ func TestResolveMessageSenderIsReplyAddress(t *testing.T) {
 	env.Set("CLAUDE_CODE_SESSION_ID", "reply-session")
 	registerSenderProcess(t, env, "claude", "reply-session", "sender", os.Getpid())
 	a := newApp(env)
-	if got := a.detectMessageSender(); got != "shuttle://sender/claude/reply-session" {
+	if got := a.messageCaller(); got != "shuttle://sender/claude/reply-session" {
 		t.Fatalf("sender = %q", got)
 	}
 }
 
-func TestBuildMessageRequestKeepsExplicitFromAsClaim(t *testing.T) {
+func TestBuildMessageRequestTakesFromAsTheSender(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "sender")
 	env.Set("CODEX_THREAD_ID", "")
-	env.Set("CLAUDE_CODE_SESSION_ID", "claim-session")
-	registerSenderProcess(t, env, "claude", "claim-session", "sender", os.Getpid())
+	env.Set("CLAUDE_CODE_SESSION_ID", "named-session")
+	registerSenderProcess(t, env, "claude", "named-session", "sender", os.Getpid())
 	opts := messageOptions{wake: true, from: "bob"}
-	request, err := newApp(env).buildMessageRequest(strings.NewReader("hello"), []string{"shuttle://host/codex/target"}, &opts)
+	request, err := newApp(env).buildMessageRequest(strings.NewReader("hello"), []string{"shuttle://host/codex/target", "hello"}, &opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.From != "shuttle://sender/claude/claim-session" || request.FromClaim != "bob" {
-		t.Fatalf("sender attribution = %q, claim = %q", request.From, request.FromClaim)
+	if request.From != "bob" {
+		t.Fatalf("sender = %q", request.From)
 	}
 }
 
-func TestRequestJSONCannotSpoofDetectedSender(t *testing.T) {
+func TestRequestJSONKeepsTheFrameSender(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "sender")
 	env.Set("CODEX_THREAD_ID", "real-thread")
 	a := newApp(env)
-	frame := `{"address":"shuttle://host/codex/target","text":"hello","from":"shuttle://host/claude/bob","message_id":"json-spoof","wake":true}`
+	frame := `{"address":"shuttle://host/codex/target","text":"hello","from":"shuttle://host/claude/bob","sender_proof":"old","message_id":"json-frame","wake":true}`
 	request, err := a.buildMessageRequest(strings.NewReader(frame+"\n"), nil, &messageOptions{requestJSON: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.From != "unverified" || request.FromClaim != "shuttle://host/claude/bob" {
-		t.Fatalf("spoofed sender promoted: from=%q claim=%q", request.From, request.FromClaim)
+	if request.From != "shuttle://host/claude/bob" {
+		t.Fatalf("sender = %q", request.From)
 	}
 }
 
@@ -526,20 +526,20 @@ func TestResolveMessageSenderFromClaudeProcessRegistration(t *testing.T) {
 	env.Set("CLAUDE_SESSION_ID", "")
 	env.Set("CLAUDE_CODE_SESSION_ID", "f95c9363-1fc8-4d7c-bdb2-7910930a47e7")
 	registerSenderProcess(t, env, "claude", "f95c9363-1fc8-4d7c-bdb2-7910930a47e7", "sender", os.Getpid())
-	if got := newApp(env).detectMessageSender(); got != "shuttle://sender/claude/f95c9363-1fc8-4d7c-bdb2-7910930a47e7" {
+	if got := newApp(env).messageCaller(); got != "shuttle://sender/claude/f95c9363-1fc8-4d7c-bdb2-7910930a47e7" {
 		t.Fatalf("sender = %q", got)
 	}
 	env.Set("CLAUDE_CODE_SESSION_ID", "")
 	if err := messaging.RegisterMailbox(env, "claude", "f95c9363-1fc8-4d7c-bdb2-7910930a47e7", "sender", "/project", os.Getpid(), false); err != nil {
 		t.Fatal(err)
 	}
-	if got := newApp(env).detectMessageSender(); got != "external" {
+	if got := newApp(env).messageCaller(); got != "" {
 		t.Fatalf("sender outside a harness = %q", got)
 	}
 }
 
-// Environment precedence only selects the unverified hint for an unbound process.
-func TestMessageSenderHintFromNestedHarnessEnvironment(t *testing.T) {
+// Environment precedence selects the session of a process with no registration.
+func TestMessageCallerFromNestedHarnessEnvironment(t *testing.T) {
 	t.Parallel()
 	const pi = "019a8f2e-7c1d-7b3e-9f40-5d6c7b8a9e01"
 	for _, tc := range []struct{ name, aiAgent, codex, claude, piID, want string }{
@@ -561,7 +561,7 @@ func TestMessageSenderHintFromNestedHarnessEnvironment(t *testing.T) {
 			env.Set("CLAUDE_SESSION_ID", "")
 			env.Set("CLAUDE_CODE_SESSION_ID", tc.claude)
 			env.Set("PI_SESSION_ID", tc.piID)
-			if got := newApp(env).messageSenderHint(); got != tc.want {
+			if got := newApp(env).messageCaller(); got != tc.want {
 				t.Fatalf("sender = %q, want %q", got, tc.want)
 			}
 		})

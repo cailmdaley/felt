@@ -184,10 +184,7 @@ func validateRequest(host string, r Request) error {
 	if (r.Text == "" && len(r.Attachments) == 0 && !r.NotifyWhenIdle) || len(r.Text) > 64<<10 || strings.ContainsRune(r.Text, 0) {
 		return errCode("invalid_request", "text must be at most 65536 bytes and may be empty only with attachments")
 	}
-	if len(r.From) > 1024 || hasControl(r.From) || strings.ContainsAny(r.From, "[];") {
-		return errCode("invalid_request", "from is too long or contains header delimiters")
-	}
-	if err := ValidateSenderClaim(r.FromClaim); err != nil {
+	if err := ValidateSender(r.From); err != nil {
 		return err
 	}
 	if len(r.ReplyTo) > 1024 || hasControl(r.ReplyTo) {
@@ -196,11 +193,10 @@ func validateRequest(host string, r Request) error {
 	return validateAttachments(r.Attachments)
 }
 
-// ValidateSenderClaim keeps caller-supplied labels bounded and on one line of
-// the message header.
-func ValidateSenderClaim(claim string) error {
-	if len(claim) > 1024 || hasControl(claim) || strings.ContainsAny(claim, "[];") {
-		return errCode("invalid_request", "from_claim is too long or contains header delimiters")
+// ValidateSender keeps a sender bounded and on one line of the message header.
+func ValidateSender(from string) error {
+	if len(from) > 1024 || hasControl(from) || strings.ContainsAny(from, "[];") {
+		return errCode("invalid_request", "from is too long or contains header delimiters")
 	}
 	return nil
 }

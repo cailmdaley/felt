@@ -19,11 +19,6 @@ func (a *app) claudeMailRecoverCmd() *cobra.Command {
 				return err
 			}
 			pending, err := messaging.RecoverClaudeMail(cmd.Context(), a.env, host, time.Now(), func(ctx context.Context, request messaging.Request) error {
-				proof, err := messaging.CreateSenderProof(a.env, request)
-				if err != nil {
-					return err
-				}
-				request.SenderProof = proof
 				receipt, err := a.postMessageContext(ctx, request)
 				return messageReceiptError(request.MessageID, receipt, err)
 			})

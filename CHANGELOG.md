@@ -11,9 +11,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Claude and Pi hooks bridge terminal program status through tmux to supporting outer terminals; `SHUTTLE_PROGRAM_STATUS=off` disables it.
 - Shuttle supports Rex as its terminal backend with `"terminal": "rex"` in `host.json`.
 
+### Removed
+
+- Sender proofs, cross-host attestations, sender claims and the board's sender marks. The `message-proof` command, the `POST /messages/attestations` route and the `context-mailbox put` proof, claim and daemon-sender flags are gone; contract level 35.
+
 ### Changed
 
-- Messages between sessions carry their text under one header, `[from life/vizier]`, with no hook preamble. An unverified sender reads `[from unverified; claims to be life/vizier]`.
+- Messages between sessions carry their text under one header, `[from life/vizier]`, with no hook preamble. The sender is what the sending CLI or API caller names; `--from` sets it. Old transcripts, queued mail and forwards from older peers read the same way.
 
 ### Fixed
 

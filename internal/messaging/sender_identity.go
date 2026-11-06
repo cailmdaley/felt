@@ -9,8 +9,8 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-// DetectProcessSender resolves a caller from a live hook registration.
-// Mutable session-id environment variables never establish sender identity.
+// DetectProcessSender names the caller from the nearest live hook registration
+// in its process ancestry, or "" when none or several match.
 func DetectProcessSender(env *sysenv.Env, host string) string {
 	ancestors := make(map[int]int)
 	for pid, distance := os.Getpid(), 0; pid > 0 && distance < 64; distance++ {

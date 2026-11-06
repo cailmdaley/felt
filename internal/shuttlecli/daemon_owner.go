@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -233,50 +232,6 @@ func (a *app) signalDaemonOwner(owner daemonOwner, signal syscall.Signal) error 
 		return errors.New("daemon owner changed before signal")
 	}
 	return a.daemonSignalPID(owner.PID, signal)
-}
-
-func (a *app) isLiveDaemonChild() bool {
-	settings, err := a.resolveHostSettings()
-	if err != nil {
-		return false
-	}
-	host, err := a.env.Hostname()
-	if err != nil {
-		return false
-	}
-	return a.isLiveDaemonChildForHost(settings, host)
-}
-
-func (a *app) isLiveDaemonChildForHost(settings hostSettings, host string) bool {
-	path, err := a.daemonOwnerPathFor(host, settings)
-	if err != nil {
-		return false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var owner daemonOwner
-	if json.Unmarshal(data, &owner) != nil || owner.PID <= 0 || owner.Birth == "" {
-		return false
-	}
-	birth, err := processBirth(a.env, owner.PID)
-	if err != nil || birth != owner.Birth {
-		return false
-	}
-
-	current := os.Getpid()
-	for range 4 {
-		parent, _, ok := messaging.ProcessParent(current)
-		if !ok || parent <= 1 || parent == current {
-			return false
-		}
-		if parent == owner.PID {
-			return true
-		}
-		current = parent
-	}
-	return false
 }
 
 // A manager may return from load/restart before its child begins executing.

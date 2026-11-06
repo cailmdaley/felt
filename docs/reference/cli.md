@@ -390,7 +390,7 @@ Fallback waits briefly for native admission or refusal, not for a model response
 A preflight failure returns the message to the hook queue; after three failed preflights, a receiver exit, or a refused or ambiguous write, Shuttle sends a failure notice to the sender's session return address.
 Each notice has a five-second timeout and at most three attempts, spaced by at least a minute; notice-only entries wait for the safety sweep rather than the fast tick.
 After the third failed attempt, Shuttle retires the entry and logs the undeliverable notice.
-Notices arrive as verified `from: shuttle` and don't answer a worker's outstanding question.
+Notices arrive `from: shuttle` and don't answer a worker's outstanding question.
 Unreadable entries are skipped with a diagnostic so other mail can recover.
 Claude's receiver approval policy still applies; a held native message doesn't start a turn.
 An interrupted preflight can retry; a durable before-write mark without a recorded result is reported as ambiguous and never blindly resent.
@@ -412,7 +412,7 @@ Text is optional: with text, the message is delivered and then the subscription
 is made; without it, the receipt is `subscribed`. The notice arrives as context
 from Shuttle and names the receiver in its text; `--notify-wake` has it start a turn instead.
 The callback address comes from the detected harness session.
-`--from` adds a claim beside that identity and cannot set it.
+`--from` names another sender; callbacks still reach the calling session.
 The owning host records the subscription under `$SHUTTLE_DATA_DIR/idle/` and a
 detached `shuttle idle-watch` observes it. Claude receivers subscribe through
 Claude Code's native inbox (`notify_when_idle` / `peer_idle_notice`), and a
@@ -504,18 +504,10 @@ No receipt proves that a model read, acted on, or integrated the message.
 Hook offers can repeat if the receiver crashes after writing context but before
 recording the offer; message IDs remain stable. Repeating the identical send
 with the same `--message-id` retrieves its recorded result without redelivery.
-`--from` is a sender claim; the message header keeps it separate from the sending session detected by Shuttle.
-Shuttle resolves the caller from a live receiver registration bound to the invoking process ancestry.
-Codex callers require a registered native session capability bound to the active terminal worker.
-An environment override on the sending command supplies no sender authority.
-Callers without sufficient evidence are labelled `unverified`, with any asserted sender shown as a neutral claim.
-The CLI binds a resolved identity to the message with one-use local proof before it reaches the daemon.
-The proof store trusts the local operating-system account; it does not isolate processes with arbitrary access to that account’s files.
+`--from` names the sender. Without it, the sender is the calling session: a live receiver registration in the process ancestry, then the session id the harness exports, then `external`.
 A fiber worker also supplies `reply_to`, a separate fiber target.
-At a local destination, the delivered header names the detected sender as `[from <fiber>]`, or `[from <address>]` for a session without a fiber.
-A sender that is not a verified session keeps its label and adds the target: `[from shuttle; reply to <fiber>]`.
-Across hosts, the destination labels the sender `unverified` and shows the original sender as a claim: `[from unverified; claims to be <sender>]`.
-Only messages produced by the daemon itself are attributed to Shuttle.
+The delivered header names the sender as `[from <fiber>]`, or `[from <address>]` for a session without a fiber.
+A sender that is not a session keeps its label and adds the target: `[from shuttle; reply to <fiber>]`.
 Reply with `shuttle message <fiber> ...` to reach the fiber's current worker across handoffs.
 Nonworker messages omit `reply_to`.
 If the receiver uses another routing alias for the sender's host, resolve an explicit session reply through its own `sessions` output.

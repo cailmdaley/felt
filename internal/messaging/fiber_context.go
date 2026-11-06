@@ -60,7 +60,7 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 }
 
 // The fiber key supplies the destination; session aliases and refreshed
-// retention/proof metadata do not change a retry's semantic identity.
+// retention metadata do not change a retry's semantic identity.
 // Wake is owner-derived routing, dependent on worker liveness.
 func fiberRequestIdentity(r Request) string {
 	r.Address = ""
@@ -285,9 +285,6 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 			return fiberContextHookEligible(root, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
 		}, func(batch []Request) error {
 			offered = true
-			for index := range batch {
-				batch[index].threadSignalVerified = batch[index].ThreadSignal != nil
-			}
 			return emit(batch)
 		}, false, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(ctx, env, r) }, harness)
 		if err != nil {
@@ -351,7 +348,6 @@ func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, addr
 	return offerMailboxEachValidated(root, func(r Request) bool {
 		return fiberContextDirectEligible(root, r, generation, hook, a)
 	}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(ctx, env, r) }, func(req Request) error {
-		req.threadSignalVerified = req.ThreadSignal != nil
 		req.ThreadSignal = nil
 		return deliverFiberContextItem(ctx, env, fiber, host, address, req)
 	})

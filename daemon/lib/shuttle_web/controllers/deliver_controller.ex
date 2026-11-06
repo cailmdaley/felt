@@ -3,10 +3,10 @@ defmodule ShuttleWeb.DeliverController do
   Agent-API endpoint: POST /api/v1/deliver
 
   Body `{fiber_id, text, from?, origin?, context_only?, message_id?, wake?,
-  unless_live?, resume_mode?}`. Puts `text` in front of the fiber's
-  worker on its owning host (`Shuttle.Delivery`): a live worker is messaged, a
-  dormant one resumes (or dispatches, if it never ran) with `text` as its From
-  User. `resume_mode` (`"fresh"` or `"previous"`) names that choice instead, as
+  unless_live?, resume_mode?}`. Puts `text`, from `from` or else Shuttle, in front
+  of the fiber's worker on its owning host (`Shuttle.Delivery`): a live worker is
+  messaged, a dormant one resumes (or dispatches, if it never ran) with `text` as
+  its From User. `resume_mode` (`"fresh"` or `"previous"`) names that choice instead, as
   in `Shuttle.Delivery`. A request carrying `origin` is forwarded to that owner's identical
   route.
 
@@ -27,7 +27,7 @@ defmodule ShuttleWeb.DeliverController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias Shuttle.{CLI, Delivery, OriginRouter}
+  alias Shuttle.{Delivery, Messaging, OriginRouter}
 
   def create(conn, params) do
     {status, body} =
@@ -35,11 +35,10 @@ defmodule ShuttleWeb.DeliverController do
         Map.get(params, "fiber_id"),
         Map.get(params, "text"),
         Map.get(params, "origin"),
-        Map.get(params, "from"),
+        Messaging.sender(params),
         Map.take(params, [
           "address",
           "context_only",
-          "from_claim",
           "message_id",
           "message_after_launch",
           "live_input",
@@ -48,7 +47,6 @@ defmodule ShuttleWeb.DeliverController do
           "notify_wake",
           "reply_to",
           "resume_mode",
-          "sender_proof",
           "wake",
           "unless_live",
           "thread_signal",
@@ -61,7 +59,9 @@ defmodule ShuttleWeb.DeliverController do
 
   @doc "Deliver on the owning daemon, forwarding when `origin` names a remote."
   @spec route(term(), term(), String.t() | nil, term()) :: {pos_integer(), map()}
-  def route(fiber_id, text, origin, from \\ nil, context \\ %{}) do
+  def route(fiber_id, text, origin, from \\ "shuttle", context \\ %{}) do
+    from = if from in [nil, ""], do: "shuttle", else: from
+
     cond do
       not (is_binary(fiber_id) and String.trim(fiber_id) != "") ->
         {400, %{delivered: false, error: "fiber_id is required"}}
@@ -75,52 +75,31 @@ defmodule ShuttleWeb.DeliverController do
             {400, %{delivered: false, error: OriginRouter.unknown_origin_message(name)}}
 
           {:remote, remote} ->
-            {sender, claimed} =
-              if context["daemon_sender"] == true,
-                do: {"shuttle", ""},
-                else: unverified_sender(from, context["from_claim"])
-
             payload =
-              %{"fiber_id" => fiber_id, "text" => text}
+              %{"fiber_id" => fiber_id, "text" => text, "from" => from}
               |> Map.merge(context)
-              |> Map.delete("sender_proof")
-              |> Map.put("from", sender)
-              |> Map.put("from_claim", claimed)
 
             remote |> OriginRouter.forward("/api/v1/deliver", payload) |> relay()
 
           :local ->
             if context["context_only"] == true do
-              {sender, claim} = verified_sender(context, from, text, false)
-
               context_reply(fiber_id, text, context["message_id"],
                 wake: context["wake"] == true,
                 retained_at: context["retained_at"],
                 thread_signal: context["thread_signal"],
                 unless_live: context["unless_live"] == true,
-                from: sender,
-                from_claim: claim,
-                sender_proof: context["sender_proof"],
-                proof_wake: context["wake"] == true,
-                proof_address: context["address"],
+                from: from,
                 reply_to: context["reply_to"],
                 notify_address: context["notify_address"],
                 notify_when_idle: context["notify_when_idle"] == true,
                 notify_wake: context["notify_wake"] == true
               )
             else
-              {sender, claim} =
-                if context["daemon_sender"] == true,
-                  do: {"shuttle", ""},
-                  else: unverified_sender(from, context["from_claim"])
-
               opts = [
-                from: sender,
-                from_claim: claim,
+                from: from,
                 message_id: context["message_id"],
                 message_after_launch: context["message_after_launch"] == true,
                 live_input: context["live_input"] == true,
-                daemon_sender: context["daemon_sender"] == true,
                 resume_mode: resume_mode(context["resume_mode"])
               ]
 
@@ -132,47 +111,6 @@ defmodule ShuttleWeb.DeliverController do
 
   defp resume_mode(mode) when mode in ["fresh", "previous"], do: mode
   defp resume_mode(_mode), do: nil
-
-  defp verified_sender(context, from, text, consume) do
-    request = %{
-      "address" => context["address"] || "",
-      "text" => text,
-      "from" => from || "",
-      "from_claim" => context["from_claim"] || "",
-      "reply_to" => context["reply_to"] || "",
-      "message_id" => context["message_id"] || "",
-      "notify_address" => context["notify_address"] || "",
-      "notify_when_idle" => context["notify_when_idle"] || false,
-      "notify_wake" => context["notify_wake"] || false,
-      "wake" => context["wake"] || false,
-      "thread_signal" => context["thread_signal"],
-      "sender_proof" => context["sender_proof"] || ""
-    }
-
-    proof_args = if consume, do: ["message-proof", "--consume"], else: ["message-proof"]
-
-    case CLI.run(proof_args, input: Jason.encode!(request) <> "\n") do
-      {:ok, output} ->
-        case Jason.decode(output) do
-          {:ok, %{"valid" => true, "sender" => sender}} ->
-            {sender, context["from_claim"] || ""}
-
-          _ ->
-            unverified_sender(from, context["from_claim"])
-        end
-
-      _ ->
-        unverified_sender(from, context["from_claim"])
-    end
-  end
-
-  defp unverified_sender(from, claim) do
-    claim = if is_binary(claim) and claim != "", do: claim, else: from
-
-    if is_binary(claim) and claim != "" and claim not in ["shuttle", "unverified"],
-      do: {"unverified", claim},
-      else: {"unverified", ""}
-  end
 
   defp context_reply(fiber_id, text, message_id, opts)
        when is_binary(message_id) and message_id != "" do

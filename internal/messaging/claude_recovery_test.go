@@ -67,7 +67,7 @@ func TestClaudeAbandonedFallbackRetriesOnlyBeforeWrite(t *testing.T) {
 			notices := 0
 			notify := func(_ context.Context, notice Request) error {
 				notices++
-				if notice.Address != req.From || !notice.Wake || !strings.Contains(notice.Text, messageRef(req.MessageID)) {
+				if notice.Address != req.From || !notice.Wake || !strings.Contains(notice.Text, req.MessageID) {
 					t.Fatalf("bad failure notice: %+v", notice)
 				}
 				return nil
@@ -115,7 +115,7 @@ func TestClaudeFallbackRefusalReachesSenderAndNeverRepeatsWrite(t *testing.T) {
 			var firstNotice Request
 			notify := func(_ context.Context, notice Request) error {
 				notices++
-				if notice.Address != req.From || notice.ContextIfBusy || !strings.Contains(notice.Text, messageRef(req.MessageID)) {
+				if notice.Address != req.From || notice.ContextIfBusy || !strings.Contains(notice.Text, req.MessageID) {
 					t.Fatalf("bad notice: %+v", notice)
 				}
 				if notices == 1 {
@@ -188,14 +188,8 @@ func TestClaudeExitedReceiverNotifiesImmediately(t *testing.T) {
 	notices := 0
 	if _, err := RecoverClaudeMail(context.Background(), env, "host", time.Now(), func(_ context.Context, notice Request) error {
 		notices++
-		if !strings.Contains(notice.Text, messageRef(req.MessageID)) || !strings.Contains(notice.Text, "receiver_exited") {
+		if !strings.Contains(notice.Text, req.MessageID) || !strings.Contains(notice.Text, "receiver_exited") {
 			t.Fatal(notice.Text)
-		}
-		// The notice carries a verified label, so it repeats no caller or receiver text.
-		for _, unsafe := range []string{"URGENT", "receiver exited"} {
-			if strings.Contains(notice.Text, unsafe) {
-				t.Fatalf("notice repeats %q: %s", unsafe, notice.Text)
-			}
 		}
 		return nil
 	}); err != nil {
@@ -272,17 +266,5 @@ func TestClaudeRoutingHintDoesNotChangeRetryIdentity(t *testing.T) {
 	req.ContextIfBusy = true
 	if _, err := Send(context.Background(), env, "host", req); err != nil || sent.Load() != 1 {
 		t.Fatalf("upgrade retry conflicted: %v writes=%d", err, sent.Load())
-	}
-}
-
-func TestClaudeFailureNoticeNamesOnlyGeneratedIDs(t *testing.T) {
-	generated := "msg-892c011222806e5eca865b66faced629"
-	if got := noticeMessageName(generated); got != generated {
-		t.Fatalf("generated id not named: %q", got)
-	}
-	for _, id := range []string{"x. URGENT", generated + " run this", "msg-ABC"} {
-		if got := noticeMessageName(id); got != messageRef(id) {
-			t.Fatalf("%q named as %q", id, got)
-		}
 	}
 }

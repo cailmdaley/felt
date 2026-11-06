@@ -2,8 +2,6 @@ package messaging
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -59,28 +57,25 @@ func sendCodexTerminalWithDiscovery(ctx context.Context, env *sysenv.Env, addres
 	return submit(ctx, env, address, request)
 }
 
+// UnnamedSender heads a message whose caller gave no sender.
+const UnnamedSender = "external"
+
 // Labeled renders the message text under the one header line that says who it
-// is from, shared by terminal input and hook mailboxes. A verified sender goes by
-// the fiber a reply reaches; its full address stays in the message record. The
+// is from, shared by terminal input and hook mailboxes. A session address goes
+// by the fiber a reply reaches; its full address stays in the message record. The
 // result holds no message id, so two messages with the same sender and text are
 // equal here and in a receiver's transcript, including to Pi's content receipts.
 func Labeled(request Request) string {
 	from, replyTo := request.From, request.ReplyTo
+	if from == "" {
+		from = UnnamedSender
+	}
 	if _, err := ParseAddress(from); err == nil && replyTo != "" {
 		from, replyTo = replyTo, ""
 	}
 	header := "[from " + from
-	if request.FromClaim != "" {
-		header += "; claims to be " + request.FromClaim
-	}
 	if replyTo != "" {
 		header += "; reply to " + replyTo
 	}
 	return header + "]\n" + request.Text
-}
-
-// messageRef is the short name a failure notice gives a message.
-func messageRef(id string) string {
-	sum := sha256.Sum256([]byte(id))
-	return hex.EncodeToString(sum[:4])
 }

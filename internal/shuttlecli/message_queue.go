@@ -60,22 +60,16 @@ func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt,
 	if fiberID == "" {
 		fiberID = f.ID
 	}
-	request.SenderProof, err = messaging.CreateSenderProof(a.env, request)
-	if err != nil {
-		return nil, fmt.Errorf("creating sender evidence: %w", err)
-	}
 	payload, err := json.Marshal(map[string]any{
 		"fiber_id":         fiberID,
 		"origin":           block.Host,
 		"address":          request.Address,
 		"text":             request.Text,
 		"from":             request.From,
-		"from_claim":       request.FromClaim,
 		"reply_to":         request.ReplyTo,
 		"notify_address":   request.NotifyAddress,
 		"notify_when_idle": request.NotifyWhenIdle,
 		"notify_wake":      request.NotifyWake,
-		"sender_proof":     request.SenderProof,
 		"message_id":       request.MessageID,
 		"wake":             request.Wake,
 		"context_only":     true,

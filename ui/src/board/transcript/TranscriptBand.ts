@@ -165,12 +165,6 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   }
   if (linkedPeerFiber) setAttr(peer, 'data-fiber', linkedPeerFiber)
   else if (peer.hasAttribute('data-fiber')) peer.removeAttribute('data-fiber')
-  peer.classList.toggle('ws-transcript-message-unverified', !!entry.unverified && !linkedPeerFiber)
-  const claimTitle = entry.unverified
-    ? `Sender not verified${entry.claimedSender ? ` · claims to be ${entry.claimedSender}` : ''}`
-    : entry.claimedSender ? `Claims to be ${entry.claimedSender}` : ''
-  if (claimTitle) setAttr(peer, 'title', claimTitle)
-  else if (peer.hasAttribute('title')) peer.removeAttribute('title')
   if (entry.direction === 'received' && !entry.verb && entry.fiber && !entry.senderIsFiber) {
     route.classList.add('ws-transcript-message-route')
     let link = route.querySelector<HTMLAnchorElement>(':scope > .ws-transcript-message-route-link')
@@ -200,7 +194,7 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   if (preview.textContent !== toggleText) preview.textContent = toggleText
   setAttr(toggle, 'data-direction', entry.direction)
   const action = entry.direction === 'received'
-    ? `Expand message from ${entry.unverified ? 'an unverified sender' : entry.peer}`
+    ? `Expand message from ${entry.peer}`
     : `Expand message to ${entry.peer}`
   setAttr(toggle, 'aria-label', entry.verb ? `${action} · ${entry.verb}` : action)
   setAttr(toggle, 'aria-expanded', String(expanded))

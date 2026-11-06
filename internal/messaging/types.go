@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -50,8 +51,6 @@ type Request struct {
 	Address       string `json:"address"`
 	Text          string `json:"text"`
 	From          string `json:"from,omitempty"`
-	FromClaim     string `json:"from_claim,omitempty"`
-	SenderProof   string `json:"sender_proof,omitempty"`
 	ReplyTo       string `json:"reply_to,omitempty"`
 	NotifyAddress string `json:"notify_address,omitempty"`
 	Wake          bool   `json:"wake"`
@@ -62,18 +61,29 @@ type Request struct {
 	MessageID    string        `json:"message_id"`
 	RetainedAt   string        `json:"retained_at,omitempty"`
 	ThreadSignal *ThreadSignal `json:"thread_signal,omitempty"`
-	// threadSignalVerified carries owner validation through a native send without
-	// exposing lifecycle authority in the sender-controlled request frame.
-	threadSignalVerified bool
-	Attachments          []Attachment `json:"attachments,omitempty"`
+	Attachments  []Attachment  `json:"attachments,omitempty"`
 	// NotifyWhenIdle subscribes From to one notice when the receiver next
 	// goes idle or exits; NotifyWake has that notice start a turn there.
 	NotifyWhenIdle bool `json:"notify_when_idle,omitempty"`
 	NotifyWake     bool `json:"notify_wake,omitempty"`
-	DaemonSender   bool `json:"daemon_sender,omitempty"`
-	// AttestedSender is a sender the daemon verified through the sending host's
-	// forward attestation; the CLI accepts it only from a live daemon parent.
-	AttestedSender string `json:"attested_sender,omitempty"`
+}
+
+// UnmarshalJSON reads mail queued by an older build, which named its sender in
+// from_claim under a placeholder from; a frame's other retired fields are ignored.
+func (r *Request) UnmarshalJSON(data []byte) error {
+	type fields Request
+	var wire struct {
+		fields
+		OldSender string `json:"from_claim"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*r = Request(wire.fields)
+	if r.From == "unverified" {
+		r.From = wire.OldSender
+	}
+	return nil
 }
 
 // ThreadSignal identifies the lifecycle fact represented by queued thread

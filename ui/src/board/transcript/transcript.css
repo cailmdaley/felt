@@ -525,12 +525,6 @@
 .ws-transcript-message-toggle::-webkit-details-marker { display: none; }
 .ws-transcript-message-direction { flex: 0 0 auto; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
 .ws-transcript-message-peer { flex: 0 1 auto; min-width: 0; color: var(--ws-ink-soft); }
-/* An unverified sender: a quiet mark, its claim on hover. */
-.ws-transcript-session-chip.ws-transcript-message-unverified {
-  color: var(--ws-ink-faint, var(--ws-ink-muted));
-  text-decoration: underline dotted;
-  cursor: help;
-}
 .ws-transcript-message-route { display: inline-flex; align-items: baseline; gap: .35em; flex: 0 1 auto; min-width: 0; white-space: nowrap; }
 .ws-transcript-message-route-link { flex: 0 1 auto; min-width: 0; max-width: min(24em, 60vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-transcript-message-peer.ws-constitution-chip {

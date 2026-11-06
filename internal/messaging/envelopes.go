@@ -12,8 +12,9 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-// DeliveredEnvelope binds the exact delivered text to its receiving conversation.
+// DeliveredEnvelope records the exact delivered text of a receiving conversation.
 // Readers use the whole envelope as the boundary, including any quoted headers.
+// Thread marks a lifecycle notice, whose id the daemon gives the thread- prefix.
 type DeliveredEnvelope struct {
 	ID       string `json:"id"`
 	Envelope string `json:"envelope"`
@@ -30,7 +31,7 @@ func recordEnvelope(env *sysenv.Env, session string, request Request) error {
 	if err := ensureDir(dir, 0700); err != nil {
 		return err
 	}
-	entry := DeliveredEnvelope{ID: request.MessageID, Envelope: Labeled(request), Thread: request.threadSignalVerified}
+	entry := DeliveredEnvelope{ID: request.MessageID, Envelope: Labeled(request), Thread: strings.HasPrefix(request.MessageID, "thread-")}
 	bytes, err := json.Marshal(entry)
 	if err != nil {
 		return err
@@ -38,9 +39,8 @@ func recordEnvelope(env *sysenv.Env, session string, request Request) error {
 	return mailboxWrite(filepath.Join(dir, mailboxKey(request.MessageID)+".json"), bytes, false)
 }
 
-// DeliveredEnvelopes reads only evidence belonging to session. Retained session
-// mailbox payloads also supply exact delivery evidence.
-// A dedup receipt alone cannot establish a message's sender or body.
+// DeliveredEnvelopes reads the envelopes delivered to session, including those
+// in its retained mailbox payloads.
 func DeliveredEnvelopes(env *sysenv.Env, session string) ([]DeliveredEnvelope, error) {
 	return DeliveredEnvelopesSince(env, session, time.Time{})
 }
