@@ -190,6 +190,33 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{state: "off", muted: false}} = Voice.update(%{"muted" => false})
   end
 
+  test "Rex focus selects only while following and cannot move a fixed recording", c do
+    params = %{"fiber_id" => "project/rex", "source" => "rex"}
+    assert {:ok, %{target: nil}} = Voice.target(params)
+    refute File.exists?(Voice.routes_path())
+
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
+    assert {:ok, %{target: %{"fiber_id" => "project/rex"}}} = Voice.target(params)
+    bytes = File.read!(Voice.routes_path())
+
+    # Persisted off wins even before recorder reconciliation updates the snapshot.
+    assert :ok = Config.enable(false)
+    assert {:ok, _} = Voice.target(%{params | "fiber_id" => "project/off"})
+    assert bytes == File.read!(Voice.routes_path())
+
+    Agent.update(c.observed, fn _ ->
+      %{available: true, meeting: %{kind: "meeting", launch: "fixed", state: "live"}}
+    end)
+
+    assert {:ok, %{enabled: true, state: "yielded"}} = Voice.update(%{"enabled" => true})
+    assert {:ok, _} = Voice.target(%{params | "fiber_id" => "project/fixed"})
+    assert bytes == File.read!(Voice.routes_path())
+
+    # Board selection still uses the same route journal while following is off.
+    assert {:ok, %{target: %{"fiber_id" => "project/board"}}} =
+             Voice.target(%{"fiber_id" => "project/board"})
+  end
+
   test "target receipt time is durable and restored by a fresh supervisor", c do
     assert {:ok, %{target: %{"fiber_id" => "project/first"}}} =
              Voice.target(%{"fiber_id" => "project/first"})

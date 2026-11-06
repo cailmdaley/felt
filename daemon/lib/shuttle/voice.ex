@@ -59,6 +59,15 @@ defmodule Shuttle.Voice do
   @impl true
   def handle_call(:show, _from, state), do: {:reply, state.snapshot, state}
 
+  def handle_call({:target, %{"source" => "rex"} = params, received_at}, from, state) do
+    if state.snapshot.enabled and state.snapshot.state != "yielded" and
+         match?({:ok, %{"enabled" => true}}, Config.read()) do
+      handle_call({:target, Map.delete(params, "source"), received_at}, from, state)
+    else
+      {:reply, {:ok, state.snapshot}, state}
+    end
+  end
+
   def handle_call({:target, %{"fiber_id" => id} = params, received_at}, _from, state)
       when is_binary(id) and id != "" do
     origin = params["origin"]
