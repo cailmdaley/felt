@@ -741,13 +741,6 @@ defmodule ShuttleWeb.SentFilesControllerTest do
       assert {"if-none-match", ~s(W/"receipt")} in StubGetFileClient.last().headers
     end
 
-    test "rejects invalid explicit session filters" do
-      for query <- ["", "&session=", "&session%5B%5D=x"] do
-        conn = get(api_conn(), "/api/v1/sent-files/session?uid=#{@match_ulid}#{query}")
-        assert conn.status == 400
-      end
-    end
-
     test "relays the remote's status verbatim" do
       stub_forward(
         "candide",

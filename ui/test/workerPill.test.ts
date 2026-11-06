@@ -132,9 +132,9 @@ describe('the terminal worker pill under a finger', () => {
   for (const [deviceName, device] of [['phone', PHONE_PORTRAIT], ['iPad', IPAD_PORTRAIT]] as const) {
     it(`gives the reader navbar worker pill a 44px touch target on ${deviceName}`, () => {
       useDevice(device)
-      const phoneMedia = DOCK_CSS.match(
-        /@media\s*\(max-width:\s*700px\),\s*\(max-height:\s*500px\)\s*and\s*\(pointer:\s*coarse\)\s*\{([\s\S]*)\n\}\s*$/,
-      )?.[1] ?? ''
+      const phoneMedia = [...DOCK_CSS.matchAll(
+        /@media\s*\(max-width:\s*700px\),\s*\(max-height:\s*500px\)\s*and\s*\(pointer:\s*coarse\)\s*\{([\s\S]*?)\n\}/g,
+      )].map(match => match[1]).join('\n')
       const fiberPill = workerPill(worker('waiting', LINK)) as unknown as FakeElement
 
       expect(fiberPill.classList.contains('kbn-card-worker')).toBe(true)

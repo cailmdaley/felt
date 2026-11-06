@@ -227,7 +227,7 @@ export class ConstitutionPicker {
       else this.opts.onEscape?.()
     }
     else if (this.opts.supplement && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-      const rows = [...this.el.querySelectorAll<HTMLElement>('.ws-channel-row, .ws-search-hit, .ws-search-result button')]
+      const rows = [...this.el.querySelectorAll<HTMLElement>('.ws-channel-row, .ws-search-result button')]
       const at = rows.indexOf(event.target as HTMLElement)
       if (event.key === 'ArrowDown') rows[Math.min(rows.length - 1, at + 1)]?.focus()
       else if (at <= 0) this.find.focus()
@@ -235,7 +235,7 @@ export class ConstitutionPicker {
     }
     else if (event.key === 'Enter' && event.target === this.find) {
       if (event.repeat) return
-      this.el.querySelector<HTMLElement>('.ws-channel-row, .ws-search-hit, .ws-search-result button')?.click()
+      this.el.querySelector<HTMLElement>('.ws-channel-row')?.click()
     } else return
     event.preventDefault(); event.stopImmediatePropagation()
   }

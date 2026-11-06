@@ -38,8 +38,8 @@ describe('workspace style contracts', () => {
   })
   it('gives back controls a hover background only on hover-capable devices', () => {
     let controls = 0
-    for (const file of ['chat.css', 'reader.css']) postcss.parse(read(file)).walkRules(rule => {
-      if (!/:hover/.test(rule.selector) || !/\.ws-(chat-back|return|document-back)/.test(rule.selector)) return
+    postcss.parse(read('reader.css')).walkRules(rule => {
+      if (!/:hover/.test(rule.selector) || !/\.ws-(return|document-back)/.test(rule.selector)) return
       if (!rule.nodes.some(node => node.type === 'decl' && node.prop === 'background')) return
       controls++
       const media: string[] = []
@@ -50,9 +50,8 @@ describe('workspace style contracts', () => {
     })
     expect(controls).toBeGreaterThan(0)
   })
-  it('limits the constitution name to two wrapping lines', () => {
-    expect(read('chat.css')).toMatch(/\.ws-chat-title\s*\{[^}]*-webkit-line-clamp:\s*2;/)
-    expect(read('chat.css')).not.toMatch(/\.ws-chat-title\s*\{[^}]*white-space:\s*nowrap/)
+  it('holds the constitution name to the band\'s one line', () => {
+    expect(read('dock.css')).toMatch(/\.ws-band-title\s*\{[^}]*text-overflow:\s*ellipsis;\s*white-space:\s*nowrap/)
   })
   it('defines every workspace token that its reader uses', () => {
     const declarations = new Set([...`${tokens}\n${css}`.matchAll(/(--ws-[\w-]+)\s*:/g)].map(m => m[1]))
@@ -61,15 +60,15 @@ describe('workspace style contracts', () => {
   })
   it('draws the dock from workspace tokens alone', () => {
     const dock = read('dock.css').replace(/\/\*[\s\S]*?\*\//g, '')
-    const declarations = new Set([...`${tokens}\n${dock}`.matchAll(/(--(?:ws|ctl|type|font|glyph|leading|rhythm|track)-[\w-]+)\s*:/g)].map(m => m[1]))
+    const declarations = new Set([...`${tokens}\n${css}\n${dock}`.matchAll(/(--tone|--(?:ws|ctl|type|font|glyph|leading|track)-[\w-]+)\s*:/g)].map(m => m[1]))
+    declarations.add('--verdict-ink') // The Desk's verdict plate declares it for the verbs both surfaces share.
     for (const token of [...dock.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
     expect(dock).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(|url\(/i)
   })
-  it('styles empty control states and the Resume action', () => {
+  it('styles empty control states', () => {
     const dock = read('dock.css').replace(/\/\*[\s\S]*?\*\//g, '')
     for (const selector of [
       '.ws-dock .kbn-ctl-date.kbn-ctl-empty',
-      '.ws-dock .kbn-ctl-resume',
       '.ws-dock .kbn-detail-parent-empty',
     ]) expect(dock).toContain(selector)
     expect(dock).not.toContain('.kbn-meeting-stamp')

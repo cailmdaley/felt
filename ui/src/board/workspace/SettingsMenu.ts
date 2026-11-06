@@ -29,7 +29,7 @@ export class SettingsMenu {
     content.hidden = false
     this.el.replaceChildren(content)
     this.el.hidden = false
-    // The top layer lifts it out of the chat's layout containment, which would otherwise make the chat its fixed-position origin.
+    // The top layer lifts it out of the band's layout containment, which would otherwise make the band its fixed-position origin.
     try { this.el.showPopover?.() } catch { /* Already shown, or unsupported: fixed positioning still draws it. */ }
     this.position()
     this.el.scrollTop = 0
@@ -65,7 +65,7 @@ export class SettingsMenu {
     const rect = this.opener.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight, gutter = 8
     const width = Math.min(400, vw - 2 * gutter)
     const left = Math.max(gutter, Math.min(rect.left, vw - width - gutter))
-    const header = this.opener.closest('.ws-chat-head')?.getBoundingClientRect()
+    const header = this.opener.closest('.ws-band-head')?.getBoundingClientRect()
     const top = (header?.bottom ?? rect.bottom) + 6
     this.el.style.setProperty('--ws-menu-left', `${left}px`)
     this.el.style.setProperty('--ws-menu-top', `${top}px`)

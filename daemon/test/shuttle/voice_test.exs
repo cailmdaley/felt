@@ -109,74 +109,13 @@ defmodule Shuttle.VoiceTest do
   end
 
   test "subscribers receive each new route as it is appended" do
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
     {:ok, _} = Voice.subscribe()
     assert {:ok, _} = Voice.target(%{"fiber_id" => "pushed/one", "origin" => nil})
     assert_receive {:voice_target, %{"fiber_id" => "pushed/one"}}
     assert {:ok, _} = Voice.target(%{"fiber_id" => "pushed/two"})
     assert_receive {:voice_target, %{"fiber_id" => "pushed/two"}}
     assert %{target: %{"fiber_id" => "pushed/two"}} = Voice.snapshot()
-  end
-
-  test "partial words are a display-only preview pinned to the target they began under",
-       c do
-    transcript = Path.join(c.root, "voice.txt")
-    partial = Path.rootname(transcript) <> ".partial"
-
-    Agent.update(c.observed, fn _ ->
-      %{
-        available: true,
-        meeting: %{kind: "voice", launch: "voice", state: "live", transcript: transcript}
-      }
-    end)
-
-    assert {:ok, _} = Voice.target(%{"fiber_id" => "a"})
-    assert {:ok, %{preview: nil}} = Voice.update(%{"enabled" => true})
-    File.write!(partial, "S1: Claude these are provisional\n")
-
-    assert {:ok,
-            %{
-              preview: %{"fiber_id" => "a", "text" => "S1: Claude these are provisional"},
-              pending: nil,
-              held: []
-            }} = Voice.update(%{})
-
-    assert {:ok, %{preview: %{"fiber_id" => "a"}}} = Voice.target(%{"fiber_id" => "b"})
-    assert {:ok, %{preview: nil}} = Voice.update(%{"muted" => true})
-
-    assert {:ok, %{preview: %{"text" => "S1: Claude these are provisional"}}} =
-             Voice.update(%{"muted" => false})
-
-    File.write!(partial, "")
-    assert {:ok, %{preview: nil}} = Voice.update(%{})
-    File.write!(partial, "S1: next line")
-    assert {:ok, %{preview: %{"fiber_id" => "b"}}} = Voice.update(%{})
-    assert {:ok, %{preview: %{"fiber_id" => "b"}}} = Voice.target(%{"fiber_id" => "c"})
-    File.write!(transcript, "13:00:00-13:00:02 me a finished line\n")
-    File.write!(partial, "S1: speech that never paused")
-    assert {:ok, %{preview: %{"fiber_id" => "c"}}} = Voice.update(%{})
-    File.write!(partial, "S1: stale")
-    assert {:ok, %{preview: nil}} = Voice.update(%{"enabled" => false})
-    assert {:ok, %{preview: %{"text" => "S1: stale"}}} = Voice.update(%{"enabled" => true})
-    Agent.update(c.observed, fn _ -> %{available: true, meeting: nil} end)
-    assert {:ok, %{preview: nil}} = Voice.update(%{})
-  end
-
-  test "the mic level is shown only while hark's level file is under a second old", c do
-    level = Path.join([c.root, "hark", "level.json"])
-    File.mkdir_p!(Path.dirname(level))
-    assert {:ok, %{level: nil}} = Voice.update(%{})
-
-    now = System.os_time(:millisecond) / 1000
-    File.write!(level, Jason.encode!(%{mic: -23.4, t: now}))
-    assert %{level: %{mic: -23.4, at: at}} = Voice.show()
-    assert {:ok, at_time, 0} = DateTime.from_iso8601(at)
-    assert_in_delta DateTime.to_unix(at_time, :millisecond), now * 1000, 1
-
-    assert %{"level" => %{"mic" => -23.4}} =
-             json_response(get(api_conn(), "/api/v1/voice"), 200)
-
-    File.write!(level, Jason.encode!(%{mic: -23.4, t: now - 5}))
-    assert %{level: nil} = Voice.show()
   end
 
   test "coldness follows owner runtime activity, with dormant and unknown targets held" do
@@ -267,7 +206,51 @@ defmodule Shuttle.VoiceTest do
     end
   end
 
-  test "public held segments distinguish repeated speech from an edited prefix", c do
+  test "partial words are a display-only preview pinned to the target they began under",
+       c do
+    transcript = Path.join(c.root, "voice.txt")
+    partial = Path.rootname(transcript) <> ".partial"
+
+    Agent.update(c.observed, fn _ ->
+      %{
+        available: true,
+        meeting: %{kind: "voice", launch: "voice", state: "live", transcript: transcript}
+      }
+    end)
+
+    assert {:ok, %{preview: nil}} = Voice.update(%{"enabled" => true})
+    assert {:ok, _} = Voice.target(%{"fiber_id" => "a"})
+    File.write!(partial, "S1: Claude these are provisional\n")
+
+    assert {:ok,
+            %{
+              preview: %{"fiber_id" => "a", "text" => "S1: Claude these are provisional"},
+              pending: nil,
+              held: []
+            }} = Voice.update(%{})
+
+    assert {:ok, %{preview: %{"fiber_id" => "a"}}} = Voice.target(%{"fiber_id" => "b"})
+    assert {:ok, %{preview: nil}} = Voice.update(%{"muted" => true})
+
+    assert {:ok, %{preview: %{"text" => "S1: Claude these are provisional"}}} =
+             Voice.update(%{"muted" => false})
+
+    File.write!(partial, "")
+    assert {:ok, %{preview: nil}} = Voice.update(%{})
+    File.write!(partial, "S1: next line")
+    assert {:ok, %{preview: %{"fiber_id" => "b"}}} = Voice.update(%{})
+    assert {:ok, %{preview: %{"fiber_id" => "b"}}} = Voice.target(%{"fiber_id" => "c"})
+    File.write!(transcript, "13:00:00-13:00:02 me a finished line\n")
+    File.write!(partial, "S1: speech that never paused")
+    assert {:ok, %{preview: %{"fiber_id" => "c"}}} = Voice.update(%{})
+    File.write!(partial, "S1: stale")
+    assert {:ok, %{preview: nil}} = Voice.update(%{"enabled" => false})
+    assert {:ok, %{preview: %{"text" => "S1: stale"}}} = Voice.update(%{"enabled" => true})
+    Agent.update(c.observed, fn _ -> %{available: true, meeting: nil} end)
+    assert {:ok, %{preview: nil}} = Voice.update(%{})
+  end
+
+  test "public held segments accumulate and a take leaves the later speech", c do
     alias Shuttle.Voice.Held
     target = %{"fiber_id" => "a", "origin" => "owner"}
     state = Held.load(Path.join(c.root, "segments.json"))
@@ -276,24 +259,19 @@ defmodule Shuttle.VoiceTest do
       Held.append(state, "launch", 42, target, [%{"speaker" => "S1", "text" => "hello world"}])
 
     assert first["segments"] == [%{"through" => 1, "text" => "S1: hello world"}]
-    assert {:ok, state} = Held.edit(state, first["id"], 1, "S1: hello")
 
     {state, grown} =
       Held.append(state, "launch", 84, target, [%{"speaker" => "S1", "text" => "world"}])
 
     assert grown["segments"] == [
-             %{"through" => 1, "text" => "S1: hello"},
+             %{"through" => 1, "text" => "S1: hello world"},
              %{"through" => 2, "text" => " world"}
            ]
-
-    assert grown["text"] == "S1: hello world"
-    assert {:ok, state} = Held.edit(state, first["id"], 2, "S1: replacement")
-    assert [%{"segments" => [%{"through" => 2, "text" => "S1: replacement"}]}] = Held.list(state)
 
     {state, _} =
       Held.append(state, "launch", 126, target, [%{"speaker" => "S1", "text" => "suffix"}])
 
-    assert {:ok, state, "S1: replacement"} = Held.take(state, first["id"], 2)
+    assert {:ok, state, "S1: hello world world"} = Held.take(state, first["id"], 2)
 
     assert [
              %{
@@ -321,20 +299,6 @@ defmodule Shuttle.VoiceTest do
       )
 
     assert %{"held" => [^held]} = json_response(get(api_conn(), "/api/v1/voice"), 200)
-    edited = Map.put(held, "text", "me: edited")
-
-    assert %{"held" => [%{"text" => "me: edited"}]} =
-             json_response(post(api_conn(), "/api/v1/voice/draft", edited), 200)
-
-    assert %{"held" => []} = json_response(post(api_conn(), "/api/v1/voice/release", held), 200)
-    assert %{"error" => _} = json_response(post(api_conn(), "/api/v1/voice/release", held), 409)
-    assert %{"error" => _} = json_response(post(api_conn(), "/api/v1/voice/draft", %{}), 422)
-
-    assert %{"error" => _} =
-             json_response(
-               post(api_conn(), "/api/v1/voice/draft", Map.put(held, "text", nil)),
-               422
-             )
   end
 
   test "meeting ownership yields voice and it returns once the meeting ends", c do
@@ -511,7 +475,7 @@ defmodule Shuttle.VoiceTest do
   end
 
   test "Rex focus selects only while following and cannot move a fixed recording", c do
-    params = %{"fiber_id" => "project/rex", "source" => "rex"}
+    params = %{"fiber_id" => "project/rex"}
     assert {:ok, %{target: nil}} = Voice.target(params)
     refute File.exists?(Voice.routes_path())
 
@@ -531,15 +495,12 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{enabled: true, state: "yielded"}} = Voice.update(%{"enabled" => true})
     assert {:ok, _} = Voice.target(%{params | "fiber_id" => "project/fixed"})
     assert bytes == File.read!(Voice.routes_path())
-
-    # Board selection still uses the same route journal while following is off.
-    assert {:ok, %{target: %{"fiber_id" => "project/board"}}} =
-             Voice.target(%{"fiber_id" => "project/board"})
   end
 
   test "a target is named from served fibers, even when the lookup missed at the switch" do
     {:ok, served} = Agent.start_link(fn -> [] end)
     Env.put_app_env(:meeting_fibers, fn -> Agent.get(served, & &1) end)
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
 
     assert {:ok, %{target: %{"name" => "01CARD", "origin" => host}}} =
              Voice.target(%{"fiber_id" => "01CARD"})
@@ -553,6 +514,8 @@ defmodule Shuttle.VoiceTest do
   end
 
   test "target receipt time is durable and restored by a fresh supervisor", c do
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
+
     assert {:ok, %{target: %{"fiber_id" => "project/first"}}} =
              Voice.target(%{"fiber_id" => "project/first"})
 
@@ -573,44 +536,14 @@ defmodule Shuttle.VoiceTest do
     assert %{target: %{"fiber_id" => "project/second"}} = Voice.show()
   end
 
-  test "slow recorder reconciliation cannot delay a target switch or its receipt timestamp", c do
-    stop_supervised!(Voice)
-    parent = self()
-
-    reconcile = fn enabled, _ ->
-      send(parent, {:blocked, self(), enabled})
-
-      receive do
-        :continue -> {:ok, %{available: true, meeting: nil}}
-      end
-    end
-
-    Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
-    assert_receive {:blocked, task, false}, 1_000
-    before = DateTime.utc_now()
-
-    assert {:ok, %{target: %{"fiber_id" => "project/new"}}} =
-             Voice.target(%{"fiber_id" => "project/new"})
-
-    assert %{target: %{"fiber_id" => "project/new"}} = Voice.show()
-
-    [row] =
-      File.read!(Voice.routes_path())
-      |> String.split("\n", trim: true)
-      |> Enum.map(&Jason.decode!/1)
-
-    {:ok, stamp, _} = DateTime.from_iso8601(row["t"])
-    assert DateTime.compare(stamp, before) != :lt
-    assert DateTime.compare(stamp, DateTime.utc_now()) != :gt
-    send(task, :continue)
-  end
-
   test "an interrupted route append is truncated without damaging complete routes", c do
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
     assert {:ok, _} = Voice.target(%{"fiber_id" => "project/first"})
     stop_supervised!(Voice)
     File.write!(Voice.routes_path(), ~s({"t":"partial), [:append])
     Env.start_scoped!({Voice, c.opts})
     assert %{target: %{"fiber_id" => "project/first"}} = Voice.show()
+    assert {:ok, %{enabled: true}} = Voice.update(%{})
     assert {:ok, _} = Voice.target(%{"fiber_id" => "project/second"})
 
     rows =
@@ -815,16 +748,7 @@ defmodule Shuttle.VoiceTest do
     assert :sys.get_state(Env.server!(Voice)).retry.failures == 0
   end
 
-  test "voice API targets the local recorder even when origin is the receiving worker's host" do
-    response =
-      api_conn() |> post("/api/v1/voice/target", Jason.encode!(%{fiber_id: "project/target"}))
-
-    assert response.status == 200
-
-    assert %{"target" => %{"fiber_id" => "project/target"}, "recorder" => recorder} =
-             Jason.decode!(response.resp_body)
-
-    assert recorder == Shuttle.MeetingRouter.own_host()
+  test "voice API answers from the local recorder" do
     response = api_conn() |> post("/api/v1/voice", Jason.encode!(%{enabled: true}))
     assert response.status == 200
     assert %{"enabled" => true, "state" => "starting"} = Jason.decode!(response.resp_body)
@@ -833,6 +757,5 @@ defmodule Shuttle.VoiceTest do
              api_conn() |> get("/api/v1/voice") |> Map.get(:resp_body) |> Jason.decode!()
 
     assert (api_conn() |> post("/api/v1/voice", ~s({"muted":3}))).status == 422
-    assert (api_conn() |> post("/api/v1/voice/target", ~s({"fiber_id":""}))).status == 422
   end
 end

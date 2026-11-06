@@ -107,27 +107,21 @@ describe('buildChannel', () => {
     expect(defaultSelection(channel)).toBe('host-a:/store/project/task/tapestry.html')
   })
 
-  it('ends a run in the chat when the fiber has a conversation, files to its left, and opens on it', () => {
-    const channel = buildChannel({ ...base, isConstitution: true, conversation: true })
-    expect(channel.documents.map(document => document.key)).toEqual([
-      'fiber:host-a:fiber-1', 'host-a:/store/project/task/report.html', 'chat:host-a:fiber-1',
-    ])
-    expect(channel.labels).toEqual(['Constitution', 'Results', 'Chat'])
-    expect(channel.documents.at(-1)?.kind).toBe('chat')
-    expect(defaultSelection(channel)).toBe('chat:host-a:fiber-1')
+  it('runs declared files left of the fiber page, sent files right, and a constitution lands on its report', () => {
+    const channel = buildChannel({ ...base, isConstitution: true })
+    expect(channel.documents.map(document => document.key)).toEqual(['host-a:/store/project/task/report.html', 'fiber:host-a:fiber-1'])
+    expect(channel.labels).toEqual(['Results', 'Constitution'])
+    expect(defaultSelection(channel)).toBe('host-a:/store/project/task/report.html')
     expect(proseDocument(channel)?.key).toBe('fiber:host-a:fiber-1')
-    // With no report, the newest sent file stands beside the chat, the older ones outward from it.
-    const sent = buildChannel({ ...base, body: 'plain', conversation: true, sent: [
+    // Sent files run outward from the fiber page, newest first.
+    const sent = buildChannel({ ...base, body: 'plain', sent: [
       { path: '/out/old.png', time: 1000 }, { path: '/out/new.png', time: 3000 }, { path: '/out/mid.png', time: 2000 },
     ] })
-    expect(sent.documents.map(document => document.name)).toEqual(['A channel', 'old.png', 'mid.png', 'new.png', 'A channel'])
-    expect(sent.documents.map(document => document.kind)).toEqual(['fiber', 'image', 'image', 'image', 'chat'])
-    // Outward from the chat: its latest word, then the declared documents in body order, then the other sent files.
-    const mixed = buildChannel({ ...base, body: 'plain', conversation: true,
+    expect(sent.documents.map(document => document.name)).toEqual(['A channel', 'new.png', 'mid.png', 'old.png'])
+    // Declared documents read outward in body order, then the sent ones on the far side.
+    const mixed = buildChannel({ ...base, body: 'plain',
       embeds: [{ path: '/a.html' }, { path: '/b.html' }], sent: [{ path: '/out/plot.png', time: 1000 }] })
-    expect(mixed.documents.map(document => document.name)).toEqual(['A channel', 'b.html', 'a.html', 'plot.png', 'A channel'])
-    // Without a conversation the run is the fiber's own, and a report leads.
-    expect(defaultSelection(buildChannel(base))).toBe('host-a:/store/project/task/report.html')
+    expect(mixed.documents.map(document => document.name)).toEqual(['b.html', 'a.html', 'A channel', 'plot.png'])
   })
 
   it('labels the fiber page as a Note or Constitution according to Shuttle presence', () => {

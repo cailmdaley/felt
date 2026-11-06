@@ -1791,8 +1791,8 @@
   border-radius: 2px;
   margin-top: 2px;
 }
-/* THE WORKER PILL — the conversation backend control in the reader's head
-   and chat. A dot carries the state's
+/* THE WORKER PILL — the conversation backend control in the reader's head.
+   A dot carries the state's
    turn's pigment (cobalt working, gold idle, cinnabar blocked, prompt or
    question, muted when the turn is unknown); the turn word and its compact age ("11m", "3h", "2d") are mono capitals,
    set tight, with no plate. Only the pointer or the keyboard draws a plate.

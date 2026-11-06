@@ -422,7 +422,6 @@ defmodule Shuttle.Poller do
         cache: cache,
         felt_stores: default_stores,
         running: running,
-        task_reads: tasks,
         dispatch_failures: failures,
         pending_results: pending,
         pulses: pulses
@@ -430,7 +429,7 @@ defmodule Shuttle.Poller do
         entries =
           base_entries
           |> Shuttle.Pulse.stamp(pulses)
-          |> stamp_runtime(running, tasks)
+          |> stamp_runtime(running)
           |> Snapshot.put_dispatch_errors(failures)
           |> stamp_pending_results(%State{pending_results: pending, running: running})
 
@@ -1481,7 +1480,6 @@ defmodule Shuttle.Poller do
       cache: cache_meta,
       felt_stores: state.felt_stores,
       running: state.running,
-      task_reads: state.task_reads,
       dispatch_failures: state.dispatch_failures,
       pending_results: state.pending_results,
       pulses: pulse_rows(state)
@@ -1582,7 +1580,7 @@ defmodule Shuttle.Poller do
         pending_entry(cached.entry, state.pending_results)
       end)
       |> Shuttle.Pulse.stamp(pulse_rows(state))
-      |> stamp_runtime(state.running, state.task_reads)
+      |> stamp_runtime(state.running)
       |> Snapshot.put_dispatch_errors(state.dispatch_failures)
 
     %{
@@ -2187,7 +2185,7 @@ defmodule Shuttle.Poller do
 
         {base
          |> Shuttle.Pulse.stamp(pulse_rows(state))
-         |> stamp_runtime(state.running, state.task_reads)
+         |> stamp_runtime(state.running)
          |> Snapshot.put_dispatch_errors(state.dispatch_failures)
          |> stamp_pending_results(state), state}
       else
@@ -3559,9 +3557,9 @@ defmodule Shuttle.Poller do
         Map.get(pending, entry.fiber["uid"] || entry.fiber["id"], 0)
       )
 
-  defp stamp_runtime(entries, running, _tasks) when map_size(running) == 0, do: entries
+  defp stamp_runtime(entries, running) when map_size(running) == 0, do: entries
 
-  defp stamp_runtime(entries, running, tasks) do
+  defp stamp_runtime(entries, running) do
     # `activity` is the `session => %{last_event_at, phase}` map derived from
     # this host's events.jsonl — the real last-activity timestamp and phase
     # category ("attention" / "waiting" / "working") of each tracked session.
@@ -3570,7 +3568,7 @@ defmodule Shuttle.Poller do
     activity = session_activity()
     index = Snapshot.runtime_index(running, activity)
     binding = session_bindings()
-    Enum.map(entries, &Snapshot.put_runtime(&1, index, activity, binding, tasks))
+    Enum.map(entries, &Snapshot.put_runtime(&1, index, activity, binding))
   end
 
   # The activity source. Defaults to the host-local event stream; overridable
@@ -5064,7 +5062,7 @@ defmodule Shuttle.Poller do
         pending_entry(cached.entry, state.pending_results)
       end)
       |> Shuttle.Pulse.stamp(pulse_rows(state))
-      |> stamp_runtime(state.running, state.task_reads)
+      |> stamp_runtime(state.running)
       |> Snapshot.put_dispatch_errors(state.dispatch_failures)
 
     local_store_by_uid =

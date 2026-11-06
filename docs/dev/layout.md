@@ -132,11 +132,9 @@ The board e2e suite uses a fixed clock, Europe/Paris time, and a mocked daemon; 
 
 `cd ui && npm run perf:typing` runs only the headless WebKit typing probe against the file harness.
 Install its browser with `npx playwright-core install webkit` from `ui/` first.
-The probe stages 406 cards across ten hosts and a 3,000-turn transcript, measures each keydown through the task after the next rendering turn, and repeats after 720 snapshot polls (three hours at the production cadence).
-It also exercises live transcript appends, bar Find, the Chronicle fiber-body editor, and navigation beyond the live-document cache budget.
+The probe stages 406 cards across ten hosts and measures each keydown through the task after the next rendering turn in bar Find and the Chronicle fiber-body editor.
 Results go to `/tmp/shuttle-typing.json` (`TYPING_OUTPUT` overrides it), with `shuttle-typing*.png` screenshots in `/tmp/`.
 Run it alone on a shared machine.
-Its gates count forbidden work and retained conversation models rather than imposing a wall-clock threshold affected by machine load.
 The ordinary Vitest suite holds the same input-path contracts without a browser.
 
 ### The stranger test: bootstrap in a clean container

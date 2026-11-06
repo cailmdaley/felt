@@ -1,5 +1,5 @@
 /** Build with `npm run harness:board`, then run `node scripts/check-meeting-button.mjs`.
- * Checks the visible Meeting arm button against the offline daemon on desktop and phone.
+ * Checks the band's Listen control against the offline daemon on desktop and phone.
  */
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
@@ -19,15 +19,12 @@ try {
     url.search = '?recorder=recorder-host'
     await page.goto(url.href)
     await page.getByText('Run the 2D B-mode null tests', { exact: true }).click()
-    const controls = page.locator('.ws-selected .ws-dock')
+    const controls = page.locator('.ws-stage-band .ws-dock')
     await controls.waitFor({ state: 'visible' })
     const meeting = controls.locator('.kbn-ctl-meet')
-    if (mobile) await controls.locator('.kbn-detail-directive').focus()
     await meeting.waitFor({ state: 'visible' })
-    const toggle = meeting.getByRole('button', { name: 'Meeting', exact: true })
-    assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
+    const toggle = meeting.locator('.kbn-ctl-meet-arm')
     assert.equal(await meeting.getByRole('radio').count(), 0)
-    assert.ok((await meeting.textContent()).includes('recorder-host'))
     await page.evaluate(() => {
       window.joins = []
       const original = window.fetch
@@ -36,33 +33,21 @@ try {
         return original(input, init)
       }
     })
-    await toggle.click()
-    assert.equal(await meeting.getByRole('radio').count(), 0)
-    assert.equal(await controls.getByRole('button', { name: 'Start meeting', exact: true }).count(), 0)
-    assert.equal(await meeting.getByRole('combobox', { name: 'Meeting audio', exact: true }).isVisible(), !mobile)
-    assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
-    assert.deepEqual(await page.evaluate(() => window.joins), [], 'arming records nothing')
-    await toggle.click()
-    assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
-    assert.equal(await meeting.getByRole('combobox', { name: 'Meeting audio', exact: true }).isVisible(), false)
-    await toggle.click()
     if (process.env.MEETING_SCREENSHOT_DIR) {
       await page.screenshot({ path: `${process.env.MEETING_SCREENSHOT_DIR}/meeting-${mobile ? 'phone' : 'desktop'}.png` })
     }
     if (!mobile) {
-      page.once('dialog', dialog => dialog.accept())
-      await controls.locator('.kbn-ctl-sends .kbn-ctl-send').first().click()
+      await toggle.click()
       await page.waitForFunction(() => window.joins?.length === 1)
       const [join] = await page.evaluate(() => window.joins)
       assert.equal(join.meeting.mode, 'call')
-      assert.equal(join.resume_mode, 'fresh')
       assert.equal(join.recorder, 'recorder-host')
       assert.ok(join.origin && join.origin !== join.recorder)
     }
     url.search = '?capture=meeting&recorder=recorder-host'
     await page.goto(url.href)
     const dialog = page.getByRole('dialog')
-    const captureToggle = dialog.getByRole('button', { name: 'Meeting', exact: true })
+    const captureToggle = dialog.getByRole('button', { name: 'Listening', exact: true })
     const language = dialog.getByRole('combobox', { name: 'Language', exact: true })
     await captureToggle.waitFor({ state: 'visible' })
     assert.equal(await language.count(), 0)
@@ -85,12 +70,12 @@ try {
           return original(input, init)
         }
       })
-      await dialog.getByRole('button', { name: 'Start meeting', exact: true }).click()
+      await dialog.getByRole('button', { name: 'Start listening', exact: true }).click()
       await page.waitForFunction(() => window.captures?.length === 1)
       assert.deepEqual(await page.evaluate(() => window.captures[0].meeting), { mode: 'call', language: 'fr' })
     }
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'phone' : 'desktop'}: visible Meeting arm button; conditional Capture language select${mobile ? '' : '; call Join and French Capture observed'}`)
+    console.log(`${mobile ? 'phone' : 'desktop'}: band Listen control; conditional Capture language select${mobile ? '' : '; call Join and French Capture observed'}`)
     await page.close()
   }
 } finally {

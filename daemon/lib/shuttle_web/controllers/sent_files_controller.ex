@@ -56,12 +56,6 @@ defmodule ShuttleWeb.SentFilesController do
 
   alias ShuttleWeb.TemporalComposite, as: Composite
 
-  def show_session(conn, %{"session" => session} = params)
-      when is_binary(session) and session != "",
-      do: show(conn, params)
-
-  def show_session(conn, _params), do: bad_param(conn, "session")
-
   def show(conn, %{"uid" => uid} = params) when is_binary(uid) and uid != "" do
     session_id = params["session"]
 

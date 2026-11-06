@@ -149,17 +149,17 @@ describe('Overview receipt membership and identity', () => {
     expect(onOpen).toHaveBeenCalledTimes(2)
   })
 
-  it('offers Chat beside an agent folio and opens it with c or . on the selected folio', async () => {
+  it('offers the conversation beside an agent folio and opens it with c or . on the selected folio', async () => {
     const agent = { ...cards[0], shuttleKind: 'oneshot' as const, tmuxSession: 'worker-alpha' }
     cards = [agent, cards[1]]
     feed.files = [receipt('alpha', '/notes/alpha/report.html')]
     overview.cardsChanged()
     await refresh()
 
-    const chat = folio('alpha').querySelector<HTMLButtonElement>('.ws-overview-folio-conversation')!
-    expect(chat.hidden).toBe(false)
-    expect(chat.getAttribute('aria-label')).toBe('Open conversation')
-    chat.click()
+    const conversation = folio('alpha').querySelector<HTMLButtonElement>('.ws-overview-folio-conversation')!
+    expect(conversation.hidden).toBe(false)
+    expect(conversation.getAttribute('aria-label')).toBe('Open conversation')
+    conversation.click()
     expect(onConversation).toHaveBeenLastCalledWith(agent)
 
     onConversation.mockClear()

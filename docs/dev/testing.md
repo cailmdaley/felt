@@ -197,7 +197,7 @@ and add your test to its file.
 - **Civil days and instants:** `src/board/civilDay.test.ts`, `civilDay.properties.test.ts`, `test/zoneReads.test.ts`.
 - **Desk classification and ordering:** `boardRules.test.ts`, `KanbanComposite.test.ts`, `deskBands.integration.test.ts`, `deskOrdering.test.ts`, `moveDestinations.test.ts`.
 - **Desk input:** `keymap.test.ts`, `deskKeyboard.integration.test.ts`, `longPress`, `dismissGesture`, `mobile`.
-- **Dispatch actions:** `boardWire.test.ts`, `daemonApi`, `startPrompt`, `KanbanModal.verdict`, `composerImages.integration`.
+- **Dispatch actions:** `boardWire.test.ts`, `daemonApi`, `startPrompt`, `KanbanModal.verdict`.
 - **Chronicle:** `src/board/views/chronicle*.test.ts`, `temporalData.test.ts`, `vocabulary.test.ts`.
 - **Meetings and the phone:** `meeting.test.ts`, `src/phone/*.test.ts`, `src/forms/meeting*.test.tsx`.
 - **Settings:** `src/forms/settings/`.

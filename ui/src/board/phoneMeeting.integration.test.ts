@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal'
+import type { Dock } from './workspace/Dock'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces'
 import { Mic, type MicHandlers } from '../phone/mic'
 import { RelayLink } from '../phone/relay'
@@ -22,22 +23,10 @@ interface BoardState {
   fetchMeetingStatus(): Promise<void>
   fetchAndRender(): Promise<void>
   showBanner(message: string, tone: string): void
-  joinCardMeeting(card: KanbanCard, mode: 'call', note: () => Promise<string>, options: object): Promise<unknown>
-  dock: {
-    buildMeeting(card: KanbanCard, error: HTMLElement, send: Send, onArm: () => void): HTMLElement
-    meetingStart(mode: 'fresh' | 'previous', verb: HTMLButtonElement): void
-  }
+  joinCardMeeting(card: KanbanCard, mode: 'call', options: object): Promise<unknown>
+  dock: Dock
   teardownState(): void
 }
-interface Send {
-  compose: () => Promise<string>
-  busy: () => boolean
-  setBusy: ReturnType<typeof vi.fn>
-  sent: ReturnType<typeof vi.fn>
-}
-/** A composer's send state with nothing pasted: the note is `compose`'s. */
-const sendWith = (compose: () => Promise<string> = async () => ''): Send =>
-  ({ compose, busy: () => false, setBusy: vi.fn(), sent: vi.fn() })
 const row = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => parseMeetingRecord({
   state: 'loading', title: 'Meeting', phone: true, launch: 'L1', tmux_session: 'hark-pane', ...overrides,
 })!
@@ -47,9 +36,14 @@ const defer = <T,>() => {
   const promise = new Promise<T>((yes) => { resolve = yes })
   return { promise, resolve }
 }
-/** Arm the composer's Meeting button. */
-const arm = (meeting: HTMLElement): void => {
-  meeting.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
+/** The band's Listen control for a card, under this page. */
+const listen = (subject: KanbanCard): { el: HTMLElement; press(): void; button: HTMLButtonElement; error: HTMLElement } => {
+  state.dock.reset()
+  state.dock.open(subject)
+  const el = state.dock.el
+  document.body.append(el)
+  const button = el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
+  return { el, button, press: () => button.click(), error: el.querySelector<HTMLElement>('.ws-band-status .kbn-detail-error')! }
 }
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
 let board: KanbanModal
@@ -86,6 +80,8 @@ beforeEach(() => {
   state.container.append(state.surfaces.renderNowSection(state.lastResponse.now, {}))
 })
 afterEach(() => {
+  state.dock.reset()
+  state.dock.el.remove()
   board.phoneAudio.unmount()
   state.container?.remove()
   state.teardownState()
@@ -103,7 +99,7 @@ describe('board phone meeting card wiring', () => {
     const banner = vi.spyOn(state, 'showBanner').mockImplementation(() => {})
     vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
     fetcher.mockResolvedValue({ ok: status < 400, status, json: async () => payload })
-    await state.joinCardMeeting(card({ id: 'task', name: 'Task' }), 'call', async () => '', {})
+    await state.joinCardMeeting(card({ id: 'task', name: 'Task' }), 'call', {})
     expect(banner).toHaveBeenCalledWith(message, tone)
   })
 
@@ -115,12 +111,10 @@ describe('board phone meeting card wiring', () => {
     fetcher.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith('/join')
       ? { meeting: current, delivery: { delivered: true, delivery: 'message' } }
       : { available: true, modes: ['call', 'phone'], recorder: 'mac-recorder', meeting: current } }))
-    const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'agent-owner' }), document.createElement('div'), sendWith(), () => {})
-    document.body.append(menu)
-    expect(menu.querySelector('.kbn-ctl-meet-arm')?.textContent).toBe('Listen')
-    expect(menu.querySelector('[role="radio"]')).toBeNull()
-    arm(menu)
-    state.dock.meetingStart('fresh', document.createElement('button'))
+    const control = listen(card({ id: 'science/task', originId: 'agent-owner', shuttleKind: 'oneshot' }))
+    expect(control.button.textContent).toBe('Listen')
+    expect(control.el.querySelector('.kbn-ctl-meet [role="radio"]')).toBeNull()
+    control.press()
     await flush()
     await vi.waitFor(() => expect(RelayLink).toHaveBeenCalled())
     const join = fetcher.mock.calls.find(([url]) => url.endsWith('/join'))!
@@ -143,12 +137,10 @@ describe('board phone meeting card wiring', () => {
   ] as const)('gates Join on the device-required mode on mobile=%s with %j', async (mobile, modes, enabled) => {
     vi.stubGlobal('matchMedia', () => ({ matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     state.meetingStatus = { available: true, modes: [...modes], meeting: null }
-    const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), sendWith(), () => {})
-    expect(menu.querySelector('[role="radio"]')).toBeNull()
-    expect(menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.disabled).toBe(!enabled)
-    expect(menu.hidden).toBe(false)
-    arm(menu)
-    state.dock.meetingStart('fresh', document.createElement('button'))
+    const control = listen(card({ id: 'science/task', shuttleKind: 'oneshot' }))
+    expect(control.el.querySelector('.kbn-ctl-meet [role="radio"]')).toBeNull()
+    expect(control.button.disabled).toBe(!enabled)
+    control.press()
     await flush()
     const joins = fetcher.mock.calls.filter(([url]) => url.endsWith('/join'))
     expect(joins).toHaveLength(enabled ? 1 : 0)
@@ -162,12 +154,13 @@ describe('board phone meeting card wiring', () => {
       if (url.endsWith('/join')) throw new Error('lost response')
       return { ok: true, status: 200, json: async () => ({ available: true, modes: ['phone'], meeting: null }) }
     })
-    const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), sendWith(), () => {})
-    arm(menu)
-    state.dock.meetingStart('fresh', document.createElement('button'))
+    const control = listen(card({ id: 'science/task', shuttleKind: 'oneshot' }))
+    control.press()
     await flush()
     await vi.waitFor(() => expect(opened.close).toHaveBeenCalledOnce())
-    state.dock.meetingStart('fresh', document.createElement('button'))
+    state.dock.syncMeeting()
+    expect(control.button.disabled).toBe(true)
+    control.press()
     await flush()
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/join'))).toHaveLength(1)
     expect(RelayLink).not.toHaveBeenCalled()
@@ -271,12 +264,10 @@ describe('board phone meeting card wiring', () => {
         status: reply.status,
         json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, modes: ['call', 'phone'], meeting: current },
       }))
-      const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), sendWith(), () => {})
-      document.body.append(menu)
-      arm(menu)
+      const control = listen(card({ id: 'science/task', originId: 'scribe-host', shuttleKind: 'oneshot' }))
       order.length = 0
       fetcher.mockClear()
-      state.dock.meetingStart('fresh', document.createElement('button'))
+      control.press()
       expect(order).toEqual(['context', 'resume', 'mic'])
       expect(fetcher).not.toHaveBeenCalled()
       opening.resolve(opened as unknown as Mic)
@@ -289,7 +280,6 @@ describe('board phone meeting card wiring', () => {
       if (reply.status === 202) expect(banners).not.toHaveBeenCalled()
       if (reply.status === 502) expect(banners).toHaveBeenCalledWith(expect.stringContaining('could not join'), 'error')
       expect(state.meetingStatus.meeting).toMatchObject({ launch: 'L1' })
-      menu.remove()
     }
   })
 
@@ -297,80 +287,12 @@ describe('board phone meeting card wiring', () => {
     state.meetingStatus.meeting = null
     vi.spyOn(state, 'showBanner').mockImplementation(() => {})
     fetcher.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'hark unavailable' }) })
-    const error = document.createElement('div')
-    const menu = state.dock.buildMeeting(card({ id: 'science/task' }), error, sendWith(), () => {})
-    arm(menu)
-    state.dock.meetingStart('fresh', document.createElement('button'))
+    const control = listen(card({ id: 'science/task', shuttleKind: 'oneshot' }))
+    control.press()
     await flush()
     expect(opened.close).toHaveBeenCalledOnce()
     expect(RelayLink).not.toHaveBeenCalled()
-    expect(error.textContent).toBe('hark unavailable')
-  })
-
-  it('composes a Phone note with images only after the pick has opened audio', async () => {
-    vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
-    state.meetingStatus.meeting = null
-    const order: string[] = []
-    const opening = defer<Mic>()
-    vi.mocked(Mic.open).mockImplementation(() => { order.push('mic'); return opening.promise })
-    const send = sendWith(async () => { order.push('compose'); return 'look\n[Image: /h/a.png]' })
-    fetcher.mockImplementation(async (url: string) => ({
-      ok: true, status: 200,
-      json: async () => url.endsWith('/join')
-        ? { meeting: current, delivery: { delivery: 'message', delivered: true } }
-        : { available: true, modes: ['call', 'phone'], meeting: current },
-    }))
-    const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), send, () => {})
-    arm(menu)
-    state.dock.meetingStart('fresh', document.createElement('button'))
-    expect(order).toEqual(['mic'])
-    expect(send.setBusy).toHaveBeenCalledWith(true)
-    opening.resolve(opened as unknown as Mic)
-    await flush()
-    await vi.waitFor(() => expect(send.sent).toHaveBeenCalledOnce())
-    expect(order).toEqual(['mic', 'compose'])
-    const join = fetcher.mock.calls.find(([url]) => String(url).endsWith('/join'))!
-    expect(JSON.parse(join[1].body).note).toBe('look\n[Image: /h/a.png]')
-    expect(send.setBusy).toHaveBeenLastCalledWith(false)
-  })
-
-  it('a failed image upload starts no meeting and releases the opened audio', async () => {
-    vi.spyOn(state, 'showBanner').mockImplementation(() => {})
-    state.meetingStatus.meeting = null
-    const error = document.createElement('div')
-    const send = sendWith(async () => { throw new Error("Couldn't upload images: fiber not found: science/task") })
-    const menu = state.dock.buildMeeting(card({ id: 'science/task' }), error, send, () => {})
-    arm(menu)
-    state.dock.meetingStart('fresh', document.createElement('button'))
-    await vi.waitFor(() => expect(error.textContent).toBe("Couldn't upload images: fiber not found: science/task"))
-    expect(opened.close).toHaveBeenCalledOnce()
-    expect(RelayLink).not.toHaveBeenCalled()
-    expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/join'))).toBe(false)
-    expect(send.sent).not.toHaveBeenCalled()
-    expect(send.setBusy).toHaveBeenLastCalledWith(false)
-  })
-
-  it('keeps the note and images when the recording started but its worker did not receive it', async () => {
-    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
-    vi.spyOn(state, 'showBanner').mockImplementation(() => {})
-    for (const [reply, received] of [
-      [{ ok: false, status: 502, payload: { recording: true, error: 'delivery failed' } }, false],
-      [{ ok: true, status: 200, payload: { delivery: { delivery: 'message', delivered: true } } }, true],
-    ] as const) {
-      state.meetingStatus.meeting = null
-      fetcher.mockImplementation(async (url: string) => ({
-        ok: url.endsWith('/join') ? reply.ok : true,
-        status: reply.status,
-        json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, modes: ['call', 'phone'], meeting: null },
-      }))
-      const send = sendWith(async () => '[Image: /h/a.png]')
-      const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), send, () => {})
-      arm(menu)
-      state.dock.meetingStart('fresh', document.createElement('button'))
-      await vi.waitFor(() => expect(send.setBusy).toHaveBeenLastCalledWith(false))
-      expect(send.sent).toHaveBeenCalledTimes(received ? 1 : 0)
-    }
+    expect(control.error.textContent).toBe('hark unavailable')
   })
 
   it('adds audio controls only to phone cards and preserves desktop Stop and Terminal', () => {

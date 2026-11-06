@@ -178,7 +178,7 @@ describe('sessionTargets', () => {
     })
   })
 
-  it('a live app conversation that was bridged still links its chat, with no terminal', () => {
+  it('a live app conversation that was bridged still links its conversation, with no terminal', () => {
     const targets = sessionTargets(rec({}), entry({ session: CLAUDE, url: BRIDGE }), { ...desk, liveSession: CLAUDE })
     expect(targets.primary).toMatchObject({ kind: 'web', href: BRIDGE })
     expect(targets.extras).toEqual([])

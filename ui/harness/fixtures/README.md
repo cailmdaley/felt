@@ -58,4 +58,4 @@ Selecting another document disposes the change reader and its shared highlighter
 Theme colors map workspace paper/ink/verdict/stop/machine tokens to Pierre's CSS-variable theme.
 Both widths use unified, wrapped diffs.
 Drafts and viewed marks are browser-local; comments keep their original snapshot anchors across rebakes.
-Sending uses the composer's existing-worker route.
+Sending uses the existing-worker route.

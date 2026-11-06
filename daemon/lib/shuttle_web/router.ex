@@ -16,9 +16,6 @@ defmodule ShuttleWeb.Router do
 
     get("/debug/profile", ProfileController, :show)
     post("/dispatch", DispatchController, :create)
-    # Images pasted into the composer, written on the host owning the fiber
-    # (owner-routed) so the directive can name their paths.
-    post("/attachments", AttachmentsController, :create)
     # Write-and-claim: register an externally-spawned live tmux session as a
     # fiber's running worker (capture sessions claim themselves here).
     post("/claim", ClaimController, :create)
@@ -40,9 +37,6 @@ defmodule ShuttleWeb.Router do
     get("/voice", VoiceController, :show)
     get("/voice/transcript", VoiceController, :transcript)
     post("/voice", VoiceController, :update)
-    post("/voice/target", VoiceController, :target)
-    post("/voice/draft", VoiceController, :draft)
-    post("/voice/release", VoiceController, :release)
     post("/voice/reveal", VoiceController, :reveal)
     # The spoken outbox plays on the host with a speaker: an addressed
     # recorder, else this host, else the first remote that can speak.
@@ -144,7 +138,6 @@ defmodule ShuttleWeb.Router do
     # (unlike /file, which serves raw bytes).
     get("/board/family", BoardController, :family)
     get("/board", BoardController, :show)
-    get("/sent-files/session", SentFilesController, :show_session)
     get("/sent-files", SentFilesController, :show)
     post("/sent-files/clear", SentFilesController, :clear)
     # The global sent-files feed, HOST-scoped like /commits (not owner-routed):
@@ -179,7 +172,6 @@ defmodule ShuttleWeb.Router do
     # Native transcript provenance: JSON receipt, with host routing selected
     # from the session ledger or an explicit `host` query parameter.
     get("/transcript", TranscriptController, :show)
-    get("/transcript/messages", TranscriptController, :messages)
   end
 
   # File/asset bytes by absolute path (owner-routed). Unlocks `:::{embed}` +
@@ -201,7 +193,6 @@ defmodule ShuttleWeb.Router do
     # arbitrary harness bytes are relayed without content negotiation.
     get("/transcript/raw", TranscriptController, :raw)
     # SSE is not subject to JSON content negotiation.
-    get("/transcript/stream", TranscriptController, :stream)
     get("/voice/events", VoiceController, :events)
     # The phone page's microphone, relayed into the live `phone` meeting's
     # hark socket. A WebSocket upgrade negotiates no JSON, so it stays outside

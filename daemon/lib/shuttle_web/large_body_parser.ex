@@ -1,17 +1,15 @@
 defmodule ShuttleWeb.LargeBodyParser do
   @moduledoc """
-  Route-specific JSON ceilings for the endpoints whose bodies carry files.
+  Route-specific JSON ceiling for the endpoint whose bodies carry files.
 
-  Each listed `POST` path is parsed here with its own `length`; every other
+  The listed `POST` path is parsed here with its own `length`; every other
   request passes through untouched to the endpoint's ordinary parser, which
   keeps Plug's default 8 MB limit. Plug.Parsers leaves an already-fetched body
   alone, so the two never both read a body.
 
     * `/api/v1/messages/files` — message envelopes with attachments (32 MB).
-    * `/api/v1/attachments` — the composer's pasted images
-      (`Shuttle.Attachments.max_request_bytes/0`).
 
-  Both also wait up to `read_timeout/0` for each socket read instead of the
+  It also waits up to `read_timeout/0` for each socket read instead of the
   default 15 s, so a body arriving over a slow uplink is not cut off with a
   408. Plug.Parsers hands `:read_timeout` to `Plug.Conn.read_body/2`, which
   Bandit applies to each receive.
@@ -20,8 +18,7 @@ defmodule ShuttleWeb.LargeBodyParser do
   @read_timeout_ms 120_000
 
   @limits %{
-    "/api/v1/messages/files" => 32 * 1024 * 1024,
-    "/api/v1/attachments" => Shuttle.Attachments.max_request_bytes()
+    "/api/v1/messages/files" => 32 * 1024 * 1024
   }
 
   @parsers Map.new(@limits, fn {path, length} ->

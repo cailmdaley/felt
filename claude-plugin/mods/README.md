@@ -38,7 +38,7 @@ Speaker side, right-aligned; the line itself is never shown:
 | State | Text |
 | --- | --- |
 | speaking | `🔈 <voice>` |
-| held while Cail talks | `🔈 paused` |
+| held while the human talks | `🔈 paused` |
 | lines held for this card | `🔈 <n> waiting` |
 | muted | `🔈 muted` |
 | idle | nothing |

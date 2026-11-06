@@ -9,12 +9,11 @@ import { constitutionAction } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
-import { cachedHead } from '../documentResources.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
-import { channelLead, chatDocument, documentLabels, documentLabelMetadata, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, documentLabels, documentLabelMetadata, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { probeDocumentTitles } from './titleProbe.js'
@@ -29,7 +28,6 @@ import { type Verdict } from './Verdicts.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
 import { SettingsMenu } from './SettingsMenu.js'
-import { ReportChip } from './ReportChip.js'
 import { PhoneThreads } from './PhoneThreads.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 
@@ -37,7 +35,6 @@ export interface ReaderOptions {
   shuttleBase: string
   themes?: ChannelThemes
   buildProse(doc: WorkspaceDocument): HTMLElement
-  disposeProse?(doc: WorkspaceDocument): void
   onRefreshProse(doc: WorkspaceDocument): void | Promise<void>
   onSelect(key: DocKey): void
   onNavigate?(source: WorkspaceDocument, href: string): void
@@ -50,7 +47,6 @@ export interface ReaderOptions {
   onRevisitDocument(key: DocKey): void
   workerPill?(card: KanbanCard): HTMLElement | null
   onVerdict?(verdict: Verdict): void
-  onCompose?(): void
   onConversation?(card: KanbanCard): void
   onRest?(card: KanbanCard, anchor: HTMLElement): void
   onEscapeLayer?(): boolean
@@ -129,8 +125,8 @@ export class Reader {
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private backDestination = 'Desk'
-  private reportChip: { key: DocKey; view: ReportChip } | null = null
-  private changeChips = new Map<DocKey, ReportChip>()
+  /** The band over the stage, seated by the workspace for a fiber on the Desk's lifecycle. */
+  private readonly band = element('div', 'ws-stage-band')
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
   private readonly headWorker = element('span', 'ws-head-worker')
   private workerClock = 0
@@ -209,7 +205,7 @@ export class Reader {
     const trail = element('div', 'ws-nav-trail')
     const documentMenu = button('ws-icon-button ws-phone-document-menu', '⋯', () => {
       const doc = this.document
-      if (doc && doc.kind !== 'chat') this.openMenu(doc, documentMenu)
+      if (doc) this.openMenu(doc, documentMenu)
     }, 'Document menu')
     trail.append(this.headWorker, documentMenu)
     // The phone's top bar owns return, the fiber's name, its worker and document actions.
@@ -263,14 +259,14 @@ export class Reader {
     this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) }, opts.shuttleBase, (source, href) => this.opts.onNavigate?.(source, href))
-    column.append(this.stage)
+    this.band.hidden = true
+    column.append(this.band, this.stage)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, column, this.threadRail.el)
     this.el.append(this.veil, this.navbar, this.sidebarToggle, this.railToggle, main, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
-      disposeProse: opts.disposeProse,
       onReview: opts.onReview,
       canReview: opts.canReview,
       reviewTarget: opts.reviewTarget,
@@ -375,9 +371,6 @@ export class Reader {
     this.setSidebarVisible(false, animate)
     if (this.expanded) this.setExpanded(false)
     this.active = false
-    this.reportChip?.view.dispose(); this.reportChip = null
-    for (const chip of this.changeChips.values()) chip.dispose()
-    this.changeChips.clear()
     this.threadRail.setArtifactLive(false)
     this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
@@ -440,10 +433,17 @@ export class Reader {
   /** Back, Escape and the phone swipe follow the same visited path. */
   back(): void { this.opts.onReturn() }
   closeSettings(after: () => void): void { this.settingsMenu.close(after) }
-  /** The settings dropdown under its ⚙, kept inside its chat's protected styling boundary. */
+  /** Seat the band over the stage, or clear it where the page has none. */
+  setBand(el: HTMLElement | null): void {
+    if (el ? this.band.firstChild === el : !this.band.firstChild) return
+    this.band.replaceChildren(...(el ? [el] : []))
+    this.band.hidden = !el
+    if (this.active) this.layout(false)
+  }
+  /** The settings dropdown under its ⚙, kept inside the band's styling boundary. */
   showSettings(content: HTMLElement, opener: HTMLElement): void {
     this.closeMenu()
-    this.settingsMenu.show(content, opener, opener.closest<HTMLElement>('.ws-chat') ?? this.el)
+    this.settingsMenu.show(content, opener, opener.closest<HTMLElement>('.ws-dock') ?? this.el)
   }
   /** On the desktop the sent files live in the rail; the phone, which has none, and a rail with nothing to draw open the sheet. */
   showSentFiles(): void {
@@ -535,25 +535,6 @@ export class Reader {
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.fresh = fresh
     this.feedFiles()
-    const chat = chatDocument(ch)
-    const present = (doc: WorkspaceDocument) => cachedHead(fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner))?.exists !== false
-    const report = channelLead({ ...ch, documents: ch.documents.filter(present) })
-    const chatFrame = chat && this.host.get(chat.key)
-    const chipKey = this.selected === chat?.key && report && chatFrame ? report.key : null
-    if (this.reportChip?.key !== chipKey) {
-      this.reportChip?.view.dispose(); this.reportChip = null
-      if (chipKey && report) this.reportChip = { key: chipKey, view: new ReportChip(report, () => this.openDocument(report.key)) }
-    }
-    const head = chatFrame?.content.querySelector('.ws-chat-head')
-    const refs = head?.querySelector('.ws-chat-refs')
-    if (refs && this.reportChip && this.reportChip.view.el.parentElement !== refs) refs.append(this.reportChip.view.el)
-    const changes = ch.documents.filter(doc => doc.kind === 'change' && doc.key !== chipKey && present(doc))
-    for (const [key, chip] of this.changeChips) if (!changes.some(doc => doc.key === key) || this.selected !== chat?.key) { chip.dispose(); this.changeChips.delete(key) }
-    if (refs && this.selected === chat?.key) for (const doc of changes) {
-      let chip = this.changeChips.get(doc.key)
-      if (!chip) { chip = new ReportChip(doc, () => this.openDocument(doc.key)); this.changeChips.set(doc.key, chip) }
-      if (chip.el.parentElement !== refs) refs.append(chip.el)
-    }
     const doc = ch.documents[index]
     if (doc) this.el.dataset.page = doc.kind
     else delete this.el.dataset.page
@@ -568,7 +549,6 @@ export class Reader {
   private prepareFrame(frame: DocumentFrame): void {
     frame.el.classList.toggle('ws-text-page', ['fiber', 'text', 'markdown', 'code'].includes(frame.doc.kind))
     frame.el.classList.toggle('ws-native-page', ['audio', 'video', 'pdf'].includes(frame.doc.kind))
-    frame.el.classList.toggle('ws-chat-frame', frame.doc.kind === 'chat')
     if (frame.doc.kind === 'audio' || frame.doc.kind === 'video') frame.el.classList.add('ws-media-page')
     frame.el.setAttribute('role', 'tabpanel')
     frame.el.setAttribute('aria-label', frame.doc.name)
@@ -589,7 +569,7 @@ export class Reader {
   private fillLabel(frame: DocumentFrame, label: string): void {
     const doc = frame.doc
     const metadata = documentLabelMetadata(doc, label, this.channel?.owner ?? doc.owner)
-    const glyph = { chat: '', fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□', change: '±' }[doc.kind]
+    const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□', change: '±' }[doc.kind]
     const parts = this.labels.get(frame)
     if (!parts) return
     parts.glyph.hidden = doc.kind === 'fiber'
@@ -611,8 +591,6 @@ export class Reader {
   }
   private preferredWidth(doc: WorkspaceDocument, max: number, height: number): number {
     if (this.phone.matches) return max
-    // The chat is the widest page of the run: it takes the room the stage gives it, up to its measure.
-    if (doc.kind === 'chat') return Math.min(max, this.measure('chat-width', 960))
     if (doc.kind === 'change') return Math.min(max, this.measure('change-width', 1200))
     let width = this.measure(doc.kind === 'html' ? 'html-width' : doc.kind === 'pdf' ? 'pdf-width' : 'prose-width', doc.kind === 'html' ? 1040 : doc.kind === 'pdf' ? 900 : 760)
     const content = this.host.get(doc.key)?.content
@@ -624,7 +602,7 @@ export class Reader {
   }
   private layoutNavbar(): void {
     const trail = this.navbar.querySelector('.ws-nav-trail')!
-    const parent = this.phone.matches && this.document?.kind !== 'chat' ? trail : this.el
+    const parent = this.phone.matches ? trail : this.el
     if (this.railToggle.parentElement !== parent) {
       if (parent === trail) trail.insertBefore(this.railToggle, trail.querySelector('.ws-phone-document-menu'))
       else this.el.insertBefore(this.railToggle, this.navbar.nextSibling)
@@ -699,7 +677,7 @@ export class Reader {
     // The rail leads with the artifact; while the artifact itself fills the stage it keeps only its heading.
     const lead = channelLead(this.channel) ?? null
     this.threadRail.showArtifact(lead, key => this.openDocument(key), !!lead && lead.key === this.selected, () => {
-      const home = chatDocument(this.channel!) ?? proseDocument(this.channel!)
+      const home = proseDocument(this.channel!)
       if (home) this.opts.onRevisitDocument(home.key)
     })
     this.paintRail()
@@ -888,7 +866,7 @@ export class Reader {
     if (this.active && this.sidebarShown) this.fillSidebar()
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
-  /** The sidebar opens only when this viewer has asked for it; the chat has the room by default. */
+  /** The sidebar opens only when this viewer has asked for it; the pages have the room by default. */
   private get sidebarShown(): boolean {
     return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? false)
   }
@@ -1139,7 +1117,6 @@ export class Reader {
     if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false
     if (constitutionAction(intent, this.currentCard, {
       verdict: (_, verdict) => this.opts.onVerdict?.(verdict),
-      compose: () => this.opts.onCompose?.(),
       conversation: card => this.opts.onConversation?.(card),
       rest: card => this.opts.onRest?.(card, this.el),
     })) return true
@@ -1243,8 +1220,8 @@ export class Reader {
   private scrollDocument(intent: KeyIntent, repeat: boolean): void {
     const doc = this.document
     const viewer = doc && this.host.get(doc.key)?.viewer
-    if (!doc || !viewer || !['chat', 'fiber', 'html', 'markdown', 'text', 'code', 'change'].includes(doc.kind)) return
-    let scroller = viewer.querySelector<HTMLElement>(doc.kind === 'chat' ? '.ws-transcript-scroll' : '.ws-prose-scroll,.kbn-fileview-text,.change-scroll')
+    if (!doc || !viewer || !['fiber', 'html', 'markdown', 'text', 'code', 'change'].includes(doc.kind)) return
+    let scroller = viewer.querySelector<HTMLElement>('.ws-prose-scroll,.kbn-fileview-text,.change-scroll')
     if (doc.kind === 'fiber') scroller = viewer.matches('.ws-prose-scroll') ? viewer : scroller
     if (doc.kind === 'html') {
       scrollHtmlViewer(viewer, intent, this.motion.matches || repeat)
@@ -1257,9 +1234,6 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
-    for (const chip of this.changeChips.values()) chip.dispose()
-    this.changeChips.clear()
-    this.reportChip?.view.dispose()
     this.threadRail.dispose()
     window.clearInterval(this.workerClock)
     this.cancelSidebarSlide?.()

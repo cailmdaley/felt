@@ -3,7 +3,7 @@
 // overview's first thumbnails, the phone reader, every /api request per phase
 // (count, bytes, duplicate reads of one document, time queued before send) and
 // main-thread long tasks. Read-only: it clicks cards, steps pages and presses
-// j / 3 / Escape, never a verdict, launch or composer.
+// j / 3 / Escape, never a verdict or launch.
 //
 //   node scripts/measure-workspace.mjs --base http://127.0.0.1:5198/ \
 //     --cards "Card name A" "Card name B" [--runs 3] [--json out.json]

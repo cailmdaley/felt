@@ -8,89 +8,26 @@ import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDev
 import { attachConversationPicker } from '../conversationMenu.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
-import type { MeetingMode } from '../../forms/meetingApi.js'
-import { openVoiceTranscript } from '../voiceTranscript.js'
-import { meetingActions, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
+import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
 import { buildSessionHistory } from '../sessionHistory.js'
-import type { TranscriptHit } from '../transcript/find.js'
-import { TranscriptBand, type TranscriptTarget } from '../transcript/TranscriptBand.js'
-import { coarsePointer, isMobileViewport } from '../mobile.js'
+import { showToast } from '../utils.js'
+import { coarsePointer } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
-import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
 import { dressVerb, headerLifecycleVerbsFor, SESSION_VERBS, sessionVerbsFor } from './lifecycleVerbs.js'
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
-import { HeldVoiceComposer } from './heldVoiceComposer.js'
+import { ListenControl, type MeetingJoinControl } from './ListenControl.js'
 import './tokens.css'
 import './dock.css'
-import './chat.css'
 
-type Directive = string | (() => Promise<string>)
 interface AgentAxes { agent: string; effort: string; chrome: boolean }
-interface ComposerSend {
-  draftKey(): string
-  compose(unlessUnchanged?: string): Promise<string>
-  busy(): boolean
-  setBusy(on: boolean, except?: HTMLButtonElement): void
-  sent(): void
-}
-function workerIdentity(card: KanbanCard): string {
-  return JSON.stringify([card.workerState, card.sessionUuid, card.tmuxSession, card.runtimePhase])
-}
-function latestTarget(card: KanbanCard): TranscriptTarget | null {
-  return card.sessionUuid ? {
-    session: card.sessionUuid,
-    host: card.shuttleHost,
-    uid: card.uid,
-    agent: card.workerAgent ?? card.shuttleAgent,
-    live: hasLiveWorker(card),
-    tasks: card.workerTasks,
-    at: instantMs(card.dispatchedAt),
-  } : null
-}
-
-
 type SessionMode = 'fresh' | 'previous'
-
-/** How a meeting join ended: the error to show beside the control (null once
- *  recording began), and whether the constitution's worker received it. */
-export interface MeetingJoinResult {
-  error: string | null
-  delivered: boolean
-}
-
-/** Which session takes a joined meeting, and whether it records system audio. */
-export interface MeetingJoinOptions {
-  session: SessionMode
-  systemAudio?: boolean
-}
-
-/** The board's meeting control, lent to the dock. */
-export interface MeetingJoinControl {
-  /** The selected recorder is available and nothing is recording. */
-  canJoin(): boolean
-  modes(): MeetingMode[]
-  recorder?(): string | null
-  /** Record a meeting and join it to the card's constitution with the note
-   *  `note` resolves to — it may upload images first, and rejects with their
-   *  failure. Called inside the pick's gesture; Phone opens audio before
-   *  awaiting `note`. Resolves to the error to show (null once recording
-   *  began) and whether the worker received the meeting. */
-  join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>, options: MeetingJoinOptions): Promise<MeetingJoinResult>
-  /** The meeting the board last observed, if any. */
-  current(): MeetingRecord | null
-  /** Stop (or dismiss, once failed) the recording: the board's one stop path. */
-  stop?(meeting: MeetingRecord): void | boolean | Promise<void | boolean>
-  pause?(meeting: MeetingRecord, paused: boolean): Promise<void>
-  /** Whether a stop for `meeting` has been asked and not yet observed. */
-  stopRequested?(meeting: MeetingRecord): boolean
-}
 
 export interface SessionWindow {
   text: string
@@ -429,15 +366,11 @@ interface AgentRecord {
   alias_of?: string | null
 }
 
-/**
- * The chat's header follows the visited path; settings separately links
- * the thread's ancestry, with the family's head first.
- */
-export interface ChatNav {
+/** The band's links: settings holds the thread's ancestry, the family's head first. */
+export interface BandNav {
   ancestry?: readonly Ancestor[]
-  origin?: { label: string; open(): void }
   desk?: () => void
-  /** Opens the constitution's own page, which has no tile in the reader's map. */
+  /** Opens the constitution's own page. */
   constitution?: () => void
 }
 
@@ -452,7 +385,7 @@ export function lifecycleOf(card: KanbanCard): { state: string; label: string } 
 }
 
 /** Settings provenance: agent, office and host, with no office repeating the name. */
-export function chatFacts(card: KanbanCard): string {
+export function bandFacts(card: KanbanCard): string {
   const slug = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
   const role = card.shuttleRole && slug(card.shuttleRole) !== slug(card.name) ? card.shuttleRole : undefined
   return [card.workerAgent ?? card.shuttleAgent, role, card.shuttleHost ?? card.originId].filter(Boolean).join(' · ')
@@ -466,18 +399,14 @@ export interface DockOptions {
 }
 
 /**
- * A constitution's chat: a single-line header with its name, state, usage,
- * report and immediate actions; the conversation as a column, and the composer
- * pinned beneath it. A fiber with no conversation shows the header and the
- * drawer only, inside its fiber page.
+ * The band above a constitution's pages: its name and state, the way to its
+ * conversation, its session and lifecycle verbs, Listen, and the settings
+ * sheet. It stays in place while the pages beneath it change.
  */
 export class Dock {
-  private readonly bands = new Map<string, Dock>()
   private root: HTMLElement | null = null
   private headRoot: HTMLElement | null = null
-  private header: HTMLElement | null = null
-  private lead: HTMLElement | null = null
-  /** The header's × returns directly to the Desk, never a lifecycle write. */
+  /** The band's × returns directly to the Desk, never a lifecycle write. */
   private leave: HTMLButtonElement | null = null
   private ancestry: HTMLElement | null = null
   private drawerClose: (() => boolean) | null = null
@@ -485,39 +414,28 @@ export class Dock {
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
   private searchRenderToken = 0
-  private pendingStartPrompt: { cardId: string; body: DispatchFailureBody } | null = null
-  private transcriptCard: KanbanCard | null = null
-  private transcriptPane: HTMLElement | null = null
-  private transcriptBand: TranscriptBand | null = null
-  /** Opens a file the worker touched in the reader's file viewer; the workspace seats it. */
-  openFile?: (path: string, title?: string, owner?: string) => void
-  /** The constitution page's entry point, shown while the nav carries one. */
-  private constitutionButton: HTMLButtonElement | null = null
-  private openConstitution: (() => void) | null = null
-  private meetingPaint: (() => void) | null = null
-  private dismissRecordingMenu: (() => boolean) | null = null
-  private meetingStartHere: (() => void) | null = null
-  private pendingMeetingHere: { launch: string | null; start: () => void } | null = null
+  private meetingCard: KanbanCard | null = null
+  private meetingPane: HTMLElement | null = null
   private meetingPaneCollapsed = false
   private meetingPaneIdentity: string | null = null
-  private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
-  private composerDisposers: (() => void)[] = []
+  /** Opens a file in the reader's viewer; the workspace seats it. */
+  openFile?: (path: string, title?: string, owner?: string) => void
+  private constitutionButton: HTMLButtonElement | null = null
+  private openConstitution: (() => void) | null = null
+  private listen: ListenControl | null = null
+  private disposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
-  private meetingArmed: () => boolean = () => false
-  private meetingStart: ((mode: SessionMode, verb?: HTMLButtonElement) => void) | null = null
   private dismissParent: (() => boolean) | null = null
   private dismissConversation: (() => boolean) | null = null
-  private composerSend: ComposerSend | null = null
-  private composerError: HTMLElement | null = null
-  private composerPaint: (() => void) | null = null
+  private errorEl: HTMLElement | null = null
+  /** A session verb is in flight; every verb holds until it lands. */
+  private starting = false
   private actPaint: (() => void) | null = null
-  private freshButton: HTMLButtonElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
   private savesPending = 0
   private saveTail: Promise<void> = Promise.resolve()
   private settingStep: { key: string; run: () => void; timer: number } | null = null
-  private readonly blockedDispatches = new Map<HTMLButtonElement, { worker: string; label: string; error: HTMLElement }>()
   private epoch = 0
   private readonly timers = new Set<number>()
   private readonly shuttleBase: string
@@ -550,30 +468,26 @@ export class Dock {
   setMeetingHostOpen(open: (meeting: MeetingRecord) => void, hostName?: (meeting: MeetingRecord) => string | undefined): void {
     this.onMeetingHostOpen = open
     this.meetingHostName = hostName
-    for (const band of this.bands.values()) band.setMeetingHostOpen(open, hostName)
   }
 
-  /** The chat's element, built on first use so controls can be exercised without a page. */
+  /** The band's element, built on first use so controls can be exercised without a page. */
   get el(): HTMLElement {
     if (!this.root) {
       this.root = document.createElement('div')
-      this.root.className = 'ws-dock ws-chat'
+      this.root.className = 'ws-dock'
       this.root.dataset.part = 'act'
-      this.root.dataset.act = 'composer'
+      this.root.dataset.act = 'band'
       this.root.tabIndex = -1
       this.root.addEventListener('click', event => event.stopPropagation())
     }
     return this.root
   }
 
-  /**
-   * The header line's actions, built once per band so a repaint re-seats the same controls under
-   * the pointer and the focus.
-   */
+  /** The band's verbs, built once so a repaint re-seats the same controls under the pointer and the focus. */
   get head(): HTMLElement {
     if (!this.headRoot) {
       this.headRoot = document.createElement('div')
-      this.headRoot.className = 'ws-fiber-acts ws-chat-acts'
+      this.headRoot.className = 'ws-fiber-acts ws-band-acts'
       this.headRoot.dataset.part = 'act'
       this.headRoot.dataset.act = 'verdict'
       this.headRoot.addEventListener('click', event => event.stopPropagation())
@@ -581,35 +495,14 @@ export class Dock {
     return this.headRoot
   }
 
-  /**
-   * Seat the header's way back and the ancestor links in settings.
-   */
   openSettings?: (content: HTMLElement, opener: HTMLElement) => void
   closeSettings?: (after: () => void) => void
 
-  setNav(nav: ChatNav): void {
-    if (!this.lead || !this.header || !this.ancestry) return
-    if (this.head.parentElement !== this.header) this.header.append(this.head)
-    const back: HTMLButtonElement[] = []
+  setNav(nav: BandNav): void {
+    if (!this.ancestry) return
     paintAncestry(this.ancestry, nav.ancestry ?? [])
-    if (nav.origin) {
-      const { label, open } = nav.origin
-      const button = document.createElement('button')
-      button.type = 'button'
-      button.className = 'ws-chat-back ws-chat-origin'
-      const destination = document.createElement('span')
-      destination.className = 'ws-back-label'
-      destination.textContent = label
-      button.append(destination)
-      button.title = `Back to ${label}`
-      button.setAttribute('aria-label', button.title)
-      button.addEventListener('click', () => open())
-      back.unshift(button)
-    }
     this.openConstitution = nav.constitution ?? null
     if (this.constitutionButton) this.constitutionButton.hidden = !this.openConstitution
-    this.lead.replaceChildren(...back)
-    this.lead.hidden = !back.length
     if (this.leave) {
       this.leave.hidden = !nav.desk
       this.leave.onclick = nav.desk ?? null
@@ -641,7 +534,6 @@ export class Dock {
   get openCardId(): string | null { return this.card?.id ?? null }
 
   open(card: KanbanCard): void {
-    // A plain note has no composer to preserve when it becomes Shuttle-managed.
     const promoted = this.card !== null && !isAgentCard(this.card) && isAgentCard(card)
     if (this.card && (this.card.uid ?? this.card.id) === (card.uid ?? card.id) && this.card.originId === card.originId && !promoted) {
       this.syncRuntime(card)
@@ -649,130 +541,58 @@ export class Dock {
     }
     this.clear()
     // Controls share this copy, so a runtime poll updates confirmation and
-    // opening targets without replacing the textarea or settings fields.
+    // opening targets without replacing the settings fields.
     this.card = { ...card }
     const view = this.card
     this.el.append(this.buildControls(view, isAgentCard(view)))
     this.syncRuntime(view)
   }
 
-  /** Identity-keyed bands preserve drafts and folded controls across channels. */
-  bandFor(card: KanbanCard): Dock {
-    const key = JSON.stringify([card.originId, card.uid ?? card.id])
-    let band = this.bands.get(key)
-    if (!band) {
-      band = new Dock(this.shuttleBase, this.onSaved, this.onTransition, this.onOpenWorker,
-        { meeting: this.meeting ?? undefined, voice: this.voice, onRest: this.onRest })
-      if (this.onMeetingHostOpen) band.setMeetingHostOpen(this.onMeetingHostOpen, this.meetingHostName)
-      band.setVerdictQueue(this.queueVerdict)
-      this.bands.set(key, band)
-    }
-    band.open(card)
-    return band
-  }
-
-  /** Document eviction releases the conversation model, timers and listeners with its DOM. */
-  releaseBand(card: KanbanCard): void {
-    const key = JSON.stringify([card.originId, card.uid ?? card.id])
-    this.bands.get(key)?.reset()
-    this.bands.delete(key)
-  }
-
-  /** Forget the cards and their controls. */
-  reset(): void {
-    for (const band of this.bands.values()) band.reset()
-    this.bands.clear()
-    this.clear()
-  }
-
-  private dismissPopovers(): void {
-    this.dismissConversation?.()
-    this.dismissParent?.()
-  }
+  /** Forget the card and its controls. */
+  reset(): void { this.clear() }
 
   private clear(): void {
     this.epoch++
-    this.dismissPopovers()
+    this.dismissConversation?.()
+    this.dismissParent?.()
     this.dismissConversation = this.dismissParent = null
-    this.meetingArmed = () => false
-    this.meetingStart = null
-    for (const dispose of this.composerDisposers.splice(0)) dispose()
+    this.listen?.dispose()
+    this.listen = null
+    for (const dispose of this.disposers.splice(0)) dispose()
     if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
     this.searchDebounce = null
     this.searchRenderToken++
     this.fiberIndex = null
-    this.card = this.workerPillCard = this.transcriptCard = null
-    this.transcriptBand?.dispose()
-    this.transcriptBand = null
+    this.card = this.workerPillCard = this.meetingCard = null
     this.constitutionButton = this.openConstitution = null
-    this.transcriptPane = null
-    this.meetingPaint = this.composerBusy = null
-    this.dismissRecordingMenu = null
-    this.meetingStartHere = null
-    this.pendingMeetingHere = null
+    this.meetingPane = null
     this.meetingPaneCollapsed = false
     this.meetingPaneIdentity = null
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
-    this.composerSend = null
-    this.composerError = null
-    this.composerPaint = this.actPaint = null
-    this.freshButton = null
+    this.starting = false
+    this.errorEl = null
+    this.actPaint = null
     this.settingsSync = null
     this.historySync = null
     this.settingStep = null
     this.savesPending = 0
-    this.blockedDispatches.clear()
+    this.saveTail = Promise.resolve()
     this.root?.replaceChildren()
     this.headRoot?.replaceChildren()
-    this.header = this.lead = this.ancestry = this.leave = null
+    this.ancestry = this.leave = null
     this.drawerClose = null
   }
 
-  /**
-   * Focus the composer without moving the page under it. Only a field out of
-   * view scrolls its page, and then to the page's top when the field fits on
-   * the first screen, so the kicker and title stay whole.
-   */
-  focusComposer(): boolean {
-    const field = this.root?.querySelector<HTMLTextAreaElement>('.kbn-detail-directive')
-    if (!field) return false
-    field.focus({ preventScroll: true })
-    let scroller = field.parentElement
-    while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement
-    if (!scroller) return true
-    const view = scroller.getBoundingClientRect()
-    const box = field.getBoundingClientRect()
-    if (box.top >= view.top && box.bottom <= view.bottom) return true
-    const fromTop = box.bottom - view.top + scroller.scrollTop
-    scroller.scrollTop = fromTop <= scroller.clientHeight ? 0 : scroller.scrollTop + box.top - view.top - box.height
-    return true
-  }
-
-  /** Read a search hit in this constitution's transcript without changing its worker. */
-  openTranscriptHit(hit: TranscriptHit, query: string): void {
-    this.transcriptBand?.openHit(hit, query)
-  }
-
-  openOutcome(text: string): void {
-    this.transcriptBand?.openAtMessage(text)
-  }
-
-  /** The page re-seated this Dock's element in a fresh prose page. */
-  reseated(): void {
-    this.transcriptBand?.reseated()
-  }
-
   handleEscape(): boolean {
-    if (this.dismissRecordingMenu?.()) return true
+    if (this.listen?.dismiss()) return true
     if (dismissSelectPicker()) return true
-    if (this.transcriptBand?.closeFull()) return true
     if (this.dismissConversation?.() || this.dismissParent?.()) return true
     return this.drawerClose?.() ?? false
   }
 
-
-  private buildTranscriptPane(card: KanbanCard): HTMLElement {
+  /** The hosted recording's words as they arrive, under the band. */
+  private buildMeetingPane(card: KanbanCard): HTMLElement {
     const pane = document.createElement('section')
     pane.className = 'kbn-detail-transcript'
     pane.hidden = true
@@ -792,34 +612,26 @@ export class Dock {
     list.setAttribute('aria-live', 'polite')
     list.tabIndex = 0
     pane.append(meta, list)
-    this.transcriptCard = card
-    this.transcriptPane = pane
+    this.meetingCard = card
+    this.meetingPane = pane
     this.syncMeeting()
     return pane
   }
 
-  /** Repaint the open card's transcript and Meeting verb from the board's
-   *  current meeting. */
+  /** Repaint the meeting pane and Listen from the board's current meeting. */
   syncMeeting(): void {
-    for (const band of this.bands.values()) band.syncMeeting()
-    this.meetingPaint?.()
+    this.listen?.meetingChanged()
     const current = this.meeting?.current() ?? null
     const identity = current ? `${current.fiber ?? ''}\0${current.started_at ?? ''}\0${current.title ?? ''}` : null
     if (identity !== this.meetingPaneIdentity) {
-      this.dismissRecordingMenu?.()
+      this.listen?.dismiss()
       this.meetingPaneIdentity = identity
       this.meetingPaneCollapsed = false
     }
-    const hosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
-    const pending = this.pendingMeetingHere
-    if (pending && current && current.launch !== pending.launch) this.pendingMeetingHere = null
-    if (pending && !current && this.meeting?.canJoin()) {
-      this.pendingMeetingHere = null
-      pending.start()
-    }
-    const pane = this.transcriptPane
-    const card = this.transcriptCard
+    const pane = this.meetingPane
+    const card = this.meetingCard
     if (!pane || !card) return
+    const hosted = meetingHostCard(current, [card]) !== null
     pane.hidden = !hosted || current === null || this.meetingPaneCollapsed
     if (!current || !hosted) return
     pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')!.hidden = current.tail.length === 0
@@ -836,24 +648,31 @@ export class Dock {
   /**
    * The worker control is the Desk card's own pill: same turn, same word,
    * same destination under a mouse or a finger (see `workerPill`).
-   * Codex workers use the same terminal path as every other worker.
    */
   workerPillFor(card: KanbanCard): HTMLElement | null {
     return card.tmuxSession || card.sessionLink ? workerPill(card, { openWorker: this.onOpenWorker }) : null
   }
 
-  /** Keyboard opening activates the exact destination used by the worker pill. */
+  /**
+   * Take the human to the conversation: the exact destination the worker pill
+   * opens, or, with no worker up, its past session resumed. An archived card
+   * stays archived; a card that never ran is launched by name, not by a key.
+   */
   openConversation(card: KanbanCard): boolean {
     const destination = resolveDestination(conversationDestinations(card, conversationDevice(), this.onOpenWorker))
-    if (!destination) return false
-    openDestination(destination)
+    if (destination) {
+      openDestination(destination)
+      return true
+    }
+    const archived = ['tempered', 'composted'].includes(deskColumn(card))
+    if (archived || hasLiveWorker(card) || !sessionVerbsFor(card).includes('resume')) return false
+    void this.startSession(card, 'previous')
     return true
   }
 
-  /** All control bands share the workspace's identity-keyed undo queue. */
+  /** The band shares the workspace's identity-keyed undo queue. */
   setVerdictQueue(queue?: (card: KanbanCard, target: Verdict) => void): void {
     this.queueVerdict = queue
-    for (const band of this.bands.values()) band.setVerdictQueue(queue)
   }
 
   verdict(card: KanbanCard, target: Verdict): void {
@@ -888,39 +707,22 @@ export class Dock {
     return row
   }
 
-  /** Refresh controls without replacing drafts or folded fields. */
+  /** Refresh the band without replacing folded fields. */
   syncRuntime(card: KanbanCard | null): void {
-    for (const band of this.bands.values()) band.syncRuntime(card)
     if (!card || !this.card ||
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
-    if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
-        Object.assign(this.card, { [key]: card[key] })
-      }
-      card = this.card
+    for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
+      Object.assign(this.card, { [key]: card[key] })
     }
+    card = this.card
     this.settingsSync?.(incoming)
     this.historySync?.()
-    this.composerPaint?.()
     this.actPaint?.()
-    for (const [button, blocked] of this.blockedDispatches) {
-      if (blocked.worker === workerIdentity(card)) continue
-      button.disabled = false
-      button.textContent = blocked.label
-      if (blocked.error.textContent === 'A worker is already running for this fiber.') {
-        blocked.error.textContent = ''
-        blocked.error.style.display = 'none'
-      }
-      this.blockedDispatches.delete(button)
-      this.composerPaint?.()
-    }
     this.workerPillCard = card
-    this.transcriptBand?.follow(latestTarget(card))
   }
 
   refreshConversationOpening(): void {
-    for (const band of this.bands.values()) band.refreshConversationOpening()
     this.syncRuntime(this.workerPillCard)
     this.root?.querySelectorAll('.kbn-ctl-history').forEach((history) => {
       history.dispatchEvent(new Event(CONVERSATION_OPENING_CHANGED))
@@ -930,22 +732,18 @@ export class Dock {
   private buildControls(card: KanbanCard, shuttleManaged: boolean): HTMLElement {
     const body = document.createElement('div')
     body.className = 'ws-dock-body'
-    this.buildControlsBody(body, card, shuttleManaged)
-    return body
-  }
-
-  private buildControlsBody(body: HTMLElement, card: KanbanCard, shuttleManaged: boolean): void {
     const statusEl = document.createElement('span')
     statusEl.className = 'kbn-detail-save-status'
     statusEl.setAttribute('aria-live', 'polite')
-    const errorEl = document.createElement('div')
+    const errorEl = this.errorEl = document.createElement('div')
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
-    // The band's usage facts feed the composer's Resume (its cache warmth), so the band comes first.
-    if (shuttleManaged) this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase, inline: true, onFile: (path, title, owner) => this.openFile?.(path, title, owner), onFacts: () => this.composerPaint?.() })
-    const composer = shuttleManaged ? this.buildComposer(card) : null
-    const meetingPane = this.buildTranscriptPane(card)
+    const showError = (message: string | null): void => {
+      errorEl.textContent = message ?? ''
+      errorEl.style.display = message ? '' : 'none'
+    }
+    const meetingPane = this.buildMeetingPane(card)
 
     const settings = document.createElement('div')
     settings.className = 'kbn-detail-controls'
@@ -1005,24 +803,7 @@ export class Dock {
         shuttleBase: this.shuttleBase, uid: card.uid, fiberHost: card.shuttleHost,
         liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession, terminalBackend: card.terminalBackend,
         desktop: atDesktop(navigator.userAgent, coarsePointer()),
-        onRead: this.transcriptBand ? record => {
-          const transcript = this.transcriptBand
-          if (!transcript) return
-          this.closeSettings?.(() => {})
-          transcript.read({
-            session: record.session,
-            host: record.host ?? undefined,
-            uid: record.uid ?? card.uid,
-            agent: record.agent ?? record.harness ?? undefined,
-            live: record.session === (hasLiveWorker(card) ? card.sessionUuid : undefined),
-            at: record.at,
-          })
-          // The list folds away so the chosen session reads under its line.
-          const fold = history?.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')
-          if (fold?.getAttribute('aria-expanded') === 'true') fold.click()
-          transcript.el.scrollIntoView({ block: 'start', behavior: 'smooth' })
-        } : undefined,
-        onError: message => { errorEl.textContent = message; errorEl.style.display = '' },
+        onError: showError,
       })
       history?.replaceWith(next)
       history = next
@@ -1044,12 +825,12 @@ export class Dock {
       refreshHistory(history?.classList.contains('kbn-ctl-history-open') ?? false)
     }
     const foot = document.createElement('div')
-    foot.className = 'kbn-ctl-foot ws-chat-status'
+    foot.className = 'kbn-ctl-foot ws-band-status'
     foot.append(errorEl, statusEl)
     const verdict = this.verdictControlsFor(card, (): HTMLElement => rest?.closest('.ws-settings-menu') ? settingsItem : rest!)
     verdict.setAttribute('role', 'group')
     verdict.setAttribute('aria-label', 'Verdict')
-    // The undo window stays visible beside the header controls.
+    // The undo window stays visible beside the band's controls.
     delete verdict.dataset.verdictKey
     markVerdictHost(this.head, card)
     const rest = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-rest')
@@ -1067,45 +848,40 @@ export class Dock {
       button.innerHTML = headerIcon(spec.icon)
       const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = spec.label
       button.append(word)
-      button.addEventListener('click', () => this.el.querySelector<HTMLButtonElement>(spec.verb === 'resume' ? '.kbn-ctl-resume' : '.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')?.click())
+      button.addEventListener('click', () => { void this.startSession(card, spec.verb === 'resume' ? 'previous' : 'fresh', word) })
       sessionActions.append(button)
       return [spec.verb, button] as const
     }))
     verdict.prepend(sessionActions)
 
-    // A single settings sheet owns configuration, history and usage details.
+    // A single settings sheet owns configuration and history.
     const drawer = document.createElement('div')
-    drawer.className = 'ws-chat-drawer'
+    drawer.className = 'ws-band-drawer'
     drawer.hidden = true
     const settingsSection = document.createElement('section')
-    settingsSection.className = 'ws-chat-section'
+    settingsSection.className = 'ws-band-section'
     settingsSection.setAttribute('aria-label', 'Settings')
-    settingsSection.hidden = false
     settingsSection.append(settings)
     const sessionsSection = document.createElement('section')
-    sessionsSection.className = 'ws-chat-section'
+    sessionsSection.className = 'ws-band-section'
     sessionsSection.setAttribute('aria-label', 'Sessions')
-    sessionsSection.hidden = false
     if (history) sessionsSection.append(history)
     drawer.append(settingsSection, sessionsSection)
 
-    const icon = (button: HTMLButtonElement, name: HeaderIcon, label: string): HTMLButtonElement => {
-      button.classList.remove('kbn-ctl-btn')
-      button.classList.add('ws-header-icon')
-      button.title = label; button.setAttribute('aria-label', label)
-      button.innerHTML = headerIcon(name)
-      return button
-    }
     // Lifecycle verbs carry their word beside the icon; only navigation is drawn bare.
     for (const [button, verb] of [[review, 'review'], [rest, 'rest'], [temper, 'temper'], [discard, 'discard']] as const) {
       if (button) dressVerb(button, verb)
     }
     const item = (label: string, name: HeaderIcon, cls: string, run: () => void): HTMLButtonElement => {
       const button = ctlButton('', cls)
-      icon(button, name, label); button.addEventListener('click', run)
+      button.classList.remove('kbn-ctl-btn')
+      button.classList.add('ws-header-icon')
+      button.title = label; button.setAttribute('aria-label', label)
+      button.innerHTML = headerIcon(name)
+      button.addEventListener('click', run)
       return button
     }
-    const settingsItem = item('Settings', 'settings', 'ws-chat-settings', () => {
+    const settingsItem = item('Settings', 'settings', 'ws-band-settings', () => {
       if (ledger.hidden) toggle.click()
       const unfold = sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')
       if (unfold?.getAttribute('aria-expanded') !== 'true') unfold?.click()
@@ -1114,728 +890,90 @@ export class Dock {
     })
     settingsItem.setAttribute('aria-haspopup', 'true')
     settingsItem.setAttribute('aria-expanded', 'false')
-    const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
+    const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-band-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
-    const consoleItem = item('Console', 'console', 'ws-chat-console', () => { this.openConversation(card) })
+    // The way to the conversation: named for where it goes, and the band's strongest control.
+    const openItem = document.createElement('button')
+    openItem.type = 'button'
+    openItem.className = 'ws-band-open'
+    openItem.addEventListener('click', () => { this.openConversation(card) })
     const destinations = (): ReturnType<typeof conversationDestinations> => conversationDestinations(card, conversationDevice(), this.onOpenWorker)
-    this.composerDisposers.push(attachConversationPicker(consoleItem, destinations))
-    const refs = document.createElement('div')
-    refs.className = 'ws-chat-refs'
-    refs.append(constitutionItem)
+    this.disposers.push(attachConversationPicker(openItem, destinations))
     this.drawerClose = () => {
       if (this.openSettings || drawer.hidden) return false
       drawer.hidden = true; settingsItem.focus({ preventScroll: true }); return true
     }
     const facts = document.createElement('p'); facts.className = 'ws-header-facts'
-    const cacheShare = this.transcriptBand?.cacheShare
-    if (cacheShare) drawer.append(cacheShare)
     drawer.append(facts)
-    const header = this.header = document.createElement('header')
-    header.className = 'ws-chat-head'
-    header.dataset.part = 'chat-header'
-    const lead = this.lead = document.createElement('span')
-    lead.className = 'ws-chat-lead'
-    lead.hidden = true
+    const header = document.createElement('header')
+    header.className = 'ws-band-head'
+    header.dataset.part = 'band-header'
     const title = document.createElement('h1')
-    title.className = 'ws-chat-title'
+    title.className = 'ws-band-title'
     title.dataset.part = 'fiber-title'
     const ancestry = this.ancestry = document.createElement('nav')
     ancestry.className = 'ws-settings-ancestry'
     ancestry.hidden = true
     // Where the constitution stands in its lifecycle, in the rail's words and tones.
     const lifecycle = document.createElement('span')
-    lifecycle.className = 'ws-chat-state'
+    lifecycle.className = 'ws-band-state'
     lifecycle.dataset.part = 'lifecycle'
     drawer.prepend(ancestry)
-    const status = document.createElement('span'); status.className = 'ws-chat-standing'
-    status.append(lifecycle, ...(this.transcriptBand ? [this.transcriptBand.meter] : []))
-    const identity = document.createElement('div'); identity.className = 'ws-chat-identity'
-    identity.append(title, status)
+    const identity = document.createElement('div'); identity.className = 'ws-band-identity'
+    identity.append(title, lifecycle)
     const leave = this.leave = document.createElement('button')
     leave.type = 'button'
-    leave.className = 'ws-header-icon ws-chat-leave'
+    leave.className = 'ws-header-icon ws-band-leave'
     leave.hidden = true
     leave.innerHTML = headerIcon('leave')
-    header.append(lead, identity, leave, this.head)
-    const placeIcons = (): void => {
-      const mobile = isMobileViewport()
-      const compact = !mobile && header.clientWidth > 0 && header.clientWidth <= 560
-      const layout = mobile ? 0 : compact ? 1 : 2
-      const active = document.activeElement
-      const focused = active instanceof HTMLElement && [constitutionItem, consoleItem, settingsItem, verdict].some(control => control.contains(active)) ? active : null
-      if (this.header) this.header.dataset.compact = String(layout < 2)
-      const place = (parent: HTMLElement, controls: HTMLElement[]): void => {
-        let next: HTMLElement | null = null
-        for (let i = controls.length - 1; i >= 0; i--) {
-          const control = controls[i]
-          if (control.parentElement !== parent || control.nextElementSibling !== next) parent.insertBefore(control, next)
-          next = control
-        }
-      }
-      place(identity, [title])
-      if (mobile || compact) {
-        place(this.head, [status, verdict, refs])
-        place(header, [lead, identity, consoleItem, settingsItem, leave, this.head])
-      } else {
-        place(this.head, [status, verdict])
-        place(header, [lead, identity, refs, consoleItem, settingsItem, leave, this.head])
-      }
-      if (focused) {
-        const target = focused.checkVisibility() ? focused : settingsItem
-        if (document.activeElement !== target) target.focus({ preventScroll: true })
-      }
+    if (this.meeting && shuttleManaged) {
+      this.listen = new ListenControl({
+        card, meeting: this.meeting, voice: this.voice?.controller, shuttleBase: this.shuttleBase,
+        openFile: (path, title, owner) => this.openFile?.(path, title, owner),
+        hostName: meeting => this.meetingHostName?.(meeting),
+        openHost: meeting => this.onMeetingHostOpen?.(meeting),
+        showPane: () => { this.meetingPaneCollapsed = false; this.syncMeeting() },
+        onError: showError,
+      })
     }
-    this.head.replaceChildren()
-    window.addEventListener('resize', placeIcons)
-    this.composerDisposers.push(() => window.removeEventListener('resize', placeIcons))
-    if (typeof ResizeObserver !== 'undefined') {
-      const resize = new ResizeObserver(placeIcons)
-      resize.observe(header)
-      this.composerDisposers.push(() => resize.disconnect())
-    }
-
-    placeIcons()
-
-    const log = document.createElement('div')
-    log.className = 'ws-chat-log'
-    const empty = document.createElement('p')
-    empty.className = 'ws-chat-empty'
-    empty.textContent = 'No conversation yet. Write below to start a worker.'
-    if (this.transcriptBand) log.append(this.transcriptBand.el, empty)
-    const compose = document.createElement('div')
-    compose.className = 'ws-chat-compose'
-    compose.append(meetingPane, ...(composer ? [composer] : []), foot)
-    this.el.classList.toggle('ws-chat-conversation', shuttleManaged)
-    body.append(header, drawer, ...(shuttleManaged ? [log] : []), compose)
+    this.head.replaceChildren(openItem, ...(this.listen ? [this.listen.el] : []), verdict)
+    header.append(identity, this.head, constitutionItem, settingsItem, leave)
+    body.append(header, drawer, meetingPane, foot)
     this.actPaint = () => {
       const column = deskColumn(card)
       this.el.dataset.column = column
       this.head.dataset.column = column
       if (title.textContent !== card.name) title.textContent = card.name
       title.title = card.name
-      // The state is said once: a live worker's pill says it, else this chip.
       const stage = lifecycleOf(card)
       if (lifecycle.textContent !== stage.label) lifecycle.textContent = stage.label
       lifecycle.dataset.state = stage.state
       lifecycle.hidden = !shuttleManaged
-      lifecycle.classList.toggle('ws-chat-state-live', hasLiveWorker(card))
-      const saidFacts = chatFacts(card)
+      const saidFacts = bandFacts(card)
       if (facts.textContent !== saidFacts) facts.textContent = saidFacts
       facts.hidden = !facts.textContent
       const offered = headerLifecycleVerbsFor(card, !!this.onRest)
-      const sessionOffered = sessionVerbsFor(card)
+      const sessionOffered = shuttleManaged ? sessionVerbsFor(card) : []
       verdict.hidden = !offered.length && !sessionOffered.length
       sessionActions.hidden = !sessionOffered.length
-      for (const spec of SESSION_VERBS) sessionButtons.get(spec.verb)!.hidden = !sessionOffered.includes(spec.verb)
-      const freshComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')
-      const resumeComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')
-      sessionButtons.get('launch')!.disabled = Boolean(freshComposerButton?.disabled)
-      sessionButtons.get('newSession')!.disabled = Boolean(freshComposerButton?.disabled)
-      sessionButtons.get('resume')!.disabled = Boolean(resumeComposerButton?.disabled)
+      for (const spec of SESSION_VERBS) {
+        const button = sessionButtons.get(spec.verb)!
+        button.hidden = !sessionOffered.includes(spec.verb)
+        button.disabled = this.starting
+      }
       if (rest) rest.hidden = !offered.includes('rest')
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')
       review.hidden = !offered.includes('review')
       const destination = resolveDestination(destinations())
-      consoleItem.hidden = !destination
-      const consoleLabel = destination ? `Open in ${destination.label}` : 'Console'
-      consoleItem.title = consoleLabel
-      consoleItem.setAttribute('aria-label', consoleLabel)
+      openItem.hidden = !destination
+      const openLabel = destination ? `Open in ${destination.label}` : ''
+      if (openItem.textContent !== openLabel) openItem.textContent = openLabel
+      openItem.title = openLabel
       sessionsSection.hidden = !card.uid
     }
     this.actPaint()
-  }
-
-  private buildComposer(card: KanbanCard): HTMLElement {
-    const epoch = this.epoch
-    const wrap = document.createElement('div')
-    wrap.className = 'kbn-ctl-compose'
-
-    const box = document.createElement('div')
-    box.className = 'kbn-ctl-composer'
-    const message = document.createElement('textarea')
-    message.className = 'kbn-detail-directive'
-    message.rows = 1
-    message.placeholder = ''
-    message.setAttribute('aria-label', 'Message for the next worker')
-    // CSS gives the message the full width and the verbs their own footer.
-    // Native field sizing grows wrapped text without a synchronous layout read.
-    const nativeSizing = globalThis.CSS?.supports?.('field-sizing', 'content') ?? false
-    if (nativeSizing) {
-      message.style.setProperty('field-sizing', 'content')
-      message.style.height = 'auto'
-    }
-    const fit = (): void => {
-      if (!nativeSizing) {
-        message.style.height = ''
-        if (message.value && message.scrollHeight > message.clientHeight) message.style.height = `${message.scrollHeight}px`
-      }
-    }
-    let fitFrame = 0
-    const scheduleFit = (): void => {
-      if (!fitFrame) fitFrame = requestAnimationFrame(() => { fitFrame = 0; fit() })
-    }
-    if (!nativeSizing) {
-      message.addEventListener('input', scheduleFit)
-      window.addEventListener('resize', scheduleFit)
-      this.composerDisposers.push(() => window.removeEventListener('resize', scheduleFit))
-      if (typeof ResizeObserver !== 'undefined') {
-        const observer = new ResizeObserver(scheduleFit)
-        observer.observe(box)
-        this.composerDisposers.push(() => observer.disconnect())
-      }
-    }
-    this.composerDisposers.push(() => cancelAnimationFrame(fitFrame))
-    // The draft belongs to its constitution and outlives a reload in this
-    // browser; a send that lands empties the field and so drops it.
-    const draftStore = `shuttle:composer-draft:${JSON.stringify([card.originId, card.uid ?? card.id])}`
-    try { message.value = localStorage.getItem(draftStore) ?? '' } catch { /* storage unavailable */ }
-    if (message.value && !nativeSizing) scheduleFit()
-    const saveDraft = (): void => {
-      try { if (message.value) localStorage.setItem(draftStore, message.value); else localStorage.removeItem(draftStore) } catch { /* storage unavailable */ }
-    }
-    message.addEventListener('input', saveDraft)
-    // Two lines under the box: a send's outcome (and the project-directory
-    // prompt a refused start raises), and the images turned away. Neither
-    // writes over the other.
-    const err = document.createElement('div')
-    err.className = 'kbn-detail-error'
-    err.style.display = 'none'
-    const imageErr = document.createElement('div')
-    imageErr.className = 'kbn-detail-error kbn-ctl-images-error'
-    imageErr.style.display = 'none'
-    const showImageError = (text: string | null): void => {
-      imageErr.textContent = text ?? ''
-      imageErr.style.display = text ? '' : 'none'
-    }
-
-    const images = new PastedImages()
-    const strip = buildImageStrip(images)
-    this.composerDisposers.push(strip.dispose)
-
-    // While a send is in flight every verb is held and the chips are frozen,
-    // so what is sent is what was shown.
-    let busy = false
-    const fresh = ctlButton('', 'kbn-ctl-send')
-    const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
-    let meetingControl: HTMLElement | undefined
-    const sends = document.createElement('span')
-    sends.className = 'kbn-ctl-sends'
-    this.composerPaint = () => {
-      const resumable = Boolean(card.sessionUuid)
-      // A live worker takes the message by default (Send ↵) and a new
-      // session is the secondary verb (⌥↵). Otherwise, in every column, a
-      // fresh session is the default and a previous session adds Resume
-      // beside it (⌥↵), marked while its prompt cache is estimated warm.
-      const live = resumable && hasLiveWorker(card)
-      const warmUntil = resumable && !live ? this.transcriptBand?.cacheWarm(card.sessionUuid!) : undefined
-      const armed = this.meetingArmed()
-      const withMeeting = armed ? ' with listening' : ''
-      const freshLabel = live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
-      const resumeLabel = live ? 'Send ↵' : 'Resume ⌥↵'
-      this.paintLabel(fresh, freshLabel)
-      this.paintLabel(resume, resumeLabel)
-      fresh.classList.toggle('kbn-ctl-secondary', live)
-      fresh.title = live ? `Start a new session${withMeeting}, cutting the live worker (⌥↵)` : resumable ? `Start a new session${withMeeting} (↵)` : armed ? 'Start with listening (↵)' : ''
-      resume.classList.toggle('kbn-ctl-secondary', resumable && !live)
-      resume.title = live ? (armed ? 'Send with listening to the live worker (↵)' : 'Send the message to the live worker (↵)')
-        : resumable ? `Resume the previous session${withMeeting} (⌥↵)${warmUntil === undefined ? '' : ` · cache warm until ${clockTime(warmUntil)}`}` : ''
-      if (warmUntil === undefined) delete resume.dataset.cache; else resume.dataset.cache = 'warm'
-      resume.hidden = false
-      const ordered = live ? [resume, fresh] : [fresh, resume]
-      const controls = [...(meetingControl ? [meetingControl] : []), ...ordered]
-      if (controls.some((control, index) => sends.children[index] !== control) || sends.children.length !== controls.length) sends.replaceChildren(...controls)
-      // A live worker is resumed only to hand it a message; attaching to it
-      // is the terminal action's.
-      const idle = hasLiveWorker(card) && !armed && message.value.trim() === '' && images.list.length === 0
-      if (!busy && !this.blockedDispatches.has(resume)) resume.disabled = idle || !resumable
-      message.placeholder = armed ? 'A note for listening (optional)'
-        : ''
-      this.actPaint?.()
-    }
-    this.composerPaint()
-    message.addEventListener('input', () => this.composerPaint?.())
-    const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
-      busy = on
-      for (const verb of [fresh, resume]) if (on || verb !== except) verb.disabled = on
-      if (!on) this.composerPaint?.()
-      else this.actPaint?.()
-      for (const control of err.querySelectorAll<HTMLInputElement | HTMLButtonElement>('.kbn-start-prompt input, .kbn-start-prompt button')) control.disabled = on
-      strip.setFrozen(on)
-      if (epoch === this.epoch) this.meetingPaint?.()
-    }
-    this.composerBusy = setBusy
-
-    const admit = (files: File[]): void => {
-      if (busy) showImageError('Wait for the send to finish before adding images.')
-      else showImageError(images.add(files))
-      strip.paint(); this.composerPaint?.()
-    }
-    message.addEventListener('paste', (e) => {
-      const files = pastedImageFiles(e.clipboardData)
-      if (!files.length) return
-      e.preventDefault()
-      admit(files)
-    })
-    box.addEventListener('dragover', (e) => {
-      if (!transferHasFiles(e.dataTransfer)) return
-      e.preventDefault()
-      box.classList.add('kbn-ctl-composer-drop')
-    })
-    box.addEventListener('dragleave', (e) => {
-      if (!box.contains(e.relatedTarget as Node | null)) box.classList.remove('kbn-ctl-composer-drop')
-    })
-    box.addEventListener('drop', (e) => {
-      box.classList.remove('kbn-ctl-composer-drop')
-      const files = filesFromTransfer(e.dataTransfer)
-      if (!files.length) return
-      e.preventDefault()
-      e.stopPropagation()
-      admit(files)
-    })
-
-    const heldVoice = this.voice ? new HeldVoiceComposer(message, this.voice.controller, card, draftStore, () => {
-      saveDraft(); scheduleFit(); this.composerPaint?.()
-    }, error => { err.textContent = error.message; err.style.display = '' }) : null
-    if (heldVoice) this.composerDisposers.push(() => heldVoice.dispose())
-
-    // What the last compose took, so a send that lands clears exactly that.
-    let composed: { text: string; ids: number[] } | null = null
-    const draftKey = (): string => JSON.stringify([message.value, images.list.map(image => image.id)])
-    const send: ComposerSend = {
-      draftKey,
-      compose: async (unlessUnchanged) => {
-        if (unlessUnchanged === draftKey()) {
-          composed = null
-          return ''
-        }
-        const voiceCompose = heldVoice?.begin()
-        composed = { text: message.value, ids: images.list.map((image) => image.id) }
-        try {
-          const text = await this.composeWithImages(card, images, composed.text)
-          if (voiceCompose) await heldVoice!.release(voiceCompose)
-          return text
-        } finally { heldVoice?.finish() }
-      },
-      busy: () => busy,
-      setBusy,
-      sent: () => {
-        if (!composed) return
-        for (const id of composed.ids) images.remove(id)
-        strip.paint()
-        showImageError(null)
-        if (heldVoice) heldVoice.sent(composed.text)
-        else if (message.value === composed.text) {
-          message.value = ''
-          message.dispatchEvent(new Event('input'))
-        }
-      },
-    }
-
-    const foot = document.createElement('div')
-    foot.className = 'kbn-ctl-composer-foot'
-    meetingControl = this.meeting ? this.buildMeeting(card, err, send, () => {
-      this.composerPaint?.()
-      fit()
-    }, box) : undefined
-    this.composerPaint()
-    foot.append(sends)
-
-    this.composerSend = send
-    this.composerError = err
-    this.freshButton = fresh
-    const pending = this.pendingStartPrompt
-    if (pending?.cardId === card.id) {
-      this.pendingStartPrompt = null
-      const parked = send.draftKey()
-      this.showStartPrompt(err, card, pending.body, () => send.compose(parked), 'fresh', fresh)
-    }
-    // Every composer verb goes through here; an armed meeting travels with it.
-    const dispatch = (mode: SessionMode, verb: HTMLButtonElement): void => {
-      if (this.meetingArmed()) {
-        if (!this.blockedDispatches.has(verb)) this.meetingStart?.(mode, verb)
-        return
-      }
-      const live = hasLiveWorker(card)
-      void this.runRequeue(card, send.compose, mode, verb, err).then(ok => {
-        if (!ok) return
-        // A message handed to a live worker shows in the chat at once; the transcript records it only when the worker reads it.
-        if (mode === 'previous' && live && composed) this.transcriptBand?.pend(composed.text)
-        send.sent()
-      })
-    }
-    fresh.addEventListener('click', event => { event.stopPropagation(); dispatch('fresh', fresh) })
-    resume.addEventListener('click', event => { event.stopPropagation(); dispatch('previous', resume) })
-
-    message.addEventListener('keydown', event => {
-      // Escape steps out of the field and hands the keys back to the reader;
-      // the draft stays.
-      if (event.key === 'Escape' && !event.isComposing && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        event.preventDefault(); event.stopPropagation()
-        message.blur()
-        return
-      }
-      if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
-      event.preventDefault(); event.stopPropagation()
-      if (event.repeat || busy) return
-      // ↵ is the default verb the buttons show, ⌥↵ the secondary.
-      const resumable = Boolean(card.sessionUuid)
-      const resumeSession = resumable && (hasLiveWorker(card) ? !event.altKey : event.altKey)
-      dispatch(resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh)
-    })
-    box.append(message, strip.el, foot)
-    wrap.append(box, imageErr, err)
-    return wrap
-  }
-
-  /**
-   * The text a composer send carries: `text`, then the paths of `images` once
-   * they are stored on the daemon owning `card`. Throws the upload's reason
-   * when it failed; the send then sends nothing.
-   */
-  private async composeWithImages(card: KanbanCard, images: PastedImages, text: string): Promise<string> {
-    if (!images.size) return text.trim()
-    return composeDirective(text, await uploadPastedImages(this.shuttleBase, card, images.list))
-  }
-
-  private paintLabel(button: HTMLButtonElement, label: string): void {
-    if (this.blockedDispatches.has(button)) return
-    const shortcut = label.match(/ (?:⌥)?↵$/)?.[0]
-    const visible = shortcut ? label.slice(0, -shortcut.length) : label
-    if (button.textContent === label && Boolean(shortcut) === !!button.querySelector('.kbn-ctl-shortcut')) return
-    button.textContent = visible
-    if (shortcut) {
-      const hint = document.createElement('span')
-      hint.className = 'kbn-ctl-shortcut'
-      hint.textContent = shortcut
-      button.append(hint)
-    }
-  }
-
-  /** The shared Hark control arms a meeting or manages the current recording;
-   * its menu holds the audio choice and live-voice controls. Armed composer
-   * verbs start the recording and deliver the note and images to the session. */
-  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: () => void, box?: HTMLElement): HTMLElement {
-    const wrap = document.createElement('span')
-    wrap.className = 'kbn-ctl-meet'
-    const armButton = ctlButton('Listen', 'kbn-ctl-meet-arm')
-    armButton.setAttribute('aria-label', 'Listen')
-    armButton.setAttribute('aria-pressed', 'false')
-    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    icon.setAttribute('viewBox', '0 0 16 16')
-    icon.setAttribute('aria-hidden', 'true')
-    icon.setAttribute('focusable', 'false')
-    const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    glyph.setAttribute('d', 'M8 1.5a2 2 0 0 0-2 2v4.25a2 2 0 0 0 4 0V3.5a2 2 0 0 0-2-2ZM3.5 7.75a4.5 4.5 0 0 0 9 0M8 12.25v2.25M5.5 14.5h5')
-    glyph.setAttribute('fill', 'none')
-    glyph.setAttribute('stroke', 'currentColor')
-    glyph.setAttribute('stroke-width', '1.35')
-    glyph.setAttribute('stroke-linecap', 'round')
-    icon.append(glyph)
-    const word = document.createElement('span')
-    word.className = 'kbn-ctl-meet-label'
-    word.textContent = 'Listen'
-    armButton.replaceChildren(icon, word)
-    const requiredMode = (): MeetingMode => isMobileViewport() ? 'phone' : 'call'
-    const canJoin = (): boolean => !!this.meeting?.canJoin() && this.meeting.modes().includes(requiredMode())
-    let starting = false
-    let armed = false
-    const audio = document.createElement('select')
-    audio.className = 'kbn-ctl-select kbn-ctl-meet-audio'
-    audio.setAttribute('aria-label', 'Listening audio')
-    audio.append(new Option('Mic + system', 'system'), new Option('Mic only', 'mic'))
-    const dropdown = ctlButton('▾', 'kbn-ctl-meet-dropdown')
-    dropdown.setAttribute('aria-label', 'Listening controls')
-    dropdown.setAttribute('aria-haspopup', 'menu')
-    dropdown.setAttribute('aria-expanded', 'false')
-    const pending = document.createElement('div')
-    pending.className = 'voice-pending'
-    pending.setAttribute('aria-live', 'polite')
-    box?.append(pending)
-    let scrollFrame = 0
-    let menu: HTMLElement | null = null
-    let menuState = ''
-    let release: Release | null = null
-    let localError: string | null = null
-    let voiceAvailable = !!this.voice?.controller.status?.available
-    const closeMenu = (): void => {
-      release?.(); release = null
-      menu?.remove(); menu = null
-      dropdown.setAttribute('aria-expanded', 'false')
-      window.removeEventListener('pointerdown', outside, true)
-    }
-    const outside = (event: PointerEvent): void => {
-      if (!menu?.contains(event.target as Node) && !wrap.contains(event.target as Node)) closeMenu()
-    }
-    const matches = (id: string | undefined): boolean => !!id && (id === card.id || id === card.uid)
-    const elsewhere = (target: NonNullable<NonNullable<typeof this.voice>['controller']['status']>['target']): boolean =>
-      !!target && (!matches(target.fiber_id) || (!!target.origin && target.origin !== card.originId))
-    const arm = (on: boolean): void => {
-      armed = on
-      armButton.setAttribute('aria-pressed', String(on))
-      armButton.classList.toggle('kbn-ctl-meet-on', on)
-      armButton.title = on ? 'Sending starts listening' : word.textContent ?? 'Listen'
-      onArm()
-    }
-    arm(false)
-    this.meetingArmed = () => armed
-    // Status is null until a poll lands, and `last` reloads from disk: the first
-    // status only sets the mark, and only a later delivery shows.
-    let seenDelivery: string | null = null
-    const paint = (): void => {
-      const status = this.voice?.controller.status
-      if (status) {
-        const delivery = status.last
-        if (seenDelivery === null) seenDelivery = delivery?.at ?? ''
-        else if (delivery && delivery.at > seenDelivery) {
-          seenDelivery = delivery.at
-          if (delivery.text && delivery.status === 'delivered' && matches(delivery.fiber_id) && (!delivery.origin || delivery.origin === card.originId)) this.transcriptBand?.pend(delivery.text, true)
-        }
-      }
-      const control = this.meeting
-      if (!control) return
-      const current = control.current()
-      const recording = current !== null && current.state !== 'failed'
-      const held = starting || send.busy() || !canJoin()
-      armButton.disabled = !recording && held
-      audio.disabled = held || recording
-      const voice = this.voice?.controller.status
-      if (voiceAvailable && !voice?.available) closeMenu()
-      voiceAvailable = !!voice?.available
-      dropdown.hidden = false
-      const signature = JSON.stringify([current?.launch, current?.state, current?.paused, current?.recorder, current?.handoff?.status, voice?.available, voice?.enabled, voice?.muted, voice?.state, voice?.target, voice?.recorder, localError])
-      if (menu && signature !== menuState) closeMenu()
-      let label = 'Listen'
-      let elsewhere: string | null = null
-      if (localError || current?.state === 'failed' || current?.handoff?.status === 'reported-failure' || voice?.state === 'failed' || voice?.last?.status === 'failed') {
-        label = 'Failed'
-      } else if (recording) {
-        const hosted = meetingHostCard(current, [card]) !== null
-        const host = this.meetingHostName?.(current) ?? (hosted ? card.name : current.fiber?.split('/').at(-1)) ?? current.title?.trim() ?? 'card'
-        label = `${current.paused ? 'Paused' : 'Listening'} · ${host}`
-      } else if (voice?.available && voice.enabled) {
-        label = `${voice.muted ? 'Paused' : 'Listening'} · ${voice.target?.name ?? card.name}`
-      }
-      if (recording && current.state !== 'stopping' && meetingHostCard(current, [card]) === null) {
-        const host = this.meetingHostName?.(current) ?? current.fiber?.split('/').at(-1) ?? current.title?.trim() ?? 'another card'
-        elsewhere = current.paused ? `The mic is paused for ${host}. This chat can't hear you.` : `Your voice is going to ${host}, not this chat.`
-      } else if (!recording && voice?.state === 'yielded') {
-        elsewhere = `Your voice is going to a recording, not this chat.`
-      }
-      if (word.textContent !== label) word.textContent = label
-      armButton.title = armed ? 'Sending starts listening' : label
-      armButton.setAttribute('aria-label', label)
-      const preview = voice?.preview
-      const text = elsewhere ?? (preview && matches(preview.fiber_id) && preview.origin === card.originId ? preview.text
-        : voice && matches(voice.pending?.fiber_id) ? voice.pending!.text : '')
-      pending.classList.toggle('voice-elsewhere', elsewhere !== null)
-      if (pending.textContent !== text) {
-        pending.textContent = text
-        pending.scrollTop = pending.scrollHeight
-        cancelAnimationFrame(scrollFrame)
-        scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; pending.scrollTop = pending.scrollHeight })
-      }
-      if ((recording || !canJoin()) && armed && !starting) arm(false)
-    }
-    const showMenu = (): void => {
-      if (menu) { closeMenu(); return }
-      menu = document.createElement('div')
-      menu.className = 'ws-select-picker'
-      menu.setAttribute('role', 'menu')
-      menu.setAttribute('aria-label', 'Listening controls')
-      const item = (label: string, act: () => void, disabled = false): void => {
-        const button = ctlButton(label, 'ws-select-option')
-        button.setAttribute('role', 'menuitem')
-        button.disabled = disabled
-        button.addEventListener('click', () => { closeMenu(); act() })
-        menu!.append(button)
-      }
-      const note = (text: string): void => { const el = document.createElement('div'); el.className = 'voice-error'; el.textContent = text; menu!.append(el) }
-      const current = this.meeting?.current()
-      const recording = !!current && current.state !== 'failed'
-      const voice = this.voice?.controller
-      const state = voice?.status
-      menuState = JSON.stringify([current?.launch, current?.state, current?.paused, current?.recorder, current?.handoff?.status, state?.available, state?.enabled, state?.muted, state?.state, state?.target, state?.recorder, localError])
-      const set = (values: { muted?: boolean; enabled?: boolean }): void => {
-        if (!voice) return
-        void voice.set(values).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
-      }
-      const stopHeld = !recording || !this.meeting?.stop || meetingActions(current, this.meeting?.stopRequested?.(current) ?? false).stopDisabled
-      if (recording) {
-        if (state?.available && !isMobileViewport()) item('Stop and follow me', () => {
-          void Promise.resolve(this.meeting?.stop?.(current)).then(async stopped => {
-            if (stopped === false) throw new Error('The recording did not stop')
-            await voice?.set(state.muted ? { enabled: true, muted: false } : { enabled: true })
-            localError = null
-          }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error) }).finally(paint)
-        }, stopHeld)
-      } else {
-        const follow = ctlButton('Follow me', 'ws-select-option')
-        follow.setAttribute('role', 'menuitemcheckbox')
-        follow.setAttribute('aria-checked', String(!!state?.enabled))
-        follow.disabled = !state?.enabled && (!state?.available || isMobileViewport())
-        follow.addEventListener('click', () => { closeMenu(); set({ enabled: !state?.enabled }) })
-        menu.append(follow)
-      }
-      if (!state?.enabled && !recording && requiredMode() === 'call') {
-        const label = document.createElement('label')
-        label.className = 'kbn-ctl-meet-audio-label'
-        label.append('Audio', audio)
-        menu.append(label)
-      }
-      if (recording) {
-        const hosted = meetingHostCard(current, [card]) !== null
-        item('Open transcript', () => {
-          if (!hosted) { this.onMeetingHostOpen?.(current); return }
-          this.meetingPaneCollapsed = false
-          this.syncMeeting()
-        })
-        if (!current.phone) item(current.paused ? 'Resume' : 'Pause', () => {
-          void this.meeting?.pause?.(current, !current.paused).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
-        }, !this.meeting?.pause || current.state !== 'live')
-        item('Stop', () => { void this.meeting?.stop?.(current) }, stopHeld)
-        if (!hosted) item('Listen here', () => {
-          const next = { launch: current.launch, start: () => this.meetingStartHere?.() }
-          this.pendingMeetingHere = next
-          void Promise.resolve(this.meeting?.stop?.(current)).then(ok => {
-            if (ok === false && this.pendingMeetingHere === next) this.pendingMeetingHere = null
-            this.syncMeeting()
-          }).catch(() => { if (this.pendingMeetingHere === next) this.pendingMeetingHere = null })
-        }, stopHeld || !this.meeting?.modes().includes(requiredMode()))
-      } else if (state?.available && state.enabled) {
-        item('Open transcript', () => {
-          if (!this.openFile) return
-          void openVoiceTranscript(this.shuttleBase, this.openFile, state.recorder)
-            .then(() => { localError = null; paint() })
-            .catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
-        }, !this.openFile)
-        item(state.muted ? 'Resume' : 'Pause', () => set({ muted: !state.muted }))
-        item('Stop', () => set({ enabled: false }))
-        if (elsewhere(state.target)) item('Listen here', () => {
-          void voice?.listenHere(card).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
-        })
-      }
-      const cadence = document.createElement('div')
-      cadence.className = 'kbn-ctl-listen-cadence'
-      const input = (label: string): HTMLInputElement => {
-        const wrapper = document.createElement('label')
-        wrapper.textContent = label
-        const field = document.createElement('input')
-        field.type = 'number'; field.min = '0.001'; field.step = 'any'; field.disabled = true
-        field.setAttribute('aria-label', label)
-        wrapper.append(field); cadence.append(wrapper)
-        return field
-      }
-      const quiet = input('Quiet seconds')
-      menu.append(cadence)
-      const configOrigin = (recording ? current.recorder : state?.recorder) ?? ''
-      const configUrl = `${this.shuttleBase}/api/v1/config/voice${configOrigin ? `?origin=${encodeURIComponent(configOrigin)}` : ''}`
-      void fetch(configUrl).then(async response => {
-        if (!response.ok) throw new Error('Could not read listening settings')
-        const file = await response.json() as { text: string; digest: string | null }
-        const doc = file.text.trim() ? JSON.parse(file.text) as Record<string, unknown> : {}
-        const oldVoice = doc.voice as { quiet_seconds?: number } | undefined
-        const oldMeeting = doc.meeting as { quiet_seconds?: number } | undefined
-        quiet.value = String(doc.quiet_seconds ?? oldVoice?.quiet_seconds ?? oldMeeting?.quiet_seconds ?? 15)
-        quiet.disabled = false
-        quiet.addEventListener('change', () => {
-          const value = Number(quiet.value)
-          if (!quiet.validity.valid || !Number.isFinite(value) || value <= 0) return
-          quiet.disabled = true
-          const { run_quiet_seconds: _, ...kept } = doc
-          void fetch(`${this.shuttleBase}/api/v1/config/voice`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: JSON.stringify({ ...kept, quiet_seconds: value }, null, 2) + '\n', origin: configOrigin, expected_digest: file.digest }),
-          }).then(async response => {
-            if (!response.ok) throw new Error('Could not save listening settings')
-            const saved = await response.json() as { digest: string | null }
-            file.digest = saved.digest
-            delete doc.run_quiet_seconds
-            doc.quiet_seconds = value
-            localError = null
-          }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
-            .finally(() => { quiet.disabled = false })
-        })
-      }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
-      const failure = localError || (current?.handoff?.status === 'reported-failure' ? 'Delivery failed' : null) || (current?.state === 'failed' ? current.error : null) || (state?.state === 'failed' ? state.error : null) || (state?.last?.status === 'failed' ? `Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}` : null)
-      if (recording && state?.enabled) {
-        item('Turn off Follow me', () => set({ enabled: false }))
-        note('Follow me returns when this recording stops.')
-      }
-      if (failure) note(failure)
-      menu.addEventListener('keydown', event => {
-        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); dropdown.focus() }
-        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && event.target !== audio && event.target !== quiet) {
-          event.preventDefault()
-          const items = [...menu!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
-          const at = items.indexOf(document.activeElement as HTMLButtonElement)
-          items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
-        }
-      })
-      menu.addEventListener('focusout', event => {
-        if (event.relatedTarget && !wrap.contains(event.relatedTarget as Node)) closeMenu()
-      })
-      wrap.append(menu)
-      release = anchorPopover(menu, wrap, { placement: 'above-start' })
-      dropdown.setAttribute('aria-expanded', 'true')
-      menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
-      window.addEventListener('pointerdown', outside, true)
-    }
-    dropdown.addEventListener('click', showMenu)
-    armButton.addEventListener('click', () => {
-      if (this.meeting?.current() && this.meeting.current()?.state !== 'failed') showMenu()
-      else arm(!armed)
-    })
-    this.dismissRecordingMenu = () => {
-      if (!menu) return false
-      closeMenu(); dropdown.focus(); return true
-    }
-    const unsubscribe = this.voice?.controller.subscribe(paint)
-    this.composerDisposers.push(() => { cancelAnimationFrame(scrollFrame); closeMenu(); unsubscribe?.() })
-    this.meetingPaint = paint
-
-    this.meetingStart = (mode, verb) => {
-      if (!armed || starting || send.busy() || !canJoin()) return
-      if (mode === 'fresh' && !this.confirmCut(card)) return
-      starting = true
-      send.setBusy(true)
-      if (verb) verb.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
-      err.style.display = 'none'
-      // The join is called inside the press's gesture, so Phone can open the
-      // mic; it resolves the note (uploading any images) after that.
-      const epoch = this.epoch
-      let joined: Promise<MeetingJoinResult>
-      try { joined = this.meeting!.join(card, requiredMode(), send.compose, { session: mode, systemAudio: !this.voice?.controller.status?.enabled && audio.value === 'system' }) }
-      catch (error) { joined = Promise.reject(error) }
-      let began = false
-      void joined.then(({ error, delivered }) => {
-        if (epoch !== this.epoch) return
-        if (error) {
-          err.textContent = error
-          err.style.display = ''
-        } else {
-          began = true
-          // A recording whose worker never received the note keeps it, and
-          // its images, for another try.
-          if (delivered) send.sent()
-        }
-      }).catch((error: unknown) => {
-        if (epoch !== this.epoch) return
-        err.textContent = (error as { message?: string })?.message ?? String(error)
-        err.style.display = ''
-      }).finally(() => {
-        starting = false
-        if (began && epoch === this.epoch) arm(false)
-        send.setBusy(false)
-      })
-    }
-    this.meetingStartHere = () => {
-      arm(true)
-      this.meetingStart?.(card.sessionUuid ? 'previous' : 'fresh')
-    }
-    wrap.append(armButton, dropdown)
-    paint()
-    return wrap
+    return body
   }
 
   /**
@@ -1878,7 +1016,7 @@ export class Dock {
     effortSelect.className = 'kbn-ctl-select kbn-ctl-effort-select'
     effortSelect.setAttribute('aria-label', 'Effort')
     if (card.shuttleEffort) effortSelect.append(new Option(card.shuttleEffort, card.shuttleEffort))
-    this.composerDisposers.push(anchorSelect(agentSelect), anchorSelect(effortSelect))
+    this.disposers.push(anchorSelect(agentSelect), anchorSelect(effortSelect))
 
     const chrome = ctlToggle('Chrome', 'kbn-ctl-chrome')
     chrome.input.id = 'kbn-detail-chrome'
@@ -2263,7 +1401,7 @@ export class Dock {
       if (release) release.reposition()
       else release = anchorPopover(dropdown, search, { placement: 'below-start', matchWidth: true })
     }
-    this.composerDisposers.push(() => { release?.(); release = null })
+    this.disposers.push(() => { release?.(); release = null })
     const closeSearch = (): void => {
       this.searchRenderToken++
       if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
@@ -2368,69 +1506,78 @@ export class Dock {
     return postDaemonJson(this.shuttleBase, path, body, label)
   }
 
-  /**
-   * Open the dock on a card whose start was refused for want of a project
-   * directory, with the composer's inline prompt already showing.
-   */
+  /** Open on a card whose start was refused for want of a project directory, with its prompt showing. */
   openStartPrompt(card: KanbanCard, body: DispatchFailureBody): void {
-    if (this.card?.id === card.id && this.card.originId === card.originId && this.composerSend && this.composerError && this.freshButton) {
-      const send = this.composerSend
-      const parked = send.draftKey()
-      this.showStartPrompt(this.composerError, this.card, body, () => send.compose(parked), 'fresh', this.freshButton)
-      return
-    }
-    this.pendingStartPrompt = { cardId: card.id, body }
     this.open(card)
+    if (this.card && this.errorEl) this.showStartPrompt(this.card, body, 'fresh')
   }
 
-  /** Reviews use the composer's delivery and refusal handling, without start authority. */
+  /** A review goes to the live worker through the same force dispatch, without start authority. */
   async sendReview(card: KanbanCard, message: string): Promise<void> {
-    if (!hasLiveWorker(card)) throw new Error('No live worker. Start or resume one from the composer before sending a review.')
-    const button = document.createElement('button'), error = document.createElement('div')
-    if (!await this.sendRequeue(card, message, 'previous', button, error, undefined, true)) {
-      throw new Error(error.textContent || 'The review was not delivered. Your draft is saved.')
+    if (!hasLiveWorker(card)) throw new Error('No live worker. Start or resume one before sending a review.')
+    let res: Response
+    try {
+      res = await postForceDispatch(this.shuttleBase, card, { user_message: message, resume_mode: 'previous', existing_only: true })
+    } catch (err: unknown) {
+      throw new Error(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}), so this may still arrive. Check the worker's conversation before sending again.`)
     }
+    if (res.ok) { this.onSaved(); return }
+    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
+    throw new Error(res.status === 409 ? 'A worker is already running for this fiber.' : dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
   }
 
   /**
-   * Manual requeue: one force dispatch ({@link postForceDispatch}) carrying the
-   * message and the resume intent inline. The daemon resolves the session to
-   * resume from the fiber's `shuttle.session_uuid`, falling back to fresh when
-   * there is nothing to resume. `projectDir` is a directory the human confirmed
-   * in the prompt a refused start raised ({@link showStartPrompt}).
-   *
-   * `directive` is the message, or the composer's function that resolves it
-   * (uploading pasted images first); it is resolved after any cut is
-   * confirmed, and a rejection is shown and sends nothing. Resolves true once
-   * a worker runs for the card.
+   * One force dispatch ({@link postForceDispatch}) with the resume intent. The
+   * daemon resolves the session to resume from the fiber's
+   * `shuttle.session_uuid`, falling back to fresh when there is nothing to
+   * resume. `projectDir` is a directory the human confirmed in the prompt a
+   * refused start raised ({@link showStartPrompt}). A worker that starts opens
+   * on the desktop, where the human talks to it.
    */
-  private async runRequeue(
-    card: KanbanCard,
-    directive: Directive,
-    mode: 'fresh' | 'previous',
-    btn: HTMLButtonElement,
-    errorEl: HTMLElement,
-    projectDir?: string,
-  ): Promise<boolean> {
-    if (this.composerSend?.busy()) return false
-    if (mode === 'fresh' && !this.confirmCut(card)) return false
-
-    // Every composer verb is held until this send lands or fails.
-    const busy = this.composerBusy
-    busy?.(true, btn)
+  private async startSession(card: KanbanCard, mode: SessionMode, word?: HTMLElement, projectDir?: string): Promise<boolean> {
+    if (this.starting || (mode === 'fresh' && !this.confirmCut(card))) return false
+    const epoch = this.epoch
+    const original = word?.textContent ?? ''
+    if (word) word.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
+    this.starting = true
+    this.actPaint?.()
+    const inBand = this.card?.uid === card.uid && this.card?.originId === card.originId
+    const showError = (message: string): void => {
+      if (!inBand) { showToast(message, 'error'); return }
+      if (epoch !== this.epoch || !this.errorEl) return
+      this.errorEl.textContent = message
+      this.errorEl.style.display = ''
+    }
+    if (inBand && this.errorEl) this.errorEl.style.display = 'none'
     try {
-      return await this.sendRequeue(card, directive, mode, btn, errorEl, projectDir)
+      let res: Response
+      try {
+        res = await postForceDispatch(this.shuttleBase, card, { user_message: '', resume_mode: mode, ...(projectDir ? { project_dir: projectDir } : {}) })
+      } catch (err: unknown) {
+        showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
+        return false
+      }
+      const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string }
+      if (res.ok || (res.status === 409 && body.tmux_session)) {
+        this.onSaved()
+        if (body.tmux_session && !coarsePointer()) this.onOpenWorker?.(body.tmux_session, card.originId)
+        return true
+      }
+      if (res.status === 409) showError('A worker is already running for this fiber.')
+      else if (inBand && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode)
+      else showError(dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
+      return false
     } finally {
-      busy?.(false, btn)
+      if (word) word.textContent = original
+      if (epoch === this.epoch) { this.starting = false; this.actPaint?.() }
     }
   }
 
   /**
    * A "New session" over a LIVE worker is a CUT: the daemon stamps the
-   * clean-exit marker, kills the running session, and starts fresh — which
-   * discards whatever in-flight context that worker was holding. Confirm
-   * before doing that. A dormant card (no live worker) cuts nothing, so it's
-   * silent; Resume never cuts, so it never confirms.
+   * clean-exit marker, kills the running session, and starts fresh, which
+   * discards whatever in-flight context that worker was holding. A dormant
+   * card cuts nothing, so it's silent; Resume never cuts.
    */
   private confirmCut(card: KanbanCard): boolean {
     if (!hasWorkerToStop(card)) return true
@@ -2438,150 +1585,34 @@ export class Dock {
     return window.confirm(
       `A worker is still running for “${card.name}”${working}.\n\n` +
         `Start a new session? This cuts the open session and discards its ` +
-        `in-flight context. Use Resume instead to continue that worker.`,
+        `in-flight context.`,
     )
-  }
-
-  /** {@link runRequeue} past its confirmation: compose, dispatch, report. */
-  private async sendRequeue(
-    card: KanbanCard,
-    directive: Directive,
-    mode: 'fresh' | 'previous',
-    btn: HTMLButtonElement,
-    errorEl: HTMLElement,
-    projectDir?: string,
-    existingOnly = false,
-  ): Promise<boolean> {
-    const epoch = this.epoch
-    const original = btn.textContent ?? ''
-    btn.disabled = true
-    btn.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
-    errorEl.style.display = 'none'
-
-    let text: string
-    try {
-      text = typeof directive === 'string' ? directive : await directive()
-    } catch (err: unknown) {
-      const detail = (err as { message?: string })?.message ?? String(err)
-      this.showDispatchError(errorEl, btn, original, detail)
-      return false
-    }
-
-    if (epoch !== this.epoch) return false
-    let res: Response
-    try {
-      res = await postForceDispatch(this.shuttleBase, card, {
-        user_message: text,
-        resume_mode: mode,
-        ...(projectDir ? { project_dir: projectDir } : {}),
-        ...(existingOnly ? { existing_only: true } : {}),
-      })
-    } catch (err: unknown) {
-      const detail = (err as { message?: string })?.message ?? String(err)
-      this.showDispatchError(errorEl, btn, original, `Shuttle did not answer (${detail}), so this may still arrive. Check the worker's conversation before sending again.`)
-      return false
-    }
-
-    const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string }
-    // A review reports to its reader, which outlives the composer this card had open.
-    if (epoch !== this.epoch && !existingOnly) {
-      if (res.ok || (res.status === 409 && body.tmux_session)) this.onSaved()
-      return false
-    }
-
-    if (res.status === 409) {
-      // A message the worker did not take stays in the composer.
-      if (body.tmux_session && text.trim() === '') {
-        btn.textContent = original
-        this.finishRequeue(card, body.tmux_session)
-        return true
-      }
-
-      this.blockedDispatches.set(btn, { worker: workerIdentity(card), label: original, error: errorEl })
-      btn.textContent = 'Already running'
-      btn.disabled = true
-      errorEl.textContent = 'A worker is already running for this fiber.'
-      errorEl.style.display = ''
-      return false
-    }
-
-    if (!res.ok) {
-      btn.disabled = false
-      btn.textContent = original
-      if (needsProjectDir(body) && !existingOnly) {
-        this.showStartPrompt(errorEl, card, body, directive, mode, btn)
-        return false
-      }
-      const msg = dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status)
-      this.showDispatchError(errorEl, btn, original, msg)
-      return false
-    }
-
-    btn.disabled = false
-    btn.textContent = original
-    // A message resumed into a live terminal worker was typed into its
-    // conversation; the human stays here rather than being sent to the tab.
-    const typedIntoLive = mode === 'previous' && text.trim() !== '' && hasLiveWorker(card)
-    this.finishRequeue(card, typedIntoLive ? undefined : body.tmux_session)
-    return true
   }
 
   /**
    * Answer a start refused for want of a project directory in place: the
    * owning host's reason and a directory field, prefilled from the nearest
-   * ancestor's `project_dir` when the card has one. Start composes the visible
-   * message again and retries the launch mode with the confirmed directory.
-   * A Desk drag carries no message unless the parked draft was edited.
+   * ancestor's `project_dir` when the card has one. Start retries the launch
+   * mode with the confirmed directory.
    */
-  private showStartPrompt(
-    errorEl: HTMLElement,
-    card: KanbanCard,
-    body: DispatchFailureBody,
-    directive: Directive,
-    mode: 'fresh' | 'previous',
-    btn: HTMLButtonElement,
-  ): void {
+  private showStartPrompt(card: KanbanCard, body: DispatchFailureBody, mode: SessionMode): void {
+    const errorEl = this.errorEl
+    if (!errorEl) return
+    const epoch = this.epoch
     const prompt = buildProjectDirPrompt({
       reason: dispatchFailureMessage(body, 'The start was refused.'),
       host: body.host ?? card.shuttleHost,
       suggestion: card.inheritedProjectDir,
-      onStart: (dir) => {
-        const send = this.composerSend
-        const epoch = this.epoch
-        void this.runRequeue(card, directive, mode, btn, errorEl, dir).then(ok => {
-          if (ok) send?.sent()
-          else if (epoch === this.epoch && errorEl.contains(prompt)) {
-            const retry = prompt.querySelector<HTMLButtonElement>('button')
-            if (retry) retry.disabled = false
-          }
+      onStart: dir => {
+        void this.startSession(card, mode, undefined, dir).then(ok => {
+          if (ok || epoch !== this.epoch || !errorEl.contains(prompt)) return
+          const retry = prompt.querySelector<HTMLButtonElement>('button')
+          if (retry) retry.disabled = false
         })
       },
     })
     errorEl.replaceChildren(prompt)
     errorEl.style.display = ''
-  }
-
-  /**
-   * Refresh worker metadata after dispatch and open a terminal on desktop.
-   * On a phone the real worker anchor remains the opening gesture.
-   */
-  private finishRequeue(card: KanbanCard, tmuxSession?: string): void {
-    this.onSaved()
-    if (tmuxSession && !coarsePointer()) {
-      this.onOpenWorker?.(tmuxSession, card.originId)
-    }
-  }
-
-  private showDispatchError(
-    errorEl: HTMLElement,
-    btn: HTMLButtonElement,
-    originalBtnText: string,
-    message: string,
-  ): void {
-    errorEl.textContent = message
-    errorEl.style.display = ''
-    btn.disabled = false
-    btn.textContent = originalBtnText
   }
 
   /**

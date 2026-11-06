@@ -38,7 +38,6 @@
 //     },
 //   }
 
-import { parseWorkerTasks, type WorkerTask } from './transcript/tasks.js';
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
 
 /**
@@ -47,7 +46,6 @@ import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
  * observation; `state` says whether that worker is running or stuck.
  */
 interface CompositeRuntime {
-  tasks?: WorkerTask[];
   /** `running` for a live worker; `blocked` for a worker whose launch failed. */
   state: 'running' | 'blocked';
   /** Owner-served tmux session name for a CLI worker — the terminal handle.
@@ -229,7 +227,7 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const agent = typeof value.agent === 'string' ? value.agent : undefined;
   const startedAt = typeof value.started_at === 'number' && Number.isFinite(value.started_at) ? value.started_at : undefined;
   const terminalBackend = value.terminal === 'rex' || value.terminal === 'tmux' ? value.terminal : undefined;
-  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, launchError, tasks: parseWorkerTasks(value.tasks) };
+  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, launchError };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

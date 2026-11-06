@@ -4,9 +4,11 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 
-const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&transcript=report`
+const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
 const selected = page => page.locator('.ws-page.ws-selected')
+const band = page => page.locator('.ws-stage-band')
+const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
 const frame = page => selected(page).frameLocator('iframe')
 async function link(page, name) {
   const target = frame(page).getByRole('link', { name, exact: true })
@@ -25,14 +27,17 @@ async function back(page, phone) {
   await button.click()
   await page.waitForTimeout(100)
 }
-async function report(page) {
-  await selected(page).locator('.ws-report-chip').click()
+async function report(page, phone) {
+  if (!await page.locator('.ws-selected[data-key$="/report.html"]').count()) {
+    if (phone) await page.locator('.ws-rail-toggle').click()
+    await page.locator(phone ? '.ws-page-sheet[open] .ws-sent-file[data-key$="/report.html"]' : '.ws-rail-files .ws-rail-file[data-key$="/report.html"]').click()
+  }
   await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
   await page.waitForTimeout(100)
 }
 export function registerLivingReportJourneys(test) {
   for (const [device, viewport, phone] of [['desktop', { width: 1440, height: 900 }, false], ['phone', { width: 390, height: 844 }, true]]) {
-    test(`Living report (${device}): header chip, fragments, reload ancestry, nested files, sends and family`, async page => {
+    test(`Living report (${device}): band, fragments, reload ancestry, nested files, sends and family`, async page => {
       const context = page.context()
       await context.addInitScript(() => {
         if (window.parent !== window) return
@@ -46,33 +51,16 @@ export function registerLivingReportJourneys(test) {
       if (phone) await page.locator('.ws-rail-toggle').click()
       const family = page.locator(phone ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
       await family.locator('.kbn-thread-row').first().click()
-      await selected(page).locator('textarea').waitFor()
-      await page.locator('.ws-report-chip').waitFor()
+      await band(page).locator('.ws-band-head').waitFor()
       assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
-      await shot(page, `${device}-landing`)
-      const dockBox = await page.locator('.ws-report-chip').boundingBox()
-      const headerBox = await selected(page).locator('.ws-chat-head').boundingBox()
-      const briefBox = await selected(page).getByRole('button', { name: 'Constitution', exact: true }).boundingBox()
-      assert.ok(dockBox.y >= headerBox.y && dockBox.y + dockBox.height <= headerBox.y + headerBox.height, 'the chip stays within the bar on every device')
-      assert.ok(dockBox.x >= briefBox.x + briefBox.width && dockBox.x - briefBox.x - briefBox.width <= 8, 'Constitution and Artifact stay adjacent')
-      assert.ok(Math.abs(dockBox.y + dockBox.height / 2 - briefBox.y - briefBox.height / 2) <= 1, 'Constitution and Artifact share a centre line')
-      assert.equal(await selected(page).locator('.ws-transcript-find').count(), 0, 'the conversation has no local Find or reserved band')
-      const composerBox = await selected(page).locator('textarea').boundingBox()
-      assert.ok(dockBox.y + dockBox.height < composerBox.y, 'dock stays above the composer')
-      await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = 0 })
-      while (await page.locator('.ws-transcript-earlier:visible').count()) {
-        await page.locator('.ws-transcript-earlier:visible').click()
-        await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = 0 })
-      }
-      assert.equal(await page.locator('.ws-report-chip').isVisible(), true, 'scrolling does not dock or hide the chip')
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
-      assert.equal(await page.locator('.ws-chat-outcome').count(), 0)
+      await shot(page, `${device}-landing`)
+      await band(page).getByRole('button', { name: 'Constitution', exact: true }).click()
+      await selected(page).locator('.ws-fiber-prose').waitFor()
       await shot(page, `${device}-top`)
 
-      // The persistent chip opens the report in the existing nested reader.
-      await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = el.scrollHeight })
-      await page.locator('.ws-report-chip').waitFor()
-      await report(page)
+      // The report opens in the existing nested reader.
+      await report(page, phone)
       await shot(page, `${device}-report`)
       // Local fragments stay in srcdoc, retain identity and keep the key bridge alive.
       const identity = await frame(page).locator('#report-identity').textContent()
@@ -82,8 +70,8 @@ export function registerLivingReportJourneys(test) {
       assert.equal(await frame(page).locator('body').evaluate(() => location.href), 'about:srcdoc')
       assert.ok(await frame(page).locator('#conclusions').evaluate(el => Math.abs(el.getBoundingClientRect().top) < 10))
       await page.keyboard.press('Escape')
-      await selected(page).locator('textarea').waitFor()
-      await report(page)
+      await selected(page).locator('.ws-fiber-prose').waitFor()
+      await report(page, phone)
       await link(page, 'Validation conclusions')
       await frame(page).locator('#validation-conclusions').waitFor()
       assert.ok(await frame(page).locator('#validation-conclusions').evaluate(el => Math.abs(el.getBoundingClientRect().top) < 10))
@@ -117,7 +105,7 @@ export function registerLivingReportJourneys(test) {
       await back(page, phone)
       await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
       await back(page, phone)
-      await selected(page).locator('textarea').waitFor()
+      await selected(page).locator('.ws-fiber-prose').waitFor()
 
       if (phone) {
         await page.locator('.ws-rail-toggle').click()
@@ -130,47 +118,39 @@ export function registerLivingReportJourneys(test) {
       } else {
         assert.ok(await page.locator('.ws-rail-files .ws-rail-file').count() > 0)
         assert.ok(await page.locator('.ws-sent-new').count() > 0)
-        await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
+        await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
         const menu = page.locator('.ws-settings-menu:not([hidden])')
         await menu.waitFor()
         assert.ok(await menu.locator('.kbn-ctl-history').count() > 0, 'sessions live in settings')
         assert.equal(await menu.locator('.ws-sent-file, .ws-phone-threads').count(), 0, 'settings hold no threads or sent files')
-        const box = await menu.boundingBox(), header = await selected(page).locator('.ws-chat-head').boundingBox()
+        const box = await menu.boundingBox(), header = await band(page).locator('.ws-band-head').boundingBox()
         assert.ok(Math.abs(box.y - (header.y + header.height)) < 16, 'the dropdown leaves both header rows clear')
         await shot(page, 'desktop-settings')
         await page.keyboard.press('Escape')
         await menu.waitFor({ state: 'hidden' })
-        assert.equal(await selected(page).getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
+        assert.equal(await band(page).getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
         const toggle = page.getByRole('button', { name: 'Hide threads and sent files', exact: true })
         await toggle.click()
         assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
         await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).click()
       }
-      // The brief stays one click away beside the living report.
-      await selected(page).getByRole('button', { name: 'Constitution', exact: true }).click()
-      await selected(page).locator('.ws-fiber-prose').waitFor()
-      assert.equal(await selected(page).locator('.ws-dock').count(), 0)
-      await selected(page).click({ position: { x: 15, y: 200 } })
-      await page.keyboard.press('r')
-      await selected(page).locator('textarea').waitFor()
-      await selected(page).locator('textarea').blur()
-      // A thread's back returns to the chat from which it was opened.
+      // A thread's back returns to the page from which it was opened.
       if (phone) {
         await page.locator('.ws-rail-toggle').click()
         await page.locator('.ws-page-sheet .kbn-thread-row[data-thread-state="working"]').first().click()
       } else await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').first().click()
-      await selected(page).getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
-      await selected(page).locator('.ws-chat-origin').click()
-      await selected(page).getByRole('heading', { name: 'Calibrate the shear response', exact: true }).waitFor()
+      await named(page, 'Response analysis')
+      await back(page, phone)
+      await named(page, 'Calibrate the shear response')
       // Further ancestors stay reachable from settings without adding a header row.
       if (phone) {
         await page.locator('.ws-rail-toggle').click()
         await page.locator('.ws-page-sheet .kbn-thread-row[data-thread-state="working"]').first().click()
       } else await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').first().click()
-      await selected(page).getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
-      await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
+      await named(page, 'Response analysis')
+      await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
       await page.locator('.ws-settings-menu:not([hidden]) .ws-settings-ancestry .ws-ancestry-link').click()
-      await selected(page).getByRole('heading', { name: 'Calibrate the shear response', exact: true }).waitFor()
+      await named(page, 'Calibrate the shear response')
       assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
       assert.equal(errors.length, 0, errors.join('\n'))
     }, viewport, 'false', 'reduce', phone)

@@ -2,11 +2,17 @@ import assert from 'node:assert/strict'
 
 /** Runs with the workspace journeys, against the same owner-routed file harness. */
 export function registerChangeJourneys(test) {
+  const sent = async (page, suffix) => {
+    const phone = page.viewportSize().width <= 700
+    if (phone) await page.locator('.ws-rail-toggle').click()
+    await page.locator(`${phone ? '.ws-page-sheet[open] .ws-sent-file' : '.ws-rail-files .ws-rail-file'}[data-key$="${suffix}"]`).click()
+  }
   const open = async page => {
     page.setDefaultTimeout(30_000)
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-    await page.locator('.ws-selected .ws-report-chip[data-document-key$="/family.change.json"]').first().click()
+    await page.locator('.ws-stage-band .ws-band-head').waitFor()
+    await sent(page, '/family.change.json')
     await page.locator('.ws-selected .change-reader').waitFor()
     await page.locator('.ws-selected .change-map').waitFor()
     await page.locator('.ws-selected .change-chapter-link').first().click()
@@ -88,7 +94,6 @@ export function registerChangeJourneys(test) {
     })
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-    await page.locator('.ws-selected .ws-report-chip[aria-label^="Read artifact:"]').click()
     const link = page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' })
     await link.waitFor()
     await page.locator('.ws-selected .kbn-fileview-loading').waitFor({ state: 'detached' })

@@ -8,10 +8,8 @@ import { projectDeskFrontier } from '../KanbanReadModel.js'
 import { deskOrder } from '../deskOrdering.js'
 import { response as boardResponse } from '../testFixtures.js'
 import { Dock } from './Dock.js'
-import { TranscriptBand } from '../transcript/TranscriptBand.js'
 import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
-import * as FiberProse from './FiberProse.js'
 import { buildFileViewer } from '../FileViewerPanel.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
@@ -152,25 +150,6 @@ it('routes a linked change to the fiber holding its file on its own host, not th
   expect(send).toHaveBeenCalledTimes(1)
 })
 
-it('releases transcript models and listeners when chat documents leave the live budget, restoring drafts on return', async () => {
-  bodyCards = boardCards = Array.from({ length: 8 }, (_, i) => card({
-    id: `work/chat-${i}`, uid: `chat-${i}`, originId: 'host-a', shuttleKind: 'oneshot', path: `work/chat-${i}/chat-${i}.md`,
-  }))
-  for (const card of boardCards) bodyOverrides.set(`${card.originId}:${card.uid}`, 'A concise constitution.')
-  const dispose = vi.spyOn(TranscriptBand.prototype, 'dispose')
-  workspace.open(boardCards[0], 'Desk'); await flush()
-  const original = document.querySelector<HTMLTextAreaElement>('.ws-selected textarea')!
-  original.value = 'A draft that survives document eviction'
-  original.dispatchEvent(new Event('input'))
-  for (const card of boardCards.slice(1)) { workspace.open(card, 'Desk'); await flush() }
-  expect(dispose.mock.calls.length).toBeGreaterThanOrEqual(2)
-  expect(original.isConnected).toBe(false)
-  workspace.open(boardCards[0], 'Desk'); await flush()
-  const restored = document.querySelector<HTMLTextAreaElement>('.ws-selected textarea')!
-  expect(restored).not.toBe(original)
-  expect(restored.value).toBe('A draft that survives document eviction')
-})
-
 it('does not redraw an unchanged active channel and follows changed cards across navigation', async () => {
   workspace.open(cards[0], 'Desk')
   await flush()
@@ -219,49 +198,40 @@ it('discovers a report only after it exists, including creation on a later refre
   expect(workspace.reader.host.get(key)).toBeDefined()
 })
 
-it('keeps B Chat behind its Constitution after visiting A from Desk', async () => {
+it('brings the constitution forward from the band and retraces to the page it left', async () => {
   bodyCards = cards.map(card => ({ ...card, shuttleKind: 'oneshot' }))
   workspace.open(bodyCards[0], 'Desk'); await flush()
   workspace.open(bodyCards[1], 'Desk'); await flush()
-  expect(workspace.reader.document?.kind).toBe('chat')
-  document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!.click()
+  workspace.reader.openDocument(docKey('host-b', '/notes/beta/report.html', 'host-b')); await flush()
+  document.querySelector<HTMLButtonElement>('.ws-stage-band .ws-band-constitution')!.click()
   await flush()
   expect(workspace.reader.document?.kind).toBe('fiber')
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Chat')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
   await pop(() => workspace.reader.back())
-  expect(workspace.reader.document?.key).toBe('chat:host-b:beta')
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Alpha')
+  expect(workspace.reader.document?.name).toBe('report.html')
 })
 
-it.each(['t', 'r'])('%s returns a report to its preceding Chat without an empty Back stop', async key => {
+it('takes a verdict key on a report without moving the page, its undo in the band', async () => {
   bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', status: 'closed' }]
   workspace.open(bodyCards[0], 'Desk'); await flush()
-  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a')); await flush()
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Chat')
-  await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
-  expect(workspace.reader.document?.kind).toBe('chat')
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
-  if (key === 'r') expect(document.activeElement?.tagName).toBe('TEXTAREA')
-  document.activeElement instanceof HTMLElement && document.activeElement.blur()
-  await pop(() => workspace.reader.back())
-  expect(workspace.isActive).toBe(false)
-  if (key === 't') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true, cancelable: true }))
+  const report = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+  workspace.reader.openDocument(report); await flush()
+  const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+  press('t')
+  expect(workspace.reader.document?.key).toBe(report)
+  expect(document.querySelectorAll('.ws-stage-band .ws-verdict-undo')).toHaveLength(1)
+  expect(document.querySelector('.ws-stage-band .ws-verdict-undo')?.textContent).toMatch(/^Tempered/)
+  press('z')
+  expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
 })
 
-it('the continue-reading callback returns Constitution to its preceding Chat without an empty Back stop', async () => {
-  const prose = vi.spyOn(FiberProse, 'buildFiberProse')
-  bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', sessionUuid: 'session-alpha', workerState: 'running' }]
-  boardCards = bodyCards
+it('gives r no work on a constitution', async () => {
+  bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', status: 'closed' }]
   workspace.open(bodyCards[0], 'Desk'); await flush()
-  document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!.click(); await flush()
-  const outcome = vi.spyOn(workspace.dock.bandFor(bodyCards[0]), 'openOutcome').mockImplementation(() => {})
-  const continueReading = prose.mock.calls.at(-1)![2].onContinueReading!
-  await pop(() => continueReading('Checked result'))
-  expect(outcome).toHaveBeenCalledOnce()
-  expect(workspace.reader.document?.kind).toBe('chat')
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
-  await pop(() => workspace.reader.back())
-  expect(workspace.isActive).toBe(false)
+  const event = new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true })
+  document.dispatchEvent(event)
+  expect(event.defaultPrevented).toBe(false)
+  expect(document.querySelector('.ws-reader textarea')).toBeNull()
 })
 
 it('scans sidebar cards in one history entry and returns the last viewed card to Desk', async () => {
@@ -320,16 +290,13 @@ it('follows visited files after reload and returns a fresh deep link to its orig
   expect(window.location.hash).toBe('#/board')
 })
 
-it.each(['fiber', 'chat'])('names the %s page behind a file, and the constitution behind another channel', async kind => {
-  if (kind === 'chat') {
-    bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }, cards[1]]
-    workspace.open(bodyCards[0], 'Desk', 'chat:host-a:alpha')
-  } else workspace.open(cards[0], 'Desk')
+it('names the fiber page behind a file, and the constitution behind another channel', async () => {
+  workspace.open(cards[0], 'Desk')
   await flush()
-  expect(workspace.reader.document?.kind).toBe(kind)
+  expect(workspace.reader.document?.kind).toBe('fiber')
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
   await flush()
-  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe(`Back to ${kind === 'chat' ? 'Chat' : 'Constitution'}`)
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Constitution')
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
   await flush()
   expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
@@ -356,12 +323,12 @@ describe('bar Find transcripts', () => {
     path: '/transcripts/alpha.jsonl', line: 2, timestamp: '2026-10-20T14:41:00Z', role: 'assistant',
     score: 9, matches: 13, snippet: 'The «Alpha» result', fibers: [{ id: 'work/alpha', name: 'Alpha' }],
   }
-  const setup = (localHost: string | undefined = 'host-a'): HTMLInputElement => {
+  const setup = (): HTMLInputElement => {
     workspace.dispose()
     const find = document.createElement('input')
     document.body.append(find)
     bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }, cards[1]]
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find, localHost: () => localHost })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find })
     return find
   }
   const type = (find: HTMLInputElement, text: string): void => {
@@ -371,62 +338,67 @@ describe('bar Find transcripts', () => {
   }
   const press = (el: HTMLElement, key: string): void => { el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
 
-  it('debounces, keeps constitutions first, steps across groups and opens the local card despite a remote duplicate first', async () => {
+  it('debounces, keeps constitutions first, and steps across into each excerpt\'s copy path', async () => {
     vi.useFakeTimers()
     const find = setup()
-    bodyCards.unshift({ ...bodyCards[0], originId: 'host-remote' })
     const original = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const url = String(input)
-      if (url.includes('/transcripts/search')) return new Response(JSON.stringify({ hits: [hit], errors: [] }))
-      if (url.includes('/transcript/raw?')) {
-        const bytes = new TextEncoder().encode(JSON.stringify({ type: 'assistant', timestamp: hit.timestamp, message: { content: [{ type: 'text', text: 'The Alpha result' }] } }) + '\n')
-        return new Response(bytes, { headers: { 'x-transcript-offset': '0', 'x-transcript-byte-count': String(bytes.byteLength) } })
-      }
-      return original(input, init)
-    })
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
+      ? new Response(JSON.stringify({ hits: [hit], errors: [] }))
+      : original(input, init))
     type(find, 'Al')
     await vi.advanceTimersByTimeAsync(400)
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/transcripts/search'))).toBe(false)
     type(find, 'Alpha')
     await vi.advanceTimersByTimeAsync(299)
-    expect(document.querySelector('.ws-search-hit')).toBeNull()
+    expect(document.querySelector('.ws-search-result')).toBeNull()
     await vi.advanceTimersByTimeAsync(1); await flush()
-    const rows = [...document.querySelectorAll<HTMLElement>('.ws-switcher .ws-channel-row, .ws-switcher .ws-search-hit')]
-    expect(rows).toHaveLength(3)
-    expect(rows.slice(0, 2).every(row => row.classList.contains('ws-channel-row'))).toBe(true)
-    expect(rows[2].querySelector('mark')?.textContent).toBe('Alpha')
-    expect(rows[2].textContent).toContain('claude · alpha')
-    expect(rows[2].querySelector('.ws-search-meta')?.textContent).toContain('13 matches')
+    const rows = [...document.querySelectorAll<HTMLElement>('.ws-switcher .ws-channel-row, .ws-switcher .ws-search-result button')]
+    expect(rows).toHaveLength(2)
+    expect(rows[0].classList.contains('ws-channel-row')).toBe(true)
+    expect(rows[1].textContent).toBe('copy path')
+    const result = document.querySelector<HTMLElement>('.ws-search-result')!
+    expect(result.querySelector('mark')?.textContent).toBe('Alpha')
+    expect(result.title).toBe('/transcripts/alpha.jsonl:2')
+    expect(result.querySelector('.ws-search-meta')?.textContent).toContain('claude · b4edf873 · alpha')
+    expect(result.querySelector('.ws-search-meta')?.textContent).toContain('13 matches')
     expect(document.querySelector('.ws-search-transcripts .kbn-flight-caption')?.textContent).toBe('Transcripts')
     press(find, 'ArrowDown'); expect(document.activeElement).toBe(rows[0])
     press(rows[0], 'ArrowDown'); expect(document.activeElement).toBe(rows[1])
-    press(rows[1], 'ArrowDown'); expect(document.activeElement).toBe(rows[2])
-    press(rows[2], 'ArrowUp'); expect(document.activeElement).toBe(rows[1])
-    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16))
-    vi.stubGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id))
-    rows[2].click(); await flush(); await vi.advanceTimersByTimeAsync(64); await flush()
-    expect(workspace.isActive).toBe(true)
-    expect(window.location.hash).toContain('alpha')
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('chat:host-a:alpha')
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`session=${hit.session}`))).toBe(true)
-    expect(document.querySelector('.ws-transcript-find')).toBeNull()
-    expect(document.querySelector('.ws-transcript-found')?.textContent).toContain('Alpha result')
+    press(rows[1], 'ArrowUp'); expect(document.activeElement).toBe(rows[0])
   })
 
-  it.each(['host-a', ''])('offers only copy path when no card belongs to local host %j', async localHost => {
+  it('opens nothing from an excerpt, and copies its location', async () => {
     vi.useFakeTimers()
-    const find = setup(localHost)
-    bodyCards = [{ ...bodyCards[0], originId: 'host-remote' }]
+    const find = setup()
+    const copied = vi.fn(async () => {})
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: copied } })
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
       ? new Response(JSON.stringify({ hits: [{ ...hit, matches: 1 }], errors: [] }))
       : original(input, init))
     type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await flush()
-    expect(document.querySelector('.ws-search-hit')).toBeNull()
-    expect(document.querySelector('.ws-search-result button')?.textContent).toBe('copy path')
     expect(document.querySelector('.ws-search-meta')?.textContent).toContain('1 match ·')
     document.querySelector<HTMLElement>('.ws-search-result')!.click(); await flush()
+    expect(workspace.isActive).toBe(false)
+    const copy = document.querySelector<HTMLButtonElement>('.ws-search-result button')!
+    copy.click(); await flush()
+    expect(copied).toHaveBeenCalledWith('/transcripts/alpha.jsonl:2')
+    expect(copy.textContent).toBe('copied')
+    expect(workspace.isActive).toBe(false)
+  })
+
+  it('never activates an excerpt from Enter in the field', async () => {
+    vi.useFakeTimers()
+    const find = setup()
+    bodyCards = []
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
+      ? new Response(JSON.stringify({ hits: [hit], errors: [] }))
+      : original(input, init))
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await flush()
+    const copy = document.querySelector<HTMLButtonElement>('.ws-search-result button')!
+    press(find, 'Enter'); await flush()
+    expect(copy.textContent).toBe('copy path')
     expect(workspace.isActive).toBe(false)
   })
 
@@ -442,7 +414,7 @@ describe('bar Find transcripts', () => {
     type(find, 'Beta'); expect(requests[0].signal.aborted).toBe(true)
     await vi.advanceTimersByTimeAsync(300)
     requests[0].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await flush()
-    expect(document.querySelector('.ws-search-hit')).toBeNull()
+    expect(document.querySelector('.ws-search-result')).toBeNull()
     workspace.closeFind(); expect(requests[1].signal.aborted).toBe(true)
     requests[1].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await flush()
     expect(document.querySelector('.ws-switcher')).toBeNull()
@@ -460,7 +432,7 @@ describe('bar Find transcripts', () => {
     expect(document.querySelector('.ws-search-note')?.textContent).toBe('Transcript search unavailable.')
     fail = false
     type(find, 'Alph'); await vi.advanceTimersByTimeAsync(300); await flush()
-    expect(document.querySelector('.ws-search-hit')).toBeNull()
+    expect(document.querySelector('.ws-search-note')).toBeNull()
     expect(document.querySelector('.ws-search-result button')?.textContent).toBe('copy path')
   })
 })
@@ -476,17 +448,16 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
     expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
   })
-  it('a Question opens its chat with the report chip rather than a remembered file', async () => {
+  it('a Question leads with its report rather than a remembered file', async () => {
     const request = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/api/v1/file-info?')
       ? Response.json({ exists: true }) : request(input, init))
     const original = cards[0]; cards[0] = { ...original, shuttleKind: 'oneshot' }
     onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0]); await flush(); await flush()
-    workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+    workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
     workspace.openQuestion(cards[0]); await flush(); await flush()
-    expect(workspace.reader.document?.kind).toBe('chat')
-    expect(document.querySelector('.ws-selected .ws-report-chip')).not.toBeNull()
+    expect(workspace.reader.document?.name).toBe('tapestry.html')
     expect(document.querySelector('.ws-report-inset')).toBeNull()
   })
 
@@ -522,6 +493,7 @@ describe('workspace reader integration', () => {
     const holds = (): string[] => [...document.querySelectorAll('.ws-role-hold-name')].map(name => name.textContent ?? '')
     workspace.open(role); await flush(); await flush()
     expect(holds()).toEqual(['Alpha'])
+    expect(document.querySelector<HTMLElement>('.ws-stage-band')?.hidden).toBe(true)
     expect(document.querySelector('[data-part="role-holders"]')).toBeNull()
     const page = document.querySelector<HTMLElement>('.ws-fiber-prose')!
     for (const chrome of ['.ws-dock', '.kbn-detail-controls', '.kbn-ctl-history-toggle', '.kbn-detail-directive', '.kbn-ctl-verdict']) {
@@ -537,8 +509,8 @@ describe('workspace reader integration', () => {
     document.querySelector<HTMLButtonElement>('.ws-role-hold')!.click()
     await flush(); await flush()
     expect(document.querySelector('.ws-selected [data-part="fiber-title"]')?.textContent).toBe('Alpha')
-    // A constitution opens on its chat, which holds the controls; its fiber page holds none.
-    expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock')).not.toBeNull()
+    // The band stands over a constitution's pages; its fiber page holds no controls.
+    expect(document.querySelector('.ws-stage-band .ws-dock')).not.toBeNull()
     expect(document.querySelector('.ws-fiber-prose .ws-dock')).toBeNull()
   })
 
@@ -819,7 +791,7 @@ describe('workspace reader integration', () => {
     expect(row.getAttribute('aria-level')).toBe('2')
     expect(row.querySelector('.ws-sidebar-crumb')?.textContent).toBe('A / ')
   })
-  it("leads a thread's chat up its ancestry, by the header's trail and by b", async () => {
+  it("leads a thread up its ancestry, by the band's trail and by b", async () => {
     workspace.dispose()
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
@@ -830,19 +802,18 @@ describe('workspace reader integration', () => {
     ]
     bodyCards = feed
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    const title = (): string | null | undefined => document.querySelector('.ws-page.ws-selected .ws-chat-title')?.textContent
+    const title = (): string | null | undefined => document.querySelector('.ws-stage-band .ws-band-title')?.textContent
     workspace.open(feed[0], 'Desk'); await flush()
     expect(title()).toBe('hub')
-    expect(document.querySelector('.ws-chat-pages')).toBeNull()
-    expect(document.querySelector('.ws-chat-head button[aria-label="Settings"]')).not.toBeNull()
+    expect(document.querySelector('.ws-band-head button[aria-label="Settings"]')).not.toBeNull()
     // A root has no orchestrator: no way back on its line, and b does nothing.
-    expect(document.querySelector<HTMLElement>('.ws-page.ws-selected .ws-settings-ancestry')?.hidden).toBe(true)
+    expect(document.querySelector<HTMLElement>('.ws-stage-band .ws-settings-ancestry')?.hidden).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await flush()
     expect(title()).toBe('hub')
     workspace.open(feed[1], 'Desk'); await flush()
     expect(title()).toBe('hub/sub')
-    const links = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-page.ws-selected .ws-settings-ancestry .ws-ancestry-link')]
+    const links = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-stage-band .ws-settings-ancestry .ws-ancestry-link')]
     expect(links().map(b => b.textContent)).toEqual(['hub'])
     links()[0].click(); await flush()
     expect(title()).toBe('hub')
@@ -1223,29 +1194,29 @@ describe('workspace reader integration', () => {
     expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(1)
   })
 
-  it('opens a constitution on its chat and keeps body links and embeds on its fiber page, which holds no controls', async () => {
+  it('opens a constitution on its report under the band, and keeps body links and embeds on its fiber page', async () => {
     const original = cards[0]
     cards[0] = { ...original, shuttleKind: 'oneshot' }
     onTestFinished(() => { cards[0] = original })
+    await feedNamesReport()
     workspace.open(cards[0])
     await flush()
-    // The chat ends the run and is the page it opens on; the body has no tile and opens from the chat's menu.
-    expect(document.querySelector('.ws-page.ws-selected')?.classList.contains('ws-chat-frame')).toBe(true)
-    expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock textarea')).not.toBeNull()
-    const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
-    expect(article.querySelector('.ws-dock')).toBeNull()
-    expect(article.querySelector('.kbn-detail-lede')).toBeNull()
-    expect(document.querySelector('.ws-dock-slot')).toBeNull()
+    expect(workspace.reader.document?.name).toBe('report.html')
+    const band = document.querySelector<HTMLElement>('.ws-stage-band')!
+    expect(band.hidden).toBe(false)
+    expect(band.nextElementSibling?.classList.contains('ws-stage')).toBe(true)
     expect(document.querySelector('.ws-tab,.ws-thumbbar')).toBeNull()
-    expect(document.querySelector('.ws-chat-outcome')).toBeNull()
-    expect(document.querySelector('.ws-report-chip')).not.toBeNull()
 
-    const constitution = document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!
+    const constitution = band.querySelector<HTMLButtonElement>('.ws-band-constitution')!
     expect(constitution.hidden).toBe(false)
     expect(constitution.getAttribute('aria-label')).toBe('Constitution')
     constitution.click()
     expect(document.querySelector('.ws-page.ws-selected .ws-fiber-prose')).not.toBeNull()
     expect(workspace.reader.document?.kind).toBe('fiber')
+    const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
+    expect(article.querySelector('.ws-dock')).toBeNull()
+    expect(article.querySelector('.kbn-detail-lede')?.textContent).toContain('A checked result.')
+    expect(band.hidden).toBe(false)
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
     await flush()
@@ -1253,7 +1224,7 @@ describe('workspace reader integration', () => {
     const dataFrame = workspace.reader.host.get(docKey('host-a', '/notes/alpha/data.csv', 'host-a'))!
     expect(dataFrame.doc.provenance.some(p => p.kind === 'link')).toBe(true)
     expect(dataFrame.el.classList.contains('ws-selected')).toBe(true)
-    expect(document.querySelector('.ws-dock-slot')).toBeNull()
+    expect(band.hidden).toBe(false)
   })
 
   it('toggles the sidebar without replacing the selected iframe or its window', async () => {
@@ -1280,10 +1251,11 @@ describe('workspace reader integration', () => {
     expect(frame.content.querySelector('iframe')).toBe(iframe)
   })
 
-  it('retains each composer draft by owner and uid across channel switches', async () => {
+  it('seats one band over each channel by owner and uid, and clears it for a note', async () => {
     const ownerCards = [
       card({ id: 'work/shared', uid: 'same-uid', name: 'Alpha copy', originId: 'host-a', fiberDir: '/notes/a', path: 'work/shared/shared.md', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' }),
       card({ id: 'work/shared', uid: 'same-uid', name: 'Beta copy', originId: 'host-b', fiberDir: '/notes/b', path: 'work/shared/shared.md', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' }),
+      card({ id: 'notes/plain', uid: 'plain', name: 'Plain', originId: 'host-a', fiberDir: '/notes/plain', path: 'notes/plain/plain.md' }),
     ]
     bodyCards = ownerCards
     workspace.dispose()
@@ -1291,33 +1263,25 @@ describe('workspace reader integration', () => {
       shuttleBase: '', cards: () => ownerCards, origin: () => 'Desk', onVisibility: visibility,
       dock: new Dock('', changed),
     })
-    workspace.open(ownerCards[0])
-    await flush()
-    const bandA = workspace.dock.bandFor(ownerCards[0]).el
-    const textareaA = bandA.querySelector<HTMLTextAreaElement>('textarea')!
-    textareaA.value = 'host A draft'
-    textareaA.dispatchEvent(new Event('input', { bubbles: true }))
-
-    workspace.open(ownerCards[1])
-    await flush()
-    const bandB = workspace.dock.bandFor(ownerCards[1]).el
-    const textareaB = bandB.querySelector<HTMLTextAreaElement>('textarea')!
-    expect(textareaB).not.toBe(textareaA)
-    expect(textareaB.value).toBe('')
-    textareaB.value = 'host B draft'
-
-    workspace.open(ownerCards[0])
-    await flush()
-    expect(workspace.dock.bandFor(ownerCards[0]).el).toBe(bandA)
-    expect(bandA.querySelector('textarea')).toBe(textareaA)
-    expect(textareaA.value).toBe('host A draft')
-    workspace.open(ownerCards[1])
-    await flush()
-    expect(workspace.dock.bandFor(ownerCards[1]).el.querySelector('textarea')).toBe(textareaB)
-    expect(textareaB.value).toBe('host B draft')
+    const band = (): HTMLElement => document.querySelector<HTMLElement>('.ws-stage-band')!
+    const name = (): string | null | undefined => band().querySelector('.ws-band-title')?.textContent
+    workspace.open(ownerCards[0]); await flush()
+    expect(band().hidden).toBe(false)
+    expect(name()).toBe('Alpha copy')
+    const dock = band().querySelector('.ws-dock')
+    workspace.open(ownerCards[1]); await flush()
+    expect(name()).toBe('Beta copy')
+    expect(band().querySelector('.ws-dock')).toBe(dock)
+    expect(band().querySelectorAll('.ws-dock')).toHaveLength(1)
+    workspace.open(ownerCards[2]); await flush()
+    expect(band().hidden).toBe(true)
+    expect(band().children).toHaveLength(0)
+    workspace.open(ownerCards[0]); await flush()
+    expect(band().hidden).toBe(false)
+    expect(name()).toBe('Alpha copy')
   })
 
-  it('retargets a renamed owner+uid band through Workspace.update without losing its draft', async () => {
+  it('retargets a renamed owner+uid band through Workspace.update', async () => {
     let liveCards = [card({ id: 'a/task', uid: 'stable-task', originId: 'host-a',
       path: 'a/task/task.md', fiberDir: '/notes/a/task', feltStore: '/notes/.felt',
       shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', shuttleHost: 'host-a', shuttleProjectDir: '/work/a' })]
@@ -1326,30 +1290,26 @@ describe('workspace reader integration', () => {
     const transition = vi.fn()
     workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => liveCards, origin: () => 'Desk', onVisibility: visibility,
-      dock: new Dock('', changed, transition),
+      dock: new Dock('', changed, transition, vi.fn()),
     })
     workspace.open(liveCards[0])
     await flush()
-    const band = document.querySelector<HTMLElement>('.ws-chat-page .ws-dock')!
-    const draft = band.querySelector<HTMLTextAreaElement>('textarea')!
-    draft.value = 'Keep this draft'
+    const band = document.querySelector<HTMLElement>('.ws-stage-band .ws-dock')!
     liveCards = [{ ...liveCards[0], id: 'b/task', path: 'b/task/task.md', fiberDir: '/notes/b/task',
       feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b',
       workerState: 'running', tmuxSession: 'new-worker', sessionUuid: 'new-session', runtimePhase: 'working' }]
     workspace.update()
-    expect(band.querySelector('textarea')).toBe(draft)
-    expect(draft.value).toBe('Keep this draft')
-    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *):not(.ws-fiber-acts *)')).toHaveLength(0)
-    expect(document.querySelectorAll('.ws-fiber-acts .kbn-card-worker')).toHaveLength(0)
-    expect(document.querySelector('.ws-chat-head .ws-chat-console')).not.toBeNull()
+    expect(document.querySelector('.ws-stage-band .ws-dock')).toBe(band)
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *)')).toHaveLength(0)
+    expect(band.querySelector<HTMLElement>('.ws-band-open')?.hidden).toBe(false)
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^working/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
+    const fresh = band.querySelector<HTMLButtonElement>('.ws-header-session[aria-label="New session"]')!
+    fresh.click()
     expect(confirm).toHaveBeenCalledOnce()
     vi.useFakeTimers()
     confirm.mockReturnValue(true)
-    // In flight, the status line carries the verdict pair.
-    document.querySelector<HTMLButtonElement>('.ws-fiber-acts .kbn-ctl-temper')!.click()
+    workspace.queueVerdict(liveCards[0], 'tempered')
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(transition).not.toHaveBeenCalled()
     vi.advanceTimersByTime(6000)
@@ -1360,10 +1320,10 @@ describe('workspace reader integration', () => {
       feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b', originId: 'host-a',
     }), 'tempered')
     vi.mocked(fetch).mockClear()
-    band.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+    fresh.click()
     await flush()
     const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/dispatch'))!
-    expect(JSON.parse(String(request[1]?.body))).toMatchObject({ fiber_id: 'b/task', origin: 'host-a', user_message: 'Keep this draft' })
+    expect(JSON.parse(String(request[1]?.body))).toMatchObject({ fiber_id: 'b/task', origin: 'host-a', user_message: '', resume_mode: 'fresh' })
   })
 
   it('Escape gives inline and reader popovers first refusal, then collapses and returns', async () => {
@@ -1375,8 +1335,7 @@ describe('workspace reader integration', () => {
     const escape = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) }
     const expand = document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!
     expand.click()
-    const band = workspace.dock.bandFor(cards[0])
-    const popover = vi.spyOn(band, 'handleEscape').mockReturnValueOnce(true).mockReturnValue(false)
+    const popover = vi.spyOn(workspace.dock, 'handleEscape').mockReturnValueOnce(true).mockReturnValue(false)
     escape()
     expect(popover).toHaveBeenCalledOnce()
     expect(document.querySelector('.ws-selected.ws-expanded')).not.toBeNull()
@@ -1398,8 +1357,8 @@ describe('workspace reader integration', () => {
   it('a refused Desk start lands on its fiber with the host-specific inline recovery prompt', async () => {
     const managed: KanbanCard = { ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' }
     workspace.openStartPrompt(managed, { reason: 'arm_refused', needs: 'project_dir', host: 'host-a', message: 'Choose a project directory.' })
-    const band = workspace.dock.bandFor(managed).el
-    expect(document.activeElement).toBe(band.querySelector('textarea'))
+    const band = workspace.dock.el
+    expect(document.activeElement).toBe(band.querySelector('.kbn-start-prompt input'))
     await flush()
     expect(workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('alpha@host-a')
@@ -1440,11 +1399,11 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await flush()
-    // The chat's Console reaches the same conversation as the navbar pill.
+    // The band's opening reaches the same conversation as the navbar pill.
     expect(document.querySelectorAll('.ws-dock .kbn-card-worker')).toHaveLength(0)
-    const console = document.querySelector<HTMLButtonElement>('.ws-chat-head .ws-chat-console')!
-    expect(console.getAttribute('aria-label')).toBe('Open in Rex')
-    console.click()
+    const opening = document.querySelector<HTMLButtonElement>('.ws-band-head .ws-band-open')!
+    expect(opening.textContent).toBe('Open in Rex')
+    opening.click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
     openWorker.mockClear()
     const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!
@@ -1456,8 +1415,7 @@ describe('workspace reader integration', () => {
     expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a')
     expect(workspace.isActive).toBe(true)
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
-    // A constitution opens on its chat, which holds the controls; its fiber page holds none.
-    expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock')).not.toBeNull()
+    expect(document.querySelector('.ws-stage-band .ws-dock')).not.toBeNull()
     expect(document.querySelector('.ws-fiber-prose .ws-dock')).toBeNull()
 
     workspace.returnToOrigin()
@@ -1653,35 +1611,25 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:alpha')
   })
 
-  it('waits for authoritative metadata before caching a cold constitution control band', async () => {
+  it('waits for authoritative metadata before seating a cold constitution\'s band', async () => {
     const managed = card({ id: 'work/cold', uid: 'cold', name: 'Cold constitution', originId: 'host-a',
       fiberDir: '/notes/cold', path: 'work/cold/cold.md', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
     let deliver!: (value: Response) => void
     const originalFetch = fetch
     vi.stubGlobal('fetch', vi.fn((url: string) => url.includes('/api/v1/fibers/cold?')
       ? new Promise<Response>(resolve => { deliver = resolve }) : originalFetch(url)))
-    const bandFor = vi.spyOn(workspace.dock, 'bandFor')
+    const open = vi.spyOn(workspace.dock, 'open')
     window.history.replaceState(null, '', '#/board/cold@host-a')
     window.dispatchEvent(new HashChangeEvent('hashchange'))
-    expect(document.querySelector('.ws-selected .ws-dock')).toBeNull()
+    expect(document.querySelector('.ws-stage-band .ws-dock')).toBeNull()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    expect(bandFor).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
     deliver(fiberReadResponse(managed))
     await flush()
     workspace.open(managed)
     await flush()
-    const band = document.querySelector<HTMLElement>('.ws-chat-page .ws-dock')!
-    const textarea = band.querySelector<HTMLTextAreaElement>('textarea')!
-    expect(textarea).not.toBeNull()
+    const band = document.querySelector<HTMLElement>('.ws-stage-band .ws-dock')!
     expect(band.querySelector('.kbn-detail-controls-toggle')?.textContent).toContain('codex-sol')
-    textarea.value = 'Unsent cold-entry draft'
-    workspace.open(cards[0])
-    await flush()
-    workspace.open(managed)
-    await flush()
-    expect(workspace.dock.bandFor(managed).el).toBe(band)
-    expect(band.querySelector('textarea')).toBe(textarea)
-    expect(textarea.value).toBe('Unsent cold-entry draft')
   })
 
   it('gives an unknown routed fiber its own retryable failure page', async () => {

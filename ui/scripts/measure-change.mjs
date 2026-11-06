@@ -148,7 +148,7 @@ try {
             new Promise((resolve) => {
               const start = performance.now()
               const control =
-                document.querySelector('.ws-selected .ws-chat-settings') ??
+                document.querySelector('.ws-stage-band .ws-band-settings') ??
                 document.querySelector('.ws-selected .ws-menu-button')
               control.click()
               requestAnimationFrame(() =>
@@ -166,7 +166,7 @@ try {
     for (let i = 0; i < 5; i++) {
       for (const [selector, samples] of [
         [
-          '.ws-selected .ws-chat-settings:visible, .ws-selected .ws-menu-button:visible, .ws-phone-document-menu:visible',
+          '.ws-stage-band .ws-band-settings:visible, .ws-selected .ws-menu-button:visible, .ws-phone-document-menu:visible',
           pointerMenuMs,
         ],
         ['.ws-rail-toggle:visible', railMs],
@@ -229,7 +229,7 @@ try {
       })
       observer.observe(document, { childList: true, subtree: true })
       document
-        .querySelector(`.ws-selected .ws-report-chip[data-document-key$="/${name}.change.json"]`)
+        .querySelector(`.ws-rail-files .ws-rail-file[data-key$="/${name}.change.json"]`)
         .click()
     },
     process.env.LIVE ? 'pr-viewer' : 'family',
@@ -266,7 +266,7 @@ try {
   await page.evaluate((hash) => {
     location.hash = hash
   }, original)
-  await page.locator('.ws-selected .ws-report-chip').first().waitFor()
+  await page.locator('.ws-rail-files .ws-rail-file').first().waitFor()
   await page.waitForTimeout(1000)
   const inactive = await snapshot('back to conversation')
   await page.waitForTimeout(9000)

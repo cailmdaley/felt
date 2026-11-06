@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
-import { head, resetDocumentResources } from '../documentResources.js'
 import { Reader } from './Reader.js'
 import { declaredTitle } from './DocumentTitles.js'
-import { buildChannel, chatDocument } from './documents.js'
+import { buildChannel, channelLead, proseDocument } from './documents.js'
 
 const alpha = card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a', shuttleKind: 'oneshot' })
 let reader: Reader
@@ -13,13 +12,11 @@ function setup(phone = false, sent = [{ path: '/plot.png', time: 1 }]) {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', vi.fn())
   const onReturn = vi.fn(), onOrchestrator = vi.fn(() => false)
-  reader = new Reader({ shuttleBase: '', buildProse: () => {
-    const el = document.createElement('div'); el.innerHTML = '<header class="ws-chat-head"><div class="ws-chat-acts"></div><div class="ws-chat-refs"></div></header><div class="ws-chat-log"></div>'; return el
-  }, onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onOpenDocument: key => reader.select(key), onRevisitDocument: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
+  reader = new Reader({ shuttleBase: '', buildProse: () => document.createElement('div'), onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onOpenDocument: key => reader.select(key), onRevisitDocument: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
   document.body.append(reader.el)
-  const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true, conversation: true,
+  const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true,
     embeds: [{ path: '/report.html' }, { path: '/detail.html' }], sent })
-  reader.show(channel, chatDocument(channel)!.key, 'Desk', alpha)
+  reader.show(channel, proseDocument(channel)!.key, 'Desk', alpha)
   return { channel, onReturn, onOrchestrator }
 }
 it('names a sent change from its head before it is opened', async () => {
@@ -31,14 +28,29 @@ it('names a sent change from its head before it is opened', async () => {
 })
 afterEach(() => { reader?.dispose(); document.body.replaceChildren(); vi.unstubAllGlobals() })
 
-it('lands on chat with a persistent report chip and no inset, strip, tabs or bottom page chooser', () => {
+it('shows a run of pages with no inset, strip, tabs or bottom page chooser', () => {
   setup()
-  expect(reader.document?.kind).toBe('chat')
+  expect(reader.document?.kind).toBe('fiber')
   expect(reader.el.querySelector('.ws-report-inset')).toBeNull()
-  expect(reader.el.querySelector('.ws-chat-head .ws-report-chip')).not.toBeNull()
   expect(reader.el.querySelector('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice')).toBeNull()
-  reader.el.querySelector<HTMLButtonElement>('.ws-report-chip')!.click()
-  expect(reader.document?.name).toBe('report.html')
+})
+it('seats the band over the stage and clears it where a page has none', () => {
+  const { channel } = setup()
+  const band = reader.el.querySelector<HTMLElement>('.ws-stage-band')!
+  const stage = band.parentElement!.querySelector('.ws-stage')
+  expect(band.hidden).toBe(true)
+  const first = document.createElement('div'), second = document.createElement('div')
+  reader.setBand(first)
+  expect(band.hidden).toBe(false)
+  expect([...band.children]).toEqual([first])
+  expect(band.nextElementSibling).toBe(stage)
+  reader.show(channel, channel.documents.find(d => d.name === 'plot.png')!.key, 'Desk', alpha)
+  expect(band.firstChild).toBe(first)
+  reader.setBand(second)
+  expect([...band.children]).toEqual([second])
+  reader.setBand(null)
+  expect(band.hidden).toBe(true)
+  expect(band.children).toHaveLength(0)
 })
 for (const phone of [false, true]) it(`delegates Back and Escape to navigation without climbing structure, phone=${phone}`, () => {
   const { channel, onReturn, onOrchestrator } = setup(phone)
@@ -49,35 +61,16 @@ for (const phone of [false, true]) it(`delegates Back and Escape to navigation w
   const documentBacks = [...reader.el.querySelectorAll('.ws-document-back')]
   expect(documentBacks.length).toBeGreaterThan(0)
   for (const back of documentBacks) expect(back.querySelector('.ws-back-label')?.textContent).toBe('Earlier constitution')
-  reader.setBackDestination('Chat')
-  for (const back of documentBacks) expect(back.querySelector('.ws-back-label')?.textContent).toBe('Chat')
+  reader.setBackDestination('Constitution')
+  for (const back of documentBacks) expect(back.querySelector('.ws-back-label')?.textContent).toBe('Constitution')
   reader.back()
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   expect(onReturn).toHaveBeenCalledTimes(2)
   expect(onOrchestrator).not.toHaveBeenCalled()
 })
 
-
-it('omits missing sent files from header chips using cached metadata only', async () => {
-  setup()
-  resetDocumentResources()
-  const fetch = vi.fn(async () => Response.json({ exists: false }))
-  vi.stubGlobal('fetch', fetch)
-  await head('/api/v1/file?path=%2Fgone.change.json&origin=host-a')
-  const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', conversation: true,
-    sent: [{ path: '/gone.change.json', time: 2 }, { path: '/kept.change.json', time: 1 }] })
-  reader.show(channel, chatDocument(channel)!.key, 'Board', alpha)
-  expect(reader.el.querySelector('[data-document-key="host-a:/gone.change.json"].ws-report-chip')).toBeNull()
-  expect(reader.el.querySelectorAll('.ws-report-chip')).toHaveLength(1)
-  expect(fetch.mock.calls.filter(call => String((call as unknown[])[0]).includes('/file-info?'))).toHaveLength(1)
-  resetDocumentResources()
-})
-
-it('opens the fiber artifact instead of a newer nested artifact', () => {
-  setup()
-  const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha/alpha.md', fiberDir: '/notes/alpha', body: '', isConstitution: true, conversation: true,
+it('leads with the fiber artifact instead of a newer nested artifact', () => {
+  const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha/alpha.md', fiberDir: '/notes/alpha', body: '', isConstitution: true,
     sent: [{ path: 'checks/artifact.html', time: 2 }, { path: 'artifact.html', time: 1 }] })
-  reader.show(channel, chatDocument(channel)!.key, 'Board', alpha)
-  reader.el.querySelector<HTMLButtonElement>('.ws-report-chip')!.click()
-  expect(reader.document?.path).toBe('/notes/alpha/artifact.html')
+  expect(channelLead(channel)?.path).toBe('/notes/alpha/artifact.html')
 })

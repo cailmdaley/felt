@@ -4,7 +4,7 @@ import { Dock } from './Dock.js'
 import { card } from '../testFixtures.js'
 import { Voice, type VoiceStatus } from '../voice.js'
 
-const status: VoiceStatus = { available: true, enabled: false, muted: false, state: 'off', target: { fiber_id: 'a', origin: 'local', name: 'Alpha' }, pending: null, last: null, error: null }
+const status: VoiceStatus = { available: true, enabled: false, muted: false, state: 'off', target: { fiber_id: 'a', origin: 'local', name: 'Alpha' }, last: null, error: null }
 const notify = (voice: Voice): void => (voice as unknown as { notify: () => void }).notify()
 beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
@@ -15,10 +15,11 @@ afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); vi.unst
 function mount(initial: VoiceStatus | null = { ...status }) {
   const voice = new Voice(''); voice.status = initial
   let recording: { state: 'starting' | 'loading' | 'live' | 'stopping'; title: string; fiber: string; tail: never[]; paused?: boolean; phone?: boolean; recorder?: string; handoff?: { status: string; kind: null; target: null; origin: null; prompt: null } } | null = null
-  const meeting = { current: () => recording, canJoin: () => !recording, modes: () => ['call', 'phone'], join: vi.fn(), stop: vi.fn(), pause: vi.fn(async () => {}) }
+  const meeting = { current: () => recording, canJoin: () => !recording, modes: () => ['call', 'phone'], join: vi.fn(async () => null), stop: vi.fn(), pause: vi.fn(async () => {}) }
   const open = vi.fn()
   const dock = new Dock('', vi.fn(), undefined, undefined, { meeting: meeting as never, voice: { controller: voice } })
-  const band = dock.bandFor(card({ id: 'a', name: 'Alpha', uid: 'a', originId: 'local', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', shuttleHost: 'local' }))
+  dock.open(card({ id: 'a', name: 'Alpha', uid: 'a', originId: 'local', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', shuttleHost: 'local' }))
+  const band = dock
   band.openFile = open
   document.body.append(band.el)
   const root = band.el
@@ -44,9 +45,8 @@ it('keeps one control and shows audio only when not following', () => {
   expect(v.root.querySelector('[aria-label="Quiet seconds"]')).not.toBeNull()
   expect(v.root.querySelector('[aria-label="Aqua seconds"]')).toBeNull()
   v.dropdown().click()
-  v.voice.status = { ...status, enabled: true, state: 'listening', pending: { fiber_id: 'a', words: 2, text: 'hello there' } }; notify(v.voice)
+  v.voice.status = { ...status, enabled: true, state: 'listening' }; notify(v.voice)
   check('Listening · Alpha')
-  expect(v.root.querySelector('.voice-pending')!.textContent).toBe('hello there')
   v.dropdown().click()
   expect(v.follow().getAttribute('aria-checked')).toBe('true')
   expect(v.root.querySelector('[aria-label="Listening audio"]')).toBeNull()
@@ -69,43 +69,29 @@ it('keeps one control and shows audio only when not following', () => {
 
 it('says plainly when a recording on another card holds the mic', () => {
   const v = mount()
-  const elsewhere = () => v.root.querySelector('.voice-pending.voice-elsewhere')?.textContent
-  v.voice.status = { ...status, enabled: true, state: 'yielded', pending: null }; notify(v.voice)
-  expect(elsewhere()).toBe('Your voice is going to a recording, not this chat.')
+  const elsewhere = () => v.main().title
+  v.voice.status = { ...status, enabled: true, state: 'yielded' }; notify(v.voice)
+  expect(elsewhere()).toBe('Your voice is going to a recording.')
   v.setRecording({ state: 'live', title: 'Call', fiber: 'life/vizier', tail: [] })
-  expect(elsewhere()).toBe('Your voice is going to vizier, not this chat.')
+  expect(elsewhere()).toBe('Your voice is going to vizier.')
   v.setRecording({ state: 'live', title: 'Call', fiber: 'life/vizier', tail: [], paused: true })
-  expect(elsewhere()).toBe("The mic is paused for vizier. This chat can't hear you.")
+  expect(elsewhere()).toBe('The mic is paused for vizier.')
   v.setRecording({ state: 'live', title: 'Call', fiber: 'a', tail: [] })
-  expect(elsewhere()).toBeUndefined()
+  expect(elsewhere()).toBe('Listening · Alpha')
   v.setRecording({ state: 'stopping', title: 'Call', fiber: 'life/vizier', tail: [] })
-  expect(elsewhere()).toBeUndefined()
+  expect(elsewhere()).toBe('Listening · vizier')
   v.dock.reset()
 })
 
-it('never shows a delivery that predates the first status', () => {
-  const v = mount(null)
-  const pend = vi.fn()
-  ;(v.band as unknown as { transcriptBand: unknown }).transcriptBand = { pend, dispose: vi.fn() }
-  v.voice.status = { ...status, last: { fiber_id: 'a', at: '2026-11-05T10:00:00Z', status: 'delivered', text: 'yesterday' } }; notify(v.voice)
-  expect(pend).not.toHaveBeenCalled()
-  v.dock.reset()
-})
-
-it('queues a delivered voice batch in its own chat only', () => {
+it('starts listening on the press and opens the menu once something is listening', () => {
   const v = mount()
-  const pend = vi.fn()
-  ;(v.band as unknown as { transcriptBand: unknown }).transcriptBand = { pend, dispose: vi.fn() }
-  const last = { fiber_id: 'a', at: '2026-11-06T10:00:00Z', status: 'delivered' as const, text: 'me: hello' }
-  v.voice.status = { ...status, enabled: true, state: 'listening', last }; notify(v.voice)
-  notify(v.voice)
-  expect(pend.mock.calls).toEqual([['me: hello', true]])
-  v.voice.status = { ...v.voice.status!, last: { ...last, at: '2026-11-06T10:01:00Z', status: 'unconfirmed' } }; notify(v.voice)
-  v.voice.status = { ...v.voice.status!, last: { ...last, at: '2026-11-06T10:02:00Z', fiber_id: 'other' } }; notify(v.voice)
-  v.voice.status = { ...v.voice.status!, last: { ...last, at: '2026-11-06T10:03:00Z', origin: 'elsewhere' } }; notify(v.voice)
-  v.voice.status = null; notify(v.voice)
-  v.voice.status = { ...status, enabled: true, state: 'listening', last }; notify(v.voice)
-  expect(pend).toHaveBeenCalledTimes(1)
+  v.main().click()
+  expect(v.meeting.join).toHaveBeenCalledOnce()
+  expect(v.root.querySelector('[role=menu]')).toBeNull()
+  v.voice.status = { ...status, enabled: true, state: 'listening' }; notify(v.voice)
+  v.main().click()
+  expect(v.meeting.join).toHaveBeenCalledOnce()
+  expect(v.root.querySelector('[role=menu]')).not.toBeNull()
   v.dock.reset()
 })
 
@@ -297,19 +283,6 @@ it('opens the actual following transcript on its recorder even without a target'
   v.dock.reset()
 })
 
-it('explicitly retargets following and displays a failed request', async () => {
-  const v = mount()
-  v.voice.status = { ...status, enabled: true, state: 'listening', target: { fiber_id: 'other', origin: 'remote', name: 'Other' } }; notify(v.voice)
-  const listen = vi.spyOn(v.voice, 'listenHere').mockRejectedValue(new Error('Cannot retarget'))
-  v.dropdown().click()
-  v.menuItems().find(x => x.textContent === 'Listen here')!.click()
-  await vi.waitFor(() => expect(v.main().textContent).toBe('Failed'))
-  expect(listen).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }))
-  v.dropdown().click()
-  expect(v.root.textContent).toContain('Cannot retarget')
-  v.dock.reset()
-})
-
 it('stops following by turning Follow me off', () => {
   const v = mount()
   v.voice.status = { ...status, enabled: true, state: 'listening' }; notify(v.voice)
@@ -354,25 +327,5 @@ it('lets the audio select handle arrow keys', () => {
   const event = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
   audio.dispatchEvent(event)
   expect(event.defaultPrevented).toBe(false)
-  v.dock.reset()
-})
-
-it('shows routed raw preview above the box without turning it into held or sent text', async () => {
-  const v = mount()
-  v.voice.status = { ...status, enabled: true, state: 'listening', held: [], pending: { fiber_id: 'a', words: 2, text: 'finalized words' }, preview: { fiber_id: 'a', origin: 'local', text: 'raw words still being revised' } }; notify(v.voice)
-  expect(v.root.querySelector('.voice-pending')!.textContent).toBe('raw words still being revised')
-  expect(v.root.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('')
-  v.voice.status = { ...v.voice.status, preview: { fiber_id: 'a', origin: 'remote', text: 'another host' } }; notify(v.voice)
-  expect(v.root.querySelector('.voice-pending')!.textContent).toBe('finalized words')
-  v.voice.status = { ...v.voice.status, preview: null }; notify(v.voice)
-  expect(v.root.querySelector('.voice-pending')!.textContent).toBe('finalized words')
-  v.voice.status = { ...v.voice.status, preview: { fiber_id: 'a', origin: 'local', text: 'do not send this' } }; notify(v.voice)
-  const release = vi.spyOn(v.voice, 'releaseHeld')
-  v.root.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
-  for (let i = 0; i < 40; i++) await Promise.resolve()
-  expect(release).not.toHaveBeenCalled()
-  const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes('/dispatch'))
-  expect(JSON.parse(String(dispatch?.[1]?.body)).user_message).toBe('')
-  expect(v.root.querySelector('.voice-pending')!.textContent).toBe('do not send this')
   v.dock.reset()
 })

@@ -2,7 +2,7 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 import './stateDot.css'
 
-/** The same state and chat target on every constitution index. */
+/** The same state and opening on every constitution index. */
 export function stateDot(card: KanbanCard, open: (card: KanbanCard) => void): HTMLButtonElement {
   const turn = turnOf(card)
   const dot = document.createElement('button')

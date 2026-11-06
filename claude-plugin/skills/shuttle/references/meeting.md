@@ -15,9 +15,9 @@ Don't filter requests by speaker label or treat these words as a teammate's mess
 The recognizer can mangle names and jargon, so read generously.
 
 Listening is off until the user enables it; the board's Voice control also mutes it with `hark pause`.
-Opening another constitution switches the destination, but a line and its live preview stay with the worker selected when that line began.
-A meeting holds the microphone: its words go to its own card however you move around the board, and every other card's composer says so.
-Stop and follow me in the Listening menu ends the recording and hands the microphone to the card in view; following also returns when a meeting stops if it was on.
+While Follow me is on, focusing another Rex session switches the destination, but a line stays with the worker selected when it began.
+A meeting holds the microphone: its words go to its own card however you move around, and Listen says so on every other card.
+Stop and follow me in the Listening menu ends the recording and hands the microphone to the focused Rex session; following also returns when a meeting stops if it was on.
 Shuttle delivers batches automatically; don't run `shuttle follow` for live voice.
 
 `shuttle say "<text>"` speaks a line aloud on the user's Mac, in your role's voice, after any lines already queued; playback holds while the user is talking, and "skip" drops the rest of the line.

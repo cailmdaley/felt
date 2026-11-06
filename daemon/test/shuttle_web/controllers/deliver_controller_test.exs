@@ -181,7 +181,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert script =~ "me: held words Claude"
   end
 
-  test "finalized voice traverses the relay, edited cold hold, dormant resume and live messaging" do
+  test "finalized voice traverses the relay, cold hold, dormant resume and live messaging" do
     alias Shuttle.Meeting.TranscriptRelay
     dormant = "tests/voice-pipeline-dormant"
     live = "tests/voice-pipeline-live"
@@ -259,7 +259,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
     [held] = TranscriptRelay.held()
     assert held["text"] == "S1: raw correction needed"
     refute_receive {:message, _}, 20
-    assert :ok = TranscriptRelay.draft(Map.put(held, "text", "S1: corrected request"))
     record.("2026-11-06T10:00:02Z", "Claude")
     poll.()
     # The owning dispatcher, not the recorder cache, selects the dormant conversation.
@@ -270,9 +269,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
     GenServer.call(worker, :status)
     script = run_script()
     assert script =~ "--resume '#{session}'"
-    assert script =~ "S1: corrected request Claude"
+    assert script =~ "S1: raw correction needed Claude"
     assert TranscriptRelay.held() == []
-    assert {:error, :conflict} = TranscriptRelay.release(held)
     write_route.("2026-11-06T10:00:03Z", live)
     record.("2026-11-06T10:00:04Z", "ordinary live words")
     poll.()

@@ -16,8 +16,6 @@ defmodule Shuttle.Meeting.TranscriptRelay do
 
   def held(opts \\ []), do: held_call(:held, opts)
   def recovery(opts \\ []), do: held_call(:recovery, opts)
-  def draft(params, opts \\ []), do: held_call({:draft, params}, opts)
-  def release(params, opts \\ []), do: held_call({:release, params}, opts)
 
   defp held_call(message, opts) do
     server = Keyword.get(opts, :server, Shuttle.Env.server(__MODULE__))
@@ -180,32 +178,6 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
       {:ok, checkpoint, held}
     end)
   end
-
-  def handle_call(
-        {:draft, %{"id" => id, "through" => through, "text" => text} = params},
-        _from,
-        state
-      )
-      when is_binary(text) do
-    change_held(state, fn held ->
-      with :ok <- Held.boundary(held, id, Map.get(params, "after", 0)),
-           {:ok, held} <- Held.edit(held, id, through, text) do
-        {:ok, :ok, held}
-      end
-    end)
-  end
-
-  def handle_call({:release, %{"id" => id, "through" => through} = params}, _from, state) do
-    change_held(state, fn held ->
-      with :ok <- Held.boundary(held, id, Map.get(params, "after", 0)),
-           {:ok, held, _text} <- Held.take(held, id, through) do
-        {:ok, :ok, held}
-      end
-    end)
-  end
-
-  def handle_call({verb, _params}, _from, state) when verb in [:draft, :release],
-    do: {:reply, {:error, :invalid_draft}, state}
 
   def handle_call({:status, launch}, _from, state) do
     reply =
@@ -1039,9 +1011,9 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   defp speaking?(config) do
     path = Path.rootname(config["transcript"]) <> ".partial"
 
-    with {:ok, %{mtime: mtime}} <- File.stat(path, time: :posix),
+    with {:ok, %{mtime: mtime}} <- Shuttle.FS.stat(path, time: :posix),
          true <- System.os_time(:second) - mtime < @partial_stale_seconds,
-         {:ok, text} <- File.read(path) do
+         {:ok, text} <- Shuttle.FS.read(path) do
       String.trim(text) != ""
     else
       _ -> false

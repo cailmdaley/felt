@@ -41,15 +41,12 @@ describe('constitution role', () => {
     expect(mapFeltJsonToFiber({ id: 'a', shuttle: { role } })?.shuttleRole).toBeUndefined()
   })
 
-  it('names the office left of the acts and opens its charter through the wikilink path', async () => {
+  it('names the office and opens its charter through the wikilink path', async () => {
     const shuttleBase = daemon(['roles/surveyor'])
     const onFiber = vi.fn()
-    const acts = document.createElement('div')
-    acts.className = 'ws-fiber-acts'
-    const pane = buildFiberProse({ ...card, shuttleRole: 'surveyor' }, channel, { shuttleBase, acts, onFiber, onFile: vi.fn() })
+    const pane = buildFiberProse({ ...card, shuttleRole: 'surveyor' }, channel, { shuttleBase, onFiber, onFile: vi.fn() })
     await settle()
     const roles = pane.querySelector<HTMLElement>('.ws-fiber-roles')!
-    expect(roles.nextElementSibling).toBe(acts)
     expect(roles.querySelectorAll('.ws-fiber-role')).toHaveLength(1)
     expect(roles.textContent).toBe('surveyor')
     roles.querySelector<HTMLAnchorElement>('a.kbn-wikilink-live')!.click()

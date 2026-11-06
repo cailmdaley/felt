@@ -1,18 +1,98 @@
-/* Inline controls at the top of the fiber's own page. */
+/* The band over a constitution's pages: its name and state, the way to its
+   conversation, its verbs, and settings, on one line that wraps when it must. */
+.ws-stage-band { flex: none; min-width: 0; }
+.ws-stage-band[hidden] { display: none; }
+.ws-band-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; min-height: 44px; box-sizing: border-box;
+  padding: 4px max(16px, var(--ws-head-end, 0px)) 4px max(16px, var(--ws-head-start, 0px));
+  border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
+}
+.ws-band-identity { flex: 1 1 220px; display: flex; align-items: baseline; gap: 0 12px; min-width: 0; }
+.ws-band-title {
+  min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ws-ink); font: 500 var(--type-title)/var(--leading-tight) var(--font-serif);
+}
+/* The lifecycle chip: the rail's state word in its tone, at the line's one text size. */
+.ws-band-state {
+  --tone: var(--ws-ink-muted);
+  flex: none; color: var(--tone);
+  font: 500 var(--type-label)/var(--leading-prose) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap;
+}
+.ws-band-state[data-state='question'] { --tone: var(--ws-state-question); }
+.ws-band-state[data-state='waiting'] { --tone: var(--ws-state-idle); }
+.ws-band-state[data-state='working'] { --tone: var(--ws-state-working); }
+.ws-band-state[data-state='to-review'] { --tone: var(--ws-state-review); }
+.ws-band-state[data-state='drafts'] { --tone: var(--ws-state-drafts); }
+.ws-band-state[data-state='resting'] { --tone: var(--ws-state-resting); color: var(--ws-ink-muted); }
+.ws-band-state:is([data-state='tempered'], [data-state='discarded']) { --tone: var(--ws-state-tempered); }
+.ws-band-acts { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; min-height: 36px; }
+/* Conversation lives in Rex: the band's one filled control goes there. */
+.ws-dock .ws-band-open {
+  flex: none; min-height: 30px; padding: 0 12px; border: 0; border-radius: var(--ws-control-radius);
+  background: var(--ws-ink); color: var(--ws-paper) !important; font: 500 var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap;
+}
+.ws-dock .ws-band-open:hover { background: var(--ws-agent); }
+/* The lifecycle group is set apart by a rule and its tone, not by distance. */
+.ws-band-acts > .kbn-ctl-verdict { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 6px; margin: 0; padding-left: 12px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-band-acts > .kbn-ctl-verdict[hidden] { display: none; }
+.ws-band-acts > .ws-verdict-undo { justify-content: flex-end; }
+.ws-header-sessions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ws-header-sessions[hidden] { display: none; }
+/* Settings keeps the further ancestors reachable without a second header row. */
+.ws-settings-ancestry { margin-bottom: 12px; }
+.ws-band-drawer { padding: 4px 0 8px; }
+.ws-band-section + .ws-band-section:not([hidden]) { border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-dock > .ws-dock-body > .kbn-detail-transcript { padding: 6px 16px; max-height: 30vh; overflow-y: auto; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-band-status { padding: 6px 16px; }
+.ws-dock .ws-band-status:not(:has(.kbn-detail-error:not([style*='display: none']), .kbn-detail-save-status:not(:empty))) { display: none; }
+
+/* Immediate actions use a shared stroke-icon grid and native keyboard focus. */
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon {
+  display: inline-grid; place-items: center; flex: none; width: 32px; height: 36px; padding: 0; margin: 0;
+  border: 0 !important; border-radius: var(--ws-control-radius); background: transparent;
+  color: var(--ws-ink-muted); cursor: pointer;
+}
+.ws-reader .ws-header-icon[hidden] { display: none; }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:hover:not(:disabled), .kbn-verb-menu .ws-header-icon:focus, .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
+.ws-header-icon:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:is(.kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon.ws-header-verb { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 8px 0 6px; }
+.ws-header-word { font: var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
+/* A Desk row's menu lists the same verbs, drawn as the header draws them. */
+.kbn-verb-menu .ws-header-icon.ws-header-verb { display: grid; justify-content: start; width: 100%; padding: 0 10px 0 8px; }
+/* Its plain items (Open terminal, Move…) keep the verbs' height, type and word column. */
+.kbn-verb-menu .kbn-verb-menu-plain {
+  display: block; width: 100%; height: 36px; box-sizing: border-box; padding: 0 10px 0 31px; margin: 0;
+  border: 0; border-radius: var(--ws-control-radius); background: transparent; text-align: left;
+  font: var(--type-label)/var(--leading-solid) var(--font-serif); color: var(--ws-ink-muted); cursor: pointer;
+}
+.kbn-verb-menu .kbn-verb-menu-plain:is(:hover, :focus) { color: var(--ws-ink); background: var(--ws-hover); outline: none; }
+.kbn-verb-menu .kbn-verb-menu-plain:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
+.kbn-verb-menu .kbn-verb-menu-rule { border: 0; border-top: 1px solid var(--ws-hairline); margin: 4px 2px; }
+.ws-header-facts { margin: 12px 0 0; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); overflow-wrap: anywhere; }
+.ws-header-facts[hidden] { display: none; }
+
+/* On the phone the top bar names the page; the band is one row of verbs that slides sideways. */
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .kbn-verb-menu [role='menuitem'] { min-height: 44px; height: 44px; }
+  .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
+  .ws-band-head { flex-wrap: nowrap; gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
+  .ws-band-identity { flex: none; }
+  /* The verbs hold still when the state word changes. */
+  .ws-band-state { min-width: 5.5em; }
+  .ws-band-title { display: none; }
+  .ws-band-acts { flex-wrap: nowrap; flex: none; }
+  .ws-band-acts > .kbn-ctl-verdict { flex: none; flex-wrap: nowrap; white-space: nowrap; padding-left: 0; border-left: 0; }
+}
+
 .ws-dock {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  padding: 0 0 var(--ws-inset);
-  margin-bottom: var(--ws-inset);
-  border-bottom: var(--ws-line-width) solid var(--ws-hairline);
   color: var(--ws-ink);
   background: var(--ws-paper);
   font: var(--type-label)/var(--leading-ui) var(--font-serif);
   --ctl-h: var(--ws-control-height);
-  --ctl-line: var(--ws-hairline);
-  --ctl-paper: var(--ws-paper);
-  --ctl-muted: var(--ws-ink-muted);
   /* A select's caret, drawn in the current ink: two half-filled squares. */
   --ctl-caret: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(-45deg, transparent 50%, currentColor 50%);
   --ctl-caret-at: right 12px center, right 8px center;
@@ -27,14 +107,7 @@
 .ws-dock :is(button, input, select, textarea):not(.kbn-card-worker) { color: inherit; }
 .ws-dock button { cursor: pointer; }
 .ws-dock :disabled { opacity: .55; cursor: default; }
-.ws-dock .kbn-detail-directive:focus-visible { outline: none; }
-.ws-dock .kbn-detail-app-guide {
-  margin: var(--ws-inset) 0;
-  color: var(--ws-ink-muted);
-  font-size: var(--type-label);
-}
-.ws-dock-body { display: grid; grid-template-columns: minmax(0, 1fr) auto 12px auto; align-items: center; gap: var(--ws-small-gap); padding-top: var(--ws-small-gap); }
-.ws-dock-body > :is(.kbn-ctl-compose, .kbn-detail-transcript, .ws-transcript, .kbn-detail-controls-open, .kbn-ctl-history-open) { grid-column: 1 / -1; }
+.ws-dock-body { display: flex; flex-direction: column; min-width: 0; }
 .ws-dock .kbn-detail-controls {
   display: flex;
   flex-direction: column;
@@ -104,12 +177,6 @@
 }
 .ws-dock .kbn-ctl-btn:hover:not(:disabled) { background-color: var(--ws-hover); border-color: var(--ws-ink); }
 .ws-dock .kbn-ctl-send { background: var(--ws-fill); }
-.ws-dock .kbn-ctl-resume { border-color: var(--ws-agent); }
-/* Resume while the previous session's prompt cache is estimated warm: a verdigris mark before its word. */
-.ws-dock .kbn-ctl-resume[data-cache='warm']::before {
-  content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px;
-  border-radius: 50%; background: var(--ws-cache-warm); vertical-align: 0.1em;
-}
 .ws-dock :is(.kbn-ctl-select, .kbn-ctl-input) {
   min-width: 0;
   border: var(--ws-line-width) solid var(--ws-hairline);
@@ -141,56 +208,12 @@
 .ws-dock .kbn-ctl-toggle:has(input:checked) { background: var(--ws-fill); border-color: var(--ws-hairline); }
 .ws-dock .kbn-ctl-toggle:has(input:checked) span::before { background: var(--ws-ink); }
 .ws-dock .kbn-ctl-toggle:has(input:focus-visible) { outline: var(--ws-focus-width) solid var(--ws-ink); }
-/* The composer: one bordered field with its verbs inside its right edge, on
-   the line of the text. It is the same size focused or not; only text that
-   wraps grows it, downward, and the verbs ride its last line. */
-.ws-dock .kbn-ctl-composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  column-gap: var(--ws-small-gap);
-  padding: 3px;
-  border: var(--ws-line-width) solid var(--ws-hairline);
-  border-radius: var(--ws-control-radius);
-  background: var(--ws-paper);
-  position: relative;
-}
-.ws-dock .kbn-ctl-composer:focus-within { border-color: var(--ws-ink-muted); }
-/* The field opens with a faint prompt chevron that stays; text begins just
-   after it, on the first line. */
-.ws-dock .kbn-ctl-composer::before {
-  content: '›'; position: absolute; left: 10px; top: calc(3px + (var(--ctl-h) - var(--type-prose) * var(--leading-prose)) / 2);
-  font: var(--type-prose)/var(--leading-prose) var(--font-serif); color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent);
-  pointer-events: none;
-}
-.ws-dock .kbn-ctl-composer:focus-within::before { color: var(--ws-ink-muted); }
-.ws-dock .kbn-detail-directive {
-  grid-column: 1;
-  grid-row: 1;
-  display: block;
-  box-sizing: border-box;
-  width: 100%;
-  height: var(--ctl-h);
-  min-height: var(--ctl-h);
-  max-height: 35vh;
-  padding: calc((var(--ctl-h) - var(--type-prose) * var(--leading-prose)) / 2) 7px calc((var(--ctl-h) - var(--type-prose) * var(--leading-prose)) / 2) 22px;
-  border: none;
-  outline: none;
-  background: transparent;
-  resize: none;
-  font: var(--type-prose)/var(--leading-prose) var(--font-serif);
-}
-.ws-dock .kbn-ctl-composer .kbn-ctl-images { grid-column: 1 / -1; grid-row: 3; }
-.ws-dock .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; display: flex; min-width: 0; align-items: center; gap: var(--ws-small-gap); }
-.ws-dock .kbn-ctl-sends { display: inline-flex; min-width: 0; gap: var(--ws-small-gap); }
-/* Verbs inside the field: the default one is a plate, the others are words. */
-.ws-dock .kbn-ctl-composer .kbn-ctl-btn { min-height: var(--ctl-h); padding-inline: 10px; border-color: transparent !important; background-color: transparent; color: var(--ws-ink-muted); }
-.ws-dock .kbn-ctl-composer .kbn-ctl-send:not(.kbn-ctl-secondary) { border-color: var(--ws-hairline) !important; background-color: var(--ws-fill); color: var(--ws-ink); }
-.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: 0 1 150px; width: 150px; min-width: 65px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-fill); }
-.ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; padding: 0 4px 0 8px; border: 0; background: transparent; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; align-items: center; max-width: 240px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
+.ws-dock .kbn-ctl-meet .kbn-ctl-btn { border: 0; }
+.ws-dock .kbn-ctl-meet-arm { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; min-height: 0; padding: 2px 4px 2px 8px; border: 0; background: transparent; color: var(--ws-ink-muted); }
+.ws-dock .kbn-ctl-meet-arm.kbn-ctl-meet-on { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-dock .kbn-ctl-meet-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-dock .kbn-ctl-meet-arm svg { display: block; flex: none; width: 16px; height: 16px; }
-.ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm.kbn-ctl-meet-on { color: var(--ws-ink); background: var(--ws-hover); box-shadow: inset 0 0 0 1px var(--ws-ink); border-radius: var(--ws-control-radius); }
 .ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
 .ws-dock .kbn-ctl-meet-dropdown { flex: none; width: 25px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); cursor: pointer; }
 .ws-dock .kbn-ctl-meet-dropdown[hidden] { display: none; }
@@ -203,32 +226,11 @@
 .ws-dock .kbn-ctl-meet [role="menuitemcheckbox"] { display: flex; justify-content: space-between; gap: 24px; }
 .ws-dock .kbn-ctl-meet [role="menuitemcheckbox"]::after { content: '○'; }
 .ws-dock .kbn-ctl-meet [role="menuitemcheckbox"][aria-checked="true"]::after { content: '●'; }
-@container (max-width: 360px) {
-  .ws-chat .kbn-ctl-meet { flex-basis: 70px; }
-  .ws-chat .kbn-ctl-meet-label { display: none; }
-}
-.ws-dock .kbn-ctl-composer .voice-pending { grid-column: 1 / -1; grid-row: 2; max-height: 5em; overflow-y: auto; padding: 0 7px 4px 24px; color: var(--ws-ink-muted); font: var(--type-prose)/var(--leading-prose) var(--font-serif); white-space: pre-wrap; }
-.ws-dock .kbn-ctl-composer .voice-pending:empty { display: none; }
-.ws-dock .kbn-ctl-composer .voice-pending.voice-elsewhere { color: var(--ws-ink); }
 .voice-error { padding: 8px 10px; max-width: 260px; font-size: var(--type-note); color: var(--ws-ink-muted); white-space: normal; }
-/* A finger leaves :hover behind on what it tapped; only a pointer hovers. */
-@media (hover: none) {
-  .ws-dock .kbn-ctl-composer .kbn-ctl-secondary:hover { background-color: transparent; }
-}
 @media (hover: hover) {
-  .ws-dock .kbn-ctl-composer .kbn-ctl-btn:hover:not(:disabled) { color: var(--ws-ink); background-color: var(--ws-hover); }
   .ws-dock .kbn-ctl-meet-arm:hover:not(:disabled) { color: var(--ws-ink); background: var(--ws-hover); }
 }
-.ws-dock .kbn-detail-directive::placeholder { color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent); }
-.ws-dock .kbn-ctl-composer-drop { border-style: dashed; border-color: var(--ws-ink); }
-.ws-dock .kbn-ctl-images { display: flex; flex-wrap: wrap; gap: var(--ws-small-gap); padding: 6px 10px; }
-.ws-dock .kbn-ctl-image { position: relative; display: inline-flex; width: 64px; height: 64px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); overflow: hidden; }
-.ws-dock .kbn-ctl-image img { width: 100%; height: 100%; object-fit: cover; }
-.ws-dock .kbn-ctl-image-file { box-sizing: border-box; width: 100%; padding: 4px 26px 4px 6px; overflow: hidden; word-break: break-all; font: var(--type-meta)/var(--leading-tight) var(--font-serif); color: var(--ws-ink); }
-.ws-dock .kbn-ctl-image-remove { position: absolute; top: 2px; right: 2px; width: 24px; height: 24px; padding: 0; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: 50%; background: var(--ws-paper); color: var(--ws-ink); font: var(--type-title)/var(--leading-solid) var(--font-serif); }
-.ws-dock .kbn-ctl-images-frozen img { opacity: .6; }
 .ws-dock .kbn-detail-error { color: var(--ws-red); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
-.ws-dock .kbn-ctl-compose .kbn-detail-error { margin-top: 6px; }
 .ws-dock .kbn-start-prompt { display: flex; flex-direction: column; gap: var(--ws-small-gap); color: var(--ws-ink); }
 .ws-dock .kbn-start-prompt-reason { margin: 0; color: var(--ws-red); }
 .ws-dock .kbn-start-prompt-label { font: var(--type-label)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-muted); }
@@ -256,25 +258,23 @@
 .ws-dock .kbn-detail-parent-option:hover { background: var(--ws-hover); }
 .ws-dock .kbn-detail-parent-option-id { font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
 .ws-dock .kbn-detail-parent-empty { cursor: default; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-ui) var(--font-serif); }
-.ws-dock .kbn-ctl-foot { grid-column: 4; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--ws-small-gap); }
+.ws-dock .kbn-ctl-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--ws-small-gap); }
 .ws-dock :is(.kbn-detail-controls-toggle, .kbn-ctl-foot .kbn-ctl-btn) { min-height: var(--ctl-h); display: flex; align-items: center; }
 .ws-dock .kbn-ctl-history-toggle { gap: 8px; }
 .ws-dock .kbn-ctl-history-toggle .kbn-ctl-label { font: inherit; color: inherit; }
 .ws-dock .kbn-ctl-history-chevron { display: inline-flex; align-items: center; line-height: var(--leading-solid); }
+.kbn-ctl-history-chevron { font-size: var(--glyph-small); }
 .ws-dock .kbn-ctl-foot .kbn-ctl-btn { padding: 4px 8px; }
-.ws-dock .kbn-ctl-foot:has(.kbn-detail-error:not([style*='display: none']), .kbn-detail-save-status:not(:empty)) { grid-column: 1 / -1; }
 .ws-dock .kbn-ctl-foot .kbn-detail-error { flex-basis: 100%; }
 .ws-dock .kbn-detail-save-status { flex: 1; color: var(--ws-ink-muted); font: var(--type-label) var(--font-serif); }
 .ws-dock .kbn-detail-save-status-saving { font-style: italic; }
 .ws-dock .kbn-detail-transcript { padding: 8px 0; border-block: var(--ws-line-width) solid var(--ws-hairline); }
-/* The meeting's line is one voice: its state, its name and Stop, all set as labels. */
+/* The meeting's line is one voice: its state and its name, set as labels. */
 .ws-dock .kbn-detail-transcript-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 5px; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-detail-transcript-dot { width: var(--ws-dot-size); height: var(--ws-dot-size); flex: none; border-radius: 50%; background: var(--ws-ink-muted); }
 .ws-dock .kbn-detail-transcript-live .kbn-detail-transcript-dot { background: var(--ws-ink); }
 .ws-dock .kbn-detail-transcript-failed .kbn-detail-transcript-dot { background: var(--ws-red); }
 .ws-dock .kbn-detail-transcript-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label)/var(--leading-tight) var(--font-serif); }
-.ws-dock button.kbn-detail-transcript-stop:not(.kbn-card-worker) { margin-left: auto; flex: none; padding: 2px 6px; border: 0; background: transparent; color: var(--ws-stop); font: inherit; cursor: pointer; }
-.ws-dock .kbn-detail-transcript-stop:disabled { opacity: .55; cursor: default; }
 .ws-dock .kbn-detail-transcript-lines { margin: 0; padding: 0; list-style: none; max-height: 9em; overflow-y: auto; overscroll-behavior: contain; font: var(--type-prose)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .ws-dock .kbn-meeting-speaker { margin-right: 5px; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-history-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: var(--ctl-h); padding: 4px 0; border: none; background: transparent; color: var(--ws-ink-muted); }
@@ -290,18 +290,10 @@
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-dock { --ctl-h: var(--ws-phone-target); }
-  /* Settings and History share the one folded row. */
-  .ws-dock-body { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .ws-dock .kbn-ctl-foot { grid-column: 3; }
-  /* The verbs wrap beneath the field, inside its border, on their own row. */
-  .ws-dock .kbn-ctl-composer { grid-template-columns: minmax(0, 1fr); }
-  .ws-dock .kbn-ctl-composer-foot { grid-column: 1; grid-row: 4; flex-wrap: nowrap; justify-content: flex-start; justify-self: stretch; }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--type-label); }
   .ws-dock :is(.kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
-  .ws-dock .kbn-ctl-image { width: 80px; height: 80px; }
   /* iOS zooms the page into any field set under 16px. */
   .ws-dock :is(input, select, textarea) { font-size: var(--type-prose); }
-  .ws-dock .kbn-ctl-image-remove { width: var(--ws-phone-target); height: var(--ws-phone-target); }
 }
 
 /* The agent and effort lists, opened as anchored popovers under their select. */
@@ -326,10 +318,5 @@
 .ws-dock :is(.kbn-detail-parent-dropdown, .ws-select-picker)[data-anchored] { box-shadow: var(--ws-shadow-low); }
 
 /* Data stays mono; verbs are serif plates. */
-.ws-dock .kbn-ctl-btn, .ws-dock .kbn-ctl-sends .kbn-ctl-btn, .ws-dock .kbn-ctl-foot .kbn-ctl-btn,
+.ws-dock .kbn-ctl-btn, .ws-dock .kbn-ctl-foot .kbn-ctl-btn,
 .ws-dock .kbn-ctl-history-toggle { font: var(--type-label)/var(--leading-ui) var(--font-serif) !important; }
-.ws-dock .kbn-ctl-verdict { grid-column: 1 / -1; display: flex; gap: 8px; margin-bottom: 8px; }
-.ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 28px; padding-inline: 12px; }
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 44px; min-width: 44px; }
-}

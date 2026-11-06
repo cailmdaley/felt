@@ -1507,7 +1507,7 @@ export class KanbanSurfaceRenderer {
    * and the action menu. The document workspace holds the
    * outcome, question, path, agent, due, warnings and the report itself.
    *
-   * Clicking the row or its dot opens the constitution's chat.
+   * Clicking the row or its dot opens the constitution.
    */
   private renderCard(
     card: KanbanCard,

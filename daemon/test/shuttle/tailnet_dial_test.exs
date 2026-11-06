@@ -973,38 +973,6 @@ defmodule Shuttle.TailnetDialTest do
     assert_private_socket_directory(data_dir)
   end
 
-  test "a quiet stream survives multiple request-timeout budgets", %{
-    base: base,
-    tls_port: tls_port
-  } do
-    previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
-    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
-    previous_proxy = Application.get_env(:shuttle, :https_proxy)
-    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
-    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
-    Application.put_env(:shuttle, :tailscale_socket, localapi)
-    Application.put_env(:shuttle, :https_proxy, false)
-
-    on_exit(fn ->
-      restore_cacerts(previous_cacerts)
-      restore_app_env(:tailscale_socket, previous_socket)
-      restore_app_env(:https_proxy, previous_proxy)
-    end)
-
-    _remote =
-      start_bridge(base, localapi, @host, tls_port, request_timeout_ms: 250, name: "sse-idle")
-
-    alias Shuttle.RemoteRegistry.Client.Default
-    assert {:ok, id} = Default.stream_get("https://#{@host}:#{tls_port}/sse", [], self(), 5_000)
-
-    try do
-      assert_receive {:remote_stream, ^id, {:open, _headers, cursor}}, 5_000
-      assert collect_stream(id, cursor) == ": open\n\ndata: late\n\n"
-    after
-      Default.stream_cancel(id)
-    end
-  end
-
   defp start_bridge(base, localapi, host, port, opts \\ []) do
     remote = remote(host, port, opts)
     data_dir = Keyword.get(opts, :data_dir, Path.join(base, "data"))
@@ -1284,18 +1252,6 @@ defmodule Shuttle.TailnetDialTest do
     }
 
     File.write!(path, Jason.encode!(document))
-  end
-
-  defp collect_stream(id, cursor, bytes \\ "") do
-    Shuttle.RemoteRegistry.Client.Default.stream_next(cursor)
-
-    receive do
-      {:remote_stream, ^id, {:data, chunk}} -> collect_stream(id, cursor, bytes <> chunk)
-      {:remote_stream, ^id, :done} -> bytes
-      {:remote_stream, ^id, {:error, reason}} -> flunk("stream failed: #{inspect(reason)}")
-    after
-      5_000 -> flunk("stream did not finish")
-    end
   end
 
   defp short_idle_budget do

@@ -5,16 +5,16 @@
  * is, not how big it is, and says which family it takes.
  *
  *   display  34  serif   a fiber's title on its page; the Desk's column heads.
- *   title    21  serif   a page's or a chat's title, section heads, the
+ *   title    21  serif   a page's or a band's title, section heads, the
  *                        outcome under a fiber's title, a dialog's heading.
- *   prose    18  serif   reading text: pages, chat messages, the composer.
+ *   prose    18  serif   reading text: pages and their bodies.
  *   row      16  serif   a row's title: Desk cards, sidebar and rail rows,
  *                        form fields.
  *   label    15  serif   the chrome's voice: buttons, tabs, menu items, the
  *                        header's verbs and its Constitution and Artifact.
  *   note     14  serif   secondary lines: an outcome under a row, a crumb, a
- *                        caption, a hint; and the chat's compact rows (steps,
- *                        messages, chips, sent files), so a row reads as one.
+ *                        caption, a hint; and compact rows (chips, sent
+ *                        files), so a row reads as one.
  *   meta     12  mono    ids, clock times, counts, keys, paths and states the
  *                        machine wrote, untracked and in the case they were
  *                        written. In serif it is only a whisper (an italic drop
@@ -22,8 +22,8 @@
  *   code   .8em  mono    inline code inside any of the above. Plex's x-height
  *                        is .52 of its size and Garamond's .40, so .8em sets
  *                        code on the same x-height as the words around it.
- *   code-block 14 mono   a block of code, the same everywhere: tool output in
- *                        the chat, the reader, the file viewer, the overview.
+ *   code-block 14 mono   a block of code, the same everywhere: the reader,
+ *                        the file viewer, the overview.
  *                        At 14 its x-height matches prose at 18.
  *
  * Mono is for what a machine wrote or a person types: code, ids, clock times,
@@ -104,17 +104,10 @@
   --leading-display: 0.87;
   --leading-initial: 0.82;
 
-  /* Vertical rhythm in the chat: the space between two prose paragraphs, and
-     the tighter step that separates the compact rows between them (message
-     rows, step groups, chips, sent files, spawned threads). */
-  --rhythm-prose: 14px;
-  --rhythm-row: 4px;
-
   /* Marks drawn from a font. */
   --glyph-initial: 1.55em;
   --glyph-initial-heading: 0.73em;
   --glyph-ornament: 0.56em;
-  --glyph-close: 20px;
   --glyph-small: 11px;
 }
 

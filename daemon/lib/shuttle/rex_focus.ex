@@ -97,7 +97,7 @@ defmodule Shuttle.RexFocus do
            true <- state.active?.(),
            {:ok, bindings} <- state.bindings.(),
            target when not is_nil(target) <- target(event, bindings, state.fibers.()) do
-        state.target.(Map.put(target, "source", "rex"))
+        state.target.(target)
       end
     end
 
@@ -307,7 +307,7 @@ defmodule Shuttle.RexFocus do
 
                 if target &&
                      (raised or title != state.last_title or identity != state.last_target),
-                   do: state.target.(Map.put(target, "source", "rex"))
+                   do: state.target.(target)
 
                 %{state | last_title: title, last_bindings: bindings, last_target: identity}
               else

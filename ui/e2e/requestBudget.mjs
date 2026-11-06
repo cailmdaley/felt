@@ -52,8 +52,6 @@ try {
   await p.goto(url)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Music' }).first().click()
   const selected = () => p.locator('.ws-page.ws-selected')
-  await selected().locator('textarea').waitFor()
-  await selected().locator('.ws-report-chip').click()
   await selected().frameLocator('iframe').getByRole('heading', { name: 'Listening notes', exact: true }).waitFor()
   // Let titles and durations settle.
   await p.clock.runFor(8_000)

@@ -54,8 +54,7 @@
 .ws-nav-lead { display: flex; min-width: 0; }
 .ws-back-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 /* Back controls use the same drawn stroke beside their destination. */
-:is(.ws-return, .ws-chat-origin, .ws-document-back)::before { content: ''; flex: none; width: 11px; height: 11px; margin-inline: 3px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: rotate(45deg); }
-.ws-chat-origin .ws-back-label { color: var(--ws-ink-muted); }
+:is(.ws-return, .ws-document-back)::before { content: ''; flex: none; width: 11px; height: 11px; margin-inline: 3px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: rotate(45deg); }
 .ws-return, .ws-channel-title { font: var(--type-label)/var(--ws-control-height) var(--font-serif); letter-spacing: 0; white-space: nowrap; }
 .ws-channel-title { color: var(--ws-ink); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ws-nav-trail { display: flex; min-width: 0; }
@@ -83,11 +82,6 @@
 .ws-reader .kbn-card-worker:is([data-turn='none'], [data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked']) .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
 .ws-stage-row { display: flex; flex: 1; min-height: 0; }
 .ws-stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-/* Open columns yield width before the desktop chat loses its readable card. */
-@media (min-width: 701px) {
-  .ws-reader[data-page='chat'] .ws-stage-column { min-width: min(100%, calc(320px + 2 * var(--ws-stage-inset))); }
-  .ws-reader[data-page='chat'] :is(.ws-sidebar, .ws-thread-rail) { flex-shrink: 1; min-width: 0; }
-}
 .ws-stage {
   /* Pages clip at the stage's sides; their shadows still fall below it. */
   position: relative; overflow-x: clip; overflow-y: visible; flex: 1; min-height: 0; min-width: 0;
@@ -366,9 +360,6 @@
   .ws-rail-toggle { top: calc(2px + env(safe-area-inset-top)); right: calc(var(--ws-small-gap) + var(--ws-phone-target)); width: var(--ws-phone-target); height: var(--ws-phone-target); }
   /* A document's Threads target belongs to its top bar, clear of its content. */
   .ws-navbar .ws-rail-toggle { position: static; }
-  /* On the chat page the head holds the control set; the threads button takes its far right and the head leaves it room. */
-  .ws-reader[data-page='chat'] .ws-rail-toggle { top: calc(4px + env(safe-area-inset-top)); right: 4px; }
-  .ws-reader[data-page='chat']:has(.ws-rail-toggle:not([hidden])) .ws-chat-head { padding-right: calc(4px + var(--ws-phone-target)); }
 }
 
 /* Family folds share the sidebar's quiet type and ink. */

@@ -1,6 +1,6 @@
-// Captures the board's type across its surfaces: the Desk, a chat (header,
-// a message row, a step group, the composer), the meeting pane and the
-// settings sheet, at 1440 and 390 in both colour schemes.
+// Captures the board's type across its surfaces: the Desk, a constitution
+// under its band, the meeting pane and the settings sheet, at 1440 and 390 in
+// both colour schemes.
 //
 //   npm run harness:board && node e2e/typeCaptures.mjs <out-dir>
 import { mkdir } from 'node:fs/promises'
@@ -19,12 +19,13 @@ async function openRoot(page) {
   const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
-  const header = page.locator('.ws-selected .ws-chat-head')
-  if (await header.locator('h1').innerText() !== root) {
+  const header = page.locator('.ws-stage-band .ws-band-head')
+  await header.waitFor()
+  if (await header.locator('h1').textContent() !== root) {
     await header.getByRole('button', { name: 'Settings', exact: true }).click()
     await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
   }
-  await header.getByRole('heading', { name: root, exact: true }).waitFor()
+  await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, root)
 }
 
 const surfaces = {
@@ -32,19 +33,16 @@ const surfaces = {
     await page.goto(`${base}?example=threads&long-title`)
     await page.locator('.kbn-desk .kbn-card').first().waitFor()
   },
-  async chat(page, device) {
-    await page.goto(`${base}?example=threads&transcript=messages&long-title`)
+  async constitution(page) {
+    await page.goto(`${base}?example=threads&long-title`)
     await openRoot(page)
-    const scroller = page.locator('.ws-selected .ws-transcript-scroll')
-    await scroller.waitFor()
-    // Bring a message row and a step group into view above the composer.
-    const row = page.locator('.ws-selected .ws-transcript-shuttle-message').first()
-    if (await row.count()) await row.evaluate((el, block) => el.scrollIntoView({ block }), device === 'phone' ? 'start' : 'center')
+    await page.locator('.ws-stage-band').getByRole('button', { name: 'Constitution', exact: true }).click()
+    await page.locator('.ws-selected .ws-fiber-prose').waitFor()
   },
   async meeting(page) {
     await page.goto(`${base}?example=threads&meeting=joined&long-title`)
     await openRoot(page)
-    await page.locator('.ws-selected .kbn-detail-transcript').first().waitFor({ timeout: 5000 }).catch(() => {})
+    await page.locator('.ws-stage-band .kbn-detail-transcript').first().waitFor({ timeout: 5000 }).catch(() => {})
   },
   async settings(page) {
     await page.goto(`${base}?example=threads`)
@@ -68,7 +66,7 @@ try {
         localStorage.setItem('shuttle:workspace:sidebar', 'false')
       })
       try {
-        await open(page, device)
+        await open(page)
         await page.waitForTimeout(400)
         await settle(page)
         const file = resolve(out, `${name}-${viewport.width}-${scheme}.png`)

@@ -309,29 +309,6 @@ describe('Desk rows in the document workspace', () => {
     }
   })
 
-  it('keeps non-Desk thread cards available to transcript search without adding them to Desk order', () => {
-    const draft = card({ id: 'draft' })
-    const foldedThread = card({ id: 'folded-thread', shuttleKind: 'oneshot', status: 'closed' })
-    const data = response({
-      now: { drafts: [draft], inFlight: [], awaitingReview: [] },
-      threads: [foldedThread],
-    })
-    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
-    board.fetchAndRender = vi.fn(async () => {})
-    window.history.replaceState(null, '', '#/desk')
-    board.mount(document.body)
-    try {
-      board.lastResponse = data
-      board.render(data)
-
-      expect(board.workspaceCards()).toBe(board.deskProjection.rows)
-      expect((board.workspace as any).cardForHit({ fibers: [{ id: foldedThread.id }] })).toBe(foldedThread)
-    } finally {
-      board.unmount()
-    }
-  })
-
   it('keeps cycle ghosts out of the sidebar order', () => {
     const draft = card({ id: 'draft' })
     const restingFirst = card({ id: 'resting/first', effectiveHorizon: 'stashed' })

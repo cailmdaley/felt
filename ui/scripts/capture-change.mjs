@@ -24,7 +24,7 @@ try {
       page.on('pageerror', error => errors.push(error.message))
       await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=change`, { waitUntil: 'domcontentloaded' })
       await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-      await page.locator('.ws-selected .ws-report-chip[data-document-key$="/family.change.json"]').click()
+      await page.locator('.ws-rail-files .ws-rail-file[data-key$="/family.change.json"]').click()
       const reader = page.locator('.ws-selected .change-reader')
       await reader.locator('.change-map-tile').first().waitFor()
       await page.evaluate(() => document.fonts.ready)

@@ -1,4 +1,4 @@
-// Cold app transfer/lazy-loading and file:// harness snapshot/transcript budgets.
+// Cold app transfer/lazy-loading and file:// harness snapshot budgets.
 // Run after `npm run build && npm run harness:board` with `node e2e/performance.mjs`.
 import assert from 'node:assert/strict'
 import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
@@ -21,7 +21,7 @@ result.assets = {
   harness: await Promise.all(await inventory(resolve('harness-board-dist'))),
 }
 
-async function openScenario(name, query, selectChat) {
+async function openScenario(name, query, openCard) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
   const page = await context.newPage()
   await page.addInitScript(() => {
@@ -39,13 +39,9 @@ async function openScenario(name, query, selectChat) {
   await page.goto(`${base}${query}`)
   await page.locator('.kbn-desk').waitFor()
   const harnessReadyMs = await page.evaluate(() => performance.now() - window.__perfNavigationStart)
-  if (selectChat) {
+  if (openCard) {
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-    await page.locator('.ws-page.ws-selected .ws-transcript-turn').last().waitFor()
-    await page.locator('.ws-page.ws-selected textarea').waitFor()
-    if (query.includes('transcript=large')) {
-      await page.getByText('Fixture bin 3000 is within the review tolerance; retain the measured value and continue.', { exact: true }).waitFor()
-    }
+    await page.locator('.ws-stage-band .ws-band-head').waitFor()
   }
   await page.screenshot({ path: join(screenshotDir, `${name}.png`) })
   const initial = await page.evaluate(() => {
@@ -68,7 +64,6 @@ async function openScenario(name, query, selectChat) {
       }, {}),
       fiberIndexRequests: requests.filter(request => request.url.includes('/api/v1/fibers?fields=index')).length,
       cards: document.querySelectorAll('.kbn-desk .kbn-card').length,
-      turns: document.querySelectorAll('.ws-page.ws-selected .ws-transcript-turn').length,
       heapBytes: performance.memory?.usedJSHeapSize ?? null,
     }
   })
@@ -96,7 +91,6 @@ async function openScenario(name, query, selectChat) {
       if (card) card.setAttribute('data-perf-identity', 'tracked')
       return card !== null
     })(),
-    turns: document.querySelectorAll('.ws-page.ws-selected .ws-transcript-turn').length,
     revision: window.__harness.modal.workspace.lastUpdateRevision,
   }))
   const cdp = await context.newCDPSession(page)
@@ -140,7 +134,6 @@ async function openScenario(name, query, selectChat) {
       revisionChanges,
       mutationTargets: [...mutationTargets.entries()].map(([key, value]) => [key, value]).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
       cardCount: document.querySelectorAll('.kbn-desk .kbn-card').length,
-      turnCount: document.querySelectorAll('.ws-page.ws-selected .ws-transcript-turn').length,
       heapBytes: performance.memory?.usedJSHeapSize ?? null,
       requests: window.__harness.requests.length,
       selectedCardIdentityPreserved: document.querySelector('.kbn-desk .kbn-card[data-perf-identity="tracked"]') !== null,
@@ -148,26 +141,6 @@ async function openScenario(name, query, selectChat) {
       parseElapsedMs: window.__perfParse.elapsedMs,
     }
   })
-  if (selectChat) {
-    result.scenarios[name].transcriptPoll = await page.evaluate(async () => {
-      const feed = [...window.__harness.modal.workspace.dock.bands.values()].find(dock => dock.transcriptBand).transcriptBand.feed
-      const beforeOffset = feed.offset
-      const beforeRequests = window.__harness.requests.filter(request => request.url.includes('/api/v1/transcript/raw')).length
-      window.__perfParse = { count: 0, elapsedMs: 0 }
-      const start = performance.now()
-      for (let i = 0; i < 239; i++) await feed.read()
-      return {
-        reads: 239,
-        representedMinutes: 60,
-        cadence: 'accelerated direct TranscriptFeed.read calls; no wall-clock interval waits',
-        elapsedMs: performance.now() - start,
-        unchangedOffset: feed.offset === beforeOffset,
-        addedRequests: window.__harness.requests.filter(request => request.url.includes('/api/v1/transcript/raw')).length - beforeRequests,
-        jsonParseCount: window.__perfParse.count,
-        jsonParseElapsedMs: window.__perfParse.elapsedMs,
-      }
-    })
-  }
   await page.evaluate(() => {
     window.__harness.requests.splice(0)
     window.__harness.handlers.splice(0)
@@ -177,14 +150,12 @@ async function openScenario(name, query, selectChat) {
   const parseMetrics = { count: tick.parseCount, elapsedMs: tick.parseElapsedMs }
   result.scenarios[name].snapshotTick = {
     polls: 240,
-    transcriptPolls: 0,
     representedMinutes: 60,
     elapsedMs: tick.elapsedMs,
     mutationRecords: tick.mutations,
     meetingControlMutations: tick.meetingControlMutations,
     mutationTargets: tick.mutationTargets,
     cards: tick.cardCount,
-    turns: tick.turnCount,
     retainedHeapGrowthBytes: heapAfterGc - heapBefore,
     heapBeforeGcBytes: heapBefore,
     heapAfterGcBytes: heapAfterGc,
@@ -194,7 +165,7 @@ async function openScenario(name, query, selectChat) {
     addedRequests: tick.requests,
     selectedCardIdentityPreserved: tick.selectedCardIdentityPreserved,
   }
-  if (selectChat) {
+  if (openCard) {
     result.scenarios[name].changedCardRefresh = await page.evaluate(async (previousRevision) => {
       const row = window.__harness.MOCK_FEED.fibers.find(entry => entry.fiber.id === 'research/workspace/calibration-report')
       const previous = row.fiber.name
@@ -202,70 +173,11 @@ async function openScenario(name, query, selectChat) {
       await window.__harness.modal.fetchAndRender()
       return {
         revisionChanged: window.__harness.modal.workspace.lastUpdateRevision !== previousRevision,
-        titleUpdated: document.querySelector('.ws-chat-title')?.textContent?.includes('live update') ?? false,
+        titleUpdated: document.querySelector('.ws-stage-band .ws-band-title')?.textContent?.includes('live update') ?? false,
       }
     }, before.revision)
   }
   result.scenarios[name].errors.push(...errors)
-  await context.close()
-}
-
-async function measureChangedTranscriptPoll() {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
-  const page = await context.newPage()
-  await page.addInitScript(() => {
-    const parse = JSON.parse
-    window.__perfParse = { count: 0, elapsedMs: 0 }
-    JSON.parse = function (...args) {
-      const start = performance.now()
-      try { return parse.apply(this, args) }
-      finally { window.__perfParse.count++; window.__perfParse.elapsedMs += performance.now() - start }
-    }
-  })
-  const errors = []
-  page.on('pageerror', error => errors.push(error.message))
-  await page.goto(`${base}?example=workspace&transcript=live`)
-  await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-  for (let i = 0; i < 32 && !(await page.locator('.ws-page.ws-selected[data-key^="chat:"]').count()); i++) {
-    await page.evaluate(() => document.activeElement?.blur())
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(30)
-  }
-  await page.locator('.ws-page.ws-selected[data-key^="chat:"]').waitFor()
-  await page.locator('.ws-page.ws-selected .ws-transcript-turn').last().waitFor()
-  await page.locator('.ws-page.ws-selected .ws-transcript-working-inline').waitFor()
-  const feed = '() => [...window.__harness.modal.workspace.dock.bands.values()].find(dock => dock.transcriptBand)?.transcriptBand?.feed'
-  await page.waitForFunction(feed)
-  await page.evaluate(() => [...window.__harness.modal.workspace.dock.bands.values()].find(dock => dock.transcriptBand).transcriptBand.feed.read())
-  await page.waitForFunction(() => [...window.__harness.modal.workspace.dock.bands.values()].find(dock => dock.transcriptBand)?.transcriptBand?.feed?.offset > 0)
-  await page.evaluate(() => { window.__perfParse = { count: 0, elapsedMs: 0 } })
-  const before = await page.evaluate(() => [...window.__harness.modal.workspace.dock.bands.values()].find(dock => dock.transcriptBand).transcriptBand.feed.offset)
-  const changed = await page.evaluate(async () => {
-    const feed = [...window.__harness.modal.workspace.dock.bands.values()].find(dock => dock.transcriptBand).transcriptBand.feed
-    let renderMutations = 0
-    const observer = new MutationObserver(records => { renderMutations += records.length })
-    observer.observe(document.body, { childList: true, subtree: true })
-    window.__perfStart = performance.now()
-    await feed.read()
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    observer.disconnect()
-    return {
-      bytes: feed.offset,
-      parseCount: window.__perfParse.count,
-      parseElapsedMs: window.__perfParse.elapsedMs,
-      elapsedMs: performance.now() - window.__perfStart,
-      renderMutations,
-      liveTextRendered: document.body.textContent?.includes('Live worker update 1: the next fictional validation batch is in progress.') ?? false,
-    }
-  })
-  await page.getByText('Live worker update 1: the next fictional validation batch is in progress.', { exact: true }).waitFor()
-  changed.bytes -= before
-  changed.elapsedMs = Math.max(0, changed.elapsedMs)
-  assert.ok(changed.bytes > 0, 'the live transcript poll receives appended JSONL bytes')
-  assert.ok(changed.parseCount > 0, 'the changed JSONL records are parsed')
-  assert.ok(changed.renderMutations > 0 && changed.liveTextRendered, 'the changed transcript poll renders its appended content')
-  assert.equal(errors.length, 0, 'the changed transcript poll has no browser errors')
-  result.changedTranscriptPoll = changed
   await context.close()
 }
 
@@ -364,14 +276,11 @@ async function measureColdApp() {
 
 try {
   await openScenario('desk', '?', false)
-  await openScenario('chat-long-transcript', '?example=workspace&transcript=large', true)
-  await measureChangedTranscriptPoll()
+  await openScenario('constitution', '?example=workspace', true)
   await measureColdApp()
 } finally {
   await browser.close()
 }
-assert.ok(result.changedTranscriptPoll.parseElapsedMs >= 0)
-assert.ok(result.changedTranscriptPoll.elapsedMs >= 0)
 
 for (const [name, scenario] of Object.entries(result.scenarios)) {
   const tick = scenario.snapshotTick
@@ -380,18 +289,12 @@ for (const [name, scenario] of Object.entries(result.scenarios)) {
   assert.equal(tick.mutationRecords, 0, `${name}: identical snapshots do not mutate the DOM`)
   assert.equal(tick.selectedCardIdentityPreserved, true, `${name}: card identity survives identical snapshots`)
   assert.equal(tick.cards, scenario.initial.cards, `${name}: card count stays constant`)
-  assert.equal(tick.turns, scenario.initial.turns, `${name}: transcript window stays constant`)
   if (scenario.changedCardRefresh) {
     assert.equal(scenario.changedCardRefresh.revisionChanged, true, `${name}: changed card payload reaches the workspace`)
-    assert.equal(scenario.changedCardRefresh.titleUpdated, true, `${name}: changed title appears in the chat`)
+    assert.equal(scenario.changedCardRefresh.titleUpdated, true, `${name}: changed title appears in the band`)
   }
   assert.ok(tick.retainedHeapGrowthBytes < 12 * 1024 * 1024, `${name}: one simulated hour retains less than 12 MiB after GC`)
-  assert.equal(tick.jsonParseCount, 0, `${name}: unchanged board snapshots do not parse transcript JSONL`)
-  if (scenario.transcriptPoll) {
-    assert.equal(scenario.transcriptPoll.unchangedOffset, true, `${name}: unchanged transcript reads retain the byte offset`)
-    assert.equal(scenario.transcriptPoll.addedRequests, 239, `${name}: the accelerated hour issues 239 transcript reads`)
-    assert.equal(scenario.transcriptPoll.jsonParseCount, 0, `${name}: unchanged transcript reads do not parse JSONL again`)
-  }
+  assert.equal(tick.jsonParseCount, 0, `${name}: unchanged board snapshots parse no JSON`)
 }
 if (process.env.REPORT_ONLY !== '1') {
   assert.equal(result.scenarios.desk.initial.fiberIndexRequests, 0, 'cold Desk does not fetch the full fiber index')

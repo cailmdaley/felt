@@ -1,5 +1,5 @@
 defmodule Shuttle.HarnessTasks do
-  @moduledoc "Harness-owned checklists and incremental Codex plan reads for the live worker projection."
+  @moduledoc "Harness-owned checklists and incremental Codex plan reads, which tell the pulse whether a worker still has work in hand."
 
   alias Shuttle.{FileTail, HarnessPaths, Transcript}
   @statuses ~w(pending in_progress completed)

@@ -9,7 +9,7 @@ export interface LifecycleVerbSpec { verb: LifecycleVerb; label: string; icon: H
 export type SessionVerb = 'launch' | 'resume' | 'newSession'
 export interface SessionVerbSpec { verb: SessionVerb; label: string; icon: HeaderIcon }
 
-/** Header actions shared with the composer by the resting constitution. */
+/** The band's ways to start a worker. */
 export const SESSION_VERBS: readonly SessionVerbSpec[] = [
   { verb: 'launch', label: 'Launch', icon: 'newSession' },
   { verb: 'resume', label: 'Resume', icon: 'resume' },
@@ -44,13 +44,11 @@ export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lif
   return reachable
 }
 
-/** Session actions paired with the lifecycle verbs in the chat header. */
+/** Session actions paired with the lifecycle verbs: a live worker can only be cut for a new one, a past session can also be resumed. */
 export function sessionVerbsFor(card: KanbanCard): SessionVerb[] {
   if (!onDesk(card)) return []
-  const column = deskColumn(card)
-  if (column === 'drafts') return ['launch']
-  if (column === 'roles' || column === 'resting' || column === 'scheduled' || column === 'tempered' || column === 'composted') return ['resume', 'newSession']
-  return []
+  if (hasLiveWorker(card)) return ['newSession']
+  return card.sessionUuid ? ['resume', 'newSession'] : ['launch']
 }
 
 /** Draw a button as the header draws a lifecycle verb: its stroke icon, then its word, in its pigment. */

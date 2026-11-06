@@ -185,8 +185,6 @@ export function linkRequests(
 export interface SessionHistoryContext extends TargetContext {
   shuttleBase: string
   uid: string
-  /** Open this row's native transcript in the board reader. */
-  onRead?: (record: SessionRecord) => void
   /** Where a failed terminal open is said. */
   onError?: (message: string) => void
 }
@@ -320,18 +318,6 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
     const targets = sessionTargets(record, link, ctx)
     const primary = targetEl(targets.primary, 'kbn-ctl-session-link')
     li.append(primary)
-    if (ctx.onRead && link?.availability !== 'transcript_missing') {
-      const read = document.createElement('button')
-      read.type = 'button'
-      read.className = 'kbn-ctl-session-alt kbn-ctl-session-read'
-      read.textContent = 'read'
-      read.title = 'Read this session transcript'
-      read.addEventListener('click', (event) => {
-        event.stopPropagation()
-        ctx.onRead?.(record)
-      })
-      li.append(read)
-    }
     for (const extra of targets.extras) li.append(targetEl(extra, 'kbn-ctl-session-alt'))
     // The whole row is its primary action, as the worker pill is.
     if (targets.primary.kind === 'terminal') {

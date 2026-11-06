@@ -92,16 +92,10 @@ export function registerRenderedTypeJourneys(test, { open, choose, headerAction 
     await open(page)
     // Author-owned artifact text lives in an iframe; its surrounding chrome is checked.
     await assertRendered(page, `${width} artifact chrome`, failures)
-    for (const view of ['Constitution', 'Chat']) {
-      await choose(page, view)
-      await assertRendered(page, `${width} ${view}`, failures)
-    }
+    await choose(page, 'Constitution')
+    await assertRendered(page, `${width} Constitution`, failures)
     await headerAction(page, 'Settings')
     await assertRendered(page, `${width} settings`, failures)
-    const messages = new URL(page.url()); messages.searchParams.set('transcript', 'messages'); messages.hash = ''
-    await page.goto(messages.href)
-    await open(page, 'Chat')
-    await assertRendered(page, `${width} message rows`, failures)
     assert.deepEqual(failures, [], 'Computed text follows type.css and the canonical clock grammar')
   }, { width, height: width === 1440 ? 900 : 844 })
 

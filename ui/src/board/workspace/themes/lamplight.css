@@ -75,7 +75,7 @@
 [data-part="page-frame"] .ws-content,
 [data-part="prose"],
 [data-part="fiber-header"] { background: transparent; }
-/* The composer's plate takes the prose's clear paper, so the chart runs under it too. */
+/* The act zone's plates take the prose's clear paper, so the chart runs under them too. */
 [data-part="prose"] { --ws-paper: transparent; }
 
 [data-part="label-bar"] {

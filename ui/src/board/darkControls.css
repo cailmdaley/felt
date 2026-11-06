@@ -14,7 +14,7 @@
  *   a verdict         its pigment as a tinted plate, a little stronger than on
  *                     paper so the plate reads off the page
  *
- * The page's own controls (the composer, its segmented settings) keep the act
+ * The page's own controls (its segmented settings) keep the act
  * zone's materials and take only a firmer edge, at the end of this sheet. */
 
 :root[data-ws-appearance='dark'] :is(.form-cancel, .set-btn:not(.set-btn-primary, .set-btn-drop), .projpick-addpath-cancel, .capture-meeting-toggle:not([aria-pressed='true'])) {
@@ -85,7 +85,7 @@
 /* The page's act zone derives its materials from the page's paper and ink
    (ChannelThemes' act defaults). On dark stock its send plate and chosen
    segment take a firmer edge, so the plate's bounds hold 3:1. */
-:root[data-ws-appearance='dark'] .ws-dock .kbn-ctl-composer .kbn-ctl-send:not(.kbn-ctl-secondary) {
+:root[data-ws-appearance='dark'] .ws-dock .kbn-ctl-send {
   border-color: color-mix(in srgb, var(--ws-ink) 48%, transparent) !important;
 }
 :root[data-ws-appearance='dark'] .ws-dock .kbn-ctl-segment[aria-checked='true'] {

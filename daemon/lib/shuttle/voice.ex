@@ -16,6 +16,7 @@ defmodule Shuttle.Voice do
   def cold?(target), do: Shuttle.Voice.Target.cold?(target)
   def update(params, opts \\ []), do: GenServer.call(server(opts), {:update, params}, 30_000)
 
+  @doc "Follow the focused Rex session while Follow me is on and no recording holds the mic."
   def target(params, opts \\ []),
     do: GenServer.call(server(opts), {:target, params, DateTime.utc_now()})
 
@@ -81,23 +82,14 @@ defmodule Shuttle.Voice do
     {:reply, %{snapshot | error: snapshot.error || state.focus_error}, state}
   end
 
-  def handle_call({:target, %{"source" => "rex"} = params, received_at}, from, state) do
-    if state.snapshot.enabled and state.snapshot.state != "yielded" and
-         match?({:ok, %{"enabled" => true}}, Config.read()) do
-      handle_call({:target, Map.delete(params, "source"), received_at}, from, state)
-    else
-      {:reply, {:ok, state.snapshot}, state}
-    end
-  end
-
   def handle_call({:target, %{"fiber_id" => id} = params, received_at}, _from, state)
       when is_binary(id) and id != "" do
     origin = params["origin"]
 
-    case if(state.route_error,
-           do: {:error, {:routes, state.route_error}},
-           else: Shuttle.OriginRouter.route_host(origin)
-         ) do
+    case route_check(state, origin) do
+      :not_following ->
+        {:reply, {:ok, state.snapshot}, state}
+
       {:error, {:routes, reason}} ->
         {:reply, {:error, reason}, state}
 
@@ -151,6 +143,18 @@ defmodule Shuttle.Voice do
     else
       {:noreply, enqueue(state, {params, from})}
     end
+  end
+
+  defp route_check(%{route_error: reason}, _origin) when not is_nil(reason),
+    do: {:error, {:routes, reason}}
+
+  defp route_check(state, origin) do
+    if following?(state), do: Shuttle.OriginRouter.route_host(origin), else: :not_following
+  end
+
+  defp following?(state) do
+    state.snapshot.enabled and state.snapshot.state != "yielded" and
+      match?({:ok, %{"enabled" => true}}, Config.read())
   end
 
   defp live_drafts(snapshot, state) do

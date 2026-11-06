@@ -4,7 +4,7 @@ import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
-import { isAgentCard, type DispatchFailureBody } from '../KanbanModalShared.js'
+import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry, IN_FLIGHT_BANDS, inFlightBand } from '../KanbanReadModel.js'
@@ -15,18 +15,17 @@ import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import type { DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { channelLead, leadReceipt, buildChannel, normalizeAbsolutePath, chatDocument, chatKey, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { meetingHostCard, type MeetingRecord } from '../meeting.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { frameBridge } from './DocumentBridge.js'
-import '../transcript/mentions.css'
+import './mentions.css'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
 import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
-import type { TranscriptHit } from '../transcript/find.js'
 import { Overview } from './Overview.js'
 import { parseRoute, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
@@ -36,8 +35,6 @@ export interface WorkspaceOptions {
   /** The current response's thread graph, built once per response. */
   threadIndex?(): ThreadIndex
   shuttleBase: string
-  /** The daemon serving shuttleBase, identified by the composite feed; unknown means no local hit can open. */
-  localHost?(): string | undefined
   cards(): KanbanCard[]
   /** The active Desk projection, already in the Desk's visible reading order. */
   deskRows(): KanbanCard[]
@@ -81,7 +78,7 @@ const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chroni
 const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
-const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'chat' ? 'Chat' : doc.kind === 'fiber' ? 'Constitution' : doc.name
+const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const current = index.card(card)
   const ancestry = index.ancestry(current).flatMap(entry => entry.card ? [index.card(entry.card)] : [])
@@ -121,9 +118,6 @@ export class Workspace {
   private routeEpoch = 0
   private lastBoardRoute: Extract<WorkspaceRoute, { kind: 'channel' }> | null = null
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
-  /** A channel opened to write to: its composer takes focus once it is shown. */
-  private composing: string | null = null
-  private transcriptHit: { card: KanbanCard; hit: TranscriptHit; query: string } | null = null
   /** The complete board-card payload used by the reader's thread and runtime surfaces. */
   private lastUpdateRevision = ''
   private lastRenderedFamilyRevision = ''
@@ -142,7 +136,7 @@ export class Workspace {
     this.dock.setMeetingHostOpen(meeting => {
       if (!meeting.fiber) return
       const host = meetingHost(meeting)
-      if (host) this.open(host, this.origin, chatKey(host.originId, host.uid ?? host.id), this.overview.hasMetadata(host), false)
+      if (host) this.open(host, this.origin, undefined, this.overview.hasMetadata(host), false)
       else if (meeting.mirror_host ?? meeting.recorder) void this.openFiber(meeting.fiber, meeting.mirror_host ?? meeting.recorder!)
     }, meeting => {
       const host = meetingHost(meeting)
@@ -176,11 +170,7 @@ export class Workspace {
     this.picker = new ConstitutionPicker(pickerOptions)
     this.barPicker = new ConstitutionPicker({
       ...pickerOptions, find: opts.find, active: () => this.barPicker.isOpen,
-      supplement: opts.find ? new TranscriptResults({
-        shuttleBase: opts.shuttleBase,
-        canOpen: hit => !!this.cardForHit(hit),
-        open: (hit, query) => this.openTranscriptHit(hit, query),
-      }) : undefined,
+      supplement: opts.find ? new TranscriptResults(opts.shuttleBase) : undefined,
       onEscape: () => { this.clearFind(); opts.find?.blur(); (document.activeElement as HTMLElement | null)?.blur?.() },
     })
     const reviewTarget = (source: WorkspaceDocument) => changeReviewTarget(source, opts.cards())
@@ -212,18 +202,13 @@ export class Workspace {
       onRevisitDocument: key => this.revisit(key),
       workerPill: card => this.dock.workerPillFor(card),
       onVerdict: verdict => this.deferVerdict(verdict),
-      onCompose: () => this.focusComposer(),
       onConversation: card => { this.dock.openConversation(card) },
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       onScan: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card), true, true),
       onOrchestrator: () => this.openOrchestrator(),
-      buildProse: doc => doc.kind === 'chat' ? this.chat(doc.key) : this.prose(doc.key),
-      disposeProse: doc => {
-        const state = [...this.channels.values()].find(s => (chatDocument(s.channel) ?? proseDocument(s.channel))?.key === doc.key)
-        if (state) this.dock.releaseBand(state.card)
-      },
+      buildProse: doc => this.prose(doc.key),
       onRefreshProse: async doc => {
         const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === doc.key)
         if (!state) return
@@ -252,22 +237,6 @@ export class Workspace {
     else this.barPicker.refresh()
     this.overview.refresh()
   }
-  /** Local search results only open cards from the daemon holding the transcript. */
-  private cardForHit(hit: TranscriptHit): KanbanCard | undefined {
-    const host = this.opts.localHost?.()
-    if (!host) return undefined
-    return hit.fibers.flatMap(fiber => this.opts.cards().filter(card =>
-      card.originId === host && (card.id === fiber.id || card.uid === fiber.id || card.path === fiber.id) && isAgentCard(card),
-    ))[0]
-  }
-  private openTranscriptHit(hit: TranscriptHit, query: string): void {
-    const card = this.cardForHit(hit)
-    if (!card) return
-    this.clearFind()
-    this.transcriptHit = { card, hit, query }
-    const state = this.ensure(card)
-    this.open(card, this.isActive ? this.origin : this.opts.origin(), chatDocument(state.channel)?.key, true, false)
-  }
   /** Close the Find's list, if it hangs open. */
   closeFind(): void { this.barPicker.close() }
   /** Empty the bar's Find and lift whatever it filtered. */
@@ -295,7 +264,7 @@ export class Workspace {
   /** A refused Desk launch enters the document channel and exposes its recovery form. */
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
     this.startPrompt = { card, failure }
-    this.open(card, this.opts.origin(), this.landing(this.ensure(card).channel))
+    this.open(card)
   }
 
   /** A Question card leads with its report, even after a previous visit to prose. */
@@ -306,15 +275,6 @@ export class Workspace {
     this.open(card)
   }
 
-  /** Open the constitution on its chat with the composer focused. */
-  compose(card: KanbanCard): void {
-    this.composing = cardIdentity(card)
-    this.open(card, this.opts.origin(), this.landing(this.ensure(card).channel))
-  }
-  /** The page that holds the composer: the chat, else the fiber's own page. */
-  private landing(channel: Channel): DocKey | undefined {
-    return (chatDocument(channel) ?? proseDocument(channel))?.key
-  }
   /** The open thread's orchestrator, as the rail would open it; false outside a thread. */
   private orchestrator(card: KanbanCard): KanbanCard | undefined {
     const index = this.opts.threadIndex?.()
@@ -339,7 +299,7 @@ export class Workspace {
     this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
-    this.history.enter(state.channel.uid, state.channel.owner, doc ?? (chatDocument(state.channel)?.key ?? state.selected), viewForOrigin(origin), scan)
+    this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin), scan)
   }
 
   /**
@@ -478,10 +438,7 @@ export class Workspace {
   private deferVerdict(verdict: Verdict): void {
     const state = this.current
     if (!state?.metadataKnown || !verdictReachable(state.card)) return
-    // A key verdict given from another page waits where the verdict lives,
-    // on the chat's header line, so the page comes forward to show it.
-    const prose = this.landing(state.channel)
-    if (this.queueVerdict(state.card, verdict) && prose && state.selected !== prose) this.revisit(prose)
+    this.queueVerdict(state.card, verdict)
   }
   /** Desk, plates, act-zone buttons and keys authorize the same delayed write.
    * Answers whether the verdict entered its undo window. */
@@ -527,58 +484,27 @@ export class Workspace {
     })
     return true
   }
-  private focusComposer(): boolean {
-    const state = this.current
-    if (!state) return false
-    const key = this.landing(state.channel)
-    if (key && state.selected !== key) {
-      this.composing = cardIdentity(state.card)
-      this.revisit(key)
-    }
-    return this.controls(state)?.focusComposer() ?? false
-  }
-  /** A channel opened to write to takes the composer's focus on its first
-   *  paint, and again once its body is read if the repaint dropped focus. */
-  private landComposer(state: ChannelState, last: boolean): void {
-    if (this.composing !== channelId(state.channel.uid, state.channel.owner)) { this.composing = null; return }
-    const lost = !document.activeElement || document.activeElement === document.body
-    if (!last || lost) this.focusComposer()
-    if (last) this.composing = null
-  }
-
-  /** Settings, history and the composer belong to fibers on the Desk's lifecycle; a note or role has none. */
+  /** The band belongs to fibers on the Desk's lifecycle; a note or role has none. */
   private controls(state: ChannelState | null): Dock | undefined {
-    return state?.metadataKnown && !state.channel.uid.startsWith('other:') && onDesk(state.card) ? this.dock.bandFor(state.card) : undefined
+    if (!state?.metadataKnown || state.channel.uid.startsWith('other:') || !onDesk(state.card)) return undefined
+    this.dock.open(state.card)
+    return this.dock
   }
-  /** A Shuttle-managed fiber has a worker conversation, and so a chat page. */
-  private conversation(state: Pick<ChannelState, 'card' | 'metadataKnown'>, uid: string): boolean {
-    return state.metadataKnown && !uid.startsWith('other:') && isAgentCard(state.card)
-  }
-  /** The header separates the visited path from the thread's ancestry. */
-  private seatNav(state: ChannelState, dock: Dock): void {
+  /** Seat the band over the channel's pages, with its links. */
+  private seatBand(state: ChannelState): void {
+    const dock = this.controls(state)
+    this.reader.setBand(dock?.el ?? null)
+    if (!dock) return
     const ancestry: KanbanCard[] = []
     for (let parent = this.orchestrator(state.card); parent; parent = this.orchestrator(parent)) ancestry.unshift(parent)
     dock.openSettings = (content, opener) => this.reader.showSettings(content, opener)
     dock.closeSettings = after => this.reader.closeSettings(after)
+    dock.openFile = (path, title, owner) => this.openFile(path, title, owner)
     dock.setNav({
       ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) }) })),
-      origin: { label: this.history.backLabel, open: () => this.reader.back() },
       desk: () => this.escapeHome(),
       constitution: () => { const page = proseDocument(state.channel); if (page) this.visit(page.key) },
     })
-  }
-  /** The chat page: the constitution's band, seated whole. */
-  private chat(key: DocKey): HTMLElement {
-    const page = document.createElement('div')
-    page.className = 'ws-chat-page'
-    const state = [...this.channels.values()].find(s => chatDocument(s.channel)?.key === key)
-    const dock = state && this.controls(state)
-    if (!state || !dock) return page
-    this.seatNav(state, dock)
-    dock.openFile = (path, title, owner) => this.openFile(path, title, owner)
-    page.append(dock.el)
-    queueMicrotask(() => dock.reseated())
-    return page
   }
   private holds(state: ChannelState): KanbanCard[] {
     const slug = roleSlug(state.card)
@@ -591,16 +517,7 @@ export class Workspace {
     const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
     if (!state) return document.createElement('div')
     this.proseRevisions.set(key, this.proseRevision(state))
-    const dock = this.controls(state)
-    // With a chat page the fiber's page is its prose alone; the controls live in the chat.
-    const chat = chatDocument(state.channel)
     const page = buildFiberProse(state.card, state.channel, {
-      controls: chat ? undefined : dock?.el,
-      onContinueReading: dock && state.card.sessionUuid ? text => {
-        if (chat) this.revisit(chat.key)
-        dock.openOutcome(text)
-      } : undefined,
-      acts: chat ? undefined : dock?.head,
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title, owner?: string) => this.openFile(path, title, owner),
@@ -619,9 +536,6 @@ export class Workspace {
       }
       page.querySelector('.ws-prose')?.append(note)
     }
-    // The caller seats the new page synchronously; the Dock then puts back
-    // what moving its element reset (scroll positions, the open transcript).
-    if (dock && !chat) queueMicrotask(() => dock.reseated())
     return page
   }
   private refreshProse(state: ChannelState): void {
@@ -637,7 +551,7 @@ export class Workspace {
     if (!state) {
       state = {
         card,
-        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, conversation: this.conversation({ card, metadataKnown }, uid), modifiedAt: card.modifiedAt }),
+        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, modifiedAt: card.modifiedAt }),
         links: [], fileModifiedAt: new Map(), loaded: false, runFinal: false, metadataKnown,
       }
       this.channels.set(key, state)
@@ -683,9 +597,6 @@ export class Workspace {
     if (sameChannel && state.loaded && state.runFinal && route.doc && state.channel.documents.some(doc => doc.key === route.doc)) {
       this.select(route.doc)
       this.reader.setBackDestination(this.history.backLabel)
-      const dock = this.controls(state)
-      if (dock) this.seatNav(state, dock)
-      this.landComposer(state, true)
       this.startTimer()
       return
     }
@@ -706,30 +617,27 @@ export class Workspace {
     }
     this.overview.setVisible(false)
     // Selection resolves before the first paint; data arriving later never moves it.
-    // A constitution with a conversation opens on its chat; another lands on its report.
-    const wanted = route.doc ?? (chatDocument(state.channel)?.key ?? state.selected ?? this.knownReport(state))
+    // A constitution lands on its report.
+    const wanted = route.doc ?? state.selected ?? this.knownReport(state)
     const loadedBefore = state.loaded && state.runFinal
     if (wanted) this.intend(state, wanted)
     this.opts.onVisibility(true)
     this.depth.setActive(true)
     this.show(state)
-    this.landComposer(state, false)
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
       this.startPrompt = null
-      const band = this.dock.bandFor(prompt.card)
-      band.openStartPrompt(prompt.card, prompt.failure)
-      if (!window.matchMedia('(max-width: 600px)').matches) band.el.querySelector<HTMLElement>('textarea')?.focus({ preventScroll: true })
+      this.dock.openStartPrompt(prompt.card, prompt.failure)
+      if (!window.matchMedia('(max-width: 600px)').matches) this.dock.el.querySelector<HTMLElement>('.kbn-start-prompt input')?.focus({ preventScroll: true })
     }
     await bodyRead
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
     if (state.questionLanding) {
       state.questionLanding = false
       const report = channelLead(state.channel)
-      state.selected = this.landing(state.channel) ?? report?.key
+      state.selected = report?.key
     }
     this.show(state, loadedBefore)
-    this.landComposer(state, true)
     this.startTimer()
   }
   /**
@@ -750,10 +658,10 @@ export class Workspace {
     const report = leadReceipt(receipts, card.fiberDir, file => file.fullPath)
     return report ? docKey(card.originId, report.fullPath, card.originId, card.fiberDir) : undefined
   }
-  /** The page on screen: the selection when the channel lists it, else the chat, else the fiber's own page. */
+  /** The page on screen: the selection when the channel lists it, else the fiber's own page. */
   private shown(state: ChannelState): DocKey {
     const documents = state.channel.documents
-    return state.selected && documents.some(d => d.key === state.selected) ? state.selected : this.landing(state.channel) ?? documents[0].key
+    return state.selected && documents.some(d => d.key === state.selected) ? state.selected : proseDocument(state.channel)?.key ?? documents[0].key
   }
   private show(state: ChannelState, animate = true): void {
     const ch = state.channel
@@ -765,16 +673,7 @@ export class Workspace {
     this.reader.setBackDestination(this.history.backLabel)
     this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
-    this.dock.syncRuntime(state.card)
-    const dock = chatDocument(ch) && this.controls(state)
-    if (dock) {
-      this.seatNav(state, dock)
-      const pending = this.transcriptHit
-      if (pending && cardIdentity(pending.card) === cardIdentity(state.card)) {
-        this.transcriptHit = null
-        dock.openTranscriptHit(pending.hit, pending.query)
-      }
-    }
+    this.seatBand(state)
   }
   private namePage(state: ChannelState, key: DocKey): void {
     const doc = state.channel.documents.find(doc => doc.key === key)!
@@ -985,7 +884,7 @@ export class Workspace {
    */
   private readFileMetadata(state: ChannelState): Promise<boolean> {
     if (state.metadataRead) return state.metadataRead
-    const files = state.channel.documents.filter(d => d.kind !== 'fiber' && d.kind !== 'chat')
+    const files = state.channel.documents.filter(d => d.kind !== 'fiber')
     let changed = false
     const read = Promise.all(files.map(async doc => {
       const info = await head(fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
@@ -1016,7 +915,6 @@ export class Workspace {
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,
-      conversation: this.conversation(state, before.uid),
       sent, links: state.links, routed: provisional ? [provisional] : undefined, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,
     })
     if (state.selected && !state.channel.documents.some(d => d.key === state.selected)) {

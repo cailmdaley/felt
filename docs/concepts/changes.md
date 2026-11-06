@@ -205,7 +205,7 @@ The reader and Send button name earlier anchors; the delivered message preserves
 Viewed marks are separate: they reset when the base, head or bundle’s non-cryptographic fingerprint changes.
 
 Send review names and targets the fiber whose directory holds the bundle, on the file’s owner host, even when another fiber links to it.
-It uses that fiber composer’s existing-worker route and sends one plain-text message with Base and Head SHAs, the title and the comments.
+It uses the existing-worker dispatch route and sends one plain-text message with Base and Head SHAs, the title and the comments.
 A missing worker route disables sending; reading a change never authorizes a fresh worker launch.
 The Send button is disabled while delivering.
 Successful delivery clears the draft; a failed send keeps it available to retry.

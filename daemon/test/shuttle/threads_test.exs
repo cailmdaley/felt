@@ -1807,14 +1807,6 @@ defmodule Shuttle.ThreadsTest do
              runtime: %{
                session_uuid: ^native,
                state: "running",
-               tasks: [
-                 %{
-                   id: "1",
-                   subject: "Read the result",
-                   status: "in_progress",
-                   activeForm: "Reading the result"
-                 }
-               ]
              }
            } = Enum.find(feed, &(Threads.address(&1.fiber) == "hub"))
 

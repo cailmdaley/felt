@@ -45,27 +45,13 @@ describe('fiber prose', () => {
     expect(ledeHtml('')).toBe('')
   })
 
-  it('keeps the outcome preview clamped when continue reading opens the transcript', () => {
-    const onContinueReading = vi.fn()
-    const outcome = 'What changed in the deck:\n\n' + '1. **A slide.** Details for review.\n\n'.repeat(20)
-    const pane = buildFiberProse(card, { ...channel, outcome }, {
-      shuttleBase: '', onFiber: vi.fn(), onFile: vi.fn(), onContinueReading,
-    })
-    const preview = pane.querySelector('.ws-outcome-preview')!
-    const before = preview.querySelector('.kbn-detail-lede')!.outerHTML
-    preview.querySelector<HTMLButtonElement>('button')!.click()
-    expect(onContinueReading).toHaveBeenCalledWith(outcome)
-    expect(preview.querySelector('.kbn-detail-lede')!.outerHTML).toBe(before)
-    expect(preview.querySelector('[aria-expanded="true"]')).toBeNull()
-  })
-
-  it('draws no outcome on a constitution page, including its body view', () => {
-    const pane = buildFiberProse({ ...card, shuttleKind: 'oneshot' }, channel, {
-      shuttleBase: '', onFiber: vi.fn(), onFile: vi.fn(), onContinueReading: vi.fn(),
-    })
-    expect(pane.querySelector('.kbn-detail-lede, .ws-outcome-preview, .ws-outcome-continue')).toBeNull()
-    expect(pane.textContent).not.toContain('Outcome')
+  it('leads a constitution page with its outcome, above its body', () => {
+    const pane = buildFiberProse({ ...card, shuttleKind: 'oneshot' }, channel, { shuttleBase: '', onFiber: vi.fn(), onFile: vi.fn() })
+    const lede = pane.querySelector('.kbn-detail-lede')!
+    expect(lede.textContent).toContain('Outcome')
+    expect(lede.compareDocumentPosition(pane.querySelector('.ws-prose-body')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(pane.querySelector('.ws-prose-body')?.textContent).toContain('See')
+    expect(pane.querySelector('button')).toBeNull()
   })
 
   it('names no Desk column for a fiber without a shuttle block', () => {

@@ -531,7 +531,6 @@ function toCard(
     modifiedAt: f.modifiedAt,
     tempered: f.tempered,
     workerState: runtime?.state,
-    workerTasks: runtime?.tasks,
     tmuxSession,
     terminalBackend: runtime?.terminalBackend,
     runtimePhase,

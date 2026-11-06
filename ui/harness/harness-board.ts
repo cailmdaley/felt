@@ -11,11 +11,8 @@
  * leave it unset to exercise the idle board. Add `?capture=meeting` to open
  * Capture with the daemon reporting meeting support.
  * `?example=workspace` selects the fictional documentation example; add
- * `?transcript=live` to watch a synthetic worker append records or
- * `?transcript=large` to exercise lazy reading of thousands of turns, or
+ * `?transcript=live` to give its constitution a live worker, or
  * `?example=workspace&transcript=search` stages the bar Find's constitutions and grouped transcript hits for "mask".
- * `?transcript=warm|cold|context` stages captured usage facts with a shifted timestamp.
- * `?transcript=narration` stages Claude's mid-turn updates, stored as tagged thinking, between its steps.
  * `?identity=all` adds synthetic CLI workers with pending and failed session attribution.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
@@ -44,7 +41,7 @@ import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
 import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, LONG_WORKSPACE_NAME, workspaceExample } from './workspace-fixtures.js'
-import { workspaceMessageProvenance, WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION, workspaceTranscriptBytes, transcriptSearchHits, type TranscriptScenario } from './transcript-fixtures.js'
+import { WORKSPACE_LATEST_SESSION, transcriptSearchHits } from './transcript-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {
@@ -1426,7 +1423,6 @@ const realFetch = (window as unknown as { __harnessNativeFetch?: typeof fetch })
 const mockRequests: Array<Record<string, unknown>> = []
 const mockHandlers: Array<Record<string, unknown>> = []
 const harnessEvents: Array<Record<string, unknown>> = []
-let liveTranscriptReads = 0
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const method = (init?.method ?? 'GET').toUpperCase()
@@ -1701,38 +1697,6 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       errors: [],
     })
   }
-  if (url.includes('/api/v1/transcript/messages')) {
-    return json({ messages: workspaceMessageProvenance(now, transcriptScenario) })
-  }
-  if (url.includes('/api/v1/transcript/raw')) {
-    const query = new URL(url, 'http://harness').searchParams
-    const session = query.get('session') ?? ''
-    if (!workspaceFixture) return json({ session, availability: 'transcript_missing' }, 404)
-    const isLatest = session === WORKSPACE_LATEST_SESSION
-    const isEarlier = session === WORKSPACE_EARLIER_SESSION
-    if (!isLatest && !isEarlier) return json({ session, availability: 'transcript_missing' }, 404)
-    const host = query.get('host')
-    if (host && host !== workspaceFixture.host) return json({ session, availability: 'host_unreachable', host }, 503)
-    const offsetText = query.get('offset')
-    if (offsetText !== null && !/^\d+$/.test(offsetText)) {
-      return json({ error: 'offset must be a non-negative integer' }, 400)
-    }
-    const offset = offsetText === null ? 0 : Number(offsetText)
-    if (!Number.isSafeInteger(offset)) return json({ error: 'offset must be a non-negative integer' }, 400)
-    const mode: TranscriptScenario = isLatest && ['live', 'messages', 'large', 'long-outcome', 'warm', 'cold', 'context', 'search', 'report', 'narration'].includes(transcriptScenario ?? '')
-      ? transcriptScenario as TranscriptScenario : 'normal'
-    const updates = mode === 'live' ? liveTranscriptReads++ : 0
-    const bytes = workspaceTranscriptBytes(mode, now, { earlier: isEarlier, updates })
-    if (offset > bytes.byteLength) return json({ session, availability: 'available_local', byte_count: bytes.byteLength }, 416)
-    const headers = new Headers({
-      'Content-Type': 'application/x-ndjson',
-      'x-transcript-byte-count': String(bytes.byteLength),
-    })
-    if (offsetText !== null) headers.set('x-transcript-offset', String(offset))
-    const responseBody = new ArrayBuffer(bytes.byteLength - offset)
-    new Uint8Array(responseBody).set(bytes.subarray(offset))
-    return new Response(responseBody, { headers })
-  }
 
   if (url.includes('/api/v1/sessions/composite')) {
     if (workspaceFixture) {
@@ -1765,28 +1729,6 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return new Response('# Daily digest\n\nThree cosmic-shear papers and one CMB-lensing cross-correlation.\n', {
       headers: { 'Content-Type': 'text/plain' },
     })
-  }
-
-  // The composer's pasted images: stored "on" the owning host, answered with
-  // the paths a directive names. The last directive sent is left on the
-  // document so a driving script can read what the worker would receive.
-  if (url.endsWith('/api/v1/attachments') && init?.method === 'POST') {
-    const request = body()
-    const items = (request.attachments as { name?: string; mime?: string; sha256?: string }[]) ?? []
-    const home = request.origin && request.origin !== 'local' ? '/home/ada-remote' : '/home/ada'
-    const dir = `${home}/.shuttle/attachments/${String(request.fiber ?? '').replace(/[^A-Za-z0-9_-]/g, '-')}`
-    const ext: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }
-    return json({
-      files: items.map((item) => ({
-        name: item.name,
-        path: `${dir}/${String(item.sha256 ?? '').slice(0, 16)}.${ext[item.mime ?? ''] ?? 'png'}`,
-        sha256: item.sha256,
-        size: 0,
-      })),
-    })
-  }
-  if (url.endsWith('/api/v1/dispatch') && init?.method === 'POST') {
-    document.body.dataset.harnessLastDirective = String(body().user_message ?? '')
   }
 
   // Any write (transition/felt-edit/dispatch) the user might trigger — swallow

@@ -23,6 +23,9 @@ func codexPluginFileClass(path string) string {
 	if strings.HasPrefix(path, "claude-plugin/skills/") {
 		return "skills-bundle"
 	}
+	if strings.HasPrefix(path, "claude-plugin/mods/") {
+		return "claude-only"
+	}
 	return ""
 }
 

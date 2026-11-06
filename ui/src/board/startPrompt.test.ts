@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
-import { Dock } from './workspace/Dock.js'
 import { dispatchFailureMessage, needsProjectDir, type DispatchFailureBody } from './KanbanModalShared.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, inheritedProjectDir, projectDirIndex } from './KanbanReadModel.js'
 import { buildProjectDirPrompt } from './projectDirPrompt.js'
-import { card } from './testFixtures.js'
 
 // ── A DOM just big enough for the prompt ─────────────────────────────────────
 // No jsdom in this suite: elements hold children, text, a value, a disabled
@@ -248,79 +246,5 @@ describe('buildProjectDirPrompt', () => {
     expect(start.disabled).toBe(false)
     input.fire('keydown', { key: 'Enter' })
     expect(onStart).toHaveBeenCalledWith('~/dev/work')
-  })
-})
-
-describe('the fiber controls answer a refused start with the prompt', () => {
-  it('renders the prompt in place of the error, then retries with the confirmed directory', async () => {
-    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) })
-    const bodies: Record<string, unknown>[] = []
-    const replies = [
-      { status: 422, ok: false, json: async () => refused },
-      { status: 200, ok: true, json: async () => ({ dispatched: true, tmux_session: 'worker' }) },
-    ]
-    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body: string }) => {
-      bodies.push(JSON.parse(init.body) as Record<string, unknown>)
-      return replies.shift()
-    }))
-    const refreshed = vi.fn()
-    const panel = new Dock('http://daemon', refreshed)
-    const requeue = panel as unknown as {
-      runRequeue: (c: ReturnType<typeof card>, directive: string, mode: 'fresh',
-        btn: HTMLButtonElement, error: HTMLElement) => Promise<void>
-    }
-    const task = card({
-      id: 'work/task',
-      originId: 'owner-host',
-      shuttleHost: 'owner-host',
-      inheritedProjectDir: { path: '/srv/checkout', from: 'work' },
-    })
-    const btn = new FakeEl('button')
-    btn.textContent = 'New session'
-    const errorEl = new FakeEl('div')
-
-    await requeue.runRequeue(task, 'go', 'fresh', btn as unknown as HTMLButtonElement,
-      errorEl as unknown as HTMLElement)
-
-    expect(errorEl.style.display).toBe('')
-    expect(btn.disabled).toBe(false)
-    expect(btn.textContent).toBe('New session')
-    expect(errorEl.textContent).not.toContain('try again')
-    expect(el(errorEl.find('kbn-start-prompt-reason')).textContent).toBe(`On owner-host: ${REASON}`)
-    expect(el(errorEl.find('kbn-start-prompt-input')).value).toBe('/srv/checkout')
-    expect(bodies[0]).not.toHaveProperty('project_dir')
-
-    el(errorEl.find('kbn-ctl-send')).fire('click')
-    await vi.waitFor(() => expect(refreshed).toHaveBeenCalledOnce())
-    expect(bodies[1]).toMatchObject({
-      fiber_id: 'work/task',
-      origin: 'owner-host',
-      force: true,
-      ad_hoc: true,
-      resume_mode: 'fresh',
-      user_message: 'go',
-      project_dir: '/srv/checkout',
-    })
-    expect(refreshed).toHaveBeenCalledOnce()
-  })
-
-  it('shows any other refused start as its reason, with no prompt', async () => {
-    vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) })
-    const other: DispatchFailureBody = {
-      reason: 'arm_refused',
-      host: 'owner-host',
-      message: 'cannot arm: agent claude-retired is not in the registry (shuttle set-agent to pick a current one)',
-    }
-    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 422, ok: false, json: async () => other })))
-    const panel = new Dock('http://daemon', vi.fn())
-    const requeue = panel as unknown as {
-      runRequeue: (c: ReturnType<typeof card>, directive: string, mode: 'fresh',
-        btn: HTMLButtonElement, error: HTMLElement) => Promise<void>
-    }
-    const errorEl = new FakeEl('div')
-    await requeue.runRequeue(card({ id: 'work/task' }), '', 'fresh',
-      new FakeEl('button') as unknown as HTMLButtonElement, errorEl as unknown as HTMLElement)
-    expect(errorEl.find('kbn-start-prompt')).toBeUndefined()
-    expect(errorEl.textContent).toBe(`On owner-host: ${other.message}`)
   })
 })

@@ -52,7 +52,7 @@ Only the map goes above this opening:
 A loose, nonblocking request for a view is welcome; don't manufacture fixed choices.
 3. **Executive summary** — below the question, followed by evidence and depth.
 
-A question card leads the Your turn band and opens the chat with its report chip in the header.
+A question card leads the Your turn band and opens on its report.
 Keep working after raising the ask, and clear it when it becomes moot.
 
 Without an outstanding ask, the default skeleton is:
@@ -104,7 +104,7 @@ The [constitution theme contract](https://cailmdaley.github.io/felt/concepts/the
 Start from [tapestry-template.html](../assets/tapestry-template.html), a palette and primitives kit, not a framework or a content model to fill in.
 Plain HTML is right too.
 It follows the viewer's light or dark appearance automatically.
-A sibling `tapestry.html` appears as a chip in the constitution's chat header without a directive.
+A sibling `tapestry.html` is the page a constitution opens on, without a directive.
 An explicit `:::{embed} tapestry.html` in the fiber body also declares it there. Existing `:::{embed} report.html` declarations continue to resolve.
 
 Reference a sibling page with `href="./name.mp3"` or its unique basename in `<code>`; the reader makes it a page link with inline play for audio ([companion references](https://cailmdaley.github.io/felt/concepts/companions/#references-between-pages)).
@@ -129,7 +129,7 @@ Replace sample claims and data; keep figures self-contained.
 ```
 
 Relative file links open in place, one level deeper in the reader.
-The `‹` button, key or phone swipe goes up one level, then back to chat.
+The `‹` button, key or phone swipe goes up one level, then back to where you came from.
 In-page `#anchors` stay in the report; external links open outside the reader.
 Download links keep their download behaviour.
 Each nested report is itself self-contained; links express structure without bundling every page into the overview.

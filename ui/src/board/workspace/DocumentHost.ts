@@ -18,7 +18,6 @@ import { createMediaPoster, type MediaPoster } from './MediaPoster.js'
 import { referenceRuntime, referenceTargets, resolveChannelReference, type ReferenceSurface } from './ChannelReferences.js'
 
 /** Pages the controller builds as DOM (`buildProse`) rather than loading a file. */
-const built = (doc: WorkspaceDocument): boolean => doc.kind === 'fiber' || doc.kind === 'chat'
 
 export interface DocumentFrame {
   el: HTMLElement
@@ -86,7 +85,6 @@ export class DocumentHost {
   private readonly options: {
     shuttleBase: string
     buildProse: (doc: WorkspaceDocument) => HTMLElement
-    disposeProse?: (doc: WorkspaceDocument) => void
     onSelect: (key: DocKey) => void
     onNavigate?: (source: WorkspaceDocument, href: string) => void
     onReview?: (source: WorkspaceDocument, message: string) => Promise<void>
@@ -200,10 +198,10 @@ export class DocumentHost {
     }
   }
 
-  /** Replace only a built page (fiber prose, the chat) when its body or channel metadata changes. */
+  /** Replace the fiber's built page when its body or channel metadata changes. */
   updateProse(key: DocKey, element: HTMLElement): void {
     const state = this.frames.get(key)
-    if (this.disposed || !state || !built(state.frame.doc) || !state.frame.viewer) return
+    if (this.disposed || !state || state.frame.doc.kind !== 'fiber' || !state.frame.viewer) return
     this.saveScroll(state)
     state.stopScroll?.()
     state.references?.dispose()
@@ -223,10 +221,6 @@ export class DocumentHost {
     if (this.disposed || !state) return
     if (!state.frame.viewer) {
       this.mount(state)
-      return
-    }
-    if (state.frame.doc.kind === 'chat') {
-      this.updateProse(key, this.options.buildProse(state.frame.doc))
       return
     }
     if (state.frame.doc.kind === 'fiber') {
@@ -319,7 +313,7 @@ export class DocumentHost {
       }
       return
     }
-    if (built(state.frame.doc)) {
+    if (state.frame.doc.kind === 'fiber') {
       const prose = this.options.buildProse(state.frame.doc)
       state.frame.content.replaceChildren(prose)
       state.frame.viewer = prose
@@ -363,7 +357,7 @@ export class DocumentHost {
         canReview: this.options.canReview ? () => this.options.canReview!(doc) : undefined,
         reviewTarget: this.options.reviewTarget ? () => this.options.reviewTarget!(doc) : undefined,
         active: state.active,
-        kind: doc.kind === 'fiber' || doc.kind === 'chat' ? undefined : doc.kind,
+        kind: doc.kind === 'fiber' ? undefined : doc.kind,
         decorateAudio: audio => {
           const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect,
             (peaks, duration) => {
@@ -508,7 +502,6 @@ export class DocumentHost {
     state.stopScroll?.()
     state.stopScroll = null
     state.readScroll = null
-    if (state.frame.viewer && built(state.frame.doc)) this.options.disposeProse?.(state.frame.doc)
     disposeFileViewer(state.frame.viewer)
     disposeFileViewer(state.pending)
     state.pending = null

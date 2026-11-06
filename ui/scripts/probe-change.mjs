@@ -57,7 +57,7 @@ try {
     try {
       const page = await prepare(ctx, mode), errors = []
       page.on('pageerror', error => errors.push(error.message))
-      await page.locator('.ws-selected .ws-report-chip[data-document-key$="/family.change.json"]').click()
+      await page.locator('.ws-rail-files .ws-rail-file[data-key$="/family.change.json"]').click()
       await page.locator('.ws-selected .change-file diffs-container [data-line-index]').first().waitFor()
       familyHash = new URL(page.url()).hash
       await page.mouse.move(0, 0)

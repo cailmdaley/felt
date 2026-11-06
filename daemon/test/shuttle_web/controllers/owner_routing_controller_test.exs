@@ -38,7 +38,6 @@ defmodule ShuttleWeb.OwnerRoutingControllerTest do
         {"kill", %{"fiber_id" => "task"}},
         {"claim", %{"fiber_id" => "task", "tmux_session" => "test-worker"}},
         {"deliver", %{"fiber_id" => "task", "text" => "remote message"}},
-        {"attachments", %{"fiber_id" => "task", "files" => []}},
         {"felt-edit", %{"fiber_id" => "task", "set" => ["status=active"]}},
         {"felt-nest", %{"fiber_id" => "task", "parent_id" => "other"}},
         {"fiber/create", %{"id" => "new-task", "name" => "Remote task"}}

@@ -109,7 +109,7 @@ describe('shared keyboard table', () => {
   it.each([{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }, { altKey: true }])('ignores composing/modifier bare keys %j', init => {
     expect(keyIntent(event('j', init), 'desk')).toBeNull()
   })
-  it.each(['t', 'x', 'r', '.', 'z'])('guards action key %s against fields, IME, modifiers and repeat', key => {
+  it.each(['t', 'x', '.', 'z'])('guards action key %s against fields, IME, modifiers and repeat', key => {
     const input = document.createElement('textarea')
     expect(keyIntent(event(key, {}, input), 'reader')).toBeNull()
     for (const init of [{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }, { altKey: true }, { repeat: true }]) {

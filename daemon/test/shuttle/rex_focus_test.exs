@@ -306,7 +306,7 @@ defmodule Shuttle.RexFocusTest do
 
     Agent.update(front, fn _ -> true end)
     tick.()
-    assert_receive {:selected, %{"fiber_id" => "other/work", "source" => "rex"}}
+    assert_receive {:selected, %{"fiber_id" => "other/work"}}
     tick.()
     refute_receive {:selected, _}
 
@@ -419,10 +419,10 @@ defmodule Shuttle.RexFocusTest do
 
   test "watcher reconnects after a stream exit and closes its CLI when following stops", c do
     {watcher, active, pids} = watcher(c.tmp_dir)
-    assert_receive {:selected, %{"fiber_id" => "project/task", "source" => "rex"}}
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
     [first] = read_pids(pids)
     System.cmd("kill", ["-TERM", to_string(first)])
-    assert_receive {:selected, %{"fiber_id" => "project/task", "source" => "rex"}}
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
     [^first, second] = read_pids(pids)
     assert second != first
 

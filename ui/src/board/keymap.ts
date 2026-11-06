@@ -1,7 +1,7 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'compose' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'rail' | 'zen'
+export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'rail' | 'zen'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
@@ -24,7 +24,6 @@ const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): Ke
  * between them. */
 const constitutionBindings = (subject: string): KeyBinding[] => [
   bind(['c', '.'], 'conversation', `Open ${subject}'s conversation`),
-  bind(['r'], 'compose', `Write to ${subject} from its fiber page`),
   bind(['t'], 'temper', `Temper ${subject} (${VERDICT_UNDO} undo)`),
   bind(['x'], 'discard', `Discard ${subject} (${VERDICT_UNDO} undo)`),
   bind(['a'], 'toReview', `Move ${subject} to Awaiting review (${VERDICT_UNDO} undo)`),
@@ -109,7 +108,7 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface,
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
   const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null
-  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'rail', 'zen', 'temper', 'discard', 'toReview', 'undoVerdict', 'compose', 'conversation', 'rest', 'pin', 'orchestrator'].includes(binding.intent)) return null
+  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'rail', 'zen', 'temper', 'discard', 'toReview', 'undoVerdict', 'conversation', 'rest', 'pin', 'orchestrator'].includes(binding.intent)) return null
   return binding.intent
 }
 
@@ -150,7 +149,6 @@ export const helpSections: readonly HelpSection[] = [
   ] },
   { title: 'A constitution', note: `The selected card, or the open fiber. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
     row(['c', '.'], 'Open its conversation', everywhere('conversation')),
-    row(['r'], 'Write to it', [...on('desk', 'compose'), ...on('reader', 'compose')]),
     row(['t'], 'Temper', [...on('desk', 'temper'), ...on('reader', 'temper')]),
     row(['x'], 'Discard', [...on('desk', 'discard'), ...on('reader', 'discard')]),
     row(['a'], 'Move to Awaiting review', [...on('desk', 'toReview'), ...on('reader', 'toReview')]),

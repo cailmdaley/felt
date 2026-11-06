@@ -48,8 +48,7 @@ function pointerListeners(text: string): string[] {
 // New stylesheets are guarded by default. Only these named surfaces are
 // outside the Desk design; shared chrome and tint palettes remain in scope.
 const styleExceptions = [
-  { path: 'workspace/', reason: 'The document workspace, conversation and thread rail keep their own interaction design.' },
-  { path: 'transcript/', reason: 'Transcript reading and search controls belong to the conversation surface.' },
+  { path: 'workspace/', reason: 'The document workspace and thread rail keep their own interaction design.' },
   { path: 'views/ChronicleView.css', reason: 'Chronicle is a separate temporal view, outside the Desk design.' },
   { path: 'FileViewerPanel.css', reason: 'Document and media viewers belong to the reader, not Desk cards.' },
   { path: 'prose.css', reason: 'Rendered document prose and wikilinks belong to the reader, not Desk cards.' },

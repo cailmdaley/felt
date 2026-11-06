@@ -924,7 +924,7 @@ shuttle transcript search to search across indexed local transcripts.`,
 			}
 		},
 	}
-	shuttleTranscriptCmd.AddCommand(a.transcriptSearchCmd(), a.transcriptIndexCmd(), a.transcriptMessagesCmd())
+	shuttleTranscriptCmd.AddCommand(a.transcriptSearchCmd(), a.transcriptIndexCmd())
 	return shuttleTranscriptCmd
 }
 

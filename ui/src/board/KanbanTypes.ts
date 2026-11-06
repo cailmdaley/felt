@@ -67,7 +67,6 @@ export interface KanbanCard {
    */
   workerState?: 'running' | 'blocked'
   /** Owner-served live harness checklist, absent without a tracked worker. */
-  workerTasks?: import('./transcript/tasks.js').WorkerTask[]
   /**
    * The live worker's terminal session name, used by attach and session history.
    */

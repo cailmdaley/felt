@@ -6,7 +6,7 @@ import { stateDot } from './stateDot.js'
 it.each([
   ['working', 'working'], ['waiting', 'idle'], ['attention', 'question'],
   ['identity_pending', 'starting'], ['identity_failed', 'blocked'],
-])('draws %s as one wordless chat button, not a backend control', (phase, turn) => {
+])('draws %s as one wordless opening button, not a backend control', (phase, turn) => {
   const constitution = card({ id: 'work', name: 'Response check', status: 'active', workerState: 'running', runtimePhase: phase })
   const open = vi.fn(), bubble = vi.fn()
   const row = document.createElement('div'), dot = stateDot(constitution, open)

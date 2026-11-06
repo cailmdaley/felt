@@ -23,7 +23,7 @@ it('opens under its button as a non-modal dropdown holding only the settings', (
 
 it('keeps both header rows clear when Settings is on the title row', () => {
   const { menu, opener, content, host } = mount()
-  const header = document.createElement('header'); header.className = 'ws-chat-head'
+  const header = document.createElement('header'); header.className = 'ws-band-head'
   host.append(header); header.append(opener)
   opener.getBoundingClientRect = () => ({ bottom: 48, left: 280 } as DOMRect)
   header.getBoundingClientRect = () => ({ bottom: 100 } as DOMRect)

@@ -102,7 +102,7 @@ export function createChangeReview(
       control.disabled = draftState.busy
     if ((!send || !canSend()) && !draftState.message)
       status.textContent =
-        'No live worker. Start or resume one from the composer before sending a review.'
+        'No live worker. Start or resume one before sending a review.'
   }
   const deliver = async (): Promise<void> => {
     paintSend()

@@ -1,5 +1,5 @@
 defmodule Shuttle.Voice.Held do
-  @moduledoc "Durable, checkpointed speech drafts owned by the transcript relay coordinator."
+  @moduledoc "Durable, checkpointed speech for a target with no live worker, owned by the transcript relay coordinator; saying the worker's name sends it."
 
   def load(path) do
     case Shuttle.FS.read(path) do
@@ -153,27 +153,6 @@ defmodule Shuttle.Voice.Held do
     end
   end
 
-  def boundary(state, id, after_prefix) do
-    if Enum.any?(
-         Map.get(state, "cards", []),
-         &(&1["id"] == id and Map.get(&1, "after", 0) == after_prefix)
-       ),
-       do: :ok,
-       else: {:error, :conflict}
-  end
-
-  def edit(state, id, through, text) when is_binary(text) do
-    with {:ok, card, prefix, rest} <- split(state, id, through) do
-      segment = %{
-        "through" => List.last(prefix)["through"],
-        "text" => text,
-        "speaker" => List.first(prefix)["speaker"]
-      }
-
-      {:ok, put_card(state, Map.put(card, "segments", [segment | rest]))}
-    end
-  end
-
   def take(state, id, through) do
     with {:ok, card, prefix, rest} <- split(state, id, through) do
       next =
@@ -243,7 +222,7 @@ defmodule Shuttle.Voice.Held do
         Map.take(attempt, ~w(fiber_id at status))
         |> Map.put(
           "detail",
-          "Your edited voice draft is retained. Copy it into the composer to send it again:\n\n" <>
+          "This voice message did not arrive, so its text is kept here:\n\n" <>
             attempt["text"]
         )
     end

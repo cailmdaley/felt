@@ -11,9 +11,6 @@ defmodule ShuttleWeb.LargeBodyParserTest do
     end
 
     assert LargeBodyParser.read_timeout() >= 120_000
-
-    assert LargeBodyParser.limits()["/api/v1/attachments"] ==
-             Shuttle.Attachments.max_request_bytes()
   end
 
   test "other routes pass through untouched" do

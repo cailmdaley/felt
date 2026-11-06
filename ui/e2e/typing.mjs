@@ -53,7 +53,7 @@ try {
     }, true)
     new MutationObserver(records => { stats.mutations += records.length }).observe(document, { childList: true, subtree: true })
   })
-  await page.goto(`${base}?example=workspace&transcript=large`)
+  await page.goto(`${base}?example=workspace`)
   await page.waitForFunction(() => window.__harness)
   const stageFleet = () => page.evaluate(async () => {
     const feed = window.__harness.MOCK_FEED
@@ -68,104 +68,24 @@ try {
     await window.__harness.modal.fetchAndRender()
     return { cards: feed.fibers.length, hosts: Object.keys(feed.origins).length }
   })
-  result.fixture = { ...await stageFleet(), transcriptTurns: 3000 }
-  await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-  await page.getByText('Fixture bin 3000 is within the review tolerance; retain the measured value and continue.', { exact: true }).waitFor()
+  result.fixture = await stageFleet()
   const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0))))
-  async function type(name, field, text, { snapshots = false, transcript = false, noScans = false } = {}) {
+  async function type(name, field, text) {
     await field.focus(); await settle()
     await page.evaluate(() => { Object.assign(window.__typing, { styles: 0, walks: 0, keys: [], mutations: 0 }) })
     for (const char of text) {
       await page.keyboard.type(char)
-      if (snapshots) await page.evaluate(async () => {
-        const feed = window.__harness.MOCK_FEED
-        feed.fibers.at(-1).fiber.outcome = `Worker progress ${feed.generated_at}`
-        feed.generated_at = new Date().toISOString()
-        await window.__harness.modal.fetchAndRender()
-      })
-      if (transcript) await page.evaluate(async () => {
-        const workspace = window.__harness.modal.workspace
-        await workspace.controls(workspace.current).transcriptBand.readNow()
-      })
       await settle()
     }
     const stats = await page.evaluate(() => window.__typing)
     result.samples[name] = { ...stats, p50Paint: percentile(stats.keys.map(k => k.paint), .5), p95Paint: percentile(stats.keys.map(k => k.paint), .95), p95Task: percentile(stats.keys.map(k => k.task), .95) }
-    if (process.env.TYPING_GATE === '1' && noScans) {
-      assert.equal(stats.styles, 0, `${name}: typing must not read computed styles`)
-      assert.equal(stats.walks, 0, `${name}: typing must not rescan transcripts`)
-      assert.equal(stats.mutations, 0, `${name}: typing must preserve control DOM`)
-    }
   }
-  const composer = page.locator('.ws-page.ws-selected textarea.kbn-detail-directive')
-  await type('composer-fresh', composer, 'hello world this is typing', { noScans: true })
-  await composer.fill(('Please examine the shear response across sky patches.\n').repeat(200))
-  await type('composer-long', composer, 'and compare null tests', { noScans: true })
-  result.longDraftHeight = await composer.evaluate(el => el.clientHeight)
-  assert.ok(result.longDraftHeight > 60, 'a multiline draft grows beyond one line')
-  await page.screenshot({ path: '/tmp/shuttle-typing-long.png' })
-  await composer.fill(''); await settle()
-  result.emptyDraftHeight = await composer.evaluate(el => el.clientHeight)
-  assert.ok(result.emptyDraftHeight < 60, 'the emptied composer returns to one line')
-  await type('composer-during-snapshots', composer, 'worker updates while typing', { snapshots: true })
-  async function state() {
-    return page.evaluate(() => {
-      const { modal } = window.__harness
-      return { nodes: document.querySelectorAll('*').length, turns: document.querySelectorAll('.ws-transcript-turn').length,
-        channels: modal.workspace.channels.size, bands: modal.workspace.opts.dock?.bands?.size ?? modal.dock?.bands?.size,
-        frames: modal.workspace.reader.host.frames.size, live: modal.workspace.reader.host.live.size,
-        revisionBytes: modal.workspace.lastUpdateRevision?.length,
-        listeners: Object.fromEntries([...window.__typingListeners].map(([key, values]) => [key, values.size])) }
-    })
-  }
-  result.snapshots.push({ ticks: 0, state: await state(), rss: rss() })
-  for (let batch = 1; batch <= 3; batch++) {
-    const tick = await page.evaluate(async () => {
-      const start = performance.now(); let maxMs = 0
-      for (let i = 0; i < 240; i++) {
-        const startTick = performance.now()
-        const feed = window.__harness.MOCK_FEED
-        // A changing worker as well as unchanged polls; no accumulation of mock requests.
-        if (i % 10 === 0) feed.fibers.at(-1).fiber.outcome = `Batch progress ${i}`
-        await window.__harness.modal.fetchAndRender()
-        maxMs = Math.max(maxMs, performance.now() - startTick)
-        window.__harness.requests.length = 0; window.__harness.handlers.length = 0
-      }
-      return { elapsedMs: performance.now() - start, maxMs }
-    })
-    await settle()
-    result.snapshots.push({ ticks: batch * 240, ...tick, state: await state(), rss: rss() })
-  }
-  if (process.env.TYPING_GATE === '1') for (const sample of result.snapshots.slice(1)) {
-    for (const key of ['nodes', 'turns', 'bands', 'frames', 'live', 'listeners'])
-      assert.deepEqual(sample.state[key], result.snapshots[0].state[key], `${key}: snapshot updates must not accumulate resources`)
-  }
-  await type('composer-aged', composer, ' more typing after three hours', { noScans: true })
-  await composer.fill('')
-  result.navigation = []
-  for (let i = 0; i < 16; i++) {
-    await page.evaluate(i => {
-      const workspace = window.__harness.modal.workspace
-      const card = workspace.opts.cards().find(card => card.id === `perf/task-${i}`)
-      workspace.open(card, 'Desk')
-    }, i)
-    await page.locator('.ws-page.ws-selected textarea.kbn-detail-directive').waitFor()
-    await settle()
-    result.navigation.push({ opened: i + 2, state: await state(), rss: rss() })
-  }
-  if (process.env.TYPING_GATE === '1') assert.ok(result.navigation.at(-1).state.bands <= 6, 'chat models follow the live-document budget')
   const search = page.locator('.kbn-find')
   // The bar find input belongs to the real board, not a synthetic probe field.
   const find = await search.count() ? search : page.locator('input[type="search"]').first()
-  await type('find-aged', find, 'calibration')
+  await type('find', find, 'calibration')
   await page.keyboard.press('Escape')
   await page.screenshot({ path: '/tmp/shuttle-typing.png' })
-  await page.goto(`${base}?example=workspace&transcript=live`)
-  await page.waitForFunction(() => window.__harness)
-  result.liveFixture = await stageFleet()
-  await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-  await page.locator('.ws-page.ws-selected textarea.kbn-detail-directive').waitFor()
-  await type('composer-during-transcript', page.locator('.ws-page.ws-selected textarea.kbn-detail-directive'), 'typing beside live worker output', { transcript: true })
   await page.goto(base)
   await page.waitForFunction(() => window.__harness)
   result.editorFixture = await stageFleet()

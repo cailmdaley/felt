@@ -53,7 +53,6 @@ export function fiberPageKicker(card: KanbanCard): string {
 /** What a surface does once a constitution key has reached a card. */
 export interface ConstitutionActions {
   verdict(card: KanbanCard, verdict: Verdict): void
-  compose(card: KanbanCard): void
   conversation(card: KanbanCard): void
   rest(card: KanbanCard): void
 }
@@ -67,9 +66,6 @@ export function constitutionAction(intent: KeyIntent, card: KanbanCard | null | 
   } else if (intent === 'toReview') {
     if (!reviewReachable(card)) return false
     actions.verdict(card, 'awaitingReview')
-  } else if (intent === 'compose') {
-    if (!onDesk(card)) return false
-    actions.compose(card)
   } else if (intent === 'conversation') actions.conversation(card)
   else if (intent === 'rest') {
     if (!restReachable(card)) return false

@@ -147,7 +147,7 @@ A launch prompt may name a `Previous session:`; read it for texture, never for i
 
 ## Asking
 
-`shuttle ask` puts the card at the top of the human's **Your turn** band without pausing the worker, and opens the chat with the report chip in its header. Write the report for someone returning cold: short background bridging what they know since they last engaged, then the question and its options and tradeoffs, then the summary. A question can be a loose request for a view, not only a choice. In Claude Code, also send a PushNotification with the question. Resuming or messaging the worker clears the ask. A headless run (`Headless: true`) can ask too; the answer arrives as a message.
+`shuttle ask` puts the card at the top of the human's **Your turn** band without pausing the worker, and opens on its report. Write the report for someone returning cold: short background bridging what they know since they last engaged, then the question and its options and tradeoffs, then the summary. A question can be a loose request for a view, not only a choice. In Claude Code, also send a PushNotification with the question. Resuming or messaging the worker clears the ask. A headless run (`Headless: true`) can ask too; the answer arrives as a message.
 
 ## Messaging
 

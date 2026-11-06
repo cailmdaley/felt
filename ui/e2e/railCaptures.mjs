@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 
 const out = resolve(process.argv[2] ?? 'rail-captures')
-const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&transcript=warm&long-title`
+const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
 const root = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const shots = [
   { name: '1440-default', viewport: { width: 1440, height: 900 } },
@@ -35,12 +35,13 @@ try {
       const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).first().locator('.kbn-card-name')
       const box = await name.boundingBox()
       await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
-      const header = page.locator('.ws-selected .ws-chat-head')
-      if (await header.locator('h1').innerText() !== root) {
+      const header = page.locator('.ws-stage-band .ws-band-head')
+      await header.waitFor()
+      if (await header.locator('h1').textContent() !== root) {
         await header.getByRole('button', { name: 'Settings', exact: true }).click()
         await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
       }
-      await header.getByRole('heading', { name: root, exact: true }).waitFor()
+      await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, root)
       await page.locator('.ws-rail-artifact iframe').first().waitFor({ timeout: 3000 }).catch(() => {})
       await page.waitForTimeout(700)
       const file = resolve(out, `${shot.name}-${scheme}.png`)

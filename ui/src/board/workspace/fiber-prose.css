@@ -1,9 +1,6 @@
 .ws-fiber-prose .ws-prose-header { border: 0; margin: 0 0 8px; padding: 0; font: var(--type-label)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .ws-fiber-prose > h1 { font-size: var(--type-display); margin-bottom: 20px; }
 .ws-fiber-prose .kbn-detail-lede { background: transparent; padding-block: 0; font-size: var(--type-title); line-height: var(--leading-tight); margin: 0 0 20px; }
-.ws-outcome-preview { overflow: hidden; margin-bottom: 20px; }
-.ws-fiber-prose .ws-outcome-preview .kbn-detail-lede { max-height: 10em; overflow: hidden; margin-bottom: 4px; }
-.ws-outcome-continue { border: 0; padding: 0; background: transparent; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-ui) var(--font-serif); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .ws-fiber-prose > .ws-prose-body { border-top: 1px solid var(--ws-hairline); padding-top: 20px; }
 .ws-fiber-prose > .ws-dock { border: 0; margin: 0; padding-bottom: 20px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {

@@ -4,13 +4,10 @@ defmodule ShuttleWeb.TranscriptController do
 
     * `GET /api/v1/transcript?session=…` returns an availability receipt;
     * `GET /api/v1/transcript/raw?session=…` returns the exact JSONL bytes;
-      `offset=N` returns a byte slice for incremental reads;
-    * `GET /api/v1/transcript/stream?session=…` follows JSONL records as SSE.
-    * `GET /api/v1/transcript/messages?session=…` returns host-owned envelope evidence.
+      `offset=N` returns a byte slice for incremental reads.
 
   The host is selected explicitly with `host=`, or from the session ledger.
-  Remote requests use the same transport as other host-local reads;
-  streams relay the owner's events without interpreting their records.
+  Remote requests use the same transport as other host-local reads.
   No endpoint here interprets transcript records or implements search.
   """
 
@@ -19,8 +16,7 @@ defmodule ShuttleWeb.TranscriptController do
   import Plug.Conn
   import ShuttleWeb.RelayHelpers, only: [present?: 1]
 
-  alias Shuttle.{CLI, OriginRouter, Poller, Remote, SessionLedger, Transcript}
-  alias ShuttleWeb.TranscriptStream
+  alias Shuttle.{OriginRouter, Poller, Remote, SessionLedger, Transcript}
 
   # Native transcripts can be materially larger than the board/file assets
   # that use OriginRouter's ordinary 30 s forwarding budget. Keep the CLI and
@@ -54,99 +50,6 @@ defmodule ShuttleWeb.TranscriptController do
       end
     else
       {:error, message} -> conn |> put_status(400) |> json(%{error: message})
-    end
-  end
-
-  def messages(conn, params) do
-    with {:ok, session} <- session_param(params) do
-      case target_host(params, session) do
-        :local ->
-          args = ["transcript", "messages", session, "--json"]
-          args = if params["since"], do: args ++ ["--since", params["since"]], else: args
-
-          case CLI.run(args) do
-            {:ok, body} ->
-              conn |> put_resp_content_type("application/json") |> send_resp(200, body)
-
-            {:command_error, _status, _output} ->
-              conn |> put_status(503) |> json(%{error: "message evidence unavailable"})
-
-            {:error, _reason} ->
-              conn |> put_status(503) |> json(%{error: "message evidence unavailable"})
-          end
-
-        {:remote, %Remote{} = remote} ->
-          query =
-            Map.take(params, ["since"]) |> Map.merge(%{"session" => session, "host" => "local"})
-
-          case OriginRouter.forward_get(remote, "/api/v1/transcript/messages", query) do
-            {:forwarded, status, content_type, body} ->
-              conn |> put_resp_content_type(content_type, nil) |> send_resp(status, body)
-
-            {:error, _reason} ->
-              unavailable(conn, session, :host_unreachable, remote.name)
-          end
-
-        {:unreachable, host} ->
-          unavailable(conn, session, :host_unreachable, host)
-      end
-    else
-      {:error, message} -> conn |> put_status(400) |> json(%{error: message})
-    end
-  end
-
-  def stream(conn, params) do
-    with {:ok, session} <- session_param(params),
-         {:ok, offset} <- offset_param(params) do
-      case target_host(params, session) do
-        :local ->
-          local_stream(conn, session, offset || 0)
-
-        {:remote, %Remote{} = remote} ->
-          query = %{"session" => session, "offset" => Integer.to_string(offset || 0)}
-          TranscriptStream.relay(conn, remote, query, session)
-
-        {:unreachable, host} ->
-          unavailable(conn, session, :host_unreachable, host)
-      end
-    else
-      {:error, message} -> conn |> put_status(400) |> json(%{error: message})
-    end
-  end
-
-  defp local_stream(conn, session, offset) do
-    with path when is_binary(path) <- Transcript.path(session),
-         {:ok, %{size: size} = stat} <- Shuttle.FS.stat(path) do
-      if offset > size do
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
-          416,
-          Jason.encode!(%{session: session, availability: "available_local", byte_count: size})
-        )
-      else
-        key = {:local, session}
-
-        case TranscriptStream.admit(key) do
-          :busy ->
-            conn |> put_status(429) |> json(%{error: "stream_capacity"})
-
-          :ok ->
-            try do
-              conn
-              |> put_resp_content_type("text/event-stream")
-              |> put_resp_header("cache-control", "no-cache, no-transform")
-              |> put_resp_header("x-accel-buffering", "no")
-              |> put_resp_header("x-transcript-offset", Integer.to_string(offset))
-              |> send_chunked(200)
-              |> TranscriptStream.follow(path, offset, stat: stat)
-            after
-              TranscriptStream.release(key)
-            end
-        end
-      end
-    else
-      _ -> unavailable(conn, session, :transcript_missing, Poller.own_host_id())
     end
   end
 
@@ -303,8 +206,7 @@ defmodule ShuttleWeb.TranscriptController do
     }
   end
 
-  @doc false
-  def unavailable(conn, session, status, host) do
+  defp unavailable(conn, session, status, host) do
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(http_status(status), Jason.encode!(receipt(session, status, host: host)))

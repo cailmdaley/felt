@@ -9,7 +9,8 @@ const base = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?ex
 const shots = process.env.CONSOLE_PICKER_SHOTS
 if (shots) await mkdir(shots, { recursive: true })
 const selected = p => p.locator('.ws-page.ws-selected')
-const consoleButton = p => selected(p).locator('.ws-chat-console')
+const band = p => p.locator('.ws-stage-band')
+const consoleButton = p => band(p).locator('.ws-band-open')
 const items = p => p.getByRole('menuitemradio')
 async function shot(p, name) {
   if (await items(p).count()) await pickerReadable(p, false)
@@ -26,39 +27,23 @@ async function pickerReadable(p, requireFocus = true) {
 async function open(p, backend) {
   await p.goto(`${base}&console=${backend}`)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-  if (!await selected(p).locator('.ws-chat-head').isVisible()) {
-    await p.locator('.ws-navbar .ws-channel-title').click()
-    await p.locator('.ws-switcher .ws-channel-row[aria-current="true"]').click()
-  }
   await consoleButton(p).waitFor({ state: 'visible' })
 }
 async function headerFits(p) {
-  const geometry = await selected(p).locator('.ws-chat-head').evaluate(header => {
+  const geometry = await band(p).locator('.ws-band-head').evaluate(header => {
     const bounds = header.getBoundingClientRect()
-    const controls = [...header.querySelectorAll('.ws-chat-console,.ws-chat-settings,.ws-chat-leave,.ws-chat-identity,.ws-chat-lead')]
+    const controls = [...header.querySelectorAll('.ws-band-open,.ws-band-settings,.ws-band-leave,.ws-band-identity')]
       .filter(el => el.checkVisibility()).map(el => ({ name: el.className, rect: el.getBoundingClientRect().toJSON() }))
-    const title = header.querySelector('.ws-chat-title').getBoundingClientRect()
-    const console = header.querySelector('.ws-chat-console').getBoundingClientRect()
-    return { bounds: bounds.toJSON(), controls, titleCenter: title.top + title.height / 2, consoleCenter: console.top + console.height / 2 }
+    return { bounds: bounds.toJSON(), controls }
   })
-  for (const { name, rect } of geometry.controls) {
-    assert.ok(rect.x >= geometry.bounds.x - 1 && rect.x + rect.width <= geometry.bounds.right + 1, `${name} fits header`)
-  }
-  if (p.viewportSize().width <= 700) assert.ok(Math.abs(geometry.titleCenter - geometry.consoleCenter) < 1, 'the phone title is centered on its Console icon')
-  if (p.viewportSize().width <= 700) {
-    const columns = await selected(p).locator('.ws-chat-head').evaluate(header => {
-      const center = selector => { const el = header.querySelector(selector); if (!el?.checkVisibility()) return null; const b = el.getBoundingClientRect(); return b.x + b.width / 2 }
-      return { settings: center('.ws-chat-settings'), leave: center('.ws-chat-leave'), constitution: center('.ws-chat-refs > .ws-chat-constitution'), report: center('.ws-chat-refs > .ws-report-chip') }
-    })
-    if (columns.constitution !== null) assert.ok(Math.abs(columns.constitution - columns.settings) < 1, 'the phone Constitution icon sits under Settings')
-    if (columns.report !== null) assert.ok(Math.abs(columns.report - columns.leave) < 1, 'the phone report icon sits under Close')
-  }
   const controls = geometry.controls
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
     const a = controls[i].rect, b = controls[j].rect
     assert.ok(Math.min(a.right, b.right) - Math.max(a.x, b.x) <= 1 || Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y) <= 1,
       `${controls[i].name} and ${controls[j].name} do not overlap`)
   }
+  const opening = await consoleButton(p).boundingBox()
+  assert.ok(opening.x >= geometry.bounds.x - 1 && opening.x + opening.width <= geometry.bounds.right + 1, 'the opening fits the band')
 }
 async function longPress(p, context, locator) {
   await locator.click({ trial: true })
@@ -101,7 +86,7 @@ try {
     p.setDefaultTimeout(10000)
     await open(p, phone ? 'tmux' : 'rex')
     await headerFits(p)
-    assert.equal(await consoleButton(p).getAttribute('aria-label'), 'Open in Claude browser')
+    assert.equal(await consoleButton(p).textContent(), 'Open in Claude browser')
     await shot(p, phone ? 'phone-header' : 'desktop-header')
     if (phone) await longPress(p, context, consoleButton(p))
     else await consoleButton(p).click({ button: 'right' })
@@ -112,12 +97,12 @@ try {
     await items(p).filter({ hasText: phone ? 'Claude browser' : 'Claude app' }).click()
     assert.equal(await p.evaluate(() => localStorage.getItem('shuttle.claude-opening')), phone ? 'browser' : 'app')
     assert.equal(await p.evaluate(() => window.__conversationLinks.at(-1)), phone ? 'https://claude.ai/code/session_fixture' : 'claude://claude.ai/code/session_fixture')
-    assert.equal(await consoleButton(p).getAttribute('aria-label'), phone ? 'Open in Claude browser' : 'Open in Claude app')
+    assert.equal(await consoleButton(p).textContent(), phone ? 'Open in Claude browser' : 'Open in Claude app')
     await consoleButton(p).click()
     assert.equal(await p.evaluate(() => window.__conversationLinks.length), 2)
     if (phone) {
-      await selected(p).getByRole('button', { name: 'Constitution', exact: true }).click()
-      await selected(p).getByRole('heading', { name: 'Validation notes', exact: true }).waitFor()
+      await band(p).getByRole('button', { name: 'Constitution', exact: true }).click()
+      await selected(p).locator('.ws-fiber-prose').waitFor()
       const pill = p.locator('.ws-navbar .ws-head-worker .kbn-card-worker')
       assert.match(await pill.getAttribute('aria-label'), /^\w+\. Open in Claude browser$/, 'the pill names its turn')
       assert.equal(await pill.getAttribute('target'), null, 'a phone opens Claude in place so iOS can hand it to the app')

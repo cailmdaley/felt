@@ -1,7 +1,7 @@
 // The board's load, idle and interaction costs, against a running board (the
 // daemon at :4000, or `vite preview` of a build, which proxies /api to it).
 // Read-only: it clicks cards and presses Escape and arrow keys, never a verdict,
-// launch or composer.
+// or launch.
 //   node scripts/perf/measure.mjs <mode> [--base URL[,URL…]] [--cpu 4] [--secs 300] [--runs 3] [--json out]
 // cold          first paint, Desk painted, channel open, long tasks; several
 //               --base URLs run interleaved, so the comparison shares conditions

@@ -93,10 +93,6 @@ export function buildFiberProse(
   channel: Channel,
   opts: {
     shuttleBase: string
-    controls?: HTMLElement
-    /** The status line's acts (worker pill, Temper, Discard), owned by the control band. */
-    acts?: HTMLElement
-    onContinueReading?: (text: string) => void
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
     /** On a role charter, the constitutions assigned to the office in Desk order. */
@@ -123,22 +119,12 @@ export function buildFiberProse(
   const kebab = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
   const roles = card.shuttleRole && kebab(card.shuttleRole) !== kebab(channel.name) ? roleChip(card.shuttleRole, opts) : null
   if (roles) header.append(roles)
-  if (opts.acts) header.append(opts.acts)
   const title = document.createElement('h1')
   title.textContent = channel.name
   title.dataset.part = 'fiber-title'
   const outcome = document.createElement('div')
-  const outcomeText = card.shuttleKind !== undefined ? '' : channel.outcome ?? card.outcome ?? ''
+  const outcomeText = channel.outcome ?? card.outcome ?? ''
   outcome.innerHTML = ledeHtml(outcomeText)
-  if (outcomeText.trim() && opts.onContinueReading) {
-    outcome.className = 'ws-outcome-preview'
-    const read = document.createElement('button')
-    read.type = 'button'
-    read.className = 'ws-outcome-continue'
-    read.textContent = 'continue reading'
-    read.addEventListener('click', () => opts.onContinueReading!(outcomeText))
-    outcome.append(read)
-  }
   const body = document.createElement('div')
   body.className = 'ws-prose-body'
   body.innerHTML = renderFiberMarkdown(channel.body, '', {
@@ -160,7 +146,7 @@ export function buildFiberProse(
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
   const slug = roleSlug(card)
   const ledger = slug ? buildRoleLedger(opts.holds ?? [], { onCard: opts.onCard ?? (() => {}) }) : null
-  article.append(header, title, ...(outcomeText.trim() ? [outcome] : []), ...(ledger ? [ledger] : []), ...(opts.controls ? [opts.controls] : []), body)
+  article.append(header, title, ...(outcomeText.trim() ? [outcome] : []), ...(ledger ? [ledger] : []), body)
   scroller.append(article)
   return scroller
 }

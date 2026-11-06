@@ -63,11 +63,7 @@ time.
 | `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
 | `GET /voice/transcript` | recorder-addressed | Resolve the current following transcript as `{path, launch, recorder}` for the file reader; no capture control |
 | `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
-| `POST /voice/target` | recorder-routed | Append a timestamped speech destination `{fiber_id, origin?}` |
-| `POST /voice/draft` | recorder-routed | Edit held speech through a displayed checkpoint `{id, after, through, text}` |
-| `POST /voice/release` | recorder-routed | Consume a displayed checkpoint `{id, after, through}` before a composer send |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
-| `POST /attachments` | owner-routed | Store files attached in the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
@@ -276,8 +272,6 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
-| `GET /transcript/stream` | host-routed | Follow complete transcript records as server-sent events |
-| `GET /transcript/messages` | host-routed | Exact Shuttle message envelopes recorded for a receiving conversation |
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 | `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
@@ -429,16 +423,11 @@ Without it, the receiving daemon is the recorder.
 `target` is `{fiber_id, origin, name}` or `null`.
 `cold` says whether the selected target is dormant or has been idle for at least `cold_minutes`.
 A working target is warm regardless of the age of its last event; unknown or stale owner activity is cold.
-`held` is a list of `{id, fiber_id, origin, after, through, text, segments}` drafts, retained across target switches, mute, recorder replacement and daemon restart.
-`after` is the last consumed segment (initially 0); it advances when an earlier prefix is released while later speech remains, even if `through` is unchanged.
-`segments` contains the current `{through, text}` pieces in order; their text concatenates to `text`.
-Editing a displayed prefix coalesces its segments at that prefix's ending checkpoint, preserving later segments.
-A composer appends only segments beyond its displayed checkpoint, so an edit response lost before more speech arrives cannot make repeated words disappear through ambiguous string-prefix matching.
-`through` identifies the last finalized speech segment included in that draft.
+`held` is a list of `{id, fiber_id, origin, after, through, text, segments}`, speech waiting for a cold target, retained across target switches, mute, recorder replacement and daemon restart.
 `pending` is `{fiber_id, words, text}` or `null`, holding finalized warm speech before a delivery trigger.
 `preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.
 Missing or empty partials, mute, disabled voice and recorder exit clear the preview.
-Preview words never enter the relay, held drafts or delivery; only final transcript rows fill the composer.
+Preview words never enter the relay, held speech or delivery.
 `level` is `{mic, at}` or `null`: the recorder mic's peak over hark's newest 100 ms block in dBFS (`mic`, a float; about -90 is digital silence, 0 is full scale) and the ISO 8601 time that block arrived (`at`), read from hark's `level.json` on each request and `null` when that file is missing or more than a second old.
 `last` is `{fiber_id, at, status, detail?}` or `null`, with `status` `delivered`, `unconfirmed` or `failed`.
 `enabled` reports the persisted intent even if recording fails. Invalid or unreadable `voice.json` fails off: `enabled: false`, `state: "failed"`, and `error` describes the configuration failure while the daemon stops any live voice recorder.
@@ -453,9 +442,8 @@ Every meeting start stops live voice and verifies the recorder has exited before
 Voice captures are hidden from `/meeting`, its stop, pause and system-audio controls, including stale-launch errors.
 Disabled, idle voice checks lifecycle-file changes without polling the terminal; startup always observes retained captures so an orphan voice recorder is stopped.
 
-`POST /voice/target` accepts `{fiber_id, origin?, recorder?}` and durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
+While following is on, the focused Rex session is the destination: `Shuttle.RexFocus` durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory. No HTTP route sets a target.
 `t` is the recorder's UTC receipt time, not the time reconciliation finishes.
-Use a durable fiber UID so renaming doesn't change the destination.
 Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
 A target switch flushes warm pending words to the old target immediately; cold speech stays with its card.
 No selected target means no delivery; the recording still retains the words.
@@ -482,15 +470,10 @@ Comments travel with the next batch and `# ended` closes the monitor.
 An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.
 The monitor persists read offsets, buffers and stable message IDs before delivery, so restart recovery doesn't replay confirmed speech.
 
-Cold speech doesn't deliver on word count, quiet, switching target or capture end.
-It fills an editable range in that card's composer without replacing typed text or moving the cursor.
-`POST /voice/draft` replaces only the held prefix through its checkpoint, preserving any later speech.
-Both mutations include the displayed `after` boundary and return 409 if another delivery has consumed any of that displayed prefix; later appends do not invalidate it.
-`POST /voice/release` consumes that prefix before Send, Resume or New session delivers the box's edited text.
-A consumed checkpoint returns **409**, so a button cannot repeat a name-triggered delivery.
+Cold speech doesn't deliver on word count, quiet, switching target or capture end; it is held for its target.
 Saying a name consumes everything held through that utterance and uses the default delivery verb: paste to a live worker, resume a dormant conversation, or start a never-run card.
 The owning daemon resolves resume versus first start from its current document, independently of recorder caches.
-A failed or interrupted name delivery retains the resolved edited text in durable recovery state and exposes it in `last.detail` for an explicit retry; it never automatically resubmits an uncertain attempt.
+A failed or interrupted name delivery retains the resolved text in durable recovery state and exposes it in `last.detail` for an explicit retry; it never automatically resubmits an uncertain attempt.
 A worker warmed through any path gets ordinary triggers on its next speech.
 
 Voice batches contain speaker-labelled paragraphs, joining consecutive lines by one speaker, with no header or timestamp.
@@ -589,7 +572,7 @@ stays `~/`-relative. Start errors are the same as meeting capture's, including
 user_message?, project_dir?, release_launch_reservation?, existing_only?}` (plus `origin` to forward).
 With `existing_only: true`, only a `previous` message to a live worker is allowed.
 A missing worker returns 422 `no_live_worker` without arming, reopening or launching anything.
-The change reader uses this form; start authority stays with the composer.
+The change reader uses this form.
 A forced start
 (`force` or `ad_hoc`) never runs a worker in the felt store. Every check runs
 before a session is cut or a document written: the owning daemon needs a
@@ -616,25 +599,6 @@ with `/dispatch`'s body and statuses plus `delivered` and `delivery`.
 With `message_after_launch: true`, the owner instead starts the dormant worker without the text in its launch prompt, waits up to 30 s for its native conversation address, then sends the text as a message using `message_id`.
 This keeps transcript-batch deduplication identical for live and dormant workers.
 An address timeout returns **503** rather than claiming delivery.
-
-`POST /attachments` accepts `{fiber, attachments: [{name, mime?, data,
-sha256}]}` (plus `origin` to forward), with `data` base64 and `sha256` the hex
-digest of the decoded bytes. The owning daemon resolves `fiber` in its own
-stores (**404** when it does not own it, **504** when felt timed out) and writes
-each file to `<data dir>/attachments/<fiber uid>/<first 16 hex of
-sha256>.<ext>` (`ext` from an image `mime`, else the name's own short alphanumeric extension, else `bin`; 0600, in a 0700 directory; the data dir is `$SHUTTLE_DATA_DIR`,
-default `~/.shuttle`). The name is content-addressed, so re-sending a file
-returns the same path. The answer is `{files: [{name, path, sha256, size}]}` in
-request order, `path` absolute on the owning host. The batch is all or nothing,
-and **400** `{error}` names the first broken rule: any file type is accepted, but a
-`mime` of `image/png`, `image/jpeg`, `image/gif` or `image/webp` must be backed by
-the bytes' signature; each file is at most 10 MB; at most 8 per request and 25 MB in
-total; `data` decodes; `sha256` matches. The route's JSON body ceiling is sized
-to that total, each socket read may take up to 120 s, and a forward allows
-120 s. Files are kept 30 days: every successful store removes files under
-`attachments/` whose mtime is older than that, and fiber directories left
-empty, without following links. Re-sending a file refreshes its mtime. The board's composer uploads here
-before it sends a directive and appends one `[Image: <path>]` line per image and one `[File: <path>]` line per other file.
 
 Desktop meeting requests accept `meeting.system_audio` (boolean, default `true`).
 Set it to `false` to start with only mic transcription.
@@ -710,22 +674,6 @@ adds `X-Transcript-Byte-Count` and `X-Transcript-SHA256` headers. Agents should
 use ordinary `jq`/`rg` recipes on that file; Shuttle deliberately does not
 define a transcript reader or search language.
 
-`/transcript/stream` accepts `session`, optional `host`, and a non-negative byte `offset` (default 0).
-Each server-sent event carries complete JSONL records in `data` lines and an `id` equal to the byte offset after its last record; partial trailing lines wait for completion.
-The stream sends comment keepalives while idle and ends with an `event: reset` if the file shrinks, is replaced, or disappears; clients should reread from offset 0 after a reset.
-A hub relay sends `event: error` with `{"error":"upstream_error"}` or `{"error":"upstream_idle"}` before closing on upstream failure or silence; clients should retry with backoff from the last committed event id.
-An upstream response that ends normally closes without an error event.
-When a remote owner does not support streaming, the hub returns 501 `stream_unsupported`; clients can fall back to polling `/transcript/raw`.
-
-`/transcript/messages` accepts `session=<uuid>` and optional `host=<name>` with the same routing as transcript reads.
-It returns `{"messages":[{"id":"…","envelope":"[from …]\\n…","thread":true}],"cursor":"…"}` from the host's private message records.
-Pass the opaque `cursor` back as `since=<cursor>` to read changes; merge responses by message ID.
-Evidence is retained for fourteen days.
-The optional `thread` flag marks a lifecycle notice from the daemon, whose message id starts `thread-`.
-Each `envelope` includes its complete body, so a quoted message header cannot create a second attributed row.
-An envelope carries no message ID; two messages with the same sender and text have equal envelopes and separate records.
-Missing evidence returns an empty array; an unreadable store returns 503.
-Evidence establishes the delivered envelope, while the native record's origin establishes whether the record is eligible for message attribution.
 Ordinary human prompt records retain their prompt boundary even when their text copies a recorded envelope.
 
 `/sessions/links` accepts `sessions=<uuid>,<uuid>,…` (at most 50) and an

@@ -42,7 +42,8 @@ import { watchAppearance } from './appearance.js'
 import './KanbanModal.css'
 import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
-import { Dock, type MeetingJoinOptions, type MeetingJoinResult } from './workspace/Dock.js'
+import { Dock } from './workspace/Dock.js'
+import type { MeetingJoinOptions } from './workspace/ListenControl.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { constitutionAction } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
@@ -386,7 +387,7 @@ export class KanbanModal {
           canJoin: () => !recordingStartHold(this.shuttleBase) && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
           modes: () => supportedMeetingModes(this.meetingStatus, isMobileViewport()),
           recorder: () => this.meetingStatus.recorder ?? null,
-          join: (card, mode, note, options) => this.joinCardMeeting(card, mode, note, options),
+          join: (card, mode, options) => this.joinCardMeeting(card, mode, options),
           current: () => this.meetingStatus.meeting,
           stop: (meeting) => this.stopCurrentMeeting(meeting),
           pause: async (meeting, paused) => { await requestMeetingPaused(this.shuttleBase, meeting, paused); await this.fetchMeetingStatus() },
@@ -458,10 +459,9 @@ export class KanbanModal {
   private async joinCardMeeting(
     card: KanbanCard,
     mode: MeetingMode,
-    composeNote: () => Promise<string>,
     { session, systemAudio = true }: MeetingJoinOptions,
-  ): Promise<MeetingJoinResult> {
-    if (recordingStartHold(this.shuttleBase)) return { error: 'Could not confirm whether listening started. Check the recorder before trying again.', delivered: false }
+  ): Promise<string | null> {
+    if (recordingStartHold(this.shuttleBase)) return 'Could not confirm whether listening started. Check the recorder before trying again.'
     const recorder = this.meetingStatus.recorder
     let opening: PhoneCaptureAttempt | undefined
     let generation: number | undefined
@@ -473,17 +473,8 @@ export class KanbanModal {
         opening?.cancel()
         const message = errText(error)
         this.showBanner(`Couldn't start listening: ${message}`, 'error')
-        return { error: message, delivered: false }
+        return message
       }
-    }
-    // The note waits for any pasted images to reach the owning host; a failed
-    // upload starts no meeting.
-    let note: string
-    try {
-      note = await composeNote()
-    } catch (error) {
-      opening?.cancel()
-      return { error: errText(error), delivered: false }
     }
     const outcome = await requestMeetingJoin(this.shuttleBase, {
       fiberId: card.id,
@@ -492,7 +483,6 @@ export class KanbanModal {
       mode,
       systemAudio,
       session,
-      note,
     })
     if (outcome.kind === 'error') {
       if (outcome.uncertain) {
@@ -501,7 +491,7 @@ export class KanbanModal {
       }
       opening?.cancel()
       this.showBanner(`Couldn't start listening: ${outcome.message}`, 'error')
-      return { error: outcome.message, delivered: false }
+      return outcome.message
     }
     if (outcome.kind === 'joined') {
       this.showBanner(`Listening — “${card.name}” ${joinDeliveryPhrase(outcome.delivery)}.`, 'info')
@@ -517,7 +507,7 @@ export class KanbanModal {
     }
     this.meetingStarted(outcome.meeting)
     void this.fetchAndRender()
-    return { error: audioError, delivered: outcome.kind !== 'recording' }
+    return audioError
   }
 
   private async stopCurrentMeeting(meeting: MeetingRecord): Promise<boolean> {
@@ -572,7 +562,6 @@ export class KanbanModal {
     )
     this.workspace = new Workspace(this.container!, {
       shuttleBase: this.shuttleBase,
-      localHost: () => this.lastResponse?.feltHost,
       cards: () => boardCards(this.lastResponse),
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
@@ -728,14 +717,13 @@ export class KanbanModal {
   }
 
   /** Desk and Chronicle cards enter the same owner-addressed document channel. */
-  private openDocumentChannel(card: KanbanCard, compose = false, doc?: DocKey): void {
+  private openDocumentChannel(card: KanbanCard, doc?: DocKey): void {
     if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
       ? document.activeElement
       : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId }
-    if (compose) this.workspace?.compose(card)
-    else if (doc) this.workspace?.open(card, undefined, doc)
+    if (doc) this.workspace?.open(card, undefined, doc)
     else if (card.status === 'active' && isQuestion(card)) this.workspace?.openQuestion(card)
     else this.workspace?.open(card)
   }
@@ -2345,7 +2333,6 @@ export class KanbanModal {
       const selected = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
       if (intent && constitutionAction(intent, selected, {
         verdict: (card, verdict) => { this.workspace?.queueVerdict(card, verdict) },
-        compose: card => this.openDocumentChannel(card, true),
         conversation: card => this.dock.openConversation(card),
         rest: card => this.openRestPopover(card),
       })) {

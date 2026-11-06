@@ -639,7 +639,7 @@ export class Overview {
     const count = node('span', '')
     const when = node('span', 'ws-overview-when')
     const conversation = button('ws-overview-folio-conversation')
-    conversation.textContent = 'Chat'
+    conversation.textContent = 'Open'
     conversation.setAttribute('aria-label', 'Open conversation')
     conversation.title = 'Open conversation'
     footer.append(marks, count, conversation, when); tx.append(title, outcome); open.append(stack, tx); el.append(open, footer)

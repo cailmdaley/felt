@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&transcript=warm&long-title`
+const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
 const root = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const section = page => page.locator('.ws-thread-rail .ws-rail-artifact')
 const railFrame = page => section(page).frameLocator('iframe')
@@ -11,12 +11,13 @@ async function openRoot(page) {
   const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
-  const header = page.locator('.ws-selected .ws-chat-head')
-  if (await header.locator('h1').innerText() !== root) {
+  const header = page.locator('.ws-stage-band .ws-band-head')
+  await header.waitFor()
+  if (await header.locator('h1').textContent() !== root) {
     await header.getByRole('button', { name: 'Settings', exact: true }).click()
     await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
   }
-  await header.getByRole('heading', { name: root, exact: true }).waitFor()
+  await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, root)
 }
 const scale = page => section(page).evaluate(el => Number(el.dataset.scale))
 const stageBox = page => page.locator('.ws-stage-column').evaluate(el => { const r = el.getBoundingClientRect(); return [r.left, r.width].map(Math.round) })
@@ -30,6 +31,7 @@ export function registerRailArtifactJourneys(test) {
     })
     await page.goto(url)
     await openRoot(page)
+    await page.locator('.ws-stage-band').getByRole('button', { name: 'Constitution', exact: true }).click()
     // Threads lead the rail, then the artifact, then Sent files.
     await section(page).waitFor()
     const order = await page.locator('.ws-thread-rail').evaluate(rail =>
@@ -38,7 +40,7 @@ export function registerRailArtifactJourneys(test) {
     const before = await stageBox(page)
     await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
     await page.waitForTimeout(200)
-    assert.deepEqual(await stageBox(page), before, 'the chat column does not move when the rail artifact loads')
+    assert.deepEqual(await stageBox(page), before, 'the stage column does not move when the rail artifact loads')
 
     // The artifact takes the height the threads above and the sent files below leave, and the files' heading stays in view.
     const geometry = await page.evaluate(() => {

@@ -177,7 +177,7 @@ describe('Reader Rest lifecycle', () => {
     { view: 'desk', tempered: true }, { view: 'desk', tempered: false },
     { view: 'chronicle', tempered: true }, { view: 'chronicle', tempered: false },
   ] as const)('s rests a constitution opened from $view with tempered=$tempered', async ({ view, tempered }) => {
-    const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot' })
+    const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot', sessionUuid: 'finished-session' })
     draw(response({ timeline: { past: [finished], futureDated: [] } }))
     inside.setView(view)
     // The same entry point receives Desk and Chronicle's original card, even
@@ -201,7 +201,7 @@ describe('Reader Rest lifecycle', () => {
 
 describe('Rest controls', () => {
   it.each([true, false])('a reviewed constitution keeps Rest on its keyboard while its header offers session actions, tempered=%s', async tempered => {
-    const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot' })
+    const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot', sessionUuid: 'finished-session' })
     draw(response({ timeline: { past: [finished], futureDated: [] } }))
     inside.setView('chronicle')
     inside.openDocumentChannel(finished)
@@ -266,16 +266,6 @@ describe('Desk constitution keys', () => {
     press('j'); press('h'); press('h'); expect(selected()).toBe('draft-uid')
     expect(press('t').defaultPrevented).toBe(false)
     expect(undoLine('draft-uid')).toBeUndefined()
-  })
-  it('r opens the selected card on its fiber page, writing', async () => {
-    draw(agentDesk())
-    press('j')
-    press('r')
-    for (let i = 0; i < 50; i++) await Promise.resolve()
-    expect(inside.workspace.isActive).toBe(true)
-    expect(window.location.hash).toContain('done')
-    expect(document.activeElement?.closest('.ws-reader')).not.toBeNull()
-    expect(document.activeElement?.tagName).toBe('TEXTAREA')
   })
 })
 

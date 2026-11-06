@@ -17,8 +17,8 @@ export interface WorkspaceDocument {
   owner: string
   path: string
   name: string
-  /** `chat` is the worker's conversation; `fiber` the fiber's own prose. */
-  kind: 'chat' | 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other' | 'change'
+  /** `fiber` is the fiber's own prose. */
+  kind: 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other' | 'change'
   provenance: Provenance[]
   /** Owner-daemon file modification time; absent when unknown. */
   modifiedAt?: string
@@ -45,8 +45,6 @@ export interface ChannelInput {
   outcome?: string
   /** True when the fiber carries a `shuttle:` block. */
   isConstitution?: boolean
-  /** True when the fiber has a worker conversation: the run then leads with its chat page. */
-  conversation?: boolean
   /** The fiber's genuine owner-daemon modification time, never its creation time. */
   modifiedAt?: string
   embeds?: { path: string; title?: string }[]
@@ -110,15 +108,11 @@ export function fiberKey(owner: string, uid: string): DocKey {
   return `fiber:${owner}:${uid}`
 }
 
-export function chatKey(owner: string, uid: string): DocKey {
-  return `chat:${owner}:${uid}`
-}
-
 /** Each kind of page's mark, shared by thumbnails and the reader's tabs. */
-export const KIND_GLYPH: Record<Exclude<WorkspaceDocument['kind'], 'chat'>, string> = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□', change: '±' }
+export const KIND_GLYPH: Record<WorkspaceDocument['kind'], string> = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□', change: '±' }
 
-/** Reuse the extension vocabulary that drives FileViewerPanel. A path is never a conversation. */
-export function documentKind(path: string): Exclude<WorkspaceDocument['kind'], 'chat'> {
+/** Reuse the extension vocabulary that drives FileViewerPanel. */
+export function documentKind(path: string): WorkspaceDocument['kind'] {
   if (/\.change\.json$/i.test(path)) return 'change'
   const kind = fileKind(path)
   if (kind === 'markdown' || kind === 'text') return 'text'
@@ -215,16 +209,11 @@ export function proseDocument(channel: Channel): WorkspaceDocument | undefined {
   return channel.documents.find(d => d.kind === 'fiber')
 }
 
-/** The worker conversation's page, when the fiber has one. */
-export function chatDocument(channel: Channel): WorkspaceDocument | undefined {
-  return channel.documents.find(d => d.kind === 'chat')
-}
-
 /** The channel's own companion or newest sent document. */
 export function channelLead(channel: Channel): WorkspaceDocument | undefined {
   const prose = proseDocument(channel)
   const dir = prose?.path.slice(0, prose.path.lastIndexOf('/')) || '/'
-  const files = channel.documents.filter(d => d.kind !== 'fiber' && d.kind !== 'chat')
+  const files = channel.documents.filter(d => d.kind !== 'fiber')
   const sent = files.filter(d => lastSent(d) !== undefined).sort((a, b) => (lastSent(b) ?? 0) - (lastSent(a) ?? 0))
   const companions = files.filter(d => d.owner === channel.owner && isReport(d) && normalizeAbsolutePath(d.path.slice(0, d.path.lastIndexOf('/')) || '/') === normalizeAbsolutePath(dir))
   return leadReceipt([...sent, ...companions.filter(d => !sent.includes(d))], dir, d => d.path, d => d.owner === channel.owner)
@@ -308,22 +297,9 @@ export function buildChannel(input: ChannelInput): Channel {
 
   documents.delete(prose.key)
   const run = arrangeDocuments(prose, documents.values(), declared)
-  // A conversation's run ends in its chat, the page a constitution opens on.
-  // The files run left of it, outward from its latest word one step away (the
-  // report, else the newest sent file), then the declared documents in body
-  // order and the sent ones newest first. The constitution page, read rarely,
-  // stands at the far end.
-  const files = run.filter(d => d !== prose)
-  const latest = files.find(isReport) ?? files.filter(d => lastSent(d) !== undefined).sort((x, y) => lastSent(y)! - lastSent(x)!)[0]
-  const outward = [...(latest ? [latest] : []), ...files.filter(d => d !== latest).sort(compareDocuments(declared))]
-  const ordered = input.conversation ? [prose, ...outward.reverse(), {
-    key: chatKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: input.name,
-    kind: 'chat' as const, provenance: [{ kind: 'fiber' as const }],
-  }] : run
-
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
-    documents: ordered, labels: documentLabels(ordered, input.isConstitution), body: input.body,
+    documents: run, labels: documentLabels(run, input.isConstitution), body: input.body,
   }
   if (input.outcome !== undefined) channel.outcome = input.outcome
   return channel
@@ -332,7 +308,6 @@ export function buildChannel(input: ChannelInput): Channel {
 /** The frame owns document naming and arrival metadata; renderers own content only. */
 export function documentLabelMetadata(doc: WorkspaceDocument, label: string, channelOwner: string, now = Date.now()): { title: string; summary: string } {
   const age = (time: number): string => ago(time, now)
-  if (doc.kind === 'chat') return { title: '', summary: 'Conversation' }
   if (doc.kind === 'fiber') {
     const time = doc.modifiedAt ? Date.parse(doc.modifiedAt) : NaN
     return { title: '', summary: Number.isFinite(time) ? `Last changed ${age(time)}` : 'Last changed unknown' }
@@ -348,8 +323,6 @@ export function documentLabelMetadata(doc: WorkspaceDocument, label: string, cha
 }
 
 export function defaultSelection(channel: Channel): DocKey {
-  const chat = chatDocument(channel)
-  if (chat) return chat.key
   const reports = channel.documents.filter(isReport)
   const report = channelLead(channel)
     ?? reports.find(document => document.provenance.some(item => item.kind === 'embed'))
@@ -362,21 +335,21 @@ export function defaultSelection(channel: Channel): DocKey {
 
 /**
  * Keep selection if it survives; otherwise walk the old run from it toward
- * its anchor (the chat, else the fiber page) and take the first page that
+ * the fiber page and take the first page that
  * survives, else the anchor.
  */
 export function fallbackSelection(previousKeys: DocKey[], nextKeys: DocKey[], selected: DocKey): DocKey | undefined {
   if (!nextKeys.length) return undefined
   if (nextKeys.includes(selected)) return selected
   const survives = new Set(nextKeys)
-  const isAnchor = (keys: DocKey[]) => keys.some(key => key.startsWith('chat:')) ? (key: DocKey) => key.startsWith('chat:') : (key: DocKey) => key.startsWith('fiber:')
+  const isAnchor = (key: DocKey): boolean => key.startsWith('fiber:')
   const from = previousKeys.indexOf(selected)
-  const anchor = previousKeys.findIndex(isAnchor(previousKeys))
+  const anchor = previousKeys.findIndex(isAnchor)
   if (from >= 0 && anchor >= 0) {
     const step = anchor > from ? 1 : -1
     for (let i = from + step; i !== anchor + step; i += step) if (survives.has(previousKeys[i])) return previousKeys[i]
   }
-  return nextKeys.find(isAnchor(nextKeys)) ?? nextKeys[0]
+  return nextKeys.find(isAnchor) ?? nextKeys[0]
 }
 
 /** Use the shortest unique path suffix, with report pages named for their folder. */
@@ -384,7 +357,6 @@ export function documentLabels(documents: WorkspaceDocument[], isConstitution = 
   const candidates = documents.map((document) => {
     const labels: string[] = []
     const add = (label: string): void => { if (label && !labels.includes(label)) labels.push(label) }
-    if (document.kind === 'chat') return ['Chat']
     if (document.kind === 'fiber') {
       add(isConstitution ? 'Constitution' : 'Note')
       return labels

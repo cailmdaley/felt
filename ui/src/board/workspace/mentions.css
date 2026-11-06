@@ -1,5 +1,4 @@
-.ws-constitution-chip,
-.ws-transcript-session-chip {
+.ws-constitution-chip {
   display: inline-flex;
   align-items: center;
   gap: .4em;
@@ -31,12 +30,3 @@
 .ws-constitution-chip-missing { opacity: .65; cursor: default; }
 .ws-constitution-chip-missing::before { content: none; }
 .ws-constitution-chip:focus-visible { outline: 2px solid var(--kbn-owed, currentColor); outline-offset: 2px; }
-.ws-transcript-spawn-chip {
-  gap: .5em;
-  padding-inline: .55em;
-  margin: 4px 6px 4px 0;
-  font: var(--type-note)/var(--leading-ui) var(--font-serif);
-}
-.ws-transcript-spawn-chip[hidden] { display: none; }
- .ws-transcript-spawns { align-self: flex-start; }
-.ws-transcript-spawns:not(:has(.ws-transcript-spawn-chip:not([hidden]))) { display: none; }
