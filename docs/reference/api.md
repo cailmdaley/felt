@@ -470,6 +470,8 @@ It defaults to:
 
 The word limit is a positive integer; the quiet interval is a positive number of seconds.
 Both apply to voice and meetings.
+The quiet interval is the one pause that means the speaker is done. Shuttle launches hark with `--settings` pointing at this file, so hark closes a speech run and sends it to the external ear after that quiet, and the monitor delivers once the same quiet has passed since the last spoken word: delivery follows the pause by the quiet plus the ear's call.
+A `run_quiet_seconds` key is dropped when the file is read and when it is saved.
 For existing nested settings, each top-level value takes precedence, followed by `voice`, then `meeting`, then the default.
 Saving Listening settings replaces the nested `voice` and `meeting` objects with the shared top-level values, preserving other top-level fields.
 `cold_minutes` is the positive number of minutes after which a worker is cold.

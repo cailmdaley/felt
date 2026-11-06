@@ -1,5 +1,11 @@
 defmodule Shuttle.Voice.Config do
-  @moduledoc "The live voice switch and the shared transcript monitor's thresholds."
+  @moduledoc """
+  The live voice switch and the shared transcript monitor's thresholds.
+
+  `quiet_seconds` is the one pause that means a speaker is done: hark reads it
+  from this file (`--settings`) to close a speech run, and the transcript relay
+  delivers once the same quiet has passed since the last spoken word.
+  """
 
   @defaults %{
     "enabled" => false,
@@ -39,7 +45,9 @@ defmodule Shuttle.Voice.Config do
 
   defp normalize(config) do
     legacy = Map.merge(Map.get(config, "meeting", %{}), Map.get(config, "voice", %{}))
-    @defaults |> Map.merge(Map.take(legacy, ~w(words quiet_seconds))) |> Map.merge(config)
+    @defaults
+    |> Map.merge(Map.take(legacy, ~w(words quiet_seconds)))
+    |> Map.merge(Map.delete(config, "run_quiet_seconds"))
   end
 
   def validate(config) when is_map(config) do

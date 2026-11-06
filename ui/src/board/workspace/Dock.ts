@@ -1727,8 +1727,6 @@ export class Dock {
         return field
       }
       const quiet = input('Quiet seconds')
-      const aqua = input('Aqua seconds')
-      const fields = [quiet, aqua]
       menu.append(cadence)
       const configOrigin = (recording ? current.recorder : state?.recorder) ?? ''
       const configUrl = `${this.shuttleBase}/api/v1/config/voice${configOrigin ? `?origin=${encodeURIComponent(configOrigin)}` : ''}`
@@ -1739,27 +1737,25 @@ export class Dock {
         const oldVoice = doc.voice as { quiet_seconds?: number } | undefined
         const oldMeeting = doc.meeting as { quiet_seconds?: number } | undefined
         quiet.value = String(doc.quiet_seconds ?? oldVoice?.quiet_seconds ?? oldMeeting?.quiet_seconds ?? 15)
-        aqua.value = String(doc.run_quiet_seconds ?? 5)
-        fields.forEach(field => { field.disabled = false })
-        const settings: [HTMLInputElement, string][] = [[quiet, 'quiet_seconds'], [aqua, 'run_quiet_seconds']]
-        for (const [field, key] of settings) {
-          field.addEventListener('change', () => {
-            const value = Number(field.value)
-            if (!field.validity.valid || !Number.isFinite(value) || value <= 0) return
-            fields.forEach(item => { item.disabled = true })
-            void fetch(`${this.shuttleBase}/api/v1/config/voice`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text: JSON.stringify({ ...doc, [key]: value }, null, 2) + '\n', origin: configOrigin, expected_digest: file.digest }),
-            }).then(async response => {
-              if (!response.ok) throw new Error('Could not save listening settings')
-              const saved = await response.json() as { digest: string | null }
-              file.digest = saved.digest
-              doc[key] = value
-              localError = null
-            }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
-              .finally(() => { fields.forEach(item => { item.disabled = false }) })
-          })
-        }
+        quiet.disabled = false
+        quiet.addEventListener('change', () => {
+          const value = Number(quiet.value)
+          if (!quiet.validity.valid || !Number.isFinite(value) || value <= 0) return
+          quiet.disabled = true
+          const { run_quiet_seconds: _, ...kept } = doc
+          void fetch(`${this.shuttleBase}/api/v1/config/voice`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: JSON.stringify({ ...kept, quiet_seconds: value }, null, 2) + '\n', origin: configOrigin, expected_digest: file.digest }),
+          }).then(async response => {
+            if (!response.ok) throw new Error('Could not save listening settings')
+            const saved = await response.json() as { digest: string | null }
+            file.digest = saved.digest
+            delete doc.run_quiet_seconds
+            doc.quiet_seconds = value
+            localError = null
+          }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
+            .finally(() => { quiet.disabled = false })
+        })
       }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
       const failure = localError || (current?.handoff?.status === 'reported-failure' ? 'Delivery failed' : null) || (current?.state === 'failed' ? current.error : null) || (state?.state === 'failed' ? state.error : null) || (state?.last?.status === 'failed' ? `Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}` : null)
       if (recording && state?.enabled) {
@@ -1769,7 +1765,7 @@ export class Dock {
       if (failure) note(failure)
       menu.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); dropdown.focus() }
-        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && event.target !== audio && event.target !== quiet && event.target !== aqua) {
+        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && event.target !== audio && event.target !== quiet) {
           event.preventDefault()
           const items = [...menu!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
           const at = items.indexOf(document.activeElement as HTMLButtonElement)

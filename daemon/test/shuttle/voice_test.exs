@@ -96,6 +96,18 @@ defmodule Shuttle.VoiceTest do
     assert Config.thresholds("meeting") == Config.thresholds("voice")
   end
 
+  test "one quiet setting: a separate run quiet is dropped on read and on save", c do
+    path = Path.join(c.root, "voice.json")
+    File.write!(path, ~s({"quiet_seconds":4,"run_quiet_seconds":2}))
+
+    assert {:ok, config} = Config.read()
+    assert config["quiet_seconds"] == 4
+    refute Map.has_key?(config, "run_quiet_seconds")
+
+    assert :ok = Config.enable(false)
+    refute path |> File.read!() |> Jason.decode!() |> Map.has_key?("run_quiet_seconds")
+  end
+
   test "subscribers receive each new route as it is appended" do
     {:ok, _} = Voice.subscribe()
     assert {:ok, _} = Voice.target(%{"fiber_id" => "pushed/one", "origin" => nil})
