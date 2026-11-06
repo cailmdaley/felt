@@ -832,6 +832,55 @@ defmodule Shuttle.TerminalTest do
 
   @tag :tmp_dir
   @tag skip: is_nil(System.find_executable("tmux"))
+  test "stop kills a real worker whose tmux socket was deleted", %{tmp_dir: dir} do
+    socket = Path.join(System.tmp_dir!(), "lost-#{System.unique_integer([:positive])}.sock")
+    Env.put_app_env(:terminal_test_socket, socket)
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_app_env(:worker_stop_ladder, [{nil, 0}, {"TERM", 2_000}, {"KILL", 2_000}])
+    name = "lost-socket-#{System.unique_integer([:positive])}-shuttle"
+    script = Shuttle.WorkerProcess.script_path(name)
+    File.write!(script, "sleep 300\n")
+    on_exit(fn -> File.rm(script) end)
+
+    assert {output, 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", name, "-P", "-F", "\#{pid}", "bash", "-l", script],
+               []
+             )
+
+    server = String.trim(output)
+    # Cleanup uses the private server's PID because its socket is deliberately gone.
+    on_exit(fn -> System.cmd("kill", ["-TERM", server], stderr_to_stdout: true) end)
+    worker = await_script_process(name, System.monotonic_time(:millisecond) + 5_000)
+    assert worker.ppid == String.to_integer(server)
+    File.rm!(socket)
+
+    assert :absent = Tmux.probe(ClaimedTmuxRunner, name)
+    assert :alive = Terminal.status(ClaimedTmuxRunner, name)
+    assert {_, 0} = System.cmd("kill", ["-0", Integer.to_string(worker.pid)])
+    assert {"", 0} = Terminal.stop(ClaimedTmuxRunner, name)
+    assert {:ok, procs} = Shuttle.WorkerProcess.scan(ClaimedTmuxRunner)
+    refute Shuttle.WorkerProcess.session_process(procs, name)
+    assert :gone = Terminal.status(ClaimedTmuxRunner, name)
+  end
+
+  defp await_script_process(name, deadline) do
+    {:ok, procs} = Shuttle.WorkerProcess.scan(ClaimedTmuxRunner)
+
+    case Shuttle.WorkerProcess.session_process(procs, name) do
+      nil ->
+        assert System.monotonic_time(:millisecond) < deadline, "worker script did not start"
+        Process.sleep(10)
+        await_script_process(name, deadline)
+
+      proc ->
+        proc
+    end
+  end
+
+  @tag :tmp_dir
+  @tag skip: is_nil(System.find_executable("tmux"))
   test "claimed capture on a private tmux server remains stoppable without terminal visibility",
        %{tmp_dir: dir} do
     socket = Path.join(System.tmp_dir!(), "claim-#{System.unique_integer([:positive])}.sock")
