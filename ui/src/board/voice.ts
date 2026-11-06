@@ -58,6 +58,7 @@ export class Voice {
   /** The target last read from the daemon; undefined until the first read. */
   private seen: string | null | undefined = undefined
   private followed: VoiceTarget | null = null
+  private revealed = ''
   private reading: Promise<boolean> = Promise.resolve(false)
   private timer: number | null = null
   private focusTimer: number | null = null
@@ -94,14 +95,25 @@ export class Voice {
   select(card: KanbanCard | null): void {
     this.card = card && isAgentCard(card) ? card : null
     const followed = this.followed
+    const key = this.card ? JSON.stringify([this.card.uid ?? this.card.id, this.card.originId]) : ''
     if (this.card && followed && this.card.originId === followed.origin && [this.card.uid, this.card.id].includes(followed.fiber_id)) {
       this.followed = null
-      this.lastTarget = JSON.stringify([this.card.uid ?? this.card.id, this.card.originId])
+      this.lastTarget = key
+      this.revealed = key
       return
     }
     this.followed = null
     if (!this.card) this.lastTarget = ''
     this.target(false)
+    this.reveal(key)
+  }
+  /** Shows a newly opened constitution's worker in Rex, which routes the mic from there. */
+  private reveal(key: string): void {
+    if (key === this.revealed) return
+    this.revealed = key
+    if (!this.card || !this.status?.enabled || document.hidden || isMobileViewport()) return
+    const body = { fiber_id: this.card.uid ?? this.card.id, origin: this.card.originId }
+    void fetch(`${this.base}/api/v1/voice/reveal`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {})
   }
   async listenHere(card: KanbanCard): Promise<void> {
     this.card = card

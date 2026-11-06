@@ -257,6 +257,48 @@ defmodule Shuttle.RexFocusTest do
     assert_receive {:selected, %{"fiber_id" => "other/work"}}
   end
 
+  test "reveal selects the opened card's local worker unless Rex already shows it" do
+    parent = self()
+
+    reveal = fn params, overrides ->
+      RexFocus.reveal(
+        params,
+        Keyword.merge(
+          [
+            active?: fn -> true end,
+            bindings: fn -> {:ok, bindings()} end,
+            fibers: fn ->
+              [
+                %{
+                  "id" => "project/task",
+                  "uid" => "01TASK",
+                  "name" => "Task",
+                  "shuttle" => %{"host" => "test-host"}
+                }
+              ]
+            end,
+            title: fn -> {:ok, "zsh ~ - other/session"} end,
+            select: fn sid, wid -> send(parent, {:select, sid, wid}) end
+          ],
+          overrides
+        )
+      )
+    end
+
+    task = %{"fiber_id" => "01TASK", "origin" => "test-host"}
+    assert :ok = reveal.(task, [])
+    assert_receive {:select, "session:a", "window:a"}
+    assert :ok = reveal.(task, title: fn -> {:error, :unavailable} end)
+    assert_receive {:select, "session:a", "window:a"}
+
+    assert :skip = reveal.(task, title: fn -> {:ok, "task - project/task"} end)
+    assert :skip = reveal.(task, active?: fn -> false end)
+    assert :skip = reveal.(%{task | "origin" => "elsewhere"}, [])
+    assert :skip = reveal.(%{"fiber_id" => "unbound", "origin" => "test-host"}, [])
+    assert :skip = reveal.(%{}, [])
+    refute_receive {:select, _, _}
+  end
+
   test "the frontmost read recognises Rex by bundle and counts a failed read as Rex" do
     Shuttle.Test.Env.put_app_env(:rex_title_observer, self())
 

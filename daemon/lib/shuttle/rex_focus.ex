@@ -9,6 +9,9 @@ defmodule Shuttle.RexFocus do
   its title names; `lsappinfo` reports the frontmost app without a grant.
   Other hosts, and macOS without that grant, use Rex's per-session
   active-window events.
+
+  `reveal/2` is the board's way in: opening a constitution selects its worker
+  in Rex, which brings Rex forward, and the front edge then routes the mic.
   """
   use GenServer
 
@@ -134,8 +137,70 @@ defmodule Shuttle.RexFocus do
 
   def target(_, _, _), do: nil
 
+  @doc """
+  Selects the local Rex worker bound to `fiber_id`, bringing Rex forward.
+  Returns `:ok` when Rex was asked to show it, `:skip` when following is off, a
+  meeting holds the mic, the fiber has no local worker, or Rex's front window
+  already shows it.
+  """
+  def reveal(params, opts \\ []) do
+    following? = Keyword.get(opts, :active?, &following?/0)
+    bindings = Keyword.get(opts, :bindings, &Shuttle.Terminal.RexBindings.read/0)
+    fibers = Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0)
+    title = Keyword.get(opts, :title, &read_title/0)
+    select = Keyword.get(opts, :select, &select/2)
+
+    with true <- following?.(),
+         {:ok, doc} <- bindings.(),
+         %{"session_id" => sid, "window_id" => wid} <- binding_for(params, doc, fibers.()),
+         false <- shows?(title.(), doc, wid) do
+      select.(sid, wid)
+      :ok
+    else
+      _ -> :skip
+    end
+  end
+
+  defp binding_for(%{"fiber_id" => id} = params, %{"bindings" => bindings}, fibers) do
+    origin = params["origin"] || Shuttle.MeetingRouter.own_host()
+
+    with %{} = fiber <-
+           Enum.find(fibers, fn f ->
+             id in [f["id"], f["uid"], f["slug"]] and get_in(f, ["shuttle", "host"]) == origin
+           end),
+         ids = Enum.reject([fiber["id"], fiber["uid"], fiber["slug"]], &is_nil/1),
+         [binding] <-
+           Enum.filter(
+             Map.values(bindings),
+             &(&1["fiber"] in ids and is_binary(&1["session_id"]) and is_binary(&1["window_id"]))
+           ) do
+      binding
+    else
+      _ -> nil
+    end
+  end
+
+  defp binding_for(_, _, _), do: nil
+
+  defp shows?({:ok, title}, doc, wid), do: match?(%{window_id: ^wid}, title_binding(title, doc))
+  defp shows?(_, _, _), do: false
+
+  defp select(sid, wid) do
+    runner = Shuttle.Runner.Default
+
+    with {:ok, client} <- Shuttle.Rex.app_client(runner),
+         do: Shuttle.Rex.select(runner, client, sid, wid)
+  end
+
   @doc false
-  def title_target(title, %{"bindings" => bindings}, fibers) do
+  def title_target(title, bindings, fibers) do
+    case title_binding(title, bindings) do
+      %{fiber: id} -> fiber_target(id, fibers)
+      nil -> nil
+    end
+  end
+
+  defp title_binding(title, %{"bindings" => bindings}) do
     alias Shuttle.Terminal.RexTree
 
     matches =
@@ -143,7 +208,14 @@ defmodule Shuttle.RexFocus do
       |> Enum.flat_map(fn
         {_, %{"fiber" => fiber, "family" => family} = binding}
         when is_binary(fiber) and is_binary(family) ->
-          [%{fiber: fiber, family: family, depth: binding["depth"] || 0}]
+          [
+            %{
+              fiber: fiber,
+              family: family,
+              depth: binding["depth"] || 0,
+              window_id: binding["window_id"]
+            }
+          ]
 
         _ ->
           []
@@ -156,7 +228,7 @@ defmodule Shuttle.RexFocus do
       end)
 
     case matches do
-      [%{fiber: id}] -> fiber_target(id, fibers)
+      [match] -> match
       _ -> nil
     end
   end

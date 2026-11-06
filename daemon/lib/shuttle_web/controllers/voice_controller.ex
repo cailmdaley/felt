@@ -8,6 +8,7 @@ defmodule ShuttleWeb.VoiceController do
   def target(conn, params), do: route(conn, params, :target, "/api/v1/voice/target")
   def draft(conn, params), do: route(conn, params, :draft, "/api/v1/voice/draft")
   def release(conn, params), do: route(conn, params, :release, "/api/v1/voice/release")
+  def reveal(conn, params), do: route(conn, params, :reveal, "/api/v1/voice/reveal")
 
   def transcript(conn, params) do
     conn
@@ -50,6 +51,7 @@ defmodule ShuttleWeb.VoiceController do
 
   defp local(:show, _params), do: {:ok, Voice.show()}
   defp local(:transcript, _params), do: Meeting.voice_transcript()
+  defp local(:reveal, params), do: {:ok, %{revealed: Shuttle.RexFocus.reveal(params) == :ok}}
 
   defp local(action, params) when action in [:draft, :release] do
     case apply(Shuttle.Meeting.TranscriptRelay, action, [params]) do

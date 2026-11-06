@@ -123,6 +123,35 @@ describe('live voice', () => {
     expect(calls.filter(c => c.url.endsWith('/target')).map(c => c.body).at(-1)).toEqual({ fiber_id: 'durable-a', origin: 'local' })
     voice.dispose()
   })
+  it('reveals a hand-opened constitution in Rex once, never a followed card or a plain note', async () => {
+    vi.useFakeTimers()
+    let current = status()
+    const reveals: unknown[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/reveal')) reveals.push(JSON.parse(String(init!.body)))
+      return { ok: true, json: async () => current }
+    }))
+    const voice = new Voice('')
+    voice.onFollow = () => {}
+    voice.mount(); await flush()
+    const a = card({ id: 'project/a', uid: 'durable-a', shuttleKind: 'oneshot' })
+    voice.select(a); await flush()
+    voice.select(a); await flush()
+    voice.select(card({ id: 'note' })); await flush()
+    voice.select(null); voice.select(a); await flush()
+    expect(reveals).toEqual([{ fiber_id: 'durable-a', origin: 'local' }, { fiber_id: 'durable-a', origin: 'local' }])
+
+    current = status({ target: { fiber_id: 'project/b', origin: 'local', name: 'B' } })
+    await vi.advanceTimersByTimeAsync(2_000); await flush()
+    voice.select(card({ id: 'project/b', uid: 'durable-b', shuttleKind: 'oneshot' })); await flush()
+    expect(reveals).toHaveLength(2)
+
+    current = status({ enabled: false })
+    await vi.advanceTimersByTimeAsync(2_000); await flush()
+    voice.select(card({ id: 'project/c', shuttleKind: 'oneshot' })); await flush()
+    expect(reveals).toHaveLength(2)
+    voice.dispose()
+  })
   it('follows from reads alone when the daemon has no target route', async () => {
     vi.useFakeTimers()
     let current = status({ target: { fiber_id: 'project/a', origin: 'local', name: 'A' } })
