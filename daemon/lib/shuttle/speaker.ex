@@ -363,11 +363,15 @@ defmodule Shuttle.Speaker do
   defp in_view?(_item, nil), do: true
   defp in_view?(item, target), do: Enum.any?(target, &(&1 in item.keys))
 
-  # The ids of the fiber live voice is routed to, while Listening is on. Both
-  # sides resolve, since the fiber feed can be unavailable at either moment.
+  # The ids of the fiber live voice is routed to, while Listening is switched
+  # on. The switch is read from its config, since Voice's snapshot reports off
+  # until its first reconcile after boot. Both sides resolve ids, since the
+  # fiber feed can be unavailable at either moment.
   defp target do
-    case Shuttle.Voice.show() do
-      %{enabled: true, target: %{"fiber_id" => id}} -> fiber_keys(id, [])
+    with {:ok, %{"enabled" => true}} <- Shuttle.Voice.Config.read(),
+         %{target: %{"fiber_id" => id}} <- Shuttle.Voice.show() do
+      fiber_keys(id, [])
+    else
       _ -> nil
     end
   catch
