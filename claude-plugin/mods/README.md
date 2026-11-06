@@ -10,20 +10,25 @@ One line above the prompt in every Claude session, read from the Shuttle
 daemon's `/api/v1/voice` and `/api/v1/speak` every 500 ms (5 s while both
 say unavailable).
 
-- **Left, the mic.** `● here` when the voice target is this session's fiber,
-  `○ → <card>` when it is elsewhere, `mic muted`, `mic failed`, or `mic off`.
-- **Middle, the words.** While the mic is here: hark's preview as it comes,
-  then Aqua's pending text, cleared once delivered; words held for this card
-  while it is cold show as `held: …`.
-- **Right, the speaker.** `🔈 <voice>: <line>` while speaking, `🔈 paused`
-  while Cail talks, `🔈 n held` for lines waiting on this card, or
-  `speaker muted`.
+Three looks while Listening is on, the speaker always at the right:
 
-The band is not drawn when Listening is off and the speaker has nothing to
-show.
+- **The words.** When the voice target is this session the band is the live
+  words: hark's preview as it comes, then Aqua's pending text, cleared once
+  delivered. Words held for this card while it is cold show too.
+- **`🎤 → <card>`** when the mic is fixed on another card (a meeting, or
+  Listen here elsewhere).
+- **`🎤 muted`** when the mic is muted.
 
-**Keys.** The mic and speaker labels are buttons: click one, or focus the band
-with `ctrl+x tab` and press `m` (mic mute) or `s` (speaker mute).
+The speaker reads `🔈 <card>: <line>` while speaking, `🔈 paused` while Cail
+talks, `🔈 n held` for lines waiting on this card, or `🔈 muted`.
+
+With Listening off the mic side is not drawn; with the speaker idle too, the
+band is not drawn at all.
+
+**Keys.** `🎤` and `🔈` are buttons: click one, or focus the band with
+`ctrl+x tab` and press `m` (mic mute) or `s` (speaker mute). The `[-]` at the
+band's right end is Claude Code's own: it collapses the band (`ctrl+x ctrl+a`)
+and no mod can remove it.
 
 The session's fiber comes from `SHUTTLE_FIBER_PATH` (its path id and its
 frontmatter `id`); a session that is not a Shuttle worker never reads as

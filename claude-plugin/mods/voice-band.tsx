@@ -1,12 +1,13 @@
 // The live-voice band: one line above the prompt, read from Shuttle's daemon.
 //
-//   m: ● here | m: ○ → <card> | m: mic muted | m: mic failed   where words go
-//   …the words as hark and then Aqua hear them  (only when the mic is here)
-//   s: 🔈 <voice>: <line> | paused | n held | speaker muted
+//   m: 🎤  <the words as hark and then Aqua hear them>   s: 🔈
+//   m: 🎤 → <card>        the mic is fixed on another card
+//   m: 🎤 muted
+//                                  s: 🔈 <card>: <line> | paused | n held | muted
 //
-// With Listening off and the speaker idle, the band is not drawn.
-// The mic and speaker labels are buttons: click one, or focus the band
-// (ctrl+x tab) and press m or s, to toggle that mute.
+// With Listening off the mic side is not drawn, and with the speaker idle too
+// the band is not drawn at all. The 🎤 and 🔈 labels are buttons: click one, or
+// focus the band (ctrl+x tab) and press m or s, to toggle that mute.
 import type { EngineInterface, Register } from 'claude-code'
 
 type Ref = { fiber_id: string; name?: string } | null
@@ -22,7 +23,7 @@ type Voice = {
 }
 type Speak = {
   available: boolean
-  speaking: { fiber_id: string; voice: string; text: string } | null
+  speaking: { fiber_id: string; name?: string | null; voice: string; text: string } | null
   held: Record<string, number>
   paused: boolean
   muted: boolean
@@ -102,27 +103,26 @@ export const register: Register = on => {
     if (e.props.hasSurvey) return next(e)
     const listening = !!(voice?.available && voice.enabled)
 
-    let mic = 'mic off'
-    let micLive = false
+    let mic = ''
+    let words = ''
     if (listening) {
-      if (voice!.muted) mic = 'mic muted'
-      else if (voice!.state === 'failed') mic = 'mic failed'
-      else if (mine(voice!.target?.fiber_id)) [mic, micLive] = ['● here', true]
-      else mic = '○ → ' + clip(voice!.target?.name ?? voice!.target?.fiber_id ?? 'nowhere', 28)
+      const v = voice!
+      if (v.muted) mic = '🎤 muted'
+      else if (!mine(v.target?.fiber_id)) mic = '🎤 → ' + clip(v.target?.name ?? v.target?.fiber_id ?? 'nowhere', 32)
+      else {
+        mic = '🎤'
+        if (mine(v.pending?.fiber_id)) words = v.pending!.text
+        else if (mine(v.preview?.fiber_id)) words = v.preview!.text ?? `${v.preview!.words} words…`
+        else words = v.held?.find(h => mine(h.fiber_id))?.text ?? ''
+      }
     }
 
-    let words = ''
-    if (mine(voice?.pending?.fiber_id)) words = voice!.pending!.text
-    else if (mine(voice?.preview?.fiber_id)) words = voice!.preview!.text ?? `${voice!.preview!.words} words…`
-    const held = voice?.held?.find(h => mine(h.fiber_id))
-    const middle = flat(words || (held ? 'held: ' + held.text : ''))
-
     let spk = ''
-    let spkLive = false
     if (speak?.available) {
       const mineHeld = Object.entries(speak.held ?? {}).reduce((n, [id, k]) => n + (mine(id) ? k : 0), 0)
-      if (speak.muted) spk = 'speaker muted'
-      else if (speak.speaking) [spk, spkLive] = [`🔈 ${speak.speaking.voice}: ${clip(flat(speak.speaking.text), 40)}`, true]
+      const who = speak.speaking && (speak.speaking.name || speak.speaking.voice)
+      if (speak.muted) spk = '🔈 muted'
+      else if (speak.speaking) spk = `🔈 ${clip(who!, 20)}: ${clip(flat(speak.speaking.text), 40)}`
       else if (speak.paused) spk = '🔈 paused'
       else if (mineHeld) spk = `🔈 ${mineHeld} held`
     }
@@ -131,14 +131,16 @@ export const register: Register = on => {
     spk ||= '🔈'
     const { Box, Text, Button } = $.ui.resolve(e)
     const width = e.props.bodyColumns
-    const room = width - (mic.length + 3) - (spk.length + 4) - 2
+    const room = width - (mic ? mic.length + 4 : 0) - (spk.length + 4) - 2
 
     return (
       <Box flexDirection="row" justifyContent="space-between" width={width}>
-        <Button key="mic" hotkey="m" plain dimColor={!micLive} label={mic}
-          onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)} />
-        <Text dimColor={!words}>{' ' + clipStart(middle, room) + ' '}</Text>
-        <Button key="speaker" hotkey="s" plain dimColor={!spkLive} label={spk}
+        {mic ? (
+          <Button key="mic" hotkey="m" plain dimColor={mic !== '🎤'} label={mic}
+            onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)} />
+        ) : null}
+        <Text>{' ' + clipStart(flat(words), room) + ' '}</Text>
+        <Button key="speaker" hotkey="s" plain dimColor={!speak?.speaking} label={spk}
           onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)} />
       </Box>
     )
