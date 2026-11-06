@@ -146,6 +146,25 @@ defmodule Shuttle.ClaudeMailRecoveryTest do
            end)
 
     assert %{"fallback" => %{"attempts" => 2}} = auto |> File.read!() |> Jason.decode!()
+    stop_supervised!(ClaudeMailRecovery)
+
+    # A failed terminal notice for A must not hide the follow-up signal for B.
+    other = Path.join(dir, "other.json")
+
+    File.write!(
+      other,
+      auto
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.delete("fallback")
+      |> put_in(["request", "message_id"], "other")
+      |> Jason.encode!()
+    )
+
+    assert {:ok, output} = Shuttle.CLI.run(["claude-mail-recover"], timeout_ms: 32_000)
+    assert %{"pending" => true, "error" => error} = Jason.decode!(output)
+    assert error != ""
+    assert %{"fallback" => %{"attempts" => 1}} = other |> File.read!() |> Jason.decode!()
   end
 
   defp eventually(check, attempts \\ 100)

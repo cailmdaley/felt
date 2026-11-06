@@ -489,7 +489,7 @@ transcript, Pi delivery remains `unknown`.
 |---|---|
 | `queued` | Hook mailbox: context-only, no turn starts. Claude-native or Pi-native wake: the harness confirmed queue admission behind the current turn |
 | `submitted` | Claude transcript shows the native user row or `queued_command`; admission only, with no model reply observed yet |
-| `context_added` | Codex hook acknowledged adding persistent context; no turn started |
+| `context_added` | A main-thread hook acknowledged adding context; no turn started |
 | `accepted` | Pi has the exact correlated user-message row; Claude has a correlated real assistant reply; other transports report their native runtime acknowledgement |
 | `unknown` | Delivery may have succeeded without enough evidence; retry the same ID to re-check |
 | `subscribed` | `--notify-when-idle` with no text: the subscription is recorded and watched; nothing was delivered |
