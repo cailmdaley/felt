@@ -38,6 +38,11 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	if out := hook("Stop"); out != "" {
 		t.Fatalf("Stop would wake the model: %s", out)
 	}
+	child, _ := json.Marshal(eventHookInput{HookEventName: "PostToolUse", SessionID: "s", AgentID: "subagent", TranscriptPath: filepath.Join(home, ".claude", "projects", "p", "s.jsonl")})
+	var childOut bytes.Buffer
+	if err := newApp(env).runEventAndMessageHook(bytes.NewReader(child), &childOut); err != nil || childOut.Len() != 0 {
+		t.Fatalf("a subagent consumed its parent's mail: %s %v", childOut.String(), err)
+	}
 	var got sessionEnvelope
 	if err := json.Unmarshal([]byte(hook("PreToolUse")), &got); err != nil {
 		t.Fatal(err)

@@ -88,11 +88,13 @@ type eventHookInput struct {
 	SessionID      string `json:"session_id"`
 	CWD            string `json:"cwd"`
 	TranscriptPath string `json:"transcript_path"`
-	ToolName       string `json:"tool_name"`
-	Prompt         string `json:"prompt"`
-	Model          string `json:"model"`
-	NativeSocket   string `json:"native_socket"`
-	NativePID      int    `json:"native_pid"`
+	// Set on a Claude subagent's hooks, which carry its parent's session_id.
+	AgentID      string `json:"agent_id"`
+	ToolName     string `json:"tool_name"`
+	Prompt       string `json:"prompt"`
+	Model        string `json:"model"`
+	NativeSocket string `json:"native_socket"`
+	NativePID    int    `json:"native_pid"`
 	// Notification's own discriminator: `idle_prompt`, `permission_prompt`,
 	// `elicitation_dialog`, … The harness says WHY it is notifying, and only
 	// `idle_prompt` means "nobody has typed in a while" rather than "I am
