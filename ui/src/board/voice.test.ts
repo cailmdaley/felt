@@ -134,6 +134,30 @@ describe('live voice', () => {
     expect(followed).toEqual(['rex/worker'])
     voice.dispose()
   })
+  it('reopens the event stream after the daemon refuses it', async () => {
+    vi.useFakeTimers()
+    const sources: Array<{ fail: () => void }> = []
+    vi.stubGlobal('EventSource', class {
+      static CLOSED = 2
+      readyState = 0
+      private errors: Array<() => void> = []
+      constructor() { sources.push({ fail: () => { this.readyState = 2; this.errors.forEach(fn => fn()) } }) }
+      addEventListener(type: string, fn: () => void): void { if (type === 'error') this.errors.push(fn) }
+      close(): void {}
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => status() })))
+    const voice = new Voice('')
+    voice.mount(); await flush()
+    sources[0].fail()
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(sources).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(sources).toHaveLength(2)
+    sources[1].fail()
+    voice.dispose()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(sources).toHaveLength(2)
+  })
   it('clears stale state when the recorder cannot be read', async () => {
     vi.useFakeTimers()
     let ok = true

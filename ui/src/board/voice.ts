@@ -35,6 +35,7 @@ export class Voice {
   private followed: VoiceTarget | null = null
   private revealed = ''
   private events: EventSource | null = null
+  private eventsTimer: number | null = null
   private timer: number | null = null
   private expectedEnabled: boolean | null = null
   private settingsRetries = 0
@@ -52,10 +53,19 @@ export class Voice {
     document.addEventListener('visibilitychange', this.visibility)
     window.addEventListener('shuttle-voice-settings-saved', this.settingsSaved)
     void this.poll()
-    if (typeof EventSource !== 'undefined') {
-      this.events = new EventSource(`${this.base}/api/v1/voice/events`)
-      this.events.addEventListener('target', this.pushed)
-    }
+    this.openEvents()
+  }
+  /** A stream refused outright, as by a daemon still booting after a deploy, is reopened after 5 s. */
+  private openEvents = (): void => {
+    this.eventsTimer = null
+    if (!this.mounted || typeof EventSource === 'undefined') return
+    const events = new EventSource(`${this.base}/api/v1/voice/events`)
+    events.addEventListener('target', this.pushed)
+    events.addEventListener('error', () => {
+      if (this.events === events && events.readyState === EventSource.CLOSED && this.eventsTimer === null)
+        this.eventsTimer = window.setTimeout(this.openEvents, 5_000)
+    })
+    this.events = events
   }
   dispose(): void {
     this.mounted = false
@@ -63,6 +73,8 @@ export class Voice {
     window.removeEventListener('shuttle-voice-settings-saved', this.settingsSaved)
     this.events?.close()
     this.events = null
+    if (this.eventsTimer !== null) window.clearTimeout(this.eventsTimer)
+    this.eventsTimer = null
     if (this.timer !== null) window.clearTimeout(this.timer)
     this.read?.abort()
     this.read = null
