@@ -2573,10 +2573,9 @@ defmodule Shuttle.PollerTest do
     assert is_integer(kill_idx), "expected the live tmux session to be killed during the cut"
     assert is_integer(new_idx), "expected a fresh tmux session after the cut"
 
-    # Order is load-bearing: marker BEFORE kill (so a failed re-dispatch still
-    # leaves the cut session clean), and the fresh spawn AFTER the kill.
-    assert marker_idx < kill_idx
-    assert new_idx > kill_idx
+    # Only a confirmed stop authorizes a clean-exit marker and replacement.
+    assert kill_idx < marker_idx
+    assert marker_idx < new_idx
 
     # The fiber is live again under a fresh session (same canonical name).
     assert Shuttle.Terminal.present?(MockRunner, second_session)
@@ -2607,6 +2606,47 @@ defmodule Shuttle.PollerTest do
 
     assert {:ok, _} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
     poller
+  end
+
+  for backend <- [Shuttle.Terminal.Tmux, Shuttle.Terminal.Rex] do
+    @tag backend: backend
+    test "New session preserves the handoff marker and tracking when #{inspect(backend)} cannot stop", %{backend: backend} do
+      Env.put_app_env(:terminal_backend, backend)
+
+      if backend == Shuttle.Terminal.Rex do
+        Env.put_app_env(:fake_rex, start_supervised!(Shuttle.Test.FakeRex))
+        Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      end
+
+      id = "tests/cut-stop-failed"
+      MockRunner.set_fiber(id, make_fiber(id))
+      MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n", "active")
+
+      {:ok, poller} =
+        start_poller!(
+          runner: Shuttle.PollerTest.PhantomRunner,
+          own_host_id: "test-host",
+          poll_interval_ms: 60_000,
+          max_concurrent_workers: 0,
+          felt_stores: [MockRunner.felt_root()]
+        )
+
+      assert {:ok, session} = Poller.dispatch_fiber(poller, id, force: true, ad_hoc: true)
+      before = get_in(MockRunner.fiber(id), ["shuttle", "runtime", "handed_off_at"])
+      %{pid: watcher} = Poller.worker_status(poller, id)
+
+      if backend == Shuttle.Terminal.Rex,
+        do: Shuttle.Test.FakeRex.reply("session.close_window", {"request timed out", :timeout}),
+        else: MockRunner.set_kill_session_failure(true)
+
+      assert {:error, :already_running} =
+               Poller.dispatch_fiber(poller, id, force: true, ad_hoc: true, resume_mode: "fresh")
+
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "handed_off_at"]) == before
+      assert %{pid: ^watcher, session: ^session} = Poller.worker_status(poller, id)
+      assert Process.alive?(watcher)
+      assert Shuttle.Terminal.status(Shuttle.PollerTest.PhantomRunner, session) == :alive
+    end
   end
 
   test "New session waits out a cut worker that outlives kill-session, then dispatches fresh" do

@@ -6180,10 +6180,10 @@ defmodule Shuttle.Poller do
 
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not
   # a refusal. A forced fresh dispatch (`force` + `resume_mode:"fresh"` — the
-  # kanban New-session button and drag-launch both send these) stamps the
-  # clean-exit marker, stops the live worker — waiting until its processes are
-  # gone (`Shuttle.Terminal.stop/2`), since the fresh session reuses its name — and
-  # drops the runtime entry, THEN lets the caller's `cond` fall through to a
+  # kanban New-session button and drag-launch both send these) stops the live
+  # worker, waiting until its processes are gone (`Shuttle.Terminal.stop/2`),
+  # since the fresh session reuses its name, then stamps the clean-exit marker
+  # and drops the runtime entry. The caller's `cond` can then fall through to a
   # fresh dispatch instead of returning `:already_running`. Without this,
   # starting fresh on an open session meant the costly resume →
   # reload-stale-transcript → handoff dance.
@@ -6202,26 +6202,23 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # The cut itself — the user-gesture twin of `kill_session`, plus the marker.
-  # Terminal teardown stamps the clean-exit marker before killing the process.
-  # An app stop must first confirm interruption: an uncertain network result
-  # retains ownership and its existing marker so reconciliation cannot release
-  # a conversation that may still be executing.
+  # A cut stamps a clean exit only after the backend confirms the worker is
+  # gone. Failed stops retain both ownership and the existing marker.
   defp cut_open_session(%State{} = state, fiber_id, uid) do
     key = running_key(state, fiber_id)
     meta = if key, do: Map.get(state.running, key)
     session = if meta, do: meta.session, else: live_session_for_fiber(state, fiber_id, uid)
 
     if session do
-      :ok =
-        Shuttle.Continuation.mark_handed_off(
-          state.runner,
-          owning_store(fiber_id, state),
-          fiber_id
-        )
-
       case Shuttle.WorkerBackend.stop(state.runner, session) do
         {_, 0} ->
+          :ok =
+            Shuttle.Continuation.mark_handed_off(
+              state.runner,
+              owning_store(fiber_id, state),
+              fiber_id
+            )
+
           if meta, do: stop_watcher(meta)
           if key, do: remove_running(state, key), else: state
 
