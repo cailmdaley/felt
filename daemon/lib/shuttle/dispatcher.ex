@@ -290,6 +290,9 @@ defmodule Shuttle.Dispatcher do
     session_id = Shuttle.Continuation.resumable_session_id(fiber)
 
     case Keyword.get(opts, :resume_mode) do
+      "resume_or_start" ->
+        if session_id, do: {:previous, session_id}, else: :fresh
+
       "previous" ->
         if session_id, do: {:previous, session_id}, else: {:error, :missing_session_id}
 

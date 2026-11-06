@@ -15,6 +15,7 @@ defmodule Shuttle.Meeting.TranscriptRelay do
   end
 
   def held(opts \\ []), do: held_call(:held, opts)
+  def recovery(opts \\ []), do: held_call(:recovery, opts)
   def draft(params, opts \\ []), do: held_call({:draft, params}, opts)
   def release(params, opts \\ []), do: held_call({:release, params}, opts)
 
@@ -168,6 +169,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
   end
 
   def handle_call(:held, _from, state), do: {:reply, Held.list(state.held), state}
+  def handle_call(:recovery, _from, state), do: {:reply, Held.recovery(state.held), state}
+
+  def handle_call({:held_source, launch, offset, target}, _from, state),
+    do: {:reply, Held.lookup(state.held, launch, offset, target), state}
 
   def handle_call({:hold, launch, offset, target, rows}, _from, state) do
     change_held(state, fn held ->
@@ -356,7 +361,9 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
     case checkpoint && Held.take(state.held, checkpoint["id"], checkpoint["through"]) do
       {:ok, held, text} ->
         text = join_voice(text, message.text, card && card["speaker"])
-        {%{message | text: text}, save_held(state, held)}
+        message = %{message | text: text}
+        held = Held.remember(held, message)
+        {message, save_held(state, held)}
 
       _ ->
         {message, state}
@@ -381,7 +388,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
         state
 
       {{key, _task}, deliveries} ->
-        [{from, _} | rest] = state.lanes[key]
+        [{from, message} | rest] = state.lanes[key]
+        outcome = Shuttle.Meeting.TranscriptRelay.Worker.delivery_outcome(result)
+        state = case change_held(state, fn held -> {:ok, :ok, Held.finish(held, message.message_id, outcome)} end) do
+          {:reply, :ok, next} -> next
+          _ -> state
+        end
         GenServer.reply(from, result)
         state = %{state | deliveries: deliveries, lanes: Map.delete(state.lanes, key)}
         if rest == [], do: state, else: launch_delivery(put_in(state.lanes[key], rest), key)
@@ -556,7 +568,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     config = state.config
 
     next =
-      config |> claim_target(state) |> read_routes(state) |> ingest(state) |> flush_due(state)
+      config |> claim_target(state) |> discard_held_buffers(state) |> read_routes(state) |> ingest(state) |> flush_due(state)
 
     state = persist!(%{state | config: next}) |> launch_deliveries()
 
@@ -727,6 +739,35 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end)
   end
 
+  defp held_source(config, target, offset, state),
+    do: GenServer.call(state.coordinator, {:held_source, config["launch"], offset, target})
+
+  defp discard_held_buffers(%{"kind" => "voice"} = config, state) do
+    buffers = Enum.reject(config["buffers"], fn buffer ->
+      case held_source(config, buffer, buffer["source_offset"], state) do
+        {:seen, _} -> true
+        :unseen -> false
+        {:error, reason} -> raise reason
+      end
+    end)
+    Map.put(config, "buffers", buffers)
+  end
+  defp discard_held_buffers(config, _state), do: config
+
+  defp add_voice_line(config, nil, line, state, voice), do: add_line(config, nil, line, state, voice)
+  defp add_voice_line(config, target, line, state, voice) do
+    case held_source(config, target, voice.offset, state) do
+      :unseen -> add_line(config, target, line, state, voice)
+      {:seen, checkpoint} ->
+        if checkpoint && Regex.match?(@names, voice.text) do
+          make_batch(config, Map.merge(target, %{"lines" => [], "voice_rows" => [], "held" => checkpoint}))
+        else
+          config
+        end
+      {:error, reason} -> raise reason
+    end
+  end
+
   defp ingest(%{"kind" => "meeting", "fiber_id" => nil} = config, state),
     do: maybe_end(config, state)
 
@@ -802,7 +843,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
                       name = row["name"] || speaker
 
-                      add_line(acc, target, "#{name} #{text}", state, %{
+                      add_voice_line(acc, target, "#{name} #{text}", state, %{
                         speaker: name,
                         text: text,
                         offset: cursor
@@ -886,7 +927,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       config["kind"] == "voice" and buffer["words"] > 0 and state.cold.(target) ->
         hold_buffer(config, buffer, state, Regex.match?(@names, spoken))
 
-      buffer["words"] >= threshold["words"] or Regex.match?(@names, spoken) ->
+      Regex.match?(@names, spoken) ->
+        make_batch(config, buffer)
+
+      buffer["words"] >= threshold["words"] ->
         flush_buffer(config, buffer, state)
 
       config["kind"] == "voice" and not same_target?(target, List.last(config["routes"])) ->
@@ -1188,7 +1232,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end
   end
 
-  defp delivery_outcome({status, body}) when status in 200..299 do
+  def delivery_outcome({status, body}) when status in 200..299 do
     case Map.fetch(body, :delivered) do
       {:ok, true} ->
         :delivered
@@ -1208,7 +1252,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end
   end
 
-  defp delivery_outcome(_), do: :failed
+  def delivery_outcome({:task_exit, _}), do: :unconfirmed
+  def delivery_outcome(_), do: :failed
 
   defp persist!(%{config: config, persisted: config} = state), do: state
 
@@ -1222,11 +1267,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       "daemon_sender" => true,
       "message_id" => id,
       "message_after_launch" => kind != "voice",
-      "live_input" => kind == "voice",
-      "resume_mode" =>
-        if(kind == "voice",
-          do: Shuttle.Voice.Target.resume_mode(%{"fiber_id" => fiber_id, "origin" => origin})
-        )
+      "live_input" => kind == "voice"
     })
   end
 end

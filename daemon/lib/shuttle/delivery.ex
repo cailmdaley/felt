@@ -99,7 +99,7 @@ defmodule Shuttle.Delivery do
         force: true,
         ad_hoc: true,
         user_message: text,
-        resume_mode: opts[:resume_mode] || "continue"
+        resume_mode: opts[:resume_mode] || if(opts[:live_input], do: "resume_or_start", else: "continue")
       )
 
     # A worker that appeared between the look and the launch takes the message.

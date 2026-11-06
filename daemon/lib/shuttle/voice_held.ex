@@ -11,7 +11,11 @@ defmodule Shuttle.Voice.Held do
           {:ok, %{"seen" => seen, "cards" => cards} = state}
           when is_map(seen) and is_list(cards) ->
             validate!(state)
-            state
+            Map.update(state, "attempts", %{}, fn attempts ->
+              Map.new(attempts, fn {id, attempt} ->
+                {id, if(attempt["status"] == "pending", do: Map.merge(attempt, %{"status" => "unconfirmed", "at" => timestamp()}), else: attempt)}
+              end)
+            end)
 
           _ ->
             %{"error" => "invalid held voice state"}
@@ -56,12 +60,27 @@ defmodule Shuttle.Voice.Held do
 
   def append(%{"error" => error}, _, _, _, _), do: raise(error)
 
+  def lookup(%{"error" => error}, _, _, _), do: {:error, error}
+  def lookup(state, launch, offset, target) do
+    source = Jason.encode!([launch, target["fiber_id"], target["origin"]])
+    if offset <= Map.get(state["seen"], source, -1) do
+      card = target(state, target)
+      through = card && get_in(card, ["checkpoints", Jason.encode!([launch, offset])])
+      checkpoint = if through && Enum.any?(card["segments"], &(&1["through"] == through)),
+        do: public(card) |> Map.put("through", through)
+      {:seen, checkpoint}
+    else
+      :unseen
+    end
+  end
+
   def append(state, launch, offset, target, rows) do
     existing = Enum.find(state["cards"], &same_target?(&1, target))
     source = Jason.encode!([launch, target["fiber_id"], target["origin"]])
 
     if offset <= Map.get(state["seen"], source, -1) do
-      {state, if(existing, do: public(existing))}
+      {:seen, checkpoint} = lookup(state, launch, offset, target)
+      {state, checkpoint}
     else
       card =
         existing ||
@@ -69,7 +88,8 @@ defmodule Shuttle.Voice.Held do
             "id" => Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false),
             "through" => 0,
             "segments" => [],
-            "speaker" => nil
+            "speaker" => nil,
+            "checkpoints" => %{}
           })
 
       card =
@@ -86,9 +106,10 @@ defmodule Shuttle.Voice.Held do
           card
           |> Map.put("through", through)
           |> Map.put("speaker", speaker)
-          |> Map.update!("segments", &(&1 ++ [%{"through" => through, "text" => prefix <> text}]))
+          |> Map.update!("segments", &(&1 ++ [%{"through" => through, "text" => prefix <> text, "speaker" => speaker}]))
         end)
 
+      card = put_in(card, ["checkpoints", Jason.encode!([launch, offset])], card["through"])
       next = state |> put_in(["seen", source], offset) |> put_card(card)
       {next, public(card)}
     end
@@ -96,7 +117,7 @@ defmodule Shuttle.Voice.Held do
 
   def edit(state, id, through, text) when is_binary(text) do
     with {:ok, card, prefix, rest} <- split(state, id, through) do
-      segment = %{"through" => List.last(prefix)["through"], "text" => text}
+      segment = %{"through" => List.last(prefix)["through"], "text" => text, "speaker" => List.first(prefix)["speaker"]}
       {:ok, put_card(state, Map.put(card, "segments", [segment | rest]))}
     end
   end
@@ -106,11 +127,43 @@ defmodule Shuttle.Voice.Held do
       next =
         if rest == [],
           do: drop_card(state, id),
-          else: put_card(state, Map.put(card, "segments", rest))
+          else: put_card(state, Map.put(card, "segments", label_first(rest)))
 
       {:ok, next, Enum.map_join(prefix, & &1["text"])}
     end
   end
+
+  def remember(state, message) do
+    attempt = %{"fiber_id" => message.fiber_id, "origin" => message.origin, "text" => message.text, "status" => "pending", "at" => timestamp()}
+    Map.update(state, "attempts", %{message.message_id => attempt}, &Map.put(&1, message.message_id, attempt))
+  end
+
+  def finish(state, id, outcome) do
+    attempts = Map.get(state, "attempts", %{})
+    case attempts[id] do
+      nil -> state
+      _ when outcome == :delivered -> Map.put(state, "attempts", Map.delete(attempts, id))
+      attempt -> Map.put(state, "attempts", Map.put(attempts, id, Map.merge(attempt, %{"status" => Atom.to_string(outcome), "at" => timestamp()})))
+    end
+  end
+
+  def recovery(state) do
+    state |> Map.get("attempts", %{}) |> Map.values()
+    |> Enum.filter(&(&1["status"] in ["failed", "unconfirmed"]))
+    |> Enum.max_by(& &1["at"], fn -> nil end)
+    |> case do
+      nil -> nil
+      attempt -> Map.take(attempt, ~w(fiber_id at status)) |> Map.put("detail", "Your edited voice draft is retained. Copy it into the composer to send it again:\n\n" <> attempt["text"])
+    end
+  end
+
+  defp label_first([first | rest]) do
+    text = first["text"]
+    first = if String.starts_with?(text, " "), do: Map.put(first, "text", first["speaker"] <> ": " <> String.trim_leading(text)), else: first
+    [first | rest]
+  end
+
+  defp timestamp, do: DateTime.to_iso8601(DateTime.utc_now())
 
   def target(%{"error" => _}, _target), do: nil
   def target(state, target), do: Enum.find(state["cards"], &same_target?(&1, target))

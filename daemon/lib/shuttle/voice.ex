@@ -42,6 +42,7 @@ defmodule Shuttle.Voice do
       relay: Keyword.get(opts, :relay, &start_relay/2),
       monitor: Keyword.get(opts, :monitor, &monitor/1),
       held: Keyword.get(opts, :held, &Shuttle.Meeting.TranscriptRelay.held/0),
+      recovery: Keyword.get(opts, :recovery, &Shuttle.Meeting.TranscriptRelay.recovery/0),
       cold: Keyword.get(opts, :cold, &cold?/1),
       snapshot: %{
         available: false,
@@ -132,8 +133,17 @@ defmodule Shuttle.Voice do
          do: Map.merge(Map.take(snapshot.target, ~w(fiber_id origin)), snapshot.preview)
 
     snapshot
+    |> Map.put(:last, recovery_last(snapshot.last, state.recovery.()))
     |> Map.put(:preview, preview)
     |> Map.put(:cold, not is_nil(snapshot.target) and state.cold.(snapshot.target))
+  end
+
+  defp recovery_last(last, nil), do: last
+  defp recovery_last(nil, recovery), do: recovery
+  defp recovery_last(last, recovery) do
+    if recovery["at"] > (last["at"] || last[:at] || "") or
+       (recovery["fiber_id"] == (last["fiber_id"] || last[:fiber_id]) and (last["status"] || last[:status]) != "delivered"),
+      do: recovery, else: last
   end
 
   @impl true
