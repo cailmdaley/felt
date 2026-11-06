@@ -1603,7 +1603,7 @@ export class Dock {
       } else if (voice?.available && voice.enabled) {
         label = `${voice.muted ? 'Paused' : 'Listening'} · ${voice.target?.name ?? card.name}`
       }
-      word.textContent = label
+      if (word.textContent !== label) word.textContent = label
       armButton.title = armed ? 'Sending starts listening' : label
       armButton.setAttribute('aria-label', label)
       const preview = voice?.preview

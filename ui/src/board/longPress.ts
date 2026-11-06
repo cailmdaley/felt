@@ -144,6 +144,9 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
   }
   const onMove = (e: PointerEvent): void => tracker.move(e.pointerId, { x: e.clientX, y: e.clientY })
   const onEnd = (): void => tracker.cancel()
+  const onScroll = (e: Event): void => {
+    if (e.target === document || (e.target instanceof Node && e.target.contains(el))) tracker.cancel()
+  }
   const onContextMenu = (e: Event): void => {
     if (tracker.pressing) e.preventDefault()
   }
@@ -159,13 +162,13 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
     window.addEventListener('dragstart', onEnd, true)
     window.addEventListener('pointerup', onEnd)
     window.addEventListener('pointercancel', onEnd)
-    window.addEventListener('scroll', onEnd, true)
+    window.addEventListener('scroll', onScroll, true)
   }
   function stopListeningToWindow(): void {
     window.removeEventListener('dragstart', onEnd, true)
     window.removeEventListener('pointerup', onEnd)
     window.removeEventListener('pointercancel', onEnd)
-    window.removeEventListener('scroll', onEnd, true)
+    window.removeEventListener('scroll', onScroll, true)
   }
 
   el.addEventListener('pointerdown', onDown)
