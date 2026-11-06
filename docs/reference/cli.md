@@ -375,17 +375,20 @@ their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
 to `claude`.
 
-A plain `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn; idle or unknown state uses the native wake path.
+A plain `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn and a native fallback endpoint is registered; idle or unknown state uses the native wake path.
 The mailbox can deliver at the next prompt, before a tool, or after a tool, so the message can reach a worker mid-turn without Claude's native wrapper.
-The main-thread hook confirms delivery by writing the message as context and acknowledging its mailbox entry.
+The main-thread hook records an offer by writing the message as context and acknowledging its mailbox entry.
 If no hook offers it within three seconds, the owning daemon's one-second recovery tick claims it exclusively for native wake, including after a daemon restart.
 Stop never drains or continues a turn; a final tool call, an interrupt or an API failure cannot strand automatic mail in the hook queue.
 Subagent hooks neither receive their parent's mail nor change the parent's turn state.
 Retrying the same message ID reports `context_added` after a hook offer, or the native receipt after fallback.
 Native delivery retains its ordinary refusal and unknown-outcome semantics; a preflight failure leaves the fallback queued for retry.
+Hook output and acknowledgment, like native delivery and receipt persistence, aren't atomic across a process crash; transport ownership prevents ordinary duplicate delivery but doesn't establish exactly-once delivery at those boundaries.
 `--wake` forces the native wake path, including during a turn.
 `--context-only` or `--wake=false` queues context without starting a turn, regardless of state.
 Pi and Codex retain their existing paths.
+An active Codex turn accepts context-only mail through native steering; an idle loaded thread receives persistent model context through `thread/inject_items`, without a separate visible TUI turn.
+Hooks offer queued context when the receiver next prompts or uses a tool; Pi offers it before the next agent turn.
 
 `--notify-when-idle` subscribes the sending session to one notice when the
 receiver next ends a turn with nothing queued or running, or exits. A receiver

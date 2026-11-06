@@ -71,6 +71,17 @@ They cover trust, live migration, Go-only and skills-only updates, and require
 `felt-skills:shuttle` skills. The migration probe also observes old skill paths
 vanishing and the live inventory finding the replacement names.
 
+## Real Claude message delivery
+
+`scripts/check-claude-auto-mail.py --shuttle /path/to/built/shuttle` is an opt-in transport probe for a host with Claude Code installed.
+It starts real Claude Code with a private home, configuration, mailbox and loopback-only inference stub; it uses no account, operator session, live daemon or public inference endpoint.
+Build the checkout's CLI into a temporary directory and pass its absolute path rather than installing it.
+
+The probe checks mid-tool hook delivery, native fallback after the final tool, parent-only mail during a subagent, a stopped worker waking natively, and an API-failed turn whose registration still says working.
+Each case requires exactly one main-thread reply to its unique token, and the subagent case checks that no child inference request contains the parent's mail.
+The replies come from the deterministic stub, not a public model; this tests the installed harness's transport behavior, not authenticated inference.
+Use `--mode` to select cases and `--output` to retain API requests, hook inputs/outputs and receipts at a chosen path.
+
 ## Real Rex tests
 
 `daemon/test/shuttle/terminal/rex_real_test.exs` and `internal/shuttlecli/terminal_rex_real_test.go` start a private Rex server on a temporary Unix socket with its own state directory.

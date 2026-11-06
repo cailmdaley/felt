@@ -357,7 +357,8 @@ canonical harness name. The CLI also resolves unique native session IDs and
 fiber paths, slugs, or UIDs before calling this endpoint. Omitting `wake`
 requests an active task turn; set `wake: false` explicitly for context-only
 delivery. The CLI's default also sends `context_if_busy: true`, which lets a
-busy Claude receiver queue context for its next main-thread prompt or tool hook.
+busy Claude receiver with a registered native endpoint queue context for its next main-thread prompt or tool hook.
+`context_if_busy` must be a boolean and requires `wake: true`.
 If no hook offers it within three seconds, the owning daemon claims it for native wake on a one-second recovery tick; this survives daemon restart.
 A forced wake without that field never silently becomes context-only delivery. The address selects the
 owner strictly; an unknown host is refused rather than attempted locally. Its

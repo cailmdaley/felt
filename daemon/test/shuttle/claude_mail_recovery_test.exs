@@ -8,6 +8,7 @@ defmodule Shuttle.ClaudeMailRecoveryTest do
 
       receive do
         :complete -> {:ok, ""}
+        {:result, result} -> result
       end
     end
   end
@@ -30,6 +31,32 @@ defmodule Shuttle.ClaudeMailRecoveryTest do
 
     assert_receive {:recover, third, ["claude-mail-recover"], _}
     send(third, :complete)
+  end
+
+  test "command failures and timeouts finish normally and leave subsequent ticks usable" do
+    Env.put_app_env(:mail_recovery_test_pid, self())
+    pid = Env.start_scoped!({ClaudeMailRecovery, name: nil, runner: Runner, interval_ms: 60_000})
+
+    for result <- [
+          {:command_error, 1, "preflight unavailable"},
+          {:command_error, :timeout, "expired"},
+          {:error, :unavailable}
+        ] do
+      assert_receive {:recover, task, ["claude-mail-recover"], _}
+      ref = Process.monitor(task)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(task, {:result, result})
+          assert_receive {:DOWN, ^ref, :process, ^task, :normal}
+        end)
+
+      assert log =~ "Claude mail recovery"
+      send(pid, :recover)
+    end
+
+    assert_receive {:recover, task, _, _}
+    send(task, :complete)
   end
 
   test "production recovery ticks every second" do

@@ -139,9 +139,12 @@ def probe(args, mode):
     command = f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))} --hook | {shlex.quote(str(args.shuttle))} hook event | tee -a {shlex.quote(str(root / 'hook-output.jsonl'))}"
     settings = {"crossSessionInbound": "accept", "hooks": {e: [{"hooks": [{"type": "command", "command": command, "timeout": 120}]}] for e in events}}
     (root / "settings.json").write_text(json.dumps(settings))
-    env = dict(os.environ, AUTO_MAIL_PROBE=str(root), AUTO_MAIL_SHUTTLE=str(args.shuttle), SHUTTLE_DATA_DIR=str(root / "data"), SHUTTLE_HOST="probe", SHUTTLE_DAEMON_URL="http://127.0.0.1:1", SHUTTLE_BOARD="off", SHUTTLE_EVENTS_FILE=str(root / "events.jsonl"), SHUTTLE_PROGRAM_STATUS="off", ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}", ANTHROPIC_AUTH_TOKEN="private-loopback-probe", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", CLAUDE_CODE_MAX_RETRIES="0", TMPDIR="/tmp")
-    for key in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "SHUTTLE_SESSION_ID", "SHUTTLE_FIBER", "SHUTTLE_WORKER", "ANTHROPIC_API_KEY"):
-        env.pop(key, None)
+    # Inherit executable/locale settings only, never worker identities, account
+    # credentials, operator configuration or another harness's plugin paths.
+    env = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL", "SHELL") if key in os.environ}
+    (root / "home").mkdir()
+    (root / "config").mkdir()
+    env.update(HOME=str(root / "home"), CLAUDE_CONFIG_DIR=str(root / "config"), AUTO_MAIL_PROBE=str(root), SHUTTLE_DATA_DIR=str(root / "data"), SHUTTLE_HOST="probe", SHUTTLE_DAEMON_URL="http://127.0.0.1:1", SHUTTLE_BOARD="off", SHUTTLE_EVENTS_FILE=str(root / "events.jsonl"), SHUTTLE_PROGRAM_STATUS="off", ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}", ANTHROPIC_AUTH_TOKEN="private-loopback-probe", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", CLAUDE_CODE_MAX_RETRIES="0", TMPDIR="/tmp")
     if mode == "last-tool":
         (root / "hold-stop").touch()
     output = (root / "output.jsonl").open("w")
@@ -198,7 +201,10 @@ def probe(args, mode):
         offers = [h for h in hooks if server.token in json.dumps(h)]
         if mode in ("mid-tool", "subagent"):
             assert len(offers) == 1, offers
-            assert offers[0]["hookSpecificOutput"]["hookEventName"] in ("PreToolUse", "PostToolUse"), offers
+            # An async subagent's completion notification starts a main-thread
+            # UserPromptSubmit; synchronous Agent versions return PostToolUse.
+            allowed = ("PreToolUse", "PostToolUse", "UserPromptSubmit") if mode == "subagent" else ("PreToolUse", "PostToolUse")
+            assert offers[0]["hookSpecificOutput"]["hookEventName"] in allowed, offers
         else:
             assert not offers, offers
         if mode == "subagent":

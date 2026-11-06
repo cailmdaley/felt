@@ -579,6 +579,21 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert_receive {:local_message_frame, %{}}
   end
 
+  test "context-only requests reject the automatic wake policy before delivery", %{host: host} do
+    for hint <- [true, "true", nil] do
+      request = %{
+        "address" => "shuttle://#{host}/claude/native",
+        "text" => "passive context",
+        "wake" => false,
+        "context_if_busy" => hint,
+        "message_id" => "passive-hint"
+      }
+
+      assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(400)
+      refute_received {:local_message_frame, _}
+    end
+  end
+
   test "only a locally verified proof preserves a sender identity", %{host: host} do
     request = %{
       "address" => "shuttle://#{host}/codex/native%2Fid",

@@ -22,6 +22,11 @@ const claudeFallbackKeyPrefix = "claude-fallback\x00"
 // Queue time and exclusive transport ownership live on disk, not in a timer or
 // a turn-state guess. The daemon runs this at boot and every second afterwards.
 func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now time.Time) error {
+	// Bound the whole pass, including waits for one of its eight observation
+	// slots, leaving four seconds to persist receipts before the daemon's
+	// 32-second shell deadline. Unstarted work stays durable for the next tick.
+	ctx, cancel := context.WithTimeout(ctx, reservationDeadlineCeiling)
+	defer cancel()
 	root := filepath.Join(dataDir(env), "mailboxes", "claude")
 	sessions, err := os.ReadDir(root)
 	if errors.Is(err, os.ErrNotExist) {
@@ -93,6 +98,9 @@ func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now ti
 }
 
 func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, dir, key string, req Request) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	claimed, err := claimClaudeFallback(dir, key)
 	if err != nil || !claimed {
 		return err
