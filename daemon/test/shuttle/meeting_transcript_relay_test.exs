@@ -1343,6 +1343,20 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert second == first
   end
 
+  test "voice speaker comments never strand a source-less buffer before finalized speech", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "# S2 = colleague\n")
+    File.write!(Path.rootname(c.path) <> ".jsonl", "")
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
+    assert %{error: nil} = poll(c)
+    assert %{error: nil} = poll(c)
+    record(c.path, "2026-11-06T10:00:01Z", "final words")
+    assert %{error: nil} = poll(c)
+    assert [%{"text" => "me: final words"}] = TranscriptRelay.held(server: c.name)
+    refute_receive {:delivery, _}, 20
+  end
+
   test "stale composer mutations cannot reintroduce or release an already consumed prefix", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")

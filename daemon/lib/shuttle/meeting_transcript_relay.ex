@@ -922,6 +922,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
   defp add_line(config, target, line, state, voice \\ nil)
 
+  defp add_line(%{"kind" => "voice"} = config, _target, "#" <> _ = line, state, nil) do
+    if String.starts_with?(line, "# ended"),
+      do: config |> Map.put("ended", true) |> flush_all(state),
+      else: config
+  end
+
   defp add_line(config, nil, line, _state, _voice),
     do: if(String.starts_with?(line, "# ended"), do: Map.put(config, "ended", true), else: config)
 

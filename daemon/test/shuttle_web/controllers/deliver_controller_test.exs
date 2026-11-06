@@ -35,6 +35,11 @@ defmodule ShuttleWeb.DeliverControllerTest do
        }), exit_code}
     end
 
+    def cmd("tmux", ["load-buffer", "-b", _buffer, path] = args, opts) do
+      send(Shuttle.Env.app(:deliver_test_pid), {:paste, File.read!(path)})
+      MockRunner.cmd("tmux", args, opts)
+    end
+
     def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
   end
 
@@ -174,6 +179,111 @@ defmodule ShuttleWeb.DeliverControllerTest do
     script = run_script()
     assert script =~ "--resume '#{session}'"
     assert script =~ "me: held words Claude"
+  end
+
+  test "finalized voice traverses the relay, edited cold hold, dormant resume and live messaging" do
+    alias Shuttle.Meeting.TranscriptRelay
+    dormant = "tests/voice-pipeline-dormant"
+    live = "tests/voice-pipeline-live"
+    session = "de11ae00-0000-4000-8000-000000000098"
+
+    put_previous_run(dormant, session, %{
+      "handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())
+    })
+
+    write_transcript(session, 30)
+    put_constitution(live)
+    assert %{"delivery" => "dispatch"} = deliver(live, "prepare receiver")
+    assert is_map(Poller.live_worker(live))
+    Env.put_app_env(:felt_runner, MessageRunner)
+    Env.put_app_env(:deliver_test_pid, self())
+    :sys.replace_state(Env.server!(Poller), fn state -> %{state | runner: MessageRunner} end)
+    root = Path.join(MockRunner.felt_root(), "voice-probe")
+    File.mkdir_p!(root)
+    transcript = Path.join(root, "voice.txt")
+    routes = Path.join(root, "routes.jsonl")
+    File.write!(transcript, "")
+
+    write_route = fn at, target ->
+      File.write!(routes, Jason.encode!(%{"t" => at, "fiber_id" => target}) <> "\n", [:append])
+    end
+
+    record = fn at, text ->
+      File.write!(
+        Path.rootname(transcript) <> ".jsonl",
+        Jason.encode!(%{"wall" => at, "speaker" => "S1", "text" => text}) <> "\n",
+        [:append]
+      )
+    end
+
+    write_route.("2026-11-06T10:00:00Z", dormant)
+    relay = Module.concat(__MODULE__, "VoiceProbe#{System.unique_integer([:positive])}")
+    Env.put_server(TranscriptRelay, relay)
+
+    start_supervised!(
+      {TranscriptRelay,
+       [
+         name: relay,
+         directory: Path.join(root, "relay"),
+         poll_ms: 60_000,
+         cold: fn target -> target["fiber_id"] == dormant end,
+         thresholds: fn _ -> %{"words" => 1, "quiet_seconds" => 1} end,
+         observe: fn -> {:ok, %{meeting: %{launch: "pipeline", state: "live", error: nil}}} end
+       ]}
+    )
+
+    assert :ok =
+             TranscriptRelay.start(
+               %{
+                 launch: "pipeline",
+                 kind: "voice",
+                 transcript: transcript,
+                 routes_path: routes,
+                 started_at: "2026-11-06T10:00:00Z"
+               },
+               nil,
+               nil,
+               server: relay
+             )
+
+    relay_state = :sys.get_state(Module.concat(relay, Coordinator))
+    {worker, _} = relay_state.workers["pipeline"]
+
+    poll = fn ->
+      send(worker, :poll)
+      GenServer.call(worker, :status)
+    end
+
+    record.("2026-11-06T10:00:01Z", "raw correction needed")
+    poll.()
+    [held] = TranscriptRelay.held()
+    assert held["text"] == "S1: raw correction needed"
+    refute_receive {:message, _}, 20
+    assert :ok = TranscriptRelay.draft(Map.put(held, "text", "S1: corrected request"))
+    record.("2026-11-06T10:00:02Z", "Claude")
+    poll.()
+    # The owning dispatcher, not the recorder cache, selects the dormant conversation.
+    task_refs =
+      :sys.get_state(worker).task_handles |> Map.values() |> Enum.map(&Process.monitor(&1.pid))
+
+    for ref <- task_refs, do: assert_receive({:DOWN, ^ref, :process, _, _}, 30_000)
+    GenServer.call(worker, :status)
+    script = run_script()
+    assert script =~ "--resume '#{session}'"
+    assert script =~ "S1: corrected request Claude"
+    assert TranscriptRelay.held() == []
+    assert {:error, :conflict} = TranscriptRelay.release(held)
+    write_route.("2026-11-06T10:00:03Z", live)
+    record.("2026-11-06T10:00:04Z", "ordinary live words")
+    poll.()
+    assert_receive {:paste, "S1: ordinary live words\n"}, 30_000
+    refute_receive {:paste, _}, 20
+    refute_receive {:message, _}, 20
+    assert TranscriptRelay.held() == []
+
+    assert Enum.count(MockRunner.commands(), fn {command, args} ->
+             command == "tmux" and match?(["new-session" | _], args)
+           end) == 2
   end
 
   # A previous run of `fiber_id` under `session`, dispatched a minute ago
