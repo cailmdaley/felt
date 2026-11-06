@@ -330,8 +330,10 @@ defmodule Shuttle.Speaker do
       state.muted or
         (talking?(partial, current.item.text) and now - elem(heard, 1) < @quiet_ms)
 
+    skip = skip(partial, Map.get(current, :before))
+
     cond do
-      skip?(partial, Map.get(current, :before)) ->
+      skip == :said or (skip == :trailing and now - elem(heard, 1) >= @quiet_ms) ->
         Logger.info("speaker: skipped for #{current.item.fiber_id || "?"}")
         if current.handle, do: state.stop.(current.handle)
         cleanup(current)
@@ -433,18 +435,36 @@ defmodule Shuttle.Speaker do
   end
 
   @doc """
-  Whether the pending words added since the line became current are a spoken
-  skip: "skip", "skip it" or "skip that".
+  How the pending words added since the line became current ask to skip it:
+  `:said` when they are only "skip", "skip it" or "skip that"; `:trailing` when
+  they end with one, not after a negation; else nil. A trailing skip counts
+  once the human is quiet, since mid-sentence it may be followed by more.
   """
-  def skip?(nil, _before), do: false
+  def skip(nil, _before), do: nil
 
-  def skip?(partial, before) do
+  def skip(partial, before) do
     new =
       if is_binary(before) and before != "" and String.starts_with?(partial, before),
         do: String.replace_prefix(partial, before, ""),
         else: partial
 
-    Enum.join(words(new), " ") in ["skip", "skip it", "skip that"]
+    words = words(new)
+    {head, tail} = last_skip(words)
+
+    cond do
+      tail not in [["skip"], ["skip", "it"], ["skip", "that"]] -> nil
+      head == [] -> :said
+      List.last(head) in ~w(don't dont not never no) -> nil
+      true -> :trailing
+    end
+  end
+
+  # Split at the last "skip": the words before it and the words from it on.
+  defp last_skip(words) do
+    case Enum.find_index(Enum.reverse(words), &(&1 == "skip")) do
+      nil -> {words, []}
+      i -> Enum.split(words, length(words) - 1 - i)
+    end
   end
 
   @doc """

@@ -187,14 +187,47 @@ defmodule Shuttle.SpeakerTest do
     assert %{speaking: %{text: "second line"}, queued: 0} = Speaker.show(server)
   end
 
-  test "skip is the new words alone" do
-    assert Speaker.skip?("skip", nil)
-    assert Speaker.skip?("Skip it!", "")
-    assert Speaker.skip?("so then skip", "so then")
-    refute Speaker.skip?("so then", "so then")
-    refute Speaker.skip?("don't skip", nil)
-    refute Speaker.skip?("skip ahead to the end", nil)
-    refute Speaker.skip?(nil, nil)
+  test "a skip ending an interruption drops the line once the human is quiet",
+       %{server: server, world: world} do
+    {:ok, _} = Speaker.speak(%{"text" => "first line", "voice" => "jean"}, server)
+    {:ok, _} = Speaker.speak(%{"text" => "second line", "voice" => "jean"}, server)
+    assert_receive {:play, "jean:first line", one}
+
+    set(world, %{now: 1_000, partial: "I'd skip"})
+    assert_receive {:stop, ^one}
+    set(world, %{now: 1_400, partial: "I've heard enough of this, skip"})
+    set(world, %{now: 2_500})
+    refute_receive {:play, _, _}, 50
+
+    # Quiet with a trailing skip: the line is dropped, not resumed.
+    set(world, %{now: 3_000})
+    assert_receive {:play, "jean:second line", _}
+  end
+
+  test "a skip mid-sentence resumes the line when the sentence goes on",
+       %{server: server, world: world} do
+    {:ok, _} = Speaker.speak(%{"text" => "first line", "voice" => "jean"}, server)
+    assert_receive {:play, "jean:first line", one}
+    set(world, %{now: 1_000, partial: "I'd skip"})
+    assert_receive {:stop, ^one}
+    set(world, %{now: 1_300, partial: "I'd skip the intro next time"})
+    set(world, %{now: 3_000})
+    assert_receive {:play, "jean:first line@500", _}
+  end
+
+  test "skip is the new words alone, or their end" do
+    assert Speaker.skip("skip", nil) == :said
+    assert Speaker.skip("Skip it!", "") == :said
+    assert Speaker.skip("so then skip", "so then") == :said
+    assert Speaker.skip("that's enough of that, skip.", nil) == :trailing
+    assert Speaker.skip("we covered this. Skip that", nil) == :trailing
+    assert Speaker.skip("skip ahead, skip it", nil) == :trailing
+    assert Speaker.skip("so then", "so then") == nil
+    assert Speaker.skip("don't skip", nil) == nil
+    assert Speaker.skip("please do not skip that", nil) == nil
+    assert Speaker.skip("skip ahead to the end", nil) == nil
+    assert Speaker.skip("I'd skip the intro", nil) == nil
+    assert Speaker.skip(nil, nil) == nil
   end
 
   test "words of the line being spoken are its echo, not the user" do
