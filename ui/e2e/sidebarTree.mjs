@@ -20,9 +20,12 @@ export function registerSidebarTreeJourneys(test) {
     assert.equal(await dotEdge('chair'), await dotEdge('hub'), 'a caret does not move a root off the shared edge')
     assert.ok(await dotEdge('chair/question') > await dotEdge('chair'), 'only depth indents a row')
     assert.equal(await row('chair/analysis').count(), 0)
-    const beforeHidingDesk = await sidebar.screenshot()
+    // Compare the sidebar surface, not text rasterization: Chromium can vary
+    // the active index underline's antialiased edge between unchanged captures.
+    const surface = { style: '.ws-sidebar * { visibility: hidden !important; }' }
+    const beforeHidingDesk = await sidebar.screenshot(surface)
     await desk.evaluate(el => el.style.visibility = 'hidden')
-    assert.ok(beforeHidingDesk.equals(await sidebar.screenshot()), 'the Desk cannot bleed blurred patches through the sidebar')
+    assert.ok(beforeHidingDesk.equals(await sidebar.screenshot(surface)), 'the Desk cannot bleed blurred patches through the sidebar')
     await desk.evaluate(el => el.style.visibility = '')
     const captions = await sidebar.locator('.kbn-flight-caption').allTextContents()
     assert.equal(new Set(captions).size, captions.length, 'each caption appears once')
