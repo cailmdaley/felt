@@ -146,3 +146,21 @@ test('below, by default, the voice line rides the hint row after the engine line
   expect(await label(band, 'mic')).toBeUndefined()
   await band.unmount()
 })
+
+test('below, at 80 columns, the words show beside a full ticker', async ($, on) => {
+  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, preview: { fiber_id: SELF, words: 5, text: 'where is my text going?' }, level: { mic: -49, at: '' } }, SPEAK)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 25; i++) await clock.advance(150)
+  const hint = await $.ui.mount({ ...HINT, surface: 'terminal', props: { ...HINT.props, hint: '(shift+tab to cycle)' } } as any)
+  expect(await label(hint, 'mic')).toBe('  ' + '▁'.repeat(20) + ' …text going?')
+  await hint.unmount()
+})
+
+test('below, at 60 columns, the ticker gives way to the words', async ($, on) => {
+  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, preview: { fiber_id: SELF, words: 5, text: 'where is my text going?' }, level: { mic: -49, at: '' } }, SPEAK)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 25; i++) await clock.advance(150)
+  const hint = await $.ui.mount({ ...HINT, surface: 'terminal', viewport: { columns: 60, rows: 30 }, props: { ...HINT.props, hint: '(shift+tab to cycle)' } } as any)
+  expect(await label(hint, 'mic')).toBe('  ' + '▁'.repeat(5) + ' …going?')
+  await hint.unmount()
+})

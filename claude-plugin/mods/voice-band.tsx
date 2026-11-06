@@ -36,7 +36,7 @@ const FAST = 500
 const SLOW = 5000
 const GLYPHS = '▁▂▃▅▇'
 const HISTORY = 20 // ticker readings kept: about 3 s at the live poll, so a phrase leaves a shape
-const PILLS = 40 // the hint row's mode pill and separators, which the engine draws around the hint
+const PILLS = 26 // the hint row's margin, mode label and separator (`  ⏵⏵ auto mode on · `, ~20), with slack; the API does not measure it
 
 // Module state: a reload starts it over and session.start fills it again.
 let base = 'http://127.0.0.1:4000'
@@ -128,7 +128,8 @@ function line(room: number, Text: any) {
           v.held?.find(h => mine(h.fiber_id))?.text ||
           '',
       )
-      const steps = levels.map(step)
+      // A narrow row keeps room for words: the ticker gives way, down to five glyphs, so the words keep twelve columns.
+      const steps = levels.slice(-Math.max(5, Math.min(HISTORY, room - 13))).map(step)
       const words = clipWords(said, room - (steps.length ? steps.length + 1 : 0))
       mic = [steps.map(i => GLYPHS[i]).join(''), words].filter(Boolean).join(' ')
       parts = [
