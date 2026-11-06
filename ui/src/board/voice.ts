@@ -82,6 +82,17 @@ export class Voice {
     if (!this.card) this.lastTarget = ''
     this.target(false)
   }
+  async listenHere(card: KanbanCard): Promise<void> {
+    this.card = card
+    const id = card.uid ?? card.id
+    this.lastTarget = JSON.stringify([id, card.originId])
+    try {
+      await this.post('/target', { fiber_id: id, origin: card.originId }, () => this.enabledIntent !== false)
+    } catch (error) {
+      this.lastTarget = ''
+      throw error
+    }
+  }
   private focus = (): void => {
     if (document.hidden || this.focusTimer !== null) return
     this.focusTimer = window.setTimeout(() => { this.focusTimer = null; this.target(true) }, 50)

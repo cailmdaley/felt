@@ -220,6 +220,19 @@ it('opens the actual following transcript on its recorder even without a target'
   v.dock.reset()
 })
 
+it('explicitly retargets following and displays a failed request', async () => {
+  const v = mount()
+  v.voice.status = { ...status, enabled: true, state: 'listening', target: { fiber_id: 'other', origin: 'remote', name: 'Other' } }; notify(v.voice)
+  const listen = vi.spyOn(v.voice, 'listenHere').mockRejectedValue(new Error('Cannot retarget'))
+  v.dropdown().click()
+  v.menuItems().find(x => x.textContent === 'Listen here')!.click()
+  await vi.waitFor(() => expect(v.main().textContent).toBe('Failed'))
+  expect(listen).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }))
+  v.dropdown().click()
+  expect(v.root.textContent).toContain('Cannot retarget')
+  v.dock.reset()
+})
+
 it('stops following by turning Follow me off', () => {
   const v = mount()
   v.voice.status = { ...status, enabled: true, state: 'listening' }; notify(v.voice)

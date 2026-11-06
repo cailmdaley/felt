@@ -62,6 +62,24 @@ describe('live voice', () => {
     ])
     voice.dispose()
   })
+  it('explicitly listens here again after another source changes the target, including on phone', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null })
+      return { ok: true, json: async () => status() }
+    }))
+    const voice = new Voice('')
+    voice.status = status()
+    const a = card({ id: 'a', shuttleKind: 'oneshot' })
+    voice.select(a); await flush()
+    voice.status = status({ target: { fiber_id: 'b', origin: 'remote', name: 'B' } })
+    await voice.listenHere(a)
+    vi.stubGlobal('matchMedia', () => ({ matches: true }))
+    await voice.listenHere(a)
+    expect(calls.filter(c => c.url.endsWith('/target')).map(c => c.body)).toEqual([
+      { fiber_id: 'a', origin: 'local' }, { fiber_id: 'a', origin: 'local' }, { fiber_id: 'a', origin: 'local' },
+    ])
+  })
   it('coalesces focus and visibility into one reassertion', async () => {
     vi.useFakeTimers()
     const calls: string[] = []

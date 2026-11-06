@@ -1682,7 +1682,9 @@ export class Dock {
         }, !this.openFile)
         item(state.muted ? 'Resume' : 'Pause', () => set({ muted: !state.muted }))
         item('Stop', () => set({ enabled: false }))
-        if (elsewhere(state.target)) item('Listen here', () => voice?.select(card))
+        if (elsewhere(state.target)) item('Listen here', () => {
+          void voice?.listenHere(card).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
+        })
       }
       const cadence = document.createElement('div')
       cadence.className = 'kbn-ctl-listen-cadence'
