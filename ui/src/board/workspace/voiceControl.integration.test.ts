@@ -76,3 +76,16 @@ it('keeps the mobile menu read-only while still allowing the destination to open
   expect(open).toHaveBeenCalledWith('a', 'local')
   control.dispose()
 })
+
+it('shows unconfirmed delivery honestly, including on a phone with a local target', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true }))
+  const voice = new Voice('')
+  voice.status = { ...status, last: { fiber_id: 'a', at: '2026-11-06T10:00:00Z', status: 'unconfirmed', detail: 'The message may have arrived. The transcript retains the words.' } }
+  const control = voiceControl(voice, card({ id: 'a' }), vi.fn())
+  const composer = document.createElement('div'); composer.append(control.chip); document.body.append(composer)
+  ;(control.chip as HTMLButtonElement).click()
+  expect(document.body.textContent).toContain('Delivery unconfirmed')
+  expect(document.body.textContent).toContain('The message may have arrived')
+  expect(document.body.textContent).not.toContain('Delivery failed')
+  control.dispose()
+})

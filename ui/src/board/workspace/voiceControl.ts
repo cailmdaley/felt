@@ -28,7 +28,7 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
   const matches = (id: string | undefined): boolean => !!id && (id === card.id || id === card.uid)
   const elsewhere = (target: NonNullable<Voice['status']>['target']): boolean =>
     !!target && (!matches(target.fiber_id) || (!!target.origin && target.origin !== card.originId))
-  const hasMenu = (state: NonNullable<Voice['status']>): boolean => !isMobileViewport() || elsewhere(state.target) || !!localError || (state.state === 'failed' && !!state.error) || state.last?.status === 'failed'
+  const hasMenu = (state: NonNullable<Voice['status']>): boolean => !isMobileViewport() || elsewhere(state.target) || !!localError || (state.state === 'failed' && !!state.error) || (state.last?.status === 'failed' || state.last?.status === 'unconfirmed')
   const paint = (): void => {
     const state = voice.status
     chip.hidden = !state?.available
@@ -74,6 +74,7 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
     if (localError) note(localError)
     if (state.state === 'failed' && state.error) note(state.error)
     if (state.last?.status === 'failed') note(`Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}`)
+    if (state.last?.status === 'unconfirmed') note(`Delivery unconfirmed${state.last.detail ? `: ${state.last.detail}` : '; the message may have arrived. The transcript retains the words.'}`)
     function note(text: string): void { const el = document.createElement('div'); el.className = 'voice-error'; el.textContent = text; menu!.append(el) }
     function showError(error: unknown): void { localError = error instanceof Error ? error.message : String(error); paint() }
     ;(chip.closest('.kbn-ctl-composer') ?? chip.parentElement)?.append(menu)

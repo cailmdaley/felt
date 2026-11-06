@@ -9,7 +9,7 @@ export interface VoiceStatus {
   state: 'off' | 'starting' | 'listening' | 'yielded' | 'failed'
   target: { fiber_id: string; origin: string; name: string } | null
   pending: { fiber_id: string; words: number; text: string } | null
-  last: { fiber_id: string; at: string; status: 'delivered' | 'failed'; detail?: string } | null
+  last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string } | null
   error: string | null
 }
 
