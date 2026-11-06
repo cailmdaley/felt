@@ -188,6 +188,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
   end
 
   @impl true
+  def handle_info({:EXIT, _source, _reason}, state), do: {:noreply, state}
+
   def handle_info({ref, result}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
     {:noreply, finish_delivery(state, ref, result)}
@@ -427,6 +429,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   def handle_info(:poll, state) do
     protect(state, fn -> poll(state) end)
   end
+
+  def handle_info({:EXIT, _source, _reason}, state), do: {:noreply, state}
 
   def handle_info({ref, result}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])

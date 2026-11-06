@@ -46,6 +46,15 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
      root: root}
   end
 
+  test "a relay ignores the port exits its trapped shell calls leave behind" do
+    state = %{marker: true}
+    port = Port.open({:spawn, "true"}, [])
+    exit = {:EXIT, port, :normal}
+
+    assert TranscriptRelay.Worker.handle_info(exit, state) == {:noreply, state}
+    assert TranscriptRelay.Coordinator.handle_info(exit, state) == {:noreply, state}
+  end
+
   test "word and name triggers preserve comments, ranges and the closing marker", c do
     File.write!(
       c.path,
