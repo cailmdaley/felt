@@ -83,6 +83,7 @@ import { joinDeliveryPhrase, meetingStatusUrl, supportedMeetingModes, meetingJoi
 import { joinMeeting as requestMeetingJoin, setMeetingSystemAudio as requestMeetingSystemAudio, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
 import { recordingStartHold } from '../forms/recordingStart'
 import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
+import { Voice } from './voice.js'
 import {
   collectCards,
   createTemporalFetchers,
@@ -299,6 +300,7 @@ export class KanbanModal {
   private gestureDepth = 0
   private workspace: Workspace | null = null
   private readonly dock: Dock
+  private readonly voice: Voice
   private deskKeyboard: DeskKeyboard | null = null
   /** Each fiber's newest report, for the rows' marks. */
   private fiberSends: FiberSends | null = null
@@ -371,6 +373,7 @@ export class KanbanModal {
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
+    this.voice = new Voice(this.shuttleBase)
     this.dock = new Dock(
       this.shuttleBase,
       () => { void this.fetchAndRender() },
@@ -378,6 +381,7 @@ export class KanbanModal {
       (card, target) => this.transition(card, target, { verdictCommitted: true }),
       this.openWorkerAfterGesture,
       {
+        voice: { controller: this.voice, open: (id, origin) => { void this.workspace?.openFiber(id, origin) } },
         meeting: {
           canJoin: () => !recordingStartHold(this.shuttleBase) && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
           modes: () => supportedMeetingModes(this.meetingStatus, isMobileViewport()),
@@ -576,6 +580,7 @@ export class KanbanModal {
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
+      onVoiceCard: card => this.voice.select(card),
       deskColumn: card => this.workspaceColumn(card),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
@@ -596,6 +601,7 @@ export class KanbanModal {
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     document.addEventListener(THREAD_PIN, this.handleThreadPin)
     this.startPolling()
+    this.voice.mount()
     void this.fetchAndRender()
   }
 
@@ -614,6 +620,7 @@ export class KanbanModal {
     this.workspace?.dispose()
     this.workspace = null
     this.dock.reset()
+    this.voice.dispose()
     this.phoneAudio.unmount()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.

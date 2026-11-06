@@ -1,0 +1,4 @@
+.voice-chip[hidden] { display: none; }
+.voice-chip { max-width: 18ch !important; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-pending { position: absolute; inset: auto 8px 100% 8px; max-height: 5em; overflow-y: auto; color: var(--ws-ink-muted); background: var(--ws-paper); font-size: var(--type-note); white-space: pre-wrap; }
+.voice-error { padding: 8px 10px; max-width: 260px; font-size: var(--type-note); color: var(--ws-ink-muted); white-space: normal; }

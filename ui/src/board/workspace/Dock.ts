@@ -9,6 +9,7 @@ import { attachConversationPicker } from '../conversationMenu.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import type { MeetingMode } from '../../forms/meetingApi.js'
+import { voiceControl } from './voiceControl.js'
 import { meetingActions, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
@@ -456,6 +457,7 @@ export function chatFacts(card: KanbanCard): string {
 }
 
 export interface DockOptions {
+  voice?: { controller: import('../voice.js').Voice; open: (id: string, origin: string) => void }
   meeting?: MeetingJoinControl
   /** Opens the Rest popover on the button that asked for it. */
   onRest?: (card: KanbanCard, anchor: HTMLElement) => void
@@ -493,6 +495,7 @@ export class Dock {
   private meetingPaint: (() => void) | null = null
   private meetingChip: HTMLButtonElement | null = null
   private dismissRecordingMenu: (() => void) | null = null
+  private dismissVoiceMenu: (() => boolean) | null = null
   private meetingStartHere: (() => void) | null = null
   private pendingMeetingHere: { launch: string | null; start: () => void } | null = null
   private meetingPaneCollapsed = false
@@ -523,6 +526,7 @@ export class Dock {
   private queueVerdict?: (card: KanbanCard, target: Verdict) => void
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
+  private readonly voice: DockOptions['voice']
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
   private onMeetingHostOpen?: (meeting: MeetingRecord) => void
   private meetingHostName?: (meeting: MeetingRecord) => string | undefined
@@ -539,6 +543,7 @@ export class Dock {
     this.onTransition = onTransition ?? (() => {})
     this.onOpenWorker = onWorkerOpen
     this.meeting = opts.meeting ?? null
+    this.voice = opts.voice
     this.onRest = opts.onRest
   }
 
@@ -657,7 +662,7 @@ export class Dock {
     let band = this.bands.get(key)
     if (!band) {
       band = new Dock(this.shuttleBase, this.onSaved, this.onTransition, this.onOpenWorker,
-        { meeting: this.meeting ?? undefined, onRest: this.onRest })
+        { meeting: this.meeting ?? undefined, voice: this.voice, onRest: this.onRest })
       if (this.onMeetingHostOpen) band.setMeetingHostOpen(this.onMeetingHostOpen, this.meetingHostName)
       band.setVerdictQueue(this.queueVerdict)
       this.bands.set(key, band)
@@ -704,6 +709,7 @@ export class Dock {
     this.meetingPaint = this.composerBusy = null
     this.meetingChip = null
     this.dismissRecordingMenu = null
+    this.dismissVoiceMenu = null
     this.meetingStartHere = null
     this.pendingMeetingHere = null
     this.meetingPaneCollapsed = false
@@ -760,6 +766,7 @@ export class Dock {
   }
 
   handleEscape(): boolean {
+    if (this.dismissVoiceMenu?.()) return true
     if (dismissSelectPicker()) return true
     if (this.transcriptBand?.closeFull()) return true
     if (this.dismissConversation?.() || this.dismissParent?.()) return true
@@ -1325,6 +1332,7 @@ export class Dock {
     const fresh = ctlButton('', 'kbn-ctl-send')
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     let meetingControl: HTMLElement | undefined
+    let voiceChip: HTMLElement | undefined
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
     this.composerPaint = () => {
@@ -1349,7 +1357,7 @@ export class Dock {
       if (warmUntil === undefined) delete resume.dataset.cache; else resume.dataset.cache = 'warm'
       resume.hidden = false
       const ordered = live ? [resume, fresh] : [fresh, resume]
-      const controls = [...(meetingControl ? [meetingControl] : []), ...ordered]
+      const controls = [...(voiceChip ? [voiceChip] : []), ...(meetingControl ? [meetingControl] : []), ...ordered]
       if (controls.some((control, index) => sends.children[index] !== control) || sends.children.length !== controls.length) sends.replaceChildren(...controls)
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
@@ -1502,8 +1510,15 @@ export class Dock {
       this.composerPaint?.()
       fit()
     }) : undefined
-    this.composerPaint()
     foot.append(meetChip)
+    if (this.voice) {
+      const control = voiceControl(this.voice.controller, card, this.voice.open)
+      voiceChip = control.chip
+      this.dismissVoiceMenu = control.dismiss
+      box.append(control.pending)
+      this.composerDisposers.push(control.dispose)
+    }
+    this.composerPaint()
     foot.append(sends)
 
     this.composerSend = send

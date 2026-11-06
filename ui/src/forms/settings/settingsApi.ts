@@ -22,7 +22,7 @@
 import { daemonErrorMessage, daemonFetch } from '../../board/daemonApi.js'
 
 /** Which operator file. The wire names are the files' own stems. */
-export type ConfigId = 'stores' | 'projects' | 'agents' | 'remotes' | 'host'
+export type ConfigId = 'stores' | 'projects' | 'agents' | 'remotes' | 'host' | 'voice'
 
 /** What a config file is called on screen, and what it governs. */
 export const CONFIG_FILENAME: Record<ConfigId, string> = {
@@ -31,6 +31,7 @@ export const CONFIG_FILENAME: Record<ConfigId, string> = {
   agents: 'agents.json',
   remotes: 'remotes.json',
   host: 'host.json',
+  voice: 'voice.json',
 }
 
 /** The three values `host.json`'s `"class"` accepts. */
