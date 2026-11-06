@@ -6206,6 +6206,7 @@ defmodule Shuttle.PollerTest do
     end
 
     @tag backend: backend
+    @tag :review_retired_inventory
     test "a closed fiber keeps its #{inspect(backend)} worker visible until teardown succeeds", %{
       backend: backend
     } do
@@ -6259,7 +6260,17 @@ defmodule Shuttle.PollerTest do
         }
       end)
 
+      # Count stop requests at the backend boundary, including an already-absent
+      # Rex address that needs no second close_window command.
+      :erlang.trace_pattern({Shuttle.WorkerBackend, :stop, 2}, true, [:local])
+      :erlang.trace(poller, true, [:call, {:tracer, self()}])
+      on_exit(fn -> :erlang.trace_pattern({Shuttle.WorkerBackend, :stop, 2}, false, [:local]) end)
       sync_poll_cycle!(poller)
+      ref = :erlang.trace_delivered(poller)
+      assert_receive {:trace_delivered, ^poller, ^ref}
+      :erlang.trace(poller, false, [:call])
+      assert_received {:trace, ^poller, :call, {Shuttle.WorkerBackend, :stop, [_, ^session]}}
+      refute_received {:trace, ^poller, :call, {Shuttle.WorkerBackend, :stop, [_, ^session]}}
       assert Poller.worker_status(poller, id) == nil
       assert reap_stop_count(backend) == 2
     end
