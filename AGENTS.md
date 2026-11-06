@@ -91,7 +91,7 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   and journals resource ownership before changing the backend; unresolved recovery
   holds every launch, including force, cron and previously observed workers.
   The CLI's locked `standing-transition` checks the current run and human lifecycle state; `patch-document` refuses a stale source digest.
-  At boot, `shuttle contract` checks level 33 against `daemon/lib/shuttle/contract.ex`; the daemon holds on a skew.
+  At boot, `shuttle contract` checks level 34 against `daemon/lib/shuttle/contract.ex`; the daemon holds on a skew.
 - **Live host-addressed content and control use `Shuttle.OriginRouter`.**
   The composite board carries each row's `origin` back to the daemon for
   requests such as `/api/v1/fibers/:id?body=true` and `/file`, so it can display

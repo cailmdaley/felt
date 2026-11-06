@@ -20,8 +20,8 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Standing transitions use the locked, conditional run-disposition writer.
-  @expected_level 33
+  # Automatic Claude mail has a durable native-wake recovery command.
+  @expected_level 34
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -53,7 +53,8 @@ defmodule Shuttle.Contract do
         "resolved lifecycle reads remain exact for UID-less documents",
     32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)",
     33 =>
-      "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)"
+      "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)",
+    34 => "claude-mail-recover (durable native wake for unoffered automatic Claude mail)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

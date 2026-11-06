@@ -158,9 +158,10 @@ then routes text (and --attach files) through the local daemon to the owning hos
 The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
-By default a busy Claude session receives context at its next prompt or tool
-hook, or continues at Stop to receive it before going idle. Other sessions use
-their native wake path. --wake forces a native wake;
+By default a busy Claude session receives context at its next main-thread prompt
+or tool hook. Mail unoffered after three seconds falls back to native wake through
+the owning daemon, even after restart. Other sessions use their native wake path.
+--wake forces a native wake immediately;
 --context-only (or --wake=false) never starts a turn.
 
 An attachment-free --context-only fiber send uses its durable mailbox regardless
@@ -687,7 +688,9 @@ func (a *app) postMessage(request messaging.Request) (messaging.Receipt, error) 
 	if request.Wake {
 		switch receipt.Status {
 		case messaging.StatusContextAdded:
-			return messaging.Receipt{}, fmt.Errorf("daemon returned context-only status %q for a wake request", receipt.Status)
+			if !request.ContextIfBusy || receipt.Transport != "claude-hook" {
+				return messaging.Receipt{}, fmt.Errorf("daemon returned context-only status %q for a wake request", receipt.Status)
+			}
 		case messaging.StatusQueued, messaging.StatusSubmitted:
 			supported := receipt.Transport == "claude-native" ||
 				(request.ContextIfBusy && receipt.Status == messaging.StatusQueued && receipt.Transport == "claude-hook") ||

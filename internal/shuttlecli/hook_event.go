@@ -47,8 +47,8 @@ state directory is the opt-in. An explicit SHUTTLE_EVENTS_FILE overrides that
 and creates the directory; SHUTTLE_EVENTS=off disables recording outright.
 
 Exits 0 on every path, including malformed input. Supported Claude and Codex hooks
-offer queued peer messages as additionalContext. Claude Stop continues only for
-messages rerouted from wake while busy; context-only messages never continue a turn.
+offer queued peer messages as additionalContext; Stop never continues a turn.
+Unoffered automatic Claude mail has a durable native-wake fallback.
 SHUTTLE_MESSAGES=off disables mailbox registration and delivery.
 
 Inside tmux, Claude and Pi hooks also send terminal program status (OSC 7501).

@@ -16,6 +16,7 @@ config :shuttle,
   # exercise it, against a tmp fixture rather than the developer's stream.
   start_event_stream: false,
   start_interrupt_watcher: false,
+  start_claude_mail_recovery: false,
   # Left off in the suite so no test run can copytruncate the developer's real
   # ~/Library/Logs/shuttle.log. log_rotator_test starts its own against tmp_dir.
   start_log_rotator: false,

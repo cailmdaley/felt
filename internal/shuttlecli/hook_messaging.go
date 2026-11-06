@@ -13,7 +13,7 @@ import (
 )
 
 // The activity hook also offers peer messages on hooks that add context without
-// continuing a stopped turn. Claude Stop continues only for busy-rerouted mail.
+// continuing a stopped turn.
 func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	observedAt := time.Now().UnixMilli()
 	b, err := io.ReadAll(io.LimitReader(r, 4<<20+1))
@@ -24,20 +24,11 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if json.NewDecoder(bytes.NewReader(b)).Decode(&input) != nil {
 		return nil
 	}
-	continued := false
-	recordLifecycle := func() {
-		a.reportProgramStatus(input)
-		_ = a.recordEvent(input)
+	if input.AgentID != "" {
+		return nil
 	}
-	if input.HookEventName == "Stop" {
-		defer func() {
-			if !continued {
-				recordLifecycle()
-			}
-		}()
-	} else {
-		recordLifecycle()
-	}
+	a.reportProgramStatus(input)
+	_ = a.recordEvent(input)
 	if input.SessionID == "" {
 		return nil
 	}
@@ -45,7 +36,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	// late, and must not overwrite or resurrect the parent's registration after
 	// a resume or SessionEnd; a subagent's tool hook must not consume mail
 	// addressed to its parent.
-	if input.HookEventName == "SubagentStop" || input.AgentID != "" {
+	if input.HookEventName == "SubagentStop" {
 		return nil
 	}
 	harness := a.messageHookHarness(input)
@@ -96,9 +87,6 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	}
 	if harness == "codex" || harness == "claude" {
 		state := turnMailboxState(input)
-		if harness == "claude" && input.HookEventName == "Stop" {
-			state = ""
-		}
 		if harness == "claude" && input.HookEventName == "Notification" && input.NotificationType == "idle_prompt" {
 			state = "idle"
 		}
@@ -113,16 +101,6 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		_ = messaging.RegisterClaudeNative(a.env, input.SessionID, host, input.CWD,
 			a.env.Getenv("CLAUDE_CODE_MESSAGING_SOCKET"), input.TranscriptPath,
 			input.HookEventName != "SessionEnd")
-	}
-	if harness == "claude" && input.HookEventName == "Stop" {
-		var stopErr error
-		continued, stopErr = messaging.FinishClaudeMailbox(a.env, input.SessionID, host, observedAt, func(requests []messaging.Request) error {
-			return json.NewEncoder(w).Encode(struct {
-				Decision string `json:"decision"`
-				Reason   string `json:"reason"`
-			}{"block", peerMessageContext(requests)})
-		})
-		return stopErr
 	}
 	offer := input.HookEventName == "UserPromptSubmit" || harness != "pi" && (input.HookEventName == "SessionStart" || input.HookEventName == "PreToolUse" || input.HookEventName == "PostToolUse")
 	wrote := false

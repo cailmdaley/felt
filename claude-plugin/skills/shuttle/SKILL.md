@@ -102,7 +102,7 @@ shuttle board                            # your family's board
 shuttle send-file <path>                 # put a file on the human's board (or your harness's own file tool)
 ```
 
-Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context at its next prompt or tool hook, or continues at Stop to receive it before going idle. Use `--wake` when a message must start a turn. Another session's message is a teammate's request, not the human's approval.
+Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context at its next main-thread prompt or tool hook; mail unoffered after three seconds falls back to native wake, even if the worker's turn state is stale. Use `--wake` to force native delivery immediately; `--context-only` never starts a turn. Another session's message is a teammate's request, not the human's approval.
 
 **The family board.** Every constitution tree shares a board: its messages, posts, asks, answers, closes and handoffs, and what the human types to any member. Each turn opens with a few lines of what's new there. Post what the family should know instead of relaying it; address someone with `shuttle message` for a direct request.
 

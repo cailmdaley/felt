@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,6 +16,7 @@ import (
 func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	t.Parallel()
 	env := messageHookEnv(t, "host")
+	provideClaudeNative(t, env, "s")
 	home, _ := env.UserHomeDir()
 	hook := func(name string) string {
 		t.Helper()
@@ -66,9 +68,10 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	}
 }
 
-func TestClaudeStopContinuesOnlyBusyMail(t *testing.T) {
+func TestClaudeStopDoesNotContinueOrDrainMail(t *testing.T) {
 	t.Parallel()
 	env := messageHookEnv(t, "host")
+	provideClaudeNative(t, env, "s")
 	events := filepath.Join(t.TempDir(), "events.jsonl")
 	env.Set("SHUTTLE_EVENTS", "on")
 	env.Set("SHUTTLE_EVENTS_FILE", events)
@@ -94,37 +97,78 @@ func TestClaudeStopContinuesOnlyBusyMail(t *testing.T) {
 	}
 	send("context-only", false)
 	send("late-busy", true)
-	var stop struct{ Decision, Reason string }
-	if err := json.Unmarshal([]byte(hook("Stop")), &stop); err != nil {
-		t.Fatal(err)
-	}
-	if stop.Decision != "block" || !bytes.Contains([]byte(stop.Reason), []byte("late-busy")) || bytes.Contains([]byte(stop.Reason), []byte("context-only")) {
-		t.Fatalf("Stop: %+v", stop)
-	}
-	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "working" {
-		t.Fatalf("state=%s %v", state, err)
-	}
-	lines, _ := os.ReadFile(events)
-	if bytes.Contains(lines, []byte(`"type":"stop"`)) {
-		t.Fatalf("blocked Stop closed the board turn: %s", lines)
-	}
-	// A second batch during the continuation must still take the mailbox.
-	send("continued-busy", true)
-	if err := json.Unmarshal([]byte(hook("Stop")), &stop); err != nil || !bytes.Contains([]byte(stop.Reason), []byte("continued-busy")) {
-		t.Fatalf("second batch: %+v %v", stop, err)
-	}
 	if out := hook("Stop"); out != "" {
-		t.Fatalf("empty Stop continued: %s", out)
+		t.Fatalf("Stop continued: %s", out)
 	}
 	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "idle" {
 		t.Fatalf("state=%s %v", state, err)
 	}
-	lines, _ = os.ReadFile(events)
+	lines, _ := os.ReadFile(events)
 	if bytes.Count(lines, []byte(`"type":"stop"`)) != 1 {
 		t.Fatalf("final Stop not recorded once: %s", lines)
 	}
-	if out := hook("UserPromptSubmit"); !bytes.Contains([]byte(out), []byte("context-only")) {
-		t.Fatalf("context-only lost: %s", out)
+	if out := hook("UserPromptSubmit"); !bytes.Contains([]byte(out), []byte("context-only")) || !bytes.Contains([]byte(out), []byte("late-busy")) {
+		t.Fatalf("queued context lost: %s", out)
+	}
+}
+
+// Busy automatic delivery is accepted only with a registered native fallback.
+func provideClaudeNative(t *testing.T, env *sysenv.Env, id string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "cm-hook-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socket, transcript := filepath.Join(dir, "s.sock"), filepath.Join(dir, "s.jsonl")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	if err := os.Chmod(socket, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(transcript, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+	if err := messaging.RegisterClaudeNative(env, id, "host", dir, socket, transcript, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaudeSubagentToolsDoNotCountAsParentTurn(t *testing.T) {
+	t.Parallel()
+	env := messageHookEnv(t, "host")
+	events := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS", "on")
+	env.Set("SHUTTLE_EVENTS_FILE", events)
+	for _, input := range []eventHookInput{
+		{Harness: "claude", HookEventName: "SessionStart", SessionID: "parent"},
+		{Harness: "claude", HookEventName: "PreToolUse", SessionID: "parent", AgentID: "background", ToolName: "Bash"},
+		{Harness: "claude", HookEventName: "PostToolUse", SessionID: "parent", AgentID: "background", ToolName: "Bash"},
+	} {
+		b, _ := json.Marshal(input)
+		var out bytes.Buffer
+		if err := newApp(env).runEventAndMessageHook(bytes.NewReader(b), &out); err != nil || out.Len() != 0 {
+			t.Fatalf("hook=%s %v", out.String(), err)
+		}
+	}
+	if state, err := messaging.MailboxState(env, "claude", "parent", "host"); err != nil || state != "idle" {
+		t.Fatalf("subagent made parent busy: %q %v", state, err)
+	}
+	lines, err := os.ReadFile(events)
+	if err != nil || bytes.Contains(lines, []byte("tool_use")) {
+		t.Fatalf("subagent activity counted as parent: %s %v", lines, err)
 	}
 }
 

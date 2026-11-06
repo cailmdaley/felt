@@ -377,9 +377,12 @@ to `claude`.
 
 A plain `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn; idle or unknown state uses the native wake path.
 The mailbox can deliver at the next prompt, before a tool, or after a tool, so the message can reach a worker mid-turn without Claude's native wrapper.
-At turn end, Stop drains busy-rerouted messages and continues with the batch as hook feedback, without the native wrapper.
-Only an empty Stop marks the receiver idle; explicit context-only messages never continue the turn.
-A dead receiver cannot accept new hook mail; retrying a busy-rerouted message still pending after receiver exit returns `unknown`.
+The main-thread hook confirms delivery by writing the message as context and acknowledging its mailbox entry.
+If no hook offers it within three seconds, the owning daemon's one-second recovery tick claims it exclusively for native wake, including after a daemon restart.
+Stop never drains or continues a turn; a final tool call, an interrupt or an API failure cannot strand automatic mail in the hook queue.
+Subagent hooks neither receive their parent's mail nor change the parent's turn state.
+Retrying the same message ID reports `context_added` after a hook offer, or the native receipt after fallback.
+Native delivery retains its ordinary refusal and unknown-outcome semantics; a preflight failure leaves the fallback queued for retry.
 `--wake` forces the native wake path, including during a turn.
 `--context-only` or `--wake=false` queues context without starting a turn, regardless of state.
 Pi and Codex retain their existing paths.

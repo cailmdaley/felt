@@ -121,6 +121,7 @@ defmodule Shuttle.Application do
     {Shuttle.Fleet, :start_remote_temporal_registry, Shuttle.RemoteTemporalRegistry},
     {Shuttle.Local, :start_event_stream, Shuttle.EventStream},
     {Shuttle.Local, :start_interrupt_watcher, Shuttle.InterruptWatcher},
+    {Shuttle.Local, :start_claude_mail_recovery, Shuttle.ClaudeMailRecovery},
     {Shuttle.Local, :start_log_rotator, Shuttle.LogRotator},
     {Shuttle.Local, :start_remote_control, Shuttle.RemoteControl},
     {Shuttle.Local, :start_transcript_indexer, Shuttle.TranscriptIndexer},

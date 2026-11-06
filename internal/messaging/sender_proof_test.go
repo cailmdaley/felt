@@ -70,6 +70,21 @@ func TestSenderProofCanonicalizesEmptyAttachments(t *testing.T) {
 	}
 }
 
+func TestSenderProofDoesNotBindAutomaticRoutingHint(t *testing.T) {
+	env := testEnv(t)
+	request := Request{Address: "shuttle://host/claude/receiver", Text: "hello", From: "shuttle://host/pi/sender", MessageID: "mixed-version", Wake: true, ContextIfBusy: true}
+	token, err := CreateSenderProof(env, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.SenderProof = token
+	// A daemon that doesn't understand the hint drops it when forwarding.
+	request.ContextIfBusy = false
+	if sender, ok, err := VerifySenderProof(env, request, false); err != nil || !ok || sender != request.From {
+		t.Fatalf("routing hint invalidated identity: %q %v %v", sender, ok, err)
+	}
+}
+
 func TestRequestIdentityIncludesClaimButNotOneUseProof(t *testing.T) {
 	request := Request{Address: "shuttle://host/pi/receiver", Text: "hello", From: "shuttle", FromClaim: "alice", MessageID: "retry"}
 	retry := request

@@ -161,6 +161,7 @@ try do
         Shuttle.RexFocus,
         Shuttle.Poller,
         Shuttle.InterruptWatcher,
+        Shuttle.ClaudeMailRecovery,
         Shuttle.LogRotator,
         Shuttle.RemoteControl,
         Shuttle.TranscriptIndexer,

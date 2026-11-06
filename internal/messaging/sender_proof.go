@@ -22,7 +22,6 @@ type senderProofRecord struct {
 	ID             string        `json:"message_id"`
 	Claim          string        `json:"from_claim,omitempty"`
 	Wake           bool          `json:"wake"`
-	ContextIfBusy  bool          `json:"context_if_busy,omitempty"`
 	NotifyAddress  string        `json:"notify_address,omitempty"`
 	NotifyWhenIdle bool          `json:"notify_when_idle,omitempty"`
 	NotifyWake     bool          `json:"notify_wake,omitempty"`
@@ -39,7 +38,7 @@ func proofRecord(request Request) senderProofRecord {
 	return senderProofRecord{
 		Sender: request.From, Address: request.Address, Text: request.Text,
 		ReplyTo: request.ReplyTo, ID: request.MessageID, Claim: request.FromClaim,
-		Wake: request.Wake, ContextIfBusy: request.ContextIfBusy, NotifyAddress: request.NotifyAddress,
+		Wake: request.Wake, NotifyAddress: request.NotifyAddress,
 		NotifyWhenIdle: request.NotifyWhenIdle, NotifyWake: request.NotifyWake,
 		ThreadSignal: request.ThreadSignal, Attachments: attachments,
 	}

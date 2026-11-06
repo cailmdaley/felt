@@ -357,7 +357,8 @@ canonical harness name. The CLI also resolves unique native session IDs and
 fiber paths, slugs, or UIDs before calling this endpoint. Omitting `wake`
 requests an active task turn; set `wake: false` explicitly for context-only
 delivery. The CLI's default also sends `context_if_busy: true`, which lets a
-busy Claude receiver queue context for its next prompt or tool hook, or a blocking Stop before the turn ends.
+busy Claude receiver queue context for its next main-thread prompt or tool hook.
+If no hook offers it within three seconds, the owning daemon claims it for native wake on a one-second recovery tick; this survives daemon restart.
 A forced wake without that field never silently becomes context-only delivery. The address selects the
 owner strictly; an unknown host is refused rather than attempted locally. Its
 receipt reports the furthest observed submission stage (`accepted`,
@@ -368,7 +369,8 @@ delivery, `queued` means the receiver queues it behind its current turn,
 means a correlated real assistant reply appears. Hook-mailbox `queued` is
 context-only and starts no turn. With `wake: true`, Claude-native
 `queued`/`submitted` receipts are valid; `context_if_busy: true` also permits a
-Claude-hook `queued` receipt. `context_added` is never a wake result.
+Claude-hook `queued` receipt, and `context_added` once the main-thread hook writes it as context.
+A retry with the same message ID returns that confirmation or the native fallback receipt.
 Native admission alone never means a model reply.
 
 The daemon records a session sender only with a valid, one-use local sender proof bound to the delivery fields.

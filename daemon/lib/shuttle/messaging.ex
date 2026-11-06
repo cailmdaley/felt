@@ -636,6 +636,9 @@ defmodule Shuttle.Messaging do
       not is_boolean(Map.get(payload, "context_if_busy", false)) ->
         {:error, 400, "context_if_busy must be a boolean"}
 
+      Map.get(payload, "context_if_busy", false) and not wake ->
+        {:error, 400, "context_if_busy requires wake"}
+
       not is_binary(id) or id == "" or byte_size(id) > 256 or has_control?(id) ->
         {:error, 400, "message_id must be a non-empty bounded string without control characters"}
 
@@ -867,8 +870,8 @@ defmodule Shuttle.Messaging do
   defp valid_wake_receipt?(receipt, request) do
     if Map.get(request.raw, "wake", false) do
       case {receipt["status"], receipt["transport"]} do
-        {"context_added", _transport} ->
-          false
+        {"context_added", transport} ->
+          transport == "claude-hook" and request.raw["context_if_busy"] == true
 
         {"queued", transport} ->
           transport in ["claude-native", "pi-native"] or

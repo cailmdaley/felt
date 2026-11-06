@@ -5,8 +5,8 @@
 # Thin shim: `shuttle hook event` reads the payload from stdin and appends one
 # JSON line to the host-local stream (~/.shuttle/events.jsonl by default). It
 # also offers queued peer context on supported Claude and Codex hooks, without
-# continuing Stop events except for busy-rerouted peer mail. It exits 0 on every
-# path and writes nothing on a host with no Shuttle state directory. See `shuttle hook event --help`.
+# continuing Stop events. It exits 0 on every path and writes nothing at all on
+# a host with no Shuttle state directory. See `shuttle hook event --help`.
 
 set -e
 

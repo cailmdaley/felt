@@ -127,6 +127,7 @@ type nativeReceiptRefresh struct {
 // how the reservation is published. The zero value is the production policy;
 // tests shorten the wait, observe it, or substitute the reservation writer.
 type dedupOptions struct {
+	keyPrefix    string
 	timeout      time.Duration
 	pollInterval time.Duration
 	onWait       func()
@@ -154,8 +155,7 @@ func (o dedupOptions) run(ctx context.Context, env *sysenv.Env, req Request, sen
 	if err := ensureDir(dir, 0700); err != nil {
 		return Receipt{}, errCode("dedup_unavailable", "cannot create message store: %v", err)
 	}
-	nameHash := sha256.Sum256([]byte(req.MessageID))
-	path := filepath.Join(dir, hex.EncodeToString(nameHash[:])+".json")
+	path := dedupRecordPath(env, o.keyPrefix+req.MessageID)
 	hash := requestHash(req)
 
 	ownerDeadline := time.Now().Add(reservationDeadlineCeiling)
@@ -356,18 +356,14 @@ func readDedupRecord(path string) (record, error) {
 	return old, nil
 }
 
+func dedupRecordPath(env *sysenv.Env, key string) string {
+	nameHash := sha256.Sum256([]byte(key))
+	return filepath.Join(dataDir(env), "messages", hex.EncodeToString(nameHash[:])+".json")
+}
+
 func refreshCompletedReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
 	if old.Receipt.Transport == "claude-hook" && old.Receipt.Status == StatusQueued && req.ContextIfBusy {
-		a, err := ParseAddress(req.Address)
-		if err == nil && mailboxReceiverEnded(env, "claude", a.ID, a.Host) {
-			pending := filepath.Join(mailboxDir(env, "claude", a.ID), "pending", mailboxKey(req.MessageID)+".json")
-			if _, err := os.Stat(pending); err == nil {
-				old.Receipt.Status = StatusUnknown
-				old.Receipt.Detail = "receiver exited before its hook offered the queued message"
-				old.ErrorCode, old.ErrorMessage = "receiver_exited", old.Receipt.Detail
-			}
-		}
-		return old
+		return refreshClaudeHookReceipt(ctx, env, req, old)
 	}
 	if old.State != "complete" || old.Hash != hash || old.TranscriptOffset == nil || *old.TranscriptOffset < 0 || (old.Receipt.Status != StatusQueued && old.Receipt.Status != StatusSubmitted && old.Receipt.Status != StatusUnknown) {
 		return old

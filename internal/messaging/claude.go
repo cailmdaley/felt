@@ -86,7 +86,7 @@ func (claudeAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Req
 }
 
 func (claudeAdapter) sendWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Address, r Request) (Receipt, error, dedupMetadata) {
-	if r.Wake && r.ContextIfBusy {
+	if r.Wake && r.ContextIfBusy && claudeNativeAvailable(env, a.ID, a.Host) {
 		state, unlock, err := lockMailboxSessionState(env, "claude", a.ID, a.Host)
 		if err == nil {
 			if state == "working" {

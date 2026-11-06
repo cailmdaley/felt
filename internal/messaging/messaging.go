@@ -156,6 +156,9 @@ func validateRequest(host string, r Request) error {
 	if r.MessageID == "" || len(r.MessageID) > 256 || hasControl(r.MessageID) {
 		return errCode("invalid_request", "invalid message_id")
 	}
+	if r.ContextIfBusy && !r.Wake {
+		return errCode("invalid_request", "context_if_busy requires wake")
+	}
 	if r.NotifyWake && !r.NotifyWhenIdle {
 		return errCode("invalid_request", "notify_wake requires notify_when_idle")
 	}
