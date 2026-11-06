@@ -200,8 +200,8 @@ export function buildFileViewer(
     return buildHtmlViewer(shuttleBase, src, fullPath, originId, onFrameLoad, options)
   }
 
-  // PDF.js renders within the board's stage so the first page can fit even in
-  // embedded WebKit, whose native PDF plugin ignores fit-view fragments.
+  // PDF.js renders within the board's stage so the first page can fit the pane
+  // even in embedded WebKit, whose native PDF plugin ignores fit-view fragments.
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
 

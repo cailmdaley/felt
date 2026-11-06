@@ -90,8 +90,6 @@
   background: var(--ws-paper);
 }
 
-.kbn-pdf-scroll .pdfViewer { padding: 0.5rem 0; }
-.kbn-pdf-scroll .page { margin-bottom: 0.5rem; }
 
 /* Loading veil over the iframe while a (possibly large, possibly remote)
    document is fetched. Lifts on iframe `load`. */

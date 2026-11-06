@@ -2125,18 +2125,34 @@ async function assertRenderedPdf(p) {
     return false
   })
   assert.equal(await selected(p).locator('.kbn-pdf-page-label').innerText(), '1 / 1')
-  const fits = await canvas.evaluate(canvas => {
-    const page = canvas.closest('.page').getBoundingClientRect()
-    const viewport = canvas.closest('.kbn-pdf-scroll').getBoundingClientRect()
-    return page.left >= viewport.left - 1 && page.right <= viewport.right + 1
-      && page.top >= viewport.top - 1 && page.bottom <= viewport.bottom + 1
+  await assertPdfFit(p, 'page-width')
+}
+
+/** The rendered first page against the scroll pane: a width fit spans it edge to edge. */
+async function assertPdfFit(p, mode) {
+  const canvas = selected(p).locator('.pdfViewer .page[data-page-number="1"] canvas').first()
+  await p.waitForFunction(mode => {
+    const page = document.querySelector('.ws-page.ws-selected .pdfViewer .page[data-page-number="1"]')?.getBoundingClientRect()
+    const pane = document.querySelector('.ws-page.ws-selected .kbn-pdf-scroll')
+    if (!page || !pane) return false
+    const box = pane.getBoundingClientRect()
+    const across = page.left >= box.left - 1 && page.right <= box.right + 1
+    return mode === 'page-width'
+      ? across && page.width >= pane.clientWidth - 2
+      : across && page.top >= box.top - 1 && page.bottom <= box.bottom + 1
+  }, mode, { timeout: 5000 }).catch(async () => {
+    const geometry = await canvas.evaluate(canvas => ({ page: canvas.closest('.page').getBoundingClientRect(), pane: canvas.closest('.kbn-pdf-scroll').getBoundingClientRect() }))
+    assert.fail(`the first PDF page holds ${mode}: ${JSON.stringify(geometry)}`)
   })
-  assert.ok(fits, 'the whole first PDF page fits in the viewer')
 }
 
 test('PDF.js paints fixture; owner route; Overview draws PDFs as faces', async p => {
   await open(p); await choose(p, 'response.pdf')
   await assertRenderedPdf(p)
+  await selected(p).getByRole('button', { name: 'Fit whole page in the viewer', exact: true }).click()
+  await assertPdfFit(p, 'page-fit')
+  await selected(p).getByRole('button', { name: 'Fit page width to the viewer', exact: true }).click()
+  await assertPdfFit(p, 'page-width')
   await choose(p, 'remote-summary.pdf')
   await assertRenderedPdf(p)
   assert.ok((await records(p)).some(r => r.url.includes('origin=basalt-login-02') && r.url.includes('remote-summary.pdf')))

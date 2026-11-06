@@ -4,6 +4,8 @@ import 'pdfjs-dist/web/pdf_viewer.css'
 
 GlobalWorkerOptions.workerSrc = new URL('../../node_modules/pdfjs-dist/build/pdf.worker.mjs', import.meta.url).href
 
+type FitMode = 'page-width' | 'page-fit'
+
 export type MountedPdfViewer = { ready: Promise<void>; dispose: () => void }
 
 export function mountPdfViewer(
@@ -15,13 +17,14 @@ export function mountPdfViewer(
   const toolbar = document.createElement('div')
   toolbar.className = 'kbn-pdf-toolbar'
   toolbar.setAttribute('aria-label', 'PDF controls')
-  const fit = button('Fit page', 'Fit page to the viewer')
+  const fitWidthControl = button('Fit width', 'Fit page width to the viewer')
+  const fitPageControl = button('Fit page', 'Fit whole page in the viewer')
   const zoomOut = button('−', 'Zoom out')
   const zoomIn = button('+', 'Zoom in')
   const pageLabel = document.createElement('span')
   pageLabel.className = 'kbn-pdf-page-label'
   pageLabel.setAttribute('aria-live', 'polite')
-  toolbar.append(fit, zoomOut, zoomIn, pageLabel)
+  toolbar.append(fitWidthControl, fitPageControl, zoomOut, zoomIn, pageLabel)
 
   const container = document.createElement('div')
   container.className = 'kbn-pdf-scroll'
@@ -42,8 +45,11 @@ export function mountPdfViewer(
     linkService,
     abortSignal: viewerController.signal,
     textLayerMode: 1,
+    removePageBorders: true,
+    // A width fit on a wide HiDPI pane exceeds this cap: the detail canvas keeps
+    // the visible area sharp while the whole-page canvas stays cheap.
     maxCanvasPixels: 4 * 1024 * 1024,
-    enableDetailCanvas: false,
+    enableDetailCanvas: true,
   } as ConstructorParameters<typeof PDFViewer>[0] & { abortSignal: AbortSignal }
   const viewer = new PDFViewer(viewerOptions)
   linkService.setViewer(viewer)
@@ -54,16 +60,17 @@ export function mountPdfViewer(
   const updatePageLabel = (): void => {
     if (!disposed && pageCount) pageLabel.textContent = `${viewer.currentPageNumber} / ${pageCount}`
   }
-  const fitPage = (): void => {
-    viewer.currentScaleValue = 'page-fit'
+  const fitTo = (mode: FitMode): void => {
+    viewer.currentScaleValue = mode
   }
-  fit.addEventListener('click', fitPage)
+  fitWidthControl.addEventListener('click', () => { fitTo('page-width') })
+  fitPageControl.addEventListener('click', () => { fitTo('page-fit') })
   zoomOut.addEventListener('click', () => { viewer.currentScaleValue = String(Math.max(0.25, viewer.currentScale * 0.8)) })
   zoomIn.addEventListener('click', () => { viewer.currentScaleValue = String(Math.min(5, viewer.currentScale * 1.25)) })
   const onPagesInit = (): void => {
     if (disposed) return
     viewer.currentPageNumber = 1
-    fitPage()
+    fitTo('page-width')
   }
   const onPageRendered = (event: { pageNumber: number }): void => {
     if (disposed || event.pageNumber !== 1 || firstPageReady) return
@@ -74,9 +81,10 @@ export function mountPdfViewer(
   eventBus.on('pagechanging', updatePageLabel)
   eventBus.on('pagerendered', onPageRendered)
   const resizeObserver = new ResizeObserver(() => {
-    if (viewer.currentScaleValue !== 'page-fit') return
+    const mode = viewer.currentScaleValue
+    if (mode !== 'page-width' && mode !== 'page-fit') return
     viewer.currentScaleValue = 'auto'
-    viewer.currentScaleValue = 'page-fit'
+    fitTo(mode)
   })
   resizeObserver.observe(container)
 

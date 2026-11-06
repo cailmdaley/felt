@@ -42,7 +42,7 @@ import { mountPdfViewer } from './pdfViewer.js'
 afterEach(() => { pdfMocks.getDocument.mockReset(); pdfMocks.viewer = null; pdfMocks.readyScale = ''; pdfMocks.resizeObserver = null; vi.unstubAllGlobals() })
 
 describe('PDF.js viewer integration', () => {
-  it('fits page one before readiness, preserves the current page on refit, and tears down its worker signals', async () => {
+  it('fits page one to the pane width before readiness, keeps the chosen fit across resizes and the current page across refits, and tears down its worker signals', async () => {
     vi.stubGlobal('ResizeObserver', class {
       disconnected = false
       callback: () => void
@@ -64,16 +64,26 @@ describe('PDF.js viewer integration', () => {
     await mounted.ready
 
     expect(pdfMocks.viewer?.currentPageNumber).toBe(1)
-    expect(pdfMocks.readyScale).toBe('page-fit')
+    expect(pdfMocks.readyScale).toBe('page-width')
     expect(onReady).toHaveBeenCalledOnce()
     const viewer = pdfMocks.viewer!
     viewer.currentPageNumber = 2
-    host.querySelector<HTMLButtonElement>('[aria-label="Fit page to the viewer"]')!.click()
+    expect(viewer.options).toMatchObject({ removePageBorders: true, enableDetailCanvas: true })
+    const resizedScales = (): string[] => {
+      const before = viewer.scaleChanges.length
+      pdfMocks.resizeObserver!.notify()
+      return viewer.scaleChanges.slice(before)
+    }
+    expect(resizedScales()).toEqual(['auto', 'page-width'])
+    host.querySelector<HTMLButtonElement>('[aria-label="Fit whole page in the viewer"]')!.click()
     expect(viewer.currentPageNumber).toBe(2)
     expect(viewer.currentScaleValue).toBe('page-fit')
-    const scalesBeforeResize = viewer.scaleChanges.length
-    pdfMocks.resizeObserver!.notify()
-    expect(viewer.scaleChanges.slice(scalesBeforeResize)).toEqual(['auto', 'page-fit'])
+    expect(resizedScales()).toEqual(['auto', 'page-fit'])
+    host.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click()
+    expect(resizedScales()).toEqual([])
+    host.querySelector<HTMLButtonElement>('[aria-label="Fit page width to the viewer"]')!.click()
+    expect(viewer.currentScaleValue).toBe('page-width')
+    expect(viewer.currentPageNumber).toBe(2)
 
     const signal = (viewer.options.abortSignal as AbortSignal)
     mounted.dispose()
