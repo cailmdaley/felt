@@ -129,48 +129,11 @@ test('below, the voice line takes the hint text\'s place', BELOW, async ($, on) 
   const hint = await $.ui.mount({ ...HINT, surface: 'terminal' } as any)
   expect(await hint.find({ type: 'Text', text: /shift\+tab/ })).toBeUndefined()
   expect(await label(hint, 'mic')).toBe('▁'.repeat(20))
-  expect(await label(hint, 'speaker')).toBe('  🔈 aria')
+  expect(await label(hint, 'speaker')).toBe('🔈 aria')
   await hint.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(band, 'mic')).toBeUndefined()
   await band.unmount()
-})
-
-test('lines held for other cards show by name, the two with most first, then +n', ABOVE, async ($, on) => {
-  daemon(on, { ...VOICE, enabled: false, target: null }, {
-    ...SPEAK,
-    speaking: { fiber_id: 'X', voice: 'aria', text: 'x' },
-    held: { 'loom/tools/hark/holistic-hark': 1, 'life/games/civbench': 2, '01FELT': 1, 'a/b/third': 1 },
-    held_names: { 'life/games/civbench': 'Civbench', '01FELT': 'felt debug', 'a/b/third': null },
-  })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await label(ui, 'speaker')).toBe('🔈 aria · Civbench 2, felt debug 1 +1')
-  expect((await ui.find({ type: 'Text', text: '🔈 aria' }))?.props).toMatchObject({ color: 'claude' })
-  expect((await ui.find({ type: 'Text', text: ' · Civbench 2, felt debug 1 +1' }))?.props).toMatchObject({ dimColor: true })
-  await ui.unmount()
-})
-
-test('with the speaker idle, another card\'s held lines show alone', ABOVE, async ($, on) => {
-  daemon(on, { ...VOICE, enabled: false, target: null }, { ...SPEAK, held: { 'life/games/civbench': 2 }, held_names: { 'life/games/civbench': 'Civbench' } })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await label(ui, 'speaker')).toBe('🔈 Civbench 2')
-  await ui.unmount()
-})
-
-test('held as a named list reads the same', ABOVE, async ($, on) => {
-  daemon(on, { ...VOICE, enabled: false, target: null }, {
-    ...SPEAK,
-    held: [
-      { fiber_id: 'loom/tools/hark/holistic-hark', name: 'Holistic hark', n: 3 },
-      { fiber_id: 'life/games/civbench', name: 'Civbench', n: 2 },
-    ],
-  } as any)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await label(ui, 'speaker')).toBe('🔈 3 waiting · Civbench 2')
-  await ui.unmount()
 })
 
 test('above is the default placement', async ($, on) => {
@@ -179,5 +142,55 @@ test('above is the default placement', async ($, on) => {
   await clock.advance(150)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'mic')).toBe('▃▃')
+  await ui.unmount()
+})
+
+test('held cards show as chips, the two with most first, then +n; a chip opens its card', ABOVE, async ($, on) => {
+  const { posts } = daemon(on, { ...VOICE, enabled: false, target: null }, {
+    ...SPEAK,
+    speaking: { fiber_id: 'X', voice: 'aria', text: 'x' },
+    held: { 'loom/tools/hark/holistic-hark': 1, 'life/games/civbench': 2, '01FELT': 1, 'a/b/third': 1 },
+    held_names: { 'life/games/civbench': 'Civbench', '01FELT': 'felt debug', 'a/b/third': null },
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'speaker')).toBe('🔈 aria')
+  expect(await label(ui, 'held:life/games/civbench')).toBe('Civbench 2')
+  expect(await label(ui, 'held:01FELT')).toBe('felt debug 1')
+  expect(await ui.find({ type: 'Text', text: ' +1' })).toBeDefined()
+  await ui.press({ key: 'held:life/games/civbench' })
+  await ui.press({ key: 'speaker' })
+  expect(posts).toEqual([
+    { url: 'http://127.0.0.1:4000/api/v1/voice/reveal', body: '{"fiber_id":"life/games/civbench"}' },
+    { url: 'http://127.0.0.1:4000/api/v1/speak', body: '{"muted":true}' },
+  ])
+  await ui.unmount()
+})
+
+test('with the speaker idle, the held chip follows a bare speaker; a list with origins reveals with origin', ABOVE, async ($, on) => {
+  const { posts } = daemon(on, { ...VOICE, enabled: false, target: null }, {
+    ...SPEAK,
+    held: [
+      { fiber_id: 'loom/tools/hark/holistic-hark', name: 'Holistic hark', n: 3 },
+      { fiber_id: 'ai-futures/felt/debug', origin: 'dapmcw68', name: 'felt debug', n: 1 },
+    ],
+  } as any)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'speaker')).toBe('🔈 3 waiting')
+  expect(await label(ui, 'held:ai-futures/felt/debug')).toBe('felt debug 1')
+  await ui.press({ key: 'held:ai-futures/felt/debug' })
+  expect(posts).toEqual([
+    { url: 'http://127.0.0.1:4000/api/v1/voice/reveal', body: '{"fiber_id":"ai-futures/felt/debug","origin":"dapmcw68"}' },
+  ])
+  await ui.unmount()
+})
+
+test('a held chip alone sits after a bare speaker', ABOVE, async ($, on) => {
+  daemon(on, { ...VOICE, enabled: false, target: null }, { ...SPEAK, held: { 'life/games/civbench': 2 }, held_names: { 'life/games/civbench': 'Civbench' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'speaker')).toBe('🔈')
+  expect(await label(ui, 'held:life/games/civbench')).toBe('Civbench 2')
   await ui.unmount()
 })

@@ -23,7 +23,7 @@ type Voice = {
   target: Ref
   level?: { mic: number; at: string } | null
 }
-type Held = { fiber_id: string; name?: string | null; n: number }
+type Held = { fiber_id: string; origin?: string | null; name?: string | null; n: number }
 type Speak = {
   available: boolean
   speaking: { fiber_id: string; name?: string | null; voice: string; text: string } | null
@@ -89,6 +89,15 @@ async function loop($: EngineInterface): Promise<void> {
   $.clock.after(await poll($), () => loop($))
 }
 
+async function reveal($: EngineInterface, card: Held): Promise<void> {
+  await $.http.fetch(base + '/api/v1/voice/reveal', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(card.origin ? { fiber_id: card.fiber_id, origin: card.origin } : { fiber_id: card.fiber_id }),
+  })
+  await poll($)
+}
+
 async function setMuted($: EngineInterface, path: string, muted: boolean): Promise<void> {
   await $.http.fetch(base + path, {
     method: 'POST',
@@ -101,31 +110,26 @@ async function setMuted($: EngineInterface, path: string, muted: boolean): Promi
 // What the voice line says now: the mic side as plain text and as coloured
 // parts, and the speaker side; empty strings where a side has nothing.
 function line(room: number, Text: any) {
-  let spk = ''
-  let held = ''
+  let state = ''
+  let chips: Held[] = []
+  let more = 0
   if (speak?.available) {
-    const held_ = heldList(speak)
-    const waiting = held_.reduce((n, h) => n + (mine(h.fiber_id) ? h.n : 0), 0)
-    if (speak.muted) spk = '🔈 muted'
-    else if (speak.speaking) spk = '🔈 ' + speak.speaking.voice
-    else if (speak.paused) spk = '🔈 paused'
-    else if (waiting) spk = `🔈 ${waiting} waiting`
+    const held = heldList(speak)
+    const waiting = held.reduce((n, card) => n + (mine(card.fiber_id) ? card.n : 0), 0)
+    if (speak.muted) state = '🔈 muted'
+    else if (speak.speaking) state = '🔈 ' + speak.speaking.voice
+    else if (speak.paused) state = '🔈 paused'
+    else if (waiting) state = `🔈 ${waiting} waiting`
     // Lines other cards hold until they are in view: the two with most, then +n.
-    const others = held_.filter(h => !mine(h.fiber_id)).sort((a, b) => b.n - a.n)
-    if (others.length) {
-      const named = others
-        .slice(0, 2)
-        .map(h => `${clip(h.name || h.fiber_id.split('/').pop()!, 20)} ${h.n}`)
-        .join(', ')
-      held = named + (others.length > 2 ? ` +${others.length - 2}` : '')
-    }
+    const others = held.filter(card => !mine(card.fiber_id)).sort((a, b) => b.n - a.n)
+    chips = others.slice(0, 2)
+    more = others.length - chips.length
+    if (chips.length && !state) state = '🔈'
   }
-  const speaking = !!speak?.speaking && !speak.muted
-  const spkParts: RenderChildren[] = [
-    spk ? <Text key="s" color={speaking ? 'claude' : undefined} dimColor={!speaking}>{spk}</Text> : '',
-    held ? <Text key="h" dimColor>{spk ? ' · ' + held : '🔈 ' + held}</Text> : '',
-  ].filter(x => x !== '')
-  spk = spk && held ? `${spk} · ${held}` : spk || (held && '🔈 ' + held)
+  const chipText = (card: Held) => `${clip(card.name || card.fiber_id.split('/').pop()!, 20)} ${card.n}`
+  const spk = [state, chips.map(chipText).join(', ') + (more ? ` +${more}` : '')]
+    .filter(Boolean)
+    .join(state === '🔈' ? ' ' : ' · ')
   room -= spk ? spk.length + 3 : 0
 
   let mic = ''
@@ -140,7 +144,40 @@ function line(room: number, Text: any) {
       parts = steps.map((i, k) => <Text key={`l${k}`} color={tone(i)} dimColor={i === 0}>{GLYPHS[i]}</Text>)
     }
   }
-  return { mic, parts: parts.length ? parts : [<Text key="m" dimColor>{mic}</Text>], spk, spkParts }
+  return {
+    mic,
+    parts: parts.length ? parts : [<Text key="m" dimColor>{mic}</Text>],
+    spk,
+    state,
+    chips: chips.map(card => ({ card, text: chipText(card) })),
+    more,
+  }
+}
+
+// The speaker side: its state mutes the speaker on a press, and each held
+// card's chip opens that card, as a click on the board does.
+function speakerSide(
+  $: EngineInterface,
+  ui: { Box: any; Button: any; Text: any },
+  side: { state: string; chips: { card: Held; text: string }[]; more: number },
+) {
+  const { Box, Button, Text } = ui
+  const speaking = !!speak?.speaking && !speak.muted
+  const sep = side.state === '🔈' ? ' ' : ' · '
+  return (
+    <Box flexDirection="row">
+      {side.state ? (
+        <Button key="speaker" plain label={side.state} onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
+          <Text color={speaking ? 'claude' : undefined} dimColor={!speaking}>{side.state}</Text>
+        </Button>
+      ) : null}
+      {side.chips.flatMap(({ card, text }, k) => [
+        <Text key={`sep${k}`} dimColor>{k ? ', ' : sep}</Text>,
+        <Button key={`held:${card.fiber_id}`} plain dimColor label={text} onPress={() => reveal($, card)} />,
+      ])}
+      {side.more ? <Text key="more" dimColor>{` +${side.more}`}</Text> : null}
+    </Box>
+  )
 }
 
 export const register: Register = (on, options) => {
@@ -166,7 +203,8 @@ export const register: Register = (on, options) => {
     if (placement !== 'above' || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const width = e.props.bodyColumns
-    const { mic, parts, spk, spkParts } = line(width, Text)
+    const side = line(width, Text)
+    const { mic, parts, spk } = side
     if (!mic && !spk) return next(e)
     return (
       <Box flexDirection="row" width={width}>
@@ -177,11 +215,7 @@ export const register: Register = (on, options) => {
             </Button>
           ) : null}
         </Box>
-        {spk ? (
-          <Button key="speaker" plain label={spk} onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
-            {spkParts}
-          </Button>
-        ) : null}
+        {spk ? speakerSide($, { Box, Button, Text }, side) : null}
       </Box>
     )
   })
@@ -193,7 +227,8 @@ export const register: Register = (on, options) => {
     if (placement !== 'below') return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const room = (e.viewport?.columns ?? 80) - PILLS
-    const { mic, parts, spk, spkParts } = line(room, Text)
+    const side = line(room, Text)
+    const { mic, parts, spk } = side
     if (!mic && !spk) return next(e)
     return (
       <Box flexDirection="row">
@@ -202,11 +237,8 @@ export const register: Register = (on, options) => {
             {parts}
           </Button>
         ) : null}
-        {spk ? (
-          <Button key="speaker" plain label={spk} onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
-            {[mic ? '  ' : '', ...spkParts].filter(x => x !== '')}
-          </Button>
-        ) : null}
+        {mic && spk ? <Text dimColor>{'  '}</Text> : null}
+        {spk ? speakerSide($, { Box, Button, Text }, side) : null}
       </Box>
     )
   })

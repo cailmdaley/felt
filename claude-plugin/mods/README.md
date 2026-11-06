@@ -42,7 +42,7 @@ Speaker side, right-aligned; the line itself is never shown:
 | lines held for this card | `🔈 <n> waiting` |
 | muted | `🔈 muted` |
 | idle | nothing |
-| lines other cards hold until they are in view | `🔈 Civbench 2, felt debug 1 +1` after any state above (`🔈 aria · Civbench 2`), the two cards with most first, named by the daemon |
+| lines other cards hold until they are in view | `🔈 Civbench 2, felt debug 1 +1` after any state above (`🔈 aria · Civbench 2`), the two cards with most first, named by the daemon; each card is its own chip |
 
 With nothing on either side the band is not drawn.
 
@@ -51,7 +51,7 @@ floor is dim, green (`success`) through the middle, amber (`warning`) from
 -20 dBFS; every other state is dim, except `🔈 <voice>` while speaking, in
 `claude`.
 
-**Keys.** Click the mic text or the speaker text to toggle that mute. From the
+**Keys.** Click the mic text or the speaker's state to toggle that mute. Click a held card's chip to open that card, as a click on the board does (`POST /api/v1/voice/reveal`): Rex selects its session, the mic follows, and its held lines play. From the
 keyboard: `ctrl+x tab` focuses the band, `tab` moves between the two, and
 Enter toggles the focused one. A single-letter hotkey would make the
 terminal draw a `m:` caption, so there is none. The `[-]` at the band's right
