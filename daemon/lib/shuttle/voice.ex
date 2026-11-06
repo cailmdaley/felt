@@ -185,6 +185,11 @@ defmodule Shuttle.Voice do
   end
 
   defp reconcile(state) do
+    state = %{
+      state
+      | snapshot: %{state.snapshot | muted: Meeting.voice_muted?(state.capture_opts)}
+    }
+
     case Config.read() do
       {:ok, settings} ->
         state = %{state | snapshot: %{state.snapshot | enabled: settings["enabled"]}}

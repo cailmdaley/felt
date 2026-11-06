@@ -6,12 +6,18 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
 
   setup %{tmp_dir: root} do
     Env.put_env("SHUTTLE_DATA_DIR", root)
-    {:ok, now} = Agent.start_link(fn -> 1_000 end)
+    now = start_supervised!(Supervisor.child_spec({Agent, fn -> 1_000 end}, id: :clock))
 
-    {:ok, observation} =
-      Agent.start_link(fn ->
-        {:ok, %{meeting: %{launch: "launch", state: "live", error: nil}}}
-      end)
+    observation =
+      start_supervised!(
+        Supervisor.child_spec(
+          {Agent,
+           fn ->
+             {:ok, %{meeting: %{launch: "launch", state: "live", error: nil}}}
+           end},
+          id: :observation
+        )
+      )
 
     name = Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}")
     parent = self()

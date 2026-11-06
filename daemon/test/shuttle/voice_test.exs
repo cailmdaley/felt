@@ -2,6 +2,11 @@ defmodule Shuttle.Test.MissingVoiceRunner do
   def cmd(_command, _args, _opts), do: {"terminal unavailable", 2}
 end
 
+defmodule Shuttle.Test.NoCaptureVoiceRunner do
+  def cmd("tmux", _args, _opts), do: {"can't find session: hark-meeting", 1}
+  def cmd(_command, _args, _opts), do: {"", 0}
+end
+
 defmodule Shuttle.VoiceTest do
   use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
@@ -96,6 +101,17 @@ defmodule Shuttle.VoiceTest do
     Env.put_app_env(:meeting_runner, Shuttle.Test.MissingVoiceRunner)
     assert {:error, _} = Voice.update(%{"enabled" => true, "muted" => true})
     assert %{enabled: true, muted: true, state: "failed"} = Voice.show()
+  end
+
+  test "successful mute controls stay visible when subsequent reconciliation fails", c do
+    stop_supervised!(Voice)
+    Env.put_app_env(:meeting_runner, Shuttle.Test.NoCaptureVoiceRunner)
+    Env.put_app_env(:hark_path, false)
+    reconcile = fn _, _ -> {:error, :recorder_unavailable} end
+    Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
+    assert {:ok, %{muted: true, state: "failed"}} = Voice.update(%{"muted" => true})
+    assert {:ok, %{muted: false, state: "failed"}} = Voice.update(%{"muted" => false})
+    assert %{muted: false, state: "failed"} = Voice.show()
   end
 
   test "target receipt time is durable and restored by a fresh supervisor", c do
