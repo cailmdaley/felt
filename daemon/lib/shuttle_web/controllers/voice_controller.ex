@@ -6,16 +6,37 @@ defmodule ShuttleWeb.VoiceController do
   def show(conn, params), do: route(conn, params, :show, "/api/v1/voice")
   def update(conn, params), do: route(conn, params, :update, "/api/v1/voice")
   def target(conn, params), do: route(conn, params, :target, "/api/v1/voice/target")
+  def draft(conn, params), do: route(conn, params, :draft, "/api/v1/voice/draft")
+  def release(conn, params), do: route(conn, params, :release, "/api/v1/voice/release")
 
   defp route(conn, params, action, path) do
     # origin belongs to the constitution receiving speech, not the recorder.
     case MeetingRouter.select_start(Map.delete(params, "prefer")) do
       {:ok, :local} ->
-        result = if action == :show, do: {:ok, Voice.show()}, else: apply(Voice, action, [params])
+        result =
+          case action do
+            :show ->
+              {:ok, Voice.show()}
+
+            action when action in [:draft, :release] ->
+              case apply(Shuttle.Meeting.TranscriptRelay, action, [params]) do
+                :ok -> {:ok, Voice.show()}
+                error -> error
+              end
+
+            _ ->
+              apply(Voice, action, [params])
+          end
 
         case result do
-          {:ok, body} -> json(conn, Map.put(body, :recorder, MeetingRouter.own_host()))
-          {:error, reason} -> conn |> put_status(422) |> json(%{error: reason})
+          {:ok, body} ->
+            json(conn, Map.put(body, :recorder, MeetingRouter.own_host()))
+
+          {:error, :conflict} ->
+            conn |> put_status(409) |> json(%{error: "held speech has already been consumed"})
+
+          {:error, reason} ->
+            conn |> put_status(422) |> json(%{error: reason})
         end
 
       {:ok, {:remote, remote}} ->

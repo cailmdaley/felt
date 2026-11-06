@@ -14,6 +14,15 @@ defmodule Shuttle.Meeting.TranscriptRelay do
     :exit, reason -> {:error, reason}
   end
 
+  def held(opts \\ []), do: held_call(:held, opts)
+  def draft(params, opts \\ []), do: held_call({:draft, params}, opts)
+  def release(params, opts \\ []), do: held_call({:release, params}, opts)
+
+  defp held_call(message, opts) do
+    server = Keyword.get(opts, :server, Shuttle.Env.server(__MODULE__))
+    GenServer.call(Module.concat(server, Coordinator), message)
+  end
+
   def targets_changed do
     GenServer.cast(Module.concat(__MODULE__, Coordinator), :targets_changed)
   end
@@ -57,6 +66,7 @@ end
 defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
   @moduledoc false
   use GenServer
+  alias Shuttle.Voice.Held
 
   def start_link(opts),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
@@ -67,6 +77,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
 
     state = %{
       directory: Keyword.fetch!(opts, :directory),
+      held_path: Path.join([Keyword.fetch!(opts, :directory), "voice", "held.json"]),
+      held: Held.load(Path.join([Keyword.fetch!(opts, :directory), "voice", "held.json"])),
       dynamic: Keyword.fetch!(opts, :dynamic),
       options: opts,
       workers: %{},
@@ -154,6 +166,37 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
         {:reply, if(match?({:ok, _}, reply), do: :ok, else: reply), state}
     end
   end
+
+  def handle_call(:held, _from, state), do: {:reply, Held.list(state.held), state}
+
+  def handle_call({:hold, launch, offset, target, rows}, _from, state) do
+    change_held(state, fn held ->
+      {held, checkpoint} = Held.append(held, launch, offset, target, rows)
+      {:ok, checkpoint, held}
+    end)
+  end
+
+  def handle_call({:draft, %{"id" => id, "through" => through, "text" => text}}, _from, state)
+      when is_binary(text) do
+    change_held(state, fn held ->
+      case Held.edit(held, id, through, text) do
+        {:ok, held} -> {:ok, :ok, held}
+        error -> error
+      end
+    end)
+  end
+
+  def handle_call({:release, %{"id" => id, "through" => through}}, _from, state) do
+    change_held(state, fn held ->
+      case Held.take(held, id, through) do
+        {:ok, held, _text} -> {:ok, :ok, held}
+        error -> error
+      end
+    end)
+  end
+
+  def handle_call({verb, _params}, _from, state) when verb in [:draft, :release],
+    do: {:reply, {:error, :invalid_draft}, state}
 
   def handle_call({:status, launch}, _from, state) do
     reply =
@@ -272,10 +315,64 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
         state
 
       [{_from, message} | _] ->
-        deliver = state.deliver
-        task = Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn -> deliver.(message) end)
+        {operation, state} = prepare_delivery(message, state)
+        task = Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, operation)
+
         put_in(state.deliveries[task.ref], {key, task})
     end
+  end
+
+  defp prepare_delivery(message, state) do
+    {message, next} = take_held(message, state)
+    deliver = state.deliver
+
+    operation = fn ->
+      if String.trim(message.text) == "", do: {200, %{delivered: true}}, else: deliver.(message)
+    end
+
+    {operation, next}
+  rescue
+    error -> {fn -> {503, %{delivered: false, error: Exception.message(error)}} end, state}
+  end
+
+  defp change_held(state, change) do
+    case change.(state.held) do
+      {:ok, reply, held} -> {:reply, reply, save_held(state, held)}
+      error -> {:reply, error, state}
+    end
+  rescue
+    error ->
+      {:reply, {:error, "held speech could not be saved: #{Exception.message(error)}"}, state}
+  end
+
+  defp save_held(state, held) when held == state.held, do: state
+  defp save_held(state, held), do: %{state | held: Held.save!(state.held_path, held)}
+
+  defp take_held(%{kind: "voice"} = message, state) do
+    checkpoint = Map.get(message, :held)
+    card = Held.target(state.held, %{"fiber_id" => message.fiber_id, "origin" => message.origin})
+    checkpoint = checkpoint || card
+
+    case checkpoint && Held.take(state.held, checkpoint["id"], checkpoint["through"]) do
+      {:ok, held, text} ->
+        text = join_voice(text, message.text, card && card["speaker"])
+        {%{message | text: text}, save_held(state, held)}
+
+      _ ->
+        {message, state}
+    end
+  end
+
+  defp take_held(message, state), do: {message, state}
+
+  defp join_voice(held, "", _speaker), do: held <> "\n"
+
+  defp join_voice(held, text, speaker) do
+    prefix = if speaker, do: speaker <> ": "
+
+    if prefix && String.starts_with?(text, prefix),
+      do: held <> " " <> String.replace_prefix(text, prefix, ""),
+      else: held <> "\n" <> text
   end
 
   defp finish_delivery(state, ref, result) do
@@ -399,6 +496,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
           )
         ),
       thresholds: Keyword.get(opts, :thresholds, &Shuttle.Voice.Config.thresholds/1),
+      cold: Keyword.get(opts, :cold, &Shuttle.Voice.cold?/1),
       claim: Keyword.get(opts, :claim, &claim/1),
       clock: Keyword.get(opts, :clock, fn -> System.system_time(:millisecond) end),
       tasks: %{},
@@ -456,7 +554,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   defp poll(state) do
     if state.timer, do: Process.cancel_timer(state.timer)
     config = state.config
-    next = config |> claim_target(state) |> read_routes() |> ingest(state) |> flush_due(state)
+
+    next =
+      config |> claim_target(state) |> read_routes(state) |> ingest(state) |> flush_due(state)
+
     state = persist!(%{state | config: next}) |> launch_deliveries()
 
     if state.config["ended"] and state.config["outbox"] == [] and map_size(state.tasks) == 0 do
@@ -574,9 +675,9 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end)
   end
 
-  defp read_routes(%{"ended" => true} = config), do: config
+  defp read_routes(%{"ended" => true} = config, _state), do: config
 
-  defp read_routes(%{"kind" => "voice", "routes_path" => path} = config) do
+  defp read_routes(%{"kind" => "voice", "routes_path" => path} = config, state) do
     case FileTail.advance(path, config["route_offset"], max_bytes: 65_536) do
       {:append, lines, offset} ->
         routes =
@@ -591,15 +692,15 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         config
         |> Map.put("routes", routes)
         |> Map.put("route_offset", offset)
-        |> flush_other_targets(current)
-        |> read_routes()
+        |> flush_other_targets(current, state)
+        |> read_routes(state)
 
       _ ->
         config
     end
   end
 
-  defp read_routes(config), do: config
+  defp read_routes(config, _state), do: config
 
   # Keep the route at capture start and every switch within this capture.
   # Earlier global history cannot own an utterance from this recorder.
@@ -620,9 +721,9 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     :ok
   end
 
-  defp flush_other_targets(config, target) do
+  defp flush_other_targets(config, target, state) do
     Enum.reduce(config["buffers"], config, fn buffer, acc ->
-      if same_target?(buffer, target), do: acc, else: flush_buffer(acc, buffer)
+      if same_target?(buffer, target), do: acc, else: flush_buffer(acc, buffer, state)
     end)
   end
 
@@ -684,36 +785,46 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     case FileTail.advance(path, config["json_offset"], max_bytes: 65_536) do
       {:append, lines, offset} ->
         next =
-          Enum.reduce(lines, config, fn line, acc ->
-            case Jason.decode(line) do
-              {:ok, %{"wall" => wall, "text" => text, "speaker" => speaker} = row}
-              when is_binary(wall) and is_binary(text) and is_binary(speaker) ->
-                case DateTime.from_iso8601(row["wall_start"] || wall) do
-                  {:ok, at, _} ->
-                    target =
-                      Enum.find(
-                        Enum.reverse(acc["routes"]),
-                        &(DateTime.compare(at, parse_time!(&1["t"])) != :lt)
-                      )
+          Enum.reduce(lines, {config, config["json_offset"]}, fn line, {acc, cursor} ->
+            cursor = cursor + byte_size(line) + 1
 
-                    name = row["name"] || speaker
+            next =
+              case Jason.decode(line) do
+                {:ok, %{"wall" => wall, "text" => text, "speaker" => speaker} = row}
+                when is_binary(wall) and is_binary(text) and is_binary(speaker) ->
+                  case DateTime.from_iso8601(row["wall_start"] || wall) do
+                    {:ok, at, _} ->
+                      target =
+                        Enum.find(
+                          Enum.reverse(acc["routes"]),
+                          &(DateTime.compare(at, parse_time!(&1["t"])) != :lt)
+                        )
 
-                    add_line(acc, target, "#{name} #{text}", state, %{speaker: name, text: text})
+                      name = row["name"] || speaker
 
-                  _ ->
-                    raise ArgumentError, "voice utterance needs an absolute wall_start timestamp"
-                end
+                      add_line(acc, target, "#{name} #{text}", state, %{
+                        speaker: name,
+                        text: text,
+                        offset: cursor
+                      })
 
-              {:ok, %{"wall" => wall} = row}
-              when is_binary(wall) and not is_map_key(row, "text") ->
-                acc
+                    _ ->
+                      raise ArgumentError,
+                            "voice utterance needs an absolute wall_start timestamp"
+                  end
 
-              _ ->
-                raise ArgumentError, "malformed voice transcript row"
-            end
+                {:ok, %{"wall" => wall} = row}
+                when is_binary(wall) and not is_map_key(row, "text") ->
+                  acc
+
+                _ ->
+                  raise ArgumentError, "malformed voice transcript row"
+              end
+
+            {next, cursor}
           end)
 
-        Map.put(next, "json_offset", offset)
+        Map.put(elem(next, 0), "json_offset", offset)
 
       _ ->
         config
@@ -749,6 +860,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
           "voice_rows",
           rows ++ [%{"speaker" => voice.speaker, "text" => voice.text}]
         )
+        |> Map.put("source_offset", voice.offset)
       else
         buffer
       end
@@ -769,13 +881,16 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
     cond do
       String.starts_with?(line, "# ended") ->
-        config |> Map.put("ended", true) |> flush_all()
+        config |> Map.put("ended", true) |> flush_all(state)
+
+      config["kind"] == "voice" and buffer["words"] > 0 and state.cold.(target) ->
+        hold_buffer(config, buffer, state, Regex.match?(@names, spoken))
 
       buffer["words"] >= threshold["words"] or Regex.match?(@names, spoken) ->
-        flush_buffer(config, buffer)
+        flush_buffer(config, buffer, state)
 
       config["kind"] == "voice" and not same_target?(target, List.last(config["routes"])) ->
-        flush_buffer(config, buffer)
+        flush_buffer(config, buffer, state)
 
       true ->
         config
@@ -787,17 +902,51 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
     Enum.reduce(config["buffers"], config, fn buffer, acc ->
       if buffer["last_word_at"] && state.clock.() - buffer["last_word_at"] >= quiet,
-        do: flush_buffer(acc, buffer),
+        do: flush_buffer(acc, buffer, state),
         else: acc
     end)
   end
 
-  defp flush_all(config), do: Enum.reduce(config["buffers"], config, &flush_buffer(&2, &1))
+  defp flush_all(config, state),
+    do: Enum.reduce(config["buffers"], config, &flush_buffer(&2, &1, state))
 
-  defp flush_buffer(%{"kind" => "voice"} = config, %{"words" => 0} = buffer),
+  defp flush_buffer(config, buffer, state)
+
+  defp flush_buffer(%{"kind" => "voice"} = config, %{"words" => 0} = buffer, _state),
     do: Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
 
-  defp flush_buffer(config, buffer) do
+  defp flush_buffer(%{"kind" => "voice"} = config, buffer, state) do
+    if state.cold.(buffer) do
+      hold_buffer(config, buffer, state, false)
+    else
+      make_batch(config, buffer)
+    end
+  end
+
+  defp flush_buffer(config, buffer, _state), do: make_batch(config, buffer)
+
+  defp hold_buffer(config, buffer, state, wake) do
+    checkpoint =
+      GenServer.call(
+        state.coordinator,
+        {:hold, config["launch"], buffer["source_offset"], buffer,
+         buffer["voice_rows"] || voice_rows(buffer["lines"])}
+      )
+
+    if match?({:error, _}, checkpoint), do: raise("cannot hold voice: #{inspect(checkpoint)}")
+    config = Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
+
+    if wake && checkpoint do
+      make_batch(
+        config,
+        Map.merge(buffer, %{"lines" => [], "voice_rows" => [], "held" => checkpoint})
+      )
+    else
+      config
+    end
+  end
+
+  defp make_batch(config, buffer) do
     lines = buffer["lines"]
 
     header =
@@ -816,7 +965,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       buffer
       |> Map.take(~w(fiber_id origin))
       |> Map.merge(%{
-        "text" => header <> render_lines(config["kind"], lines, buffer["voice_rows"]) <> "\n",
+        "text" =>
+          if(buffer["held"],
+            do: "",
+            else: header <> render_lines(config["kind"], lines, buffer["voice_rows"]) <> "\n"
+          ),
+        "held" => buffer["held"],
         "message_id" => "meeting-" <> id
       })
 
@@ -924,7 +1078,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
               origin: batch["origin"],
               text: batch["text"],
               message_id: batch["message_id"],
-              kind: acc.config["kind"]
+              kind: acc.config["kind"],
+              held: batch["held"]
             })
           end)
 
@@ -1066,8 +1221,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     ShuttleWeb.DeliverController.route(fiber_id, text, origin, "shuttle", %{
       "daemon_sender" => true,
       "message_id" => id,
-      "message_after_launch" => true,
-      "live_input" => kind == "voice"
+      "message_after_launch" => kind != "voice",
+      "live_input" => kind == "voice",
+      "resume_mode" =>
+        if(kind == "voice",
+          do: Shuttle.Voice.Target.resume_mode(%{"fiber_id" => fiber_id, "origin" => origin})
+        )
     })
   end
 end

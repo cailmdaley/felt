@@ -3,6 +3,7 @@ defmodule Shuttle.Voice.Config do
 
   @defaults %{
     "enabled" => false,
+    "cold_minutes" => 5,
     "voice" => %{"words" => 200, "quiet_seconds" => 15},
     "meeting" => %{"words" => 150, "quiet_seconds" => 10}
   }
@@ -40,6 +41,10 @@ defmodule Shuttle.Voice.Config do
     cond do
       not is_boolean(Map.get(config, "enabled", false)) ->
         {:error, "enabled must be a boolean"}
+
+      not (is_number(Map.get(config, "cold_minutes", 5)) and
+               Map.get(config, "cold_minutes", 5) > 0) ->
+        {:error, "cold_minutes must be positive"}
 
       true ->
         Enum.reduce_while(~w(voice meeting), :ok, fn kind, :ok ->

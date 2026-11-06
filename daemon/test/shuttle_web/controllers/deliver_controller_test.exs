@@ -136,6 +136,48 @@ defmodule ShuttleWeb.DeliverControllerTest do
     refute run_script() =~ "me: Claude hello"
   end
 
+  test "a voice name wake starts a never-run card with the same plain text as a composer send" do
+    fiber = "tests/voice-name-fresh"
+    put_constitution(fiber)
+
+    assert {200, %{delivered: true, delivery: "dispatch"}} =
+             Shuttle.Meeting.TranscriptRelay.Worker.deliver(%{
+               fiber_id: fiber,
+               origin: nil,
+               kind: "voice",
+               message_id: "voice-name",
+               text: "me: held words Claude\n"
+             })
+
+    assert run_script() =~ "me: held words Claude"
+  end
+
+  test "a voice name wake resumes a dormant prior conversation even after a handoff" do
+    fiber = "tests/voice-name-previous"
+    session = "de11ae00-0000-4000-8000-000000000099"
+
+    put_previous_run(fiber, session, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
+
+    write_transcript(session, 30)
+
+    Env.put_app_env(:voice_target_entries, fn ->
+      [%{fiber: %{"id" => fiber, "shuttle" => %{"runtime" => %{"session_uuid" => session}}}}]
+    end)
+
+    assert {200, %{delivered: true, delivery: "resume"}} =
+             Shuttle.Meeting.TranscriptRelay.Worker.deliver(%{
+               fiber_id: fiber,
+               origin: nil,
+               kind: "voice",
+               message_id: "voice-name",
+               text: "me: held words Claude\n"
+             })
+
+    script = run_script()
+    assert script =~ "--resume '#{session}'"
+    assert script =~ "me: held words Claude"
+  end
+
   # A previous run of `fiber_id` under `session`, dispatched a minute ago
   # unless `extra` says otherwise, with `extra` runtime fields (a handoff, say).
   defp put_previous_run(fiber_id, session, extra \\ %{}) do
