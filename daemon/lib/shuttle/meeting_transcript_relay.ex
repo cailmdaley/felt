@@ -484,6 +484,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   alias Shuttle.FileTail
 
   @names ~r/\b(?:claude|cloud|clawed|claw|klaud|clot|clock|clod|claud)\b/iu
+  @partial_stale_seconds 60
   @stamp ~r/^\d{2}:\d{2}:\d{2}(?:-\d{2}:\d{2}:\d{2})?\s+/
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
@@ -889,7 +890,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
                       add_voice_line(acc, target, "#{name} #{text}", state, %{
                         speaker: name,
                         text: text,
-                        offset: cursor
+                        offset: cursor,
+                        silent_ms: voice_silence(at, row)
                       })
 
                     _ ->
@@ -958,7 +960,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     buffer =
       buffer |> Map.update!("lines", &(&1 ++ [line])) |> Map.update!("words", &(&1 + words))
 
-    buffer = if words > 0, do: Map.put(buffer, "last_word_at", state.clock.()), else: buffer
+    buffer =
+      if words > 0,
+        do: Map.put(buffer, "last_word_at", state.clock.() - silence(line, voice)),
+        else: buffer
 
     config =
       Map.put(
@@ -990,14 +995,51 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end
   end
 
+  # Quiet counts from the last spoken word, so time spent finishing the text is
+  # part of the wait. Speech still running holds the batch together.
   defp flush_due(config, state) do
     quiet = state.thresholds.(config["kind"])["quiet_seconds"] * 1_000
+    speaking = speaking?(config)
 
     Enum.reduce(config["buffers"], config, fn buffer, acc ->
-      if buffer["last_word_at"] && state.clock.() - buffer["last_word_at"] >= quiet,
+      if not speaking and buffer["last_word_at"] &&
+           state.clock.() - buffer["last_word_at"] >= quiet,
         do: flush_buffer(acc, buffer, state),
         else: acc
     end)
+  end
+
+  defp silence(_line, %{silent_ms: silent_ms}), do: silent_ms
+
+  defp silence(line, _voice) do
+    with [_, hours, minutes, seconds] <-
+           Regex.run(~r/^\d{2}:\d{2}:\d{2}-(\d{2}):(\d{2}):(\d{2})\s/, line) do
+      {_, {now_h, now_m, now_s}} = :calendar.local_time()
+      [hours, minutes, seconds] = Enum.map([hours, minutes, seconds], &String.to_integer/1)
+      now = now_h * 3600 + now_m * 60 + now_s
+      Integer.mod(now - (hours * 3600 + minutes * 60 + seconds), 86_400) * 1_000
+    else
+      _ -> 0
+    end
+  end
+
+  defp voice_silence(at, %{"start" => start, "end" => finish}) do
+    ended = DateTime.to_unix(at, :millisecond) + round((finish - start) * 1_000)
+    max(System.system_time(:millisecond) - ended, 0)
+  end
+
+  defp voice_silence(_at, _row), do: 0
+
+  defp speaking?(config) do
+    path = Path.rootname(config["transcript"]) <> ".partial"
+
+    with {:ok, %{mtime: mtime}} <- File.stat(path, time: :posix),
+         true <- System.os_time(:second) - mtime < @partial_stale_seconds,
+         {:ok, text} <- File.read(path) do
+      String.trim(text) != ""
+    else
+      _ -> false
+    end
   end
 
   defp flush_all(config, state),

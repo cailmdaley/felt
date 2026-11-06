@@ -112,6 +112,22 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert text =~ "first words\n10:00:02 me another phrase\n# S2 = Martin"
   end
 
+  test "quiet counts from the spoken end, and speech in progress holds the batch", c do
+    {date, {hour, minute, second}} = :calendar.local_time()
+    ended = NaiveDateTime.from_erl!({date, {hour, minute, second}}) |> NaiveDateTime.add(-10)
+    stamp = ended |> NaiveDateTime.to_time() |> Time.to_iso8601()
+    partial = Path.rootname(c.path) <> ".partial"
+    File.write!(partial, "me: still talking")
+    File.write!(c.path, "#{stamp}-#{stamp} me finished a while ago\n")
+    start_monitor(c)
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    File.write!(partial, "")
+    poll(c)
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "finished a while ago"
+  end
+
   test "a switch flushes the old buffer, and a late line spoken before it still reaches that target",
        c do
     routes = Path.join(c.root, "routes.jsonl")
