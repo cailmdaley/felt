@@ -193,7 +193,7 @@ export function buildFileViewer(
   // from; anything else as a code block, reusing the `md-code-block` markup
   // the markdown renderer already emits for fenced code.
   if (kind === 'text') {
-    return buildTextViewer(src, fullPath, ext, onTextPane, options)
+    return buildTextViewer(src, fullPath, originId, ext, onTextPane, options)
   }
 
   if (kind === 'html') {
@@ -794,6 +794,7 @@ export function htmlWithBase(html: string, src: string): string {
 function buildTextViewer(
   src: string,
   fullPath: string,
+  originId: string,
   ext: string,
   onReady?: (scroller: HTMLElement) => void,
   options: FileViewerOptions = {},
@@ -817,7 +818,7 @@ function buildTextViewer(
       const scrollTop = hasContent ? wrap.scrollTop : 0
       if (MARKDOWN_EXTS.has(ext)) {
         pane.classList.add('kbn-detail-prose')
-        pane.innerHTML = renderMarkdown(text)
+        pane.innerHTML = renderMarkdown(text, { basePath: fullPath.slice(0, fullPath.lastIndexOf('/')) || '/', originId })
       } else {
         pane.innerHTML =
           `<pre class="md-code-block language-${escapeHtml(ext || 'plaintext')}">` +

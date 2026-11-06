@@ -102,6 +102,19 @@ export function installWorkspaceNativeURLs(example: WorkspaceExample): Workspace
   patch(HTMLImageElement.prototype)
   patch(HTMLIFrameElement.prototype)
   patch(HTMLMediaElement.prototype)
+  // Markdown inserts images through innerHTML, bypassing the native src setter.
+  new MutationObserver(records => {
+    for (const record of records) for (const node of record.addedNodes) {
+      if (!(node instanceof Element)) continue
+      const images = node.matches('img') ? [node] : node.querySelectorAll('img')
+      for (const image of images) {
+        const source = image.getAttribute('src')
+        if (!source) continue
+        const target = rewrite(source)
+        if (target !== source) (image as HTMLImageElement).src = target
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true })
   return { blobURLs, rewrites }
 }
 
@@ -349,7 +362,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     file(WORKSPACE_HOST, `${fiberDir}/validation.html`, 'text/html', '<!doctype html><html><head><title>Independent validation</title><style>body{font:20px/1.6 Georgia;margin:48px;color:#30291f}img{max-width:100%}</style></head><body><h1>Independent patches agree</h1><p>Every response ratio lies within 0.3% of unity. The north and south patches agree within the stated uncertainty.</p><a href="./response.svg">Open the response plot →</a><div style="height:100vh"></div><h2 id="validation-conclusions">Validation conclusions</h2><div style="height:100vh"></div></body></html>'),
     file(WORKSPACE_HOST, `${fiberDir}/response.svg`, 'image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500"><rect width="800" height="500" fill="#fbf6e9"/><text x="80" y="60" font-size="28" fill="#30291f">Response ratios agree with unity</text><path d="M80 100V420H740M80 250H740" fill="none" stroke="#a39478"/><path d="M140 248L270 252L400 249L530 247L660 251" fill="none" stroke="#3f8278" stroke-width="4"/><g fill="#3f8278"><circle cx="140" cy="248" r="7"/><circle cx="270" cy="252" r="7"/><circle cx="400" cy="249" r="7"/><circle cx="530" cy="247" r="7"/><circle cx="660" cy="251" r="7"/></g><text x="300" y="470" font-size="20" fill="#30291f">Independent sky patch</text></svg>'),
     file(WORKSPACE_HOST, `${fiberDir}/analysis/report.html`, 'text/html', '<!doctype html><html><head><title>Response analysis</title></head><body><h1>Response analysis</h1><p>The independent analysis confirms the calibration.</p><a href="../response.svg">Response plot</a></body></html>'),
-    file(WORKSPACE_HOST, notes, 'text/markdown', `![Wide screenshot gradient](${OVERSIZED_IMAGE})\n\n` + '# Field note\n\nThe transfer ratio is consistent with unity in the validation range.\n\n| ell | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 1000 | 1100 | 1200 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| ratio | 0.998 | 1.003 | 1.001 | 0.999 | 1.002 | 1.000 | 0.997 | 1.004 | 1.001 | 0.998 | 1.002 | 1.000 |\n\nRead [the report](../.felt/research/workspace/calibration-report/report.html), or listen to `tone.mp3`.\n'),
+    file(WORKSPACE_HOST, notes, 'text/markdown', `![Wide screenshot gradient](live-arrival.png)\n\n` + '# Field note\n\nThe transfer ratio is consistent with unity in the validation range.\n\n| ell | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 1000 | 1100 | 1200 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| ratio | 0.998 | 1.003 | 1.001 | 0.999 | 1.002 | 1.000 | 0.997 | 1.004 | 1.001 | 0.998 | 1.002 | 1.000 |\n\nRead [the report](../.felt/research/workspace/calibration-report/report.html), or listen to `tone.mp3`.\n'),
     file(WORKSPACE_HOST, readme, 'text/plain', 'Fixture text document.\n\nThis body is served by the mocked file route.\nListen to `tone.mp3`.\n'),
     file(WORKSPACE_HOST, code, 'text/x-python', 'def response(ell, transfer):\n    return ell * transfer\n'),
     file(WORKSPACE_HOST, linkedText, 'text/csv', 'ell,response\n100,0.998\n200,1.003\n'),
@@ -401,7 +414,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       '',
       '## Validation notes',
       '',
-      `![Wide screenshot gradient](${OVERSIZED_IMAGE})`,
+      `![Wide screenshot gradient](${liveImage})`,
       '',
       'Read the [mask table](tables/mask.csv) alongside the report.',
       '',

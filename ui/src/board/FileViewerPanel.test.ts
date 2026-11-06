@@ -34,6 +34,16 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('resolves Markdown images against the deliverable directory and byte-owning host', () => {
+    const viewer = buildFileViewer('', '/reports/run/notes.md', 'host-b')
+    watch.content!('![Plot](figures/wide.png)')
+    const image = viewer.querySelector('img')!
+    const source = new URL(image.src)
+    expect(source.pathname).toBe('/api/v1/file')
+    expect(source.searchParams.get('path')).toBe('/reports/run/figures/wide.png')
+    expect(source.searchParams.get('origin')).toBe('host-b')
+    disposeFileViewer(viewer)
+  })
   it('reloads a rewritten change through the live watcher with a new review identity', async () => {
     const dispose = vi.fn()
     changeRenderer.mount.mockImplementation((root: HTMLElement, bundle: { title: string }) => {

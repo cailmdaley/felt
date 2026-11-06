@@ -545,8 +545,9 @@ test('Oversized embedded media fit report and constitution text columns', async 
     await img.decode()
     const parent = img.closest('.kbn-detail-prose')
     const css = getComputedStyle(parent)
-    return { width: img.width, height: img.height, column: parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) }
+    return { width: img.width, height: img.height, natural: img.naturalWidth, column: parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) }
   })
+  assert.equal(proseSize.natural, 3000)
   // img.width rounds to whole pixels; a percentage padding leaves the column fractional.
   assert.ok(proseSize.width <= Math.ceil(proseSize.column), JSON.stringify(proseSize))
   assert.ok(Math.abs(proseSize.height / proseSize.width - .2) < .01)
@@ -556,7 +557,7 @@ test('Oversized embedded media fit report and constitution text columns', async 
   assert.ok(await markdownImage.evaluate(async img => {
     await img.decode()
     const parent = img.closest('.kbn-detail-prose'), css = getComputedStyle(parent)
-    return img.width <= Math.ceil(parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight)) && Math.abs(img.height / img.width - .2) < .01
+    return img.naturalWidth === 3000 && img.width <= Math.ceil(parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight)) && Math.abs(img.height / img.width - .2) < .01
   }), 'Markdown deliverables fit their padded text column')
 })
 
