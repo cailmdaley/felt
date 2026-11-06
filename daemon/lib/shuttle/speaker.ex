@@ -3,6 +3,10 @@ defmodule Shuttle.Speaker do
   Speaks lines on this host, one at a time in arrival order, each in the voice of
   its fiber's role. Rendering is pocket-tts; playback is afplay.
 
+  While live voice has a target, only lines from that constitution play; the
+  rest wait, per fiber and in order, until it is in view. Without a target
+  every line plays.
+
   Playback holds while Cail is talking (hark's live voice has pending words
   beyond an echo of the line being spoken) or while the speaker is muted, and resumes from just before where it stopped.
   afplay keeps its clock running under SIGSTOP, so a hold stops the player and a
@@ -30,19 +34,23 @@ defmodule Shuttle.Speaker do
       %{"text" => text} when is_binary(text) ->
         text = String.trim(text)
         fiber_id = params["fiber_id"]
+        fiber = find_fiber(fiber_id, opts)
 
         voice =
           case params["voice"] do
             voice when is_binary(voice) and voice != "" -> voice
-            _ -> voice_for(fiber_id, opts)
+            _ -> role_voice(fiber, opts)
           end
+
+        keys =
+          Enum.filter([fiber_id | Enum.map(~w(uid id slug), &(fiber && fiber[&1]))], &is_binary/1)
 
         if text == "",
           do: {:error, "text is empty"},
           else:
             GenServer.call(
               server(opts),
-              {:speak, %{fiber_id: fiber_id, text: text, voice: voice}}
+              {:speak, %{fiber_id: fiber_id, keys: keys, text: text, voice: voice}}
             )
 
       _ ->
@@ -53,17 +61,21 @@ defmodule Shuttle.Speaker do
   def available?, do: not is_nil(Shuttle.Env.find_executable("afplay"))
 
   @doc "The voice of the fiber's role: the charter's `voice:`, else #{@default_voice}."
-  def voice_for(fiber_id, opts \\ []) do
+  def voice_for(fiber_id, opts \\ []), do: role_voice(find_fiber(fiber_id, opts), opts)
+
+  defp find_fiber(fiber_id, opts) when is_binary(fiber_id) do
     fibers = Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0)
+
+    Enum.find(fibers.(), fn fiber ->
+      is_map(fiber) and fiber_id in [fiber["uid"], fiber["id"], fiber["slug"]]
+    end)
+  end
+
+  defp find_fiber(_fiber_id, _opts), do: nil
+
+  defp role_voice(fiber, opts) do
     stores = Keyword.get(opts, :stores, &Shuttle.FeltStores.configured_stores/0)
-
-    role =
-      is_binary(fiber_id) &&
-        Enum.find_value(fibers.(), fn fiber ->
-          if is_map(fiber) and fiber_id in [fiber["uid"], fiber["id"], fiber["slug"]],
-            do: get_in(fiber, ["shuttle", "role"])
-        end)
-
+    role = fiber && get_in(fiber, ["shuttle", "role"])
     (is_binary(role) && charter_voice(role, stores.())) || @default_voice
   end
 
@@ -127,6 +139,7 @@ defmodule Shuttle.Speaker do
        clock: Keyword.get(opts, :clock, fn -> System.monotonic_time(:millisecond) end),
        poll_ms: Keyword.get(opts, :poll_ms, @poll_ms),
        partial: Keyword.get(opts, :partial, &partial/0),
+       target: Keyword.get(opts, :target, &target/0),
        render_fun: Keyword.get(opts, :render, &render/2),
        play: Keyword.get(opts, :play, &play/1),
        stop: Keyword.get(opts, :stop, &stop/1),
@@ -147,7 +160,7 @@ defmodule Shuttle.Speaker do
 
   def handle_call({:speak, item}, _from, state) do
     ahead = :queue.len(state.queue) + if(state.current || state.render, do: 1, else: 0)
-    state = advance(%{state | queue: :queue.in(item, state.queue)})
+    state = advance(%{state | queue: :queue.in(item, state.queue)}) |> schedule()
     {:reply, {:ok, %{voice: item.voice, ahead: ahead}}, state}
   end
 
@@ -174,7 +187,7 @@ defmodule Shuttle.Speaker do
   end
 
   def handle_info(:poll, state),
-    do: {:noreply, hold_or_play(%{state | timer: nil}) |> schedule()}
+    do: {:noreply, %{state | timer: nil} |> hold_or_play() |> advance() |> schedule()}
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -184,9 +197,16 @@ defmodule Shuttle.Speaker do
 
   def terminate(_reason, _state), do: :ok
 
+  # The first queued line from the constitution in view, or the first of all
+  # when nothing is in view.
   defp advance(%{current: nil, render: nil} = state) do
-    case :queue.out(state.queue) do
-      {{:value, item}, queue} ->
+    target = state.target.()
+
+    case Enum.split_while(:queue.to_list(state.queue), &(not in_view?(&1, target))) do
+      {_, []} ->
+        state
+
+      {before, [item | rest]} ->
         render = state.render_fun
 
         task =
@@ -194,10 +214,7 @@ defmodule Shuttle.Speaker do
             render.(item.text, item.voice)
           end)
 
-        %{state | queue: queue, render: {task, item}}
-
-      {:empty, _} ->
-        state
+        %{state | queue: :queue.from_list(before ++ rest), render: {task, item}}
     end
   end
 
@@ -265,11 +282,26 @@ defmodule Shuttle.Speaker do
     end
   end
 
-  defp schedule(%{current: nil} = state), do: state
+  defp in_view?(_item, nil), do: true
+  defp in_view?(item, target), do: target in item.keys
+
+  # The fiber live voice is routed to, while Listening is on.
+  defp target do
+    case Shuttle.Voice.show() do
+      %{enabled: true, target: %{"fiber_id" => id}} -> id
+      _ -> nil
+    end
+  catch
+    :exit, _ -> nil
+  end
+
   defp schedule(%{timer: timer} = state) when not is_nil(timer), do: state
 
-  defp schedule(state),
-    do: %{state | timer: Process.send_after(self(), :poll, state.poll_ms)}
+  defp schedule(state) do
+    if state.current || state.render || not :queue.is_empty(state.queue),
+      do: %{state | timer: Process.send_after(self(), :poll, state.poll_ms)},
+      else: state
+  end
 
   defp cleanup(current) do
     Shuttle.FS.rm(current.wav)
@@ -284,10 +316,14 @@ defmodule Shuttle.Speaker do
         item -> Map.take(item, [:fiber_id, :voice, :text])
       end
 
+    target = state.target.()
+    {ready, held} = Enum.split_with(:queue.to_list(state.queue), &in_view?(&1, target))
+
     %{
       available: available?(),
       speaking: speaking,
-      queued: :queue.len(state.queue),
+      queued: length(ready),
+      held: Enum.frequencies_by(held, & &1.fiber_id),
       paused: not is_nil(state.current) and is_nil(state.current.handle),
       muted: state.muted,
       error: state.error

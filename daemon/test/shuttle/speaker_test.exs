@@ -4,7 +4,7 @@ defmodule Shuttle.SpeakerTest do
   @moduletag :tmp_dir
 
   setup do
-    {:ok, world} = Agent.start_link(fn -> %{partial: nil, now: 0} end)
+    {:ok, world} = Agent.start_link(fn -> %{partial: nil, now: 0, target: nil} end)
     parent = self()
 
     opts = [
@@ -12,6 +12,7 @@ defmodule Shuttle.SpeakerTest do
       poll_ms: 10,
       clock: fn -> Agent.get(world, & &1.now) end,
       partial: fn -> Agent.get(world, & &1.partial) end,
+      target: fn -> Agent.get(world, & &1.target) end,
       render: fn text, voice -> {:ok, "#{voice}:#{text}"} end,
       play: fn path ->
         handle = make_ref()
@@ -73,6 +74,38 @@ defmodule Shuttle.SpeakerTest do
     assert_receive {:play, "jean:a", again}
     send(pid, {again, {:exit_status, 0}})
     assert_receive {:play, "jean:b", _}
+  end
+
+  test "only the constitution in view speaks; the others wait their turn",
+       %{pid: pid, server: server, world: world} do
+    fibers = [fibers: fn -> [%{"id" => "a/one", "uid" => "U1"}] end]
+
+    say = fn fiber, text ->
+      Speaker.speak(
+        %{"fiber_id" => fiber, "text" => text, "voice" => "jean"},
+        Keyword.merge(server, fibers)
+      )
+    end
+
+    set(world, %{target: "U1"})
+    {:ok, _} = say.("a/two", "two first")
+    {:ok, _} = say.("a/one", "one first")
+    {:ok, _} = say.("a/two", "two second")
+    assert_receive {:play, "jean:one first", one}
+    assert %{queued: 0, held: %{"a/two" => 2}} = Speaker.show(server)
+
+    set(world, %{target: "a/two"})
+    refute_receive {:play, _, _}, 50
+    send(pid, {one, {:exit_status, 0}})
+    assert_receive {:play, "jean:two first", two}
+    send(pid, {two, {:exit_status, 0}})
+    assert_receive {:play, "jean:two second", three}
+
+    {:ok, _} = say.("a/one", "one again")
+    set(world, %{target: nil})
+    send(pid, {three, {:exit_status, 0}})
+    assert_receive {:play, "jean:one again", _}
+    assert %{held: %{}} = Speaker.show(server)
   end
 
   test "words of the line being spoken are its echo, not Cail" do
