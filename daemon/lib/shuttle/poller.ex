@@ -2965,19 +2965,22 @@ defmodule Shuttle.Poller do
 
   defp replace_pulse_session(state, fiber, now) do
     fiber_id = fiber_address(fiber)
-    next = cut_open_session(state, fiber_id, fiber["uid"])
 
-    if running_worker(next, fiber_id) do
-      next
-    else
-      {next, result} = do_dispatch_fiber(next, fiber, resume_mode: "fresh")
-
-      if match?({:ok, _}, result) do
-        pulses = next.pulses |> Shuttle.Pulse.advance(fiber, now)
-        persist_pulses(next, Shuttle.Pulse.delivered(pulses, runtime_key_for_fiber(fiber), now))
-      else
+    with {:ok, next} <- cut_open_session(state, fiber_id, fiber["uid"]) do
+      if running_worker(next, fiber_id) do
         next
+      else
+        {next, result} = do_dispatch_fiber(next, fiber, resume_mode: "fresh")
+
+        if match?({:ok, _}, result) do
+          pulses = next.pulses |> Shuttle.Pulse.advance(fiber, now)
+          persist_pulses(next, Shuttle.Pulse.delivered(pulses, runtime_key_for_fiber(fiber), now))
+        else
+          next
+        end
       end
+    else
+      {:error, _reason, next} -> next
     end
   end
 
@@ -4628,8 +4631,13 @@ defmodule Shuttle.Poller do
     # drag-launch) stamps the clean-exit marker, kills the live tmux, and drops
     # the runtime entry, then FALLS THROUGH to the fresh dispatch below instead
     # of bouncing off `:already_running`. See cut_open_session_for_fresh/5.
-    state = cut_open_session_for_fresh(state, fiber_id, runtime_key, uid, opts)
+    case cut_open_session_for_fresh(state, fiber_id, runtime_key, uid, opts) do
+      {:ok, state} -> dispatch_after_cut(state, fiber_id, runtime_key, uid, opts)
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
+    end
+  end
 
+  defp dispatch_after_cut(state, fiber_id, runtime_key, uid, opts) do
     message = Keyword.get(opts, :user_message)
 
     paste_into =
@@ -6215,7 +6223,7 @@ defmodule Shuttle.Poller do
     if forced_fresh? and open_session?(state, fiber_id, runtime_key, uid) do
       cut_open_session(state, fiber_id, uid)
     else
-      state
+      {:ok, state}
     end
   end
 
@@ -6229,7 +6237,7 @@ defmodule Shuttle.Poller do
     if session do
       case Shuttle.WorkerBackend.stop(state.runner, session) do
         {_, 0} ->
-          :ok =
+          result =
             Shuttle.Continuation.mark_handed_off(
               state.runner,
               owning_store(fiber_id, state),
@@ -6237,14 +6245,26 @@ defmodule Shuttle.Poller do
             )
 
           if meta, do: stop_watcher(meta)
-          if key, do: remove_running(state, key), else: state
+          state = if key, do: remove_running(state, key), else: state
+
+          case result do
+            :ok ->
+              {:ok, state}
+
+            {:error, reason} ->
+              Logger.warning(
+                "Could not mark stopped worker #{fiber_id} handed off: #{inspect(reason)}; fresh dispatch refused"
+              )
+
+              {:error, {:handoff_failed, reason}, state}
+          end
 
         {output, _} ->
           Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
-          state
+          {:ok, state}
       end
     else
-      state
+      {:ok, state}
     end
   end
 

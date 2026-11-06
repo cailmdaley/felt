@@ -2653,6 +2653,59 @@ defmodule Shuttle.PollerTest do
       assert Process.alive?(watcher)
       assert Shuttle.Terminal.status(Shuttle.PollerTest.PhantomRunner, session) == :alive
     end
+
+    @tag backend: backend
+    @tag :review_cut_marker
+    test "a failed cut marker write after #{inspect(backend)} stops refuses replacement without crashing",
+         %{backend: backend} do
+      Env.put_app_env(:terminal_backend, backend)
+
+      if backend == Shuttle.Terminal.Rex do
+        Env.put_app_env(:fake_rex, start_supervised!(Shuttle.Test.FakeRex))
+        Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      end
+
+      id = "tests/cut-marker-failed"
+      MockRunner.set_fiber(id, make_fiber(id))
+
+      MockRunner.set_shuttle(
+        id,
+        "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+        "active"
+      )
+
+      runner = Shuttle.PollerTest.PhantomRunner
+
+      {:ok, poller} =
+        start_poller!(
+          runner: runner,
+          own_host_id: "test-host",
+          poll_interval_ms: 60_000,
+          max_concurrent_workers: 0,
+          felt_stores: [MockRunner.felt_root()]
+        )
+
+      assert {:ok, session} = Poller.dispatch_fiber(poller, id, force: true, ad_hoc: true)
+      %{pid: watcher} = Poller.worker_status(poller, id)
+      Env.put_app_env(:phantom_runtime_write_fails, true)
+
+      assert {:error, {:handoff_failed, reason}} =
+               Poller.dispatch_fiber(poller, id, force: true, ad_hoc: true, resume_mode: "fresh")
+
+      assert reason =~ "runtime write failed"
+      assert Process.alive?(poller)
+      refute Process.alive?(watcher)
+      assert Poller.worker_status(poller, id) == nil
+      assert :gone = Shuttle.Terminal.status(runner, session)
+
+      if backend == Shuttle.Terminal.Rex do
+        assert Enum.count(Shuttle.Test.FakeRex.calls(), fn {_, args, _} ->
+                 "session.create" in args
+               end) == 1
+      else
+        assert length(new_session_scripts()) == 1
+      end
+    end
   end
 
   test "New session waits out a cut worker that outlives kill-session, then dispatches fresh" do
