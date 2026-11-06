@@ -204,6 +204,14 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 				t.Fatalf("human records: %+v", records)
 			}
 
+			for _, spoken := range []string{"me: so about that plot", "S2: can you remake it\nme: yes please", "S?: mumbled"} {
+				input.Prompt = spoken
+				runPrompt()
+			}
+			if records = readBoardRecords(t, sink); len(records) != 3 {
+				t.Fatalf("live voice reached the board: %+v", records)
+			}
+
 			input.SessionID = "unbound"
 			input.Prompt = "not bound"
 			if row, err := currentSessionBinding(messaging.Address{Host: "host", Harness: messaging.NormalizeHarness(harness), ID: input.SessionID}, a.localMessageLedger()); err != nil || row != nil {

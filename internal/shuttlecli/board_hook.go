@@ -115,7 +115,20 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 		r.Kind = "answered"
 		r.Text = "Q: " + question + " — A: " + input.Prompt
 	}
+	if r.Kind == "human" && spokenPrompt(input.Prompt) {
+		return
+	}
 	a.recordBoard(r)
+}
+
+// spokenLine is how live voice pastes speech: a transcript speaker label, then
+// the words. A name assigned with `hark name` doesn't match and stays on the board.
+var spokenLine = regexp.MustCompile(`^(me|S\d+|S\?): `)
+
+// spokenPrompt reports live voice, which reaches its own worker and stays off
+// the family board. Spoken answers still clear a question.
+func spokenPrompt(prompt string) bool {
+	return spokenLine.MatchString(strings.TrimLeft(prompt, " \t\r\n"))
 }
 
 // humanLabel names the person typing in a worker's chat: SHUTTLE_HUMAN, else
