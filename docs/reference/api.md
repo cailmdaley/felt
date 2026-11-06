@@ -405,8 +405,11 @@ Without it, the receiving daemon is the recorder.
 `target` is `{fiber_id, origin, name}` or `null`.
 `cold` says whether the selected target is dormant or has been idle for at least `cold_minutes`.
 A working target is warm regardless of the age of its last event; unknown or stale owner activity is cold.
-`held` is a list of `{id, fiber_id, origin, after, through, text}` drafts, retained across target switches, mute, recorder replacement and daemon restart.
+`held` is a list of `{id, fiber_id, origin, after, through, text, segments}` drafts, retained across target switches, mute, recorder replacement and daemon restart.
 `after` is the last consumed segment (initially 0); it advances when an earlier prefix is released while later speech remains, even if `through` is unchanged.
+`segments` contains the current `{through, text}` pieces in order; their text concatenates to `text`.
+Editing a displayed prefix coalesces its segments at that prefix's ending checkpoint, preserving later segments.
+A composer appends only segments beyond its displayed checkpoint, so an edit response lost before more speech arrives cannot make repeated words disappear through ambiguous string-prefix matching.
 `through` identifies the last finalized speech segment included in that draft.
 `pending` is `{fiber_id, words, text}` or `null`, holding finalized warm speech before a delivery trigger.
 `preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.

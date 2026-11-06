@@ -204,6 +204,44 @@ defmodule Shuttle.VoiceTest do
     end
   end
 
+  test "public held segments distinguish repeated speech from an edited prefix", c do
+    alias Shuttle.Voice.Held
+    target = %{"fiber_id" => "a", "origin" => "owner"}
+    state = Held.load(Path.join(c.root, "segments.json"))
+
+    {state, first} =
+      Held.append(state, "launch", 42, target, [%{"speaker" => "S1", "text" => "hello world"}])
+
+    assert first["segments"] == [%{"through" => 1, "text" => "S1: hello world"}]
+    assert {:ok, state} = Held.edit(state, first["id"], 1, "S1: hello")
+
+    {state, grown} =
+      Held.append(state, "launch", 84, target, [%{"speaker" => "S1", "text" => "world"}])
+
+    assert grown["segments"] == [
+             %{"through" => 1, "text" => "S1: hello"},
+             %{"through" => 2, "text" => " world"}
+           ]
+
+    assert grown["text"] == "S1: hello world"
+    assert {:ok, state} = Held.edit(state, first["id"], 2, "S1: replacement")
+    assert [%{"segments" => [%{"through" => 2, "text" => "S1: replacement"}]}] = Held.list(state)
+
+    {state, _} =
+      Held.append(state, "launch", 126, target, [%{"speaker" => "S1", "text" => "suffix"}])
+
+    assert {:ok, state, "S1: replacement"} = Held.take(state, first["id"], 2)
+
+    assert [
+             %{
+               "after" => 2,
+               "through" => 3,
+               "text" => "S1: suffix",
+               "segments" => [%{"through" => 3, "text" => "S1: suffix"}]
+             }
+           ] = Held.list(state)
+  end
+
   test "held draft APIs consume once and report claim conflicts without launching", c do
     alias Shuttle.Meeting.TranscriptRelay
     name = Module.concat(__MODULE__, "Relay#{System.unique_integer([:positive])}")

@@ -284,6 +284,7 @@ defmodule Shuttle.Voice.Held do
       card
       |> Map.take(~w(id fiber_id origin through))
       |> Map.put("after", Map.get(card, "after", 0))
+      |> Map.put("segments", Enum.map(card["segments"], &Map.take(&1, ~w(through text))))
       |> Map.put("text", Enum.map_join(card["segments"], & &1["text"]))
 
   defp same_target?(a, b), do: a["fiber_id"] == b["fiber_id"] and a["origin"] == b["origin"]
