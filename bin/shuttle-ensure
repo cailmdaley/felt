@@ -7,13 +7,9 @@ owner=$(head -n 1 "$owner_file" 2>/dev/null || true)
 [ -n "$owner" ] || exit 0
 node=$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)
 node=${node%%.*}
-[ "$node" = "$owner" ] || {
-  [ "${1:-}" = "--start" ] || printf 'shuttle: daemon lives on %s\n' "$owner" >&2
-  exit 0
-}
+[ "$node" = "$owner" ] || exit 0
 
 if [ "${1:-}" != "--start" ]; then
-  printf 'shuttle: daemon lives on %s\n' "$owner" >&2
   nohup "$HOME/.local/bin/shuttle-ensure" --start </dev/null >/dev/null 2>&1 &
   exit 0
 fi

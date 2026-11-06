@@ -81,11 +81,11 @@ run_ensure() {
 line_count() { wc -l < "$1" | tr -d ' '; }
 
 printf 'other\n' > "$WORK/node"
-# Login-shell stdout also carries machine-readable SSH replies such as a
-# deploy worktree path; the ownership notice belongs on stderr.
+# Login-shell output also carries machine-readable SSH replies such as a
+# deploy worktree path, so the login path prints nothing on either stream.
 output=$(run_ensure 2> "$WORK/notice")
 [ -z "$output" ]
-[ "$(cat "$WORK/notice")" = 'shuttle: daemon lives on owner' ]
+[ ! -s "$WORK/notice" ]
 [ ! -s "$WORK/created" ]
 [ "$(SHUTTLE_TEST_NODE="$WORK/node" HOME="$WORK/home" PATH="$WORK/bin:$WORK/home/.local/bin:/usr/bin:/bin" "$REPO/bin/shuttle-launch" --recover)" = "shuttle-launch: this host belongs to login node 'owner'; leaving it alone" ]
 [ "$(SHUTTLE_TEST_NODE="$WORK/node" HOME="$WORK/home" PATH="$WORK/bin:$WORK/home/.local/bin:/usr/bin:/bin" "$REPO/bin/tailscaled-launch")" = "tailscaled-launch: this host belongs to login node 'owner'; leaving it alone" ]
@@ -95,7 +95,7 @@ printf 'owner\n' > "$WORK/node"
 SECONDS=0
 output=$(LOOP_COHORT=3 run_ensure 2> "$WORK/notice")
 [ -z "$output" ]
-[ "$(cat "$WORK/notice")" = 'shuttle: daemon lives on owner' ]
+[ ! -s "$WORK/notice" ]
 LOOP_COHORT=3 run_ensure >/dev/null & second=$!
 LOOP_COHORT=3 run_ensure >/dev/null & third=$!
 wait "$second"
