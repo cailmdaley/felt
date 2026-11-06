@@ -28,7 +28,7 @@ The user starts a meeting from the board, either from the Capture form in meetin
 Shuttle sends transcript batches and `# ended` automatically for board meetings.
 A capture receives everything from the beginning once the scribe claims its fiber; a joined constitution receives batches immediately.
 Don't run `shuttle follow` for either.
-The daemon flushes after enough words, a quiet interval since the last speech, or a name mention (`claude`, `cloud`, `clawed`, `klaud`).
+The daemon flushes after enough words, a quiet interval since the last speech, or a name mention (`claude`, `cloud`, `clawed`, `klaud`, `clot`, `clod`, `claud`).
 Voice and meeting word limits and quiet intervals live in Settings → Voice.
 Comments beginning with `#` ride along, including speaker aliases and `# ended`.
 
@@ -40,7 +40,7 @@ You can name a speaker yourself by appending a line such as `# S2 = Martin` once
 
 1. **Capture as usual, with two meeting specifics** ([capture.md](capture.md), steps 1–5). The fiber is the meeting: file it where the project keeps meetings, conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub from the note and the project's tree, and give its body the time, the mode and the transcript path. With an empty note a provisional name is fine; rename it once the first minutes make the subject clear. Your role is `scribe`. This page defines the office; the `roles/scribe` charter holds only the user's conventions and what past meetings taught, and outranks this page where they differ. If the store has none, create it with just its name and an empty working-knowledge section. Post the supplied `Claim` as given, after the install; it carries the meeting's launch id, and the board seats the meeting on your fiber's card.
 2. **Read quietly, from the moment you've claimed.** Automatic batches begin with the recording's first words; don't delay the claim while polishing the fiber. Keep running notes in the fiber — what was discussed, decisions, action items by owner, open questions — each with its timestamp and speaker label. Don't narrate.
-3. **Act when addressed.** A line spoken to you by name is a request (the monitor also catches "Cloud", "Clawed" and "Klaud"). Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
+3. **Act when addressed.** A line spoken to you by name is a request (the monitor also catches "Cloud", "Clawed", "Klaud" and "Clot"). Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
 4. **Keep the report live.** Keep `tapestry.html` in the fiber folder as the meeting's current state — summary, decisions, action items, figures — rewritten whole and self-contained ([tapestry.md](tapestry.md)). Send it once with `send-file` so it sits on the Board, then rewrite it in place after each substantive change.
 5. **Consolidate at `# ended`**: write the notes document and propose the fiber extraction ([below](#from-transcript-to-notes)), rewrite the report, then run `shuttle close <meeting-fiber>`.
 

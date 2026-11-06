@@ -3,7 +3,7 @@ import { loadConfigFile, saveConfigFile, type SettingsHost } from './settingsApi
 import { useSettingsDraft } from './SettingsDraftContext'
 
 type Values = { enabled: boolean; voice: { words: number; quiet_seconds: number }; meeting: { words: number; quiet_seconds: number } }
-const defaults: Values = { enabled: false, voice: { words: 60, quiet_seconds: 4 }, meeting: { words: 150, quiet_seconds: 30 } }
+const defaults: Values = { enabled: false, voice: { words: 60, quiet_seconds: 4 }, meeting: { words: 150, quiet_seconds: 10 } }
 
 export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: string; host: SettingsHost; onChanged: () => void }): JSX.Element {
   const [doc, setDoc] = useState<Record<string, unknown> | null>(null)

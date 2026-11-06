@@ -4,7 +4,7 @@ defmodule Shuttle.Voice.Config do
   @defaults %{
     "enabled" => false,
     "voice" => %{"words" => 60, "quiet_seconds" => 4},
-    "meeting" => %{"words" => 150, "quiet_seconds" => 30}
+    "meeting" => %{"words" => 150, "quiet_seconds" => 10}
   }
 
   def path do

@@ -54,7 +54,7 @@ defmodule Shuttle.VoiceTest do
     assert {:ok,
             %{
               "voice" => %{"words" => 60, "quiet_seconds" => 4},
-              "meeting" => %{"quiet_seconds" => 30}
+              "meeting" => %{"quiet_seconds" => 10}
             }} = Config.read()
 
     for invalid <- [

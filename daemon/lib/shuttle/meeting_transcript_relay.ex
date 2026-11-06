@@ -357,7 +357,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   use GenServer
   alias Shuttle.FileTail
 
-  @names ~r/\b(?:claude|cloud|clawed|klaud)\b/iu
+  @names ~r/\b(?:claude|cloud|clawed|klaud|clot|clod|claud)\b/iu
   @stamp ~r/^\d{2}:\d{2}:\d{2}(?:-\d{2}:\d{2}:\d{2})?\s+/
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)

@@ -15,7 +15,7 @@ import (
 
 // defaultFollowNames are the words that address the agent, including common
 // speech-recognition renderings of "Claude".
-var defaultFollowNames = []string{"claude", "cloud", "clawed", "klaud"}
+var defaultFollowNames = []string{"claude", "cloud", "clawed", "klaud", "clot", "clod", "claud"}
 
 func (a *app) shuttleFollowCmd() *cobra.Command {
 	shuttleFollowCmd := &cobra.Command{

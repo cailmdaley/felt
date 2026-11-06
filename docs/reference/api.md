@@ -428,12 +428,12 @@ It defaults to:
 ```json
 {"enabled": false,
  "voice": {"words": 60, "quiet_seconds": 4},
- "meeting": {"words": 150, "quiet_seconds": 30}}
+ "meeting": {"words": 150, "quiet_seconds": 10}}
 ```
 
 Word limits are positive integers; quiet intervals are positive numbers of seconds.
 `POST /voice` with `enabled: false` can repair an invalid operator file by replacing it with disabled defaults. Valid files retain their thresholds and unknown keys.
-The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `klaud`), or quiet since the last spoken line.
+The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `klaud`, `clot`, `clod`, `claud`), or quiet since the last spoken line.
 Voice and meeting thresholds are independent; name detection is always on.
 Comments travel with the next batch and `# ended` closes the monitor.
 An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.

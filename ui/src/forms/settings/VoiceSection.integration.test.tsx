@@ -29,7 +29,7 @@ it('saves changed voice settings on the selected host without dropping other key
   expect(api.save).toHaveBeenCalledOnce()
   const [, owner, id, text, digest] = api.save.mock.calls[0]
   expect(owner).toEqual(host); expect(id).toBe('voice'); expect(digest).toBe('before')
-  expect(JSON.parse(text)).toEqual({ enabled: true, voice: { words: 23, quiet_seconds: 0.5, extra: 'kept' }, meeting: { words: 150, quiet_seconds: 30 }, other: true })
+  expect(JSON.parse(text)).toEqual({ enabled: true, voice: { words: 23, quiet_seconds: 0.5, extra: 'kept' }, meeting: { words: 150, quiet_seconds: 10 }, other: true })
   expect(api.load).toHaveBeenCalledTimes(1)
   act(() => root.unmount())
 })
