@@ -9,7 +9,7 @@
 // five readings at their left; Listening off draws no mic side and an idle
 // speaker no speaker side. The mic text and the speaker text are buttons:
 // a click, or Enter once the band has the focus (ctrl+x tab), toggles that mute.
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 type Ref = { fiber_id: string; name?: string } | null
 type Voice = {
@@ -54,7 +54,12 @@ function clipWords(s: string, n: number): string {
   const space = tail.indexOf(' ')
   return '…' + (space >= 0 && space < tail.length - 1 ? tail.slice(space + 1) : tail)
 }
-const glyph = (db: number) => GLYPHS[Math.min(4, Math.max(0, Math.floor(((db + 50) / 40) * 5)))]
+// A level's glyph, -50 dBFS (the gate) to -10, and its theme colour: dim at
+// the floor, green through the middle, amber from -20 dBFS.
+const step = (db: number) => Math.min(4, Math.max(0, Math.floor(((db + 50) / 40) * 5)))
+const tone = (i: number) => (i === 0 ? 'inactive' : i < 3 ? 'success' : 'warning')
+// hark's speaker labels (`me:`, `S1:`), wherever a turn starts in the words.
+const LABEL = /((?:^|\s)(?:me|S\d+):)/
 const here = () => !!(voice?.available && voice.enabled && !voice.muted && mine(voice.target?.fiber_id))
 const flat = (s: string) => s.replace(/\s+/g, ' ').trim()
 const mine = (id?: string) => !!id && self.includes(id)
@@ -114,6 +119,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
 
     let spk = ''
     if (speak?.available) {
@@ -127,36 +133,49 @@ export const register: Register = on => {
     const width = e.props.bodyColumns
     const room = width - (spk ? spk.length + 3 : 0)
     let mic = ''
+    let parts: RenderChildren[] = []
     if (voice?.available && voice.enabled) {
       const v = voice
       if (v.muted) mic = '🎤 muted'
       else if (!mine(v.target?.fiber_id)) mic = clip('🎤 → ' + (v.target?.name ?? v.target?.fiber_id ?? 'nowhere'), room)
       else {
-        const words = flat(
+        const said = flat(
           (mine(v.pending?.fiber_id) && v.pending!.text) ||
             (mine(v.preview?.fiber_id) && v.preview!.text) ||
             v.held?.find(h => mine(h.fiber_id))?.text ||
             '',
         )
-        const ticker = levels.map(glyph).join('')
-        mic = ticker && words ? ticker + ' ' + clipWords(words, room - ticker.length - 1) : ticker || clipWords(words, room)
+        const steps = levels.map(step)
+        const words = clipWords(said, room - (steps.length ? steps.length + 1 : 0))
+        mic = [steps.map(i => GLYPHS[i]).join(''), words].filter(Boolean).join(' ')
+        parts = [
+          ...steps.map((i, k) => <Text key={`l${k}`} color={tone(i)} dimColor={i === 0}>{GLYPHS[i]}</Text>),
+          steps.length && words ? ' ' : '',
+          ...words.split(LABEL).filter(Boolean).map((w, k) =>
+            LABEL.test(w) ? <Text key={`w${k}`} color="suggestion">{w}</Text> : <Text key={`w${k}`} dimColor>{w}</Text>,
+          ),
+        ].filter(x => x !== '')
       }
     }
 
     if (!mic && !spk) return next(e)
-    const { Box, Button } = $.ui.resolve(e)
+    const speaking = !!speak?.speaking && !speak.muted
 
     return (
       <Box flexDirection="row" width={width}>
         <Box flexGrow={1}>
           {mic ? (
-            <Button key="mic" plain dimColor label={mic}
-              onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)} />
+            <Button key="mic" plain dimColor={!parts.length} label={mic}
+              onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)}>
+              {parts.length ? parts : mic}
+            </Button>
           ) : null}
         </Box>
         {spk ? (
-          <Button key="speaker" plain dimColor label={spk}
-            onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)} />
+          <Button key="speaker" plain label={spk}
+            onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
+            {speaking ? <Text color="claude">{spk}</Text> : <Text dimColor>{spk}</Text>}
+          </Button>
         ) : null}
       </Box>
     )

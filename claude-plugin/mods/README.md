@@ -32,6 +32,11 @@ Speaker side, right-aligned; the line itself is never shown:
 
 With nothing on either side the band is not drawn.
 
+**Colour**, from the theme so light and dark both hold: a ticker glyph at the
+floor is dim, green (`success`) through the middle, amber (`warning`) from
+-20 dBFS; hark's speaker labels (`me:`, `S1:`) are `suggestion`; the words
+and every other state are dim, except `🔈 <voice>` while speaking, in `claude`.
+
 **Keys.** Click the mic text or the speaker text to toggle that mute. From the
 keyboard: `ctrl+x tab` focuses the band, `tab` moves between the two, and
 Enter toggles the focused one. A single-letter hotkey would make the

@@ -104,3 +104,18 @@ test('Listening off and the speaker idle draw nothing', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /engine/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('the ticker and the speaker labels take theme colours', async ($, on) => {
+  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, pending: { fiber_id: SELF, words: 4, text: 'me: hello S1: hi' }, level: { mic: -15, at: '' } },
+    { ...SPEAK, speaking: { fiber_id: 'X', voice: 'aria', text: 'a line' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(150)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'mic')).toBe('▇▇ me: hello S1: hi')
+  expect((await ui.find({ type: 'Text', text: '▇' }))?.props).toMatchObject({ color: 'warning' })
+  expect((await ui.find({ type: 'Text', text: 'me:' }))?.props).toMatchObject({ color: 'suggestion' })
+  expect((await ui.find({ type: 'Text', text: ' S1:' }))?.props).toMatchObject({ color: 'suggestion' })
+  expect((await ui.find({ type: 'Text', text: ' hello' }))?.props).toMatchObject({ dimColor: true })
+  expect((await ui.find({ type: 'Text', text: '🔈 aria' }))?.props).toMatchObject({ color: 'claude' })
+  await ui.unmount()
+})
