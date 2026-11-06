@@ -44,18 +44,18 @@ afterEach(() => { dock?.reset(); document.body.replaceChildren(); vi.restoreAllM
 
 async function mount(patch: Partial<KanbanCard> = {}): Promise<void> {
   const meeting = { current: () => null, canJoin: () => true, modes: () => ['call'], join: vi.fn() }
-  dock = new Dock('', vi.fn(), undefined, undefined, { voice: { controller: voice, open: vi.fn() }, meeting: meeting as never })
+  dock = new Dock('', vi.fn(), undefined, undefined, { voice: { controller: voice }, meeting: meeting as never })
   const band = dock.bandFor(card({ id: 'task', uid: 'uid', originId: 'owner', shuttleHost: 'owner', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', sessionUuid: 'session', ...patch }))
   root = band.el; document.body.append(root); await flush()
 }
 
-it('fills the editable box and says Voice · Held on the existing Hark control', async () => {
+it('fills the editable box and keeps one Listening control as the worker warms', async () => {
   await mount()
   expect(field().value).toBe('me: original words')
-  expect(root.querySelector('.kbn-ctl-meet-arm')!.textContent).toBe('Voice · Held')
+  expect(root.querySelector('.kbn-ctl-meet-arm')!.textContent).toBe('Listening · Task')
   expect(root.querySelectorAll('.kbn-ctl-meet')).toHaveLength(1)
   voice.status = { ...server, cold: false }; notify()
-  expect(root.querySelector('.kbn-ctl-meet-arm')!.textContent).toBe('Here')
+  expect(root.querySelector('.kbn-ctl-meet-arm')!.textContent).toBe('Listening · Task')
 })
 
 it.each([
