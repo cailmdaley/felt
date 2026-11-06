@@ -338,7 +338,8 @@ defmodule Shuttle.RexFocusTest do
               ]
             end,
             title: fn -> {:ok, "zsh ~ - other/session"} end,
-            select: fn sid, wid -> send(parent, {:select, sid, wid}) end
+            select: fn host, sid, wid -> send(parent, {:select, host, sid, wid}) end,
+            locate: fn _, _, _ -> flunk("a local reveal never looks on another host") end
           ],
           overrides
         )
@@ -347,16 +348,68 @@ defmodule Shuttle.RexFocusTest do
 
     task = %{"fiber_id" => "01TASK", "origin" => "test-host"}
     assert :ok = reveal.(task, [])
-    assert_receive {:select, "session:a", "window:a"}
+    assert_receive {:select, nil, "session:a", "window:a"}
     assert :ok = reveal.(task, title: fn -> {:error, :unavailable} end)
-    assert_receive {:select, "session:a", "window:a"}
+    assert_receive {:select, nil, "session:a", "window:a"}
 
     assert {:skip, :shown} = reveal.(task, title: fn -> {:ok, "task - project/task"} end)
     assert {:skip, :off} = reveal.(task, active?: fn -> false end)
     assert {:skip, :unbound} = reveal.(%{task | "origin" => "elsewhere"}, [])
     assert {:skip, :unbound} = reveal.(%{"fiber_id" => "unbound", "origin" => "test-host"}, [])
     assert {:skip, :unbound} = reveal.(%{}, [])
-    refute_receive {:select, _, _}
+    refute_receive {:select, _, _, _}
+  end
+
+  test "reveal finds a remote worker's window on its host's Rex server by its labels" do
+    parent = self()
+
+    fibers = [
+      %{
+        "id" => "01HUB",
+        "uid" => "01HUB",
+        "slug" => "science/unions/unions-hub",
+        "shuttle" => %{"host" => "fir"}
+      },
+      %{
+        "id" => "01CHILD",
+        "uid" => "01CHILD",
+        "slug" => "science/unions/unions-hub/onecov",
+        "shuttle" => %{"host" => "fir"}
+      }
+    ]
+
+    reveal = fn params, overrides ->
+      RexFocus.reveal(
+        params,
+        Keyword.merge(
+          [
+            active?: fn -> true end,
+            own_host: "mac",
+            fibers: fn -> fibers end,
+            title: fn -> {:ok, "task - project/task"} end,
+            locate: fn host, session, window ->
+              send(parent, {:locate, host, session, window})
+              {:ok, "session:f", "window:c"}
+            end,
+            select: fn host, sid, wid -> send(parent, {:select, host, sid, wid}) end
+          ],
+          overrides
+        )
+      )
+    end
+
+    child = %{"fiber_id" => "01CHILD", "origin" => "fir"}
+    assert :ok = reveal.(child, [])
+    assert_receive {:locate, "fir", "unions/unions-hub", "└ onecov"}
+    assert_receive {:select, "fir", "session:f", "window:c"}
+
+    assert {:skip, :shown} =
+             reveal.(child, title: fn -> {:ok, "\u2060└ onecov - unions/unions-hub"} end)
+
+    assert {:skip, :unbound} = reveal.(child, locate: fn _, _, _ -> nil end)
+    assert {:skip, :unbound} = reveal.(%{child | "origin" => "nibi"}, [])
+    assert {:skip, :off} = reveal.(child, active?: fn -> false end)
+    refute_receive {:select, _, _, _}
   end
 
   test "the frontmost read recognises Rex by bundle and counts a failed read as Rex" do

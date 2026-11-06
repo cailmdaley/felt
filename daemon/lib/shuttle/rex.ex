@@ -32,9 +32,10 @@ defmodule Shuttle.Rex do
     end
   end
 
-  def flags do
+  @doc "CLI flags for `server`: this host's server by default, else another host's by its Rex label."
+  def flags(server \\ server()) do
     ["--autostart=false", "--timeout", "5s"] ++
-      case server() do
+      case server do
         nil -> []
         endpoint -> ["-S", endpoint]
       end
@@ -50,7 +51,8 @@ defmodule Shuttle.Rex do
     with {:ok, output} <-
            command(runner, ["api", "call"] ++ session ++ [method, "-"],
              input: Jason.encode!(args) <> "\n",
-             input_eof: true
+             input_eof: true,
+             server: Keyword.get_lazy(opts, :server, &server/0)
            ),
          {:ok, result} when is_map(result) <- Jason.decode(output) do
       {:ok, result}
@@ -62,6 +64,8 @@ defmodule Shuttle.Rex do
   end
 
   def command(runner, args, opts \\ []) do
+    {server, opts} = Keyword.pop_lazy(opts, :server, &server/0)
+
     case bin() do
       nil ->
         {:error, {:unknown, "Rex executable not found"}}
@@ -69,7 +73,7 @@ defmodule Shuttle.Rex do
       executable ->
         runner.cmd(
           executable,
-          flags() ++ args,
+          flags(server) ++ args,
           Keyword.merge([stderr_to_stdout: true, timeout_ms: 6_000], opts)
         )
         |> classify()
@@ -105,8 +109,8 @@ defmodule Shuttle.Rex do
 
   def whoami(runner), do: json_command(runner, ["whoami", "--json"])
 
-  def sessions(runner),
-    do: collection(call(runner, "session.list", %{}), "sessions", "session_id")
+  def sessions(runner, opts \\ []),
+    do: collection(call(runner, "session.list", %{}, opts), "sessions", "session_id")
 
   def blocks(runner, sid),
     do: collection(call(runner, "session.list_blocks", %{}, session: sid), "blocks", "block_id")
@@ -119,8 +123,8 @@ defmodule Shuttle.Rex do
 
   def create(runner, spec), do: call(runner, "session.create", spec)
 
-  def windows(runner, sid) do
-    case call(runner, "session.view", %{}, session: sid) do
+  def windows(runner, sid, opts \\ []) do
+    case call(runner, "session.view", %{}, Keyword.put(opts, :session, sid)) do
       {:ok, view} -> {:ok, view["windows"] || []}
       error -> error
     end
@@ -170,9 +174,9 @@ defmodule Shuttle.Rex do
   def send_key(runner, sid, bid, key),
     do: command(runner, ["send-key", "-s", sid, "-b", bid, key])
 
-  def app_client(runner) do
+  def app_client(runner, opts \\ []) do
     with {:ok, %{"clients" => clients}} when is_list(clients) <-
-           json_command(runner, ["client", "ls", "--json"]) do
+           json_command(runner, ["client", "ls", "--json"], opts) do
       case Enum.find(clients, &match?(%{"info" => %{"kind" => "app"}}, &1)) do
         %{"client_id" => id} -> {:ok, id}
         nil -> {:error, :not_found}
@@ -184,18 +188,23 @@ defmodule Shuttle.Rex do
     end
   end
 
-  def select(runner, client, sid, wid \\ nil),
+  def select(runner, client, sid, wid \\ nil, opts \\ []),
     do:
-      call(runner, "client.perform", %{
-        "client_id" => client,
-        "action" => "session.select",
-        "args" =>
-          if(wid, do: %{"session_id" => sid, "window_id" => wid}, else: %{"session_id" => sid}),
-        "timeout_ms" => 5_000
-      })
+      call(
+        runner,
+        "client.perform",
+        %{
+          "client_id" => client,
+          "action" => "session.select",
+          "args" =>
+            if(wid, do: %{"session_id" => sid, "window_id" => wid}, else: %{"session_id" => sid}),
+          "timeout_ms" => 5_000
+        },
+        opts
+      )
 
-  defp json_command(runner, args) do
-    with {:ok, output} <- command(runner, args),
+  defp json_command(runner, args, opts \\ []) do
+    with {:ok, output} <- command(runner, args, opts),
          {:ok, result} when is_map(result) <- Jason.decode(output) do
       {:ok, result}
     else

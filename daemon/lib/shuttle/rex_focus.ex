@@ -138,30 +138,84 @@ defmodule Shuttle.RexFocus do
   def target(_, _, _), do: nil
 
   @doc """
-  Selects the local Rex worker bound to `fiber_id`, bringing Rex forward.
-  Returns `:ok` when Rex was asked to show it, otherwise `{:skip, reason}`:
-  `:off` when voice is off or a meeting holds the mic, `:unbound` when the
-  fiber has no local worker, `:shown` when Rex's front window already shows it.
+  Selects the Rex worker for `fiber_id` and `origin`, bringing Rex forward.
+  A local worker is found by its binding; a worker on another host by its
+  window and session labels on that host's Rex server, which the app shows
+  under the host's name. Returns `:ok` when Rex was asked to show it,
+  otherwise `{:skip, reason}`: `:off` when voice is off or a meeting holds the
+  mic, `:unbound` when no worker window is found, `:shown` when Rex's front
+  window already shows it.
   """
   def reveal(params, opts \\ []) do
     following? = Keyword.get(opts, :active?, &following?/0)
+    own = Keyword.get_lazy(opts, :own_host, &Shuttle.MeetingRouter.own_host/0)
+
+    cond do
+      not following?.() -> {:skip, :off}
+      params["origin"] in [nil, "", own] -> reveal_local(params, opts)
+      true -> reveal_remote(params, opts)
+    end
+  end
+
+  defp reveal_local(params, opts) do
     bindings = Keyword.get(opts, :bindings, &Shuttle.Terminal.RexBindings.read/0)
     fibers = Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0)
     title = Keyword.get(opts, :title, &read_title/0)
-    select = Keyword.get(opts, :select, &select/2)
+    select = Keyword.get(opts, :select, &select/3)
 
-    with {:on, true} <- {:on, following?.()},
-         {:ok, doc} <- bindings.(),
+    with {:ok, doc} <- bindings.(),
          {:bound, %{"session_id" => sid, "window_id" => wid}} <-
            {:bound, binding_for(params, doc, fibers.())},
          {:shown, false} <- {:shown, shows?(title.(), doc, wid)} do
-      select.(sid, wid)
+      select.(nil, sid, wid)
       :ok
     else
-      {:on, _} -> {:skip, :off}
       {:bound, _} -> {:skip, :unbound}
       {:shown, _} -> {:skip, :shown}
       {:error, _} -> {:skip, :unbound}
+    end
+  end
+
+  defp reveal_remote(%{"fiber_id" => id, "origin" => host}, opts) do
+    fibers = Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0).()
+    title = Keyword.get(opts, :title, &read_title/0)
+    locate = Keyword.get(opts, :locate, &locate/3)
+    select = Keyword.get(opts, :select, &select/3)
+
+    with %{} = fiber <-
+           Enum.find(fibers, fn f ->
+             id in [f["id"], f["uid"], f["slug"]] and get_in(f, ["shuttle", "host"]) == host
+           end),
+         {window, session} = remote_labels(fiber, fibers),
+         {:shown, false} <- {:shown, shown_title?(title.(), window <> " - " <> session)},
+         {:ok, sid, wid} <- locate.(host, session, window) do
+      select.(host, sid, wid)
+      :ok
+    else
+      {:shown, true} -> {:skip, :shown}
+      _ -> {:skip, :unbound}
+    end
+  end
+
+  defp reveal_remote(_, _), do: {:skip, :unbound}
+
+  defp shown_title?({:ok, title}, expected), do: normalize_title(title) == expected
+  defp shown_title?(_, _), do: false
+
+  # The one window labelled `window` in the session labelled `session` on
+  # `host`'s Rex server.
+  defp locate(host, session, window) do
+    runner = Shuttle.Runner.Default
+
+    with {:ok, sessions} <- Shuttle.Rex.sessions(runner, server: host),
+         [%{"session_id" => sid}] <-
+           Enum.filter(sessions, &(normalize_title(&1["label"] || "") == session)),
+         {:ok, windows} <- Shuttle.Rex.windows(runner, sid, server: host),
+         [%{"window_id" => wid}] <-
+           Enum.filter(windows, &(normalize_title(&1["label"] || "") == window)) do
+      {:ok, sid, wid}
+    else
+      _ -> nil
     end
   end
 
@@ -189,11 +243,13 @@ defmodule Shuttle.RexFocus do
   defp shows?({:ok, title}, doc, wid), do: match?(%{window_id: ^wid}, title_binding(title, doc))
   defp shows?(_, _, _), do: false
 
-  defp select(sid, wid) do
+  # `host` nil is this host's Rex server; another host's is addressed by name.
+  defp select(host, sid, wid) do
     runner = Shuttle.Runner.Default
+    server = if host, do: [server: host], else: []
 
-    with {:ok, client} <- Shuttle.Rex.app_client(runner),
-         {:ok, _} <- Shuttle.Rex.select(runner, client, sid, wid),
+    with {:ok, client} <- Shuttle.Rex.app_client(runner, server),
+         {:ok, _} <- Shuttle.Rex.select(runner, client, sid, wid, server),
          do: Shuttle.Terminal.Rex.activate_app(runner)
   end
 
@@ -228,10 +284,8 @@ defmodule Shuttle.RexFocus do
       end)
       |> Enum.uniq_by(&{&1["uid"] || &1["id"], &1["shuttle"]["host"]})
       |> Enum.filter(fn fiber ->
-        family = RexTree.family(fiber["slug"] || fiber["id"], fibers)
-        [%{label: label}] = RexTree.layout([family])
-        session = RexTree.display_label(RexTree.session_label(family.family))
-        normalize_title(RexTree.display_label(label) <> " - " <> session) == title
+        {window, session} = remote_labels(fiber, fibers)
+        window <> " - " <> session == title
       end)
 
     case matches do
@@ -271,6 +325,17 @@ defmodule Shuttle.RexFocus do
       [match] -> match
       _ -> nil
     end
+  end
+
+  # The window and session labels a worker's own daemon projects for it,
+  # normalized as titles are.
+  defp remote_labels(fiber, fibers) do
+    alias Shuttle.Terminal.RexTree
+    family = RexTree.family(fiber["slug"] || fiber["id"], fibers)
+    [%{label: label}] = RexTree.layout([family])
+
+    {normalize_title(RexTree.display_label(label)),
+     normalize_title(RexTree.display_label(RexTree.session_label(family.family)))}
   end
 
   defp normalize_title(title), do: title |> String.replace("\u2060", "") |> String.trim()
