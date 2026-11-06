@@ -8,7 +8,7 @@ What people say in a conversation is a candidate, not a decision: propose promot
 
 Live voice sends microphone speech to the constitution most recently viewed on the board.
 You stay that constitution's worker; this is conversational input, not a request to file a meeting.
-Each batch arrives as ordinary input, with a speaker label on every spoken line and no timestamps. It stays off the family board.
+Each batch arrives as ordinary input, with a speaker label on every spoken line and no timestamps. The family board counts these turns per worker and leaves the words to `shuttle board --spoken`; meeting batches stay off it.
 `me` identifies a voiceprint match to the enrolled user; other labels may be the user or people in the room.
 Use the conversation to judge who is addressing whom: a colleague's request to you counts too.
 Don't filter requests by speaker label or treat these words as a teammate's message.

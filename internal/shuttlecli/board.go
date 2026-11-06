@@ -136,6 +136,55 @@ type boardRow struct {
 	ToMember  string `json:"to_member"`
 	Actor     string `json:"actor"`
 	Delivered bool   `json:"delivered"`
+	Summary   string `json:"-"`
+}
+
+// foldSpoken replaces each unbroken stretch of spoken turns with one row that
+// counts them per worker, so the board says who was spoken to and not what.
+func foldSpoken(rows []boardRow) []boardRow {
+	var out []boardRow
+	for i := 0; i < len(rows); {
+		if rows[i].Kind != "spoken" {
+			out = append(out, rows[i])
+			i++
+			continue
+		}
+		end := i
+		for end < len(rows) && rows[end].Kind == "spoken" {
+			end++
+		}
+		out = append(out, spokenSummary(rows[i:end]))
+		i = end
+	}
+	return out
+}
+
+func spokenSummary(run []boardRow) boardRow {
+	counts, order := map[string]int{}, []string{}
+	for _, row := range run {
+		if counts[row.Member] == 0 {
+			order = append(order, row.Member)
+		}
+		counts[row.Member]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, member := range order {
+		n, noun := counts[member], "messages"
+		if n == 1 {
+			noun = "message"
+		}
+		if member == "" {
+			member = "someone"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s to %s", n, noun, member))
+	}
+	last := run[len(run)-1]
+	actor := last.Actor
+	if actor == "" {
+		actor = "someone"
+	}
+	return boardRow{boardRecord: boardRecord{ID: last.ID, Timestamp: last.Timestamp, Kind: "spoken"},
+		Summary: actor + " sent " + strings.Join(parts, ", ")}
 }
 
 type boardFamily struct {
@@ -173,6 +222,11 @@ func boardPhrase(r boardRow) string {
 		return member + " posted"
 	case "human":
 		return actor + " wrote to " + member + " at the thread"
+	case "spoken":
+		if r.Summary != "" {
+			return r.Summary
+		}
+		return actor + " said to " + member
 	case "answered":
 		return actor + " answered " + member + "'s question at the thread"
 	case "asked":
@@ -197,7 +251,7 @@ func boardPhrase(r boardRow) string {
 
 func (a *app) boardCmd() *cobra.Command {
 	var since string
-	var all bool
+	var all, spoken bool
 	cmd := &cobra.Command{Use: "board [fiber]", Short: "Read the family board", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		q := url.Values{}
 		if all {
@@ -240,7 +294,16 @@ func (a *app) boardCmd() *cobra.Command {
 		if err := json.Unmarshal(body, &response); err != nil {
 			return fmt.Errorf("parsing family board: %w", err)
 		}
-		for _, row := range response.Records {
+		rows := foldSpoken(response.Records)
+		if spoken {
+			rows = rows[:0]
+			for _, row := range response.Records {
+				if row.Kind == "spoken" {
+					rows = append(rows, row)
+				}
+			}
+		}
+		for _, row := range rows {
 			line := time.UnixMilli(row.Timestamp).Local().Format("15:04") + "  " + boardPhrase(row)
 			if row.Text != "" {
 				line += ": " + boardSingleLine(row.Text)
@@ -251,6 +314,7 @@ func (a *app) boardCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&since, "since", "", "Show records since a duration or RFC3339 timestamp")
 	cmd.Flags().BoolVar(&all, "all", false, "Show records across all families")
+	cmd.Flags().BoolVar(&spoken, "spoken", false, "Show live-voice turns in full instead of counted")
 	cmd.AddCommand(&cobra.Command{
 		Use: "append", Hidden: true, Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

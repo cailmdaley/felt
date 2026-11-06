@@ -116,7 +116,7 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 		r.Text = "Q: " + question + " — A: " + input.Prompt
 	}
 	if r.Kind == "human" && spokenPrompt(input.Prompt) {
-		return
+		r.Kind = "spoken"
 	}
 	a.recordBoard(r)
 }
@@ -125,8 +125,8 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 // the words. A name assigned with `hark name` doesn't match and stays on the board.
 var spokenLine = regexp.MustCompile(`^(me|S\d+|S\?): `)
 
-// spokenPrompt reports live voice, which reaches its own worker and stays off
-// the family board. Spoken answers still clear a question.
+// spokenPrompt reports live voice. Its words reach their worker in full; the
+// board shows others only who was spoken to. Spoken answers still clear a question.
 func spokenPrompt(prompt string) bool {
 	return spokenLine.MatchString(strings.TrimLeft(prompt, " \t\r\n"))
 }
@@ -224,6 +224,7 @@ func (a *app) boardDigest(harness, session string) (text string, acknowledge fun
 	if response.Family != nil {
 		label = response.Family.Label
 	}
+	fresh = foldSpoken(fresh)
 	var out strings.Builder
 	fmt.Fprintf(&out, "Family board (%s), new since your last turn:\n", label)
 	// The newest lines carry the current state; older ones are one command away.

@@ -86,3 +86,23 @@ func TestBoardText(t *testing.T) {
 		t.Fatalf("invalid trimmed text: %q", got)
 	}
 }
+
+func TestFoldSpokenCountsEachStretchPerWorker(t *testing.T) {
+	spoken := func(member, text string) boardRow {
+		return boardRow{boardRecord: boardRecord{Kind: "spoken", Text: text}, Actor: "Cail", Member: member}
+	}
+	rows := foldSpoken([]boardRow{
+		spoken("hark", "secret one"), spoken("vizier", "secret two"), spoken("hark", "secret three"),
+		{boardRecord: boardRecord{Kind: "post", Text: "kept"}, Member: "debug"},
+		spoken("hark", "secret four"),
+	})
+	var lines []string
+	for _, row := range rows {
+		lines = append(lines, boardDigestLine(row))
+	}
+	got := strings.Join(lines, "\n")
+	if len(rows) != 3 || !strings.Contains(got, "Cail sent 2 messages to hark, 1 message to vizier") ||
+		!strings.Contains(got, "Cail sent 1 message to hark") || !strings.Contains(got, "kept") || strings.Contains(got, "secret") {
+		t.Fatalf("folded board:\n%s", got)
+	}
+}
