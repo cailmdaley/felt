@@ -509,7 +509,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       persisted: config,
       error: nil,
       coordinator: Keyword.fetch!(opts, :coordinator),
-      poll_ms: Keyword.get(opts, :poll_ms, 1_000),
+      poll_ms: Keyword.get(opts, :poll_ms, 250),
       deliver: fn message ->
         GenServer.call(Keyword.fetch!(opts, :coordinator), {:deliver, message}, :infinity)
       end,
