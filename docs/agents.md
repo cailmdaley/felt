@@ -170,7 +170,9 @@ Pi's JavaScript handoff implementation is outside its approval boundary.
 `event.sh` runs asynchronously only on `SubagentStop`, which never touches mailbox or native receiver registrations.
 `SessionEnd` stays synchronous so its receiver withdrawal finishes before a resumed `SessionStart` registers a new receiver.
 `SessionStart`, `PreToolUse`, `PostToolUse`, and `UserPromptSubmit` stay synchronous for queued peer-message delivery.
-`Stop` never drains the mailbox.
+Claude `Stop` offers only messages rerouted from wake while busy and returns a blocking decision with the batch as its reason.
+A blocked Stop leaves the mailbox working and emits no terminal-status or activity-stream stop; an empty Stop marks idle under the same lock busy senders use.
+Context-only messages stay queued for a prompt or tool hook and never continue a turn.
 `Stop` and `Notification` also stay synchronous: the daemon folds state transitions in file order, so a late stop or notification can close a newer working turn.
 A late post can likewise reopen a stopped turn.
 Making those recorders asynchronous requires an ordering-aware daemon change, not just a hook flag.

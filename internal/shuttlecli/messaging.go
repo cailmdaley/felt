@@ -159,7 +159,8 @@ The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
 By default a busy Claude session receives context at its next prompt or tool
-hook; other sessions use their native wake path. --wake forces a native wake;
+hook, or continues at Stop to receive it before going idle. Other sessions use
+their native wake path. --wake forces a native wake;
 --context-only (or --wake=false) never starts a turn.
 
 An attachment-free --context-only fiber send uses its durable mailbox regardless

@@ -66,12 +66,75 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	}
 }
 
+func TestClaudeStopContinuesOnlyBusyMail(t *testing.T) {
+	t.Parallel()
+	env := messageHookEnv(t, "host")
+	events := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS", "on")
+	env.Set("SHUTTLE_EVENTS_FILE", events)
+	env.Set("SHUTTLE_BOARD", "off")
+	hook := func(name string) string {
+		t.Helper()
+		b, _ := json.Marshal(eventHookInput{HookEventName: name, Harness: "claude", SessionID: "s"})
+		var out bytes.Buffer
+		if err := newApp(env).runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	hook("SessionStart")
+	hook("UserPromptSubmit")
+	hook("PostToolUse") // the last tool has finished
+	send := func(id string, busy bool) {
+		t.Helper()
+		r := messaging.Request{Address: "shuttle://host/claude/s", Text: id, MessageID: id, Wake: busy, ContextIfBusy: busy}
+		if receipt, err := messaging.Send(context.Background(), env, "host", r); err != nil || receipt.Status != messaging.StatusQueued {
+			t.Fatalf("send: %+v %v", receipt, err)
+		}
+	}
+	send("context-only", false)
+	send("late-busy", true)
+	var stop struct{ Decision, Reason string }
+	if err := json.Unmarshal([]byte(hook("Stop")), &stop); err != nil {
+		t.Fatal(err)
+	}
+	if stop.Decision != "block" || !bytes.Contains([]byte(stop.Reason), []byte("late-busy")) || bytes.Contains([]byte(stop.Reason), []byte("context-only")) {
+		t.Fatalf("Stop: %+v", stop)
+	}
+	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "working" {
+		t.Fatalf("state=%s %v", state, err)
+	}
+	lines, _ := os.ReadFile(events)
+	if bytes.Contains(lines, []byte(`"type":"stop"`)) {
+		t.Fatalf("blocked Stop closed the board turn: %s", lines)
+	}
+	// A second batch during the continuation must still take the mailbox.
+	send("continued-busy", true)
+	if err := json.Unmarshal([]byte(hook("Stop")), &stop); err != nil || !bytes.Contains([]byte(stop.Reason), []byte("continued-busy")) {
+		t.Fatalf("second batch: %+v %v", stop, err)
+	}
+	if out := hook("Stop"); out != "" {
+		t.Fatalf("empty Stop continued: %s", out)
+	}
+	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "idle" {
+		t.Fatalf("state=%s %v", state, err)
+	}
+	lines, _ = os.ReadFile(events)
+	if bytes.Count(lines, []byte(`"type":"stop"`)) != 1 {
+		t.Fatalf("final Stop not recorded once: %s", lines)
+	}
+	if out := hook("UserPromptSubmit"); !bytes.Contains([]byte(out), []byte("context-only")) {
+		t.Fatalf("context-only lost: %s", out)
+	}
+}
+
 func TestSubagentStopNeverTouchesReceiverRegistrations(t *testing.T) {
 	for _, harness := range []string{"claude", "codex", "pi"} {
 		t.Run(harness, func(t *testing.T) {
 			env := messageHookEnv(t, "host")
 			events := filepath.Join(t.TempDir(), "events.jsonl")
 			env.Set("SHUTTLE_EVENTS", "")
+			env.Set("SHUTTLE_EVENTS", "on")
 			env.Set("SHUTTLE_EVENTS_FILE", events)
 			hook := func(name, cwd string) {
 				t.Helper()

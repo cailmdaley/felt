@@ -377,7 +377,9 @@ to `claude`.
 
 A plain `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn; idle or unknown state uses the native wake path.
 The mailbox can deliver at the next prompt, before a tool, or after a tool, so the message can reach a worker mid-turn without Claude's native wrapper.
-If the turn ends before another eligible hook, the message remains queued until a later prompt; no wake or delivery deadline is guaranteed.
+At turn end, Stop drains busy-rerouted messages and continues with the batch as hook feedback, without the native wrapper.
+Only an empty Stop marks the receiver idle; explicit context-only messages never continue the turn.
+A dead receiver cannot accept new hook mail; retrying a busy-rerouted message still pending after receiver exit returns `unknown`.
 `--wake` forces the native wake path, including during a turn.
 `--context-only` or `--wake=false` queues context without starting a turn, regardless of state.
 Pi and Codex retain their existing paths.
