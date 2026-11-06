@@ -234,7 +234,7 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 				t.Fatal("successor session did not clear ask")
 			}
 			input.SessionID = "session"
-			input.Prompt = "[Shuttle message machine]"
+			input.Prompt = "[from work/fiber]\nmachine"
 			runPrompt()
 			env.Set("SHUTTLE_BOARD", "off")
 			input.SessionID = "resume"

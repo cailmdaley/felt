@@ -107,7 +107,7 @@ function matchedReceipts(
 export class TranscriptModel {
   private readonly turnList: Turn[] = []
   private readonly tools = new Map<string, ToolReference>()
-  private readonly messages = new Set<string>()
+  private readonly messages = new Map<string, number>()
   private readonly messagesByTool = new Map<string, MessageReference[]>()
   private readonly sourceRecords = new Map<number, { turn: Turn; start: number; count: number; entries: Entry[] }>()
   private sentFiles = new Map<string, SentFileNotice>()
@@ -122,11 +122,18 @@ export class TranscriptModel {
     return this.turnList
   }
 
+  /** A delivery re-offered to a conversation draws one row; each ledgered copy of an envelope draws its own. */
+  private admitMessage(entry: ShuttleMessage): boolean {
+    const rows = this.messages.get(entry.id) ?? 0
+    if (rows >= (entry.copies ?? 1)) return false
+    this.messages.set(entry.id, rows + 1)
+    return true
+  }
+
   append(entries: readonly Entry[]): void {
     for (const entry of entries) {
       if (entry.kind === 'shuttle-message') {
-        if (this.messages.has(entry.id)) continue
-        this.messages.add(entry.id)
+        if (!this.admitMessage(entry)) continue
       }
       if (entry.kind === 'usage') {
         if (entry.model) this.facts.model = entry.model
@@ -314,11 +321,10 @@ export class TranscriptModel {
     const start = source.entries.length ? source.turn.steps.indexOf(source.entries[0] as Step) : source.start
     if (start < 0) return undefined
     if (source.entries.some((entry, index) => source.turn.steps[start + index] !== entry)) return undefined
-    for (const entry of source.entries) if (entry.kind === 'shuttle-message') this.messages.delete(entry.id)
+    for (const entry of source.entries) if (entry.kind === 'shuttle-message') this.messages.set(entry.id, this.messages.get(entry.id)! - 1)
     const replacement = entries.filter((entry): entry is Exclude<Entry, { kind: 'prompt' | 'usage' | 'tool' | 'result' }> =>
       entry.kind !== 'prompt' && entry.kind !== 'usage' && entry.kind !== 'tool' && entry.kind !== 'result')
-      .filter(entry => entry.kind !== 'shuttle-message' || !this.messages.has(entry.id))
-    for (const entry of replacement) if (entry.kind === 'shuttle-message') this.messages.add(entry.id)
+      .filter(entry => entry.kind !== 'shuttle-message' || this.admitMessage(entry))
     const end = start + source.count
     if (source.turn.answer >= end) source.turn.answer += replacement.length - source.count
     else if (source.turn.answer >= start) source.turn.answer = -1

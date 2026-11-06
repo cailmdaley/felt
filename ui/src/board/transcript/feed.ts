@@ -1,4 +1,4 @@
-import type { MessageProvenance } from './messages.js'
+import { mentionsEnvelope, shuttleMessageParts, type MessageProvenance } from './messages.js'
 import { normalizeRecord, type Entry } from './records.js'
 
 export type StreamEnd = 'closed' | 'reset' | 'unsupported' | 'busy' | 'failed' | 'stopped'
@@ -82,7 +82,8 @@ export class TranscriptFeed {
   private provenancePrefetched = false
   private provenanceRetryTimer: ReturnType<typeof setTimeout> | null = null
   private provenanceRetryDelay = 500
-  private provenanceCandidates = new Set<string>()
+  /** Carrier records seen, by their exact text: a delivery's text is all a transcript keeps of it. */
+  private provenanceCandidates = new Map<string, number>()
   private provenanceGeneration = 0
   private candidateRecords = new Map<number, CandidateRecord>()
   private nextCandidateRecord = 0
@@ -343,6 +344,14 @@ export class TranscriptFeed {
     return null
   }
 
+  /** The ledger holds a delivery for every record of this text. */
+  private evidenced(text: string): boolean {
+    const ledger = [...this.provenance.values()]
+    const parts = shuttleMessageParts(text, ledger).filter(part => typeof part !== 'string')
+    const records = this.provenanceCandidates.get(text) ?? 0
+    return parts.length > 0 && parts.every(part => ledger.filter(item => item.envelope === part.envelope).length >= records)
+  }
+
   private async emitLines(lines: string[], epoch: number, slice = { started: now() }, evidence: EvidenceSnapshot = {}): Promise<void> {
     let batch: Entry[] = []
     let pendingCandidates: CandidateRecord[] = []
@@ -370,19 +379,19 @@ export class TranscriptFeed {
       if (line.trim()) {
         try {
           const value = JSON.parse(line) as unknown
-          const candidateIds = [...candidateMessageText(value).matchAll(/\[Shuttle message ([^\s\]\r\n]+)/g)].map(match => match[1])
+          const text = candidateMessageText(value)
           let record: CandidateRecord | undefined
-          if (candidateIds.length) {
-            const unseen = candidateIds.some(id => !this.provenanceCandidates.has(id))
-            for (const id of candidateIds) {
-              if (!this.provenanceCandidates.has(id)) this.provenanceGeneration++
-              this.provenanceCandidates.add(id)
-            }
-            if (unseen) this.provenanceNeeded = candidateIds.some(id => !this.provenance.has(id))
-            if (unseen && this.provenanceRetryTimer !== null) {
-              clearTimeout(this.provenanceRetryTimer)
-              this.provenanceRetryTimer = null
-              this.provenanceRetryDelay = 500
+          if (mentionsEnvelope(text)) {
+            this.provenanceCandidates.set(text, (this.provenanceCandidates.get(text) ?? 0) + 1)
+            const unseen = !this.evidenced(text)
+            if (unseen) {
+              this.provenanceGeneration++
+              this.provenanceNeeded = true
+              if (this.provenanceRetryTimer !== null) {
+                clearTimeout(this.provenanceRetryTimer)
+                this.provenanceRetryTimer = null
+                this.provenanceRetryDelay = 500
+              }
             }
             evidence.value ??= this.ensureProvenance(unseen)
             evidence.deadline ??= new Promise<void>(resolve => {
@@ -440,8 +449,6 @@ export class TranscriptFeed {
       if (added !== null && added > 0) {
         for (const record of this.candidateRecords.values()) {
           if (!record.emitted) continue
-          const ids = [...candidateMessageText(record.value).matchAll(/\[Shuttle message ([^\s\]\r\n]+)/g)].map(match => match[1])
-          if (!ids.some(id => this.provenance.has(id))) continue
           const entries = normalizeRecord(record.value, [...this.provenance.values()])
             .map(entry => ({ ...entry, sourceRecord: record.record }))
           if (JSON.stringify(entries) !== JSON.stringify(record.entries)) {
@@ -451,7 +458,7 @@ export class TranscriptFeed {
         }
       }
       if (requestGeneration < this.provenanceGeneration
-          && [...this.provenanceCandidates].some(id => !this.provenance.has(id))) {
+          && [...this.provenanceCandidates.keys()].some(text => !this.evidenced(text))) {
         void this.ensureProvenance(true)
       }
     }).catch(() => {
@@ -484,6 +491,7 @@ export class TranscriptFeed {
     this.lineOffset = 0
     this.decoder = new TextDecoder()
     this.pendingLine = ''
+    this.provenanceCandidates.clear()
   }
 
   private active(epoch: number): boolean {

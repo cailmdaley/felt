@@ -89,7 +89,7 @@ func TestClaudeNativeHeaderHasExactSenderAndFiberReplyTarget(t *testing.T) {
 		t.Fatalf("%#v %v", receipt, err)
 	}
 	frame := <-seen
-	if content := frame["message"].(map[string]any)["content"]; content != "[Shuttle message 825a0369 from work/fiber]\nhello" {
+	if content := frame["message"].(map[string]any)["content"]; content != "[from work/fiber]\nhello" {
 		t.Fatalf("header: %v", content)
 	}
 	if !strings.HasPrefix(frame["from"].(string), "uds:") {

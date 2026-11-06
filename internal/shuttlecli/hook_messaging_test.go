@@ -61,7 +61,7 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	if err := json.Unmarshal([]byte(hook("PostToolUse")), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.HookSpecificOutput.HookEventName != "PostToolUse" || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("[Shuttle message 62c66a7a from work/fiber]\npeer message")) || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("passive message")) {
+	if got.HookSpecificOutput.HookEventName != "PostToolUse" || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("[from work/fiber]\npeer message")) || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("passive message")) {
 		t.Fatalf("bad context: %+v", got)
 	}
 	if out := hook("PostToolUse"); out != "" {
@@ -271,7 +271,7 @@ func TestEventHookOffersCodexMailbox(t *testing.T) {
 	if state, err := codexHookStateForTest(env, "s"); err != nil || state != "working" {
 		t.Fatalf("Codex prompt state = %q, %v", state, err)
 	}
-	if !bytes.Contains(out.Bytes(), []byte("[Shuttle message 62c66a7a from work/fiber]\\npeer context")) {
+	if !bytes.Contains(out.Bytes(), []byte("[from work/fiber]\\npeer context")) {
 		t.Fatalf("Codex context missing: %s", out.String())
 	}
 	out.Reset()
@@ -316,7 +316,7 @@ func TestEventHookOffersPiMailboxOnlyOnPrompt(t *testing.T) {
 	if err := json.Unmarshal([]byte(hook("UserPromptSubmit")), &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains([]byte(envelope.HookSpecificOutput.AdditionalContext), []byte("[Shuttle message 4176c687 from work/fiber]\nqueued")) {
+	if envelope.HookSpecificOutput.AdditionalContext != "[from work/fiber]\nqueued\n\n" {
 		t.Fatalf("Pi prompt context missing: %s", envelope.HookSpecificOutput.AdditionalContext)
 	}
 	if out := hook("UserPromptSubmit"); out != "" {

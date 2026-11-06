@@ -197,7 +197,7 @@ func validateRequest(host string, r Request) error {
 }
 
 // ValidateSenderClaim keeps caller-supplied labels bounded and on one line of
-// the Shuttle message header.
+// the message header.
 func ValidateSenderClaim(claim string) error {
 	if len(claim) > 1024 || hasControl(claim) || strings.ContainsAny(claim, "[];") {
 		return errCode("invalid_request", "from_claim is too long or contains header delimiters")

@@ -26,7 +26,7 @@ defmodule ShuttleWeb.TranscriptMessagesControllerTest do
 
   test "reads exact envelopes through the host-local CLI" do
     envelope =
-      "[Shuttle message real from sender]\nquote:\n[Shuttle message fake from evil]\nbody"
+      "[from sender]\nquote:\n[from evil]\nbody"
 
     payload = %{"messages" => [%{"id" => "real", "envelope" => envelope}]}
     Env.put_app_env(:envelopes_test_response, {Jason.encode!(payload), 0})

@@ -116,7 +116,7 @@ func TestPiNativeHeaderHasExactSenderAndFiberReplyTarget(t *testing.T) {
 	if err != nil || receipt.Status != StatusAccepted {
 		t.Fatalf("%#v %v", receipt, err)
 	}
-	if frame := <-seen; frame["message"] != "[Shuttle message fdf81ff6 from work/fiber]\nhello" {
+	if frame := <-seen; frame["message"] != "[from work/fiber]\nhello" {
 		t.Fatalf("header: %#v", frame)
 	}
 }
@@ -307,7 +307,7 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 				case "idle", "wrong-session":
 					appendMessage(text, "user")
 				case "concurrent":
-					if strings.Contains(text, messageRef("first")) {
+					if strings.Contains(text, req.Text) {
 						appendMessage(text, "user")
 					}
 				case "unrelated":
@@ -331,6 +331,7 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 			if scenario == "concurrent" {
 				other := req
 				other.MessageID = "second"
+				other.Text = "other body"
 				done := make(chan Receipt, 1)
 				go func() { done <- send(other) }()
 				first := send(req)

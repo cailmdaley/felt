@@ -95,7 +95,9 @@ does not participate in worker execution.
 
 ## Message identity and handoffs
 
-A delivered message header keeps the sending session in `from` and shows a worker's fiber separately as `reply to <fiber>` (`reply_to` in JSON).
+A delivered message is its text under one header line: `[from life/vizier]`.
+A verified worker goes by the fiber a reply reaches (`reply_to` in JSON), and a verified session without a fiber by its address.
+Any other sender keeps `from` and shows a worker's fiber as `reply to <fiber>`: `[from unverified; claims to be life/vizier; reply to work/fiber]`.
 The sending CLI checks the daemon-exported `SHUTTLE_FIBER_PATH` against the caller's native session, then falls back to the local session ledger.
 An inherited dispatch path does not make a nested, unrelated session the fiber's worker.
 Native adapters and hook offers share the header formatter in `internal/messaging`; Claude's native wire `from` remains its UDS policy-receipt endpoint, while the content header carries the sender and fiber labels.

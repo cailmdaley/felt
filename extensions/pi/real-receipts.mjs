@@ -3,14 +3,12 @@
 // Uses a private daemon, tmux server, HOME and synthetic local model provider.
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const messageRef = (id) => createHash("sha256").update(id).digest("hex").slice(0, 8);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "felt-real-pi-receipts-"));
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 const agentDir = path.join(root, "agent");
@@ -256,8 +254,8 @@ try {
   await wait(1000);
   assert.equal((await deliver("idle", "Idle receipt probe")).delivered, true);
   const concurrent = await Promise.all([
-    deliver("concurrent-a", "Same concurrent body"),
-    deliver("concurrent-b", "Same concurrent body"),
+    deliver("concurrent-a", "Concurrent body a"),
+    deliver("concurrent-b", "Concurrent body b"),
   ]);
   assert.ok(
     concurrent.every(
@@ -266,9 +264,9 @@ try {
         ["accepted", "queued"].includes(body.receipt.status),
     ),
   );
-  for (const id of ["concurrent-a", "concurrent-b"]) {
+  for (const id of ["a", "b"]) {
     assert.equal(
-      (await deliver(id, "Same concurrent body")).receipt.status,
+      (await deliver(`concurrent-${id}`, `Concurrent body ${id}`)).receipt.status,
       "accepted",
     );
   }
@@ -298,21 +296,21 @@ try {
   );
   assert.equal(dropped.delivered, null);
   assert.equal(dropped.receipt.status, "unknown");
-  for (const id of [
-    "idle",
-    "concurrent-a",
-    "concurrent-b",
-    "active",
-    "mid-turn",
+  for (const body of [
+    "Idle receipt probe",
+    "Concurrent body a",
+    "Concurrent body b",
+    "Start a held model turn",
+    "Message during the held turn",
   ]) {
     assert.equal(
       entries().filter(
         (e) =>
           e.message?.role === "user" &&
-          text(e).startsWith(`[Shuttle message ${messageRef(id)} `),
+          text(e).endsWith(`]\n${body}`),
       ).length,
       1,
-      `one admitted row for ${id}`,
+      `one admitted row for ${body}`,
     );
   }
   assert.equal(

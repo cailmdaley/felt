@@ -1,4 +1,4 @@
-import { sentShuttleMessages, shuttleMessages, shuttleMessageParts, type MessageProvenance, type ShuttleMessage } from './messages.js'
+import { opensWithEnvelope, sentShuttleMessages, shuttleMessages, shuttleMessageParts, type MessageProvenance, type ShuttleMessage } from './messages.js'
 
 export type UsageEntry = {
   kind: 'usage'
@@ -339,7 +339,7 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
 function deliveredContext(text: string, time: number | undefined, provenance: readonly MessageProvenance[]): Entry[] {
   return shuttleMessageParts(text, provenance).flatMap<Entry>(part => {
     if (typeof part !== 'string') {
-      const messages = shuttleMessages(part.envelope, time, true, [part])
+      const messages = shuttleMessages(part.envelope, time, true, provenance)
       return messages.length ? messages : [event('Context', { text: part.envelope, detail: firstLine(part.envelope) }, time)]
     }
     const rest = part.trim()
@@ -590,7 +590,7 @@ export function normalizeRecord(raw: unknown, provenance: readonly MessageProven
       if (entry.kind === 'prompt') return [entry]
       if (record.isMeta !== true) return [entry]
       const text = entry.text ?? ''
-      if (!/^\s*\[Shuttle message /.test(text)) return [entry]
+      if (!opensWithEnvelope(text)) return [entry]
       const messages = shuttleMessages(text, entry.at, true, provenance)
       if (!messages.length) return [entry]
       return deliveredContext(text, entry.at, provenance)

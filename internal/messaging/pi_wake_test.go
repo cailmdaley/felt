@@ -18,7 +18,7 @@ func TestPiConferHeaderHasExactSenderAndFiberReplyTarget(t *testing.T) {
 	if receipt, err := Send(context.Background(), env, "h", req); err != nil {
 		t.Fatalf("%#v %v", receipt, err)
 	}
-	if wire := <-seen; !strings.Contains(string(wire), "[Shuttle message bb07937f from work/fiber]\\nhello") {
+	if wire := <-seen; !strings.Contains(string(wire), "[from work/fiber]\\nhello") {
 		t.Fatalf("header: %s", wire)
 	}
 }

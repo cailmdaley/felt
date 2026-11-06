@@ -11,8 +11,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Claude and Pi hooks bridge terminal program status through tmux to supporting outer terminals; `SHUTTLE_PROGRAM_STATUS=off` disables it.
 - Shuttle supports Rex as its terminal backend with `"terminal": "rex"` in `host.json`.
 
+### Changed
+
+- Messages between sessions carry their text under one header, `[from life/vizier]`, with no hook preamble. An unverified sender reads `[from unverified; claims to be life/vizier]`.
+
 ### Fixed
 
+- The board draws delivered messages and thread notices as messages again, from transcripts in every header format.
 - Remote recovery respects a responding daemon regardless of whether it runs under
   tmux or a service supervisor. Booting daemons are allowed to finish, and queued
   restarts check liveness again before invoking the launcher.

@@ -716,11 +716,12 @@ An upstream response that ends normally closes without an error event.
 When a remote owner does not support streaming, the hub returns 501 `stream_unsupported`; clients can fall back to polling `/transcript/raw`.
 
 `/transcript/messages` accepts `session=<uuid>` and optional `host=<name>` with the same routing as transcript reads.
-It returns `{"messages":[{"id":"…","envelope":"[Shuttle message …]\\n…","thread":true}],"cursor":"…"}` from the host's private message records.
+It returns `{"messages":[{"id":"…","envelope":"[from …]\\n…","thread":true}],"cursor":"…"}` from the host's private message records.
 Pass the opaque `cursor` back as `since=<cursor>` to read changes; merge responses by message ID.
 Evidence is retained for fourteen days.
 The optional `thread` flag identifies a recorded lifecycle signal; a message id's spelling alone carries no lifecycle authority.
 Each `envelope` includes its complete body, so a quoted message header cannot create a second attributed row.
+An envelope carries no message ID; two messages with the same sender and text have equal envelopes and separate records.
 Missing evidence returns an empty array; an unreadable store returns 503.
 Evidence establishes the delivered envelope, while the native record's origin establishes whether the record is eligible for message attribution.
 Ordinary human prompt records retain their prompt boundary even when their text copies a recorded envelope.

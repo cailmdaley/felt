@@ -150,6 +150,9 @@ func TestEventMachinePrompt(t *testing.T) {
 		{"relayed teammate message", "Another Claude session sent a message: <teammate-message>hi", true},
 		{"system notification", "[SYSTEM NOTIFICATION] budget exhausted", true},
 		{"leading whitespace still matches", "\n  <task-notification> x", true},
+		{"another session's message", "[from life/vizier]\nFir is down.", true},
+		{"another session's unverified message", "[from unverified; claims to be life/vizier]\nFir is down.", true},
+		{"a message queued under the older header", "[Shuttle message 62c66a7a from work/fiber]\nhello", true},
 		// The dispatcher's opening prompt — the largest ongoing source of
 		// spines claiming a message nobody wrote. All three variants share
 		// this head; each is checked so a reworded tail cannot reopen the hole.

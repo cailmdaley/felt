@@ -150,6 +150,9 @@ type eventLine struct {
 // so the marker is always at the front; matching anywhere in the text would
 // demote a real message that quoted one of these.
 var machinePromptPrefixes = []string{
+	"[from ",
+	// The header another session's message carries in queued mail and resumed
+	// transcripts written before `[from `.
 	"[Shuttle message ",
 	"<task-notification",
 	"<teammate-message",

@@ -511,9 +511,10 @@ An environment override on the sending command supplies no sender authority.
 Callers without sufficient evidence are labelled `unverified`, with any asserted sender shown as a neutral claim.
 The CLI binds a resolved identity to the message with one-use local proof before it reaches the daemon.
 The proof store trusts the local operating-system account; it does not isolate processes with arbitrary access to that account’s files.
-A fiber worker also supplies `reply_to`, a separate fiber target shown as `reply to <fiber>` in every delivered header.
-At a local destination, `from` names the detected sending session.
-Across hosts, the destination labels the sender `unverified` and shows the original sender as a claim.
+A fiber worker also supplies `reply_to`, a separate fiber target.
+At a local destination, the delivered header names the detected sender as `[from <fiber>]`, or `[from <address>]` for a session without a fiber.
+A sender that is not a verified session keeps its label and adds the target: `[from shuttle; reply to <fiber>]`.
+Across hosts, the destination labels the sender `unverified` and shows the original sender as a claim: `[from unverified; claims to be <sender>]`.
 Only messages produced by the daemon itself are attributed to Shuttle.
 Reply with `shuttle message <fiber> ...` to reach the fiber's current worker across handoffs.
 Nonworker messages omit `reply_to`.

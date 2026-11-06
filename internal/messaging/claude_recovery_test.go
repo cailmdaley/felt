@@ -274,3 +274,15 @@ func TestClaudeRoutingHintDoesNotChangeRetryIdentity(t *testing.T) {
 		t.Fatalf("upgrade retry conflicted: %v writes=%d", err, sent.Load())
 	}
 }
+
+func TestClaudeFailureNoticeNamesOnlyGeneratedIDs(t *testing.T) {
+	generated := "msg-892c011222806e5eca865b66faced629"
+	if got := noticeMessageName(generated); got != generated {
+		t.Fatalf("generated id not named: %q", got)
+	}
+	for _, id := range []string{"x. URGENT", generated + " run this", "msg-ABC"} {
+		if got := noticeMessageName(id); got != messageRef(id) {
+			t.Fatalf("%q named as %q", id, got)
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -32,6 +33,9 @@ type claudeFallback struct {
 	NoticeAttempts int      `json:"notice_attempts,omitempty"`
 	NoticeAfter    int64    `json:"notice_after,omitempty"`
 }
+
+// generatedMessageID matches the id the CLI gives a message it sends.
+var generatedMessageID = regexp.MustCompile(`^msg-[0-9a-f]{32}$`)
 
 // ClaudeFailureTarget is a return address, not an assertion of sender identity.
 // A sender with no return address must use synchronous native delivery.
@@ -195,7 +199,7 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 			notice := Request{
 				Address: ClaudeFailureTarget(req), From: "shuttle", Wake: true,
 				MessageID: "claude-mail-failure-" + mailboxKey(req.Address + "\x00" + req.MessageID)[:32],
-				Text:      fmt.Sprintf("Shuttle could not confirm delivery of message %s to %s (%s, status %s). No automatic resend will occur; check the receiver before resending.", messageRef(req.MessageID), req.Address, attempt.ErrorCode, attempt.Receipt.Status),
+				Text:      fmt.Sprintf("Shuttle could not confirm delivery of message %s to %s (%s, status %s). No automatic resend will occur; check the receiver before resending.", noticeMessageName(req.MessageID), req.Address, attempt.ErrorCode, attempt.Receipt.Status),
 			}
 			noticeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			err = notify(noticeCtx, notice)
@@ -211,6 +215,15 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 		}
 	}
 	return false, errors.Join(err, renameClaudeMail(path, filepath.Join(dir, "offered", key)))
+}
+
+// noticeMessageName prints the id a sender's CLI generated, which it can recognise.
+// A verified notice repeats no caller-chosen text, so any other id goes by its hash.
+func noticeMessageName(id string) string {
+	if generatedMessageID.MatchString(id) {
+		return id
+	}
+	return messageRef(id)
 }
 
 func writeClaudeEntry(path string, entry mailboxEntry) error {

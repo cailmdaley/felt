@@ -58,6 +58,18 @@ describe('TranscriptModel', () => {
     expect(model.turns[0].steps.map(step => step.kind)).toEqual(['shuttle-message', 'text'])
   })
 
+  it('draws one row for a re-offered delivery and one for each ledgered copy of an envelope', () => {
+    const row = (copies?: number) => ({ kind: 'shuttle-message' as const, id: 'm-1', direction: 'received' as const, peer: 'vizier', text: 'Still down.', ...(copies ? { copies } : {}) })
+    const messageRows = (model: TranscriptModel) => model.turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    const reoffered = new TranscriptModel()
+    reoffered.append([{ kind: 'prompt', text: 'Go', images: 0, dispatch: false }, row(), row()])
+    expect(messageRows(reoffered)).toHaveLength(1)
+    const repeated = new TranscriptModel()
+    repeated.append([{ kind: 'prompt', text: 'Go', images: 0, dispatch: false }, row(2), row(2), row(2)])
+    expect(messageRows(repeated)).toHaveLength(2)
+  })
+
+
   it('keeps a late message replacement anchored after sent-file rows are inserted', () => {
     const model = new TranscriptModel()
     model.append([

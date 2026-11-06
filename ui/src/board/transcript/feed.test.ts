@@ -623,3 +623,47 @@ it('reads one evidence snapshot for a transcript spanning many decode slices', a
   await vi.waitFor(() => expect(entriesFrom(onEntries).filter(entry=>entry.kind==='shuttle-message').slice(-16)).toHaveLength(16))
   reader.dispose()
 })
+
+it('looks up each new delivery from a sender the ledger already knows', async () => {
+  const first = '[from life/vizier]\nFir is down.'
+  const second = '[from life/vizier]\nFir is up.'
+  const row = (content: string) => JSON.stringify({ type: 'attachment', attachment: { type: 'hook_additional_context', content } }) + '\n'
+  let bytes = new TextEncoder().encode(row(first))
+  const messages = [{ id: 'first-id', envelope: first }]
+  const { reader, onEntries } = feed(async input => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith('/messages')) return Response.json({ messages, cursor: 'c' })
+    const offset = Number(url.searchParams.get('offset'))
+    return response(bytes.slice(offset), 200, { 'x-transcript-offset': String(offset) })
+  }, { provenance: true })
+  await reader.read()
+  messages.push({ id: 'second-id', envelope: second })
+  bytes = new Uint8Array([...bytes, ...new TextEncoder().encode(row(second))])
+  await reader.read()
+  expect(entriesFrom(onEntries)).toEqual([
+    expect.objectContaining({ kind: 'shuttle-message', id: 'first-id', text: 'Fir is down.' }),
+    expect.objectContaining({ kind: 'shuttle-message', id: 'second-id', text: 'Fir is up.' }),
+  ])
+  reader.dispose()
+})
+
+it('learns of a second delivery of the same text and patches both records', async () => {
+  const envelope = '[from life/vizier]\nStill down.'
+  const row = JSON.stringify({ type: 'attachment', attachment: { type: 'hook_additional_context', content: envelope } }) + '\n'
+  let bytes = new TextEncoder().encode(row)
+  const messages = [{ id: 'first-id', envelope }]
+  const onReplaceRecord = vi.fn<(record: number, entries: Entry[]) => void>()
+  const { reader, onEntries } = feed(async input => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith('/messages')) return Response.json({ messages, cursor: 'c' })
+    const offset = Number(url.searchParams.get('offset'))
+    return response(bytes.slice(offset), 200, { 'x-transcript-offset': String(offset) })
+  }, { provenance: true, onReplaceRecord })
+  await reader.read()
+  messages.push({ id: 'second-id', envelope })
+  bytes = new Uint8Array([...bytes, ...new TextEncoder().encode(row)])
+  await reader.read()
+  expect(entriesFrom(onEntries).at(-1)).toMatchObject({ kind: 'shuttle-message', copies: 2 })
+  await vi.waitFor(() => expect(onReplaceRecord).toHaveBeenCalledWith(1, [expect.objectContaining({ kind: 'shuttle-message', copies: 2 })]))
+  reader.dispose()
+})
