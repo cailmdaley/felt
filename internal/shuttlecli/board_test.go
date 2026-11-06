@@ -87,14 +87,14 @@ func TestBoardText(t *testing.T) {
 	}
 }
 
-func TestFoldSpokenCountsEachStretchPerWorker(t *testing.T) {
-	spoken := func(member, text string) boardRow {
-		return boardRow{boardRecord: boardRecord{Kind: "spoken", Text: text}, Actor: "Cail", Member: member}
+func TestFoldHumanTurnsCountsEachStretchPerWorker(t *testing.T) {
+	turn := func(member, text string) boardRow {
+		return boardRow{boardRecord: boardRecord{Kind: "human", Text: text}, Actor: "Cail", Member: member}
 	}
-	rows := foldSpoken([]boardRow{
-		spoken("hark", "secret one"), spoken("vizier", "secret two"), spoken("hark", "secret three"),
+	rows := foldHumanTurns([]boardRow{
+		turn("hark", "secret one"), turn("vizier", "secret two"), turn("hark", "secret three"),
 		{boardRecord: boardRecord{Kind: "post", Text: "kept"}, Member: "debug"},
-		spoken("hark", "secret four"),
+		turn("hark", "secret four"),
 	})
 	var lines []string
 	for _, row := range rows {

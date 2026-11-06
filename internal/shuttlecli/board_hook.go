@@ -115,20 +115,7 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 		r.Kind = "answered"
 		r.Text = "Q: " + question + " — A: " + input.Prompt
 	}
-	if r.Kind == "human" && spokenPrompt(input.Prompt) {
-		r.Kind = "spoken"
-	}
 	a.recordBoard(r)
-}
-
-// spokenLine is how live voice pastes speech: a transcript speaker label, then
-// the words. A name assigned with `hark name` doesn't match and stays on the board.
-var spokenLine = regexp.MustCompile(`^(me|S\d+|S\?): `)
-
-// spokenPrompt reports live voice. Its words reach their worker in full; the
-// board shows others only who was spoken to. Spoken answers still clear a question.
-func spokenPrompt(prompt string) bool {
-	return spokenLine.MatchString(strings.TrimLeft(prompt, " \t\r\n"))
 }
 
 // humanLabel names the person typing in a worker's chat: SHUTTLE_HUMAN, else
@@ -224,7 +211,7 @@ func (a *app) boardDigest(harness, session string) (text string, acknowledge fun
 	if response.Family != nil {
 		label = response.Family.Label
 	}
-	fresh = foldSpoken(fresh)
+	fresh = foldHumanTurns(fresh)
 	var out strings.Builder
 	fmt.Fprintf(&out, "Family board (%s), new since your last turn:\n", label)
 	// The newest lines carry the current state; older ones are one command away.

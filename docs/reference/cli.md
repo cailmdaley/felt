@@ -582,11 +582,11 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
     `mark-runtime` serve daemon and fleet plumbing. An adopter running
     shuttle solo will not need them.
 
-### `shuttle board [fiber] [--since 2h|<RFC3339>] [--all] [--spoken] [--json]`
+### `shuttle board [fiber] [--since 2h|<RFC3339>] [--all] [--turns] [--json]`
 
 Read family activity from the local daemon, oldest first.
 Omit the fiber inside a worker to use its own family; `--all` reads across families.
-Each stretch of live-voice turns reads as one line counting them per worker; `--spoken` lists those turns in full, and `--json` always carries them.
+Each stretch of the human's turns, typed or spoken, reads as one line counting them per worker; `--turns` lists them in full, and `--json` always carries them.
 
 ### `shuttle post <text|-> [--fiber <id>]`
 

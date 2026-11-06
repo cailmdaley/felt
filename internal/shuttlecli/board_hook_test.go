@@ -204,22 +204,13 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 				t.Fatalf("human records: %+v", records)
 			}
 
-			for _, spoken := range []string{"me: so about that plot", "S2: can you remake it\nme: yes please", "S?: mumbled"} {
-				input.Prompt = spoken
-				runPrompt()
-			}
-			records = readBoardRecords(t, sink)
-			if len(records) != 6 || records[3].Kind != "spoken" || records[5].Kind != "spoken" || records[3].Text != "me: so about that plot" {
-				t.Fatalf("live voice records: %+v", records)
-			}
-
 			input.SessionID = "unbound"
 			input.Prompt = "not bound"
 			if row, err := currentSessionBinding(messaging.Address{Host: "host", Harness: messaging.NormalizeHarness(harness), ID: input.SessionID}, a.localMessageLedger()); err != nil || row != nil {
 				t.Fatalf("unexpected binding for other session: %+v, %v", row, err)
 			}
 			runPrompt()
-			if records = readBoardRecords(t, sink); len(records) != 6 {
+			if records = readBoardRecords(t, sink); len(records) != 3 {
 				t.Fatalf("unbound session changed board records: %+v", records)
 			}
 
@@ -235,7 +226,7 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 			input.SessionID = "resume"
 			input.Prompt = "continued after session succession"
 			runPrompt()
-			if records = readBoardRecords(t, sink); len(records) != 7 || records[6].Kind != "answered" || records[6].Text != "Q: Continue? — A: "+input.Prompt {
+			if records = readBoardRecords(t, sink); len(records) != 4 || records[3].Kind != "answered" || records[3].Text != "Q: Continue? — A: "+input.Prompt {
 				t.Fatalf("successor session records: %+v", records)
 			}
 			block, _, _ = shuttle.BlockOf(mustRead(t, st, "f"))

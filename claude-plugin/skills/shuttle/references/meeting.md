@@ -8,7 +8,7 @@ What people say in a conversation is a candidate, not a decision: propose promot
 
 Live voice sends microphone speech to the constitution most recently viewed on the board.
 You stay that constitution's worker; this is conversational input, not a request to file a meeting.
-Each batch arrives as ordinary input, with a speaker label on every spoken line and no timestamps. The family board counts these turns per worker and leaves the words to `shuttle board --spoken`; meeting batches stay off it.
+Each batch arrives as ordinary input, with a speaker label on every spoken line and no timestamps. The family board counts these turns per worker, like typed ones, and leaves the words to `shuttle board --turns`; meeting batches stay off it.
 `me` identifies a voiceprint match to the enrolled user; other labels may be the user or people in the room.
 Use the conversation to judge who is addressing whom: a colleague's request to you counts too.
 Don't filter requests by speaker label or treat these words as a teammate's message.
@@ -22,7 +22,7 @@ Shuttle delivers batches automatically; don't run `shuttle follow` for live voic
 
 ## Live meeting
 
-The user starts a meeting from the board, either from the Capture form in meeting mode, which launches you as a new capture, or from a constitution's card, which joins the meeting to that constitution through whichever session verb the user pressed. `hark` records on the user's machine and writes a speaker-labelled transcript to a path on this host. Your message opens with `Meeting mode`, that path and the mode, then the user's note, which may be empty. The mode says where the audio comes from: `call` records the machine's echo-cancelled mic and its system audio (Zoom, Meet), or the mic alone when the user chose Mic only, and `phone` records through a phone's mic. Desktop meetings always use `call`, including in-person meetings with silent system audio; mobile meetings always use `phone`. On the Mac, mic and phone words come from Aqua, so mic lines land in runs up to 75 s apart while system lines keep arriving as turns and stay local. Every voice is numbered `S1`, `S2`, …; in `call`, a mic voice that matches the user's enrolled voiceprint is named `me`, so a line without `me` may still be the user. You are the scribe from the moment you claim, or, when joined, from the moment the message arrives.
+The user starts a meeting from the board, either from the Capture form in meeting mode, which launches you as a new capture, or from a constitution's card, which joins the meeting to that constitution through whichever session verb the user pressed. `hark` records on the user's machine and writes a speaker-labelled transcript to a path on this host. Your message opens with `Meeting mode`, that path and the mode, then the user's note, which may be empty. The mode says where the audio comes from: `call` records the machine's echo-cancelled mic and its system audio (Zoom, Meet), or the mic alone when the user chose Mic only, and `phone` records through a phone's mic. Desktop meetings always use `call`, including in-person meetings with silent system audio; mobile meetings always use `phone`. On the Mac, words come from Aqua, so every track's lines land in runs up to 75 s apart. Every voice is numbered `S1`, `S2`, …; in `call`, a mic voice that matches the user's enrolled voiceprint is named `me`, so a line without `me` may still be the user. You are the scribe from the moment you claim, or, when joined, from the moment the message arrives.
 
 ### The transcript
 
