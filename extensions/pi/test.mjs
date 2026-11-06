@@ -63,13 +63,34 @@ async function waitFor(predicate, message) {
 const hasHook = (file, verb, eventName) => readCalls(file).some(({ args, payload }) =>
 	args.join(" ") === `hook ${verb}` && (!eventName || payload?.hook_event_name === eventName));
 
+const { registerHooks } = await import("node:module");
+const sdkFixture = "data:text/javascript," + encodeURIComponent(`
+export class AgentSession {
+  get sessionId() { return globalThis.piTestSessionId(); }
+  async prompt(message, options) {
+    await Promise.resolve();
+    if (message === "async refusal") throw new Error("refused");
+    options.preflightResult(globalThis.piTestDisposition(message));
+  }
+}`);
+registerHooks({ resolve(specifier, context, nextResolve) {
+	return specifier === "@earendil-works/pi-coding-agent"
+		? { url: sdkFixture, shortCircuit: true } : nextResolve(specifier, context);
+} });
+const { AgentSession } = await import("@earendil-works/pi-coding-agent");
 const { default: install } = await import("./index.ts");
+let busy = false;
+globalThis.piTestSessionId = () => sessionId;
+globalThis.piTestDisposition = message => message === "Pi may have refused this" ? "handled" : busy ? "queued" : "started";
+const session = new AgentSession();
+const originalPrompt = AgentSession.prototype.prompt;
 const handlers = new Map();
 const sent = [];
 const pi = {
 	on(name, handler) { handlers.set(name, handler); },
 	sendUserMessage(message, options) {
 		sent.push({ message, options });
+		void session.prompt(message, { source: "extension", streamingBehavior: options.deliverAs }).catch(() => {});
 	},
 };
 install(pi);
@@ -118,23 +139,30 @@ reply = await request({ type: "msg", requestId: "unconfirmed", sessionId, messag
 assert.equal(reply.ok, undefined, "a void API return cannot confirm delivery");
 
 await handlers.get("agent_start")({}, ctx);
+busy = true;
 reply = await request({ type: "msg", requestId: "active", sessionId, message: "active message" });
-assert.deepEqual(reply, { delivery: "steer", requestId: "active", sessionId });
+assert.deepEqual(reply, { ok: true, queued: true, delivery: "steer", requestId: "active", sessionId });
 assert.deepEqual(sent.at(-1), { message: "active message", options: { deliverAs: "steer" } });
+assert.equal(AgentSession.prototype.prompt, originalPrompt, "the admission callback does not leave the shared method replaced");
+reply = await request({ type: "msg", requestId: "refused-async", sessionId, message: "async refusal" });
+assert.equal(reply.ok, undefined, "an asynchronous rejection is not queue admission");
+reply = await request({ type: "msg", requestId: "handled-busy", sessionId, message: "Pi may have refused this" });
+assert.equal(reply.ok, undefined, "a handled input is not queue admission even when Pi is busy");
+
 
 reply = await request({ type: "msg", requestId: "wrong-session", sessionId: "other", message: "must reject" });
 assert.equal(reply.ok, false);
 const beforeDuplicate = sent.length;
 reply = await request({ type: "msg", requestId: "one-connection", sessionId, message: "first" }, JSON.stringify({ type: "msg", requestId: "second", sessionId, message: "second" }) + "\n");
-assert.equal(reply.ok, undefined);
+assert.equal(reply.ok, true);
 assert.equal(sent.length, beforeDuplicate + 1);
 
 const large = "x".repeat(70_000);
 reply = await request({ type: "msg", requestId: "large", sessionId, message: large });
-assert.equal(reply.ok, undefined);
+assert.equal(reply.ok, true);
 
 reply = await request({ type: "msg", requestId: "escaped-limit", sessionId, message: "<".repeat(64 << 10) });
-assert.equal(reply.ok, undefined, "a legal message must fit after JSON escaping");
+assert.equal(reply.ok, true, "a legal message must fit after JSON escaping");
 
 const beforeContext = sent.length;
 const context = await handlers.get("before_agent_start")({ prompt: "prompt" }, ctx);
@@ -183,7 +211,7 @@ assert.equal(fs.statSync(socketPath).mode & 0o777, 0o600);
 reply = await request({ type: "msg", requestId: "stale", sessionId: oldSession, message: "wrong conversation" });
 assert.equal(reply.ok, false);
 reply = await request({ type: "msg", requestId: "new", sessionId, message: "new conversation" });
-assert.equal(reply.ok, undefined);
+assert.equal(reply.ok, true);
 assert.equal(reply.delivery, "follow_up", "new idle session must not inherit the old session's streaming state");
 
 await handlers.get("agent_start")({}, ctx);

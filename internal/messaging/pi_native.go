@@ -169,14 +169,20 @@ func piNativeSessions(env *sysenv.Env, host string) []Session {
 }
 
 func sendPiNative(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error) {
+	receipt, err, _ := sendPiNativeWithDedupMetadata(ctx, env, a, req, 15*time.Second)
+	return receipt, err
+}
+
+func sendPiNativeWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Address, req Request, observationTimeout time.Duration) (Receipt, error, dedupMetadata) {
+	metadata := dedupMetadata{}
 	r, err := readPiNative(env, a.ID)
 	if err != nil || r.ID != a.ID || r.Host != a.Host || !piNativeAvailable(env, a.ID, a.Host) {
-		return rejected(req, piNativeTransport, "Pi session has not registered a native receiver endpoint"), errCode("preflight_failed", "Pi native receiver endpoint unavailable")
+		return rejected(req, piNativeTransport, "Pi session has not registered a native receiver endpoint"), errCode("preflight_failed", "Pi native receiver endpoint unavailable"), metadata
 	}
 	d := net.Dialer{Timeout: 2 * time.Second}
 	conn, err := d.DialContext(ctx, "unix", r.Socket)
 	if err != nil {
-		return rejected(req, piNativeTransport, "Pi native socket unavailable"), errCode("preflight_failed", "Pi native socket unavailable: %v", err)
+		return rejected(req, piNativeTransport, "Pi native socket unavailable"), errCode("preflight_failed", "Pi native socket unavailable: %v", err), metadata
 	}
 	defer conn.Close()
 	deadline := time.Now().Add(15 * time.Second)
@@ -184,29 +190,46 @@ func sendPiNative(ctx context.Context, env *sysenv.Env, a Address, req Request) 
 		deadline = d
 	}
 	if err := publishOwnerDeadline(ctx, deadline); err != nil {
-		return rejected(req, piNativeTransport, "cannot persist delivery deadline"), errCode("preflight_failed", "cannot persist Pi native delivery deadline")
+		return rejected(req, piNativeTransport, "cannot persist delivery deadline"), errCode("preflight_failed", "cannot persist Pi native delivery deadline"), metadata
 	}
 	_ = conn.SetDeadline(deadline)
 	transcript := openPiReceiptTranscript(r.Transcript, a.ID)
 	if transcript != nil {
 		defer transcript.Close()
 	}
+	if r.Transcript != "" {
+		offset := int64(0)
+		if transcript != nil {
+			offset, _ = transcript.Seek(0, io.SeekCurrent)
+		}
+		metadata.TranscriptOffset = &offset
+		metadata.PiContentHash = nativeContentHash(labeled(req))
+	}
+	observationDeadline := time.Now().Add(observationTimeout)
+	if deadline.Before(observationDeadline) {
+		observationDeadline = deadline
+	}
 	requestID := fmt.Sprintf("shuttle-pi-%d", time.Now().UnixNano())
 	if err := json.NewEncoder(conn).Encode(map[string]any{"type": "msg", "requestId": requestID, "sessionId": a.ID, "message": labeled(req)}); err != nil {
-		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native request write did not complete"}, errCode("ambiguous_delivery", "Pi native request may have reached the receiver: %v", err)
+		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native request write did not complete"}, errCode("ambiguous_delivery", "Pi native request may have reached the receiver: %v", err), metadata
 	}
 	line, err := bufio.NewReaderSize(io.LimitReader(conn, (512<<10)+1), 4096).ReadBytes('\n')
 	if err != nil {
-		if observePiReceipt(ctx, transcript, r.Transcript, a.ID, labeled(req), deadline) {
-			return piTranscriptReceipt(req), nil
+		if observePiReceiptHash(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), observationDeadline) {
+			return piTranscriptReceipt(req), nil, metadata
 		}
-		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native acknowledgement was not received"}, errCode("ambiguous_delivery", "Pi native acknowledgement was not received: %v", err)
+		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native acknowledgement was not received"}, errCode("ambiguous_delivery", "Pi native acknowledgement was not received: %v", err), metadata
 	}
 	receipt, replyErr := decodePiNativeReply(line, requestID, a.ID, req)
-	if receipt.Status == StatusUnknown && observePiReceipt(ctx, transcript, r.Transcript, a.ID, labeled(req), deadline) {
-		return piTranscriptReceipt(req), nil
+	if receipt.Status == StatusQueued && r.Transcript == "" {
+		receipt.Status = StatusUnknown
+		receipt.Detail = "Pi has no session transcript; delivery is unconfirmed"
+		replyErr = errCode("ambiguous_delivery", "%s", receipt.Detail)
 	}
-	return receipt, replyErr
+	if receipt.Status == StatusUnknown && observePiReceiptHash(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), observationDeadline) {
+		return piTranscriptReceipt(req), nil, metadata
+	}
+	return receipt, replyErr, metadata
 }
 
 func decodePiNativeReply(line []byte, requestID, sessionID string, req Request) (Receipt, error) {
@@ -226,10 +249,15 @@ func decodePiNativeReply(line []byte, requestID, sessionID string, req Request) 
 	if resp.Delivery != "steer" && resp.Delivery != "follow_up" {
 		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native acknowledgement lacked correlated evidence"}, errCode("ambiguous_delivery", "Pi native acknowledgement lacked correlated evidence")
 	}
-	return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: piNativeTransport, Detail: resp.Delivery}, nil
+	status := StatusAccepted
+	if resp.Queued {
+		status = StatusQueued
+	}
+	return Receipt{MessageID: req.MessageID, Address: req.Address, Status: status, Transport: piNativeTransport, Detail: resp.Delivery}, nil
 }
 
 type piNativeReply struct {
+	Queued    bool   `json:"queued"`
 	OK        *bool  `json:"ok"`
 	Delivery  string `json:"delivery"`
 	Error     string `json:"error"`
@@ -263,42 +291,58 @@ func openPiReceiptTranscript(path, sessionID string) *os.File {
 }
 
 func observePiReceipt(ctx context.Context, f *os.File, path, sessionID, text string, deadline time.Time) bool {
+	return observePiReceiptHash(ctx, f, path, sessionID, nativeContentHash(text), deadline)
+}
+
+func observePiReceiptHash(ctx context.Context, f *os.File, path, sessionID, contentHash string, deadline time.Time) bool {
 	if path == "" {
 		return false
 	}
 	var reader *bufio.Reader
+	headerPending := f == nil
 	if f != nil {
 		reader = bufio.NewReader(f)
 	}
 	var partial []byte
+	discard := false
 	for {
 		if reader == nil {
-			// A fresh Pi session writes its file on its first user turn.
 			opened, err := os.Open(path)
 			if err == nil {
 				defer opened.Close()
 				reader = bufio.NewReader(opened)
-				line, err := reader.ReadBytes('\n')
-				var header struct {
-					Type string `json:"type"`
-					ID   string `json:"id"`
-				}
-				if err != nil || json.Unmarshal(line, &header) != nil || header.Type != "session" || header.ID != sessionID {
-					return false
-				}
 			}
 		}
 		if reader != nil {
 			for {
 				line, err := reader.ReadSlice('\n')
-				partial = append(partial, line...)
-				if len(partial) > 2<<20 {
-					return false
+				if !discard {
+					if len(partial)+len(line) > 2<<20 {
+						discard = true
+						partial = nil
+					} else {
+						partial = append(partial, line...)
+					}
 				}
 				if err == bufio.ErrBufferFull {
 					continue
 				}
-				if err == nil {
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return false
+				}
+				if headerPending {
+					var header struct {
+						Type string `json:"type"`
+						ID   string `json:"id"`
+					}
+					if discard || json.Unmarshal(partial, &header) != nil || header.Type != "session" || header.ID != sessionID {
+						return false
+					}
+					headerPending = false
+				} else if !discard {
 					var row struct {
 						Type    string `json:"type"`
 						Message struct {
@@ -319,17 +363,13 @@ func observePiReceipt(ctx context.Context, f *os.File, path, sessionID, text str
 								}
 							}
 						}
-						if plain == text {
+						if nativeContentHash(plain) == contentHash {
 							return true
 						}
 					}
-					partial = nil
-					continue
 				}
-				if err != io.EOF {
-					return false
-				}
-				break
+				partial = nil
+				discard = false
 			}
 		}
 		if !time.Now().Before(deadline) {
@@ -341,6 +381,35 @@ func observePiReceipt(ctx context.Context, f *os.File, path, sessionID, text str
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
+}
+
+// A repeated read observes admission without writing another socket request.
+func refreshPiNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, stored record) (nativeReceiptRefresh, bool) {
+	address, err := ParseAddress(req.Address)
+	if err != nil || address.Harness != "pi" || stored.PiContentHash == "" {
+		return nativeReceiptRefresh{}, false
+	}
+	registration, err := readPiNative(env, address.ID)
+	if err != nil || registration.ID != address.ID || registration.Host != address.Host {
+		return nativeReceiptRefresh{}, false
+	}
+	f := openPiReceiptTranscript(registration.Transcript, address.ID)
+	if f != nil {
+		defer f.Close()
+		if _, err := f.Seek(*stored.TranscriptOffset, io.SeekStart); err != nil {
+			return nativeReceiptRefresh{}, false
+		}
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, claudeRetryObservationTimeout)
+	defer cancel()
+	deadline, _ := refreshCtx.Deadline()
+	if !observePiReceiptHash(refreshCtx, f, registration.Transcript, address.ID, stored.PiContentHash, deadline) {
+		return nativeReceiptRefresh{}, false
+	}
+	upgraded := stored.Receipt
+	upgraded.Status = StatusAccepted
+	upgraded.Detail = "Pi transcript recorded this user message"
+	return nativeReceiptRefresh{Receipt: upgraded}, true
 }
 
 func piTranscriptReceipt(req Request) Receipt {

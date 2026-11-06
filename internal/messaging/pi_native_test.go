@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func FuzzPiNativeReply(f *testing.F) {
 	for _, seed := range []string{
+		`{"ok":true,"queued":true,"requestId":"request","sessionId":"session","delivery":"steer"}`,
 		`{"ok":true,"requestId":"request","sessionId":"session","delivery":"follow_up"}`,
 		`{"ok":true,"requestId":"request","sessionId":"session","delivery":"steer"}`,
 		`{"ok":false,"requestId":"request","sessionId":"session","error":"refused"}`,
@@ -31,12 +33,12 @@ func FuzzPiNativeReply(f *testing.F) {
 			t.Fatalf("reply changed routing identity: %#v", receipt)
 		}
 		switch receipt.Status {
-		case StatusAccepted, StatusRejected:
+		case StatusAccepted, StatusQueued, StatusRejected:
 			var evidence piNativeReply
 			if json.Unmarshal(data, &evidence) != nil || evidence.RequestID != "request" || evidence.SessionID != "session" || evidence.OK == nil {
 				t.Fatalf("uncorrelated evidence produced definitive receipt: %#v", receipt)
 			}
-			if receipt.Status == StatusAccepted {
+			if receipt.Status == StatusAccepted || receipt.Status == StatusQueued {
 				if err != nil || !*evidence.OK || (evidence.Delivery != "steer" && evidence.Delivery != "follow_up") {
 					t.Fatalf("accepted without native admission evidence: %#v", receipt)
 				}
@@ -85,7 +87,9 @@ func piNativeFixture(t *testing.T, reply any) (string, func()) {
 			if fn, ok := reply.(func(map[string]any) any); ok {
 				response = fn(request)
 			}
-			_ = json.NewEncoder(conn).Encode(response)
+			if response != nil {
+				_ = json.NewEncoder(conn).Encode(response)
+			}
 			_ = conn.Close()
 		}
 	}()
@@ -344,5 +348,139 @@ func TestPiNativeTranscriptReceipts(t *testing.T) {
 				t.Fatalf("receipt=%+v want=%s", got, want)
 			}
 		})
+	}
+}
+
+func TestPiNativeQueuedRefreshAfterObservationDeadline(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	transcript := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(transcript, []byte(`{"type":"session","id":"session"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var sends atomic.Int32
+	socket, closeFixture := piNativeFixture(t, func(frame map[string]any) any {
+		sends.Add(1)
+		return map[string]any{"requestId": frame["requestId"], "sessionId": frame["sessionId"], "delivery": "steer", "ok": true, "queued": true}
+	})
+	defer closeFixture()
+	if err := RegisterPiNative(env, "session", "host", "/project", socket, transcript, os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	req := Request{Address: "shuttle://host/pi/session", MessageID: "held-steer", Text: "one task", Wake: true}
+	first, err := withDedup(context.Background(), env, req, func(ctx context.Context) dedupSendResult {
+		receipt, err, metadata := sendPiNativeWithDedupMetadata(ctx, env, Address{Host: "host", Harness: "pi", ID: "session"}, req, 50*time.Millisecond)
+		return dedupSendResult{Receipt: receipt, Err: err, Metadata: metadata}
+	})
+	if err != nil || first.Status != StatusQueued {
+		t.Fatalf("queued receipt=%+v err=%v", first, err)
+	}
+	time.Sleep(50 * time.Millisecond) // The steer remains held past the observation deadline.
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancelRead()
+	pending, err := Send(readCtx, env, "host", req)
+	if err != nil || pending.Status != StatusQueued {
+		t.Fatalf("pending receipt=%+v err=%v", pending, err)
+	}
+	appendPiUserRow(t, transcript, labeled(req))
+	for i := 0; i < 2; i++ {
+		admitted, err := Send(context.Background(), env, "host", req)
+		if err != nil || admitted.Status != StatusAccepted {
+			t.Fatalf("admitted receipt=%+v err=%v", admitted, err)
+		}
+	}
+	if got := sends.Load(); got != 1 {
+		t.Fatalf("message was sent %d times", got)
+	}
+}
+
+func TestPiNativeQueueNeedsReplyAndTranscript(t *testing.T) {
+	for _, scenario := range []string{"dropped socket", "no session"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			var reply any
+			transcript := ""
+			if scenario == "dropped socket" {
+				transcript = filepath.Join(t.TempDir(), "session.jsonl")
+				if err := os.WriteFile(transcript, []byte(`{"type":"session","id":"session"}`+"\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "no session" {
+				reply = func(frame map[string]any) any {
+					return map[string]any{"requestId": frame["requestId"], "sessionId": frame["sessionId"], "ok": true, "queued": true, "delivery": "steer"}
+				}
+			}
+			socket, closeFixture := piNativeFixture(t, reply)
+			defer closeFixture()
+			if err := RegisterPiNative(env, "session", "host", "/project", socket, transcript, os.Getpid(), true); err != nil {
+				t.Fatal(err)
+			}
+			req := Request{Address: "shuttle://host/pi/session", MessageID: "no-evidence", Text: "task", Wake: true}
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			receipt, err := sendPiNative(ctx, env, Address{Host: "host", Harness: "pi", ID: "session"}, req)
+			if receipt.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
+				t.Fatalf("receipt=%+v err=%v", receipt, err)
+			}
+		})
+	}
+}
+
+func appendPiUserRow(t *testing.T, path, text string) {
+	t.Helper()
+	row, err := json.Marshal(map[string]any{"type": "message", "message": map[string]any{"role": "user", "content": []map[string]string{{"type": "text", "text": text}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.Write(append(row, '\n')); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPiReceiptSkipsOversizedTranscriptRow(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"session","id":"session"}`+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f := openPiReceiptTranscript(path, "session")
+	if f == nil {
+		t.Fatal("cannot open transcript")
+	}
+	defer f.Close()
+	appendPiUserRow(t, path, strings.Repeat("x", 4<<20))
+	appendPiUserRow(t, path, "expected message")
+	if !observePiReceipt(context.Background(), f, path, "session", "expected message", time.Now().Add(100*time.Millisecond)) {
+		t.Fatal("oversized unrelated row hid the admitted message")
+	}
+}
+
+func TestPiReceiptWaitsForSessionHeader(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		time.Sleep(20 * time.Millisecond)
+		if err := os.WriteFile(path, []byte(`{"type":"session","id":"session"}`+"\n"), 0600); err != nil {
+			t.Error(err)
+			return
+		}
+		appendPiUserRow(t, path, "expected message")
+	}()
+	observed := observePiReceipt(context.Background(), nil, path, "session", "expected message", time.Now().Add(200*time.Millisecond))
+	<-done
+	if !observed {
+		t.Fatal("empty session file was mistaken for a missing header")
 	}
 }

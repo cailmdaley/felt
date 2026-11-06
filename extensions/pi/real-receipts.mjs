@@ -259,29 +259,37 @@ try {
   ]);
   assert.ok(
     concurrent.every(
-      (body) => body.delivered === true && body.receipt.status === "accepted",
+      (body) =>
+        body.delivered === true &&
+        ["accepted", "queued"].includes(body.receipt.status),
     ),
   );
+  for (const id of ["concurrent-a", "concurrent-b"]) {
+    assert.equal(
+      (await deliver(id, "Same concurrent body")).receipt.status,
+      "accepted",
+    );
+  }
   const started = new Promise((resolve) => (turnStarted = resolve));
   holdNext = true;
   const active = deliver("active", "Start a held model turn");
   await started;
-  let completed = false;
-  const steering = deliver("mid-turn", "Message during the held turn").then(
-    (body) => {
-      completed = true;
-      return body;
-    },
-  );
-  await wait(250);
+  const steering = await deliver("mid-turn", "Message during the held turn");
+  assert.equal(steering.receipt.status, "queued");
+  assert.equal(steering.delivered, true);
   assert.equal(
-    completed,
+    entries().some(
+      (e) =>
+        e.message?.role === "user" &&
+        text(e).includes("Message during the held turn"),
+    ),
     false,
-    "queued input has no transcript admission evidence yet",
   );
   releaseTurn();
   assert.equal((await active).delivered, true);
-  assert.equal((await steering).delivered, true);
+  const admitted = await deliver("mid-turn", "Message during the held turn");
+  assert.equal(admitted.receipt.status, "accepted");
+  assert.equal(admitted.delivered, true);
   const dropped = await deliver(
     "dropped",
     "DROP_RECEIPT: Pi input handler consumes this without a user turn",

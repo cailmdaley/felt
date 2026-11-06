@@ -65,6 +65,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
       else
         {status, error_code, exit_status} =
           case request["message_id"] do
+            "pi-queued" -> {"queued", nil, 0}
             "unknown" -> {"unknown", "ambiguous_delivery", 1}
             "refused" -> {"rejected", "wake_refused", 1}
             "session-unavailable" -> {"rejected", "session_unavailable", 1}
@@ -78,9 +79,10 @@ defmodule ShuttleWeb.MessagingControllerTest do
           end
 
         transport =
-          case status do
-            "queued" -> "claude-native"
-            "submitted" -> "codex-terminal"
+          case {request["message_id"], status} do
+            {"pi-queued", "queued"} -> "pi-native"
+            {_, "queued"} -> "claude-native"
+            {_, "submitted"} -> "codex-terminal"
             _ -> "codex"
           end
 
@@ -359,6 +361,16 @@ defmodule ShuttleWeb.MessagingControllerTest do
         refute_receive {:cleared_ask, _, _}
       end
     end
+  end
+
+  test "Pi queue admission is a successful wake receipt", %{host: host} do
+    assert {:ok, 200, %{"status" => "queued", "transport" => "pi-native"}} =
+             Shuttle.Messaging.send_message(%{
+               "address" => "shuttle://#{host}/pi/session",
+               "text" => "Task held behind the current turn",
+               "message_id" => "pi-queued",
+               "wake" => true
+             })
   end
 
   test "local discovery includes the fiber from its session ledger", %{

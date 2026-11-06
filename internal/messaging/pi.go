@@ -253,3 +253,11 @@ func (piAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Request
 	}
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusAccepted, Transport: "pi-rpc+unix-socket", Detail: resp.Delivery}, nil
 }
+
+func (piAdapter) sendWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error, dedupMetadata) {
+	if req.Wake && piNativeAvailable(env, a.ID, a.Host) {
+		return sendPiNativeWithDedupMetadata(ctx, env, a, req, 15*time.Second)
+	}
+	receipt, err := (piAdapter{}).send(ctx, env, a, req)
+	return receipt, err, dedupMetadata{}
+}

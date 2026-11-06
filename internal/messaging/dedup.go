@@ -28,6 +28,7 @@ type record struct {
 	Nonce                  string  `json:"nonce,omitempty"`
 	TranscriptOffset       *int64  `json:"transcript_offset,omitempty"`
 	ClaudeQueueContentHash string  `json:"claude_queue_content_hash,omitempty"`
+	PiContentHash          string  `json:"pi_content_hash,omitempty"`
 }
 
 // requestHash identifies a request across retries. The sender counts once,
@@ -104,8 +105,9 @@ const (
 )
 
 type dedupMetadata struct {
-	ClaudeTranscriptOffset *int64
+	TranscriptOffset       *int64
 	ClaudeQueueContentHash string
+	PiContentHash          string
 }
 
 type dedupSendResult struct {
@@ -114,7 +116,7 @@ type dedupSendResult struct {
 	Metadata dedupMetadata
 }
 
-type claudeReceiptRefresh struct {
+type nativeReceiptRefresh struct {
 	Receipt      Receipt
 	ErrorCode    string
 	ErrorMessage string
@@ -221,15 +223,16 @@ func sendReserved(ctx context.Context, env *sysenv.Env, dir, path, hash string, 
 	}
 	defer tmp.Abort()
 	metadata := result.Metadata
-	if receipt.Transport != claudeNativeTransport || (receipt.Status != StatusQueued && receipt.Status != StatusSubmitted && receipt.Status != StatusUnknown) {
+	if (receipt.Transport != claudeNativeTransport && receipt.Transport != piNativeTransport) || (receipt.Status != StatusQueued && receipt.Status != StatusSubmitted && receipt.Status != StatusUnknown) {
 		metadata = dedupMetadata{}
 	}
 	stored := record{
 		Hash:                   hash,
 		State:                  "complete",
 		Receipt:                receipt,
-		TranscriptOffset:       metadata.ClaudeTranscriptOffset,
+		TranscriptOffset:       metadata.TranscriptOffset,
 		ClaudeQueueContentHash: metadata.ClaudeQueueContentHash,
+		PiContentHash:          metadata.PiContentHash,
 	}
 	if sendErr != nil {
 		stored.ErrorCode = ErrorCode(sendErr)
@@ -306,7 +309,7 @@ func duplicateResult(ctx context.Context, env *sysenv.Env, req Request, path, ha
 		case old.Hash != hash:
 			receipt, err = rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request")
 		case old.State == "complete":
-			receipt, err = storedResult(refreshCompletedClaudeReceipt(ctx, env, req, path, hash, old))
+			receipt, err = storedResult(refreshCompletedNativeReceipt(ctx, env, req, path, hash, old))
 		case old.State != "reserved" || old.OwnerPID <= 0:
 			receipt, err = ownerlessRecord(req)
 		case !processAlive(old.OwnerPID, old.OwnerStart):
@@ -352,11 +355,18 @@ func readDedupRecord(path string) (record, error) {
 	return old, nil
 }
 
-func refreshCompletedClaudeReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
-	if old.State != "complete" || old.Hash != hash || old.Receipt.Transport != claudeNativeTransport || old.TranscriptOffset == nil || old.ClaudeQueueContentHash == "" || (old.Receipt.Status != StatusQueued && old.Receipt.Status != StatusSubmitted && old.Receipt.Status != StatusUnknown) {
+func refreshCompletedNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
+	if old.State != "complete" || old.Hash != hash || old.TranscriptOffset == nil || *old.TranscriptOffset < 0 || (old.Receipt.Status != StatusQueued && old.Receipt.Status != StatusSubmitted && old.Receipt.Status != StatusUnknown) {
 		return old
 	}
-	candidate, ok := refreshClaudeNativeReceipt(ctx, env, req, old)
+	var candidate nativeReceiptRefresh
+	var ok bool
+	switch old.Receipt.Transport {
+	case claudeNativeTransport:
+		candidate, ok = refreshClaudeNativeReceipt(ctx, env, req, old)
+	case piNativeTransport:
+		candidate, ok = refreshPiNativeReceipt(ctx, env, req, old)
+	}
 	if !ok {
 		return old
 	}
@@ -364,22 +374,22 @@ func refreshCompletedClaudeReceipt(ctx context.Context, env *sysenv.Env, req Req
 	// One stable lock per messages directory avoids a sidecar for every message.
 	lock, err := os.OpenFile(filepath.Join(filepath.Dir(path), ".refresh.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return mergeClaudeReceiptRefresh(old, candidate)
+		return mergeNativeReceiptRefresh(old, candidate)
 	}
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if current, readErr := readDedupRecord(path); readErr == nil && current.Hash == hash && current.State == "complete" {
-			return mergeClaudeReceiptRefresh(current, candidate)
+			return mergeNativeReceiptRefresh(current, candidate)
 		}
-		return mergeClaudeReceiptRefresh(old, candidate)
+		return mergeNativeReceiptRefresh(old, candidate)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 
 	current, err := readDedupRecord(path)
 	if err != nil || current.Hash != hash || current.State != "complete" {
-		return mergeClaudeReceiptRefresh(old, candidate)
+		return mergeNativeReceiptRefresh(old, candidate)
 	}
-	upgraded, changed := mergeClaudeReceiptRefreshWithChange(current, candidate)
+	upgraded, changed := mergeNativeReceiptRefreshWithChange(current, candidate)
 	if !changed {
 		return current
 	}
@@ -390,12 +400,12 @@ func refreshCompletedClaudeReceipt(ctx context.Context, env *sysenv.Env, req Req
 	return upgraded
 }
 
-func mergeClaudeReceiptRefresh(current record, candidate claudeReceiptRefresh) record {
-	merged, _ := mergeClaudeReceiptRefreshWithChange(current, candidate)
+func mergeNativeReceiptRefresh(current record, candidate nativeReceiptRefresh) record {
+	merged, _ := mergeNativeReceiptRefreshWithChange(current, candidate)
 	return merged
 }
 
-func mergeClaudeReceiptRefreshWithChange(current record, candidate claudeReceiptRefresh) (record, bool) {
+func mergeNativeReceiptRefreshWithChange(current record, candidate nativeReceiptRefresh) (record, bool) {
 	if current.Receipt.Status == StatusAccepted {
 		return current, false
 	}

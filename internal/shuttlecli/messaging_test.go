@@ -220,6 +220,7 @@ func TestPostMessageNarrowsWakeReceiptStages(t *testing.T) {
 		wake, accepted          bool
 	}{
 		{"native queued", messaging.StatusQueued, "claude-native", true, true},
+		{"Pi queued", messaging.StatusQueued, "pi-native", true, true},
 		{"native submitted", messaging.StatusSubmitted, "claude-native", true, true},
 		{"Codex terminal submitted", messaging.StatusSubmitted, "codex-terminal", true, true},
 		{"Codex terminal queued", messaging.StatusQueued, "codex-terminal", true, false},
@@ -595,5 +596,12 @@ func TestFilterPeerDirectoryAppliesHostAndHarness(t *testing.T) {
 	}
 	if len(got.Gaps) != 1 || got.Gaps[0].Harness != "claude-code" {
 		t.Fatalf("alias filter lost its discovery gap: %#v", got.Gaps)
+	}
+}
+
+func TestPiQueuedMessageReceiptIsNotAnError(t *testing.T) {
+	receipt := messaging.Receipt{MessageID: "held", Address: "shuttle://host/pi/session", Status: messaging.StatusQueued, Transport: "pi-native"}
+	if err := messageReceiptError("message", receipt, nil); err != nil {
+		t.Fatalf("queue admission was treated as a failed send: %v", err)
 	}
 }

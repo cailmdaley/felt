@@ -17,6 +17,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import installHandoff from "./handoff.ts";
+import { sendWithAdmission } from "./admission.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
@@ -272,10 +273,11 @@ export default function feltExtension(pi: ExtensionAPI) {
 				}
 				const delivery = streaming ? "steer" : "follow_up";
 				try {
-					// The void API return is not admission evidence. The sender confirms
-					// the exact user message in this session's transcript.
-					pi.sendUserMessage(request.message, { deliverAs: streaming ? "steer" : "followUp" });
-					writeNativeReply(socket, { ...replyBase, delivery });
+					sendWithAdmission(pi, sid, request.message, streaming ? "steer" : "followUp", (disposition) => {
+						writeNativeReply(socket, disposition === "queued"
+							? { ...replyBase, ok: true, queued: true, delivery }
+							: { ...replyBase, delivery });
+					});
 				} catch (error) {
 					writeNativeReply(socket, { ...replyBase, ok: false, error: error instanceof Error ? error.message : String(error) });
 				}

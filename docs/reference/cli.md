@@ -459,12 +459,18 @@ hooks' message registration and delivery, set `SHUTTLE_MESSAGES=off` in the
 receiver environment. Installing hook files does not establish that the harness
 has enabled or trusted them; discovery reflects receiver registration.
 
+Pi wake delivery is `queued` only when Pi's prompt API confirms steer or
+follow-up queue admission. It becomes `accepted` when the session transcript
+records the exact labeled user message. Repeating the same send with the same
+message ID checks for that evidence without resending. Without a session
+transcript, Pi delivery remains `unknown`.
+
 | Receipt | Evidence |
 |---|---|
-| `queued` | Hook mailbox: context-only, no turn starts. Claude-native wake: queued behind the current turn; the detail says it runs when that turn ends |
+| `queued` | Hook mailbox: context-only, no turn starts. Claude-native or Pi-native wake: the harness confirmed queue admission behind the current turn |
 | `submitted` | Claude transcript shows the native user row or `queued_command`; admission only, with no model reply observed yet |
 | `context_added` | Codex hook acknowledged adding persistent context; no turn started |
-| `accepted` | Claude has a correlated real assistant reply; other transports report their native runtime acknowledgement |
+| `accepted` | Pi has the exact correlated user-message row; Claude has a correlated real assistant reply; other transports report their native runtime acknowledgement |
 | `unknown` | Delivery may have succeeded without enough evidence; retry the same ID to re-check |
 | `subscribed` | `--notify-when-idle` with no text: the subscription is recorded and watched; nothing was delivered |
 | `rejected` | The request or receiving transport refused delivery |

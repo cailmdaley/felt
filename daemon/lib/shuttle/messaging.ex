@@ -867,7 +867,7 @@ defmodule Shuttle.Messaging do
           false
 
         {"queued", transport} ->
-          transport == "claude-native"
+          transport in ["claude-native", "pi-native"]
 
         {"submitted", transport} ->
           transport in ["claude-native", "codex-terminal"]

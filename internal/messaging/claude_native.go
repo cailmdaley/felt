@@ -162,7 +162,7 @@ func claudeNativeUUID(r Request) string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", h[:4], h[4:6], h[6:8], h[8:10], h[10:16])
 }
 
-func claudeContentHash(content string) string {
+func nativeContentHash(content string) string {
 	h := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(h[:])
 }
@@ -204,22 +204,22 @@ const claudeRetryObservationTimeout = 2 * time.Second
 
 // refreshClaudeNativeReceipt scans only from the persisted send-time offset. It
 // observes transcript evidence and never connects to or writes to the receiver.
-func refreshClaudeNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, stored record) (claudeReceiptRefresh, bool) {
+func refreshClaudeNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, stored record) (nativeReceiptRefresh, bool) {
 	address, err := ParseAddress(req.Address)
 	if err != nil || address.Harness != "claude" || stored.TranscriptOffset == nil || *stored.TranscriptOffset < 0 || stored.ClaudeQueueContentHash == "" {
-		return claudeReceiptRefresh{}, false
+		return nativeReceiptRefresh{}, false
 	}
 	registration, err := readClaudeNative(env, address.ID)
 	if err != nil || registration.ID != address.ID || registration.Host != address.Host {
-		return claudeReceiptRefresh{}, false
+		return nativeReceiptRefresh{}, false
 	}
 	f, err := openClaudeTranscript(registration.Transcript, false)
 	if err != nil {
-		return claudeReceiptRefresh{}, false
+		return nativeReceiptRefresh{}, false
 	}
 	defer f.Close()
 	if _, err := f.Seek(*stored.TranscriptOffset, io.SeekStart); err != nil {
-		return claudeReceiptRefresh{}, false
+		return nativeReceiptRefresh{}, false
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, claudeRetryObservationTimeout)
 	defer cancel()
@@ -229,18 +229,18 @@ func refreshClaudeNativeReceipt(ctx context.Context, env *sysenv.Env, req Reques
 		receipt := stored.Receipt
 		receipt.Status = StatusUnknown
 		receipt.Detail = detail
-		return claudeReceiptRefresh{Receipt: receipt, ErrorCode: "receiver_turn_failed", ErrorMessage: detail}, true
+		return nativeReceiptRefresh{Receipt: receipt, ErrorCode: "receiver_turn_failed", ErrorMessage: detail}, true
 	}
 	if observeErr != nil && !errors.Is(observeErr, context.DeadlineExceeded) && !errors.Is(observeErr, context.Canceled) {
-		return claudeReceiptRefresh{}, false
+		return nativeReceiptRefresh{}, false
 	}
 	if claudeStageRank(stage) <= claudeStageRank(stored.Receipt.Status) {
-		return claudeReceiptRefresh{}, false
+		return nativeReceiptRefresh{}, false
 	}
 	upgraded := stored.Receipt
 	upgraded.Status = stage
 	upgraded.Detail = claudeStageReceipt(req, stage).Detail
-	return claudeReceiptRefresh{Receipt: upgraded}, true
+	return nativeReceiptRefresh{Receipt: upgraded}, true
 }
 
 // claudeNativeLive verifies that the registered receiver still owns its bound
@@ -328,7 +328,7 @@ func sendClaudeNativeWithMetadata(ctx context.Context, env *sysenv.Env, a Addres
 		}
 		offset = &position
 	}
-	metadata := dedupMetadata{ClaudeTranscriptOffset: offset, ClaudeQueueContentHash: claudeContentHash(body.Message.Content)}
+	metadata := dedupMetadata{TranscriptOffset: offset, ClaudeQueueContentHash: nativeContentHash(body.Message.Content)}
 	observationCtx, cancelObservation := context.WithTimeout(ctx, claudeNativeObservationTimeout)
 	defer cancelObservation()
 	if deadline, ok := observationCtx.Deadline(); ok {
@@ -477,7 +477,7 @@ func observeClaudeTurn(ctx context.Context, f *os.File, path, sessionID, uuid, c
 				case row.Type == "attachment" && row.Attachment.Type == "queued_command" && row.Attachment.SourceUUID == uuid && row.UUID != "":
 					ancestry[row.UUID] = true
 					stage = advanceClaudeStage(stage, StatusSubmitted)
-				case row.Type == "queue-operation" && row.Operation == "enqueue" && claudeContentHash(row.Content) == contentHash:
+				case row.Type == "queue-operation" && row.Operation == "enqueue" && nativeContentHash(row.Content) == contentHash:
 					stage = advanceClaudeStage(stage, StatusQueued)
 				}
 				if ancestry[row.ParentUUID] && row.UUID != "" {

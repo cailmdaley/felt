@@ -210,7 +210,7 @@ func TestObserveClaudeTurnReportsFurthestObservedStage(t *testing.T) {
 			defer f.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
 			defer cancel()
-			stage, err := observeClaudeTurn(ctx, f, path, "session", uuid, claudeContentHash(content), nil)
+			stage, err := observeClaudeTurn(ctx, f, path, "session", uuid, nativeContentHash(content), nil)
 			if stage != tc.stage {
 				t.Fatalf("stage = %q, want %q (err %v)", stage, tc.stage, err)
 			}
@@ -361,7 +361,7 @@ func TestClaudeNativeRetryReturnsObservedStageWhenRefreshLockIsBusy(t *testing.T
 		Hash: requestHash(req), State: "complete",
 		Receipt:   Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: claudeNativeTransport, Detail: "stored unknown"},
 		ErrorCode: "ambiguous_delivery", ErrorMessage: "stored unknown",
-		TranscriptOffset: &offset, ClaudeQueueContentHash: claudeContentHash(labeled(req)),
+		TranscriptOffset: &offset, ClaudeQueueContentHash: nativeContentHash(labeled(req)),
 	}
 	writeDedupRecord(t, dataDir(env), req, stored)
 	lock, err := os.OpenFile(filepath.Join(dataDir(env), "messages", ".refresh.lock"), os.O_CREATE|os.O_RDWR, 0600)
@@ -425,7 +425,7 @@ func TestClaudeNativeRetryKeepsReceiptWhenTranscriptCannotBeRescanned(t *testing
 			}
 			offset := int64(0)
 			stored := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubmitted, Transport: claudeNativeTransport, Detail: "stored submitted"}
-			writeDedupRecord(t, dataDir(env), req, record{Hash: requestHash(req), State: "complete", Receipt: stored, TranscriptOffset: &offset, ClaudeQueueContentHash: claudeContentHash(labeled(req))})
+			writeDedupRecord(t, dataDir(env), req, record{Hash: requestHash(req), State: "complete", Receipt: stored, TranscriptOffset: &offset, ClaudeQueueContentHash: nativeContentHash(labeled(req))})
 
 			got, err := Send(context.Background(), env, "host", req)
 			if err != nil || !reflect.DeepEqual(got, stored) || sent.Load() != 0 || strings.Contains(got.Detail, dataDir(env)) {
