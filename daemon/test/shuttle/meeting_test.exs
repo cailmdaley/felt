@@ -2003,6 +2003,38 @@ defmodule Shuttle.MeetingTest do
            end) == 1
   end
 
+  for backend <- [Shuttle.Terminal.Tmux, Shuttle.Terminal.Rex] do
+    @tag backend: backend
+    test "a live recorder without its #{inspect(backend)} terminal prevents a second recording",
+         %{
+           hark_dir: dir,
+           backend: backend
+         } do
+      write_meeting(dir, %{"launch" => "invisible", "pid" => 321, "phase" => "live"})
+      opts = [terminal: backend, state_dir: Path.join(dir, "retained")]
+
+      Shuttle.Test.MeetingRunner.set_handler(fn
+        "tmux", _args, _opts, state ->
+          {{"no server running", 1}, state}
+
+        "ps", ["-p", "321", "-o", "command="], _opts, state ->
+          {{"python hark capture", 0}, state}
+
+        _command, _args, _opts, state ->
+          {{"unexpected command", 1}, state}
+      end)
+
+      assert {:ok, %{meeting: %{state: "live", launch: "invisible"}}} = Meeting.show(opts)
+
+      assert {:error, {:conflict, %{launch: "invisible"}}} =
+               Meeting.start(%{"mode" => "call"}, :record, "meeting", nil, opts)
+
+      refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {command, args, _} ->
+               command == "tmux" and "new-session" in args
+             end)
+    end
+  end
+
   for phase <- ["loading", "live"], missing <- [:tmux_launch, :json_launch, :dead_pane] do
     test "#{phase} hark with #{missing} supplies the card state and can be stopped", %{
       hark_dir: hark_dir
