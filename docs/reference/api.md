@@ -405,7 +405,8 @@ Without it, the receiving daemon is the recorder.
 `target` is `{fiber_id, origin, name}` or `null`.
 `cold` says whether the selected target is dormant or has been idle for at least `cold_minutes`.
 A working target is warm regardless of the age of its last event; unknown or stale owner activity is cold.
-`held` is a list of `{id, fiber_id, origin, through, text}` drafts, retained across target switches, mute, recorder replacement and daemon restart.
+`held` is a list of `{id, fiber_id, origin, after, through, text}` drafts, retained across target switches, mute, recorder replacement and daemon restart.
+`after` is the last consumed segment (initially 0); it advances when an earlier prefix is released while later speech remains, even if `through` is unchanged.
 `through` identifies the last finalized speech segment included in that draft.
 `pending` is `{fiber_id, words, text}` or `null`, holding finalized warm speech before a delivery trigger.
 `preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.
@@ -456,6 +457,8 @@ It fills an editable range in that card's composer without replacing typed text 
 `POST /voice/release` consumes that prefix before Send, Resume or New session delivers the box's edited text.
 A consumed checkpoint returns **409**, so a button cannot repeat a name-triggered delivery.
 Saying a name consumes everything held through that utterance and uses the default delivery verb: paste to a live worker, resume a dormant conversation, or start a never-run card.
+The owning daemon resolves resume versus first start from its current document, independently of recorder caches.
+A failed or interrupted name delivery retains the resolved edited text in durable recovery state and exposes it in `last.detail` for an explicit retry; it never automatically resubmits an uncertain attempt.
 A worker warmed through any path gets ordinary triggers on its next speech.
 
 Voice batches contain speaker-labelled paragraphs, joining consecutive lines by one speaker, with no header or timestamp.

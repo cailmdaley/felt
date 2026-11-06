@@ -389,11 +389,20 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
 
       {{key, _task}, deliveries} ->
         [{from, message} | rest] = state.lanes[key]
-        outcome = Shuttle.Meeting.TranscriptRelay.Worker.delivery_outcome(result)
-        state = case change_held(state, fn held -> {:ok, :ok, Held.finish(held, message.message_id, outcome)} end) do
-          {:reply, :ok, next} -> next
-          _ -> state
-        end
+
+        outcome =
+          if message.kind == "voice" and match?({:task_exit, _}, result),
+            do: :unconfirmed,
+            else: Shuttle.Meeting.TranscriptRelay.Worker.delivery_outcome(result)
+
+        state =
+          case change_held(state, fn held ->
+                 {:ok, :ok, Held.finish(held, message.message_id, outcome)}
+               end) do
+            {:reply, :ok, next} -> next
+            _ -> state
+          end
+
         GenServer.reply(from, result)
         state = %{state | deliveries: deliveries, lanes: Map.delete(state.lanes, key)}
         if rest == [], do: state, else: launch_delivery(put_in(state.lanes[key], rest), key)
@@ -568,7 +577,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     config = state.config
 
     next =
-      config |> claim_target(state) |> discard_held_buffers(state) |> read_routes(state) |> ingest(state) |> flush_due(state)
+      config
+      |> claim_target(state)
+      |> discard_held_buffers(state)
+      |> read_routes(state)
+      |> ingest(state)
+      |> flush_due(state)
 
     state = persist!(%{state | config: next}) |> launch_deliveries()
 
@@ -743,28 +757,40 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     do: GenServer.call(state.coordinator, {:held_source, config["launch"], offset, target})
 
   defp discard_held_buffers(%{"kind" => "voice"} = config, state) do
-    buffers = Enum.reject(config["buffers"], fn buffer ->
-      case held_source(config, buffer, buffer["source_offset"], state) do
-        {:seen, _} -> true
-        :unseen -> false
-        {:error, reason} -> raise reason
-      end
-    end)
+    buffers =
+      Enum.reject(config["buffers"], fn buffer ->
+        case held_source(config, buffer, buffer["source_offset"], state) do
+          {:seen, _} -> true
+          :unseen -> false
+          {:error, reason} -> raise reason
+        end
+      end)
+
     Map.put(config, "buffers", buffers)
   end
+
   defp discard_held_buffers(config, _state), do: config
 
-  defp add_voice_line(config, nil, line, state, voice), do: add_line(config, nil, line, state, voice)
+  defp add_voice_line(config, nil, line, state, voice),
+    do: add_line(config, nil, line, state, voice)
+
   defp add_voice_line(config, target, line, state, voice) do
     case held_source(config, target, voice.offset, state) do
-      :unseen -> add_line(config, target, line, state, voice)
+      :unseen ->
+        add_line(config, target, line, state, voice)
+
       {:seen, checkpoint} ->
         if checkpoint && Regex.match?(@names, voice.text) do
-          make_batch(config, Map.merge(target, %{"lines" => [], "voice_rows" => [], "held" => checkpoint}))
+          make_batch(
+            config,
+            Map.merge(target, %{"lines" => [], "voice_rows" => [], "held" => checkpoint})
+          )
         else
           config
         end
-      {:error, reason} -> raise reason
+
+      {:error, reason} ->
+        raise reason
     end
   end
 
@@ -1252,7 +1278,6 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end
   end
 
-  def delivery_outcome({:task_exit, _}), do: :unconfirmed
   def delivery_outcome(_), do: :failed
 
   defp persist!(%{config: config, persisted: config} = state), do: state

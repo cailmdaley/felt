@@ -160,9 +160,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     write_transcript(session, 30)
 
-    Env.put_app_env(:voice_target_entries, fn ->
-      [%{fiber: %{"id" => fiber, "shuttle" => %{"runtime" => %{"session_uuid" => session}}}}]
-    end)
+    Env.put_app_env(:voice_target_entries, fn -> [] end)
 
     assert {200, %{delivered: true, delivery: "resume"}} =
              Shuttle.Meeting.TranscriptRelay.Worker.deliver(%{

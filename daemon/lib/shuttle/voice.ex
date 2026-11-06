@@ -140,10 +140,11 @@ defmodule Shuttle.Voice do
 
   defp recovery_last(last, nil), do: last
   defp recovery_last(nil, recovery), do: recovery
+
   defp recovery_last(last, recovery) do
     if recovery["at"] > (last["at"] || last[:at] || "") or
-       (recovery["fiber_id"] == (last["fiber_id"] || last[:fiber_id]) and (last["status"] || last[:status]) != "delivered"),
-      do: recovery, else: last
+         (recovery["fiber_id"] == (last["fiber_id"] || last[:fiber_id]) and
+            (last["status"] || last[:status]) != "delivered"), do: recovery, else: last
   end
 
   @impl true
@@ -372,7 +373,9 @@ defmodule Shuttle.Voice do
           preview:
             if(
               voice && enabled && row.state == "live" &&
-                not Meeting.voice_muted?(state.capture_opts), do: read_preview(row[:transcript])),
+                not Meeting.voice_muted?(state.capture_opts),
+              do: read_preview(row[:transcript])
+            ),
           last: status.last || read_last() || state.snapshot.last,
           error: error
         }

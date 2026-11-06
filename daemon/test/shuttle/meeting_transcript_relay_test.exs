@@ -1048,10 +1048,11 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     [remaining] = TranscriptRelay.held(server: c.name)
     assert remaining["id"] == shown["id"]
     assert remaining["through"] > shown["through"]
-    assert remaining["text"] == " later words"
+    assert remaining["after"] == shown["through"]
+    assert remaining["text"] == "me: later words"
     record(c.path, "2026-11-06T10:00:03Z", "Claude")
     poll(c)
-    assert_receive {:delivery, %{text: " later words Claude\n"}}, 1_000
+    assert_receive {:delivery, %{text: "me: later words Claude\n"}}, 1_000
     refute_receive {:delivery, _}, 20
   end
 
@@ -1130,6 +1131,222 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     poll(c)
     assert TranscriptRelay.held(server: c.name) == []
     refute_receive {:delivery, _}, 20
+  end
+
+  for consumed <- [false, true] do
+    test "held source replay stays deduplicated after restart warm, consumed=#{consumed}", c do
+      routes = Path.join(c.root, "routes.jsonl")
+      route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+      File.write!(c.path, "")
+      record(c.path, "2026-11-06T10:00:01Z", "held words")
+      start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
+      poll(c)
+      [shown] = TranscriptRelay.held(server: c.name)
+      if unquote(consumed), do: assert(:ok = TranscriptRelay.release(shown, server: c.name))
+      assert :ok = stop_supervised(TranscriptRelay)
+      rewind_voice(c, 0)
+      start_supervised!({TranscriptRelay, c.opts})
+      TranscriptRelay.status("launch", server: c.name)
+      poll(c)
+      refute_receive {:delivery, _}, 20
+      record(c.path, "2026-11-06T10:00:02Z", "Claude fresh words")
+      poll(c)
+
+      expected =
+        if unquote(consumed),
+          do: "me: Claude fresh words\n",
+          else: "me: held words Claude fresh words\n"
+
+      assert_receive {:delivery, %{text: ^expected}}, 1_000
+      sync_tasks(c)
+      assert TranscriptRelay.held(server: c.name) == []
+      refute_receive {:delivery, _}, 20
+    end
+  end
+
+  test "a persisted warm buffer already moved into held cannot reenter delivery", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "warm before hold")
+    cold = start_supervised!(Supervisor.child_spec({Agent, fn -> false end}, id: :cold))
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> Agent.get(cold, & &1) end)
+    poll(c)
+    old = File.read!(relay_path(c, "launch"))
+    Agent.update(cold, fn _ -> true end)
+    record(c.path, "2026-11-06T10:00:02Z", "cold suffix")
+    poll(c)
+
+    assert [%{"text" => "me: warm before hold cold suffix"}] =
+             TranscriptRelay.held(server: c.name)
+
+    assert :ok = stop_supervised(TranscriptRelay)
+    File.write!(relay_path(c, "launch"), old)
+    start_supervised!({TranscriptRelay, c.opts})
+    TranscriptRelay.status("launch", server: c.name)
+    poll(c)
+    record(c.path, "2026-11-06T10:00:03Z", "Claude")
+    poll(c)
+    assert_receive {:delivery, %{text: "me: warm before hold cold suffix Claude\n"}}, 1_000
+    refute_receive {:delivery, _}, 20
+  end
+
+  test "a held name reread before its reader commit wakes once without adding its words again",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "Claude held once")
+    directory = Path.join(c.root, "relays")
+    File.mkdir_p!(Path.join(directory, "voice"))
+    source = Path.rootname(c.path) <> ".jsonl"
+    held = Shuttle.Voice.Held.load(Path.join([directory, "voice", "held.json"]))
+
+    {held, _} =
+      Shuttle.Voice.Held.append(
+        held,
+        "launch",
+        File.stat!(source).size,
+        %{"fiber_id" => "fiber-a", "origin" => "owner"},
+        [%{"speaker" => "me", "text" => "Claude held once"}]
+      )
+
+    Shuttle.Voice.Held.save!(Path.join([directory, "voice", "held.json"]), held)
+    start_monitor(c, kind: "voice", routes: routes)
+    poll(c)
+    assert_receive {:delivery, %{text: "me: Claude held once\n"}}, 1_000
+    sync_tasks(c)
+    poll(c)
+    assert TranscriptRelay.held(server: c.name) == []
+    refute_receive {:delivery, _}, 20
+  end
+
+  for failure <- [:refused, :crash] do
+    test "edited name payload survives #{failure} and restart without an automatic retry", c do
+      routes = Path.join(c.root, "routes.jsonl")
+      route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+      File.write!(c.path, "")
+      record(c.path, "2026-11-06T10:00:01Z", "raw original")
+      parent = self()
+
+      deliver = fn message ->
+        send(parent, {:delivery, message})
+
+        case unquote(failure) do
+          :refused -> {503, %{delivered: false}}
+          :crash -> exit(:lost_after_submit)
+        end
+      end
+
+      opts = Keyword.merge(c.opts, cold: fn _ -> true end, deliver: deliver)
+      start_monitor(%{c | opts: opts}, kind: "voice", routes: routes)
+      poll(c)
+      [shown] = TranscriptRelay.held(server: c.name)
+
+      assert :ok =
+               TranscriptRelay.draft(Map.put(shown, "text", "me: edited correction"),
+                 server: c.name
+               )
+
+      record(c.path, "2026-11-06T10:00:02Z", "Claude")
+      poll(c)
+      assert_receive {:delivery, %{text: "me: edited correction Claude\n"}}, 1_000
+      sync_tasks(c)
+      assert TranscriptRelay.held(server: c.name) == []
+      recovery = TranscriptRelay.recovery(server: c.name)
+      expected = if unquote(failure) == :crash, do: "unconfirmed", else: "failed"
+      assert recovery["status"] == expected
+      assert recovery["detail"] =~ "me: edited correction Claude"
+      assert :ok = stop_supervised(TranscriptRelay)
+      start_supervised!({TranscriptRelay, opts})
+      TranscriptRelay.status("launch", server: c.name)
+      poll(c)
+      assert TranscriptRelay.recovery(server: c.name)["detail"] == recovery["detail"]
+      refute_receive {:delivery, _}, 20
+    end
+  end
+
+  test "an interrupted name submission retains its resolved edits without replay", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "raw words")
+    parent = self()
+
+    deliver = fn message ->
+      send(parent, {:submitting, message})
+
+      receive do
+        :finish -> {200, %{delivered: true}}
+      end
+    end
+
+    opts = Keyword.merge(c.opts, cold: fn _ -> true end, deliver: deliver)
+    start_monitor(%{c | opts: opts}, kind: "voice", routes: routes)
+    poll(c)
+    [shown] = TranscriptRelay.held(server: c.name)
+
+    assert :ok =
+             TranscriptRelay.draft(Map.put(shown, "text", "me: precious correction"),
+               server: c.name
+             )
+
+    record(c.path, "2026-11-06T10:00:02Z", "Claude")
+    poll(c)
+    assert_receive {:submitting, %{text: "me: precious correction Claude\n"}}, 1_000
+    assert :ok = stop_supervised(TranscriptRelay)
+    start_supervised!({TranscriptRelay, opts})
+    TranscriptRelay.status("launch", server: c.name)
+    poll(c)
+
+    assert %{"status" => "unconfirmed", "detail" => detail} =
+             TranscriptRelay.recovery(server: c.name)
+
+    assert detail =~ "me: precious correction Claude"
+    assert TranscriptRelay.held(server: c.name) == []
+    refute_receive {:submitting, _}, 20
+  end
+
+  test "a name stays explicit if the target crosses the cold threshold during ingestion", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "Claude wake")
+    calls = start_supervised!(Supervisor.child_spec({Agent, fn -> 0 end}, id: :cold))
+    cold = fn _ -> Agent.get_and_update(calls, fn n -> {n > 0, n + 1} end) end
+    start_monitor(c, kind: "voice", routes: routes, cold: cold)
+    poll(c)
+    assert_receive {:delivery, %{text: "me: Claude wake\n"}}, 1_000
+    assert TranscriptRelay.held(server: c.name) == []
+  end
+
+  test "meeting delivery task exits retain their batch for retry", c do
+    File.write!(c.path, "Claude meeting words\n")
+    parent = self()
+    calls = start_supervised!(Supervisor.child_spec({Agent, fn -> 0 end}, id: :attempts))
+
+    deliver = fn message ->
+      send(parent, {:delivery, message})
+
+      case Agent.get_and_update(calls, fn n -> {n, n + 1} end) do
+        0 -> exit(:transient_failure)
+        _ -> {200, %{delivered: true}}
+      end
+    end
+
+    start_monitor(c, deliver: deliver)
+    assert_receive {:delivery, first}, 1_000
+    sync_tasks(c)
+    assert [_] = Jason.decode!(File.read!(relay_path(c, "launch")))["outbox"]
+    poll(c)
+    assert_receive {:delivery, second}, 1_000
+    assert second == first
+  end
+
+  defp rewind_voice(c, offset) do
+    file = relay_path(c, "launch")
+    config = file |> File.read!() |> Jason.decode!() |> Map.put("json_offset", offset)
+    File.write!(file, Jason.encode!(config))
   end
 
   defp relay_path(c, launch) do

@@ -39,6 +39,7 @@ defmodule Shuttle.VoiceTest do
       poll_ms: 60_000,
       reconcile: reconcile,
       held: fn -> [] end,
+      recovery: fn -> nil end,
       cold: fn _ -> false end,
       relay: fn _, _ -> :ok end,
       monitor: fn _ -> %{pending: nil, last: nil} end
@@ -138,6 +139,60 @@ defmodule Shuttle.VoiceTest do
     refute Target.cold?(%{"fiber_id" => "uid-a", "origin" => "owner"})
     assert Target.cold?(%{"fiber_id" => "a", "origin" => "other"})
     assert Target.cold?(%{"fiber_id" => "dormant", "origin" => "owner"})
+  end
+
+  test "resolved edited-payload recovery is exposed instead of a generic failed delivery", c do
+    recovery = %{
+      "fiber_id" => "a",
+      "status" => "unconfirmed",
+      "at" => "2026-11-06T10:00:01Z",
+      "detail" => "Copy retained correction"
+    }
+
+    :sys.replace_state(c.pid, fn state ->
+      %{
+        state
+        | recovery: fn -> recovery end,
+          snapshot: %{
+            state.snapshot
+            | last: %{
+                "fiber_id" => "a",
+                "status" => "failed",
+                "at" => "2026-11-06T10:00:02Z",
+                "detail" => "generic"
+              }
+          }
+      }
+    end)
+
+    assert %{last: ^recovery} = Voice.show()
+    delivered = %{"fiber_id" => "a", "status" => "delivered", "at" => "2026-11-06T10:00:03Z"}
+
+    :sys.replace_state(c.pid, fn state ->
+      %{state | snapshot: %{state.snapshot | last: delivered}}
+    end)
+
+    assert %{last: ^delivered} = Voice.show()
+  end
+
+  test "corrupt held metadata fails visibly instead of losing drafts", c do
+    alias Shuttle.Voice.Held
+    file = Path.join(c.root, "held.json")
+
+    {state, _} =
+      Held.append(Held.load(file), "launch", 42, %{"fiber_id" => "a", "origin" => "owner"}, [
+        %{"speaker" => "S1", "text" => "words"}
+      ])
+
+    for invalid <- [
+          put_in(state, ["cards", Access.at(0), "segments", Access.at(0), "speaker"], nil),
+          put_in(state, ["cards", Access.at(0), "checkpoints"], []),
+          put_in(state, ["cards", Access.at(0), "after"], 99),
+          Map.put(state, "attempts", %{"id" => %{"status" => "failed", "text" => "edits"}})
+        ] do
+      File.write!(file, Jason.encode!(invalid))
+      assert {:error, "invalid held voice state"} = Held.list(Held.load(file))
+    end
   end
 
   test "held draft APIs consume once and report claim conflicts without launching", c do

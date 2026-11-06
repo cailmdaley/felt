@@ -11,9 +11,14 @@ defmodule Shuttle.Voice.Held do
           {:ok, %{"seen" => seen, "cards" => cards} = state}
           when is_map(seen) and is_list(cards) ->
             validate!(state)
+
             Map.update(state, "attempts", %{}, fn attempts ->
               Map.new(attempts, fn {id, attempt} ->
-                {id, if(attempt["status"] == "pending", do: Map.merge(attempt, %{"status" => "unconfirmed", "at" => timestamp()}), else: attempt)}
+                {id,
+                 if(attempt["status"] == "pending",
+                   do: Map.merge(attempt, %{"status" => "unconfirmed", "at" => timestamp()}),
+                   else: attempt
+                 )}
               end)
             end)
 
@@ -37,15 +42,33 @@ defmodule Shuttle.Voice.Held do
     Enum.each(state["cards"], fn card ->
       true = Enum.all?(~w(id fiber_id), &is_binary(card[&1]))
       true = is_integer(card["through"]) and card["through"] > 0
+      after_prefix = Map.get(card, "after", 0)
+      true = is_integer(after_prefix) and after_prefix >= 0 and after_prefix < card["through"]
       true = is_binary(card["speaker"])
       true = is_list(card["segments"]) and card["segments"] != []
 
       Enum.reduce(card["segments"], 0, fn segment, previous ->
-        true = is_binary(segment["text"])
+        true = is_binary(segment["text"]) and is_binary(segment["speaker"])
         through = segment["through"]
         true = is_integer(through) and through > previous and through <= card["through"]
         through
       end)
+
+      true = is_map(card["checkpoints"])
+
+      true =
+        Enum.all?(card["checkpoints"], fn {source, through} ->
+          is_binary(source) and is_integer(through) and through > 0 and through <= card["through"]
+        end)
+    end)
+
+    true = is_map(Map.get(state, "attempts", %{}))
+
+    Enum.each(Map.get(state, "attempts", %{}), fn {id, attempt} ->
+      true = is_binary(id) and is_map(attempt)
+      true = Enum.all?(~w(fiber_id text at), &is_binary(attempt[&1]))
+      true = attempt["status"] in ~w(pending failed unconfirmed)
+      {:ok, _, _} = DateTime.from_iso8601(attempt["at"])
     end)
   end
 
@@ -58,21 +81,26 @@ defmodule Shuttle.Voice.Held do
   def list(%{"error" => error}), do: {:error, error}
   def list(state), do: Enum.map(state["cards"], &public/1)
 
-  def append(%{"error" => error}, _, _, _, _), do: raise(error)
-
   def lookup(%{"error" => error}, _, _, _), do: {:error, error}
+
   def lookup(state, launch, offset, target) do
     source = Jason.encode!([launch, target["fiber_id"], target["origin"]])
+
     if offset <= Map.get(state["seen"], source, -1) do
       card = target(state, target)
       through = card && get_in(card, ["checkpoints", Jason.encode!([launch, offset])])
-      checkpoint = if through && Enum.any?(card["segments"], &(&1["through"] == through)),
-        do: public(card) |> Map.put("through", through)
+
+      checkpoint =
+        if through && Enum.any?(card["segments"], &(&1["through"] == through)),
+          do: public(card) |> Map.put("through", through)
+
       {:seen, checkpoint}
     else
       :unseen
     end
   end
+
+  def append(%{"error" => error}, _, _, _, _), do: raise(error)
 
   def append(state, launch, offset, target, rows) do
     existing = Enum.find(state["cards"], &same_target?(&1, target))
@@ -87,6 +115,7 @@ defmodule Shuttle.Voice.Held do
           Map.merge(Map.take(target, ~w(fiber_id origin)), %{
             "id" => Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false),
             "through" => 0,
+            "after" => 0,
             "segments" => [],
             "speaker" => nil,
             "checkpoints" => %{}
@@ -106,7 +135,10 @@ defmodule Shuttle.Voice.Held do
           card
           |> Map.put("through", through)
           |> Map.put("speaker", speaker)
-          |> Map.update!("segments", &(&1 ++ [%{"through" => through, "text" => prefix <> text, "speaker" => speaker}]))
+          |> Map.update!(
+            "segments",
+            &(&1 ++ [%{"through" => through, "text" => prefix <> text, "speaker" => speaker}])
+          )
         end)
 
       card = put_in(card, ["checkpoints", Jason.encode!([launch, offset])], card["through"])
@@ -117,7 +149,12 @@ defmodule Shuttle.Voice.Held do
 
   def edit(state, id, through, text) when is_binary(text) do
     with {:ok, card, prefix, rest} <- split(state, id, through) do
-      segment = %{"through" => List.last(prefix)["through"], "text" => text, "speaker" => List.first(prefix)["speaker"]}
+      segment = %{
+        "through" => List.last(prefix)["through"],
+        "text" => text,
+        "speaker" => List.first(prefix)["speaker"]
+      }
+
       {:ok, put_card(state, Map.put(card, "segments", [segment | rest]))}
     end
   end
@@ -127,39 +164,84 @@ defmodule Shuttle.Voice.Held do
       next =
         if rest == [],
           do: drop_card(state, id),
-          else: put_card(state, Map.put(card, "segments", label_first(rest)))
+          else:
+            put_card(
+              state,
+              card |> Map.put("segments", label_first(rest)) |> Map.put("after", through)
+            )
 
       {:ok, next, Enum.map_join(prefix, & &1["text"])}
     end
   end
 
   def remember(state, message) do
-    attempt = %{"fiber_id" => message.fiber_id, "origin" => message.origin, "text" => message.text, "status" => "pending", "at" => timestamp()}
-    Map.update(state, "attempts", %{message.message_id => attempt}, &Map.put(&1, message.message_id, attempt))
+    attempt = %{
+      "fiber_id" => message.fiber_id,
+      "origin" => message.origin,
+      "text" => message.text,
+      "status" => "pending",
+      "at" => timestamp()
+    }
+
+    Map.update(
+      state,
+      "attempts",
+      %{message.message_id => attempt},
+      &Map.put(&1, message.message_id, attempt)
+    )
   end
 
   def finish(state, id, outcome) do
     attempts = Map.get(state, "attempts", %{})
+
     case attempts[id] do
-      nil -> state
-      _ when outcome == :delivered -> Map.put(state, "attempts", Map.delete(attempts, id))
-      attempt -> Map.put(state, "attempts", Map.put(attempts, id, Map.merge(attempt, %{"status" => Atom.to_string(outcome), "at" => timestamp()})))
+      nil ->
+        state
+
+      _ when outcome == :delivered ->
+        Map.put(state, "attempts", Map.delete(attempts, id))
+
+      attempt ->
+        Map.put(
+          state,
+          "attempts",
+          Map.put(
+            attempts,
+            id,
+            Map.merge(attempt, %{"status" => Atom.to_string(outcome), "at" => timestamp()})
+          )
+        )
     end
   end
 
   def recovery(state) do
-    state |> Map.get("attempts", %{}) |> Map.values()
+    state
+    |> Map.get("attempts", %{})
+    |> Map.values()
     |> Enum.filter(&(&1["status"] in ["failed", "unconfirmed"]))
     |> Enum.max_by(& &1["at"], fn -> nil end)
     |> case do
-      nil -> nil
-      attempt -> Map.take(attempt, ~w(fiber_id at status)) |> Map.put("detail", "Your edited voice draft is retained. Copy it into the composer to send it again:\n\n" <> attempt["text"])
+      nil ->
+        nil
+
+      attempt ->
+        Map.take(attempt, ~w(fiber_id at status))
+        |> Map.put(
+          "detail",
+          "Your edited voice draft is retained. Copy it into the composer to send it again:\n\n" <>
+            attempt["text"]
+        )
     end
   end
 
   defp label_first([first | rest]) do
     text = first["text"]
-    first = if String.starts_with?(text, " "), do: Map.put(first, "text", first["speaker"] <> ": " <> String.trim_leading(text)), else: first
+
+    first =
+      if String.starts_with?(text, " "),
+        do: Map.put(first, "text", first["speaker"] <> ": " <> String.trim_leading(text)),
+        else: first
+
     [first | rest]
   end
 
@@ -186,6 +268,7 @@ defmodule Shuttle.Voice.Held do
     do:
       card
       |> Map.take(~w(id fiber_id origin through))
+      |> Map.put("after", Map.get(card, "after", 0))
       |> Map.put("text", Enum.map_join(card["segments"], & &1["text"]))
 
   defp same_target?(a, b), do: a["fiber_id"] == b["fiber_id"] and a["origin"] == b["origin"]

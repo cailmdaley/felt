@@ -2518,7 +2518,11 @@ defmodule Shuttle.MeetingTest do
     File.write!(config, ~s({"enabled":true,"voice":{"words":0,"quiet_seconds":1}}))
     Env.put_env("SHUTTLE_VOICE_FILE", config)
     Env.put_env("SHUTTLE_DATA_DIR", root)
-    Env.start_scoped!({Shuttle.Voice, [name: nil, poll_ms: 60_000]})
+
+    Env.start_scoped!(
+      {Shuttle.Voice, [name: nil, poll_ms: 60_000, held: fn -> [] end, recovery: fn -> nil end]}
+    )
+
     assert {:ok, %{state: "failed", enabled: false, error: error}} = Shuttle.Voice.update(%{})
     assert error =~ "invalid voice settings"
     assert File.read!(Path.join([dir, "voice", voice <> ".txt"])) =~ "# ended"
@@ -2618,6 +2622,8 @@ defmodule Shuttle.MeetingTest do
          [
            name: nil,
            poll_ms: 60_000,
+           held: fn -> [] end,
+           recovery: fn -> nil end,
            relay: fn _, _ -> :ok end,
            monitor: fn _ -> %{pending: nil, last: nil} end
          ]}
