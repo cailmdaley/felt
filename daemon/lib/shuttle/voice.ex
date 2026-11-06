@@ -8,13 +8,17 @@ defmodule Shuttle.Voice do
 
   def show(opts \\ []), do: GenServer.call(server(opts), :show)
   def update(params, opts \\ []), do: GenServer.call(server(opts), {:update, params}, 30_000)
-  def target(params, opts \\ []), do: GenServer.call(server(opts), {:target, params})
+
+  def target(params, opts \\ []),
+    do: GenServer.call(server(opts), {:target, params, DateTime.utc_now()})
+
   defp server(opts), do: Keyword.get(opts, :server, Shuttle.Env.server(__MODULE__))
   def routes_path, do: Path.join(Shuttle.data_dir(), "voice-routes.jsonl")
   def last_path, do: Path.join(Shuttle.data_dir(), "voice-last.json")
 
   @impl true
   def init(opts) do
+    Process.flag(:trap_exit, true)
     routes_path = Keyword.get(opts, :routes_path, routes_path())
     {lines, route_bytes, _} = Shuttle.FileTail.snapshot(routes_path)
     :ok = truncate_routes(routes_path, route_bytes)
@@ -27,6 +31,8 @@ defmodule Shuttle.Voice do
 
     state = %{
       target: target,
+      task: nil,
+      queue: [],
       routes_path: routes_path,
       route_bytes: route_bytes,
       poll_ms: Keyword.get(opts, :poll_ms, 1_000),
@@ -53,7 +59,7 @@ defmodule Shuttle.Voice do
   @impl true
   def handle_call(:show, _from, state), do: {:reply, state.snapshot, state}
 
-  def handle_call({:target, %{"fiber_id" => id} = params}, _from, state)
+  def handle_call({:target, %{"fiber_id" => id} = params, received_at}, _from, state)
       when is_binary(id) and id != "" do
     origin = params["origin"]
 
@@ -68,7 +74,7 @@ defmodule Shuttle.Voice do
           "name" => target_name(id, origin) || params["name"] || Path.basename(id)
         }
 
-        row = Map.put(target, "t", DateTime.to_iso8601(DateTime.utc_now()))
+        row = Map.put(target, "t", DateTime.to_iso8601(received_at))
 
         case append_route(state.routes_path, state.route_bytes, row) do
           {:ok, route_bytes} ->
@@ -89,41 +95,108 @@ defmodule Shuttle.Voice do
     end
   end
 
-  def handle_call({:target, _}, _from, state),
+  def handle_call({:target, _, _}, _from, state),
     do: {:reply, {:error, "fiber_id is required"}, state}
 
-  def handle_call({:update, params}, _from, state) do
+  def handle_call({:update, params}, from, state) do
     invalid =
       Enum.any?(~w(enabled muted), &(Map.has_key?(params, &1) and not is_boolean(params[&1])))
 
     if invalid do
       {:reply, {:error, "enabled and muted must be booleans"}, state}
     else
-      with :ok <-
-             if(Map.has_key?(params, "enabled"), do: Config.enable(params["enabled"]), else: :ok),
-           :ok <-
-             if(Map.has_key?(params, "muted"),
-               do: Meeting.mute_voice(params["muted"], state.capture_opts),
-               else: :ok
-             ) do
-        state = reconcile(state)
-        {:reply, {:ok, state.snapshot}, state}
-      else
-        {:error, reason} -> {:reply, {:error, inspect(reason)}, state}
-      end
+      {:noreply, enqueue(state, {params, from})}
     end
   end
 
   @impl true
   def handle_info(:tick, state) do
-    state = reconcile(state)
     Process.send_after(self(), :tick, state.poll_ms)
-    {:noreply, state}
+    {:noreply, if(state.task, do: state, else: enqueue(state, {%{}, nil}))}
+  end
+
+  def handle_info({ref, result}, %{task: {%Task{ref: ref}, from}} = state) do
+    Process.demonitor(ref, [:flush])
+    finish_task(state, from, result)
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: {%Task{ref: ref}, from}} = state),
+    do: finish_task(state, from, {:error, "voice reconciliation exited: #{inspect(reason)}"})
+
+  @impl true
+  def terminate(_reason, %{task: {task, _}}), do: Task.shutdown(task, :brutal_kill)
+  def terminate(_reason, _state), do: :ok
+
+  defp finish_task(state, from, result) do
+    {reply, snapshot} =
+      case result do
+        {:ok, snapshot} ->
+          snapshot = %{snapshot | target: state.target}
+          {{:ok, snapshot}, snapshot}
+
+        {:error, reason} ->
+          enabled =
+            case Config.read() do
+              {:ok, settings} -> settings["enabled"]
+              _ -> state.snapshot.enabled
+            end
+
+          snapshot = %{
+            state.snapshot
+            | enabled: enabled,
+              muted: Meeting.voice_muted?(state.capture_opts),
+              state: "failed",
+              error: inspect(reason)
+          }
+
+          {{:error, inspect(reason)}, snapshot}
+      end
+
+    if from, do: GenServer.reply(from, reply)
+    state = %{state | task: nil, snapshot: snapshot}
+
+    case state.queue do
+      [] -> {:noreply, state}
+      [next | rest] -> {:noreply, enqueue(%{state | queue: rest}, next)}
+    end
+  end
+
+  defp enqueue(%{task: task} = state, operation) when not is_nil(task),
+    do: %{state | queue: state.queue ++ [operation]}
+
+  defp enqueue(state, {params, from}) do
+    task =
+      Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
+        with :ok <-
+               if(Map.has_key?(params, "enabled"),
+                 do: Config.enable(params["enabled"]),
+                 else: :ok
+               ),
+             :ok <-
+               if(Map.has_key?(params, "muted"),
+                 do: Meeting.mute_voice(params["muted"], state.capture_opts),
+                 else: :ok
+               ) do
+          {:ok, reconcile(state).snapshot}
+        end
+      end)
+
+    %{state | task: {task, from}}
   end
 
   defp reconcile(state) do
-    with {:ok, settings} <- Config.read(),
-         {:ok, observed} <- state.reconcile.(settings["enabled"], state.capture_opts) do
+    case Config.read() do
+      {:ok, settings} ->
+        state = %{state | snapshot: %{state.snapshot | enabled: settings["enabled"]}}
+        reconcile(state, settings)
+
+      {:error, reason} ->
+        %{state | snapshot: %{state.snapshot | state: "failed", error: inspect(reason)}}
+    end
+  end
+
+  defp reconcile(state, settings) do
+    with {:ok, observed} <- state.reconcile.(settings["enabled"], state.capture_opts) do
       row = observed.meeting
       voice = not is_nil(row) and row[:kind] == "voice"
       if voice and is_binary(row[:transcript]), do: state.relay.(row, state.routes_path)

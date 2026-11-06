@@ -2375,7 +2375,50 @@ defmodule Shuttle.MeetingTest do
     assert {:ok, _} = Meeting.reconcile_voice(false)
   end
 
-  defp set_voice_handler(dir) do
+  test "a failed or ignored voice interrupt falls back to verified process exit before meeting launch",
+       %{hark_dir: dir} do
+    for behavior <- [:interrupt_error, :ignore_interrupt] do
+      set_voice_handler(dir, behavior)
+      assert {:ok, _} = Meeting.reconcile_voice(true)
+
+      assert {:ok, %{meeting: %{kind: "meeting"}}} =
+               Meeting.start(%{"mode" => "call"}, :record, "meeting", nil, voice_stop_wait_ms: 0)
+
+      calls = Shuttle.Test.MeetingRunner.calls()
+
+      killed =
+        Enum.find_index(calls, fn {cmd, args, _} -> cmd == "kill" and args == ["-KILL", "321"] end)
+
+      launched =
+        calls
+        |> Enum.with_index()
+        |> Enum.filter(fn {{cmd, args, _}, _} ->
+          cmd == "tmux" and match?(["new-session" | _], args)
+        end)
+        |> List.last()
+        |> elem(1)
+
+      assert killed < launched
+
+      assert Enum.any?(Enum.slice(calls, (killed + 1)..(launched - 1)), fn {cmd, args, _} ->
+               cmd == "ps" and args == ["-p", "321", "-o", "command="]
+             end)
+    end
+  end
+
+  test "a voice process that cannot be killed never overlaps a meeting", %{hark_dir: dir} do
+    set_voice_handler(dir, :unkillable)
+    assert {:ok, _} = Meeting.reconcile_voice(true)
+
+    assert {:error, {:operation, "live voice process did not exit; meeting capture not started"}} =
+             Meeting.start(%{"mode" => "call"}, :record, "meeting", nil, voice_stop_wait_ms: 0)
+
+    assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end) == 1
+  end
+
+  defp set_voice_handler(dir, behavior \\ :graceful) do
     Shuttle.Test.MeetingRunner.set_handler(fn
       "tmux", ["has-session" | _], _opts, nil ->
         {{"can't find session: hark-meeting", 1}, nil}
@@ -2418,11 +2461,20 @@ defmodule Shuttle.MeetingTest do
       "ps", ["-p", "321", "-o", "command="], _opts, state ->
         {{"", 1}, state}
 
-      "kill", ["-INT", "321"], _opts, {launch, _} ->
-        row = File.read!(Path.join(dir, "meeting.json")) |> Jason.decode!()
-        File.write!(row["transcript"], "# ended\n", [:append])
-        write_meeting(dir, Map.put(row, "phase", "ended"))
-        {{"", 0}, {launch, :ended}}
+      "kill", ["-INT", "321"], _opts, {launch, _} = state ->
+        if behavior == :graceful do
+          row = File.read!(Path.join(dir, "meeting.json")) |> Jason.decode!()
+          File.write!(row["transcript"], "# ended\n", [:append])
+          write_meeting(dir, Map.put(row, "phase", "ended"))
+          {{"", 0}, {launch, :ended}}
+        else
+          {{"", if(behavior == :interrupt_error, do: 1, else: 0)}, state}
+        end
+
+      "kill", ["-KILL", "321"], _opts, {launch, _} = state ->
+        if behavior == :unkillable,
+          do: {{"not permitted", 1}, state},
+          else: {{"", 0}, {launch, :crashed}}
 
       "env", [_hark_dir, _executable, command], _opts, state
       when command in ["pause", "resume"] ->

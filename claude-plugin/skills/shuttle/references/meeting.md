@@ -4,21 +4,43 @@ Transcripts reach you three ways. In a **live meeting** you are the scribe: you 
 
 What people say in a conversation is a candidate, not a decision: propose promotions to fibers, never make one silently, and send nothing to another human (issue, chat, email, wiki) until the user approves the text. A meeting transcript is a conversation between colleagues, so keep it out of git; reference its path, and quote only what the notes need.
 
+## Live voice
+
+Live voice sends microphone speech to the constitution most recently viewed on the board.
+You stay that constitution's worker; this is conversational input, not a request to file a meeting.
+Each batch starts with `Live voice:` and keeps a speaker label on every spoken line, without timestamps.
+`me` identifies a voiceprint match to the enrolled user; other labels may be the user or people in the room.
+Use the conversation to judge who is addressing whom: a colleague's request to you counts too.
+Don't filter requests by speaker label or treat these words as a teammate's message.
+The recognizer can mangle names and jargon, so read generously.
+
+Listening is off until the user enables it; the board's Voice control also mutes it with `hark pause`.
+Opening another constitution switches the destination, but a delayed line goes to the worker selected when that line began.
+A meeting temporarily takes the microphone; live voice returns afterward if still enabled.
+Shuttle delivers batches automatically; don't run `shuttle follow` for live voice.
+
 ## Live meeting
 
 The user starts a meeting from the board, either from the Capture form in meeting mode, which launches you as a new capture, or from a constitution's card, which joins the meeting to that constitution through whichever session verb the user pressed. `hark` records on the user's machine and writes a speaker-labelled transcript to a path on this host. Your message opens with `Meeting mode`, that path and the mode, then the user's note, which may be empty. The mode says where the audio comes from: `call` records the machine's echo-cancelled mic and its system audio (Zoom, Meet), or the mic alone when the user chose Mic only, and `phone` records through a phone's mic. Desktop meetings always use `call`, including in-person meetings with silent system audio; mobile meetings always use `phone`. Every voice is numbered `S1`, `S2`, …; in `call`, a mic voice that matches the user's enrolled voiceprint is named `me`, so a line without `me` may still be the user. You are the scribe from the moment you claim, or, when joined, from the moment the message arrives.
 
 ### The transcript
 
-Follow it with `shuttle follow <path>`, under `Monitor` in Claude Code, elsewhere by reading its stdout. It waits for the file, prints what is already there, then delivers batches, flushing at once when someone says your name, and exits at `# ended`. The transcript mostly explains itself. Three things it can't show: lines are whole turns and can land slightly out of order around interruptions; the recognizer mangles names and jargon, so read generously; and you can name a speaker yourself by appending a line such as `# S2 = Martin` once the content makes it clear.
+Shuttle sends transcript batches and `# ended` automatically for board meetings.
+A capture receives everything from the beginning once the scribe claims its fiber; a joined constitution receives batches immediately.
+Don't run `shuttle follow` for either.
+The daemon flushes after enough words, a quiet interval since the last speech, or a name mention (`claude`, `cloud`, `clawed`, `klaud`).
+Voice and meeting word limits and quiet intervals live in Settings → Voice.
+Comments beginning with `#` ride along, including speaker aliases and `# ended`.
 
-For a joined meeting started from the board, Shuttle sends transcript batches and `# ended` to the worker automatically; don't also run `shuttle follow` for that recording.
+Lines are whole turns and can land slightly out of order around interruptions.
+The recognizer mangles names and jargon, so read generously.
+You can name a speaker yourself by appending a line such as `# S2 = Martin` once the content makes it clear.
 
 ### Steps
 
 1. **Capture as usual, with two meeting specifics** ([capture.md](capture.md), steps 1–5). The fiber is the meeting: file it where the project keeps meetings, conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub from the note and the project's tree, and give its body the time, the mode and the transcript path. With an empty note a provisional name is fine; rename it once the first minutes make the subject clear. Your role is `scribe`. This page defines the office; the `roles/scribe` charter holds only the user's conventions and what past meetings taught, and outranks this page where they differ. If the store has none, create it with just its name and an empty working-knowledge section. Post the supplied `Claim` as given, after the install; it carries the meeting's launch id, and the board seats the meeting on your fiber's card.
-2. **Follow quietly, from the moment you've claimed.** The meeting is already running, so start watching before you polish the fiber. Keep running notes in the fiber — what was discussed, decisions, action items by owner, open questions — each with its timestamp and speaker label. Don't narrate.
-3. **Act when addressed.** A line spoken to you by name is a request (`follow` already catches "Cloud", "Clawed" and "Klaud"). Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
+2. **Read quietly, from the moment you've claimed.** Automatic batches begin with the recording's first words; don't delay the claim while polishing the fiber. Keep running notes in the fiber — what was discussed, decisions, action items by owner, open questions — each with its timestamp and speaker label. Don't narrate.
+3. **Act when addressed.** A line spoken to you by name is a request (the monitor also catches "Cloud", "Clawed" and "Klaud"). Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
 4. **Keep the report live.** Keep `tapestry.html` in the fiber folder as the meeting's current state — summary, decisions, action items, figures — rewritten whole and self-contained ([tapestry.md](tapestry.md)). Send it once with `send-file` so it sits on the Board, then rewrite it in place after each substantive change.
 5. **Consolidate at `# ended`**: write the notes document and propose the fiber extraction ([below](#from-transcript-to-notes)), rewrite the report, then run `shuttle close <meeting-fiber>`.
 
@@ -41,7 +63,10 @@ shuttle follow "$T"                                                  # under Mon
 shuttle meeting stop --recorder mac --launch <id>                    # the id start printed on stderr
 ```
 
-No agent is launched and no fiber is told, so you are the scribe from the moment the path prints; nothing claims a fiber for you. Use `--mode phone` when the audio comes from a phone. A `recording_unknown` failure means the recorder may already be recording: check before starting again.
+No agent is launched and no fiber is told, so you are the scribe from the moment the path prints; nothing claims a fiber for you.
+`shuttle follow` waits for the file, prints existing lines, and flushes by words, name mentions or quiet time since the last spoken line (30 s by default), then exits at `# ended`.
+Use `--mode phone` when the audio comes from a phone.
+A `recording_unknown` failure means the recorder may already be recording: check before starting again.
 
 ## From transcript to notes
 

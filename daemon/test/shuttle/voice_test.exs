@@ -1,3 +1,7 @@
+defmodule Shuttle.Test.MissingVoiceRunner do
+  def cmd(_command, _args, _opts), do: {"terminal unavailable", 2}
+end
+
 defmodule Shuttle.VoiceTest do
   use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
@@ -29,7 +33,7 @@ defmodule Shuttle.VoiceTest do
     ]
 
     pid = Env.start_scoped!({Voice, opts})
-    Voice.show()
+    {:ok, _} = Voice.update(%{})
     {:ok, pid: pid, opts: opts, root: root, observed: observed}
   end
 
@@ -72,6 +76,28 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{state: "listening"}} = Voice.update(%{})
   end
 
+  test "persisted enable state stays visible through recorder failures and recovery", c do
+    stop_supervised!(Voice)
+    {:ok, result} = Agent.start_link(fn -> {:error, :unavailable} end)
+    reconcile = fn _, _ -> Agent.get(result, & &1) end
+    Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
+    assert {:ok, %{enabled: true, state: "failed"}} = Voice.update(%{"enabled" => true})
+    assert %{enabled: true, state: "failed"} = Voice.show()
+    Agent.update(result, fn _ -> {:ok, %{available: true, meeting: nil}} end)
+    assert {:ok, %{enabled: true, state: "starting"}} = Voice.update(%{})
+    Agent.update(result, fn _ -> {:error, :stop_failed} end)
+    assert {:ok, %{enabled: false, state: "failed"}} = Voice.update(%{"enabled" => false})
+  end
+
+  test "a failed mute after enabling still reports the persisted enabled switch", c do
+    Env.put_app_env(:hark_path, false)
+    File.mkdir_p!(Path.join(c.root, "hark"))
+    # Mute can't inspect the terminal, but enabling has already persisted.
+    Env.put_app_env(:meeting_runner, Shuttle.Test.MissingVoiceRunner)
+    assert {:error, _} = Voice.update(%{"enabled" => true, "muted" => true})
+    assert %{enabled: true, muted: true, state: "failed"} = Voice.show()
+  end
+
   test "target receipt time is durable and restored by a fresh supervisor", c do
     assert {:ok, %{target: %{"fiber_id" => "project/first"}}} =
              Voice.target(%{"fiber_id" => "project/first"})
@@ -91,6 +117,38 @@ defmodule Shuttle.VoiceTest do
     stop_supervised!(Voice)
     Env.start_scoped!({Voice, c.opts})
     assert %{target: %{"fiber_id" => "project/second"}} = Voice.show()
+  end
+
+  test "slow recorder reconciliation cannot delay a target switch or its receipt timestamp", c do
+    stop_supervised!(Voice)
+    parent = self()
+
+    reconcile = fn enabled, _ ->
+      send(parent, {:blocked, self(), enabled})
+
+      receive do
+        :continue -> {:ok, %{available: true, meeting: nil}}
+      end
+    end
+
+    Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
+    assert_receive {:blocked, task, false}, 1_000
+    before = DateTime.utc_now()
+
+    assert {:ok, %{target: %{"fiber_id" => "project/new"}}} =
+             Voice.target(%{"fiber_id" => "project/new"})
+
+    assert %{target: %{"fiber_id" => "project/new"}} = Voice.show()
+
+    [row] =
+      File.read!(Voice.routes_path())
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+
+    {:ok, stamp, _} = DateTime.from_iso8601(row["t"])
+    assert DateTime.compare(stamp, before) != :lt
+    assert DateTime.compare(stamp, DateTime.utc_now()) != :gt
+    send(task, :continue)
   end
 
   test "an interrupted route append is truncated without damaging complete routes", c do

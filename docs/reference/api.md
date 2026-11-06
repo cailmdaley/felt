@@ -59,6 +59,9 @@ time.
 | `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
 | `POST /meeting/start` | recorder-routed | Record on the selected recorder, mirrored toward `origin`, with no agent; answers the transcript's path on `origin` |
 | `POST /meeting/system-audio` | recorder-addressed | Enable or mute system transcription in a live desktop meeting with `{recorder?, launch, enabled}` |
+| `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
+| `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
+| `POST /voice/target` | recorder-routed | Append a timestamped speech destination `{fiber_id, origin?}` |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /attachments` | owner-routed | Store files attached in the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
@@ -391,6 +394,55 @@ may total at most 20 MiB. Successful receipts include
 copy. File-bearing envelopes are refused on `/messages`; this dedicated route
 prevents an older daemon from silently dropping fields it does not recognize.
 
+### Live voice
+
+`GET /voice` returns `{available, enabled, muted, state, target, pending, last, error, recorder}`.
+An optional `recorder` selects the recording daemon, independently of the receiving worker's `origin`.
+Without it, the receiving daemon is the recorder.
+`state` is `off`, `starting`, `listening`, `yielded` (a meeting owns the microphone), or `failed`.
+`target` is `{fiber_id, origin, name}` or `null`.
+`pending` is `{fiber_id, words, text}` or `null`; `last` is `{fiber_id, at, status, detail?}` or `null`, with `status` `delivered` or `failed`.
+`enabled` reports the persisted intent even if recording fails.
+
+`POST /voice` accepts `{enabled?, muted?, recorder?}` and returns the same state.
+Both control fields must be booleans; invalid input returns **422**.
+Enabling persists to `voice.json`; muting uses `hark pause` and survives recorder restarts.
+The daemon keeps one retained `hark --voice` running while enabled, adopts it after daemon restarts, and replaces it after a crash.
+There is no scheduled recorder restart.
+Every meeting start stops live voice and verifies the recorder has exited before opening another capture; voice returns after the meeting ends.
+Voice captures are hidden from `/meeting` and its stop control.
+
+`POST /voice/target` accepts `{fiber_id, origin?, recorder?}` and durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
+`t` is the recorder's UTC receipt time, not the time reconciliation finishes.
+Use a durable fiber UID so renaming doesn't change the destination.
+Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
+A target switch flushes pending words to the old target immediately.
+No selected target means no delivery; the recording still retains the words.
+
+`voice.json` is an operator file exposed by the config API as id `voice`, beside `host`.
+It defaults to:
+
+```json
+{"enabled": false,
+ "voice": {"words": 60, "quiet_seconds": 4},
+ "meeting": {"words": 150, "quiet_seconds": 30}}
+```
+
+Word limits are positive integers; quiet intervals are positive numbers of seconds.
+The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `klaud`), or quiet since the last spoken line.
+Voice and meeting thresholds are independent; name detection is always on.
+Comments travel with the next batch and `# ended` closes the monitor.
+An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.
+The monitor persists read offsets, buffers and stable message IDs before delivery, so restart recovery doesn't replay confirmed speech.
+
+Voice batches say `Live voice:` and preserve speaker labels, without meeting timestamps or a repeated room-speech warning.
+They use `/deliver` with `message_after_launch: true` and a stable `message_id`: a live worker is messaged, a dormant one is resumed and then messaged through the same deduplicated path.
+Registered batches stay ordered per destination, while different destinations can proceed independently.
+A failed voice delivery is recorded in `last` and dropped from the delivery queue; it isn't retried indefinitely, and its words remain in the transcript.
+Meeting batches retain their stable IDs and retry until confirmed.
+
+### Meetings
+
 `GET /meeting` without a selector reports local capabilities and recording state, so daemon capability probes cannot recursively select another recorder.
 The answer includes `{available, modes, recorder, meeting}`.
 Use `recorder=<host>` for an explicit read, or `prefer=phone` for capability-based selection.
@@ -447,8 +499,11 @@ for `/dispatch`: `previous` messages a live worker or resumes a dormant one, and
 `fresh` starts a new session, cutting a live worker. The answer is `{meeting, delivery}`, where
 `delivery` is `/deliver`'s body; if delivery fails after hark starts, it carries
 the delivery's status with `recording: true` and `error`, and the recording
-continues. Shuttle also sends transcript batches and the end marker to the
-worker while hark records. Start errors are the same as meeting capture's.
+continues.
+Shuttle also sends transcript batches and the end marker to the worker while hark records.
+Capture meetings use the same monitor after the scribe claims its fiber, beginning at the transcript's first line.
+Neither board flow needs `shuttle follow`.
+Start errors are the same as meeting capture's.
 
 `POST /meeting/start` accepts `{origin?, recorder?, meeting: {mode, system_audio?}, note?}`
 and records without any agent: no capture is routed and nothing goes to
@@ -494,6 +549,9 @@ fiber with a live worker receives `text` through session messaging at
 it with `text` as the From User: `delivery: "resume"` continues its previous
 conversation, `delivery: "dispatch"` starts one when it has none. These answer
 with `/dispatch`'s body and statuses plus `delivered` and `delivery`.
+With `message_after_launch: true`, the owner instead starts the dormant worker without the text in its launch prompt, waits up to 30 s for its native conversation address, then sends the text as a message using `message_id`.
+This keeps transcript-batch deduplication identical for live and dormant workers.
+An address timeout returns **503** rather than claiming delivery.
 
 `POST /attachments` accepts `{fiber, attachments: [{name, mime?, data,
 sha256}]}` (plus `origin` to forward), with `data` base64 and `sha256` the hex

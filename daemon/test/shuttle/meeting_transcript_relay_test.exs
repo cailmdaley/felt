@@ -105,8 +105,9 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert first =~ "first phrase"
     assert late =~ "late old words"
     assert new =~ "new words Claude"
-    assert new =~ "Live voice from Cail"
-    assert new =~ "room speech may be mixed in; speaker labels: me"
+    assert new =~ "Live voice:\nme new words Claude"
+    refute new =~ "room speech"
+    refute new =~ "Cail's spoken words"
     refute new =~ "10:00:11"
     refute first =~ "new words"
     refute new =~ "late old words"
@@ -156,6 +157,87 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     sync_tasks(c)
   end
 
+  test "a recorder restart cannot overtake a pending batch to the same destination", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "old Claude")
+    parent = self()
+
+    deliver = fn message ->
+      send(parent, {:attempt, self(), message})
+
+      receive do
+        :accept -> {200, %{delivered: true}}
+      end
+    end
+
+    start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
+    assert_receive {:attempt, old, %{text: text}}, 1_000
+    assert text =~ "old Claude"
+    next = Path.join(c.root, "next.txt")
+    File.write!(next, "")
+    record(next, "2026-11-06T10:00:02Z", "new Claude")
+
+    assert :ok =
+             TranscriptRelay.start(
+               %{launch: "next", transcript: next, kind: "voice", routes_path: routes},
+               nil,
+               nil,
+               server: c.name
+             )
+
+    refute_receive {:attempt, _, _}, 50
+    send(old, :accept)
+    assert_receive {:attempt, new, %{text: text}}, 1_000
+    assert text =~ "new Claude"
+    send(new, :accept)
+  end
+
+  test "recovery reserves older outboxes before a newer launch can register delivery", c do
+    directory = Path.join(c.root, "relays")
+    File.mkdir_p!(directory)
+
+    for {launch, at, word} <- [
+          {"old", "2026-11-06T10:00:00Z", "old"},
+          {"new", "2026-11-06T10:01:00Z", "new"}
+        ] do
+      digest = :crypto.hash(:sha256, launch) |> Base.encode16(case: :lower)
+
+      config = %{
+        "launch" => launch,
+        "created_at" => at,
+        "kind" => "voice",
+        "transcript" => c.path,
+        "offset" => 0,
+        "routes_path" => Path.join(c.root, "routes.jsonl"),
+        "ended" => true,
+        "outbox" => [
+          %{"fiber_id" => "fiber-a", "origin" => "owner", "text" => word, "message_id" => launch}
+        ]
+      }
+
+      File.write!(Path.join(directory, digest <> ".json"), Jason.encode!(config))
+    end
+
+    parent = self()
+
+    deliver = fn message ->
+      send(parent, {:attempt, self(), message})
+
+      receive do
+        :accept -> {200, %{delivered: true}}
+      end
+    end
+
+    start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
+    assert_receive {:attempt, old, %{text: "old"}}, 1_000
+    refute_receive {:attempt, _, _}, 20
+    send(old, :accept)
+    assert_receive {:attempt, new, %{text: "new"}}, 1_000
+    send(new, :accept)
+  end
+
   test "a final JSON utterance arriving during exit observation is drained before the footer",
        c do
     routes = Path.join(c.root, "routes.jsonl")
@@ -172,6 +254,51 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     poll(c)
     assert_receive {:delivery, %{text: text}}, 1_000
     assert text =~ "last spoken words\n# ended"
+  end
+
+  test "an incomplete final JSON row closes after recorder exit without losing complete words",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "# S2 = colleague\n# ended\n")
+    record(c.path, "2026-11-06T10:00:01Z", "complete words")
+    json = Path.rootname(c.path) <> ".jsonl"
+    File.write!(json, "{\"wall\":", [:append])
+    start_monitor(c, kind: "voice", routes: routes)
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    Agent.update(c.observation, fn _ -> {:ok, %{meeting: nil}} end)
+    poll(c)
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "me complete words"
+    assert text =~ "# S2 = colleague"
+    assert text =~ "# incomplete final voice JSON row retained in transcript"
+    assert text =~ "# ended"
+    assert File.read!(json) =~ "{\"wall\":"
+    sync_tasks(c)
+    pid = worker(c)
+    ref = Process.monitor(pid)
+    send(pid, :poll)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+  end
+
+  test "a colleague's speaker label is kept without attributing their request to Cail", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+
+    File.write!(
+      Path.rootname(c.path) <> ".jsonl",
+      Jason.encode!(%{
+        "wall" => "2026-11-06T10:00:01Z",
+        "speaker" => "S2",
+        "text" => "Claude make this plot"
+      }) <> "\n"
+    )
+
+    start_monitor(c, kind: "voice", routes: routes)
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text == "Live voice:\nS2 Claude make this plot\n"
   end
 
   test "a slow or failed voice destination does not hold a later target or retry forever", c do

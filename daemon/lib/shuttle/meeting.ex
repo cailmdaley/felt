@@ -143,7 +143,7 @@ defmodule Shuttle.Meeting do
             with :ok <- end_voice(snapshot, context, opts), do: {:ok, %{snapshot | meeting: nil}}
 
           voice_row?(snapshot.meeting) and snapshot.meeting.state == "failed" ->
-            with :ok <- kill_launch(context.tmux, opts), do: start_voice(opts)
+            with :ok <- end_voice(snapshot, context, opts), do: start_voice(opts)
 
           voice_row?(snapshot.meeting) ->
             {:ok, snapshot}
@@ -258,27 +258,60 @@ defmodule Shuttle.Meeting do
   end
 
   defp end_voice(snapshot, context, opts) do
-    with {:ok, _} <- stop_current(snapshot, context, opts) do
-      await_voice_end(context.tmux, opts, System.monotonic_time(:millisecond) + 10_000)
+    grace = Keyword.get(opts, :voice_stop_wait_ms, 3_000)
+
+    case stop_current(snapshot, context, opts) do
+      {:ok, _} ->
+        await_voice_end(context, opts, System.monotonic_time(:millisecond) + grace)
+
+      {:error, _} ->
+        force_voice_end(context, opts)
     end
   end
 
-  defp await_voice_end(tmux, opts, deadline) do
-    with {:ok, snapshot, context} <- inspect_current(opts) do
-      cond do
-        not voice_row?(snapshot.meeting) ->
-          :ok
+  defp await_voice_end(context, opts, deadline) do
+    case pid_observation(context.meeting_json, opts) do
+      :not_hark ->
+        kill_launch(context.tmux, opts)
 
-        snapshot.meeting.state == "failed" ->
-          kill_launch(context.tmux, opts)
-
-        System.monotonic_time(:millisecond) >= deadline ->
-          kill_launch(tmux, opts)
-
-        true ->
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          force_voice_end(context, opts)
+        else
           Process.sleep(50)
-          await_voice_end(tmux, opts, deadline)
-      end
+          await_voice_end(context, opts, deadline)
+        end
+    end
+  end
+
+  defp force_voice_end(context, opts) do
+    # Closing a retained terminal is not evidence that its child released
+    # the microphone. Verify the original recorder PID before proceeding.
+    case pid_observation(context.meeting_json, opts) do
+      :not_hark ->
+        kill_launch(context.tmux, opts)
+
+      :hark ->
+        run(opts, "kill", ["-KILL", valid_pid(context.meeting_json)])
+        deadline = System.monotonic_time(:millisecond) + 1_000
+        await_voice_exit(context, opts, deadline)
+
+      :unknown ->
+        {:error, {:operation, "could not verify live voice exited; meeting capture not started"}}
+    end
+  end
+
+  defp await_voice_exit(context, opts, deadline) do
+    cond do
+      pid_observation(context.meeting_json, opts) == :not_hark ->
+        kill_launch(context.tmux, opts)
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        {:error, {:operation, "live voice process did not exit; meeting capture not started"}}
+
+      true ->
+        Process.sleep(10)
+        await_voice_exit(context, opts, deadline)
     end
   end
 
