@@ -25,7 +25,7 @@ function daemon(on: any, voice: object, speak: object) {
 }
 
 const VOICE = { available: true, enabled: true, muted: false, state: 'listening', pending: null, preview: null, held: [] }
-const SPEAK = { available: true, speaking: null, queued: 0, held: {}, paused: false, muted: false }
+const SPEAK = { available: true, speaking: null, queued: 0, held: [], paused: false, muted: false }
 
 const ABOVE = { options: { placement: 'above' } } as const
 const BELOW = { options: { placement: 'below' } } as const
@@ -83,7 +83,7 @@ test('muted mic and speaker say so, and a click toggles each', ABOVE, async ($, 
 })
 
 test('paused and waiting speaker states', ABOVE, async ($, on) => {
-  daemon(on, { ...VOICE, enabled: false, target: null }, { ...SPEAK, held: { 'loom/tools/hark/holistic-hark': 2 } })
+  daemon(on, { ...VOICE, enabled: false, target: null }, { ...SPEAK, held: [{ fiber_id: 'loom/tools/hark/holistic-hark', name: 'Holistic hark', n: 2 }] })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'speaker')).toBe('🔈 2 waiting')
@@ -149,8 +149,12 @@ test('held cards show as chips, the two with most first, then +n; a chip opens i
   const { posts } = daemon(on, { ...VOICE, enabled: false, target: null }, {
     ...SPEAK,
     speaking: { fiber_id: 'X', voice: 'aria', text: 'x' },
-    held: { 'loom/tools/hark/holistic-hark': 1, 'life/games/civbench': 2, '01FELT': 1, 'a/b/third': 1 },
-    held_names: { 'life/games/civbench': 'Civbench', '01FELT': 'felt debug', 'a/b/third': null },
+    held: [
+      { fiber_id: 'loom/tools/hark/holistic-hark', name: 'Holistic hark', n: 1 },
+      { fiber_id: 'life/games/civbench', name: 'Civbench', n: 2 },
+      { fiber_id: '01FELT', name: 'felt debug', n: 1 },
+      { fiber_id: 'a/b/third', name: null, n: 1 },
+    ],
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -187,7 +191,7 @@ test('with the speaker idle, the held chip follows a bare speaker; a list with o
 })
 
 test('a held chip alone sits after a bare speaker', ABOVE, async ($, on) => {
-  daemon(on, { ...VOICE, enabled: false, target: null }, { ...SPEAK, held: { 'life/games/civbench': 2 }, held_names: { 'life/games/civbench': 'Civbench' } })
+  daemon(on, { ...VOICE, enabled: false, target: null }, { ...SPEAK, held: [{ fiber_id: 'life/games/civbench', name: 'Civbench', n: 2 }] })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'speaker')).toBe('🔈')

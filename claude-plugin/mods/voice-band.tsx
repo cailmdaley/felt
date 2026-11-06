@@ -27,9 +27,7 @@ type Held = { fiber_id: string; origin?: string | null; name?: string | null; n:
 type Speak = {
   available: boolean
   speaking: { fiber_id: string; name?: string | null; voice: string; text: string } | null
-  // A list of held cards; the map with held_names is the daemon's older shape.
-  held: Held[] | Record<string, number>
-  held_names?: Record<string, string | null>
+  held: Held[]
   paused: boolean
   muted: boolean
 }
@@ -57,10 +55,6 @@ const clip = (s: string, n: number) => (s.length <= n ? s : s.slice(0, Math.max(
 const step = (db: number) => Math.min(4, Math.max(0, Math.floor(((db + 50) / 40) * 5)))
 const tone = (i: number) => (i === 0 ? 'inactive' : i < 3 ? 'success' : 'warning')
 const here = () => !!(voice?.available && voice.enabled && !voice.muted && mine(voice.target?.fiber_id))
-const heldList = (s: Speak): Held[] =>
-  Array.isArray(s.held)
-    ? s.held
-    : Object.entries(s.held ?? {}).map(([fiber_id, n]) => ({ fiber_id, n, name: s.held_names?.[fiber_id] }))
 const mine = (id?: string) => !!id && self.includes(id)
 
 async function get<T>($: EngineInterface, path: string): Promise<T | null> {
@@ -114,7 +108,7 @@ function line(room: number, Text: any) {
   let chips: Held[] = []
   let more = 0
   if (speak?.available) {
-    const held = heldList(speak)
+    const held = speak.held ?? []
     const waiting = held.reduce((n, card) => n + (mine(card.fiber_id) ? card.n : 0), 0)
     if (speak.muted) state = '🔈 muted'
     else if (speak.speaking) state = '🔈 ' + speak.speaking.voice
