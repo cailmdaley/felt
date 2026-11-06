@@ -26,6 +26,20 @@ func TestSaySendsTheLineAndNamesTheVoice(t *testing.T) {
 	}
 }
 
+func TestSaySaysWhenTheLineIsHeld(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	var got map[string]any
+	serveDaemon(t, env, meetingDaemon(t, "/api/v1/speak", 200, `{"voice":"jean","ahead":0,"held":true,"recorder":"mac"}`, &got))
+	out, _, err := executeIn(t, env, "", "say", "--fiber", "loom/x", "Later.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "Speaking on mac as jean, held until its card is in view\n" {
+		t.Fatalf("stdout %q", out)
+	}
+}
+
 func TestSayWithoutAWorkerAsksForAFiber(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

@@ -52,13 +52,16 @@ terminal, and --voice overrides the voice for this line.`,
 			var answer struct {
 				Voice    string `json:"voice"`
 				Ahead    int    `json:"ahead"`
+				Held     bool   `json:"held"`
 				Recorder string `json:"recorder"`
 			}
 			if err := json.Unmarshal(body, &answer); err != nil {
 				return fmt.Errorf("decoding speak answer: %w", err)
 			}
 			when := "next"
-			if answer.Ahead > 0 {
+			if answer.Held {
+				when = "held until its card is in view"
+			} else if answer.Ahead > 0 {
 				when = fmt.Sprintf("after %d queued", answer.Ahead)
 			}
 			fmt.Fprintf(a.env.Stdout, "Speaking on %s as %s, %s\n", answer.Recorder, answer.Voice, when)

@@ -160,8 +160,9 @@ defmodule Shuttle.Speaker do
 
   def handle_call({:speak, item}, _from, state) do
     ahead = :queue.len(state.queue) + if(state.current || state.render, do: 1, else: 0)
+    held = not in_view?(item, state.target.())
     state = advance(%{state | queue: :queue.in(item, state.queue)}) |> schedule()
-    {:reply, {:ok, %{voice: item.voice, ahead: ahead}}, state}
+    {:reply, {:ok, %{voice: item.voice, ahead: ahead, held: held}}, state}
   end
 
   @impl true

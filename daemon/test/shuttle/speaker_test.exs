@@ -88,7 +88,7 @@ defmodule Shuttle.SpeakerTest do
     end
 
     set(world, %{target: "U1"})
-    {:ok, _} = say.("a/two", "two first")
+    assert {:ok, %{held: true}} = say.("a/two", "two first")
     {:ok, _} = say.("a/one", "one first")
     {:ok, _} = say.("a/two", "two second")
     assert_receive {:play, "jean:one first", one}
