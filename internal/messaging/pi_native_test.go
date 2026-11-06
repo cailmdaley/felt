@@ -110,7 +110,7 @@ func TestPiNativeHeaderHasExactSenderAndFiberReplyTarget(t *testing.T) {
 	if err != nil || receipt.Status != StatusAccepted {
 		t.Fatalf("%#v %v", receipt, err)
 	}
-	if frame := <-seen; frame["message"] != "[Shuttle message pi-header from shuttle://peer/pi/A; reply to work/fiber]\nhello" {
+	if frame := <-seen; frame["message"] != "[Shuttle message fdf81ff6 from work/fiber]\nhello" {
 		t.Fatalf("header: %#v", frame)
 	}
 }
