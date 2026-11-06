@@ -26,7 +26,7 @@ Mic side, at the left:
 
 | State | Text |
 | --- | --- |
-| target is this session | `▁▁▂▅▇▅▃▂▁▁ …the live words` (the last twenty mic levels, about 3 s, scrolling left, then hark's words, replaced by Aqua's, cleared once delivered; cut at a word from the left) |
+| target is this session | `▁▁▂▅▇▅▃▂▁▁▁▁▁▁▁▁▁▁▁▁` (the last twenty mic levels, about 3 s, scrolling left; no words, which the transcript and the board show) |
 | target is another card (a meeting holds the mic, or Listen here elsewhere) | `🎤 → <card name>` |
 | muted | `🎤 muted` |
 | Listening off | nothing |
@@ -45,8 +45,8 @@ With nothing on either side the band is not drawn.
 
 **Colour**, from the theme so light and dark both hold: a ticker glyph at the
 floor is dim, green (`success`) through the middle, amber (`warning`) from
--20 dBFS; hark's speaker labels (`me:`, `S1:`) are `suggestion`; the words
-and every other state are dim, except `🔈 <voice>` while speaking, in `claude`.
+-20 dBFS; every other state is dim, except `🔈 <voice>` while speaking, in
+`claude`.
 
 **Keys.** Click the mic text or the speaker text to toggle that mute. From the
 keyboard: `ctrl+x tab` focuses the band, `tab` moves between the two, and

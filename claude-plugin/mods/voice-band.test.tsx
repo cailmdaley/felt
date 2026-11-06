@@ -30,28 +30,29 @@ const SPEAK = { available: true, speaking: null, queued: 0, held: {}, paused: fa
 const ABOVE = { options: { placement: 'above' } } as const
 const label = async (ui: any, key: string) => (await ui.find({ type: 'Button', key }))?.text
 
-test('the mic is here: the band is the words, cut at a word from the left', ABOVE, async ($, on) => {
-  const text = 'one two three four five six seven eight nine ten eleven twelve'
-  daemon(on, { ...VOICE, target: { fiber_id: SELF, name: 'Holistic hark' }, preview: { fiber_id: SELF, words: 12, text } }, SPEAK)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: 30 } })
-    expect(await label(ui, 'mic')).toBe('…eight nine ten eleven twelve')
-    expect(await label(ui, 'speaker')).toBeUndefined()
-    await ui.unmount()
-  }
-})
-
-test('the level ticker leads the words and scrolls through twenty readings', ABOVE, async ($, on) => {
+test('the mic is here: the band is the ticker alone, twenty readings scrolling', ABOVE, async ($, on) => {
   const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, pending: { fiber_id: SELF, words: 2, text: 'hello there' }, level: { mic: -30, at: '' } }, SPEAK)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (let i = 0; i < 6; i++) await clock.advance(150)
   let ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await label(ui, 'mic')).toBe('▃'.repeat(7) + ' hello there')
+  expect(await label(ui, 'mic')).toBe('▃'.repeat(7))
+  expect(await ui.find({ type: 'Text', text: /hello/ })).toBeUndefined()
   await ui.unmount()
   for (let i = 0; i < 30; i++) await clock.advance(150)
   ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await label(ui, 'mic')).toBe('▃'.repeat(20) + ' hello there')
+  expect(await label(ui, 'mic')).toBe('▃'.repeat(20))
+  await ui.unmount()
+})
+
+test('ticker glyphs and the speaking voice take theme colours', ABOVE, async ($, on) => {
+  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, level: { mic: -15, at: '' } },
+    { ...SPEAK, speaking: { fiber_id: 'X', voice: 'aria', text: 'a line' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(150)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'mic')).toBe('▇▇')
+  expect((await ui.find({ type: 'Text', text: '▇' }))?.props).toMatchObject({ color: 'warning' })
+  expect((await ui.find({ type: 'Text', text: '🔈 aria' }))?.props).toMatchObject({ color: 'claude' })
   await ui.unmount()
 })
 
@@ -110,57 +111,26 @@ test('Listening off and the speaker idle draw nothing', ABOVE, async ($, on) => 
   await ui.unmount()
 })
 
-test('the ticker and the speaker labels take theme colours', ABOVE, async ($, on) => {
-  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, pending: { fiber_id: SELF, words: 4, text: 'me: hello S1: hi' }, level: { mic: -15, at: '' } },
-    { ...SPEAK, speaking: { fiber_id: 'X', voice: 'aria', text: 'a line' } })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await clock.advance(150)
-  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await label(ui, 'mic')).toBe('▇▇ me: hello S1: hi')
-  expect((await ui.find({ type: 'Text', text: '▇' }))?.props).toMatchObject({ color: 'warning' })
-  expect((await ui.find({ type: 'Text', text: 'me:' }))?.props).toMatchObject({ color: 'suggestion' })
-  expect((await ui.find({ type: 'Text', text: ' S1:' }))?.props).toMatchObject({ color: 'suggestion' })
-  expect((await ui.find({ type: 'Text', text: ' hello' }))?.props).toMatchObject({ dimColor: true })
-  expect((await ui.find({ type: 'Text', text: '🔈 aria' }))?.props).toMatchObject({ color: 'claude' })
-  await ui.unmount()
-})
 
 const HINT = {
   plugin: 'felt',
   component: 'PromptHint',
-  props: { isDraft: false, isWorking: false, hint: '? for shortcuts' },
+  props: { isDraft: false, isWorking: false, hint: '(shift+tab to cycle)' },
   viewport: { columns: 80, rows: 30 },
 } as const
 
-test('below, by default, the voice line rides the hint row after the engine line', async ($, on) => {
-  daemon(on, { ...VOICE, target: { fiber_id: SELF }, pending: { fiber_id: SELF, words: 2, text: 'me: hello' } },
+test('below, by default, the ticker rides the hint row after the hint', async ($, on) => {
+  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, preview: { fiber_id: SELF, words: 1, text: 'hello' }, level: { mic: -49, at: '' } },
     { ...SPEAK, speaking: { fiber_id: 'X', voice: 'aria', text: 'x' } })
-  on('ui.render', ($, e) => { const { Text } = $.ui.resolve(e); return <Text>? for shortcuts</Text> })
+  on('ui.render', ($, e) => { const { Text } = $.ui.resolve(e); return <Text>engine</Text> })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 25; i++) await clock.advance(150)
   const hint = await $.ui.mount({ ...HINT, surface: 'terminal' } as any)
-  expect(await hint.find({ type: 'Text', text: /for shortcuts/ })).toBeDefined()
-  expect(await label(hint, 'mic')).toBe('  me: hello')
+  expect(await hint.find({ type: 'Text', text: /shift\+tab/ })).toBeDefined()
+  expect(await label(hint, 'mic')).toBe('  ' + '▁'.repeat(20))
   expect(await label(hint, 'speaker')).toBe('  🔈 aria')
   await hint.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(band, 'mic')).toBeUndefined()
   await band.unmount()
-})
-
-test('below, at 80 columns, the words show beside a full ticker', async ($, on) => {
-  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, preview: { fiber_id: SELF, words: 5, text: 'where is my text going?' }, level: { mic: -49, at: '' } }, SPEAK)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (let i = 0; i < 25; i++) await clock.advance(150)
-  const hint = await $.ui.mount({ ...HINT, surface: 'terminal', props: { ...HINT.props, hint: '(shift+tab to cycle)' } } as any)
-  expect(await label(hint, 'mic')).toBe('  ' + '▁'.repeat(20) + ' …text going?')
-  await hint.unmount()
-})
-
-test('below, at 60 columns, the ticker gives way to the words', async ($, on) => {
-  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, preview: { fiber_id: SELF, words: 5, text: 'where is my text going?' }, level: { mic: -49, at: '' } }, SPEAK)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (let i = 0; i < 25; i++) await clock.advance(150)
-  const hint = await $.ui.mount({ ...HINT, surface: 'terminal', viewport: { columns: 60, rows: 30 }, props: { ...HINT.props, hint: '(shift+tab to cycle)' } } as any)
-  expect(await label(hint, 'mic')).toBe('  ' + '▁'.repeat(5) + ' …going?')
-  await hint.unmount()
 })
