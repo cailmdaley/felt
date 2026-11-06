@@ -157,3 +157,17 @@ test('with the speaker idle, another card\'s held lines show alone', ABOVE, asyn
   expect(await label(ui, 'speaker')).toBe('🔈 Civbench 2')
   await ui.unmount()
 })
+
+test('held as a named list reads the same', ABOVE, async ($, on) => {
+  daemon(on, { ...VOICE, enabled: false, target: null }, {
+    ...SPEAK,
+    held: [
+      { fiber_id: 'loom/tools/hark/holistic-hark', name: 'Holistic hark', n: 3 },
+      { fiber_id: 'life/games/civbench', name: 'Civbench', n: 2 },
+    ],
+  } as any)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'speaker')).toBe('🔈 3 waiting · Civbench 2')
+  await ui.unmount()
+})

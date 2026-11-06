@@ -23,10 +23,12 @@ type Voice = {
   target: Ref
   level?: { mic: number; at: string } | null
 }
+type Held = { fiber_id: string; name?: string | null; n: number }
 type Speak = {
   available: boolean
   speaking: { fiber_id: string; name?: string | null; voice: string; text: string } | null
-  held: Record<string, number>
+  // A list of held cards; the map with held_names is the daemon's older shape.
+  held: Held[] | Record<string, number>
   held_names?: Record<string, string | null>
   paused: boolean
   muted: boolean
@@ -55,6 +57,10 @@ const clip = (s: string, n: number) => (s.length <= n ? s : s.slice(0, Math.max(
 const step = (db: number) => Math.min(4, Math.max(0, Math.floor(((db + 50) / 40) * 5)))
 const tone = (i: number) => (i === 0 ? 'inactive' : i < 3 ? 'success' : 'warning')
 const here = () => !!(voice?.available && voice.enabled && !voice.muted && mine(voice.target?.fiber_id))
+const heldList = (s: Speak): Held[] =>
+  Array.isArray(s.held)
+    ? s.held
+    : Object.entries(s.held ?? {}).map(([fiber_id, n]) => ({ fiber_id, n, name: s.held_names?.[fiber_id] }))
 const mine = (id?: string) => !!id && self.includes(id)
 
 async function get<T>($: EngineInterface, path: string): Promise<T | null> {
@@ -98,19 +104,18 @@ function line(room: number, Text: any) {
   let spk = ''
   let held = ''
   if (speak?.available) {
-    const waiting = Object.entries(speak.held ?? {}).reduce((n, [id, k]) => n + (mine(id) ? k : 0), 0)
+    const held_ = heldList(speak)
+    const waiting = held_.reduce((n, h) => n + (mine(h.fiber_id) ? h.n : 0), 0)
     if (speak.muted) spk = '🔈 muted'
     else if (speak.speaking) spk = '🔈 ' + speak.speaking.voice
     else if (speak.paused) spk = '🔈 paused'
     else if (waiting) spk = `🔈 ${waiting} waiting`
     // Lines other cards hold until they are in view: the two with most, then +n.
-    const others = Object.entries(speak.held ?? {})
-      .filter(([id]) => !mine(id))
-      .sort((a, b) => b[1] - a[1])
+    const others = held_.filter(h => !mine(h.fiber_id)).sort((a, b) => b.n - a.n)
     if (others.length) {
       const named = others
         .slice(0, 2)
-        .map(([id, n]) => `${clip(speak!.held_names?.[id] || id.split('/').pop()!, 20)} ${n}`)
+        .map(h => `${clip(h.name || h.fiber_id.split('/').pop()!, 20)} ${h.n}`)
         .join(', ')
       held = named + (others.length > 2 ? ` +${others.length - 2}` : '')
     }
