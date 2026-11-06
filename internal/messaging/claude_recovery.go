@@ -195,7 +195,7 @@ func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPend
 			notice := Request{
 				Address: ClaudeFailureTarget(req), From: "shuttle", Wake: true,
 				MessageID: "claude-mail-failure-" + mailboxKey(req.Address + "\x00" + req.MessageID)[:32],
-				Text:      fmt.Sprintf("Shuttle could not confirm delivery of message %s to %s: %s. Delivery status: %s. No automatic resend will occur; check the receiver before resending.", req.MessageID, req.Address, attempt.ErrorMessage, attempt.Receipt.Status),
+				Text:      fmt.Sprintf("Shuttle could not confirm delivery of message %s to %s (%s, status %s). No automatic resend will occur; check the receiver before resending.", messageRef(req.MessageID), req.Address, attempt.ErrorCode, attempt.Receipt.Status),
 			}
 			noticeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			err = notify(noticeCtx, notice)
