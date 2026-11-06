@@ -50,12 +50,12 @@ defmodule Shuttle.SpeakerTest do
     assert %{speaking: nil, queued: 0} = Speaker.show(server)
   end
 
-  test "holds while Cail talks and resumes just before where it stopped",
+  test "holds while the user talks and resumes just before where it stopped",
        %{server: server, world: world} do
     {:ok, _} = Speaker.speak(%{"text" => "long", "voice" => "jean"}, server)
     assert_receive {:play, "jean:long", handle}
 
-    set(world, %{now: 1_000, partial: "long, Kale"})
+    set(world, %{now: 1_000, partial: "long, lung"})
     refute_receive {:stop, _}, 50
     set(world, %{now: 2_000, partial: "wait, stop"})
     assert_receive {:stop, ^handle}
@@ -65,7 +65,7 @@ defmodule Shuttle.SpeakerTest do
     assert_receive {:play, "jean:long@1500", _}
   end
 
-  test "Cail's interruption: held while his words grow, resumed 1.5 s after they stop",
+  test "an interruption: held while the user's words grow, resumed 1.5 s after they stop",
        %{server: server, world: world} do
     {:ok, _} = Speaker.speak(%{"text" => "a deliberately long line", "voice" => "jean"}, server)
     assert_receive {:play, "jean:a deliberately long line", handle}
@@ -162,11 +162,11 @@ defmodule Shuttle.SpeakerTest do
     assert Speaker.fiber_keys("U1", fibers: fn -> [] end) == ["U1"]
   end
 
-  test "words of the line being spoken are its echo, not Cail" do
-    line = "Hello Cail, the outbox is live."
+  test "words of the line being spoken are its echo, not the user" do
+    line = "Hello Ada, the outbox is live."
     refute Speaker.talking?(nil, line)
     refute Speaker.talking?("", line)
-    refute Speaker.talking?("Hello, Kale. The outbox is live.", line)
+    refute Speaker.talking?("Hello, Aida. The outbox is live.", line)
     refute Speaker.talking?("stop", line)
     assert Speaker.talking?("hold on a second", line)
     assert Speaker.talking?("the outbox, wait, stop", line)

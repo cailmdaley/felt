@@ -13,11 +13,11 @@ func TestSaySendsTheLineAndNamesTheVoice(t *testing.T) {
 	var got map[string]any
 	serveDaemon(t, env, meetingDaemon(t, "/api/v1/speak", 200, `{"voice":"borges","ahead":2,"recorder":"mac"}`, &got))
 
-	out, _, err := executeIn(t, env, "", "say", "--fiber", "loom/x", "--voice", "borges", "Hello Cail.")
+	out, _, err := executeIn(t, env, "", "say", "--fiber", "loom/x", "--voice", "borges", "Hello there.")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"fiber_id": "loom/x", "voice": "borges", "text": "Hello Cail."}
+	want := map[string]any{"fiber_id": "loom/x", "voice": "borges", "text": "Hello there."}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("request %v, want %v", got, want)
 	}

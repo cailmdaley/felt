@@ -7,11 +7,12 @@ defmodule Shuttle.Speaker do
   rest wait, per fiber and in order, until it is in view. Without a target
   every line plays.
 
-  Playback holds while the human is talking (hark's live voice has pending words
-  beyond an echo of the line being spoken) or while the speaker is muted, and resumes from just before where it stopped.
-  afplay keeps its clock running under SIGSTOP, so a hold stops the player and a
-  resume plays the rest of the file from the held offset. the human is quiet once his
-  pending words have not changed for #{1_500} ms.
+  Playback holds while the human is talking (hark's live voice has pending
+  words beyond an echo of the line being spoken) or while the speaker is muted,
+  and resumes from just before where it stopped. afplay keeps its clock running
+  under SIGSTOP, so a hold stops the player and a resume plays the rest of the
+  file from the held offset. The human is quiet once their pending words have
+  not changed for 1.5 s.
 
   The queue, the current line and its offset are journaled, so a daemon restart
   resumes a held or playing line rather than losing it.
