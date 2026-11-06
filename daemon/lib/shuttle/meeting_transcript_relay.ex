@@ -717,24 +717,22 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       {id, tasks} ->
         batch = Enum.find(state.config["outbox"], &(&1["message_id"] == id))
 
-        delivered =
-          case result do
-            {status, outcome} when status in 200..299 ->
-              outcome[:delivered] == true or outcome["delivered"] == true
-
-            _ ->
-              false
-          end
+        outcome = delivery_outcome(result)
 
         config =
-          if delivered or state.config["kind"] == "voice" do
+          if outcome != :failed or state.config["kind"] == "voice" do
             last = %{
               "fiber_id" => batch["fiber_id"],
               "at" => DateTime.to_iso8601(DateTime.utc_now()),
-              "status" => if(delivered, do: "delivered", else: "failed")
+              "status" => if(outcome == :failed, do: "failed", else: "delivered")
             }
 
-            last = if delivered, do: last, else: Map.put(last, "detail", inspect(result))
+            last =
+              case outcome do
+                :delivered -> last
+                :unconfirmed -> Map.put(last, "detail", "unconfirmed")
+                :failed -> Map.put(last, "detail", inspect(result))
+              end
 
             if state.config["kind"] == "voice" do
               :ok = Shuttle.FS.mkdir_p(Shuttle.data_dir())
@@ -756,6 +754,28 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         })
     end
   end
+
+  defp delivery_outcome({status, body}) when status in 200..299 do
+    case Map.fetch(body, :delivered) do
+      {:ok, true} ->
+        :delivered
+
+      {:ok, nil} ->
+        :unconfirmed
+
+      {:ok, false} ->
+        :failed
+
+      :error ->
+        case Map.fetch(body, "delivered") do
+          {:ok, true} -> :delivered
+          {:ok, nil} -> :unconfirmed
+          _ -> :failed
+        end
+    end
+  end
+
+  defp delivery_outcome(_), do: :failed
 
   defp persist!(state) do
     :ok = Shuttle.FS.write_atomic(state.file, Jason.encode!(state.config) <> "\n")

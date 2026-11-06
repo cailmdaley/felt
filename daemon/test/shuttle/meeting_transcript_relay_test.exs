@@ -325,6 +325,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
     assert_receive {:attempt, stalled, %{fiber_id: "fiber-a"}}, 1_000
     assert_receive {:attempt, _, %{fiber_id: "fiber-b"}}, 1_000
+    sync_target(c, "fiber-b")
     send(stalled, :fail)
     sync_tasks(c)
     poll(c)
@@ -395,13 +396,13 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert length(Regex.scan(~r/before crash/, text)) == 1
   end
 
-  test "unconfirmed meeting deliveries retain their message id across a monitor restart", c do
+  test "failed meeting deliveries retain their message id across a monitor restart", c do
     File.write!(c.path, "10:00:01 me Claude keep this\n# ended\n")
     parent = self()
 
     deliver = fn message ->
       send(parent, {:delivery, message})
-      {202, %{delivered: nil}}
+      {503, %{delivered: false}}
     end
 
     c = %{c | opts: Keyword.put(c.opts, :deliver, deliver)}
@@ -412,6 +413,35 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert_receive {:delivery, retry}, 1_000
     assert retry.message_id == first.message_id
     assert retry.text == first.text
+  end
+
+  test "an unconfirmed native send is not a failure and is not retried", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "Claude unconfirmed probe")
+    parent = self()
+
+    deliver = fn message ->
+      send(parent, {:delivery, message})
+
+      {202,
+       %{"delivered" => nil, "detail" => "native acknowledgement lacked correlated evidence"}}
+    end
+
+    start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
+    assert_receive {:delivery, _}, 1_000
+    sync_tasks(c)
+
+    assert %{last: %{"status" => "delivered", "detail" => "unconfirmed"}} =
+             TranscriptRelay.status("launch", server: c.name)
+
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    stop_supervised!(TranscriptRelay)
+    start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
+    :sys.get_state(Module.concat(c.name, Coordinator))
+    refute_receive {:delivery, _}, 20
   end
 
   test "completed launches are not replayed when the recorder is still stopping or the daemon restarts",
@@ -478,6 +508,23 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
   defp poll(c) do
     pid = worker(c)
     send(pid, :poll)
+    GenServer.call(pid, :status)
+  end
+
+  defp sync_target(c, fiber_id) do
+    pid = worker(c)
+    state = :sys.get_state(pid)
+
+    for {ref, id} <- state.tasks,
+        Enum.any?(
+          state.config["outbox"],
+          &(&1["message_id"] == id and &1["fiber_id"] == fiber_id)
+        ) do
+      task = state.task_handles[ref]
+      monitor = Process.monitor(task.pid)
+      assert_receive {:DOWN, ^monitor, :process, _, _}, 1_000
+    end
+
     GenServer.call(pid, :status)
   end
 

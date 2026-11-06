@@ -439,7 +439,9 @@ Voice batches say `Live voice:` and preserve speaker labels, without meeting tim
 They use `/deliver` with `message_after_launch: true` and a stable `message_id`: a live worker is messaged, a dormant one is resumed and then messaged through the same deduplicated path.
 Registered batches stay ordered per destination, while different destinations can proceed independently.
 A failed voice delivery is recorded in `last` and dropped from the delivery queue; it isn't retried indefinitely, and its words remain in the transcript.
-Meeting batches retain their stable IDs and retry until confirmed.
+A **202** response with `delivered: null` counts as sent, without a retry; `last` reports `status: "delivered", detail: "unconfirmed"` rather than a false failure.
+Only an explicit `delivered: false` or a non-2xx response is a failed send.
+Meeting batches retain their stable IDs and retry definite failures.
 
 ### Meetings
 
