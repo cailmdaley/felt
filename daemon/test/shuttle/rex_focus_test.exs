@@ -77,6 +77,66 @@ defmodule Shuttle.RexFocusTest do
     assert nil == RexFocus.title_target("task - project/task", ambiguous, fibers())
   end
 
+  test "a remote worker's window resolves through the served fiber tree to its origin" do
+    hub = %{
+      "id" => "01HUB",
+      "uid" => "01HUB",
+      "slug" => "science/unions/unions-hub",
+      "name" => "UNIONS hub",
+      "shuttle" => %{"host" => "fir"}
+    }
+
+    child = %{
+      "id" => "01CHILD",
+      "uid" => "01CHILD",
+      "slug" => "science/unions/unions-hub/onecov",
+      "name" => "OneCov",
+      "shuttle" => %{"host" => "fir"}
+    }
+
+    # The loom's local copy of the same fiber, as the Mac serves it.
+    local_copy = %{child | "id" => "science/unions/unions-hub/onecov"}
+    fibers = fibers() ++ [hub, local_copy, child]
+
+    assert %{"fiber_id" => "01CHILD", "origin" => "fir", "name" => "OneCov"} ==
+             RexFocus.title_target(
+               "\u2060└ onecov - unions/unions-hub",
+               bindings(),
+               fibers,
+               "mac"
+             )
+
+    assert %{"fiber_id" => "01HUB", "origin" => "fir"} =
+             RexFocus.title_target("unions-hub - unions/unions-hub", bindings(), fibers, "mac")
+
+    # Wrong depth or session label, or the worker's own host, names nothing.
+    assert nil == RexFocus.title_target("onecov - unions/unions-hub", bindings(), fibers, "mac")
+    assert nil == RexFocus.title_target("└ onecov - unions/other", bindings(), fibers, "mac")
+    assert nil == RexFocus.title_target("└ onecov - unions/unions-hub", bindings(), fibers, "fir")
+
+    # The same labels on two hosts are ambiguous.
+    twin = %{child | "uid" => "01TWIN", "id" => "01TWIN", "shuttle" => %{"host" => "nibi"}}
+
+    assert nil ==
+             RexFocus.title_target(
+               "└ onecov - unions/unions-hub",
+               bindings(),
+               fibers ++ [twin],
+               "mac"
+             )
+
+    # A local binding wins over a remote fiber with the same labels.
+    remote_task = %{"id" => "01R", "slug" => "project/task", "shuttle" => %{"host" => "fir"}}
+
+    assert %{"origin" => "test-host"} =
+             RexFocus.title_target(
+               "task - project/task",
+               bindings(),
+               fibers() ++ [remote_task],
+               "mac"
+             )
+  end
+
   test "accessibility polling routes across sessions, ignores blanks, and never overwrites later board selection",
        c do
     title = start_supervised!({Agent, fn -> {:ok, "task - project/task"} end})

@@ -179,6 +179,7 @@ defmodule Shuttle.VoiceTest do
     refute Target.cold_runtime?(%{phase: "waiting", last_activity_at: now - 60_000}, 2, now)
 
     entries = [
+      %{fiber: %{"id" => "path/a", "uid" => "uid-a", "shuttle" => %{"host" => "owner"}}},
       %{
         fiber: %{"id" => "a", "uid" => "uid-a", "shuttle" => %{"host" => "owner"}},
         runtime: %{phase: "working"}

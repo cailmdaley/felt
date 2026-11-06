@@ -40,7 +40,13 @@ defmodule Shuttle.MeetingRouter do
         {:ok, :local}
 
       true ->
-        case probe(opts, "/api/v1/speak", &match?(%{"available" => true}, &1)) do
+        # Addressed, so a host that cannot speak answers for itself instead
+        # of forwarding the probe on to one that can.
+        case probe(
+               opts,
+               &("/api/v1/speak?recorder=" <> URI.encode_www_form(&1.name)),
+               &match?(%{"available" => true}, &1)
+             ) do
           nil -> {:error, "no host can speak: none has afplay"}
           remote -> {:ok, {:remote, remote}}
         end
@@ -95,7 +101,7 @@ defmodule Shuttle.MeetingRouter do
 
           response =
             if remaining > 0,
-              do: client.get(Remote.url_for(remote, path), remaining),
+              do: client.get(Remote.url_for(remote, url_path(path, remote)), remaining),
               else: {:error, :probe_deadline}
 
           case response do
@@ -121,6 +127,9 @@ defmodule Shuttle.MeetingRouter do
       _ -> nil
     end)
   end
+
+  defp url_path(path, remote) when is_function(path, 1), do: path.(remote)
+  defp url_path(path, _remote), do: path
 
   def normalize_origin(origin) when origin in [nil, "", "local"], do: own_host()
   def normalize_origin(origin), do: origin

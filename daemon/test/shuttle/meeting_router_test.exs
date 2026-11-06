@@ -366,9 +366,12 @@ defmodule Shuttle.MeetingRouterTest do
   test "a speaker is the addressed recorder, else this host, else the first remote that speaks" do
     speaks = fn available -> {:ok, Jason.encode!(%{available: available})} end
 
+    # agent-host has no speaker; asked without an address it would forward
+    # the read to one that has, so the probe addresses each host by name.
     RecorderClient.set(%{
-      {:get, "http://agent-host.example/api/v1/speak"} => speaks.(false),
-      {:get, "http://mac-recorder.example/api/v1/speak"} => speaks.(true)
+      {:get, "http://agent-host.example/api/v1/speak"} => speaks.(true),
+      {:get, "http://agent-host.example/api/v1/speak?recorder=agent-host"} => speaks.(false),
+      {:get, "http://mac-recorder.example/api/v1/speak?recorder=mac-recorder"} => speaks.(true)
     })
 
     assert {:ok, :local} = MeetingRouter.select_speaker(%{}, speaks: true)

@@ -8,9 +8,12 @@ defmodule Shuttle.Voice.Target do
         _ -> 5
       end
 
-    entries = Shuttle.Env.app(:voice_target_entries, &entries/0).()
-    entry = Enum.find(entries, &matches?(&1, target))
-    runtime = entry && (entry[:runtime] || entry["runtime"])
+    # Only the worker's own host publishes its runtime; other stores carry
+    # the same fiber without one.
+    runtime =
+      Shuttle.Env.app(:voice_target_entries, &entries/0).()
+      |> Enum.find_value(&(matches?(&1, target) && (&1[:runtime] || &1["runtime"])))
+
     cold_runtime?(runtime, minutes, System.system_time(:millisecond))
   end
 

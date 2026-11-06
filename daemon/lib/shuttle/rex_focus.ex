@@ -196,11 +196,46 @@ defmodule Shuttle.RexFocus do
          do: Shuttle.Rex.select(runner, client, sid, wid)
   end
 
-  @doc false
-  def title_target(title, bindings, fibers) do
+  @doc """
+  The worker a Rex window title names. A local binding names it exactly; a
+  worker on another host, whose Rex server the app also shows, is found by
+  the labels its own daemon projects from the fiber tree, which the served
+  fibers carry with their `shuttle.host`.
+  """
+  def title_target(title, bindings, fibers, own_host \\ Shuttle.MeetingRouter.own_host()) do
     case title_binding(title, bindings) do
       %{fiber: id} -> fiber_target(id, fibers)
-      nil -> nil
+      nil -> remote_title_target(title, fibers, own_host)
+    end
+  end
+
+  defp remote_title_target(title, fibers, own_host) do
+    alias Shuttle.Terminal.RexTree
+    title = normalize_title(title)
+
+    matches =
+      fibers
+      |> Enum.filter(fn fiber ->
+        host = get_in(fiber, ["shuttle", "host"])
+        path = fiber["slug"] || fiber["id"]
+
+        is_binary(host) and host != own_host and is_binary(path) and
+          String.contains?(
+            title,
+            path |> String.split("/") |> List.last() |> String.slice(0, 100)
+          )
+      end)
+      |> Enum.uniq_by(&{&1["uid"] || &1["id"], &1["shuttle"]["host"]})
+      |> Enum.filter(fn fiber ->
+        family = RexTree.family(fiber["slug"] || fiber["id"], fibers)
+        [%{label: label}] = RexTree.layout([family])
+        session = RexTree.display_label(RexTree.session_label(family.family))
+        normalize_title(RexTree.display_label(label) <> " - " <> session) == title
+      end)
+
+    case matches do
+      [fiber] -> fiber_target(fiber["uid"] || fiber["id"], [fiber])
+      _ -> nil
     end
   end
 
@@ -242,7 +277,7 @@ defmodule Shuttle.RexFocus do
   defp fiber_target(id, fibers) do
     case Enum.find(fibers, &(id in [&1["id"], &1["uid"], &1["slug"]])) do
       %{"shuttle" => shuttle} = fiber when is_map(shuttle) and map_size(shuttle) > 0 ->
-        %{"fiber_id" => id, "origin" => shuttle["host"], "name" => fiber["name"]}
+        %{"fiber_id" => fiber["uid"] || id, "origin" => shuttle["host"], "name" => fiber["name"]}
 
       _ ->
         nil
