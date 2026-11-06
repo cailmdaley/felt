@@ -6,10 +6,21 @@ sees it.
 
 ## Voice band (`voice-band.tsx`)
 
-One dim line above the prompt in every Claude session, read from the Shuttle
+One dim voice line in every Claude session, read from the Shuttle
 daemon's `/api/v1/voice` and `/api/v1/speak`: every 150 ms while the mic is
 here (the level ticker moves), 500 ms otherwise, 5 s while both say
 unavailable.
+
+**Placement** is the plugin option `placement` (`/config`, row "Voice line
+placement", or `pluginConfigs` in settings):
+
+- `below` (default): on the hint row under the prompt, after the engine's
+  hint text, costing no line. The engine keeps its mode pill
+  (`⏵⏵ auto mode on`) and what follows live; the voice line takes the room
+  left and is not right-aligned.
+- `above`: its own band above the prompt, the speaker right-aligned. Claude
+  Code draws its `[-]` collapse control beside it and keeps its status row
+  between the band and the input.
 
 Mic side, at the left:
 

@@ -5,5 +5,17 @@
   "author": {
     "name": "Cail Daley"
   },
-  "hooks": "./mods/hooks.json"
+  "hooks": "./mods/hooks.json",
+  "userConfig": {
+    "placement": {
+      "type": "string",
+      "title": "Voice line placement",
+      "description": "Where the live-voice line draws: below, on the prompt's hint row (no extra line), or above, as its own band.",
+      "default": "below",
+      "options": [
+        "below",
+        "above"
+      ]
+    }
+  }
 }

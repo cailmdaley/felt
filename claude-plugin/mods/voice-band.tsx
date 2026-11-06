@@ -35,6 +35,7 @@ const LIVE = 150 // the mic is here: the level ticker moves
 const FAST = 500
 const SLOW = 5000
 const GLYPHS = '▁▂▃▅▇'
+const PILLS = 40 // the hint row's mode pill and separators, which the engine draws around the hint
 
 // Module state: a reload starts it over and session.start fills it again.
 let base = 'http://127.0.0.1:4000'
@@ -43,6 +44,7 @@ let voice: Voice | null = null
 let speak: Speak | null = null
 let seen = ''
 let levels: number[] = []
+let placement: 'above' | 'below' = 'below'
 let running = false
 
 const clip = (s: string, n: number) => (s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + '…')
@@ -99,7 +101,49 @@ async function setMuted($: EngineInterface, path: string, muted: boolean): Promi
   await poll($)
 }
 
-export const register: Register = on => {
+// What the voice line says now: the mic side as plain text and as coloured
+// parts, and the speaker side; empty strings where a side has nothing.
+function line(room: number, Text: any) {
+  let spk = ''
+  if (speak?.available) {
+    const waiting = Object.entries(speak.held ?? {}).reduce((n, [id, k]) => n + (mine(id) ? k : 0), 0)
+    if (speak.muted) spk = '🔈 muted'
+    else if (speak.speaking) spk = '🔈 ' + speak.speaking.voice
+    else if (speak.paused) spk = '🔈 paused'
+    else if (waiting) spk = `🔈 ${waiting} waiting`
+  }
+  room -= spk ? spk.length + 3 : 0
+
+  let mic = ''
+  let parts: RenderChildren[] = []
+  if (voice?.available && voice.enabled) {
+    const v = voice
+    if (v.muted) mic = '🎤 muted'
+    else if (!mine(v.target?.fiber_id)) mic = clip('🎤 → ' + (v.target?.name ?? v.target?.fiber_id ?? 'nowhere'), room)
+    else {
+      const said = flat(
+        (mine(v.pending?.fiber_id) && v.pending!.text) ||
+          (mine(v.preview?.fiber_id) && v.preview!.text) ||
+          v.held?.find(h => mine(h.fiber_id))?.text ||
+          '',
+      )
+      const steps = levels.map(step)
+      const words = clipWords(said, room - (steps.length ? steps.length + 1 : 0))
+      mic = [steps.map(i => GLYPHS[i]).join(''), words].filter(Boolean).join(' ')
+      parts = [
+        ...steps.map((i, k) => <Text key={`l${k}`} color={tone(i)} dimColor={i === 0}>{GLYPHS[i]}</Text>),
+        steps.length && words ? ' ' : '',
+        ...words.split(LABEL).filter(Boolean).map((w, k) =>
+          LABEL.test(w) ? <Text key={`w${k}`} color="suggestion">{w}</Text> : <Text key={`w${k}`} dimColor>{w}</Text>,
+        ),
+      ].filter(x => x !== '')
+    }
+  }
+  return { mic, parts: parts.length ? parts : [<Text key="m" dimColor>{mic}</Text>], spk, speaking: !!speak?.speaking && !speak.muted }
+}
+
+export const register: Register = (on, options) => {
+  placement = options.placement === 'above' ? 'above' : 'below'
   on('session.start', async ($, e, next) => {
     base = (await $.env.get('SHUTTLE_DAEMON_URL'))?.replace(/\/+$/, '') || base
     const path = await $.env.get('SHUTTLE_FIBER_PATH')
@@ -118,63 +162,49 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    if (placement !== 'above' || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-
-    let spk = ''
-    if (speak?.available) {
-      const waiting = Object.entries(speak.held ?? {}).reduce((n, [id, k]) => n + (mine(id) ? k : 0), 0)
-      if (speak.muted) spk = '🔈 muted'
-      else if (speak.speaking) spk = '🔈 ' + speak.speaking.voice
-      else if (speak.paused) spk = '🔈 paused'
-      else if (waiting) spk = `🔈 ${waiting} waiting`
-    }
-
     const width = e.props.bodyColumns
-    const room = width - (spk ? spk.length + 3 : 0)
-    let mic = ''
-    let parts: RenderChildren[] = []
-    if (voice?.available && voice.enabled) {
-      const v = voice
-      if (v.muted) mic = '🎤 muted'
-      else if (!mine(v.target?.fiber_id)) mic = clip('🎤 → ' + (v.target?.name ?? v.target?.fiber_id ?? 'nowhere'), room)
-      else {
-        const said = flat(
-          (mine(v.pending?.fiber_id) && v.pending!.text) ||
-            (mine(v.preview?.fiber_id) && v.preview!.text) ||
-            v.held?.find(h => mine(h.fiber_id))?.text ||
-            '',
-        )
-        const steps = levels.map(step)
-        const words = clipWords(said, room - (steps.length ? steps.length + 1 : 0))
-        mic = [steps.map(i => GLYPHS[i]).join(''), words].filter(Boolean).join(' ')
-        parts = [
-          ...steps.map((i, k) => <Text key={`l${k}`} color={tone(i)} dimColor={i === 0}>{GLYPHS[i]}</Text>),
-          steps.length && words ? ' ' : '',
-          ...words.split(LABEL).filter(Boolean).map((w, k) =>
-            LABEL.test(w) ? <Text key={`w${k}`} color="suggestion">{w}</Text> : <Text key={`w${k}`} dimColor>{w}</Text>,
-          ),
-        ].filter(x => x !== '')
-      }
-    }
-
+    const { mic, parts, spk, speaking } = line(width, Text)
     if (!mic && !spk) return next(e)
-    const speaking = !!speak?.speaking && !speak.muted
-
     return (
       <Box flexDirection="row" width={width}>
         <Box flexGrow={1}>
           {mic ? (
-            <Button key="mic" plain dimColor={!parts.length} label={mic}
-              onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)}>
-              {parts.length ? parts : mic}
+            <Button key="mic" plain label={mic} onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)}>
+              {parts}
             </Button>
           ) : null}
         </Box>
         {spk ? (
-          <Button key="speaker" plain label={spk}
-            onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
+          <Button key="speaker" plain label={spk} onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
             {speaking ? <Text color="claude">{spk}</Text> : <Text dimColor>{spk}</Text>}
+          </Button>
+        ) : null}
+      </Box>
+    )
+  })
+
+  // Below: on the hint row. The engine keeps its mode pill and whatever follows
+  // the hint live; the tree stands in for the hint's own text, so it sizes to
+  // its content and the voice line follows the hint after a gap.
+  on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
+    if (placement !== 'below') return next(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const room = (e.viewport?.columns ?? 80) - e.props.hint.length - PILLS
+    const { mic, parts, spk, speaking } = line(room, Text)
+    if (!mic && !spk) return next(e)
+    return (
+      <Box flexDirection="row">
+        <Text dimColor>{e.props.hint}</Text>
+        {mic ? (
+          <Button key="mic" plain label={mic} onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)}>
+            {['  ', ...parts]}
+          </Button>
+        ) : null}
+        {spk ? (
+          <Button key="speaker" plain label={spk} onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
+            {'  '}{speaking ? <Text color="claude">{spk}</Text> : <Text dimColor>{spk}</Text>}
           </Button>
         ) : null}
       </Box>
