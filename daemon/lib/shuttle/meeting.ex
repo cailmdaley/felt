@@ -884,7 +884,16 @@ defmodule Shuttle.Meeting do
   defp dismiss_failed(_context, _opts), do: :ok
 
   defp hark_argv(executable, paths, title, mode, launch_id, language, system_audio) do
-    [executable, "-o", paths.local_transcript, "--launch=" <> launch_id, "--title=" <> title] ++
+    [
+      executable,
+      "-o",
+      paths.local_transcript,
+      "--launch=" <> launch_id,
+      "--title=" <> title,
+      "--external-ear",
+      "--settings",
+      Shuttle.Voice.Config.path()
+    ] ++
       mode_flag(mode) ++
       if(mode == "call" and not system_audio, do: ["--mic-only"], else: []) ++
       language_flag(language) ++

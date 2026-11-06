@@ -1727,8 +1727,8 @@ export class Dock {
         return field
       }
       const quiet = input('Quiet seconds')
-      const aqua = state?.enabled && !recording ? input('Aqua seconds') : null
-      const fields = aqua ? [quiet, aqua] : [quiet]
+      const aqua = input('Aqua seconds')
+      const fields = [quiet, aqua]
       menu.append(cadence)
       const configOrigin = (recording ? current.recorder : state?.recorder) ?? ''
       const configUrl = `${this.shuttleBase}/api/v1/config/voice${configOrigin ? `?origin=${encodeURIComponent(configOrigin)}` : ''}`
@@ -1739,10 +1739,9 @@ export class Dock {
         const oldVoice = doc.voice as { quiet_seconds?: number } | undefined
         const oldMeeting = doc.meeting as { quiet_seconds?: number } | undefined
         quiet.value = String(doc.quiet_seconds ?? oldVoice?.quiet_seconds ?? oldMeeting?.quiet_seconds ?? 15)
-        if (aqua) aqua.value = String(doc.run_quiet_seconds ?? 5)
+        aqua.value = String(doc.run_quiet_seconds ?? 5)
         fields.forEach(field => { field.disabled = false })
-        const settings: [HTMLInputElement, string][] = [[quiet, 'quiet_seconds']]
-        if (aqua) settings.push([aqua, 'run_quiet_seconds'])
+        const settings: [HTMLInputElement, string][] = [[quiet, 'quiet_seconds'], [aqua, 'run_quiet_seconds']]
         for (const [field, key] of settings) {
           field.addEventListener('change', () => {
             const value = Number(field.value)

@@ -1880,6 +1880,7 @@ defmodule Shuttle.MeetingTest do
 
       command = List.last(Enum.take_while(args, &(&1 != ";")))
       assert String.contains?(command, "--mic-only") == not enabled
+      assert command =~ "'--external-ear' '--settings' '#{Shuttle.Voice.Config.path()}'"
     end
   end
 
