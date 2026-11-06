@@ -435,7 +435,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert retry.text == first.text
   end
 
-  test "an unconfirmed native send is not a failure and is not retried", c do
+  test "an unconfirmed voice delivery is reported honestly without automatic replay", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
@@ -453,7 +453,12 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert_receive {:delivery, _}, 1_000
     sync_tasks(c)
 
-    assert %{last: %{"status" => "delivered", "detail" => "unconfirmed"}} =
+    assert %{
+             last: %{
+               "status" => "unconfirmed",
+               "detail" => "The message may have arrived. The transcript retains the words."
+             }
+           } =
              TranscriptRelay.status("launch", server: c.name)
 
     poll(c)

@@ -215,3 +215,24 @@ func TestNewEnvelopePrunesInactiveSessionEvidence(t *testing.T) {
 		t.Fatalf("inactive evidence retained: %v", err)
 	}
 }
+
+func TestLabeledNamesASenderByItsReplyTarget(t *testing.T) {
+	cases := []struct {
+		name string
+		req  Request
+		want string
+	}{
+		{"fiber sender", Request{MessageID: "m", From: "shuttle://host/claude/A", ReplyTo: "work/fiber"}, "from work/fiber]"},
+		{"session without a fiber keeps its address", Request{MessageID: "m", From: "shuttle://host/claude/A"}, "from shuttle://host/claude/A]"},
+		{"unverified sender stays unverified", Request{MessageID: "m", From: "unverified", FromClaim: "shuttle://host/claude/A", ReplyTo: "work/fiber"}, "from unverified; claims to be shuttle://host/claude/A; reply to work/fiber]"},
+		{"the daemon stays the daemon", Request{MessageID: "m", From: "shuttle", ReplyTo: "work/fiber"}, "from shuttle; reply to work/fiber]"},
+	}
+	for _, c := range cases {
+		if got, want := Labeled(c.req), "[Shuttle message "+messageRef("m")+" "+c.want+"\n"; got != want {
+			t.Errorf("%s: %q, want %q", c.name, got, want)
+		}
+	}
+	if messageRef("m") == messageRef("n") {
+		t.Fatal("different messages share a reference")
+	}
+}

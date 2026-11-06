@@ -194,6 +194,7 @@ defmodule Shuttle.Meeting do
          transcript <- Path.join([hark_dir(opts), "voice", launch <> ".txt"]),
          :ok <- Shuttle.FS.mkdir_p(Path.dirname(transcript)),
          :ok <- apply_voice_mute(executable, opts),
+         started_at <- DateTime.to_iso8601(DateTime.utc_now()),
          :ok <-
            create_session(
              [
@@ -215,6 +216,7 @@ defmodule Shuttle.Meeting do
            kind: "voice",
            launch: launch,
            transcript: transcript,
+           started_at: started_at,
            title: "Live voice",
            state: "starting",
            error: nil
@@ -995,7 +997,15 @@ defmodule Shuttle.Meeting do
   defp observe_retained(opts) do
     case RetainedTerminal.observe(@session, meeting_runner(opts), opts) do
       :gone ->
-        {:ok, %{tmux: :absent, raw_meeting: nil, meeting_json: nil, pid_alive?: false}}
+        raw_meeting = read_meeting_json(opts)
+
+        {:ok,
+         %{
+           tmux: :absent,
+           raw_meeting: raw_meeting,
+           meeting_json: raw_meeting,
+           pid_alive?: pid_mentions_hark?(raw_meeting, opts)
+         }}
 
       {:ok, retained} ->
         metadata = retained.metadata

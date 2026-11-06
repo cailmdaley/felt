@@ -681,7 +681,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert {context, 0} = hook.("UserPromptSubmit")
 
     assert context |> Jason.decode!() |> get_in(["hookSpecificOutput", "additionalContext"]) =~
-             "[Shuttle message real-reply from unverified; claims to be shuttle://peer/pi/sender; reply to peer/work]"
+             "[Shuttle message 9b628114 from unverified; claims to be shuttle://peer/pi/sender; reply to peer/work]"
 
     # A's pairing is rotated; B is a Codex CLI worker without thread_id.
     # Its native address is established by the fiber's runtime, not guessed.
