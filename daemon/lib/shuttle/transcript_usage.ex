@@ -17,6 +17,7 @@ defmodule Shuttle.TranscriptUsage do
     * `cache_warm_until` — epoch ms. Only Claude's native usage establishes a
       TTL: an hour after an hour-long write or a read of a live hour-long
       entry, otherwise five minutes. A compaction forgets it.
+    * `cache_ttl` — ms, the lifetime of the entry that sets `cache_warm_until`.
     * `hit_share` — the share of the tail's context tokens read from the cache.
     * `at` — epoch ms of the latest record.
   """
@@ -36,6 +37,7 @@ defmodule Shuttle.TranscriptUsage do
     hour_until: nil,
     short_until: nil,
     warm_until: nil,
+    ttl: nil,
     read_tokens: 0,
     context_tokens: 0
   }
@@ -148,7 +150,8 @@ defmodule Shuttle.TranscriptUsage do
         at: entry.at || state.at,
         hour_until: nil,
         short_until: nil,
-        warm_until: nil
+        warm_until: nil,
+        ttl: nil
     }
   end
 
@@ -182,12 +185,14 @@ defmodule Shuttle.TranscriptUsage do
     short? = write > hour_write or (read > 0 and not hour_read?)
     hour_until = if hour?, do: at + @hour_ms, else: state.hour_until
     short_until = if short?, do: at + @short_ms, else: state.short_until
+    warm_until = max(hour_until || 0, short_until || 0)
 
     %{
       state
       | hour_until: hour_until,
         short_until: short_until,
-        warm_until: max(hour_until || 0, short_until || 0)
+        warm_until: warm_until,
+        ttl: if(warm_until == hour_until, do: @hour_ms, else: @short_ms)
     }
   end
 
@@ -199,6 +204,7 @@ defmodule Shuttle.TranscriptUsage do
       window: state.window,
       cached: state.cached,
       cache_warm_until: state.warm_until,
+      cache_ttl: state.ttl,
       hit_share: hit_share(state),
       at: state.at
     }

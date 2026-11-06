@@ -167,6 +167,7 @@ defmodule ShuttleWeb.TranscriptControllerTest do
                "context" => 100,
                "cached" => 98,
                "cache_warm_until" => 1_791_554_212_531,
+               "cache_ttl" => 300_000,
                "hit_share" => 0.98,
                "at" => 1_791_553_912_531
              }

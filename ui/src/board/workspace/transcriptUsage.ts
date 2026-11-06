@@ -1,9 +1,12 @@
+import { clockTime } from '../civilDay.js'
+
 /** A session's latest usage, from `GET /api/v1/transcript/usage`. Times are epoch milliseconds. */
 export interface TranscriptUsage {
   context?: number
   window?: number
   cached?: number
   cache_warm_until?: number
+  cache_ttl?: number
   hit_share?: number
   at?: number
 }
@@ -34,14 +37,36 @@ export function warmUntil(usage: TranscriptUsage | null): number | undefined {
 }
 
 /**
- * The context figure's tooltip. Claude transcripts record no window; Claude
- * sessions run with a million-token one.
+ * The window a session's context is read against. Claude transcripts record
+ * none; Claude sessions run with a million-token window.
  */
-export function contextTitle(usage: TranscriptUsage, agent: string | undefined): string {
-  if (usage.context === undefined) return ''
+function contextWindow(recorded: number | undefined, agent: string | undefined): number | undefined {
+  return recorded || (agent?.startsWith('claude') ? 1_000_000 : undefined)
+}
+
+/**
+ * Paint the session's usage: context as its token count, tinted from verdigris
+ * toward red as it fills the window; the cache as a verdigris dot draining as
+ * the entry ages, an alarm-red ring once cold.
+ */
+export function paintUsage(context: HTMLElement, cache: HTMLElement, usage: TranscriptUsage | null, agent: string | undefined): void {
   const count = (n: number): string => new Intl.NumberFormat('en-US').format(n)
-  const window_ = usage.window ?? (agent?.startsWith('claude') ? 1_000_000 : undefined)
-  const tokens = `Context: ${count(usage.context)} tokens`
-  if (!window_) return tokens
-  return `${tokens} of a ${count(window_)}-token window (${Math.round(Math.min(1, usage.context / window_) * 100)}% full)`
+  const tokens = usage?.context
+  const window_ = tokens === undefined ? undefined : contextWindow(usage?.window, agent)
+  const share = tokens !== undefined && window_ ? Math.round(Math.min(1, tokens / window_) * 100) : undefined
+  context.hidden = tokens === undefined
+  context.textContent = tokens === undefined ? '' : tokenLabel(tokens)
+  context.title = tokens === undefined ? '' : `Context: ${count(tokens)} tokens${window_ ? ` of a ${count(window_)}-token window (${share}% full)` : ''}`
+  if (share === undefined) context.style.removeProperty('color')
+  else context.style.color = `color-mix(in oklch, var(--kbn-alarm) ${share}%, var(--kbn-tempered))`
+
+  const until = usage?.cache_warm_until
+  const now = Date.now()
+  const warm = until !== undefined && until > now
+  const said = until === undefined ? '' : warm ? `Cache warm until ${clockTime(until)}` : `Cache cold since ${clockTime(until)}`
+  cache.hidden = until === undefined
+  cache.dataset.cache = until === undefined ? '' : warm ? 'warm' : 'cold'
+  cache.title = until === undefined ? '' : `${said} (estimated from Claude cache usage)`
+  cache.setAttribute('aria-label', said)
+  cache.style.setProperty('--ws-cache-left', warm ? String(Math.min(1, (until - now) / (usage?.cache_ttl ?? 300_000))) : '0')
 }

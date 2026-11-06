@@ -675,12 +675,13 @@ define a transcript reader or search language.
 
 `/transcript/usage` accepts the same parameters and reads at most the file's
 last 16 MiB, so it stays cheap on a huge transcript, and it needs no live
-worker. It answers `{context?, window?, cached?, cache_warm_until?, hit_share?,
+worker. It answers `{context?, window?, cached?, cache_warm_until?, cache_ttl?, hit_share?,
 at}`: `context` is the latest turn's prompt tokens, absent after a compaction
 that records no count until the next measured turn; `window` is the context
 window, which only Codex records; `cached` is the tokens that turn read from
 the prompt cache; `cache_warm_until` is an estimate that only Claude's native
-usage establishes, and it may already be past; `hit_share` is the share of
+usage establishes, and it may already be past; `cache_ttl` is the lifetime in
+milliseconds of the entry behind that estimate; `hit_share` is the share of
 context tokens read from the cache over the turns in the tail. Times are epoch
 milliseconds. A session with nothing to report answers 404 with the `/transcript`
 receipt, `availability` being `transcript_missing` or `usage_missing`; an

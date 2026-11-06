@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { bandFacts, Dock, stripFacts } from './Dock.js'
 import { clockTime } from '../civilDay.js'
+import { CLAUDE_OPENING_KEY } from '../conversationOpening.js'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 
@@ -599,22 +600,58 @@ describe('Listen', () => {
 })
 
 describe('opening the conversation by key', () => {
-  it('resumes a past session and opens its worker', async () => {
-    const open = vi.fn()
-    vi.mocked(fetch).mockImplementation(async () => response({ tmux_session: 'worker-1' }))
-    const keys = new Dock('', saved, undefined, open)
-    expect(keys.openConversation(task({ status: 'open', sessionUuid: 'past', effectiveHorizon: 'stashed' }))).toBe(true)
+  const posts = (): [string, unknown][] => vi.mocked(fetch).mock.calls
+    .filter(([, init]) => init?.method === 'POST')
+    .map(([url, init]) => [String(url), JSON.parse(String(init!.body))])
+
+  it.each<[string, Partial<KanbanCard>]>([
+    ['resting', { status: 'open', effectiveHorizon: 'stashed' }],
+    ['awaiting review', { status: 'closed' }],
+    ['tempered', { status: 'closed', tempered: true }],
+    ['discarded', { status: 'closed', tempered: false }],
+  ])('reopens a %s card\'s past session with no dispatch', async (_, state) => {
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockImplementation(async () => response({ attached: true }))
+    const keys = new Dock('', saved, undefined, vi.fn())
+    expect(keys.openConversation(task({ ...state, sessionUuid: 'past' }))).toBe(true)
     await flush()
-    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: '' })
-    expect(open).toHaveBeenCalledWith('worker-1', 'owner')
+    expect(posts()).toEqual([['/api/v1/attach', { session: 'past', shuttle_host: 'owner' }]])
   })
 
-  it('never starts a card that has not run or wakes an archived one', () => {
+  it('reopens over a dead session\'s link, but keeps a link the human chose', async () => {
     vi.mocked(fetch).mockClear()
-    const keys = new Dock('', saved)
+    vi.mocked(fetch).mockImplementation(async () => response({ attached: true }))
+    const keys = new Dock('', saved, undefined, vi.fn())
+    const card = task({ status: 'closed', sessionUuid: 'past', sessionLink: 'https://claude.ai/code/session_abc' })
+    keys.openConversation(card)
+    await flush()
+    expect(posts()).toHaveLength(1)
+    vi.stubGlobal('localStorage', { getItem: (key: string) => key === CLAUDE_OPENING_KEY ? 'browser' : null })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    keys.openConversation(card)
+    await flush()
+    expect(posts()).toHaveLength(1)
+    expect(click).toHaveBeenCalledOnce()
+    click.mockRestore()
+    vi.unstubAllGlobals()
+  })
+
+  it('says a refused reopening', async () => {
+    vi.mocked(fetch).mockImplementation(async () => response({ error: 'no transcript for past on this host' }, 422))
+    new Dock('', saved, undefined, vi.fn()).openConversation(task({ status: 'closed', sessionUuid: 'past' }))
+    await flush()
+    expect(document.body.textContent).toContain('no transcript for past on this host')
+  })
+
+  it('opens a live worker and never starts a card that has not run', async () => {
+    vi.mocked(fetch).mockClear()
+    const open = vi.fn()
+    const keys = new Dock('', saved, undefined, open)
+    expect(keys.openConversation(task({ status: 'active', sessionUuid: 'past', tmuxSession: 'worker-1', workerState: 'running' }))).toBe(true)
+    expect(open).toHaveBeenCalledWith('worker-1', 'owner')
     expect(keys.openConversation(task({ status: 'open' }))).toBe(false)
-    expect(keys.openConversation(task({ status: 'closed', tempered: true, sessionUuid: 'past' }))).toBe(false)
-    expect(writes()).toEqual([])
+    await flush()
+    expect(posts()).toEqual([])
   })
 })
 
@@ -1073,16 +1110,22 @@ describe('session usage', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'], now: Date.parse('2026-10-09T20:00:00Z') })
   })
 
-  it('says the context and the warmth beside the state word and on Resume, with no live worker', async () => {
+  const left = (): number => Number(part('cache').style.getPropertyValue('--ws-cache-left'))
+
+  it('draws the figure and the cache dot beside the state word, with no live worker', async () => {
     const until = Date.parse('2026-10-09T20:30:00Z')
-    answering(() => ({ context: 182_340, cache_warm_until: until, hit_share: 0.94 }))
+    answering(() => ({ context: 182_340, cache_warm_until: until, cache_ttl: 3_600_000, hit_share: 0.94 }))
     dock.open(resting())
     await flush()
     const said = `warm until ${clockTime(until)}`
     expect(part('context').textContent).toBe('182k')
     expect(part('context').title).toBe('Context: 182,340 tokens of a 1,000,000-token window (18% full)')
-    expect(part('context').previousElementSibling).toBe(part('lifecycle'))
-    expect(part('cache-warmth').textContent).toBe(said)
+    expect(part('context').style.color).toBe('color-mix(in oklch, var(--kbn-alarm) 18%, var(--kbn-tempered))')
+    expect(part('context-meter').previousElementSibling).toBe(part('lifecycle'))
+    expect(part('cache').dataset.cache).toBe('warm')
+    expect(part('cache').textContent).toBe('')
+    expect(left()).toBe(0.5)
+    expect(part('cache').title).toBe(`Cache ${said} (estimated from Claude cache usage)`)
     expect(session('Resume').title).toBe(`Resume · cache ${said}`)
     expect(band.el.querySelector('.ws-header-facts')!.textContent).toContain('94% cached')
     expect(usageReads()).toEqual([`/api/v1/transcript/usage?session=${id}&host=candide`])
@@ -1093,7 +1136,7 @@ describe('session usage', () => {
     dock.open(resting({ shuttleAgent: 'codex-sol' }))
     await flush()
     expect(part('context').title).toBe('Context: 129,500 tokens of a 259,000-token window (50% full)')
-    expect(part('cache-warmth').hidden).toBe(true)
+    expect(part('cache').hidden).toBe(true)
   })
 
   it('shows nothing of an unavailable read and asks nothing without a session', async () => {
@@ -1101,7 +1144,7 @@ describe('session usage', () => {
     dock.open(resting())
     await flush()
     expect(usageReads()).toHaveLength(1)
-    expect([part('context').hidden, part('cache-warmth').hidden]).toEqual([true, true])
+    expect(part('context-meter').hidden).toBe(true)
     expect(session('Resume').title).toBe('Resume')
     expect(band.el.querySelector('.ws-header-facts')!.textContent).not.toContain('cached')
     dock.reset()
@@ -1110,21 +1153,46 @@ describe('session usage', () => {
     expect(usageReads()).toHaveLength(1)
   })
 
-  it('keeps the figure and says no warmth once the estimate has passed', async () => {
-    answering(() => ({ context: 900, cache_warm_until: Date.now() - 1 }))
+  it('keeps the figure and draws a cold ring once the estimate has passed', async () => {
+    const until = Date.now() - 1
+    answering(() => ({ context: 900, cache_warm_until: until }))
     dock.open(resting())
     await flush()
     expect(part('context').textContent).toBe('900')
-    expect(part('cache-warmth').hidden).toBe(true)
+    expect(part('cache').dataset.cache).toBe('cold')
+    expect(left()).toBe(0)
+    expect(part('cache').getAttribute('aria-label')).toBe(`Cache cold since ${clockTime(until)}`)
     expect(session('Resume').title).toBe('Resume')
   })
 
-  it('refreshes every thirty seconds while visible, on a new session, and never after clearing', async () => {
+  it('drains the dot to the cold ring without another answer', async () => {
+    vi.mocked(fetch).mockClear()
+    let up = true
+    vi.mocked(fetch).mockImplementation(async input => {
+      if (!String(input).includes('/transcript/usage')) return response()
+      if (!up) throw new Error('offline')
+      return response({ context: 1000, cache_warm_until: Date.now() + 300_000, cache_ttl: 300_000 })
+    })
+    dock.open(resting())
+    await flush()
+    expect(left()).toBe(1)
+    up = false
+    vi.advanceTimersByTime(150_000)
+    await flush()
+    expect(left()).toBe(0.5)
+    expect(part('context').textContent).toBe('1k')
+    vi.advanceTimersByTime(150_000)
+    await flush()
+    expect(part('cache').dataset.cache).toBe('cold')
+    expect(part('context').textContent).toBe('1k')
+  })
+
+  it('refreshes every fifteen seconds while visible, on a new session, and never after clearing', async () => {
     answering(url => ({ context: url.includes(id) ? 1000 : 2000 }))
     dock.open(resting())
     await flush()
     expect(part('context').textContent).toBe('1k')
-    vi.advanceTimersByTime(29_999)
+    vi.advanceTimersByTime(14_999)
     expect(usageReads()).toHaveLength(1)
     vi.advanceTimersByTime(1)
     expect(usageReads()).toHaveLength(2)

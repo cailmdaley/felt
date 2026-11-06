@@ -4,7 +4,7 @@ import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { atDesktop, workerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
-import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, resolveDestination, openDestination } from '../conversationOpening.js'
+import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, resolveDestination, openDestination, type ConversationDestination } from '../conversationOpening.js'
 import { attachConversationPicker } from '../conversationMenu.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
@@ -12,14 +12,14 @@ import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord 
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
-import { buildSessionHistory } from '../sessionHistory.js'
+import { attachConversation, buildSessionHistory } from '../sessionHistory.js'
 import { showToast } from '../utils.js'
 import { coarsePointer } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
 import { dressVerb, headerLifecycleVerbsFor, SESSION_VERBS, sessionVerbsFor } from './lifecycleVerbs.js'
-import { contextTitle, fetchTranscriptUsage, tokenLabel, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
+import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
@@ -399,7 +399,8 @@ export interface DockOptions {
   onRest?: (card: KanbanCard, anchor: HTMLElement) => void
 }
 
-const USAGE_REFRESH_MS = 30_000
+/** A warm cache dot drains on this cadence, and the figures follow the session's turns. */
+const USAGE_REFRESH_MS = 15_000
 
 /**
  * The band above a constitution's pages: its name and state, the way to its
@@ -662,19 +663,25 @@ export class Dock {
 
   /**
    * Take the human to the conversation: the exact destination the worker pill
-   * opens, or, with no worker up, its past session resumed. An archived card
-   * stays archived; a card that never ran is launched by name, not by a key.
+   * opens, or, on a desktop with no worker up, the past session reopened in a
+   * terminal on its host. A reopening sends nothing and starts no turn, and it
+   * leaves the card's lifecycle alone, so it holds in every column. A card
+   * that never ran is launched by name, not by a key.
    */
   openConversation(card: KanbanCard): boolean {
     const destination = resolveDestination(conversationDestinations(card, conversationDevice(), this.onOpenWorker))
-    if (destination) {
-      openDestination(destination)
+    if (card.sessionUuid && this.reopens(card, destination)) {
+      void attachConversation(this.shuttleBase, { session: card.sessionUuid, shuttle_host: card.shuttleHost ?? null }, message => showToast(message, 'error'))
       return true
     }
-    const archived = ['tempered', 'composted'].includes(deskColumn(card))
-    if (archived || hasLiveWorker(card) || !sessionVerbsFor(card).includes('resume')) return false
-    void this.startSession(card, 'previous')
+    if (!destination) return false
+    openDestination(destination)
     return true
+  }
+
+  /** Whether opening means reopening the past session: a link the human chose still wins. */
+  private reopens(card: KanbanCard, destination: ConversationDestination | undefined): boolean {
+    return conversationDevice().desktop && !!card.sessionUuid && !hasLiveWorker(card) && destination?.id !== conversationOpening()
   }
 
   /** The band shares the workspace's identity-keyed undo queue. */
@@ -734,14 +741,14 @@ export class Dock {
     this.workerPillCard = card
   }
 
-  /** Read the card's session usage and repaint; a read that outlives its session or band is dropped. */
+  /** Read the card's session usage and repaint; a failed read keeps the last figures, and one that outlives its session or band is dropped. */
   private async readUsage(card: KanbanCard): Promise<void> {
     const session = card.sessionUuid
     if (!session) return
     const epoch = this.epoch
     const usage = await fetchTranscriptUsage(this.shuttleBase, session, card.shuttleHost)
     if (this.epoch !== epoch || card.sessionUuid !== session) return
-    this.usage = usage
+    this.usage = usage ?? this.usage
     this.actPaint?.()
   }
 
@@ -943,15 +950,18 @@ export class Dock {
     lifecycle.dataset.part = 'lifecycle'
     drawer.prepend(ancestry)
     const contextFact = document.createElement('span')
-    contextFact.className = 'ws-band-context'
     contextFact.dataset.part = 'context'
-    const warmthFact = document.createElement('span')
-    warmthFact.className = 'ws-band-warmth'
-    warmthFact.dataset.part = 'cache-warmth'
+    const cacheFact = document.createElement('span')
+    cacheFact.className = 'ws-band-cache'
+    cacheFact.dataset.part = 'cache'
+    const meter = document.createElement('span')
+    meter.className = 'ws-band-meter'
+    meter.dataset.part = 'context-meter'
+    meter.append(contextFact, cacheFact)
     const usageRefresh = window.setInterval(() => { if (!document.hidden) void this.readUsage(card) }, USAGE_REFRESH_MS)
     this.disposers.push(() => window.clearInterval(usageRefresh))
     const identity = document.createElement('div'); identity.className = 'ws-band-identity'
-    identity.append(title, lifecycle, contextFact, warmthFact)
+    identity.append(title, lifecycle, meter)
     const leave = this.leave = document.createElement('button')
     leave.type = 'button'
     leave.className = 'ws-header-icon ws-band-leave'
@@ -981,14 +991,10 @@ export class Dock {
       lifecycle.dataset.state = stage.state
       lifecycle.hidden = !shuttleManaged
       const usage = this.usage
-      contextFact.hidden = usage?.context === undefined
-      contextFact.textContent = usage?.context === undefined ? '' : tokenLabel(usage.context)
-      contextFact.title = usage ? contextTitle(usage, card.workerAgent ?? card.shuttleAgent) : ''
+      paintUsage(contextFact, cacheFact, usage, card.workerAgent ?? card.shuttleAgent)
+      meter.hidden = contextFact.hidden && cacheFact.hidden
       const warm = warmUntil(usage)
       const warmSaid = warm === undefined ? '' : `warm until ${clockTime(warm)}`
-      warmthFact.hidden = warm === undefined
-      warmthFact.textContent = warmSaid
-      warmthFact.title = warm === undefined ? '' : `Cache ${warmSaid} (estimated from Claude cache usage)`
       const hit = usage?.hit_share === undefined ? undefined : Math.round(usage.hit_share * 100)
       const saidFacts = [bandFacts(card), ...(hit === undefined ? [] : [`${hit}% cached`])].join(' · ')
       if (facts.textContent !== saidFacts) facts.textContent = saidFacts
@@ -1009,10 +1015,11 @@ export class Dock {
       discard.hidden = !offered.includes('discard')
       review.hidden = !offered.includes('review')
       const destination = resolveDestination(destinations())
-      openItem.hidden = !destination
-      const openLabel = destination ? `Open in ${destination.label}` : ''
+      const reopening = this.reopens(card, destination)
+      openItem.hidden = !destination && !reopening
+      const openLabel = reopening ? 'Reopen session' : destination ? `Open in ${destination.label}` : ''
       if (openItem.textContent !== openLabel) openItem.textContent = openLabel
-      openItem.title = openLabel
+      openItem.title = reopening ? 'Reopen the past session in a terminal; nothing is sent' : openLabel
       sessionsSection.hidden = !card.uid
     }
     this.actPaint()

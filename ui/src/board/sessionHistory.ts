@@ -182,6 +182,26 @@ export function linkRequests(
   return byHost
 }
 
+/** `POST /api/v1/attach`: success opens the conversation's terminal on this display, a failure is said. */
+export async function attachConversation(shuttleBase: string, attach: AttachBody, onError: (message: string) => void): Promise<void> {
+  try {
+    const res = await fetch(`${shuttleBase}/api/v1/attach`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(attach),
+    })
+    if (!res.ok) {
+      const detail = await res
+        .json()
+        .then((b: { error?: unknown }) => (typeof b?.error === 'string' ? b.error : ''))
+        .catch(() => '')
+      onError(detail ? `Couldn’t open terminal: ${detail}` : 'Couldn’t open terminal')
+    }
+  } catch {
+    onError('Couldn’t reach the daemon to open the terminal')
+  }
+}
+
 export interface SessionHistoryContext extends TargetContext {
   shuttleBase: string
   uid: string
@@ -230,26 +250,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
   let pendingRetryAttempts = 0
   const maxPendingRetries = 8
 
-  /** `POST /api/v1/attach`, the terminal action: success raises Kitty, a
-   *  failure is said. */
-  const openTerminal = async (attach: AttachBody): Promise<void> => {
-    try {
-      const res = await fetch(`${ctx.shuttleBase}/api/v1/attach`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(attach),
-      })
-      if (!res.ok) {
-        const detail = await res
-          .json()
-          .then((b: { error?: unknown }) => (typeof b?.error === 'string' ? b.error : ''))
-          .catch(() => '')
-        ctx.onError?.(detail ? `Couldn’t open terminal: ${detail}` : 'Couldn’t open terminal')
-      }
-    } catch {
-      ctx.onError?.('Couldn’t reach the daemon to open the terminal')
-    }
-  }
+  const openTerminal = (attach: AttachBody): Promise<void> => attachConversation(ctx.shuttleBase, attach, message => ctx.onError?.(message))
 
   const targetEl = (target: SessionTarget, cls: string): HTMLElement => {
     if (target.kind === 'web' || target.kind === 'app') {

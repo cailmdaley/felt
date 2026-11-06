@@ -25,17 +25,17 @@
 .ws-band-state[data-state='drafts'] { --tone: var(--ws-state-drafts); }
 .ws-band-state[data-state='resting'] { --tone: var(--ws-state-resting); color: var(--ws-ink-muted); }
 .ws-band-state:is([data-state='tempered'], [data-state='discarded']) { --tone: var(--ws-state-tempered); }
-/* The session's context and cache warmth. The words yield first, so a tight
-   line keeps the figure and the verbs. */
-.ws-band-context, .ws-band-warmth { color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-prose) var(--font-serif); white-space: nowrap; }
-.ws-band-context { flex: none; font-variant-numeric: tabular-nums; }
-.ws-band-warmth { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ws-band-context:not([hidden]) + .ws-band-warmth { margin-left: -9px; }
-.ws-band-context:not([hidden]) + .ws-band-warmth::before { content: '· '; }
-/* A long name leaves the facts their room, down to a name still worth reading. */
-@container band (min-width: 521px) {
-  .ws-band-identity:has(.ws-band-warmth:not([hidden])) .ws-band-title { max-width: max(9em, calc(100% - 240px)); }
+/* One context figure and the cache's warmth: a verdigris dot draining clockwise
+   as the entry ages; cold, an alarm-red ring. Context carries its own tint (paintUsage). */
+.ws-band-meter { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; color: var(--ws-ink-muted); white-space: nowrap; font: var(--type-label)/var(--leading-prose) var(--font-mono); }
+.ws-band-meter[hidden], .ws-band-meter > [hidden] { display: none; }
+.ws-band-cache {
+  --ws-cache-left: 1;
+  box-sizing: border-box; flex: none; width: 9px; height: 9px;
+  border: 1.25px solid var(--ws-cache-warm); border-radius: 50%;
+  background: conic-gradient(var(--ws-cache-warm) calc(var(--ws-cache-left) * 1turn), transparent 0);
 }
+.ws-band-cache[data-cache='cold'] { border-color: var(--ws-cache-cold); background: transparent; }
 .ws-band-acts { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; min-height: 36px; }
 /* Conversation lives in Rex: the band's one filled control goes there. */
 .ws-dock .ws-band-open {
@@ -98,13 +98,11 @@
     .ws-band-acts .ws-header-word, .ws-band-acts .kbn-ctl-meet-label { display: none; }
     :is(.ws-reader, .kbn-verb-menu) .ws-band-acts .ws-header-icon.ws-header-verb { padding: 0 6px; }
   }
-  @container band (max-width: 520px) {
-    .ws-band-warmth { display: none; }
-  }
 }
 
 /* On the phone the top bar names the page; the band is one row of verbs that slides sideways. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-band-meter { display: none; }
   .kbn-verb-menu [role='menuitem'] { min-height: 44px; height: 44px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
   .ws-band-head { flex-wrap: nowrap; gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
@@ -320,6 +318,7 @@
 .ws-dock .kbn-ctl-history-empty { margin: 0; padding: 4px 0 8px; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-ui) var(--font-serif); }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-band-meter { display: none; }
   .ws-dock { --ctl-h: var(--ws-phone-target); }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--type-label); }
   .ws-dock :is(.kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }

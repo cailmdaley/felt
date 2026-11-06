@@ -58,6 +58,7 @@ defmodule Shuttle.TranscriptUsageTest do
                context: 53_327,
                cached: 26_331,
                cache_warm_until: at + @hour,
+               cache_ttl: @hour,
                hit_share: 0.494,
                at: at
              }
@@ -81,7 +82,8 @@ defmodule Shuttle.TranscriptUsageTest do
       assert read(path, lines, "claude-code").cache_warm_until == renewed + @hour
 
       lines = lines ++ [claude(late, read: 900)]
-      assert read(path, lines, "claude-code").cache_warm_until == late + 5 * @minute
+      assert %{cache_warm_until: warm, cache_ttl: ttl} = read(path, lines, "claude-code")
+      assert {warm, ttl} == {late + 5 * @minute, 5 * @minute}
     end
 
     test "a short write beside a live hour keeps the later estimate", %{path: path} do

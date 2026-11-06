@@ -1689,7 +1689,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.includes('/api/v1/transcript/usage')) {
     if (!workspaceFixture || !url.includes(WORKSPACE_LATEST_SESSION)) return json({ availability: 'transcript_missing' }, 404)
-    return json({ context: 182_340, cached: 179_216, cache_warm_until: Date.now() + 47 * 60_000, hit_share: 0.94, at: Date.now() - 13 * 60_000 })
+    return json({ context: 182_340, cached: 179_216, cache_warm_until: Date.now() + 47 * 60_000, cache_ttl: 3_600_000, hit_share: 0.94, at: Date.now() - 13 * 60_000 })
   }
   if (url.includes('/api/v1/transcripts/search')) {
     const query = new URL(url, 'http://harness').searchParams.get('q') ?? ''

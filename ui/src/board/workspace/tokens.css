@@ -38,7 +38,9 @@
   --ws-mask: var(--kbn-ink);
   --ws-agent: var(--kbn-agent);
   --ws-verdict: var(--kbn-tempered);
-  /* A warm prompt cache, in the meter's verdigris. */
+  /* The prompt cache: warm in the meter's verdigris, cold in alarm red. */
+  --ws-cache-warm: var(--kbn-tempered);
+  --ws-cache-cold: var(--kbn-alarm);
   --ws-red: var(--ws-owed);
   --ws-stop: var(--kbn-error);
 
