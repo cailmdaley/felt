@@ -20,18 +20,18 @@ defmodule Shuttle.Voice do
   def init(opts) do
     Process.flag(:trap_exit, true)
     routes_path = Keyword.get(opts, :routes_path, routes_path())
-    {lines, route_bytes, _} = Shuttle.FileTail.snapshot(routes_path)
-    :ok = truncate_routes(routes_path, route_bytes)
-
-    target =
-      case List.last(lines) do
-        nil -> nil
-        line -> Jason.decode!(line) |> Map.take(~w(fiber_id origin name))
-      end
+    {target, route_bytes, route_error} = restore_routes(routes_path)
 
     state = %{
       target: target,
       task: nil,
+      retry: new_retry(),
+      configured_enabled: nil,
+      idle_key: nil,
+      idle: false,
+      capture_error: nil,
+      route_error: route_error,
+      clock: Keyword.get(opts, :clock, fn -> System.monotonic_time(:millisecond) end),
       queue: [],
       routes_path: routes_path,
       route_bytes: route_bytes,
@@ -43,12 +43,12 @@ defmodule Shuttle.Voice do
       snapshot: %{
         available: false,
         enabled: false,
-        muted: Meeting.voice_muted?(),
-        state: "off",
+        muted: Meeting.voice_muted?(Keyword.get(opts, :capture_opts, [])),
+        state: if(route_error, do: "failed", else: "off"),
         target: target,
         pending: nil,
         last: read_last(),
-        error: nil
+        error: route_error
       }
     }
 
@@ -63,7 +63,13 @@ defmodule Shuttle.Voice do
       when is_binary(id) and id != "" do
     origin = params["origin"]
 
-    case Shuttle.OriginRouter.route_host(origin) do
+    case if(state.route_error,
+           do: {:error, {:routes, state.route_error}},
+           else: Shuttle.OriginRouter.route_host(origin)
+         ) do
+      {:error, {:routes, reason}} ->
+        {:reply, {:error, reason}, state}
+
       {:error, {:unknown_origin, host}} ->
         {:reply, {:error, Shuttle.OriginRouter.unknown_origin_message(host)}, state}
 
@@ -128,17 +134,29 @@ defmodule Shuttle.Voice do
   def terminate(_reason, _state), do: :ok
 
   defp finish_task(state, from, result) do
+    state =
+      case result do
+        {:ok, next} ->
+          Map.merge(
+            state,
+            Map.take(next, [:retry, :configured_enabled, :idle, :idle_key, :capture_error])
+          )
+
+        _ ->
+          state
+      end
+
     {reply, snapshot} =
       case result do
-        {:ok, snapshot} ->
-          snapshot = %{snapshot | target: state.target}
+        {:ok, next} ->
+          snapshot = %{next.snapshot | target: state.target}
           {{:ok, snapshot}, snapshot}
 
         {:error, reason} ->
           enabled =
             case Config.read() do
               {:ok, settings} -> settings["enabled"]
-              _ -> state.snapshot.enabled
+              _ -> false
             end
 
           snapshot = %{
@@ -177,7 +195,7 @@ defmodule Shuttle.Voice do
                  do: Meeting.mute_voice(params["muted"], state.capture_opts),
                  else: :ok
                ) do
-          {:ok, reconcile(state).snapshot}
+          {:ok, reconcile(state)}
         end
       end)
 
@@ -185,52 +203,221 @@ defmodule Shuttle.Voice do
   end
 
   defp reconcile(state) do
-    state = %{
-      state
-      | snapshot: %{state.snapshot | muted: Meeting.voice_muted?(state.capture_opts)}
-    }
-
     case Config.read() do
       {:ok, settings} ->
-        state = %{state | snapshot: %{state.snapshot | enabled: settings["enabled"]}}
-        reconcile(state, settings)
+        enabled = settings["enabled"]
+
+        state =
+          if state.configured_enabled != enabled,
+            do: %{state | retry: new_retry(), configured_enabled: enabled, idle: false},
+            else: state
+
+        if state.route_error do
+          fail_off(state, state.route_error)
+        else
+          reconcile_capture(state, enabled)
+        end
 
       {:error, reason} ->
-        %{state | snapshot: %{state.snapshot | state: "failed", error: inspect(reason)}}
+        fail_off(state, "invalid voice settings: #{inspect(reason)}")
     end
   end
 
-  defp reconcile(state, settings) do
-    with {:ok, observed} <- state.reconcile.(settings["enabled"], state.capture_opts) do
-      row = observed.meeting
-      voice = not is_nil(row) and row[:kind] == "voice"
-      if voice and is_binary(row[:transcript]), do: state.relay.(row, state.routes_path)
-      status = if voice, do: state.monitor.(row.launch), else: %{pending: nil, last: nil}
+  defp fail_off(state, reason) do
+    next = reconcile_capture(state, false)
+    stop_error = if next.snapshot.state == "failed", do: next.snapshot.error
+    error = if stop_error, do: "#{reason}; recorder: #{stop_error}", else: reason
+    %{next | snapshot: %{next.snapshot | enabled: false, state: "failed", error: error}}
+  end
 
-      phase =
-        cond do
-          not settings["enabled"] -> "off"
-          row && not voice -> "yielded"
-          row && row.state == "failed" -> "failed"
-          row && row.state == "live" -> "listening"
-          true -> "starting"
-        end
+  defp reconcile_capture(state, enabled) do
+    key = Meeting.voice_observation_key(state.capture_opts)
 
-      snapshot = %{
-        available: observed.available,
-        enabled: settings["enabled"],
-        muted: Meeting.voice_muted?(state.capture_opts),
-        state: phase,
-        target: state.target,
-        pending: status.pending,
-        last: status.last || read_last() || state.snapshot.last,
-        error: if(voice, do: row[:error])
+    state = %{
+      state
+      | snapshot: %{
+          state.snapshot
+          | muted: Meeting.voice_muted?(state.capture_opts),
+            last: read_last() || state.snapshot.last
+        }
+    }
+
+    if not enabled and state.idle and key == state.idle_key do
+      %{
+        state
+        | snapshot: %{
+            state.snapshot
+            | enabled: false,
+              state: if(state.capture_error, do: "failed", else: "off"),
+              error: state.capture_error
+          }
       }
-
-      %{state | snapshot: snapshot}
     else
+      observe_capture(state, enabled, key)
+    end
+  end
+
+  defp observe_capture(state, enabled, key) do
+    now = state.clock.()
+    retry = state.retry
+    allowed = not retry.latched and (is_nil(retry.at) or now >= retry.at)
+
+    opts =
+      Keyword.merge(state.capture_opts,
+        voice_start: allowed,
+        restart_voice: allowed and not is_nil(retry.at)
+      )
+
+    case state.reconcile.(enabled, opts) do
+      {:ok, observed} ->
+        row = observed.meeting
+        voice = not is_nil(row) and row[:kind] == "voice"
+        retry = track_retry(retry, row, now)
+
+        relay_result =
+          if voice and row.state != "failed" and is_binary(row[:transcript]),
+            do: state.relay.(row, state.routes_path),
+            else: :ok
+
+        status =
+          case relay_result do
+            {:error, reason} -> %{pending: nil, last: nil, error: inspect(reason)}
+            _ when voice -> state.monitor.(row.launch)
+            _ -> %{pending: nil, last: nil}
+          end
+
+        relay_error = Map.get(status, :error)
+
+        phase =
+          cond do
+            not enabled -> "off"
+            row && not voice -> "yielded"
+            row && row.state == "failed" -> "failed"
+            retry.latched or not is_nil(retry.at) -> "failed"
+            row && row.state == "live" -> "listening"
+            true -> "starting"
+          end
+
+        error =
+          cond do
+            retry.latched -> "voice repeatedly crashed; toggle enabled off and on to retry"
+            voice && row[:error] -> row[:error]
+            not is_nil(retry.at) and is_nil(row) -> state.snapshot.error
+            true -> relay_error
+          end
+
+        snapshot = %{
+          available: observed.available,
+          enabled: enabled,
+          muted: Meeting.voice_muted?(state.capture_opts),
+          state: phase,
+          target: state.target,
+          pending: status.pending,
+          last: status.last || read_last() || state.snapshot.last,
+          error: error
+        }
+
+        %{
+          state
+          | snapshot: snapshot,
+            retry: retry,
+            idle: is_nil(row) or (not enabled and not voice),
+            idle_key: key,
+            capture_error: nil
+        }
+
       {:error, reason} ->
-        %{state | snapshot: %{state.snapshot | state: "failed", error: inspect(reason)}}
+        retry = if enabled and allowed, do: failed_retry(retry, now), else: retry
+
+        %{
+          state
+          | retry: retry,
+            idle: not enabled and key == {:error, :enoent},
+            idle_key: key,
+            capture_error: inspect(reason),
+            snapshot: %{
+              state.snapshot
+              | enabled: enabled,
+                muted: Meeting.voice_muted?(state.capture_opts),
+                state: "failed",
+                error:
+                  if(retry.latched,
+                    do:
+                      "voice repeatedly failed; toggle enabled off and on to retry: #{inspect(reason)}",
+                    else: inspect(reason)
+                  )
+            }
+        }
+    end
+  end
+
+  defp new_retry,
+    do: %{failures: 0, at: nil, latched: false, launch: nil, started: nil, failed: nil}
+
+  defp track_retry(%{latched: true} = retry, _row, _now), do: retry
+
+  defp track_retry(retry, %{kind: "voice", state: "failed", launch: launch}, now) do
+    if retry.failed == launch do
+      retry
+    else
+      retry =
+        if retry.launch == launch and not is_nil(retry.started) and now - retry.started >= 30_000,
+          do: new_retry(),
+          else: retry
+
+      %{failed_retry(retry, now) | failed: launch}
+    end
+  end
+
+  defp track_retry(retry, %{kind: "voice", launch: launch}, now) do
+    cond do
+      retry.launch != launch -> %{retry | launch: launch, started: now, at: nil}
+      now - retry.started >= 30_000 -> %{new_retry() | launch: launch, started: now}
+      true -> retry
+    end
+  end
+
+  defp track_retry(retry, _row, _now), do: retry
+
+  defp failed_retry(retry, now) do
+    failures = min(retry.failures + 1, 5)
+    delay = min(1_000 * Integer.pow(2, failures - 1), 30_000)
+    %{retry | failures: failures, at: now + delay, latched: failures >= 5}
+  end
+
+  defp restore_routes(path) do
+    case Shuttle.FS.read(path) do
+      {:ok, contents} -> restore_readable_routes(path, contents)
+      {:error, :enoent} -> {nil, 0, nil}
+      {:error, reason} -> {nil, 0, "voice route recovery failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp restore_readable_routes(path, contents) do
+    bytes =
+      case :binary.matches(contents, "\n") do
+        [] -> 0
+        matches -> elem(List.last(matches), 0) + 1
+      end
+
+    lines = contents |> binary_part(0, bytes) |> String.split("\n", trim: true)
+
+    decoded =
+      Enum.reduce_while(lines, {:ok, nil}, fn line, _ ->
+        case Jason.decode(line) do
+          {:ok, %{"fiber_id" => id} = row} when is_binary(id) and id != "" ->
+            {:cont, {:ok, Map.take(row, ~w(fiber_id origin name))}}
+
+          _ ->
+            {:halt, {:error, "invalid voice route journal"}}
+        end
+      end)
+
+    with {:ok, target} <- decoded,
+         :ok <- truncate_routes(path, bytes) do
+      {target, bytes, nil}
+    else
+      {:error, reason} -> {nil, bytes, "voice route recovery failed: #{inspect(reason)}"}
     end
   end
 

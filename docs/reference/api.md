@@ -402,15 +402,17 @@ Without it, the receiving daemon is the recorder.
 `state` is `off`, `starting`, `listening`, `yielded` (a meeting owns the microphone), or `failed`.
 `target` is `{fiber_id, origin, name}` or `null`.
 `pending` is `{fiber_id, words, text}` or `null`; `last` is `{fiber_id, at, status, detail?}` or `null`, with `status` `delivered` or `failed`.
-`enabled` reports the persisted intent even if recording fails.
+`enabled` reports the persisted intent even if recording fails. Invalid or unreadable `voice.json` fails off: `enabled: false`, `state: "failed"`, and `error` describes the configuration failure while the daemon stops any live voice recorder.
 
 `POST /voice` accepts `{enabled?, muted?, recorder?}` and returns the same state.
 Both control fields must be booleans; invalid input returns **422**.
 Enabling persists to `voice.json`; muting uses `hark pause` and survives recorder restarts.
-The daemon keeps one retained `hark --voice` running while enabled, adopts it after daemon restarts, and replaces it after a crash.
+The daemon keeps one retained `hark --voice` running while enabled and adopts it after daemon restarts.
+Crash retries wait 1, 2, 4 and 8 seconds; five failures latch `failed` until enabled is toggled off and on. A recorder stable for 30 seconds resets the failure budget. This retry budget belongs to the running daemon; a daemon restart starts a fresh budget.
 There is no scheduled recorder restart.
-Every meeting start stops live voice and verifies the recorder has exited before opening another capture; voice returns after the meeting ends.
-Voice captures are hidden from `/meeting` and its stop control.
+Every meeting start stops live voice and verifies the recorder has exited before opening another capture; voice returns after the meeting ends or fails, with the same PID-exit verification before replacement.
+Voice captures are hidden from `/meeting`, its stop control and system-audio control, including stale-launch errors.
+Disabled, idle voice checks lifecycle-file changes without polling the terminal; startup always observes retained captures so an orphan voice recorder is stopped.
 
 `POST /voice/target` accepts `{fiber_id, origin?, recorder?}` and durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
 `t` is the recorder's UTC receipt time, not the time reconciliation finishes.
@@ -418,6 +420,7 @@ Use a durable fiber UID so renaming doesn't change the destination.
 Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
 A target switch flushes pending words to the old target immediately.
 No selected target means no delivery; the recording still retains the words.
+An unreadable or malformed route journal, or a failed recovery truncation, leaves voice failed off with a visible `error`; repair the journal and restart the daemon before recording or selecting a target.
 
 `voice.json` is an operator file exposed by the config API as id `voice`, beside `host`.
 It defaults to:
@@ -429,6 +432,7 @@ It defaults to:
 ```
 
 Word limits are positive integers; quiet intervals are positive numbers of seconds.
+`POST /voice` with `enabled: false` can repair an invalid operator file by replacing it with disabled defaults. Valid files retain their thresholds and unknown keys.
 The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `klaud`), or quiet since the last spoken line.
 Voice and meeting thresholds are independent; name detection is always on.
 Comments travel with the next batch and `# ended` closes the monitor.
@@ -487,6 +491,7 @@ An unavailable hark executable returns **503**. An existing meeting in
 Meeting mode rejects an invalid mode or a mode unsupported by the recorder with **422**.
 If capture fails after hark starts, the capture's status and error body include
 the meeting row and `recording: true`; recording continues on its recorder.
+The capture transcript monitor starts only after successful scribe dispatch, including a forwarded owner's `spawned: true` response. If monitor startup fails, the successful capture response and recording are preserved; `meeting.relay_error` reports the monitor failure.
 A transport failure after forwarding a start returns `recording_unknown: true` and the recorder address.
 The hub never retries or falls back to another recorder after attempting that write: the first recorder may already be recording.
 Capture and Join hold further starts after an ambiguous answer and instruct the operator to inspect the recorder before starting another meeting.

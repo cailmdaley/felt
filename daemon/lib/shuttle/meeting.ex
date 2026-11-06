@@ -104,8 +104,16 @@ defmodule Shuttle.Meeting do
       _ when phase in @active_phases and pid_alive? ->
         {meeting_row(fresh, phase, tmux_status), false}
 
+      _ when pid_alive? ->
+        {meeting_row(fresh, "failed", tmux_status, first_error(fresh["error"], pane_tail)), false}
+
       :absent ->
-        {nil, false}
+        if voice_document?(fresh) and phase != "ended",
+          do: {meeting_row(fresh, "failed", tmux_status), false},
+          else: {nil, false}
+
+      _ when phase == "failed" ->
+        {meeting_row(fresh, "failed", tmux_status, first_error(fresh["error"], pane_tail)), false}
 
       %{state: :alive} ->
         {meeting_row(fresh, "starting", tmux_status), false}
@@ -139,26 +147,45 @@ defmodule Shuttle.Meeting do
         if voice_row?(snapshot.meeting), do: sync_voice_mute(opts)
 
         cond do
+          not enabled and is_nil(snapshot.meeting) and voice_document?(context.meeting_json) ->
+            with :ok <- end_voice(snapshot, context, opts), do: {:ok, snapshot}
+
           voice_row?(snapshot.meeting) and not enabled ->
             with :ok <- end_voice(snapshot, context, opts), do: {:ok, %{snapshot | meeting: nil}}
 
-          voice_row?(snapshot.meeting) and snapshot.meeting.state == "failed" ->
+          voice_row?(snapshot.meeting) and snapshot.meeting.state == "failed" and
+              Keyword.get(opts, :restart_voice, false) ->
             with :ok <- end_voice(snapshot, context, opts), do: start_voice(opts)
 
           voice_row?(snapshot.meeting) ->
             {:ok, snapshot}
 
+          snapshot.meeting != nil and snapshot.meeting.state == "failed" and enabled ->
+            with :ok <- end_voice(snapshot, context, opts),
+                 do: maybe_start_voice(opts, %{snapshot | meeting: nil})
+
           snapshot.meeting != nil ->
             {:ok, snapshot}
 
           enabled ->
-            start_voice(opts)
+            with :ok <- end_voice(snapshot, context, opts),
+                 do: maybe_start_voice(opts, snapshot)
 
           true ->
             {:ok, snapshot}
         end
       end
     end)
+  end
+
+  # File observation wakes an idle, disabled Voice without shelling out. Boot
+  # always performs a full observation, including retained orphan captures.
+  @doc false
+  def voice_observation_key(opts \\ []),
+    do: Shuttle.FS.read(Path.join(hark_dir(opts), "meeting.json"))
+
+  defp maybe_start_voice(opts, snapshot) do
+    if Keyword.get(opts, :voice_start, true), do: start_voice(opts), else: {:ok, snapshot}
   end
 
   defp start_voice(opts) do
@@ -242,6 +269,15 @@ defmodule Shuttle.Meeting do
       {output, _} -> {:error, {:operation, "could not mute live voice: #{output}"}}
     end
   end
+
+  defp hide_voice(snapshot) do
+    if voice_row?(snapshot.meeting), do: %{snapshot | meeting: nil}, else: snapshot
+  end
+
+  defp voice_document?(%{} = data),
+    do: data["kind"] == "voice" or String.starts_with?(launch_from(data) || "", "voice-")
+
+  defp voice_document?(_), do: false
 
   defp voice_row?(%{kind: "voice"}), do: true
   defp voice_row?(_), do: false
@@ -341,13 +377,10 @@ defmodule Shuttle.Meeting do
   @spec stop(keyword()) :: {:ok, map()} | {:error, term()}
   def stop(opts \\ []) do
     with_meeting_lock(fn ->
-      with {:ok, snapshot, context} <- inspect_current(opts),
+      with {:ok, observed, context} <- inspect_current(opts),
+           snapshot <- hide_voice(observed),
            :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
-           {:ok, result} <-
-             if(voice_row?(snapshot.meeting),
-               do: {:ok, %{snapshot | meeting: nil}},
-               else: stop_current(snapshot, context, opts)
-             ) do
+           {:ok, result} <- stop_current(snapshot, context, opts) do
         {:ok, result}
       end
     end)
@@ -356,7 +389,8 @@ defmodule Shuttle.Meeting do
   @doc "Enable or mute system transcription for the addressed live desktop meeting."
   def system_audio(enabled, opts \\ []) when is_boolean(enabled) do
     with_meeting_lock(fn ->
-      with {:ok, snapshot, _context} <- inspect_current(opts),
+      with {:ok, observed, _context} <- inspect_current(opts),
+           snapshot <- hide_voice(observed),
            :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
            %{state: "live", phone: false} = row <-
              snapshot.meeting,
@@ -576,10 +610,6 @@ defmodule Shuttle.Meeting do
              "meeting start launch=#{launch_id} mode=#{mode} fiber=#{inspect(fiber)} transcript=#{inspect(paths.transcript)}"
            ),
          {:ok, row} <- await_launch(launch_id, paths, title, fiber, mode, opts) do
-      if target == :capture and Shuttle.Env.app(:start_meeting_transcript_relay, true) do
-        Shuttle.Meeting.TranscriptRelay.start(row, nil, origin)
-      end
-
       {:ok,
        %{
          meeting: row,
@@ -990,7 +1020,7 @@ defmodule Shuttle.Meeting do
            tmux: tmux,
            raw_meeting: usable_meeting,
            meeting_json: usable_meeting,
-           pid_alive?: not retained.dead and pid_mentions_hark?(usable_meeting, opts),
+           pid_alive?: pid_mentions_hark?(usable_meeting, opts),
            retained: retained
          }}
 

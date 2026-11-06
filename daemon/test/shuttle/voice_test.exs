@@ -1,5 +1,10 @@
 defmodule Shuttle.Test.MissingVoiceRunner do
-  def cmd(_command, _args, _opts), do: {"terminal unavailable", 2}
+  def cmd(command, args, _opts) do
+    if observer = Shuttle.Env.app(:voice_command_observer),
+      do: send(observer, {:voice_command, command, args})
+
+    {"terminal unavailable", 2}
+  end
 end
 
 defmodule Shuttle.Test.NoCaptureVoiceRunner do
@@ -88,7 +93,15 @@ defmodule Shuttle.VoiceTest do
     Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
     assert {:ok, %{enabled: true, state: "failed"}} = Voice.update(%{"enabled" => true})
     assert %{enabled: true, state: "failed"} = Voice.show()
-    Agent.update(result, fn _ -> {:ok, %{available: true, meeting: nil}} end)
+
+    Agent.update(result, fn _ ->
+      {:ok,
+       %{
+         available: true,
+         meeting: %{kind: "voice", launch: "voice-recovered", state: "starting", error: nil}
+       }}
+    end)
+
     assert {:ok, %{enabled: true, state: "starting"}} = Voice.update(%{})
     Agent.update(result, fn _ -> {:error, :stop_failed} end)
     assert {:ok, %{enabled: false, state: "failed"}} = Voice.update(%{"enabled" => false})
@@ -112,6 +125,37 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{muted: true, state: "failed"}} = Voice.update(%{"muted" => true})
     assert {:ok, %{muted: false, state: "failed"}} = Voice.update(%{"muted" => false})
     assert %{muted: false, state: "failed"} = Voice.show()
+  end
+
+  test "disabled voice without lifecycle evidence probes an unavailable terminal only once", c do
+    stop_supervised!(Voice)
+    Env.put_app_env(:voice_command_observer, self())
+
+    opts =
+      Keyword.merge(c.opts,
+        reconcile: &Shuttle.Meeting.reconcile_voice/2,
+        capture_opts: [runner: Shuttle.Test.MissingVoiceRunner, hark_path: false]
+      )
+
+    pid = Env.start_scoped!({Voice, opts})
+    assert {:ok, %{state: "failed", enabled: false, error: error}} = Voice.update(%{})
+    assert error =~ "terminal unavailable"
+    assert_receive {:voice_command, "tmux", _}
+
+    for _ <- 1..3 do
+      send(pid, :tick)
+      assert {:ok, %{state: "failed", enabled: false}} = Voice.update(%{})
+    end
+
+    refute_receive {:voice_command, _, _}
+  end
+
+  test "idle off snapshots retain explicit mute changes" do
+    Env.put_app_env(:meeting_runner, Shuttle.Test.NoCaptureVoiceRunner)
+    Env.put_app_env(:hark_path, false)
+    assert {:ok, %{state: "off", muted: true}} = Voice.update(%{"muted" => true})
+    assert {:ok, %{state: "off", muted: true}} = Voice.update(%{})
+    assert {:ok, %{state: "off", muted: false}} = Voice.update(%{"muted" => false})
   end
 
   test "target receipt time is durable and restored by a fresh supervisor", c do
@@ -181,6 +225,200 @@ defmodule Shuttle.VoiceTest do
       |> Enum.map(&Jason.decode!/1)
 
     assert [%{"fiber_id" => "project/first"}, %{"fiber_id" => "project/second"}] = rows
+  end
+
+  test "invalid settings fail off, stop reconciliation and the off switch repairs invalid JSON",
+       c do
+    assert {:ok, %{enabled: true}} = Voice.update(%{"enabled" => true})
+
+    for invalid <- ["{not-json", ~s({"enabled":true,"voice":{"words":0,"quiet_seconds":1}})] do
+      File.write!(Config.path(), invalid)
+      assert {:ok, %{enabled: false, state: "failed", error: error}} = Voice.update(%{})
+      assert error =~ "invalid voice settings"
+      assert_receive {:reconciled, false}
+      assert Process.alive?(c.pid)
+      assert {:ok, %{enabled: false, state: "off"}} = Voice.update(%{"enabled" => false})
+      assert {:ok, %{"enabled" => false}} = Config.read()
+      assert {:ok, %{enabled: true}} = Voice.update(%{"enabled" => true})
+    end
+  end
+
+  test "route decode and truncation failures stay visible without crashing Voice", c do
+    for bad <- [:decode, :truncate] do
+      stop_supervised!(Voice)
+      path = Path.join(c.root, "routes-#{bad}")
+
+      if bad == :decode do
+        File.write!(path, "not-json\n")
+      else
+        File.write!(path, Jason.encode!(%{fiber_id: "project/target"}) <> "\npartial")
+        File.chmod!(path, 0o444)
+        assert {:ok, _} = File.read(path)
+      end
+
+      pid = Env.start_scoped!({Voice, Keyword.put(c.opts, :routes_path, path)})
+      assert {:ok, %{enabled: false, state: "failed", error: error}} = Voice.update(%{})
+      assert error =~ "voice route recovery failed"
+      assert Process.alive?(pid)
+      assert {:error, ^error} = Voice.target(%{"fiber_id" => "project/target"})
+
+      if bad == :decode do
+        assert File.read!(path) == "not-json\n"
+      else
+        assert error =~ "eacces"
+        assert File.read!(path) =~ "partial"
+      end
+    end
+  end
+
+  test "relay startup and monitor errors are visible without restarting the recorder", c do
+    stop_supervised!(Voice)
+
+    Agent.update(c.observed, fn _ ->
+      %{
+        available: true,
+        meeting: %{
+          kind: "voice",
+          launch: "voice-live",
+          state: "live",
+          transcript: "/tmp/voice.txt",
+          error: nil
+        }
+      }
+    end)
+
+    opts =
+      Keyword.merge(c.opts,
+        relay: fn _, _ -> {:error, :relay_write_failed} end,
+        monitor: fn _ -> flunk("a failed relay start must not be queried") end
+      )
+
+    pid = Env.start_scoped!({Voice, opts})
+    assert {:ok, %{state: "listening", error: error}} = Voice.update(%{"enabled" => true})
+    assert error =~ "relay_write_failed"
+    assert Process.alive?(pid)
+    stop_supervised!(Voice)
+
+    opts =
+      Keyword.merge(c.opts,
+        monitor: fn _ -> %{pending: nil, last: nil, error: "delivery unavailable"} end
+      )
+
+    Env.start_scoped!({Voice, opts})
+    assert {:ok, %{state: "listening", error: "delivery unavailable"}} = Voice.update(%{})
+  end
+
+  test "crashes back off exponentially, keep one failed row and latch until an enabled toggle",
+       c do
+    stop_supervised!(Voice)
+    {:ok, clock} = Agent.start_link(fn -> 0 end)
+    {:ok, recorder} = Agent.start_link(fn -> %{row: nil, launches: 0} end)
+
+    reconcile = fn enabled, opts ->
+      Agent.get_and_update(recorder, fn recorder ->
+        recorder =
+          cond do
+            not enabled ->
+              %{recorder | row: nil}
+
+            (is_nil(recorder.row) and opts[:voice_start]) or opts[:restart_voice] ->
+              launch = "voice-#{recorder.launches + 1}"
+
+              %{
+                row: %{kind: "voice", state: "live", launch: launch, error: nil},
+                launches: recorder.launches + 1
+              }
+
+            true ->
+              recorder
+          end
+
+        {{:ok, %{available: true, meeting: recorder.row}}, recorder}
+      end)
+    end
+
+    opts = Keyword.merge(c.opts, reconcile: reconcile, clock: fn -> Agent.get(clock, & &1) end)
+    Env.start_scoped!({Voice, opts})
+    assert {:ok, %{state: "listening"}} = Voice.update(%{"enabled" => true})
+
+    for failure <- 1..5 do
+      Agent.update(recorder, fn r -> %{r | row: %{r.row | state: "failed", error: "crashed"}} end)
+      assert {:ok, %{state: "failed"}} = Voice.update(%{})
+      for _ <- 1..3, do: assert({:ok, %{state: "failed"}} = Voice.update(%{}))
+      assert Agent.get(recorder, & &1.launches) == failure
+
+      if failure < 5 do
+        delay = 1_000 * Integer.pow(2, failure - 1)
+        Agent.update(clock, &(&1 + delay - 1))
+        assert {:ok, %{state: "failed"}} = Voice.update(%{})
+        assert Agent.get(recorder, & &1.launches) == failure
+        Agent.update(clock, &(&1 + 1))
+        assert {:ok, %{state: "listening"}} = Voice.update(%{})
+        assert Agent.get(recorder, & &1.launches) == failure + 1
+      end
+    end
+
+    Agent.update(clock, &(&1 + 1_000_000))
+    assert {:ok, %{state: "failed", error: error}} = Voice.update(%{})
+    assert error =~ "toggle enabled"
+    assert Agent.get(recorder, & &1.launches) == 5
+    Agent.update(recorder, fn r -> %{r | row: %{r.row | state: "live", error: nil}} end)
+    assert {:ok, %{state: "failed"}} = Voice.update(%{"enabled" => true})
+    assert {:ok, %{state: "off"}} = Voice.update(%{"enabled" => false})
+    assert {:ok, %{state: "listening"}} = Voice.update(%{"enabled" => true})
+    assert Agent.get(recorder, & &1.launches) == 6
+  end
+
+  test "startup failures use the same bounded retry budget", c do
+    stop_supervised!(Voice)
+    {:ok, clock} = Agent.start_link(fn -> 0 end)
+    {:ok, attempts} = Agent.start_link(fn -> 0 end)
+
+    reconcile = fn enabled, opts ->
+      if enabled and opts[:voice_start] do
+        Agent.update(attempts, &(&1 + 1))
+        {:error, :launch_failed}
+      else
+        {:ok, %{available: true, meeting: nil}}
+      end
+    end
+
+    opts = Keyword.merge(c.opts, reconcile: reconcile, clock: fn -> Agent.get(clock, & &1) end)
+    Env.start_scoped!({Voice, opts})
+    assert {:ok, %{state: "failed"}} = Voice.update(%{"enabled" => true})
+    assert Agent.get(attempts, & &1) == 1
+
+    for failure <- 1..4 do
+      for _ <- 1..3, do: Voice.update(%{})
+      assert Agent.get(attempts, & &1) == failure
+      Agent.update(clock, &(&1 + 1_000 * Integer.pow(2, failure - 1)))
+      assert {:ok, %{state: "failed"}} = Voice.update(%{})
+    end
+
+    Agent.update(clock, &(&1 + 1_000_000))
+    assert {:ok, %{state: "failed", error: error}} = Voice.update(%{})
+    assert error =~ "toggle enabled"
+    assert Agent.get(attempts, & &1) == 5
+  end
+
+  test "a stable recorder resets its fast-crash budget", c do
+    stop_supervised!(Voice)
+    {:ok, clock} = Agent.start_link(fn -> 0 end)
+    opts = Keyword.put(c.opts, :clock, fn -> Agent.get(clock, & &1) end)
+    Env.start_scoped!({Voice, opts})
+    row = %{kind: "voice", state: "failed", launch: "voice-first", error: "crashed"}
+    Agent.update(c.observed, &%{&1 | meeting: row})
+    assert {:ok, %{state: "failed"}} = Voice.update(%{"enabled" => true})
+
+    Agent.update(
+      c.observed,
+      &%{&1 | meeting: %{row | launch: "voice-stable", state: "live", error: nil}}
+    )
+
+    assert {:ok, %{state: "listening"}} = Voice.update(%{})
+    Agent.update(clock, &(&1 + 30_000))
+    assert {:ok, %{state: "listening"}} = Voice.update(%{})
+    assert :sys.get_state(Env.server!(Voice)).retry.failures == 0
   end
 
   test "voice API targets the local recorder even when origin is the receiving worker's host" do

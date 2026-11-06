@@ -58,7 +58,15 @@ defmodule Shuttle.Voice.Config do
   def validate(_), do: {:error, "voice settings must be a JSON object"}
 
   def enable(enabled) do
-    with {:ok, config} <- read(),
+    # Off is a safety control even when the operator file cannot be decoded.
+    config =
+      case read() do
+        {:ok, config} -> {:ok, config}
+        {:error, _} when enabled == false -> {:ok, @defaults}
+        error -> error
+      end
+
+    with {:ok, config} <- config,
          {:ok, _} <-
            Shuttle.ConfigFiles.write(:voice, Jason.encode!(Map.put(config, "enabled", enabled))) do
       :ok

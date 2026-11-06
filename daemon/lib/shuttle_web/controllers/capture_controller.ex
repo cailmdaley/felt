@@ -73,7 +73,7 @@ defmodule ShuttleWeb.CaptureController do
     case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         result = OriginRouter.forward(remote, "/api/v1/capture", params)
-        relay_capture(conn, result, meeting_row)
+        relay_capture(conn, result, meeting_row, params["origin"])
 
       :local ->
         create_local(conn, params, meeting_row)
@@ -155,18 +155,24 @@ defmodule ShuttleWeb.CaptureController do
     end
   end
 
-  defp relay_capture(conn, result, nil),
+  defp relay_capture(conn, result, nil, _origin),
     do: relay_json(conn, result, &capture_failed/2)
 
-  defp relay_capture(conn, {:forwarded, status, body}, meeting_row) do
+  defp relay_capture(conn, {:forwarded, status, body}, meeting_row, origin) do
     outcome = decode_capture_body(body)
     meeting_row = Meeting.log_delivery(meeting_row, status, outcome)
+
+    meeting_row =
+      if status in 200..299 and outcome["spawned"] == true,
+        do: start_capture_relay(meeting_row, origin),
+        else: meeting_row
+
     payload = Map.put(outcome, "meeting", meeting_row)
     payload = if status >= 400, do: Map.put(payload, "recording", true), else: payload
     conn |> put_status(status) |> json(MeetingRouter.stamp(payload))
   end
 
-  defp relay_capture(conn, {:error, {:forward_failed, name, reason}}, meeting_row) do
+  defp relay_capture(conn, {:error, {:forward_failed, name, reason}}, meeting_row, _origin) do
     outcome = capture_failed(name, reason)
     meeting_row = Meeting.log_delivery(meeting_row, :unconfirmed, outcome)
 
@@ -189,8 +195,22 @@ defmodule ShuttleWeb.CaptureController do
   defp capture_json(conn, payload, nil), do: json(conn, payload)
 
   defp capture_json(conn, payload, row) do
-    row = Meeting.log_delivery(row, 200, payload)
+    row = Meeting.log_delivery(row, 200, payload) |> start_capture_relay(nil)
     json(conn, MeetingRouter.stamp(Map.put(payload, "meeting", row)))
+  end
+
+  defp start_capture_relay(row, origin) do
+    if Shuttle.Env.app(:start_meeting_transcript_relay, true) do
+      start =
+        Shuttle.Env.app(:meeting_transcript_relay_start, &Shuttle.Meeting.TranscriptRelay.start/3)
+
+      case start.(row, nil, origin) do
+        :ok -> row
+        {:error, reason} -> Map.put(row, :relay_error, inspect(reason))
+      end
+    else
+      row
+    end
   end
 
   # A terminal capture's harness session, when the launch pre-assigned one.

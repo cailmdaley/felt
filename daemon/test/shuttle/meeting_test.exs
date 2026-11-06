@@ -1332,6 +1332,7 @@ defmodule Shuttle.MeetingTest do
 
     Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_starting_meeting_handler(hark_dir)
+    observe_capture_relay({:error, :relay_disk_full})
 
     conn =
       api_conn()
@@ -1387,6 +1388,9 @@ defmodule Shuttle.MeetingTest do
     launch = launch_from_tmux_args(args)
     assert is_binary(launch)
     assert request["meeting_launch"] == launch
+    assert_receive {:capture_relay, %{launch: ^launch}, "project-host"}
+    assert Jason.decode!(conn.resp_body)["meeting"]["relay_error"] =~ "relay_disk_full"
+    assert {:ok, %{meeting: %{state: "live"}}} = Meeting.show()
   end
 
   test "a capture meeting finds its scribe's fiber by the launch stamp, on any host", %{
@@ -1437,6 +1441,7 @@ defmodule Shuttle.MeetingTest do
   test "capture failure after hark starts returns the capture error and recording row", %{
     hark_dir: hark_dir
   } do
+    observe_capture_relay(:ok)
     set_starting_meeting_handler(hark_dir)
 
     conn =
@@ -1453,6 +1458,8 @@ defmodule Shuttle.MeetingTest do
              "recording" => true,
              "meeting" => %{"state" => "live", "handoff" => %{"status" => "reported-failure"}}
            } = Jason.decode!(conn.resp_body)
+
+    refute_receive {:capture_relay, _, _}
   end
 
   for {label, result, status, handoff} <- [
@@ -1461,6 +1468,8 @@ defmodule Shuttle.MeetingTest do
       ] do
     @tag capture_receipt: true
     test "meeting capture #{label} returns its updated receipt", %{hark_dir: dir} do
+      observe_capture_relay(:ok)
+
       Env.put_app_env(:remotes, [
         %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
       ])
@@ -1487,12 +1496,14 @@ defmodule Shuttle.MeetingTest do
                Jason.decode!(conn.resp_body)
 
       assert {:ok, %{meeting: %{handoff: %{"status" => unquote(handoff)}}}} = Meeting.show()
+      refute_receive {:capture_relay, _, _}
     end
   end
 
   @tag capture_receipt: true
   test "local meeting capture returns the successful receipt", %{hark_dir: dir, tmp_dir: project} do
     set_starting_meeting_handler(dir)
+    observe_capture_relay({:error, :relay_disk_full})
 
     poller =
       Task.async(fn ->
@@ -1521,6 +1532,10 @@ defmodule Shuttle.MeetingTest do
              Jason.decode!(conn.resp_body)
 
     Task.await(poller)
+    assert_receive {:capture_relay, %{launch: launch}, nil}
+    assert Jason.decode!(conn.resp_body)["meeting"]["launch"] == launch
+    assert Jason.decode!(conn.resp_body)["meeting"]["relay_error"] =~ "relay_disk_full"
+    assert {:ok, %{meeting: %{state: "live"}}} = Meeting.show()
   end
 
   test "meeting capture reports hark availability before attempting to start", %{
@@ -2304,14 +2319,32 @@ defmodule Shuttle.MeetingTest do
              Meeting.reconcile_voice(true)
 
     assert {:ok, %{meeting: nil}} = Meeting.show()
-    assert {:ok, %{meeting: nil}} = Meeting.stop()
+    assert {:ok, %{meeting: nil}} = Meeting.stop(launch: "stale-meeting")
+    assert {:error, {:validation, _}} = Meeting.system_audio(false, launch: "stale-meeting")
+    assert {:error, {:validation, _}} = Meeting.system_audio(true, launch: launch)
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "kill" end)
+
+    for route <- ["/api/v1/meeting/stop", "/api/v1/meeting/system-audio"] do
+      conn = api_conn() |> post(route, Jason.encode!(%{launch: "stale-meeting", enabled: false}))
+      refute conn.status == 409
+      refute conn.resp_body =~ launch
+      refute conn.resp_body =~ "voice"
+    end
 
     assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
              cmd == "tmux" and match?(["new-session" | _], args)
            end) == 1
 
     Shuttle.Test.MeetingRunner.set_custom({launch, :crashed})
-    assert {:ok, %{meeting: %{kind: "voice", launch: next}}} = Meeting.reconcile_voice(true)
+
+    for _ <- 1..3 do
+      assert {:ok, %{meeting: %{kind: "voice", launch: ^launch, state: "failed"}}} =
+               Meeting.reconcile_voice(true)
+    end
+
+    assert {:ok, %{meeting: %{kind: "voice", launch: next}}} =
+             Meeting.reconcile_voice(true, restart_voice: true)
+
     refute next == launch
     assert {:ok, %{meeting: nil}} = Meeting.reconcile_voice(false)
   end
@@ -2363,7 +2396,7 @@ defmodule Shuttle.MeetingTest do
            end)
 
     Shuttle.Test.MeetingRunner.set_custom({launch, :crashed})
-    assert {:ok, _} = Meeting.reconcile_voice(true)
+    assert {:ok, _} = Meeting.reconcile_voice(true, restart_voice: true)
     assert Meeting.voice_muted?()
     assert {:ok, _} = Meeting.start(%{"mode" => "call"}, :record, "meeting", nil)
     assert Meeting.voice_muted?()
@@ -2418,6 +2451,160 @@ defmodule Shuttle.MeetingTest do
            end) == 1
   end
 
+  test "failed meetings yield to voice only after the original recorder exits", %{hark_dir: dir} do
+    for behavior <- [:ignore_interrupt, :unkillable] do
+      set_voice_handler(dir, behavior)
+      assert {:ok, %{launch: launch}} = Meeting.start(%{"mode" => "call"}, :record, "failed", nil)
+      data = File.read!(Path.join(dir, "meeting.json")) |> Jason.decode!()
+      failed = Map.merge(data, %{"phase" => "failed", "error" => "audio failed"})
+      write_meeting(dir, failed)
+
+      assert {%{state: "failed"}, false} =
+               Meeting.derive(%{state: :alive, launch: launch, fiber: nil}, failed, false)
+
+      result = Meeting.reconcile_voice(true, voice_stop_wait_ms: 0)
+      calls = Shuttle.Test.MeetingRunner.calls()
+
+      killed =
+        Enum.find_index(calls, fn {cmd, args, _} -> cmd == "kill" and args == ["-KILL", "321"] end)
+
+      assert is_integer(killed)
+
+      if behavior == :unkillable do
+        assert {:error, {:operation, _}} = result
+
+        assert Enum.count(calls, fn {cmd, args, _} ->
+                 cmd == "tmux" and match?(["new-session" | _], args)
+               end) == 1
+      else
+        assert {:ok, %{meeting: %{kind: "voice", launch: voice}}} = result
+        refute voice == launch
+
+        assert Enum.any?(Enum.drop(calls, killed + 1), fn {cmd, args, _} ->
+                 cmd == "ps" and args == ["-p", "321", "-o", "command="]
+               end)
+      end
+    end
+  end
+
+  test "invalid voice configuration stops a live microphone and off repairs it", %{
+    hark_dir: dir,
+    tmp_dir: root
+  } do
+    set_voice_handler(dir)
+    assert {:ok, %{meeting: %{launch: voice}}} = Meeting.reconcile_voice(true)
+    config = Path.join(root, "voice.json")
+    File.write!(config, ~s({"enabled":true,"voice":{"words":0,"quiet_seconds":1}}))
+    Env.put_env("SHUTTLE_VOICE_FILE", config)
+    Env.put_env("SHUTTLE_DATA_DIR", root)
+    Env.start_scoped!({Shuttle.Voice, [name: nil, poll_ms: 60_000]})
+    assert {:ok, %{state: "failed", enabled: false, error: error}} = Shuttle.Voice.update(%{})
+    assert error =~ "invalid voice settings"
+    assert File.read!(Path.join([dir, "voice", voice <> ".txt"])) =~ "# ended"
+    assert {:ok, %{state: "off", enabled: false}} = Shuttle.Voice.update(%{"enabled" => false})
+    assert {:ok, %{"enabled" => false}} = Shuttle.Voice.Config.read()
+
+    assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end) == 1
+  end
+
+  test "a missing voice terminal preserves its failed row for explicit retry", %{hark_dir: dir} do
+    set_voice_handler(dir, :orphan_terminal)
+    assert {:ok, %{meeting: %{launch: launch}}} = Meeting.reconcile_voice(true)
+    Shuttle.Test.MeetingRunner.set_custom({launch, :crashed})
+
+    for _ <- 1..3 do
+      assert {:ok, %{meeting: %{launch: ^launch, kind: "voice", state: "failed"}}} =
+               Meeting.reconcile_voice(true)
+    end
+
+    assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end) == 1
+  end
+
+  test "ended lifecycle evidence cannot replace a recorder whose PID is unverified", %{
+    hark_dir: dir
+  } do
+    write_meeting(dir, %{"launch" => "old-meeting", "phase" => "ended", "pid" => 321})
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", _args, _opts, state -> {{"can't find session: hark-meeting", 1}, state}
+      "ps", _args, _opts, state -> {{"permission denied", 2}, state}
+      _cmd, _args, _opts, state -> {{"", 0}, state}
+    end)
+
+    assert {:error, {:operation, message}} = Meeting.reconcile_voice(true, voice_stop_wait_ms: 0)
+    assert message =~ "could not verify"
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end)
+  end
+
+  test "disabled Voice recovers a boot orphan then its idle ticks launch no commands", %{
+    hark_dir: dir,
+    tmp_dir: root
+  } do
+    set_voice_handler(dir, :orphan_terminal)
+    assert {:ok, %{meeting: %{launch: orphan}}} = Meeting.reconcile_voice(true)
+    Env.put_env("SHUTTLE_VOICE_FILE", Path.join(root, "voice.json"))
+    Env.put_env("SHUTTLE_DATA_DIR", root)
+
+    pid =
+      Env.start_scoped!(
+        {Shuttle.Voice,
+         [
+           name: nil,
+           poll_ms: 60_000,
+           relay: fn _, _ -> :ok end,
+           monitor: fn _ -> %{pending: nil, last: nil} end
+         ]}
+      )
+
+    assert {:ok, %{state: "off"}} = Shuttle.Voice.update(%{})
+    assert File.read!(Path.join([dir, "voice", orphan <> ".txt"])) =~ "# ended"
+    assert {^orphan, :ended} = Shuttle.Test.MeetingRunner.custom()
+    calls = Shuttle.Test.MeetingRunner.calls()
+
+    for _ <- 1..5 do
+      send(pid, :tick)
+      assert {:ok, %{state: "off"}} = Shuttle.Voice.update(%{})
+    end
+
+    assert Shuttle.Test.MeetingRunner.calls() == calls
+    # A new lifecycle file wakes observation even while disabled.
+    write_meeting(dir, %{"launch" => "changed", "phase" => "ended"})
+    assert {:ok, %{state: "off"}} = Shuttle.Voice.update(%{})
+    assert length(Shuttle.Test.MeetingRunner.calls()) > length(calls)
+
+    # A failed meeting tombstone is not a recording to poll while voice is off.
+    set_voice_handler(dir)
+    assert {:ok, _} = Meeting.start(%{"mode" => "call"}, :record, "failed", nil)
+    data = File.read!(Path.join(dir, "meeting.json")) |> Jason.decode!()
+    write_meeting(dir, Map.merge(data, %{"phase" => "failed", "error" => "audio failed"}))
+    assert {:ok, %{state: "off"}} = Shuttle.Voice.update(%{})
+    calls = Shuttle.Test.MeetingRunner.calls()
+
+    for _ <- 1..3 do
+      send(pid, :tick)
+      assert {:ok, %{state: "off"}} = Shuttle.Voice.update(%{})
+    end
+
+    assert Shuttle.Test.MeetingRunner.calls() == calls
+  end
+
+  defp observe_capture_relay(result) do
+    parent = self()
+    Env.put_app_env(:start_meeting_transcript_relay, true)
+
+    Env.put_app_env(:meeting_transcript_relay_start, fn row, nil, origin ->
+      send(parent, {:capture_relay, row, origin})
+      result
+    end)
+  end
+
   defp set_voice_handler(dir, behavior \\ :graceful) do
     Shuttle.Test.MeetingRunner.set_handler(fn
       "tmux", ["has-session" | _], _opts, nil ->
@@ -2425,6 +2612,9 @@ defmodule Shuttle.MeetingTest do
 
       "tmux", ["display-message" | _], _opts, nil ->
         {{"can't find session: hark-meeting", 1}, nil}
+
+      "tmux", ["has-session" | _], _opts, state when behavior == :orphan_terminal ->
+        {{"can't find session: hark-meeting", 1}, state}
 
       "tmux", ["display-message" | _], _opts, {launch, :live} = state ->
         {{"0|0|1234|#{launch}|\n", 0}, state}
@@ -2462,7 +2652,7 @@ defmodule Shuttle.MeetingTest do
         {{"", 1}, state}
 
       "kill", ["-INT", "321"], _opts, {launch, _} = state ->
-        if behavior == :graceful do
+        if behavior in [:graceful, :orphan_terminal] do
           row = File.read!(Path.join(dir, "meeting.json")) |> Jason.decode!()
           File.write!(row["transcript"], "# ended\n", [:append])
           write_meeting(dir, Map.put(row, "phase", "ended"))
