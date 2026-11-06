@@ -184,6 +184,15 @@ defmodule Shuttle.VoiceTest do
         %{"speaker" => "S1", "text" => "words"}
       ])
 
+    for offset <- [nil, -1, "42"] do
+      assert_raise ArgumentError, "invalid held source offset", fn ->
+        Held.append(state, "launch", offset, %{"fiber_id" => "a"}, [])
+      end
+
+      assert {:error, "invalid held source offset"} =
+               Held.lookup(state, "launch", offset, %{"fiber_id" => "a"})
+    end
+
     for invalid <- [
           put_in(state, ["cards", Access.at(0), "segments", Access.at(0), "speaker"], nil),
           put_in(state, ["cards", Access.at(0), "checkpoints"], []),

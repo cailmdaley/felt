@@ -1547,6 +1547,21 @@ defmodule Shuttle.DispatcherTest do
            ) == :fresh
   end
 
+  test "voice default starts only a never-launched card and refuses a lost conversation identity" do
+    assert :fresh =
+             Dispatcher.check_resume_intent(%{"shuttle" => %{}}, resume_mode: "resume_or_start")
+
+    fiber = %{"shuttle" => %{"runtime" => %{"dispatched_at" => iso_now()}}}
+
+    assert {:error, :missing_session_id} =
+             Dispatcher.check_resume_intent(fiber, resume_mode: "resume_or_start")
+
+    fiber = put_in(fiber, ["shuttle", "runtime", "session_uuid"], "prior-conversation")
+
+    assert {:previous, "prior-conversation"} =
+             Dispatcher.check_resume_intent(fiber, resume_mode: "resume_or_start")
+  end
+
   test "resolve_resume_intent defers to check_resume_intent for non-ad-hoc dispatches" do
     # The delegation boundary: anything other than {:standing_run, _, :ad_hoc}
     # takes the continuation-decision path. With no shuttle fields there's nothing
@@ -1941,7 +1956,9 @@ defmodule Shuttle.DispatcherTest do
     # session-UUID capture timed out, so no ledger line, no resume, and no
     # day-view attribution for any pi worker. This is that bug's tombstone.
     test "pi_sessions_dir encodes the cwd the way pi does" do
-      assert Shuttle.HarnessPaths.pi_sessions_dir("/no-such-root/user/loom") =~ "--no-such-root-user-loom--"
+      assert Shuttle.HarnessPaths.pi_sessions_dir("/no-such-root/user/loom") =~
+               "--no-such-root-user-loom--"
+
       refute Shuttle.HarnessPaths.pi_sessions_dir("/no-such-root/user/loom") =~ "---"
 
       assert Shuttle.HarnessPaths.pi_sessions_dir("/Users/cd280747/dev/felt") =~

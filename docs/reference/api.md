@@ -62,8 +62,8 @@ time.
 | `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
 | `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
 | `POST /voice/target` | recorder-routed | Append a timestamped speech destination `{fiber_id, origin?}` |
-| `POST /voice/draft` | recorder-routed | Edit held speech through a displayed checkpoint `{id, through, text}` |
-| `POST /voice/release` | recorder-routed | Consume a displayed checkpoint `{id, through}` before a composer send |
+| `POST /voice/draft` | recorder-routed | Edit held speech through a displayed checkpoint `{id, after, through, text}` |
+| `POST /voice/release` | recorder-routed | Consume a displayed checkpoint `{id, after, through}` before a composer send |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /attachments` | owner-routed | Store files attached in the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
@@ -454,6 +454,7 @@ The monitor persists read offsets, buffers and stable message IDs before deliver
 Cold speech doesn't deliver on word count, quiet, switching target or capture end.
 It fills an editable range in that card's composer without replacing typed text or moving the cursor.
 `POST /voice/draft` replaces only the held prefix through its checkpoint, preserving any later speech.
+Both mutations include the displayed `after` boundary and return 409 if another delivery has consumed any of that displayed prefix; later appends do not invalidate it.
 `POST /voice/release` consumes that prefix before Send, Resume or New session delivers the box's edited text.
 A consumed checkpoint returns **409**, so a button cannot repeat a name-triggered delivery.
 Saying a name consumes everything held through that utterance and uses the default delivery verb: paste to a live worker, resume a dormant conversation, or start a never-run card.

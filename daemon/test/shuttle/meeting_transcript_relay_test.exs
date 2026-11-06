@@ -1343,6 +1343,73 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert second == first
   end
 
+  test "stale composer mutations cannot reintroduce or release an already consumed prefix", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "first words")
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
+    poll(c)
+    [first] = TranscriptRelay.held(server: c.name)
+    record(c.path, "2026-11-06T10:00:02Z", "later words")
+    poll(c)
+    [stale] = TranscriptRelay.held(server: c.name)
+    assert :ok = TranscriptRelay.release(first, server: c.name)
+
+    assert {:error, :conflict} =
+             TranscriptRelay.draft(Map.put(stale, "text", "stale full draft"), server: c.name)
+
+    assert {:error, :conflict} = TranscriptRelay.release(stale, server: c.name)
+
+    assert [%{"after" => 1, "through" => 2, "text" => "me: later words"} = current] =
+             TranscriptRelay.held(server: c.name)
+
+    assert :ok =
+             TranscriptRelay.draft(Map.put(current, "text", "me: corrected suffix"),
+               server: c.name
+             )
+
+    assert :ok = TranscriptRelay.release(current, server: c.name)
+    assert TranscriptRelay.held(server: c.name) == []
+    refute_receive {:delivery, _}, 20
+  end
+
+  test "a recovered voice buffer without per-buffer source metadata holds and reloads safely",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "old warm words")
+    start_monitor(c, kind: "voice", routes: routes)
+    poll(c)
+    assert :ok = stop_supervised(TranscriptRelay)
+    file = relay_path(c, "launch")
+
+    config =
+      file
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.update!("buffers", fn [buffer] ->
+        [Map.drop(buffer, ~w(source_offset voice_rows))]
+      end)
+
+    File.write!(file, Jason.encode!(config))
+    Agent.update(c.now, fn _ -> 10_000 end)
+    opts = Keyword.put(c.opts, :cold, fn _ -> true end)
+    start_supervised!({TranscriptRelay, opts})
+    TranscriptRelay.status("launch", server: c.name)
+    poll(c)
+    assert [%{"text" => "me: old warm words"}] = TranscriptRelay.held(server: c.name)
+    record(c.path, "2026-11-06T10:00:02Z", "new words")
+    poll(c)
+    assert [%{"text" => "me: old warm words new words"}] = TranscriptRelay.held(server: c.name)
+    assert :ok = stop_supervised(TranscriptRelay)
+    start_supervised!({TranscriptRelay, opts})
+    TranscriptRelay.status("launch", server: c.name)
+    assert [%{"text" => "me: old warm words new words"}] = TranscriptRelay.held(server: c.name)
+    refute_receive {:delivery, _}, 20
+  end
+
   defp rewind_voice(c, offset) do
     file = relay_path(c, "launch")
     config = file |> File.read!() |> Jason.decode!() |> Map.put("json_offset", offset)

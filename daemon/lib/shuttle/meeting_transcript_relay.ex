@@ -181,21 +181,25 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
     end)
   end
 
-  def handle_call({:draft, %{"id" => id, "through" => through, "text" => text}}, _from, state)
+  def handle_call(
+        {:draft, %{"id" => id, "through" => through, "text" => text} = params},
+        _from,
+        state
+      )
       when is_binary(text) do
     change_held(state, fn held ->
-      case Held.edit(held, id, through, text) do
-        {:ok, held} -> {:ok, :ok, held}
-        error -> error
+      with :ok <- Held.boundary(held, id, Map.get(params, "after", 0)),
+           {:ok, held} <- Held.edit(held, id, through, text) do
+        {:ok, :ok, held}
       end
     end)
   end
 
-  def handle_call({:release, %{"id" => id, "through" => through}}, _from, state) do
+  def handle_call({:release, %{"id" => id, "through" => through} = params}, _from, state) do
     change_held(state, fn held ->
-      case Held.take(held, id, through) do
-        {:ok, held, _text} -> {:ok, :ok, held}
-        error -> error
+      with :ok <- Held.boundary(held, id, Map.get(params, "after", 0)),
+           {:ok, held, _text} <- Held.take(held, id, through) do
+        {:ok, :ok, held}
       end
     end)
   end
@@ -630,6 +634,9 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       true = is_binary(buffer["fiber_id"])
       true = is_list(buffer["lines"]) and Enum.all?(buffer["lines"], &is_binary/1)
       true = is_integer(buffer["words"])
+
+      if config["kind"] == "voice",
+        do: true = is_integer(buffer["source_offset"]) and buffer["source_offset"] >= 0
     end)
 
     Enum.each(config["outbox"], fn batch ->
@@ -665,6 +672,16 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
     config = Map.merge(defaults, config)
     config = Map.update!(config, "routes", &bound_routes(&1, config["started_at"]))
+
+    config =
+      if config["kind"] == "voice" do
+        Map.update!(config, "buffers", fn buffers ->
+          Enum.map(buffers, &Map.put_new(&1, "source_offset", config["json_offset"]))
+        end)
+      else
+        config
+      end
+
     # An in-flight meeting message keeps its original identity across recovery.
     case Map.pop(config, "pending") do
       {nil, config} ->

@@ -83,6 +83,9 @@ defmodule Shuttle.Voice.Held do
 
   def lookup(%{"error" => error}, _, _, _), do: {:error, error}
 
+  def lookup(_state, _launch, offset, _target) when not is_integer(offset) or offset < 0,
+    do: {:error, "invalid held source offset"}
+
   def lookup(state, launch, offset, target) do
     source = Jason.encode!([launch, target["fiber_id"], target["origin"]])
 
@@ -101,6 +104,9 @@ defmodule Shuttle.Voice.Held do
   end
 
   def append(%{"error" => error}, _, _, _, _), do: raise(error)
+
+  def append(_state, _launch, offset, _target, _rows) when not is_integer(offset) or offset < 0,
+    do: raise(ArgumentError, "invalid held source offset")
 
   def append(state, launch, offset, target, rows) do
     existing = Enum.find(state["cards"], &same_target?(&1, target))
@@ -145,6 +151,15 @@ defmodule Shuttle.Voice.Held do
       next = state |> put_in(["seen", source], offset) |> put_card(card)
       {next, public(card)}
     end
+  end
+
+  def boundary(state, id, after_prefix) do
+    if Enum.any?(
+         Map.get(state, "cards", []),
+         &(&1["id"] == id and Map.get(&1, "after", 0) == after_prefix)
+       ),
+       do: :ok,
+       else: {:error, :conflict}
   end
 
   def edit(state, id, through, text) when is_binary(text) do
