@@ -114,6 +114,7 @@ type app struct {
 	// terminals holds the host's observation/stop backends, resolved lazily.
 	terminals          []terminalBackend
 	rexTailnetListener func() bool
+	rexTitleHelper     func() string
 	// detectTmuxOrigin reports which launchd coalition owns the tmux server.
 	detectTmuxOrigin func() tmuxOriginReport
 	// loginEnvCapture is the login-shell capture installDaemonSupervisor uses.
@@ -176,6 +177,7 @@ func newApp(env *sysenv.Env) *app {
 		return progstatus.Write(path, b)
 	}
 	a.rexTailnetListener = func() bool { return probeRexTailnetListener("http://127.0.0.1:7297/") }
+	a.rexTitleHelper = func() string { return probeRexTitleHelper(a.env) }
 	a.detectTmuxOrigin = a.probeTmuxOrigin
 	a.loginEnvCapture = a.captureLoginEnv
 	a.execDaemonRelease = a.execRelease

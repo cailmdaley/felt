@@ -97,6 +97,7 @@ type ReceiptRex struct {
 	ResponsiblePath string            `json:"responsible_path,omitempty"`
 	TailnetListener *bool             `json:"tailnet_listener,omitempty"`
 	AppClient       bool              `json:"app_client"`
+	TitleHelper     string            `json:"title_helper,omitempty"`
 }
 
 func (a *app) doctorCmd() *cobra.Command {

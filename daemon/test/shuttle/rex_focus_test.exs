@@ -211,17 +211,27 @@ defmodule Shuttle.RexFocusTest do
     refute_receive {:selected, _}
   end
 
-  test "the bounded accessibility read classifies permission failure without exposing raw stderr" do
+  test "the bounded title read classifies a missing grant and a missing helper", %{
+    tmp_dir: tmp_dir
+  } do
     Shuttle.Test.Env.put_app_env(:rex_title_observer, self())
     Shuttle.Test.Env.put_app_env(:rex_title_result, {"└ task - project/root\n", 0})
-    assert {:ok, "└ task - project/root"} = RexFocus.read_title(Shuttle.Test.RexTitleRunner)
-    assert_receive {:title_command, "/usr/bin/osascript", ["-e", _], opts}
+    helper = Path.join(tmp_dir, "shuttle-rex-title")
+    File.write!(helper, "")
+    File.chmod!(helper, 0o755)
+
+    assert {:ok, "└ task - project/root"} =
+             RexFocus.read_title(Shuttle.Test.RexTitleRunner, helper)
+
+    assert_receive {:title_command, ^helper, [], opts}
     assert opts[:timeout_ms] == 1_500
     assert opts[:max_output_bytes] == 4_096
-    Shuttle.Test.Env.put_app_env(:rex_title_result, {"not allowed assistive access (-1719)", 1})
-    assert {:error, :accessibility} = RexFocus.read_title(Shuttle.Test.RexTitleRunner)
+    Shuttle.Test.Env.put_app_env(:rex_title_result, {"", 3})
+    assert {:error, :accessibility} = RexFocus.read_title(Shuttle.Test.RexTitleRunner, helper)
     Shuttle.Test.Env.put_app_env(:rex_title_result, {"timed out", :timeout})
-    assert {:error, :unavailable} = RexFocus.read_title(Shuttle.Test.RexTitleRunner)
+    assert {:error, :unavailable} = RexFocus.read_title(Shuttle.Test.RexTitleRunner, helper)
+    File.rm!(helper)
+    assert {:error, :no_helper} = RexFocus.read_title(Shuttle.Test.RexTitleRunner, helper)
   end
 
   test "tmux hosts neither consult voice nor start a Rex stream" do

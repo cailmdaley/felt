@@ -3,8 +3,9 @@ defmodule Shuttle.RexFocus do
   Routes the Rex view into the spoken-time voice journal.
 
   macOS accessibility window titles identify the app's selected worker across
-  sessions. Other hosts, and macOS without accessibility access, use Rex's
-  per-session active-window events.
+  sessions, read through `~/.local/bin/shuttle-rex-title`, which holds the
+  Accessibility grant so deploys can't invalidate it. Other hosts, and macOS
+  without that grant, use Rex's per-session active-window events.
   """
   use GenServer
 
@@ -195,7 +196,10 @@ defmodule Shuttle.RexFocus do
         message =
           case reason do
             :accessibility ->
-              "Rex session following needs macOS Accessibility access for Shuttle; following tab changes only."
+              "Rex session following needs macOS Accessibility for ~/.local/bin/shuttle-rex-title (System Settings > Privacy & Security > Accessibility); following tab changes only."
+
+            :no_helper ->
+              "Rex session following needs ~/.local/bin/shuttle-rex-title; run make cli-install in the felt repo. Following tab changes only."
 
             :unavailable ->
               "Rex window title unavailable; following tab changes only."
@@ -222,31 +226,19 @@ defmodule Shuttle.RexFocus do
   end
 
   @doc false
-  def read_title(runner \\ Shuttle.Runner.Default) do
-    script = """
-    tell application "System Events"
-      if not (exists process "Rex") then return ""
-      tell process "Rex"
-        if (count of windows) is 0 then return ""
-        return title of front window
-      end tell
-    end tell
-    """
-
-    case runner.cmd("/usr/bin/osascript", ["-e", script],
-           stderr_to_stdout: true,
-           timeout_ms: 1_500,
-           max_output_bytes: 4_096
-         ) do
-      {title, 0} ->
-        {:ok, String.trim_trailing(title, "\n")}
-
-      {error, _} ->
-        if String.contains?(error, ["-1719", "-25211", "not authorized", "not allowed"]),
-          do: {:error, :accessibility},
-          else: {:error, :unavailable}
+  def read_title(runner \\ Shuttle.Runner.Default, helper \\ title_helper()) do
+    if Shuttle.FS.exists?(helper) do
+      case runner.cmd(helper, [], timeout_ms: 1_500, max_output_bytes: 4_096) do
+        {title, 0} -> {:ok, String.trim_trailing(title, "\n")}
+        {_, 3} -> {:error, :accessibility}
+        _ -> {:error, :unavailable}
+      end
+    else
+      {:error, :no_helper}
     end
   end
+
+  defp title_helper, do: Path.join(Shuttle.Env.home(), ".local/bin/shuttle-rex-title")
 
   defp following? do
     Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and

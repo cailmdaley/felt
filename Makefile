@@ -153,6 +153,7 @@ ui-unlocked: $(UI_DEPS_STAMP)
 
 cli-install:
 	GOBIN=$(INSTALL_DIR) go install ./cmd/felt ./cmd/shuttle
+	sh scripts/shuttle-rex-title-install.sh
 
 # The daemon calls both CLIs: felt for fiber content and shuttle for orchestration.
 # Build the pair locally with the release; activation installs it explicitly.

@@ -1,17 +1,29 @@
 package shuttlecli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // Rex health is read-only: every request disables autostart and no request
 // selects a session, starts an app, or changes a privacy grant.
+const (
+	rexTitleHelperGranted    = "granted"
+	rexTitleHelperNotGranted = "not_granted"
+	rexTitleHelperMissing    = "missing"
+	rexTitleHelperFailed     = "failed"
+)
+
 func (a *app) collectRexReceipt() *ReceiptRex {
 	terminal, err := a.hostTerminal()
 	if err != nil || terminal != "rex" {
@@ -77,6 +89,10 @@ func (a *app) collectRexReceipt() *ReceiptRex {
 	if rec.Privacy["full_disk_access"] != "granted" {
 		rec.Warning = "grant Rex Server Full Disk Access in macOS System Settings; its workers inherit Rex Server's privacy grants"
 	}
+	rec.TitleHelper = a.rexTitleHelper()
+	if warning := rexTitleHelperWarning(rec.TitleHelper); warning != "" {
+		rec.Warning = strings.TrimPrefix(rec.Warning+"; "+warning, "; ")
+	}
 
 	var clients struct {
 		Clients *[]struct {
@@ -117,12 +133,50 @@ func (a *app) printRexReceipt(rec *ReceiptRex) {
 	if len(rec.Privacy) > 0 {
 		fmt.Fprintf(a.env.Stdout, "  Rex Server Full Disk Access: %s\n", rec.Privacy["full_disk_access"])
 	}
+	if rec.TitleHelper != "" {
+		fmt.Fprintf(a.env.Stdout, "  Rex session following: %s\n", rec.TitleHelper)
+	}
 	if rec.Warning != "" {
 		fmt.Fprintf(a.env.Stdout, "warning: %s\n", rec.Warning)
 	}
 	if rec.Repair != "" {
 		fmt.Fprintf(a.env.Stdout, "  Rex: %s\n", rec.Repair)
 	}
+}
+
+// The helper disclaims responsibility for itself, so its exit status reports its
+// own Accessibility grant from any caller.
+func probeRexTitleHelper(env *sysenv.Env) string {
+	home, err := env.UserHomeDir()
+	if err != nil {
+		return rexTitleHelperMissing
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = env.CommandContext(ctx, filepath.Join(home, ".local", "bin", "shuttle-rex-title")).Run()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return rexTitleHelperGranted
+	case errors.Is(err, os.ErrNotExist):
+		return rexTitleHelperMissing
+	case errors.As(err, &exit) && exit.ExitCode() == 3:
+		return rexTitleHelperNotGranted
+	default:
+		return rexTitleHelperFailed
+	}
+}
+
+func rexTitleHelperWarning(state string) string {
+	switch state {
+	case rexTitleHelperMissing:
+		return "Rex session following needs ~/.local/bin/shuttle-rex-title; run make cli-install in the felt repo"
+	case rexTitleHelperNotGranted:
+		return "grant ~/.local/bin/shuttle-rex-title Accessibility in macOS System Settings so voice follows the Rex session in view"
+	case rexTitleHelperFailed:
+		return "~/.local/bin/shuttle-rex-title failed; voice follows Rex tab changes only"
+	}
+	return ""
 }
 
 // A direct loopback request has no Tailscale identity. Rex's tailnet listener

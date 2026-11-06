@@ -50,6 +50,7 @@ func TestDoctorRexReceipt(t *testing.T) {
 			env.Set("SHUTTLE_REX_SERVER", "unix:///doctor-test.sock")
 			a := newApp(env)
 			a.hostGOOS = "darwin"
+			a.rexTitleHelper = func() string { return rexTitleHelperGranted }
 			rec := a.collectRexReceipt()
 			if rec == nil || rec.Status != tc.want || rec.Reachable != tc.reachable || rec.AppClient != tc.app || (rec.Warning != "") != tc.warning {
 				t.Fatalf("Rex receipt = %+v", rec)
@@ -78,6 +79,67 @@ func TestDoctorRexReceipt(t *testing.T) {
 				t.Fatalf("read-only commands: %s (%v)", calls, err)
 			}
 		})
+	}
+}
+
+func TestRexTitleHelperProbeReadsExitStatus(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, script, want string
+		warning            bool
+	}{
+		{"granted", "exit 0", rexTitleHelperGranted, false},
+		{"not granted", "exit 3", rexTitleHelperNotGranted, true},
+		{"failed", "exit 1", rexTitleHelperFailed, true},
+		{"missing", "", rexTitleHelperMissing, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			home := t.TempDir()
+			env.Set("HOME", home)
+			if tc.script != "" {
+				dir := filepath.Join(home, ".local", "bin")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				sysenvtest.LinkScript(t, filepath.Join(dir, "shuttle-rex-title"), "#!/bin/sh\n"+tc.script+"\n")
+			}
+			got := probeRexTitleHelper(env)
+			if got != tc.want || (rexTitleHelperWarning(got) != "") != tc.warning {
+				t.Fatalf("helper state = %q, warning %q", got, rexTitleHelperWarning(got))
+			}
+		})
+	}
+}
+
+func TestDoctorJoinsRexWarnings(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	if err := os.WriteFile(env.Getenv("SHUTTLE_HOST_CONFIG_FILE"), []byte(`{"terminal":"rex"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "rex")
+	sysenvtest.LinkScript(t, bin, `#!/bin/sh
+case "$*" in
+ *'whoami --json') echo '{"rex_version":"test-version"}' ;;
+ *'privacy_status -') echo '{"services":[{"service":"full_disk_access","status":"denied"}]}' ;;
+ *'client ls --json') echo '{"clients":[]}' ;;
+esac
+`)
+	env.Set("SHUTTLE_REX_BIN", bin)
+	a := newApp(env)
+	a.hostGOOS = "darwin"
+	a.rexTitleHelper = func() string { return rexTitleHelperNotGranted }
+	rec := a.collectRexReceipt()
+	if rec.TitleHelper != rexTitleHelperNotGranted || !strings.Contains(rec.Warning, "Full Disk Access") || !strings.Contains(rec.Warning, "shuttle-rex-title") {
+		t.Fatalf("Rex receipt = %+v", rec)
+	}
+	var stdout bytes.Buffer
+	env.Stdout = &stdout
+	a.printRexReceipt(rec)
+	if !strings.Contains(stdout.String(), "Rex session following: not_granted") {
+		t.Fatal(stdout.String())
 	}
 }
 
