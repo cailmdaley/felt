@@ -40,6 +40,7 @@ Speaker side, right-aligned; the line itself is never shown:
 | lines held for this card | `🔈 <n> waiting` |
 | muted | `🔈 muted` |
 | idle | nothing |
+| lines other cards hold until they are in view | `🔈 Civbench 2, felt debug 1 +1` after any state above (`🔈 aria · Civbench 2`), the two cards with most first, named from `held_names` |
 
 With nothing on either side the band is not drawn.
 

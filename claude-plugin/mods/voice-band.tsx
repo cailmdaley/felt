@@ -5,10 +5,12 @@
 //   🎤 → <card>                                                🔈 paused
 //   🎤 muted                                                   🔈 <n> waiting
 //                                                              🔈 muted
+//                                                    🔈 Civbench 2, felt debug 1 +1
 //
 // While the voice target is this session the mic side is the level ticker,
 // its last twenty readings scrolling left; Listening off draws no mic side and
-// an idle speaker no speaker side. The mic and speaker texts are buttons: a
+// an idle speaker no speaker side. Lines other cards hold until they are in
+// view follow the speaker's state, named, the two with most first. The mic and speaker texts are buttons: a
 // click, or Enter once the band has the focus (ctrl+x tab), toggles that mute.
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
@@ -25,6 +27,7 @@ type Speak = {
   available: boolean
   speaking: { fiber_id: string; name?: string | null; voice: string; text: string } | null
   held: Record<string, number>
+  held_names?: Record<string, string | null>
   paused: boolean
   muted: boolean
 }
@@ -93,13 +96,31 @@ async function setMuted($: EngineInterface, path: string, muted: boolean): Promi
 // parts, and the speaker side; empty strings where a side has nothing.
 function line(room: number, Text: any) {
   let spk = ''
+  let held = ''
   if (speak?.available) {
     const waiting = Object.entries(speak.held ?? {}).reduce((n, [id, k]) => n + (mine(id) ? k : 0), 0)
     if (speak.muted) spk = '🔈 muted'
     else if (speak.speaking) spk = '🔈 ' + speak.speaking.voice
     else if (speak.paused) spk = '🔈 paused'
     else if (waiting) spk = `🔈 ${waiting} waiting`
+    // Lines other cards hold until they are in view: the two with most, then +n.
+    const others = Object.entries(speak.held ?? {})
+      .filter(([id]) => !mine(id))
+      .sort((a, b) => b[1] - a[1])
+    if (others.length) {
+      const named = others
+        .slice(0, 2)
+        .map(([id, n]) => `${clip(speak!.held_names?.[id] || id.split('/').pop()!, 20)} ${n}`)
+        .join(', ')
+      held = named + (others.length > 2 ? ` +${others.length - 2}` : '')
+    }
   }
+  const speaking = !!speak?.speaking && !speak.muted
+  const spkParts: RenderChildren[] = [
+    spk ? <Text key="s" color={speaking ? 'claude' : undefined} dimColor={!speaking}>{spk}</Text> : '',
+    held ? <Text key="h" dimColor>{spk ? ' · ' + held : '🔈 ' + held}</Text> : '',
+  ].filter(x => x !== '')
+  spk = spk && held ? `${spk} · ${held}` : spk || (held && '🔈 ' + held)
   room -= spk ? spk.length + 3 : 0
 
   let mic = ''
@@ -114,7 +135,7 @@ function line(room: number, Text: any) {
       parts = steps.map((i, k) => <Text key={`l${k}`} color={tone(i)} dimColor={i === 0}>{GLYPHS[i]}</Text>)
     }
   }
-  return { mic, parts: parts.length ? parts : [<Text key="m" dimColor>{mic}</Text>], spk, speaking: !!speak?.speaking && !speak.muted }
+  return { mic, parts: parts.length ? parts : [<Text key="m" dimColor>{mic}</Text>], spk, spkParts }
 }
 
 export const register: Register = (on, options) => {
@@ -140,7 +161,7 @@ export const register: Register = (on, options) => {
     if (placement !== 'above' || e.props.hasSurvey) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const width = e.props.bodyColumns
-    const { mic, parts, spk, speaking } = line(width, Text)
+    const { mic, parts, spk, spkParts } = line(width, Text)
     if (!mic && !spk) return next(e)
     return (
       <Box flexDirection="row" width={width}>
@@ -153,7 +174,7 @@ export const register: Register = (on, options) => {
         </Box>
         {spk ? (
           <Button key="speaker" plain label={spk} onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
-            {speaking ? <Text color="claude">{spk}</Text> : <Text dimColor>{spk}</Text>}
+            {spkParts}
           </Button>
         ) : null}
       </Box>
@@ -167,7 +188,7 @@ export const register: Register = (on, options) => {
     if (placement !== 'below') return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const room = (e.viewport?.columns ?? 80) - e.props.hint.length - PILLS
-    const { mic, parts, spk, speaking } = line(room, Text)
+    const { mic, parts, spk, spkParts } = line(room, Text)
     if (!mic && !spk) return next(e)
     return (
       <Box flexDirection="row">
@@ -179,7 +200,7 @@ export const register: Register = (on, options) => {
         ) : null}
         {spk ? (
           <Button key="speaker" plain label={spk} onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
-            {'  '}{speaking ? <Text color="claude">{spk}</Text> : <Text dimColor>{spk}</Text>}
+            {['  ', ...spkParts]}
           </Button>
         ) : null}
       </Box>
