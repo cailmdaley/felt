@@ -35,6 +35,7 @@ defmodule Shuttle.RexFocus do
       title: Keyword.get(opts, :title, if(Shuttle.Rex.macos?(), do: &read_title/0)),
       last_title: nil,
       last_bindings: nil,
+      last_target: nil,
       title_ready: false,
       warning: nil,
       warn: Keyword.get(opts, :warn, &Shuttle.Voice.focus_error/1),
@@ -61,7 +62,7 @@ defmodule Shuttle.RexFocus do
         state
         |> stop_stream()
         |> warning(nil)
-        |> Map.merge(%{last_title: nil, last_bindings: nil, title_ready: false})
+        |> Map.merge(%{last_title: nil, last_bindings: nil, last_target: nil, title_ready: false})
       end
 
     Process.send_after(self(), :tick, state.poll_ms)
@@ -170,11 +171,16 @@ defmodule Shuttle.RexFocus do
           case state.bindings.() do
             {:ok, bindings} ->
               if title != state.last_title or bindings != state.last_bindings do
-                if target = title_target(title, bindings, state.fibers.()),
-                  do: state.target.(Map.put(target, "source", "rex"))
-              end
+                target = title_target(title, bindings, state.fibers.())
+                identity = target_identity(target)
 
-              %{state | last_title: title, last_bindings: bindings}
+                if target && (title != state.last_title or identity != state.last_target),
+                  do: state.target.(Map.put(target, "source", "rex"))
+
+                %{state | last_title: title, last_bindings: bindings, last_target: identity}
+              else
+                state
+              end
 
             {:error, _} ->
               state
@@ -193,9 +199,12 @@ defmodule Shuttle.RexFocus do
 
         state
         |> warning(message)
-        |> Map.merge(%{title_ready: false, last_title: nil, last_bindings: nil})
+        |> Map.merge(%{title_ready: false, last_title: nil, last_bindings: nil, last_target: nil})
     end
   end
+
+  defp target_identity(nil), do: nil
+  defp target_identity(target), do: {target["fiber_id"], target["origin"]}
 
   defp warning(%{warning: message} = state, message), do: state
 

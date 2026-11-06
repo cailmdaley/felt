@@ -122,7 +122,7 @@ defmodule Shuttle.RexFocusTest do
     assert_receive {:selected, %{"fiber_id" => "project/task"}}
   end
 
-  test "title observed before its binding is installed is retried when bindings change", c do
+  test "late bindings are retried but unrelated binding writes cannot override the board", c do
     observed = start_supervised!({Agent, fn -> %{"bindings" => %{}} end})
 
     {watcher, _, _} =
@@ -136,6 +136,11 @@ defmodule Shuttle.RexFocusTest do
     Agent.update(observed, fn _ -> bindings() end)
     send(watcher, :tick)
     assert_receive {:selected, %{"fiber_id" => "project/task"}}
+
+    Agent.update(observed, &Map.put(&1, "viewers", %{"new-viewer" => %{}}))
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive {:selected, _}
   end
 
   test "missing AX access warns once, falls back to events, and recovers without retaining the stream",
