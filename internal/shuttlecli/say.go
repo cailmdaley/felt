@@ -11,13 +11,13 @@ import (
 func (a *app) shuttleSayCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "say <text>",
-		Short: "Speak a line aloud on Cail's speaker, in your role's voice",
+		Short: "Speak a line aloud on the human's speaker, in your role's voice",
 		Long: `Queue one line on the spoken outbox. The daemon routes it to the host
 with a speaker, renders it with pocket-tts in the voice of the calling worker's
 role (the charter's voice: field, else dylan_thomas), and plays it after any
-lines already queued. Playback holds while Cail is talking.
+lines already queued. Playback holds while the human is talking.
 
-Speak only inside a conversation Cail is having with you by voice: one line,
+Speak only inside a conversation the human is having with you by voice: one line,
 the rest on the card. Never unprompted.
 
 A worker is identified from its session; --fiber names the speaker from a
