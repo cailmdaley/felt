@@ -796,6 +796,11 @@ defmodule Shuttle.Messaging do
         clear_worker_question(request.address, Map.get(request.raw, "from", ""))
       end
 
+      if status in 200..299 and receipt["transport"] == "claude-hook" and
+           receipt["status"] == "queued" and request.raw["context_if_busy"] == true do
+        Shuttle.ClaudeMailRecovery.queued()
+      end
+
       {:ok, status, Map.drop(receipt, ["_felt_error_code", "_felt_receipt_produced"])}
     end
   end

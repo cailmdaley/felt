@@ -86,16 +86,20 @@ func (claudeAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Req
 }
 
 func (claudeAdapter) sendWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Address, r Request) (Receipt, error, dedupMetadata) {
-	if r.Wake && r.ContextIfBusy && claudeNativeAvailable(env, a.ID, a.Host) {
-		state, unlock, err := lockMailboxSessionState(env, "claude", a.ID, a.Host)
-		if err == nil {
-			if state == "working" {
-				r.Wake = false
-				receipt, err := queueMailbox(env, a, r)
-				unlock()
-				return receipt, err, dedupMetadata{}
+	if r.Wake && r.ContextIfBusy && ClaudeFailureTarget(r) != "" && len(Labeled(r))+2 <= claudeHookBatchBytes && claudeNativeAvailable(env, a.ID, a.Host) {
+		if state, err := MailboxState(env, "claude", a.ID, a.Host); err == nil && state == "working" {
+			queued := r
+			queued.Wake = false
+			receipt, err := queueMailbox(env, a, queued)
+			if err == nil {
+				return receipt, nil, dedupMetadata{}
 			}
-			unlock()
+			// Only known-unsent failures can change transports. An enqueue may
+			// publish its entry before reporting a filesystem durability error.
+			if ErrorCode(err) != "queue_full" && ErrorCode(err) != "unavailable" {
+				receipt.Status = StatusUnknown
+				return receipt, errCode("ambiguous_delivery", "context queue may have accepted the message: %v", err), dedupMetadata{}
+			}
 		}
 	}
 	if r.Wake {

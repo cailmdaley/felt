@@ -375,14 +375,24 @@ their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
 to `claude`.
 
-A plain `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn and a native fallback endpoint is registered; idle or unknown state uses the native wake path.
-The mailbox can deliver at the next prompt, before a tool, or after a tool, so the message can reach a worker mid-turn without Claude's native wrapper.
+A plain `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn, a native fallback endpoint and sender return address are available, and the message fits the hook's context limit.
+Idle or unknown state, a full mailbox, oversized mail, or a sender with no return address uses native delivery.
+Claude offers mail only on `UserPromptSubmit` and `PostToolUse`; `PreToolUse` context can be lost when a tool is interrupted.
 The main-thread hook records an offer by writing the message as context and acknowledging its mailbox entry.
-If no hook offers it within three seconds, the owning daemon's one-second recovery tick claims it exclusively for native wake, including after a daemon restart.
+If no hook offers it within 30 seconds, or the worker stops working sooner, the owning daemon claims it exclusively for native wake.
+Recovery runs at boot, on queued receipts, once per second while mail is pending, and on a one-minute safety sweep.
+Queue age and transport ownership survive a daemon restart.
 Stop never drains or continues a turn; a final tool call, an interrupt or an API failure cannot strand automatic mail in the hook queue.
 Subagent hooks neither receive their parent's mail nor change the parent's turn state.
 Retrying the same message ID reports `context_added` after a hook offer, or the native receipt after fallback.
-Native delivery retains its ordinary refusal and unknown-outcome semantics; a preflight failure leaves the fallback queued for retry.
+Fallback waits briefly for native admission or refusal, not for a model response.
+A preflight failure returns the message to the hook queue; after three failed preflights, a receiver exit, or a refused or ambiguous write, Shuttle sends a failure notice to the sender's session return address.
+A failure notice that cannot reach its sender remains durable for later recovery.
+Claude's receiver approval policy still applies; a held native message doesn't start a turn.
+An interrupted preflight can retry; a durable before-write mark without a recorded result is reported as ambiguous and never blindly resent.
+Claude hook batches stay below 8 KiB, including message labels.
+Oversized direct context-only messages are refused with instructions to split them or use `--wake`.
+Durable fiber context can be queued before its receiver's harness is known; a single oversized entry reaches Claude as a reference to its retained full-message JSON, never a truncated preview or a native wake.
 Hook output and acknowledgment, like native delivery and receipt persistence, aren't atomic across a process crash; transport ownership prevents ordinary duplicate delivery but doesn't establish exactly-once delivery at those boundaries.
 `--wake` forces the native wake path, including during a turn.
 `--context-only` or `--wake=false` queues context without starting a turn, regardless of state.

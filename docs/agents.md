@@ -153,7 +153,7 @@ plugin.
 | `session.sh` | `SessionStart` | Wraps `felt session`'s plain-text context (active + recently-touched fibers) in the harness's `additionalContext` envelope |
 | `remind.sh` | `PreToolUse` | Gates the first non-skill tool call in a felt-enabled project until the felt skill has activated this session; a pass-through everywhere else |
 | `touch.sh` | `PostToolUse` (Edit/Write/MultiEdit) | Stamps a fiber's `updated-at` when the agent edits its markdown file directly, so hand-edits count toward recency the same as `felt edit` does |
-| `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Calls `shuttle hook event` to append one JSON line to `~/.shuttle/events.jsonl` and handle Shuttle mailbox registration/delivery; writes nothing unless `~/.shuttle` exists |
+| `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `StopFailure`, `SubagentStop`, `Notification`, `SessionEnd` | Calls `shuttle hook event` to append one JSON line to `~/.shuttle/events.jsonl` and handle Shuttle mailbox registration/delivery; writes nothing unless `~/.shuttle` exists |
 
 The logic lives in the owning binary, not the script. `remind.sh` and
 `touch.sh` call `felt hook pretool` and `felt hook posttool`; `event.sh` calls `shuttle hook event`.
@@ -169,12 +169,14 @@ Pi's JavaScript handoff implementation is outside its approval boundary.
 
 `event.sh` runs asynchronously only on `SubagentStop`, which never touches mailbox or native receiver registrations.
 `SessionEnd` stays synchronous so its receiver withdrawal finishes before a resumed `SessionStart` registers a new receiver.
-`SessionStart`, `PreToolUse`, `PostToolUse`, and `UserPromptSubmit` stay synchronous for queued peer-message delivery.
-`Stop` records the turn end but never drains mail or continues a turn.
-Automatic busy-Claude mail waits up to three seconds for a main-thread hook offer, then the daemon claims unoffered entries for native wake.
-The one-second recovery tick reads the durable queue after a restart; hook output and fallback claims share a lock so only one transport offers a message.
-Subagent tool hooks neither touch parent registrations nor write parent activity events.
-Context-only messages stay queued for a prompt or tool hook and never continue a turn.
+Claude offers queued mail only on `PostToolUse` and `UserPromptSubmit`, which stay synchronous.
+`PreToolUse` context can be discarded when a tool is interrupted, so that hook records activity but offers no mail.
+`Stop` and `StopFailure` record a turn end but never drain mail or continue a turn.
+Automatic busy-Claude mail waits up to 30 seconds for a main-thread hook offer, or falls back sooner when the worker isn't working.
+The daemon runs one recovery pass at a time: queued receipts trigger it, pending mail gets one-second follow-ups, and boot plus a one-minute sweep recover missed receipts.
+The durable fallback-directory rename and the hook's output share a short mailbox lock, so only one transport offers a message.
+Claude subagent lifecycle/tool hooks neither touch parent registrations nor write parent activity events; sent-file records and other harnesses' child events retain their own event trails.
+Context-only messages stay queued for a safe prompt or tool hook and never continue a turn.
 `Stop` and `Notification` also stay synchronous: the daemon folds state transitions in file order, so a late stop or notification can close a newer working turn.
 A late post can likewise reopen a stopped turn.
 Making those recorders asynchronous requires an ordering-aware daemon change, not just a hook flag.

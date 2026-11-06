@@ -5,47 +5,71 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-const claudeHookOfferWindow = 3 * time.Second
-const claudeFallbackKeyPrefix = "claude-fallback\x00"
+const claudeHookOfferWindow = 30 * time.Second
+const claudeHookBatchBytes = (8 << 10) - 512 // Leave room for the hook's framing.
+const claudeFallbackAttempts = 3
 
-// RecoverClaudeMail gives unoffered automatic Claude mail a native wake path.
-// Queue time and exclusive transport ownership live on disk, not in a timer or
-// a turn-state guess. The daemon runs this at boot and every second afterwards.
-func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now time.Time) error {
-	// Bound the whole pass, including waits for one of its eight observation
-	// slots, leaving four seconds to persist receipts before the daemon's
-	// 32-second shell deadline. Unstarted work stays durable for the next tick.
-	ctx, cancel := context.WithTimeout(ctx, reservationDeadlineCeiling)
-	defer cancel()
+// The fallback directory is the transport claim. WriteStarted is persisted
+// immediately before the native write: an interrupted preflight is safe to
+// retry, but a write without a result is ambiguous and must not be repeated.
+type claudeFallback struct {
+	Attempts     int      `json:"attempts,omitempty"`
+	WriteStarted bool     `json:"write_started,omitempty"`
+	Receipt      *Receipt `json:"receipt,omitempty"`
+	ErrorCode    string   `json:"error_code,omitempty"`
+	ErrorMessage string   `json:"error_message,omitempty"`
+}
+
+// ClaudeFailureTarget is a return address, not an assertion of sender identity.
+// A sender with no return address must use synchronous native delivery.
+func ClaudeFailureTarget(req Request) string {
+	for _, target := range []string{req.From, req.NotifyAddress, req.FromClaim, req.ReplyTo} {
+		if _, err := ParseAddress(target); err == nil {
+			return target
+		}
+	}
+	return ""
+}
+
+// RecoverClaudeMail runs one bounded pass. A single writable lock excludes
+// overlapping CLI/daemon passes, including on NFS. Hooks only contend on the
+// short mailbox rename, never on native delivery or notification I/O.
+// notify routes failures back through the daemon; nil leaves failures durable.
+func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now time.Time, notify func(context.Context, Request) error) error {
 	root := filepath.Join(dataDir(env), "mailboxes", "claude")
-	sessions, err := os.ReadDir(root)
-	if errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	lock, err := os.OpenFile(filepath.Join(root, ".recovery.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var failures []error
-	slots := make(chan struct{}, 8)
-	report := func(err error) {
-		if err != nil {
-			mu.Lock()
-			failures = append(failures, err)
-			mu.Unlock()
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil
 		}
+		return err
 	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	ctx, cancel := context.WithTimeout(ctx, reservationDeadlineCeiling)
+	defer cancel()
+	sessions, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	var items []mailboxPendingItem
 	for _, session := range sessions {
 		if !session.IsDir() {
 			continue
@@ -57,8 +81,7 @@ func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now ti
 				continue
 			}
 			if err != nil {
-				report(err)
-				continue
+				return err
 			}
 			for _, file := range files {
 				if file.IsDir() || !strings.HasSuffix(file.Name(), ".json") {
@@ -70,116 +93,158 @@ func RecoverClaudeMail(ctx context.Context, env *sysenv.Env, host string, now ti
 					continue
 				}
 				if err != nil {
-					report(err)
+					return err
+				}
+				a, err := ParseAddress(entry.Request.Address)
+				if err != nil || a.Harness != "claude" || a.Host != host || !entry.Request.ContextIfBusy {
 					continue
 				}
-				req := entry.Request
-				address, err := ParseAddress(req.Address)
-				if err != nil || address.Harness != "claude" || address.Host != host || !req.ContextIfBusy || now.Sub(time.Unix(0, entry.QueuedAt)) < claudeHookOfferWindow {
+				turn, _ := MailboxState(env, "claude", a.ID, host)
+				if state == "pending" && turn == "working" && now.Sub(time.Unix(0, entry.QueuedAt)) < claudeHookOfferWindow {
 					continue
 				}
-				select {
-				case slots <- struct{}{}:
-				case <-ctx.Done():
-					wg.Wait()
-					return ctx.Err()
-				}
-				wg.Add(1)
-				go func(dir, key string, req Request) {
-					defer wg.Done()
-					defer func() { <-slots }()
-					report(recoverClaudeMessage(ctx, env, dir, key, req))
-				}(dir, file.Name(), req)
+				items = append(items, mailboxPendingItem{path, entry})
 			}
 		}
 	}
-	wg.Wait()
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].entry.QueuedAt == items[j].entry.QueuedAt {
+			return items[i].path < items[j].path
+		}
+		return items[i].entry.QueuedAt < items[j].entry.QueuedAt
+	})
+	var failures []error
+	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		if err := recoverClaudeMessage(ctx, env, item, notify); err != nil {
+			failures = append(failures, err)
+		}
+	}
 	return errors.Join(failures...)
 }
 
-func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, dir, key string, req Request) error {
-	if err := ctx.Err(); err != nil {
+// ClaudeMailPending keeps fast recovery scheduled only while automatic mail
+// remains. Context-only mail never schedules a wake.
+func ClaudeMailPending(env *sysenv.Env) (bool, error) {
+	pending := false
+	root := filepath.Join(dataDir(env), "mailboxes", "claude")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == "offered" {
+			return filepath.SkipDir
+		}
+		state := filepath.Base(filepath.Dir(path))
+		if d.IsDir() || (state != "pending" && state != "fallback") || !strings.HasSuffix(path, ".json") {
+			return nil
+		}
+		entry, err := readFiberMailboxEntry(path)
+		if err == nil && entry.Request.ContextIfBusy {
+			pending = true
+			return fs.SkipAll
+		}
 		return err
-	}
+	})
+	return pending, err
+}
+
+func recoverClaudeMessage(ctx context.Context, env *sysenv.Env, item mailboxPendingItem, notify func(context.Context, Request) error) error {
+	dir, key := filepath.Dir(filepath.Dir(item.path)), filepath.Base(item.path)
 	claimed, err := claimClaudeFallback(dir, key)
 	if err != nil || !claimed {
 		return err
 	}
-	// Overlapping recovery passes skip an in-flight native observation instead
-	// of queueing behind it. New messages still start their fallback on time.
-	file, err := os.Open(filepath.Join(dir, "fallback", key))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+	path := filepath.Join(dir, "fallback", key)
+	entry, err := readFiberMailboxEntry(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil
+	if entry.Fallback == nil {
+		entry.Fallback = &claudeFallback{}
+	}
+	attempt := entry.Fallback
+	req := entry.Request
+	a, _ := ParseAddress(req.Address)
+	if attempt.Receipt == nil {
+		var receipt Receipt
+		var failure error
+		switch {
+		case attempt.WriteStarted:
+			receipt, failure = stoppedAttempt(req)
+		case mailboxReceiverEnded(env, "claude", a.ID, a.Host):
+			receipt, failure = rejected(req, "claude-native", "receiver exited before delivery"), errCode("receiver_exited", "receiver exited before delivery")
+		default:
+			attempt.Attempts++
+			if err := writeClaudeEntry(path, entry); err != nil {
+				return err
+			}
+			// publishOwnerDeadline runs immediately before conn.Write. No other
+			// reservation or delivery record is needed for this exclusive claim.
+			sendCtx := context.WithValue(ctx, reservationDeadlinePublisherKey{}, func(time.Time) error {
+				attempt.WriteStarted = true
+				return writeClaudeEntry(path, entry)
+			})
+			req.Wake, req.ContextIfBusy = true, false
+			receipt, failure, _ = sendClaudeNativeBrief(sendCtx, env, a, req)
+			if ErrorCode(failure) == "preflight_failed" && attempt.Attempts < claudeFallbackAttempts {
+				attempt.WriteStarted = false
+				if err := writeClaudeEntry(path, entry); err != nil {
+					return err
+				}
+				// No write happened. A later main-thread hook can still deliver.
+				return renameClaudeMail(path, filepath.Join(dir, "pending", key))
+			}
 		}
-		return err
-	}
-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-	address, err := ParseAddress(req.Address)
-	if err != nil {
-		return err
-	}
-	req.Wake, req.ContextIfBusy = true, false
-	receipt, sendErr := (dedupOptions{keyPrefix: claudeFallbackKeyPrefix}).run(ctx, env, req, func(ctx context.Context) dedupSendResult {
-		receipt, err, metadata := sendClaudeNativeWithMetadata(ctx, env, address, req)
-		return dedupSendResult{Receipt: receipt, Err: err, Metadata: metadata}
-	})
-	// Preflight failures prove that nothing was sent. Leave the durable claim
-	// for the next recovery pass; hooks must not take it back in the meantime.
-	if ErrorCode(sendErr) == "preflight_failed" {
-		return fmt.Errorf("Claude mail %s: %w", req.MessageID, sendErr)
-	}
-	if receipt.MessageID == "" {
-		return sendErr
-	}
-	path := dedupRecordPath(env, claudeFallbackKeyPrefix+req.MessageID)
-	stored, err := readDedupRecord(path)
-	if err != nil {
-		return err
-	}
-	if stored.State != "complete" {
-		// An abandoned native reservation is ambiguous, never permission to
-		// resend. Persist that terminal uncertainty before retiring the queue.
-		if stored.State != "reserved" || processAlive(stored.OwnerPID, stored.OwnerStart) {
-			return sendErr
+		attempt.Receipt = &receipt
+		if failure != nil {
+			attempt.ErrorCode, attempt.ErrorMessage = ErrorCode(failure), failure.Error()
 		}
-		stored = record{Hash: stored.Hash, State: "complete", Receipt: receipt, ErrorCode: ErrorCode(sendErr)}
-		if sendErr != nil {
-			stored.ErrorMessage = sendErr.Error()
-		}
-		b, err := json.Marshal(stored)
-		if err != nil {
-			return err
-		}
-		if err := mailboxWrite(path, b, false); err != nil {
+		if err := writeClaudeEntry(path, entry); err != nil {
 			return err
 		}
 	}
-	if err := ensureDir(filepath.Join(dir, "offered"), 0700); err != nil {
-		return err
+	if attempt.ErrorCode != "" {
+		if notify == nil {
+			return fmt.Errorf("Claude mail %s: %s", req.MessageID, attempt.ErrorMessage)
+		}
+		notice := Request{
+			Address: ClaudeFailureTarget(req), From: "shuttle", Wake: true,
+			MessageID: "claude-mail-failure-" + mailboxKey(req.Address + "\x00" + req.MessageID)[:32],
+			Text:      fmt.Sprintf("Shuttle could not confirm delivery of message %s to %s: %s. Delivery status: %s. No automatic resend will occur; check the receiver before resending.", req.MessageID, req.Address, attempt.ErrorMessage, attempt.Receipt.Status),
+		}
+		if err := notify(ctx, notice); err != nil {
+			return err // Keep the result, not permission to repeat the write.
+		}
 	}
-	if err := os.Rename(filepath.Join(dir, "fallback", key), filepath.Join(dir, "offered", key)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := syncDir(filepath.Join(dir, "offered")); err != nil {
-		return err
-	}
-	if err := syncDir(filepath.Join(dir, "fallback")); err != nil {
-		return err
-	}
-	return sendErr
+	return renameClaudeMail(path, filepath.Join(dir, "offered", key))
 }
 
-// The hook's own output lock makes choosing the hook or native transport
-// exclusive. Never hold this lock while calling Claude: its native turn may
-// itself run a hook. A persisted claim also fences hooks after a crash.
+func writeClaudeEntry(path string, entry mailboxEntry) error {
+	b, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	return mailboxWrite(path, b, false)
+}
+
+func renameClaudeMail(from, to string) error {
+	if err := ensureDir(filepath.Dir(to), 0700); err != nil {
+		return err
+	}
+	if err := os.Rename(from, to); err != nil {
+		return err
+	}
+	return errors.Join(syncDir(filepath.Dir(from)), syncDir(filepath.Dir(to)))
+}
+
+// The rename is the claim. The same short lock encloses hook output, so a
+// message can belong to the hook or the fallback, never both.
 func claimClaudeFallback(dir, key string) (bool, error) {
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -199,74 +264,34 @@ func claimClaudeFallback(dir, key string) (bool, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	pending := filepath.Join(dir, "pending", key)
-	entry, err := readFiberMailboxEntry(pending)
+	err = renameClaudeMail(filepath.Join(dir, "pending", key), fallback)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	entry.NativeFallback = true
-	b, err := json.Marshal(entry)
-	if err != nil {
-		return false, err
-	}
-	if err := mailboxWrite(pending, b, false); err != nil {
-		return false, err
-	}
-	if err := ensureDir(filepath.Dir(fallback), 0700); err != nil {
-		return false, err
-	}
-	if err := os.Rename(pending, fallback); err != nil {
-		return false, err
-	}
-	if err := syncDir(filepath.Dir(fallback)); err != nil {
-		return false, err
-	}
-	if err := syncDir(filepath.Dir(pending)); err != nil {
-		return false, err
-	}
-	return true, nil
+	return err == nil, err
 }
 
-func refreshClaudeHookReceipt(ctx context.Context, env *sysenv.Env, req Request, old record) record {
-	address, err := ParseAddress(req.Address)
+// A queued receipt can report a completed hook/fallback result on retry,
+// without another native write or a model-response observation window.
+func refreshClaudeHookReceipt(env *sysenv.Env, req Request, old record) record {
+	a, err := ParseAddress(req.Address)
 	if err != nil {
 		return old
 	}
-	dir := mailboxDir(env, "claude", address.ID)
-	entry, err := readFiberMailboxEntry(filepath.Join(dir, "offered", mailboxKey(req.MessageID)+".json"))
-	if err == nil && !entry.NativeFallback {
-		old.Receipt.Status = StatusContextAdded
-		old.Receipt.Detail = "the main-thread hook wrote this message as context; no claim of a model reply"
+	dir := mailboxDir(env, "claude", a.ID)
+	for _, state := range []string{"offered", "fallback"} {
+		entry, err := readFiberMailboxEntry(filepath.Join(dir, state, mailboxKey(req.MessageID)+".json"))
+		if err != nil {
+			continue
+		}
+		if entry.Fallback != nil && entry.Fallback.Receipt != nil {
+			r := entry.Fallback.Receipt
+			old.Receipt.Status, old.Receipt.Transport, old.Receipt.Detail = r.Status, r.Transport, r.Detail
+			old.ErrorCode, old.ErrorMessage = entry.Fallback.ErrorCode, entry.Fallback.ErrorMessage
+		} else if state == "offered" {
+			old.Receipt.Status, old.Receipt.Detail = StatusContextAdded, "the main-thread hook wrote this message as context; no claim of a model reply"
+		}
 		return old
-	}
-	path := dedupRecordPath(env, claudeFallbackKeyPrefix+req.MessageID)
-	fallback, err := readDedupRecord(path)
-	nativeReq := req
-	nativeReq.Wake, nativeReq.ContextIfBusy = true, false
-	if err == nil {
-		if fallback.State == "complete" {
-			// The outer dedup record has already checked the original request.
-			// The fallback hashes the rendered delivery (attachments included
-			// in Text), so its hash is intentionally different from that input.
-			fallback = refreshCompletedReceipt(ctx, env, nativeReq, path, fallback.Hash, fallback)
-			old.Receipt.Status, old.Receipt.Transport, old.Receipt.Detail = fallback.Receipt.Status, fallback.Receipt.Transport, fallback.Receipt.Detail
-			old.ErrorCode, old.ErrorMessage = fallback.ErrorCode, fallback.ErrorMessage
-			return old
-		}
-		if fallback.State == "reserved" && !processAlive(fallback.OwnerPID, fallback.OwnerStart) {
-			receipt, failure := stoppedAttempt(req)
-			old.Receipt.Status, old.Receipt.Transport, old.Receipt.Detail = receipt.Status, receipt.Transport, receipt.Detail
-			old.ErrorCode, old.ErrorMessage = ErrorCode(failure), failure.Error()
-			return old
-		}
-	}
-	if mailboxReceiverEnded(env, "claude", address.ID, address.Host) {
-		old.Receipt.Status = StatusUnknown
-		old.Receipt.Detail = "receiver exited before the queued message was offered"
-		old.ErrorCode, old.ErrorMessage = "receiver_exited", old.Receipt.Detail
 	}
 	return old
 }

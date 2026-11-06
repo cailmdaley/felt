@@ -77,8 +77,11 @@ vanishing and the live inventory finding the replacement names.
 It starts real Claude Code with a private home, configuration, mailbox and loopback-only inference stub; it uses no account, operator session, live daemon or public inference endpoint.
 Build the checkout's CLI into a temporary directory and pass its absolute path rather than installing it.
 
-The probe checks mid-tool hook delivery, native fallback after the final tool, parent-only mail during a subagent, a stopped worker waking natively, and an API-failed turn whose registration still says working.
-Each case requires exactly one main-thread reply to its unique token, and the subagent case checks that no child inference request contains the parent's mail.
+The probe checks mid-tool delivery, a realistic four-second inference gap, interruption of a tool after a queued message, native fallback after the final tool, parent-only mail during a subagent, stopped-worker wake, and API-failure recovery.
+Transport cases explicitly allow native inbound messages and require exactly one main-thread reply to each unique token.
+The subagent case checks that no child inference request contains the parent's mail.
+A separate default-policy case omits `crossSessionInbound` and checks that headless Claude holds a native message for approval and Shuttle reports the hold rather than claiming delivery.
+Daemon tests also run the production recovery CLI against a private mailbox; Go tests exercise bounded retries, crash ownership, sender notices, order and context limits.
 The replies come from the deterministic stub, not a public model; this tests the installed harness's transport behavior, not authenticated inference.
 Use `--mode` to select cases and `--output` to retain API requests, hook inputs/outputs and receipts at a chosen path.
 

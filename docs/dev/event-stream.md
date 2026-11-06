@@ -173,6 +173,7 @@ The phase is derived from those facts: a pending request is `attention`; an open
   A prompt or tool event starts the turn, so a quiet resume of a known waiting session remains the human's turn.
 - `user_prompt_submit` opens the turn and clears background work and pending requests, preserving the Codex child count.
 - `stop` closes the turn, restates the background count, and clears pending requests.
+  Claude's `StopFailure` also records `stop`, so an API-failed turn doesn't stay working.
 - Permission, elicitation, and untyped notifications set a pending request.
   `idle_prompt` closes a started turn without clearing an existing request; an unstarted session remains unstarted.
 - Tool progress clears pending requests and opens the turn, except for Codex child activity on an already-closed parent turn with live children.
@@ -186,6 +187,7 @@ The phase is derived from those facts: a pending request is `attention`; an open
   interrupted`, carrying the transcript record's time and id and no receiver
   fields.
 - Sent files and unrecognized event types do not change turn state.
+  A Claude subagent's `SendUserFile` records `file_sent`, preserving its paths without reporting the parent's tool activity.
 
 The background count carries forward until a prompt, session start, session end, or another stop changes it.
 An idle notification knows nothing about those shells on its own.

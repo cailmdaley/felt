@@ -274,6 +274,16 @@ func claudeNativeAvailable(env *sysenv.Env, id, host string) bool {
 }
 
 func sendClaudeNativeWithMetadata(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error, dedupMetadata) {
+	return sendClaudeNative(ctx, env, a, req, claudeNativeObservationTimeout)
+}
+
+// Automatic fallback waits briefly for admission or refusal, not for a model
+// response. Direct native sends keep their full response observation window.
+func sendClaudeNativeBrief(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error, dedupMetadata) {
+	return sendClaudeNative(ctx, env, a, req, time.Second)
+}
+
+func sendClaudeNative(ctx context.Context, env *sysenv.Env, a Address, req Request, observationWindow time.Duration) (Receipt, error, dedupMetadata) {
 	preflight := func(detail string) (Receipt, error, dedupMetadata) {
 		return rejected(req, claudeNativeTransport, detail), errCode("preflight_failed", "%s", detail), dedupMetadata{}
 	}
@@ -329,7 +339,7 @@ func sendClaudeNativeWithMetadata(ctx context.Context, env *sysenv.Env, a Addres
 		offset = &position
 	}
 	metadata := dedupMetadata{TranscriptOffset: offset, ClaudeQueueContentHash: nativeContentHash(body.Message.Content)}
-	observationCtx, cancelObservation := context.WithTimeout(ctx, claudeNativeObservationTimeout)
+	observationCtx, cancelObservation := context.WithTimeout(ctx, observationWindow)
 	defer cancelObservation()
 	if deadline, ok := observationCtx.Deadline(); ok {
 		if err := publishOwnerDeadline(observationCtx, deadline); err != nil {

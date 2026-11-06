@@ -47,10 +47,13 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 		t.Fatalf("a subagent consumed its parent's mail: %s %v", childOut.String(), err)
 	}
 	var got sessionEnvelope
-	if err := json.Unmarshal([]byte(hook("PreToolUse")), &got); err != nil {
+	if out := hook("PreToolUse"); out != "" {
+		t.Fatalf("PreToolUse context can be lost on interrupt: %s", out)
+	}
+	if err := json.Unmarshal([]byte(hook("PostToolUse")), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.HookSpecificOutput.HookEventName != "PreToolUse" || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("[Shuttle message 62c66a7a from work/fiber]\npeer message")) {
+	if got.HookSpecificOutput.HookEventName != "PostToolUse" || !bytes.Contains([]byte(got.HookSpecificOutput.AdditionalContext), []byte("[Shuttle message 62c66a7a from work/fiber]\npeer message")) {
 		t.Fatalf("bad context: %+v", got)
 	}
 	if out := hook("PostToolUse"); out != "" {
@@ -90,7 +93,7 @@ func TestClaudeStopDoesNotContinueOrDrainMail(t *testing.T) {
 	hook("PostToolUse") // the last tool has finished
 	send := func(id string, busy bool) {
 		t.Helper()
-		r := messaging.Request{Address: "shuttle://host/claude/s", Text: id, MessageID: id, Wake: busy, ContextIfBusy: busy}
+		r := messaging.Request{Address: "shuttle://host/claude/s", Text: id, From: "shuttle://peer/pi/sender", MessageID: id, Wake: busy, ContextIfBusy: busy}
 		if receipt, err := messaging.Send(context.Background(), env, "host", r); err != nil || receipt.Status != messaging.StatusQueued {
 			t.Fatalf("send: %+v %v", receipt, err)
 		}

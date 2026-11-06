@@ -72,7 +72,7 @@ func nativeClaudeFixture(t *testing.T, env *sysenv.Env, respond func(map[string]
 	if err := RegisterClaudeNative(env, "session", "host", dir, socket, transcript, true); err != nil {
 		t.Fatal(err)
 	}
-	return Request{Address: "shuttle://host/claude/session", Text: "hello", MessageID: "native-test", Wake: true}, &sent
+	return Request{Address: "shuttle://host/claude/session", Text: "hello", From: "shuttle://peer/pi/sender", MessageID: "native-test", Wake: true}, &sent
 }
 
 // Mutation: remove reply metadata from the native content header. The wire

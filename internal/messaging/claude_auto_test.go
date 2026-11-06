@@ -34,9 +34,6 @@ func TestClaudeContextIfBusy(t *testing.T) {
 				t.Fatalf("receipt=%+v err=%v", receipt, err)
 			}
 			if tc.wantTransport == "claude-hook" {
-				if receipt.Status != StatusQueued || sent.Load() != 0 {
-					t.Fatalf("receipt=%+v native sends=%d", receipt, sent.Load())
-				}
 				var delivered []Request
 				if err := OfferMailbox(env, "claude", "session", "host", func(batch []Request) error { delivered = append(delivered, batch...); return nil }); err != nil {
 					t.Fatal(err)
@@ -44,7 +41,7 @@ func TestClaudeContextIfBusy(t *testing.T) {
 				if len(delivered) != 1 || delivered[0].Text != req.Text {
 					t.Fatalf("offered=%+v", delivered)
 				}
-				if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute)); err != nil {
+				if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 					t.Fatal(err)
 				}
 				again, err := Send(context.Background(), env, "host", req)
@@ -58,43 +55,38 @@ func TestClaudeContextIfBusy(t *testing.T) {
 	}
 }
 
-// A final tool, API failure, interrupt, or missing Stop can all leave the
-// registration working forever. None may prevent an ordinary message waking it.
-func TestClaudeUnofferedMailFallsBackWithoutLifecycleEvidence(t *testing.T) {
-	for _, end := range []string{"last-tool", "api-failure", "interrupt", "daemon-restart"} {
-		t.Run(end, func(t *testing.T) {
+func TestClaudeUnofferedMailFallsBackAtThirtySecondsOrTurnEnd(t *testing.T) {
+	for _, idle := range []bool{false, true} {
+		t.Run(map[bool]string{false: "missing-stop", true: "idle"}[idle], func(t *testing.T) {
 			env := testEnv(t)
 			req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
 			req.ContextIfBusy = true
-			if err := SetMailboxState(env, "claude", "session", "host", "working"); err != nil {
+			_ = SetMailboxState(env, "claude", "session", "host", "working")
+			if _, err := Send(context.Background(), env, "host", req); err != nil {
 				t.Fatal(err)
 			}
-			if receipt, err := Send(context.Background(), env, "host", req); err != nil || receipt.Status != StatusQueued {
-				t.Fatalf("queued=%+v %v", receipt, err)
-			}
-			if end == "interrupt" {
-				_ = SetMailboxState(env, "claude", "session", "host", "idle")
-			}
-			// Recovery reads only disk; no original sender or in-memory timer survives.
-			recovered := env.Clone()
-			if err := RecoverClaudeMail(context.Background(), recovered, "host", time.Now()); err != nil {
+			if err := RecoverClaudeMail(context.Background(), env.Clone(), "host", time.Now().Add(29*time.Second), nil); err != nil {
 				t.Fatal(err)
 			}
 			if sent.Load() != 0 {
-				t.Fatal("fallback before the offer window expired")
+				t.Fatal("fell back before 30-second offer window")
+			}
+			at := time.Now().Add(31 * time.Second)
+			if idle {
+				_ = SetMailboxState(env, "claude", "session", "host", "idle")
+				at = time.Now()
 			}
 			for i := 0; i < 2; i++ {
-				if err := RecoverClaudeMail(context.Background(), recovered, "host", time.Now().Add(time.Minute)); err != nil {
+				if err := RecoverClaudeMail(context.Background(), env.Clone(), "host", at, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
-			offered := 0
-			if err := OfferMailbox(env, "claude", "session", "host", func(rs []Request) error { offered += len(rs); return nil }); err != nil {
+			if err := OfferMailbox(env, "claude", "session", "host", func([]Request) error { t.Error("native mail also offered by hook"); return nil }); err != nil {
 				t.Fatal(err)
 			}
 			receipt, err := Send(context.Background(), env, "host", req)
-			if err != nil || receipt.Transport != "claude-native" || receipt.Status != StatusAccepted || sent.Load() != 1 || offered != 0 {
-				t.Fatalf("receipt=%+v native=%d hook=%d err=%v", receipt, sent.Load(), offered, err)
+			if err != nil || receipt.Transport != "claude-native" || sent.Load() != 1 {
+				t.Fatalf("receipt=%+v native=%d err=%v", receipt, sent.Load(), err)
 			}
 		})
 	}
@@ -118,7 +110,7 @@ func TestClaudeFallbackAndHookCannotBothDeliver(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute)); err != nil {
+			if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -129,7 +121,7 @@ func TestClaudeFallbackAndHookCannotBothDeliver(t *testing.T) {
 	}
 	wg.Wait()
 	if sent.Load() != 0 {
-		t.Fatalf("native duplicated a hook offer: %d", sent.Load())
+		t.Fatalf("native duplicated hook offer: %d", sent.Load())
 	}
 }
 
@@ -140,18 +132,18 @@ func TestClaudePassiveContextNeverFallsBack(t *testing.T) {
 	if _, err := Send(context.Background(), env, "host", req); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute)); err != nil {
+	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
-	if sent.Load() != 0 {
-		t.Fatal("context-only woke receiver")
+	if pending, err := ClaudeMailPending(env); err != nil || pending {
+		t.Fatalf("passive mail schedules recovery: %v %v", pending, err)
 	}
-	if !pendingMailboxText(t, env, "claude", "session", req.Text) {
-		t.Fatal("passive mail lost")
+	if sent.Load() != 0 || !pendingMailboxText(t, env, "claude", "session", req.Text) {
+		t.Fatal("passive mail woke receiver or was lost")
 	}
 }
 
-func TestClaudeFallbackPreflightCanRetryButCannotReachHook(t *testing.T) {
+func TestClaudeFallbackPreflightReturnsMailToHook(t *testing.T) {
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
 	req.ContextIfBusy = true
@@ -160,26 +152,20 @@ func TestClaudeFallbackPreflightCanRetryButCannotReachHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	native := filepath.Join(mailboxDir(env, "claude", "session"), "native.json")
-	registration, err := os.ReadFile(native)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := os.Remove(native); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute)); err == nil {
-		t.Fatal("missing native registration must report failure")
-	}
-	if err := OfferMailbox(env, "claude", "session", "host", func([]Request) error { t.Error("claimed mail reached hook"); return nil }); err != nil {
+	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(native, registration, 0600); err != nil {
+	offered := 0
+	if err := OfferMailbox(env, "claude", "session", "host", func(requests []Request) error { offered += len(requests); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute)); err != nil {
+	if err := RecoverClaudeMail(context.Background(), env, "host", time.Now().Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
-	if sent.Load() != 1 {
-		t.Fatalf("native=%d", sent.Load())
+	if sent.Load() != 0 || offered != 1 {
+		t.Fatalf("writes=%d hook offers=%d", sent.Load(), offered)
 	}
 }

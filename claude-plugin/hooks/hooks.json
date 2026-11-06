@@ -79,6 +79,16 @@
         ]
       }
     ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"; [ ! -x \"$p\" ] || \"$p\""
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [

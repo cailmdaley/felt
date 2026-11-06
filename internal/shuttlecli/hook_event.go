@@ -70,6 +70,7 @@ var eventTypes = map[string]string{
 	"PreToolUse":       "pre_tool_use",
 	"PostToolUse":      "post_tool_use",
 	"Stop":             "stop",
+	"StopFailure":      "stop",
 	"SubagentStop":     "subagent_stop",
 	"SessionStart":     "session_start",
 	"SessionEnd":       "session_end",
@@ -259,6 +260,9 @@ func (a *app) renderEventLine(stdin io.Reader) (string, bool) {
 
 func (a *app) renderEvent(input eventHookInput) (string, bool) {
 	eventType, known := eventTypes[input.HookEventName]
+	if input.AgentID != "" && input.ToolName == "SendUserFile" && a.messageHookHarness(input) == "claude" {
+		eventType = "file_sent"
+	}
 	if !known {
 		return "", false
 	}

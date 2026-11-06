@@ -35,7 +35,6 @@ type mailboxRegistration struct {
 	Host     string `json:"host"`
 	CWD      string `json:"cwd"`
 	State    string `json:"state,omitempty"`
-	StateAt  int64  `json:"state_at,omitempty"`
 	LastSeen int64  `json:"last_seen"`
 	PID      int    `json:"pid,omitempty"`
 	Start    string `json:"start,omitempty"`
@@ -93,9 +92,10 @@ func HookPIDIsAncestor(pid int) bool {
 }
 
 type mailboxEntry struct {
-	Request        Request `json:"request"`
-	QueuedAt       int64   `json:"queued_at"`
-	NativeFallback bool    `json:"native_fallback,omitempty"`
+	Request  Request `json:"request"`
+	QueuedAt int64   `json:"queued_at"`
+	// Fallback records native write ownership and bounded preflight retries.
+	Fallback *claudeFallback `json:"fallback,omitempty"`
 	// AttemptAddress pins a direct fiber-context send across a lost receipt
 	// and worker handoff. A retired destination may roll forward to its
 	// successor with PossibleRepeat when its outcome cannot be established.
@@ -160,7 +160,7 @@ func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int
 		if current.PID != pid || current.Start != candidateStart {
 			return errCode("unavailable", "mailbox session is already registered to a live receiver process")
 		}
-		reg.State, reg.StateAt = current.State, current.StateAt
+		reg.State = current.State
 	}
 	if active {
 		reg.CWD, reg.LastSeen, reg.PID, reg.Start = cwd, time.Now().UnixMilli(), pid, processStartToken(pid)
@@ -243,11 +243,6 @@ func mailboxRegistrationFor(env *sysenv.Env, harness, id string) (mailboxRegistr
 // SetMailboxState records the turn phase observed by a harness hook. Unknown
 // remains unknown until a lifecycle hook establishes a safe input boundary.
 func SetMailboxState(env *sysenv.Env, harness, id, host, state string) error {
-	return SetMailboxStateAt(env, harness, id, host, state, time.Now().UnixMilli())
-}
-
-// SetMailboxStateAt ignores delayed lifecycle observations from an older turn.
-func SetMailboxStateAt(env *sysenv.Env, harness, id, host, state string, at int64) error {
 	if state != "idle" && state != "working" {
 		return errCode("invalid_request", "invalid mailbox turn state")
 	}
@@ -265,10 +260,7 @@ func SetMailboxStateAt(env *sysenv.Env, harness, id, host, state string, at int6
 	if err != nil || r.ID != id || r.Host != host || !r.live() {
 		return errCode("unavailable", "mailbox session has no live receiver registration")
 	}
-	if at < r.StateAt {
-		return nil
-	}
-	r.State, r.StateAt = state, at
+	r.State = state
 	r.LastSeen = time.Now().UnixMilli()
 	b, err := json.Marshal(r)
 	if err != nil {
@@ -330,6 +322,9 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if r.Wake {
 		return rejected(r, transport, "hook mailboxes cannot wake a session"), errCode("wake_required", "hook mailboxes cannot wake a session")
 	}
+	if a.Harness == "claude" && len(Labeled(r))+2 > claudeHookBatchBytes {
+		return rejected(r, transport, "message exceeds Claude's safe hook context limit; split it or use --wake"), errCode("invalid_request", "message exceeds Claude's safe hook context limit; split it or use --wake")
+	}
 	if requestExpired(r, time.Now()) {
 		return rejected(r, transport, "thread notice expired"), errCode("expired", "thread notice is outside the 14-day retention window")
 	}
@@ -338,7 +333,7 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	}
 	detail := "queued for the session's next prompt or tool hook; no turn started"
 	if a.Harness == "claude" && r.ContextIfBusy {
-		detail = "queued for a main-thread hook; native wake follows if not offered within 3 seconds"
+		detail = "queued for a main-thread hook; native wake follows if not offered within 30 seconds or when the turn stops"
 	}
 	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: detail}, nil
 }
@@ -386,13 +381,13 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 		return output(requests)
 	}
 	offered := false
-	err := offerMailbox(mailboxDir(env, harness, id), func(r Request) bool {
+	err := offerMailboxWithAck(mailboxDir(env, harness, id), func(r Request) bool {
 		a, err := ParseAddress(r.Address)
 		return err == nil && a.Harness == harness && a.ID == id && a.Host == host
 	}, func(batch []Request) error {
 		offered = true
 		return emit(batch)
-	})
+	}, false, nil, harness)
 	if err != nil || offered {
 		return err
 	}
@@ -401,11 +396,11 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 }
 
 func offerMailbox(dir string, accepts func(Request) bool, emit func([]Request) error) error {
-	return offerMailboxWithAck(dir, accepts, emit, false, nil)
+	return offerMailboxWithAck(dir, accepts, emit, false, nil, "")
 }
 
 func offerMailboxValidated(dir string, accepts func(Request) bool, current func(context.Context, Request) (bool, error), emit func([]Request) error) error {
-	return offerMailboxWithAck(dir, accepts, emit, false, current)
+	return offerMailboxWithAck(dir, accepts, emit, false, current, "")
 }
 
 // offerMailboxEach acknowledges each request as soon as its individual
@@ -420,10 +415,10 @@ func offerMailboxEachValidated(dir string, accepts func(Request) bool, current f
 			}
 		}
 		return nil
-	}, true, current)
+	}, true, current, "")
 }
 
-func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Request) error, each bool, current func(context.Context, Request) (bool, error)) error {
+func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Request) error, each bool, current func(context.Context, Request) (bool, error), harness string) error {
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
@@ -466,7 +461,7 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 			}
 			continue
 		}
-		if entry.NativeFallback || !accepts(entry.Request) {
+		if !accepts(entry.Request) {
 			continue
 		}
 		items = append(items, mailboxPendingItem{path, entry})
@@ -545,12 +540,26 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 			}
 			lifecycleSelected = true
 		}
-		if size+len(it.entry.Request.Text) > 64<<10 {
+		limit, cost := 64<<10, len(it.entry.Request.Text)
+		if harness == "claude" {
+			limit = claudeHookBatchBytes
+			// Durable fiber context may have been queued before its receiving
+			// harness was known. Offer a retained file reference for a single
+			// oversized entry rather than acknowledging truncated context.
+			if len(Labeled(it.entry.Request))+2 > limit {
+				it.entry.Request.Text = "Full message JSON (read request.text before acting): " + filepath.Join(dir, "offered", filepath.Base(it.path))
+			}
+			cost = len(Labeled(it.entry.Request)) + 2
+		}
+		if cost > limit {
+			continue
+		}
+		if size+cost > limit {
 			break
 		}
 		selected = append(selected, it)
 		batch = append(batch, it.entry.Request)
-		size += len(it.entry.Request.Text)
+		size += cost
 		if len(selected) == 16 {
 			break
 		}

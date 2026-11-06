@@ -281,15 +281,15 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 		}
 		offered := false
 		root := mailboxDir(env, "fiber", link.Fiber)
-		err = offerMailboxValidated(root, func(r Request) bool {
+		err = offerMailboxWithAck(root, func(r Request) bool {
 			return fiberContextHookEligible(root, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
-		}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(ctx, env, r) }, func(batch []Request) error {
+		}, func(batch []Request) error {
 			offered = true
 			for index := range batch {
 				batch[index].threadSignalVerified = batch[index].ThreadSignal != nil
 			}
 			return emit(batch)
-		})
+		}, false, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(ctx, env, r) }, harness)
 		if err != nil {
 			validationErrors = append(validationErrors, err)
 		}

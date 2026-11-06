@@ -357,9 +357,12 @@ canonical harness name. The CLI also resolves unique native session IDs and
 fiber paths, slugs, or UIDs before calling this endpoint. Omitting `wake`
 requests an active task turn; set `wake: false` explicitly for context-only
 delivery. The CLI's default also sends `context_if_busy: true`, which lets a
-busy Claude receiver with a registered native endpoint queue context for its next main-thread prompt or tool hook.
+busy Claude receiver with a native endpoint and sender return address queue context for `UserPromptSubmit` or `PostToolUse`.
+A full queue, oversized message, or missing return address uses native delivery instead.
 `context_if_busy` must be a boolean and requires `wake: true`.
-If no hook offers it within three seconds, the owning daemon claims it for native wake on a one-second recovery tick; this survives daemon restart.
+Unassigned mail falls back after 30 seconds or as soon as the receiver isn't working.
+Queued receipts trigger serialized recovery; pending mail gets one-second checks, with a boot pass and a one-minute safety sweep.
+Queue age and the hook/native claim survive daemon restart.
 A forced wake without that field never silently becomes context-only delivery. The address selects the
 owner strictly; an unknown host is refused rather than attempted locally. Its
 receipt reports the furthest observed submission stage (`accepted`,
@@ -373,6 +376,11 @@ context-only and starts no turn. With `wake: true`, Claude-native
 Claude-hook `queued` receipt, and `context_added` once the main-thread hook writes it as context.
 A retry with the same message ID returns that confirmation or the native fallback receipt.
 Native admission alone never means a model reply.
+Fallback waits briefly for admission or refusal rather than observing a model response.
+Preflight failures return mail to the hook queue and retry at most three times.
+A terminal failure, exited receiver or ambiguous interrupted write produces a durable failure notice to the sender's session return address.
+Claude's native approval policy applies to fallback; Shuttle cannot start a turn that Claude holds for approval.
+The routing hint isn't part of the message's retry identity, so adding or stripping it across a mixed-version fleet doesn't cause an ID conflict.
 
 The daemon records a session sender only with a valid, one-use local sender proof bound to the delivery fields.
 Public requests without that evidence are labelled `unverified`; `from` is retained as a neutral sender claim.

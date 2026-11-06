@@ -42,7 +42,6 @@ func requestHash(r Request) string {
 	b, _ := json.Marshal(struct {
 		Address, Text, From string
 		Wake                bool
-		ContextIfBusy       bool         `json:"context_if_busy,omitempty"`
 		Attachments         []Attachment `json:"attachments,omitempty"`
 		ReplyTo             string       `json:"reply_to,omitempty"`
 		FromClaim           string       `json:"from_claim,omitempty"`
@@ -50,7 +49,7 @@ func requestHash(r Request) string {
 		NotifyWhenIdle      bool         `json:"notify_when_idle,omitempty"`
 		NotifyWake          bool         `json:"notify_wake,omitempty"`
 		IdleOnly            bool         `json:"idle_only,omitempty"`
-	}{r.Address, r.Text, sender, r.Wake, r.ContextIfBusy, r.Attachments, r.ReplyTo, claim, r.NotifyAddress, r.NotifyWhenIdle, r.NotifyWake, r.IdleOnly})
+	}{r.Address, r.Text, sender, r.Wake, r.Attachments, r.ReplyTo, claim, r.NotifyAddress, r.NotifyWhenIdle, r.NotifyWake, r.IdleOnly})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
@@ -127,7 +126,6 @@ type nativeReceiptRefresh struct {
 // how the reservation is published. The zero value is the production policy;
 // tests shorten the wait, observe it, or substitute the reservation writer.
 type dedupOptions struct {
-	keyPrefix    string
 	timeout      time.Duration
 	pollInterval time.Duration
 	onWait       func()
@@ -155,7 +153,7 @@ func (o dedupOptions) run(ctx context.Context, env *sysenv.Env, req Request, sen
 	if err := ensureDir(dir, 0700); err != nil {
 		return Receipt{}, errCode("dedup_unavailable", "cannot create message store: %v", err)
 	}
-	path := dedupRecordPath(env, o.keyPrefix+req.MessageID)
+	path := dedupRecordPath(env, req.MessageID)
 	hash := requestHash(req)
 
 	ownerDeadline := time.Now().Add(reservationDeadlineCeiling)
@@ -363,7 +361,7 @@ func dedupRecordPath(env *sysenv.Env, key string) string {
 
 func refreshCompletedReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
 	if old.Receipt.Transport == "claude-hook" && old.Receipt.Status == StatusQueued && req.ContextIfBusy {
-		return refreshClaudeHookReceipt(ctx, env, req, old)
+		return refreshClaudeHookReceipt(env, req, old)
 	}
 	if old.State != "complete" || old.Hash != hash || old.TranscriptOffset == nil || *old.TranscriptOffset < 0 || (old.Receipt.Status != StatusQueued && old.Receipt.Status != StatusSubmitted && old.Receipt.Status != StatusUnknown) {
 		return old

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -158,9 +159,12 @@ then routes text (and --attach files) through the local daemon to the owning hos
 The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
-By default a busy Claude session receives context at its next main-thread prompt
-or tool hook. Mail unoffered after three seconds falls back to native wake through
-the owning daemon, even after restart. Other sessions use their native wake path.
+By default a busy Claude session receives context on main-thread prompt submission
+or tool completion. Mail unoffered after 30 seconds, or when the worker stops working,
+falls back to native wake through the owning daemon, even after restart.
+A full mailbox, oversized mail, or no sender return address uses native delivery.
+Fallback failures send a notice to the sender; Claude's approval policy still applies.
+Other sessions use their native wake path.
 --wake forces a native wake immediately;
 --context-only (or --wake=false) never starts a turn.
 
@@ -639,6 +643,10 @@ func (a *app) harnessSessionFromEnv() (harness, id string) {
 }
 
 func (a *app) postMessage(request messaging.Request) (messaging.Receipt, error) {
+	return a.postMessageContext(context.Background(), request)
+}
+
+func (a *app) postMessageContext(ctx context.Context, request messaging.Request) (messaging.Receipt, error) {
 	var receipt messaging.Receipt
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -657,7 +665,12 @@ func (a *app) postMessage(request messaging.Request) (messaging.Receipt, error) 
 		timeout = 120 * time.Second
 	}
 	client := a.daemonHTTPClient(timeout)
-	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payload))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return receipt, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(httpRequest)
 	if err != nil {
 		return receipt, fmt.Errorf("reaching daemon at %s: %w", endpoint, err)
 	}

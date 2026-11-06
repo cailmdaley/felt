@@ -47,9 +47,6 @@ the stream is disabled.`,
 			if err != nil {
 				origin = ""
 			}
-			if harness == "claude" && origin != "" {
-				_ = messaging.SetMailboxStateAt(a.env, harness, session, origin, "idle", at)
-			}
 			line, err := encodeJSONLine(eventLine{
 				ID:         session + "-interrupted-" + id,
 				Timestamp:  at,
