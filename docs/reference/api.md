@@ -474,7 +474,7 @@ For existing nested settings, each top-level value takes precedence, followed by
 Saving Listening settings replaces the nested `voice` and `meeting` objects with the shared top-level values, preserving other top-level fields.
 `cold_minutes` is the positive number of minutes after which a worker is cold.
 `POST /voice` with `enabled: false` can repair an invalid operator file by replacing it with disabled defaults. Valid files retain their thresholds and unknown keys.
-The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `klaud`, `clot`, `clod`, `claud`), or quiet since the last spoken line.
+The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `claw`, `klaud`, `clot`, `clock`, `clod`, `claud`), or quiet since the last spoken line.
 Name detection is always on.
 Comments travel with the next batch and `# ended` closes the monitor.
 An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.

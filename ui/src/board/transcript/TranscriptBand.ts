@@ -1279,7 +1279,7 @@ export class TranscriptBand {
    * only when it takes the message in, so until a prompt with its words
    * appears the bubble stands after the last turn, marked as queued.
    */
-  pend(text: string): void {
+  pend(text: string, delivered = false): void {
     const words = text.trim()
     if (!words || !this.inline || !this.target) return
     const message = createMessage('you')
@@ -1293,6 +1293,8 @@ export class TranscriptBand {
     message.kicker.prepend(state)
     this.sent.push({ text: words, at, node: message.node, target: { ...(this.latest ?? this.target) } })
     this.paintSent()
+    // A delivery is learned of after the fact, so its prompt may already be recorded.
+    if (delivered) this.confirmSent()
     this.scroller.scrollTop = this.scroller.scrollHeight
   }
 

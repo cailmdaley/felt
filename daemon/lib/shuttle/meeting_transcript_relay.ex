@@ -483,7 +483,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   use GenServer
   alias Shuttle.FileTail
 
-  @names ~r/\b(?:claude|cloud|clawed|klaud|clot|clod|claud)\b/iu
+  @names ~r/\b(?:claude|cloud|clawed|claw|klaud|clot|clock|clod|claud)\b/iu
   @stamp ~r/^\d{2}:\d{2}:\d{2}(?:-\d{2}:\d{2}:\d{2})?\s+/
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
@@ -1242,6 +1242,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
               "fiber_id" => batch["fiber_id"],
               "at" => DateTime.to_iso8601(DateTime.utc_now()),
               "status" => Atom.to_string(outcome),
+              "origin" => batch["origin"],
               "text" => batch["text"]
             }
 

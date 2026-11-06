@@ -33,7 +33,7 @@ defmodule Shuttle.Voice do
       configured_enabled: nil,
       idle_key: nil,
       idle: false,
-      preview_target: nil,
+      preview_pin: nil,
       capture_error: nil,
       focus_error: nil,
       route_error: route_error,
@@ -202,7 +202,7 @@ defmodule Shuttle.Voice do
               :idle,
               :idle_key,
               :capture_error,
-              :preview_target
+              :preview_pin
             ])
           )
 
@@ -394,8 +394,7 @@ defmodule Shuttle.Voice do
                not Meeting.voice_muted?(state.capture_opts),
              do: read_preview(row[:transcript])
 
-        # A line stays with the worker in view when its first words appeared.
-        preview_target = if words, do: state.preview_target || state.target
+        preview_pin = pin_preview(state.preview_pin, words, row, state.target)
 
         snapshot = %{
           available: observed.available,
@@ -405,8 +404,8 @@ defmodule Shuttle.Voice do
           target: state.target,
           pending: status.pending,
           preview:
-            if(words && preview_target,
-              do: Map.merge(Map.take(preview_target, ~w(fiber_id origin)), words)
+            if(words && preview_pin && preview_pin.target,
+              do: Map.merge(Map.take(preview_pin.target, ~w(fiber_id origin)), words)
             ),
           last: status.last || read_last() || state.snapshot.last,
           error: error
@@ -416,7 +415,7 @@ defmodule Shuttle.Voice do
           state
           | snapshot: snapshot,
             retry: retry,
-            preview_target: preview_target,
+            preview_pin: preview_pin,
             idle: is_nil(row) or (not enabled and not voice),
             idle_key: key,
             capture_error: nil
@@ -444,6 +443,25 @@ defmodule Shuttle.Voice do
                   )
             }
         }
+    end
+  end
+
+  # A preview belongs to the line in progress: the worker in view when its first
+  # words appeared, until the transcript gains a finished line.
+  defp pin_preview(_pin, nil, _row, _target), do: nil
+
+  defp pin_preview(pin, _words, row, target) do
+    finished = finished_size(row[:transcript])
+
+    if pin && pin.finished == finished,
+      do: pin,
+      else: %{target: target, finished: finished}
+  end
+
+  defp finished_size(path) do
+    case Shuttle.FS.stat(path) do
+      {:ok, %{size: size}} -> size
+      _ -> nil
     end
   end
 

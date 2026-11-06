@@ -1579,12 +1579,18 @@ export class Dock {
     }
     arm(false)
     this.meetingArmed = () => armed
-    let lastDelivery = this.voice?.controller.status?.last?.at
+    // Status is null until a poll lands, and `last` reloads from disk: the first
+    // status only sets the mark, and only a later delivery shows.
+    let seenDelivery: string | null = null
     const paint = (): void => {
-      const delivery = this.voice?.controller.status?.last
-      if (delivery?.at !== lastDelivery) {
-        lastDelivery = delivery?.at
-        if (delivery?.text && delivery.status === 'delivered' && matches(delivery.fiber_id)) this.transcriptBand?.pend(delivery.text)
+      const status = this.voice?.controller.status
+      if (status) {
+        const delivery = status.last
+        if (seenDelivery === null) seenDelivery = delivery?.at ?? ''
+        else if (delivery && delivery.at > seenDelivery) {
+          seenDelivery = delivery.at
+          if (delivery.text && delivery.status === 'delivered' && matches(delivery.fiber_id) && (!delivery.origin || delivery.origin === card.originId)) this.transcriptBand?.pend(delivery.text, true)
+        }
       }
       const control = this.meeting
       if (!control) return
@@ -1657,7 +1663,11 @@ export class Dock {
       const stopHeld = !recording || !this.meeting?.stop || meetingActions(current, this.meeting?.stopRequested?.(current) ?? false).stopDisabled
       if (recording) {
         if (state?.available && !isMobileViewport()) item('Stop and follow me', () => {
-          void voice?.set({ enabled: true }).then(() => this.meeting?.stop?.(current)).then(() => { localError = null; paint() }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
+          void Promise.resolve(this.meeting?.stop?.(current)).then(async stopped => {
+            if (stopped === false) throw new Error('The recording did not stop')
+            await voice?.set(state.muted ? { enabled: true, muted: false } : { enabled: true })
+            localError = null
+          }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error) }).finally(paint)
         }, stopHeld)
       } else {
         const follow = ctlButton('Follow me', 'ws-select-option')
@@ -1753,7 +1763,10 @@ export class Dock {
         }
       }).catch((error: unknown) => { localError = error instanceof Error ? error.message : String(error); paint() })
       const failure = localError || (current?.handoff?.status === 'reported-failure' ? 'Delivery failed' : null) || (current?.state === 'failed' ? current.error : null) || (state?.state === 'failed' ? state.error : null) || (state?.last?.status === 'failed' ? `Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}` : null)
-      if (recording && state?.enabled) note('Follow me returns when this recording stops.')
+      if (recording && state?.enabled) {
+        item('Turn off Follow me', () => set({ enabled: false }))
+        note('Follow me returns when this recording stops.')
+      }
       if (failure) note(failure)
       menu.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); dropdown.focus() }
