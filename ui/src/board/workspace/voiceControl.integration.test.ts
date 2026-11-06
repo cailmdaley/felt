@@ -23,6 +23,21 @@ it('shows pending words only on their card and replaces them when sent', () => {
   expect(here.chip.textContent).toBe('Voice · Meeting')
   here.dispose(); away.dispose()
 })
+it('shows a refused mute in the chip menu rather than silently losing it', async () => {
+  const voice = new Voice('')
+  voice.status = status
+  vi.spyOn(voice, 'set').mockRejectedValue(new Error('Recorder unavailable'))
+  const control = voiceControl(voice, card({ id: 'a' }), vi.fn())
+  const composer = document.createElement('div'); composer.className = 'kbn-ctl-composer'
+  composer.append(control.chip); document.body.append(composer)
+  ;(control.chip as HTMLButtonElement).click()
+  ;[...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(item => item.textContent === 'Mute')!.click()
+  await Promise.resolve(); await Promise.resolve()
+  expect(control.chip.textContent).toBe('Voice · Failed')
+  ;(control.chip as HTMLButtonElement).click()
+  expect(document.body.textContent).toContain('Recorder unavailable')
+  control.dispose()
+})
 it('keeps the mobile menu read-only while still allowing the destination to open', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: true }))
   const voice = new Voice('')

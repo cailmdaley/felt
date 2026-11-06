@@ -15,6 +15,7 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
   pending.className = 'voice-pending'
   pending.setAttribute('aria-live', 'polite')
   let menu: HTMLElement | null = null
+  let localError: string | null = null
   let release: (() => void) | null = null
   const close = (): void => {
     release?.(); release = null
@@ -29,7 +30,7 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
     chip.hidden = !state?.available
     if (!state?.available) { close(); pending.textContent = ''; return }
     const here = matches(state.target?.fiber_id) && (!state.target?.origin || state.target.origin === card.originId)
-    const label = !state.enabled ? 'Off' : state.muted ? 'Muted' : state.state === 'yielded' ? 'Meeting' : state.state === 'failed' ? 'Failed' : state.state === 'starting' ? 'Starting' : here ? 'Here' : state.target?.name ?? 'No target'
+    const label = localError ? 'Failed' : !state.enabled ? 'Off' : state.muted ? 'Muted' : state.state === 'yielded' ? 'Meeting' : state.state === 'failed' ? 'Failed' : state.state === 'starting' ? 'Starting' : here ? 'Here' : state.target?.name ?? 'No target'
     chip.textContent = `Voice · ${label}`
     chip.title = 'Voice controls'
     pending.textContent = matches(state.pending?.fiber_id) ? state.pending!.text : ''
@@ -52,13 +53,17 @@ export function voiceControl(voice: Voice, card: KanbanCard, open: (id: string, 
     }
     if (state.target && (!matches(state.target.fiber_id) || (!!state.target.origin && state.target.origin !== card.originId))) item(`Open ${state.target.name}`, () => open(state.target!.fiber_id, state.target!.origin))
     if (!isMobileViewport()) {
-      item(state.muted ? 'Unmute' : 'Mute', () => { void voice.set({ muted: !state.muted }).catch(showError) })
-      item(state.enabled ? 'Turn voice off' : 'Turn voice on', () => { void voice.set({ enabled: !state.enabled }).catch(showError) })
+      const set = (values: { muted?: boolean; enabled?: boolean }): void => {
+        void voice.set(values).then(() => { localError = null; paint() }).catch(showError)
+      }
+      item(state.muted ? 'Unmute' : 'Mute', () => set({ muted: !state.muted }))
+      item(state.enabled ? 'Turn voice off' : 'Turn voice on', () => set({ enabled: !state.enabled }))
     }
+    if (localError) note(localError)
     if (state.state === 'failed' && state.error) note(state.error)
     if (state.last?.status === 'failed') note(`Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}`)
     function note(text: string): void { const el = document.createElement('div'); el.className = 'voice-error'; el.textContent = text; menu!.append(el) }
-    function showError(error: unknown): void { chip.title = String(error) }
+    function showError(error: unknown): void { localError = error instanceof Error ? error.message : String(error); paint() }
     ;(chip.closest('.kbn-ctl-composer') ?? chip.parentElement)?.append(menu)
     release = anchorPopover(menu, chip, { placement: 'above-start', matchWidth: true })
     chip.setAttribute('aria-expanded', 'true')
