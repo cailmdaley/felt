@@ -251,7 +251,7 @@ CI runs `npm test`, then type-checks and builds the bundle with
 ### Deploying
 
 Restarting the daemon preserves terminal workers: the terminal backend owns their processes, while Shuttle owns their watchers.
-An autonomous worker that has built and verified a change SHOULD deploy it.
+Workers do not deploy for themselves: a verified change goes to the materializer seat (see [Landing changes](#landing-changes)), the one driver of `bin/shuttle-deploy`.
 
 ```
 resolve one commit → push → preflight origin availability and default-branch freshness
@@ -311,18 +311,28 @@ Run the targeted local tests before pushing; use the full suite for broad change
 CI is feedback, not a landing or deployment gate: do not wait for CI after pushing.
 The repo's SessionStart hook prints the cached latest completed main CI result when red and refreshes it in the background for the next session.
 
-Work lands directly on `main`: commit as each piece lands, rebase on
-`origin/main`, run the suites the change touches, and push. No PRs and no
-long-lived branches — iteration happens on `main`, one small improvement after
-another, rather than across review boundaries. A worktree is fine for
-isolation while working; rebase and push its commits to `main`. Hold a push
-only for a failing or unrun required local test; an open design question gets a decision fiber
-and a best call, not a pending branch. Screenshots that would have gone in a
-PR body go to the human with `shuttle send-file` and into the fiber.
+Work reaches `main` and the fleet through one seat, the felt materializer
+(role `felt-materializer` in the store; `shuttle roles` finds it). Lanes share
+one deploy lock per host and one quarantine, so landing is one worker's job.
+A lane commits on a branch or worktree, runs the suites its change touches,
+pushes the branch, and sends the seat a land request in the format its charter
+gives; it does not rebase onto `main`, push `main` or run `bin/shuttle-deploy`.
 
-Landing includes deploying (`bin/shuttle-deploy --hosts ...`, then
-`shuttle daemon release`) to the hosts the change affects: a UI-only change
-goes to the hubs whose board is opened; daemon or CLI changes go fleet-wide.
+The seat keeps `main` linear: it rebases each lane on `origin/main`, runs the
+suites the diff touches, pushes, and batches ready lanes into one deploy, keeping
+a contract or route change with its matching UI. It deploys
+(`bin/shuttle-deploy --hosts ...`, then `shuttle daemon release`) to the hosts
+the change affects: a UI-only change goes to the hubs whose board is opened;
+daemon or CLI changes go fleet-wide. It verifies those hosts and reports the
+landed SHA and hosts to the requester. A conflict that needs a judgment about
+the work goes back to its lane; a host that needs the human's MFA is reported
+and skipped.
+
+No PRs and no long-lived branches: iteration happens on `main`, one small
+improvement after another, rather than across review boundaries. Hold a landing
+only for a failing or unrun required local test; an open design question gets a
+decision fiber and a best call, not a pending branch. Screenshots that would have
+gone in a PR body go to the human with `shuttle send-file` and into the fiber.
 
 ## Contributing
 

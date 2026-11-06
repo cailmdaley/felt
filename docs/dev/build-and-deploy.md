@@ -4,6 +4,9 @@ The developer-side build and fleet-deploy loop. For *installing* a daemon
 (fetched release, keep-alive, supervisor flags, TCC), see
 [Installing the shuttle daemon](../shuttle/installation.md).
 
+In the maintainer fleet, one seat runs the deploy; lanes send it a land request
+(*Landing changes* in `AGENTS.md`).
+
 ## Build targets
 
 ```

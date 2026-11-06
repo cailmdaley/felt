@@ -65,6 +65,12 @@ Before opening a PR, verify:
   `shuttle ls`/`shuttle show` and shells `shuttle agents` for registry-only
   reads; do not add a parallel registry in Elixir config or Go source.
 
+## Landing
+
+Maintainer lanes do not push `main` or deploy: a tested branch goes to the felt
+materializer seat, which lands and deploys it. The rules are under *Landing
+changes* in `AGENTS.md`.
+
 ## Scope
 
 felt is deliberately personal-scale: no auth model, no team conventions, the
