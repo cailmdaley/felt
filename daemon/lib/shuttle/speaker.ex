@@ -46,8 +46,7 @@ defmodule Shuttle.Speaker do
             _ -> role_voice(fiber, opts)
           end
 
-        keys =
-          Enum.filter([fiber_id | Enum.map(~w(uid id slug), &(fiber && fiber[&1]))], &is_binary/1)
+        keys = fiber_keys(fiber_id, fiber)
 
         if text == "",
           do: {:error, "text is empty"},
@@ -76,6 +75,16 @@ defmodule Shuttle.Speaker do
   end
 
   defp find_fiber(_fiber_id, _opts), do: nil
+
+  @doc "Every id a fiber answers to: the one given, and its uid, id and slug once found."
+  def fiber_keys(fiber_id, opts) when is_list(opts),
+    do: fiber_keys(fiber_id, find_fiber(fiber_id, opts))
+
+  def fiber_keys(fiber_id, fiber) do
+    [fiber_id | Enum.map(~w(uid id slug), &(fiber && fiber[&1]))]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.uniq()
+  end
 
   defp role_voice(fiber, opts) do
     stores = Keyword.get(opts, :stores, &Shuttle.FeltStores.configured_stores/0)
@@ -352,12 +361,13 @@ defmodule Shuttle.Speaker do
   end
 
   defp in_view?(_item, nil), do: true
-  defp in_view?(item, target), do: target in item.keys
+  defp in_view?(item, target), do: Enum.any?(target, &(&1 in item.keys))
 
-  # The fiber live voice is routed to, while Listening is on.
+  # The ids of the fiber live voice is routed to, while Listening is on. Both
+  # sides resolve, since the fiber feed can be unavailable at either moment.
   defp target do
     case Shuttle.Voice.show() do
-      %{enabled: true, target: %{"fiber_id" => id}} -> id
+      %{enabled: true, target: %{"fiber_id" => id}} -> fiber_keys(id, [])
       _ -> nil
     end
   catch

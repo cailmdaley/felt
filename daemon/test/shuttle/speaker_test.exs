@@ -134,14 +134,14 @@ defmodule Shuttle.SpeakerTest do
       )
     end
 
-    set(world, %{target: "U1"})
+    set(world, %{target: ["U1"]})
     assert {:ok, %{held: true}} = say.("a/two", "two first")
     {:ok, _} = say.("a/one", "one first")
     {:ok, _} = say.("a/two", "two second")
     assert_receive {:play, "jean:one first", one}
     assert %{queued: 0, held: %{"a/two" => 2}} = Speaker.show(server)
 
-    set(world, %{target: "a/two"})
+    set(world, %{target: ["a/two"]})
     refute_receive {:play, _, _}, 50
     send(pid, {one, {:exit_status, 0}})
     assert_receive {:play, "jean:two first", two}
@@ -153,6 +153,13 @@ defmodule Shuttle.SpeakerTest do
     send(pid, {three, {:exit_status, 0}})
     assert_receive {:play, "jean:one again", _}
     assert %{held: %{}} = Speaker.show(server)
+  end
+
+  test "a fiber answers to all its ids, or the one given while the feed is unavailable" do
+    fibers = [fibers: fn -> [%{"id" => "U1", "uid" => "U1", "slug" => "a/one"}] end]
+    assert Speaker.fiber_keys("a/one", fibers) == ["a/one", "U1"]
+    assert Speaker.fiber_keys("U1", fibers) == ["U1", "a/one"]
+    assert Speaker.fiber_keys("U1", fibers: fn -> [] end) == ["U1"]
   end
 
   test "words of the line being spoken are its echo, not Cail" do
