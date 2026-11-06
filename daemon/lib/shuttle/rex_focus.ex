@@ -193,7 +193,8 @@ defmodule Shuttle.RexFocus do
     runner = Shuttle.Runner.Default
 
     with {:ok, client} <- Shuttle.Rex.app_client(runner),
-         do: Shuttle.Rex.select(runner, client, sid, wid)
+         {:ok, _} <- Shuttle.Rex.select(runner, client, sid, wid),
+         do: Shuttle.Terminal.Rex.activate_app(runner)
   end
 
   @doc """
