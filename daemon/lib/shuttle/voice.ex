@@ -68,6 +68,7 @@ defmodule Shuttle.Voice do
 
   @impl true
   def handle_call(:show, _from, state) do
+    state = name_target(state)
     snapshot = live_drafts(state.snapshot, state)
     {:reply, %{snapshot | error: snapshot.error || state.focus_error}, state}
   end
@@ -99,7 +100,9 @@ defmodule Shuttle.Voice do
         target = %{
           "fiber_id" => id,
           "origin" => origin || Shuttle.MeetingRouter.own_host(),
-          "name" => target_name(id, origin) || params["name"] || Path.basename(id)
+          "name" =>
+            target_name(id, origin) || params["name"] || known_name(state.target, id) ||
+              Path.basename(id)
         }
 
         row = Map.put(target, "t", DateTime.to_iso8601(received_at))
@@ -544,6 +547,25 @@ defmodule Shuttle.Voice do
       {:error, reason} -> {nil, bytes, "voice route recovery failed: #{inspect(reason)}"}
     end
   end
+
+  # A target named only by its id (a served-fiber lookup that missed when it
+  # was set, or a journal row written so) is named again once the fiber is served.
+  defp name_target(%{target: %{"fiber_id" => id} = target} = state) do
+    with true <- target["name"] in [nil, "", id, Path.basename(id)],
+         name when is_binary(name) <- target_name(id, target["origin"]) do
+      target = Map.put(target, "name", name)
+      %{state | target: target, snapshot: %{state.snapshot | target: target}}
+    else
+      _ -> state
+    end
+  end
+
+  defp name_target(state), do: state
+
+  defp known_name(%{"fiber_id" => id, "name" => name}, id) when is_binary(name) and name != "",
+    do: if(name in [id, Path.basename(id)], do: nil, else: name)
+
+  defp known_name(_target, _id), do: nil
 
   defp target_name(id, origin) do
     fibers = Shuttle.Env.app(:meeting_fibers, &Meeting.served_fibers/0)

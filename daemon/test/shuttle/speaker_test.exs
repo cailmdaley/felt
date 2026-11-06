@@ -50,6 +50,19 @@ defmodule Shuttle.SpeakerTest do
     assert %{speaking: nil, queued: 0} = Speaker.show(server)
   end
 
+  test "the line being spoken carries its card's name", %{server: server} do
+    fibers = fn -> [%{"uid" => "01CARD", "name" => "The card"}] end
+
+    {:ok, _} =
+      Speaker.speak(
+        %{"text" => "hello", "voice" => "jean", "fiber_id" => "01CARD"},
+        server ++ [fibers: fibers]
+      )
+
+    assert_receive {:play, "jean:hello", _}
+    assert %{speaking: %{fiber_id: "01CARD", name: "The card"}} = Speaker.show(server)
+  end
+
   test "holds while the user talks and resumes just before where it stopped",
        %{server: server, world: world} do
     {:ok, _} = Speaker.speak(%{"text" => "long", "voice" => "jean"}, server)

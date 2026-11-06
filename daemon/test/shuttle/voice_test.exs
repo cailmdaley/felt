@@ -504,6 +504,21 @@ defmodule Shuttle.VoiceTest do
              Voice.target(%{"fiber_id" => "project/board"})
   end
 
+  test "a target is named from served fibers, even when the lookup missed at the switch" do
+    {:ok, served} = Agent.start_link(fn -> [] end)
+    Env.put_app_env(:meeting_fibers, fn -> Agent.get(served, & &1) end)
+
+    assert {:ok, %{target: %{"name" => "01CARD", "origin" => host}}} =
+             Voice.target(%{"fiber_id" => "01CARD"})
+
+    card = %{"uid" => "01CARD", "name" => "The card", "shuttle" => %{"host" => host}}
+    Agent.update(served, fn _ -> [card] end)
+    assert %{target: %{"name" => "The card"}} = Voice.show()
+
+    Agent.update(served, fn _ -> [] end)
+    assert {:ok, %{target: %{"name" => "The card"}}} = Voice.target(%{"fiber_id" => "01CARD"})
+  end
+
   test "target receipt time is durable and restored by a fresh supervisor", c do
     assert {:ok, %{target: %{"fiber_id" => "project/first"}}} =
              Voice.target(%{"fiber_id" => "project/first"})

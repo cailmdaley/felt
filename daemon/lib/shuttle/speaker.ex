@@ -57,7 +57,14 @@ defmodule Shuttle.Speaker do
           else:
             GenServer.call(
               server(opts),
-              {:speak, %{fiber_id: fiber_id, keys: keys, text: text, voice: voice}}
+              {:speak,
+               %{
+                 fiber_id: fiber_id,
+                 name: fiber && fiber["name"],
+                 keys: keys,
+                 text: text,
+                 voice: voice
+               }}
             )
 
       _ ->
@@ -416,8 +423,8 @@ defmodule Shuttle.Speaker do
     speaking =
       case state.current || (state.render && elem(state.render, 1)) do
         nil -> nil
-        %{item: item} -> Map.take(item, [:fiber_id, :voice, :text])
-        item -> Map.take(item, [:fiber_id, :voice, :text])
+        %{item: item} -> Map.take(item, [:fiber_id, :name, :voice, :text])
+        item -> Map.take(item, [:fiber_id, :name, :voice, :text])
       end
 
     target = state.target.()
