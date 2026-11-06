@@ -3,8 +3,8 @@ defmodule Shuttle.SpeakerTest do
   alias Shuttle.Speaker
   @moduletag :tmp_dir
 
-  setup do
-    {:ok, world} = Agent.start_link(fn -> %{partial: nil, now: 0, target: nil} end)
+  setup %{tmp_dir: root} do
+    world = start_supervised!({Agent, fn -> %{partial: nil, now: 0, target: nil} end})
     parent = self()
 
     opts = [
@@ -20,14 +20,19 @@ defmodule Shuttle.SpeakerTest do
         handle
       end,
       stop: fn handle -> send(parent, {:stop, handle}) end,
-      slice: fn wav, from -> {:ok, "#{wav}@#{from}"} end
+      slice: fn wav, from -> {:ok, "#{wav}@#{from}"} end,
+      journal: Path.join(root, "outbox.bin")
     ]
 
     pid = start_supervised!({Speaker, opts})
-    %{pid: pid, server: [server: opts[:name]], world: world}
+    %{pid: pid, server: [server: opts[:name]], world: world, opts: opts}
   end
 
-  defp set(world, change), do: Agent.update(world, &Map.merge(&1, change))
+  # Each state lasts a few polls, so the speaker sees every one.
+  defp set(world, change) do
+    Agent.update(world, &Map.merge(&1, change))
+    Process.sleep(30)
+  end
 
   test "plays lines one at a time in arrival order", %{pid: pid, server: server} do
     assert {:ok, %{voice: "jean", ahead: 0}} =
@@ -58,6 +63,48 @@ defmodule Shuttle.SpeakerTest do
 
     set(world, %{now: 9_000, partial: ""})
     assert_receive {:play, "jean:long@1500", _}
+  end
+
+  test "Cail's interruption: held while his words grow, resumed 1.5 s after they stop",
+       %{server: server, world: world} do
+    {:ok, _} = Speaker.speak(%{"text" => "a deliberately long line", "voice" => "jean"}, server)
+    assert_receive {:play, "jean:a deliberately long line", handle}
+
+    set(world, %{now: 4_000, partial: "okay I'm"})
+    assert_receive {:stop, ^handle}
+    set(world, %{now: 5_000, partial: "okay I'm interrupting you"})
+    set(world, %{now: 6_000, partial: "okay I'm interrupting you let me see"})
+    refute_receive {:play, _, _}, 50
+
+    # His words stay pending but stop changing: quiet after 1.5 s.
+    set(world, %{now: 7_000})
+    refute_receive {:play, _, _}, 50
+    set(world, %{now: 7_600})
+    assert_receive {:play, "jean:a deliberately long line@3500", _}
+    assert %{paused: false} = Speaker.show(server)
+  end
+
+  test "a restart resumes the held line and keeps the queue",
+       %{server: server, world: world, opts: opts} do
+    wav = Path.join(Path.dirname(opts[:journal]), "line.wav")
+    File.write!(wav, "")
+    opts = Keyword.put(opts, :render, fn _text, _voice -> {:ok, wav} end)
+    stop_supervised!(Speaker)
+    start_supervised!({Speaker, opts})
+
+    {:ok, _} = Speaker.speak(%{"text" => "held", "voice" => "jean"}, server)
+    {:ok, _} = Speaker.speak(%{"text" => "next", "voice" => "jean"}, server)
+    assert_receive {:play, ^wav, _}
+    set(world, %{now: 2_000, partial: "hold on please"})
+    assert_receive {:stop, _}
+
+    stop_supervised!(Speaker)
+    start_supervised!({Speaker, opts})
+    assert %{speaking: %{text: "held"}, queued: 1, paused: true} = Speaker.show(server)
+
+    set(world, %{now: 10_000})
+    assert_receive {:play, play, _}
+    assert play == wav <> "@1500"
   end
 
   test "mute holds the line and the queue without dropping them",

@@ -10,7 +10,11 @@ defmodule Shuttle.Speaker do
   Playback holds while Cail is talking (hark's live voice has pending words
   beyond an echo of the line being spoken) or while the speaker is muted, and resumes from just before where it stopped.
   afplay keeps its clock running under SIGSTOP, so a hold stops the player and a
-  resume plays the rest of the file from the held offset.
+  resume plays the rest of the file from the held offset. Cail is quiet once his
+  pending words have not changed for #{1_500} ms.
+
+  The queue, the current line and its offset are journaled, so a daemon restart
+  resumes a held or playing line rather than losing it.
   """
   use GenServer
   require Logger
@@ -20,7 +24,7 @@ defmodule Shuttle.Speaker do
   @bank "http://127.0.0.1:8322"
   @poll_ms 250
   @rewind_ms 500
-  @partial_stale_seconds 10
+  @quiet_ms 1_500
 
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -127,13 +131,19 @@ defmodule Shuttle.Speaker do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
+    journal = Keyword.get_lazy(opts, :journal, &journal_path/0)
+    saved = restore(journal)
+    if saved.current || saved.queue != [], do: send(self(), :poll)
 
     {:ok,
      %{
-       queue: :queue.new(),
-       current: nil,
+       queue: :queue.from_list(saved.queue),
+       current: saved.current,
        render: nil,
-       muted: false,
+       muted: saved.muted,
+       journal: journal,
+       saved: saved,
+       heard: {nil, nil},
        error: nil,
        timer: nil,
        clock: Keyword.get(opts, :clock, fn -> System.monotonic_time(:millisecond) end),
@@ -151,7 +161,7 @@ defmodule Shuttle.Speaker do
   def handle_call(:show, _from, state), do: {:reply, snapshot(state), state}
 
   def handle_call({:mute, muted}, _from, state) when is_boolean(muted) do
-    state = hold_or_play(%{state | muted: muted})
+    state = hold_or_play(%{state | muted: muted}) |> save()
     {:reply, {:ok, snapshot(state)}, state}
   end
 
@@ -161,7 +171,7 @@ defmodule Shuttle.Speaker do
   def handle_call({:speak, item}, _from, state) do
     ahead = :queue.len(state.queue) + if(state.current || state.render, do: 1, else: 0)
     held = not in_view?(item, state.target.())
-    state = advance(%{state | queue: :queue.in(item, state.queue)}) |> schedule()
+    state = advance(%{state | queue: :queue.in(item, state.queue)}) |> schedule() |> save()
     {:reply, {:ok, %{voice: item.voice, ahead: ahead, held: held}}, state}
   end
 
@@ -184,19 +194,67 @@ defmodule Shuttle.Speaker do
     Logger.info("speaker: afplay exited #{status} for #{current.item.fiber_id || "?"}")
     cleanup(current)
     error = if status == 0, do: state.error, else: "afplay exited #{status}"
-    {:noreply, advance(%{state | current: nil, error: error})}
+    {:noreply, advance(%{state | current: nil, error: error}) |> save()}
   end
 
   def handle_info(:poll, state),
-    do: {:noreply, %{state | timer: nil} |> hold_or_play() |> advance() |> schedule()}
+    do: {:noreply, %{state | timer: nil} |> hold_or_play() |> advance() |> schedule() |> save()}
 
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, %{current: %{handle: handle}} = state) when not is_nil(handle),
-    do: state.stop.(handle)
+  def terminate(_reason, %{current: %{handle: handle} = current} = state)
+      when not is_nil(handle) do
+    state.stop.(handle)
+    offset = current.offset + state.clock.() - current.started
+    save(%{state | current: %{current | handle: nil, offset: offset}})
+  end
 
-  def terminate(_reason, _state), do: :ok
+  def terminate(_reason, state), do: save(state)
+
+  defp journal_path, do: Path.join([Shuttle.data_dir(), "speaker", "outbox.bin"])
+
+  defp restore(nil), do: %{queue: [], current: nil, muted: false}
+
+  defp restore(path) do
+    with {:ok, bytes} <- Shuttle.FS.read(path),
+         %{queue: queue, current: current, muted: muted} <- :erlang.binary_to_term(bytes) do
+      case current do
+        nil ->
+          %{queue: queue, current: nil, muted: muted}
+
+        %{wav: wav} = current ->
+          if match?({:ok, _}, Shuttle.FS.stat(wav)),
+            do: %{queue: queue, current: current, muted: muted},
+            else: %{queue: [current.item | queue], current: nil, muted: muted}
+      end
+    else
+      _ -> restore(nil)
+    end
+  end
+
+  # Write the journal when what it records has changed.
+  defp save(%{journal: nil} = state), do: state
+
+  defp save(state) do
+    rendering = if state.render, do: [elem(state.render, 1)], else: []
+
+    saved = %{
+      queue: rendering ++ :queue.to_list(state.queue),
+      current:
+        state.current &&
+          %{state.current | handle: nil, segment: nil, started: nil},
+      muted: state.muted
+    }
+
+    if saved == state.saved do
+      state
+    else
+      Shuttle.FS.mkdir_p(Path.dirname(state.journal))
+      :ok = Shuttle.FS.write_atomic(state.journal, :erlang.term_to_binary(saved))
+      %{state | saved: saved}
+    end
+  end
 
   # The first queued line from the constitution in view, or the first of all
   # when nothing is in view.
@@ -226,24 +284,34 @@ defmodule Shuttle.Speaker do
     current = %{item: item, wav: wav, segment: nil, handle: nil, offset: 0, started: nil}
 
     {:noreply,
-     %{state | render: nil, current: current, error: nil} |> hold_or_play() |> schedule()}
+     %{state | render: nil, current: current, error: nil}
+     |> hold_or_play()
+     |> schedule()
+     |> save()}
   end
 
   defp rendered(state, item, {:error, reason}) do
     Logger.warning("speaker: render failed for #{item.fiber_id || "?"}: #{reason}")
-    {:noreply, advance(%{state | render: nil, error: reason})}
+    {:noreply, advance(%{state | render: nil, error: reason}) |> save()}
   end
 
   # Held: stop the player and keep the offset. Free: play from the offset.
   defp hold_or_play(%{current: nil} = state), do: state
 
   defp hold_or_play(%{current: current} = state) do
-    held = state.muted or talking?(state.partial.(), current.item.text)
+    partial = state.partial.()
+    now = state.clock.()
+    heard = if partial == elem(state.heard, 0), do: state.heard, else: {partial, now}
+    state = %{state | heard: heard}
+
+    held =
+      state.muted or
+        (talking?(partial, current.item.text) and now - elem(heard, 1) < @quiet_ms)
 
     cond do
       held and current.handle ->
         state.stop.(current.handle)
-        offset = current.offset + state.clock.() - current.started
+        offset = current.offset + now - current.started
         %{state | current: %{current | handle: nil, offset: offset}}
 
       not held and is_nil(current.handle) ->
@@ -350,8 +418,6 @@ defmodule Shuttle.Speaker do
   defp partial do
     with {:ok, %{path: path}} <- Shuttle.Meeting.voice_transcript(),
          partial = Path.rootname(path) <> ".partial",
-         {:ok, %{mtime: mtime}} <- Shuttle.FS.stat(partial, time: :posix),
-         true <- System.os_time(:second) - mtime < @partial_stale_seconds,
          {:ok, text} <- Shuttle.FS.read(partial) do
       text
     else
