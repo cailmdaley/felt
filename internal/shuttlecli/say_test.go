@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -31,5 +32,24 @@ func TestSayWithoutAWorkerAsksForAFiber(t *testing.T) {
 	_, _, err := executeIn(t, env, "", "say", "Hello.")
 	if err == nil || !strings.HasSuffix(err.Error(), "(or pass --fiber)") {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestVoicesMarksTheRolesHoldingThem(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/speak/voices" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"voices":[{"name":"borges","kind":"bank","role":"tutor"},{"name":"jean","kind":"builtin","role":null}]}`))
+	}))
+
+	out, _, err := executeIn(t, env, "", "voices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "borges           bank     roles/tutor\njean             builtin\n"; out != want {
+		t.Fatalf("stdout %q, want %q", out, want)
 	}
 }

@@ -67,6 +67,37 @@ defmodule Shuttle.Speaker do
     (is_binary(role) && charter_voice(role, stores.())) || @default_voice
   end
 
+  @builtins ~w(alba azelma cosette eponine fantine javert jean marius)
+
+  @doc """
+  Every voice this host can speak in, the bank's then pocket-tts's built-ins,
+  each with the role whose charter names it (nil when unclaimed).
+  """
+  def voices(opts \\ []) do
+    bank = Keyword.get_lazy(opts, :bank, fn -> Shuttle.Env.expand("~/.claude/voices") end)
+    stores = Keyword.get(opts, :stores, &Shuttle.FeltStores.configured_stores/0).()
+
+    claims =
+      for store <- stores,
+          {:ok, roles} <- [Shuttle.FS.ls(Path.join([store, ".felt", "roles"]))],
+          role <- Enum.sort(roles),
+          voice = charter_voice(role, [store]),
+          into: %{},
+          do: {voice, role}
+
+    banked =
+      case Shuttle.FS.ls(bank) do
+        {:ok, files} ->
+          for f <- Enum.sort(files), Path.extname(f) == ".safetensors", do: Path.rootname(f)
+
+        _ ->
+          []
+      end
+
+    Enum.map(banked, &%{name: &1, kind: "bank", role: claims[&1]}) ++
+      Enum.map(@builtins, &%{name: &1, kind: "builtin", role: claims[&1]})
+  end
+
   defp charter_voice(role, stores) do
     Enum.find_value(stores, fn store ->
       case Shuttle.FiberDoc.read_path(Path.join([store, ".felt", "roles", role, role <> ".md"])) do

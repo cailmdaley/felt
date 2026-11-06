@@ -85,6 +85,31 @@ defmodule Shuttle.SpeakerTest do
     assert Speaker.talking?("the outbox, wait, stop", line)
   end
 
+  test "lists the bank and built-ins with the roles that hold them", %{tmp_dir: root} do
+    for {role, front} <- [{"tutor", "voice: borges\n"}, {"scout", "voice: jean\n"}, {"bare", ""}] do
+      charter = Path.join([root, ".felt", "roles", role, role <> ".md"])
+      File.mkdir_p!(Path.dirname(charter))
+      File.write!(charter, "---\nname: #{role}\n#{front}---\n")
+    end
+
+    File.write!(Path.join([root, ".felt", "roles", "roles.md"]), "---\nname: Roles\n---\n")
+    bank = Path.join(root, "voices")
+    File.mkdir_p!(bank)
+
+    for f <- ~w(borges.safetensors borges.wav cohen.safetensors),
+        do: File.write!(Path.join(bank, f), "")
+
+    voices = Speaker.voices(bank: bank, stores: fn -> [root] end)
+
+    assert [
+             %{name: "borges", kind: "bank", role: "tutor"},
+             %{name: "cohen", kind: "bank", role: nil},
+             %{name: "alba", kind: "builtin", role: nil} | _
+           ] = voices
+
+    assert %{role: "scout"} = Enum.find(voices, &(&1.name == "jean"))
+  end
+
   test "resolves the voice from the fiber's role charter", %{tmp_dir: root} do
     charter = Path.join([root, ".felt", "roles", "tutor", "tutor.md"])
     File.mkdir_p!(Path.dirname(charter))

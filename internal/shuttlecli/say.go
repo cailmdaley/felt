@@ -69,3 +69,45 @@ terminal, and --voice overrides the voice for this line.`,
 	cmd.Flags().String("voice", "", "Voice for this line: a bank voice or a pocket-tts built-in")
 	return cmd
 }
+
+func (a *app) shuttleVoicesCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "voices",
+		Short: "List the voices shuttle say can speak in, and the roles holding them",
+		Long: `List the voice bank and pocket-tts built-ins on the host that speaks, each
+with the role whose charter names it in voice:. Unclaimed voices carry no role.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			endpoint, err := a.daemonEndpoint("/api/v1/speak/voices")
+			if err != nil {
+				return err
+			}
+			body, err := a.getDaemon(endpoint, daemonRoutedPostTimeout)
+			if err != nil {
+				return err
+			}
+			if a.json {
+				a.printDaemonBody(body)
+				return nil
+			}
+			var answer struct {
+				Voices []struct {
+					Name string `json:"name"`
+					Kind string `json:"kind"`
+					Role string `json:"role"`
+				} `json:"voices"`
+			}
+			if err := json.Unmarshal(body, &answer); err != nil {
+				return fmt.Errorf("decoding voices: %w", err)
+			}
+			for _, v := range answer.Voices {
+				line := fmt.Sprintf("%-16s %-8s", v.Name, v.Kind)
+				if v.Role != "" {
+					line += " roles/" + v.Role
+				}
+				fmt.Fprintln(a.env.Stdout, strings.TrimRight(line, " "))
+			}
+			return nil
+		},
+	}
+}
