@@ -269,13 +269,14 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # implies handoff), so stamp the clean-exit marker (when the fiber could be
   # read) before killing the stale session.
   @doc false
-  def reap_closed_session(%State{} = state, fiber_id, fiber, session) do
+  def reap_closed_session(%State{} = state, fiber_id, fiber, session, runtime_key \\ nil) do
     if is_map(fiber) and Map.get(fiber, "status") == "closed" and
          Poller.host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) and
          closed_stop_due?(state, session) do
-      Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
+      runtime_key = runtime_key || Poller.runtime_key_for_fiber(fiber)
+      Poller.stamp_handoff_if_stale(state, runtime_key, fiber)
 
-      case Poller.stop_worker(state, fiber_id, session) do
+      case Poller.stop_worker(state, fiber_id, session, runtime_key) do
         {{:ok, _}, state} ->
           %{state | closed_session_retries: Map.delete(state.closed_session_retries, session)}
 
@@ -283,7 +284,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
           Logger.warning("Could not stop closed fiber #{fiber_id}: #{reason}; retrying in 60s")
 
           state =
-            if Poller.running_key(state, fiber_id),
+            if Map.has_key?(state.running, runtime_key),
               do: state,
               else: adopt_live_session(state, fiber_id, fiber, fiber["uid"], session)
 

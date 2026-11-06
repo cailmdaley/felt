@@ -201,6 +201,16 @@ defmodule Shuttle.Test.FeltStoreRunner do
   @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id thread_exit_verb)
 
   def put_shuttle_fields(id, fields) do
+    id =
+      Agent.get(server(), fn state ->
+        if Map.has_key?(state.fibers, id),
+          do: id,
+          else:
+            Enum.find_value(state.fibers, id, fn {key, fiber} ->
+              if fiber["uid"] == id, do: key
+            end)
+      end)
+
     {runtime_fields, config_fields} = Map.split(fields, @runtime_key_names)
 
     Agent.update(server(), fn state ->

@@ -5544,14 +5544,20 @@ defmodule Shuttle.Poller do
   end
 
   defp reconcile_fiber_closures(%State{} = state) do
-    Enum.reduce(state.running, state, fn {_runtime_key, meta}, state_acc ->
+    Enum.reduce(state.running, state, fn {runtime_key, meta}, state_acc ->
       fiber_id = fiber_address(meta)
 
-      case fetch_fiber_full(fiber_id, state_acc) do
+      case fetch_fiber_full(runtime_key, state_acc) do
         {:ok, fiber} ->
           cond do
             Map.get(fiber, "status") == "closed" ->
-              SessionReconciliation.reap_closed_session(state_acc, fiber_id, fiber, meta.session)
+              SessionReconciliation.reap_closed_session(
+                state_acc,
+                fiber_id,
+                fiber,
+                meta.session,
+                runtime_key
+              )
 
             true ->
               state_acc
@@ -5698,8 +5704,12 @@ defmodule Shuttle.Poller do
   # confirmed stop. Shared by explicit stop, rest and closed-fiber reaping.
   # An observed session comes from a positive inventory matched to its fiber.
   @doc false
-  def stop_worker(state, fiber_id, observed_session \\ nil) do
-    case running_key(state, fiber_id) do
+  def stop_worker(state, fiber_id, observed_session \\ nil),
+    do: stop_worker(state, fiber_id, observed_session, running_key(state, fiber_id))
+
+  @doc false
+  def stop_worker(state, fiber_id, observed_session, runtime_key) do
+    case Map.get(state.running, runtime_key) do
       nil ->
         reply =
           if observed_session,
@@ -5708,8 +5718,7 @@ defmodule Shuttle.Poller do
 
         {reply, state}
 
-      runtime_key ->
-        meta = Map.get(state.running, runtime_key)
+      meta ->
         session = meta.session
         # Stop the watcher BEFORE the kill so its has-session poll doesn't also
         # report the exit and double-handle through handle_worker_exit.

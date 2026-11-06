@@ -6100,6 +6100,67 @@ defmodule Shuttle.PollerTest do
     end
 
     @tag backend: backend
+    @tag :review_runtime_key
+    test "closing one of two #{inspect(backend)} rows sharing an address stops only its runtime key",
+         %{backend: backend} do
+      Env.put_app_env(:terminal_backend, backend)
+
+      if backend == Shuttle.Terminal.Rex do
+        Env.put_app_env(:fake_rex, start_supervised!(Shuttle.Test.FakeRex))
+        Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      end
+
+      shared = "tests/shared-address"
+      other = "tests/other-address"
+
+      for {id, uid} <- [
+            {shared, "01JZ00000000000000000000ZZ"},
+            {other, "01JZ00000000000000000000AA"}
+          ] do
+        MockRunner.set_fiber(id, make_fiber(id, %{"uid" => uid}))
+
+        MockRunner.set_shuttle(
+          id,
+          "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+          "active"
+        )
+      end
+
+      {:ok, poller} =
+        start_poller!(
+          runner: Shuttle.PollerTest.PhantomRunner,
+          own_host_id: "test-host",
+          poll_interval_ms: 60_000,
+          max_concurrent_workers: 0,
+          felt_stores: [MockRunner.felt_root()]
+        )
+
+      assert {:ok, closing_session} =
+               Poller.dispatch_fiber(poller, shared, force: true, ad_hoc: true)
+
+      assert {:ok, open_session} = Poller.dispatch_fiber(poller, other, force: true, ad_hoc: true)
+      closing_uid = MockRunner.fiber(shared)["uid"]
+      open_uid = MockRunner.fiber(other)["uid"]
+      MockRunner.set_fiber(shared, Map.put(MockRunner.fiber(shared), "status", "closed"))
+      MockRunner.set_fiber(other, Map.put(MockRunner.fiber(other), "id", shared))
+
+      :sys.replace_state(poller, fn state ->
+        %{state | running: Map.update!(state.running, open_uid, &Map.put(&1, :fiber_id, shared))}
+      end)
+
+      sync_poll_cycle!(poller)
+      state = :sys.get_state(poller)
+      refute Map.has_key?(state.running, closing_uid)
+      assert %{session: ^open_session, pid: watcher} = state.running[open_uid]
+      assert Process.alive?(watcher)
+      assert :alive = Shuttle.Terminal.status(Shuttle.PollerTest.PhantomRunner, open_session)
+      assert :gone = Shuttle.Terminal.status(Shuttle.PollerTest.PhantomRunner, closing_session)
+      assert get_in(MockRunner.fiber(shared), ["shuttle", "runtime", "handed_off_at"])
+      refute get_in(MockRunner.fiber(other), ["shuttle", "runtime", "handed_off_at"])
+      assert reap_stop_count(backend) == 1
+    end
+
+    @tag backend: backend
     @tag :review_unknown_inventory
     test "an unknown inventory defers closed #{inspect(backend)} teardown until a healthy scan",
          %{backend: backend} do
