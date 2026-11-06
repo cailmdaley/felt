@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { bandFacts, Dock, stripFacts } from './Dock.js'
+import { clockTime } from '../civilDay.js'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 
@@ -1050,5 +1051,106 @@ describe('pulse cadence in the workspace strip', () => {
       shuttlePulseRuntime: { state: 'paused' },
     }))
     expect(facts.cadence?.text).toBe('every 59m · paused')
+  })
+})
+
+describe('session usage', () => {
+  const id = '11111111-2222-3333-4444-555555555555'
+  const resting = (patch: Partial<KanbanCard> = {}): KanbanCard => task({ status: 'closed', sessionUuid: id, shuttleAgent: 'claude-opus', shuttleHost: 'candide', ...patch })
+  const part = (name: string): HTMLElement => band.el.querySelector<HTMLElement>(`[data-part="${name}"]`)!
+  const usageReads = (): string[] => vi.mocked(fetch).mock.calls.map(([url]) => String(url)).filter(url => url.includes('/transcript/usage'))
+  const answering = (usage: (url: string) => object | null): void => {
+    vi.mocked(fetch).mockImplementation(async input => {
+      if (!String(input).includes('/transcript/usage')) return response()
+      const body = usage(String(input))
+      return body ? response(body) : response({ availability: 'transcript_missing' }, 404)
+    })
+  }
+
+  beforeEach(() => {
+    dock.reset()
+    vi.mocked(fetch).mockClear()
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'], now: Date.parse('2026-10-09T20:00:00Z') })
+  })
+
+  it('says the context and the warmth beside the state word and on Resume, with no live worker', async () => {
+    const until = Date.parse('2026-10-09T20:30:00Z')
+    answering(() => ({ context: 182_340, cache_warm_until: until, hit_share: 0.94 }))
+    dock.open(resting())
+    await flush()
+    const said = `warm until ${clockTime(until)}`
+    expect(part('context').textContent).toBe('182k')
+    expect(part('context').title).toBe('Context: 182,340 tokens of a 1,000,000-token window (18% full)')
+    expect(part('context').previousElementSibling).toBe(part('lifecycle'))
+    expect(part('cache-warmth').textContent).toBe(said)
+    expect(session('Resume').title).toBe(`Resume · cache ${said}`)
+    expect(band.el.querySelector('.ws-header-facts')!.textContent).toContain('94% cached')
+    expect(usageReads()).toEqual([`/api/v1/transcript/usage?session=${id}&host=candide`])
+  })
+
+  it('reads a recorded window against the figure', async () => {
+    answering(() => ({ context: 129_500, window: 259_000 }))
+    dock.open(resting({ shuttleAgent: 'codex-sol' }))
+    await flush()
+    expect(part('context').title).toBe('Context: 129,500 tokens of a 259,000-token window (50% full)')
+    expect(part('cache-warmth').hidden).toBe(true)
+  })
+
+  it('shows nothing of an unavailable read and asks nothing without a session', async () => {
+    answering(() => null)
+    dock.open(resting())
+    await flush()
+    expect(usageReads()).toHaveLength(1)
+    expect([part('context').hidden, part('cache-warmth').hidden]).toEqual([true, true])
+    expect(session('Resume').title).toBe('Resume')
+    expect(band.el.querySelector('.ws-header-facts')!.textContent).not.toContain('cached')
+    dock.reset()
+    dock.open(resting({ sessionUuid: undefined }))
+    await flush()
+    expect(usageReads()).toHaveLength(1)
+  })
+
+  it('keeps the figure and says no warmth once the estimate has passed', async () => {
+    answering(() => ({ context: 900, cache_warm_until: Date.now() - 1 }))
+    dock.open(resting())
+    await flush()
+    expect(part('context').textContent).toBe('900')
+    expect(part('cache-warmth').hidden).toBe(true)
+    expect(session('Resume').title).toBe('Resume')
+  })
+
+  it('refreshes every thirty seconds while visible, on a new session, and never after clearing', async () => {
+    answering(url => ({ context: url.includes(id) ? 1000 : 2000 }))
+    dock.open(resting())
+    await flush()
+    expect(part('context').textContent).toBe('1k')
+    vi.advanceTimersByTime(29_999)
+    expect(usageReads()).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(usageReads()).toHaveLength(2)
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    vi.advanceTimersByTime(30_000)
+    expect(usageReads()).toHaveLength(2)
+    hidden.mockRestore()
+
+    dock.syncRuntime(resting({ sessionUuid: 'aaaaaaaa-2222-3333-4444-555555555555' }))
+    expect(part('context').hidden).toBe(true)
+    expect(usageReads()).toHaveLength(3)
+    await flush()
+    expect(part('context').textContent).toBe('2k')
+
+    dock.reset()
+    vi.advanceTimersByTime(90_000)
+    expect(usageReads()).toHaveLength(3)
+  })
+
+  it('drops a read that outlives its session', async () => {
+    const answer = deferred<Response>()
+    vi.mocked(fetch).mockImplementation(() => answer.promise)
+    dock.open(resting())
+    dock.syncRuntime(resting({ sessionUuid: undefined }))
+    answer.resolve(response({ context: 1000 }))
+    await flush()
+    expect(part('context').hidden).toBe(true)
   })
 })

@@ -34,6 +34,15 @@ defmodule Shuttle.FileTailTest do
     assert {:append, ["partial-rest"], 15} = FileTail.advance(path, 2)
   end
 
+  test "last_lines keeps the whole lines of a tail and says whether it reached the start",
+       %{path: path} do
+    File.write!(path, "first\nsecond\nthird\npartial")
+
+    assert FileTail.last_lines(path, 1_000) == {["first", "second", "third"], true}
+    assert FileTail.last_lines(path, 16) == {["third"], false}
+    assert FileTail.last_lines(path <> ".absent", 16) == {[], true}
+  end
+
   test "advance reads only appended bytes", %{path: path} do
     File.write!(path, "a\n")
     {_lines, offset, _inode} = FileTail.snapshot(path)

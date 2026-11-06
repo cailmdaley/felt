@@ -19,6 +19,7 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
 import { dressVerb, headerLifecycleVerbsFor, SESSION_VERBS, sessionVerbsFor } from './lifecycleVerbs.js'
+import { contextTitle, fetchTranscriptUsage, tokenLabel, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
@@ -398,6 +399,8 @@ export interface DockOptions {
   onRest?: (card: KanbanCard, anchor: HTMLElement) => void
 }
 
+const USAGE_REFRESH_MS = 30_000
+
 /**
  * The band above a constitution's pages: its name and state, the way to its
  * conversation, its session and lifecycle verbs, Listen, and the settings
@@ -433,6 +436,8 @@ export class Dock {
   private actPaint: (() => void) | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
+  private usage: TranscriptUsage | null = null
+  private usageSession: string | undefined
   private savesPending = 0
   private saveTail: Promise<void> = Promise.resolve()
   private settingStep: { key: string; run: () => void; timer: number } | null = null
@@ -575,6 +580,8 @@ export class Dock {
     this.actPaint = null
     this.settingsSync = null
     this.historySync = null
+    this.usage = null
+    this.usageSession = undefined
     this.settingStep = null
     this.savesPending = 0
     this.saveTail = Promise.resolve()
@@ -718,8 +725,24 @@ export class Dock {
     card = this.card
     this.settingsSync?.(incoming)
     this.historySync?.()
+    if (card.sessionUuid !== this.usageSession) {
+      this.usageSession = card.sessionUuid
+      this.usage = null
+      void this.readUsage(card)
+    }
     this.actPaint?.()
     this.workerPillCard = card
+  }
+
+  /** Read the card's session usage and repaint; a read that outlives its session or band is dropped. */
+  private async readUsage(card: KanbanCard): Promise<void> {
+    const session = card.sessionUuid
+    if (!session) return
+    const epoch = this.epoch
+    const usage = await fetchTranscriptUsage(this.shuttleBase, session, card.shuttleHost)
+    if (this.epoch !== epoch || card.sessionUuid !== session) return
+    this.usage = usage
+    this.actPaint?.()
   }
 
   refreshConversationOpening(): void {
@@ -919,8 +942,16 @@ export class Dock {
     lifecycle.className = 'ws-band-state'
     lifecycle.dataset.part = 'lifecycle'
     drawer.prepend(ancestry)
+    const contextFact = document.createElement('span')
+    contextFact.className = 'ws-band-context'
+    contextFact.dataset.part = 'context'
+    const warmthFact = document.createElement('span')
+    warmthFact.className = 'ws-band-warmth'
+    warmthFact.dataset.part = 'cache-warmth'
+    const usageRefresh = window.setInterval(() => { if (!document.hidden) void this.readUsage(card) }, USAGE_REFRESH_MS)
+    this.disposers.push(() => window.clearInterval(usageRefresh))
     const identity = document.createElement('div'); identity.className = 'ws-band-identity'
-    identity.append(title, lifecycle)
+    identity.append(title, lifecycle, contextFact, warmthFact)
     const leave = this.leave = document.createElement('button')
     leave.type = 'button'
     leave.className = 'ws-header-icon ws-band-leave'
@@ -949,8 +980,19 @@ export class Dock {
       if (lifecycle.textContent !== stage.label) lifecycle.textContent = stage.label
       lifecycle.dataset.state = stage.state
       lifecycle.hidden = !shuttleManaged
-      const saidFacts = bandFacts(card)
+      const usage = this.usage
+      contextFact.hidden = usage?.context === undefined
+      contextFact.textContent = usage?.context === undefined ? '' : tokenLabel(usage.context)
+      contextFact.title = usage ? contextTitle(usage, card.workerAgent ?? card.shuttleAgent) : ''
+      const warm = warmUntil(usage)
+      const warmSaid = warm === undefined ? '' : `warm until ${clockTime(warm)}`
+      warmthFact.hidden = warm === undefined
+      warmthFact.textContent = warmSaid
+      warmthFact.title = warm === undefined ? '' : `Cache ${warmSaid} (estimated from Claude cache usage)`
+      const hit = usage?.hit_share === undefined ? undefined : Math.round(usage.hit_share * 100)
+      const saidFacts = [bandFacts(card), ...(hit === undefined ? [] : [`${hit}% cached`])].join(' · ')
       if (facts.textContent !== saidFacts) facts.textContent = saidFacts
+      facts.title = hit === undefined ? '' : `The session's recent turns read ${hit}% of their context tokens from the prompt cache`
       facts.hidden = !facts.textContent
       const offered = headerLifecycleVerbsFor(card, !!this.onRest)
       const sessionOffered = shuttleManaged ? sessionVerbsFor(card) : []
@@ -960,6 +1002,7 @@ export class Dock {
         const button = sessionButtons.get(spec.verb)!
         button.hidden = !sessionOffered.includes(spec.verb)
         button.disabled = this.starting
+        if (spec.verb === 'resume') button.title = warm === undefined ? spec.label : `${spec.label} · cache ${warmSaid}`
       }
       if (rest) rest.hidden = !offered.includes('rest')
       temper.hidden = !offered.includes('temper')

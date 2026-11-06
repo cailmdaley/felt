@@ -172,6 +172,8 @@ defmodule ShuttleWeb.Router do
     # Native transcript provenance: JSON receipt, with host routing selected
     # from the session ledger or an explicit `host` query parameter.
     get("/transcript", TranscriptController, :show)
+    # The session's latest context and cache facts, read from the native tail.
+    get("/transcript/usage", TranscriptController, :usage)
   end
 
   # File/asset bytes by absolute path (owner-routed). Unlocks `:::{embed}` +

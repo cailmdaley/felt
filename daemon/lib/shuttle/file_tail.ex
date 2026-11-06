@@ -138,6 +138,23 @@ defmodule Shuttle.FileTail do
   end
 
   @doc """
+  The complete lines in the last `max_bytes` of `path`, and whether they reach
+  its start. The line the window cuts and a partial trailing line are left
+  out. A missing or unreadable file is `{[], true}`.
+  """
+  @spec last_lines(Path.t(), pos_integer()) :: {[String.t()], boolean()}
+  def last_lines(path, max_bytes) do
+    with {:ok, %{size: size}} <- Shuttle.FS.stat(path),
+         offset = max(size - max_bytes, 0),
+         {:ok, chunk} <- read_range(path, offset, size - offset) do
+      {lines, _consumed} = split_complete(chunk)
+      {if(offset > 0, do: Enum.drop(lines, 1), else: lines), offset == 0}
+    else
+      _ -> {[], true}
+    end
+  end
+
+  @doc """
   The inode of `path`, or `nil` when it does not exist. Rotation moves it; an
   append or a truncation does not.
   """

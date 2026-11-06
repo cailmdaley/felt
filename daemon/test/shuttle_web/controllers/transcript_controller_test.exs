@@ -153,6 +153,47 @@ defmodule ShuttleWeb.TranscriptControllerTest do
              |> json_response(200)
   end
 
+  describe "usage" do
+    test "answers the latest usage of a local transcript", %{path: path} do
+      File.write!(
+        path,
+        ~s({"type":"assistant","timestamp":"2026-10-09T13:51:52.531Z","message":{"model":"claude-opus-5-5",) <>
+          ~s("usage":{"input_tokens":2,"cache_read_input_tokens":98,"cache_creation_input_tokens":0}}}\n)
+      )
+
+      assert local_conn()
+             |> get("/api/v1/transcript/usage", %{"session" => @session})
+             |> json_response(200) == %{
+               "context" => 100,
+               "cached" => 98,
+               "cache_warm_until" => 1_791_554_212_531,
+               "hit_share" => 0.98,
+               "at" => 1_791_553_912_531
+             }
+    end
+
+    test "a transcript without usage and a missing one are 404 receipts" do
+      assert %{"availability" => "usage_missing", "harness" => nil} =
+               local_conn()
+               |> get("/api/v1/transcript/usage", %{"session" => @session})
+               |> json_response(404)
+
+      missing = "11111111-2222-3333-4444-555555555555"
+
+      assert %{"availability" => "transcript_missing", "session" => ^missing} =
+               local_conn()
+               |> get("/api/v1/transcript/usage", %{"session" => missing})
+               |> json_response(404)
+    end
+
+    test "an invalid session is a 400" do
+      assert %{"error" => "session must be a UUID"} =
+               local_conn()
+               |> get("/api/v1/transcript/usage", %{"session" => "nope"})
+               |> json_response(400)
+    end
+  end
+
   describe "remote host routing" do
     setup do
       StubGetFileClient.start!()
@@ -227,6 +268,33 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       assert query["session"] == @session
       assert query["offset"] == "42"
       assert query["host"] == "local"
+    end
+
+    test "usage is relayed from the owner, its receipts included" do
+      StubGetFileClient.set_response({:ok, 200, "application/json", ~s({"context":7,"at":1})})
+
+      assert local_conn()
+             |> get("/api/v1/transcript/usage", %{"session" => @session, "host" => "candide"})
+             |> json_response(200) == %{"context" => 7, "at" => 1}
+
+      assert StubGetFileClient.last().url =~ "/api/v1/transcript/usage?"
+      assert StubGetFileClient.last().url =~ "host=local"
+
+      StubGetFileClient.set_response(
+        {:ok, 404, "application/json", ~s({"availability":"transcript_missing"})}
+      )
+
+      assert %{"availability" => "transcript_missing"} =
+               local_conn()
+               |> get("/api/v1/transcript/usage", %{"session" => @session, "host" => "candide"})
+               |> json_response(404)
+
+      StubGetFileClient.set_response({:error, :econnrefused})
+
+      assert %{"availability" => "host_unreachable", "host" => "candide"} =
+               local_conn()
+               |> get("/api/v1/transcript/usage", %{"session" => @session, "host" => "candide"})
+               |> json_response(503)
     end
 
     test "unreachable host is explicit" do

@@ -272,6 +272,7 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
+| `GET /transcript/usage` | host-routed | A session's latest context and cache facts, read from the transcript's tail |
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 | `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
@@ -671,6 +672,19 @@ receipt carries `availability` (`available_local`, `available_remote`,
 adds `X-Transcript-Byte-Count` and `X-Transcript-SHA256` headers. Agents should
 use ordinary `jq`/`rg` recipes on that file; Shuttle deliberately does not
 define a transcript reader or search language.
+
+`/transcript/usage` accepts the same parameters and reads at most the file's
+last 16 MiB, so it stays cheap on a huge transcript, and it needs no live
+worker. It answers `{context?, window?, cached?, cache_warm_until?, hit_share?,
+at}`: `context` is the latest turn's prompt tokens, absent after a compaction
+that records no count until the next measured turn; `window` is the context
+window, which only Codex records; `cached` is the tokens that turn read from
+the prompt cache; `cache_warm_until` is an estimate that only Claude's native
+usage establishes, and it may already be past; `hit_share` is the share of
+context tokens read from the cache over the turns in the tail. Times are epoch
+milliseconds. A session with nothing to report answers 404 with the `/transcript`
+receipt, `availability` being `transcript_missing` or `usage_missing`; an
+unreachable owner answers 503 with `host_unreachable`.
 
 Ordinary human prompt records retain their prompt boundary even when their text copies a recorded envelope.
 

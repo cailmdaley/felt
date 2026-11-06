@@ -4,11 +4,12 @@ defmodule ShuttleWeb.TranscriptController do
 
     * `GET /api/v1/transcript?session=…` returns an availability receipt;
     * `GET /api/v1/transcript/raw?session=…` returns the exact JSONL bytes;
-      `offset=N` returns a byte slice for incremental reads.
+      `offset=N` returns a byte slice for incremental reads;
+    * `GET /api/v1/transcript/usage?session=…` returns the session's latest
+      usage facts, which `Shuttle.TranscriptUsage` reads from the file's tail.
 
   The host is selected explicitly with `host=`, or from the session ledger.
   Remote requests use the same transport as other host-local reads.
-  No endpoint here interprets transcript records or implements search.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -16,7 +17,7 @@ defmodule ShuttleWeb.TranscriptController do
   import Plug.Conn
   import ShuttleWeb.RelayHelpers, only: [present?: 1]
 
-  alias Shuttle.{OriginRouter, Poller, Remote, SessionLedger, Transcript}
+  alias Shuttle.{OriginRouter, Poller, Remote, SessionLedger, Transcript, TranscriptUsage}
 
   # Native transcripts can be materially larger than the board/file assets
   # that use OriginRouter's ordinary 30 s forwarding budget. Keep the CLI and
@@ -46,6 +47,18 @@ defmodule ShuttleWeb.TranscriptController do
       case target_host(params, session) do
         :local -> local_bytes(conn, session, offset)
         {:remote, %Remote{} = remote} -> remote_bytes(conn, session, remote, offset)
+        {:unreachable, host} -> unavailable(conn, session, :host_unreachable, host)
+      end
+    else
+      {:error, message} -> conn |> put_status(400) |> json(%{error: message})
+    end
+  end
+
+  def usage(conn, params) do
+    with {:ok, session} <- session_param(params) do
+      case target_host(params, session) do
+        :local -> local_usage(conn, session)
+        {:remote, %Remote{} = remote} -> remote_usage(conn, session, remote)
         {:unreachable, host} -> unavailable(conn, session, :host_unreachable, host)
       end
     else
@@ -103,6 +116,31 @@ defmodule ShuttleWeb.TranscriptController do
 
       nil ->
         unavailable(conn, session, :transcript_missing, Poller.own_host_id())
+    end
+  end
+
+  defp local_usage(conn, session) do
+    case Transcript.path(session) do
+      nil ->
+        unavailable(conn, session, :transcript_missing, Poller.own_host_id())
+
+      path ->
+        case TranscriptUsage.read(path, Transcript.harness_for(path)) do
+          nil -> unavailable(conn, session, :usage_missing, Poller.own_host_id())
+          usage -> json(conn, usage)
+        end
+    end
+  end
+
+  defp remote_usage(conn, session, %Remote{} = remote) do
+    query = %{"session" => session, "host" => "local"}
+
+    case OriginRouter.forward_get(remote, "/api/v1/transcript/usage", query) do
+      {:forwarded, status, _content_type, body} ->
+        conn |> put_resp_content_type("application/json") |> send_resp(status, body)
+
+      {:error, _reason} ->
+        unavailable(conn, session, :host_unreachable, remote.name)
     end
   end
 
@@ -213,6 +251,7 @@ defmodule ShuttleWeb.TranscriptController do
   end
 
   defp http_status(:transcript_missing), do: 404
+  defp http_status(:usage_missing), do: 404
   defp http_status(:identity_pending), do: 409
   defp http_status(:host_unreachable), do: 503
 

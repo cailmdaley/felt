@@ -1,0 +1,2 @@
+{"type":"message","timestamp":"2026-10-03T15:39:21.687Z","message":{"role":"assistant","provider":"github-copilot","model":"gpt-6-luna","api":"openai-responses","stopReason":"toolUse","usage":{"input":3,"output":339,"cacheRead":0,"cacheWrite":16764,"reasoning":213,"totalTokens":17106,"cost":{"input":3.0000000000000004e-7,"output":0.0001695,"cacheRead":0,"cacheWrite":0.0020955,"total":0.0022653}}}}
+{"type":"compaction","timestamp":"2026-08-29T18:22:50.999Z","tokensBefore":258276}
