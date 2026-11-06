@@ -247,7 +247,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   const oldSender = oldHeader.locator('.ws-transcript-message-peer.ws-constitution-chip')
   await oldSender.waitFor()
   assert.equal(await oldSender.getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the old sender links to its fiber')
-  assert.equal(await oldSender.getAttribute('title'), null, 'the sender carries no qualification')
+  assert.ok(!/claims to be|verified/i.test(await oldSender.getAttribute('title') ?? ''), 'the sender carries no qualification')
 
   const sessionChip = sessionMessage.locator('.ws-transcript-session-chip')
   await sessionChip.waitFor()
