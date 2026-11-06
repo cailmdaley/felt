@@ -46,3 +46,10 @@ A message the worker has not yet taken in has no record at all: the chat shows i
 # Captured thread spawn
 
 `claude-shuttle-thread-command.jsonl` is a real Bash call from a chair's Claude Code session on 2026-10-22 that opened two threads with `shuttle thread … --slug …` and nested them with `felt nest`, with its real result. Only the tool-use id is replaced.
+
+# Thinking stored as narration
+
+`claude-thinking-narration.jsonl` keeps the shape of Claude Code 2.1.319 records read on 2026-11-06 from sessions run with `--thinking-display summarized`: one row per content block sharing a message id, with `apiBlockIndex`, `thinkingDurationMs` and a signature per thinking block.
+Claude Code writes an update it shows between tool calls as a `thinking` block. The server names the block's kind in the signature, a base64 protobuf, at field 2 > field 1 > field 8 (`thinking` or `narration`); signatures from before that field exist carry none.
+All text, identifiers and paths are written for the fixture, and each signature keeps the real envelope around zeroed payload bytes.
+The turn holds reasoning then an update in one message, an update alone in its message, two reasoning blocks that position alone would misread, two untagged blocks, a tagged block with empty text, and a final text answer.

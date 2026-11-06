@@ -144,6 +144,20 @@ test('The chat follows a live transcript by byte offset', async p => {
   assert.ok(Number(new URL(requests.at(-1).url, 'file:///').searchParams.get('offset')) > 0)
 })
 
+test('Claude\'s mid-turn updates read as messages between its steps, and its reasoning stays folded', async p => {
+  await p.goto(`${url}&transcript=narration`)
+  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await choose(p, 'Chat')
+  const band = selected(p).locator('.ws-transcript')
+  await band.getByText('Splits now close on their last bin').waitFor()
+  const rows = await band.locator('.ws-transcript-turn').last().locator('.ws-transcript-msg-agent, .ws-transcript-steps').evaluateAll(nodes =>
+    nodes.map(node => node.matches('.ws-transcript-steps') ? 'steps' : node.textContent.trim()))
+  assert.deepEqual(rows.map(row => row === 'steps' ? row : row.replace(/^.*?(I'm fixing|The threshold|Splits)/s, '$1').slice(0, 13)),
+    ['steps', "I'm fixing th", 'steps', 'The threshold', 'steps', 'Splits now cl'])
+  assert.equal(await band.getByText('I should check the log before I call this finished.').isVisible(), false, 'reasoning beside an update stays folded')
+  if (process.env.WORKSPACE_SHOTS) await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'narration.png') })
+})
+
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone-390', { width: 390, height: 844 }], ['phone-320', { width: 320, height: 844 }]]) test(`Shuttle messages are separate expandable chat rows (${device})`, async p => {
   await p.goto(`${url}&transcript=messages`)
   await p.locator('.kbn-card').filter({ hasText: name }).click()

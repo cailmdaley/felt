@@ -304,7 +304,7 @@ export class TranscriptModel {
             this.sourceRecords.set(entry.sourceRecord, { turn, start: stepIndex, count: 1, entries: [entry] })
           }
         }
-        if (entry.kind === 'text') turn.answer = turn.steps.length - 1
+        if (entry.kind === 'text' && !entry.narration) turn.answer = turn.steps.length - 1
         if (entry.kind === 'shuttle-message' && entry.direction === 'sent' && entry.toolId) {
           this.messagesByTool.set(entry.toolId, [...(this.messagesByTool.get(entry.toolId) ?? []), { message: entry, turn }])
         }
@@ -456,7 +456,7 @@ export class TranscriptModel {
     }
     turn.startedAt = times.length ? Math.min(...times) : undefined
     turn.endedAt = times.length ? Math.max(...times) : undefined
-    turn.answer = turn.steps.reduce((answer, step, index) => step.kind === 'text' ? index : answer, -1)
+    turn.answer = turn.steps.reduce((answer, step, index) => step.kind === 'text' && !step.narration ? index : answer, -1)
   }
 
   private touch(turn: Turn): void {

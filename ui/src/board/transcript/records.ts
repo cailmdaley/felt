@@ -22,7 +22,8 @@ export type Entry = (
   | ShuttleMessage
   | UsageEntry
   | { kind: 'prompt'; text: string; images: number; dispatch: boolean; at?: number }
-  | { kind: 'text'; text: string; at?: number; model?: string }
+  /** `narration` marks an update Claude gave mid-turn, which is drawn as text but is never the turn's answer. */
+  | { kind: 'text'; text: string; at?: number; model?: string; narration?: true }
   | { kind: 'thinking'; text: string; at?: number }
   | { kind: 'tool'; id: string; name: string; input: unknown; at?: number }
   | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; acceptedMessageReceipts?: ShuttleMessageReceipt[]; unknownMessageReceipts?: ShuttleMessageReceipt[]; commandOutcomes?: CommandOutcome[]; at?: number }
@@ -377,6 +378,53 @@ function claudeAttachment(record: ObjectValue, provenance: readonly MessageProve
   return images ? [at({ kind: 'prompt' as const, text: '', images, dispatch: false }, time)] : []
 }
 
+/** The last length-delimited `field` of a protobuf message. Throws where the field is absent or the bytes don't parse. */
+function protobufField(bytes: Uint8Array, field: number): Uint8Array {
+  let offset = 0
+  const varint = (): number => {
+    let value = 0
+    for (let scale = 1; ; scale *= 128) {
+      if (offset >= bytes.length) throw new RangeError('truncated varint')
+      const byte = bytes[offset++]
+      value += (byte & 127) * scale
+      if (byte < 128) return value
+    }
+  }
+  let found: Uint8Array | undefined
+  while (offset < bytes.length) {
+    const key = varint()
+    const wire = key % 8
+    if (wire === 0) varint()
+    else if (wire === 1) offset += 8
+    else if (wire === 5) offset += 4
+    else if (wire === 2) {
+      const length = varint()
+      if (Math.floor(key / 8) === field) found = bytes.subarray(offset, offset + length)
+      offset += length
+    } else throw new RangeError('unknown wire type')
+  }
+  if (offset > bytes.length || !found) throw new RangeError('no such field')
+  return found
+}
+
+/**
+ * Claude Code stores the updates it shows between tool calls as thinking blocks.
+ * The server names a block's kind inside its signature, a base64 protobuf, at
+ * field 2 > field 1 > field 8, and the terminal draws a block as a message by
+ * that kind alone. Older signatures carry no kind and read as reasoning.
+ */
+function isNarration(signature: unknown): boolean {
+  if (typeof signature !== 'string') return false
+  try {
+    const decoded = atob(signature)
+    const bytes = new Uint8Array(decoded.length)
+    for (let index = 0; index < decoded.length; index++) bytes[index] = decoded.charCodeAt(index)
+    return new TextDecoder().decode(protobufField(protobufField(protobufField(bytes, 2), 1), 8)) === 'narration'
+  } catch {
+    return false
+  }
+}
+
 function claudeRecord(record: ObjectValue, provenance: readonly MessageProvenance[]): Entry[] {
   if (record.isSidechain === true) return []
   if (record.type === 'attachment') return claudeAttachment(record, provenance)
@@ -411,7 +459,11 @@ function claudeRecord(record: ObjectValue, provenance: readonly MessageProvenanc
       out.push(at({ kind: 'text' as const, text: value, ...(model ? { model } : {}) }, time))
     } else if (block.type === 'thinking') {
       const thinking = string(block.thinking) ?? value
-      if (thinking?.trim()) out.push(at({ kind: 'thinking' as const, text: thinking }, time))
+      if (thinking?.trim()) {
+        out.push(at(isNarration(block.signature)
+          ? { kind: 'text' as const, text: thinking, narration: true as const, ...(model ? { model } : {}) }
+          : { kind: 'thinking' as const, text: thinking }, time))
+      }
     } else if (block.type === 'tool_use') {
       const id = string(block.id)
       const name = string(block.name)

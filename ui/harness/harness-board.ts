@@ -15,6 +15,7 @@
  * `?transcript=large` to exercise lazy reading of thousands of turns, or
  * `?example=workspace&transcript=search` stages the bar Find's constitutions and grouped transcript hits for "mask".
  * `?transcript=warm|cold|context` stages captured usage facts with a shifted timestamp.
+ * `?transcript=narration` stages Claude's mid-turn updates, stored as tagged thinking, between its steps.
  * `?identity=all` adds synthetic CLI workers with pending and failed session attribution.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
@@ -1718,7 +1719,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     const offset = offsetText === null ? 0 : Number(offsetText)
     if (!Number.isSafeInteger(offset)) return json({ error: 'offset must be a non-negative integer' }, 400)
-    const mode: TranscriptScenario = isLatest && ['live', 'messages', 'large', 'long-outcome', 'warm', 'cold', 'context', 'search', 'report'].includes(transcriptScenario ?? '')
+    const mode: TranscriptScenario = isLatest && ['live', 'messages', 'large', 'long-outcome', 'warm', 'cold', 'context', 'search', 'report', 'narration'].includes(transcriptScenario ?? '')
       ? transcriptScenario as TranscriptScenario : 'normal'
     const updates = mode === 'live' ? liveTranscriptReads++ : 0
     const bytes = workspaceTranscriptBytes(mode, now, { earlier: isEarlier, updates })
