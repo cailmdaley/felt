@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { loadConfigFile, saveConfigFile, type SettingsHost } from './settingsApi'
 import { useSettingsDraft } from './SettingsDraftContext'
 
-type Values = { words: number; quiet_seconds: number; cold_minutes: number }
-const defaults: Values = { words: 200, quiet_seconds: 15, cold_minutes: 5 }
+type Values = { words: number; quiet_seconds: number }
+const defaults: Values = { words: 200, quiet_seconds: 15 }
 
 export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: string; host: SettingsHost; onChanged: () => void }): JSX.Element {
   const [doc, setDoc] = useState<Record<string, unknown> | null>(null)
@@ -24,7 +24,6 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
       setValues({
         words: (parsed.words as number | undefined) ?? voice.words ?? meeting.words ?? defaults.words,
         quiet_seconds: (parsed.quiet_seconds as number | undefined) ?? voice.quiet_seconds ?? meeting.quiet_seconds ?? defaults.quiet_seconds,
-        cold_minutes: (parsed.cold_minutes as number | undefined) ?? defaults.cold_minutes,
       })
     }).catch((err: Error) => { if (!cancelled) setError(err.message) })
     return () => { cancelled = true }
@@ -45,8 +44,8 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
     {error && <div className="set-error" role="alert">{error}</div>}
     {!doc && !error && <div className="set-empty">Reading…</div>}
     {doc && <form onSubmit={event => { event.preventDefault(); void save() }}>
-      <ul className="set-list">{(['words', 'quiet_seconds', 'cold_minutes'] as const).map(field => <li className="set-row" key={field}>
-        <label className="set-row-main">{field === 'words' ? 'Words' : field === 'quiet_seconds' ? 'Quiet seconds' : 'Cold-worker minutes'}{' '}
+      <ul className="set-list">{(['words', 'quiet_seconds'] as const).map(field => <li className="set-row" key={field}>
+        <label className="set-row-main">{field === 'words' ? 'Words' : 'Quiet seconds'}{' '}
           <input className="set-select" type="number" min={field === 'words' ? '1' : '0.001'} step={field === 'words' ? '1' : 'any'} required value={values[field]} onChange={event => {
             setValues({ ...values, [field]: Number(event.target.value) }); setDirty(true)
           }} />

@@ -1,28 +1,13 @@
 defmodule Shuttle.Voice.Target do
   @moduledoc "Classifies voice targets from the owner's published worker activity."
 
+  @doc "A target is cold when it has no live worker; a live worker idle at its prompt is warm."
   def cold?(target) do
-    minutes =
-      case Shuttle.Voice.Config.read() do
-        {:ok, config} -> config["cold_minutes"]
-        _ -> 5
-      end
-
     # Only the worker's own host publishes its runtime; other stores carry
     # the same fiber without one.
-    runtime =
-      Shuttle.Env.app(:voice_target_entries, &entries/0).()
-      |> Enum.find_value(&(matches?(&1, target) && (&1[:runtime] || &1["runtime"])))
-
-    cold_runtime?(runtime, minutes, System.system_time(:millisecond))
-  end
-
-  def cold_runtime?(nil, _minutes, _now), do: true
-
-  def cold_runtime?(runtime, minutes, now) do
-    phase = runtime[:phase] || runtime["phase"]
-    at = runtime[:last_activity_at] || runtime["last_activity_at"]
-    phase != "working" and (not is_number(at) or now - at >= minutes * 60_000)
+    Shuttle.Env.app(:voice_target_entries, &entries/0).()
+    |> Enum.find_value(&(matches?(&1, target) && (&1[:runtime] || &1["runtime"])))
+    |> is_nil()
   end
 
   defp entries do

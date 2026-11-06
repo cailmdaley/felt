@@ -421,8 +421,7 @@ An optional `recorder` selects the recording daemon, independently of the receiv
 Without it, the receiving daemon is the recorder.
 `state` is `off`, `starting`, `listening`, `yielded` (a meeting owns the microphone), or `failed`.
 `target` is `{fiber_id, origin, name}` or `null`.
-`cold` says whether the selected target is dormant or has been idle for at least `cold_minutes`.
-A working target is warm regardless of the age of its last event; unknown or stale owner activity is cold.
+`cold` says whether the selected target has no live worker. A live worker is warm, however long it has been idle; a target whose owner cannot be read is cold.
 `held` is a list of `{id, fiber_id, origin, after, through, text, segments}`, speech waiting for a cold target, retained across target switches, mute, recorder replacement and daemon restart.
 `pending` is `{fiber_id, words, text}` or `null`, holding finalized warm speech before a delivery trigger.
 `preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.
@@ -453,7 +452,7 @@ An unreadable or malformed route journal, or a failed recovery truncation, leave
 It defaults to:
 
 ```json
-{"enabled": false, "words": 200, "quiet_seconds": 15, "cold_minutes": 5}
+{"enabled": false, "words": 200, "quiet_seconds": 15}
 ```
 
 The word limit is a positive integer; the quiet interval is a positive number of seconds.
@@ -462,7 +461,6 @@ The quiet interval is the one pause that means the speaker is done. Shuttle laun
 A `run_quiet_seconds` key is dropped when the file is read and when it is saved.
 For existing nested settings, each top-level value takes precedence, followed by `voice`, then `meeting`, then the default.
 Saving Listening settings replaces the nested `voice` and `meeting` objects with the shared top-level values, preserving other top-level fields.
-`cold_minutes` is the positive number of minutes after which a worker is cold.
 `POST /voice` with `enabled: false` can repair an invalid operator file by replacing it with disabled defaults. Valid files retain their thresholds and unknown keys.
 The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `claw`, `klaud`, `clot`, `clock`, `clod`, `claud`), or quiet since the last spoken line.
 Name detection is always on.

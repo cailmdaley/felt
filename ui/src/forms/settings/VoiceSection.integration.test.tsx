@@ -17,8 +17,8 @@ it('saves shared listening settings on the selected host without dropping other 
   await act(async () => { root.render(<VoiceSection shuttleBase="" host={host} onChanged={vi.fn()} />) })
   expect(container.querySelector('input[type=checkbox]')).toBeNull()
   expect(container.textContent).toContain('Quiet seconds')
-  expect(container.textContent).toContain('Cold-worker minutes')
-  expect(container.querySelectorAll<HTMLInputElement>('input[type=number]')).toHaveLength(3)
+  expect(container.textContent).not.toContain('Cold-worker minutes')
+  expect(container.querySelectorAll<HTMLInputElement>('input[type=number]')).toHaveLength(2)
   const quiet = container.querySelectorAll<HTMLInputElement>('input[type=number]')[1]
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(quiet, '0.5')
@@ -29,7 +29,7 @@ it('saves shared listening settings on the selected host without dropping other 
   expect(api.save).toHaveBeenCalledOnce()
   const [, owner, id, text, digest] = api.save.mock.calls[0]
   expect(owner).toEqual(host); expect(id).toBe('voice'); expect(digest).toBe('before')
-  expect(JSON.parse(text)).toEqual({ enabled: false, words: 23, quiet_seconds: 0.5, cold_minutes: 5, other: true })
+  expect(JSON.parse(text)).toEqual({ enabled: false, words: 23, quiet_seconds: 0.5, other: true })
   expect(api.load).toHaveBeenCalledTimes(1)
   act(() => root.unmount())
 })

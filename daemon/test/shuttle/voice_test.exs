@@ -56,16 +56,12 @@ defmodule Shuttle.VoiceTest do
 
     assert {:ok,
             %{
-              "cold_minutes" => 5,
               "words" => 200,
               "quiet_seconds" => 15
             }} = Config.read()
 
     for invalid <- [
           %{"enabled" => "yes"},
-          %{"cold_minutes" => 0},
-          %{"cold_minutes" => -1},
-          %{"cold_minutes" => "5"},
           %{"words" => 0},
           %{"voice" => %{"words" => 0, "quiet_seconds" => 4}},
           %{"meeting" => %{"words" => 5, "quiet_seconds" => -1}},
@@ -120,14 +116,6 @@ defmodule Shuttle.VoiceTest do
 
   test "coldness follows owner runtime activity, with dormant and unknown targets held" do
     alias Shuttle.Voice.Target
-    now = 1_000_000
-    assert Target.cold_runtime?(nil, 5, now)
-    assert Target.cold_runtime?(%{}, 5, now)
-    refute Target.cold_runtime?(%{phase: "working", last_activity_at: 0}, 5, now)
-    refute Target.cold_runtime?(%{phase: "waiting", last_activity_at: now - 299_999}, 5, now)
-    assert Target.cold_runtime?(%{phase: "waiting", last_activity_at: now - 300_000}, 5, now)
-    assert Target.cold_runtime?(%{"phase" => "attention", "last_activity_at" => 0}, 5, now)
-    refute Target.cold_runtime?(%{phase: "waiting", last_activity_at: now - 60_000}, 2, now)
 
     entries = [
       %{fiber: %{"id" => "path/a", "uid" => "uid-a", "shuttle" => %{"host" => "owner"}}},
@@ -141,6 +129,14 @@ defmodule Shuttle.VoiceTest do
     refute Target.cold?(%{"fiber_id" => "uid-a", "origin" => "owner"})
     assert Target.cold?(%{"fiber_id" => "a", "origin" => "other"})
     assert Target.cold?(%{"fiber_id" => "dormant", "origin" => "owner"})
+    # A live worker waiting at its prompt for hours is warm.
+    idle = %{
+      fiber: %{"id" => "idle", "shuttle" => %{"host" => "owner"}},
+      runtime: %{phase: "waiting", last_activity_at: 0}
+    }
+
+    Env.put_app_env(:voice_target_entries, fn -> [idle] end)
+    refute Target.cold?(%{"fiber_id" => "idle", "origin" => "owner"})
   end
 
   test "resolved edited-payload recovery is exposed instead of a generic failed delivery", c do

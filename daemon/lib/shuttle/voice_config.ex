@@ -9,7 +9,6 @@ defmodule Shuttle.Voice.Config do
 
   @defaults %{
     "enabled" => false,
-    "cold_minutes" => 5,
     "words" => 200,
     "quiet_seconds" => 15
   }
@@ -45,6 +44,7 @@ defmodule Shuttle.Voice.Config do
 
   defp normalize(config) do
     legacy = Map.merge(Map.get(config, "meeting", %{}), Map.get(config, "voice", %{}))
+
     @defaults
     |> Map.merge(Map.take(legacy, ~w(words quiet_seconds)))
     |> Map.merge(Map.delete(config, "run_quiet_seconds"))
@@ -54,10 +54,6 @@ defmodule Shuttle.Voice.Config do
     cond do
       not is_boolean(Map.get(config, "enabled", false)) ->
         {:error, "enabled must be a boolean"}
-
-      not (is_number(Map.get(config, "cold_minutes", 5)) and
-               Map.get(config, "cold_minutes", 5) > 0) ->
-        {:error, "cold_minutes must be positive"}
 
       not Enum.all?(~w(voice meeting), &is_map(Map.get(config, &1, %{}))) ->
         {:error, "voice and meeting settings must be objects"}

@@ -294,7 +294,7 @@ export class ListenControl {
       this.item('Turn off Follow me', () => set({ enabled: false }))
       this.note('Follow me returns when this recording stops.')
     }
-    for (const held of state?.held ?? []) this.note(`Held for ${held.fiber_id.split("/").at(-1)} until you say its name: ${held.text}`)
+    for (const held of state?.held ?? []) this.note(`Held for ${held.fiber_id.split("/").at(-1)} until its worker is up and you speak to it: ${held.text}`)
     if (failure) this.note(failure)
     menu.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.dismiss() }
