@@ -219,6 +219,8 @@ defmodule Shuttle.Meeting do
                "--voice",
                "--settings",
                Shuttle.Voice.Config.path(),
+               "--routes",
+               Shuttle.Voice.routes_path(),
                "-o",
                transcript,
                "--launch=" <> launch,
