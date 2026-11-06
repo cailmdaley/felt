@@ -158,6 +158,7 @@ try do
   for module <- [
         Shuttle.EventStream,
         Shuttle.Voice,
+        Shuttle.RexFocus,
         Shuttle.Poller,
         Shuttle.InterruptWatcher,
         Shuttle.LogRotator,

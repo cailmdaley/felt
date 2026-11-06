@@ -190,6 +190,77 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{state: "off", muted: false}} = Voice.update(%{"muted" => false})
   end
 
+  test "Rex focus warnings appear in status, clear on recovery, and do not hide recorder failures",
+       c do
+    Voice.focus_error("Rex needs Accessibility access")
+    assert %{error: "Rex needs Accessibility access"} = Voice.show()
+    assert {:ok, _} = Voice.update(%{})
+    assert %{error: "Rex needs Accessibility access"} = Voice.show()
+    Voice.focus_error(nil)
+    assert %{error: nil} = Voice.show()
+
+    stop_supervised!(Voice)
+
+    Env.start_scoped!(
+      {Voice, Keyword.put(c.opts, :reconcile, fn _, _ -> {:error, :capture_failed} end)}
+    )
+
+    assert {:ok, %{error: capture_error}} = Voice.update(%{})
+    Voice.focus_error("Rex needs Accessibility access")
+    assert %{error: ^capture_error} = Voice.show()
+  end
+
+  test "a Voice-only restart restores the active Rex fallback warning", c do
+    watcher =
+      Env.start_scoped!(
+        {Shuttle.RexFocus,
+         name: nil,
+         poll_ms: 60_000,
+         active?: fn -> true end,
+         title: fn -> {:error, :accessibility} end,
+         command: fn -> nil end}
+      )
+
+    :sys.get_state(watcher)
+    assert %{error: warning} = Voice.show()
+    assert warning =~ "Accessibility"
+    stop_supervised!(Voice)
+    replacement = Env.start_scoped!({Voice, c.opts})
+    assert replacement != c.pid
+    assert {:ok, %{enabled: true}} = Voice.update(%{"enabled" => true})
+    assert %{error: nil} = Voice.show()
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    assert %{enabled: true, error: ^warning} = Voice.show()
+  end
+
+  test "Rex focus selects only while following and cannot move a fixed recording", c do
+    params = %{"fiber_id" => "project/rex", "source" => "rex"}
+    assert {:ok, %{target: nil}} = Voice.target(params)
+    refute File.exists?(Voice.routes_path())
+
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
+    assert {:ok, %{target: %{"fiber_id" => "project/rex"}}} = Voice.target(params)
+    bytes = File.read!(Voice.routes_path())
+
+    # Persisted off wins even before recorder reconciliation updates the snapshot.
+    assert :ok = Config.enable(false)
+    assert {:ok, _} = Voice.target(%{params | "fiber_id" => "project/off"})
+    assert bytes == File.read!(Voice.routes_path())
+
+    Agent.update(c.observed, fn _ ->
+      %{available: true, meeting: %{kind: "meeting", launch: "fixed", state: "live"}}
+    end)
+
+    assert {:ok, %{enabled: true, state: "yielded"}} = Voice.update(%{"enabled" => true})
+    assert {:ok, _} = Voice.target(%{params | "fiber_id" => "project/fixed"})
+    assert bytes == File.read!(Voice.routes_path())
+
+    # Board selection still uses the same route journal while following is off.
+    assert {:ok, %{target: %{"fiber_id" => "project/board"}}} =
+             Voice.target(%{"fiber_id" => "project/board"})
+  end
+
   test "target receipt time is durable and restored by a fresh supervisor", c do
     assert {:ok, %{target: %{"fiber_id" => "project/first"}}} =
              Voice.target(%{"fiber_id" => "project/first"})

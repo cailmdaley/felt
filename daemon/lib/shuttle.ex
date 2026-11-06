@@ -223,7 +223,10 @@ defmodule Shuttle.Application do
         do: core ++ [Shuttle.Meeting.TranscriptRelay],
         else: core
 
-    core = if Shuttle.Env.app(:start_voice, true), do: core ++ [Shuttle.Voice], else: core
+    core =
+      if Shuttle.Env.app(:start_voice, true),
+        do: core ++ [Shuttle.Voice, Shuttle.RexFocus],
+        else: core
 
     Enum.map(core, &Supervisor.child_spec(&1, [])) ++
       [
