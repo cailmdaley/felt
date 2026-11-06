@@ -418,7 +418,9 @@ describe('anchored pickers', () => {
     recording = null
     meetingDock.syncMeeting()
     expect(join).toHaveBeenCalledWith(expect.objectContaining({ id: 'foreign/chat' }), 'call', expect.any(Function), { session: 'previous', systemAudio: true })
+    expect(band.el.querySelector('.kbn-ctl-meet-label')?.textContent).toBe('Meeting')
     await flush()
+    expect(band.el.querySelector('.kbn-ctl-meet-label')?.textContent).toBe('Meeting')
     meetingDock.reset()
   })
 

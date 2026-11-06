@@ -501,7 +501,7 @@ export class Dock {
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
   private meetingArmed: () => boolean = () => false
-  private meetingStart: ((mode: SessionMode, verb: HTMLButtonElement) => void) | null = null
+  private meetingStart: ((mode: SessionMode, verb?: HTMLButtonElement) => void) | null = null
   private dismissParent: (() => boolean) | null = null
   private dismissConversation: (() => boolean) | null = null
   private composerSend: ComposerSend | null = null
@@ -1497,21 +1497,9 @@ export class Dock {
     }
   }
 
-  /**
-   * Meeting, for this constitution: a toggle in the composer's control row.
-   * Off by default. While it is on, the composer's verbs carry a meeting:
-   * New session, Resume or Send starts recording on the daemon and hands that
-   * session the meeting, with the composer's message and its images' lines as
-   * the note. Nothing records before that press; mobile opens this tab's mic
-   * in the press's gesture and keeps its controls on the board.
-   *
-   * A desktop call exposes its audio choice through an arrow inside the toggle while it is on.
-   *
-   * One meeting records at a time. While any does, one Recording button
-   * replaces the idle toggle and holds the recording actions in its menu. It is also disabled
-   * when the device's required audio mode is unavailable. It follows the
-   * board's meeting poll. `onArm` hears the toggle so the composer can repaint.
-   */
+  /** The shared Hark control arms a meeting or manages the current recording;
+   * its menu holds the audio choice and live-voice controls. Armed composer
+   * verbs start the recording and deliver the note and images to the session. */
   private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: () => void, box?: HTMLElement): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
@@ -1553,6 +1541,7 @@ export class Dock {
     let menu: HTMLElement | null = null
     let release: Release | null = null
     let localError: string | null = null
+    let voiceAvailable = !!this.voice?.controller.status?.available
     const closeMenu = (): void => {
       release?.(); release = null
       menu?.remove(); menu = null
@@ -1569,6 +1558,7 @@ export class Dock {
       armed = on
       armButton.setAttribute('aria-pressed', String(on))
       armButton.classList.toggle('kbn-ctl-meet-on', on)
+      armButton.title = on ? 'Sending starts recording' : word.textContent ?? 'Meeting'
       onArm()
     }
     arm(false)
@@ -1582,16 +1572,21 @@ export class Dock {
       armButton.disabled = !recording && held
       audio.disabled = held || recording
       const voice = this.voice?.controller.status
+      if (voiceAvailable && !voice?.available) closeMenu()
+      voiceAvailable = !!voice?.available
+      const voiceNotes = !!voice?.available && (!!localError || (voice.state === 'failed' && !!voice.error) || voice.last?.status === 'failed' || voice.last?.status === 'unconfirmed')
+      const hasMenu = requiredMode() === 'call' || recording || !!(current?.state === 'failed' && current.error) || !!(current && meetingHandoffWarning(current)) || !!voiceNotes || (!!voice?.available && elsewhere(voice.target))
+      dropdown.hidden = !hasMenu
       let label = 'Meeting'
       if (recording) {
         const hosted = meetingHostCard(current, [card]) !== null
         const host = this.meetingHostName?.(current) ?? (hosted ? card.name : current.fiber?.split('/').at(-1)) ?? current.title?.trim() ?? 'Meeting'
         label = `Recording · ${host}`
-      } else if (voice?.available && voice.enabled) {
+      } else if (voice?.available && (voice.enabled || localError || voice.state === 'failed')) {
         label = localError || voice.state === 'failed' ? 'Failed' : voice.muted ? 'Muted' : voice.state === 'starting' ? 'Starting' : voice.state === 'yielded' ? 'Meeting' : voice.target ? (elsewhere(voice.target) ? voice.target.name : 'Here') : 'No target'
       }
       word.textContent = label
-      armButton.title = label
+      armButton.title = armed ? 'Sending starts recording' : label
       armButton.setAttribute('aria-label', label)
       const text = voice && matches(voice.pending?.fiber_id) ? voice.pending!.text : ''
       if (pending.textContent !== text) {
@@ -1664,7 +1659,7 @@ export class Dock {
       }
       menu.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); dropdown.focus() }
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && event.target !== audio) {
           event.preventDefault()
           const items = [...menu!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
           const at = items.indexOf(document.activeElement as HTMLButtonElement)
@@ -1696,7 +1691,7 @@ export class Dock {
       if (mode === 'fresh' && !this.confirmCut(card)) return
       starting = true
       send.setBusy(true)
-      verb.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
+      if (verb) verb.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
       err.style.display = 'none'
       // The join is called inside the press's gesture, so Phone can open the
       // mic; it resolves the note (uploading any images) after that.
@@ -1728,7 +1723,7 @@ export class Dock {
     }
     this.meetingStartHere = () => {
       arm(true)
-      this.meetingStart?.(card.sessionUuid ? 'previous' : 'fresh', armButton)
+      this.meetingStart?.(card.sessionUuid ? 'previous' : 'fresh')
     }
     wrap.append(armButton, dropdown)
     paint()

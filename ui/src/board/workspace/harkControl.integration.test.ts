@@ -40,6 +40,10 @@ it('keeps one shared control through idle, listening, mute, recording and yield'
   v.voice.status = { ...status, enabled: true, state: 'listening', pending: { fiber_id: 'a', words: 2, text: 'hello there' } }; notify(v.voice)
   check('Here')
   expect(v.root.querySelector('.voice-pending')!.textContent).toBe('hello there')
+  v.main().click()
+  expect(v.main().classList.contains('kbn-ctl-meet-on')).toBe(true)
+  expect(v.main().title).toBe('Sending starts recording')
+  v.main().click()
   v.dropdown().click(); expect(v.menuItems().map(x => x.textContent)).toContain('Mute'); v.dropdown().click()
   v.voice.status = { ...v.voice.status, muted: true }; notify(v.voice); check('Muted')
   v.dropdown().click(); expect(v.menuItems().map(x => x.textContent)).toContain('Unmute'); v.dropdown().click()
@@ -62,9 +66,33 @@ it('shows failures and unconfirmed notes; voice actions retain error feedback', 
   v.dock.reset()
 })
 
+it('shows a failed attempt to turn voice on even while it remains disabled', async () => {
+  const v = mount()
+  vi.spyOn(v.voice, 'set').mockRejectedValue(new Error('Cannot start'))
+  v.dropdown().click(); v.menuItems().find(x => x.textContent === 'Turn voice on')!.click()
+  await Promise.resolve(); await Promise.resolve()
+  expect(v.main().textContent).toBe('Failed')
+  v.dropdown().click(); expect(v.root.textContent).toContain('Cannot start')
+  v.voice.status = { ...status, available: false }; notify(v.voice)
+  expect(v.root.querySelector('[role=menu]')).toBeNull()
+  v.dock.reset()
+})
+
+it('lets native audio select handle arrow keys', () => {
+  const v = mount()
+  v.dropdown().click()
+  const audio = v.root.querySelector<HTMLSelectElement>('.kbn-ctl-meet-audio')!
+  const event = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+  audio.dispatchEvent(event)
+  expect(event.defaultPrevented).toBe(false)
+  v.dock.reset()
+})
+
 it('keeps voice read-only on mobile and can open the target', () => {
   const v = mount(true)
+  expect(v.dropdown().hidden).toBe(true)
   v.voice.status = { ...status, enabled: true, state: 'listening', target: { fiber_id: 'other', origin: 'remote', name: 'Elsewhere' } }; notify(v.voice)
+  expect(v.dropdown().hidden).toBe(false)
   expect(v.main().textContent).toBe('Elsewhere')
   v.dropdown().click()
   expect(v.menuItems().map(x => x.textContent)).toEqual(['Open Elsewhere'])

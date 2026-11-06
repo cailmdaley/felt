@@ -186,15 +186,21 @@
 /* Verbs inside the field: the default one is a plate, the others are words. */
 .ws-dock .kbn-ctl-composer .kbn-ctl-btn { min-height: var(--ctl-h); padding-inline: 10px; border-color: transparent !important; background-color: transparent; color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-composer .kbn-ctl-send:not(.kbn-ctl-secondary) { border-color: var(--ws-hairline) !important; background-color: var(--ws-fill); color: var(--ws-ink); }
-.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; width: 150px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-fill); }
+.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: 0 1 150px; width: 150px; min-width: 65px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-fill); }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; padding: 0 4px 0 8px; border: 0; background: transparent; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-meet-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-dock .kbn-ctl-meet-arm svg { display: block; flex: none; width: 16px; height: 16px; }
-.ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm.kbn-ctl-meet-on { color: var(--ws-ink); }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm.kbn-ctl-meet-on { color: var(--ws-ink); background: var(--ws-hover); box-shadow: inset 0 0 0 1px var(--ws-ink); border-radius: var(--ws-control-radius); }
 .ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
 .ws-dock .kbn-ctl-meet-dropdown { flex: none; width: 25px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); cursor: pointer; }
+.ws-dock .kbn-ctl-meet-dropdown[hidden] { display: none; }
+@media (pointer: coarse) { .ws-dock .kbn-ctl-meet-dropdown { width: 44px; min-height: 44px; } }
 .ws-dock .kbn-ctl-meet-audio-label { display: grid; gap: 4px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-meet .ws-select-option { font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+@container (max-width: 360px) {
+  .ws-chat .kbn-ctl-meet { flex-basis: 70px; }
+  .ws-chat .kbn-ctl-meet-label { display: none; }
+}
 .voice-pending { position: absolute; inset: auto 8px 100% 8px; max-height: 5em; overflow-y: auto; color: var(--ws-ink-muted); background: var(--ws-paper); font-size: var(--type-note); white-space: pre-wrap; }
 .voice-error { padding: 8px 10px; max-width: 260px; font-size: var(--type-note); color: var(--ws-ink-muted); white-space: normal; }
 /* A finger leaves :hover behind on what it tapped; only a pointer hovers. */
