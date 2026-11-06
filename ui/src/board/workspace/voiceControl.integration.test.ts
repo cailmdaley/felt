@@ -5,7 +5,7 @@ import { Voice, type VoiceStatus } from '../voice'
 import { voiceControl } from './voiceControl'
 
 const status: VoiceStatus = { available: true, enabled: true, muted: false, state: 'listening', target: { fiber_id: 'a', origin: 'local', name: 'Alpha' }, pending: { fiber_id: 'a', words: 2, text: 'hello there' }, last: null, error: null }
-afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
+afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 it('shows pending words only on their card and replaces them when sent', () => {
   const voice = new Voice('')
   voice.status = status
@@ -22,4 +22,19 @@ it('shows pending words only on their card and replaces them when sent', () => {
   expect(here.pending.textContent).toBe('')
   expect(here.chip.textContent).toBe('Voice · Meeting')
   here.dispose(); away.dispose()
+})
+it('keeps the mobile menu read-only while still allowing the destination to open', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true }))
+  const voice = new Voice('')
+  voice.status = status
+  const open = vi.fn()
+  const control = voiceControl(voice, card({ id: 'b' }), open)
+  const composer = document.createElement('div'); composer.className = 'kbn-ctl-composer'
+  composer.append(control.chip); document.body.append(composer)
+  ;(control.chip as HTMLButtonElement).click()
+  const items = [...document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')]
+  expect(items.map(item => item.textContent)).toEqual(['Open Alpha'])
+  items[0].click()
+  expect(open).toHaveBeenCalledWith('a', 'local')
+  control.dispose()
 })
