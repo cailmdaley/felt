@@ -10,6 +10,8 @@ defmodule Shuttle.Meeting.TranscriptRelay do
   def start(row, fiber_id, origin, opts \\ []) do
     server = Keyword.get(opts, :server, __MODULE__)
     GenServer.call(Module.concat(server, Coordinator), {:start, row, fiber_id, origin})
+  catch
+    :exit, reason -> {:error, reason}
   end
 
   def targets_changed do
@@ -60,6 +62,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
       dynamic: Keyword.fetch!(opts, :dynamic),
       options: opts,
       workers: %{},
+      errors: %{},
       deliver: Keyword.get(opts, :deliver, &Shuttle.Meeting.TranscriptRelay.Worker.deliver/1),
       lanes: %{},
       deliveries: %{}
@@ -76,20 +79,33 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
         _ -> []
       end
 
-    configs =
-      for file <- files,
-          String.ends_with?(file, ".json"),
-          {:ok, bytes} <- [Shuttle.FS.read(Path.join(state.directory, file))],
-          {:ok, %{"launch" => _} = config} <- [Jason.decode(bytes)],
-          config["completed"] != true,
-          do: config
+    {configs, errors} =
+      Enum.reduce(files, {[], %{}}, fn file, {configs, errors} ->
+        if String.ends_with?(file, ".json") do
+          case Shuttle.Meeting.TranscriptRelay.Worker.load(Path.join(state.directory, file)) do
+            {:ok, %{"completed" => true}} -> {configs, errors}
+            {:ok, config} -> {[config | configs], errors}
+            {:error, reason} -> {configs, Map.put(errors, Path.rootname(file), inspect(reason))}
+          end
+        else
+          {configs, errors}
+        end
+      end)
 
+    state = %{state | errors: errors}
     configs = Enum.sort_by(configs, &(&1["created_at"] || ""))
 
     # Reserve recovered batches before any worker can submit a new one.
     # Hash filenames and process scheduling don't define conversation order.
     state = Enum.reduce(configs, state, &reserve_batches/2)
-    state = Enum.reduce(configs, state, fn config, acc -> elem(start_worker(acc, config), 1) end)
+
+    state =
+      Enum.reduce(configs, state, fn config, acc ->
+        case start_worker(acc, config) do
+          {{:error, _}, acc} -> release_reservations(acc, config["outbox"])
+          {_, acc} -> acc
+        end
+      end)
 
     {:noreply, state}
   end
@@ -104,9 +120,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
       "origin" => origin,
       "transcript" => transcript,
       "kind" => value(row, :kind) || "meeting",
-      "title" => value(row, :title) || Path.basename(transcript || "meeting.txt", ".txt"),
+      "title" => value(row, :title) || transcript_title(transcript),
       "created_at" => DateTime.to_iso8601(DateTime.utc_now()),
       "routes_path" => value(row, :routes_path),
+      "started_at" => value(row, :started_at),
       "offset" => 0,
       "json_offset" => 0,
       "route_offset" => 0,
@@ -116,11 +133,17 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
       "ended" => false
     }
 
-    if Enum.all?([config["launch"], transcript], &(is_binary(&1) and &1 != "")) do
-      {reply, state} = start_worker(state, config)
-      {:reply, if(match?({:ok, _}, reply), do: :ok, else: reply), state}
-    else
-      {:reply, {:error, :invalid_meeting}, state}
+    cond do
+      not Enum.all?([config["launch"], transcript], &(is_binary(&1) and &1 != "")) ->
+        {:reply, {:error, :invalid_meeting}, state}
+
+      config["kind"] == "voice" and not valid_start?(config["started_at"]) ->
+        {reply, state} = start_error(state, config["launch"], :capture_start_required)
+        {:reply, reply, state}
+
+      true ->
+        {reply, state} = start_worker(state, config)
+        {:reply, if(match?({:ok, _}, reply), do: :ok, else: reply), state}
     end
   end
 
@@ -131,11 +154,11 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
           try do
             GenServer.call(pid, :status)
           catch
-            :exit, _ -> %{pending: nil, last: nil}
+            :exit, _ -> %{pending: nil, last: nil, error: "relay unavailable"}
           end
 
         nil ->
-          %{pending: nil, last: nil}
+          %{pending: nil, last: nil, error: state.errors[digest(launch)]}
       end
 
     {:reply, status, state}
@@ -189,9 +212,39 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
     {:noreply, put_in(state.workers[launch], {pid, Process.monitor(pid)})}
   end
 
+  def handle_info({:relay_error, outbox}, state) do
+    {:noreply, release_reservations(state, outbox)}
+  end
+
   @impl true
   def terminate(_reason, state) do
     Enum.each(state.deliveries, fn {_ref, {_key, task}} -> Task.shutdown(task, :brutal_kill) end)
+  end
+
+  # A quarantined relay keeps its durable outbox, but cannot hold a lane
+  # with a reservation it will never attach a delivery request to.
+  defp release_reservations(state, outbox) do
+    ids = MapSet.new(outbox, & &1["message_id"])
+
+    Enum.reduce(state.lanes, state, fn {key, lane}, acc ->
+      remaining =
+        Enum.reject(lane, fn {owner, message} ->
+          is_nil(owner) and MapSet.member?(ids, message.message_id)
+        end)
+
+      cond do
+        remaining == [] ->
+          %{acc | lanes: Map.delete(acc.lanes, key)}
+
+        remaining == lane ->
+          acc
+
+        true ->
+          acc = put_in(acc.lanes[key], remaining)
+          busy = Enum.any?(acc.deliveries, fn {_, {target, _}} -> target == key end)
+          if busy, do: acc, else: launch_delivery(acc, key)
+      end
+    end)
   end
 
   defp reserve_batches(config, state) do
@@ -233,6 +286,17 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
   end
 
   defp start_worker(state, config) do
+    do_start_worker(state, config)
+  rescue
+    error -> start_error(state, config["launch"], Exception.message(error))
+  catch
+    :exit, reason -> start_error(state, config["launch"], reason)
+  end
+
+  defp start_error(state, launch, reason),
+    do: {{:error, reason}, put_in(state.errors[digest(launch)], inspect(reason))}
+
+  defp do_start_worker(state, config) do
     launch = config["launch"]
 
     case state.workers[launch] do
@@ -240,32 +304,31 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
         {{:ok, pid}, state}
 
       nil ->
-        digest = :crypto.hash(:sha256, launch) |> Base.encode16(case: :lower)
-        path = Path.join(state.directory, digest <> ".json")
+        path = Path.join(state.directory, digest(launch) <> ".json")
 
         with :ok <- Shuttle.FS.mkdir_p(state.directory),
              :ok <- ensure_config(path, config),
-             false <- completed?(path),
+             {:ok, saved} <- Shuttle.Meeting.TranscriptRelay.Worker.load(path),
+             false <- saved["completed"] == true,
              opts <- Keyword.merge(state.options, file: path, coordinator: self()),
              {:ok, pid} <-
                DynamicSupervisor.start_child(
                  state.dynamic,
                  {Shuttle.Meeting.TranscriptRelay.Worker, opts}
                ) do
+          state = %{state | errors: Map.delete(state.errors, digest(launch))}
           {{:ok, pid}, put_in(state.workers[launch], {pid, Process.monitor(pid)})}
         else
-          true -> {{:ok, :completed}, state}
-          {:error, reason} -> {{:error, reason}, state}
+          true ->
+            {{:ok, :completed}, %{state | errors: Map.delete(state.errors, digest(launch))}}
+
+          {:error, reason} ->
+            start_error(state, launch, reason)
         end
     end
   end
 
-  defp completed?(path) do
-    with {:ok, bytes} <- Shuttle.FS.read(path),
-         {:ok, %{"completed" => true}} <- Jason.decode(bytes),
-         do: true,
-         else: (_ -> false)
-  end
+  defp digest(launch), do: :crypto.hash(:sha256, launch) |> Base.encode16(case: :lower)
 
   defp ensure_config(path, config) do
     if Shuttle.FS.exists?(path),
@@ -273,7 +336,18 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
       else: Shuttle.FS.write_atomic(path, Jason.encode!(config) <> "\n")
   end
 
-  defp value(row, key), do: Map.get(row, key) || Map.get(row, Atom.to_string(key))
+  defp valid_start?(value) when is_binary(value),
+    do: match?({:ok, _, _}, DateTime.from_iso8601(value))
+
+  defp valid_start?(_), do: false
+
+  defp transcript_title(path) when is_binary(path), do: Path.basename(path, ".txt")
+  defp transcript_title(_), do: "meeting"
+
+  defp value(row, key) when is_map(row),
+    do: Map.get(row, key) || Map.get(row, Atom.to_string(key))
+
+  defp value(_, _), do: nil
 end
 
 defmodule Shuttle.Meeting.TranscriptRelay.Worker do
@@ -297,12 +371,14 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   def init(opts) do
     Process.flag(:trap_exit, true)
     file = Keyword.fetch!(opts, :file)
-    {:ok, bytes} = Shuttle.FS.read(file)
-    config = Jason.decode!(bytes) |> normalize()
+    {:ok, config} = load(file)
 
     state = %{
       file: file,
       config: config,
+      persisted: config,
+      error: nil,
+      coordinator: Keyword.fetch!(opts, :coordinator),
       poll_ms: Keyword.get(opts, :poll_ms, 1_000),
       deliver: fn message ->
         GenServer.call(Keyword.fetch!(opts, :coordinator), {:deliver, message}, :infinity)
@@ -341,11 +417,35 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
           text: Enum.join(buffer["lines"], "\n")
         }
 
-    {:reply, %{pending: pending, last: state.config["last"]}, state}
+    {:reply, %{pending: pending, last: state.config["last"], error: state.error}, state}
   end
 
   @impl true
+  def handle_info(:poll, %{error: error} = state) when not is_nil(error),
+    do: {:noreply, state}
+
   def handle_info(:poll, state) do
+    protect(state, fn -> poll(state) end)
+  end
+
+  def handle_info({ref, result}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    protect(state, fn -> {:noreply, complete(state, ref, result)} end)
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    protect(state, fn ->
+      {:noreply,
+       complete(state, ref, {503, %{error: "delivery task exited: #{inspect(reason)}"}})}
+    end)
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    Enum.each(state.task_handles, fn {_, task} -> Task.shutdown(task, :brutal_kill) end)
+  end
+
+  defp poll(state) do
     if state.timer, do: Process.cancel_timer(state.timer)
     config = state.config
     next = config |> claim_target(state) |> read_routes() |> ingest(state) |> flush_due(state)
@@ -365,18 +465,56 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end
   end
 
-  def handle_info({ref, result}, state) when is_reference(ref) do
-    Process.demonitor(ref, [:flush])
-    {:noreply, complete(state, ref, result)}
+  # A bad durable document is a relay error, not a supervisor restart loop.
+  def load(path) do
+    with {:ok, bytes} <- Shuttle.FS.read(path),
+         {:ok, config} <- Jason.decode(bytes) do
+      config = normalize(config)
+      validate!(config)
+      {:ok, config}
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
-    {:noreply, complete(state, ref, {503, %{error: "delivery task exited: #{inspect(reason)}"}})}
+  defp validate!(%{"launch" => launch, "completed" => true}) when is_binary(launch), do: :ok
+
+  defp validate!(config) do
+    true = is_binary(config["launch"]) and config["launch"] != ""
+    true = is_binary(config["transcript"])
+    true = config["kind"] in ["meeting", "voice"]
+
+    for key <- ~w(offset json_offset route_offset) do
+      true = is_integer(config[key]) and config[key] >= 0
+    end
+
+    for key <- ~w(routes buffers outbox), do: true = is_list(config[key])
+    Enum.each(config["routes"], &validate_route!/1)
+
+    Enum.each(config["buffers"], fn buffer ->
+      true = is_binary(buffer["fiber_id"])
+      true = is_list(buffer["lines"]) and Enum.all?(buffer["lines"], &is_binary/1)
+      true = is_integer(buffer["words"])
+    end)
+
+    Enum.each(config["outbox"], fn batch ->
+      true = Enum.all?(~w(fiber_id text message_id), &is_binary(batch[&1]))
+    end)
+
+    :ok
   end
 
-  @impl true
-  def terminate(_reason, state) do
-    Enum.each(state.task_handles, fn {_, task} -> Task.shutdown(task, :brutal_kill) end)
+  defp protect(state, operation) do
+    operation.()
+  rescue
+    error -> degrade(state, Exception.message(error))
+  catch
+    :exit, reason -> degrade(state, inspect(reason))
+  end
+
+  defp degrade(state, error) do
+    send(state.coordinator, {:relay_error, state.config["outbox"]})
+    {:noreply, %{state | error: error}}
   end
 
   defp normalize(config) do
@@ -391,6 +529,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     }
 
     config = Map.merge(defaults, config)
+    config = Map.update!(config, "routes", &bound_routes(&1, config["started_at"]))
     # An in-flight meeting message keeps its original identity across recovery.
     case Map.pop(config, "pending") do
       {nil, config} ->
@@ -427,16 +566,25 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end)
   end
 
+  defp read_routes(%{"ended" => true} = config), do: config
+
   defp read_routes(%{"kind" => "voice", "routes_path" => path} = config) do
-    case FileTail.advance(path, config["route_offset"]) do
+    case FileTail.advance(path, config["route_offset"], max_bytes: 65_536) do
       {:append, lines, offset} ->
-        routes = config["routes"] ++ Enum.map(lines, &Jason.decode!/1)
+        routes =
+          Enum.reduce(lines, config["routes"], fn line, routes ->
+            route = Jason.decode!(line)
+            validate_route!(route)
+            bound_routes(routes ++ [route], config["started_at"])
+          end)
+
         current = List.last(routes)
 
         config
         |> Map.put("routes", routes)
         |> Map.put("route_offset", offset)
         |> flush_other_targets(current)
+        |> read_routes()
 
       _ ->
         config
@@ -445,18 +593,38 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
   defp read_routes(config), do: config
 
+  # Keep the route at capture start and every switch within this capture.
+  # Earlier global history cannot own an utterance from this recorder.
+  defp bound_routes(routes, nil), do: routes
+
+  defp bound_routes(routes, started_at) do
+    at = parse_time!(started_at)
+
+    {before, during} =
+      Enum.split_while(routes, &(DateTime.compare(parse_time!(&1["t"]), at) == :lt))
+
+    Enum.take(before, -1) ++ during
+  end
+
+  defp validate_route!(route) do
+    true = is_map(route) and is_binary(route["fiber_id"])
+    %DateTime{} = parse_time!(route["t"])
+    :ok
+  end
+
   defp flush_other_targets(config, target) do
     Enum.reduce(config["buffers"], config, fn buffer, acc ->
       if same_target?(buffer, target), do: acc, else: flush_buffer(acc, buffer)
     end)
   end
 
-  defp ingest(%{"kind" => "meeting", "fiber_id" => nil} = config, _state), do: config
+  defp ingest(%{"kind" => "meeting", "fiber_id" => nil} = config, state),
+    do: maybe_end(config, state)
+
   defp ingest(%{"ended" => true} = config, _state), do: config
 
   defp ingest(config, state) do
     config = if config["kind"] == "voice", do: ingest_voice(config, state), else: config
-
     ingest_text(config, state)
   end
 
@@ -510,7 +678,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         next =
           Enum.reduce(lines, config, fn line, acc ->
             case Jason.decode(line) do
-              {:ok, %{"wall" => wall, "text" => text, "speaker" => speaker} = row} ->
+              {:ok, %{"wall" => wall, "text" => text, "speaker" => speaker} = row}
+              when is_binary(wall) and is_binary(text) and is_binary(speaker) ->
                 case DateTime.from_iso8601(row["wall_start"] || wall) do
                   {:ok, at, _} ->
                     target =
@@ -522,15 +691,11 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
                     add_line(acc, target, "#{row["name"] || speaker} #{text}", state)
 
                   _ ->
-                    Map.put(
-                      acc,
-                      "error",
-                      "voice utterance needs an absolute wall_start timestamp: #{wall}"
-                    )
+                    raise ArgumentError, "voice utterance needs an absolute wall_start timestamp"
                 end
 
               _ ->
-                acc
+                raise ArgumentError, "malformed voice transcript row"
             end
           end)
 
@@ -541,7 +706,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     end
   end
 
-  defp parse_time!(value), do: elem(DateTime.from_iso8601(value), 1)
+  defp parse_time!(value) do
+    {:ok, at, _} = DateTime.from_iso8601(value)
+    at
+  end
 
   defp add_line(config, nil, line, _state),
     do: if(String.starts_with?(line, "# ended"), do: Map.put(config, "ended", true), else: config)
@@ -658,7 +826,11 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     # After observing the recorder's exit, drain once more: its last JSON row
     # may have landed between this tick's JSON read and the text footer.
     drained = if config["kind"] == "voice", do: ingest_voice(config, state), else: config
-    target = if config["kind"] == "voice", do: List.last(config["routes"]), else: config
+
+    target =
+      if config["kind"] == "voice",
+        do: List.last(config["routes"]),
+        else: if(config["fiber_id"], do: config)
 
     cond do
       json_pending?(drained) and drained["json_offset"] > config["json_offset"] ->
@@ -777,9 +949,11 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
   defp delivery_outcome(_), do: :failed
 
+  defp persist!(%{config: config, persisted: config} = state), do: state
+
   defp persist!(state) do
     :ok = Shuttle.FS.write_atomic(state.file, Jason.encode!(state.config) <> "\n")
-    state
+    %{state | persisted: state.config}
   end
 
   def deliver(%{fiber_id: fiber_id, text: text, origin: origin, message_id: id}) do

@@ -187,7 +187,13 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
 
     assert :ok =
              TranscriptRelay.start(
-               %{launch: "next", transcript: next, kind: "voice", routes_path: routes},
+               %{
+                 launch: "next",
+                 transcript: next,
+                 kind: "voice",
+                 routes_path: routes,
+                 started_at: "2026-11-06T10:00:02Z"
+               },
                nil,
                nil,
                server: c.name
@@ -343,11 +349,10 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert detail =~ "owner unavailable"
   end
 
-  test "capture waits for the claim and then delivers from byte zero even after recording ended",
+  test "capture waits for the claim while live and then delivers from byte zero",
        c do
     File.write!(c.path, "10:00:01 me early words\n# ended\n")
     {:ok, claim} = Agent.start_link(fn -> nil end)
-    Agent.update(c.observation, fn _ -> {:ok, %{meeting: nil}} end)
     opts = Keyword.put(c.opts, :claim, fn _ -> Agent.get(claim, & &1) end)
     start_monitor(%{c | opts: opts}, fiber: nil)
     poll(c)
@@ -488,6 +493,346 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     refute text =~ "XXXXX"
   end
 
+  test "an unclaimed capture completes when the meeting ends and cannot claim a later meeting",
+       c do
+    File.write!(c.path, "early words\n# ended\n")
+    {:ok, claim} = Agent.start_link(fn -> nil end)
+    opts = Keyword.put(c.opts, :claim, fn _ -> Agent.get(claim, & &1) end)
+    start_monitor(%{c | opts: opts}, fiber: nil)
+    poll(c)
+    pid = worker(c)
+    ref = Process.monitor(pid)
+    Agent.update(c.observation, fn _ -> {:ok, %{meeting: nil}} end)
+    send(pid, :poll)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+    assert %{"completed" => true} = Jason.decode!(File.read!(relay_path(c, "launch")))
+    assert File.read!(c.path) == "early words\n# ended\n"
+    Agent.update(claim, fn _ -> {"later/fiber", "owner"} end)
+
+    assert :ok =
+             TranscriptRelay.start(%{launch: "launch", transcript: c.path}, nil, nil,
+               server: c.name
+             )
+
+    refute_receive {:delivery, _}, 20
+  end
+
+  test "new voice captures retain only the launch anchor and in-capture switches across recovery",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    # More than one route read chunk, with irrelevant global history.
+    for i <- 1..2_000 do
+      route(routes, "2026-11-05T10:00:00Z", "old-#{i}")
+    end
+
+    route(routes, "2026-11-06T09:59:59Z", "anchor")
+    route(routes, "2026-11-06T10:00:10Z", "fiber-b")
+    route(routes, "2026-11-06T10:00:20Z", "fiber-c")
+    File.write!(c.path, "")
+    # A partial route must not prevent reading utterances.
+    File.write!(routes, "{", [:append])
+    record(c.path, "2026-11-06T10:00:11Z", "initial words")
+    start_monitor(c, kind: "voice", routes: routes)
+    assert %{error: nil} = poll(c)
+    config = Jason.decode!(File.read!(relay_path(c, "launch")))
+
+    assert [%{"fiber_id" => "anchor"}, %{"fiber_id" => "fiber-b"}, %{"fiber_id" => "fiber-c"}] =
+             config["routes"]
+
+    stop_supervised!(TranscriptRelay)
+    record(c.path, "2026-11-06T10:00:01Z", "late anchor Claude")
+    record(c.path, "2026-11-06T10:00:12Z", "late middle Claude")
+    start_supervised!({TranscriptRelay, c.opts})
+    assert_receive {:delivery, %{fiber_id: "anchor", text: anchor}}, 1_000
+    assert anchor =~ "late anchor Claude"
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: initial}}, 1_000
+    assert initial =~ "initial words"
+    sync_tasks(c)
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: middle}}, 1_000
+    assert middle =~ "late middle Claude"
+    refute middle =~ "late anchor"
+  end
+
+  test "idle polling does not rewrite unchanged durable relay state", c do
+    File.write!(c.path, "pending words\n")
+    start_monitor(c)
+    poll(c)
+    path = relay_path(c, "launch")
+    %{inode: inode} = File.stat!(path)
+    bytes = File.read!(path)
+    for _ <- 1..3, do: assert(%{error: nil} = poll(c))
+    assert %{inode: ^inode} = File.stat!(path)
+    assert File.read!(path) == bytes
+  end
+
+  for {label, line} <- [
+        {"JSON", "not-json"},
+        {"timestamp", ~s({"t":"not-a-time","fiber_id":"fiber-a"})},
+        {"shape", ~s({"t":"2026-11-06T10:00:00Z","fiber_id":23})}
+      ] do
+    test "malformed route #{label} degrades only that relay and exposes an error", c do
+      routes = Path.join(c.root, "routes.jsonl")
+      File.write!(routes, unquote(line) <> "\n")
+      assert_isolated_failure(c, %{kind: "voice", routes_path: routes})
+    end
+  end
+
+  for {label, line} <- [
+        {"JSON", "not-json"},
+        {"timestamp", ~s({"wall":"not-a-time","speaker":"me","text":"Claude"})},
+        {"shape", ~s({"wall":"2026-11-06T10:00:00Z","speaker":{},"text":5})}
+      ] do
+    test "malformed voice transcript #{label} degrades only that relay", c do
+      routes = Path.join(c.root, "routes.jsonl")
+      route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+      File.write!(Path.rootname(c.path) <> ".jsonl", unquote(line) <> "\n")
+      assert_isolated_failure(c, %{kind: "voice", routes_path: routes})
+    end
+  end
+
+  test "invalid text encoding degrades one meeting relay without a restart cascade", c do
+    assert_isolated_failure(c, %{}, <<255, 10>>)
+  end
+
+  for {label, bytes} <- [
+        {"JSON", "{"},
+        {"outbox", ~s({"launch":"broken","transcript":"ignored","offset":0,"outbox":[42]})},
+        {"buffers", ~s({"launch":"broken","transcript":"ignored","offset":0,"buffers":{}})}
+      ] do
+    test "malformed durable #{label} is isolated during recovery and start returns an error", c do
+      File.mkdir_p!(Path.join(c.root, "relays"))
+      File.write!(relay_path(c, "broken"), unquote(bytes))
+      File.write!(c.path, "Claude healthy\n")
+      start_monitor(c)
+      assert_receive {:delivery, %{text: text}}, 1_000
+      assert text =~ "healthy"
+      assert %{error: error} = TranscriptRelay.status("broken", server: c.name)
+      assert is_binary(error) and error != ""
+
+      assert {:error, _} =
+               TranscriptRelay.start(%{launch: "broken", transcript: c.path}, "fiber-a", "owner",
+                 server: c.name
+               )
+
+      assert Process.alive?(Process.whereis(Module.concat(c.name, Supervisor)))
+    end
+  end
+
+  test "start returns errors for unavailable coordinator and unwritable relay directory", c do
+    assert {:error, _} = TranscriptRelay.start(%{}, nil, nil, server: c.name)
+    directory = Path.join(c.root, "relays")
+    File.write!(directory, "not a directory")
+    start_supervised!({TranscriptRelay, c.opts})
+    coordinator = Process.whereis(Module.concat(c.name, Coordinator))
+
+    assert {:error, _} =
+             TranscriptRelay.start(%{launch: "launch", transcript: c.path}, "fiber-a", "owner",
+               server: c.name
+             )
+
+    assert %{error: error} = TranscriptRelay.status("launch", server: c.name)
+    assert is_binary(error)
+    assert Process.alive?(coordinator)
+    File.rm!(directory)
+    File.write!(c.path, "Claude still healthy\n")
+
+    assert :ok =
+             TranscriptRelay.start(%{launch: "healthy", transcript: c.path}, "fiber-a", "owner",
+               server: c.name
+             )
+
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "still healthy"
+  end
+
+  test "a failed state write retains the durable offset and outbox without sending new words",
+       c do
+    File.write!(c.path, "buffered words\n")
+    start_monitor(c)
+    poll(c)
+    path = relay_path(c, "launch")
+    bytes = File.read!(path)
+    File.rename!(path, path <> ".saved")
+    File.mkdir!(path)
+    File.write!(c.path, "Claude trigger\n", [:append])
+    assert %{error: error} = poll(c)
+    assert is_binary(error) and error != ""
+    refute_receive {:delivery, _}, 20
+    assert File.read!(path <> ".saved") == bytes
+    assert Process.alive?(Process.whereis(Module.concat(c.name, Supervisor)))
+    # Repair and restart recovers the unacknowledged suffix from the durable offset.
+    stop_supervised!(TranscriptRelay)
+    File.rmdir!(path)
+    File.rename!(path <> ".saved", path)
+    start_supervised!({TranscriptRelay, c.opts})
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "buffered words\nClaude trigger"
+  end
+
+  test "a failed acknowledgement write preserves the durable outbox and message identity", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "Claude durable words")
+    File.mkdir!(Shuttle.Voice.last_path())
+    start_monitor(c, kind: "voice", routes: routes)
+    assert_receive {:delivery, first}, 1_000
+    sync_tasks(c)
+    assert %{error: error} = TranscriptRelay.status("launch", server: c.name)
+    assert is_binary(error) and error != ""
+    assert [%{"message_id" => id}] = Jason.decode!(File.read!(relay_path(c, "launch")))["outbox"]
+    assert id == first.message_id
+    assert Process.alive?(Process.whereis(Module.concat(c.name, Supervisor)))
+    stop_supervised!(TranscriptRelay)
+    File.rmdir!(Shuttle.Voice.last_path())
+    start_supervised!({TranscriptRelay, c.opts})
+    assert_receive {:delivery, retry}, 1_000
+    assert retry == first
+  end
+
+  test "a non-encodable start row returns an error without stopping existing relays", c do
+    File.write!(c.path, "waiting words\n")
+    start_monitor(c)
+    poll(c)
+    pid = worker(c)
+
+    assert {:error, _} =
+             TranscriptRelay.start(
+               %{launch: "broken", transcript: c.path, title: {:bad}},
+               "fiber-a",
+               "owner",
+               server: c.name
+             )
+
+    assert Process.alive?(pid)
+
+    assert %{pending: %{text: "waiting words"}, error: nil} =
+             TranscriptRelay.status("launch", server: c.name)
+  end
+
+  test "voice start requires actual capture time instead of guessing from relay registration",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    start_supervised!({TranscriptRelay, c.opts})
+    row = %{launch: "launch", transcript: c.path, kind: "voice", routes_path: routes}
+
+    for at <- [nil, "not-a-time"] do
+      assert {:error, :capture_start_required} =
+               TranscriptRelay.start(Map.put(row, :started_at, at), nil, nil, server: c.name)
+    end
+
+    refute File.exists?(relay_path(c, "launch"))
+
+    assert :ok =
+             TranscriptRelay.start(Map.put(row, :started_at, "2026-11-06T10:00:00Z"), nil, nil,
+               server: c.name
+             )
+
+    assert %{error: nil} = poll(c)
+  end
+
+  for failure <- [:startup, :poll] do
+    test "a recovered relay quarantined during #{failure} releases its nil-owned lane reservations",
+         c do
+      File.mkdir_p!(Path.join(c.root, "relays"))
+      File.write!(c.path, "")
+      routes = Path.join(c.root, "routes.jsonl")
+      File.write!(routes, "not-json\n")
+
+      for {launch, at} <- [{"old", "2026-11-06T10:00:00Z"}, {"new", "2026-11-06T10:01:00Z"}] do
+        config = %{
+          "launch" => launch,
+          "created_at" => at,
+          "kind" => if(launch == "old", do: "voice", else: "meeting"),
+          "transcript" => c.path,
+          "routes_path" => routes,
+          "offset" => 0,
+          "ended" => launch == "new",
+          "outbox" => [
+            %{
+              "fiber_id" => "fiber-a",
+              "origin" => "owner",
+              "text" => launch,
+              "message_id" => launch
+            }
+          ]
+        }
+
+        path =
+          if launch == "old" and unquote(failure) == :startup,
+            do: Path.join([c.root, "relays", "old.json"]),
+            else: relay_path(c, launch)
+
+        File.write!(path, Jason.encode!(config))
+      end
+
+      if unquote(failure) == :startup, do: File.mkdir!(relay_path(c, "old"))
+      start_supervised!({TranscriptRelay, c.opts})
+      # The old relay never attaches its reserved outbox to a delivery request.
+      # Its quarantine must not permanently hold the newer same-target batch.
+      assert_receive {:delivery, %{text: "new", fiber_id: "fiber-a"}}, 1_000
+      refute_receive {:delivery, %{text: "old"}}, 20
+      assert %{error: error} = TranscriptRelay.status("old", server: c.name)
+      assert is_binary(error) and error != ""
+
+      old_path =
+        if unquote(failure) == :startup,
+          do: Path.join([c.root, "relays", "old.json"]),
+          else: relay_path(c, "old")
+
+      assert [%{"message_id" => "old"}] = Jason.decode!(File.read!(old_path))["outbox"]
+    end
+  end
+
+  defp assert_isolated_failure(c, fields, bytes \\ "") do
+    File.write!(c.path, bytes)
+    start_supervised!({TranscriptRelay, c.opts})
+    supervisor = Process.whereis(Module.concat(c.name, Supervisor))
+    coordinator = Process.whereis(Module.concat(c.name, Coordinator))
+
+    assert :ok =
+             TranscriptRelay.start(
+               Map.merge(
+                 %{launch: "launch", transcript: c.path, started_at: "2026-11-06T10:00:00Z"},
+                 fields
+               ),
+               "fiber-a",
+               "owner",
+               server: c.name
+             )
+
+    pid = worker(c)
+    assert %{error: error} = GenServer.call(pid, :status)
+    assert is_binary(error) and error != ""
+
+    for _ <- 1..5 do
+      send(pid, :poll)
+      assert %{error: ^error} = GenServer.call(pid, :status)
+    end
+
+    assert Process.whereis(Module.concat(c.name, Supervisor)) == supervisor
+    assert Process.whereis(Module.concat(c.name, Coordinator)) == coordinator
+    assert Process.alive?(pid)
+    healthy = Path.join(c.root, "healthy.txt")
+    File.write!(healthy, "Claude healthy relay\n")
+
+    assert :ok =
+             TranscriptRelay.start(%{launch: "healthy", transcript: healthy}, "other", "owner",
+               server: c.name
+             )
+
+    assert_receive {:delivery, %{fiber_id: "other", text: text}}, 1_000
+    assert text =~ "healthy relay"
+  end
+
+  defp relay_path(c, launch) do
+    digest = :crypto.hash(:sha256, launch) |> Base.encode16(case: :lower)
+    Path.join([c.root, "relays", digest <> ".json"])
+  end
+
   defp start_monitor(c, extra \\ []) do
     opts = Keyword.merge(c.opts, Keyword.take(extra, [:deliver]))
     start_supervised!({TranscriptRelay, opts})
@@ -497,7 +842,8 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
       transcript: c.path,
       title: "Weekly sync",
       kind: Keyword.get(extra, :kind, "meeting"),
-      routes_path: extra[:routes]
+      routes_path: extra[:routes],
+      started_at: Keyword.get(extra, :started_at, "2026-11-06T10:00:00Z")
     }
 
     assert :ok =
