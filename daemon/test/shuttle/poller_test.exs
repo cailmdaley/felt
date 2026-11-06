@@ -6083,11 +6083,26 @@ defmodule Shuttle.PollerTest do
 
   for backend <- [Shuttle.Terminal.Tmux, Shuttle.Terminal.Rex] do
     @tag backend: backend
+    @tag :review_server_absent
     test "closed reaping stops an unreachable #{inspect(backend)} worker through its process", %{
       backend: backend
     } do
       {state, session} = closed_reap_fixture(backend)
-      assert :ok = backend.close(ReapRunner, session)
+
+      case backend do
+        Shuttle.Terminal.Tmux ->
+          assert :ok = backend.close(ReapRunner, session)
+
+        Shuttle.Terminal.Rex ->
+          for method <- ["session.list", "session.list_blocks"],
+              do: Shuttle.Test.FakeRex.reply(method, {"server is not running", 4})
+
+          {:ok, bindings} = Shuttle.Terminal.RexBindings.read()
+          sid = get_in(bindings, ["bindings", session, "session_id"])
+          assert {:error, :server_absent} = Shuttle.Rex.blocks(ReapRunner, sid)
+      end
+
+      assert :absent = backend.probe(ReapRunner, session)
       MockRunner.set_ps_result({"812 1 bash -l /tmp/shuttle-run-#{session}.42.sh\n", 0})
       Env.put_app_env(:worker_stop_ladder, [{"TERM", 0}, {"KILL", 0}])
 
