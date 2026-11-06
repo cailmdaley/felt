@@ -219,7 +219,7 @@
 /* A compact row: one state dot and the name on one line. */
 .ws-sidebar .ws-constitution-row { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; padding: var(--ws-small-gap) var(--ws-inset); }
 .ws-sidebar .ws-constitution-row > .kbn-card-header { flex: 1 1 0; min-width: 0; }
-.ws-sidebar .ws-constitution-row .kbn-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-sidebar .ws-constitution-row .kbn-card-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-sidebar .ws-constitution-row > .kbn-card-meta { flex: 0 1 auto; min-width: 0; }
 .ws-sidebar .ws-constitution-card .kbn-review-meta-btn { font: var(--type-label)/var(--leading-tight) var(--font-serif); letter-spacing: 0; text-transform: none; }
 .ws-sidebar .ws-constitution-card:hover { background: var(--ws-hover); }
@@ -387,7 +387,11 @@
 .ws-channel-row[aria-level]:not([aria-level="1"]) { padding-left: calc(16px + var(--sidebar-depth, 1) * 12px); }
 .ws-sidebar-count, .ws-sidebar-crumb { opacity: .6; font-family: var(--font-serif);
   font-size: var(--type-note); }
-.ws-sidebar-count { margin-left: auto; white-space: nowrap; }
+.ws-sidebar-count { flex: none; margin-left: auto; white-space: nowrap; }
+/* A family's caret hangs in the row's gutter, so every root's dot shares one edge and only depth moves a row. */
+.ws-sidebar .ws-channel-row[aria-level="1"] { position: relative; }
+.ws-sidebar-fold[data-fold="collapsed"] { position: absolute; inset: 0 auto 0 0; width: var(--ws-inset); padding: 0; text-align: center; opacity: .65; }
+.ws-sidebar-fold[data-fold="collapsed"]:hover { opacity: 1; }
 
 .ws-sidebar-fold[data-fold="working"]::before { content: '▸ '; }
 .ws-sidebar-fold[data-fold="working"][aria-expanded="true"]::before { content: '▾ '; }
