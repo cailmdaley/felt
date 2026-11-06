@@ -4626,11 +4626,10 @@ defmodule Shuttle.Poller do
   end
 
   defp dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
-    # "New session" on an OPEN session is a CUT, not a refusal: a forced fresh
-    # dispatch (force + resume_mode:"fresh" — the kanban New-session button and
-    # drag-launch) stamps the clean-exit marker, kills the live tmux, and drops
-    # the runtime entry, then FALLS THROUGH to the fresh dispatch below instead
-    # of bouncing off `:already_running`. See cut_open_session_for_fresh/5.
+    # A forced fresh dispatch confirms the open worker has stopped, then
+    # writes the clean-exit marker and removes runtime tracking. A failed
+    # marker write refuses replacement; failed stops preserve the live worker.
+    # See cut_open_session_for_fresh/5.
     case cut_open_session_for_fresh(state, fiber_id, runtime_key, uid, opts) do
       {:ok, state} -> dispatch_after_cut(state, fiber_id, runtime_key, uid, opts)
       {:error, reason, state} -> {:reply, {:error, reason}, state}
