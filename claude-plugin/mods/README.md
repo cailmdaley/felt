@@ -6,29 +6,38 @@ sees it.
 
 ## Voice band (`voice-band.tsx`)
 
-One line above the prompt in every Claude session, read from the Shuttle
-daemon's `/api/v1/voice` and `/api/v1/speak` every 500 ms (5 s while both
-say unavailable).
+One dim line above the prompt in every Claude session, read from the Shuttle
+daemon's `/api/v1/voice` and `/api/v1/speak`: every 150 ms while the mic is
+here (the level ticker moves), 500 ms otherwise, 5 s while both say
+unavailable.
 
-Three looks while Listening is on, the speaker always at the right:
+Mic side, at the left:
 
-- **The words.** When the voice target is this session the band is the live
-  words: hark's preview as it comes, then Aqua's pending text, cleared once
-  delivered. Words held for this card while it is cold show too.
-- **`🎤 → <card>`** when the mic is fixed on another card (a meeting, or
-  Listen here elsewhere).
-- **`🎤 muted`** when the mic is muted.
+| State | Text |
+| --- | --- |
+| target is this session | `▁▂▅▇▃ …the live words` (the last five mic levels, then hark's words, replaced by Aqua's, cleared once delivered; cut at a word from the left) |
+| target is another card (a meeting holds the mic, or Listen here elsewhere) | `🎤 → <card name>` |
+| muted | `🎤 muted` |
+| Listening off | nothing |
 
-The speaker reads `🔈 <card>: <line>` while speaking, `🔈 paused` while Cail
-talks, `🔈 n held` for lines waiting on this card, or `🔈 muted`.
+Speaker side, right-aligned; the line itself is never shown:
 
-With Listening off the mic side is not drawn; with the speaker idle too, the
-band is not drawn at all.
+| State | Text |
+| --- | --- |
+| speaking | `🔈 <voice>` |
+| held while Cail talks | `🔈 paused` |
+| lines held for this card | `🔈 <n> waiting` |
+| muted | `🔈 muted` |
+| idle | nothing |
 
-**Keys.** `🎤` and `🔈` are buttons: click one, or focus the band with
-`ctrl+x tab` and press `m` (mic mute) or `s` (speaker mute). The `[-]` at the
-band's right end is Claude Code's own: it collapses the band (`ctrl+x ctrl+a`)
-and no mod can remove it.
+With nothing on either side the band is not drawn.
+
+**Keys.** Click the mic text or the speaker text to toggle that mute. From the
+keyboard: `ctrl+x tab` focuses the band, `tab` moves between the two, and
+Enter toggles the focused one. A single-letter hotkey would make the
+terminal draw a `m:` caption, so there is none. The `[-]` at the band's right
+end is Claude Code's own: it collapses the band (`ctrl+x ctrl+a`), and no mod
+can remove it.
 
 The session's fiber comes from `SHUTTLE_FIBER_PATH` (its path id and its
 frontmatter `id`); a session that is not a Shuttle worker never reads as
