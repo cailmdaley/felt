@@ -363,6 +363,27 @@ defmodule Shuttle.MeetingRouterTest do
            ] = RecorderClient.calls()
   end
 
+  test "a speaker is the addressed recorder, else this host, else the first remote that speaks" do
+    speaks = fn available -> {:ok, Jason.encode!(%{available: available})} end
+
+    RecorderClient.set(%{
+      {:get, "http://agent-host.example/api/v1/speak"} => speaks.(false),
+      {:get, "http://mac-recorder.example/api/v1/speak"} => speaks.(true)
+    })
+
+    assert {:ok, :local} = MeetingRouter.select_speaker(%{}, speaks: true)
+    assert RecorderClient.calls() == []
+
+    assert {:ok, {:remote, %Remote{name: "mac-recorder"}}} =
+             MeetingRouter.select_speaker(%{}, speaks: false)
+
+    assert {:ok, {:remote, %Remote{name: "linux-recorder"}}} =
+             MeetingRouter.select_speaker(%{"recorder" => "linux-recorder"}, speaks: true)
+
+    RecorderClient.set(%{})
+    assert {:error, "no host can speak" <> _} = MeetingRouter.select_speaker(%{}, speaks: false)
+  end
+
   test "unreachable and non-device remotes fall back only during selection" do
     RecorderClient.set(%{
       {:get, "http://mac-recorder.example/api/v1/meeting"} => capability(~w(phone))

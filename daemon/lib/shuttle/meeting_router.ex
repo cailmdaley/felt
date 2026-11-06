@@ -30,6 +30,23 @@ defmodule Shuttle.MeetingRouter do
     end
   end
 
+  @doc "The host that speaks: an addressed recorder, else this host, else the first remote that can."
+  def select_speaker(params, opts \\ []) do
+    cond do
+      params["recorder"] not in [nil, ""] ->
+        select(params, opts)
+
+      Keyword.get_lazy(opts, :speaks, &Shuttle.Speaker.available?/0) ->
+        {:ok, :local}
+
+      true ->
+        case probe(opts, "/api/v1/speak", &match?(%{"available" => true}, &1)) do
+          nil -> {:error, "no host can speak: none has afplay"}
+          remote -> {:ok, {:remote, remote}}
+        end
+    end
+  end
+
   # Non-phone starts record here, even when the agent lives on another host.
   def select_start(params, opts \\ []) do
     select(Map.delete(params, "origin"), opts)
@@ -46,6 +63,17 @@ defmodule Shuttle.MeetingRouter do
   end
 
   defp prefer_phone(opts) do
+    case probe(opts, "/api/v1/meeting", fn
+           %{"available" => true, "modes" => modes} when is_list(modes) -> "call" in modes
+           _ -> false
+         end) do
+      nil -> {:ok, :local}
+      remote -> {:ok, {:remote, remote}}
+    end
+  end
+
+  # The first remote, by name, whose answer at `path` satisfies `accept`.
+  defp probe(opts, path, accept) do
     client = Keyword.get(opts, :client, OriginRouter.forward_client())
     timeout = Keyword.get(opts, :probe_ms, @probe_ms)
     own = Keyword.get(opts, :own_host_id, own_host())
@@ -67,17 +95,14 @@ defmodule Shuttle.MeetingRouter do
 
           response =
             if remaining > 0,
-              do: client.get(Remote.url_for(remote, "/api/v1/meeting"), remaining),
+              do: client.get(Remote.url_for(remote, path), remaining),
               else: {:error, :probe_deadline}
 
           case response do
             {:ok, body} ->
               case Jason.decode(body) do
-                {:ok, %{"available" => true, "modes" => modes}} when is_list(modes) ->
-                  if "call" in modes, do: remote, else: nil
-
-                _ ->
-                  nil
+                {:ok, answer} -> if accept.(answer), do: remote
+                _ -> nil
               end
 
             _ ->
@@ -91,13 +116,10 @@ defmodule Shuttle.MeetingRouter do
       )
       |> Enum.to_list()
 
-    case Enum.find_value(results, fn
-           {:ok, %Remote{} = remote} -> remote
-           _ -> nil
-         end) do
-      nil -> {:ok, :local}
-      remote -> {:ok, {:remote, remote}}
-    end
+    Enum.find_value(results, fn
+      {:ok, %Remote{} = remote} -> remote
+      _ -> nil
+    end)
   end
 
   def normalize_origin(origin) when origin in [nil, "", "local"], do: own_host()
@@ -146,8 +168,8 @@ defmodule Shuttle.MeetingRouter do
     end
   end
 
-  def forward_read(remote) do
-    case OriginRouter.forward_client().get_file(Remote.url_for(remote, "/api/v1/meeting"), 2_000) do
+  def forward_read(remote, path \\ "/api/v1/meeting") do
+    case OriginRouter.forward_client().get_file(Remote.url_for(remote, path), 2_000) do
       {:ok, status, _type, body} ->
         {status, stamp(decode(body), remote.name)}
 

@@ -43,6 +43,10 @@ defmodule ShuttleWeb.Router do
     post("/voice/target", VoiceController, :target)
     post("/voice/draft", VoiceController, :draft)
     post("/voice/release", VoiceController, :release)
+    # The spoken outbox plays on the host with a speaker: an addressed
+    # recorder, else this host, else the first remote that can speak.
+    get("/speak", SpeakController, :show)
+    post("/speak", SpeakController, :create)
     # The unified kanban write-plane: one call hides resolve + invoke +
     # owner-routing (local invoke, or forward to the owning remote daemon's
     # own /transition).

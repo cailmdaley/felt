@@ -31,6 +31,8 @@ The charter is written for every holder, of whatever model. Fold in what a sessi
 
 Every model leaves its idiosyncrasies in what it writes: a register, a habit of emphasis, a stance that suited it. When the charter reads as another model's voice, or its last holders ran on a different model than you, reread it as an outsider before relying on it. Keep what holds for the office, rewrite what was one holder's manner, and cut what no longer helps. That pass is part of holding the role, not a detour from it.
 
+A top-level `voice:` in the charter's frontmatter names the voice `shuttle say` speaks in for the office's constitutions: a file stem in the Mac's voice bank (`~/.claude/voices`) or a pocket-tts built-in such as `jean`. Without one, the office speaks as `dylan_thomas`.
+
 A role may carry a name that emerged from its first real run (Boswell, Colbert). The name belongs to the office, every holder inherits it, and any holder may decline it with a note.
 
 ## Handoffs

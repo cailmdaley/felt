@@ -224,7 +224,7 @@ defmodule Shuttle.Application do
 
     core =
       if Shuttle.Env.app(:start_voice, true),
-        do: core ++ [Shuttle.Voice, Shuttle.RexFocus],
+        do: core ++ [Shuttle.Voice, Shuttle.RexFocus, Shuttle.Speaker],
         else: core
 
     Enum.map(core, &Supervisor.child_spec(&1, [])) ++

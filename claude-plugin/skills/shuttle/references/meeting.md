@@ -20,6 +20,10 @@ A meeting holds the microphone: its words go to its own card however you move ar
 Stop and follow me in the Listening menu ends the recording and hands the microphone to the card in view; following also returns when a meeting stops if it was on.
 Shuttle delivers batches automatically; don't run `shuttle follow` for live voice.
 
+`shuttle say "<text>"` speaks a line aloud on the user's Mac, in your role's voice, after any lines already queued; playback holds while the user is talking.
+Speak only inside a conversation the user is clearly having with you by voice: answer in one spoken line and put the rest on the card.
+Never speak unprompted, at a random point in the day, or to narrate replies to typed turns.
+
 ## Live meeting
 
 The user starts a meeting from the board, either from the Capture form in meeting mode, which launches you as a new capture, or from a constitution's card, which joins the meeting to that constitution through whichever session verb the user pressed. `hark` records on the user's machine and writes a speaker-labelled transcript to a path on this host. Your message opens with `Meeting mode`, that path and the mode, then the user's note, which may be empty. The mode says where the audio comes from: `call` records the machine's echo-cancelled mic and its system audio (Zoom, Meet), or the mic alone when the user chose Mic only, and `phone` records through a phone's mic. Desktop meetings always use `call`, including in-person meetings with silent system audio; mobile meetings always use `phone`. On the Mac, words come from Aqua, so every track's lines land in runs up to 75 s apart. Every voice is numbered `S1`, `S2`, …; in `call`, a mic voice that matches the user's enrolled voiceprint is named `me`, so a line without `me` may still be the user. You are the scribe from the moment you claim, or, when joined, from the moment the message arrives.
