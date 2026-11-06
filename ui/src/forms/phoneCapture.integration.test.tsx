@@ -99,8 +99,9 @@ describe('phone Capture form wiring', () => {
     click('.capture-meeting-toggle')
     click('.capture-meeting-toggle')
     expect(document.querySelector('.capture-meeting-toggle')?.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('.capture-meeting-toggle')?.textContent).toBe('Listening')
     expect(document.querySelector('[role="radiogroup"]')).toBeNull()
-    expect(document.querySelector('.form-submit')?.textContent).toBe('Start meeting')
+    expect(document.querySelector('.form-submit')?.textContent).toBe('Start listening')
   })
 
   it('does not offer another meeting while the daemon reports a live recording', async () => {
@@ -161,7 +162,7 @@ describe('phone Capture form wiring', () => {
     click('.capture-meeting-toggle')
     expect(document.querySelector('.capture-meeting-toggle')?.getAttribute('aria-pressed')).toBe('true')
     expect(document.querySelector('[role="radiogroup"]')).toBeNull()
-    expect(document.querySelector('.form-submit')?.textContent).toBe('Start meeting')
+    expect(document.querySelector('.form-submit')?.textContent).toBe('Start listening')
   })
 
   it('defaults mobile Capture to Phone, restores its successful host/project, and leaves the keyboard closed', async () => {
@@ -173,7 +174,7 @@ describe('phone Capture form wiring', () => {
     expect(choices().slice(0, 2)).toEqual([saved.hostId, saved.projectId])
     expect(document.querySelector('textarea')?.placeholder).toBe('Optional — the scribe works it out as you talk')
     expect(document.activeElement?.tagName).not.toBe('TEXTAREA')
-    expect(document.querySelector('.form-submit')?.textContent).toBe('Start meeting')
+    expect(document.querySelector('.form-submit')?.textContent).toBe('Start listening')
   })
 
   it('keeps desktop defaults and offers no mode picker', async () => {

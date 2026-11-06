@@ -31,7 +31,7 @@ try {
       return { width: el.getBoundingClientRect().width, scroll: el.scrollWidth, client: el.clientWidth }
     })
     assert.ok(geometry.scroll > geometry.client, 'long name is ellipsized')
-    assert.ok(await meeting.isVisible(), 'Meeting remains visible')
+    assert.ok(await meeting.isVisible(), 'Listening remains visible')
     assert.ok(await send.isVisible(), 'send remains visible')
     const before = await selected.locator('.kbn-ctl-composer').boundingBox()
     await page.evaluate(() => {
@@ -45,7 +45,7 @@ try {
     const after = await selected.locator('.kbn-ctl-composer').boundingBox()
     assert.ok(Math.abs(after.y - before.y) < 1, 'pending speech does not move the composer')
     await selected.locator('.kbn-ctl-meet-dropdown').click()
-    assert.ok(await page.getByRole('menuitem', { name: 'Mute', exact: true }).isVisible())
+    assert.ok(await page.getByRole('menuitem', { name: 'Pause', exact: true }).isVisible())
     await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-${scheme}.png` })
     await context.close()
   }

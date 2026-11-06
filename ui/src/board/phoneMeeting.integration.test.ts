@@ -22,6 +22,7 @@ interface BoardState {
   fetchMeetingStatus(): Promise<void>
   fetchAndRender(): Promise<void>
   showBanner(message: string, tone: string): void
+  joinCardMeeting(card: KanbanCard, mode: 'call', note: () => Promise<string>, options: object): Promise<unknown>
   dock: {
     buildMeeting(card: KanbanCard, error: HTMLElement, send: Send, onArm: () => void): HTMLElement
     meetingStart(mode: 'fresh' | 'previous', verb: HTMLButtonElement): void
@@ -94,6 +95,18 @@ afterEach(() => {
 })
 
 describe('board phone meeting card wiring', () => {
+  it.each([
+    [{ meeting: { state: 'live' }, delivery: { delivered: true, delivery: 'message' } }, 200, 'Listening — “Task” its worker is listening.', 'info'],
+    [{ recording: true, error: 'owner unreachable', meeting: { state: 'live' } }, 502, 'Listening, but “Task” could not join: owner unreachable', 'error'],
+    [{ error: 'recorder unavailable' }, 503, "Couldn't start listening: recorder unavailable", 'error'],
+  ] as const)('uses Listening language in join banners', async (payload, status, message, tone) => {
+    const banner = vi.spyOn(state, 'showBanner').mockImplementation(() => {})
+    vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
+    fetcher.mockResolvedValue({ ok: status < 400, status, json: async () => payload })
+    await state.joinCardMeeting(card({ id: 'task', name: 'Task' }), 'call', async () => '', {})
+    expect(banner).toHaveBeenCalledWith(message, tone)
+  })
+
   it('pins Join, polling, audio and Stop to the recorder while preserving the agent owner', async () => {
     current = row({ recorder: 'mac-recorder' })
     state.meetingStatus = { available: true, modes: ['call', 'phone'], recorder: 'mac-recorder', meeting: null }
@@ -104,7 +117,7 @@ describe('board phone meeting card wiring', () => {
       : { available: true, modes: ['call', 'phone'], recorder: 'mac-recorder', meeting: current } }))
     const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'agent-owner' }), document.createElement('div'), sendWith(), () => {})
     document.body.append(menu)
-    expect(menu.querySelector('.kbn-ctl-meet-arm')?.textContent).toBe('Meeting')
+    expect(menu.querySelector('.kbn-ctl-meet-arm')?.textContent).toBe('Listen')
     expect(menu.querySelector('[role="radio"]')).toBeNull()
     arm(menu)
     state.dock.meetingStart('fresh', document.createElement('button'))
@@ -160,6 +173,43 @@ describe('board phone meeting card wiring', () => {
     expect(RelayLink).not.toHaveBeenCalled()
   })
 
+  it('updates the Desk paused state and system audio action on the same recording', () => {
+    current = row({ state: 'live', phone: false, system_audio: true, paused: false })
+    state.meetingStatus.meeting = current
+    redraw()
+    const block = find('.kbn-meeting')
+    expect(block.querySelector('.kbn-meeting-state')!.textContent).toBe('Recording')
+    expect(block.querySelector<HTMLButtonElement>('.kbn-meeting-system-audio')!.disabled).toBe(false)
+    current = { ...current, paused: true }
+    state.meetingStatus.meeting = current
+    redraw()
+    expect(block.querySelector('.kbn-meeting-state')!.textContent).toBe('Paused')
+    expect(block.getAttribute('aria-label')).toContain('paused')
+    block.querySelector<HTMLButtonElement>('.kbn-meeting-system-audio')!.click()
+    expect(block.querySelector<HTMLButtonElement>('.kbn-meeting-system-audio')!.disabled).toBe(true)
+    expect(fetcher.mock.calls.some(([url]) => url.includes('system-audio'))).toBe(false)
+    current = { ...current, paused: false }
+    state.meetingStatus.meeting = current
+    redraw()
+    expect(block.querySelector('.kbn-meeting-state')!.textContent).toBe('Recording')
+    expect(block.querySelector<HTMLButtonElement>('.kbn-meeting-system-audio')!.disabled).toBe(false)
+  })
+
+  it('shows only definite handoff failures on the Desk', () => {
+    const handoff = { status: 'unconfirmed', kind: 'capture', target: 'task', origin: 'host', prompt: null }
+    current = row({ state: 'live', handoff })
+    state.meetingStatus.meeting = current
+    redraw()
+    const error = find('.kbn-meeting-error')
+    expect(error.hidden).toBe(true)
+    expect(error.textContent).toBe('')
+    current = { ...current, handoff: { ...handoff, status: 'reported-failure' } }
+    state.meetingStatus.meeting = current
+    redraw()
+    expect(error.hidden).toBe(false)
+    expect(error.textContent).toContain('Scribe delivery failed')
+  })
+
   it('sets no timer while idle and looks at a held mic once a second', async () => {
     const timeouts = vi.spyOn(window, 'setTimeout'), intervals = vi.spyOn(window, 'setInterval')
     board.phoneAudio.mount()
@@ -199,6 +249,7 @@ describe('board phone meeting card wiring', () => {
 
   it('starts a joined Phone from the actual menu gesture and binds confirmed recording even when delivery fails', async () => {
     vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
+    const banners = vi.spyOn(state, 'showBanner').mockImplementation(() => {})
     const order: string[] = []
     vi.stubGlobal('AudioContext', class {
       constructor() { order.push('context') }
@@ -211,6 +262,7 @@ describe('board phone meeting card wiring', () => {
       { ok: false, status: 502, payload: { recording: true, error: 'delivery failed' } },
     ]) {
       board.phoneAudio.cancel()
+      banners.mockClear()
       state.meetingStatus.meeting = null
       const opening = defer<Mic>()
       vi.mocked(Mic.open).mockImplementation(() => { order.push('mic'); return opening.promise })
@@ -234,6 +286,8 @@ describe('board phone meeting card wiring', () => {
       }))
       expect(RelayLink).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'wss://audio.example/api/v1/meeting/audio?launch=L1' }))
       expect(board.phoneAudio.session.mic).toBe(opened)
+      if (reply.status === 202) expect(banners).not.toHaveBeenCalled()
+      if (reply.status === 502) expect(banners).toHaveBeenCalledWith(expect.stringContaining('could not join'), 'error')
       expect(state.meetingStatus.meeting).toMatchObject({ launch: 'L1' })
       menu.remove()
     }

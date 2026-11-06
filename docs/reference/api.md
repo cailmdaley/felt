@@ -58,8 +58,10 @@ time.
 | `POST /capture` | recorder-routed meeting; owner-routed agent | Launch a session from a free-text prompt; meeting mode starts hark on the selected recorder before routing the scribe capture |
 | `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
 | `POST /meeting/start` | recorder-routed | Record on the selected recorder, mirrored toward `origin`, with no agent; answers the transcript's path on `origin` |
-| `POST /meeting/system-audio` | recorder-addressed | Enable or mute system transcription in a live desktop meeting with `{recorder?, launch, enabled}` |
+| `POST /meeting/system-audio` | recorder-addressed | Enable or mute system transcription in an unpaused live desktop meeting with `{recorder?, launch, enabled}` |
+| `POST /meeting/pause` | recorder-addressed | Pause or resume both desktop tracks with `{recorder?, launch, paused}` |
 | `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
+| `GET /voice/transcript` | recorder-addressed | Resolve the current following transcript as `{path, launch, recorder}` for the file reader; no capture control |
 | `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
 | `POST /voice/target` | recorder-routed | Append a timestamped speech destination `{fiber_id, origin?}` |
 | `POST /voice/draft` | recorder-routed | Edit held speech through a displayed checkpoint `{id, after, through, text}` |
@@ -84,6 +86,16 @@ time.
 | `POST /sessions/receiver` | host-addressed | Resolve the live native Codex process for `{session_uuid}` and return `{session_uuid, pid, process_start}` from a kernel lifetime probe; 404 means absent or stale, 503 means process state is unknown |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
+
+### Following transcript
+
+`GET /voice/transcript?recorder=<host>` resolves hark's current following transcript on the selected recorder.
+An absent recorder means this daemon; `origin` names the speech recipient and does not select the recorder.
+The response is `{path, launch, recorder}` with `Cache-Control: no-store`.
+Open `path` through `/file?path=<path>&origin=<recorder>` so the reader fetches the recorder's bytes, not the target card's files.
+The resolver only accepts the launch's regular `.txt` file inside hark's `voice` directory and refuses symlinks at the directory or file.
+It returns 404 when no transcript is available, 400 for an unknown recorder, and 502 when that recorder cannot be reached; it never falls back to another host.
+Resolving the transcript does not start, stop, or reconcile audio capture.
 
 ### Fiber creation
 
@@ -425,7 +437,7 @@ The daemon keeps one retained `hark --voice` running while enabled and adopts it
 Crash retries wait 1, 2, 4 and 8 seconds; five failures latch `failed` until enabled is toggled off and on. A recorder stable for 30 seconds resets the failure budget. This retry budget belongs to the running daemon; a daemon restart starts a fresh budget.
 There is no scheduled recorder restart.
 Every meeting start stops live voice and verifies the recorder has exited before opening another capture; voice returns after the meeting ends or fails, with the same PID-exit verification before replacement.
-Voice captures are hidden from `/meeting`, its stop control and system-audio control, including stale-launch errors.
+Voice captures are hidden from `/meeting`, its stop, pause and system-audio controls, including stale-launch errors.
 Disabled, idle voice checks lifecycle-file changes without polling the terminal; startup always observes retained captures so an orphan voice recorder is stopped.
 
 `POST /voice/target` accepts `{fiber_id, origin?, recorder?}` and durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
@@ -440,16 +452,17 @@ An unreadable or malformed route journal, or a failed recovery truncation, leave
 It defaults to:
 
 ```json
-{"enabled": false,
- "cold_minutes": 5,
- "voice": {"words": 200, "quiet_seconds": 15},
- "meeting": {"words": 150, "quiet_seconds": 10}}
+{"enabled": false, "words": 200, "quiet_seconds": 15, "cold_minutes": 5}
 ```
 
-Word limits are positive integers; quiet intervals and `cold_minutes` are positive numbers.
+The word limit is a positive integer; the quiet interval is a positive number of seconds.
+Both apply to voice and meetings.
+For existing nested settings, each top-level value takes precedence, followed by `voice`, then `meeting`, then the default.
+Saving Listening settings replaces the nested `voice` and `meeting` objects with the shared top-level values, preserving other top-level fields.
+`cold_minutes` is the positive number of minutes after which a worker is cold.
 `POST /voice` with `enabled: false` can repair an invalid operator file by replacing it with disabled defaults. Valid files retain their thresholds and unknown keys.
 The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `klaud`, `clot`, `clod`, `claud`), or quiet since the last spoken line.
-Voice and meeting thresholds are independent; name detection is always on.
+Name detection is always on.
 Comments travel with the next batch and `# ended` closes the monitor.
 An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.
 The monitor persists read offsets, buffers and stable message IDs before delivery, so restart recovery doesn't replay confirmed speech.
@@ -614,6 +627,16 @@ Set it to `false` to start with only mic transcription.
 The raw system reference remains available for mic echo cancellation.
 A stale launch returns 409; phone meetings reject this control.
 The meeting row reports `system_audio` from hark’s lifecycle state.
+
+`POST /meeting/pause` accepts `{recorder?, launch, paused}` with a boolean `paused` and a nonempty launch id.
+It returns HTTP 200 with `{recorder, meeting}`; the meeting keeps `state: "live"` and reports `paused` separately.
+Pause mutes both mic and system transcription through hark's two manual pause flags; Resume restores the system-audio choice from before Pause.
+The restore choice is stored locally with the launch id, so repeated requests and daemon restarts preserve Mic only.
+`GET /meeting` and control replies derive `meeting.paused` from both flags, not from the saved restore choice or the last request.
+This reports the manual gate, not an acknowledgement from the audio thread; hark polls the flags and may finish transcribing audio heard before the pause.
+A stale launch returns **409**, invalid input or a non-live, phone or voice capture returns **422**, and a failed hark command returns **503**.
+System-audio changes are refused while paused.
+Recorder selection and one-hop forwarding match Stop: control addresses the recorder, not the worker's owner, and never falls back to another host.
 
 `POST /meeting/stop` accepts `{recorder, launch}` and returns HTTP 202 with `{meeting}` or 404 when no meeting exists.
 The recorder checks the launch identity inside the same lock as Stop; a stale control cannot stop a replacement recording.

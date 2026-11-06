@@ -1421,12 +1421,13 @@ export class KanbanSurfaceRenderer {
   private updateMeetingBlock(root: HTMLElement, meeting: MeetingRecord): void {
     const actions = meetingActions(meeting, this.o.isMeetingStopRequested?.(meeting) ?? false)
     const title = meeting.title?.trim() || 'Untitled meeting'
+    const stateWord = meetingStateWord(meeting.state, meeting.paused)
     const hosted = root.classList.contains('kbn-card--meeting')
     for (const state of ['starting', 'loading', 'live', 'stopping', 'failed']) {
       root.classList.toggle(`kbn-meeting-${state}`, meeting.state === state)
     }
     if (!hosted) {
-      root.setAttribute('aria-label', `Meeting: ${title}, ${meetingStateWord(meeting.state)}`)
+      root.setAttribute('aria-label', `Meeting: ${title}, ${stateWord}`)
       root.querySelector<HTMLElement>('.kbn-meeting-title')!.textContent = title
       const fiber = root.querySelector<HTMLElement>('.kbn-meeting-fiber')!
       fiber.textContent = meeting.fiber ? `${meeting.joined ? 'joins' : 'notes in'} ${meeting.fiber}` : ''
@@ -1438,13 +1439,13 @@ export class KanbanSurfaceRenderer {
       fiber.hidden = !meeting.fiber
     }
     const block = root.querySelector<HTMLElement>('.kbn-meeting')!
-    block.setAttribute('aria-label', `Meeting ${meetingStateWord(meeting.state).toLowerCase()}: ${title}`)
+    block.setAttribute('aria-label', `Meeting ${stateWord.toLowerCase()}: ${title}`)
     // Where the audio comes from (a phone meeting's), then where the
     // transcript is written.
     block.querySelector<HTMLElement>('.kbn-meeting-host')!.textContent =
       (meeting.phone ? 'phone mic · ' : '') + (meeting.recorder ? `records on ${meeting.recorder}` : 'recorder') +
       (meeting.mirror_host ? ` → ${meeting.mirror_host}` : '')
-    block.querySelector<HTMLElement>('.kbn-meeting-state')!.textContent = meetingStateWord(meeting.state)
+    block.querySelector<HTMLElement>('.kbn-meeting-state')!.textContent = stateWord
     const duration = block.querySelector<HTMLTimeElement>('.kbn-meeting-duration')!
     const value = meetingDuration(meeting)
     duration.dataset.startedAt = meeting.started_at ?? ''
@@ -1459,7 +1460,7 @@ export class KanbanSurfaceRenderer {
     const phone = this.o.getPhoneMeeting?.()
     if (phone) paintPhoneMeetingControls(block, meeting, phone)
     const actionGroup = block.querySelector<HTMLElement>('.kbn-meeting-actions')!
-    const actionSignature = [meeting.state, meeting.phone, meeting.system_audio, actions.terminal, actions.stop, actions.stopDisabled, actions.dismiss].join(':')
+    const actionSignature = [meeting.state, meeting.paused, meeting.phone, meeting.system_audio, actions.terminal, actions.stop, actions.stopDisabled, actions.dismiss].join(':')
     if (actionGroup.dataset.signature === actionSignature) return
     actionGroup.dataset.signature = actionSignature
     actionGroup.replaceChildren()
@@ -1485,9 +1486,9 @@ export class KanbanSurfaceRenderer {
     }
     if (meeting.state === 'live' && !meeting.phone && typeof meeting.system_audio === 'boolean' && this.o.onMeetingSystemAudio) {
       const enabled = !meeting.system_audio
-      addAction(`System audio: ${meeting.system_audio ? 'on' : 'off'}`, 'kbn-meeting-system-audio', false, () => {
+      addAction(`System audio: ${meeting.system_audio ? 'on' : 'off'}`, 'kbn-meeting-system-audio', !!meeting.paused, () => {
         const current = this.o.getMeeting?.()
-        if (current?.launch === meeting.launch) void this.o.onMeetingSystemAudio?.(current, enabled)
+        if (current?.launch === meeting.launch && !current.paused) void this.o.onMeetingSystemAudio?.(current, enabled)
       })
     }
     if (actions.terminal && !meeting.phone && this.o.onMeetingTerminal) {

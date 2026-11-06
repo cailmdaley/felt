@@ -101,6 +101,78 @@ defmodule Shuttle.MeetingRouterTest do
              RecorderClient.calls()
   end
 
+  test "pause stays on the addressed recorder, forwards once and preserves observed state" do
+    Env.put_app_env(:write_forward_client, Shuttle.Test.RecorderOnceClient)
+    url = "http://mac-recorder.example/api/v1/meeting/pause"
+
+    for paused <- [true, false] do
+      RecorderClient.set(%{
+        {:post, url} =>
+          {:ok, 200, Jason.encode!(%{meeting: %{launch: "L1", state: "live", paused: paused}})}
+      })
+
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/meeting/pause",
+          Jason.encode!(%{
+            recorder: "mac-recorder",
+            origin: "agent-host",
+            prefer: "phone",
+            launch: "L1",
+            paused: paused
+          })
+        )
+
+      assert conn.status == 200
+
+      assert %{
+               "recorder" => "mac-recorder",
+               "meeting" => %{"recorder" => "mac-recorder", "paused" => ^paused}
+             } = Jason.decode!(conn.resp_body)
+
+      assert [
+               {:post, ^url,
+                %{
+                  "launch" => "L1",
+                  "paused" => ^paused,
+                  "recorder" => "mac-recorder",
+                  "recorder_forwarded" => true,
+                  "origin" => "agent-host"
+                }, _}
+             ] = RecorderClient.calls()
+    end
+
+    RecorderClient.set(%{{:post, url} => {:error, :timeout}})
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/meeting/pause",
+        Jason.encode!(%{recorder: "mac-recorder", launch: "L1", paused: true})
+      )
+
+    assert conn.status == 502
+    assert [{:post, ^url, _, _}] = RecorderClient.calls()
+
+    RecorderClient.set(%{})
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/meeting/pause",
+        Jason.encode!(%{
+          recorder: "mac-recorder",
+          recorder_forwarded: true,
+          launch: "L1",
+          paused: true
+        })
+      )
+
+    assert conn.status == 400
+    assert RecorderClient.calls() == []
+  end
+
   test "normal GET is local; preferred GET selects capable remote and stamps status and row" do
     RecorderClient.set(
       Map.put(

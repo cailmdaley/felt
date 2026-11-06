@@ -120,14 +120,15 @@ re-arms, on a oneshot it writes the terminus. The outcome stays: the last run's 
 the next run writes its own.
 
 Opening a Desk card enters its constitution's documents.
-The fiber's own page carries a compact control band above the outcome: worker pill, message box with New session, Resume and Meeting, folded settings and session history, and Temper / Discard.
+The fiber's own page carries a compact control band above the outcome: worker pill, message box with New session, Resume and Listen, folded settings and session history, and Temper / Discard.
+Listen arms a session with listening; its menu lets the transcript follow the card in view or stay on one card.
 The message box starts at one line and grows on focus or with a draft.
 Settings include the next launch's agent, effort, surface and kind, plus the card's due day and parent.
 The Desk also offers Stash and Capture dialogs and Attach.
 
 Files pasted or dropped into the message box wait there, each with a × to
 remove it (images as thumbnails, other types as a name chip): any type, at most 10 MB each, 8 per send
-and 25 MB in total. New session, Resume and Meeting first store them on the
+and 25 MB in total. New session and Resume, with or without listening, first store them on the
 host that owns the fiber (under its data directory's `attachments/`), then
 send the message followed by one `[Image: <path>]` line per image (`[File: <path>]` for other types), so the
 worker opens each by path. If the upload fails nothing is sent and the box

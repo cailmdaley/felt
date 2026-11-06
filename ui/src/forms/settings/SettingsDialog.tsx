@@ -32,7 +32,7 @@ const SECTIONS: Array<{ id: SectionId; label: string; description: string }> = [
   { id: 'projects', label: 'Project folders', description: 'Where you can create and capture work' },
   { id: 'agents', label: 'Worker agents', description: 'Models and their default effort' },
   { id: 'fleet', label: 'Connected hosts', description: 'Other daemons and SSH routes' },
-  { id: 'voice', label: 'Voice', description: 'Speech delivery and meeting timing' },
+  { id: 'voice', label: 'Listening', description: 'Speech delivery timing' },
   { id: 'hostClass', label: 'Access & listening', description: 'Who can reach this daemon' },
   { id: 'host', label: 'Daemon status', description: 'Health, version and launch quarantine' },
 ]

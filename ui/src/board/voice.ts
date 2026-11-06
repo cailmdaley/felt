@@ -22,6 +22,8 @@ export class VoiceRequestError extends Error {
 }
 
 export interface VoiceStatus {
+  /** The audio recorder, not the target card's origin. */
+  recorder?: string
   available: boolean
   enabled: boolean
   muted: boolean

@@ -54,15 +54,23 @@ describe('meeting capture response', () => {
     )).toEqual({ kind: 'meeting-recording', host: 'project host' })
   })
 
+  it('does not report an unconfirmed scribe handoff as a failure', () => {
+    expect(captureOutcome(
+      { ok: false, status: 502 },
+      { recording: true, error: 'response lost', meeting: { state: 'live', handoff: { status: 'unconfirmed' } } },
+      { projectDir: common.projectDir, meetingMode: 'call', host: 'project host' },
+    )).toEqual({ kind: 'meeting-recording', host: 'project host' })
+  })
+
   it('keeps a locally recording meeting as a warning when the scribe fails', () => {
     expect(captureOutcome(
       { ok: false, status: 502 },
-      { recording: true, error: 'owner host is unreachable' },
+      { recording: true, error: 'owner host is unreachable', meeting: { state: 'live', handoff: { status: 'reported-failure' } } },
       { projectDir: common.projectDir, meetingMode: 'call', host: 'project host' },
     )).toEqual({
       kind: 'meeting-recording',
       host: 'project host',
-      error: 'Recording; the scribe didn\'t start: owner host is unreachable',
+      error: 'Listening; the scribe didn\'t start: owner host is unreachable',
     })
   })
 

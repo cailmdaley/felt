@@ -35,6 +35,16 @@ const meeting = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => ({
 })
 
 describe('meeting wire status', () => {
+  it('reads a paused live recording without inventing a new lifecycle state', () => {
+    for (const paused of [true, false]) {
+      expect(parseMeetingStatus({ available: true, meeting: { state: 'live', paused } })?.meeting)
+        .toMatchObject({ state: 'live', paused })
+    }
+    for (const paused of [undefined, null, 'true']) {
+      expect(parseMeetingStatus({ available: true, meeting: { state: 'live', paused } })?.meeting?.paused).toBe(false)
+    }
+  })
+
   it('accepts the contract row and rejects unknown states', () => {
     expect(parseMeetingStatus({ available: true, meeting: meeting() })).toMatchObject({
       available: true,
@@ -60,9 +70,10 @@ describe('joining a meeting to a constitution', () => {
   })
 
   it('says how the worker received the meeting', () => {
-    expect(joinDeliveryPhrase('message')).toBe('its worker has the meeting')
-    expect(joinDeliveryPhrase('resume')).toBe('resumed with the meeting')
-    expect(joinDeliveryPhrase('dispatch')).toBe('started with the meeting')
+    expect(joinDeliveryPhrase('message')).toBe('its worker is listening')
+    expect(joinDeliveryPhrase('resume')).toBe('resumed listening')
+    expect(joinDeliveryPhrase('dispatch')).toBe('started listening')
+    expect(joinDeliveryPhrase('other')).toBe('joined listening')
   })
 
   it('resolves duplicate fiber ids on the meeting owner and never another origin', () => {
@@ -216,15 +227,15 @@ describe('a meeting on its card', () => {
     expect(now.awaitingReview.map((c) => c.id)).toEqual(['loom/review'])
   })
 
-  it('preserves interrupted handoff intent and warns without promising a scribe', () => {
+  it('preserves handoff intent and warns only on reported failure', () => {
     const handoff = { status: 'unconfirmed', kind: 'capture', target: '/work/project', origin: 'project-host', prompt: 'Follow the transcript' }
     const row = parseMeetingStatus({ available: true, meeting: { ...meeting(), handoff } })!.meeting!
     expect(row.handoff).toEqual(handoff)
-    expect(meetingHandoffWarning(row)).toContain('Scribe delivery is unconfirmed')
-    expect(meetingHandoffWarning(row)).toContain('/work/project')
-    expect(meetingHandoffWarning(row)).toContain('project-host')
-    expect(meetingHandoffWarning({ ...row, handoff: { ...handoff, status: 'reported-failure' } })).toContain('Scribe delivery failed')
-    for (const status of ['record-only', 'reported-success']) {
+    const failure = meetingHandoffWarning({ ...row, handoff: { ...handoff, status: 'reported-failure' } })
+    expect(failure).toContain('Scribe delivery failed')
+    expect(failure).toContain('/work/project')
+    expect(failure).toContain('project-host')
+    for (const status of ['unconfirmed', 'record-only', 'reported-success']) {
       expect(meetingHandoffWarning({ ...row, handoff: { ...handoff, status } })).toBeNull()
     }
   })

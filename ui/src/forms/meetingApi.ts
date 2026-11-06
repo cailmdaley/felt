@@ -47,6 +47,23 @@ export async function stopMeeting(
   if (!response.ok) throw new Error(responseError(payload, response.status))
 }
 
+/** Pause or resume the fixed recording on its recorder, not its worker's host. */
+export async function setMeetingPaused(
+  shuttleBase: string,
+  meeting: MeetingRecord,
+  paused: boolean,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  if (!meeting.launch) throw new Error('The meeting has no launch id. Refresh before pausing it.')
+  const response = await fetcher(`${shuttleBase}/api/v1/meeting/pause`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...(meeting.recorder ? { recorder: meeting.recorder } : {}), launch: meeting.launch, paused }),
+  })
+  const payload: unknown = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(responseError(payload, response.status))
+}
+
 export async function setMeetingSystemAudio(
   shuttleBase: string,
   meeting: MeetingRecord,
@@ -120,7 +137,7 @@ export async function joinMeeting(
   fetcher: typeof fetch = fetch,
 ): Promise<JoinMeetingOutcome> {
   if (recordingStartHold(shuttleBase)) return {
-    kind: 'error', message: 'Recording start is unconfirmed. Inspect the recorder in Capture before starting another meeting.',
+    kind: 'error', message: 'Could not confirm whether listening started. Check the recorder in Capture before trying again.',
   }
   holdRecordingStart(shuttleBase, input.recorder ?? null)
   let response: Response
@@ -135,7 +152,7 @@ export async function joinMeeting(
   } catch (error: unknown) {
     holdRecordingStart(shuttleBase, input.recorder ?? null)
     return { kind: 'error', uncertain: true, recorder: input.recorder,
-      message: `Recording start couldn't be confirmed: ${(error as Error)?.message ?? String(error)}. Inspect the recorder before starting another meeting.` }
+      message: `Could not confirm whether listening started: ${(error as Error)?.message ?? String(error)}. Check the recorder before trying again.` }
   }
   if (payload.recording_unknown === true) {
     holdRecordingStart(shuttleBase, typeof payload.recorder === 'string' ? payload.recorder : input.recorder ?? null)
@@ -157,7 +174,7 @@ export async function joinMeeting(
   }
   if (payload.recording === true) return { kind: 'recording', error: responseError(payload, response.status), meeting }
   if (response.status === 409 && payload.meeting) {
-    return { kind: 'error', message: 'A meeting is already starting or running.' }
+    return { kind: 'error', message: 'Listening is already starting or running.' }
   }
   return { kind: 'error', message: responseError(payload, response.status) }
 }

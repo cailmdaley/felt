@@ -80,7 +80,7 @@ import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { joinDeliveryPhrase, meetingStatusUrl, supportedMeetingModes, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
-import { joinMeeting as requestMeetingJoin, setMeetingSystemAudio as requestMeetingSystemAudio, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
+import { joinMeeting as requestMeetingJoin, setMeetingPaused as requestMeetingPaused, setMeetingSystemAudio as requestMeetingSystemAudio, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
 import { recordingStartHold } from '../forms/recordingStart'
 import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
 import { Voice } from './voice.js'
@@ -381,7 +381,7 @@ export class KanbanModal {
       (card, target) => this.transition(card, target, { verdictCommitted: true }),
       this.openWorkerAfterGesture,
       {
-        voice: { controller: this.voice, open: (id, origin) => { void this.workspace?.openFiber(id, origin) } },
+        voice: { controller: this.voice },
         meeting: {
           canJoin: () => !recordingStartHold(this.shuttleBase) && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
           modes: () => supportedMeetingModes(this.meetingStatus, isMobileViewport()),
@@ -389,6 +389,7 @@ export class KanbanModal {
           join: (card, mode, note, options) => this.joinCardMeeting(card, mode, note, options),
           current: () => this.meetingStatus.meeting,
           stop: (meeting) => this.stopCurrentMeeting(meeting),
+          pause: async (meeting, paused) => { await requestMeetingPaused(this.shuttleBase, meeting, paused); await this.fetchMeetingStatus() },
           stopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
         },
         onRest: card => this.openRestPopover(card),
@@ -460,7 +461,7 @@ export class KanbanModal {
     composeNote: () => Promise<string>,
     { session, systemAudio = true }: MeetingJoinOptions,
   ): Promise<MeetingJoinResult> {
-    if (recordingStartHold(this.shuttleBase)) return { error: 'Recording start is unconfirmed. Inspect the recorder before starting another meeting.', delivered: false }
+    if (recordingStartHold(this.shuttleBase)) return { error: 'Could not confirm whether listening started. Check the recorder before trying again.', delivered: false }
     const recorder = this.meetingStatus.recorder
     let opening: PhoneCaptureAttempt | undefined
     let generation: number | undefined
@@ -471,7 +472,7 @@ export class KanbanModal {
       } catch (error) {
         opening?.cancel()
         const message = errText(error)
-        this.showBanner(`Couldn't start the meeting: ${message}`, 'error')
+        this.showBanner(`Couldn't start listening: ${message}`, 'error')
         return { error: message, delivered: false }
       }
     }
@@ -499,15 +500,13 @@ export class KanbanModal {
         void this.refreshMeeting()
       }
       opening?.cancel()
-      this.showBanner(`Couldn't start the meeting: ${outcome.message}`, 'error')
+      this.showBanner(`Couldn't start listening: ${outcome.message}`, 'error')
       return { error: outcome.message, delivered: false }
     }
     if (outcome.kind === 'joined') {
-      this.showBanner(`Recording — “${card.name}” ${joinDeliveryPhrase(outcome.delivery)}.`, 'info')
-    } else if (outcome.kind === 'unconfirmed') {
-      this.showBanner(`Recording — sent to “${card.name}”, not yet confirmed: ${outcome.detail}`, 'info')
-    } else {
-      this.showBanner(`Recording, but “${card.name}” didn't receive the meeting: ${outcome.error}`, 'error')
+      this.showBanner(`Listening — “${card.name}” ${joinDeliveryPhrase(outcome.delivery)}.`, 'info')
+    } else if (outcome.kind === 'recording') {
+      this.showBanner(`Listening, but “${card.name}” could not join: ${outcome.error}`, 'error')
     }
     let audioError: string | null = null
     if (opening && generation !== undefined) {

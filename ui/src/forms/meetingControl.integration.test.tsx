@@ -24,6 +24,7 @@ describe('rendered MeetingControl', () => {
     for (const enabled of [false, true]) {
       act(() => root.render(<MeetingControl enabled={enabled} disabled={false} onChange={change} />))
       expect(container.querySelectorAll('button')).toHaveLength(1)
+      expect(container.querySelector('button')!.textContent).toBe('Listening')
       expect(container.querySelector('[role="radiogroup"]')).toBeNull()
       act(() => container.querySelector<HTMLButtonElement>('button')!.click())
       expect(change).toHaveBeenLastCalledWith(!enabled)

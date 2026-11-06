@@ -334,7 +334,7 @@ export function registerHeaderBarJourneys(test) {
       await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'resting-seat-phone-light.png') })
     }
   }, { width: 390, height: 844 })
-  test('Meeting, New session and Resume stay visible in the composer at every width', async page => {
+  test('Listen, New session and Resume stay visible in the composer at every width', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'true')
@@ -355,8 +355,8 @@ export function registerHeaderBarJourneys(test) {
       assert.equal(geometry.controls.length, 3)
       assert.ok(geometry.controls.every(r => r.left >= geometry.left && r.right <= geometry.right), JSON.stringify(geometry))
       const centers = geometry.controls.map(r => r.center)
-      assert.ok(Math.max(...centers) - Math.min(...centers) < 1, `Meeting, New session and Resume share one footer row at ${width}: ${centers}`)
-      assert.equal(await arm.getAttribute('aria-label'), 'Meeting')
+      assert.ok(Math.max(...centers) - Math.min(...centers) < 1, `Listen, New session and Resume share one footer row at ${width}: ${centers}`)
+      assert.equal(await arm.getAttribute('aria-label'), 'Listen')
       assert.equal(await arm.getAttribute('aria-pressed'), 'false')
       assert.equal(await composer.locator('.kbn-ctl-meet-overflow').count(), 0)
       if (width <= 320) assert.equal(await composer.locator('.kbn-ctl-meet-label').isVisible(), false)
@@ -378,20 +378,18 @@ export function registerHeaderBarJourneys(test) {
       assert.equal(await arm.getAttribute('aria-pressed'), 'false')
     }
   }, { width: 1440, height: 900 })
-  test('One recording button holds the actions in both its host and another chat', async page => {
+  test('One Listening button holds the actions in both its host and another chat', async page => {
     await page.goto(`${url}&meeting=joined`)
     await openRoot(page)
     const composer = page.locator('.ws-selected .kbn-ctl-composer')
     const chip = composer.locator('.kbn-ctl-meet-arm')
     await chip.waitFor({ state: 'visible' })
-    assert.match(await chip.innerText(), /^Recording · /)
+    assert.match(await chip.innerText(), /^Listening · /)
     assert.equal(await composer.locator('.kbn-ctl-meet-chip, .kbn-ctl-meet-arm, .kbn-ctl-meet-stop').evaluateAll(nodes => nodes.filter(el => el.checkVisibility()).length), 1)
     assert.equal(await composer.locator('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop').count(), 0)
     await chip.click()
-    await page.getByRole('menuitem', { name: 'Hide transcript', exact: true }).click()
-    assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isHidden())
-    await chip.click()
-    await page.getByRole('menuitem', { name: 'Show transcript', exact: true }).click()
+    await page.getByRole('menuitemcheckbox', { name: /^Follow me/ }).waitFor({ state: 'visible' })
+    await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).click()
     assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible())
     await page.locator('.ws-chat-leave').click()
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
@@ -399,26 +397,26 @@ export function registerHeaderBarJourneys(test) {
     assert.ok(await foreign.locator('.kbn-ctl-meet-arm').isVisible())
     assert.equal(await foreign.locator('.kbn-ctl-meet-chip, .kbn-ctl-meet-arm, .kbn-ctl-meet-stop').evaluateAll(nodes => nodes.filter(el => el.checkVisibility()).length), 1)
     await foreign.locator('.kbn-ctl-meet-arm').click()
-    assert.ok(await page.getByRole('menuitem', { name: 'Stop recording', exact: true }).isEnabled())
-    assert.ok(await page.getByRole('menuitem', { name: 'Start recording here', exact: true }).isEnabled())
+    assert.ok(await page.getByRole('menuitem', { name: 'Stop', exact: true }).isEnabled())
+    assert.ok(await page.getByRole('menuitem', { name: 'Listen here', exact: true }).isEnabled())
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await captureMeetingState(page, 'single-recording-menu', width, 'light')
     }
-    await page.getByRole('menuitem', { name: 'Open recording', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).click()
     await page.locator('.ws-selected .ws-chat-head').getByRole('heading', { name: title, exact: true }).waitFor()
     await chip.click()
-    await page.getByRole('menuitem', { name: 'Stop recording', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Stop', exact: true }).click()
     await page.waitForFunction(() => window.__harness.requests.some(r => r.url?.includes('/meeting/stop')))
   }, { width: 1000, height: 900 })
-  test('Start recording here stops the old capture and joins the current chat', async page => {
+  test('Listen here stops the old capture and joins the current chat', async page => {
     await page.goto(`${url}&meeting=joined`)
     await openRoot(page)
     await page.locator('.ws-chat-leave').click()
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     await page.locator('.ws-selected .kbn-ctl-meet-arm').click()
     page.once('dialog', dialog => dialog.accept())
-    await page.getByRole('menuitem', { name: 'Start recording here', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Listen here', exact: true }).click()
     await page.waitForFunction(() => window.__harness.requests.some(r => r.url?.includes('/meeting/join')))
     const calls = await page.evaluate(() => window.__harness.requests.filter(r => /meeting\/(stop|join)$/.test(r.url)))
     assert.deepEqual(calls.map(r => r.url.split('/').at(-1)), ['stop', 'join'])

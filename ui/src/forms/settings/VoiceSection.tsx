@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { loadConfigFile, saveConfigFile, type SettingsHost } from './settingsApi'
 import { useSettingsDraft } from './SettingsDraftContext'
 
-type Values = { enabled: boolean; cold_minutes: number; voice: { words: number; quiet_seconds: number }; meeting: { words: number; quiet_seconds: number } }
-const defaults: Values = { enabled: false, cold_minutes: 5, voice: { words: 200, quiet_seconds: 15 }, meeting: { words: 150, quiet_seconds: 10 } }
+type Values = { words: number; quiet_seconds: number; cold_minutes: number }
+const defaults: Values = { words: 200, quiet_seconds: 15, cold_minutes: 5 }
 
 export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: string; host: SettingsHost; onChanged: () => void }): JSX.Element {
   const [doc, setDoc] = useState<Record<string, unknown> | null>(null)
@@ -18,10 +18,14 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
     loadConfigFile(shuttleBase, host, 'voice').then(file => {
       if (cancelled) return
       const parsed = file.text.trim() ? JSON.parse(file.text) as Record<string, unknown> : {}
-      const voice = (parsed.voice ?? {}) as Partial<Values['voice']>
-      const meeting = (parsed.meeting ?? {}) as Partial<Values['meeting']>
+      const voice = (parsed.voice ?? {}) as Partial<Values>
+      const meeting = (parsed.meeting ?? {}) as Partial<Values>
       setDoc(parsed); setDigest(file.digest)
-      setValues({ enabled: parsed.enabled === true, cold_minutes: typeof parsed.cold_minutes === 'number' ? parsed.cold_minutes : defaults.cold_minutes, voice: { ...defaults.voice, ...voice }, meeting: { ...defaults.meeting, ...meeting } })
+      setValues({
+        words: (parsed.words as number | undefined) ?? voice.words ?? meeting.words ?? defaults.words,
+        quiet_seconds: (parsed.quiet_seconds as number | undefined) ?? voice.quiet_seconds ?? meeting.quiet_seconds ?? defaults.quiet_seconds,
+        cold_minutes: (parsed.cold_minutes as number | undefined) ?? defaults.cold_minutes,
+      })
     }).catch((err: Error) => { if (!cancelled) setError(err.message) })
     return () => { cancelled = true }
   }, [shuttleBase, host.origin])
@@ -29,35 +33,25 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
     if (!doc) return
     setBusy(true); setError(null)
     try {
-      const next = { ...doc, enabled: values.enabled, cold_minutes: values.cold_minutes, voice: { ...doc.voice as object, ...values.voice }, meeting: { ...doc.meeting as object, ...values.meeting } }
+      const { voice: _voice, meeting: _meeting, ...rest } = doc
+      const next = { ...rest, ...values }
       const file = await saveConfigFile(shuttleBase, host, 'voice', JSON.stringify(next, null, 2) + '\n', digest)
       setDoc(next); setDigest(file.digest); setDirty(false); onChanged()
-      if (host.isLocal) window.dispatchEvent(new CustomEvent('shuttle-voice-settings-saved', { detail: values.enabled }))
     } catch (err) { setError((err as Error).message) }
     finally { setBusy(false) }
   }
   return <>
-    <p className="set-lede">Voice and meetings send speech after this many words or seconds of quiet.</p>
+    <p className="set-lede">Send speech after this many words or seconds of quiet.</p>
     {error && <div className="set-error" role="alert">{error}</div>}
     {!doc && !error && <div className="set-empty">Reading…</div>}
     {doc && <form onSubmit={event => { event.preventDefault(); void save() }}>
-      <label><input type="checkbox" checked={values.enabled} onChange={event => { setValues({ ...values, enabled: event.target.checked }); setDirty(true) }} /> Voice on</label>
-      {(['voice', 'meeting'] as const).map(kind => <div key={kind}>
-        <div className="set-section-label">{kind === 'voice' ? 'Voice' : 'Meetings'}</div>
-        <ul className="set-list">{(['words', 'quiet_seconds'] as const).map(field => <li className="set-row" key={field}>
-          <label className="set-row-main">{field === 'words' ? 'Words' : 'Quiet seconds'}{' '}
-            <input className="set-select" type="number" min={field === 'words' ? '1' : '0.001'} step={field === 'words' ? '1' : 'any'} required value={values[kind][field]} onChange={event => {
-              setValues({ ...values, [kind]: { ...values[kind], [field]: Number(event.target.value) } }); setDirty(true)
-            }} />
-          </label>
-        </li>)}</ul>
-      </div>)}
-      <p className="set-lede">Dormant workers and workers idle this long hold speech in their composer until you send it or say a name.</p>
-      <label>Cold minutes{' '}
-        <input className="set-select" type="number" min="0.001" step="any" required value={values.cold_minutes} onChange={event => {
-          setValues({ ...values, cold_minutes: Number(event.target.value) }); setDirty(true)
-        }} />
-      </label>
+      <ul className="set-list">{(['words', 'quiet_seconds', 'cold_minutes'] as const).map(field => <li className="set-row" key={field}>
+        <label className="set-row-main">{field === 'words' ? 'Words' : field === 'quiet_seconds' ? 'Quiet seconds' : 'Cold-worker minutes'}{' '}
+          <input className="set-select" type="number" min={field === 'words' ? '1' : '0.001'} step={field === 'words' ? '1' : 'any'} required value={values[field]} onChange={event => {
+            setValues({ ...values, [field]: Number(event.target.value) }); setDirty(true)
+          }} />
+        </label>
+      </li>)}</ul>
       <button className="set-btn set-btn-primary" type="submit" disabled={!dirty || busy}>Save</button>
     </form>}
   </>

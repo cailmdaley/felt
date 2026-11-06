@@ -32,7 +32,7 @@ const change = (label: string, value: string): void => { select(label).value = v
 
 beforeEach(async () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/agents') ? response(agents) : response()))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/agents') ? response(agents) : url.endsWith('/config/voice') ? response({ text: '{}', digest: null }) : response()))
   saved.mockClear()
   dock = new Dock('', saved)
   band = dock.bandFor(task())
@@ -290,7 +290,7 @@ describe('anchored pickers', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
     expect(meetingBand.el.querySelector('.kbn-ctl-meet-chip')).toBeNull()
     expect(meetingBand.el.querySelector('[aria-label="Meeting kind"]')).toBeNull()
-    expect(field.placeholder).toBe('A note for the meeting (optional)')
+    expect(field.placeholder).toBe('A note for listening (optional)')
     vi.mocked(fetch).mockClear()
     field.value = 'agenda'
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
@@ -305,8 +305,8 @@ describe('anchored pickers', () => {
     recording = { title: 'Standup', state: 'live' }
     canJoin = false
     meetingDock.syncMeeting()
-    expect([toggle.getAttribute('aria-pressed'), toggle.disabled, toggle.title]).toEqual(['false', false, 'Recording · Standup'])
-    expect(toggle.textContent).toBe('Recording · Standup')
+    expect([toggle.getAttribute('aria-pressed'), toggle.disabled, toggle.title]).toEqual(['false', false, 'Listening · Standup'])
+    expect(toggle.textContent).toBe('Listening · Standup')
     expect(q('.kbn-ctl-sends').hidden).toBe(false)
     meetingDock.reset()
   })
@@ -321,7 +321,7 @@ describe('anchored pickers', () => {
     document.body.append(band.el)
     const chip = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
     chip.click()
-    const stopItem = () => [...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Stop recording')!
+    const stopItem = () => [...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Stop')!
     stopItem().click()
     expect(stop).toHaveBeenCalledWith(recording)
     meetingDock.syncMeeting()
@@ -392,11 +392,11 @@ describe('anchored pickers', () => {
     const band = meetingDock.bandFor(task({ id: 'foreign/chat' }))
     document.body.append(band.el)
     const chip = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
-    expect(chip.textContent).toBe('Recording · vizier')
+    expect(chip.textContent).toBe('Listening · vizier')
     expect(band.el.querySelector<HTMLElement>('.kbn-ctl-meet')!.hidden).toBe(false)
     expect(band.el.querySelector('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop')).toBeNull()
     chip.click()
-    const open = [...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Open recording')!
+    const open = [...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Open transcript')!
     open.click()
     expect(openHost).toHaveBeenCalledWith(recording)
     meetingDock.reset()
@@ -411,16 +411,16 @@ describe('anchored pickers', () => {
     const band = meetingDock.bandFor(task({ id: 'foreign/chat', sessionUuid: 'existing' }))
     document.body.append(band.el)
     band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
-    ;[...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Start recording here')!.click()
+    ;[...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Listen here')!.click()
     await flush()
     expect(stop).toHaveBeenCalledTimes(1)
     expect(join).not.toHaveBeenCalled()
     recording = null
     meetingDock.syncMeeting()
     expect(join).toHaveBeenCalledWith(expect.objectContaining({ id: 'foreign/chat' }), 'call', expect.any(Function), { session: 'previous', systemAudio: true })
-    expect(band.el.querySelector('.kbn-ctl-meet-label')?.textContent).toBe('Meeting')
+    expect(band.el.querySelector('.kbn-ctl-meet-label')?.textContent).toBe('Listen')
     await flush()
-    expect(band.el.querySelector('.kbn-ctl-meet-label')?.textContent).toBe('Meeting')
+    expect(band.el.querySelector('.kbn-ctl-meet-label')?.textContent).toBe('Listen')
     meetingDock.reset()
   })
 
@@ -432,7 +432,7 @@ describe('anchored pickers', () => {
     const band = meetingDock.bandFor(task())
     document.body.append(band.el)
     band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
-    ;[...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Start recording here')!.click()
+    ;[...band.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === 'Listen here')!.click()
     await flush()
     recording = null
     meetingDock.syncMeeting()
@@ -507,11 +507,11 @@ describe('anchored pickers', () => {
       const band = meetingDock.bandFor(resting())
       document.body.append(band.el)
       const button = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
-      expect(button.textContent).toBe('Meeting')
+      expect(button.textContent).toBe('Listen')
       band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-dropdown')!.click()
       expect(band.el.querySelector('.kbn-ctl-meet-audio')).not.toBeNull()
       button.click()
-      expect(button.textContent).toBe('Meeting')
+      expect(button.textContent).toBe('Listen')
       meetingDock.reset()
     })
 
@@ -519,7 +519,7 @@ describe('anchored pickers', () => {
       const { join, q, meetingDock } = mountMeeting(resting())
       q<HTMLButtonElement>('.kbn-ctl-meet-dropdown').click()
       const audio = q<HTMLSelectElement>('.kbn-ctl-meet-audio')
-      expect([...audio.options].map(option => option.text)).toEqual(['Mic + system audio', 'Mic only'])
+      expect([...audio.options].map(option => option.text)).toEqual(['Mic + system', 'Mic only'])
       audio.value = 'mic'
       q<HTMLButtonElement>('.kbn-ctl-resume').click()
       expect(join.mock.calls[0][3]).toEqual({ session: 'previous', systemAudio: false })

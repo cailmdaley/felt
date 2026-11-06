@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.VoiceController do
   @moduledoc "Recorder-addressed live voice state, controls and spoken-time targets."
   use Phoenix.Controller, formats: [:json]
-  alias Shuttle.{MeetingRouter, OriginRouter, Remote, Voice}
+  alias Shuttle.{Meeting, MeetingRouter, OriginRouter, Remote, Voice}
 
   def show(conn, params), do: route(conn, params, :show, "/api/v1/voice")
   def update(conn, params), do: route(conn, params, :update, "/api/v1/voice")
@@ -9,24 +9,17 @@ defmodule ShuttleWeb.VoiceController do
   def draft(conn, params), do: route(conn, params, :draft, "/api/v1/voice/draft")
   def release(conn, params), do: route(conn, params, :release, "/api/v1/voice/release")
 
+  def transcript(conn, params) do
+    conn
+    |> put_resp_header("cache-control", "no-store")
+    |> route(params, :transcript, "/api/v1/voice/transcript")
+  end
+
   defp route(conn, params, action, path) do
     # origin belongs to the constitution receiving speech, not the recorder.
     case MeetingRouter.select_start(Map.delete(params, "prefer")) do
       {:ok, :local} ->
-        result =
-          case action do
-            :show ->
-              {:ok, Voice.show()}
-
-            action when action in [:draft, :release] ->
-              case apply(Shuttle.Meeting.TranscriptRelay, action, [params]) do
-                :ok -> {:ok, Voice.show()}
-                error -> error
-              end
-
-            _ ->
-              apply(Voice, action, [params])
-          end
+        result = local(action, params)
 
         case result do
           {:ok, body} ->
@@ -35,14 +28,17 @@ defmodule ShuttleWeb.VoiceController do
           {:error, :conflict} ->
             conn |> put_status(409) |> json(%{error: "held speech has already been consumed"})
 
+          {:error, :not_found} ->
+            conn |> put_status(404) |> json(%{error: "No listening transcript is available yet"})
+
           {:error, reason} ->
             conn |> put_status(422) |> json(%{error: reason})
         end
 
       {:ok, {:remote, remote}} ->
         {status, body} =
-          if action == :show,
-            do: forward_read(remote),
+          if action in [:show, :transcript],
+            do: forward_read(remote, path),
             else: MeetingRouter.forward_control(remote, path, params)
 
         conn |> put_status(status) |> json(body)
@@ -52,11 +48,23 @@ defmodule ShuttleWeb.VoiceController do
     end
   end
 
-  defp forward_read(remote) do
-    case OriginRouter.forward_client().get_file(Remote.url_for(remote, "/api/v1/voice"), 2_000) do
+  defp local(:show, _params), do: {:ok, Voice.show()}
+  defp local(:transcript, _params), do: Meeting.voice_transcript()
+
+  defp local(action, params) when action in [:draft, :release] do
+    case apply(Shuttle.Meeting.TranscriptRelay, action, [params]) do
+      :ok -> {:ok, Voice.show()}
+      error -> error
+    end
+  end
+
+  defp local(action, params), do: apply(Voice, action, [params])
+
+  defp forward_read(remote, path) do
+    case OriginRouter.forward_client().get_file(Remote.url_for(remote, path), 2_000) do
       {:ok, status, _type, bytes} ->
         case Jason.decode(bytes) do
-          {:ok, body} -> {status, Map.put(body, "recorder", remote.name)}
+          {:ok, body} when is_map(body) -> {status, Map.put(body, "recorder", remote.name)}
           _ -> {502, %{error: "recorder returned invalid voice state"}}
         end
 

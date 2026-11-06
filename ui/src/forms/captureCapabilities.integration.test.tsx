@@ -262,7 +262,7 @@ describe('rendered Capture capabilities', () => {
     click('.form-submit')
     await tick()
     expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/capture'))).toHaveLength(1)
-    expect(query('.form-error').textContent).toMatch(/Inspect the recorder/)
+    expect(query('.form-error').textContent).toMatch(/Check the recorder/)
   })
 
   it.each([['call'], ['phone', 'call'], ['call', 'phone']])('desktop always submits call with capabilities %j', async (...offered) => {

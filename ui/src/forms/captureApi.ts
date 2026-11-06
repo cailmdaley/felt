@@ -59,7 +59,7 @@ export function captureOutcome(
 ): CaptureOutcome {
   if (data.recording_unknown === true) return {
     kind: 'error', uncertain: true,
-    message: data.error || data.message || 'Recording start is unconfirmed. Inspect the recorder before starting another meeting.',
+    message: data.error || data.message || 'Could not confirm whether listening started. Check the recorder before trying again.',
   }
   const spawned = response.ok && data.spawned === true
   const hasMeetingRow = !!data.meeting && typeof data.meeting === 'object' && !Array.isArray(data.meeting)
@@ -67,11 +67,14 @@ export function captureOutcome(
 
   if (options.meetingMode && recording) {
     const explicitError = data.error || data.reason
-    if (spawned && !explicitError) return { kind: 'meeting-recording', host: options.host }
+    const meeting = data.meeting as { handoff?: { status?: string } } | null | undefined
+    if (meeting?.handoff?.status === 'unconfirmed' || (spawned && !explicitError)) {
+      return { kind: 'meeting-recording', host: options.host }
+    }
     return {
       kind: 'meeting-recording',
       host: options.host,
-      error: `Recording; the scribe didn't start: ${captureError(response.status, data, options.projectDir)}`,
+      error: `Listening; the scribe didn't start: ${captureError(response.status, data, options.projectDir)}`,
     }
   }
 

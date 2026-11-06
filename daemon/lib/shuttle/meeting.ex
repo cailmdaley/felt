@@ -140,6 +140,23 @@ defmodule Shuttle.Meeting do
     with {:ok, snapshot, _context} <- inspect_current(opts), do: {:ok, snapshot}
   end
 
+  @doc "Resolve hark's current following transcript without starting or controlling capture."
+  def voice_transcript(opts \\ []) do
+    root = Path.join(hark_dir(opts), "voice")
+
+    with %{"phase" => phase, "launch" => launch, "transcript" => path} <-
+           read_meeting_json(opts),
+         true <- phase in ~w(loading live stopping failed),
+         true <- is_binary(launch) and Regex.match?(~r/\Avoice-[a-zA-Z0-9_-]+\z/, launch),
+         true <- Path.type(root) == :absolute and path == Path.join(root, launch <> ".txt"),
+         {:ok, %{type: :directory}} <- Shuttle.FS.lstat(root),
+         {:ok, %{type: :regular}} <- Shuttle.FS.lstat(path) do
+      {:ok, %{path: path, launch: launch}}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
   @doc false
   def reconcile_voice(enabled, opts \\ []) do
     with_meeting_lock(fn ->
@@ -200,6 +217,8 @@ defmodule Shuttle.Meeting do
              [
                executable,
                "--voice",
+               "--settings",
+               Shuttle.Voice.Config.path(),
                "-o",
                transcript,
                "--launch=" <> launch,
@@ -388,13 +407,84 @@ defmodule Shuttle.Meeting do
     end)
   end
 
+  @doc "Pause both desktop tracks, or resume with the addressed meeting's audio choice."
+  def pause(paused, opts \\ []) when is_boolean(paused) do
+    with_meeting_lock(fn ->
+      with {:ok, observed, _context} <- inspect_current(opts),
+           snapshot <- hide_voice(observed),
+           :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
+           %{state: "live", phone: false} = row <- snapshot.meeting,
+           executable when is_binary(executable) <- find_hark(opts),
+           :ok <- change_pause(executable, row, paused, opts),
+           {:ok, updated, _context} <- inspect_current(opts) do
+        {:ok, hide_voice(updated)}
+      else
+        {:error, _} = error -> error
+        _ -> {:error, {:validation, "pause requires a live desktop meeting"}}
+      end
+    end)
+  end
+
+  defp change_pause(executable, row, paused, opts) do
+    path = Path.join(hark_dir(opts), "meeting-pause.json")
+
+    with {:ok, saved} <- pause_settings(path, row.launch),
+         settings <-
+           saved ||
+             %{
+               "launch" => row.launch,
+               "system_paused" => Shuttle.FS.exists?(Path.join(hark_dir(opts), "system-paused"))
+             },
+         :ok <- if(paused, do: Shuttle.FS.write_atomic(path, Jason.encode!(settings)), else: :ok),
+         :ok <-
+           set_track_pause(executable, paused or settings["system_paused"], ["--system"], opts),
+         :ok <- set_track_pause(executable, paused, [], opts),
+         :ok <- if(paused, do: :ok, else: remove_flag(path)) do
+      :ok
+    end
+  end
+
+  # The launch-scoped receipt preserves Mic only across pauses, daemon restarts
+  # and a retry after only one of hark's two track commands succeeded.
+  defp pause_settings(path, launch) do
+    case Shuttle.FS.read(path) do
+      {:ok, bytes} ->
+        with {:ok, settings} <- Jason.decode(bytes),
+             do: {:ok, if(settings["launch"] == launch, do: settings)}
+
+      {:error, :enoent} ->
+        {:ok, nil}
+
+      error ->
+        error
+    end
+  end
+
+  defp set_track_pause(executable, paused, track, opts) do
+    case run(
+           opts,
+           "env",
+           [
+             "HARK_DIR=" <> hark_dir(opts),
+             executable,
+             if(paused, do: "pause", else: "resume")
+           ] ++ track
+         ) do
+      {_output, 0} ->
+        :ok
+
+      {output, status} ->
+        {:error, {:operation, "could not change hark pause (#{status}): #{String.trim(output)}"}}
+    end
+  end
+
   @doc "Enable or mute system transcription for the addressed live desktop meeting."
   def system_audio(enabled, opts \\ []) when is_boolean(enabled) do
     with_meeting_lock(fn ->
       with {:ok, observed, _context} <- inspect_current(opts),
            snapshot <- hide_voice(observed),
            :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
-           %{state: "live", phone: false} = row <-
+           %{state: "live", phone: false, paused: false} = row <-
              snapshot.meeting,
            executable when is_binary(executable) <- find_hark(opts),
            {_output, 0} <-
@@ -413,7 +503,7 @@ defmodule Shuttle.Meeting do
           {:error, {:operation, "could not change hark system audio (#{status})"}}
 
         _ ->
-          {:error, {:validation, "system audio requires a live desktop meeting"}}
+          {:error, {:validation, "system audio requires an unpaused live desktop meeting"}}
       end
     end)
   end
@@ -1067,6 +1157,7 @@ defmodule Shuttle.Meeting do
           if is_map(meeting) do
             meeting
             |> Map.put(:tail, transcript_tail(meeting.transcript))
+            |> Map.put(:paused, desktop_paused?(meeting, opts))
             |> find_scribe_fiber(launch_from(usable_meeting) || tmux_launch(tmux), opts)
             |> Map.put(
               :handoff,
@@ -1093,6 +1184,13 @@ defmodule Shuttle.Meeting do
       end
     end
   end
+
+  defp desktop_paused?(%{state: "live", phone: false}, opts) do
+    Shuttle.FS.exists?(Path.join(hark_dir(opts), "paused")) and
+      Shuttle.FS.exists?(Path.join(hark_dir(opts), "system-paused"))
+  end
+
+  defp desktop_paused?(_meeting, _opts), do: false
 
   defp validate_stop_launch(_snapshot, nil), do: :ok
   defp validate_stop_launch(%{meeting: nil}, _launch), do: :ok

@@ -196,7 +196,13 @@
 .ws-dock .kbn-ctl-meet-dropdown[hidden] { display: none; }
 @media (pointer: coarse) { .ws-dock .kbn-ctl-meet-dropdown { width: 44px; min-height: 44px; } }
 .ws-dock .kbn-ctl-meet-audio-label { display: grid; gap: 4px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+.ws-dock .kbn-ctl-listen-cadence { display: flex; gap: 8px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+.ws-dock .kbn-ctl-listen-cadence label { display: grid; gap: 4px; min-width: 0; }
+.ws-dock .kbn-ctl-listen-cadence input { width: 5em; color: var(--ws-ink); background: var(--ws-fill); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
 .ws-dock .kbn-ctl-meet .ws-select-option { font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+.ws-dock .kbn-ctl-meet [role="menuitemcheckbox"] { display: flex; justify-content: space-between; gap: 24px; }
+.ws-dock .kbn-ctl-meet [role="menuitemcheckbox"]::after { content: '○'; }
+.ws-dock .kbn-ctl-meet [role="menuitemcheckbox"][aria-checked="true"]::after { content: '●'; }
 @container (max-width: 360px) {
   .ws-chat .kbn-ctl-meet { flex-basis: 70px; }
   .ws-chat .kbn-ctl-meet-label { display: none; }

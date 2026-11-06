@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { joinMeeting, joinMeetingBody, parseCaptureMeetingCapabilities, setMeetingSystemAudio, stopMeeting } from './meetingApi'
+import { joinMeeting, joinMeetingBody, parseCaptureMeetingCapabilities, setMeetingPaused, setMeetingSystemAudio, stopMeeting } from './meetingApi'
 import type { MeetingRecord } from '../board/meeting'
 
 const reply = (body: unknown, status = 200): Response =>
@@ -155,11 +155,35 @@ describe('joinMeeting', () => {
       reply({ error: 'a meeting is already active', meeting: { state: 'live' } }, 409),
     )
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, busy))
-      .resolves.toEqual({ kind: 'error', message: 'A meeting is already starting or running.' })
+      .resolves.toEqual({ kind: 'error', message: 'Listening is already starting or running.' })
 
     const offline = vi.fn<typeof fetch>().mockRejectedValue(new Error('connection refused'))
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, offline))
-      .resolves.toMatchObject({ kind: 'error', uncertain: true, message: expect.stringContaining('Inspect the recorder before starting another meeting') })
+      .resolves.toMatchObject({ kind: 'error', uncertain: true, message: expect.stringContaining('Check the recorder before trying again') })
+  })
+})
+
+describe('fixed recording pause', () => {
+  it('uses one endpoint and pins pause and resume to the recorder and launch, not the owner', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply({ meeting: { paused: true } }))
+    const meeting = { launch: 'L1', recorder: 'recorder', mirror_host: 'worker-owner' } as MeetingRecord
+    for (const paused of [true, false]) {
+      await setMeetingPaused('https://hub', meeting, paused, fetcher)
+      expect(fetcher).toHaveBeenLastCalledWith('https://hub/api/v1/meeting/pause', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recorder: 'recorder', launch: 'L1', paused }),
+      })
+    }
+    await expect(setMeetingPaused('https://hub', { ...meeting, launch: null }, true, fetcher)).rejects.toThrow('no launch id')
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports stale launch and unsupported capture errors without retrying', async () => {
+    for (const status of [409, 422, 503]) {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply({ error: 'cannot pause this recording' }, status))
+      await expect(setMeetingPaused('https://hub', { launch: 'L1' } as MeetingRecord, true, fetcher)).rejects.toThrow('cannot pause this recording')
+      expect(fetcher).toHaveBeenCalledOnce()
+    }
   })
 })
 

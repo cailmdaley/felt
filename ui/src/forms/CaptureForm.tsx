@@ -207,7 +207,7 @@ export function CaptureForm({
     if (submittingRef.current || (meetingEnabled && (startUncertain || recordingStartHold(shuttleBase)))) return
     const trimmed = prompt.trim()
     if (meetingIntent && meetingCapabilities.loading) {
-      setError('Meeting availability is still loading.')
+      setError('Listening availability is still loading.')
       return
     }
     if (!trimmed && !meetingEnabled) {
@@ -235,7 +235,7 @@ export function CaptureForm({
       const generation = opening ? await opening.ready : null
       if (!mounted.current) return
       if (requestedMeetingMode && recordingStartHold(shuttleBase)) {
-        throw new Error('Recording start is unconfirmed. Inspect the recorder before starting another meeting.')
+        throw new Error('Could not confirm whether listening started. Check the recorder before trying again.')
       }
       startSent = true
       if (requestedMeetingMode) holdRecordingStart(shuttleBase, meetingCapabilities.recorder)
@@ -273,7 +273,7 @@ export function CaptureForm({
         let recordingError = outcome.error
         try {
           if (phone && generation !== null) {
-            if (!mounted.current) throw new Error('Recording started after Capture closed; the mic is off. Connect it from In flight.')
+            if (!mounted.current) throw new Error('Listening started after Capture closed; the mic is off. Connect it from In flight.')
             opening!.bind(generation, data.meeting)
           }
           if (!outcome.error) rememberMeetingProject(selectedProject)
@@ -294,7 +294,7 @@ export function CaptureForm({
       const uncertain = requestedMeetingMode !== null && startSent && !startAnswered
       if (uncertain) holdRecordingStart(shuttleBase, meetingCapabilities.recorder)
       setError(uncertain
-        ? 'Recording start is unconfirmed. Inspect the recorder before starting another meeting; this form will not retry.'
+        ? 'Could not confirm whether listening started. Check the recorder before trying again; this form will not retry.'
         : daemonErrorMessage(err))
       setSubmitting(false)
     }
@@ -313,13 +313,13 @@ export function CaptureForm({
       onOpenChange={(next) => {
         if (!next && !submitting) onCancel()
       }}
-      title={meetingEnabled ? 'Start a meeting' : 'New idea'}
+      title={meetingEnabled ? 'Start listening' : 'New idea'}
       eyebrow="shuttle · capture"
       onOpenAutoFocus={mobileMeeting ? (event) => event.preventDefault() : undefined}
     >
       <div className={`form-sheet${mobileMeeting && meetingEnabled ? ' capture-mobile-meeting' : ''}`}  onKeyDown={handleKeyDown}>
         {startUncertain && !submitting && <div className="form-error" role="alert">
-          <p>Recording start is unconfirmed on {heldRecorder}. Inspect the recorder before starting another meeting.</p>
+          <p>Could not confirm whether listening started on {heldRecorder}. Check the recorder before trying again.</p>
           <button type="button" className="form-btn form-cancel" data-resolve-recording onClick={() => {
             resolveRecordingStart(shuttleBase)
             setError(null)
@@ -387,12 +387,12 @@ export function CaptureForm({
           {meetingEnabled && !mobileMeeting && (
             <Field label="Audio">
               <select
-                aria-label="Meeting audio"
+                aria-label="Listening audio"
                 value={systemAudio ? 'system' : 'mic'}
                 disabled={submitting}
                 onChange={(event) => setSystemAudio(event.target.value === 'system')}
               >
-                <option value="system">Mic + system audio</option>
+                <option value="system">Mic + system</option>
                 <option value="mic">Mic only</option>
               </select>
             </Field>
@@ -410,8 +410,8 @@ export function CaptureForm({
         <ChromeFlag checked={chrome} capable={chromeCapable} onChange={setChrome} />
         <FormError error={error} />
         <FormFoot
-          verb={meetingEnabled ? 'start meeting' : 'spawn'}
-          submitLabel={submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start meeting' : 'Spawn'}
+          verb={meetingEnabled ? 'start listening' : 'spawn'}
+          submitLabel={submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start listening' : 'Spawn'}
           submitting={submitting}
           disabled={submitting || (meetingEnabled && startUncertain) || (meetingIntent && !meetingAvailable) || (!meetingEnabled && !prompt.trim())}
           tone="cobalt"
@@ -440,7 +440,7 @@ export function MeetingControl({ enabled, disabled, onChange, hostLabel }: {
           disabled={disabled}
           onClick={() => onChange(!enabled)}
         >
-          Meeting
+          Listening
         </button>
       </div>
       {hostLabel && <span className="capture-meeting-host-label">{hostLabel}</span>}

@@ -57,8 +57,8 @@ defmodule Shuttle.VoiceTest do
     assert {:ok,
             %{
               "cold_minutes" => 5,
-              "voice" => %{"words" => 200, "quiet_seconds" => 15},
-              "meeting" => %{"quiet_seconds" => 10}
+              "words" => 200,
+              "quiet_seconds" => 15
             }} = Config.read()
 
     for invalid <- [
@@ -66,6 +66,7 @@ defmodule Shuttle.VoiceTest do
           %{"cold_minutes" => 0},
           %{"cold_minutes" => -1},
           %{"cold_minutes" => "5"},
+          %{"words" => 0},
           %{"voice" => %{"words" => 0, "quiet_seconds" => 4}},
           %{"meeting" => %{"words" => 5, "quiet_seconds" => -1}},
           []
@@ -74,9 +75,25 @@ defmodule Shuttle.VoiceTest do
     end
 
     assert {:ok, %{enabled: true, state: "starting"}} = Voice.update(%{"enabled" => true})
-    assert {:ok, %{"enabled" => true, "voice" => %{"words" => 200}}} = Config.read()
+    assert {:ok, %{"enabled" => true, "words" => 200}} = Config.read()
     assert {:error, _} = Voice.update(%{"muted" => "true"})
     assert File.exists?(Path.join(c.root, "voice.json"))
+  end
+
+  test "both modes share thresholds, including old nested files", c do
+    path = Path.join(c.root, "voice.json")
+
+    File.write!(
+      path,
+      ~s({"voice":{"words":42,"quiet_seconds":3},"meeting":{"words":75,"quiet_seconds":8}})
+    )
+
+    assert Config.thresholds("voice") == %{"words" => 42, "quiet_seconds" => 3}
+    assert Config.thresholds("meeting") == Config.thresholds("voice")
+
+    File.write!(path, ~s({"meeting":{"words":75,"quiet_seconds":8},"words":99}))
+    assert Config.thresholds("voice") == %{"words" => 99, "quiet_seconds" => 8}
+    assert Config.thresholds("meeting") == Config.thresholds("voice")
   end
 
   test "partial words are a display-only current-target preview, cleared by mute, pause and end",

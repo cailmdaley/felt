@@ -1636,6 +1636,163 @@ defmodule Shuttle.MeetingTest do
     assert message =~ "unknown origin"
   end
 
+  test "pause mutes both tracks and resumes the audio choice across repeated requests and observation",
+       %{hark_dir: dir} do
+    own = Shuttle.MeetingRouter.own_host()
+
+    for system_paused <- [false, true] do
+      write_meeting(dir, %{"launch" => "current", "pid" => 321, "phase" => "live"})
+
+      if system_paused,
+        do: File.write!(Path.join(dir, "system-paused"), ""),
+        else: File.rm(Path.join(dir, "system-paused"))
+
+      File.write!(Path.join(dir, "voice-muted"), "voice preference")
+      set_pause_meeting_handler(dir)
+
+      for _ <- 1..2 do
+        conn =
+          post(
+            api_conn(),
+            "/api/v1/meeting/pause",
+            Jason.encode!(%{launch: "current", paused: true})
+          )
+
+        assert conn.status == 200
+
+        assert %{
+                 "recorder" => ^own,
+                 "meeting" => %{"state" => "live", "paused" => true, "launch" => "current"}
+               } = Jason.decode!(conn.resp_body)
+
+        assert File.exists?(Path.join(dir, "paused"))
+        assert File.exists?(Path.join(dir, "system-paused"))
+      end
+
+      assert {:error, {:validation, _}} = Meeting.system_audio(true, launch: "current")
+
+      assert %{"meeting" => %{"paused" => true}} =
+               get(api_conn(), "/api/v1/meeting") |> Map.fetch!(:resp_body) |> Jason.decode!()
+
+      # Rebuild the runner with no in-memory state: the restore choice is on disk.
+      set_pause_meeting_handler(dir)
+
+      for _ <- 1..2 do
+        conn =
+          post(
+            api_conn(),
+            "/api/v1/meeting/pause",
+            Jason.encode!(%{launch: "current", paused: false})
+          )
+
+        assert conn.status == 200
+
+        assert %{"meeting" => %{"state" => "live", "paused" => false, "launch" => "current"}} =
+                 Jason.decode!(conn.resp_body)
+
+        refute File.exists?(Path.join(dir, "paused"))
+        assert File.exists?(Path.join(dir, "system-paused")) == system_paused
+      end
+
+      refute File.exists?(Path.join(dir, "meeting-pause.json"))
+      assert File.read!(Path.join(dir, "voice-muted")) == "voice preference"
+    end
+  end
+
+  test "pause reads actual flags, not a successful command or stale receipt", %{hark_dir: dir} do
+    write_meeting(dir, %{"launch" => "current", "pid" => 321, "phase" => "live"})
+    set_current_meeting_handler("current", 321)
+    assert {:ok, %{meeting: %{paused: false}}} = Meeting.pause(true, launch: "current")
+    File.write!(Path.join(dir, "paused"), "")
+    assert {:ok, %{meeting: %{paused: false}}} = Meeting.show()
+    File.write!(Path.join(dir, "system-paused"), "")
+    assert {:ok, %{meeting: %{paused: true}}} = Meeting.show()
+    File.rm!(Path.join(dir, "paused"))
+    assert {:ok, %{meeting: %{paused: false}}} = Meeting.show()
+  end
+
+  test "partial pause failure is reported and a retry preserves the original system choice", %{
+    hark_dir: dir
+  } do
+    write_meeting(dir, %{"launch" => "current", "pid" => 321, "phase" => "live"})
+    set_pause_meeting_handler(dir, :fail_mic)
+
+    conn =
+      post(api_conn(), "/api/v1/meeting/pause", Jason.encode!(%{launch: "current", paused: true}))
+
+    assert conn.status == 503
+    assert Jason.decode!(conn.resp_body)["error"] =~ "could not change hark pause"
+    assert {:ok, %{meeting: %{paused: false}}} = Meeting.show()
+    assert File.exists?(Path.join(dir, "system-paused"))
+    refute File.exists?(Path.join(dir, "paused"))
+    assert {:ok, %{meeting: %{paused: true}}} = Meeting.pause(true, launch: "current")
+    assert {:ok, %{meeting: %{paused: false}}} = Meeting.pause(false, launch: "current")
+    refute File.exists?(Path.join(dir, "system-paused"))
+  end
+
+  test "pause requires a boolean and current launch, and never controls phone or inactive captures",
+       %{hark_dir: dir} do
+    write_meeting(dir, %{"launch" => "current", "pid" => 321, "phase" => "live"})
+    set_pause_meeting_handler(dir)
+
+    for body <- [
+          %{launch: "current"},
+          %{launch: "current", paused: "true"},
+          %{paused: true},
+          %{launch: 3, paused: true}
+        ] do
+      assert post(api_conn(), "/api/v1/meeting/pause", Jason.encode!(body)).status == 422
+    end
+
+    conn =
+      post(api_conn(), "/api/v1/meeting/pause", Jason.encode!(%{launch: "old", paused: true}))
+
+    assert conn.status == 409
+    assert %{"meeting" => %{"launch" => "current"}} = Jason.decode!(conn.resp_body)
+
+    for {phase, phone} <- [
+          {"loading", nil},
+          {"stopping", nil},
+          {"failed", nil},
+          {"live", "/tmp/phone.sock"}
+        ] do
+      write_meeting(dir, %{
+        "launch" => "current",
+        "pid" => 321,
+        "phase" => phase,
+        "phone" => phone
+      })
+
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/meeting/pause",
+          Jason.encode!(%{launch: "current", paused: true})
+        )
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["error"] == "pause requires a live desktop meeting"
+    end
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "env" end)
+  end
+
+  test "a pause receipt from another launch cannot change a new recording's audio choice", %{
+    hark_dir: dir
+  } do
+    write_meeting(dir, %{"launch" => "current", "pid" => 321, "phase" => "live"})
+
+    File.write!(
+      Path.join(dir, "meeting-pause.json"),
+      Jason.encode!(%{launch: "old", system_paused: true})
+    )
+
+    set_pause_meeting_handler(dir)
+    assert {:ok, %{meeting: %{paused: true}}} = Meeting.pause(true, launch: "current")
+    assert {:ok, %{meeting: %{paused: false}}} = Meeting.pause(false, launch: "current")
+    refute File.exists?(Path.join(dir, "system-paused"))
+  end
+
   test "system audio rejects invalid startup settings and phone controls", %{hark_dir: dir} do
     for value <- [nil, "false", 0] do
       assert {:error, {:validation, "meeting.system_audio must be a boolean"}} =
@@ -2318,6 +2475,15 @@ defmodule Shuttle.MeetingTest do
              Meeting.reconcile_voice(true)
 
     assert {:ok, _, 0} = DateTime.from_iso8601(row.started_at)
+    config_path = Shuttle.Voice.Config.path()
+
+    assert Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn
+             {"tmux", ["new-session" | args], _} ->
+               Enum.any?(args, &(String.contains?(&1, "'--settings' '#{config_path}'")))
+
+             _ ->
+               false
+           end)
 
     relay = Module.concat(__MODULE__, "Voice#{System.unique_integer([:positive])}")
 
@@ -2343,10 +2509,14 @@ defmodule Shuttle.MeetingTest do
     assert {:ok, %{meeting: nil}} = Meeting.stop(launch: "stale-meeting")
     assert {:error, {:validation, _}} = Meeting.system_audio(false, launch: "stale-meeting")
     assert {:error, {:validation, _}} = Meeting.system_audio(true, launch: launch)
+    assert {:error, {:validation, _}} = Meeting.pause(true, launch: launch)
     refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "kill" end)
 
-    for route <- ["/api/v1/meeting/stop", "/api/v1/meeting/system-audio"] do
-      conn = api_conn() |> post(route, Jason.encode!(%{launch: "stale-meeting", enabled: false}))
+    for route <- ["/api/v1/meeting/stop", "/api/v1/meeting/system-audio", "/api/v1/meeting/pause"] do
+      conn =
+        api_conn()
+        |> post(route, Jason.encode!(%{launch: "stale-meeting", enabled: false, paused: true}))
+
       refute conn.status == 409
       refute conn.resp_body =~ launch
       refute conn.resp_body =~ "voice"
@@ -2743,6 +2913,30 @@ defmodule Shuttle.MeetingTest do
       _command, _args, _opts, state ->
         {{"", 0}, state}
     end)
+  end
+
+  defp set_pause_meeting_handler(dir, failure \\ nil) do
+    Shuttle.Test.MeetingRunner.set_handler(
+      fn
+        "tmux", ["display-message" | _], _opts, state ->
+          {{"0|0|1234|current|\n", 0}, state}
+
+        "ps", ["-p", "321", "-o", "command="], _opts, state ->
+          {{"python hark capture", 0}, state}
+
+        "env", [_, _, "pause"], _opts, :fail_mic ->
+          {{"mic pause failed", 1}, nil}
+
+        "env", [_, _, command | track], _opts, state ->
+          path = Path.join(dir, if(track == ["--system"], do: "system-paused", else: "paused"))
+          if command == "pause", do: File.write!(path, ""), else: File.rm(path)
+          {{"", 0}, state}
+
+        _command, _args, _opts, state ->
+          {{"", 0}, state}
+      end,
+      failure
+    )
   end
 
   defp set_current_meeting_handler(launch, pid) do

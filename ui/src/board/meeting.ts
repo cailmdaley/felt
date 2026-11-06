@@ -21,6 +21,8 @@ export interface MeetingRecord {
   /** The daemon recording this meeting, independent of its scribe's owner. */
   recorder?: string | null
   state: MeetingState
+  /** Both desktop tracks are manually paused in hark; the capture stays live. */
+  paused?: boolean
   title: string | null
   started_at: string | null
   /** The transcript's last spoken lines, oldest first. */
@@ -72,6 +74,7 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
     handoff: parseMeetingHandoff(raw.handoff),
     recorder: nullableString('recorder'),
     state: raw.state as MeetingState,
+    paused: raw.paused === true,
     title: nullableString('title'),
     started_at: nullableString('started_at'),
     tail: Array.isArray(raw.tail) ? raw.tail.filter((line): line is string => typeof line === 'string') : [],
@@ -97,10 +100,9 @@ function parseMeetingHandoff(value: unknown): MeetingHandoff | null {
 
 export function meetingHandoffWarning(meeting: MeetingRecord): string | null {
   const receipt = meeting.handoff
-  if (!receipt || !['unconfirmed', 'reported-failure'].includes(receipt.status)) return null
-  const outcome = receipt.status === 'unconfirmed' ? 'is unconfirmed' : 'failed'
+  if (!receipt || receipt.status !== 'reported-failure') return null
   const destination = [receipt.target, receipt.origin].filter(Boolean).join(' on ')
-  return `Scribe delivery ${outcome}${destination ? ` to ${destination}` : ''}. Recording continues. Check the target worker before manually sending the meeting prompt; don't blindly retry.`
+  return `Scribe delivery failed${destination ? ` to ${destination}` : ''}. Recording continues. Check the target worker before manually sending the meeting prompt; don't blindly retry.`
 }
 
 export function parseMeetingStatus(value: unknown): MeetingStatus | null {
@@ -118,7 +120,8 @@ export function parseMeetingStatus(value: unknown): MeetingStatus | null {
   return meeting ? { ...status, meeting: { ...meeting, recorder: meeting.recorder ?? recorder } } : null
 }
 
-export function meetingStateWord(state: MeetingState): string {
+export function meetingStateWord(state: MeetingState, paused = false): string {
+  if (state === 'live' && paused) return 'Paused'
   return {
     starting: 'Starting',
     loading: 'Loading',
@@ -137,10 +140,10 @@ export function meetingJoinable(status: MeetingStatus): boolean {
 /** How a joined constitution's worker received the meeting, for the banner. */
 export function joinDeliveryPhrase(delivery: string): string {
   return {
-    message: 'its worker has the meeting',
-    resume: 'resumed with the meeting',
-    dispatch: 'started with the meeting',
-  }[delivery] ?? 'joined the meeting'
+    message: 'its worker is listening',
+    resume: 'resumed listening',
+    dispatch: 'started listening',
+  }[delivery] ?? 'joined listening'
 }
 
 export interface MeetingActions {

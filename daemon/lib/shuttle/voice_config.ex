@@ -4,8 +4,8 @@ defmodule Shuttle.Voice.Config do
   @defaults %{
     "enabled" => false,
     "cold_minutes" => 5,
-    "voice" => %{"words" => 200, "quiet_seconds" => 15},
-    "meeting" => %{"words" => 150, "quiet_seconds" => 10}
+    "words" => 200,
+    "quiet_seconds" => 15
   }
 
   def path do
@@ -23,18 +23,23 @@ defmodule Shuttle.Voice.Config do
       {:ok, bytes} ->
         with {:ok, config} <- Jason.decode(bytes),
              :ok <- validate(config),
-             do: {:ok, Map.merge(@defaults, config)}
+             do: {:ok, normalize(config)}
 
       {:error, reason} ->
         {:error, Shuttle.FS.format_error(reason)}
     end
   end
 
-  def thresholds(kind) do
+  def thresholds(_kind) do
     case read() do
-      {:ok, config} -> config[kind]
-      {:error, _} -> @defaults[kind]
+      {:ok, config} -> Map.take(config, ~w(words quiet_seconds))
+      {:error, _} -> Map.take(@defaults, ~w(words quiet_seconds))
     end
+  end
+
+  defp normalize(config) do
+    legacy = Map.merge(Map.get(config, "meeting", %{}), Map.get(config, "voice", %{}))
+    @defaults |> Map.merge(Map.take(legacy, ~w(words quiet_seconds))) |> Map.merge(config)
   end
 
   def validate(config) when is_map(config) do
@@ -46,17 +51,18 @@ defmodule Shuttle.Voice.Config do
                Map.get(config, "cold_minutes", 5) > 0) ->
         {:error, "cold_minutes must be positive"}
 
-      true ->
-        Enum.reduce_while(~w(voice meeting), :ok, fn kind, :ok ->
-          case Map.get(config, kind, @defaults[kind]) do
-            %{"words" => words, "quiet_seconds" => quiet}
-            when is_integer(words) and words > 0 and is_number(quiet) and quiet > 0 ->
-              {:cont, :ok}
+      not Enum.all?(~w(voice meeting), &is_map(Map.get(config, &1, %{}))) ->
+        {:error, "voice and meeting settings must be objects"}
 
-            _ ->
-              {:halt, {:error, "#{kind} requires positive words (integer) and quiet_seconds"}}
-          end
-        end)
+      true ->
+        case normalize(config) do
+          %{"words" => words, "quiet_seconds" => quiet}
+          when is_integer(words) and words > 0 and is_number(quiet) and quiet > 0 ->
+            :ok
+
+          _ ->
+            {:error, "words must be a positive integer and quiet_seconds must be positive"}
+        end
     end
   end
 

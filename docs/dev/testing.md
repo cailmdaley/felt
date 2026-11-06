@@ -36,6 +36,19 @@ The realistic case uses 3,000 managed fibers and real tmux on a private socket, 
 Codex is an external executable stub. These gates require tmux, preserve production quarantine and read the dirty-I/O scheduler count from release VM arguments.
 A new production child belongs in the independent manifest in `test/support/production_boot.exs`.
 
+## Real Hark pause probe
+
+`daemon/test/shuttle/meeting_pause_real_test.exs` runs the installed Hark CLI against a private `HARK_DIR` and a live Hark `PauseMonitor` with synthetic PCM, without opening audio devices or loading recognition models.
+It checks both track gates, transcript pause/resume markers, repeated requests, and restoration of mic-only versus mic + system capture.
+With Hark installed in a Python environment, run from `daemon/`:
+
+```bash
+SHUTTLE_TEST_HARK_PYTHON=/path/to/hark/venv/bin/python mix test test/shuttle/meeting_pause_real_test.exs --include integration
+```
+
+The environment's `bin/hark` must be beside that Python executable.
+The normal suite excludes this integration probe.
+
 ## Native filesystem I/O
 
 `daemon/test/shuttle/fs_test.exs` exercises caller-owned raw operations with `file_server_2` suspended in an isolated VM.

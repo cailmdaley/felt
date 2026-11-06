@@ -171,26 +171,31 @@ defmodule ShuttleWeb.MeetingController do
     end
   end
 
-  def system_audio(conn, params) do
+  def pause(conn, params),
+    do: control(conn, params, "paused", "/api/v1/meeting/pause", &Meeting.pause/2)
+
+  def system_audio(conn, params),
+    do: control(conn, params, "enabled", "/api/v1/meeting/system-audio", &Meeting.system_audio/2)
+
+  defp control(conn, params, field, path, action) do
     cond do
-      not is_boolean(params["enabled"]) or params["launch"] in [nil, ""] ->
-        conn |> put_status(422) |> json(%{error: "launch and boolean enabled are required"})
+      not is_boolean(params[field]) or not is_binary(params["launch"]) or params["launch"] == "" ->
+        conn |> put_status(422) |> json(%{error: "launch and boolean #{field} are required"})
 
       true ->
         case MeetingRouter.select(Map.delete(params, "prefer")) do
           {:ok, :local} ->
-            case Meeting.system_audio(params["enabled"], launch: params["launch"]) do
+            case action.(params[field], launch: params["launch"]) do
               {:ok, snapshot} ->
                 json(conn, MeetingRouter.stamp(%{meeting: snapshot.meeting}))
 
               {:error, reason} ->
-                {status, body} = system_audio_error(reason)
+                {status, body} = control_error(reason)
                 conn |> put_status(status) |> json(MeetingRouter.stamp(body))
             end
 
           {:ok, {:remote, remote}} ->
-            {status, body} =
-              MeetingRouter.forward_control(remote, "/api/v1/meeting/system-audio", params)
+            {status, body} = MeetingRouter.forward_control(remote, path, params)
 
             conn |> put_status(status) |> json(body)
 
@@ -200,11 +205,11 @@ defmodule ShuttleWeb.MeetingController do
     end
   end
 
-  defp system_audio_error({:stale_launch, row}),
+  defp control_error({:stale_launch, row}),
     do: {409, %{error: "a different meeting is recording now", meeting: row}}
 
-  defp system_audio_error({:validation, message}), do: {422, %{error: message}}
-  defp system_audio_error(reason), do: {503, %{error: error_message(reason)}}
+  defp control_error({:validation, message}), do: {422, %{error: message}}
+  defp control_error(reason), do: {503, %{error: error_message(reason)}}
 
   def stop(conn, params) do
     cond do
