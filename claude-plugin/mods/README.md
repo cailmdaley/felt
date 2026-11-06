@@ -14,13 +14,13 @@ unavailable.
 **Placement** is the plugin option `placement` (`/config`, row "Voice line
 placement", or `pluginConfigs` in settings):
 
-- `below` (default): on the hint row under the prompt, after the engine's
-  hint text, costing no line. The engine keeps its mode pill
-  (`⏵⏵ auto mode on`) and what follows live; the voice line takes the room
-  left and is not right-aligned.
-- `above`: its own band above the prompt, the speaker right-aligned. Claude
-  Code draws its `[-]` collapse control beside it and keeps its status row
-  between the band and the input.
+- `above` (default): its own band above the prompt, the speaker
+  right-aligned. Claude Code draws its `[-]` collapse control beside it and
+  keeps its status row between the band and the input.
+- `below`: on the hint row under the prompt, after the engine's hint text,
+  costing no line. The engine keeps its mode pill (`⏵⏵ auto mode on`) and
+  what follows live; the voice line is appended, not right-aligned, and the
+  row is often already full. The keyboard focus path does not reach it.
 
 Mic side, at the left:
 
@@ -40,7 +40,7 @@ Speaker side, right-aligned; the line itself is never shown:
 | lines held for this card | `🔈 <n> waiting` |
 | muted | `🔈 muted` |
 | idle | nothing |
-| lines other cards hold until they are in view | `🔈 Civbench 2, felt debug 1 +1` after any state above (`🔈 aria · Civbench 2`), the two cards with most first, named from `held_names` |
+| lines other cards hold until they are in view | `🔈 Civbench 2, felt debug 1 +1` after any state above (`🔈 aria · Civbench 2`), the two cards with most first, named by the daemon |
 
 With nothing on either side the band is not drawn.
 

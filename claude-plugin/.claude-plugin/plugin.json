@@ -10,11 +10,11 @@
     "placement": {
       "type": "string",
       "title": "Voice line placement",
-      "description": "Where the live-voice line draws: below, on the prompt's hint row (no extra line), or above, as its own band.",
-      "default": "below",
+      "description": "Where the live-voice line draws: above, as its own band, or below, on the prompt's hint row after the engine's hint.",
+      "default": "above",
       "options": [
-        "below",
-        "above"
+        "above",
+        "below"
       ]
     }
   }

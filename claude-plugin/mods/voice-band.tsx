@@ -48,7 +48,7 @@ let voice: Voice | null = null
 let speak: Speak | null = null
 let seen = ''
 let levels: number[] = []
-let placement: 'above' | 'below' = 'below'
+let placement: 'above' | 'below' = 'above'
 let running = false
 
 const clip = (s: string, n: number) => (s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + '…')
@@ -144,7 +144,7 @@ function line(room: number, Text: any) {
 }
 
 export const register: Register = (on, options) => {
-  placement = options.placement === 'above' ? 'above' : 'below'
+  placement = options.placement === 'below' ? 'below' : 'above'
   on('session.start', async ($, e, next) => {
     base = (await $.env.get('SHUTTLE_DAEMON_URL'))?.replace(/\/+$/, '') || base
     const path = await $.env.get('SHUTTLE_FIBER_PATH')

@@ -28,6 +28,7 @@ const VOICE = { available: true, enabled: true, muted: false, state: 'listening'
 const SPEAK = { available: true, speaking: null, queued: 0, held: {}, paused: false, muted: false }
 
 const ABOVE = { options: { placement: 'above' } } as const
+const BELOW = { options: { placement: 'below' } } as const
 const label = async (ui: any, key: string) => (await ui.find({ type: 'Button', key }))?.text
 
 test('the mic is here: the band is the ticker alone, twenty readings scrolling', ABOVE, async ($, on) => {
@@ -119,7 +120,7 @@ const HINT = {
   viewport: { columns: 80, rows: 30 },
 } as const
 
-test('below, by default, the ticker rides the hint row after the hint', async ($, on) => {
+test('below, the ticker rides the hint row after the hint', BELOW, async ($, on) => {
   const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, preview: { fiber_id: SELF, words: 1, text: 'hello' }, level: { mic: -49, at: '' } },
     { ...SPEAK, speaking: { fiber_id: 'X', voice: 'aria', text: 'x' } })
   on('ui.render', ($, e) => { const { Text } = $.ui.resolve(e); return <Text>engine</Text> })
@@ -169,5 +170,14 @@ test('held as a named list reads the same', ABOVE, async ($, on) => {
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'speaker')).toBe('🔈 3 waiting · Civbench 2')
+  await ui.unmount()
+})
+
+test('above is the default placement', async ($, on) => {
+  const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, level: { mic: -30, at: '' } }, SPEAK)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(150)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'mic')).toBe('▃▃')
   await ui.unmount()
 })
