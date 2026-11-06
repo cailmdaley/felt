@@ -388,7 +388,7 @@ defmodule Shuttle.Speaker do
 
     held =
       state.muted or
-        (talking?(partial, Map.get(current.item, :said, current.item.text)) and
+        (talking?(heard_over(partial, current), Map.get(current.item, :said, current.item.text)) and
            now - elem(heard, 1) < @quiet_ms)
 
     skip = skip(partial, Map.get(current, :before))
@@ -506,10 +506,7 @@ defmodule Shuttle.Speaker do
   def inbox_word(nil, _before), do: nil
 
   def inbox_word(partial, before) do
-    new =
-      if is_binary(before) and before != "" and String.starts_with?(partial, before),
-        do: String.replace_prefix(partial, before, ""),
-        else: partial
+    new = since(partial, before)
 
     case Enum.join(words(new), " ") do
       words when words in ["play", "play them", "what's waiting", "whats waiting"] -> :play
@@ -614,10 +611,7 @@ defmodule Shuttle.Speaker do
   def skip(nil, _before), do: nil
 
   def skip(partial, before) do
-    new =
-      if is_binary(before) and before != "" and String.starts_with?(partial, before),
-        do: String.replace_prefix(partial, before, ""),
-        else: partial
+    new = since(partial, before)
 
     words = words(new)
     {head, tail} = last_skip(words)
@@ -636,6 +630,21 @@ defmodule Shuttle.Speaker do
       nil -> {words, []}
       i -> Enum.split(words, length(words) - 1 - i)
     end
+  end
+
+  # The words that can hold a line: all pending words until it first plays,
+  # then only those added since it began, so words from before it cannot hold
+  # it again each time its own echo changes the pending line.
+  defp heard_over(partial, %{started: nil, offset: 0}), do: partial
+  defp heard_over(partial, current), do: since(partial, Map.get(current, :before))
+
+  # The pending words added since `before`, the words pending when a line
+  # began; hark extends its pending line, so they are its prefix.
+  defp since(partial, before) do
+    if is_binary(partial) and is_binary(before) and before != "" and
+         String.starts_with?(partial, before),
+       do: String.replace_prefix(partial, before, ""),
+       else: partial
   end
 
   @doc """

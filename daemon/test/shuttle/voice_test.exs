@@ -464,6 +464,8 @@ defmodule Shuttle.VoiceTest do
   end
 
   test "a route records the source that moved it" do
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
+
     assert {:ok, %{target: %{"fiber_id" => "a/card"}}} =
              Voice.target(%{"fiber_id" => "a/card", "source" => "inbox"})
 

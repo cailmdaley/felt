@@ -367,6 +367,23 @@ defmodule Shuttle.SpeakerTest do
     assert Speaker.inbox_word(nil, nil) == nil
   end
 
+  test "words pending before the line began don't hold it while its echo grows",
+       %{server: server, world: world} do
+    set(world, %{partial: "okay then um let's do the"})
+
+    {:ok, _} =
+      Speaker.speak(%{"text" => "Holistic hark: the inbox is live", "voice" => "jean"}, server)
+
+    # The leftover words are seen pending as the line begins, then go quiet.
+    Process.sleep(30)
+    set(world, %{now: 2_000})
+    assert_receive {:play, "jean:Holistic hark: the inbox is live", _}
+
+    set(world, %{now: 3_000, partial: "okay then um let's do the listic hark"})
+    set(world, %{now: 3_500, partial: "okay then um let's do the listic hark the inbox is live"})
+    refute_receive {:stop, _}, 50
+  end
+
   test "words of the line being spoken are its echo, not the user" do
     line = "Hello Ada, the outbox is live."
     refute Speaker.talking?(nil, line)
