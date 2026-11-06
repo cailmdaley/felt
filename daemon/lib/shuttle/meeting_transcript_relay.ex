@@ -896,14 +896,23 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
             last = %{
               "fiber_id" => batch["fiber_id"],
               "at" => DateTime.to_iso8601(DateTime.utc_now()),
-              "status" => if(outcome == :failed, do: "failed", else: "delivered")
+              "status" => Atom.to_string(outcome)
             }
 
             last =
               case outcome do
-                :delivered -> last
-                :unconfirmed -> Map.put(last, "detail", "unconfirmed")
-                :failed -> Map.put(last, "detail", inspect(result))
+                :delivered ->
+                  last
+
+                :unconfirmed ->
+                  Map.put(
+                    last,
+                    "detail",
+                    "The message may have arrived. The transcript retains the words."
+                  )
+
+                :failed ->
+                  Map.put(last, "detail", inspect(result))
               end
 
             if state.config["kind"] == "voice" do

@@ -2313,7 +2313,28 @@ defmodule Shuttle.MeetingTest do
   test "voice reuses its retained launch, recovers a crash and is hidden from meeting controls",
        %{hark_dir: dir} do
     set_voice_handler(dir)
-    assert {:ok, %{meeting: %{kind: "voice", launch: launch}}} = Meeting.reconcile_voice(true)
+
+    assert {:ok, %{meeting: %{kind: "voice", launch: launch} = row}} =
+             Meeting.reconcile_voice(true)
+
+    assert {:ok, _, 0} = DateTime.from_iso8601(row.started_at)
+
+    relay = Module.concat(__MODULE__, "Voice#{System.unique_integer([:positive])}")
+
+    start_supervised!(
+      {Shuttle.Meeting.TranscriptRelay,
+       name: relay,
+       directory: Path.join(dir, "relay-state"),
+       observe: fn -> {:ok, %{meeting: row}} end}
+    )
+
+    assert :ok =
+             Shuttle.Meeting.TranscriptRelay.start(
+               Map.put(row, :routes_path, Path.join(dir, "routes.jsonl")),
+               nil,
+               nil,
+               server: relay
+             )
 
     assert {:ok, %{meeting: %{kind: "voice", launch: ^launch, state: "live"}}} =
              Meeting.reconcile_voice(true)
@@ -2522,6 +2543,45 @@ defmodule Shuttle.MeetingTest do
     assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
              cmd == "tmux" and match?(["new-session" | _], args)
            end) == 1
+  end
+
+  test "Rex without a retained pointer stops a live voice orphan", %{hark_dir: dir} do
+    set_voice_handler(dir)
+    assert {:ok, %{meeting: %{launch: launch}}} = Meeting.reconcile_voice(true)
+    opts = [terminal: Shuttle.Terminal.Rex, state_dir: Path.join(dir, "retained")]
+    assert {:ok, %{meeting: %{launch: ^launch, state: "live"}}} = Meeting.voice_capture(opts)
+    assert {:ok, %{meeting: nil}} = Meeting.reconcile_voice(false, opts)
+    assert {^launch, :ended} = Shuttle.Test.MeetingRunner.custom()
+    assert File.read!(Path.join([dir, "voice", launch <> ".txt"])) =~ "# ended"
+  end
+
+  test "Rex without a retained pointer cannot replace an unverified voice PID", %{hark_dir: dir} do
+    write_meeting(dir, %{
+      "launch" => "voice-orphan",
+      "kind" => "voice",
+      "phase" => "live",
+      "pid" => 321
+    })
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "ps", _args, _opts, state -> {{"permission denied", 2}, state}
+      _cmd, _args, _opts, state -> {{"", 0}, state}
+    end)
+
+    opts = [
+      terminal: Shuttle.Terminal.Rex,
+      state_dir: Path.join(dir, "retained"),
+      voice_stop_wait_ms: 0
+    ]
+
+    for enabled <- [false, true] do
+      assert {:error, {:operation, message}} =
+               Meeting.reconcile_voice(enabled, Keyword.put(opts, :restart_voice, true))
+
+      assert message =~ "could not verify"
+    end
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "rex" end)
   end
 
   test "ended lifecycle evidence cannot replace a recorder whose PID is unverified", %{
