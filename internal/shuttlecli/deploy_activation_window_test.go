@@ -128,6 +128,14 @@ func TestDeployCancelledActivationRetainsRollbackBeforeAcknowledgement(t *testin
 	if e := next.Wait(); e == nil {
 		t.Fatal("cancelled activation succeeded")
 	}
+	deployAwait(t, "released deploy lock: "+last, func() bool {
+		file, err := os.OpenFile(filepath.Join(f.home, ".shuttle/deploy.lock"), os.O_RDWR, 0600)
+		if err != nil {
+			return false
+		}
+		defer file.Close()
+		return syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil
+	})
 	if got := strings.TrimSpace(fleetRead(filepath.Join(f.home, ".shuttle/deploy/previous"))); got != previous {
 		t.Fatalf("lost previous release before E acknowledgement: got %q want %q", got, previous)
 	}
