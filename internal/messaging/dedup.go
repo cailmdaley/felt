@@ -42,6 +42,7 @@ func requestHash(r Request) string {
 	b, _ := json.Marshal(struct {
 		Address, Text, From string
 		Wake                bool
+		ContextIfBusy       bool         `json:"context_if_busy,omitempty"`
 		Attachments         []Attachment `json:"attachments,omitempty"`
 		ReplyTo             string       `json:"reply_to,omitempty"`
 		FromClaim           string       `json:"from_claim,omitempty"`
@@ -49,7 +50,7 @@ func requestHash(r Request) string {
 		NotifyWhenIdle      bool         `json:"notify_when_idle,omitempty"`
 		NotifyWake          bool         `json:"notify_wake,omitempty"`
 		IdleOnly            bool         `json:"idle_only,omitempty"`
-	}{r.Address, r.Text, sender, r.Wake, r.Attachments, r.ReplyTo, claim, r.NotifyAddress, r.NotifyWhenIdle, r.NotifyWake, r.IdleOnly})
+	}{r.Address, r.Text, sender, r.Wake, r.ContextIfBusy, r.Attachments, r.ReplyTo, claim, r.NotifyAddress, r.NotifyWhenIdle, r.NotifyWake, r.IdleOnly})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }

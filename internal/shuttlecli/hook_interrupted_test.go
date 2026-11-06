@@ -1,6 +1,13 @@
 package shuttlecli
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/cailmdaley/felt/internal/messaging"
+)
 
 func TestHookInterruptedRecordsTranscriptInterrupt(t *testing.T) {
 	t.Parallel()
@@ -30,6 +37,36 @@ func TestHookInterruptedRecordsTranscriptInterrupt(t *testing.T) {
 		if _, present := line[k]; present {
 			t.Fatalf("%s present; the daemon is not the receiver", k)
 		}
+	}
+}
+
+func TestClaudeInterruptUpdatesOnlyTheCurrentTurn(t *testing.T) {
+	env := messageHookEnv(t, "host")
+	if err := messaging.RegisterMailbox(env, "claude", "s", "host", "/tmp", os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UnixMilli()
+	if err := messaging.SetMailboxStateAt(env, "claude", "s", "host", "working", at); err != nil {
+		t.Fatal(err)
+	}
+	interrupt := func(timestamp int64) {
+		t.Helper()
+		cmd := newApp(env).hookInterruptedCmd()
+		cmd.SetArgs([]string{"--session", "s", "--harness", "claude", "--id", "r", "--at", fmt.Sprint(timestamp)})
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	interrupt(at + 1)
+	if state, _ := messaging.MailboxState(env, "claude", "s", "host"); state != "idle" {
+		t.Fatalf("interrupt state = %q", state)
+	}
+	if err := messaging.SetMailboxStateAt(env, "claude", "s", "host", "working", at+2); err != nil {
+		t.Fatal(err)
+	}
+	interrupt(at + 1)
+	if state, _ := messaging.MailboxState(env, "claude", "s", "host"); state != "working" {
+		t.Fatalf("stale interrupt changed state = %q", state)
 	}
 }
 

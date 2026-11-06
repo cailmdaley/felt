@@ -74,6 +74,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
             "preflight" -> {"rejected", "preflight_failed", 1}
             "conflict" -> {"rejected", "message_id_conflict", 1}
             "unproduced" -> {"unknown", "internal", 1}
+            "queued-hook" -> {"queued", nil, 0}
             id when id in ["queued", "context_added", "submitted"] -> {id, nil, 0}
             _ -> {"accepted", nil, 0}
           end
@@ -81,6 +82,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
         transport =
           case {request["message_id"], status} do
             {"pi-queued", "queued"} -> "pi-native"
+            {"queued-hook", "queued"} -> "claude-hook"
             {_, "queued"} -> "claude-native"
             {_, "submitted"} -> "codex-terminal"
             _ -> "codex"
@@ -557,6 +559,26 @@ defmodule ShuttleWeb.MessagingControllerTest do
                     }}
   end
 
+  test "automatic busy messages preserve their policy and accept a Claude hook receipt", %{
+    host: host
+  } do
+    request = %{
+      "address" => "shuttle://#{host}/claude/native",
+      "text" => "hello",
+      "wake" => true,
+      "context_if_busy" => true,
+      "message_id" => "queued-hook"
+    }
+
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+    assert %{"status" => "queued", "transport" => "claude-hook"} = receipt
+    assert_receive {:local_message_frame, %{"context_if_busy" => true, "wake" => true}}
+
+    request = Map.delete(request, "context_if_busy")
+    assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(502)
+    assert_receive {:local_message_frame, %{}}
+  end
+
   test "only a locally verified proof preserves a sender identity", %{host: host} do
     request = %{
       "address" => "shuttle://#{host}/codex/native%2Fid",
@@ -588,6 +610,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
       "sender_proof" => "verified-test-proof",
       "notify_address" => "shuttle://peer/pi/A",
       "notify_when_idle" => true,
+      "context_if_busy" => true,
       "message_id" => "remote-proof"
     }
 
@@ -598,7 +621,8 @@ defmodule ShuttleWeb.MessagingControllerTest do
              "from" => "unverified",
              "from_claim" => "shuttle://peer/pi/A",
              "notify_address" => "shuttle://peer/pi/A",
-             "notify_when_idle" => true
+             "notify_when_idle" => true,
+             "context_if_busy" => true
            } = frame
 
     refute Map.has_key?(frame, "sender_proof")

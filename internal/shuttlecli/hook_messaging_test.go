@@ -31,12 +31,13 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	if !messaging.MailboxAvailable(env, "claude", "s", "host") {
 		t.Fatal("hook failed to register")
 	}
-	r := messaging.Request{Address: "shuttle://host/claude/s", Text: "peer message", From: "shuttle://peer/pi/A", ReplyTo: "work/fiber", MessageID: "m"}
-	if _, err := messaging.Send(context.Background(), env, "host", r); err != nil {
-		t.Fatal(err)
+	hook("UserPromptSubmit")
+	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "working" {
+		t.Fatalf("Claude prompt state = %q, %v", state, err)
 	}
-	if out := hook("Stop"); out != "" {
-		t.Fatalf("Stop would wake the model: %s", out)
+	r := messaging.Request{Address: "shuttle://host/claude/s", Text: "peer message", From: "shuttle://peer/pi/A", ReplyTo: "work/fiber", MessageID: "m", Wake: true, ContextIfBusy: true}
+	if receipt, err := messaging.Send(context.Background(), env, "host", r); err != nil || receipt.Transport != "claude-hook" {
+		t.Fatalf("send: %+v %v", receipt, err)
 	}
 	child, _ := json.Marshal(eventHookInput{HookEventName: "PostToolUse", SessionID: "s", AgentID: "subagent", TranscriptPath: filepath.Join(home, ".claude", "projects", "p", "s.jsonl")})
 	var childOut bytes.Buffer
@@ -52,6 +53,12 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	}
 	if out := hook("PostToolUse"); out != "" {
 		t.Fatalf("duplicated message: %s", out)
+	}
+	if out := hook("Stop"); out != "" {
+		t.Fatalf("Stop would wake the model: %s", out)
+	}
+	if state, err := messaging.MailboxState(env, "claude", "s", "host"); err != nil || state != "idle" {
+		t.Fatalf("Claude stop state = %q, %v", state, err)
 	}
 	hook("SessionEnd")
 	if messaging.MailboxAvailable(env, "claude", "s", "host") {

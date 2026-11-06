@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/messaging"
 )
@@ -14,6 +15,7 @@ import (
 // The activity hook also offers peer messages on hooks that add context without
 // continuing a stopped turn. Stop and SubagentStop never drain the mailbox.
 func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
+	observedAt := time.Now().UnixMilli()
 	b, err := io.ReadAll(io.LimitReader(r, 4<<20+1))
 	if err != nil || len(b) > 4<<20 {
 		return nil
@@ -80,9 +82,13 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		}
 		return nil
 	}
-	if harness == "codex" {
-		if state := codexMailboxState(input); state != "" {
-			_ = messaging.SetMailboxState(a.env, harness, input.SessionID, host, state)
+	if harness == "codex" || harness == "claude" {
+		state := turnMailboxState(input)
+		if harness == "claude" && (input.HookEventName == "Stop" || input.HookEventName == "Notification" && input.NotificationType == "idle_prompt") {
+			state = "idle"
+		}
+		if state != "" {
+			_ = messaging.SetMailboxStateAt(a.env, harness, input.SessionID, host, state, observedAt)
 		}
 	}
 	if harness == "pi" && input.NativeSocket != "" {
@@ -121,7 +127,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	return nil
 }
 
-func codexMailboxState(input eventHookInput) string {
+func turnMailboxState(input eventHookInput) string {
 	switch input.HookEventName {
 	case "SessionStart":
 		return "idle"

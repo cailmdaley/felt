@@ -347,7 +347,7 @@ listed only while that process runs; a context-only message to a receiver
 whose process has exited is rejected rather than queued. Peer JSON
 rows include the fiber path when the session ledger records its pairing, and
 provenance rows include a canonical `address` when the host and harness are known.
-Messages wake idle receivers or steer ongoing work by default:
+Messages wake idle receivers; a busy Claude receiver gets context at its next hook by default:
 
 ```bash
 shuttle sessions --json
@@ -375,10 +375,12 @@ their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
 to `claude`.
 
-`--context-only` queues or adds context without starting a new turn.
-An active Codex turn accepts it through native steering; an idle loaded thread receives persistent model context through `thread/inject_items`, without a separate visible TUI turn. Hooks offer queued context when the receiver next prompts or uses a
-tool; Pi offers it before the next agent turn. `--wake` remains an explicit alias
-for the default; `--wake=false` is equivalent to `--context-only`.
+A plain `shuttle message` to Claude uses the hook mailbox when its latest lifecycle hook reports a working turn; idle or unknown state uses the native wake path.
+The mailbox can deliver at the next prompt, before a tool, or after a tool, so the message can reach a worker mid-turn without Claude's native wrapper.
+If the turn ends before another eligible hook, the message remains queued until a later prompt; no wake or delivery deadline is guaranteed.
+`--wake` forces the native wake path, including during a turn.
+`--context-only` or `--wake=false` queues context without starting a turn, regardless of state.
+Pi and Codex retain their existing paths.
 
 `--notify-when-idle` subscribes the sending session to one notice when the
 receiver next ends a turn with nothing queued or running, or exits. A receiver
@@ -406,7 +408,7 @@ harness integration. Existing Confer Pi workers
 also remain addressable, but standalone Pi sessions do not require Confer.
 Hooks alone cannot wake Claude or Codex: install and enable the receiver's hooks
 for context delivery, and use a supported live native endpoint for wake.
-A failed wake never silently becomes a context-only send. Pending native input
+An explicitly forced wake never silently becomes a context-only send. Pending native input
 or approval is handled by the harness, not by injecting terminal keystrokes.
 
 Codex workers run through the terminal harness. Native messaging addresses the exact terminal session; hook-only sessions support context-only delivery when registered. Shuttle does not paste messages into terminal input.
