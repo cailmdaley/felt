@@ -120,15 +120,15 @@ const HINT = {
   viewport: { columns: 80, rows: 30 },
 } as const
 
-test('below, the ticker rides the hint row after the hint', BELOW, async ($, on) => {
+test('below, the voice line takes the hint text\'s place', BELOW, async ($, on) => {
   const { clock } = daemon(on, { ...VOICE, target: { fiber_id: SELF }, preview: { fiber_id: SELF, words: 1, text: 'hello' }, level: { mic: -49, at: '' } },
     { ...SPEAK, speaking: { fiber_id: 'X', voice: 'aria', text: 'x' } })
   on('ui.render', ($, e) => { const { Text } = $.ui.resolve(e); return <Text>engine</Text> })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (let i = 0; i < 25; i++) await clock.advance(150)
   const hint = await $.ui.mount({ ...HINT, surface: 'terminal' } as any)
-  expect(await hint.find({ type: 'Text', text: /shift\+tab/ })).toBeDefined()
-  expect(await label(hint, 'mic')).toBe('  ' + '▁'.repeat(20))
+  expect(await hint.find({ type: 'Text', text: /shift\+tab/ })).toBeUndefined()
+  expect(await label(hint, 'mic')).toBe('▁'.repeat(20))
   expect(await label(hint, 'speaker')).toBe('  🔈 aria')
   await hint.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })

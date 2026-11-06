@@ -17,10 +17,12 @@ placement", or `pluginConfigs` in settings):
 - `above` (default): its own band above the prompt, the speaker
   right-aligned. Claude Code draws its `[-]` collapse control beside it and
   keeps its status row between the band and the input.
-- `below`: on the hint row under the prompt, after the engine's hint text,
-  costing no line. The engine keeps its mode pill (`⏵⏵ auto mode on`) and
-  what follows live; the voice line is appended, not right-aligned, and the
-  row is often already full. The keyboard focus path does not reach it.
+- `below`: on the hint row under the prompt, in place of the engine's hint
+  text (`(shift+tab to cycle)`, `esc to interrupt`), costing no line. The
+  engine still draws its permission-mode pill and a ` · ` before the voice
+  line (`⏵⏵ auto mode on · ▁▂▃…  🔈 felt debug 1`); no hook or setting removes
+  them. With nothing to show, the engine's own hint returns. The voice line
+  is not right-aligned there, and the keyboard focus path does not reach it.
 
 Mic side, at the left:
 

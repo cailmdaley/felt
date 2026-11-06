@@ -186,26 +186,25 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // Below: on the hint row. The engine keeps its mode pill and whatever follows
-  // the hint live; the tree stands in for the hint's own text, so it sizes to
-  // its content and the voice line follows the hint after a gap.
+  // Below: on the hint row, in place of the engine's hint text (`shift+tab to
+  // cycle`, `esc to interrupt`). The engine keeps its permission-mode pill and
+  // its ` · ` separator at the left; no hook or setting removes them.
   on('ui.render', { component: 'PromptHint' }, ($, e, next) => {
     if (placement !== 'below') return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const room = (e.viewport?.columns ?? 80) - e.props.hint.length - PILLS
+    const room = (e.viewport?.columns ?? 80) - PILLS
     const { mic, parts, spk, spkParts } = line(room, Text)
     if (!mic && !spk) return next(e)
     return (
       <Box flexDirection="row">
-        <Text dimColor>{e.props.hint}</Text>
         {mic ? (
           <Button key="mic" plain label={mic} onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)}>
-            {['  ', ...parts]}
+            {parts}
           </Button>
         ) : null}
         {spk ? (
           <Button key="speaker" plain label={spk} onPress={() => setMuted($, '/api/v1/speak', !speak?.muted)}>
-            {['  ', ...spkParts]}
+            {[mic ? '  ' : '', ...spkParts].filter(x => x !== '')}
           </Button>
         ) : null}
       </Box>
