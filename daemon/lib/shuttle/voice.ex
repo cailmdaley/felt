@@ -7,6 +7,12 @@ defmodule Shuttle.Voice do
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
   def show(opts \\ []), do: GenServer.call(server(opts), :show)
+
+  @doc "The switch, state and target alone, cheap enough to read on every Rex poll."
+  def snapshot(opts \\ []), do: GenServer.call(server(opts), :snapshot)
+
+  @doc "Delivers `{:voice_target, target}` to the calling process on every new route."
+  def subscribe, do: Registry.register(__MODULE__.Streams, :target, nil)
   def cold?(target), do: Shuttle.Voice.Target.cold?(target)
   def update(params, opts \\ []), do: GenServer.call(server(opts), {:update, params}, 30_000)
 
@@ -67,6 +73,8 @@ defmodule Shuttle.Voice do
   end
 
   @impl true
+  def handle_call(:snapshot, _from, state), do: {:reply, state.snapshot, state}
+
   def handle_call(:show, _from, state) do
     state = name_target(state)
     snapshot = live_drafts(state.snapshot, state)
@@ -110,6 +118,10 @@ defmodule Shuttle.Voice do
         case append_route(state.routes_path, state.route_bytes, row) do
           {:ok, route_bytes} ->
             Shuttle.Meeting.TranscriptRelay.targets_changed()
+
+            Registry.dispatch(__MODULE__.Streams, :target, fn entries ->
+              for {pid, _} <- entries, do: send(pid, {:voice_target, target})
+            end)
 
             state = %{
               state

@@ -39,6 +39,7 @@ defmodule ShuttleWeb.Router do
     get("/meeting", MeetingController, :show)
     get("/voice", VoiceController, :show)
     get("/voice/transcript", VoiceController, :transcript)
+    get("/voice/events", VoiceController, :events)
     post("/voice", VoiceController, :update)
     post("/voice/target", VoiceController, :target)
     post("/voice/draft", VoiceController, :draft)

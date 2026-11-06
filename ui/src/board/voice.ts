@@ -60,6 +60,7 @@ export class Voice {
   private followed: VoiceTarget | null = null
   private revealed = ''
   private reading: Promise<boolean> = Promise.resolve(false)
+  private events: EventSource | null = null
   private timer: number | null = null
   private focusTimer: number | null = null
   private expectedEnabled: boolean | null = null
@@ -80,12 +81,18 @@ export class Voice {
     window.addEventListener('focus', this.focus)
     window.addEventListener('shuttle-voice-settings-saved', this.settingsSaved)
     void this.poll()
+    if (typeof EventSource !== 'undefined') {
+      this.events = new EventSource(`${this.base}/api/v1/voice/events`)
+      this.events.addEventListener('target', this.pushed)
+    }
   }
   dispose(): void {
     this.mounted = false
     document.removeEventListener('visibilitychange', this.visibility)
     window.removeEventListener('focus', this.focus)
     window.removeEventListener('shuttle-voice-settings-saved', this.settingsSaved)
+    this.events?.close()
+    this.events = null
     if (this.timer !== null) window.clearTimeout(this.timer)
     if (this.focusTimer !== null) window.clearTimeout(this.focusTimer)
     this.focusTimer = null
@@ -134,6 +141,14 @@ export class Voice {
       this.focusTimer = null
       void this.poll().then(followed => { if (!followed) this.target(true) })
     }, 50)
+  }
+  /** A pushed route follows at once; a read already in flight is stale and dropped. */
+  private pushed = (event: Event): void => {
+    if (!this.status) return
+    this.revision++
+    this.status = { ...this.status, target: JSON.parse((event as MessageEvent<string>).data) as VoiceStatus['target'] }
+    this.notify()
+    this.follow(this.status)
   }
   private settingsSaved = (event: Event): void => {
     this.expectedEnabled = (event as CustomEvent<boolean>).detail

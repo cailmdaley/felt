@@ -152,6 +152,42 @@ describe('live voice', () => {
     expect(reveals).toHaveLength(2)
     voice.dispose()
   })
+  it('follows a pushed route at once and ignores a poll that started before it', async () => {
+    vi.useFakeTimers()
+    const sources: Array<{ url: string; emit: (target: unknown) => void }> = []
+    vi.stubGlobal('EventSource', class {
+      private listeners: Array<(event: Event) => void> = []
+      constructor(url: string) {
+        sources.push({ url, emit: target => this.listeners.forEach(fn => fn(new MessageEvent('target', { data: JSON.stringify(target) }))) })
+      }
+      addEventListener(_: string, fn: (event: Event) => void): void { this.listeners.push(fn) }
+      close(): void {}
+    })
+    let release!: () => void
+    let slow = false
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      if (slow) await new Promise<void>(resolve => { release = resolve })
+      return { ok: true, json: async () => status() }
+    }))
+    const followed: string[] = []
+    const voice = new Voice('')
+    voice.onFollow = target => followed.push(target.fiber_id)
+    voice.mount(); await flush()
+    expect(sources.map(s => s.url)).toEqual(['/api/v1/voice/events'])
+    sources[0].emit(null)
+    expect(followed).toEqual([])
+
+    slow = true
+    await vi.advanceTimersByTimeAsync(2_000)
+    sources[0].emit({ fiber_id: 'rex/worker', origin: 'local', name: 'Worker' })
+    expect(followed).toEqual(['rex/worker'])
+    expect(voice.status?.target?.fiber_id).toBe('rex/worker')
+    release(); await flush()
+    expect(voice.status?.target?.fiber_id).toBe('rex/worker')
+    sources[0].emit({ fiber_id: 'rex/worker', origin: 'local', name: 'Worker' })
+    expect(followed).toEqual(['rex/worker'])
+    voice.dispose()
+  })
   it('follows from reads alone when the daemon has no target route', async () => {
     vi.useFakeTimers()
     let current = status({ target: { fiber_id: 'project/a', origin: 'local', name: 'A' } })

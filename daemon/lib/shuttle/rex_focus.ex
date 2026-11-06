@@ -52,7 +52,7 @@ defmodule Shuttle.RexFocus do
           GenServer.whereis(Shuttle.Env.server(Shuttle.Voice))
         end),
       warn: Keyword.get(opts, :warn, &Shuttle.Voice.focus_error/1),
-      poll_ms: Keyword.get(opts, :poll_ms, 1_000),
+      poll_ms: Keyword.get(opts, :poll_ms, 250),
       active?: Keyword.get(opts, :active?, &following?/0),
       command: Keyword.get(opts, :command, &command/0),
       bindings: Keyword.get(opts, :bindings, &Shuttle.Terminal.RexBindings.read/0),
@@ -346,7 +346,7 @@ defmodule Shuttle.RexFocus do
 
   defp following? do
     Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and
-      case Shuttle.Voice.show() do
+      case Shuttle.Voice.snapshot() do
         %{enabled: true, state: state} when state != "yielded" -> true
         _ -> false
       end

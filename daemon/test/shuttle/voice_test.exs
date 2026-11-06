@@ -96,6 +96,15 @@ defmodule Shuttle.VoiceTest do
     assert Config.thresholds("meeting") == Config.thresholds("voice")
   end
 
+  test "subscribers receive each new route as it is appended" do
+    {:ok, _} = Voice.subscribe()
+    assert {:ok, _} = Voice.target(%{"fiber_id" => "pushed/one", "origin" => nil})
+    assert_receive {:voice_target, %{"fiber_id" => "pushed/one"}}
+    assert {:ok, _} = Voice.target(%{"fiber_id" => "pushed/two"})
+    assert_receive {:voice_target, %{"fiber_id" => "pushed/two"}}
+    assert %{target: %{"fiber_id" => "pushed/two"}} = Voice.snapshot()
+  end
+
   test "partial words are a display-only preview pinned to the target they began under",
        c do
     transcript = Path.join(c.root, "voice.txt")
