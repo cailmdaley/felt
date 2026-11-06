@@ -2610,7 +2610,8 @@ defmodule Shuttle.PollerTest do
 
   for backend <- [Shuttle.Terminal.Tmux, Shuttle.Terminal.Rex] do
     @tag backend: backend
-    test "New session preserves the handoff marker and tracking when #{inspect(backend)} cannot stop", %{backend: backend} do
+    test "New session preserves the handoff marker and tracking when #{inspect(backend)} cannot stop",
+         %{backend: backend} do
       Env.put_app_env(:terminal_backend, backend)
 
       if backend == Shuttle.Terminal.Rex do
@@ -2620,7 +2621,12 @@ defmodule Shuttle.PollerTest do
 
       id = "tests/cut-stop-failed"
       MockRunner.set_fiber(id, make_fiber(id))
-      MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n", "active")
+
+      MockRunner.set_shuttle(
+        id,
+        "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+        "active"
+      )
 
       {:ok, poller} =
         start_poller!(
@@ -6012,6 +6018,175 @@ defmodule Shuttle.PollerTest do
              _ -> false
            end)
   end
+
+  defmodule ReapRunner do
+    def cmd("kill", args, opts) do
+      MockRunner.set_ps_result({"", 0})
+      MockRunner.cmd("kill", args, opts)
+    end
+
+    def cmd(command, args, opts), do: Shuttle.PollerTest.PhantomRunner.cmd(command, args, opts)
+  end
+
+  for backend <- [Shuttle.Terminal.Tmux, Shuttle.Terminal.Rex] do
+    @tag backend: backend
+    test "closed reaping stops an unreachable #{inspect(backend)} worker through its process", %{
+      backend: backend
+    } do
+      {state, session} = closed_reap_fixture(backend)
+      assert :ok = backend.close(ReapRunner, session)
+      MockRunner.set_ps_result({"812 1 bash -l /tmp/shuttle-run-#{session}.42.sh\n", 0})
+      Env.put_app_env(:worker_stop_ladder, [{"TERM", 0}, {"KILL", 0}])
+
+      assert {:ok, [^session]} = scan = Poller.list_shuttle_sessions(state)
+      state = Shuttle.Poller.SessionReconciliation.reconcile_orphaned_sessions(state, scan, true)
+      assert {"kill", ["-TERM", "--", "-812", "812"]} in MockRunner.commands()
+      assert {:ok, []} = scan = Poller.list_shuttle_sessions(state)
+      Shuttle.Poller.SessionReconciliation.reconcile_orphaned_sessions(state, scan, true)
+      assert Enum.count(MockRunner.commands(), &match?({"kill", _}, &1)) == 1
+    end
+
+    @tag backend: backend
+    test "a closed fiber keeps its #{inspect(backend)} worker visible until teardown succeeds", %{
+      backend: backend
+    } do
+      Env.put_app_env(:terminal_backend, backend)
+
+      if backend == Shuttle.Terminal.Rex do
+        Env.put_app_env(:fake_rex, start_supervised!(Shuttle.Test.FakeRex))
+        Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      end
+
+      id = "tests/closed-stop-tracking"
+      MockRunner.set_fiber(id, make_fiber(id))
+
+      MockRunner.set_shuttle(
+        id,
+        "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+        "active"
+      )
+
+      {:ok, poller} =
+        start_poller!(
+          runner: Shuttle.PollerTest.PhantomRunner,
+          own_host_id: "test-host",
+          poll_interval_ms: 60_000,
+          max_concurrent_workers: 0,
+          felt_stores: [MockRunner.felt_root()]
+        )
+
+      assert {:ok, session} = Poller.dispatch_fiber(poller, id, force: true, ad_hoc: true)
+      MockRunner.set_fiber(id, Map.put(MockRunner.fiber(id), "status", "closed"))
+
+      if backend == Shuttle.Terminal.Rex,
+        do: Shuttle.Test.FakeRex.reply("session.close_window", {"request timed out", :timeout}),
+        else: MockRunner.set_kill_session_failure(true)
+
+      sync_poll_cycle!(poller)
+      assert %{session: ^session, pid: watcher} = Poller.worker_status(poller, id)
+      assert Process.alive?(watcher)
+      assert reap_stop_count(backend) == 1
+      sync_poll_cycle!(poller)
+      assert reap_stop_count(backend) == 1
+
+      if backend == Shuttle.Terminal.Rex,
+        do: Shuttle.Test.FakeRex.clear_reply("session.close_window"),
+        else: MockRunner.set_kill_session_failure(false)
+
+      :sys.replace_state(poller, fn state ->
+        %{
+          state
+          | closed_session_retries: %{session => System.monotonic_time(:millisecond) - 60_001}
+        }
+      end)
+
+      sync_poll_cycle!(poller)
+      assert Poller.worker_status(poller, id) == nil
+      assert reap_stop_count(backend) == 2
+    end
+
+    @tag backend: backend
+    test "closed reaping backs off a failing #{inspect(backend)} stop and retries after cooldown",
+         %{backend: backend} do
+      {state, session} = closed_reap_fixture(backend)
+
+      if backend == Shuttle.Terminal.Rex,
+        do: Shuttle.Test.FakeRex.reply("session.close_window", {"request timed out", :timeout}),
+        else: MockRunner.set_kill_session_failure(true)
+
+      scan = {:ok, [session]}
+      reap = &Shuttle.Poller.SessionReconciliation.reconcile_orphaned_sessions(&1, scan, true)
+      state = reap.(state) |> reap.()
+      assert [%{pid: watcher, session: ^session}] = Map.values(state.running)
+      on_exit(fn -> if Process.alive?(watcher), do: Shuttle.WorkerWatcher.stop(watcher) end)
+      assert reap_stop_count(backend) == 1
+
+      state = %{
+        state
+        | closed_session_retries: %{session => System.monotonic_time(:millisecond) - 60_001}
+      }
+
+      if backend == Shuttle.Terminal.Rex,
+        do: Shuttle.Test.FakeRex.clear_reply("session.close_window"),
+        else: MockRunner.set_kill_session_failure(false)
+
+      fiber = MockRunner.fiber("tests/closed-reap")
+
+      state =
+        Shuttle.Poller.SessionReconciliation.reap_closed_session(
+          state,
+          fiber["id"],
+          fiber,
+          session
+        )
+
+      assert reap_stop_count(backend) == 2
+      assert state.closed_session_retries == %{}
+      assert :gone = Shuttle.Terminal.status(ReapRunner, session)
+    end
+  end
+
+  defp closed_reap_fixture(backend) do
+    Env.put_app_env(:terminal_backend, backend)
+
+    if backend == Shuttle.Terminal.Rex do
+      Env.put_app_env(:fake_rex, start_supervised!(Shuttle.Test.FakeRex))
+      Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    end
+
+    id = "tests/closed-reap"
+    fiber = make_fiber(id, %{"status" => "closed"})
+    MockRunner.set_fiber(id, fiber)
+    MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n", "closed")
+    fiber = MockRunner.fiber(id)
+    session = FiberUid.session(id)
+
+    assert :ok =
+             Shuttle.Terminal.launch(ReapRunner, session, MockRunner.felt_root(), "true\n",
+               preflighted: true
+             )
+
+    state = %Poller.State{
+      self_ref: self(),
+      heartbeat_interval_ms: 60_000,
+      runner: ReapRunner,
+      own_host_id: "test-host",
+      felt_stores: [MockRunner.felt_root()],
+      last_known_listings: %{MockRunner.felt_root() => [fiber]},
+      adopted?: true
+    }
+
+    {state, session}
+  end
+
+  defp reap_stop_count(Shuttle.Terminal.Tmux),
+    do: Enum.count(MockRunner.commands(), &match?({"tmux", ["kill-session" | _]}, &1))
+
+  defp reap_stop_count(Shuttle.Terminal.Rex),
+    do:
+      Enum.count(Shuttle.Test.FakeRex.calls(), fn {_, args, _} ->
+        "session.close_window" in args
+      end)
 
   # Startup adoption recognizes every live worker session by the
   # `<leaf>-<uid>-shuttle` name its fiber resolves to, whatever the fiber id

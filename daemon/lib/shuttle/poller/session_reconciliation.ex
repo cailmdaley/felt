@@ -2,14 +2,13 @@ defmodule Shuttle.Poller.SessionReconciliation do
   @moduledoc """
   Orphan adoption / live-session reconciliation for the poller.
 
-  When the daemon restarts, the `*-shuttle` tmux sessions it launched keep
-  running untouched (tmux owns the worker process; Shuttle only owns the
-  watcher). This module re-adopts those live sessions so the daemon resumes
-  supervising them — at boot (`adopt_orphans/1`) and on every poll
-  (`reconcile_orphaned_sessions/3`). Both walk the live `*-shuttle` tmux
-  sessions, map each back to its fiber by its `<leaf>-<uid>-shuttle` name
-  through `candidate_session_lookup/1`, and either start a watcher over the
-  live session, kill a session whose fiber has closed, or skip an unknown one.
+  Workers survive daemon restarts in their terminal backend. This module
+  re-adopts them at boot (`adopt_orphans/1`) and on every poll
+  (`reconcile_orphaned_sessions/3`). Terminal and process inventories map each
+  worker back to its fiber by its `<leaf>-<uid>-shuttle` name through
+  `candidate_session_lookup/1`. Open fibers acquire a watcher; closed fibers
+  have their worker stopped. Failed stops keep a watcher and retry at most
+  once a minute. Unknown workers are left alone.
 
   Functions take the `Shuttle.Poller.State` struct and return updated state;
   the helpers they share with the rest of the poller live in `Shuttle.Poller`.
@@ -72,6 +71,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   defp adopt_unwatched(%State{} = state, sessions) do
+    state = %{state | closed_session_retries: Map.take(state.closed_session_retries, sessions)}
     running_sessions = Enum.map(state.running, fn {_, meta} -> meta.session end) |> MapSet.new()
 
     orphan_sessions = Enum.reject(sessions, &MapSet.member?(running_sessions, &1))
@@ -112,7 +112,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
             adopt_live_session(state, fiber_id, fiber, uid, session)
 
           true ->
-            kill_closed_session(state, fiber_id, fiber, session)
+            reap_closed_session(state, fiber_id, fiber, session)
         end
 
       {:error, _} ->
@@ -123,6 +123,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   defp adopt_live_session(state, fiber_id, fiber, uid, session) do
+    state = %{state | closed_session_retries: Map.delete(state.closed_session_retries, session)}
     # Label only — Shuttle owns resolution; read its resolved id off the
     # already-fetched fiber JSON rather than re-resolving.
     agent_id = Poller.agent_id_from_fiber(fiber)
@@ -249,7 +250,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
             {:error, _} -> nil
           end
 
-        kill_closed_session(state, fiber_id, fiber, session)
+        reap_closed_session(state, fiber_id, fiber, session)
 
       :ambiguous ->
         Logger.warning(
@@ -267,14 +268,39 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # A live session whose fiber is closed: the worker's deliberate exit (closed
   # implies handoff), so stamp the clean-exit marker (when the fiber could be
   # read) before killing the stale session.
-  defp kill_closed_session(%State{} = state, fiber_id, fiber, session) do
+  @doc false
+  def reap_closed_session(%State{} = state, fiber_id, fiber, session) do
     if is_map(fiber) and Map.get(fiber, "status") == "closed" and
-         Poller.host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) do
+         Poller.host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) and
+         closed_stop_due?(state, session) do
       Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
-      Logger.info("Killing stale session for closed fiber: #{fiber_id} session=#{session}")
-      _ = Shuttle.Terminal.close(state.runner, session)
-    end
 
-    state
+      case Poller.stop_worker(state, fiber_id, session) do
+        {{:ok, _}, state} ->
+          %{state | closed_session_retries: Map.delete(state.closed_session_retries, session)}
+
+        {{:error, reason}, state} ->
+          Logger.warning("Could not stop closed fiber #{fiber_id}: #{reason}; retrying in 60s")
+
+          state =
+            if Poller.running_key(state, fiber_id),
+              do: state,
+              else: adopt_live_session(state, fiber_id, fiber, fiber["uid"], session)
+
+          retries =
+            Map.put(state.closed_session_retries, session, System.monotonic_time(:millisecond))
+
+          %{state | closed_session_retries: retries}
+      end
+    else
+      state
+    end
+  end
+
+  defp closed_stop_due?(state, session) do
+    case Map.get(state.closed_session_retries, session) do
+      nil -> true
+      last_attempt -> System.monotonic_time(:millisecond) - last_attempt >= 60_000
+    end
   end
 end

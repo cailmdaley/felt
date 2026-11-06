@@ -190,6 +190,8 @@ defmodule Shuttle.Poller do
       # adopting live shuttle sessions (`adopt_orphans`) and every poll
       # reconciles entries whose tmux session has died.
       running: %{},
+      # Failed closed-worker stops retry at most once a minute per session.
+      closed_session_retries: %{},
       standing_roles: [],
       pulses: %{},
       pulse_jobs: %{},
@@ -2316,7 +2318,7 @@ defmodule Shuttle.Poller do
   end
 
   defp transition_call({:kill_session, fiber_id}, _from, state) do
-    {reply, state} = stop_tracked_worker(state, fiber_id)
+    {reply, state} = stop_worker(state, fiber_id)
     {:reply, reply, state}
   end
 
@@ -2394,7 +2396,7 @@ defmodule Shuttle.Poller do
     {result, state} =
       case {verb == :rest or (verb == :pause and "--no-kill" not in args), result} do
         {true, {:ok, output}} ->
-          case stop_tracked_worker(state, address) do
+          case stop_worker(state, address) do
             {{:ok, :no_session}, state} -> {{:ok, output}, state}
             {{:ok, session}, state} -> {{:ok, output <> "  worker: stopped #{session}\n"}, state}
             {{:error, reason}, state} -> {{:error, reason}, state}
@@ -5506,8 +5508,20 @@ defmodule Shuttle.Poller do
   # `sessions` is this cycle's `list_shuttle_sessions/1` scan.
   defp reconcile(%State{} = state, sessions, listings_ok?) do
     state = %{state | orphans: []}
+    before = state.running
     state = reconcile_fiber_closures(state)
     state = reconcile_missing_running_sessions(state)
+
+    # The cycle's inventory predates these confirmed stops. Do not reap or
+    # re-adopt the retired worker again from that stale positive observation.
+    retired = for {key, meta} <- before, not Map.has_key?(state.running, key), do: meta.session
+
+    sessions =
+      case sessions do
+        {:ok, names} -> {:ok, names -- retired}
+        error -> error
+      end
+
     SessionReconciliation.reconcile_orphaned_sessions(state, sessions, listings_ok?)
   end
 
@@ -5516,17 +5530,14 @@ defmodule Shuttle.Poller do
   end
 
   defp reconcile_fiber_closures(%State{} = state) do
-    Enum.reduce(state.running, state, fn {runtime_key, meta}, state_acc ->
+    Enum.reduce(state.running, state, fn {_runtime_key, meta}, state_acc ->
       fiber_id = fiber_address(meta)
 
       case fetch_fiber_full(fiber_id, state_acc) do
         {:ok, fiber} ->
           cond do
             Map.get(fiber, "status") == "closed" ->
-              stamp_handoff_if_stale(state_acc, fiber_id, fiber)
-              Logger.info("Fiber closed externally: #{fiber_id}; stopping watcher")
-              stop_watcher(meta)
-              remove_running(state_acc, runtime_key)
+              SessionReconciliation.reap_closed_session(state_acc, fiber_id, fiber, meta.session)
 
             true ->
               state_acc
@@ -5669,13 +5680,19 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Stop a fiber's worker through its backend (tmux, or an app conversation's
-  # interrupt) and tear down its runtime entry, tracked or not. Writes no
-  # status. Shared by `/kill` and the rest transition.
-  defp stop_tracked_worker(state, fiber_id) do
+  # Stop through the terminal backend and remove tracking only after a
+  # confirmed stop. Shared by explicit stop, rest and closed-fiber reaping.
+  # An observed session comes from a positive inventory matched to its fiber.
+  @doc false
+  def stop_worker(state, fiber_id, observed_session \\ nil) do
     case running_key(state, fiber_id) do
       nil ->
-        {stop_untracked_worker(state, fiber_id), state}
+        reply =
+          if observed_session,
+            do: stop_live_session(state, fiber_id, observed_session),
+            else: stop_untracked_worker(state, fiber_id)
+
+        {reply, state}
 
       runtime_key ->
         meta = Map.get(state.running, runtime_key)
