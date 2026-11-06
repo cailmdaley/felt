@@ -123,6 +123,24 @@ describe('live voice', () => {
     expect(calls.filter(c => c.url.endsWith('/target')).map(c => c.body).at(-1)).toEqual({ fiber_id: 'durable-a', origin: 'local' })
     voice.dispose()
   })
+  it('follows from reads alone when the daemon has no target route', async () => {
+    vi.useFakeTimers()
+    let current = status({ target: { fiber_id: 'project/a', origin: 'local', name: 'A' } })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/target')
+      ? { ok: false, status: 404, json: async () => ({}) }
+      : { ok: true, json: async () => current }))
+    const followed: string[] = []
+    const voice = new Voice('')
+    voice.onFollow = target => followed.push(target.fiber_id)
+    voice.mount(); await flush()
+    voice.select(card({ id: 'note-b', shuttleKind: 'oneshot' })); await flush()
+    window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(50); await flush()
+    expect(followed).toEqual([])
+    current = status({ target: { fiber_id: 'project/c', origin: 'local', name: 'C' } })
+    await vi.advanceTimersByTimeAsync(2_000); await flush()
+    expect(followed).toEqual(['project/c'])
+    voice.dispose()
+  })
   it('returning to the board follows a change made while away instead of re-asserting its card', async () => {
     vi.useFakeTimers()
     let current = status()

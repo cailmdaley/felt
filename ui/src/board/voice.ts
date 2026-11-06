@@ -45,9 +45,10 @@ const targetKey = (target: VoiceStatus['target'] | undefined): string | null =>
   target ? JSON.stringify([target.fiber_id, target.origin]) : null
 
 /**
- * One visible-tab poll and one ordered write stream per board. A target the
- * board did not post, such as Rex's, is handed to `onFollow` so the board shows
- * it; the card that opens as a result is not posted back.
+ * One visible-tab poll and one ordered write stream per board. A target that
+ * changed since the board last read or wrote it, such as one Rex routed, is
+ * handed to `onFollow` so the board shows it; the card that opens as a result
+ * is not posted back. Following needs only `GET /api/v1/voice`.
  */
 export class Voice {
   status: VoiceStatus | null = null
@@ -243,7 +244,7 @@ export class Voice {
     const key = targetKey(status.target)
     const known = this.seen
     this.seen = key
-    if (known === undefined || key === known || key === this.lastTarget || !status.enabled || !status.target || !this.onFollow || isMobileViewport()) return false
+    if (known === undefined || key === known || !status.enabled || !status.target || !this.onFollow || isMobileViewport()) return false
     this.lastTarget = key!
     this.followed = status.target
     this.onFollow(status.target)

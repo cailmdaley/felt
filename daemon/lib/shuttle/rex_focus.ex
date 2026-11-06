@@ -7,9 +7,7 @@ defmodule Shuttle.RexFocus do
   Accessibility grant so deploys can't invalidate it. Titles route only while
   Rex is the frontmost app, and Rex coming to the front re-asserts the worker
   its title names; `lsappinfo` reports the frontmost app without a grant.
-  While Rex is behind another app, a new voice target with a local Rex binding
-  becomes the active tab of its Rex session through the server, which never
-  raises the app; Rex's selected session changes only by hand. Other hosts, and macOS without that grant, use Rex's per-session
+  Other hosts, and macOS without that grant, use Rex's per-session
   active-window events.
   """
   use GenServer
@@ -41,9 +39,6 @@ defmodule Shuttle.RexFocus do
       title: Keyword.get(opts, :title, if(Shuttle.Rex.macos?(), do: &read_title/0)),
       front?: Keyword.get(opts, :front?, &rex_front?/0),
       last_front: false,
-      seen_target: nil,
-      voice_target: Keyword.get(opts, :voice_target, &voice_target/0),
-      focus_window: Keyword.get(opts, :focus_window, &focus_window/2),
       last_title: nil,
       last_bindings: nil,
       last_target: nil,
@@ -78,7 +73,6 @@ defmodule Shuttle.RexFocus do
         |> warning(nil)
         |> Map.merge(%{
           last_front: false,
-          seen_target: nil,
           last_title: nil,
           last_bindings: nil,
           last_target: nil,
@@ -141,14 +135,7 @@ defmodule Shuttle.RexFocus do
   def target(_, _, _), do: nil
 
   @doc false
-  def title_target(title, bindings, fibers) do
-    case title_binding(title, bindings) do
-      %{fiber: id} -> fiber_target(id, fibers)
-      nil -> nil
-    end
-  end
-
-  defp title_binding(title, %{"bindings" => bindings}) do
+  def title_target(title, %{"bindings" => bindings}, fibers) do
     alias Shuttle.Terminal.RexTree
 
     matches =
@@ -156,14 +143,7 @@ defmodule Shuttle.RexFocus do
       |> Enum.flat_map(fn
         {_, %{"fiber" => fiber, "family" => family} = binding}
         when is_binary(fiber) and is_binary(family) ->
-          [
-            %{
-              fiber: fiber,
-              family: family,
-              depth: binding["depth"] || 0,
-              window_id: binding["window_id"]
-            }
-          ]
+          [%{fiber: fiber, family: family, depth: binding["depth"] || 0}]
 
         _ ->
           []
@@ -176,49 +156,8 @@ defmodule Shuttle.RexFocus do
       end)
 
     case matches do
-      [match] -> match
+      [%{fiber: id}] -> fiber_target(id, fibers)
       _ -> nil
-    end
-  end
-
-  @doc false
-  def target_binding(%{"fiber_id" => id, "origin" => origin}, %{"bindings" => bindings}, fibers) do
-    with %{} = fiber <-
-           Enum.find(fibers, fn f ->
-             id in [f["id"], f["uid"], f["slug"]] and get_in(f, ["shuttle", "host"]) == origin
-           end),
-         ids = Enum.reject([fiber["id"], fiber["uid"], fiber["slug"]], &is_nil/1),
-         [binding] <-
-           bindings
-           |> Map.values()
-           |> Enum.filter(&(&1["fiber"] in ids and is_binary(&1["window_id"]))) do
-      binding
-    else
-      _ -> nil
-    end
-  end
-
-  def target_binding(_, _, _), do: nil
-
-  # Each new voice target is mirrored once. Rex in front is the source of the
-  # target, and a tab already showing it needs nothing.
-  defp mirror(state, title, front) do
-    case state.voice_target.() do
-      target when target == state.seen_target ->
-        state
-
-      target ->
-        state = %{state | seen_target: target}
-
-        with false <- front,
-             {:ok, bindings} <- state.bindings.(),
-             %{"session_id" => sid, "window_id" => wid} <-
-               target_binding(target, bindings, state.fibers.()),
-             false <- match?(%{window_id: ^wid}, title_binding(title, bindings)) do
-          state.focus_window.(sid, wid)
-        end
-
-        state
     end
   end
 
@@ -243,7 +182,7 @@ defmodule Shuttle.RexFocus do
 
         front = state.front?.()
         raised = front and not state.last_front
-        state = state |> Map.put(:last_front, front) |> mirror(title, front)
+        state = %{state | last_front: front}
 
         if not front or String.trim(title) == "" do
           state
@@ -326,11 +265,6 @@ defmodule Shuttle.RexFocus do
       _ -> true
     end
   end
-
-  defp voice_target, do: Shuttle.Voice.show().target
-
-  defp focus_window(sid, wid),
-    do: Shuttle.Rex.command(Shuttle.Runner.Default, ["window", "focus", "-s", sid, wid])
 
   defp title_helper, do: Path.join(Shuttle.Env.home(), ".local/bin/shuttle-rex-title")
 
