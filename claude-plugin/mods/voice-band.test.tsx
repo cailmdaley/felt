@@ -28,7 +28,7 @@ function daemon(on: any, voice: object, { companions = [] as string[], fiber = t
   return { posts, reads, checked, clock }
 }
 
-const OFF = { available: true, mode: 'off', destination: null, paused: false, pending_words: 0, level: null }
+const OFF = { available: true, mode: 'off', follow: true, destination: null, paused: false, pending_words: 0, level: null }
 const HERE = { ...OFF, mode: 'following', destination: { fiber_id: SELF, name: 'Holistic hark' } }
 
 const ABOVE = { options: { placement: 'above' } } as const
@@ -77,12 +77,21 @@ test('following another card names its slug, and its words when there are some',
   await ui.unmount()
 })
 
-test('a meeting reads as following, and a ULID destination by its name', ABOVE, async ($, on) => {
-  daemon(on, { ...OFF, mode: 'meeting', destination: { fiber_id: '01OTHER', name: 'Standup' } })
+test('a pinned ULID destination shows its name and a pin', ABOVE, async ($, on) => {
+  daemon(on, { ...OFF, mode: 'pinned', follow: false, destination: { fiber_id: '01OTHER', name: 'Standup' }, pending_words: 2 })
   await start($)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'mic')).toBe('🔈')
-  expect(await ui.find({ type: 'Text', text: ' → Standup' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 📌 → Standup · 2 words…' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a pinned target is visible here even while muted', ABOVE, async ($, on) => {
+  daemon(on, { ...HERE, mode: 'pinned', follow: false, paused: true })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'mic')).toBe('🔇')
+  expect(await ui.find({ type: 'Text', text: ' 📌 → Holistic hark' })).toBeDefined()
   await ui.unmount()
 })
 

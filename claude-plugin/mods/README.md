@@ -12,6 +12,7 @@ the left, the mic's state beside them.
 ```
 ⧉ ⌗ ☰ 🔊 12 words… ✕
 ⧉ ⌗ ☰ 🔈 → voice-modes · 8 words… ✕
+⧉ ⌗ ☰ 🔈 📌 → voice-modes
 ⧉ ⌗ ☰ 🔇
 ```
 
@@ -29,13 +30,14 @@ Each opens its page on the board through `POST /api/v1/board/open`.
 | --- | --- |
 | speech (above -36 dBFS; holds until below -44 dBFS) | `🔊` |
 | mic open and quiet | `🔈` |
-| muted, or a meeting paused | `🔇` alone |
+| muted | `🔇` |
 | words said and not yet sent | ` n words…` after the glyph, then `✕` |
-| words go to another card | ` → <slug>`, then ` · n words…` when there are some |
+| following another card | ` → <slug>`, then ` · n words…` when there are some |
+| pinned to a card | ` 📌 → <slug>`, even in that card's session or while muted |
 | Listening off | nothing |
 
-The slug is the last segment of the destination's path id, else its name. A
-meeting reads as following. Clicking the glyph toggles the mute
+The slug is the last segment of the destination's path id, else its name.
+Clicking the glyph toggles the mute
 (`POST /api/v1/voice/toggle`, the route the board's and the global hotkey's
 mute use too); `✕` drops the words not yet sent (`POST /api/v1/voice/discard`).
 With no pins and no audio the line is not drawn.

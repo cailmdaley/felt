@@ -3,19 +3,22 @@
 //
 //   ⧉ ⌗ ☰ 🔊 12 words… ✕
 //   ⧉ ⌗ ☰ 🔈 → voice-modes · 8 words… ✕
+//   ⧉ ⌗ ☰ 🔈 📌 → voice-modes
 //   ⧉ ⌗ ☰ 🔇
 //
 // Pins at the left open this session's family page, tapestry and constitution
 // on the board. The audio glyph says what the mic hears: 🔊 sound arriving,
 // 🔈 open and quiet, 🔇 muted; a click toggles the mute. `n words…` counts
 // what was said but not yet sent, and `✕` drops it; `→ <slug>` names the card
-// words go to when it is not this one. Listening off draws no audio side.
+// words go to when it is not this one. A pinned target is shown even here.
+// Listening off draws no audio side.
 import type { EngineInterface, Register } from 'claude-code'
 
 type Ref = { fiber_id: string; name?: string } | null
 type Voice = {
   available: boolean
-  mode: 'off' | 'following' | 'meeting'
+  mode: 'off' | 'following' | 'pinned'
+  follow: boolean
   destination: Ref
   paused: boolean
   pending_words?: number
@@ -117,7 +120,8 @@ function line($: EngineInterface, ui: { Box: any; Button: any; Text: any }) {
     sounding = db > (sounding ? OFF : ON)
     const glyph = v.paused ? '🔇' : sounding ? '🔊' : '🔈'
     const n = v.paused ? 0 : v.pending_words ?? 0
-    const where = v.paused || mine(v.destination?.fiber_id) ? '' : ` → ${slug(v.destination)}`
+    const where = !v.follow && v.destination ? ` 📌 → ${slug(v.destination)}`
+      : v.paused || mine(v.destination?.fiber_id) ? '' : ` → ${slug(v.destination)}`
     const words = where + (n ? `${where ? ' ·' : ''} ${n} words…` : '')
     audio = (
       <Box flexDirection="row">
