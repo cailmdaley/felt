@@ -196,6 +196,7 @@ defmodule ShuttleWeb.Router do
     get("/transcript/raw", TranscriptController, :raw)
     # SSE is not subject to JSON content negotiation.
     get("/voice/events", VoiceController, :events)
+    get("/rex/focus", VoiceController, :rex_focus)
     # The phone page's microphone, relayed into the live `phone` meeting's
     # hark socket. A WebSocket upgrade negotiates no JSON, so it stays outside
     # `:api` like the byte routes above.

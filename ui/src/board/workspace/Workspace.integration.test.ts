@@ -952,6 +952,25 @@ describe('workspace reader integration', () => {
     workspace.reader.back(); await flush()
     expect(conversation).not.toHaveBeenCalled()
   })
+  it('goes where Rex went from the Desk, another family or a lone body, and never writes back', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })
+    const remote = thread({ id: 'far', originId: 'host-b', status: 'active' })
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), remote]
+    bodyCards = feed
+    workspace.dispose()
+    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true), sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    expect(workspace.isActive).toBe(false)
+    workspace.follow('hub-mid', 'host-a'); await flush()
+    expect(workspace.isActive).toBe(true)
+    expect(selected()).toBe('family:host-a:hub-mid')
+    workspace.follow('far', 'host-b'); await flush()
+    expect(selected()).toBe('family:host-b:far')
+    expect(sight.mock.lastCall?.[0].id).toBe('far')
+    expect(conversation).not.toHaveBeenCalled()
+  })
   it('tells voice what it shows: the thread the map rests on, the page elsewhere, and opens quietly from a click', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })

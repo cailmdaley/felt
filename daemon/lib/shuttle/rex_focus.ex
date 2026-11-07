@@ -1,6 +1,8 @@
 defmodule Shuttle.RexFocus do
   @moduledoc """
-  Routes the Rex view into the spoken-time voice journal.
+  Follows the worker on Rex's screen: it streams to the board through
+  `subscribe/0`, and routes the spoken-time voice journal while voice follows.
+  The watch runs while either wants it.
 
   macOS accessibility window titles identify the app's selected worker across
   sessions, read through `~/.local/bin/shuttle-rex-title`, which holds the
@@ -9,6 +11,10 @@ defmodule Shuttle.RexFocus do
   its title names; `lsappinfo` reports the frontmost app without a grant.
   Other hosts, and macOS without that grant, use Rex's per-session
   active-window events.
+
+  The stream carries only what Rex itself chooses, so a selection the board
+  makes behind its own window never comes back to it. A daemon starting up, or
+  a board connecting, learns where Rex stands without announcing it.
 
   `reveal/2` moves Rex's selection behind whatever has the keyboard, for a
   caller that sets the voice target itself. Selecting never activates the app.
@@ -41,7 +47,7 @@ defmodule Shuttle.RexFocus do
       discard: false,
       title: Keyword.get(opts, :title, if(Shuttle.Rex.macos?(), do: &read_title/0)),
       front?: Keyword.get(opts, :front?, &rex_front?/0),
-      last_front: false,
+      last_front: nil,
       last_title: nil,
       last_bindings: nil,
       last_target: nil,
@@ -54,6 +60,8 @@ defmodule Shuttle.RexFocus do
       warn: Keyword.get(opts, :warn, &Shuttle.Voice.focus_error/1),
       poll_ms: Keyword.get(opts, :poll_ms, 250),
       active?: Keyword.get(opts, :active?, &following?/0),
+      watched?: Keyword.get(opts, :watched?, &watched?/0),
+      publish: Keyword.get(opts, :publish, &publish/1),
       command: Keyword.get(opts, :command, &command/0),
       bindings: Keyword.get(opts, :bindings, &Shuttle.Terminal.RexBindings.read/0),
       fibers: Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0),
@@ -67,7 +75,7 @@ defmodule Shuttle.RexFocus do
   @impl true
   def handle_info(:tick, state) do
     state =
-      if state.active?.() do
+      if state.active?.() or state.watched?.() do
         state = poll_title(state)
         if state.title_ready, do: stop_stream(state), else: ensure_stream(state)
       else
@@ -75,7 +83,7 @@ defmodule Shuttle.RexFocus do
         |> stop_stream()
         |> warning(nil)
         |> Map.merge(%{
-          last_front: false,
+          last_front: nil,
           last_title: nil,
           last_bindings: nil,
           last_target: nil,
@@ -94,10 +102,11 @@ defmodule Shuttle.RexFocus do
     if not state.discard and not state.title_ready do
       with {:ok, %{"payload" => %{"event" => %{"type" => "active_window_changed"}}} = event} <-
              Jason.decode(line),
-           true <- state.active?.(),
+           true <- state.active?.() or state.watched?.(),
            {:ok, bindings} <- state.bindings.(),
            target when not is_nil(target) <- target(event, bindings, state.fibers.()) do
-        state.target.(target)
+        state.publish.(target)
+        route(state, target)
       end
     end
 
@@ -116,6 +125,16 @@ defmodule Shuttle.RexFocus do
 
   @impl true
   def terminate(_reason, state), do: state |> stop_stream() |> warning(nil)
+
+  @doc "Delivers `{:rex_focus, target}` to the calling process each time Rex's worker is chosen."
+  def subscribe, do: Registry.register(Shuttle.Voice.Streams, :rex_focus, nil)
+
+  @doc "Tells every subscriber that `target` is now the worker in view."
+  def publish(target) do
+    Registry.dispatch(Shuttle.Voice.Streams, :rex_focus, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:rex_focus, target})
+    end)
+  end
 
   @doc false
   def target(
@@ -288,9 +307,16 @@ defmodule Shuttle.RexFocus do
         window <> " - " <> session == title
       end)
 
+    # Copies of one fiber on two hosts share a title; its live copy is the worker.
     case matches do
-      [fiber] -> fiber_target(fiber["uid"] || fiber["id"], [fiber])
-      _ -> nil
+      [fiber] ->
+        fiber_target(fiber["uid"] || fiber["id"], [fiber])
+
+      many ->
+        case Enum.filter(many, &(&1["status"] == "active")) do
+          [fiber] -> fiber_target(fiber["uid"] || fiber["id"], [fiber])
+          _ -> nil
+        end
     end
   end
 
@@ -358,7 +384,8 @@ defmodule Shuttle.RexFocus do
         state = state |> warning(nil) |> Map.put(:title_ready, true)
 
         front = state.front?.()
-        raised = front and not state.last_front
+        raised = front and state.last_front != true
+        arrived = not is_nil(state.last_front)
         state = %{state | last_front: front}
 
         if not front or String.trim(title) == "" do
@@ -372,8 +399,10 @@ defmodule Shuttle.RexFocus do
                 identity = target_identity(target)
 
                 if target &&
-                     (raised or title != state.last_title or identity != state.last_target),
-                   do: state.target.(target)
+                     (raised or title != state.last_title or identity != state.last_target) do
+                  if arrived, do: state.publish.(target)
+                  route(state, target)
+                end
 
                 %{state | last_title: title, last_bindings: bindings, last_target: identity}
               else
@@ -403,6 +432,8 @@ defmodule Shuttle.RexFocus do
         |> Map.put(:title_ready, false)
     end
   end
+
+  defp route(state, target), do: if(state.active?.(), do: state.target.(target))
 
   defp target_identity(nil), do: nil
   defp target_identity(target), do: {target["fiber_id"], target["origin"]}
@@ -451,6 +482,11 @@ defmodule Shuttle.RexFocus do
         %{enabled: true, state: state} when state != "yielded" -> true
         _ -> false
       end
+  end
+
+  defp watched? do
+    Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and
+      Registry.lookup(Shuttle.Voice.Streams, :rex_focus) != []
   end
 
   defp command do

@@ -68,4 +68,16 @@ try {
   assert.equal(await page.evaluate(() => window.__harness.modal.voice.status.target.fiber_id), route.fiber_id)
   await context.close()
   console.log('voice follows the page the board shows: ok')
+
+  const desk = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const fromDesk = await desk.newPage()
+  await fromDesk.goto(`${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=music`)
+  await fromDesk.locator('.kbn-desk .kbn-card').first().waitFor()
+  await fromDesk.evaluate(() => {
+    const modal = window.__harness.modal, card = modal.workspaceCards()[0]
+    modal.rexFocus.moved({ fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name })
+  })
+  await fromDesk.locator('.ws-stage-band').waitFor()
+  await desk.close()
+  console.log('the board goes where Rex went, from the Desk: ok')
 } finally { await browser.close() }

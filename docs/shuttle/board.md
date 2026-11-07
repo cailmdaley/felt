@@ -256,7 +256,7 @@ A file, the tapestry or the constitution opens on the stage, and Back returns to
 
 Escape, `h`, Back and a double-click or double-tap on the field step out one level: to the thread's orchestrator, then to the whole family, and only then off the page. Stepping out, zooming and panning change the view and leave Rex alone.
 
-When Rex's focus moves to a thread on the open map, the map flies to it without speaking back. A thread on another map lands there. A page of the same fiber's channel stands, so opening a file does not bounce back to the map. Opening a page does not change what Rex shows.
+When Rex's worker changes while Rex is in front, from its sidebar or by Rex coming forward, the board goes there, with voice on or off. A thread on the open map is flown to, without speaking back to Rex or to voice. A thread on another map lands there, on any host, from any view; Tree and Globe show it in place. A page of the same fiber's channel stands, so opening a file does not bounce back to the map. Opening a page does not change what Rex shows.
 
 ### Where voice goes
 

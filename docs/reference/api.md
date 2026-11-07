@@ -63,6 +63,7 @@ time.
 | `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
 | `GET /voice/transcript` | recorder-addressed | Resolve the current following transcript as `{path, launch, recorder}` for the file reader; no capture control |
 | `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
+| `GET /rex/focus` | **not** owner-routed | Server-sent `focus` events `{fiber_id, origin, name}` for each worker Rex moves to, whether or not voice is on; nothing on connect |
 | `POST /voice/target` | recorder-routed | Route following to `{fiber_id, origin?, name?}`, the board's view; returns voice state, unchanged unless following |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
@@ -443,7 +444,7 @@ Every meeting start stops live voice and verifies the recorder has exited before
 Voice captures are hidden from `/meeting`, its stop, pause and system-audio controls, including stale-launch errors.
 Disabled, idle voice checks lifecycle-file changes without polling the terminal; startup always observes retained captures so an orphan voice recorder is stopped.
 
-While following is on, the destination is whichever of Rex and the board had focus last. `Shuttle.RexFocus` routes Rex's worker when Rex comes to the front or changes worker, and the board posts what it shows to `POST /voice/target` while it has the keyboard, on regaining it included. Each route durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
+While following is on, the destination is whichever of Rex and the board had focus last. `Shuttle.RexFocus` routes Rex's worker when Rex comes to the front or changes worker, the same moves it streams on `GET /rex/focus`, and the board posts what it shows to `POST /voice/target` while it has the keyboard, on regaining it included. Each route durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
 `t` is the recorder's UTC receipt time, not the time reconciliation finishes.
 Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
 A target switch flushes warm pending words to the old target immediately; cold speech stays with its card.

@@ -317,6 +317,108 @@ defmodule Shuttle.RexFocusTest do
     assert_receive {:selected, %{"fiber_id" => "other/work"}}
   end
 
+  test "Rex's moves reach a watching board with voice off, and voice stays out of it", c do
+    front = start_supervised!({Agent, fn -> true end}, id: :front)
+    title = start_supervised!({Agent, fn -> {:ok, "task - project/task"} end}, id: :title)
+    other = %{"fiber" => "other/work", "family" => "other/work", "depth" => 0}
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, false,
+        poll_ms: 60_000,
+        watched?: fn -> true end,
+        front?: fn -> Agent.get(front, & &1) end,
+        title: fn -> Agent.get(title, & &1) end,
+        bindings: fn -> {:ok, put_in(bindings(), ["bindings", "other"], other)} end,
+        fibers: fn ->
+          fibers() ++
+            [%{"id" => "other/work", "name" => "Work", "shuttle" => %{"host" => "test-host"}}]
+        end
+      )
+
+    tick = fn ->
+      send(watcher, :tick)
+      :sys.get_state(watcher)
+    end
+
+    # Where Rex already stands when the watch begins is not a move.
+    tick.()
+    refute_receive {:published, _}, 30
+
+    Agent.update(title, fn _ -> {:ok, "work - other/work"} end)
+    tick.()
+    assert_receive {:published, %{"fiber_id" => "other/work", "origin" => "test-host"}}
+    tick.()
+    refute_receive {:published, _}, 30
+
+    # A selection the board makes behind its own window does not come back.
+    Agent.update(front, fn _ -> false end)
+    tick.()
+    Agent.update(title, fn _ -> {:ok, "task - project/task"} end)
+    tick.()
+    refute_receive {:published, _}, 30
+
+    Agent.update(front, fn _ -> true end)
+    tick.()
+    assert_receive {:published, %{"fiber_id" => "project/task"}}
+    refute_receive {:selected, _}, 30
+  end
+
+  test "nobody watching and voice off polls nothing", c do
+    parent = self()
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, false,
+        poll_ms: 60_000,
+        title: fn ->
+          send(parent, :title_read)
+          {:ok, "task - project/task"}
+        end
+      )
+
+    send(watcher, :tick)
+    :sys.get_state(watcher)
+    refute_receive :title_read, 30
+  end
+
+  test "subscribers receive each published move" do
+    {:ok, _} = RexFocus.subscribe()
+    RexFocus.publish(%{"fiber_id" => "uid", "origin" => "fir"})
+    assert_receive {:rex_focus, %{"fiber_id" => "uid", "origin" => "fir"}}
+  end
+
+  test "a fiber copied on two hosts resolves to its live copy" do
+    copy = fn host, status ->
+      %{
+        "id" => "project/hub/leg",
+        "uid" => "01LEG",
+        "slug" => "project/hub/leg",
+        "status" => status,
+        "shuttle" => %{"host" => host}
+      }
+    end
+
+    hub = %{"id" => "project/hub", "slug" => "project/hub", "shuttle" => %{"host" => "fir"}}
+    {window, session} = {"\u2514 leg", "project/hub"}
+    title = window <> " - " <> session
+    empty = %{"bindings" => %{}}
+
+    assert %{"origin" => "fir", "fiber_id" => "01LEG"} =
+             RexFocus.title_target(
+               title,
+               empty,
+               [hub, copy.("fir", "active"), copy.("nibi", "open")],
+               "mac"
+             )
+
+    assert nil ==
+             RexFocus.title_target(
+               title,
+               empty,
+               [hub, copy.("fir", "active"), copy.("nibi", "active")],
+               "mac"
+             )
+  end
+
   test "reveal selects the opened card's local worker unless Rex already shows it" do
     parent = self()
 
@@ -598,6 +700,8 @@ defmodule Shuttle.RexFocusTest do
              front?: fn -> true end,
              poll_ms: 25,
              active?: fn -> Agent.get(active, & &1) end,
+             watched?: fn -> false end,
+             publish: fn target -> send(parent, {:published, target}) end,
              command: fn -> {script, [pids, event_file]} end,
              bindings: fn -> {:ok, bindings()} end,
              fibers: &fibers/0,

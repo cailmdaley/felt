@@ -47,29 +47,7 @@ describe('live voice', () => {
     expect(new Set(urls)).toEqual(new Set(['/api/v1/voice']))
     voice.dispose()
   })
-  it('follows a target Rex moved to once, and never posts one', async () => {
-    vi.useFakeTimers()
-    let current = status()
-    const posts: string[] = []
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === 'POST') posts.push(url)
-      return { ok: true, json: async () => current }
-    }))
-    const followed: string[] = []
-    const voice = new Voice('')
-    voice.onFollow = target => followed.push(target.fiber_id)
-    voice.mount(); await flush()
-    await vi.advanceTimersByTimeAsync(2_000); await flush()
-    expect(followed).toEqual([])
-
-    current = status({ target: { fiber_id: 'project/b', origin: 'local', name: 'B' } })
-    await vi.advanceTimersByTimeAsync(2_000); await flush()
-    await vi.advanceTimersByTimeAsync(2_000); await flush()
-    expect(followed).toEqual(['project/b'])
-    expect(posts).toEqual([])
-    voice.dispose()
-  })
-  it('follows a pushed route at once and ignores a poll that started before it', async () => {
+  it('shows a pushed route at once and ignores a poll that started before it', async () => {
     vi.useFakeTimers()
     const sources: Array<{ url: string; emit: (target: unknown) => void }> = []
     vi.stubGlobal('EventSource', class {
@@ -86,23 +64,18 @@ describe('live voice', () => {
       if (slow) await new Promise<void>(resolve => { release = resolve })
       return { ok: true, json: async () => status() }
     }))
-    const followed: string[] = []
     const voice = new Voice('')
-    voice.onFollow = target => followed.push(target.fiber_id)
     voice.mount(); await flush()
     expect(sources.map(s => s.url)).toEqual(['/api/v1/voice/events'])
     sources[0].emit(null)
-    expect(followed).toEqual([])
 
     slow = true
     await vi.advanceTimersByTimeAsync(2_000)
     sources[0].emit({ fiber_id: 'rex/worker', origin: 'local', name: 'Worker' })
-    expect(followed).toEqual(['rex/worker'])
     expect(voice.status?.target?.fiber_id).toBe('rex/worker')
     release(); await flush()
     expect(voice.status?.target?.fiber_id).toBe('rex/worker')
     sources[0].emit({ fiber_id: 'rex/worker', origin: 'local', name: 'Worker' })
-    expect(followed).toEqual(['rex/worker'])
     voice.dispose()
   })
   it('reopens the event stream after the daemon refuses it', async () => {
@@ -211,10 +184,8 @@ describe('live voice', () => {
       return voice
     }
 
-    it('sets the target from what the board shows, once the view holds, without following its own write back', async () => {
+    it('sets the target from what the board shows, once the view holds', async () => {
       const voice = await mounted(status({ target: held }))
-      const followed: string[] = []
-      voice.onFollow = target => followed.push(target.fiber_id)
       voice.see(other)
       voice.see(worker)
       await vi.advanceTimersByTimeAsync(300)
@@ -224,13 +195,10 @@ describe('live voice', () => {
       await vi.advanceTimersByTimeAsync(400); await flush()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
       await vi.advanceTimersByTimeAsync(2_000); await flush()
-      expect(followed).toEqual([])
       voice.dispose()
     })
     it('lets the last focused of Rex and the board decide', async () => {
       const voice = await mounted(status({ target: held }))
-      const followed: string[] = []
-      voice.onFollow = target => followed.push(target.fiber_id)
       focused = false
       voice.see(worker)
       await vi.advanceTimersByTimeAsync(400); await flush()
@@ -241,14 +209,11 @@ describe('live voice', () => {
       focused = false
       current = status({ target: held })
       await vi.advanceTimersByTimeAsync(2_000); await flush()
-      expect(followed).toEqual(['uid-b'])
       expect(posts).toHaveLength(1)
       voice.dispose()
     })
-    it('takes back the seen route when the write fails, and leaves a target that already agrees alone', async () => {
+    it('leaves a target that already agrees alone, and survives a refused write', async () => {
       const voice = await mounted(status({ target: held }))
-      const followed: string[] = []
-      voice.onFollow = target => followed.push(target.fiber_id)
       voice.see(other)
       await vi.advanceTimersByTimeAsync(400); await flush()
       expect(posts).toEqual([])
@@ -256,7 +221,6 @@ describe('live voice', () => {
       voice.see(worker)
       await vi.advanceTimersByTimeAsync(400); await flush()
       await vi.advanceTimersByTimeAsync(2_000); await flush()
-      expect(followed).toEqual([])
       voice.dispose()
     })
     it.each([

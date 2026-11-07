@@ -17,15 +17,8 @@ defmodule ShuttleWeb.VoiceController do
       {:ok, :local} ->
         Voice.subscribe()
 
-        conn =
-          conn
-          |> put_resp_content_type("text/event-stream")
-          |> put_resp_header("cache-control", "no-cache, no-transform")
-          |> put_resp_header("x-accel-buffering", "no")
-          |> send_chunked(200)
-
-        case chunk(conn, target_event(Voice.snapshot().target)) do
-          {:ok, conn} -> stream_targets(conn)
+        case conn |> open_stream() |> chunk(event("target", Voice.snapshot().target)) do
+          {:ok, conn} -> stream(conn, :voice_target, "target")
           {:error, _} -> conn
         end
 
@@ -34,21 +27,40 @@ defmodule ShuttleWeb.VoiceController do
     end
   end
 
-  defp stream_targets(conn) do
-    event =
+  @doc """
+  Streams each worker Rex moves to as a server-sent `focus` event, whether or
+  not voice is on. Rex's app is on this daemon's host, so it never routes to a
+  recorder. Nothing is sent on connect; a comment every 15 s holds the
+  connection.
+  """
+  def rex_focus(conn, _params) do
+    Shuttle.RexFocus.subscribe()
+    conn |> open_stream() |> stream(:rex_focus, "focus")
+  end
+
+  defp open_stream(conn) do
+    conn
+    |> put_resp_content_type("text/event-stream")
+    |> put_resp_header("cache-control", "no-cache, no-transform")
+    |> put_resp_header("x-accel-buffering", "no")
+    |> send_chunked(200)
+  end
+
+  defp stream(conn, message, name) do
+    next =
       receive do
-        {:voice_target, target} -> target_event(target)
+        {^message, payload} -> event(name, payload)
       after
         15_000 -> ": keepalive\n\n"
       end
 
-    case chunk(conn, event) do
-      {:ok, conn} -> stream_targets(conn)
+    case chunk(conn, next) do
+      {:ok, conn} -> stream(conn, message, name)
       {:error, _} -> conn
     end
   end
 
-  defp target_event(target), do: "event: target\ndata: #{Jason.encode!(target)}\n\n"
+  defp event(name, payload), do: "event: #{name}\ndata: #{Jason.encode!(payload)}\n\n"
 
   def transcript(conn, params) do
     conn
