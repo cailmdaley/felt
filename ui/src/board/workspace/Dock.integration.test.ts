@@ -497,8 +497,7 @@ describe('Listen', () => {
     recording = { title: 'Standup', state: 'live' }
     canJoin = false
     listening.syncMeeting()
-    expect([toggle.disabled, toggle.title, toggle.textContent]).toEqual([false, 'Your voice is going to Standup.', 'RecordingStandup'])
-    expect(toggle.getAttribute('aria-label')).toBe('Recording → Standup')
+    expect([toggle.disabled, toggle.title, toggle.textContent]).toEqual([false, 'Your voice is going to Standup.', 'Listening · Standup'])
     listening.reset()
   })
 
@@ -548,7 +547,7 @@ describe('Listen', () => {
     listening.setMeetingHostOpen(openHost, () => 'vizier')
     listening.syncMeeting()
     const chip = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    expect(chip.getAttribute('aria-label')).toBe('Recording → vizier')
+    expect(chip.textContent).toBe('Listening · vizier')
     expect(q('.kbn-ctl-meet').hidden).toBe(false)
     expect(listening.el.querySelector('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop')).toBeNull()
     chip.click()
@@ -557,25 +556,30 @@ describe('Listen', () => {
     listening.reset()
   })
 
-  it('says in one line where the words go, here or elsewhere, and shows no transcript', () => {
+  it('says beside Listen where the words go, and shows no transcript', () => {
     let recording: Record<string, unknown> | null = null
     const { q, item, listening } = mountListen(task(), { current: () => recording })
     const openFile = vi.fn()
     listening.openFile = openFile
     listening.setMeetingHostOpen(vi.fn(), meeting => meeting.fiber?.split('/').at(-1))
-    const chip = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    expect(chip.getAttribute('aria-label')).toBe('Listen')
-    recording = { launch: 'L1', title: 'Standup', state: 'live', fiber: 'a/task', recorder: 'rec', transcript: '/m/standup.txt', tail: ['hello there'] }
+    const strip = q('.ws-voice-strip')
+    expect(strip.parentElement).toBe(listening.head)
+    expect(strip.previousElementSibling).toBe(q('.kbn-ctl-meet'))
+    expect(strip.hidden).toBe(true)
+    recording = { launch: 'L1', title: 'Standup', state: 'live', fiber: 'a/task', joined: true, recorder: 'owner', transcript: '/m/standup.txt', tail: ['hello there'] }
     listening.syncMeeting()
-    expect(chip.getAttribute('aria-label')).toBe('Recording → task')
-    expect(q('.kbn-ctl-meet').dataset.voice).toBe('recording')
+    expect([strip.hidden, strip.textContent]).toEqual([false, 'Meeting → task'])
     expect(listening.el.textContent).not.toContain('hello there')
+    expect(listening.el.querySelector('.kbn-detail-transcript')).toBeNull()
+    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+    item('Open transcript').click()
+    expect(openFile).toHaveBeenCalledWith('/m/standup.txt', 'Meeting transcript', 'owner')
     recording = { ...recording, fiber: 'b/elsewhere', paused: true }
     listening.syncMeeting()
-    expect(chip.getAttribute('aria-label')).toBe('Paused → elsewhere')
-    chip.click()
-    item('Open transcript').click()
-    expect(openFile).toHaveBeenCalledWith('/m/standup.txt', 'Meeting transcript', 'rec')
+    expect(strip.textContent).toBe('Meeting → elsewhere · paused')
+    recording = null
+    listening.syncMeeting()
+    expect(strip.hidden).toBe(true)
     listening.reset()
   })
 

@@ -20,6 +20,7 @@ import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
 import { dressVerb, headerLifecycleVerbsFor } from './lifecycleVerbs.js'
 import { WorkerActions } from './workerActions.js'
+import { VoiceStrip, voiceLine } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
@@ -424,6 +425,7 @@ export class Dock {
   private constitutionButton: HTMLButtonElement | null = null
   private openConstitution: (() => void) | null = null
   private listen: ListenControl | null = null
+  private voiceStrip: VoiceStrip | null = null
   private disposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
   private dismissParent: (() => boolean) | null = null
@@ -561,6 +563,7 @@ export class Dock {
     this.dismissConversation = this.dismissParent = null
     this.listen?.dispose()
     this.listen = null
+    this.voiceStrip = null
     for (const dispose of this.disposers.splice(0)) dispose()
     if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
     this.searchDebounce = null
@@ -596,6 +599,12 @@ export class Dock {
   /** Repaint Listen from the board's current meeting. */
   syncMeeting(): void {
     this.listen?.meetingChanged()
+    this.paintVoice()
+  }
+
+  /** Repaint the voice strip from the board's meeting and live voice. */
+  private paintVoice(): void {
+    this.voiceStrip?.paint(voiceLine(this.meeting?.current() ?? null, this.voice?.controller.status ?? null, meeting => this.meetingHostName?.(meeting)))
   }
 
   /**
@@ -913,10 +922,19 @@ export class Dock {
         openFile: (path, title, owner) => this.openFile?.(path, title, owner),
         hostName: meeting => this.meetingHostName?.(meeting),
         openHost: meeting => this.onMeetingHostOpen?.(meeting),
+        showPane: () => {
+          const current = this.meeting?.current()
+          if (current?.transcript) this.openFile?.(current.transcript, 'Meeting transcript', current.recorder ?? undefined)
+        },
         onError: showError,
       })
     }
-    this.head.replaceChildren(openItem, ...(this.listen ? [this.listen.el] : []), verdict)
+    // Listen keeps its own slot; the strip beside it says where the words go.
+    const voiceStrip = this.voiceStrip = new VoiceStrip()
+    const unsubscribe = this.voice?.controller.subscribe(() => this.paintVoice())
+    if (unsubscribe) this.disposers.push(unsubscribe)
+    this.paintVoice()
+    this.head.replaceChildren(openItem, ...(this.listen ? [this.listen.el] : []), voiceStrip.el, verdict)
     header.append(identity, this.head, constitutionItem, settingsItem, leave)
     body.append(header, worker.el, drawer, foot)
     this.actPaint = () => {
