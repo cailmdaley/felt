@@ -89,8 +89,8 @@ export class FamilyPage {
   private touch = false
   /** The thread a first tap came to, which a second tap converses with. */
   private peeked: string | null = null
-  /** Each thread's tapestry as far as it has been read, null for none yet or none at all. */
-  private readonly leads = new Map<string, MapFile | null>()
+  /** Each thread's tapestry: the read that finds it, and the file once it has. */
+  private readonly leads = new Map<string, { read: Promise<MapFile | undefined>; file?: MapFile }>()
   private readonly open: (card: KanbanCard, doc?: string) => void
   private readonly feeds: FamilyFeeds
   private readonly place: MapPlace
@@ -158,9 +158,8 @@ export class FamilyPage {
     if (event.key === 'Escape' || event.key === 'h') return this.stepOut()
     if (event.key === 'v') { this.cycle(); return true }
     if (event.key === 'l') {
-      const lead = this.leading
-      if (lead) this.open(lead.card, lead.doc)
-      return !!lead
+      this.leading(lead => { if (lead) this.open(lead.card, lead.doc) })
+      return true
     }
     if (event.key === 'c') {
       const card = this.selection
@@ -210,10 +209,19 @@ export class FamilyPage {
   }
   /** The map has come to a thread other than its page's own. */
   get elsewhere(): boolean { return !!this.focused && this.focused.key !== this.model?.current }
-  /** What `l` opens from a thread: its tapestry, else its newest file. */
-  get leading(): { card: KanbanCard; doc: string } | undefined {
-    const focus = this.focused ?? (this.drawing.layout ? this.model?.root : undefined), file = (focus && this.leads.get(focus.key)) ?? focus?.files[0]
-    return focus && file ? { card: focus.card, doc: file.key } : undefined
+  /**
+   * Hands `then` what `l` opens from the map's thread, its tapestry else its
+   * newest file, once the tapestry's read has landed. A map that has left the
+   * thread by then hears nothing.
+   */
+  leading(then: (lead?: { card: KanbanCard; doc: string }) => void): void {
+    const at = this.leadThread
+    void Promise.resolve(at && this.leads.get(at.key)?.read).then(found => {
+      const thread = this.leadThread
+      if (!this.awake || thread?.key !== at?.key) return
+      const file = found ?? thread?.files[0]
+      then(thread && file ? { card: thread.card, doc: file.key } : undefined)
+    })
   }
 
   /** A constitution with no threads: one body, held unfolded, with no level above it. */
@@ -221,12 +229,14 @@ export class FamilyPage {
   /** The drawing has somewhere to unfold a thread: a field, or a fold in its rows. */
   private get unfolds(): boolean { return !!this.drawing.layout || !!this.drawing.folds }
   private get focused(): MapThread | undefined { return this.place.focus ? this.model?.threads.get(this.place.focus) : undefined }
+  /** The thread `l` leaves from: the focus, or a field's root while it stands whole. */
+  private get leadThread(): MapThread | undefined { return this.focused ?? (this.drawing.layout ? this.model?.root : undefined) }
   private get sight(): Sight {
     return { key: this.focused?.key ?? null, holds: thread => this.holds(thread) }
   }
   private holds(thread: MapThread): Holds {
     return {
-      lead: this.leads.get(thread.key) ?? undefined,
+      lead: this.leads.get(thread.key)?.file,
       constitution: thread.card.path ? { key: fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id), name: 'Constitution', at: 0, unread: false } : undefined,
     }
   }
@@ -250,12 +260,14 @@ export class FamilyPage {
     for (const key of [this.focused?.key ?? this.model?.root.key, ...owners]) {
       const thread = key ? this.model?.threads.get(key) : undefined
       if (!thread || this.leads.has(thread.key)) continue
-      this.leads.set(thread.key, null)
-      void this.feeds.lead(thread.card).then(lead => {
-        if (!lead) return
-        this.leads.set(thread.key, lead)
-        if (this.awake) this.drawField()
-      })
+      const entry: { read: Promise<MapFile | undefined>; file?: MapFile } = {
+        read: this.feeds.lead(thread.card).then(lead => {
+          entry.file = lead
+          if (lead && this.awake) this.drawField()
+          return lead
+        }),
+      }
+      this.leads.set(thread.key, entry)
     }
   }
   /** Comes to a thread: the map flies to it, and whatever it holds unfolds. */

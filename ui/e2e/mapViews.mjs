@@ -88,6 +88,24 @@ export function registerMapViewJourneys(test) {
     await until(page, () => document.querySelector('.ws-page.ws-selected .fm-star[data-worker]')?.getAttribute('aria-label').startsWith('Response analysis,'))
   }, { width: 390, height: 844 }, 'reduce', true)
 
+  test('`l` before the tapestry has been read waits for it, rather than opening the newest file', async page => {
+    await page.goto(`${url.replace('example=threads', 'example=families')}#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub`)
+    await page.locator('.ws-page.ws-selected .fm-star').first().waitFor()
+    await page.evaluate(() => {
+      const fetched = window.fetch, held = []
+      window.__landReads = () => held.splice(0).forEach(land => land())
+      window.fetch = (input, init) => /tapestry\.html/.test(String(input)) ? new Promise(land => held.push(() => land(fetched(input, init)))) : fetched(input, init)
+    })
+    await star(page, 'Pipeline repository steward').click()
+    await rested(page)
+    const map = await page.evaluate(() => location.hash)
+    await page.keyboard.press('l')
+    await page.waitForTimeout(200)
+    assert.equal(await page.evaluate(() => location.hash), map, 'nothing opens while the read is out')
+    await page.evaluate(() => window.__landReads())
+    await until(page, () => /tapestry\.html/.test(decodeURIComponent(location.hash)))
+  })
+
   test('The Tree: hotkey 4, keys move without Rex, a thread opens its chat, a file opens and Back returns to its row', async page => {
     await board(page)
     await page.keyboard.press('4')

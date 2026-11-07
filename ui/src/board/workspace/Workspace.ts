@@ -424,9 +424,12 @@ export class Workspace {
     const map = state && this.isActive ? this.familyDocument(state.card) : undefined
     if (!state || !map) return false
     if (this.shown(state) !== map) { this.visit(map); return true }
-    const page = state.familyPage, leading = page?.leading, lead = channelLead(state.channel)
-    if (leading) this.openFromMap(leading.card, leading.doc)
-    else if (lead && !page?.elsewhere) this.visit(lead.key)
+    const page = state.familyPage, lead = channelLead(state.channel)
+    const leave = (leading?: { card: KanbanCard; doc: DocKey }): void => {
+      if (leading) this.openFromMap(leading.card, leading.doc)
+      else if (lead && !page?.elsewhere) this.visit(lead.key)
+    }
+    if (page) page.leading(leave); else leave()
     return true
   }
   private cycleDrawing(): boolean {

@@ -4,6 +4,7 @@ import { card } from '../testFixtures.js'
 import { ThreadIndex } from '../threads.js'
 import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 import type { KanbanCard } from '../KanbanTypes.js'
+import type { MapFile } from '../family/model.js'
 import type { FamilyFeeds, MapPlace } from './FamilyPage.js'
 import { shouldForwardDocumentKey } from '../keymap.js'
 import { radial } from '../family/radial.js'
@@ -585,17 +586,43 @@ describe('coming to a thread', () => {
     expect(place.focus).toBeNull()
     expect(family.el.querySelector('.fm-fold-file')).toBeNull()
   })
-  it('names the tapestry for `l`, else the newest file, and never reads for a thread it has left', async () => {
+  it('names the tapestry for `l`, else the newest file, reading each thread once', async () => {
     const reads = vi.fn((thread: KanbanCard) => holding.lead(thread)), { page: family } = page(vi.fn(), { ...holding, lead: reads }, undefined, tree)
-    expect(family.leading).toBeUndefined()
+    const leading = async (): Promise<string | undefined> => { let doc: string | undefined; family.leading(lead => { doc = lead?.doc }); await settled(); return doc }
+    expect(await leading()).toBeUndefined()
     click(option(family, 'Mid'))
-    expect(family.leading?.doc).toBe('doc:fresh.png')
-    await settled()
-    expect(family.leading?.doc).toBe('doc:tapestry')
+    expect(await leading()).toBe('doc:tapestry')
     expect(reads.mock.calls.filter(([thread]) => thread.id === 'hub/mid')).toHaveLength(1)
     click(option(family, 'Leaf a'))
     await settled()
-    expect(family.leading).toBeUndefined()
+    expect(await leading()).toBeUndefined()
+  })
+  it('holds `l` for a tapestry still being read, and drops it if the map moves on', async () => {
+    const landing: Array<() => void> = []
+    const slow = (thread: KanbanCard): Promise<MapFile | undefined> => new Promise(resolve => landing.push(() => { void holding.lead(thread).then(resolve) }))
+    const open = vi.fn(), { page: family } = page(open, { ...holding, files: () => sent, lead: slow }, undefined, tree)
+    const press = (key: string): boolean => family.keydown(new KeyboardEvent('keydown', { key }))
+    click(option(family, 'Mid'))
+    expect(press('l')).toBe(true)
+    await settled()
+    expect(open).not.toHaveBeenCalled()
+    landing.splice(0).forEach(land => land())
+    await settled()
+    expect(open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'hub/mid' }), 'doc:tapestry')
+    open.mockClear()
+    click(option(family, 'Leaf a'))
+    press('l')
+    click(option(family, 'Mid'))
+    landing.splice(0).forEach(land => land())
+    await settled()
+    expect(open).not.toHaveBeenCalled()
+  })
+  it('falls to the newest file for `l` once the read finds no tapestry', async () => {
+    const open = vi.fn(), { page: family } = page(open, { ...holding, files: () => sent, lead: async () => undefined }, undefined, tree)
+    click(option(family, 'Mid'))
+    family.keydown(new KeyboardEvent('keydown', { key: 'l' }))
+    await settled()
+    expect(open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'hub/mid' }), sent[0].key)
   })
   it('colours a thread by its state and leaves a new file to the mark on top', () => {
     const fresh: FamilyFeeds = { ...feeds, files: thread => thread.id === 'hub/w' ? [{ ...staged('fresh.png'), unread: true }] : [] }
