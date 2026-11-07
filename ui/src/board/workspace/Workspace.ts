@@ -47,7 +47,7 @@ export interface WorkspaceOptions {
   origin(): string
   onVisibility(active: boolean): void
   /** The fiber the page shows, which voice follows. */
-  onSight?(card: KanbanCard): void
+  onSight?(card: KanbanCard | null): void
   onReturnCard?(card: KanbanCard): void
   onEscapeHome?(): void
   /** A history entry addressed a board view or channel origin; switch to it without pushing. */
@@ -157,6 +157,7 @@ export class Workspace {
       openDocument: (card, doc) => this.openFromMap(card, doc),
       converse: card => this.reach(card),
       constitutionKey: card => fiberKey(card.originId, card.uid ?? card.id),
+      see: card => this.opts.onSight?.(card),
     }
     this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {
       shuttleBase: opts.shuttleBase, frameActive: frame => frameBridge(frame)?.active ?? null,

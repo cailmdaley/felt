@@ -17,6 +17,8 @@ export interface GlobeHost {
   openDocument(card: KanbanCard, doc: string): void
   converse(card: KanbanCard): void
   constitutionKey(card: KanbanCard): string
+  /** The thread a surface has come to rest on, which voice follows; null for none. */
+  see?(card: KanbanCard | null): void
   /** Heard when a feed lands. */
   onFeeds?: () => void
 }

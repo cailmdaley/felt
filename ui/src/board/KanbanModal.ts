@@ -574,7 +574,7 @@ export class KanbanModal {
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'tree' ? 'Tree' : this.activeViewId === 'globe' ? 'Globe' : this.activeViewId === 'map' ? 'Map' : 'Board',
       onVisibility: (active) => { this.showWorkspace(active); if (!active) this.voice.see(null) },
-      onSight: card => this.voice.see(constitutionFor(card, boardCards(this.lastResponse))),
+      onSight: card => this.voice.see(card && constitutionFor(card, boardCards(this.lastResponse))),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
         this.workspaceReturnFocus = null

@@ -29,7 +29,10 @@ class MapView implements TemporalView {
 
   mount(host: HTMLElement, context: ViewContext): void {
     const workspace = context.workspace!, feedsHost = workspace.globeHost
-    this.page = new FamilyPage((card, doc) => { if (doc) feedsHost.openDocument(card, doc); else workspace.openFromDesk(card) }, card => feedsHost.converse(card), feedsHost.feeds, this.place, () => {})
+    this.page = new FamilyPage((card, doc) => { if (doc) feedsHost.openDocument(card, doc); else workspace.openFromDesk(card) }, (card, quiet) => { workspace.dock.openConversation(card, quiet) }, feedsHost.feeds, this.place, () => {}, () => {
+      const settled = this.page?.settled
+      feedsHost.see?.(settled?.path ? settled : null)
+    })
     const desk = document.createElement('button')
     desk.type = 'button'
     desk.className = 'ws-family-drawing'

@@ -68,7 +68,7 @@ export interface ViewContext extends TemporalFetchers {
     mountOverview(host: HTMLElement): void
     hideOverview(): void
     readonly isActive: boolean
-    readonly dock: { openConversation(card: KanbanCard): unknown }
+    readonly dock: { openConversation(card: KanbanCard, quiet?: boolean): unknown }
     reach(card: KanbanCard): void
     openFromDesk(card: KanbanCard): void
     openPage(card: KanbanCard, doc: DocKey): void

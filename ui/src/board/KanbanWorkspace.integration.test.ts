@@ -368,9 +368,12 @@ describe('the Desk\'s map', () => {
   it('flies to the thread Rex moves to and leaves the reader shut', () => {
     stored.set('shuttle.desk.map', '1')
     const { board, host } = opened(), follow = vi.spyOn(board.workspace as unknown as { follow(id: string, owner: string): void }, 'follow')
-    ;(board as unknown as { voice: { onFollow(target: { fiber_id: string; origin: string }): void } }).voice.onFollow({ fiber_id: 'flight', origin: 'local' })
+    ;(board as unknown as { voice: { onRex(target: { fiber_id: string; origin: string }): void } }).voice.onRex({ fiber_id: 'flight', origin: 'local' })
     expect(follow).not.toHaveBeenCalled()
     expect(host.querySelector('.fm-star[data-worker]')?.getAttribute('aria-label')).toMatch(/^flight,/)
+    const see = vi.spyOn((board as unknown as { voice: { see(card: KanbanCard | null): void } }).voice, 'see')
+    host.querySelector<HTMLElement>('.fm-star[data-root]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(see).toHaveBeenLastCalledWith(null)
     board.unmount()
     host.remove()
   })
