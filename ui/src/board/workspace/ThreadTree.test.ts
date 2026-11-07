@@ -5,13 +5,12 @@ import { ThreadIndex } from '../threads.js'
 import { threadRow } from '../ThreadPeek.js'
 import { renderThreadTree } from './ThreadTree.js'
 
-it('names each row state and distinguishes question, blocked and a discarded ancestor', () => {
+it('names each row state and distinguishes question, blocked and discarded', () => {
   const root = card({ id: 'root', status: 'active', workerState: 'running', runtimePhase: 'working' })
   const question = card({ id: 'question', orchestrator: root.id, status: 'active', ask: { text: 'Which?', at: '2026-01-01T00:00:00Z' } })
   const blocked = card({ id: 'blocked', orchestrator: root.id, status: 'active', workerState: 'blocked' })
   const dropped = card({ id: 'dropped', orchestrator: root.id, status: 'closed', tempered: false })
-  const beneath = card({ id: 'beneath', orchestrator: 'dropped', status: 'active', workerState: 'running', runtimePhase: 'working' })
-  const index = new ThreadIndex([root, question, blocked, dropped, beneath]), container = document.createElement('div')
+  const index = new ThreadIndex([root, question, blocked, dropped]), container = document.createElement('div')
   container.append(...renderThreadTree(index, root, root, c => threadRow(c, index, vi.fn())))
   const row = (name: string) => [...container.querySelectorAll<HTMLElement>('.kbn-thread-row')].find(el => el.querySelector('.kbn-thread-name')?.textContent === name)!
   expect(row(root.name).querySelector('.ws-tree-state')?.textContent).toBe('Working')
@@ -36,11 +35,19 @@ it('keeps a waiting descendant visible beneath its archived ancestor', () => {
   expect(ask.closest('details:not([open])')).toBeNull()
   expect(ask.getAttribute('aria-level')).toBe('3')
   expect(container.querySelector<HTMLElement>('[data-card-uid="old"]')!.closest('details:not([open])')).toBeNull()
-  expect(container.querySelector('[data-card-uid="quiet"]')).toBeNull()
-  expect(container.querySelector('details')).toBeNull()
+  expect(container.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
 })
 
-it('draws threads in play as the tree, then the resting, and never the archived', () => {
+it('opens a disclosure when the current thread becomes archived without navigating', () => {
+  const root = card({ id: 'root' }), current = card({ id: 'child', orchestrator: 'root', status: 'active' })
+  const index = new ThreadIndex([root, { ...current, status: 'closed', tempered: true }]), container = document.createElement('div')
+  container.append(...renderThreadTree(index, root, current, c => threadRow(c, index, vi.fn()), new Map()))
+  const fold = container.querySelector<HTMLDetailsElement>('details')!
+  expect(fold.open).toBe(true)
+  expect(fold.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('child')
+})
+
+it('draws threads in play as the tree, then the resting, then the archived below it', () => {
   const root = card({ id: 'root', status: 'active' })
   const working = card({ id: 'working', orchestrator: 'root', status: 'active', createdAt: '2026-11-01T10:00:00Z' })
   const parked = card({ id: 'parked', orchestrator: 'root', status: 'open', effectiveHorizon: 'stashed', createdAt: '2026-11-01T09:00:00Z' })
@@ -48,6 +55,7 @@ it('draws threads in play as the tree, then the resting, and never the archived'
   const index = new ThreadIndex([root, working, parked, done]), container = document.createElement('div')
   container.append(...renderThreadTree(index, root, root, c => threadRow(c, index, vi.fn())))
   const order = [...container.querySelectorAll<HTMLElement>('.kbn-thread-row, summary')].map(el => el.matches('summary') ? el.textContent : el.dataset.cardUid)
-  expect(order).toEqual(['root', 'working', '1 resting', 'parked'])
-  expect(container.querySelector<HTMLDetailsElement>('details')!.open).toBe(true)
+  expect(order).toEqual(['root', 'working', '1 resting', 'parked', '1 archived', 'done'])
+  const [resting, archived] = container.querySelectorAll<HTMLDetailsElement>('details')
+  expect([resting.open, archived.open]).toEqual([true, false])
 })

@@ -2,7 +2,7 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { threadKey, type FamilyNeed, type ThreadIndex } from './threads.js'
 import { threadRow } from './ThreadPeek.js'
 import { turnOf } from './turn.js'
-import { renderThreadTree } from './workspace/ThreadTree.js'
+import { outlineOpen, renderOutline, type Fold, type Outline } from './threadOutline.js'
 import { workerPlateFacts } from './workspace/workerPlate.js'
 import './deskFrontier.css'
 
@@ -11,18 +11,16 @@ export function familyCounts(others: Readonly<Record<FamilyNeed, number>>): { wo
   return { working: others.working, needs: others.yours + others.review }
 }
 
-const FOLDS_KEY = 'shuttle.desk.threads'
-/** Each family's folds as this browser left them: the whole tree, and its resting shelf. */
-type Fold = { all?: boolean; resting?: boolean }
-/** The browser's folds, read afresh; this page's own where the browser keeps none. */
+const FOLDS_KEY = 'shuttle.desk.folds'
+/** The browser's folds by thread, read afresh; this page's own where the browser keeps none. */
 let folds: Record<string, Fold> = {}
-function foldOf(family: string): Fold {
+function foldOf(card: KanbanCard): Fold {
   try { folds = JSON.parse(localStorage.getItem(FOLDS_KEY) ?? '{}') as Record<string, Fold> } catch { /* this page's folds stand */ }
-  return folds[family] ?? {}
+  return folds[threadKey(card)] ?? {}
 }
-function setFold(family: string, change: Fold): void {
-  const fold = { ...foldOf(family), ...change }
-  folds[family] = fold
+function setFold(card: KanbanCard, fold: Fold): void {
+  foldOf(card)
+  folds[threadKey(card)] = fold
   try { localStorage.setItem(FOLDS_KEY, JSON.stringify(folds)) } catch { /* the fold lasts this page only */ }
 }
 
@@ -31,11 +29,12 @@ const NEEDS_YOU: ReadonlySet<string> = new Set(['waiting', 'to-review'])
 /**
  * A family's Desk row, shared by desktop and phone. The row is the node that
  * set the family's column: a thread leads with a quiet crumb to its root. The
- * family's threads hang beneath that row as a tree. Folded, it shows the
- * threads that need the human (a turn or a verdict, as the count says), with
- * their ancestors for context; the count's caret opens the whole tree, its resting threads on a
- * shelf of their own. Archived threads are never drawn here. Folds are remembered per browser. A root
- * whose family a thread leads keeps its count, which takes you to that row.
+ * family's threads hang beneath that row as an outline (`renderOutline`),
+ * open by default on the threads that need the human, a turn or a verdict as
+ * the count says. The count's caret folds the whole, and each thread with
+ * threads of its own folds on its own caret. Folds are remembered per
+ * browser. A root whose family a thread leads keeps its count, which takes
+ * you to that row.
  */
 export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard, family?: boolean) => void, now = Date.now()): void {
   const self = index.card(card), family = index.family(self)
@@ -88,9 +87,9 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
   }
 }
 
-/** The family's threads under its row, the count their caret. */
+/** The family's threads under its row, the count the caret of the whole. */
 function installThreads(host: HTMLElement, count: HTMLButtonElement, self: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, now: number): void {
-  const family = index.family(self), familyKey = threadKey(family.root)
+  const family = index.family(self)
   const caret = document.createElement('span'); caret.className = 'kbn-thread-caret'; caret.setAttribute('aria-hidden', 'true')
   count.append(caret)
   const list = document.createElement('div'); list.className = 'kbn-desk-threads'
@@ -99,30 +98,29 @@ function installThreads(host: HTMLElement, count: HTMLButtonElement, self: Kanba
   for (const type of ['click', 'pointerdown', 'mousedown', 'touchstart'] as const) list.addEventListener(type, event => event.stopPropagation())
   list.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation() })
   list.addEventListener('dragstart', event => { event.preventDefault(); event.stopPropagation() })
-  list.addEventListener('toggle', event => {
-    const shelf = event.target as HTMLElement
-    if (shelf instanceof HTMLDetailsElement && shelf.dataset.threadDetails) setFold(familyKey, { [shelf.dataset.threadDetails]: shelf.open })
-  }, true)
-  const asking = new Set(index.subtree(family.root).filter(thread => thread !== self && NEEDS_YOU.has(index.state(thread))).map(threadKey))
-  const draw = (): void => {
-    const fold = foldOf(familyKey), all = !!fold.all
-    count.setAttribute('aria-expanded', String(all))
-    count.setAttribute('aria-label', `${count.title}; ${all ? 'fold' : 'show all'} the family's threads`)
-    list.replaceChildren(...renderThreadTree(index, family.root, self, (thread, focus) => {
-      const row = threadRow(thread, index, open); row.dataset.threadFocus = focus
+  const outline: Outline = {
+    index, root: family.root, current: self,
+    needs: thread => thread !== self && NEEDS_YOU.has(index.state(thread)),
+    fold: foldOf, setFold,
+    row: thread => {
+      const row = threadRow(thread, index, open)
       const { elapsed } = workerPlateFacts(thread, now)
       if (elapsed) { const age = document.createElement('span'); age.className = 'kbn-row-elapsed'; age.textContent = elapsed; row.append(age) }
       return row
-    }, {
-      restingOpen: !!fold.resting,
-      only: all ? undefined : thread => asking.has(threadKey(thread)),
-      withRoot: false,
-    }))
+    },
+  }
+  const draw = (): void => {
+    const active = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement.dataset.threadFocus : undefined
+    const opened = outlineOpen(outline)
+    count.setAttribute('aria-expanded', String(opened))
+    count.setAttribute('aria-label', `${count.title}; ${opened ? 'fold' : 'unfold'} the family's threads`)
+    list.replaceChildren(...opened ? renderOutline(outline, draw) : [])
     list.hidden = !list.childElementCount
+    if (active) [...list.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === active)?.focus({ preventScroll: true })
   }
   count.addEventListener('click', event => {
     event.stopPropagation()
-    setFold(familyKey, { all: count.getAttribute('aria-expanded') !== 'true' })
+    setFold(family.root, count.getAttribute('aria-expanded') === 'true' ? { collapsed: true } : { collapsed: false })
     draw()
   })
   draw()

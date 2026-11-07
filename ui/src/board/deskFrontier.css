@@ -18,17 +18,23 @@
 /* The family's threads, nested under the title. */
 .kbn-desk-threads { grid-column: 2 / -1; flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; margin: 3px 0 0; padding-left: 2px; border-left: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent); }
 .kbn-desk-threads[hidden] { display: none; }
-.kbn-desk-threads .ws-tree-state { display: none; }
-.kbn-desk-threads .kbn-thread-row { box-sizing: border-box; gap: 6px; padding: 2px 6px 2px calc(6px + var(--ws-thread-depth, 0) * var(--ws-thread-indent)); line-height: var(--leading-prose); border-radius: 3px; }
+.kbn-desk-threads .kbn-thread-row { box-sizing: border-box; gap: 4px; padding: 2px 6px 2px calc(var(--ws-thread-depth, 0) * var(--ws-thread-indent)); line-height: var(--leading-prose); border-radius: 3px; }
 .kbn-desk-threads .kbn-thread-row .constitution-state-dot { transform: scale(0.8); }
 .kbn-desk-threads .kbn-thread-name { color: var(--kbn-ink-soft); }
 .kbn-desk-threads .kbn-thread-row:hover .kbn-thread-name, .kbn-desk-threads .kbn-thread-row.kbn-key-selected .kbn-thread-name { color: var(--kbn-ink); }
 .kbn-desk-threads .kbn-thread-row.kbn-key-selected { background: var(--kbn-plate); outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
 .kbn-desk-threads .kbn-thread-row.ws-thread-current .kbn-thread-name { color: var(--kbn-ink); font-weight: 500; }
-.kbn-desk-threads .ws-tree-shelf > summary { padding: 2px 6px; }
-.kbn-desk-threads .ws-tree-shelf > summary::before { display: inline-block; width: 0.9em; text-align: center; transition: transform 120ms; }
-.kbn-thread-count:focus-visible, .kbn-card-crumb button:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+/* Every thread with threads of its own folds on its caret; a leaf keeps the caret's room. */
+.kbn-thread-fold { flex: none; display: inline-grid; place-items: center; width: 14px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--kbn-ink-muted); font: inherit; cursor: pointer; }
+button.kbn-thread-fold::before { content: '›'; transition: transform 120ms; }
+button.kbn-thread-fold[aria-expanded='true']::before { transform: rotate(90deg); }
+button.kbn-thread-fold:hover { color: var(--kbn-ink); }
+.kbn-thread-more { align-self: flex-start; margin-left: calc(14px + var(--ws-thread-depth, 0) * var(--ws-thread-indent)); padding: 1px 6px; border: 0; background: transparent; color: var(--kbn-ink-muted); font: inherit; font-size: var(--type-meta); cursor: pointer; }
+.kbn-thread-more:hover { color: var(--kbn-ink); }
+.kbn-thread-count:focus-visible, .kbn-card-crumb button:focus-visible, .kbn-thread-fold:focus-visible, .kbn-thread-more:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-card-crumb-root { max-width: 5em; }
   .kbn-desk-threads .kbn-thread-row { min-height: 32px; font-size: var(--type-note); }
+  .kbn-thread-fold { width: 28px; height: 32px; }
+  .kbn-thread-more { min-height: 30px; margin-left: calc(28px + var(--ws-thread-depth, 0) * var(--ws-thread-indent)); font-size: var(--type-note); }
 }

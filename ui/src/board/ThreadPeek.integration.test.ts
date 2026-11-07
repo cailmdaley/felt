@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { installFrontierDetails } from './DeskFrontier.js'
 import { ThreadIndex } from './threads.js'
 import { card, response } from './testFixtures.js'
@@ -12,6 +12,11 @@ const ask = card({ id: 'root/work/ask', name: 'Choose cut', orchestrator: 'root/
 const quiet = card({ id: 'root/work/draft', orchestrator: 'root/work', status: 'open' })
 
 describe('a family row', () => {
+  beforeEach(() => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
+    return () => vi.unstubAllGlobals()
+  })
   it('a deep asker leads with an elided crumb whose root opens the family, and the count names work', () => {
     const host = document.createElement('div'), name = document.createElement('span'), end = document.createElement('div'), open = vi.fn()
     name.className = 'kbn-card-name'; name.textContent = ask.name; host.append(name, end)
@@ -27,8 +32,16 @@ describe('a family row', () => {
     expect(threads.hidden).toBe(true)
     count.click()
     expect(count.getAttribute('aria-expanded')).toBe('true')
-    expect([...threads.querySelectorAll('.kbn-thread-name')].map(n => n.textContent)).toEqual(['Analysis', 'Choose cut', quiet.name])
-    expect(threads.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('Choose cut')
+    const names = () => [...threads.querySelectorAll('.kbn-thread-name')].map(n => n.textContent)
+    // Nothing needs you, so the outline opens one level, each thread with threads folded on its own caret.
+    expect(names()).toEqual(['Analysis'])
+    const fold = threads.querySelector<HTMLButtonElement>('button.kbn-thread-fold')!
+    expect(fold.getAttribute('aria-expanded')).toBe('false')
+    fold.click()
+    expect(names()).toEqual(['Analysis', 'Choose cut', quiet.name])
+    expect(open).not.toHaveBeenCalledWith(work)
+    expect(threads.querySelector('[aria-current="true"] .kbn-thread-name')?.textContent).toBe('Choose cut')
+    expect(threads.querySelector<HTMLElement>('[data-card-uid="root/work/ask"]')!.dataset.depth).toBe('1')
     threads.querySelector<HTMLElement>('.kbn-thread-row')!.click(); expect(open).toHaveBeenLastCalledWith(work)
     count.click()
     expect(threads.hidden).toBe(true)
@@ -91,7 +104,7 @@ describe('a family row', () => {
       expect(section.querySelector('.kbn-card-name')?.textContent).toBe('Quiet chair / … /\u00a0Choose cut')
       expect(section.querySelector('.kbn-count-working')?.textContent).toBe('1 working')
       section.querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
-      expect([...section.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(n => n.textContent)).toEqual(['Analysis', 'Choose cut', quiet.name])
+      expect([...section.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(n => n.textContent)).toEqual(['Analysis'])
       expect(open).not.toHaveBeenCalled()
       section.querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
     } finally { vi.unstubAllGlobals() }

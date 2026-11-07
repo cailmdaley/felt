@@ -94,16 +94,23 @@ need: the root, or the thread that leads what the family asks of you, named
 after a quiet crumb to its root. A root led by one of its threads keeps its own
 row where its own state puts it.
 
-The family's threads hang beneath its row as a tree, each thread under its
-orchestrator, drawn with the same dot and age as a row. Folded, the tree shows
-every thread that needs you, a turn or a verdict, with the threads above it
-for context, so what waits on you is visible without opening anything. The
-count at the row's end says how many need you, in red when one of them is a
-question, else how many work, else how many threads there are; its caret opens the whole tree, with the resting
-threads on a fold of their own beneath it. Archived threads are not on the
-Desk; they stay on their constitution's page. A root's count, on a family a thread
-leads, opens the tree on the leading row instead. Each fold is remembered in
-this browser.
+The family's threads hang beneath its row as an outline, each thread under
+its orchestrator, drawn with the same dot and age as a row. It opens by
+default on every thread that needs you, a turn or a verdict, and on the
+threads above it, so what waits on you is visible without opening anything;
+the rest of each level waits behind a quiet "n more", in play first and then
+resting. A level where nothing needs you stays folded, and opens on all of its threads.
+Archived threads are not on the Desk, except as the way to live work beneath
+them; they stay on their constitution's page.
+
+Every level folds. The count at the row's end, which says how many need you
+(in red when one of them is a question), else how many work, else how many
+threads there are, carries the caret that folds the whole family to its
+row; every thread with threads of its own carries a caret of its own. Each
+fold is remembered in this browser, so the whole Desk can be folded down to
+its rows. Shutting a level forgets its "more", so it reopens on what needs
+you. A root's count, on a family a thread leads, opens the outline on the
+leading row instead.
 
 A click on a thread opens its page, as a click on a row does, and `j` / `k`
 walk the threads that are showing as well as the rows.
