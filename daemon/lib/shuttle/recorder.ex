@@ -166,7 +166,7 @@ defmodule Shuttle.Recorder do
          launch <- "voice-" <> launch_id(),
          transcript <- Path.join([hark_dir(opts), "voice", launch <> ".txt"]),
          :ok <- Shuttle.FS.mkdir_p(Path.dirname(transcript)),
-         :ok <- apply_voice_mute(executable, opts),
+         :ok <- apply_voice_mute(opts),
          started_at <- DateTime.to_iso8601(DateTime.utc_now()),
          :ok <-
            create_session(
@@ -235,7 +235,7 @@ defmodule Shuttle.Recorder do
       with :ok <- Shuttle.FS.mkdir_p(hark_dir(opts)),
            :ok <- if(muted, do: Shuttle.FS.write(path, ""), else: remove_flag(path)),
            {:ok, snapshot, _context} <- inspect_current(opts) do
-        if snapshot.capture, do: apply_voice_mute(find_hark(opts), opts), else: :ok
+        if snapshot.capture, do: apply_voice_mute(opts), else: :ok
       end
     end)
   end
@@ -255,8 +255,7 @@ defmodule Shuttle.Recorder do
     end
   end
 
-  defp apply_voice_mute(executable, opts),
-    do: set_track_pause(executable, voice_muted?(opts), [], opts)
+  defp apply_voice_mute(opts), do: set_track_pause(voice_muted?(opts), :mic, opts)
 
   defp voice_document?(%{} = data),
     do: data["kind"] == "voice" or String.starts_with?(launch_from(data) || "", "voice-")
@@ -327,7 +326,7 @@ defmodule Shuttle.Recorder do
         paused = Shuttle.FS.exists?(Path.join(hark_dir(opts), "system-paused"))
 
         if paused == enabled,
-          do: set_track_pause(find_hark(opts), not enabled, ["--system"], opts),
+          do: set_track_pause(not enabled, :system, opts),
           else: :ok
 
       :error ->
@@ -337,23 +336,23 @@ defmodule Shuttle.Recorder do
 
   defp sync_system_audio(_snapshot, _enabled, _opts), do: :ok
 
-  defp set_track_pause(nil, _paused, _track, _opts), do: {:error, :unavailable}
+  # Hark's pause gates are flag files its live session polls (`hark pause` and
+  # `hark resume` only touch them), so the daemon sets them directly rather than
+  # running hark, whose install may sit where launchd processes cannot read.
+  defp set_track_pause(paused, track, opts) do
+    path = Path.join(hark_dir(opts), if(track == :system, do: "system-paused", else: "paused"))
 
-  defp set_track_pause(executable, paused, track, opts) do
-    case run(
-           opts,
-           "env",
-           [
-             "HARK_DIR=" <> hark_dir(opts),
-             executable,
-             if(paused, do: "pause", else: "resume")
-           ] ++ track
-         ) do
-      {_output, 0} ->
+    result =
+      if paused,
+        do: with(:ok <- Shuttle.FS.mkdir_p(hark_dir(opts)), do: Shuttle.FS.write(path, "")),
+        else: remove_flag(path)
+
+    case result do
+      :ok ->
         :ok
 
-      {output, status} ->
-        {:error, {:operation, "could not change hark pause (#{status}): #{String.trim(output)}"}}
+      {:error, reason} ->
+        {:error, {:operation, "could not change hark pause: #{inspect(reason)}"}}
     end
   end
 

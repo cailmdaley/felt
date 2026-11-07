@@ -261,8 +261,7 @@ defmodule Shuttle.RecorderTest do
   end
 
   test "voice argv selects desktop system audio and live toggles use the system gate", %{
-    hark_dir: dir,
-    hark_path: hark
+    hark_dir: dir
   } do
     set_voice_handler(dir)
 
@@ -289,13 +288,7 @@ defmodule Shuttle.RecorderTest do
              Recorder.reconcile_voice(true, system_audio: true)
 
     refute File.exists?(Path.join(dir, "system-paused"))
-    calls = Shuttle.Test.RecorderRunner.calls()
-
-    assert {"env", ["HARK_DIR=" <> dir, hark, "pause", "--system"],
-            [stderr_to_stdout: true, timeout_ms: 5000]} in calls
-
-    assert {"env", ["HARK_DIR=" <> dir, hark, "resume", "--system"],
-            [stderr_to_stdout: true, timeout_ms: 5000]} in calls
+    refute Enum.any?(Shuttle.Test.RecorderRunner.calls(), &match?({"env", _, _}, &1))
 
     assert {:ok, %{capture: %{launch: ^launch}}} = Recorder.reconcile_voice(true)
     assert {:ok, %{capture: nil}} = Recorder.reconcile_voice(false)
@@ -421,43 +414,7 @@ defmodule Shuttle.RecorderTest do
              Shuttle.Voice.update(%{"system_audio" => true})
 
     assert {:ok, %{"system_audio" => true}} = Shuttle.Voice.Config.read()
-
-    assert Enum.any?(Shuttle.Test.RecorderRunner.calls(), fn
-             {"env", [_, _, "resume", "--system"], _} -> true
-             _ -> false
-           end)
-  end
-
-  test "a failed live system gate reports persisted intent and retries on reconciliation", %{
-    hark_dir: dir
-  } do
-    set_voice_handler(dir, :system_failure)
-
-    Env.start_scoped!(
-      {Shuttle.Voice,
-       [
-         name: nil,
-         poll_ms: 60_000,
-         relay: fn _, _ -> :ok end,
-         monitor: fn _ -> %{pending: nil, last: nil} end
-       ]}
-    )
-
-    assert {:ok, _} = Shuttle.Voice.update(%{"enabled" => true})
-    File.write!(Path.join(dir, "system-paused"), "")
-
-    assert {:ok, %{state: "failed", error: error}} =
-             Shuttle.Voice.update(%{"system_audio" => true})
-
-    assert error =~ "system gate failed"
-    assert %{enabled: true, system_audio: true, state: "failed"} = Shuttle.Voice.show()
-    assert {:ok, %{"system_audio" => true}} = Shuttle.Voice.Config.read()
-    assert {:ok, %{system_audio: true, state: "failed"}} = Shuttle.Voice.update(%{})
-
-    assert Enum.count(Shuttle.Test.RecorderRunner.calls(), fn
-             {"env", [_, _, "resume", "--system"], _} -> true
-             _ -> false
-           end) == 2
+    refute File.exists?(Path.join(dir, "system-paused"))
   end
 
   test "pure state derivation rejects stale metadata and trusts terminal captures only while alive" do
@@ -673,24 +630,6 @@ defmodule Shuttle.RecorderTest do
         if behavior == :unkillable,
           do: {{"not permitted", 1}, state},
           else: {{"", 0}, {launch, :crashed}}
-
-      "env", [_, _, _, "--system"], _opts, state when behavior == :system_failure ->
-        {{"system gate failed", 1}, state}
-
-      "env", [_hark_dir, _executable, command, "--system"], _opts, state ->
-        if command == "pause",
-          do: File.write!(Path.join(dir, "system-paused"), ""),
-          else: File.rm(Path.join(dir, "system-paused"))
-
-        {{"", 0}, state}
-
-      "env", [_hark_dir, _executable, command], _opts, state
-      when command in ["pause", "resume"] ->
-        if command == "pause",
-          do: File.write!(Path.join(dir, "paused"), ""),
-          else: File.rm(Path.join(dir, "paused"))
-
-        {{"", 0}, state}
 
       _command, _args, _opts, state ->
         {{"", 0}, state}
