@@ -266,7 +266,7 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   const said = [...taken, ...labels.map(labelBox), ...names.map(armNameBox)]
   const open = (at: Point, half: number): boolean => !said.some(box => touches(box, { left: at.x - half, right: at.x + half, top: at.y - half, bottom: at.y + half }))
   for (const star of stars) if (star.inert) star.hidden ||= !open(star, star.r)
-  const minis = sheets.map(mini => ({ ...mini, marks: mini.marks.filter(mark => open(mark, MINI_MARK / 2)) }))
+  const minis = sheets.map(mini => ({ ...mini, marks: mini.marks.filter(mark => open(mark, MINI_MARK / 2) && inView({ x: mark.x, y: mark.y - MINI_MARK / 2 })) }))
   return {
     k, frame: plate, stars, arms, names, minis, labels,
     numerals: narrow ? nameable.filter(star => star.numeral).map(star => {
