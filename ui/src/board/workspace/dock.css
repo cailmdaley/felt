@@ -56,7 +56,7 @@
 
 /* The worker's line under the band's head: an opening message and the verbs that send it. */
 .ws-band-head:has(+ .ws-worker-acts:not([hidden])) { border-bottom: 0; }
-.ws-worker-acts { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ws-worker-acts { display: flex; flex: 1 0 100%; align-items: center; gap: 4px; min-width: 0; }
 .ws-dock .ws-worker-acts { padding: 0 16px 6px; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-worker-acts[hidden] { display: none; }
 .ws-worker-message {
