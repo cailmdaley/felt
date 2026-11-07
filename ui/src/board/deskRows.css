@@ -2,7 +2,7 @@
    dense in mono like the constitution page's rows. A family is its root's
    line and the indented lines beneath it; no box, no rule. Reading a row or
    its report opens the document workspace. */
-:root { --kbn-desk-row: 22px; --kbn-desk-indent: 16px; }
+:root { --kbn-desk-row: 22px; --kbn-desk-indent: 8px; }
 .kbn-col-list { gap: 0; padding: 3px 6px; }
 .kbn-flight-band-list { gap: 0; }
 .kbn-flight-caption { margin-bottom: 1px; }
@@ -84,7 +84,7 @@
 .kbn-card-stale-mark { flex-shrink: 0; color: var(--kbn-ink-muted); font-size: var(--type-meta); }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  :root { --kbn-desk-row: 32px; --kbn-desk-indent: 12px; }
+  :root { --kbn-desk-row: 32px; --kbn-desk-indent: 6px; }
   .kbn-col-list .kbn-card { padding: 0 6px 0 4px; }
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
