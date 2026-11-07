@@ -80,7 +80,7 @@ shuttle: block is work the daemon can dispatch; without one it is a note.
 Local write verbs validate before touching disk and work offline. When
 shuttle.host names a configured remote, lifecycle writes, reopen, and dispatch
 route through the local daemon to the owner instead of writing this host's Git
-mirror. Snapshot, dispatch, sessions, transcript, message, meeting,
+mirror. Snapshot, dispatch, sessions, transcript, message,
 validate-identity, and status --all talk to the local daemon.
 
 Common paths:
@@ -248,7 +248,6 @@ func (a *app) rootCmd() *cobra.Command {
 		a.remoteControlCmd(),
 		a.shuttleDispatchCmd(),
 		a.doctorCmd(),
-		a.shuttleFollowCmd(),
 		a.shuttleHandoffCmd(),
 		a.hookCmd(),
 		a.shuttleHostCmd(),
@@ -265,7 +264,6 @@ func (a *app) rootCmd() *cobra.Command {
 		a.reshapeCmd(),
 		a.uninstallShuttleCmd(),
 		a.markRuntimeCmd(),
-		a.shuttleMeetingCmd(),
 		a.shuttleSayCmd(),
 		a.shuttleVoicesCmd(),
 		a.shuttleInboxCmd(),

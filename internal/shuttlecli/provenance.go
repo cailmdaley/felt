@@ -873,15 +873,25 @@ func transcriptResult(receipt TranscriptReceipt, localPath string) transcriptCom
 
 func (a *app) shuttleTranscriptCmd() *cobra.Command {
 	shuttleTranscriptCmd := &cobra.Command{
-		Use:   "transcript <session-id>",
-		Short: "Search every local transcript, or print one session's transcript path",
-		Long: `Resolves a complete native transcript by session ID. When the transcript
-is on this host, prints its original native path. When it is remote, streams the
-exact bytes through Shuttle's native transcript surface into the managed
-felt cache and prints that ordinary local path. Use jq/rg/tail to inspect it, or
-shuttle transcript search to search across indexed local transcripts.`,
-		Args: cobra.ExactArgs(1),
+		Use:   "transcript [session-id]",
+		Short: "Read the day's spoken transcript, with the card each line went to",
+		Long: `Read the day's spoken transcript from the recorder through the local daemon.
+Filter by date, card, recorder, or inclusive spoken time; --json returns the
+complete response. Each voice batch points to its place with --since.
+
+With a session ID, print that session's native transcript path, materializing a
+remote transcript into the local cache. Use jq/rg/tail to inspect it, or use
+shuttle transcript search to search indexed local session transcripts.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return a.spokenTranscript(cmd)
+			}
+			for _, flag := range []string{"date", "fiber", "since", "recorder"} {
+				if cmd.Flags().Changed(flag) {
+					return fmt.Errorf("--%s is for the spoken transcript, not a session ID", flag)
+				}
+			}
 			if !sessionUUIDPattern.MatchString(args[0]) {
 				return fmt.Errorf("invalid session ID %q: expected a UUID", args[0])
 			}
@@ -924,6 +934,10 @@ shuttle transcript search to search across indexed local transcripts.`,
 			}
 		},
 	}
+	shuttleTranscriptCmd.Flags().String("date", "", "Recorder-local date (YYYY-MM-DD; default today)")
+	shuttleTranscriptCmd.Flags().String("fiber", "", "Card ID, path or slug")
+	shuttleTranscriptCmd.Flags().String("since", "", "Inclusive recorder-local time (HH:MM[:SS])")
+	shuttleTranscriptCmd.Flags().String("recorder", "", "Recorder host (default: local daemon)")
 	shuttleTranscriptCmd.AddCommand(a.transcriptSearchCmd(), a.transcriptIndexCmd())
 	return shuttleTranscriptCmd
 }

@@ -1,17 +1,31 @@
 package shuttlecli
 
 import (
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
 )
 
+func speechDaemon(t *testing.T, path string, status int, answer string, got *map[string]any) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != path {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(got); err != nil {
+			t.Errorf("request body: %v", err)
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(answer))
+	})
+}
+
 func TestSaySendsTheLineAndNamesTheVoice(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	var got map[string]any
-	serveDaemon(t, env, meetingDaemon(t, "/api/v1/speak", 200, `{"voice":"borges","ahead":2,"recorder":"mac"}`, &got))
+	serveDaemon(t, env, speechDaemon(t, "/api/v1/speak", 200, `{"voice":"borges","ahead":2,"recorder":"mac"}`, &got))
 
 	out, _, err := executeIn(t, env, "", "say", "--fiber", "loom/x", "--voice", "borges", "Hello there.")
 	if err != nil {
@@ -30,7 +44,7 @@ func TestSaySaysWhenTheLineIsHeld(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	var got map[string]any
-	serveDaemon(t, env, meetingDaemon(t, "/api/v1/speak", 200, `{"voice":"jean","ahead":0,"held":true,"recorder":"mac"}`, &got))
+	serveDaemon(t, env, speechDaemon(t, "/api/v1/speak", 200, `{"voice":"jean","ahead":0,"held":true,"recorder":"mac"}`, &got))
 	out, _, err := executeIn(t, env, "", "say", "--fiber", "loom/x", "Later.")
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +106,7 @@ func TestInboxPlayOpensTheInbox(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	var got map[string]any
-	serveDaemon(t, env, meetingDaemon(t, "/api/v1/speak", 200, `{"held":[],"inbox":{"playing":true,"card":{"fiber_id":"a/two","name":"Two card"}}}`, &got))
+	serveDaemon(t, env, speechDaemon(t, "/api/v1/speak", 200, `{"held":[],"inbox":{"playing":true,"card":{"fiber_id":"a/two","name":"Two card"}}}`, &got))
 	out, _, err := executeIn(t, env, "", "inbox", "--play")
 	if err != nil {
 		t.Fatal(err)

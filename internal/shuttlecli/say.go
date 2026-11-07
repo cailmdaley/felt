@@ -41,7 +41,7 @@ terminal, and --voice overrides the voice for this line.`,
 			if voice = strings.TrimSpace(voice); voice != "" {
 				request["voice"] = voice
 			}
-			body, err := a.postMeeting("/api/v1/speak", request)
+			body, err := a.postSpeech("/api/v1/speak", request)
 			if err != nil {
 				return err
 			}
@@ -143,7 +143,7 @@ next card the same way; --stop closes the inbox and leaves the rest held.`,
 					body, err = a.getDaemon(endpoint, daemonRoutedPostTimeout)
 				}
 			case 1:
-				body, err = a.postMeeting("/api/v1/speak", map[string]any{"inbox": actions[0]})
+				body, err = a.postSpeech("/api/v1/speak", map[string]any{"inbox": actions[0]})
 			default:
 				return fmt.Errorf("--play, --next and --stop are exclusive")
 			}
@@ -185,6 +185,19 @@ next card the same way; --stop closes the inbox and leaves the rest held.`,
 	cmd.Flags().Bool("next", false, "Play the next card's held lines")
 	cmd.Flags().Bool("stop", false, "Close the inbox and leave the rest held")
 	return cmd
+}
+
+// postSpeech sends a spoken-output request through the local daemon.
+func (a *app) postSpeech(path string, request map[string]any) ([]byte, error) {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encoding spoken-output request: %w", err)
+	}
+	endpoint, err := a.daemonEndpoint(path)
+	if err != nil {
+		return nil, err
+	}
+	return a.postDaemon(endpoint, payload, daemonRoutedPostTimeout)
 }
 
 // firstWords is the first n words of text, marked when cut.
