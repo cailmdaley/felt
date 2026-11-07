@@ -109,7 +109,12 @@ function installThreads(host: HTMLElement, count: HTMLButtonElement, self: Kanba
     count.setAttribute('aria-label', `${count.title}; ${all ? 'fold' : 'show all'} the family's threads`)
     list.replaceChildren(...renderThreadTree(index, family.root, self, (thread, focus) => {
       const row = threadRow(thread, index, open); row.dataset.threadFocus = focus
-      const { elapsed } = workerPlateFacts(thread, now)
+      const { turn, elapsed } = workerPlateFacts(thread, now)
+      if (turn === 'question' || turn === 'blocked') {
+        const mark = document.createElement('span'); mark.className = 'kbn-thread-asks'; mark.dataset.turn = turn
+        mark.textContent = turn === 'question' ? '?' : '!'; mark.title = turn === 'question' ? 'Your question' : 'Blocked'
+        row.append(mark)
+      }
       if (elapsed) { const age = document.createElement('span'); age.className = 'kbn-row-elapsed'; age.textContent = elapsed; row.append(age) }
       return row
     }, {

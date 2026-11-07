@@ -17,6 +17,9 @@
 .kbn-desk-threads { grid-column: 2 / -1; flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; margin: 3px 0 0; padding-left: 2px; border-left: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent); }
 .kbn-desk-threads[hidden] { display: none; }
 .kbn-desk-threads .ws-tree-state { display: none; }
+/* A question is the one red on the Desk's threads; a block is drawn quietly. */
+.kbn-thread-asks { flex: none; font: 600 var(--type-meta)/var(--leading-solid) var(--font-serif); color: var(--ws-state-question); }
+.kbn-thread-asks[data-turn='blocked'] { color: var(--kbn-ink-muted); }
 .kbn-desk-threads .kbn-thread-row { box-sizing: border-box; gap: 6px; padding: 2px 6px 2px calc(6px + var(--ws-thread-depth, 0) * var(--ws-thread-indent)); line-height: var(--leading-prose); border-radius: 3px; }
 .kbn-desk-threads .kbn-thread-row .constitution-state-dot { transform: scale(0.8); }
 .kbn-desk-threads .kbn-thread-name { color: var(--kbn-ink-soft); }
