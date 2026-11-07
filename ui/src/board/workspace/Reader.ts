@@ -668,7 +668,7 @@ export class Reader {
     menu.setAttribute('aria-label', 'Document and constitution actions')
     menu.append(button('ws-menu-item', 'Sent files', () => this.showSentFiles()))
     const url = isDrawn(doc) ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
-    for (const [label, download] of [['Open in new tab', false], ['Download', true]] as const) {
+    for (const [label, download] of (doc.kind === 'family' ? [['Open in new tab', false]] : [['Open in new tab', false], ['Download', true]]) as Array<[string, boolean]>) {
       const a = element('a', 'ws-menu-item', label)
       a.href = isDrawn(doc) && download ? fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner) : url
       if (download) a.download = doc.name
@@ -679,7 +679,7 @@ export class Reader {
       void navigator.clipboard?.writeText(doc.path).then(() => showToast('Path copied')).catch(() => showToast('Couldn’t copy path', 'error'))
       this.closeMenu()
     }))
-    menu.append(button('ws-menu-item', 'Refresh', () => { this.host.refresh(doc.key); this.closeMenu() }))
+    if (doc.kind !== 'family') menu.append(button('ws-menu-item', 'Refresh', () => { this.host.refresh(doc.key); this.closeMenu() }))
     const receipts = element('details', 'ws-receipts')
     const sends = doc.provenance.filter(p => p.kind === 'sent')
     receipts.append(element('summary', '', `Receipts (${sends.length})`))
@@ -821,9 +821,9 @@ export class Reader {
     if (this.active && this.sidebarShown) this.fillSidebar()
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
-  /** The viewer's choice stands; with none, the sidebar opens only where the stage keeps its working width beside it. */
+  /** The viewer's choice stands; with none, the window's width decides whether the stage keeps its working width beside the default sidebar. */
   private get sidebarShown(): boolean {
-    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? window.innerWidth - this.sidebarPixels() >= STAGE_BESIDE_SIDEBAR)
+    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? window.innerWidth - this.sidebarPixels(null) >= STAGE_BESIDE_SIDEBAR)
   }
   /**
    * Opening or closing the sidebar is one coordinated motion: the column

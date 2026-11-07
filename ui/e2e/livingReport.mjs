@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
+import { familyTree, sentFiles } from './familyNav.mjs'
 
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
@@ -29,8 +30,7 @@ async function back(page, phone) {
 }
 async function report(page, phone) {
   if (!await page.locator('.ws-selected[data-key$="/report.html"]').count()) {
-    if (phone) await page.locator('.ws-rail-toggle').click()
-    await page.locator(phone ? '.ws-page-sheet[open] .ws-sent-file[data-key$="/report.html"]' : '.ws-rail-files .ws-rail-file[data-key$="/report.html"]').click()
+    await (await sentFiles(page)).and(page.locator('[data-key$="/report.html"]')).click()
   }
   await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
   await page.waitForTimeout(100)
@@ -48,9 +48,7 @@ export function registerLivingReportJourneys(test) {
       await page.goto(url)
       await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]').click()
       // The family tree keeps the report's owning constitution at its root.
-      if (phone) await page.locator('.ws-rail-toggle').click()
-      const family = page.locator(phone ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
-      await family.locator('.kbn-thread-row').first().click()
+      await (await familyTree(page)).locator('.kbn-thread-row').first().click()
       await band(page).locator('.ws-band-head').waitFor()
       assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
@@ -107,46 +105,30 @@ export function registerLivingReportJourneys(test) {
       await back(page, phone)
       await selected(page).locator('.ws-fiber-prose').waitFor()
 
-      if (phone) {
-        await page.locator('.ws-rail-toggle').click()
-        await page.locator('.ws-page-sheet[open]').waitFor()
-        assert.ok(await page.locator('.ws-page-sheet .ws-sent-file').count() > 0)
-        assert.ok(await page.locator('.ws-page-sheet .ws-tree-archived').count() > 0)
-        await shot(page, 'phone-sheet')
-        await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
-        await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
-      } else {
-        assert.ok(await page.locator('.ws-rail-files .ws-rail-file').count() > 0)
-        assert.ok(await page.locator('.ws-sent-new').count() > 0)
+      assert.ok(await (await sentFiles(page)).count() > 0)
+      await shot(page, `${device}-sheet`)
+      await page.keyboard.press('Escape')
+      await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
+      if (!phone) {
         await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
         const menu = page.locator('.ws-settings-menu:not([hidden])')
         await menu.waitFor()
         assert.ok(await menu.locator('.kbn-ctl-history').count() > 0, 'sessions live in settings')
-        assert.equal(await menu.locator('.ws-sent-file, .ws-phone-threads').count(), 0, 'settings hold no threads or sent files')
+        assert.equal(await menu.locator('.ws-sent-file, .ws-family').count(), 0, 'settings hold no threads or sent files')
         const box = await menu.boundingBox(), header = await band(page).locator('.ws-band-head').boundingBox()
         assert.ok(Math.abs(box.y - (header.y + header.height)) < 16, 'the dropdown leaves both header rows clear')
         await shot(page, 'desktop-settings')
         await page.keyboard.press('Escape')
         await menu.waitFor({ state: 'hidden' })
         assert.equal(await band(page).getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
-        const toggle = page.getByRole('button', { name: 'Hide threads and sent files', exact: true })
-        await toggle.click()
-        assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
-        await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).click()
       }
       // A thread's back returns to the page from which it was opened.
-      if (phone) {
-        await page.locator('.ws-rail-toggle').click()
-        await page.locator('.ws-page-sheet .kbn-thread-row[data-thread-state="working"]').first().click()
-      } else await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').first().click()
+      await (await familyTree(page)).locator('.kbn-thread-row[data-thread-state="working"]').first().click()
       await named(page, 'Response analysis')
       await back(page, phone)
       await named(page, 'Calibrate the shear response')
       // Further ancestors stay reachable from settings without adding a header row.
-      if (phone) {
-        await page.locator('.ws-rail-toggle').click()
-        await page.locator('.ws-page-sheet .kbn-thread-row[data-thread-state="working"]').first().click()
-      } else await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').first().click()
+      await (await familyTree(page)).locator('.kbn-thread-row[data-thread-state="working"]').first().click()
       await named(page, 'Response analysis')
       await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
       await page.locator('.ws-settings-menu:not([hidden]) .ws-settings-ancestry .ws-ancestry-link').click()
@@ -154,21 +136,6 @@ export function registerLivingReportJourneys(test) {
       assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
       assert.equal(errors.length, 0, errors.join('\n'))
     }, viewport, 'false', 'reduce', phone)
-  }
-  for (const hasTouch of [false, true]) {
-    test(`Persistent rail (${hasTouch ? 'coarse' : 'fine'} pointer)`, async page => {
-      await page.goto(url)
-      const enter = () => page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]').click()
-      await enter()
-      await page.getByRole('button', { name: 'Hide threads and sent files', exact: true }).click()
-      assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
-      assert.equal(await page.evaluate(() => localStorage.getItem('shuttle:workspace:rail')), 'false')
-      await page.reload()
-      await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).waitFor()
-      assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
-      await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).click()
-      assert.equal(await page.locator('.ws-thread-rail').isVisible(), true)
-    }, { width: 1200, height: 900 }, 'false', 'reduce', hasTouch)
   }
 }
 

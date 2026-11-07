@@ -108,7 +108,7 @@
   /* A sidebar card's meta row: host mark and worker pill on one 19 px line, the Desk's chip height. */
   --ws-meta-row: 19px;
   --ws-sidebar-dot-size: 10px;
-  /* The thread rail's tone bar, mark column and indent step. */
+  /* A thread tree's tone bar, mark column and indent step. */
   --ws-thread-bar: 3px;
   --ws-thread-indent: 14px;
   /* Each thread state's tone, in the sidebar's and the Desk's vocabulary: the

@@ -163,7 +163,7 @@ export class DocumentHost {
     // Touch neighbours first, leaving the actual subject newest in the LRU.
     const visible = [index - 1, index + 1, index]
       .filter((i) => i >= 0 && i < this.documents.length)
-      .filter((i) => i === index || this.documents[i].kind !== 'change')
+      .filter((i) => i === index || !['change', 'family'].includes(this.documents[i].kind))
       .map((i) => this.documents[i].key)
     for (const id of visible) {
       const state = this.frames.get(id)!

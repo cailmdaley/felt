@@ -52,7 +52,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
     vi.stubGlobal('matchMedia', () => ({ matches: false }))
     try {
       const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-      const page = new FamilyPage(vi.fn(), { marks: () => undefined, files: () => [] }); page.update(hub, index)
+      const page = new FamilyPage(vi.fn(), { marks: () => undefined, files: () => [], refresh: () => {} }, vi.fn()); page.update(hub, index)
       const labels = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.kbn-thread-row')]
         .filter(row => row.querySelector('.kbn-thread-name')!.textContent !== hub.name)
         .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('.ws-tree-state')!.textContent]))

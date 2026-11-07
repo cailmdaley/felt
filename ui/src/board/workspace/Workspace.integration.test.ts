@@ -14,6 +14,7 @@ import { buildFileViewer } from '../FileViewerPanel.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
+  bindDrawnPage: vi.fn(),
   buildFileViewer: vi.fn((_base: string, path: string, _owner: string, onLoad?: (frame: HTMLIFrameElement, refreshed: boolean) => void) => {
     const wrap = document.createElement('div')
     const iframe = document.createElement('iframe')
@@ -460,6 +461,20 @@ describe('workspace reader integration', () => {
     workspace.openQuestion(cards[0]); await flush(); await flush()
     expect(workspace.reader.document?.name).toBe('tapestry.html')
     expect(document.querySelector('.ws-report-inset')).toBeNull()
+  })
+
+  it('a Question on a constitution with threads never paints its map', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
+    const feed = [thread({ id: 'hub', status: 'active', ask: { text: 'Which?', at: new Date().toISOString() } }), thread({ id: 'hub/a', orchestrator: 'hub', status: 'active' })]
+    bodyCards = feed
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.openQuestion(feed[0])
+    await Promise.resolve()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).not.toBe('family:host-a:hub')
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).not.toBe('family:host-a:hub')
   })
 
   it('a Question without a report opens its constitution', async () => {
@@ -923,6 +938,40 @@ describe('workspace reader integration', () => {
     expect(peek()).toBe('hub/b')
     expect(scroller().scrollTop).toBe(333)
     expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^hub\/b,/)
+  })
+  it('opens a thread from the map on its own lead page, the current one and an orchestrator among them', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), thread({ id: 'hub/mid/leaf', orchestrator: 'hub/mid', status: 'active' })]
+    bodyCards = feed
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .kbn-thread-row')].find(el => el.querySelector('.kbn-thread-name')?.textContent === name)!
+    workspace.open(feed[0], 'Desk'); await flush()
+    expect(selected()).toBe('family:host-a:hub')
+    row('hub').click(); await flush()
+    expect(selected()).not.toBe('family:host-a:hub')
+    workspace.reader.select('family:host-a:hub'); await flush()
+    row('hub/mid').click(); await flush()
+    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub/mid')
+    expect(selected()).not.toBe('family:host-a:hub-mid')
+    workspace.open(feed[2], 'Desk'); await flush()
+    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub/mid/leaf')
+  })
+  it('leaves Download and Refresh off the map\'s document menu', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/a', orchestrator: 'hub', status: 'active' })]
+    bodyCards = feed
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.open(feed[0], 'Desk'); await flush()
+    document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!.click()
+    const items = [...document.querySelectorAll('.ws-menu .ws-menu-item')].map(item => item.textContent)
+    expect(items).toContain('Copy path')
+    expect(items).not.toContain('Download')
+    expect(items).not.toContain('Refresh')
   })
   it('opens a family row from the page, and adds the page when a family forms without moving the selection', async () => {
     workspace.dispose()

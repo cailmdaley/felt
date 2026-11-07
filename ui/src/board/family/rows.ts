@@ -22,7 +22,7 @@ export function planRows(threads: readonly MapThread[], heading: (thread: MapThr
 
 /** A thread's head in the attention order, or null for quiet history. */
 export const heading = (model: FamilyModel, thread: MapThread): string | null =>
-  model.attention.includes(thread) ? ATTENTION_WORD[thread.standing as Attention] : null
+  thread.standing === 'still' ? 'No worker' : model.attention.includes(thread) ? ATTENTION_WORD[thread.standing as Attention] : null
 
 /** The time scale over a drawing's rows. */
 export function axis(layer: HTMLElement, x: (at: number) => number, now: number): void {

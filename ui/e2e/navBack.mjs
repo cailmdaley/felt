@@ -1,3 +1,4 @@
+import { familyTree } from './familyNav.mjs'
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -58,8 +59,7 @@ export function registerNavigationJourneys(test) {
     await named(page, 'Choose the response cut')
     await checkBack('Desk')
     await shot('01-nested-from-desk')
-    if (phone) await page.locator('.ws-rail-toggle').click()
-    const rows = page.locator(phone ? '.ws-page-sheet[open] .kbn-thread-row' : '.ws-thread-rail .kbn-thread-row')
+    const rows = (await familyTree(page)).locator('.kbn-thread-row')
     await rows.filter({ hasText: 'Review the null tests' }).click()
     await named(page, 'Review the null tests')
     await checkBack('Choose the response cut')

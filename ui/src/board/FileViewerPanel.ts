@@ -450,10 +450,16 @@ function formatMediaTime(seconds: number): string {
 
 const liveViewSubscriptions = new WeakMap<HTMLElement, LiveFileSubscription>()
 const viewerDisposers = new WeakMap<HTMLElement, () => void>()
+/** A board-drawn page's share of the lifecycle its frame gives every viewer. */
+export interface DrawnPageLife { suspend(): void; resume(): void; dispose(): void }
+const drawnPages = new WeakMap<HTMLElement, DrawnPageLife>()
+export function bindDrawnPage(viewer: HTMLElement, life: DrawnPageLife): void { drawnPages.set(viewer, life) }
 
 /** Stop the shared poll when its viewer tab closes. */
 export function disposeFileViewer(viewer: HTMLElement | null): void {
   if (!viewer) return
+  drawnPages.get(viewer)?.dispose()
+  drawnPages.delete(viewer)
   liveViewSubscriptions.get(viewer)?.()
   liveViewSubscriptions.delete(viewer)
   viewerDisposers.get(viewer)?.()
@@ -471,6 +477,7 @@ export function playFileViewerAudio(viewer: HTMLElement): void {
 /** Pause a hidden reader tab without tearing down its viewer DOM. */
 export function suspendFileViewer(viewer: HTMLElement | null): void {
   if (viewer) {
+    drawnPages.get(viewer)?.suspend()
     liveViewSubscriptions.get(viewer)?.suspend()
     const state = mediaViewers.get(viewer)
     if (state) { state.active = false; state.inline = false; state.media.pause() }
@@ -482,6 +489,7 @@ export function suspendFileViewer(viewer: HTMLElement | null): void {
 /** Resume a reader tab and revalidate its file while retaining its DOM. */
 export function resumeFileViewer(viewer: HTMLElement | null): void {
   if (viewer) {
+    drawnPages.get(viewer)?.resume()
     void liveViewSubscriptions.get(viewer)?.resume()
     const state = mediaViewers.get(viewer)
     if (state) state.active = true

@@ -43,8 +43,8 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 
 The Desk gives the top-level orchestrator a card; its **thread badge** counts unfinished threads and draws attention when a descendant needs the human.
 The card's expansion lists threads by name, state and outcome, with waiting threads first; **sub-entries** draw the waiting threads under the root card without hovering, unless that display option is turned off.
-Opening the card puts the conversation in the centre and the **thread rail**, a collapsible tree of its descendants, on the right.
-Open a thread there to read its own conversation and report, then use the breadcrumb to return to its orchestrator.
+Opening the card lands on its **family map**, a live drawing of its threads with the whole tree folded at its foot.
+Open a thread there to read its report; `l` returns to the map and `b` goes up to its orchestrator.
 **To review** means closed work awaiting a verdict, not accepted work; tempered and discarded threads are archived, folded away rather than counted as unfinished.
 
 “Keep going” tells the orchestrator to read incoming results, answer what it can, return work that misses Desired State, and arm draft threads whose inputs are ready.

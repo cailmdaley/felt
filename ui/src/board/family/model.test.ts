@@ -25,7 +25,7 @@ it('orders attention by kind, then newest first within a kind', () => {
     thread('hub/question-old', { ...running('working', 1), ask: { text: 'Older?', at: new Date(now - 5 * hour).toISOString() } }),
     thread('hub/question-new', { status: 'active', ask: { text: 'Newer?', at: new Date(now - 4 * hour).toISOString() } }),
   ], { ...noFeeds, files: thread => thread.id === 'hub/new' ? [{ key: 'k', name: 'a.html', at: now - 5 * hour, unread: true }] : [] })
-  expect(m.attention.map(t => t.card.id.slice(4))).toEqual(['question-old', 'question-new', 'blocked', 'new', 'review', 'turn-new', 'turn-old', 'working'])
+  expect(m.attention.map(t => t.card.id.slice(4))).toEqual(['question-old', 'question-new', 'blocked', 'new', 'turn-new', 'turn-old', 'review', 'working'])
   expect(m.attention[0].rank).toBe(0)
   expect(m.attention[1].note).toBe('Newer?')
 })
@@ -67,4 +67,30 @@ it('takes the last move from every source it knows, never past now', () => {
 it('names the open thread when the family holds it', () => {
   const child = thread('hub/t', running('working', 1)), index = new ThreadIndex([root, child])
   expect(familyModel(index, root, child, noFeeds, now).current).toBe(familyModel(index, root, child, noFeeds, now).attention[0].key)
+})
+it('reads an in-flight thread with no worker as what it is, ahead of finished work', () => {
+  const m = model([root,
+    thread('hub/armed', { status: 'active' }),
+    thread('hub/stopped', { status: 'active', dispatchedAt: new Date(now - 9 * hour).toISOString() }),
+    thread('hub/held', { status: 'active', held: true }),
+    thread('hub/done', { status: 'closed', tempered: true, closedAt: new Date(now - hour).toISOString() }),
+  ])
+  const word = (id: string): string => [...m.threads.values()].find(t => t.card.id === id)!.word
+  expect(word('hub/armed')).toBe('armed')
+  expect(word('hub/stopped')).toBe('stopped')
+  expect(word('hub/held')).toBe('held')
+  expect(m.attention).toEqual([])
+  expect(m.order.at(-2)!.card.id).toBe('hub/done')
+  expect(m.order.filter(t => t.standing === 'still').length).toBe(3)
+})
+it('keeps a draft with a launch error a draft count', () => {
+  const m = model([root, thread('hub/draft', { status: 'open', launchError: 'no container' })])
+  expect(m.counts.blocked).toBe(0)
+  expect(m.aside.drafts).toBe(1)
+})
+it('shows a closed thread\'s outcome, not the ask it left behind', () => {
+  const m = model([root, thread('hub/closed', { status: 'closed', closedAt: new Date(now - 9 * hour).toISOString(), outcome: 'Landed', ask: { text: 'Leftover?', at: new Date(now - 2 * hour).toISOString() } })])
+  const closed = [...m.threads.values()].find(t => t.card.id === 'hub/closed')!
+  expect(closed.note).toBe('Landed')
+  expect(closed.lastMove).toBe(now - 9 * hour)
 })

@@ -282,6 +282,12 @@ describe('Reader channel sidebar', () => {
     storage.clear()
     expect(makeReader().el.classList.contains('ws-with-sidebar')).toBe(true)
   })
+  it('keeps its default open however wide the viewer has dragged it', () => {
+    storage.clear()
+    vi.stubGlobal('innerWidth', 1200)
+    storage.set('shuttle:workspace:sidebar-width', '480')
+    expect(makeReader().el.classList.contains('ws-with-sidebar')).toBe(true)
+  })
   it('defaults open until the viewer closes it, with a labelled Constitutions lead control', () => {
     storage.clear()
     const fresh = makeReader()

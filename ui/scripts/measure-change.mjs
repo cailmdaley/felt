@@ -25,7 +25,6 @@ try {
     if (window.top !== window) return
     localStorage.clear()
     localStorage.setItem('shuttle:workspace:sidebar', 'false')
-    localStorage.setItem('shuttle:workspace:rail', 'false')
     window.__measure = { tasks: [], timers: new Map(), fired: {}, reads: 0 }
     if (PerformanceObserver.supportedEntryTypes.includes('longtask'))
       new PerformanceObserver((list) =>

@@ -12,6 +12,12 @@ let surface: ReferenceSurface | undefined
 afterEach(() => { surface?.dispose(); surface = undefined; document.body.replaceChildren(); vi.useRealTimers() })
 
 describe('channel reference resolution', () => {
+  it('finds the fiber\'s own file past the family page that shares its path', () => {
+    const fiber = { ...doc('/channel/music.md'), kind: 'fiber' as const }, map = { ...fiber, key: 'family:host-a:music', kind: 'family' as const, name: 'Family' }
+    expect(resolveChannelReference('./music.md', source, [map, fiber])).toBe(fiber)
+    expect(resolveChannelReference('music.md', source, [map, fiber])).toBe(fiber)
+  })
+
   it('uses the source directory for relative paths and channel uniqueness for bare names', () => {
     expect(resolveChannelReference('tone.mp3', source, files)).toBe(audio)
     expect(resolveChannelReference('./tone.mp3', source, files)).toBe(audio)

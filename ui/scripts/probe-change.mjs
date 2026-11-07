@@ -18,7 +18,6 @@ async function prepare(ctx, mode = 'light') {
     if (window.top !== window) return
     localStorage.setItem('shuttle.appearance', JSON.stringify({ mode, dark: 'night-chart' }))
     localStorage.setItem('shuttle:workspace:sidebar', 'false')
-    localStorage.setItem('shuttle:workspace:rail', 'false')
   }, mode)
   const page = await ctx.newPage()
   page.setDefaultTimeout(30_000)
