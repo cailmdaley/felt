@@ -119,7 +119,7 @@ describe('moving on the globe', () => {
     expect(board.conversed).toEqual([])
   })
   it('turns from straight over the pole and on past it, the grabbed point under the pointer', () => {
-    const frame = (): Frame => frameOf(place.camera ?? { turn: northUp(Math.PI / 4, Math.PI / 2), at: [0, 0], radius: 386 }, 'globe', { width: WIDTH, height: HEIGHT })
+    const frame = (): Frame => frameOf(place.camera ?? { turn: northUp(Math.PI / 4, Math.PI / 2), sky: [0, 0], at: [0, 0], radius: 386 }, 'globe', { width: WIDTH, height: HEIGHT })
     const grabbed = invert(frame(), 400, 380)!
     drag([400, 380], [400, 760])
     const seen = project(frame(), grabbed)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cellCount, cellOf, centre, type Vec } from './healpix.js'
-import { PERIOD, UPRIGHT, carried, facing, flight, frameOf, grip, invert, keeping, northUp, onPlane, planeAt, project, rotate, wholeRadius, type Camera, type Projection } from './camera.js'
+import { PERIOD, UPRIGHT, carried, mollweideAngle, facing, flight, frameOf, grip, invert, keeping, northUp, onPlane, planeAt, project, rotate, wholeRadius, type Camera, type Projection } from './camera.js'
 
 const viewport = { width: 800, height: 1000 }
 const unit = (lon: number, lat: number): Vec => [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)]
@@ -19,7 +19,9 @@ const lean = (camera: Camera): number => {
 const views: Array<[Projection, Camera]> = [
   ['globe', at(.7, .9, 380)],
   ['globe', at(-2, -1.4, 1e6)],
-  ['globe', rolled({ turn: northUp(.4, Math.PI / 2), at: [0, 0], radius: 500 }, 2)],
+  ['globe', rolled({ turn: northUp(.4, Math.PI / 2), sky: [0, 0], at: [0, 0], radius: 500 }, 2)],
+  ['mollweide', at(2, 0, 130)],
+  ['mollweide', at(2, .6, 90_000)],
   ['plane', at(2, 0, 400)],
   ['plane', at(2, .6, 90_000)],
   ['plane', at(.3, 1.2, 4000)],
@@ -44,7 +46,7 @@ describe('the projections', () => {
     expect(project(frame, [-1, 0, 0]).depth).toBeCloseTo(-1)
   })
   it('looks straight down on the pole with the chosen meridian below', () => {
-    const frame = frameOf({ turn: northUp(Math.PI / 4, Math.PI / 2), at: [0, 0], radius: 300 }, 'globe', viewport)
+    const frame = frameOf({ turn: northUp(Math.PI / 4, Math.PI / 2), sky: [0, 0], at: [0, 0], radius: 300 }, 'globe', viewport)
     expect(project(frame, [0, 0, 1]).x).toBeCloseTo(400)
     expect(project(frame, [0, 0, 1]).y).toBeCloseTo(500)
     const below = project(frame, unit(Math.PI / 4, 0))
@@ -63,8 +65,20 @@ describe('the projections', () => {
       expect(across).toBeCloseTo(down, 3)
     }
   })
-  it('finds nothing off the sphere, or in the plane\'s notches', () => {
+  it('solves Mollweide\'s angle across the whole range, poles included', () => {
+    for (const z of [-1, -.9999, -.5, 0, .3, .99, .99999, 1]) {
+      const angle = mollweideAngle(z)
+      expect((2 * angle + Math.sin(2 * angle)) / Math.PI).toBeCloseTo(z, 9)
+    }
+  })
+  it('fits Mollweide\'s whole sky at half as much height as width', () => {
+    const r = wholeRadius('mollweide', viewport), frame = frameOf(at(0, 0, r), 'mollweide', viewport)
+    expect(project(frame, unit(Math.PI - 1e-9, 0)).x).toBeCloseTo(786)
+    expect(project(frame, [0, 0, 1]).y).toBeCloseTo(500 - Math.SQRT2 * r)
+  })
+  it('finds nothing off the sphere, off the map, or in the plane\'s notches', () => {
     expect(invert(frameOf(at(0, 0, 100), 'globe', viewport), 5, 5)).toBeNull()
+    expect(invert(frameOf(at(0, 0, 100), 'mollweide', viewport), 5, 5)).toBeNull()
     expect(onPlane(0, PERIOD / 4 * .99)).toBeNull()
     expect(onPlane(PERIOD / 8, PERIOD / 4 * .99)).not.toBeNull()
   })
@@ -104,6 +118,11 @@ describe('keeping a point under the pointer', () => {
     expect(lean(camera)).toBeGreaterThanOrEqual(0)
     expect(lean(camera)).toBeLessThan(.6 / 4)
   })
+  it('takes hold of Mollweide\'s rim from beside the map', () => {
+    const camera = at(0, 0, 100), held = grip(camera, 'mollweide', viewport, 5, 500) as unknown as Vec
+    expect(Math.hypot(...held)).toBeCloseTo(1, 9)
+    expect(project(frameOf(camera, 'mollweide', viewport), held).x).toBeCloseTo(400 - 2 * Math.SQRT2 * 100, 3)
+  })
   it('turns from beside the sphere by its rim', () => {
     const camera = at(0, 0, 200), held = grip(camera, 'globe', viewport, 700, 500)
     expect(Math.abs(lean(keeping(camera, 'globe', viewport, held, 700, 650)))).toBeGreaterThan(.3)
@@ -123,9 +142,11 @@ describe('keeping a point under the pointer', () => {
     }
   })
   it('carries the view between projections', () => {
-    const plane = carried(at(1.1, .4, 900), 'plane')
+    const plane = carried({ ...at(0, 0, 900), turn: at(1.1, .4, 900).turn }, 'globe', 'plane')
     closeTo(invert(frameOf(plane, 'plane', viewport), 400, 500)!, unit(1.1, .4), 9)
-    closeTo(rotate(carried(plane, 'globe').turn, [0, 0, 1]), unit(1.1, .4), 9)
+    const sky = carried(plane, 'plane', 'mollweide')
+    closeTo(invert(frameOf(sky, 'mollweide', viewport), 400, 500)!, unit(1.1, .4), 9)
+    closeTo(rotate(carried({ ...sky, turn: at(0, 0, 1).turn }, 'mollweide', 'globe').turn, [0, 0, 1]), unit(1.1, .4), 9)
   })
 })
 

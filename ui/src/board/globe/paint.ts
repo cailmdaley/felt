@@ -4,11 +4,11 @@
  * in as it grows and its parent gives way to it, so zooming is continuous.
  */
 import { markPath } from '../family/drawing.js'
-import { PERIOD, planeOutline, project, type Frame, type Viewport } from './camera.js'
+import { PERIOD, fromCentre, mollweideAngle, planeOutline, project, type Frame, type Viewport } from './camera.js'
 import { NORTH, baseCell, cellRadius, cellSpan, centre as cellCentre, child, outline, uniq, type Cell, type Digit, type Vec } from './healpix.js'
 import { KIND_GLYPH, documentKind, parseDocKey } from '../workspace/documents.js'
 import type { Box, Point } from './labels.js'
-import { askKind, traceOf, type Body, type Scene, type Tone } from './scene.js'
+import { askKind, chart, traceOf, type Body, type Scene, type Tone, type Trace } from './scene.js'
 
 /** A leader's strength and the radius of the dot on its tile. */
 const LEADER_ALPHA = .45, LEADER_DOT = 2
@@ -95,7 +95,32 @@ function tracePlane(c: CanvasRenderingContext2D, f: Frame, cell: Cell): boolean 
   if (Math.abs(offset) + half > f.r * PERIOD / 2) draw(planeOutline(f, cell, -Math.sign(offset) * PERIOD))
   return true
 }
-const traceAny = (c: CanvasRenderingContext2D, f: Frame, cell: Cell, points: () => Float64Array): boolean => f.projection === 'globe' ? traceGlobe(c, f, points()) : tracePlane(c, f, cell)
+const EDGE = 2 * Math.SQRT2
+/** Traces an outline on Mollweide's map, and once more shifted by a turn where it crosses the map's seam. */
+function traceChart(c: CanvasRenderingContext2D, f: Frame, trace: Trace): boolean {
+  const { phi, sin, cos } = chart(trace), count = phi.length, rate = f.r * EDGE / Math.PI
+  const lons = new Float64Array(count)
+  lons[0] = fromCentre(f, phi[0])
+  let low = lons[0], high = lons[0]
+  for (let n = 1; n < count; n++) {
+    const step = phi[n] - phi[n - 1]
+    lons[n] = lons[n - 1] + step - 2 * Math.PI * Math.round(step / (2 * Math.PI))
+    low = Math.min(low, lons[n]); high = Math.max(high, lons[n])
+  }
+  const draw = (shift: number): void => {
+    for (let n = 0; n < count; n++) {
+      const x = f.cx + rate * (lons[n] + shift) * cos[n], y = f.cy - f.r * (Math.SQRT2 * sin[n] - f.rise)
+      if (n) c.lineTo(x, y); else c.moveTo(x, y)
+    }
+    c.closePath()
+  }
+  draw(0)
+  if (high > Math.PI) draw(-2 * Math.PI)
+  if (low < -Math.PI) draw(2 * Math.PI)
+  return true
+}
+const traceAny = (c: CanvasRenderingContext2D, f: Frame, cell: Cell, trace: () => Trace): boolean =>
+  f.projection === 'globe' ? traceGlobe(c, f, trace().points) : f.projection === 'mollweide' ? traceChart(c, f, trace()) : tracePlane(c, f, cell)
 
 /** The tile is on screen, near enough. */
 function seen(f: Frame, viewport: Viewport, cell: Cell, centre: Vec, radius: number): boolean {
@@ -103,6 +128,12 @@ function seen(f: Frame, viewport: Viewport, cell: Cell, centre: Vec, radius: num
   if (f.projection === 'plane') {
     const corners = planeOutline(f, cell)
     sx = (corners[2] + corners[6]) / 2; sy = (corners[1] + corners[5]) / 2
+  } else if (f.projection === 'mollweide') {
+    const [x, y, z] = centre, angle = mollweideAngle(z)
+    sx = f.cx + f.r * EDGE / Math.PI * fromCentre(f, Math.atan2(y, x)) * Math.cos(angle); sy = f.cy - f.r * (Math.SQRT2 * Math.sin(angle) - f.rise)
+    // Mollweide stretches a cell sideways toward the rim, and a wide one near the seam reaches the far edge too.
+    if (radius > .1) return true
+    radius *= 2
   } else {
     const [x, y, z] = centre
     if (x * f.fwdX + y * f.fwdY + z * f.fwdZ < -Math.sin(Math.min(1.5, radius))) return false
@@ -113,17 +144,17 @@ function seen(f: Frame, viewport: Viewport, cell: Cell, centre: Vec, radius: num
 }
 
 /** Grid outlines, kept between frames; let go when there are more than a few screens' worth. */
-const gridTraces = new Map<string, Float64Array>()
+const gridTraces = new Map<string, Trace>()
 const GRID_KEPT = 6000
-function gridTrace(cell: Cell, step: number): Float64Array {
+function gridTrace(cell: Cell, step: number): Trace {
   const key = `${uniq(cell)}:${step}`
-  let points = gridTraces.get(key)
-  if (!points) {
+  let trace = gridTraces.get(key)
+  if (!trace) {
     if (gridTraces.size >= GRID_KEPT) gridTraces.clear()
-    points = outline(cell, step)
-    gridTraces.set(key, points)
+    trace = { points: outline(cell, step) }
+    gridTraces.set(key, trace)
   }
-  return points
+  return trace
 }
 /** Draws the grid of the finest order that still reads at this zoom and the two above it, finer ones fainter. */
 function grid(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, palette: Palette): void {
@@ -188,7 +219,7 @@ function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene:
     const appear = fade * smooth(LEAST_PX, FADE_PX, px)
     const opened = body.kids.length ? smooth(8, 56, px) : 1
     c.beginPath()
-    if (traceAny(c, f, body.cell, () => traceOf(body, stepFor(px)).points)) {
+    if (traceAny(c, f, body.cell, () => traceOf(body, stepFor(px)))) {
       const strength = STRENGTH[body.tone] * body.heat * (body.settled && !awake ? SETTLED : 1), ground = !body.thread ? 1 : body.kids.some(kid => kid.kind === 'thread') ? 1 - .55 * smooth(40, 220, px) : 1 - .25 * smooth(40, 220, px)
       if (opened < 1 && body.hottest !== body.tone) {
         c.fillStyle = palette.tones[body.hottest]
@@ -217,7 +248,7 @@ function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene:
 function ring(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, body: Body, colour: string, width: number, dash: number[]): void {
   if (!seen(f, viewport, body.cell, body.centre, body.radius)) return
   c.beginPath()
-  if (!traceAny(c, f, body.cell, () => traceOf(body, stepFor(body.span * f.r)).points)) return
+  if (!traceAny(c, f, body.cell, () => traceOf(body, stepFor(body.span * f.r)))) return
   c.strokeStyle = colour; c.lineWidth = width; c.setLineDash(dash)
   c.stroke()
   c.setLineDash([])
@@ -275,6 +306,10 @@ export function paint(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport,
     sea.addColorStop(0, palette.ocean); sea.addColorStop(1, palette.deep)
     c.fillStyle = sea
     c.beginPath(); c.arc(f.cx, f.cy, f.r, 0, 2 * Math.PI); c.fill(); c.clip()
+  } else if (f.projection === 'mollweide') {
+    c.beginPath()
+    c.ellipse(f.cx, f.cy + f.rise * f.r, EDGE * f.r, Math.SQRT2 * f.r, 0, 0, 2 * Math.PI)
+    c.fillStyle = palette.deep; c.fill(); c.clip()
   } else {
     // The twelve diamonds, cut to one turn of the plane around the centre.
     c.beginPath()

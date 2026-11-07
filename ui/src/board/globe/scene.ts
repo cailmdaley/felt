@@ -4,12 +4,13 @@ import { ATTENTION } from '../family/model.js'
 import { assign, tilesOf, type Band, type Tile, type TileKind } from './assign.js'
 import { persistentId, type Forest } from './forest.js'
 import { centre, cellRadius, cellSpan, outline, type Cell, type Vec } from './healpix.js'
+import { mollweideAngle } from './camera.js'
 
 /** What a tile's colour says: a thread's state, or what kind of thing it is. */
 export type Tone = Exclude<Standing, 'new'> | 'new' | 'land' | 'page'
 
-/** A cell's outline on the sphere at some detail. */
-export interface Trace { points: Float64Array }
+/** A cell's outline on the sphere at some detail, and the longitude and Mollweide angle of each point once a map has asked for them. */
+export interface Trace { points: Float64Array; phi?: Float64Array; sin?: Float64Array; cos?: Float64Array }
 
 export interface Body {
   tile: Tile
@@ -45,6 +46,19 @@ export const traceOf = (body: Body, step: number): Trace => {
   if (!trace) { trace = { points: outline(body.cell, step) }; body.traces.set(step, trace) }
   return trace
 }
+/** Fills in the Mollweide numbers for an outline. */
+export function chart(trace: Trace): Required<Trace> {
+  if (!trace.phi) {
+    const count = trace.points.length / 3
+    trace.phi = new Float64Array(count); trace.sin = new Float64Array(count); trace.cos = new Float64Array(count)
+    for (let n = 0; n < count; n++) {
+      const x = trace.points[3 * n], y = trace.points[3 * n + 1], angle = mollweideAngle(trace.points[3 * n + 2])
+      trace.phi[n] = Math.atan2(y, x); trace.sin[n] = Math.sin(angle); trace.cos[n] = Math.cos(angle)
+    }
+  }
+  return trace as Required<Trace>
+}
+
 const CALM = ATTENTION.length + 2
 const MONTH_HOURS_LOG = Math.log10(720)
 const urgencyOf = (standing: Standing): number => {

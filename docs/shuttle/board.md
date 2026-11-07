@@ -294,7 +294,7 @@ The tile's colour is its state, in the Desk's pigments, and it fades with age. A
 
 **Moving.** One hand does it: scroll zooms about the pointer, and so does a pinch, down to the smallest thing there filling the stage; drag turns. The globe turns freely, over the poles and on: the point you grab stays exactly under the pointer at any zoom and orientation, a drag beside the sphere turns it by its rim, and a let-go drag coasts to a stop. North rights itself only while the hand moves, turned about the grabbed point, so it never slides out from under you, and every flight lands north up. The view opens looking straight down on the north, where everything in flight is. A flight frames a tile whole between the trail and the peek. Under the tile in focus names come first, live threads before archived ones. A name that its tile cannot hold stands nearby inside the focus, or out on the open water beside it, never across its edge, with a fine line back to its tile. Names grow in as their tiles can hold them whole, and the grid, drawn under the tiles, refines with the zoom.
 
-**The plane.** `m` or the switch at the top right lays the sphere flat on HEALPix's own plane (Calabretta & Roukema 2007): the twelve base pixels as diamonds in three rows, north in flight on top, every cell a straight square diamond, the polar ones included, scaled to the sphere's area so a tile is as wide on both. It wraps east and west, and keeps itself in view top to bottom. Clicks, zoom and flights are the same there. On the globe, cells near the poles are sheared as HEALPix makes them, which the plane shows undistorted.
+**Mollweide and the plane.** `m` or the switch at the top right steps from the globe to Mollweide's whole sky, the map healpy draws, and on to HEALPix's own plane (Calabretta & Roukema 2007), looking where the last one looked. The plane lays the twelve base pixels out as diamonds in three rows, north in flight on top, every cell a straight square diamond, the polar ones included, scaled to the sphere's area so a tile is as wide on it as on the sphere; it wraps east and west and keeps itself in view top to bottom. On the globe the cells near the poles are sheared as HEALPix makes them, and Mollweide squeezes the polar row where everything in flight sits; the plane shows them undistorted. Clicks, zoom and flights are the same on all three.
 
 **Clicking.** A click on a thread flies to it and moves Rex to its window at once, if it has one; on a phone a tap comes to it. A click on a tapestry, report, file or constitution opens it on the stage, and Back returns to the Globe as it stood. A click on a province or area flies to it. Zooming, turning and stepping back never touch Rex. A click in Rex flies the Globe to that thread, as it moves the family map, while voice is on.
 
@@ -305,7 +305,7 @@ The tile's colour is its state, in the Desk's pigments, and it fades with age. A
 | `Enter` | What a click does, on the tile in focus |
 | `/` | Find; picking a thread flies the Globe to it, leaving Rex and the stage be, and a fiber the Globe has no tile for opens its page |
 | `+`, `-` | Zoom |
-| `m` | Globe or the HEALPix plane |
+| `m` | Globe, Mollweide, the HEALPix plane, in turn |
 
 ## The board is optional, and the bundle is its own artifact
 

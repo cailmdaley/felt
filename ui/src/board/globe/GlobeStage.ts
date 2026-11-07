@@ -1,7 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, ATTENTION_WORD, conversable, type MapFeeds, type MapFile } from '../family/model.js'
 import { htmlEl as el, markPath, shortAgo, svgEl } from '../family/drawing.js'
-import { PERIOD, UPRIGHT, bounded, carried, planeOutline, facing, flight, frameOf, grip, invert, keeping, northUp, project, wholeRadius, type Camera, type Flight, type Frame, type Grip, type Projection, type Viewport } from './camera.js'
+import { PERIOD, PROJECTIONS, UPRIGHT, bounded, carried, planeOutline, facing, flight, frameOf, grip, invert, keeping, northUp, project, wholeRadius, type Camera, type Flight, type Frame, type Grip, type Projection, type Viewport } from './camera.js'
 import { forestOf, persistentId } from './forest.js'
 import { NORTH, cellSpan, centre, child, facePoint, inCell, ipixOf, type FacePoint, type Vec } from './healpix.js'
 import { blocks, inscribed, overlaps, placeNames, within, type Block, type Box, type Candidate, type Point } from './labels.js'
@@ -191,7 +191,7 @@ export class GlobeStage {
     this.peek.setAttribute('aria-live', 'polite')
     const head = el('div', 'globe-head')
     head.append(this.crumbs, this.counts)
-    for (const [projection, label] of [['globe', 'Globe'], ['plane', 'Plane']] as const) {
+    for (const [projection, label] of [['globe', 'Globe'], ['mollweide', 'Mollweide'], ['plane', 'Plane']] as const) {
       const button = el('button', 'globe-toggle-option', label); button.type = 'button'
       button.dataset.projection = projection
       button.title = 'Change the projection (m)'
@@ -267,7 +267,7 @@ export class GlobeStage {
     return Math.max(this.whole * 4, Math.min(this.viewport.width, this.viewport.height) * 1.2 / cellSpan(this.scene.deepest + 1))
   }
   /** The whole sphere from over the north, or the whole sky on the map. */
-  private opening(): Camera { return { turn: OPENING, at: [PERIOD / 2, 0], radius: this.whole } }
+  private opening(): Camera { return { turn: OPENING, sky: [Math.PI / 4, 0], at: [PERIOD / 2, 0], radius: this.whole } }
   private frameNow(): Frame { return frameOf(this.camera, this.place.projection, this.viewport) }
   /** A camera within the zoom's bounds, and on the plane, over it. */
   private held(camera: Camera): Camera {
@@ -301,7 +301,7 @@ export class GlobeStage {
     const radius = Math.min((width - 2 * FRAME_MARGIN) / (right - left), (bottom - top - 2 * FRAME_MARGIN) / (down - up))
     const sized: Camera = { ...centred, radius }
     const shiftX = width / 2 - radius * ((left + right) / 2 - unit.cx), shiftY = (top + bottom) / 2 - radius * ((up + down) / 2 - unit.cy)
-    return keeping(sized, this.place.projection, this.viewport, this.place.projection === 'globe' ? body.centre : sized.at, shiftX, shiftY)
+    return keeping(sized, this.place.projection, this.viewport, this.place.projection === 'plane' ? sized.at : body.centre, shiftX, shiftY)
   }
   private come(body: Body): void {
     this.place.focus = body.key
@@ -322,10 +322,10 @@ export class GlobeStage {
 
   private project(projection: Projection): void {
     if (projection === this.place.projection) return
-    const camera = this.camera, wasWhole = camera.radius <= this.whole * 1.01
+    const camera = this.camera, wasWhole = camera.radius <= this.whole * 1.01, from = this.place.projection
     this.stopFlight()
     this.place.projection = projection
-    this.camera = wasWhole ? this.opening() : this.held(carried(camera, projection))
+    this.camera = wasWhole ? this.opening() : this.held(carried(camera, from, projection))
     this.request()
   }
   /** The deepest tile at a screen point that is wide enough to aim at. */
@@ -393,8 +393,8 @@ export class GlobeStage {
   }
 
   private layoutKey(): string {
-    const { turn, at, radius } = this.camera
-    return [this.place.projection, ...turn, ...at, radius, this.viewport.width, this.viewport.height, this.place.focus, !!this.flying, this.headHeight, this.footHeight, this.revision, this.signature].join('|')
+    const { turn, sky, at, radius } = this.camera
+    return [this.place.projection, ...turn, ...sky, ...at, radius, this.viewport.width, this.viewport.height, this.place.focus, !!this.flying, this.headHeight, this.footHeight, this.revision, this.signature].join('|')
   }
   private readPalette(): void {
     const paper = getComputedStyle(this.el).backgroundColor
@@ -682,7 +682,7 @@ export class GlobeStage {
   }
   private zoomAbout(radius: number, at: Point): void {
     const under = invert(this.frameNow(), at.x, at.y)
-    this.zoomTo(radius, under, under || this.place.projection === 'plane' ? grip(this.camera, this.place.projection, this.viewport, at.x, at.y) : null, at)
+    this.zoomTo(radius, under, under ? grip(this.camera, this.place.projection, this.viewport, at.x, at.y) : null, at)
   }
   /** Zooms to a radius, no closer than what is under the pointer allows, keeping a held point where it is. */
   private zoomTo(radius: number, under: Vec | null, held: Grip | null, at: Point): void {
@@ -770,7 +770,7 @@ export class GlobeStage {
     const { width, height } = this.viewport, middle = { x: width / 2, y: height / 2 }
     switch (event.key) {
       case 'Escape': case 'h': return this.stepOut()
-      case 'm': this.project(this.place.projection === 'globe' ? 'plane' : 'globe'); return true
+      case 'm': this.project(PROJECTIONS[(PROJECTIONS.indexOf(this.place.projection) + 1) % PROJECTIONS.length]); return true
       case '+': case '=': this.stopFlight(); this.zoomAbout(this.camera.radius * KEY_ZOOM, middle); this.request(); return true
       case '-': case '_': this.stopFlight(); this.zoomAbout(this.camera.radius / KEY_ZOOM, middle); this.request(); return true
       case 'ArrowRight': case 'ArrowDown': this.nextAsk(); return true
