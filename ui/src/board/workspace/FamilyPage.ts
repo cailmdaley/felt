@@ -389,7 +389,7 @@ export class FamilyPage {
     if (!model || event.detail > 1 || target.closest('.fp-doc')) return
     const held = target.closest<HTMLElement>('[data-held]'), files = target.closest<HTMLElement>('[data-files]')
     if (held) { this.toggleDoc(model.threads.get(held.dataset.owner!)!, held.dataset.held!); return }
-    if (files) { this.select(files.dataset.files!); this.toggle(`files:${files.dataset.files}`); return }
+    if (files) { this.select(files.dataset.files!); this.toggleFiles(files.dataset.files!); return }
     const key = target.closest<HTMLElement>('[role="treeitem"]')?.dataset.row
     if (key) this.activate(key)
   }
@@ -400,6 +400,20 @@ export class FamilyPage {
     if (thread && thread !== model.root) this.toggle(key)
     else if (!thread) { this.toggle(key); return }
     this.enter(key)
+  }
+  /** A thread's ⧉ n list unfolds or folds; folding it folds a sent file open from it, and a cursor in it returns to ⧉ n. */
+  private toggleFiles(key: string): void {
+    const list = this.row(key)?.querySelector<HTMLElement>('.fp-files')
+    const shown = this.place.docs!.get(key)
+    if (this.place.open.has(`files:${key}`) && list) {
+      const within = list.contains(document.activeElement)
+      if ([...list.querySelectorAll<HTMLElement>('[data-held]')].some(item => item.dataset.held === shown)) this.place.docs!.delete(key)
+      this.place.open.delete(`files:${key}`)
+      this.paint()
+      if (within) this.row(key)?.querySelector<HTMLElement>('[data-files]')?.focus({ preventScroll: true })
+      return
+    }
+    this.toggle(`files:${key}`)
   }
   private toggle(key: string): void {
     if (!this.place.open.delete(key)) this.place.open.add(key)
