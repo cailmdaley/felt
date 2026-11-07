@@ -27,7 +27,7 @@ const box = async locator => { const { x, y } = await locator.boundingBox(); ret
 
 export function registerMapViewJourneys(test) {
   const tree = page => page.locator('.ws-page.ws-selected .fp-tree')
-  const row = (page, name) => tree(page).locator('.fp-row').filter({ has: page.locator('.fp-name').getByText(name, { exact: true }) })
+  const row = (page, name) => tree(page).locator('.fp-row').filter({ has: page.locator(`.fp-name[title="${name}"]`) })
   const landed = async page => {
     await board(page)
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).last().locator('.kbn-card-name').click()
@@ -45,7 +45,7 @@ export function registerMapViewJourneys(test) {
     assert.equal(await analysis.getAttribute('aria-expanded'), 'true')
     await asks(page, quiet.length + 1)
     assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'], 'an unfolding click moves Rex to the thread\'s window')
-    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-worker] .fp-name')?.textContent === 'Response analysis')
+    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-worker] .fp-name')?.title === 'Response analysis')
     assert.equal(await band(), root, 'the page does not change')
     await analysis.locator('[data-kind="constitution"]').waitFor()
     const order = await analysis.locator('.fp-held > button').evaluateAll(buttons => buttons.map(button => button.dataset.kind ?? button.className))

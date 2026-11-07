@@ -19,8 +19,8 @@ export async function familyTree(page) {
   }
   return tree
 }
-/** A thread's row on its family's page, by its exact name. */
-export const threadRow = (page, tree, name) => tree.locator('.fp-row').filter({ has: page.locator('.fp-name').getByText(name, { exact: true }) })
+/** A thread's row on its family's page, by its exact name, which its slug carries as a tooltip. */
+export const threadRow = (page, tree, name) => tree.locator('.fp-row').filter({ has: page.locator(`.fp-name[title="${name}"]`) })
 /**
  * Opens a thread's own page from its row: the activation unfolds the row in
  * place (a second one when the first folded it), and the constitution it

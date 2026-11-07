@@ -54,7 +54,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
     expect(page.el.querySelector('.fp-aside')!.textContent).toBe('1 seat · 1 resting')
     page.el.querySelector('.fp-aside')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
     const words = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.fp-row:not(.fp-head)')]
-      .map(row => [row.querySelector('.fp-name')!.textContent, row.querySelector('.fp-meta')!.textContent!.split(' · ')[0]]))
+      .map(row => [row.querySelector<HTMLElement>('.fp-name')!.title, row.querySelector('.fp-meta')!.textContent!.split(' · ')[0]]))
     expect(words).toEqual({ [spawned.name]: 'armed', [standing.name]: 'resting', [seat.name]: 'seat', [asking.name]: 'your turn' })
   })
 })

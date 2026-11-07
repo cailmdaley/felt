@@ -816,8 +816,8 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     const pages = (): (string | null)[] => [...document.querySelectorAll('.ws-page')].map(page => page.getAttribute('data-key'))
-    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector('.fp-name')?.textContent === name)!
-    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.textContent ?? undefined
+    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
+    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
 
     workspace.open(feed[0], 'Desk'); await flush()
     expect(selected()).toBe('family:host-a:hub')
@@ -843,8 +843,8 @@ describe('workspace reader integration', () => {
     bodyCards = feed
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector('.fp-name')?.textContent === name)!
-    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.textContent ?? undefined
+    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
+    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
     workspace.open(feed[0], 'Desk'); await flush()
     const scroller = (): HTMLElement => document.querySelector<HTMLElement>('.ws-selected .ws-family-scroll')!
     const key = (name: string): void => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })) }
@@ -872,8 +872,8 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
-    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector('.fp-name')?.textContent === name)!
-    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.textContent ?? undefined
+    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
+    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
     workspace.open(feed[0], 'Desk'); await flush()
     expect(selected()).toBe('family:host-a:hub')
     row('hub/mid').click(); await flush()
@@ -899,7 +899,7 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
-    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.textContent ?? undefined
+    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
     workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await flush()
     expect(selected()).toBe('fiber:host-a:hub-mid')
     workspace.openFromDesk(feed[1]); await flush()
@@ -920,8 +920,8 @@ describe('workspace reader integration', () => {
     const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation')
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
-    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector('.fp-name')?.textContent === name)!
-    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.textContent ?? undefined
+    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
+    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
     workspace.open(feed[0], 'Desk'); await flush()
     workspace.follow('hub-mid', 'host-a'); await flush()
     expect(selected()).toBe('family:host-a:hub')
@@ -946,7 +946,7 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation')
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
-    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector('.fp-name')?.textContent === name)!
+    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     workspace.openFromDesk(feed[0]); await flush()
     expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: null, select_only: true }])
     row('hub/mid').click()
@@ -1009,7 +1009,7 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     const dock = new Dock('', changed), sight = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
-    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector('.fp-name')?.textContent === name)!
+    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     const seen = (): string | undefined => (sight.mock.lastCall?.[0] as KanbanCard | undefined)?.id
     workspace.openFromDesk(feed[0]); await flush()
     expect(seen()).toBe('hub')
@@ -1077,8 +1077,8 @@ describe('workspace reader integration', () => {
     bodyCards = [hub, leaf]
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
-    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector('.fp-name')?.textContent === name)!
-    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.textContent ?? undefined
+    const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
+    const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
     workspace.open(hub, 'Desk'); await flush()
     expect(selected()).toBe('family:host-a:hub')
     feed = [hub, leaf]

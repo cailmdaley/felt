@@ -34,9 +34,9 @@ function made(over: { feeds?: FamilyFeeds; place?: MapPlace; known?: KanbanCard[
   family.update(root, new ThreadIndex(over.known ?? cards), now)
   return { family, open, reach, converse, place, sighted }
 }
-const row = (family: FamilyPage, name: string): HTMLElement => [...family.el.querySelectorAll<HTMLElement>('.fp-row')].find(el => el.querySelector('.fp-name')!.textContent === name)!
+const row = (family: FamilyPage, name: string): HTMLElement => [...family.el.querySelectorAll<HTMLElement>('.fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')!.title === name)!
 const said = (family: FamilyPage): string[] => [...family.el.querySelector('.fp-tree')!.children].map(el =>
-  el.classList.contains('fp-section') ? `[${el.textContent}]` : el.classList.contains('fp-aside') ? `(${el.textContent})` : el.querySelector('.fp-name')!.textContent!)
+  el.classList.contains('fp-section') ? `[${el.textContent}]` : el.classList.contains('fp-aside') ? `(${el.textContent})` : el.querySelector<HTMLElement>('.fp-name')!.title)
 const held = (family: FamilyPage, name: string): string[] => [...row(family, name).querySelectorAll('.fp-held button')].map(el => el.querySelector('.fp-file-name')?.textContent ?? el.textContent!)
 const click = (el: Element): void => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })) }
 const press = (el: Element, key: string): KeyboardEvent => { const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); el.dispatchEvent(event); return event }
@@ -158,7 +158,7 @@ describe('a row', () => {
 })
 
 describe('keys', () => {
-  const at = (): string => (document.activeElement as HTMLElement).querySelector('.fp-name')?.textContent ?? document.activeElement!.textContent!
+  const at = (): string => (document.activeElement as HTMLElement).querySelector<HTMLElement>('.fp-name')?.title || document.activeElement!.textContent!
   const keys = (...names: string[]): void => { for (const name of names) press(document.activeElement!, name) }
   it('step through one level with j and k, go down with l and up with h, and leave Rex be', async () => {
     const { family, reach } = made()

@@ -6,6 +6,7 @@ import { bindDrawnPage } from '../FileViewerPanel.js'
 import type { Conversations } from '../conversationOpening.js'
 import { threadKey, type ThreadIndex } from '../threads.js'
 import { fiberKey } from './documents.js'
+import { slug } from '../threadOutline.js'
 import type { WorkerActions } from './workerActions.js'
 import './family-page.css'
 
@@ -236,7 +237,7 @@ export class FamilyPage {
     row.append(title, el('p', 'fp-note'), el('div', 'fp-held'))
     return row
   }
-  /** A thread's row: one mark, the state its section says; its name, and its tapestry or report while folded; its own state and last move; what it came to or asks. */
+  /** A thread's row: one mark, the state its section says; its slug, the name in its tooltip as on the Desk, and its tapestry or report while folded; its own state and last move; what it came to or asks. */
   private fillThread(row: HTMLElement, thread: MapThread, standing: Standing, open: boolean): void {
     const model = this.model!
     row.dataset.thread = thread.key
@@ -246,7 +247,9 @@ export class FamilyPage {
     row.toggleAttribute('data-worker', thread.key === this.place.worker)
     row.toggleAttribute('data-current', thread.key === model.current)
     row.querySelector('.fp-mark path')!.setAttribute('d', markPath(standing, 4.5))
-    row.querySelector('.fp-name')!.textContent = thread.name
+    const name = row.querySelector<HTMLElement>('.fp-name')!
+    name.textContent = thread === model.root ? thread.name : slug(thread.card)
+    name.title = thread.name
     row.querySelector('.fp-meta')!.textContent = standingLine(thread, model.now) || shortAgo(thread.lastMove, model.now)
     const note = row.querySelector<HTMLElement>('.fp-note')!
     note.textContent = thread.note
