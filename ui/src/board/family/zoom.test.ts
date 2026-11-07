@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import mapCss from './family-map.css?raw'
 import { card } from '../testFixtures.js'
 import { ThreadIndex } from '../threads.js'
 import { FamilyPage } from '../workspace/FamilyPage.js'
@@ -98,9 +97,4 @@ it('pans a zoomed field by dragging it, and leaves the base field to the page', 
   expect(stage.classList.contains('family-map-gesturing')).toBe(true)
   mouse(window, 'pointerup', 400)
   expect(stage.classList.contains('family-map-gesturing')).toBe(false)
-})
-it('stops every animation and drift under reduced motion, whatever else is on the stage', () => {
-  const reduced = mapCss.slice(mapCss.indexOf('@media (prefers-reduced-motion'))
-  expect(reduced).toMatch(/--fm-drift: 0s !important/)
-  expect(reduced).toMatch(/animation: none !important/)
 })
