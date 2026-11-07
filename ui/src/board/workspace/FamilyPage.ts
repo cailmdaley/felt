@@ -431,9 +431,10 @@ export class FamilyPage {
   /**
    * One vim grammar, depth along h and l. j and k (or down and up) move the
    * highlight among the rows, never committing; on a row's documents they
-   * step among them. l (or right) goes in: from a row to its documents, entering
-   * the thread, and from a document to its page unfolded under the row (⧉ n
-   * lists the sent files). h (or left) goes out: from a document to its row,
+   * step among them. l (or right) goes in: from a row it unfolds the first
+   * document under the row, entering the thread, and from a document it unfolds
+   * the next in its place (⧉ n lists the sent files and unfolds the newest).
+   * h (or left) goes out: from a document to its row,
    * folding what it had unfolded, and from a row back off the page. Enter does
    * what a click does.
    */
@@ -451,11 +452,11 @@ export class FamilyPage {
       const peers = onRow ? [...this.tree.querySelectorAll<HTMLElement>('[role="treeitem"]')] : docs()
       next = peers[peers.indexOf(item) + step]
     } else if (event.key === 'l' || event.key === 'ArrowRight') {
-      if (onRow && thread) { this.enter(owner); next = docs()[0]; if (!next && !this.place.open.has(owner) && thread !== model.root) this.toggle(owner) }
-      else if (onRow) { this.toggle(owner); return void event.preventDefault() }
-      else if (item.dataset.files && !this.place.open.has(`files:${owner}`)) { this.toggle(`files:${owner}`); next = docs().find(doc => doc.closest('.fp-files')) }
-      else if (item.dataset.held && thread && this.place.docs!.get(owner) !== item.dataset.held) { this.toggleDoc(thread, item.dataset.held); next = this.findDoc(owner, item.dataset.held) }
-      else return void event.preventDefault()
+      if (onRow && !thread) { this.toggle(owner); return void event.preventDefault() }
+      const chip = onRow ? docs()[0] : docs()[docs().indexOf(item) + 1]
+      if (chip) next = this.show(thread!, chip)
+      else if (onRow) { this.enter(owner); if (!this.place.open.has(owner) && thread !== model.root) this.toggle(owner) }
+      if (!next) return void event.preventDefault()
     } else if (event.key === 'h' || event.key === 'ArrowLeft') {
       if (onRow) { event.preventDefault(); this.leave?.(); return }
       const listed = !!item.closest('.fp-files')
@@ -475,6 +476,18 @@ export class FamilyPage {
     this.reveal(next, false)
     const at = next.dataset.row ? model.threads.get(next.dataset.row) : undefined
     this.announcement.textContent = at ? [at.name, at.note].filter(Boolean).join('. ') : next.title || next.textContent || ''
+  }
+  /** Unfolds a chip's document under its row (⧉ n: its list, and the newest file), returning the chip to rest on. */
+  private show(thread: MapThread, chip: HTMLElement): HTMLElement | undefined {
+    if (chip.dataset.files) {
+      if (!this.place.open.has(`files:${thread.key}`)) this.toggle(`files:${thread.key}`)
+      const first = this.row(thread.key)?.querySelector<HTMLElement>('.fp-files [data-held]') ?? undefined
+      return first && this.show(thread, first)
+    }
+    const held = chip.dataset.held!
+    if (this.place.docs!.get(thread.key) !== held) this.toggleDoc(thread, held)
+    else this.enter(thread.key)
+    return this.findDoc(thread.key, held)
   }
   private findDoc(owner: string, held: string): HTMLElement | undefined {
     return [...(this.row(owner)?.querySelectorAll<HTMLElement>('[data-held]') ?? [])].find(doc => doc.dataset.held === held)

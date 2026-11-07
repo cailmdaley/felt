@@ -165,7 +165,7 @@ export const helpSections: readonly HelpSection[] = [
   ] },
   { title: 'A constitution\'s page', note: 'One grammar, depth along h and l. Moving the highlight commits to nothing; entering a thread (l, Enter or a click) is what moves voice and Rex. Escape folds outward, then goes back.', rows: [
     row(['j', 'k', '↓', '↑'], 'Next / previous thread; on a row\'s documents, next / previous document', []),
-    row(['l', '→'], 'In: a row to its documents ⌗ ☰ ⧉, a document to its page unfolded under the row', []),
+    row(['l', '→'], 'In: a row unfolds its first document ⌗ ☰ ⧉ under it; again, the next in its place', on('reader', 'tapestry')),
     row(['h', '←'], 'Out: a document to its row, folding it; a row off the page', []),
     row(['Enter'], 'Unfold or fold a row, entering it', []),
     row(['c'], 'Open the highlighted thread in Rex', []),
