@@ -167,11 +167,11 @@ export class FamilyPage {
   }
 
   /**
-   * Scrolls the page alone to a row, to its top or just into view: a row's own
-   * scrollIntoView would also slide the reader's page track under it.
+   * Scrolls the page alone to a row or document, to its top or just into view:
+   * an element's own scrollIntoView would also slide the reader's page track under it.
    */
-  private reveal(row: HTMLElement, top: boolean): void {
-    const view = this.scroller.getBoundingClientRect(), box = row.getBoundingClientRect(), margin = 8
+  private reveal(row: HTMLElement, top: boolean, margin = 8): void {
+    const view = this.scroller.getBoundingClientRect(), box = row.getBoundingClientRect()
     if (top || box.top < view.top) this.scroller.scrollTop += box.top - view.top - margin
     else if (box.bottom > view.bottom) this.scroller.scrollTop += Math.min(box.bottom - view.bottom + margin, box.top - view.top - margin)
   }
@@ -344,15 +344,22 @@ export class FamilyPage {
     shown.el.remove()
     this.embedded.delete(key)
   }
-  /** A chip's document unfolds under its row, or folds; either enters the thread. */
+  /**
+   * A chip's document unfolds under its row, entering the thread, and the page
+   * scrolls its top to the top of the view; folding it moves nothing else.
+   */
   private toggleDoc(thread: MapThread, doc: DocKey): void {
     const docs = this.place.docs!
-    if (docs.get(thread.key) === doc) docs.delete(thread.key)
-    else docs.set(thread.key, doc)
+    if (docs.get(thread.key) === doc) {
+      docs.delete(thread.key)
+      this.paint()
+      return
+    }
+    docs.set(thread.key, doc)
     this.enter(thread.key)
     this.paint()
-    const row = this.row(thread.key)
-    if (row && docs.has(thread.key)) this.reveal(row, true)
+    const slot = this.row(thread.key)?.querySelector<HTMLElement>(':scope > .fp-doc')
+    if (slot) this.reveal(slot, true, 0)
   }
   private markSelected(): void {
     const selected = this.selectedKey

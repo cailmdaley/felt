@@ -4,6 +4,8 @@
 .ws-family-announce { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .fp-tree { max-width: 1200px; padding-bottom: 32px; outline: none; }
+/* Room below an unfolded document, so even the last row's can scroll to the top of the view. */
+.fp-tree:has(.fp-doc:not([hidden])) { padding-bottom: 85vh; }
 .fp-row { --fp-indent: calc(var(--fp-level, 0) * 16px); position: relative; padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + var(--fp-indent)); cursor: pointer; outline: none; }
 .fp-row[data-selected]:not(.fp-head) { background: var(--ws-hover); }
 .fp-row:focus-visible, .fp-aside:focus-visible { outline: 1px solid var(--ws-hairline); outline-offset: -1px; }
@@ -23,7 +25,8 @@
 .fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; visibility: hidden; }
 .fp-row:not(.fp-head):is(:hover, :focus-within, [data-selected]) .fp-verbs { visibility: visible; }
 .ws-reader .fp-verbs .ws-header-icon { width: 26px; height: 26px; }
-.fp-docs { grid-area: docs; display: grid; grid-template-columns: 2.6ch 2.6ch 5ch; gap: 2px; white-space: nowrap; }
+.ws-reader .fp-verbs .ws-header-icon svg { width: 19px; height: 19px; }
+.fp-docs { grid-area: docs; display: grid; font-size: var(--type-row); line-height: var(--leading-solid); grid-template-columns: 2.6ch 2.6ch 5ch; gap: 2px; white-space: nowrap; }
 .fp-lead { grid-column: 1; } .fp-constitution { grid-column: 2; } .fp-sent { grid-column: 3; justify-self: start; }
 .fp-chip { min-width: 2.2ch; padding: 0 4px; border: 1px solid transparent; border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-soft); font: inherit; cursor: pointer; }
 .fp-chip:hover, .fp-chip:focus-visible { border-color: var(--ws-hairline); color: var(--ws-ink); outline: none; }

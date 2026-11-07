@@ -61,6 +61,7 @@
   border: 0 !important; border-radius: var(--ws-control-radius); background: transparent;
   color: var(--ws-ink-muted); cursor: pointer;
 }
+.ws-reader .ws-header-icon > svg { width: 20px; height: 20px; }
 .ws-reader .ws-header-icon[hidden] { display: none; }
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon:hover:not(:disabled), .kbn-verb-menu .ws-header-icon:focus, .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-header-icon:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }

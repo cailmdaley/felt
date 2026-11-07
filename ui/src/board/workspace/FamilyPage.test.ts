@@ -118,7 +118,10 @@ describe('a row', () => {
     expect(row(family, 'Mid').querySelector('.fp-lead')!.getAttribute('aria-pressed')).toBe('true')
     expect(reach).toHaveBeenCalledExactlyOnceWith(mid)
     expect(sighted).toHaveBeenCalledOnce()
+    place.entered = null
     click(row(family, 'Mid').querySelector('.fp-lead')!)
+    expect(reach, 'folding a document never touches Rex').toHaveBeenCalledOnce()
+    expect(sighted).toHaveBeenCalledOnce()
     expect(dispose).toHaveBeenCalledOnce()
     expect(place.docs!.size).toBe(0)
     expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(true)
