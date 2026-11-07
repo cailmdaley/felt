@@ -1,0 +1,85 @@
+/* Tree: one quiet page of rows. Row marks and tones are the family map's
+   `data-standing` vocabulary; hover and selection change only the row itself,
+   so a key press restyles two elements. */
+.kbn-view-host-held { overflow: hidden; }
+.tree-page {
+  --tree-step: 18px;
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  width: 100%; max-width: 1100px; margin: 0 auto;
+  font-size: var(--type-label); line-height: var(--leading-ui); color: var(--ws-ink);
+}
+.tree-head { display: flex; align-items: center; gap: 12px; padding: 4px 8px 8px; border-bottom: .5px solid var(--kbn-hairline); }
+.tree-counts { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 2px 14px; min-width: 0; }
+.tree-count-button {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 0; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: var(--type-note); color: var(--fm-text);
+}
+.tree-count-button:hover .tree-count-word { text-decoration: underline; text-underline-offset: 2px; }
+.tree-count-n { font-variant-numeric: tabular-nums; font-weight: 600; }
+.tree-filter {
+  flex: 0 1 200px; min-width: 0; padding: 3px 8px; font: inherit; font-size: var(--type-note); color: var(--ws-ink);
+  background: transparent; border: .5px solid var(--kbn-hairline); border-radius: 3px;
+}
+.tree-filter:focus { outline: 1px solid var(--kbn-owed-bright); outline-offset: -1px; }
+
+.tree-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 0 24px; outline: none; -webkit-overflow-scrolling: touch; scroll-padding: 8px 0; }
+.tree-empty { padding: 16px 8px; color: var(--ws-ink-muted); }
+
+.tree-row {
+  display: grid; grid-template-columns: 16px 14px minmax(0, 1fr) auto 32px; column-gap: 6px; align-items: baseline;
+  padding: 3px 8px 3px calc(8px + var(--tree-level) * var(--tree-step));
+  border-radius: 3px; cursor: pointer;
+  /* One hairline per level above the row. */
+  background-image: repeating-linear-gradient(to right, transparent 0 7px, color-mix(in srgb, var(--kbn-ink-muted) 14%, transparent) 7px 8px, transparent 8px var(--tree-step));
+  background-position: 8px 0;
+  background-size: calc(var(--tree-level) * var(--tree-step)) 100%;
+  background-repeat: no-repeat;
+}
+.tree-row:hover { background-color: color-mix(in srgb, var(--kbn-ink) 4%, transparent); }
+.tree-row[aria-selected='true'] { background-color: color-mix(in srgb, var(--kbn-owed-bright) 14%, transparent); }
+.tree-list:focus-visible .tree-row[aria-selected='true'] { box-shadow: inset 2px 0 0 var(--kbn-owed-bright); }
+
+.tree-caret { align-self: stretch; display: grid; place-items: center; margin: -3px 0; }
+.tree-caret-glyph { width: 0; height: 0; border-left: 5px solid var(--ws-ink-muted); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; }
+.tree-row[aria-expanded='true'] .tree-caret-glyph { transform: rotate(90deg); }
+
+.tree-mark { width: 12px; height: 12px; align-self: center; flex: none; }
+svg.tree-mark path { fill: var(--fm-tone); stroke: var(--fm-tone); stroke-width: 1; }
+svg.tree-mark:is([data-standing='quiet'], [data-standing='aside']) path { fill-opacity: .16; stroke-opacity: .7; }
+svg.tree-mark[data-standing='still'] path { fill: none; stroke-dasharray: 2 2; }
+svg.tree-mark[data-standing='review'] path { fill-opacity: .12; stroke-width: 1.5; }
+svg.tree-mark[data-standing='working'] path { fill-opacity: .4; }
+
+.tree-name { overflow-wrap: anywhere; min-width: 0; }
+.tree-row[data-kind='group'] .tree-name { font-family: var(--font-serif); font-size: var(--type-row); font-weight: 500; }
+.tree-row[data-standing]:not([data-kind='file']):not([data-quiet]) .tree-name { color: var(--ws-ink); }
+.tree-row[data-quiet] .tree-name { color: var(--ws-ink-muted); }
+.tree-row[data-kind='fold'] .tree-name { color: var(--ws-ink-muted); font-size: var(--type-note); font-style: italic; }
+.tree-row[data-kind='file'] .tree-name { font-size: var(--type-note); color: var(--ws-ink-soft); }
+.tree-row[data-role='tapestry'] .tree-name { font-weight: 500; color: var(--ws-ink); }
+.tree-row[data-role='constitution'] .tree-name { color: var(--ws-ink-muted); }
+
+.tree-meta { display: inline-flex; align-items: baseline; gap: 10px; font-size: var(--type-meta); color: var(--ws-ink-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tree-rollup { display: inline-flex; align-items: center; gap: 2px; color: var(--fm-text); font-weight: 600; }
+.tree-rollup .tree-mark { width: 10px; height: 10px; }
+.tree-age { min-width: 3ch; text-align: right; }
+.tree-host { color: var(--ws-ink-muted); }
+.tree-map {
+  grid-column: 5; justify-self: end; padding: 0 4px; border: .5px solid var(--kbn-hairline); border-radius: 3px; background: none; cursor: pointer;
+  font: inherit; font-size: var(--type-meta); color: var(--ws-ink-muted); visibility: hidden;
+}
+.tree-row:is(:hover, [aria-selected='true']) .tree-map { visibility: visible; }
+.tree-map:hover { color: var(--ws-ink); border-color: var(--ws-ink-muted); }
+
+.tree-trail { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; padding: 6px 8px; min-height: 30px; border-top: .5px solid var(--kbn-hairline); font-size: var(--type-note); color: var(--ws-ink-muted); }
+.tree-crumb { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.tree-crumb:last-child { color: var(--ws-ink); }
+.tree-crumb:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+@media (max-width: 700px) {
+  .tree-page { --tree-step: 12px; }
+  .tree-row { grid-template-columns: 16px 14px minmax(0, 1fr) auto; }
+  .tree-meta { grid-column: 3 / 4; grid-row: 2; }
+  .tree-host { display: none; }
+  .tree-count-word { display: none; }
+}

@@ -12,9 +12,9 @@ One repo, one checkout, four artifacts:
   It shells out to `felt` for fiber content and writes, and to `shuttle` for
   orchestration. It polls the fiber tree, launches terminal workers,
   exposes a `:4000` snapshot/control API, and watches each worker.
-- **the board UI** (TypeScript, `ui/`) — three full-page views over the fiber
-  tree and the fleet's session/commit ledgers (Desk kanban, Chronicle, and the
-  Board canvas of sent work), plus a settings sheet on `⌘,` over every host's
+- **the board UI** (TypeScript, `ui/`) — four full-page views over the fiber
+  tree and the fleet's session/commit ledgers (Desk kanban, Chronicle, the
+  Board canvas of sent work, and the Tree of the whole hierarchy), plus a settings sheet on `⌘,` over every host's
   operator files. It keeps the map and renders no conversation: that lives in
   Rex. The daemon serves it at `http://127.0.0.1:4000/`.
 

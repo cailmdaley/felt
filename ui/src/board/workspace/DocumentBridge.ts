@@ -306,7 +306,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     if (!routeHash) {
       try { const url = new URL(href); if (url.origin === boardOrigin) routeHash = url.hash } catch { /* Relative files remain files. */ }
     }
-    if (active && href.length <= 4096 && (routeHash === '#/desk' || routeHash === '#/chronicle' || parseBoardRoute(routeHash))) {
+    if (active && href.length <= 4096 && (routeHash === '#/desk' || routeHash === '#/chronicle' || routeHash === '#/tree' || parseBoardRoute(routeHash))) {
       event.preventDefault()
       event.stopImmediatePropagation()
       send('navigate', { href: routeHash })

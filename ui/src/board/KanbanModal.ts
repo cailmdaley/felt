@@ -555,8 +555,9 @@ export class KanbanModal {
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
     else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
     else if (window.location.hash === '#/chronicle') this.setView('chronicle')
+    else if (window.location.hash === '#/tree') this.setView('tree')
     this.keymapHelp = new KeymapHelp(
-      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'overview',
+      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : this.activeViewId === 'tree' ? 'tree' : 'overview',
     )
     this.workspace = new Workspace(this.container!, {
       sends: card => this.fiberSends?.sends(card) ?? [],
@@ -566,7 +567,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'tree' ? 'Tree' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
@@ -581,7 +582,10 @@ export class KanbanModal {
       onRest: card => this.openRestPopover(card),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
-    this.voice.onFollow = target => this.workspace?.follow(target.fiber_id, target.origin)
+    this.voice.onFollow = target => {
+      if (!this.workspace?.isActive && this.activeView?.reveal?.(target.fiber_id, target.origin)) return
+      this.workspace?.follow(target.fiber_id, target.origin)
+    }
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
@@ -1119,7 +1123,7 @@ export class KanbanModal {
   }
 
   /**
-   * `1`–`3` switch views. Deliberately narrow: a bare digit only, so
+   * `1`–`4` switch views. Deliberately narrow: a bare digit only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
    * is not going somewhere it matters — a focused text field, or a Radix
    * dialog layered over the board. Returns true when the
@@ -1128,9 +1132,9 @@ export class KanbanModal {
   private handleViewHotkey(e: KeyboardEvent): boolean {
     const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'shelf' ? 'overview' : 'desk'
     const intent = keyIntent(e, surface)
-    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board') return false
+    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'tree') return false
     if (keystrokeIsSpokenFor()) return false
-    const id: BoardViewId = intent === 'desk' ? 'desk' : intent === 'chronicle' ? 'chronicle' : 'shelf'
+    const id: BoardViewId = intent === 'board' ? 'shelf' : intent
     e.preventDefault()
     e.stopPropagation()
     this.setView(id, true, intent === 'desk')
@@ -2307,6 +2311,8 @@ export class KanbanModal {
       if (this.workspace?.handleOverviewEscapeLayer()) { e.preventDefault(); e.stopPropagation(); return }
       e.preventDefault(); e.stopPropagation(); this.setView('desk'); return
     }
+    if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
+    if (e.key === 'Escape' && this.activeViewId === 'tree' && !keystrokeIsSpokenFor()) { e.preventDefault(); e.stopPropagation(); this.setView('desk'); return }
     // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too.
     if (this.activeViewId === 'chronicle' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()

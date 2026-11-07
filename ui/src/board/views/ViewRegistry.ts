@@ -1,15 +1,17 @@
 /**
  * ViewRegistry — the contract between KanbanModal and the temporal views.
  *
- * The board is three full-page views behind one hotkey row:
+ * The board is four full-page views behind one hotkey row:
  *
  *   1  desk       the kanban page (Now board + Resting). Owned by
  *                 KanbanModal itself, NOT a TemporalView.
- *   2  chronicle  ┐ registered views — each mounts into a full-width host
- *   3  board      ┘ where the Desk surfaces would otherwise be.
+ *   2  chronicle  ┐
+ *   3  board      │ registered views — each mounts into a full-width host
+ *   4  tree       ┘ where the Desk surfaces would otherwise be.
  *
  * Chronicle holds the record in time. Board is the document workspace's
- * contact sheet, grouped by recent work, project or host.
+ * contact sheet, grouped by recent work, project or host. Tree is the whole
+ * hierarchy with its files.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.
@@ -25,16 +27,22 @@
  * (./chronicleFeeds.ts) rather than refetching per poll.
  */
 
+import type { MapFile } from '../family/model.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
+import type { DocKey } from '../workspace/documents.js'
 import type { TemporalFetchers } from './TemporalData.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'shelf'
+  id: 'chronicle' | 'shelf' | 'tree'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void
   refresh(ctx: ViewContext): void
   unmount(): void
+  /** Offers the view a keystroke the chassis left alone; true when it took it. */
+  keydown?(event: KeyboardEvent): boolean
+  /** Rex moved to this fiber: show it here, leaving Rex be; false to leave it to the reader. */
+  reveal?(id: string, origin: string): boolean
 }
 
 /**
@@ -55,7 +63,15 @@ export interface TemporalView {
 export interface ViewContext extends TemporalFetchers {
   response: KanbanResponse
   /** Persistent document sheet, owned by the board's workspace controller. */
-  workspace?: { mountOverview(host: HTMLElement): void; hideOverview(): void }
+  workspace?: {
+    mountOverview(host: HTMLElement): void
+    hideOverview(): void
+    readonly isActive: boolean
+    readonly dock: { openConversation(card: KanbanCard): unknown }
+    openFromDesk(card: KanbanCard): void
+    openPage(card: KanbanCard, doc: DocKey): void
+    readLead(card: KanbanCard): Promise<MapFile | undefined>
+  }
   /**
    * WORK — every card on the eight lifecycle/planning surfaces, deduped. This
    * is the list to walk for due-marks and lane building.
@@ -139,7 +155,7 @@ export function viewFallbackKind(state: {
 
 // ── Hotkey guard ─────────────────────────────────────────────────────────────
 //
-// The chassis runs bare-key hotkeys — the 1-3 view switch and the bare `,` for
+// The chassis runs bare-key hotkeys — the 1-4 view switch and the bare `,` for
 // settings — and each must agree on when a keystroke is NOT theirs. These are
 // the shared predicates, so the next dialog added to the app is covered by
 // every bare key at once.
@@ -180,7 +196,7 @@ export function isBlockingDialog(
  * `[data-state="open"]` is Radix's stamp — Stash, Capture and the settings
  * sheet all render through `AppDialog`. `[aria-modal="true"]` catches every
  * OTHER modal dialog: a hand-rolled one carries `role="dialog"
- * aria-modal="true"` and no data-state, and without this clause `1`-`3` would
+ * aria-modal="true"` and no data-state, and without this clause `1`-`4` would
  * switch views out from under it. Matching on aria rather than on a library's
  * attribute means a dialog built outside AppDialog is covered without a code
  * change here.
@@ -233,7 +249,7 @@ export interface HotkeyLike {
  * Two openings, because the board is two things at once. On a keyboard it is
  * an application, and an application's preferences are `⌘,` — the one chord
  * a Mac user tries without being told. On the board itself every other page is
- * a BARE key (`1`–`3`), and a phone's keyboard has no `⌘` at all, so a bare `,`
+ * a BARE key (`1`–`4`), and a phone's keyboard has no `⌘` at all, so a bare `,`
  * opens it too. `,` is free: the chassis owns only the digits.
  *
  * Pure, and it deliberately does NOT consult the DOM — the two kinds are

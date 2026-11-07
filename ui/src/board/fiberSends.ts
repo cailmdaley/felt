@@ -51,7 +51,9 @@ export class FiberSends {
 
   private readonly base: string
   private readonly onChange: () => void
-  constructor(base: string, onChange: () => void) { this.base = base; this.onChange = onChange }
+  private readonly window: number
+  /** `window` is how far back a read reaches. */
+  constructor(base: string, onChange: () => void, window = SEND_WINDOW_MS) { this.base = base; this.onChange = onChange; this.window = window }
 
   private of(card: KanbanCard): ShelfFile[] {
     return (card.uid ? this.byFiber.get(card.uid) : undefined) ?? this.byFiber.get(card.id) ?? []
@@ -72,7 +74,7 @@ export class FiberSends {
     this.readAt = nowMs
     this.inflight = Promise.resolve().then(async () => {
       try {
-        const since = Math.floor(nowMs - SEND_WINDOW_MS)
+        const since = Math.max(0, Math.floor(nowMs - this.window))
         const res = await fetch(`${this.base}/api/v1/sent-files/all/composite?since_ms=${since}`, { cache: 'no-store' })
         if (!res.ok) throw new Error('Sent-files feed unavailable')
         const raw = await res.json()

@@ -1,12 +1,12 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
-export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'drawing' | 'tapestry'
+export type KeySurface = 'desk' | 'overview' | 'reader' | 'tree'
+export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'tree' | 'map' | 'nextAsk' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'drawing' | 'tapestry'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
-  'back', 'find', 'help', 'desk', 'chronicle', 'board', 'tapestry',
+  'back', 'find', 'help', 'desk', 'chronicle', 'board', 'tree', 'tapestry',
 ]
 export interface KeyBinding {
   keys: readonly string[]
@@ -41,7 +41,7 @@ export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="i
  * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */
 export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   desk: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'tree', 'Switch to Tree'),
     bind(['/'], 'find', 'Find a card or constitution'),
     bind(['h', 'ArrowLeft'], 'left', 'Previous column / region'), bind(['l', 'ArrowRight'], 'right', 'Next column / region'),
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
@@ -50,7 +50,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'tree', 'Switch to Tree'),
     bind(['/'], 'find', 'Find work or files'), bind(['Escape'], 'back', 'Return to Desk when nothing is open'),
     bind(['h', 'ArrowLeft'], 'left', 'Move left'), bind(['l', 'ArrowRight'], 'right', 'Move right'),
     bind(['j', 'ArrowDown'], 'down', 'Move down'), bind(['k', 'ArrowUp'], 'up', 'Move up'),
@@ -58,7 +58,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['c', '.'], 'conversation', 'Open conversation'), bind(['Enter', 'o'], 'open', 'Open file'), bind(['?'], 'help', 'Keyboard help'),
   ],
   reader: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'tree', 'Switch to Tree'),
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
@@ -75,6 +75,17 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['b'], 'orchestrator', 'Back to the thread’s orchestrator'),
     bind(['l'], 'tapestry', 'Between the family map and its tapestry'), bind(['v'], 'drawing', 'Next drawing of the family map'),
     bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape'], 'back', 'Close a layer, then go back'),
+    bind(['?'], 'help', 'Keyboard help'),
+  ],
+  tree: [
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'tree', 'Switch to Tree'),
+    bind(['/'], 'find', 'Filter by name'), bind(['Escape'], 'back', 'Clear the filter, then return to Desk'),
+    bind(['j', 'ArrowDown'], 'down', 'Next row'), bind(['k', 'ArrowUp'], 'up', 'Previous row'),
+    bind(['h', 'ArrowLeft'], 'left', 'Collapse, or to the parent'), bind(['l', 'ArrowRight'], 'right', 'Expand, or to the first child'),
+    bind(['g', 'Home'], 'first', 'First row'), bind(['G', 'End'], 'last', 'Last row'),
+    bind(['PageDown'], 'pageDown', 'A page down'), bind(['PageUp'], 'pageUp', 'A page up'),
+    bind(['Enter', 'o'], 'open', 'Open: a thread\'s chat, a file on the stage'), bind(['c', '.'], 'conversation', 'Open its conversation'),
+    bind(['m'], 'map', 'Open the thread\'s map'), bind(['n'], 'nextAsk', 'Next thing that asks of you'),
     bind(['?'], 'help', 'Keyboard help'),
   ],
 }
@@ -106,13 +117,13 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface,
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
   const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null
-  if (event.repeat && ['open', 'back', 'help', 'find', 'temper', 'discard', 'toReview', 'undoVerdict', 'conversation', 'rest', 'pin', 'orchestrator', 'drawing', 'tapestry'].includes(binding.intent)) return null
+  if (event.repeat && ['open', 'back', 'help', 'find', 'temper', 'discard', 'toReview', 'undoVerdict', 'conversation', 'rest', 'pin', 'orchestrator', 'drawing', 'tapestry', 'map', 'nextAsk'].includes(binding.intent)) return null
   return binding.intent
 }
 
 /** How one physical key of a binding reads in the help guide. */
 export function keyLabels(binding: KeyBinding): string[] {
-  const names: Record<string, string> = { ArrowLeft: '←', ArrowRight: '→', ArrowDown: '↓', ArrowUp: '↑', Escape: 'Esc', ' ': 'Space', 'Shift+ ': '⇧Space', J: '⇧J', K: '⇧K' }
+  const names: Record<string, string> = { PageDown: 'PgDn', PageUp: 'PgUp', ArrowLeft: '←', ArrowRight: '→', ArrowDown: '↓', ArrowUp: '↑', Escape: 'Esc', ' ': 'Space', 'Shift+ ': '⇧Space', J: '⇧J', K: '⇧K' }
   return binding.keys.map(key => `${binding.command ? '⌘' : ''}${binding.alt ? '⌥' : ''}${names[key] ?? key}`)
 }
 
@@ -125,7 +136,7 @@ export interface HelpRow {
 export interface HelpSection { title: string; note?: string; rows: readonly HelpRow[] }
 
 const everywhere = (...intents: KeyIntent[]): Array<readonly [KeySurface, KeyIntent]> =>
-  (['desk', 'overview', 'reader'] as const).flatMap(surface => intents.map(intent => [surface, intent] as const))
+  (['desk', 'overview', 'reader', 'tree'] as const).flatMap(surface => intents.map(intent => [surface, intent] as const))
 const on = (surface: KeySurface, ...intents: KeyIntent[]): Array<readonly [KeySurface, KeyIntent]> => intents.map(intent => [surface, intent] as const)
 const row = (keys: string[], label: string, covers: Array<readonly [KeySurface, KeyIntent]>): HelpRow => ({ keys, label, covers })
 
@@ -134,7 +145,7 @@ const row = (keys: string[], label: string, covers: Array<readonly [KeySurface, 
  * covers its surface and intent and shows each of its keys. */
 export const helpSections: readonly HelpSection[] = [
   { title: 'Everywhere', rows: [
-    row(['1', '2', '3'], 'Desk, Chronicle, Board', everywhere('desk', 'chronicle', 'board')),
+    row(['1', '2', '3', '4'], 'Desk, Chronicle, Board, Tree', everywhere('desk', 'chronicle', 'board', 'tree')),
     row(['/'], 'Find', everywhere('find')),
     row(['Esc'], 'Close a layer, then step back', everywhere('back')),
     row(['?'], 'This guide', everywhere('help')),
@@ -144,6 +155,14 @@ export const helpSections: readonly HelpSection[] = [
     row(['h', 'l', '←', '→'], 'Previous / next column', [...on('desk', 'left', 'right'), ...on('overview', 'left', 'right')]),
     row(['g', 'G'], 'First / last in the column', [...on('desk', 'first', 'last'), ...on('overview', 'first', 'last')]),
     row(['Enter', 'o'], 'Open; on a fiber page, expand it', everywhere('open')),
+  ] },
+  { title: 'Tree', note: 'A letter no key here takes starts the filter too.', rows: [
+    row(['j', 'k', '↓', '↑'], 'Next / previous row', on('tree', 'down', 'up')),
+    row(['l', '→', 'h', '←'], 'Expand / collapse, or step in and out', on('tree', 'right', 'left')),
+    row(['g', 'Home', 'G', 'End'], 'First / last row', on('tree', 'first', 'last')),
+    row(['PgDn', 'PgUp'], 'A page down / up', on('tree', 'pageDown', 'pageUp')),
+    row(['m'], 'Open the thread\'s map', on('tree', 'map')),
+    row(['n'], 'Next thing that asks of you', on('tree', 'nextAsk')),
   ] },
   { title: 'A constitution', note: `The selected card, or the open fiber. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
     row(['c', '.'], 'Open its conversation', everywhere('conversation')),

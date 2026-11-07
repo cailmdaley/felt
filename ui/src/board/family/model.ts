@@ -104,7 +104,7 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     const { card, depth } = node
     const marks = feeds.marks(card), files = feeds.files(card)
     const launches = marks?.launches ?? [], commits = marks?.commits ?? []
-    const born = Date.parse(card.createdAt) || now, ended = Date.parse(card.closedAt ?? '') || null
+    const ended = Date.parse(card.closedAt ?? '') || null, born = Date.parse(card.createdAt) || ended || now
     const ask = turnOf(card, now).turn === 'question' ? card.ask : undefined
     const lastMove = Math.min(now, Math.max(card.lastActivityAt ?? 0, ...launches, ...commits, ...files.map(file => file.at), ended ?? 0, born, Date.parse(ask?.at ?? '') || 0))
     const fresh = files.some(file => file.unread)

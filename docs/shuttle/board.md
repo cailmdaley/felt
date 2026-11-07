@@ -1,7 +1,7 @@
 # The board
 
 The daemon serves the board at `http://127.0.0.1:4000/`. It is one page with
-three full-page views behind a hotkey row, `1`–`3`, and a settings sheet on
+four full-page views behind a hotkey row, `1`–`4`, and a settings sheet on
 `⌘,`. Everything on it is a view over fibers the daemon already polls, plus
 the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
@@ -10,9 +10,10 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 | `1` | **Desk** | What needs doing, and what is running right now |
 | `2` | **Chronicle** | What a stretch of weeks was about |
 | `3` | **Board** | What the work produced |
+| `4` | **Tree** | Where everything is |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
-`#/desk`, `#/chronicle`, and `#/board` deep-link the views.
+`#/desk`, `#/chronicle`, `#/board`, and `#/tree` deep-link the views.
 A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
 ## Desk — the kanban
@@ -262,6 +263,34 @@ With the map focused, the arrow keys walk its threads and Enter comes to one. `l
 
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
 A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).
+
+## Tree — where everything is
+
+Hotkey `4` opens the whole hierarchy on one page: every family on every host, threads at any depth, and each thread's files.
+
+A thread hangs from its orchestrator. A family's root hangs from the nearest card along its fiber path, else from groups named by the path, and a group holding one thing gives way to it, so `life/admin/forms/one-form` alone reads as its own row.
+Each row shows a caret, a state mark in the Desk's colours, its name, a count of the threads and files under it, the host where it differs from the row above and from this daemon, and the age of its newest move. A collapsed row also counts what is under it by kind: asking, new, your turn, to review and working. The head totals the same counts for the fleet, and each one steps to the next row of its kind; `n` steps through everything that asks of you.
+
+Places are stable: groups by name, then threads newest-born first. In-play threads stand in their parent; its drafts, resting and archived threads wait dim in folds of those names, newest move first, and a parent with nothing else to show lists them without a fold.
+A thread's rows run tapestry or report first, sent files newest first, its threads and folds, and its constitution last. A thread with threads of its own keeps its sent files in a **Files** fold. Sent files reach back to the fleet's first record; a tapestry is read when its thread is first open.
+
+By default, whatever holds live work is open far enough to show it. What a hand opens or shuts is remembered in this browser. Rex moving to a worker selects that row, holding the way to it open until the next such move, and leaves anything already filtered alone.
+
+| Key | What it does |
+|---|---|
+| `j` `k` `↓` `↑` | Next or previous row, without touching Rex |
+| `l` `→` | Expand, or step to the first child |
+| `h` `←` | Collapse, or step to the parent |
+| `g` `G` `Home` `End` | First or last row |
+| `PgDn` `PgUp` | A page down or up |
+| `Enter` `o` | Act: a thread opens its Rex chat, a file opens on the stage, a group or fold toggles |
+| `c` `.` | Open the chat of the row's thread |
+| `m` | Open the thread's map |
+| `/` | Filter by name or fiber path; matches keep their ancestors. A letter no key here takes starts the filter too |
+| `Esc` | Clear the filter, then return to the Desk |
+
+A click does the same as `Enter`, and also opens a thread with its row collapsed; the caret only folds, and a row's **map** button opens its map. On a touch screen the first tap comes to a thread and the second opens its chat.
+The bar at the foot names the selected row's path, and each step of it selects that row. Going to a page and coming Back keeps the selection and the scroll position.
 
 ## The board is optional, and the bundle is its own artifact
 

@@ -83,9 +83,9 @@ interface ChannelState {
   error?: string
 }
 export type WorkspaceView = WorkspaceOriginView
-const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board' }
-const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }
-const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : 'board'
+const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/tree': 'tree' }
+const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', tree: 'Tree' }
+const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Tree' ? 'tree' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
@@ -296,6 +296,12 @@ export class Workspace {
   private openFromMap(card: KanbanCard, doc?: DocKey): void {
     this.open(card, this.origin, doc, this.overview.hasMetadata(card))
   }
+  /** One of a fiber's pages, opened from the view on show. */
+  openPage(card: KanbanCard, doc: DocKey): void {
+    this.open(card, this.opts.origin(), doc, this.overview.hasMetadata(card))
+  }
+  /** A thread's tapestry or report, for the Tree. */
+  readLead(card: KanbanCard): Promise<MapFile | undefined> { return this.mapLead(card) }
   /** A Desk or Chronicle click lands on the fiber's map, at its body, and moves Rex there. */
   openFromDesk(card: KanbanCard): void {
     const map = this.landOnMap(card)
@@ -476,7 +482,7 @@ export class Workspace {
   handleOverviewEscapeLayer(): boolean { return this.overview.handleEscapeLayer() }
 
   /** View keys park the reader; Board restores its last unreturned channel. */
-  suspend(view: 'desk' | 'chronicle'): void {
+  suspend(view: 'desk' | 'chronicle' | 'tree'): void {
     this.history.view(`#/${view}`)
   }
   showBoard(): void {
@@ -817,7 +823,7 @@ export class Workspace {
     if (!href) return
     const route = parseRoute(href)
     if (route?.kind === 'channel') { this.history.enter(route.uid, route.owner, route.doc); return }
-    if (route?.kind === 'overview' || href === '#/desk' || href === '#/chronicle') { this.history.view(href); return }
+    if (route?.kind === 'overview' || href === '#/desk' || href === '#/chronicle' || href === '#/tree') { this.history.view(href); return }
     if (href.startsWith('#')) return
     let path: string, hash: string, owner = source.owner
     try {

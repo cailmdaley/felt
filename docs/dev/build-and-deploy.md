@@ -444,7 +444,7 @@ human is only one of them:
   One reset buys one attempt, and it 409s when no recovery action is waiting.
 
 **The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the Desk
-kanban with Stash/Capture, Chronicle, and Board on hotkeys 1–3. Board is a
+kanban with Stash/Capture, Chronicle, Board and Tree on hotkeys 1–4. Board is a
 document overview and reader; fiber controls sit inline on the fiber page and
 the worker pill opens its conversation. The UI is served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).
