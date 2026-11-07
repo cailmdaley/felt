@@ -49,6 +49,14 @@ test('sound arriving here: a loud glyph, the words counted, and a discard', ABOV
   await ui.unmount()
 })
 
+test('room noise below speech level keeps the soft glyph', ABOVE, async ($, on) => {
+  daemon(on, { ...HERE, level: { mic: -40 } })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'mic')).toBe('🔈')
+  await ui.unmount()
+})
+
 test('a quiet open mic is the soft glyph alone', ABOVE, async ($, on) => {
   daemon(on, { ...HERE, level: { mic: -60 } })
   await start($)

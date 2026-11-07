@@ -26,7 +26,11 @@ type Page = 'constitution' | 'tapestry' | 'files'
 const LIVE = 150 // words come here: the glyph and count move with speech
 const FAST = 500
 const SLOW = 5000
-const GATE = -50 // dBFS: above it, sound is arriving
+// dBFS, with hysteresis: speech lights 🔊 above ON, and it holds until the
+// level falls below OFF, so room noise stays 🔈 and a phrase doesn't flicker.
+const ON = -36
+const OFF = -44
+let sounding = false
 const SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹'
 
 // Module state: a reload starts it over and session.start fills it again.
@@ -108,7 +112,9 @@ function line($: EngineInterface, ui: { Box: any; Button: any; Text: any }) {
   let audio = null
   if (listening(voice)) {
     const v = voice
-    const glyph = v.paused ? '🔇' : (v.level?.mic ?? -Infinity) > GATE ? '🔊' : '🔈'
+    const db = v.level?.mic ?? -Infinity
+    sounding = db > (sounding ? OFF : ON)
+    const glyph = v.paused ? '🔇' : sounding ? '🔊' : '🔈'
     const n = v.paused ? 0 : v.pending_words ?? 0
     const where = v.paused || mine(v.destination?.fiber_id) ? '' : ` → ${slug(v.destination)}`
     const words = where + (n ? `${where ? ' ·' : ''} ${n} words…` : '')
