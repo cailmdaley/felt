@@ -2012,13 +2012,6 @@
   display: none;
 }
 
-/* Same story as the folio strip: `installBandCollapse` appends the fold mark
-   to every band head so one DOM serves both shapes, and the wide board — where
-   Resting never folds — simply gives it no box. */
-.kbn-bandhead-fold {
-  display: none;
-}
-
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The notch, the home indicator, and the rounded corners. The board is
      `inset: 0` on a `border-box`, so this is padding, not margin. */
@@ -2280,11 +2273,7 @@
   }
   .kbn-card-meta-spacer { flex: 0 1 auto; }
 
-  /* ── The bands, folded ─────────────────────────────────────────────────
-     Roles and Resting stop being furniture beside the board and become
-     gatherings under it: a full-width head you tap, and everything else
-     shown or shut. `installBandCollapse` only wires the head on a mobile
-     viewport, which is why nothing below has a desktop twin. */
+  /* Roles and Resting take the full width under the pager. */
   .kbn-section-roles,
   .kbn-section-stash {
     flex-direction: column;
@@ -2311,9 +2300,7 @@
     outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
     outline-offset: -3px;
   }
-  /* The fold mark sits at the far right of the head — a plain ochre wedge,
-     pointing down at what it opens and lying flat when the band is shut.
-     Kept off the wide board entirely, where the bands never fold. */
+  /* The fold mark sits at the far right of the head. */
   .kbn-bandhead-fold {
     display: block;
     margin-left: auto;
@@ -2325,7 +2312,6 @@
   }
   .kbn-bandhead-fold::before { content: '▾'; }
   .kbn-band-folded .kbn-bandhead-fold { transform: rotate(-90deg); }
-  .kbn-band-folded > *:not(.kbn-bandhead) { display: none; }
   .kbn-cluster-grid {
     padding: 0 8px 8px;
   }
@@ -2457,21 +2443,21 @@
   }
 }
 
-/* Half a screen, beside Rex: the Desk is a scroll. In flight runs the full
-   width, and what waits on it follows beneath, each column only as tall as its
-   entries, so no column cuts a card off at its foot. */
+/* Half a screen, beside Rex: the Desk scrolls in section order. */
 @media (min-width: 701px) and (max-width: 1180px) {
   .kbn-section-now { flex: none; min-height: 0; }
-  .kbn-now-board { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto auto; align-items: start; }
+  .kbn-now-board { grid-template-columns: minmax(0, 1fr); align-items: start; }
   .kbn-now-board .kbn-col { max-height: none; }
   .kbn-now-board .kbn-col-list { overflow: visible; }
-  .kbn-col-inFlight { grid-column: 1 / -1; grid-row: 1; }
-  .kbn-col-awaitingReview { grid-column: 1; grid-row: 2; }
-  .kbn-col-drafts { grid-column: 2; grid-row: 2; }
   .kbn-now-board .kbn-col-title { font-size: var(--type-title); white-space: nowrap; }
 }
-/* Narrower still, one column. */
-@media (min-width: 701px) and (max-width: 860px) {
-  .kbn-now-board { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
-  .kbn-col-awaitingReview, .kbn-col-drafts { grid-column: 1; grid-row: auto; }
+/* Each heading folds its own contents on every screen. */
+.kbn-col > [hidden], .kbn-section-roles > [hidden], .kbn-section-stash > [hidden] { display: none !important; }
+.kbn-col-head, .kbn-bandhead { cursor: pointer; }
+.kbn-bandhead-fold { display: inline-block; margin-left: auto; color: var(--kbn-ink-muted); transition: transform 160ms ease; }
+.kbn-bandhead-fold::before { content: '▾'; }
+.kbn-band-folded .kbn-bandhead-fold { transform: rotate(-90deg); }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .kbn-col-head, .kbn-col-inFlight .kbn-col-head { display: flex; position: static; width: auto; }
+  .kbn-col-inFlight .kbn-col-head :is(.kbn-col-title, .kbn-col-count) { display: initial; }
 }

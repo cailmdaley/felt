@@ -5,6 +5,7 @@ import { type KanbanResponse } from './KanbanTypes.js'
 import { card, response } from './testFixtures.js'
 import type { Workspace } from './workspace/Workspace.js'
 import { MOBILE_MEDIA } from './mobile.js'
+import type { VoiceStatus } from './voice.js'
 
 interface BoardInternals {
   render(data: KanbanResponse): void
@@ -15,6 +16,7 @@ interface BoardInternals {
   deskEl: HTMLElement
   lensCycleId: string | null
   activeViewId: 'desk' | 'chronicle' | 'shelf'
+  voice: { status: VoiceStatus | null; notify(): void }
   deskKeyboard: { selection: { uid: string; origin: string } | null }
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
   setView(view: 'desk' | 'chronicle' | 'shelf'): void
@@ -62,7 +64,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: scroll })
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: intoView })
   window.history.replaceState(null, '', '/')
-  localStorage.clear(); sessionStorage.clear(); settings.mockClear(); intoView.mockClear(); scroll.mockClear()
+  localStorage.clear(); localStorage.setItem('shuttle.desk.sections', JSON.stringify({ drafts: true })); sessionStorage.clear(); settings.mockClear(); intoView.mockClear(); scroll.mockClear()
   board = new KanbanModal({ shuttleBase: '', onSettingsClick: settings })
   inside = board as unknown as BoardInternals
   vi.spyOn(inside, 'startPolling').mockImplementation(() => {})
@@ -82,6 +84,18 @@ function activate(button: HTMLButtonElement, key: 'Enter' | ' '): void {
   expect(up.defaultPrevented).toBe(false)
   if (!down.defaultPrevented && !up.defaultPrevented) button.click()
 }
+
+it('repaints the Desk as the voice target changes', () => {
+  const band = () => document.querySelector<HTMLElement>('[data-card-uid="head-uid"]')!.closest<HTMLElement>('[data-flight-band]')!.dataset.flightBand
+  expect(band()).toBe('yourTurn')
+  inside.voice.status = { available: true, enabled: false, muted: false, state: 'off', target: { fiber_id: 'head-uid', origin: head.originId, name: head.name }, last: null, error: null }
+  inside.voice.notify()
+  expect(band()).toBe('working')
+  expect(document.querySelector('[data-card-uid="head-uid"] .constitution-state-dot')?.getAttribute('data-turn')).toBe('working')
+  inside.voice.status = { ...inside.voice.status, target: null }
+  inside.voice.notify()
+  expect(band()).toBe('yourTurn')
+})
 
 describe('Desk row menu', () => {
   const row = () => document.querySelector<HTMLElement>('[data-card-uid="review"]')!

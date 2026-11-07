@@ -1270,7 +1270,7 @@ describe('workspace reader integration', () => {
     expect(walked()).toEqual(rows.map(row => row.uid ?? row.id))
     const columns: string[] = []
     for (let n = 0; n < 4; n++) { await step('J'); columns.push(landed()!.split(' · ')[0]) }
-    expect(columns).toEqual(['In flight', 'Awaiting review', 'Roles', 'Resting'])
+    expect(columns).toEqual(['In flight', 'Awaiting review', 'Resting', 'Roles'])
   })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()

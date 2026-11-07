@@ -257,24 +257,13 @@ export class KanbanSurfaceRenderer {
     return section
   }
 
-  /**
-   * Make a band head fold its band away — mobile only.
-   *
-   * On a phone the pager already fills the screen, so Resting stacks below it
-   * and becomes a leaf you open. On the desktop board they are
-   * standing furniture that is always shown, so nothing here applies: the head
-   * gets no interactive role, no listener and no fold mark, and the CSS that
-   * acts on `kbn-band-folded` lives entirely inside the mobile query.
-   *
-   * The class is stamped regardless of viewport so a window resized past 700px
-   * finds the band in the state its owner last left it; only the affordance is
-   * conditional.
-   */
+  /** Fold a Desk section from its heading and remember it in this browser. */
   private installBandCollapse(section: HTMLElement, head: HTMLElement, band: BandId): void {
     const state = readBandState()
     let open = state[band]
     const paint = (): void => {
       section.classList.toggle('kbn-band-folded', !open)
+      for (const child of section.children) if (child !== head) (child as HTMLElement).hidden = !open
       head.setAttribute('aria-expanded', open ? 'true' : 'false')
     }
     const mark = document.createElement('span')
@@ -282,7 +271,6 @@ export class KanbanSurfaceRenderer {
     mark.setAttribute('aria-hidden', 'true')
     head.append(mark)
     paint()
-    if (!isMobileViewport()) return
     head.setAttribute('role', 'button')
     head.tabIndex = 0
     const toggle = (): void => {
@@ -292,7 +280,7 @@ export class KanbanSurfaceRenderer {
     }
     head.addEventListener('click', toggle)
     head.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return
+      if (e.target !== head || (e.key !== 'Enter' && e.key !== ' ')) return
       e.preventDefault()
       toggle()
     })
@@ -615,7 +603,6 @@ export class KanbanSurfaceRenderer {
 
     const restingHead = renderBandHead('Resting', stash.length)
     section.append(restingHead)
-    this.installBandCollapse(section, restingHead, 'resting')
 
     const grid = document.createElement('div')
     grid.className = 'kbn-cluster-grid'
@@ -636,6 +623,7 @@ export class KanbanSurfaceRenderer {
     }
 
     section.append(grid)
+    this.installBandCollapse(section, restingHead, 'resting')
     this.installSectionDragHandlers(section, {
       skipColHead: true,
       commit: (card) => void this.o.setSurface(card, 'stashed'),
@@ -666,7 +654,6 @@ export class KanbanSurfaceRenderer {
 
     const head = renderBandHead('Roles', roles.length)
     section.append(head)
-    this.installBandCollapse(section, head, 'roles')
 
     const row = document.createElement('div')
     row.className = 'kbn-roles-row'
@@ -679,6 +666,7 @@ export class KanbanSurfaceRenderer {
       row.append(empty)
     }
     section.append(row)
+    this.installBandCollapse(section, head, 'roles')
     this.installSectionDragHandlers(section, {
       skipColHead: false,
       skipTarget: '.kbn-role-chip, .kbn-role-threads',
@@ -1134,7 +1122,7 @@ export class KanbanSurfaceRenderer {
     head.className = 'kbn-col-head'
     head.tabIndex = 0
     head.setAttribute('role', 'button')
-    head.setAttribute('aria-label', `Drop here to move to ${title}`)
+    head.setAttribute('aria-label', `${title} (${cards.length + ghosts.length})`)
     const headTitle = document.createElement('h2')
     headTitle.className = 'kbn-col-title'
     appendCappedText(headTitle, title)
@@ -1246,6 +1234,7 @@ export class KanbanSurfaceRenderer {
     }
 
     col.append(head, list)
+    this.installBandCollapse(col, head, kind)
     return col
   }
 

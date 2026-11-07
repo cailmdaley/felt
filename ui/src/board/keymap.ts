@@ -32,10 +32,10 @@ const constitutionBindings = (subject: string): KeyBinding[] => [
 ]
 
 /** Desk regions follow reading order: the three Now columns left-to-right,
- * then Roles, then Resting. In flight's Your turn and Working bands form one
+ * then Resting, then Roles. In flight's Your turn and Working bands form one
  * column. Roles and Resting each form one list in their drawn reading order.
  * Empty regions are skipped; movement stops at the ends, never wraps. */
-export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-roles', '.kbn-section-stash'] as const
+export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-stash', '.kbn-section-roles'] as const
 
 /** The binding table is also the help overlay's source; surfaces consume intents,
  * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */

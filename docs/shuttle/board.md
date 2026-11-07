@@ -18,11 +18,10 @@ A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to 
 
 ## Desk — the kanban
 
-Three surfaces: the **Now** board of cards that need something; **Roles**, a
-band of launcher chips for every seat at rest (a constitution with
-`shuttle.seat: true` and a role), in name order and never paged; and **Resting**, where
-everything else put down waits — paused and snoozed work, the hubs you start by
-hand, and standing constitutions between runs.
+The Desk shows **Drafts**, **In flight**, **Awaiting review**, **Resting** and **Roles**, in that order.
+Resting holds paused and snoozed work, hubs you start by hand, and standing constitutions between runs.
+Roles holds a launcher chip for every seat at rest (a constitution with `shuttle.seat: true` and a role), in name order and never paged.
+Click a section heading to fold or unfold it; Drafts starts folded and the others open, and each fold is remembered in this browser.
 
 ![The Desk with fictional workshop tasks: lunch options and speaker bios in Drafts, the participant guide and venue access In flight, and the programme and venue decision Awaiting review.](../assets/board-desk.jpg)
 
@@ -55,7 +54,10 @@ live workers whose move is yours: questions first and drawn heavier (an
 outstanding `shuttle ask`, a harness prompt, or a blocked launch), then workers
 idle at their prompt with nothing they started still running. **Working** holds
 the rest, including a worker idle over its own background shells or
-subagents. The daemon reads those live children from each harness: Claude
+subagents.
+The worker whose conversation you are following also stays in Working, even when it finishes a reply or has a question, and does not count as needing you.
+The board uses the voice target, which also follows Rex, for this distinction.
+The daemon reads those live children from each harness: Claude
 Code's `background_tasks` on `stop`, Codex's `spawn_agent` calls and
 `subagent_stop` events, and Codex terminal sessions that name
 the worker as `parentThreadId`. A harness that reports none reads as your
@@ -89,10 +91,15 @@ anything else.
 
 ### A family's threads
 
-A family's root heads its threads in each section of work they stand in (Your turn, Working, Awaiting review), whatever its own state, its own mark drawn faintly where that state is another; beneath it each thread hangs under its nearest shown ancestor, the threads between left out and named in its slug path from there (`a1/b1` under `a` in Your turn, `a1` under `a`'s header in Working).
+A family's root heads its threads in each section of work they stand in (Your turn, Working, Awaiting review), its own mark drawn faintly where its state is another.
+If the root is not in the section and only one thread is, that thread stands alone as its slug path from the root, with its own dot and age.
+Otherwise each thread hangs under its nearest shown ancestor, the threads between left out and named in its slug path from there.
 Drafts, Resting and the Roles list only a family's root, whose own threads in that state fold beneath it; a thread's draft is reached from its family. Every Desk row and thread is named by its fiber slug, as Rex's sidebar shows them, cut short by an ellipsis; the full name is the tooltip and the title of the page it opens. Archived threads are not on the Desk.
 
-The work sections are set as dense mono lines, a family's root and its threads at the same size, the root in bold, grouped by indentation alone. Every level folds. The count at a row's end says how many threads it holds in its section (in red when one of them is a question) and carries the caret that folds them; every thread holding threads of its own carries a caret of its own. Your turn and Awaiting review stand open by default and the other sections stay folded, and each fold is remembered in this browser, so the whole Desk can be folded down to its rows.
+The work sections are dense mono lines, a family's root and its threads at the same size, the root in bold, grouped by indentation alone.
+The dot is the row's own state; the count includes the root when it is in the section and all its threads in that state, red when one has a question.
+The count's caret folds the threads; every thread holding threads of its own carries a caret too.
+Family folds in Your turn and Awaiting review start open, and the others start folded; each is remembered in this browser.
 
 A click on a thread opens its page, as a click on a row does, and `j` / `k`
 walk the threads that are showing as well as the rows.
@@ -218,7 +225,7 @@ Reselecting the same page leaves history untouched.
 Stepping between constitutions with j/k or J/K replaces the current visit.
 One Back or root Escape returns from a step to its predecessor; returning to Desk selects the last card viewed.
 
-Bare reader keys work outside editable fields: h/l or left/right step pages, and on a constitution's page, away from the rows, `l` unfolds the selected thread's tapestry or report, else its newest file, under its row, and folds it again; j/k step constitutions in the Desk's order as one flow, across its columns (Drafts, In flight, Awaiting review, Roles and Resting), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands beside its family's row; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+Bare reader keys work outside editable fields: h/l or left/right step pages, and on a constitution's page, away from the rows, `l` unfolds the selected thread's tapestry or report, else its newest file, under its row, and folds it again; j/k step constitutions in the Desk's order as one flow, across its columns (Drafts, In flight, Awaiting review, Resting and Roles), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands beside its family's row; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
 The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the band); t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back).
 s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.

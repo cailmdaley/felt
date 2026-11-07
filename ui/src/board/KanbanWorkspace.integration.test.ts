@@ -81,8 +81,8 @@ describe('Desk rows in the document workspace', () => {
       })
       const root = document.createElement('div')
       root.append(renderer.renderNowSection(order.now, data.staleness))
-      root.append(renderer.renderRolesSection(order.roles, data.staleness))
       root.append(renderer.renderStashSection(order.resting, data.staleness))
+      root.append(renderer.renderRolesSection(order.roles, data.staleness))
       return [...root.querySelectorAll<HTMLElement>('[data-fiber-id]')].map(el => el.dataset.fiberId!)
     }
     const first = make('2026-11-02')
@@ -208,7 +208,7 @@ describe('Desk rows in the document workspace', () => {
         board.workspace.open(page, 'Desk')
         await flushTasks()
         const stops = board.workspace as unknown as { deskStop(card: KanbanCard): string }
-        expect(readerRows(board)).toEqual(['draft', 'working', 'review', 'roles/seat', 'resting/item', page.id])
+        expect(readerRows(board)).toEqual(['draft', 'working', 'review', 'resting/item', 'roles/seat', page.id])
         expect(stops.deskStop(page)).toBe('Open')
       }
     } finally {

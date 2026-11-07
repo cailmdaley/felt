@@ -54,13 +54,13 @@ export function deskOrder(
     place(now.inFlight.filter(card => inFlightBand(card) === band), 'inFlight', label)
   }
   place(now.awaitingReview, 'awaitingReview', 'Awaiting review')
-  place(roles, 'roles', 'Roles')
   place(resting.flat, 'resting', 'Resting')
+  place(roles, 'roles', 'Roles')
   return {
     now,
     roles,
     resting,
-    rows: [...now.drafts, ...now.inFlight, ...now.awaitingReview, ...roles, ...resting.flat].filter(card => !card.deskSection),
+    rows: [...now.drafts, ...now.inFlight, ...now.awaitingReview, ...resting.flat, ...roles].filter(card => !card.deskSection),
     placements,
   }
 }

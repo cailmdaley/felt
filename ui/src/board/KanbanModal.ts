@@ -2005,12 +2005,10 @@ export class KanbanModal {
     }
 
     this.deskEl.append(this.surfaces.renderNowSection(order.now, staleness, lens))
-    // Seats at rest sit in their own band between Now and Resting.
+    // Resting draws snoozed work and standing constitutions asleep between runs.
+    this.deskEl.append(this.surfaces.renderStashSection(order.resting, staleness))
     const rolesBand = this.surfaces.renderRolesSection(order.roles, staleness)
     if (rolesBand) this.deskEl.append(rolesBand)
-    // Resting draws everything at rest — snoozed work AND standing constitutions asleep
-    // between runs, which classify as `scheduled`; see `restingCards`.
-    this.deskEl.append(this.surfaces.renderStashSection(order.resting, staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
     // A redraw repaints the selection in place: the Desk scrolls only when the
