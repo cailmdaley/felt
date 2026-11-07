@@ -602,7 +602,7 @@ defmodule Shuttle.Voice do
           | snapshot: snapshot,
             retry: retry,
             preview_pin: preview_pin,
-            source: snapshot.source,
+            source: if(row && row.state != "starting", do: snapshot.source, else: state.source),
             launch: if(row && not match?({:error, _}, relay_result), do: row.launch),
             observed_at: now,
             idle: is_nil(row) or not enabled,

@@ -128,7 +128,8 @@ defmodule Shuttle.Recorder do
                  do: {:ok, %{snapshot | capture: nil}}
 
           snapshot.capture &&
-              (Keyword.get(opts, :source, source(snapshot.capture)) != source(snapshot.capture) or
+              ((snapshot.capture.state != "starting" and
+                  Keyword.get(opts, :source, source(snapshot.capture)) != source(snapshot.capture)) or
                  (snapshot.capture.state == "failed" and opts[:restart_voice])) ->
             with :ok <- end_voice(snapshot, context, opts), do: start_voice(opts)
 

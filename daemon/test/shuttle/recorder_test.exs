@@ -294,6 +294,28 @@ defmodule Shuttle.RecorderTest do
     assert {:ok, %{capture: nil}} = Recorder.reconcile_voice(false)
   end
 
+  test "a phone launch warming up without a lifecycle file is not mistaken for desktop", %{
+    hark_dir: dir
+  } do
+    set_voice_handler(dir)
+    assert {:ok, %{capture: %{launch: launch}}} = Recorder.reconcile_voice(true, source: "phone")
+    File.rm!(Path.join(dir, "meeting.json"))
+
+    for _ <- 1..3 do
+      assert {:ok, %{capture: %{launch: ^launch, state: "starting"}}} =
+               Recorder.reconcile_voice(true, source: "phone")
+    end
+
+    refute Enum.any?(Shuttle.Test.RecorderRunner.calls(), fn {command, _, _} ->
+             command == "kill"
+           end)
+
+    assert Enum.count(Shuttle.Test.RecorderRunner.calls(), fn
+             {"tmux", ["new-session" | _], _} -> true
+             _ -> false
+           end) == 1
+  end
+
   test "source switches stop the old recorder before starting its replacement", %{hark_dir: dir} do
     for behavior <- [:graceful, :ignore_interrupt, :unkillable] do
       File.rm(Path.join(dir, "meeting.json"))

@@ -1,10 +1,6 @@
 defmodule Shuttle.HostCapabilities do
   @moduledoc """
-  Host-local capabilities for Capture, published by the owning daemon.
-
-  Hark has no capability-reporting CLI protocol. Its device capture is supported
-  on macOS; other hosts use phone audio rather than promising microphone or
-  system-audio support from the presence of CLI flags.
+  Host-local browser capability for Capture, published by the owning daemon.
 
   Browser access requires this daemon's user to own the macOS console and have
   a GUI login domain. The probes never open an application or a permission
