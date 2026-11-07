@@ -164,6 +164,8 @@ interface KanbanSurfaceRendererOptions {
   /** Open the chat-first capture — the In flight head's `✶` action. Omit to
    *  render the In flight head title + count alone. */
   onNewIdeaClick?: () => void
+  /** Show the Desk as its map — the In flight head's Map control. */
+  onMapClick?: () => void
   getMeeting?: () => MeetingRecord | null
   getPhoneMeeting?: () => PhoneMeeting
   isMeetingStopRequested?: (meeting: MeetingRecord) => boolean
@@ -1148,6 +1150,8 @@ export class KanbanSurfaceRenderer {
     headLabel.className = 'kbn-col-head-label'
     headLabel.append(headTitle, headCount)
     head.append(headLabel)
+    const map = kind === 'inFlight' ? this.makeMapAction() : null
+    if (map) headLabel.append(map)
     const action = this.makeColumnAction(kind)
     if (action) head.append(action)
 
@@ -1291,6 +1295,22 @@ export class KanbanSurfaceRenderer {
       // bubble up to it (or to the column's open-detail / drag wiring).
       e.stopPropagation()
       spec.onClick()
+    })
+    return btn
+  }
+
+  /** The In flight head's way to the map, a word beside its count. */
+  private makeMapAction(): HTMLButtonElement | null {
+    const onClick = this.o.onMapClick
+    if (!onClick) return null
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'kbn-col-map'
+    btn.textContent = 'Map'
+    btn.title = 'Show everything in flight as a map (m)'
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      onClick()
     })
     return btn
   }
@@ -1704,9 +1724,8 @@ function adoptColumnActions(board: HTMLElement, strip: HTMLElement): void {
   const segs = strip.querySelectorAll<HTMLElement>('.kbn-folio-seg')
   const cols = board.querySelectorAll<HTMLElement>('.kbn-col')
   cols.forEach((col, i) => {
-    const action = col.querySelector<HTMLElement>('.kbn-col-action')
     const seg = segs[i]
-    if (action && seg) seg.append(action)
+    if (seg) seg.append(...col.querySelectorAll<HTMLElement>('.kbn-col-map, .kbn-col-action'))
   })
 }
 

@@ -7,7 +7,7 @@ export type WorkspaceRoute =
 
 const OVERVIEW_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
-export type WorkspaceOriginView = 'desk' | 'chronicle' | 'board' | 'tree' | 'globe'
+export type WorkspaceOriginView = 'desk' | 'chronicle' | 'board' | 'tree' | 'globe' | 'map'
 interface HistoryPage { hash: string; label?: string; pageLabel?: string }
 interface RouteState {
   depth: number
@@ -25,13 +25,14 @@ function encode(value: string): string {
 }
 
 function isOriginView(value: unknown): value is WorkspaceOriginView {
-  return value === 'desk' || value === 'chronicle' || value === 'board' || value === 'tree' || value === 'globe'
+  return value === 'desk' || value === 'chronicle' || value === 'board' || value === 'tree' || value === 'globe' || value === 'map'
 }
 function originFromHash(hash: string): WorkspaceOriginView | null {
   if (hash === '#/desk') return 'desk'
   if (hash === '#/chronicle') return 'chronicle'
   if (hash === '#/tree') return 'tree'
   if (hash === '#/globe') return 'globe'
+  if (hash === '#/map') return 'map'
   if (hash === OVERVIEW_HASH || hash.startsWith(`${OVERVIEW_HASH}/`)) return 'board'
   return null
 }
@@ -117,7 +118,7 @@ export class WorkspaceHistory {
     const sameChannel = this.current?.kind === 'channel' && route.uid === this.current.uid && route.owner === this.current.owner
     return (sameChannel ? back?.pageLabel : back?.label) ?? route.uid
   }
-  private get originLabel(): string { return { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', tree: 'Tree', globe: 'Globe' }[this.routeOrigin] }
+  private get originLabel(): string { return { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', tree: 'Tree', globe: 'Globe', map: 'Map' }[this.routeOrigin] }
 
   /** Resolve this entry's page address and names without adding a visit. */
   name(label: string, pageLabel = label, doc = this.current?.kind === 'channel' ? this.current.doc : undefined): void {

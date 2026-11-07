@@ -110,7 +110,7 @@ export interface Sky {
   focus: { thread: MapThread; at: Point; held: Satellite[]; title: Point & { width: number } } | null
   minis: Mini[]
   /** On a phone, what stands under the disc: the thread in sight, and its own threads. */
-  ledger: { thread: MapThread; held: Satellite[]; threads: MapThread[] }
+  ledger: { thread: MapThread; held: Satellite[]; threads: Star[] }
 }
 
 /** A body's radius from its work: a thread or, one scale up, a whole family. */
@@ -163,6 +163,8 @@ const labelBox = (label: Pick<SkyLabel, 'x' | 'y' | 'width' | 'side'>): Box => (
   left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - LABEL_HEIGHT / 2 + .5, bottom: label.y + LABEL_HEIGHT / 2 - .5,
 })
 
+const armNameBox = (name: ArmName): Box => ({ left: name.side === 'left' ? name.x - ARM_NAME_WIDTH : name.x, right: name.side === 'left' ? name.x : name.x + ARM_NAME_WIDTH, top: name.y - ARM_NAME_RISE, bottom: name.y + ARM_NAME_RISE })
+
 /** Each name on the side of its body its arm runs out to, else the other, clear of every other name, body and line, or not at all. */
 export function nearLabels(stars: readonly Seen[], named: readonly Seen[], frame: Frame, reserved: readonly Box[], lines: readonly Point[]): SkyLabel[] {
   const placed: Box[] = [...reserved], labels: SkyLabel[] = []
@@ -214,7 +216,8 @@ export function arrival(plate: Plate, view: View, kept: string | null): string |
  * and what shows growing with the room each body has. A scene's threads are
  * dots until the room around them can hold them, then bodies on their arms; the
  * thread in sight takes its title and the names of what it holds as its scene
- * reaches the plate; every body in view takes a name where it has room.
+ * reaches the plate; every body in view takes a name where it has room, and
+ * dots and sheets give way to the names.
  */
 export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: Sight | null): Sky {
   const { k } = view, { width, height, reach, narrow } = plate, dx = view.x * width, dy = view.y * height
@@ -245,8 +248,7 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
     return { key: star.thread.key, at: star, scale: Math.min(small, k * star.scale), segments: star.segments, opacity: Math.min(1, (ARMS_GONE * reach - star.room) / ((ARMS_GONE - ARMS_FADE) * reach)) }
   })
   const nameable = stars.filter(star => star.owner && !star.inert && !star.hidden && !star.focus && inView(star)).sort((a, b) => b.owner!.room - a.owner!.room || (a.thread.rank < 0 ? Infinity : a.thread.rank) - (b.thread.rank < 0 ? Infinity : b.thread.rank))
-  const asking = nameable.filter(star => needsHuman(star.thread))
-  const minis = narrow ? [] : nameable.filter(star => star.room >= MINIS_FROM).slice(0, MINIS).map(star => miniature(star.thread, sight?.holds(star.thread) ?? {}, star, star.room))
+  const sheets = narrow ? [] : nameable.filter(star => star.room >= MINIS_FROM).slice(0, MINIS).map(star => miniature(star.thread, sight?.holds(star.thread) ?? {}, star, star.room))
   const lines = arms.flatMap(arm => arm.segments.flatMap(segment => segment.way.map(point => ({ x: arm.at.x + point.x * arm.scale, y: arm.at.y + point.y * arm.scale }))))
   const labels = narrow ? [] : nearLabels(stars, nameable, plate, taken, lines)
   const names: ArmName[] = []
@@ -257,18 +259,22 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
       if (!last) continue
       const label = labels.find(item => item.thread === last.thread), edge = label ? labelBox(label) : { top: last.y - last.r, bottom: last.y + last.r }
       const name = { label: `${plate.armNames[arm]} · ${on.length}`, side: last.side, x: last.x + (last.side === 'left' ? -last.r - LABEL_GAP : last.r + LABEL_GAP), y: arm === 'todo' ? edge.top - ARM_NAME_RISE : edge.bottom + ARM_NAME_RISE }
-      const box = { left: name.side === 'left' ? name.x - ARM_NAME_WIDTH : name.x, right: name.side === 'left' ? name.x : name.x + ARM_NAME_WIDTH, top: name.y - ARM_NAME_RISE, bottom: name.y + ARM_NAME_RISE }
+      const box = armNameBox(name)
       if (box.top >= 0 && box.bottom <= height && ![...taken, ...labels.map(labelBox)].some(other => touches(box, other)) && !lines.some(({ x, y }) => x > box.left && x < box.right && y > box.top && y < box.bottom)) names.push(name)
     }
   }
+  const said = [...taken, ...labels.map(labelBox), ...names.map(armNameBox)]
+  const open = (at: Point, half: number): boolean => !said.some(box => touches(box, { left: at.x - half, right: at.x + half, top: at.y - half, bottom: at.y + half }))
+  for (const star of stars) if (star.inert) star.hidden ||= !open(star, star.r)
+  const minis = sheets.map(mini => ({ ...mini, marks: mini.marks.filter(mark => open(mark, MINI_MARK / 2)) }))
   return {
     k, frame: plate, stars, arms, names, minis, labels,
-    numerals: narrow ? asking.map(star => {
+    numerals: narrow ? nameable.filter(star => star.numeral).map(star => {
       const out = Math.hypot(star.x - seen.x, star.y - seen.y) || 1
-      return { thread: star.thread, numeral: star.thread.rank + 1, x: star.x + (star.x - seen.x) / out * (star.r + 9), y: star.y + (star.y - seen.y) / out * (star.r + 9) }
+      return { thread: star.thread, numeral: star.numeral, x: star.x + (star.x - seen.x) / out * (star.r + 9), y: star.y + (star.y - seen.y) / out * (star.r + 9) }
     }) : [],
     focus: titled ? { thread: seen.thread, at: seen, held, title: titled } : null,
-    ledger: { thread: seen.thread, held: narrow ? held : [], threads: narrow ? plate.stars.filter(star => star.owner?.thread === seen.thread).map(star => star.thread) : [] },
+    ledger: { thread: seen.thread, held: narrow ? held : [], threads: narrow ? plate.stars.filter(star => star.owner?.thread === seen.thread) : [] },
   }
 }
 
@@ -458,15 +464,15 @@ function drawLedger(layer: HTMLElement, sky: Sky, model: FamilyModel): void {
   const { thread, held: items, threads } = sky.ledger
   const rows = part(layer, 'fm-ledger-threads', cls => htmlEl('div', cls))
   reconcile(part(layer, 'fm-ledger-held', cls => htmlEl('div', cls)), items, heldId, heldWay, (way, item) => fillHeld(way, item, thread, model))
-  reconcile(rows, threads, item => item.key, () => {
+  reconcile(rows, threads, star => star.thread.key, () => {
     const row = htmlEl('div', 'fm-ledger-row')
     const body = svgEl('svg', 'fm-ledger-mark'); body.setAttribute('viewBox', '-8 -8 16 16'); body.append(svgEl('path'))
     row.append(htmlEl('span', 'fm-ledger-rank'), body, htmlEl('span', 'fm-ledger-name'), htmlEl('span', 'fm-ledger-age'))
     return row
-  }, (row, item) => {
+  }, (row, { thread: item, numeral }) => {
     tagThread(row, item)
     const [rank, body, name, age] = row.children
-    setText(rank, needsHuman(item) ? String(item.rank + 1) : '')
+    setText(rank, numeral ? String(numeral) : '')
     body.firstElementChild!.setAttribute('d', markPath(item.tone, 5))
     setText(name, item.name)
     setText(age, shortAgo(item.lastMove, model.now))

@@ -45,7 +45,7 @@ export const htmlEl = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: stri
   if (text !== undefined) el.textContent = text
   return el
 }
-export const shortAgo = (at: number, now: number): string => ago(at, now).replace(/ ago$/, '')
+export const shortAgo = (at: number, now: number): string => ago(at, now).replace(/ ago$/, '').replace('just now', 'now')
 
 /** The host's stage for a drawing, with a click on any thread's mark wired to `open`. */
 export function mount(host: HTMLElement, name: string, model: FamilyModel, open: OpenThread): Stage {

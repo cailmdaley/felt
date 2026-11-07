@@ -70,6 +70,8 @@ export interface FamilyModel {
   counts: Record<Attention, number>
   /** The open thread, when the map holds it. */
   current: string | null
+  /** Threads that lie on the just-finished arm whatever they still hold. */
+  finished?: ReadonlySet<string>
 }
 
 /** A thread's time open, to its close or to now. */

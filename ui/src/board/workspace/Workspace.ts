@@ -86,9 +86,9 @@ interface ChannelState {
   error?: string
 }
 export type WorkspaceView = WorkspaceOriginView
-const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/tree': 'tree', '#/globe': 'globe' }
-const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', tree: 'Tree', globe: 'Globe' }
-const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Tree' ? 'tree' : origin === 'Globe' ? 'globe' : 'board'
+const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/tree': 'tree', '#/globe': 'globe', '#/map': 'map' }
+const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', tree: 'Tree', globe: 'Globe', map: 'Map' }
+const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Tree' ? 'tree' : origin === 'Globe' ? 'globe' : origin === 'Map' ? 'map' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
@@ -136,7 +136,7 @@ export class Workspace {
   private lastUpdateRevision = ''
   private lastRenderedFamilyRevision = ''
   private readonly mapFeeds: FamilyFeeds
-  /** What the Globe reaches through the board: the map's feeds, and its pages and conversations. */
+  /** What a surface over the whole fleet reaches through the board: the map's feeds, and its pages and conversations. */
   readonly globeHost: GlobeHost
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
@@ -497,7 +497,7 @@ export class Workspace {
   handleOverviewEscapeLayer(): boolean { return this.overview.handleEscapeLayer() }
 
   /** View keys park the reader; Board restores its last unreturned channel. */
-  suspend(view: 'desk' | 'chronicle' | 'tree' | 'globe'): void {
+  suspend(view: 'desk' | 'chronicle' | 'tree' | 'globe' | 'map'): void {
     this.history.view(`#/${view}`)
   }
   showBoard(): void {

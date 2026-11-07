@@ -17,6 +17,14 @@ const PEEK_FILES = 4
 const SETTLE_MS = 120
 const STEPS: Readonly<Record<string, number>> = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }
 
+/** What a page maps: the cards it reads, how they become a model, and the tree that folds at its foot, when one tree holds them. */
+export interface MapScope {
+  key: string
+  cards: readonly KanbanCard[]
+  model(now: number): FamilyModel
+  tree?: { index: ThreadIndex; root: KanbanCard; current: KanbanCard }
+}
+
 /** What the map reads, and how to ask for it again. */
 export interface FamilyFeeds extends MapFeeds {
   refresh(): void
@@ -68,7 +76,7 @@ export class FamilyPage {
   private readonly disposed: () => void
   private drawing: Drawing = chosenDrawing() ?? ROSTER[0]
   private model: FamilyModel | null = null
-  private last: { card: KanbanCard; index: ThreadIndex } | null = null
+  private scope: MapScope | null = null
   private selected: string | null = null
   private signature = ''
   /** The peek as built, so a repaint keeps it when nothing in it moved. */
@@ -124,22 +132,46 @@ export class FamilyPage {
   }
 
   update(card: KanbanCard, index: ThreadIndex, now = Date.now()): void {
-    this.last = { card, index }
+    const root = index.family(index.card(card)).root, current = index.card(card)
+    this.map({ key: threadKey(card), cards: [root, ...index.subtree(root)], model: at => familyModel(index, root, current, this.feeds, at), tree: { index, root, current } }, now)
+  }
+  /** Maps a scope: a family, or any other set of threads with a model of its own. */
+  map(scope: MapScope, now = Date.now()): void {
+    this.scope = scope
     if (!this.awake) return
     this.feeds.refresh()
-    const root = index.family(index.card(card)).root
-    const family = [root, ...index.subtree(root)]
     this.take(chosenDrawing() ?? this.drawing)
-    const signature = JSON.stringify([threadKey(card), Math.floor(now / 60_000), this.drawing.name, family, family.map(thread => [this.feeds.marks(thread), this.feeds.files(thread)])])
+    const signature = JSON.stringify([scope.key, Math.floor(now / 60_000), this.drawing.name, scope.cards, scope.cards.map(thread => [this.feeds.marks(thread), this.feeds.files(thread)])])
     if (signature === this.signature) return
     this.signature = signature
-    this.model = familyModel(index, root, index.card(card), this.feeds, now)
+    this.model = scope.model(now)
     if (this.place.focus && !this.model.threads.has(this.place.focus)) this.place.focus = null
     if (this.lone) this.place.focus = this.model.root.key
     this.paint()
     this.readLead()
-    this.paintTree(index, root, index.card(card))
+    this.all.hidden = !scope.tree
+    if (scope.tree) this.paintTree(scope.tree)
   }
+  /** The keys of a page no reader holds: stepping out, its lead, its conversation, its drawing, and the first arrow into the map. */
+  keydown(event: KeyboardEvent): boolean {
+    if (event.metaKey || event.ctrlKey || event.altKey) return false
+    if (event.key === 'Escape' || event.key === 'h') return this.stepOut()
+    if (event.key === 'v') { this.cycle(); return true }
+    if (event.key === 'l') {
+      const lead = this.leading
+      if (lead) this.open(lead.card, lead.doc)
+      return !!lead
+    }
+    if (event.key === 'c') {
+      const card = this.selection
+      if (card && conversable(card)) this.converse(card)
+      return !!card
+    }
+    if (STEPS[event.key] && !this.stage.contains(document.activeElement)) { this.focus(); return true }
+    return false
+  }
+  /** Sets a control of the surface's own beside the drawings. */
+  control(button: HTMLButtonElement): void { this.roster.prepend(button) }
   /** The next drawing of the roster. */
   cycle(): void { this.show(ROSTER[(ROSTER.indexOf(this.drawing) + 1) % ROSTER.length]) }
   /** Takes the keys, on the selected thread. */
@@ -195,7 +227,7 @@ export class FamilyPage {
   private holds(thread: MapThread): Holds {
     return {
       lead: this.leads.get(thread.key) ?? undefined,
-      constitution: { key: fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id), name: 'Constitution', at: 0, unread: false },
+      constitution: thread.card.path ? { key: fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id), name: 'Constitution', at: 0, unread: false } : undefined,
     }
   }
   private stageSize(): { width: number; height: number } { return { width: this.stage.clientWidth || 1000, height: this.stage.clientHeight || 680 } }
@@ -298,7 +330,7 @@ export class FamilyPage {
     this.stage.replaceChildren()
     this.stage.className = ''
   }
-  private repaint(): void { if (this.last) this.update(this.last.card, this.last.index) }
+  private repaint(): void { if (this.scope) this.map(this.scope) }
   /** The map stops where it is, reading and drawing nothing, until its frame is selected again. */
   private suspend(): void {
     this.awake = false
@@ -311,7 +343,7 @@ export class FamilyPage {
     this.repaint()
     this.resized()
   }
-  private dispose(): void {
+  dispose(): void {
     this.suspend()
     this.observer?.disconnect()
     this.zoom.dispose()
@@ -376,7 +408,7 @@ export class FamilyPage {
     markSelection(this.stage, model, this.selected)
     for (const body of this.stage.querySelectorAll('.fm-star, .fm-row')) body.toggleAttribute('data-worker', body.getAttribute('data-thread') === this.place.worker)
   }
-  private paintTree(index: ThreadIndex, root: KanbanCard, current: KanbanCard): void {
+  private paintTree({ index, root, current }: NonNullable<MapScope['tree']>): void {
     for (const fold of this.allBody.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')) this.openFolds.set(fold.dataset.threadDetails!, fold.open)
     const active = document.activeElement
     const focus = active instanceof HTMLElement && this.allBody.contains(active) ? active.dataset.threadFocus : undefined

@@ -328,3 +328,61 @@ describe('Desk rows in the document workspace', () => {
     expect(board.workspaceCards().map(item => item.id)).toEqual(deskOrder(board.lastResponse).rows.map(item => item.id))
   })
 })
+
+describe('the Desk\'s map', () => {
+  const stored = new Map<string, string>()
+  beforeEach(() => {
+    stored.clear()
+    vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect(): void {} })
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }))
+    window.location.hash = ''
+  })
+  const data = response({ now: { drafts: [], inFlight: [card({ id: 'flight', status: 'active', workerState: 'running', runtimePhase: 'working', shuttleKind: 'oneshot' })], awaitingReview: [] } })
+  const opened = (): { board: WorkspaceBoard; host: HTMLElement } => {
+    const host = document.createElement('div'), board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
+    document.body.append(host)
+    board.mount(host)
+    board.lastResponse = data
+    board.render(data)
+    return { board, host }
+  }
+  const tab = (host: HTMLElement): string | undefined => host.querySelector<HTMLElement>('.kbn-viewtab-active')?.dataset.view
+
+  it('turns the In flight column into the map, keeps the Desk tab lit and is remembered', () => {
+    const { board, host } = opened()
+    expect(host.querySelectorAll('.kbn-col-map').length).toBe(1)
+    expect(host.querySelector('.kbn-viewtab[data-view="map"]')).toBeNull()
+    host.querySelector<HTMLElement>('.kbn-col-map')!.click()
+    expect(host.querySelector('.ws-family-page')).not.toBeNull()
+    expect(board.deskEl!.style.display).toBe('none')
+    expect(tab(host)).toBe('desk')
+    board.unmount()
+    host.remove()
+    const again = opened()
+    expect(again.host.querySelector('.ws-family-page')).not.toBeNull()
+    again.board.unmount()
+    again.host.remove()
+  })
+  it('flies to the thread Rex moves to and leaves the reader shut', () => {
+    stored.set('shuttle.desk.map', '1')
+    const { board, host } = opened(), follow = vi.spyOn(board.workspace as unknown as { follow(id: string, owner: string): void }, 'follow')
+    ;(board as unknown as { voice: { onFollow(target: { fiber_id: string; origin: string }): void } }).voice.onFollow({ fiber_id: 'flight', origin: 'local' })
+    expect(follow).not.toHaveBeenCalled()
+    expect(host.querySelector('.fm-star[data-worker]')?.getAttribute('aria-label')).toMatch(/^flight,/)
+    board.unmount()
+    host.remove()
+  })
+  it('comes back to the cards, and stays there', () => {
+    stored.set('shuttle.desk.map', '1')
+    const { board, host } = opened()
+    const desk = [...host.querySelectorAll<HTMLButtonElement>('.ws-family-drawing')].find(button => button.textContent === 'Desk')!
+    desk.click()
+    expect(board.deskEl!.style.display).toBe('')
+    expect(host.querySelector('.ws-family-page')).toBeNull()
+    expect(stored.has('shuttle.desk.map')).toBe(false)
+    board.unmount()
+    host.remove()
+  })
+})

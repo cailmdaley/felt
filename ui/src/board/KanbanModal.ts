@@ -100,6 +100,7 @@ import {
   type ViewContext,
   viewFallbackKind,
 } from './views/index.js'
+import { chooseDeskMap, deskIsMap } from './views/MapView.js'
 import { isTypingTarget } from './views/ViewRegistry.js'
 import { FiberSends } from './fiberSends.js'
 import type { DocKey } from './workspace/documents.js'
@@ -418,6 +419,7 @@ export class KanbanModal {
       releaseQuarantine: (host) => this.releaseQuarantine(host),
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
+      onMapClick: () => this.setDeskMap(true),
       getMeeting: () => this.meetingStatus.meeting,
       getPhoneMeeting: () => this.phoneAudio,
       isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
@@ -555,11 +557,12 @@ export class KanbanModal {
     const wanted = new URLSearchParams(window.location.search).get('view')
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
     else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
+    else if (window.location.hash === '#/map' || (deskIsMap() && ['', '#/desk'].includes(window.location.hash))) this.setView('map')
     else if (window.location.hash === '#/chronicle') this.setView('chronicle')
     else if (window.location.hash === '#/tree') this.setView('tree')
     else if (window.location.hash === '#/globe') this.setView('globe')
     this.keymapHelp = new KeymapHelp(
-      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : this.activeViewId === 'tree' ? 'tree' : 'overview',
+      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' || this.activeViewId === 'map' ? 'desk' : this.activeViewId === 'tree' ? 'tree' : 'overview',
     )
     this.workspace = new Workspace(this.container!, {
       sends: card => this.fiberSends?.sends(card) ?? [],
@@ -569,7 +572,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'tree' ? 'Tree' : this.activeViewId === 'globe' ? 'Globe' : 'Board',
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'tree' ? 'Tree' : this.activeViewId === 'globe' ? 'Globe' : this.activeViewId === 'map' ? 'Map' : 'Board',
       onVisibility: (active) => { this.showWorkspace(active); if (!active) this.voice.see(null) },
       onSight: card => this.voice.see(constitutionFor(card, boardCards(this.lastResponse))),
       onReturnCard: card => {
@@ -818,7 +821,7 @@ export class KanbanModal {
 
     const specs: Array<{ id: BoardViewId; label: string; hotkey: string }> = [
       { id: 'desk', label: 'desk', hotkey: DESK_HOTKEY },
-      ...listViews().map((view) => ({
+      ...listViews().filter((view) => view.hotkey).map((view) => ({
         id: view.id as BoardViewId,
         label: view.title.toLowerCase(),
         hotkey: view.hotkey,
@@ -901,11 +904,12 @@ export class KanbanModal {
    * Switch the page. Idempotent — re-selecting the active view is a no-op, so
    * a stray click or repeated hotkey never tears a view down and back up.
    */
-  private setView(id: BoardViewId, navigate = true, forceHome = false): void {
-    if (forceHome && id === 'desk' && this.workspace?.isActive) {
+  private setView(wanted: BoardViewId, navigate = true, forceHome = false): void {
+    if (forceHome && wanted === 'desk' && this.workspace?.isActive) {
       this.workspace.escapeHome()
       return
     }
+    const id = wanted === 'desk' && deskIsMap() ? 'map' : wanted
     // With the reader open the bar marks the view it came from: that tab, or
     // its key, closes the reader back to it; any other switches and closes.
     if (navigate && this.workspace?.isActive && id === this.activeViewId) {
@@ -936,6 +940,12 @@ export class KanbanModal {
       return
     }
     this.mountOrRefreshActiveView()
+  }
+
+  /** The Desk's posture in this browser: its cards, or its map. */
+  private setDeskMap(on: boolean): void {
+    chooseDeskMap(on)
+    this.setView(on ? 'map' : 'desk')
   }
 
   /**
@@ -990,7 +1000,7 @@ export class KanbanModal {
     if (this.lensSlotEl) this.lensSlotEl.style.display = onDesk ? '' : 'none'
     if (this.viewHostEl) this.viewHostEl.style.display = onDesk ? 'none' : ''
     for (const tab of this.tabsEl?.querySelectorAll<HTMLElement>('.kbn-viewtab') ?? []) {
-      const selected = tab.dataset.view === this.activeViewId
+      const selected = tab.dataset.view === (this.activeViewId === 'map' ? 'desk' : this.activeViewId)
       tab.classList.toggle('kbn-viewtab-active', selected)
       tab.setAttribute('aria-selected', String(selected))
       this.labelOriginTab(tab, selected)
@@ -1098,6 +1108,7 @@ export class KanbanModal {
         if (card) this.openDocumentChannel(card)
       },
       requestRefresh: () => { void this.fetchAndRender() },
+      showDesk: () => this.setDeskMap(false),
     }
   }
 
@@ -1136,6 +1147,12 @@ export class KanbanModal {
   private handleViewHotkey(e: KeyboardEvent): boolean {
     const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'shelf' ? 'overview' : 'desk'
     const intent = keyIntent(e, surface)
+    if (intent === 'map' && (this.activeViewId === 'desk' || this.activeViewId === 'map') && !keystrokeIsSpokenFor()) {
+      e.preventDefault()
+      e.stopPropagation()
+      this.setDeskMap(this.activeViewId === 'desk')
+      return true
+    }
     if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'tree' && intent !== 'globe') return false
     if (keystrokeIsSpokenFor()) return false
     const id: BoardViewId = intent === 'board' ? 'shelf' : intent

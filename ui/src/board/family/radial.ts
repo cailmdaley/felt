@@ -75,11 +75,11 @@ function measured(model: FamilyModel): Map<MapThread, Measure> {
   walk(model.root)
   return out
 }
-/** A thread's two arms, in order from its body: what has anything in play in it is to do, the rest just finished. */
+/** A thread's two arms, in order from its body: what has anything in play in it is to do, the rest and the model's `finished` just finished. */
 export function armsOf(model: FamilyModel, thread: MapThread = model.root, pins: Pins = readPins(model), measures = measured(model)): Record<Arm, MapThread[]> {
   const kids = thread.children.map(key => model.threads.get(key)!).filter(kid => measures.get(kid)!.count > 0).sort((a, b) => measures.get(a)!.best - measures.get(b)!.best)
   const arm = (name: Arm): MapThread[] => {
-    const on = kids.filter(kid => (pins[kid.key]?.arm ?? (measures.get(kid)!.live ? 'todo' : 'done')) === name)
+    const on = kids.filter(kid => (pins[kid.key]?.arm ?? (measures.get(kid)!.live && !model.finished?.has(kid.key) ? 'todo' : 'done')) === name)
     return arrange(on, Object.fromEntries(on.flatMap(kid => pins[kid.key] ? [[kid.key, pins[kid.key].slot]] : [])))
   }
   return { todo: arm('todo'), done: arm('done') }
@@ -121,7 +121,7 @@ function wayOf(curve: Curve, from: number, to: number, sign: 1 | -1): Point[] {
 }
 const pathOf = (way: readonly Point[]): string => way.map(({ x, y }, n) => `${n ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('')
 
-interface Spot extends Point { thread: MapThread; arm: Arm; side: 'left' | 'right'; r: number; room: number }
+interface Spot extends Point { thread: MapThread; arm: Arm; side: 'left' | 'right'; r: number; room: number; numeral: number }
 /**
  * How far up a run of this length each thread's station falls, as many as fit:
  * pushed up from its wanted place only as far as the one below needs, then back
@@ -167,7 +167,7 @@ function layArm(kids: readonly MapThread[], arm: Arm, frame: Frame, curve: Curve
   const within = kids.map((_, n) => n < ups.length ? indexAt(curve, footY - ups[n]) : curve.tip + (n - ups.length + 1) * step)
   const spots = kids.map((thread, n): Spot => {
     const { x, y } = pointAt(curve, within[n]), tail = n >= ups.length
-    return { thread, arm, side: tail === (arm === 'todo') ? 'right' : 'left', x: sign * x, y: sign * y, r: tail ? Math.min(radii[n], 3) : radii[n], room: rooms[n] }
+    return { thread, arm, side: tail === (arm === 'todo') ? 'right' : 'left', x: sign * x, y: sign * y, r: tail ? Math.min(radii[n], 3) : radii[n], room: rooms[n], numeral: arm === 'todo' ? n + 1 : 0 }
   })
   const keys = kids.map(kid => kid.key)
   const segments = kids.map((kid, n): Segment => {
@@ -200,7 +200,7 @@ export function radialLayout(model: FamilyModel, width: number, height: number):
   const place = (thread: MapThread, x: number, y: number, r: number, full: number, room: number, owner: Star | null, spot: Spot | null): void => {
     const star: Star = {
       thread, x, y, r, full, own: thread === model.root ? rootRadius(model, 1) : ownRadius(thread), room, scale: room / reach, owner, side: spot?.side ?? 'right', arm: spot?.arm ?? null,
-      numeral: isDrawn(thread) && measures.get(thread)!.live ? thread.rank + 1 : 0, segments: [],
+      numeral: spot?.numeral ?? 0, segments: [],
     }
     stars.push(star)
     const arms = armsOf(model, thread, pins, measures)

@@ -151,9 +151,17 @@ Claude sessions with Remote Control can open in the browser or Claude app, using
 Codex workers open in their terminal session; remote access depends on the host terminal backend.
 See [Opening conversations](conversations.md) for the choices, prerequisites, and quick-access terminal setup.
 
+### The Desk's map
+
+**Map** beside In flight's count, or `m`, turns the whole Desk into one map of everything in flight; **Desk** above the map, or `m`, turns it back. The choice is kept per browser, the Desk tab and its key land on whichever the browser last chose, and the cards are the default. It takes the whole page because half a screen is its primary size, and a column of that would be a phone's map.
+
+It is the [family map](#the-family-map) with a different root. The centre stands for the Desk, with the fleet's launches and commits ringed about it. Its **To do** arm holds every family with a row in In flight, the family's most urgent thread first, numbered by place. Its **Just finished** arm holds the families that came to Awaiting review, and those with a closed constitution at their root in the last three days. A family's body speaks for its most urgent thread: its colour, its word and its note are that thread's, and it carries the mark of any new file inside it, so a question deep in a hub shows red from the whole view.
+
+Each family's scene is the drawing its own family map has, so everything about coming to a thread holds: a click flies there and opens its Rex chat quietly, zooming never touches Rex, the tapestry, report and sent files sit at the same places and open on the stage, and Back returns to the same zoom. A move in Rex flies this map too. The arrows walk every thread on it, most urgent first. `v` changes the drawing, `l` opens the focused thread's lead, `c` its conversation, and Escape or `h` steps out. Drags place a family along an arm, as on any map.
+
 ### Desk keyboard
 
-Bare keys act on the Desk when focus is outside an editable field. `h` / `←` and `l` / `→` move between columns and regions; `j` / `↓` and `k` / `↑` select the next or previous card. `g` and `G` select the first or last card in the current column. `Enter` / `o` opens the constitution, `Esc` / `u` clears selection, `/` opens Find, and `?` shows keyboard help. Movement skips empty regions and stops at the ends.
+Bare keys act on the Desk when focus is outside an editable field. `m` shows the Desk's map. `h` / `←` and `l` / `→` move between columns and regions; `j` / `↓` and `k` / `↑` select the next or previous card. `g` and `G` select the first or last card in the current column. `Enter` / `o` opens the constitution, `Esc` / `u` clears selection, `/` opens Find, and `?` shows keyboard help. Movement skips empty regions and stops at the ends.
 
 ## Chronicle — where the time went
 

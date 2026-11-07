@@ -1191,6 +1191,18 @@
   display: flex; align-items: baseline; gap: 0;
   min-width: 0;
 }
+.kbn-col-map {
+  margin-left: 10px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--kbn-ink-muted);
+  font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+  cursor: pointer;
+}
+.kbn-col-map:hover { color: var(--kbn-ink); border-color: var(--kbn-ink-muted); }
+.kbn-col-map:focus-visible { color: var(--kbn-ink); border-color: var(--kbn-ink-muted); outline: none; }
 .kbn-col-head:focus { outline: none; }
 .kbn-col-head:focus-visible {
   /* Manuscript focus — cinnabar dashed inset so it reads as a ruled
@@ -2218,7 +2230,8 @@
   .kbn-col-list { padding-top: 8px; }
   /* Only the active leaf carries its action; the other segments remain page
      marks instead of turning the strip into a toolbar. */
-  .kbn-folio-seg .kbn-col-action { display: none; }
+  .kbn-folio-seg :is(.kbn-col-action, .kbn-col-map) { display: none; }
+  .kbn-folio-seg-active .kbn-col-map { display: inline-flex; flex: 0 0 auto; margin-left: 2px; }
   .kbn-folio-seg-active .kbn-col-action {
     display: inline-flex;
     flex: 0 0 auto;

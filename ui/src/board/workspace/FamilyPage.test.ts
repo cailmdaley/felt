@@ -9,6 +9,7 @@ import { shouldForwardDocumentKey } from '../keymap.js'
 import { radial } from '../family/radial.js'
 import { disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { FamilyPage } from './FamilyPage.js'
+import { familyModel } from '../family/model.js'
 import { threadKey as threadKeyOf } from '../threads.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
@@ -604,5 +605,36 @@ describe('coming to a thread', () => {
     expect(body.querySelector('.fm-star-fresh')?.getAttribute('d')).not.toBe('')
     expect(family.el.querySelector('[data-standing="new"].fm-star')).toBeNull()
     expect(family.el.querySelector('.ws-family-count[data-standing="new"]')?.textContent).toBe('1 new')
+  })
+})
+
+describe('a page with no reader around it', () => {
+  const scoped = () => {
+    const open = vi.fn(), converse = vi.fn(), family = new FamilyPage(open, converse, feeds, { focus: null, view: null }, vi.fn())
+    document.body.append(family.el)
+    const index = new ThreadIndex(cards)
+    family.map({ key: 'all', cards, model: at => familyModel(index, root, root, feeds, at) }, now)
+    return { family, open, converse }
+  }
+  it('maps a scope of its own, with no tree to fold at its foot', () => {
+    const { family } = scoped()
+    expect(option(family, 'Asked')).toBeTruthy()
+    expect(family.el.querySelector<HTMLElement>('.ws-family-all')!.hidden).toBe(true)
+  })
+  it('takes the map\'s keys itself: stepping out, the conversation, the drawing and a first arrow', () => {
+    const { family, converse } = scoped()
+    click(option(family, 'Asked'))
+    converse.mockClear()
+    expect(family.keydown(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true)
+    expect(family.keydown(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(false)
+    expect(family.keydown(new KeyboardEvent('keydown', { key: 'ArrowDown' }))).toBe(true)
+    expect(family.keydown(new KeyboardEvent('keydown', { key: 'j', metaKey: true }))).toBe(false)
+    expect(family.keydown(new KeyboardEvent('keydown', { key: 'v' }))).toBe(true)
+    expect(family.el.dataset.drawing).toBe('cloth')
+  })
+  it('sets a surface\'s own control beside the drawings', () => {
+    const { family } = scoped(), button = document.createElement('button')
+    family.control(button)
+    expect(family.el.querySelector('.ws-family-roster')!.firstElementChild).toBe(button)
   })
 })

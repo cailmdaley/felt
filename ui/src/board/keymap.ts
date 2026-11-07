@@ -47,7 +47,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
     bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
     ...constitutionBindings('the selected card'),
-    bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
+    bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['m'], 'map', 'Between the Desk\'s cards and its map'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
     bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'tree', 'Switch to Tree'), bind(['5'], 'globe', 'Switch to Globe'),
@@ -183,5 +183,6 @@ export const helpSections: readonly HelpSection[] = [
   { title: 'Family map', note: 'With the map focused, the arrows walk its threads from the most urgent, and Enter opens one.', rows: [
     row(['l'], 'To its tapestry, and back to the map', on('reader', 'tapestry')),
     row(['v'], 'Next drawing', on('reader', 'drawing')),
+    row(['m'], 'Between the Desk\'s cards and its map', on('desk', 'map')),
   ] },
 ]
