@@ -81,9 +81,14 @@ defmodule Shuttle.Voice.TranscriptRelay.Coordinator do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
+    directory = Keyword.fetch!(opts, :directory)
+    old = Path.join(Path.dirname(directory), "meeting-transcript-relays")
+
+    if not Shuttle.FS.exists?(directory) and Shuttle.FS.exists?(old),
+      do: :ok = Shuttle.FS.rename(old, directory)
 
     state = %{
-      directory: Keyword.fetch!(opts, :directory),
+      directory: directory,
       dynamic: Keyword.fetch!(opts, :dynamic),
       options: opts,
       workers: %{},

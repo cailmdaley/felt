@@ -47,6 +47,32 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
      root: root}
   end
 
+  test "boot moves existing checkpoints without replaying the live launch", c do
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "already delivered send")
+    start_monitor(c)
+    assert_receive {:delivery, _}, 1_000
+    sync_tasks(c)
+    stop_supervised!(TranscriptRelay)
+    old = Path.join(c.root, "meeting-transcript-relays")
+    File.rename!(Path.join(c.root, "relays"), old)
+    start_supervised!({TranscriptRelay, c.opts})
+    assert %{error: nil} = TranscriptRelay.status("launch", server: c.name)
+    assert %{error: nil} = poll(c)
+    refute File.exists?(old)
+    assert File.exists?(relay_path(c, "launch"))
+    refute_receive {:delivery, _}, 50
+  end
+
+  test "boot leaves existing destination checkpoints intact", c do
+    old = Path.join(c.root, "meeting-transcript-relays")
+    File.mkdir_p!(old)
+    File.write!(Path.join(old, "marker"), "old")
+    File.mkdir_p!(Path.join(c.root, "relays"))
+    start_supervised!({TranscriptRelay, c.opts})
+    assert File.read!(Path.join(old, "marker")) == "old"
+  end
+
   test "the day transcript keeps routed, unrouted, cold-dropped and discarded utterances", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:02Z", "fiber-a")
