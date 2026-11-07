@@ -723,7 +723,7 @@ ledgers](../shuttle/telemetry.md) for what writes the files underneath.
 | `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |
 | `GET /board` | `events.jsonl` | Host-local board records since `since_ms`, oldest first; ETag/304 supported |
 | `GET /board/family` | local and remote board feeds | Current family board, resolved against constitution containment |
-| `POST /board/open` | this daemon's boards | `{fiber_id, origin?, page}` asks every board on this daemon's `/voice/events` stream to show that fiber's `constitution`, `tapestry` or `files` page; `origin` defaults to this host |
+| `POST /board/open` | every board in the fleet | `{fiber_id, origin?, page}` asks every board on a `/voice/events` stream to show that fiber's `constitution`, `tapestry` or `files` page; `origin` defaults to this host. The daemon tells its own boards and passes the request, marked `forwarded: true`, to every other daemon in the fleet, which tells only its own |
 
 `/activity` takes `from_ms` and `to_ms` and answers
 `{host, from_ms, to_ms, buckets}`. It rounds the window inward to whole minutes

@@ -41,9 +41,11 @@ defmodule ShuttleWeb.VoiceController do
   end
 
   @doc """
-  `POST /api/v1/board/open {fiber_id, origin?, page}` asks every board on this
-  daemon's stream to show a page of a fiber: `constitution`, `tapestry` or
-  `files`. The origin defaults to this host.
+  `POST /api/v1/board/open {fiber_id, origin?, page}` asks every board in the
+  fleet to show a page of a fiber: `constitution`, `tapestry` or `files`. The
+  origin defaults to this host. This daemon tells its own boards and passes the
+  request, marked `forwarded`, to every other daemon in the fleet, which tells
+  only its own: a worker on any host reaches the board the human is looking at.
   """
   def open(conn, %{"fiber_id" => id, "page" => page} = params)
       when is_binary(id) and id != "" and page in ~w(constitution tapestry files) do
@@ -53,11 +55,24 @@ defmodule ShuttleWeb.VoiceController do
       for {pid, _} <- entries, do: send(pid, {:board_open, open})
     end)
 
+    unless params["forwarded"] == true, do: forward_open(open)
     json(conn, %{ok: true})
   end
 
   def open(conn, _params),
     do: conn |> put_status(400) |> json(%{error: "fiber_id and page are required"})
+
+  defp forward_open(open) do
+    own = MeetingRouter.own_host()
+    body = open |> Map.put(:forwarded, true) |> Jason.encode!()
+    client = OriginRouter.forward_client()
+
+    for remote <- Shuttle.RegistryCommon.configured_remotes(), remote.name != own do
+      Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+        client.post(Remote.url_for(remote, "/api/v1/board/open"), body, "application/json", 2_000)
+      end)
+    end
+  end
 
   defp stream(conn) do
     next =

@@ -217,4 +217,42 @@ defmodule ShuttleWeb.BoardControllerTest do
     assert 400 == post(api_conn(), "/api/v1/board/open", %{page: "files"}).status
     refute_receive {:board_open, _}, 30
   end
+
+  defmodule OpenForwardClient do
+    def post(url, body, _type, _timeout) do
+      send(:persistent_term.get({__MODULE__, :test}), {:forwarded, url, Jason.decode!(body)})
+      {:ok, 200, ~s({"ok":true})}
+    end
+  end
+
+  test "open passes the request once to every other daemon in the fleet" do
+    :persistent_term.put({OpenForwardClient, :test}, self())
+    Shuttle.Test.Env.put_app_env(:write_forward_client, OpenForwardClient)
+
+    Shuttle.Test.Env.put_app_env(:remotes, [
+      %{name: "fir", url: "http://127.0.0.1:4101"},
+      %{name: Shuttle.MeetingRouter.own_host(), url: "http://127.0.0.1:4102"}
+    ])
+
+    body = %{fiber_id: "01FIBER", page: "files"}
+    assert %{"ok" => true} = api_conn() |> post("/api/v1/board/open", body) |> json_response(200)
+    own = Shuttle.MeetingRouter.own_host()
+
+    assert_receive {:forwarded, "http://127.0.0.1:4101/api/v1/board/open",
+                    %{
+                      "fiber_id" => "01FIBER",
+                      "origin" => ^own,
+                      "page" => "files",
+                      "forwarded" => true
+                    }}
+
+    refute_receive {:forwarded, _, _}, 50
+
+    forwarded = Map.put(body, :forwarded, true)
+
+    assert %{"ok" => true} =
+             api_conn() |> post("/api/v1/board/open", forwarded) |> json_response(200)
+
+    refute_receive {:forwarded, _, _}, 50
+  end
 end
