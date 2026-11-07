@@ -1,4 +1,6 @@
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
+import { isAgentCard } from '../KanbanModalShared.js'
+import { onDesk } from './fiberPageState.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 
 type SessionMode = 'fresh' | 'previous'
@@ -70,6 +72,8 @@ export class WorkerActions {
 
   private paint(): void {
     const card = this.card
+    // Only a Shuttle constitution on the Desk's lifecycle has a worker to run.
+    this.el.hidden = !isAgentCard(card) || !onDesk(card)
     const live = hasLiveWorker(card)
     const said = this.field.value.trim() !== ''
     const verb = !this.resumes ? 'Start' : live ? 'Send' : 'Resume'
