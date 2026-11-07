@@ -9,12 +9,16 @@ export interface VoiceLine {
 }
 
 /**
- * The voice snapshot's destination: a meeting that holds the mic, named by its
- * fiber, else the live voice target. `meetingName` names a meeting's fiber.
+ * Where words go: a meeting the board observes, named by its fiber, else the
+ * daemon's `mode` / `destination` / `paused`, else the live voice target from
+ * a daemon that predates them. `meetingName` names a meeting's fiber.
  */
 export function voiceLine(meeting: MeetingRecord | null, voice: VoiceStatus | null, meetingName: (meeting: MeetingRecord) => string | undefined): VoiceLine {
-  if (meeting && meeting.state !== 'failed' && meeting.state !== 'stopping') {
+  if (meeting && meeting.state !== 'failed') {
     return { mode: 'meeting', name: meetingName(meeting) ?? meeting.fiber?.split('/').at(-1) ?? meeting.title?.trim() ?? 'a meeting', paused: !!meeting.paused }
+  }
+  if (voice?.available && voice.mode && voice.mode !== 'off') {
+    return { mode: voice.mode, name: voice.destination?.name ?? 'Rex', paused: !!voice.paused }
   }
   if (voice?.available && voice.enabled && voice.state === 'yielded') return { mode: 'meeting', name: 'a recording', paused: false }
   if (voice?.available && voice.enabled && voice.state !== 'failed') {

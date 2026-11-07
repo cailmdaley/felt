@@ -493,7 +493,7 @@ describe('Listen', () => {
     expect([toggle.disabled, toggle.textContent]).toEqual([true, 'Listen'])
     recording = { title: 'Standup', state: 'live' }
     listening.syncMeeting()
-    expect([toggle.disabled, toggle.textContent]).toEqual([false, 'Meeting · Standup'])
+    expect([toggle.disabled, toggle.getAttribute('aria-label')]).toEqual([false, 'Meeting · Standup'])
     expect(toggle.title).toContain('every word goes to Standup')
     listening.reset()
   })
@@ -541,7 +541,7 @@ describe('Listen', () => {
     listening.setMeetingHostOpen(openHost, () => 'vizier')
     listening.syncMeeting()
     const chip = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    expect(chip.textContent).toBe('Meeting · vizier')
+    expect(chip.getAttribute('aria-label')).toBe('Meeting · vizier')
     expect(q('.kbn-ctl-meet').hidden).toBe(false)
     expect(listening.el.querySelectorAll('.kbn-ctl-meet-stop:not([hidden])')).toHaveLength(1)
     expect(listening.el.querySelector('.kbn-detail-transcript-stop')).toBeNull()

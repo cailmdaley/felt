@@ -85,8 +85,9 @@ type Mode =
 /**
  * The band's Listening control. The mic does one thing at a time: off,
  * following the card in view, or recording a meeting joined to one card.
- * Listen turns following on; once anything is on, the control reads where
- * words go and offers Pause and Stop. Stop always turns the mic off. The ▾
+ * Listen turns following on; once anything is on, the control draws the
+ * mode's icon (a mic, or a red dot for a meeting) and offers Pause and Stop,
+ * and the band's voice strip beside it names where words go. Stop always turns the mic off. The ▾
  * menu holds what is rarer: recording a meeting here, the transcript, and the
  * quiet before a batch is sent.
  */
@@ -283,7 +284,10 @@ export class ListenControl {
       ? !this.opts.meeting.canJoin() || !this.opts.meeting.modes().includes('phone')
       : !voice?.available))
     if (this.button.disabled && !this.phone && !this.starting && !failure) title = voice?.error ? `Listening is unavailable: ${voice.error}` : 'Listening is unavailable on this host'
-    if (this.word.textContent !== label) this.word.textContent = label
+    // While on, the band's voice strip names where words go; the control keeps only its icon.
+    const shown = on ? '' : label
+    if (this.word.textContent !== shown) this.word.textContent = shown
+    this.word.hidden = on
     this.button.title = title
     this.button.setAttribute('aria-label', label)
     this.el.dataset.mode = mode.kind

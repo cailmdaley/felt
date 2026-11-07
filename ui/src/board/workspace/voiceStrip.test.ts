@@ -17,10 +17,15 @@ describe('the voice strip', () => {
     expect(said(meeting({ paused: true }), null)).toBe('Meeting → debug · paused')
     expect(said(null, voice({ state: 'yielded' }))).toBe('Meeting → a recording')
   })
-  it('says nothing when the mic is off, failed or stopping', () => {
+  it('says nothing when the mic is off or the meeting failed, and holds a stopping meeting until it ends', () => {
     expect(said(null, null)).toBe('')
     expect(said(null, voice({ enabled: false }))).toBe('')
     expect(said(meeting({ state: 'failed' }), null)).toBe('')
-    expect(said(meeting({ state: 'stopping' }), null)).toBe('')
+    expect(said(meeting({ state: 'stopping' }), null)).toBe('Meeting → debug')
+  })
+  it('reads the daemon\'s mode, destination and paused when it reports them', () => {
+    expect(said(null, voice({ mode: 'meeting', destination: { fiber_id: 'x', origin: 'h', name: 'Standup' }, paused: true }))).toBe('Meeting → Standup · paused')
+    expect(said(null, voice({ mode: 'following', destination: { fiber_id: 'u', origin: 'h', name: 'Two columns' }, paused: false }))).toBe('Following → Two columns')
+    expect(said(null, voice({ mode: 'off', enabled: false }))).toBe('')
   })
 })
