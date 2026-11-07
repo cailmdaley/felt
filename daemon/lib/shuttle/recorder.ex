@@ -337,17 +337,6 @@ defmodule Shuttle.Recorder do
 
   defp sync_system_audio(_snapshot, _enabled, _opts), do: :ok
 
-  @doc "Apply the system transcription gate to the live recorder."
-  def system_audio(enabled, opts \\ []) do
-    with_recorder_lock(fn ->
-      with {:ok, snapshot, _} <- inspect_current(opts) do
-        if snapshot.capture && not snapshot.capture.phone,
-          do: set_track_pause(find_hark(opts), not enabled, ["--system"], opts),
-          else: :ok
-      end
-    end)
-  end
-
   defp set_track_pause(nil, _paused, _track, _opts), do: {:error, :unavailable}
 
   defp set_track_pause(executable, paused, track, opts) do

@@ -445,11 +445,6 @@ defmodule Shuttle.Voice do
                if(Map.has_key?(params, "muted"),
                  do: Recorder.mute_voice(params["muted"], state.capture_opts),
                  else: :ok
-               ),
-             :ok <-
-               if(Map.has_key?(params, "system_audio"),
-                 do: Recorder.system_audio(params["system_audio"], state.capture_opts),
-                 else: :ok
                ) do
           state =
             cond do

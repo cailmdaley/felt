@@ -280,8 +280,15 @@ defmodule Shuttle.RecorderTest do
                false
            end)
 
-    assert :ok = Recorder.system_audio(false)
-    assert :ok = Recorder.system_audio(true)
+    assert {:ok, %{capture: %{launch: ^launch}}} =
+             Recorder.reconcile_voice(true, system_audio: false)
+
+    assert File.exists?(Path.join(dir, "system-paused"))
+
+    assert {:ok, %{capture: %{launch: ^launch}}} =
+             Recorder.reconcile_voice(true, system_audio: true)
+
+    refute File.exists?(Path.join(dir, "system-paused"))
     calls = Shuttle.Test.RecorderRunner.calls()
 
     assert {"env", ["HARK_DIR=" <> dir, hark, "pause", "--system"],
@@ -408,6 +415,7 @@ defmodule Shuttle.RecorderTest do
     )
 
     assert {:ok, %{launch: launch}} = Shuttle.Voice.update(%{"enabled" => true})
+    File.write!(Path.join(dir, "system-paused"), "")
 
     assert {:ok, %{system_audio: true, launch: ^launch}} =
              Shuttle.Voice.update(%{"system_audio" => true})
@@ -437,7 +445,10 @@ defmodule Shuttle.RecorderTest do
 
     assert {:ok, _} = Shuttle.Voice.update(%{"enabled" => true})
     File.write!(Path.join(dir, "system-paused"), "")
-    assert {:error, error} = Shuttle.Voice.update(%{"system_audio" => true})
+
+    assert {:ok, %{state: "failed", error: error}} =
+             Shuttle.Voice.update(%{"system_audio" => true})
+
     assert error =~ "system gate failed"
     assert %{enabled: true, system_audio: true, state: "failed"} = Shuttle.Voice.show()
     assert {:ok, %{"system_audio" => true}} = Shuttle.Voice.Config.read()
