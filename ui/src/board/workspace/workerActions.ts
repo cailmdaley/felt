@@ -1,5 +1,5 @@
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
-import { headerIcon } from './headerIcon.js'
+import { headerIcon, type HeaderIcon } from './headerIcon.js'
 
 type SessionMode = 'fresh' | 'previous'
 
@@ -73,7 +73,10 @@ export class WorkerActions {
     const live = hasLiveWorker(card)
     const said = this.field.value.trim() !== ''
     const verb = !this.resumes ? 'Start' : live ? 'Send' : 'Resume'
-    this.primary.dataset.verb = verb
+    if (this.primary.dataset.verb !== verb) {
+      this.primary.dataset.verb = verb
+      this.primary.querySelector('svg')!.outerHTML = headerIcon(verb === 'Start' ? 'start' : verb === 'Send' ? 'send' : 'resume')
+    }
     if (!this.busy) word(this.primary).textContent = verb
     this.primary.title = live ? `Type this into ${card.name}'s conversation (Enter)` : `${verb} ${card.name}${said ? ' with this message' : ''} (Enter)${verb === 'Resume' && this.note ? ` · ${this.note}` : ''}`
     this.primary.setAttribute('aria-label', `${verb} ${card.name}`)
@@ -102,7 +105,7 @@ export class WorkerActions {
   }
 }
 
-function button(cls: string, icon: 'resume' | 'newSession', label = ''): HTMLButtonElement {
+function button(cls: string, icon: HeaderIcon, label = ''): HTMLButtonElement {
   const control = document.createElement('button')
   control.type = 'button'
   control.className = `ws-header-icon ws-header-verb ${cls}`
