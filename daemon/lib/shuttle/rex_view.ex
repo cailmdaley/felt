@@ -32,11 +32,20 @@ defmodule Shuttle.RexView do
       behind: %{}
     }
 
+    send(self(), :relabel)
     send(self(), :sweep)
     {:ok, state}
   end
 
+  # A boot relabels what earlier builds named, such as a resumed pane's `resume-<uuid>`.
   @impl true
+  def handle_info(:relabel, state) do
+    if Shuttle.Terminal.primary() == Shuttle.Terminal.Rex,
+      do: Shuttle.Terminal.RexTree.refresh(runner())
+
+    {:noreply, state}
+  end
+
   def handle_info(:sweep, state) do
     behind =
       with true <- Shuttle.Terminal.primary() == Shuttle.Terminal.Rex,
