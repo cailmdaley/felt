@@ -163,10 +163,11 @@ export const helpSections: readonly HelpSection[] = [
     row(['↓', '↑', 'd', 'u', 'Space', '⇧Space'], 'Scroll: line, half page, page', on('reader', 'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp')),
     row(['p', '[', ']'], 'Audio: play or pause, back or forward 5 s', on('reader', 'audioPlay', 'audioBack', 'audioForward')),
   ] },
-  { title: 'A constitution\'s page', note: 'With a row focused, keys move a level at a time: the head\'s holdings and the family\'s threads, or an unfolded thread\'s holdings and threads. Enter unfolds a row and moves Rex to its worker; Escape folds outward, then goes back.', rows: [
-    row(['j', 'k', '↓', '↑'], 'Next / previous piece of the level', []),
-    row(['l', '→'], 'Unfold a row and step into it; open a holding', []),
-    row(['h', '←'], 'Step out to the thread above, folding it', []),
-    row(['l'], 'Outside the rows: the selected thread\'s tapestry, and back to the page', on('reader', 'tapestry')),
+  { title: 'A constitution\'s page', note: 'One grammar, depth along h and l. Moving the highlight commits to nothing; entering a thread (l, Enter or a click) is what moves voice and Rex. Escape folds outward, then goes back.', rows: [
+    row(['j', 'k', '↓', '↑'], 'Next / previous thread; on a row\'s documents, next / previous document', []),
+    row(['l', '→'], 'In: a row to its documents ⌗ ☰ ⧉, a document to its page unfolded under the row', []),
+    row(['h', '←'], 'Out: a document to its row, folding it; a row off the page', []),
+    row(['Enter'], 'Unfold or fold a row, entering it', []),
+    row(['c'], 'Open the highlighted thread in Rex', []),
   ] },
 ]

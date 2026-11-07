@@ -136,7 +136,8 @@ function addHubFixture(example: WorkspaceExample, now: number): void {
     })
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\n${row.note}`
     if (HUB_TAPESTRIES.includes(row.id)) {
-      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.name}</title></head><body><h1>${row.name}</h1><p>${row.note}</p></body></html>`
+      // A screen-filling map above the findings, as tapestries are drawn, so a page drawn at full height meets viewport units.
+      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.name}</title><style>.map{height:100vh;display:grid;place-items:center;background:#e4dcc8}</style></head><body><div class="map">map</div><h1>${row.name}</h1>${`<p>${row.note}</p>`.repeat(12)}</body></html>`
       example.files.push({ owner: WORKSPACE_HOST, path: `/fixture-store/workspace/${row.id}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
     }
     launches.forEach((at, n) => example.sessions.push({ at, fiber: row.id, uid: row.id, session, harness: 'codex', agent: 'codex-sol', host: WORKSPACE_HOST, tmux: null, kind: n === launches.length - 1 ? 'dispatch' : 'resume' }))
