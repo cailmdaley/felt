@@ -438,8 +438,10 @@ export class FamilyPage {
       else return void event.preventDefault()
     } else if (event.key === 'h' || event.key === 'ArrowLeft') {
       if (onRow) { event.preventDefault(); this.leave?.(); return }
-      if (this.place.docs!.delete(owner)) this.paint()
-      if (item.closest('.fp-files')) this.place.open.delete(`files:${owner}`), this.paint()
+      const listed = !!item.closest('.fp-files')
+      this.place.docs!.delete(owner)
+      if (listed) this.place.open.delete(`files:${owner}`)
+      this.paint()
       next = this.row(owner)
     } else if ((event.key === 'Enter' || event.key === ' ') && onRow) {
       event.preventDefault()
