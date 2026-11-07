@@ -114,11 +114,12 @@ function indexAt(curve: Curve, y: number): number {
   for (let n = foot; n < tip; n++) if (points[n + 1].y <= y) return n + (points[n].y - y) / (points[n].y - points[n + 1].y)
   return tip
 }
-/** The path along the curve between two places, reflected for the just-finished arm. */
-function pathOf(curve: Curve, from: number, to: number, sign: 1 | -1): string {
+/** The way along the curve between two places, reflected for the just-finished arm. */
+function wayOf(curve: Curve, from: number, to: number, sign: 1 | -1): Point[] {
   const stops = [from, ...Array.from({ length: Math.ceil(to) - Math.ceil(from) }, (_, n) => Math.ceil(from) + n), to]
-  return stops.map((index, n) => { const { x, y } = pointAt(curve, index); return `${n ? 'L' : 'M'}${(sign * x).toFixed(1)} ${(sign * y).toFixed(1)}` }).join('')
+  return stops.map(index => { const { x, y } = pointAt(curve, index); return { x: sign * x, y: sign * y } })
 }
+const pathOf = (way: readonly Point[]): string => way.map(({ x, y }, n) => `${n ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('')
 
 interface Spot extends Point { thread: MapThread; arm: Arm; side: 'left' | 'right'; r: number; room: number }
 /**
@@ -169,7 +170,10 @@ function layArm(kids: readonly MapThread[], arm: Arm, frame: Frame, curve: Curve
     return { thread, arm, side: tail === (arm === 'todo') ? 'right' : 'left', x: sign * x, y: sign * y, r: tail ? Math.min(radii[n], 3) : radii[n], room: rooms[n] }
   })
   const keys = kids.map(kid => kid.key)
-  const segments = kids.map((kid, n): Segment => ({ id: `${arm}${n}`, tone: kid.tone, quiet: n >= ups.length, links: keys.slice(n), d: pathOf(curve, n ? within[n - 1] : 0, within[n], sign) }))
+  const segments = kids.map((kid, n): Segment => {
+    const way = wayOf(curve, n ? within[n - 1] : 0, within[n], sign)
+    return { id: `${arm}${n}`, tone: kid.tone, quiet: n >= ups.length, links: keys.slice(n), d: pathOf(way), way }
+  })
   return { spots, segments }
 }
 

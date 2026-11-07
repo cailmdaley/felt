@@ -13,6 +13,9 @@ const LABEL_RANK = 22
 const LABEL_AGE = 34
 const LABEL_FILES = 28
 const LABEL_GAP = 7
+/** How far a name may lift off its body's line to clear the arm, and how much of its row's height is air a line may pass through. */
+const NUDGES: readonly number[] = [0, 5, 10, 15]
+const LINE_INSET = 4
 const MARGIN = 8
 const NUMERAL = 19
 /** A body's step along the rim past its arm's end, and along a phone's arm. */
@@ -57,7 +60,7 @@ export interface Frame {
   narrow: boolean
 }
 /** A length of arm: from the body before it, or the centre, to a body. */
-export interface Segment { id: string; tone: MapThread['tone']; quiet: boolean; d: string; links: string[] }
+export interface Segment { id: string; tone: MapThread['tone']; quiet: boolean; d: string; way: Point[]; links: string[] }
 export interface Star extends Point {
   thread: MapThread
   owner: Star | null
@@ -151,22 +154,26 @@ const labelBox = (label: Pick<SkyLabel, 'x' | 'y' | 'width' | 'side'>): Box => (
   left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - LABEL_HEIGHT / 2 + .5, bottom: label.y + LABEL_HEIGHT / 2 - .5,
 })
 
-/** Each name on the side of its body its arm runs out to, else the other, whole and clear of every other name and body, or not at all. */
-export function nearLabels(stars: readonly Seen[], named: readonly Seen[], frame: Frame, reserved: readonly Box[]): SkyLabel[] {
+/** Each name on the side of its body its arm runs out to, else the other, clear of every other name, body and line, or not at all. */
+export function nearLabels(stars: readonly Seen[], named: readonly Seen[], frame: Frame, reserved: readonly Box[], lines: readonly Point[]): SkyLabel[] {
   const placed: Box[] = [...reserved], labels: SkyLabel[] = []
   const clear = (box: Box, own: Seen): boolean => !placed.some(other => touches(box, other))
+    && !lines.some(({ x, y }) => x > box.left && x < box.right && y > box.top + LINE_INSET && y < box.bottom - LINE_INSET)
     && stars.every(star => star === own || star.inert || !touches(box, { left: star.x - star.r, right: star.x + star.r, top: star.y - star.r, bottom: star.y + star.r }))
   for (const star of named) {
-    for (const side of [star.side, star.side === 'left' ? 'right' as const : 'left' as const]) {
-      const x = side === 'right' ? star.x + star.r + LABEL_GAP : star.x - star.r - LABEL_GAP
-      const fit = labelFit(star.thread, side === 'right' ? frame.width - MARGIN - x : x - MARGIN)
-      if (!fit) continue
-      const label = { thread: star.thread, numeral: star.numeral, x, y: star.y, side, ...fit }
-      const box = labelBox(label)
-      if (box.top < 0 || box.bottom > frame.height || !clear(box, star)) continue
-      placed.push(box)
-      labels.push(label)
-      break
+    const out = star.arm === 'done' ? 1 : -1
+    search: for (const side of [star.side, star.side === 'left' ? 'right' as const : 'left' as const]) {
+      for (const nudge of NUDGES) {
+        const x = side === 'right' ? star.x + star.r + LABEL_GAP : star.x - star.r - LABEL_GAP
+        const fit = labelFit(star.thread, side === 'right' ? frame.width - MARGIN - x : x - MARGIN)
+        if (!fit) continue
+        const label = { thread: star.thread, numeral: star.numeral, x, y: star.y + out * nudge, side, ...fit }
+        const box = labelBox(label)
+        if (box.top < 0 || box.bottom > frame.height || !clear(box, star)) continue
+        placed.push(box)
+        labels.push(label)
+        break search
+      }
     }
   }
   return labels
@@ -225,7 +232,8 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   const nameable = stars.filter(star => star.owner && !star.inert && !star.hidden && !star.focus && inView(star)).sort((a, b) => b.owner!.room - a.owner!.room || (a.thread.rank < 0 ? Infinity : a.thread.rank) - (b.thread.rank < 0 ? Infinity : b.thread.rank))
   const asking = nameable.filter(star => needsHuman(star.thread))
   const minis = narrow ? [] : nameable.filter(star => star.room >= MINIS_FROM).slice(0, MINIS).map(star => miniature(star.thread, sight?.holds(star.thread) ?? {}, star, star.room))
-  const labels = narrow ? [] : nearLabels(stars, nameable, plate, taken)
+  const lines = arms.flatMap(arm => arm.segments.flatMap(segment => segment.way.map(point => ({ x: arm.at.x + point.x * arm.scale, y: arm.at.y + point.y * arm.scale }))))
+  const labels = narrow ? [] : nearLabels(stars, nameable, plate, taken, lines)
   const names: ArmName[] = []
   if (named && !narrow) {
     for (const arm of ['todo', 'done'] as const) {
@@ -235,7 +243,7 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
       const label = labels.find(item => item.thread === last.thread), edge = label ? labelBox(label) : { top: last.y - last.r, bottom: last.y + last.r }
       const name = { label: `${plate.armNames[arm]} · ${on.length}`, side: last.side, x: last.x + (last.side === 'left' ? -last.r - LABEL_GAP : last.r + LABEL_GAP), y: arm === 'todo' ? edge.top - ARM_NAME_RISE : edge.bottom + ARM_NAME_RISE }
       const box = { left: name.side === 'left' ? name.x - ARM_NAME_WIDTH : name.x, right: name.side === 'left' ? name.x : name.x + ARM_NAME_WIDTH, top: name.y - ARM_NAME_RISE, bottom: name.y + ARM_NAME_RISE }
-      if (box.top >= 0 && box.bottom <= height && ![...taken, ...labels.map(labelBox)].some(other => touches(box, other))) names.push(name)
+      if (box.top >= 0 && box.bottom <= height && ![...taken, ...labels.map(labelBox)].some(other => touches(box, other)) && !lines.some(({ x, y }) => x > box.left && x < box.right && y > box.top && y < box.bottom)) names.push(name)
     }
   }
   return {

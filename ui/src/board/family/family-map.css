@@ -117,7 +117,7 @@ button.fm-held { cursor: pointer; }
 .family-map .fm-focus-name { color: var(--ws-ink); font: var(--type-row)/var(--leading-tight) var(--font-serif); }
 .family-map .fm-focus-state { color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
 .family-map .fm-arm-name { position: absolute; top: -8px; left: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; }
-.family-map .fm-arm-name[data-side='right'] { translate: -100% 0; }
+.family-map .fm-arm-name[data-side='left'] { translate: -100% 0; }
 
 /* The rows shared by the cloth and the delta */
 .family-map .fm-rows { position: relative; width: 100%; }
