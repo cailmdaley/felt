@@ -790,6 +790,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         do: Map.put(buffer, "last_word_at", state.clock.() - silence(line, voice)),
         else: buffer
 
+    # In live voice a name only wakes: the batch still waits for quiet.
+    buffer =
+      if config["kind"] == "voice" and Regex.match?(@names, spoken),
+        do: Map.put(buffer, "summoned", true),
+        else: buffer
+
     config =
       Map.put(
         config,
@@ -803,7 +809,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       String.starts_with?(line, "# ended") ->
         config |> Map.put("ended", true) |> flush_all(state)
 
-      summoned?(config, spoken) ->
+      config["kind"] == "voice" and Regex.match?(@closing, spoken) ->
+        make_batch(config, buffer)
+
+      config["kind"] != "voice" and Regex.match?(@names, spoken) ->
         make_batch(config, buffer)
 
       buffer["words"] >= threshold["words"] ->
@@ -829,11 +838,6 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         do: flush_buffer(acc, buffer, state),
         else: acc
     end)
-  end
-
-  defp summoned?(config, spoken) do
-    Regex.match?(@names, spoken) or
-      (config["kind"] == "voice" and Regex.match?(@closing, spoken))
   end
 
   defp silence(_line, %{silent_ms: silent_ms}), do: silent_ms
@@ -878,10 +882,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     do: Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
 
   # Waking a worker is deliberate: speech to a target with no live worker
-  # becomes a batch only when summoned, and is otherwise dropped here. The
-  # transcript on disk keeps the words.
+  # becomes a batch only when it named the worker or ended with "send", and is
+  # otherwise dropped here. The transcript on disk keeps the words.
   defp flush_buffer(%{"kind" => "voice"} = config, buffer, state) do
-    if state.cold.(buffer),
+    if state.cold.(buffer) and buffer["summoned"] != true,
       do: Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer))),
       else: make_batch(config, buffer)
   end

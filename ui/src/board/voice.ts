@@ -5,12 +5,6 @@ import { coarsePointer, isMobileViewport } from './mobile.js'
 /** How long a view must hold before voice follows it, so a pan does not flap. */
 const SIGHT_MS = 350
 
-/** Words spoken to a constitution with no live worker, waiting for its next voice message. */
-export interface VoiceHeld {
-  fiber_id: string
-  text: string
-}
-
 export interface VoiceStatus {
   /** The audio recorder, not the target card's origin. */
   recorder?: string
@@ -22,7 +16,11 @@ export interface VoiceStatus {
   target: (RexMove & { source?: string }) | null
   last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string } | null
   error: string | null
-  held?: VoiceHeld[]
+  /** What holds the mic: following the card in view, a meeting joined to one card, or nothing. */
+  mode?: 'off' | 'following' | 'meeting'
+  /** Where words go right now. */
+  destination?: RexMove | null
+  paused?: boolean
 }
 
 /** The constitution a card's page speaks to: the card itself, or the nearest constitution above it by path on the same host. */

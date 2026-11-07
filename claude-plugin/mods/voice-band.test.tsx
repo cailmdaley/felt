@@ -67,11 +67,19 @@ test('fixed elsewhere, the band names the card alone', ABOVE, async ($, on) => {
   await ui.unmount()
 })
 
+test('a meeting reads as a meeting, and names its card', ABOVE, async ($, on) => {
+  daemon(on, { ...VOICE, enabled: false, state: 'off', mode: 'meeting', destination: { fiber_id: 'X', name: 'Standup' }, paused: false, target: { fiber_id: SELF } }, SPEAK)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'mic')).toBe('● meeting → Standup')
+  await ui.unmount()
+})
+
 test('muted mic and speaker say so, and a click toggles each', ABOVE, async ($, on) => {
   const { posts } = daemon(on, { ...VOICE, muted: true, target: { fiber_id: SELF } }, { ...SPEAK, muted: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await label(ui, 'mic')).toBe('🎤 muted')
+  expect(await label(ui, 'mic')).toBe('🎤 paused')
   expect(await label(ui, 'speaker')).toBe('🔈 muted')
   await ui.press({ key: 'mic' })
   await ui.press({ key: 'speaker' })

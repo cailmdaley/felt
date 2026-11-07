@@ -143,7 +143,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     route(routes, "2026-11-06T10:00:10Z", "fiber-b")
     # This arrives after the switch, but started before it.
     record(c.path, "2026-11-06T10:00:09Z", "late old words")
-    record(c.path, "2026-11-06T10:00:11Z", "new words Claude")
+    record(c.path, "2026-11-06T10:00:11Z", "new words send")
     poll(c)
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: first}}, 1_000
     sync_tasks(c)
@@ -152,8 +152,8 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert_receive {:delivery, %{fiber_id: "fiber-b", text: new}}, 1_000
     assert first =~ "first phrase"
     assert late =~ "late old words"
-    assert new =~ "new words Claude"
-    assert new == "me: new words Claude\n"
+    assert new =~ "new words send"
+    assert new == "me: new words send\n"
     refute new =~ "room speech"
     refute new =~ "Cail's spoken words"
     refute new =~ "10:00:11"
@@ -172,7 +172,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
         ~s({"wall": "2026-11-06T10:00:01", "name": {"speaker": "S1", "as": "me"}}),
         ~s({"wall": "2026-11-06T10:00:02", "pause": {"track": "mic", "state": "paused"}}),
         ~s({"wall": "2026-11-06T10:00:03", "lost": {"track": "mic", "at": "10:00:02"}}),
-        ~s({"wall": "2026-11-06T10:00:04+00:00", "track": "mic", "speaker": "S1", "name": "me", "start": 4.0, "end": 5.0, "text": "still heard Claude"})
+        ~s({"wall": "2026-11-06T10:00:04+00:00", "track": "mic", "speaker": "S1", "name": "me", "start": 4.0, "end": 5.0, "text": "still heard send"})
       ]
       |> Enum.join("\n")
       |> Kernel.<>("\n")
@@ -181,7 +181,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     start_monitor(c, kind: "voice", routes: routes)
     poll(c)
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
-    assert text =~ "me: still heard Claude"
+    assert text =~ "me: still heard send"
   end
 
   test "subsecond spoken starts choose the route on their own side of a switch", c do
@@ -189,21 +189,21 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     route(routes, "2026-11-06T10:00:00.100000Z", "fiber-a")
     route(routes, "2026-11-06T10:00:00.500000Z", "fiber-b")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:00.499999Z", "old Claude")
-    record(c.path, "2026-11-06T10:00:00.500000Z", "new Claude")
+    record(c.path, "2026-11-06T10:00:00.499999Z", "old send")
+    record(c.path, "2026-11-06T10:00:00.500000Z", "new send")
     start_monitor(c, kind: "voice", routes: routes)
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: old}}, 1_000
     assert_receive {:delivery, %{fiber_id: "fiber-b", text: new}}, 1_000
-    assert old =~ "old Claude"
-    assert new =~ "new Claude"
+    assert old =~ "old send"
+    assert new =~ "new send"
   end
 
   test "voice batches stay FIFO within a target while other targets are independent", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "first Claude")
-    record(c.path, "2026-11-06T10:00:02Z", "second Claude")
+    record(c.path, "2026-11-06T10:00:01Z", "first send")
+    record(c.path, "2026-11-06T10:00:02Z", "second send")
     parent = self()
 
     deliver = fn msg ->
@@ -216,14 +216,14 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
     assert_receive {:attempt, first, %{text: text}}, 1_000
-    assert text =~ "first Claude"
+    assert text =~ "first send"
     poll(c)
     refute_receive {:attempt, _, _}, 20
     send(first, :accept)
     sync_tasks(c)
     poll(c)
     assert_receive {:attempt, second, %{text: text}}, 1_000
-    assert text =~ "second Claude"
+    assert text =~ "second send"
     send(second, :accept)
     sync_tasks(c)
   end
@@ -232,7 +232,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "old Claude")
+    record(c.path, "2026-11-06T10:00:01Z", "old send")
     parent = self()
 
     deliver = fn message ->
@@ -245,10 +245,10 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
     assert_receive {:attempt, old, %{text: text}}, 1_000
-    assert text =~ "old Claude"
+    assert text =~ "old send"
     next = Path.join(c.root, "next.txt")
     File.write!(next, "")
-    record(next, "2026-11-06T10:00:02Z", "new Claude")
+    record(next, "2026-11-06T10:00:02Z", "new send")
 
     assert :ok =
              TranscriptRelay.start(
@@ -267,7 +267,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     refute_receive {:attempt, _, _}, 50
     send(old, :accept)
     assert_receive {:attempt, new, %{text: text}}, 1_000
-    assert text =~ "new Claude"
+    assert text =~ "new send"
     send(new, :accept)
   end
 
@@ -368,13 +368,13 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
       Jason.encode!(%{
         "wall" => "2026-11-06T10:00:01Z",
         "speaker" => "S2",
-        "text" => "Claude make this plot"
+        "text" => "Claude make this plot, send"
       }) <> "\n"
     )
 
     start_monitor(c, kind: "voice", routes: routes)
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert text == "S2: Claude make this plot\n"
+    assert text == "S2: Claude make this plot, send\n"
   end
 
   test "voice groups consecutive speakers without headers or timestamps", c do
@@ -387,7 +387,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
           {"2026-11-06T10:00:02Z", "me", "two"},
           {"2026-11-06T10:00:03Z", "S2", "three"},
           {"2026-11-06T10:00:04Z", "S2", "four"},
-          {"2026-11-06T10:00:05Z", "me", "Claude five"}
+          {"2026-11-06T10:00:05Z", "me", "five send"}
         ] do
       File.write!(
         Path.rootname(c.path) <> ".jsonl",
@@ -398,15 +398,15 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
 
     start_monitor(c, kind: "voice", routes: routes)
     assert_receive {:delivery, %{text: first}}, 1_000
-    assert first == "me: one two\nS2: three four\nme: Claude five\n"
+    assert first == "me: one two\nS2: three four\nme: five send\n"
     sync_tasks(c)
-    record(c.path, "2026-11-06T10:10:05Z", "Claude no timestamp")
+    record(c.path, "2026-11-06T10:10:05Z", "no timestamp send")
     poll(c)
-    assert_receive {:delivery, %{text: "me: Claude no timestamp\n"}}, 1_000
+    assert_receive {:delivery, %{text: "me: no timestamp send\n"}}, 1_000
     sync_tasks(c)
-    record(c.path, "2026-11-06T10:20:06Z", "Claude after silence")
+    record(c.path, "2026-11-06T10:20:06Z", "after silence send")
     poll(c)
-    assert_receive {:delivery, %{text: "me: Claude after silence\n"}}, 1_000
+    assert_receive {:delivery, %{text: "me: after silence send\n"}}, 1_000
   end
 
   test "a slow or failed voice destination does not hold a later target or retry forever", c do
@@ -414,8 +414,8 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     route(routes, "2026-11-06T10:00:10Z", "fiber-b")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:09Z", "old Claude")
-    record(c.path, "2026-11-06T10:00:11Z", "new Claude")
+    record(c.path, "2026-11-06T10:00:09Z", "old send")
+    record(c.path, "2026-11-06T10:00:11Z", "new send")
     parent = self()
 
     deliver = fn message ->
@@ -526,7 +526,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "Claude unconfirmed probe")
+    record(c.path, "2026-11-06T10:00:01Z", "unconfirmed probe send")
     parent = self()
 
     deliver = fn message ->
@@ -775,7 +775,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "Claude durable words")
+    record(c.path, "2026-11-06T10:00:01Z", "durable words send")
     File.mkdir!(Shuttle.Voice.last_path())
     start_monitor(c, kind: "voice", routes: routes)
     assert_receive {:delivery, first}, 1_000
@@ -800,7 +800,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "Claude once")
+    record(c.path, "2026-11-06T10:00:01Z", "once send")
     parent = self()
 
     deliver = fn message ->
@@ -824,7 +824,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "Claude once")
+    record(c.path, "2026-11-06T10:00:01Z", "once send")
     parent = self()
 
     deliver = fn message ->
@@ -1022,6 +1022,9 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
       refute_receive {:delivery, _}, 20
       record(c.path, "2026-11-06T10:00:02Z", "please #{unquote(spoken_name)}")
       poll(c)
+      refute_receive {:delivery, _}, 20
+      Agent.update(c.now, fn _ -> 5_000 end)
+      poll(c)
       assert_receive {:delivery, %{kind: "voice", text: text}}, 1_000
       assert text == "me: first words please #{unquote(spoken_name)}\n"
       sync_tasks(c)
@@ -1030,7 +1033,36 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     end
   end
 
-  test "the closing phrase summons a cold target like a name", c do
+  test "a name mid-sentence waits for quiet: warm speech batches as usual, cold speech is let through",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    cold = start_supervised!(Supervisor.child_spec({Agent, fn -> false end}, id: :cold))
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> Agent.get(cold, & &1) end)
+    record(c.path, "2026-11-06T10:00:01Z", "the Claude Island part is next")
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    Agent.update(c.now, fn _ -> 5_000 end)
+    poll(c)
+    assert_receive {:delivery, %{text: "me: the Claude Island part is next\n"}}, 1_000
+    sync_tasks(c)
+
+    Agent.update(cold, fn _ -> true end)
+    record(c.path, "2026-11-06T10:00:02Z", "unnamed aside")
+    poll(c)
+    Agent.update(c.now, fn _ -> 10_000 end)
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    record(c.path, "2026-11-06T10:00:03Z", "ask Claude about the plot")
+    poll(c)
+    refute_receive {:delivery, _}, 20
+    Agent.update(c.now, fn _ -> 15_000 end)
+    poll(c)
+    assert_receive {:delivery, %{text: "me: ask Claude about the plot\n"}}, 1_000
+  end
+
+  test "the closing phrase summons a cold target at once", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
@@ -1058,14 +1090,16 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert_receive {:delivery, %{text: "me: early words warm words\n"}}, 1_000
   end
 
-  test "a name stays explicit if the target crosses the cold threshold during ingestion", c do
+  test "a named buffer still delivers if the target turns cold before quiet", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
     record(c.path, "2026-11-06T10:00:01Z", "Claude wake")
-    calls = start_supervised!(Supervisor.child_spec({Agent, fn -> 0 end}, id: :cold))
-    cold = fn _ -> Agent.get_and_update(calls, fn n -> {n > 0, n + 1} end) end
-    start_monitor(c, kind: "voice", routes: routes, cold: cold)
+    cold = start_supervised!(Supervisor.child_spec({Agent, fn -> false end}, id: :cold))
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> Agent.get(cold, & &1) end)
+    poll(c)
+    Agent.update(cold, fn _ -> true end)
+    Agent.update(c.now, fn _ -> 5_000 end)
     poll(c)
     assert_receive {:delivery, %{text: "me: Claude wake\n"}}, 1_000
   end

@@ -43,26 +43,61 @@ export interface ListenOptions {
   onError(message: string | null): void
 }
 
-function option(label: string): HTMLButtonElement {
+const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
+
+const ICONS = {
+  mic: 'M8 1.5a2 2 0 0 0-2 2v4.25a2 2 0 0 0 4 0V3.5a2 2 0 0 0-2-2ZM3.5 7.75a4.5 4.5 0 0 0 9 0M8 12.25v2.25M5.5 14.5h5',
+  meeting: 'M8 3.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 1 0 0-9ZM8 6.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3Z',
+  pause: 'M5.5 3.5v9M10.5 3.5v9',
+  resume: 'M5 3.25v9.5L12.5 8Z',
+  stop: 'M4 4h8v8H4Z',
+}
+
+function svg(d: string): SVGSVGElement {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  icon.setAttribute('viewBox', '0 0 16 16')
+  icon.setAttribute('aria-hidden', 'true')
+  icon.setAttribute('focusable', 'false')
+  const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  glyph.setAttribute('d', d)
+  glyph.setAttribute('fill', 'none')
+  glyph.setAttribute('stroke', 'currentColor')
+  glyph.setAttribute('stroke-width', '1.35')
+  glyph.setAttribute('stroke-linecap', 'round')
+  glyph.setAttribute('stroke-linejoin', 'round')
+  icon.append(glyph)
+  return icon
+}
+
+function plainButton(className: string): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
-  button.className = 'kbn-ctl-btn ws-select-option'
-  button.textContent = label
+  button.className = `kbn-ctl-btn ${className}`
   return button
 }
 
-const message = (error: unknown): string => error instanceof Error ? error.message : String(error)
+/** What the mic is doing, as the control draws it. */
+type Mode =
+  | { kind: 'off' }
+  | { kind: 'failed'; error: string }
+  | { kind: 'following'; paused: boolean; name: string }
+  | { kind: 'meeting'; paused: boolean; name: string; meeting: MeetingRecord }
 
 /**
- * The band's Hark control. Listen starts a recording joined to this
- * constitution, on the session it already has; its menu manages the current
- * recording, live voice and the listening cadence.
+ * The band's Listening control. The mic does one thing at a time: off,
+ * following the card in view, or recording a meeting joined to one card.
+ * Listen turns following on; once anything is on, the control reads where
+ * words go and offers Pause and Stop. Stop always turns the mic off. The ▾
+ * menu holds what is rarer: recording a meeting here, the transcript, and the
+ * quiet before a batch is sent.
  */
 export class ListenControl {
   readonly el = document.createElement('span')
-  private readonly button = document.createElement('button')
+  private readonly button = plainButton('kbn-ctl-meet-arm')
   private readonly word = document.createElement('span')
-  private readonly dropdown = document.createElement('button')
+  private readonly pauseButton = plainButton('kbn-ctl-meet-pause')
+  private readonly stopButton = plainButton('kbn-ctl-meet-stop')
+  private readonly dropdown = plainButton('kbn-ctl-meet-dropdown')
   private readonly audio = document.createElement('select')
   private readonly opts: ListenOptions
   private readonly unsubscribe?: () => void
@@ -71,52 +106,38 @@ export class ListenControl {
   private menuState = ''
   private release: Release | null = null
   private localError: string | null = null
-  private voiceAvailable: boolean
-  /** A move to this constitution waits for the recording it stopped to end. */
-  private pendingHere: string | null | undefined = undefined
+  private paintedIcon = ICONS.mic
 
   constructor(opts: ListenOptions) {
     this.opts = opts
     this.el.className = 'kbn-ctl-meet'
-    this.button.type = 'button'
-    this.button.className = 'kbn-ctl-btn kbn-ctl-meet-arm'
-    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    icon.setAttribute('viewBox', '0 0 16 16')
-    icon.setAttribute('aria-hidden', 'true')
-    icon.setAttribute('focusable', 'false')
-    const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    glyph.setAttribute('d', 'M8 1.5a2 2 0 0 0-2 2v4.25a2 2 0 0 0 4 0V3.5a2 2 0 0 0-2-2ZM3.5 7.75a4.5 4.5 0 0 0 9 0M8 12.25v2.25M5.5 14.5h5')
-    glyph.setAttribute('fill', 'none')
-    glyph.setAttribute('stroke', 'currentColor')
-    glyph.setAttribute('stroke-width', '1.35')
-    glyph.setAttribute('stroke-linecap', 'round')
-    icon.append(glyph)
     this.word.className = 'kbn-ctl-meet-label'
-    this.word.textContent = 'Listen'
-    this.button.append(icon, this.word)
+    this.button.append(svg(ICONS.mic), this.word)
+    this.stopButton.append(svg(ICONS.stop))
+    this.stopButton.setAttribute('aria-label', 'Stop listening')
+    this.stopButton.title = 'Stop: the mic goes off'
     this.audio.className = 'kbn-ctl-select kbn-ctl-meet-audio'
-    this.audio.setAttribute('aria-label', 'Listening audio')
+    this.audio.setAttribute('aria-label', 'Meeting audio')
     this.audio.append(new Option('Mic + system', 'system'), new Option('Mic only', 'mic'))
-    this.dropdown.type = 'button'
-    this.dropdown.className = 'kbn-ctl-btn kbn-ctl-meet-dropdown'
     this.dropdown.textContent = '▾'
-    this.dropdown.setAttribute('aria-label', 'Listening controls')
+    this.dropdown.setAttribute('aria-label', 'Listening options')
     this.dropdown.setAttribute('aria-haspopup', 'menu')
     this.dropdown.setAttribute('aria-expanded', 'false')
     this.dropdown.addEventListener('click', () => this.showMenu())
     this.button.addEventListener('click', () => {
-      const current = opts.meeting.current()
-      if ((current && current.state !== 'failed') || opts.voice?.status?.enabled) this.showMenu()
-      else this.start()
+      const kind = this.mode().kind
+      if (kind === 'off' || kind === 'failed') this.listen()
+      else this.showMenu()
     })
-    this.voiceAvailable = !!opts.voice?.status?.available
+    this.pauseButton.addEventListener('click', () => this.pause())
+    this.stopButton.addEventListener('click', () => this.stop())
     this.unsubscribe = opts.voice?.subscribe(() => this.paint())
-    this.el.append(this.button, this.dropdown)
+    this.el.append(this.button, this.pauseButton, this.stopButton, this.dropdown)
     this.paint()
   }
 
-  private get requiredMode(): MeetingMode { return isMobileViewport() ? 'phone' : 'call' }
-  private get canJoin(): boolean { return this.opts.meeting.canJoin() && this.opts.meeting.modes().includes(this.requiredMode) }
+  /** A phone is its own mic, so listening there records on the phone. */
+  private get phone(): boolean { return isMobileViewport() }
 
   dispose(): void {
     this.closeMenu()
@@ -130,39 +151,88 @@ export class ListenControl {
     return true
   }
 
-  /** A recording ended or changed: close a stale menu, and take a move that was waiting for it. */
-  meetingChanged(): void {
-    const current = this.opts.meeting.current()
-    if (this.pendingHere !== undefined && current && current.launch !== this.pendingHere) this.pendingHere = undefined
-    if (this.pendingHere !== undefined && !current && this.canJoin) {
-      this.pendingHere = undefined
-      this.start()
-    }
-    this.paint()
-  }
+  /** A recording started, ended or changed. */
+  meetingChanged(): void { this.paint() }
 
   private fail(error: unknown): void {
     this.localError = message(error)
     this.paint()
   }
 
-  private start(): void {
+  private mode(): Mode {
+    const { card, meeting } = this.opts
+    const current = meeting.current()
+    const voice = this.opts.voice?.status
+    const failure = this.localError
+      ?? (current?.state === 'failed' ? current.error ?? 'The recording failed' : null)
+      ?? (current?.handoff?.status === 'reported-failure' ? 'Delivery failed' : null)
+      ?? (voice?.enabled && voice.state === 'failed' ? voice.error ?? 'Listening failed' : null)
+      ?? (voice?.enabled && voice.last?.status === 'failed' ? `Delivery failed${voice.last.detail ? `: ${voice.last.detail}` : ''}` : null)
+    if (failure) return { kind: 'failed', error: failure }
+    if (current) {
+      const hosted = meetingHostCard(current, [card]) !== null
+      const name = hosted ? card.name : this.opts.hostName(current) ?? current.fiber?.split('/').at(-1) ?? current.title?.trim() ?? 'a card'
+      return { kind: 'meeting', paused: !!current.paused, name, meeting: current }
+    }
+    if (voice?.enabled) return { kind: 'following', paused: voice.muted, name: voice.target?.name ?? 'nothing yet' }
+    return { kind: 'off' }
+  }
+
+  /** Listen: follow what is in view, or on a phone, record on the phone joined to this card. */
+  private listen(): void {
+    this.localError = null
+    if (this.phone) { this.record('phone'); return }
+    void this.opts.voice?.set({ enabled: true, muted: false })
+      .then(() => this.paint())
+      .catch((error: unknown) => this.fail(error))
+  }
+
+  /** Record a meeting joined to this card. Following turns off: one mode at a time. */
+  private record(mode: MeetingMode): void {
     const { card, meeting, voice } = this.opts
-    if (this.starting || !this.canJoin) return
+    if (this.starting || !meeting.canJoin() || !meeting.modes().includes(mode)) return
     this.starting = true
+    this.localError = null
     this.opts.onError(null)
     this.paint()
+    const following = !!voice?.status?.enabled
     let joined: Promise<string | null>
     try {
-      joined = meeting.join(card, this.requiredMode, {
+      joined = meeting.join(card, mode, {
         session: card.sessionUuid ? 'previous' : 'fresh',
-        systemAudio: !voice?.status?.enabled && this.audio.value === 'system',
+        systemAudio: mode === 'call' && this.audio.value === 'system',
       })
     } catch (error) { joined = Promise.reject(error instanceof Error ? error : new Error(String(error))) }
-    void joined.then(error => this.opts.onError(error)).catch((error: unknown) => this.opts.onError(message(error))).finally(() => {
-      this.starting = false
-      this.paint()
-    })
+    void joined
+      .then(async error => {
+        this.opts.onError(error)
+        if (!error && following) await voice?.set({ enabled: false })
+      })
+      .catch((error: unknown) => this.opts.onError(message(error)))
+      .finally(() => { this.starting = false; this.paint() })
+  }
+
+  private pause(): void {
+    const mode = this.mode()
+    const done = (task: Promise<void> | undefined): void => {
+      void task?.then(() => { this.localError = null; this.paint() }).catch((error: unknown) => this.fail(error))
+    }
+    if (mode.kind === 'meeting') done(this.opts.meeting.pause?.(mode.meeting, !mode.paused))
+    else if (mode.kind === 'following') done(this.opts.voice?.set({ muted: !mode.paused }))
+  }
+
+  /** Stop: whatever holds the mic stops, and nothing takes over. */
+  private stop(): void {
+    const { meeting, voice } = this.opts
+    const current = meeting.current()
+    this.localError = null
+    void (async () => {
+      if (current && meeting.stop) {
+        const stopped = await meeting.stop(current)
+        if (stopped === false) throw new Error('The recording did not stop')
+      }
+      if (voice?.status?.enabled) await voice.set({ enabled: false })
+    })().catch((error: unknown) => { this.localError = message(error) }).finally(() => this.paint())
   }
 
   private closeMenu(): void {
@@ -179,126 +249,109 @@ export class ListenControl {
   private signature(): string {
     const current = this.opts.meeting.current()
     const voice = this.opts.voice?.status
-    return JSON.stringify([current?.launch, current?.state, current?.paused, current?.recorder, current?.handoff?.status, voice?.available, voice?.enabled, voice?.muted, voice?.state, voice?.target, voice?.recorder, voice?.held?.length, this.localError])
+    return JSON.stringify([current?.launch, current?.state, current?.paused, current?.recorder, voice?.available, voice?.enabled, voice?.muted, voice?.recorder, this.localError])
   }
 
   private paint(): void {
-    const { card, meeting } = this.opts
-    const current = meeting.current()
-    const recording = current !== null && current.state !== 'failed'
+    const mode = this.mode()
     const voice = this.opts.voice?.status
-    this.button.disabled = !recording && !voice?.enabled && (this.starting || !this.canJoin)
-    this.audio.disabled = this.starting || recording
-    if (this.voiceAvailable && !voice?.available) this.closeMenu()
-    this.voiceAvailable = !!voice?.available
+    const on = mode.kind === 'following' || mode.kind === 'meeting'
     if (this.menu && this.signature() !== this.menuState) this.closeMenu()
-    let label = 'Listen'
-    let elsewhere: string | null = null
-    if (this.localError || current?.state === 'failed' || current?.handoff?.status === 'reported-failure' || voice?.state === 'failed' || voice?.last?.status === 'failed') {
-      label = 'Failed'
-    } else if (recording) {
-      const hosted = meetingHostCard(current, [card]) !== null
-      const host = this.opts.hostName(current) ?? (hosted ? card.name : current.fiber?.split('/').at(-1)) ?? current.title?.trim() ?? 'card'
-      label = current.paused ? 'Paused' : 'Listening'
-      if (!hosted) label += ` · ${host}`
-      if (!hosted && current.state !== 'stopping') elsewhere = current.paused ? `The mic is paused for ${host}.` : `Your voice is going to ${host}.`
-    } else if (voice?.available && voice.enabled) {
-      label = voice.muted ? 'Paused' : 'Listening'
-      if (voice.target?.fiber_id !== (card.uid ?? card.id)) label += ` · ${voice.target?.name ?? 'Rex'}`
-      if (voice.state === 'yielded') elsewhere = 'Your voice is going to a recording.'
+
+    const icon = mode.kind === 'meeting' ? ICONS.meeting : ICONS.mic
+    if (icon !== this.paintedIcon) { this.button.firstElementChild?.replaceWith(svg(icon)); this.paintedIcon = icon }
+    let label: string
+    let title: string
+    switch (mode.kind) {
+      case 'off':
+        label = 'Listen'
+        title = this.phone ? 'Listen: record on this phone, joined to this card' : 'Listen: your words go to whatever card you are looking at'
+        break
+      case 'failed':
+        label = 'Failed'
+        title = mode.error
+        break
+      case 'following':
+        label = `Following · ${mode.name}`
+        title = `${mode.paused ? 'Paused. ' : ''}Following you: words go to ${mode.name}, the card you are looking at`
+        break
+      case 'meeting':
+        label = `Meeting · ${mode.name}`
+        title = `${mode.paused ? 'Paused. ' : ''}Recording a meeting: every word goes to ${mode.name}, wherever you look`
+        break
     }
+    this.button.disabled = (mode.kind === 'off' || mode.kind === 'failed') && (this.starting || (this.phone
+      ? !this.opts.meeting.canJoin() || !this.opts.meeting.modes().includes('phone')
+      : !voice?.available))
+    if (this.button.disabled && !this.phone && !this.starting) title = voice?.error ? `Listening is unavailable: ${voice.error}` : 'Listening is unavailable on this host'
     if (this.word.textContent !== label) this.word.textContent = label
-    const whole = /^(Listening|Paused)$/.test(label) ? `${label} · ${card.name}` : label
-    this.button.title = elsewhere ?? whole
-    this.button.setAttribute('aria-label', whole)
-    this.button.classList.toggle('kbn-ctl-meet-on', recording || !!voice?.enabled)
+    this.button.title = title
+    this.button.setAttribute('aria-label', title)
+    this.el.dataset.mode = mode.kind
+    this.el.classList.toggle('kbn-ctl-meet-paused', on && mode.paused)
+    this.button.classList.toggle('kbn-ctl-meet-on', on)
+
+    const pausable = mode.kind === 'following' || (mode.kind === 'meeting' && !mode.meeting.phone && !!this.opts.meeting.pause)
+    this.pauseButton.hidden = !pausable
+    if (pausable) {
+      const want = mode.paused ? ICONS.resume : ICONS.pause
+      if (this.pauseButton.dataset.icon !== want) { this.pauseButton.replaceChildren(svg(want)); this.pauseButton.dataset.icon = want }
+      this.pauseButton.setAttribute('aria-label', mode.paused ? 'Resume listening' : 'Pause listening')
+      this.pauseButton.title = mode.paused ? 'Resume' : 'Pause: words go nowhere until you resume'
+      this.pauseButton.disabled = mode.kind === 'meeting' && mode.meeting.state !== 'live'
+    }
+    this.stopButton.hidden = !on && !this.opts.meeting.current() && !voice?.enabled
+    this.stopButton.disabled = mode.kind === 'meeting'
+      && (!this.opts.meeting.stop || meetingActions(mode.meeting, this.opts.meeting.stopRequested?.(mode.meeting) ?? false).stopDisabled)
   }
 
   private item(label: string, act: () => void, disabled = false): void {
-    const button = option(label)
+    const button = plainButton('ws-select-option')
+    button.textContent = label
     button.setAttribute('role', 'menuitem')
     button.disabled = disabled
     button.addEventListener('click', () => { this.closeMenu(); act() })
     this.menu!.append(button)
   }
 
-  private note(text: string): void {
-    const el = document.createElement('div')
-    el.className = 'voice-error'
-    el.textContent = text
-    this.menu!.append(el)
-  }
-
   private showMenu(): void {
     if (this.menu) { this.closeMenu(); return }
     const { card, meeting } = this.opts
-    const voice = this.opts.voice
+    const state = this.opts.voice?.status
+    const mode = this.mode()
     const menu = this.menu = document.createElement('div')
     menu.className = 'ws-select-picker'
     menu.setAttribute('role', 'menu')
-    menu.setAttribute('aria-label', 'Listening controls')
-    const current = meeting.current()
-    const recording = !!current && current.state !== 'failed'
-    const state = voice?.status
+    menu.setAttribute('aria-label', 'Listening options')
     this.menuState = this.signature()
-    const set = (values: { muted?: boolean; enabled?: boolean }): void => {
-      void voice?.set(values).then(() => { this.localError = null; this.paint() }).catch((error: unknown) => this.fail(error))
-    }
-    const stopHeld = !recording || !meeting.stop || meetingActions(current, meeting.stopRequested?.(current) ?? false).stopDisabled
-    if (recording) {
-      if (state?.available && !isMobileViewport()) this.item('Stop and follow me', () => {
-        void Promise.resolve(meeting.stop?.(current)).then(async stopped => {
-          if (stopped === false) throw new Error('The recording did not stop')
-          await voice?.set(state.muted ? { enabled: true, muted: false } : { enabled: true })
-          this.localError = null
-        }).catch((error: unknown) => { this.localError = message(error) }).finally(() => this.paint())
-      }, stopHeld)
-    } else {
-      const follow = option('Follow me')
-      follow.setAttribute('role', 'menuitemcheckbox')
-      follow.setAttribute('aria-checked', String(!!state?.enabled))
-      follow.disabled = !state?.enabled && (!state?.available || isMobileViewport())
-      follow.addEventListener('click', () => { this.closeMenu(); set({ enabled: !state?.enabled }) })
-      menu.append(follow)
-    }
-    if (!state?.enabled && !recording && this.requiredMode === 'call') {
-      const label = document.createElement('label')
-      label.className = 'kbn-ctl-meet-audio-label'
-      label.append('Audio', this.audio)
-      menu.append(label)
-    }
-    if (recording) {
+
+    const current = meeting.current()
+    if (current) {
       const hosted = meetingHostCard(current, [card]) !== null
       this.item('Open transcript', () => { if (hosted) this.opts.showPane(); else this.opts.openHost(current) })
-      if (!current.phone) this.item(current.paused ? 'Resume' : 'Pause', () => {
-        void meeting.pause?.(current, !current.paused).then(() => { this.localError = null; this.paint() }).catch((error: unknown) => this.fail(error))
-      }, !meeting.pause || current.state !== 'live')
-      this.item('Stop', () => { void meeting.stop?.(current) }, stopHeld)
-      if (!hosted) this.item('Listen here', () => {
-        this.pendingHere = current.launch
-        void Promise.resolve(meeting.stop?.(current)).then(ok => {
-          if (ok === false) this.pendingHere = undefined
-          this.meetingChanged()
-        }).catch(() => { this.pendingHere = undefined })
-      }, stopHeld || !meeting.modes().includes(this.requiredMode))
-    } else if (state?.available && state.enabled) {
+    } else if (state?.enabled) {
       this.item('Open transcript', () => {
         void openVoiceTranscript(this.opts.shuttleBase, this.opts.openFile, state.recorder)
           .then(() => { this.localError = null; this.paint() })
           .catch((error: unknown) => this.fail(error))
       })
-      this.item(state.muted ? 'Resume' : 'Pause', () => set({ muted: !state.muted }))
-      this.item('Stop', () => set({ enabled: false }))
     }
-    const cadence = this.cadence(recording ? current.recorder : state?.recorder)
+    if (!current && !this.phone && meeting.modes().includes('call')) {
+      this.item(`Record a meeting on ${card.name}`, () => this.record('call'), this.starting || !meeting.canJoin())
+      const label = document.createElement('label')
+      label.className = 'kbn-ctl-meet-audio-label'
+      label.append('Audio', this.audio)
+      menu.append(label)
+    }
+    const cadence = this.cadence(current ? current.recorder : state?.recorder)
     menu.append(cadence.el)
-    const failure = this.localError || (current?.handoff?.status === 'reported-failure' ? 'Delivery failed' : null) || (current?.state === 'failed' ? current.error : null) || (state?.state === 'failed' ? state.error : null) || (state?.last?.status === 'failed' ? `Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}` : null)
-    if (recording && state?.enabled) {
-      this.item('Turn off Follow me', () => set({ enabled: false }))
-      this.note('Follow me returns when this recording stops.')
+    if (mode.kind === 'failed') {
+      const note = document.createElement('div')
+      note.className = 'voice-error'
+      note.textContent = mode.error
+      menu.append(note)
     }
-    for (const held of state?.held ?? []) this.note(`Held for ${held.fiber_id.split("/").at(-1)} until its worker is up and you speak to it: ${held.text}`)
-    if (failure) this.note(failure)
+
     menu.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.dismiss() }
       if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && event.target !== this.audio && !cadence.fields.includes(event.target as HTMLInputElement)) {
@@ -318,29 +371,23 @@ export class ListenControl {
     window.addEventListener('pointerdown', this.outside, true)
   }
 
-  /** The two listening delays, read from and written to the recorder's voice file. */
+  /** The quiet before a batch is sent, read from and written to the recorder's voice file. */
   private cadence(recorder: string | null | undefined): { el: HTMLElement; fields: HTMLInputElement[] } {
     const el = document.createElement('div')
     el.className = 'kbn-ctl-listen-cadence'
-    const input = (label: string): HTMLInputElement => {
-      const wrapper = document.createElement('label')
-      wrapper.textContent = label
-      const field = document.createElement('input')
-      field.type = 'number'; field.min = '0.001'; field.step = 'any'; field.disabled = true
-      field.setAttribute('aria-label', label)
-      wrapper.append(field); el.append(wrapper)
-      return field
-    }
-    const quiet = input('Quiet seconds')
+    const wrapper = document.createElement('label')
+    wrapper.textContent = 'Quiet seconds'
+    const quiet = document.createElement('input')
+    quiet.type = 'number'; quiet.min = '0.001'; quiet.step = 'any'; quiet.disabled = true
+    quiet.setAttribute('aria-label', 'Quiet seconds')
+    wrapper.append(quiet); el.append(wrapper)
     const origin = recorder ?? ''
     const base = `${this.opts.shuttleBase}/api/v1/config/voice`
     void fetch(`${base}${origin ? `?origin=${encodeURIComponent(origin)}` : ''}`).then(async response => {
       if (!response.ok) throw new Error('Could not read listening settings')
       const file = await response.json() as { text: string; digest: string | null }
       const doc = file.text.trim() ? JSON.parse(file.text) as Record<string, unknown> : {}
-      const oldVoice = doc.voice as { quiet_seconds?: number } | undefined
-      const oldMeeting = doc.meeting as { quiet_seconds?: number } | undefined
-      quiet.value = String(doc.quiet_seconds ?? oldVoice?.quiet_seconds ?? oldMeeting?.quiet_seconds ?? 15)
+      quiet.value = String(doc.quiet_seconds ?? 15)
       quiet.disabled = false
       quiet.addEventListener('change', () => {
         const value = Number(quiet.value)

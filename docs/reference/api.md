@@ -448,7 +448,7 @@ Disabled, idle voice checks lifecycle-file changes without polling the terminal;
 While following is on, the destination is whichever of Rex and the board had focus last. `Shuttle.RexFocus` routes Rex's worker when Rex comes to the front or changes worker, and the board posts what it shows to `POST /voice/target` while it has the keyboard, on regaining it included. Each route durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
 `t` is the recorder's UTC receipt time, not the time reconciliation finishes.
 Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
-A target switch flushes warm pending words to the old target immediately and drops unsummoned cold speech.
+A target switch flushes warm pending words to the old target immediately, and cold words unless they named the worker.
 No selected target means no delivery; the recording still retains the words.
 An unreadable or malformed route journal, or a failed recovery truncation, leaves voice failed off with a visible `error`; repair the journal and restart the daemon before recording or selecting a target.
 
@@ -466,14 +466,15 @@ A `run_quiet_seconds` key is dropped when the file is read and when it is saved.
 For existing nested settings, each top-level value takes precedence, followed by `voice`, then `meeting`, then the default.
 Saving Listening settings replaces the nested `voice` and `meeting` objects with the shared top-level values, preserving other top-level fields.
 `POST /voice` with `enabled: false` can repair an invalid operator file by replacing it with disabled defaults. Valid files retain their thresholds and unknown keys.
-The daemon's shared monitor checks once a second and flushes on the word limit, a name (`claude`, `cloud`, `clawed`, `claw`, `klaud`, `clot`, `clock`, `clod`, `claud`), or quiet since the last spoken line.
+The daemon's shared monitor checks once a second and flushes on the word limit or quiet since the last spoken line.
+In a meeting a name (`claude`, `cloud`, `clawed`, `claw`, `klaud`, `clot`, `clock`, `clod`, `claud`) anywhere in a line also flushes at once; in live voice a name only marks the pending words as summoned and they still wait for quiet, while `send` as the last word sends them at once.
 Name detection is always on.
 Comments travel with the next batch and `# ended` closes the monitor.
 An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.
 The monitor persists read offsets, buffers and stable message IDs before delivery, so restart recovery doesn't replay confirmed speech.
 
-Waking a worker is deliberate: speech to a cold target is delivered only when summoned by a name or the closing `send`, which sends the target's pending words through that utterance with the default delivery verb: paste to a live worker, resume a dormant conversation, or start a never-run card.
-Otherwise the word limit, quiet, a target switch or capture end drops cold speech; the transcript on disk keeps the words, and nothing is stored for later.
+Waking a worker is deliberate: speech to a cold target is delivered only when its pending words named the worker or ended with `send`, and then with the default delivery verb: paste to a live worker, resume a dormant conversation, or start a never-run card.
+Unnamed cold speech is dropped when the word limit, quiet, a target switch or capture end flushes it; the transcript on disk keeps the words, and nothing is stored for later.
 The owning daemon resolves resume versus first start from its current document, independently of recorder caches.
 A worker warmed through any path gets ordinary triggers on its pending and next speech.
 

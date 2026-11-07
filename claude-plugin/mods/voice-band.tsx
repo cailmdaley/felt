@@ -3,15 +3,17 @@
 //
 //   ▁▁▂▅▇▅▃▂▁▁▁▁▁▁▁▁▁▁▁▁                                       🔈 <voice>
 //   🎤 → <card>                                                🔈 paused
-//   🎤 muted                                                   🔈 <n> waiting
-//                                                              🔈 muted
+//   ● meeting → <card>                                         🔈 <n> waiting
+//   🎤 paused                                                  🔈 muted
 //                                                    🔈 Civbench 2, felt debug 1 +1
 //
-// While the voice target is this session the mic side is the level ticker,
-// its last twenty readings scrolling left; Listening off draws no mic side and
+// The mic side says what holds the mic: following (🎤) the card in view, or a
+// meeting (●) joined to one card. While words come to this session it is the
+// level ticker, its last twenty readings scrolling left; Listening off draws no mic side and
 // an idle speaker no speaker side. Lines other cards hold until they are in
 // view follow the speaker's state, named, the two with most first. The mic and speaker texts are buttons: a
-// click, or Enter once the band has the focus (ctrl+x tab), toggles that mute.
+// click, or Enter once the band has the focus (ctrl+x tab), toggles that mute;
+// a meeting pauses from the board.
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 type Ref = { fiber_id: string; name?: string } | null
@@ -21,6 +23,10 @@ type Voice = {
   muted: boolean
   state: string
   target: Ref
+  /** What holds the mic, where words go now, and whether it is paused. */
+  mode?: 'off' | 'following' | 'meeting'
+  destination?: Ref
+  paused?: boolean
   level?: { mic: number; at: string } | null
 }
 type Held = { fiber_id: string; origin?: string | null; name?: string | null; n: number }
@@ -54,7 +60,10 @@ const clip = (s: string, n: number) => (s.length <= n ? s : s.slice(0, Math.max(
 // the floor, green through the middle, amber from -20 dBFS.
 const step = (db: number) => Math.min(4, Math.max(0, Math.floor(((db + 50) / 40) * 5)))
 const tone = (i: number) => (i === 0 ? 'inactive' : i < 3 ? 'success' : 'warning')
-const here = () => !!(voice?.available && voice.enabled && !voice.muted && mine(voice.target?.fiber_id))
+const modeOf = (v: Voice) => v.mode ?? (v.enabled ? 'following' : 'off')
+const destinationOf = (v: Voice) => (v.mode ? v.destination : v.target) ?? null
+const pausedOf = (v: Voice) => v.paused ?? v.muted
+const here = () => !!(voice?.available && modeOf(voice) !== 'off' && !pausedOf(voice) && mine(destinationOf(voice)?.fiber_id))
 const mine = (id?: string) => !!id && self.includes(id)
 
 async function get<T>($: EngineInterface, path: string): Promise<T | null> {
@@ -128,14 +137,20 @@ function line(room: number, Text: any) {
 
   let mic = ''
   let parts: RenderChildren[] = []
-  if (voice?.available && voice.enabled) {
+  if (voice?.available && modeOf(voice) !== 'off') {
     const v = voice
-    if (v.muted) mic = '🎤 muted'
-    else if (!mine(v.target?.fiber_id)) mic = clip('🎤 → ' + (v.target?.name ?? v.target?.fiber_id ?? 'nowhere'), room)
+    const meeting = modeOf(v) === 'meeting'
+    const dest = destinationOf(v)
+    const glyph = meeting ? '● meeting' : '🎤'
+    if (pausedOf(v)) mic = `${glyph} paused`
+    else if (!mine(dest?.fiber_id)) mic = clip(`${glyph} → ` + (dest?.name ?? dest?.fiber_id ?? 'nowhere'), room)
     else {
       const steps = levels.map(step)
-      mic = steps.map(i => GLYPHS[i]).join('')
-      parts = steps.map((i, k) => <Text key={`l${k}`} color={tone(i)} dimColor={i === 0}>{GLYPHS[i]}</Text>)
+      mic = (meeting ? '● ' : '') + steps.map(i => GLYPHS[i]).join('')
+      parts = [
+        ...(meeting ? [<Text key="rec" color="error">● </Text>] : []),
+        ...steps.map((i, k) => <Text key={`l${k}`} color={tone(i)} dimColor={i === 0}>{GLYPHS[i]}</Text>),
+      ]
     }
   }
   return {
@@ -204,7 +219,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="row" width={width}>
         <Box flexGrow={1}>
           {mic ? (
-            <Button key="mic" plain label={mic} onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)}>
+            <Button key="mic" plain label={mic} onPress={() => voice && modeOf(voice) === 'following' && setMuted($, '/api/v1/voice', !voice.muted)}>
               {parts}
             </Button>
           ) : null}
@@ -227,7 +242,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="row">
         {mic ? (
-          <Button key="mic" plain label={mic} onPress={() => setMuted($, '/api/v1/voice', !voice?.muted)}>
+          <Button key="mic" plain label={mic} onPress={() => voice && modeOf(voice) === 'following' && setMuted($, '/api/v1/voice', !voice.muted)}>
             {parts}
           </Button>
         ) : null}

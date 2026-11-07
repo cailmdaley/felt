@@ -429,45 +429,48 @@ describe('Listen', () => {
     document.body.append(listening.el)
     const q = <T extends HTMLElement>(selector: string): T => listening.el.querySelector<T>(selector)!
     const item = (text: string): HTMLButtonElement => [...listening.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === text)!
-    return { join, listening, q, item, control: meeting }
+    const record = (): void => {
+      listening.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-dropdown')!.click()
+      ;[...listening.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent?.startsWith('Record a meeting'))!.click()
+    }
+    return { join, listening, q, item, record, control: meeting }
   }
   const resting = () => task({ id: 'roles/surveyor', uid: 'surveyor', sessionUuid: 'prior', status: 'open', shuttleSeat: true, shuttleRole: 'surveyor', effectiveHorizon: 'stashed' })
 
-  it('starts recording at the press, on the session the card has, writing nothing itself', async () => {
+  it('records a meeting from the menu, on the session the card has, writing nothing itself', async () => {
     const fresh = mountListen(task())
     vi.mocked(fetch).mockClear()
-    fresh.q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+    fresh.record()
     expect(fresh.join).toHaveBeenCalledTimes(1)
     expect(fresh.join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'call', { session: 'fresh', systemAudio: true })
-    expect(fresh.q<HTMLButtonElement>('.kbn-ctl-meet-arm').disabled).toBe(true)
     await flush()
-    expect(fresh.q<HTMLButtonElement>('.kbn-ctl-meet-arm').disabled).toBe(false)
     expect(writes()).toEqual([])
     fresh.listening.reset()
     const prior = mountListen(resting())
-    prior.q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+    prior.record()
     expect(prior.join.mock.calls[0][2]).toEqual({ session: 'previous', systemAudio: true })
     await flush()
     prior.listening.reset()
   })
 
   it('takes one press while a start is pending', async () => {
-    const { join, q, listening } = mountListen()
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+    const { join, record, listening } = mountListen()
+    record()
+    listening.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-dropdown')!.click()
+    expect([...listening.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent?.startsWith('Record a meeting'))!.disabled).toBe(true)
     expect(join).toHaveBeenCalledTimes(1)
     await flush()
     listening.reset()
   })
 
   it('says why a recording did not start, and clears it on the next try', async () => {
-    const { join, q, listening } = mountListen()
+    const { join, q, record, listening } = mountListen()
     join.mockResolvedValueOnce('hark unavailable')
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+    record()
     await flush()
     expect(q('.ws-band-status .kbn-detail-error').textContent).toBe('hark unavailable')
     expect(q('.ws-band-status .kbn-detail-error').style.display).toBe('')
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+    record()
     await flush()
     expect(join).toHaveBeenCalledTimes(2)
     expect(q('.ws-band-status .kbn-detail-error').style.display).toBe('none')
@@ -475,29 +478,23 @@ describe('Listen', () => {
   })
 
   it('shows a thrown start the same way', async () => {
-    const { join, q, listening } = mountListen()
+    const { join, q, record, listening } = mountListen()
     join.mockRejectedValueOnce(new Error('microphone refused'))
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+    record()
     await flush()
     expect(q('.ws-band-status .kbn-detail-error').textContent).toBe('microphone refused')
-    expect(q<HTMLButtonElement>('.kbn-ctl-meet-arm').disabled).toBe(false)
     listening.reset()
   })
 
-  it('holds the press when this device cannot record, and names a recording elsewhere', () => {
+  it('holds Listen where following is unavailable, and names a meeting elsewhere', () => {
     let recording: { title: string; state: 'live' } | null = null
-    let canJoin = false
-    const { q, listening } = mountListen(task(), { canJoin: () => canJoin, current: () => recording })
+    const { q, listening } = mountListen(task(), { canJoin: () => !recording, current: () => recording })
     const toggle = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    expect(toggle.disabled).toBe(true)
-    canJoin = true
-    listening.syncMeeting()
-    expect(toggle.disabled).toBe(false)
-    expect(toggle.textContent).toBe('Listen')
+    expect([toggle.disabled, toggle.textContent]).toEqual([true, 'Listen'])
     recording = { title: 'Standup', state: 'live' }
-    canJoin = false
     listening.syncMeeting()
-    expect([toggle.disabled, toggle.title, toggle.textContent]).toEqual([false, 'Your voice is going to Standup.', 'Listening · Standup'])
+    expect([toggle.disabled, toggle.textContent]).toEqual([false, 'Meeting · Standup'])
+    expect(toggle.title).toContain('every word goes to Standup')
     listening.reset()
   })
 
@@ -517,25 +514,22 @@ describe('Listen', () => {
     const audio = q<HTMLSelectElement>('.kbn-ctl-meet-audio')
     expect([...audio.options].map(option => option.text)).toEqual(['Mic + system', 'Mic only'])
     audio.value = 'mic'
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
+    ;[...listening.el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent?.startsWith('Record a meeting'))!.click()
     expect(join.mock.calls[0][2]).toEqual({ session: 'previous', systemAudio: false })
     await flush()
     listening.reset()
   })
 
-  it('stops through the recording menu and disables repeated stops', () => {
+  it('stops with the Stop button and disables repeated stops', () => {
     const recording = { title: 'Standup', state: 'live', fiber: 'a/task', tail: [] }
     let requested = false
     const stop = vi.fn(() => { requested = true })
-    const { q, item, listening } = mountListen(task(), { canJoin: () => false, modes: () => ['call'], current: () => recording, stop, stopRequested: () => requested })
-    const chip = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    chip.click()
-    item('Stop').click()
+    const { q, listening } = mountListen(task(), { canJoin: () => false, modes: () => ['call'], current: () => recording, stop, stopRequested: () => requested })
+    const stopButton = q<HTMLButtonElement>('.kbn-ctl-meet-stop')
+    stopButton.click()
     expect(stop).toHaveBeenCalledWith(recording)
     listening.syncMeeting()
-    chip.click()
-    expect(item('Stop').disabled).toBe(true)
-    item('Stop').click()
+    expect(stopButton.disabled).toBe(true)
     expect(stop).toHaveBeenCalledTimes(1)
     listening.reset()
   })
@@ -547,9 +541,10 @@ describe('Listen', () => {
     listening.setMeetingHostOpen(openHost, () => 'vizier')
     listening.syncMeeting()
     const chip = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    expect(chip.textContent).toBe('Listening · vizier')
+    expect(chip.textContent).toBe('Meeting · vizier')
     expect(q('.kbn-ctl-meet').hidden).toBe(false)
-    expect(listening.el.querySelector('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop')).toBeNull()
+    expect(listening.el.querySelectorAll('.kbn-ctl-meet-stop:not([hidden])')).toHaveLength(1)
+    expect(listening.el.querySelector('.kbn-detail-transcript-stop')).toBeNull()
     chip.click()
     item('Open transcript').click()
     expect(openHost).toHaveBeenCalledWith(recording)
@@ -580,36 +575,6 @@ describe('Listen', () => {
     recording = null
     listening.syncMeeting()
     expect(strip.hidden).toBe(true)
-    listening.reset()
-  })
-
-  it('moves recording here only after the old recording ends', async () => {
-    let recording: Record<string, unknown> | null = { launch: 'L1', title: 'Night sky', state: 'live', fiber: 'host/meeting', tail: [] }
-    const stop = vi.fn(async () => true)
-    const { join, q, item, listening } = mountListen(task({ id: 'foreign/fiber', sessionUuid: 'existing' }), { canJoin: () => !recording, modes: () => ['call'], current: () => recording, stop })
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
-    item('Listen here').click()
-    await flush()
-    expect(stop).toHaveBeenCalledTimes(1)
-    expect(join).not.toHaveBeenCalled()
-    recording = null
-    listening.syncMeeting()
-    expect(join).toHaveBeenCalledWith(expect.objectContaining({ id: 'foreign/fiber' }), 'call', { session: 'previous', systemAudio: true })
-    expect(q('.kbn-ctl-meet-label').textContent).toBe('Listen')
-    await flush()
-    expect(q('.kbn-ctl-meet-label').textContent).toBe('Listen')
-    listening.reset()
-  })
-
-  it('cancels starting here when stopping fails', async () => {
-    let recording: Record<string, unknown> | null = { launch: 'L1', state: 'live', fiber: 'other', tail: [] }
-    const { join, q, item, listening } = mountListen(task(), { canJoin: () => !recording, modes: () => ['call'], current: () => recording, stop: async () => false })
-    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
-    item('Listen here').click()
-    await flush()
-    recording = null
-    listening.syncMeeting()
-    expect(join).not.toHaveBeenCalled()
     listening.reset()
   })
 })

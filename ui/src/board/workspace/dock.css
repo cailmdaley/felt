@@ -265,6 +265,12 @@
 .ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
 .ws-dock .kbn-ctl-meet-dropdown { flex: none; width: 25px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); cursor: pointer; }
 .ws-dock .kbn-ctl-meet-dropdown[hidden] { display: none; }
+.ws-dock :is(.kbn-ctl-meet-pause, .kbn-ctl-meet-stop) { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 25px; padding: 0; background: transparent; color: var(--ws-ink); }
+.ws-dock :is(.kbn-ctl-meet-pause, .kbn-ctl-meet-stop)[hidden] { display: none; }
+.ws-dock :is(.kbn-ctl-meet-pause, .kbn-ctl-meet-stop) svg { display: block; width: 14px; height: 14px; }
+.ws-dock :is(.kbn-ctl-meet-pause, .kbn-ctl-meet-stop):hover:not(:disabled) { background: var(--ws-hover); }
+.ws-dock .kbn-ctl-meet[data-mode=meeting] .kbn-ctl-meet-arm svg { color: var(--ws-red); }
+.ws-dock .kbn-ctl-meet-paused .kbn-ctl-meet-arm { color: var(--ws-ink-muted); background: transparent; }
 @media (pointer: coarse) { .ws-dock .kbn-ctl-meet-dropdown { width: 44px; min-height: 44px; } }
 .ws-dock .kbn-ctl-meet-audio-label { display: grid; gap: 4px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-listen-cadence { display: flex; gap: 8px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }

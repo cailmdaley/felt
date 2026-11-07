@@ -131,9 +131,6 @@ describe('board phone meeting card wiring', () => {
     [false, ['phone'], false],
     [true, ['call', 'phone'], true],
     [true, ['call'], false],
-    [false, ['phone', 'call'], true],
-    [false, ['call'], true],
-    [false, [], false],
   ] as const)('gates Join on the device-required mode on mobile=%s with %j', async (mobile, modes, enabled) => {
     vi.stubGlobal('matchMedia', () => ({ matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     state.meetingStatus = { available: true, modes: [...modes], meeting: null }
