@@ -100,6 +100,13 @@ const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
 const meetingScenario = search.get('meeting')
 const recorderHost = search.get('recorder') ?? 'local'
 const systemAudioEnabled = search.get('system_audio') !== 'off'
+// `?voice=following|paused` stages live voice following a card; unset, it is available and off.
+const voiceScenario = search.get('voice')
+let mockVoice: Record<string, unknown> = {
+  available: true, enabled: !!voiceScenario, muted: voiceScenario === 'paused', state: voiceScenario ? 'listening' : 'off',
+  target: { fiber_id: 'harness-voice-target', origin: 'local', name: 'Two columns and a family view' },
+  last: null, error: null, recorder: 'local',
+}
 const MOCK_TAIL = [
   '14:02:51 me  okay, I think everyone is here, let us start with the null tests',
   '14:03:12 S1  so the chi-squared for the B-modes came back at forty-one for thirty-six bins',
@@ -1444,6 +1451,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   const bodyOrigin = (): string => (body().origin as string) || LOCAL_HOST
 
+  if (url.split('?')[0].endsWith('/api/v1/voice')) {
+    if (init?.method === 'POST') mockVoice = { ...mockVoice, ...body(), state: body().enabled === false ? 'off' : 'listening' }
+    return json(mockVoice)
+  }
   // The board's composite feed and the local-only meeting control plane.
   if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)
   if (workspaceFixture && url.includes('/api/v1/fibers/') && url.includes('body=true')) {

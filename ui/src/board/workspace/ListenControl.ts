@@ -272,11 +272,11 @@ export class ListenControl {
         title = mode.error
         break
       case 'following':
-        label = `Following · ${mode.name}`
+        label = `${mode.paused ? 'Paused' : 'Following'} · ${mode.name}`
         title = `${mode.paused ? 'Paused. ' : ''}Following you: words go to ${mode.name}, the card you are looking at`
         break
       case 'meeting':
-        label = `Meeting · ${mode.name}`
+        label = `${mode.paused ? 'Paused' : 'Meeting'} · ${mode.name}`
         title = `${mode.paused ? 'Paused. ' : ''}Recording a meeting: every word goes to ${mode.name}, wherever you look`
         break
     }
@@ -286,7 +286,7 @@ export class ListenControl {
     if (this.button.disabled && !this.phone && !this.starting) title = voice?.error ? `Listening is unavailable: ${voice.error}` : 'Listening is unavailable on this host'
     if (this.word.textContent !== label) this.word.textContent = label
     this.button.title = title
-    this.button.setAttribute('aria-label', title)
+    this.button.setAttribute('aria-label', label)
     this.el.dataset.mode = mode.kind
     this.el.classList.toggle('kbn-ctl-meet-paused', on && mode.paused)
     this.button.classList.toggle('kbn-ctl-meet-on', on)

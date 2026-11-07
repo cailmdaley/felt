@@ -26,24 +26,27 @@ try {
       const el = document.querySelector('.ws-stage-band .kbn-ctl-meet-label')
       return { scroll: el.scrollWidth, client: el.clientWidth, text: el.textContent }
     })
-    assert.match(geometry.text, /^Listening/)
+    assert.match(geometry.text, /^Following · /)
     assert.ok(geometry.scroll > geometry.client, 'long name is ellipsized')
     assert.ok(await band.locator('.kbn-ctl-meet').isVisible(), 'Listening remains visible')
+    assert.ok(await band.locator('.kbn-ctl-meet-pause').isVisible(), 'Pause sits beside the label')
+    assert.ok(await band.locator('.kbn-ctl-meet-stop').isVisible(), 'Stop sits beside the label')
     await arm.click()
-    assert.ok(await page.getByRole('menuitem', { name: 'Pause', exact: true }).isVisible(), 'a press while listening opens the menu')
+    assert.ok(await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).isVisible(), 'a press while listening opens the menu')
     await mkdir(process.env.HARK_SCREENSHOT_DIR || '/tmp', { recursive: true })
     await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-${scheme}.png` })
     await page.keyboard.press('Escape')
     await page.evaluate(() => {
       const voice = window.__harness.modal.voice
-      voice.status = { ...voice.status, state: 'yielded' }
+      voice.status = { ...voice.status, muted: true }
       voice.notify()
     })
-    await page.waitForFunction(() => document.querySelector('.ws-stage-band .kbn-ctl-meet-arm')?.title === 'Your voice is going to a recording.')
-    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-elsewhere-${scheme}.png` })
+    await band.locator('.kbn-ctl-meet-paused').waitFor()
+    assert.equal(await band.locator('.kbn-ctl-meet-pause').getAttribute('aria-label'), 'Resume listening')
+    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-paused-${scheme}.png` })
     await context.close()
   }
-  console.log('voice layout and elsewhere state: ok (light + dark)')
+  console.log('voice layout and paused state: ok (light + dark)')
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const page = await context.newPage()
