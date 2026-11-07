@@ -21,6 +21,7 @@
 .family-map .fm-link { fill: none; stroke: var(--ws-ink); stroke-opacity: .42; stroke-width: .75; transition: transform var(--fm-drift) ease-in-out, stroke-opacity .2s; }
 .family-map .fm-link:is([data-standing='quiet'], [data-standing='aside']) { stroke-opacity: .2; }
 .family-map .fm-link[data-merged] { stroke-opacity: .3; stroke-width: .6; }
+.family-map .fm-link:not([data-says], [data-chain]) { stroke-opacity: 0; }
 .family-map .fm-link[data-chain] { stroke-opacity: .9; stroke-width: 1.25; }
 .family-map .fm-line path { fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .family-map .fm-line-rising { stroke: var(--ws-ink-muted); stroke-opacity: .6; stroke-width: 1; }
@@ -40,8 +41,8 @@
 .family-map-dragging, .family-map-dragging * { cursor: grabbing !important; user-select: none; }
 .family-map .fm-unpin { position: absolute; top: 4px; left: 16px; z-index: 1; padding: 0; border: 0; background: transparent; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); cursor: pointer; }
 .family-map .fm-unpin[hidden] { display: none; }
-.family-map .fm-leader { stroke: var(--ws-ink-muted); stroke-opacity: .4; stroke-width: .75; stroke-dasharray: 1 3; transition: transform var(--fm-drift) ease-in-out; }
-.family-map .fm-leader[data-selected] { stroke: var(--fm-tone); stroke-opacity: 1; stroke-dasharray: none; }
+.family-map .fm-leader { stroke: var(--ws-ink-muted); stroke-opacity: .25; stroke-width: .75; stroke-dasharray: 1 4; transition: transform var(--fm-drift) ease-in-out; }
+.family-map .fm-leader[data-selected] { stroke-opacity: .6; }
 .family-map .fm-star { transition: transform var(--fm-drift) ease-in-out, opacity .3s; animation: fm-appear .6s ease-out; }
 .family-map .fm-star-hit { fill: transparent; }
 .family-map .fm-star-halo { fill: var(--fm-tone); fill-opacity: 0; }

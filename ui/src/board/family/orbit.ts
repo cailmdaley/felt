@@ -32,6 +32,8 @@ const SIGHT = .3
 /** How near a body's own scale the view must be for a hand to have reached it. */
 const SIGHT_DEPTH = .6
 const GATHERED_LEAST = 4
+/** How long a close still counts as just come back up. */
+const RECENT_MS = 24 * 3_600_000
 /** How many bodies in view show what they hold. */
 const MINIS = 8
 
@@ -81,7 +83,7 @@ export const bodyRadius = (thread: MapThread, unit: number): number => {
 export const rootRadius = (model: FamilyModel, unit: number): number => unit * Math.min(28, 8 + bodySize(model.mass) * .8)
 
 /** How far from its body a name may sit, in rows, nearest first. */
-export const NEAR_ROWS: readonly number[] = [0, -1, 1, -2, 2, -3, 3, -4, 4, -6, 6, -8, 8]
+export const NEAR_ROWS: readonly number[] = [0, -1, 1, -2, 2, -3, 3]
 export interface Box { left: number; right: number; top: number; bottom: number }
 
 /** Each name beside its body, on whichever side and row first keeps clear of every other name and body, whole or not at all. */
@@ -182,7 +184,12 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   return { ...zoomed, ...unfolded, minis, labels: nearLabels(inView, named, numeral, cx, width, height, unfolded?.locality ? heldBoxes(unfolded.locality) : []) }
 }
 
-function drawLinks(layer: SVGGElement, plate: Plate): void {
+/**
+ * Lineage where it says something: below the first generation, around an
+ * unfolded thread, and for what just came back up. A direct child's line to the
+ * root is implied by the family, drawn only on the selected thread's path.
+ */
+function drawLinks(layer: SVGGElement, plate: Plate, model: FamilyModel): void {
   const star = new Map(plate.stars.map(item => [item.thread.key, item]))
   const near = new Set(plate.locality?.kids.map(slot => slot.thread))
   const links = plate.stars.filter(item => (plate.links || near.has(item.thread)) && item.thread.parent !== null && star.has(item.thread.parent))
@@ -194,6 +201,7 @@ function drawLinks(layer: SVGGElement, plate: Plate): void {
     path.setAttribute('data-standing', item.thread.tone)
     path.toggleAttribute('data-merged', item.thread.merged)
     path.toggleAttribute('data-far', !!plate.locality?.gathered && !near.has(item.thread))
+    path.toggleAttribute('data-says', item.thread.depth > 1 || near.has(item.thread) || item.thread.fresh || model.now - (item.thread.ended ?? 0) < RECENT_MS)
     lay(path, star.get(item.thread.parent!)!, item)
   })
 }
@@ -273,7 +281,7 @@ function drawLabels(layer: HTMLElement, numerals: HTMLElement, plate: Plate, mod
     const [rank, name, age] = el.children
     rank.textContent = label.numeral ? String(label.numeral) : ''
     name.textContent = label.thread.name
-    age.textContent = shortAgo(label.thread.lastMove, model.now)
+    age.textContent = label.thread.name.length * LABEL_CHAR > 2 * (label.width - LABEL_MARKS) ? '' : shortAgo(label.thread.lastMove, model.now)
   })
   reconcile(numerals, plate.numerals, numeral => numeral.thread.key, () => htmlEl('div', 'fm-numeral'), (el, numeral) => {
     tagThread(el, numeral.thread)
@@ -406,7 +414,7 @@ export function paintPlate(host: HTMLElement, plate: Plate, model: FamilyModel):
     fade.children[0].setAttribute('offset', '.6'); fade.children[1].setAttribute('offset', '1')
     line.style.setProperty('--fm-fade', `url(#${fade.id})`)
   }
-  drawLinks(part(svg, 'fm-links', cls => svgEl('g', cls)), plate)
+  drawLinks(part(svg, 'fm-links', cls => svgEl('g', cls)), plate, model)
   drawLeaders(part(svg, 'fm-leaders', cls => svgEl('g', cls)), plate)
   drawHeld(svg, part(frame, 'fm-helds', cls => htmlEl('div', cls)), plate, model)
   drawStars(part(svg, 'fm-stars', cls => svgEl('g', cls)), plate, model)

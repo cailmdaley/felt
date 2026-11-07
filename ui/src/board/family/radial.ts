@@ -23,6 +23,8 @@ const MERGED_LEAST = 3.4
 const DRAG_FROM = 5
 const ARM_NAMES: Readonly<Record<Arm, string>> = { todo: 'To do', done: 'Just finished' }
 const DONE_ROWS: readonly number[] = NEAR_ROWS.slice(0, 5)
+/** What asks may stray further for its name. */
+const ASK_ROWS: readonly number[] = [...NEAR_ROWS, -4, 4, -5, 5]
 /** An arm's name, drawn in from its tip: its width and height, as family-map.css sets them. */
 const NAME_BOX = { width: 110, height: 20 }
 
@@ -169,7 +171,7 @@ export function radialLayout(model: FamilyModel, width: number, height: number):
   const first = stars.filter(item => item.thread.depth === 1 && !asking.includes(item))
   return {
     k: 1, width, height: narrow ? cy + R + 18 : height, cx, cy, R, narrow, stars, links: true, numerals,
-    labels: narrow ? [] : nearLabels(stars, [...asking, ...first], numeral, cx, width, height, reserved, item => measures.get(item.thread)!.live ? NEAR_ROWS : DONE_ROWS),
+    labels: narrow ? [] : nearLabels(stars, [...asking, ...first], numeral, cx, width, height, reserved, item => needsHuman(item.thread) ? ASK_ROWS : measures.get(item.thread)!.live ? NEAR_ROWS : DONE_ROWS),
     line: { rising, receding }, arms: names,
   }
 }
@@ -228,7 +230,7 @@ const current = new WeakMap<HTMLElement, { model: FamilyModel; open: OpenThread;
 
 export const radial: Drawing = {
   name: 'radial', label: 'Radial',
-  reading: ['Zoom: ⌘ scroll or pinch', 'Centre: the constitution', 'One arm: to do, next at the centre', 'Other arm: just finished, newest at the centre', 'Every thread: the same two arms, zoom in', 'Arcs: who launched whom', 'Size: its mass of work', 'Dots: sent files', 'Colour: its state', 'Glow: how recently it moved', 'Diamond: a new file', 'Drag a body along or across the arms'],
+  reading: ['Zoom: ⌘ scroll or pinch', 'Centre: the constitution', 'One arm: to do, next at the centre', 'Other arm: just finished, newest at the centre', 'Every thread: the same two arms, zoom in', 'Arcs: lineage below the first generation, and what just came back', 'Size: its mass of work', 'Dots: sent files', 'Colour: its state', 'Glow: how recently it moved', 'Diamond: a new file', 'Drag a body along or across the arms'],
   layout: radialLayout,
   draw(host, model, open, view = WHOLE, sight = null) {
     const { width, height } = mount(host, 'radial', model, open)

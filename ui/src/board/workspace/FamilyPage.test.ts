@@ -533,6 +533,16 @@ describe('coming to a thread', () => {
     const way = family.el.querySelector<HTMLElement>('.fm-mini')
     if (way) { way.click(); expect(open).toHaveBeenCalledWith(expect.anything(), way.dataset.held) }
   })
+  it('draws lineage only where it says something: deeper threads, the selected path, what came back', () => {
+    const closed = card({ id: 'hub/c', name: 'Closed', orchestrator: 'hub', status: 'closed', tempered: true, createdAt: when(30), closedAt: when(2) })
+    const { page: family } = page(vi.fn(), feeds, undefined, [...tree, closed])
+    const link = (id: string): Element => [...family.el.querySelectorAll('.fm-link')].find(el => el.getAttribute('data-link')?.endsWith(id))!
+    expect(link('hub/mid/a').hasAttribute('data-says')).toBe(true)
+    expect(link('hub/c').hasAttribute('data-says')).toBe(true)
+    expect(link('hub/mid').hasAttribute('data-says')).toBe(false)
+    pointer(option(family, 'Leaf a'), 'pointerover', 'mouse')
+    expect(link('hub/mid').hasAttribute('data-chain')).toBe(true)
+  })
   it('keeps the thread in frame as the family moves, and leaves the view where a hand put it', () => {
     const { page: family, place } = page(vi.fn(), holding, undefined, tree)
     click(option(family, 'Mid'))

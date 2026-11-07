@@ -4,7 +4,7 @@ import type { Holds, Point } from './drawing.js'
 /** The scale from which a focused thread unfolds what it holds. */
 export const REVEAL = 2.4
 const REACH_LEAST = 120
-const REACH_MOST = 168
+const REACH_MOST = 196
 const NAME_MOST = 300
 const MARGIN = 14
 /** A focused body's least radius. */
@@ -76,7 +76,7 @@ export function unfold(model: FamilyModel, thread: MapThread, holds: Holds, gath
   const { width, height, narrow } = frame, { lead, constitution } = holds
   const files = thread.files.filter(file => file.key !== lead?.key)
   const r = Math.max(body, FOCUS_BODY), kids = gather ? kidsOf(model, thread, drawn) : []
-  const reach = narrow ? 0 : Math.round(Math.min(REACH_MOST, Math.max(REACH_LEAST, Math.min(width, height) * .24)))
+  const reach = narrow ? 0 : Math.round(Math.min(REACH_MOST, Math.max(REACH_LEAST, Math.min(width, height) * .29)))
   const satellite = (place: Point, side: 'left' | 'right', kind: HeldKind, room: number, file?: MapFile, more = 0): Satellite => ({ ...place, file, kind, more, side, room })
   if (narrow) {
     const room = width - NARROW_INSET - MARGIN
