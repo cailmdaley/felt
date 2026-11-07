@@ -316,7 +316,7 @@ Work reaches `main` and the fleet through one seat, the felt materializer
 one deploy lock per host and one quarantine, so landing is one worker's job.
 A lane commits on a branch or worktree, runs the suites its change touches,
 pushes the branch, and sends the seat a land request in the format its charter
-gives; it does not rebase onto `main`, push `main` or run `bin/shuttle-deploy`.
+gives, naming the repo (`felt` or `hark`: the seat lands Hark's own repo too); it does not rebase onto `main`, push `main` or run `bin/shuttle-deploy`.
 
 The seat keeps `main` linear: it rebases each lane on `origin/main`, runs the
 suites the diff touches, pushes, and batches ready lanes into one deploy, keeping
