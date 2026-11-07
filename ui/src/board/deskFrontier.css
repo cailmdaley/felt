@@ -28,3 +28,5 @@ button.kbn-thread-fold:hover { color: var(--kbn-ink); }
   .kbn-desk-threads .kbn-thread-row { min-height: 32px; font-size: var(--type-note); }
   .kbn-thread-fold { width: 28px; height: 32px; }
 }
+/* A root heading a section its own state is not in: its own mark, faint. */
+.kbn-card-header > .constitution-state-dot { opacity: 0.4; }

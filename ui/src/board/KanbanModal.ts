@@ -2577,7 +2577,8 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
 } {
   let card: KanbanCard | null = null
   const drop = (list: KanbanCard[]): KanbanCard[] => {
-    const idx = list.findIndex((c) => c.id === cardId)
+    // A root's header in another section is a view of it, not the card.
+    const idx = list.findIndex((c) => c.id === cardId && !c.deskSection)
     if (idx < 0) return list
     card = list[idx]
     return [...list.slice(0, idx), ...list.slice(idx + 1)]

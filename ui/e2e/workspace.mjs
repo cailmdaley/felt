@@ -380,14 +380,14 @@ test('Desk action menus open on a phone long press without hover', async p => {
 
 test('Desk family action menus preserve native activation and Resting row stacking', async p => {
   const fixture = new URL(url); fixture.searchParams.set('example', 'threads'); await p.goto(fixture.href)
-  const family = p.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]')
+  const family = p.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header)')
   await family.waitFor()
-  await p.keyboard.press('j'); await p.keyboard.press('h'); await p.keyboard.press('Home')
-  for (let row = 0; row < 10 && !await family.evaluate(el => el.classList.contains('kbn-key-selected')); row++) await p.keyboard.press('j')
+  await p.keyboard.press('j'); await p.keyboard.press('h'); await p.keyboard.press('h'); await p.keyboard.press('l'); await p.keyboard.press('l')
+  for (let row = 0; row < 20 && !await family.evaluate(el => el.classList.contains('kbn-key-selected')); row++) await p.keyboard.press('j')
   assert.ok(await family.evaluate(el => el === document.activeElement && el.classList.contains('kbn-key-selected')))
   for (const key of ['Enter', 'Space']) {
     await family.focus(); await family.press('Shift+F10'); await p.getByRole('menu').waitFor()
-    assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Close for review', 'Rest', 'Temper', 'Discard', 'Move…'])
+    assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
     await p.keyboard.press('Escape'); assert.ok(await family.evaluate(el => el === document.activeElement))
     await family.press('Shift+F10')
     await p.getByRole('menu').getByRole('menuitem', { name: 'Temper', exact: true }).press(key)

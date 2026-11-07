@@ -274,7 +274,7 @@ export function registerHeaderBarJourneys(test) {
     const posts = () => page.evaluate(() => window.__harness.requests.filter(r => r.method !== 'GET').length)
     const before = await posts()
     await header.locator('.ws-band-leave').click()
-    await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]').waitFor({ state: 'visible' })
+    await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header)').waitFor({ state: 'visible' })
     await page.locator('.ws-reader.ws-dormant').waitFor({ state: 'attached' })
     assert.equal(await posts(), before, '× sends no write')
   }, { width: 1440, height: 900 })

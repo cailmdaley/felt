@@ -45,19 +45,23 @@ describe('a Desk row and the threads it holds in its section', () => {
     count!.click()
     expect(names()).toEqual([])
   })
-  it('in Working, names a thread row by its slug path from the root and keeps its threads folded until opened', () => {
-    const { name, names, count } = row(busy)
-    expect(name.textContent).toBe('hub/busy')
-    expect(name.title).toBe('Busy')
-    expect(count!.querySelector('.kbn-count-working')?.textContent).toBe('1 working')
+  it('heads Working with the root when its own state is another, faint, its working threads folded until opened, each level on its own', () => {
+    const { host, name, names, count } = row({ ...root, deskSection: 'working' })
+    expect(name.textContent).toBe('Hub')
+    expect(host.classList.contains('kbn-card-header')).toBe(true)
+    expect(count!.querySelector('.kbn-count-working')?.textContent).toBe('2 working')
     expect(names()).toEqual([])
     count!.click()
-    expect(names()).toEqual(['helper'])
-    // The fold is remembered: the row drawn again stands open.
-    expect(row(busy).names()).toEqual(['helper'])
+    expect(names()).toEqual(['busy'])
+    host.querySelector<HTMLButtonElement>('.kbn-desk-threads button.kbn-thread-fold')!.click()
+    expect(names()).toEqual(['busy', '  helper'])
+    // The folds are remembered by section: drawn again, Working stands as left, and Your turn keeps its own.
+    expect(row({ ...root, deskSection: 'working' }).names()).toEqual(['busy', '  helper'])
+    expect(row(root).names()).toEqual(['busy/asks', '  deeper'])
   })
   it('draws no count where the section holds nothing beneath the row, and never an archived thread', () => {
-    const { count, host } = row(deeper)
+    const lone = card({ id: 'proj/lone', name: 'Lone', ...waiting })
+    const { count, host } = row(lone, [lone])
     expect(count).toBeNull()
     expect(host.querySelector('.kbn-desk-threads')).toBeNull()
     expect(row(root).host.textContent).not.toMatch(/done/)
@@ -72,7 +76,7 @@ describe('a Desk row and the threads it holds in its section', () => {
     const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
       stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn() })
     const section = renderer.renderNowSection(data.now, {})
-    expect([...section.querySelectorAll('.kbn-card .kbn-card-name')].map(n => n.textContent).sort()).toEqual(['Hub', 'hub/busy'])
+    expect([...section.querySelectorAll('.kbn-card .kbn-card-name')].map(n => n.textContent)).toEqual(['Hub', 'Hub'])
     expect([...section.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(n => n.textContent)).toEqual(['busy/asks', 'deeper'])
   })
 })

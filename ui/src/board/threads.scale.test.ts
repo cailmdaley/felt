@@ -57,11 +57,10 @@ describe('a family splits across the sections its threads stand in', () => {
       runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) })
   const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} }).renderNowSection(board.now, {})
-  it('threads in another state stand in their own section, each named by its slug path from the root', () => {
+  it('threads in another state group beneath their root heading that section, named by slug', () => {
     const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'working', 10)))
-    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(11)
-    expect(desk.querySelectorAll('.kbn-desk-threads')).toHaveLength(0)
-    expect([...desk.querySelectorAll('.kbn-card-name')].map(el => el.textContent)).toContain('cmbx/t3')
+    expect([...desk.querySelectorAll('.kbn-card')].map(el => [el.querySelector('.kbn-card-name')!.textContent, el.classList.contains('kbn-card-header')])).toEqual([['cmbx', false], ['cmbx', true]])
+    expect(desk.querySelector('.kbn-card-header .kbn-count-working')!.textContent).toBe('10 working')
   })
   it('threads in the row\'s own state hang beneath it, open where they need you', () => {
     const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'waiting', 12)))
@@ -90,8 +89,8 @@ describe('thread read model at fleet scale', () => {
       const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
         stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} })
       const desk = renderer.renderNowSection(board.now, {})
-      // Each tree keeps its root and its leading request.
-      expect(desk.querySelectorAll('.kbn-card')).toHaveLength(threadIndexFor(board).frontier().filter(c => board.now.inFlight.includes(c)).length)
+      // Each family's root, and its header in each other section of work.
+      expect(desk.querySelectorAll('.kbn-card')).toHaveLength(board.now.inFlight.length)
       expect(desk.querySelector('.kbn-thread-tree')).toBeNull()
       expect(threadIndexFor(board)).toBe(threadIndexFor(board))
       expect(threadIndexBuilds()).toBe(before + 1)

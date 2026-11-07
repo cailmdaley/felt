@@ -73,16 +73,20 @@ export function shouldIncludeInKanban(fiber: Fiber): boolean {
   return isCycleFiber(fiber);
 }
 
+/** The Desk column a family root's header stands in. */
+const sectionColumn = (card: KanbanCard): 'inFlight' | 'awaitingReview' => card.deskSection === 'to-review' ? 'awaitingReview' : 'inFlight';
+
 /** Reproject optimistic lifecycle edits through the same frontier as a fresh feed. */
 export function projectDeskFrontier(response: KanbanResponse): KanbanResponse {
   const candidates = [...response.now.drafts, ...response.now.inFlight, ...response.now.awaitingReview,
     ...response.stash, ...response.roles, ...response.timeline.futureDated, ...response.timeline.past, ...(response.threads ?? [])];
   const seen = new Set<string>();
-  const cards = candidates.filter(card => { const key = threadKey(card); if (seen.has(key)) return false; seen.add(key); return true });
+  const cards = candidates.filter(card => { const key = threadKey(card); if (card.deskSection || seen.has(key)) return false; seen.add(key); return true });
   const index = new ThreadIndex(cards);
   const visible = new Set(index.frontier());
   const rows = cards.filter(card => visible.has(card)).map(card => ({ ...card, threadSummary: index.summary(card) }));
-  const at = (column: string) => rows.filter(card => deskColumn(card) === column);
+  const headers = index.headers();
+  const at = (column: string) => [...rows.filter(card => deskColumn(card) === column), ...headers.filter(card => sectionColumn(card) === column)];
   const now = { drafts: at('drafts').sort(byCreatedAtDesc), inFlight: at('inFlight').sort(byInFlightBand), awaitingReview: at('awaitingReview').sort(byClosedAtDesc) };
   const stash = at('resting'), roles = at('roles');
   const timeline = { ...response.timeline, futureDated: at('scheduled').sort(byDueAtAsc), past: [...at('tempered'), ...at('composted')].sort(byClosedAtDesc) };
@@ -288,6 +292,7 @@ function assembleSurfaces(
   for (const { card, column } of classified) {
     if (frontier.has(card)) buckets[column].push(card);
   }
+  for (const header of threadIndex.headers()) buckets[sectionColumn(header)].push(header);
 
   scheduled.sort(byCreatedAtDesc);
   // Desk has no persisted human arrangement; drafts use creation order.
@@ -730,6 +735,7 @@ export function isQuestion(card: KanbanCard): boolean {
  * Held, after Working, until it is released.
  */
 export function inFlightBand(card: KanbanCard): InFlightBand {
+  if (card.deskSection) return card.deskSection === 'waiting' ? 'yourTurn' : 'working';
   if (turnOf(card).yours) return 'yourTurn';
   return card.held ? 'held' : 'working';
 }

@@ -89,7 +89,7 @@ anything else.
 
 ### A family's threads
 
-A family appears once in In flight's Your turn and Working, and in Awaiting review, wherever its threads are, and each appearance holds only the threads in that section's state: a thread is a row of its own when no ancestor shares its state, and otherwise hangs beneath its nearest ancestor that does, named by the slug path from that ancestor (`a1/b1` under `a` when `a1` is in another section), while a thread row with no such ancestor is named by its path from the family's root (`a/a1`).
+A family's root heads its threads in each section of work they stand in (Your turn, Working, Awaiting review), whatever its own state, its own mark drawn faintly where that state is another; beneath it each thread hangs under its nearest shown ancestor, the threads between left out and named in its slug path from there (`a1/b1` under `a` in Your turn, `a1` under `a`'s header in Working).
 Drafts, Resting and the Roles list only a family's root, whose own threads in that state fold beneath it; a thread's draft is reached from its family. Names are fiber slugs, as Rex's sidebar shows them, cut short by an ellipsis; the full name is the row's tooltip and the title of the page a thread opens. Archived threads are not on the Desk.
 
 Every level folds. The count at a row's end says how many threads it holds in its section (in red when one of them is a question) and carries the caret that folds them; every thread holding threads of its own carries a caret of its own. Your turn and Awaiting review stand open by default and the other sections stay folded, and each fold is remembered in this browser, so the whole Desk can be folded down to its rows.

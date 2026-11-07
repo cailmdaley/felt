@@ -28,8 +28,8 @@ export interface Family {
   /** Every node of the tree but the row, by need. */
   others: Record<FamilyNeed, number>
 }
-/** States whose threads stand on the Desk only through their family's root. */
-const QUIET: ReadonlySet<ThreadState> = new Set(['drafts', 'resting', 'roles'])
+/** The sections where a family's threads group beneath its root whatever the root's own state. */
+const SPLIT = ['waiting', 'working', 'to-review'] as const
 const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'roles', 'resting', 'archived']
 /**
  * A thread's state: the Desk column it would sit in (`deskColumn`), with
@@ -73,6 +73,7 @@ export class ThreadIndex {
   private readonly ancestryTitles = new Map<string, string>()
   private readonly sums = new Map<string, ThreadSummary>()
   private readonly families = new Map<string, Family>()
+  private heads: KanbanCard[] | null = null
   /** A UID proves mirrored identity; without it, host/store/path stays distinct. */
   private readonly firstOf = new Map<string, string>()
 
@@ -227,21 +228,23 @@ export class ThreadIndex {
   family(card: KanbanCard): Family {
     return this.families.get(this.key(card)) ?? { root: card, lead: card, need: null, askers: [card], others: { yours: 0, review: 0, working: 0 } }
   }
-  /**
-   * The Desk's rows. Work in flight or awaiting review is a row when no
-   * ancestor shares its state, and otherwise hangs beneath its nearest
-   * ancestor that does, so a family stands once in each such section and no
-   * node twice. Drafts, the resting and the Roles keep only roots as rows.
-   */
+  /** The Desk's own rows: every family's root, in the section its own state puts it. */
   frontier(): KanbanCard[] {
-    const rows: KanbanCard[] = []
-    for (const [key, state] of this.states) {
-      let parent = this.parents.get(key)
-      if (parent && QUIET.has(state)) continue
-      while (parent && this.state(parent) !== state) parent = this.parentOf(parent)
-      if (!parent) rows.push(this.cards.get(key)!)
+    return [...this.states.keys()].filter(key => !this.parents.has(key)).map(key => this.cards.get(key)!)
+  }
+  /**
+   * A copy of a family's root heading each section of work in flight or
+   * awaiting review that its threads stand in and its own state does not, so
+   * the family's threads in that section group beneath it. Built once.
+   */
+  headers(): KanbanCard[] {
+    if (this.heads) return this.heads
+    this.heads = []
+    for (const root of this.frontier()) {
+      const own = this.state(root), held = new Set(this.subtree(root).map(card => this.state(card)))
+      for (const section of SPLIT) if (section !== own && held.has(section)) this.heads.push({ ...root, deskSection: section })
     }
-    return rows
+    return this.heads
   }
   /** Cached parent-chain tooltips keep deep family pages linear in graph reads. */
   ancestryTitle(card: KanbanCard): string {

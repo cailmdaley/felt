@@ -52,8 +52,8 @@ export function registerNavigationJourneys(test) {
       return control
     }
     await page.goto(url + '#/desk')
-    // The card's own name opens its lead; the family's other askers sit on rows beneath it.
-    const name = page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]').locator('.kbn-card-name')
+    // A thread under its family's root opens its own page.
+    const name = page.locator('.kbn-desk .kbn-thread-row[data-fiber-id="research/workspace/calibration-report/analysis/checks/question"]').locator('.kbn-thread-name')
     const nameBox = await name.boundingBox()
     await name.click({ position: { x: nameBox.width - 6, y: nameBox.height / 2 } })
     await named(page, 'Choose the response cut')

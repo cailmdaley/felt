@@ -2,9 +2,10 @@ import { DESK_REGION_SELECTORS, type KeyIntent } from './keymap.js'
 import { isMobileViewport } from './mobile.js'
 import { folioScrollTarget } from './deskMobile.js'
 
-export interface DeskAddress { uid: string; origin: string }
-const identity = (el: HTMLElement): DeskAddress => ({ uid: el.dataset.cardUid!, origin: el.dataset.cardOrigin! })
-const matches = (el: HTMLElement, address: DeskAddress): boolean => el.dataset.cardUid === address.uid && el.dataset.cardOrigin === address.origin
+/** A Desk row: a card, or the header its family's root stands as in another `section`. */
+export interface DeskAddress { uid: string; origin: string; section?: string }
+const identity = (el: HTMLElement): DeskAddress => ({ uid: el.dataset.cardUid!, origin: el.dataset.cardOrigin!, section: el.dataset.deskSection })
+const matches = (el: HTMLElement, address: DeskAddress): boolean => el.dataset.cardUid === address.uid && el.dataset.cardOrigin === address.origin && el.dataset.deskSection === address.section
 const behavior = (): ScrollBehavior => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
 
 /** Selection belongs to card identity, not a DOM node or a feed position. */
@@ -102,7 +103,7 @@ export class DeskKeyboard {
     const address = identity(el)
     this.revealFrame = requestAnimationFrame(() => {
       this.revealFrame = 0
-      if (this.selected?.uid !== address.uid || this.selected.origin !== address.origin) return
+      if (this.selected?.uid !== address.uid || this.selected.origin !== address.origin || this.selected.section !== address.section) return
       const current = this.node()
       if (current) this.revealPlaced(current)
     })

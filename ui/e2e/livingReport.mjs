@@ -46,7 +46,7 @@ export function registerLivingReportJourneys(test) {
       const errors = []
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
-      await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"] .kbn-card-name').click()
+      await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header) .kbn-card-name').click()
       // The family's page keeps the report's owning constitution at its head.
       await openThread(page, (await familyTree(page)).locator('.fp-head'), 'Calibrate the shear response')
       await band(page).locator('.ws-band-head').waitFor()

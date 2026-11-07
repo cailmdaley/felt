@@ -2086,7 +2086,7 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
     resp.threads ?? [],
   ]) {
     for (const card of list) {
-      if (seen.has(card.id)) continue
+      if (card.deskSection || seen.has(card.id)) continue
       seen.add(card.id)
       out.push(card)
     }
