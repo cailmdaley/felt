@@ -2645,7 +2645,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await open(p)
   await band(p).locator('.ws-band-head').waitFor()
   if (phone) await settleTransitions(p, '.ws-navbar')
-  if (!phone) for (const control of ['.ws-header-session:not([hidden])', '.ws-band-settings']) await still(p, `hovering ${control}`, () => band(p).locator(control).first().hover(), { allow: [`.ws-stage-band ${control}`] })
+  if (!phone) for (const control of ['.ws-worker-acts button:not([hidden])', '.ws-band-settings']) await still(p, `hovering ${control}`, () => band(p).locator(control).first().hover(), { allow: [`.ws-stage-band ${control}`] })
   await still(p, 'a poll repaint under the band', () => repaint(p))
   await bandMenu(p, 'Settings')
   if (!phone) {

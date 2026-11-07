@@ -6,15 +6,6 @@ import { deskColumn } from '../deskColumn.js'
 /** A lifecycle verb a constitution offers wherever it is acted on: the opened card's header and the Desk row's menu. */
 export type LifecycleVerb = 'review' | 'rest' | 'temper' | 'discard'
 export interface LifecycleVerbSpec { verb: LifecycleVerb; label: string; icon: HeaderIcon; cls: string }
-export type SessionVerb = 'launch' | 'resume' | 'newSession'
-export interface SessionVerbSpec { verb: SessionVerb; label: string; icon: HeaderIcon }
-
-/** The band's ways to start a worker. */
-export const SESSION_VERBS: readonly SessionVerbSpec[] = [
-  { verb: 'launch', label: 'Launch', icon: 'newSession' },
-  { verb: 'resume', label: 'Resume', icon: 'resume' },
-  { verb: 'newSession', label: 'New session', icon: 'newSession' },
-]
 
 /** The one definition: header order, word, stroke icon and pigment class of each verb. */
 export const LIFECYCLE_VERBS: readonly LifecycleVerbSpec[] = [
@@ -42,13 +33,6 @@ export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lif
   if (deskColumn(card) === 'drafts') return reachable.filter(verb => verb === 'rest')
   if (['resting', 'scheduled', 'tempered', 'composted'].includes(deskColumn(card))) return []
   return reachable
-}
-
-/** Session actions paired with the lifecycle verbs: a live worker can only be cut for a new one, a past session can also be resumed. */
-export function sessionVerbsFor(card: KanbanCard): SessionVerb[] {
-  if (!onDesk(card)) return []
-  if (hasLiveWorker(card)) return ['newSession']
-  return card.sessionUuid ? ['resume', 'newSession'] : ['launch']
 }
 
 /** Draw a button as the header draws a lifecycle verb: its stroke icon, then its word, in its pigment. */

@@ -8,7 +8,7 @@ import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDev
 import { attachConversationPicker } from '../conversationMenu.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
-import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
+import type { MeetingRecord } from '../meeting.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
@@ -18,7 +18,9 @@ import { coarsePointer } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
-import { dressVerb, headerLifecycleVerbsFor, SESSION_VERBS, sessionVerbsFor } from './lifecycleVerbs.js'
+import { dressVerb, headerLifecycleVerbsFor } from './lifecycleVerbs.js'
+import { onDesk } from './fiberPageState.js'
+import { WorkerActions } from './workerActions.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
@@ -28,7 +30,7 @@ import './tokens.css'
 import './dock.css'
 
 interface AgentAxes { agent: string; effort: string; chrome: boolean }
-type SessionMode = 'fresh' | 'previous'
+export type SessionMode = 'fresh' | 'previous'
 
 export interface SessionWindow {
   text: string
@@ -418,10 +420,6 @@ export class Dock {
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
   private searchRenderToken = 0
-  private meetingCard: KanbanCard | null = null
-  private meetingPane: HTMLElement | null = null
-  private meetingPaneCollapsed = false
-  private meetingPaneIdentity: string | null = null
   /** Opens a file in the reader's viewer; the workspace seats it. */
   openFile?: (path: string, title?: string, owner?: string) => void
   private constitutionButton: HTMLButtonElement | null = null
@@ -569,11 +567,8 @@ export class Dock {
     this.searchDebounce = null
     this.searchRenderToken++
     this.fiberIndex = null
-    this.card = this.workerPillCard = this.meetingCard = null
+    this.card = this.workerPillCard = null
     this.constitutionButton = this.openConstitution = null
-    this.meetingPane = null
-    this.meetingPaneCollapsed = false
-    this.meetingPaneIdentity = null
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
     this.starting = false
@@ -599,58 +594,9 @@ export class Dock {
     return this.drawerClose?.() ?? false
   }
 
-  /** The hosted recording's words as they arrive, under the band. */
-  private buildMeetingPane(card: KanbanCard): HTMLElement {
-    const pane = document.createElement('section')
-    pane.className = 'kbn-detail-transcript'
-    pane.hidden = true
-    const meta = document.createElement('div')
-    meta.className = 'kbn-detail-transcript-meta'
-    const dot = document.createElement('span')
-    dot.className = 'kbn-detail-transcript-dot'
-    dot.setAttribute('aria-hidden', 'true')
-    const state = document.createElement('span')
-    state.className = 'kbn-detail-transcript-state'
-    const title = document.createElement('span')
-    title.className = 'kbn-detail-transcript-title'
-    meta.append(dot, state, title)
-    const list = document.createElement('ol')
-    list.className = 'kbn-detail-transcript-lines'
-    list.setAttribute('aria-label', 'Transcript')
-    list.setAttribute('aria-live', 'polite')
-    list.tabIndex = 0
-    pane.append(meta, list)
-    this.meetingCard = card
-    this.meetingPane = pane
-    this.syncMeeting()
-    return pane
-  }
-
-  /** Repaint the meeting pane and Listen from the board's current meeting. */
+  /** Repaint Listen from the board's current meeting. */
   syncMeeting(): void {
     this.listen?.meetingChanged()
-    const current = this.meeting?.current() ?? null
-    const identity = current ? `${current.fiber ?? ''}\0${current.started_at ?? ''}\0${current.title ?? ''}` : null
-    if (identity !== this.meetingPaneIdentity) {
-      this.listen?.dismiss()
-      this.meetingPaneIdentity = identity
-      this.meetingPaneCollapsed = false
-    }
-    const pane = this.meetingPane
-    const card = this.meetingCard
-    if (!pane || !card) return
-    const hosted = meetingHostCard(current, [card]) !== null
-    pane.hidden = !hosted || current === null || this.meetingPaneCollapsed
-    if (!current || !hosted) return
-    pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')!.hidden = current.tail.length === 0
-    for (const st of ['starting', 'loading', 'live', 'stopping', 'failed']) {
-      pane.classList.toggle(`kbn-detail-transcript-${st}`, current.state === st)
-    }
-    pane.querySelector<HTMLElement>('.kbn-detail-transcript-state')!.textContent =
-      meetingStateWord(current.state, current.paused)
-    pane.querySelector<HTMLElement>('.kbn-detail-transcript-title')!.textContent =
-      current.title?.trim() ?? ''
-    paintTranscript(pane.querySelector<HTMLOListElement>('.kbn-detail-transcript-lines')!, current.tail)
   }
 
   /**
@@ -684,6 +630,11 @@ export class Dock {
   /** Whether opening means reopening the past session: a link the human chose still wins. */
   private reopens(card: KanbanCard, destination: ConversationDestination | undefined): boolean {
     return conversationDevice().desktop && !!card.sessionUuid && !hasLiveWorker(card) && destination?.id !== conversationOpening()
+  }
+
+  /** A worker's own line for an opening message, Resume and New session, for a page to seat beside that worker. */
+  workerActionsFor(card: KanbanCard): WorkerActions {
+    return new WorkerActions(card, (target, mode, message, word) => this.startSession(target, mode, word, undefined, message))
   }
 
   /** The band shares the workspace's identity-keyed undo queue. */
@@ -775,7 +726,6 @@ export class Dock {
       errorEl.textContent = message ?? ''
       errorEl.style.display = message ? '' : 'none'
     }
-    const meetingPane = this.buildMeetingPane(card)
 
     const settings = document.createElement('div')
     settings.className = 'kbn-detail-controls'
@@ -872,19 +822,8 @@ export class Dock {
     review.title = 'Move to Awaiting review (a)'
     review.addEventListener('click', () => this.verdict(card, 'awaitingReview'))
     verdict.prepend(review)
-    const sessionActions = document.createElement('span')
-    sessionActions.className = 'ws-header-sessions'
-    const sessionButtons = new Map(SESSION_VERBS.map(spec => {
-      const button = ctlButton('', 'ws-header-icon ws-header-verb ws-header-session')
-      button.title = spec.label; button.setAttribute('aria-label', spec.label)
-      button.innerHTML = headerIcon(spec.icon)
-      const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = spec.label
-      button.append(word)
-      button.addEventListener('click', () => { void this.startSession(card, spec.verb === 'resume' ? 'previous' : 'fresh', word) })
-      sessionActions.append(button)
-      return [spec.verb, button] as const
-    }))
-    verdict.prepend(sessionActions)
+    const worker = this.workerActionsFor(card)
+    this.disposers.push(() => worker.dispose())
 
     // A single settings sheet owns configuration and history.
     const drawer = document.createElement('div')
@@ -975,13 +914,12 @@ export class Dock {
         openFile: (path, title, owner) => this.openFile?.(path, title, owner),
         hostName: meeting => this.meetingHostName?.(meeting),
         openHost: meeting => this.onMeetingHostOpen?.(meeting),
-        showPane: () => { this.meetingPaneCollapsed = false; this.syncMeeting() },
         onError: showError,
       })
     }
     this.head.replaceChildren(openItem, ...(this.listen ? [this.listen.el] : []), verdict)
     header.append(identity, this.head, constitutionItem, settingsItem, leave)
-    body.append(header, drawer, meetingPane, foot)
+    body.append(header, worker.el, drawer, foot)
     this.actPaint = () => {
       const column = deskColumn(card)
       this.el.dataset.column = column
@@ -996,22 +934,15 @@ export class Dock {
       paintUsage(contextFact, cacheFact, usage, card.workerAgent ?? card.shuttleAgent)
       meter.hidden = contextFact.hidden && cacheFact.hidden
       const warm = warmUntil(usage)
-      const warmSaid = warm === undefined ? '' : `warm until ${clockTime(warm)}`
       const hit = usage?.hit_share === undefined ? undefined : Math.round(usage.hit_share * 100)
       const saidFacts = [bandFacts(card), ...(hit === undefined ? [] : [`${hit}% cached`])].join(' · ')
       if (facts.textContent !== saidFacts) facts.textContent = saidFacts
       facts.title = hit === undefined ? '' : `The session's recent turns read ${hit}% of their context tokens from the prompt cache`
       facts.hidden = !facts.textContent
       const offered = headerLifecycleVerbsFor(card, !!this.onRest)
-      const sessionOffered = shuttleManaged ? sessionVerbsFor(card) : []
-      verdict.hidden = !offered.length && !sessionOffered.length
-      sessionActions.hidden = !sessionOffered.length
-      for (const spec of SESSION_VERBS) {
-        const button = sessionButtons.get(spec.verb)!
-        button.hidden = !sessionOffered.includes(spec.verb)
-        button.disabled = this.starting
-        if (spec.verb === 'resume') button.title = warm === undefined ? spec.label : `${spec.label} · cache ${warmSaid}`
-      }
+      verdict.hidden = !offered.length
+      worker.el.hidden = !shuttleManaged || !onDesk(card)
+      worker.update(card, warm === undefined ? '' : `cache warm until ${clockTime(warm)}`)
       if (rest) rest.hidden = !offered.includes('rest')
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')
@@ -1586,7 +1517,7 @@ export class Dock {
    * refused start raised ({@link showStartPrompt}). A worker that starts opens
    * on the desktop, where the human talks to it.
    */
-  private async startSession(card: KanbanCard, mode: SessionMode, word?: HTMLElement, projectDir?: string): Promise<boolean> {
+  private async startSession(card: KanbanCard, mode: SessionMode, word?: HTMLElement, projectDir?: string, message = ''): Promise<boolean> {
     if (this.starting || (mode === 'fresh' && !this.confirmCut(card))) return false
     const epoch = this.epoch
     const original = word?.textContent ?? ''
@@ -1604,7 +1535,7 @@ export class Dock {
     try {
       let res: Response
       try {
-        res = await postForceDispatch(this.shuttleBase, card, { user_message: '', resume_mode: mode, ...(projectDir ? { project_dir: projectDir } : {}) })
+        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, resume_mode: mode, ...(projectDir ? { project_dir: projectDir } : {}) })
       } catch (err: unknown) {
         showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
         return false
@@ -1616,7 +1547,7 @@ export class Dock {
         return true
       }
       if (res.status === 409) showError('A worker is already running for this fiber.')
-      else if (inBand && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode)
+      else if (inBand && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode, message)
       else showError(dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
       return false
     } finally {
@@ -1647,7 +1578,7 @@ export class Dock {
    * ancestor's `project_dir` when the card has one. Start retries the launch
    * mode with the confirmed directory.
    */
-  private showStartPrompt(card: KanbanCard, body: DispatchFailureBody, mode: SessionMode): void {
+  private showStartPrompt(card: KanbanCard, body: DispatchFailureBody, mode: SessionMode, message = ''): void {
     const errorEl = this.errorEl
     if (!errorEl) return
     const epoch = this.epoch
@@ -1656,7 +1587,7 @@ export class Dock {
       host: body.host ?? card.shuttleHost,
       suggestion: card.inheritedProjectDir,
       onStart: dir => {
-        void this.startSession(card, mode, undefined, dir).then(ok => {
+        void this.startSession(card, mode, undefined, dir, message).then(ok => {
           if (ok || epoch !== this.epoch || !errorEl.contains(prompt)) return
           const retry = prompt.querySelector<HTMLButtonElement>('button')
           if (retry) retry.disabled = false
