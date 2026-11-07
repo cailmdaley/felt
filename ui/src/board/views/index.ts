@@ -16,7 +16,6 @@ import './ChronicleView.js'
 import './BoardView.js'
 import './TreeView.js'
 import './GlobeView.js'
-import './MapView.js'
 
 export {
   blockingDialogOpen,

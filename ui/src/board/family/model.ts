@@ -115,7 +115,7 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     const standing = standingOf(card, index, fresh, lastMove, now), tone = standingOf(card, index, false, lastMove, now) as MapThread['tone']
     const thread: MapThread = {
       key: threadKey(card), card, name: card.name, depth, parent, children: [], standing, tone,
-      word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : THREAD_LABEL[index.state(card)].toLowerCase()),
+      word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : index.state(card) === 'roles' ? 'seat' : THREAD_LABEL[index.state(card)].toLowerCase()),
       note: ask?.text ?? card.outcome ?? '', rank: -1, lastMove, born, ended, launches, commits, files, fresh,
       merged: index.state(card) === 'archived', weight: launches.length + commits.length + files.length,
     }

@@ -7,7 +7,7 @@ export type WorkspaceRoute =
 
 const OVERVIEW_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
-export type WorkspaceOriginView = 'desk' | 'chronicle' | 'board' | 'tree' | 'globe' | 'map'
+export type WorkspaceOriginView = 'desk' | 'chronicle' | 'board' | 'tree' | 'globe'
 interface HistoryPage { hash: string; label?: string; pageLabel?: string }
 interface RouteState {
   depth: number
@@ -25,14 +25,13 @@ function encode(value: string): string {
 }
 
 function isOriginView(value: unknown): value is WorkspaceOriginView {
-  return value === 'desk' || value === 'chronicle' || value === 'board' || value === 'tree' || value === 'globe' || value === 'map'
+  return value === 'desk' || value === 'chronicle' || value === 'board' || value === 'tree' || value === 'globe'
 }
 function originFromHash(hash: string): WorkspaceOriginView | null {
   if (hash === '#/desk') return 'desk'
   if (hash === '#/chronicle') return 'chronicle'
   if (hash === '#/tree') return 'tree'
   if (hash === '#/globe') return 'globe'
-  if (hash === '#/map') return 'map'
   if (hash === OVERVIEW_HASH || hash.startsWith(`${OVERVIEW_HASH}/`)) return 'board'
   return null
 }

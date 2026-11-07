@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { card } from './testFixtures.js'
 import { ThreadIndex, threadState } from './threads.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
-import { FamilyPage } from './workspace/FamilyPage.js'
+import { FamilyPage, placeAt } from './workspace/FamilyPage.js'
 import { deskColumn } from './deskColumn.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
@@ -48,17 +48,14 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       expect(constitutionMentions([c])[0].state).toBe(label)
     }
   })
-  it('the family page draws each state label', () => {
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    try {
-      const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-      const page = new FamilyPage(vi.fn(), vi.fn(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, vi.fn()); page.update(hub, index)
-      const labels = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.kbn-thread-row')]
-        .filter(row => row.querySelector('.kbn-thread-name')!.textContent !== hub.name)
-        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('.ws-tree-state')!.textContent]))
-      const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
-      expect(labels).toEqual({ ...want, [spawned.name]: 'Armed', [seat.name]: 'Resting' })
-    } finally { vi.unstubAllGlobals() }
+  it('the constitution\'s page names each state, the set-aside behind its fold', () => {
+    const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
+    const page = new FamilyPage(vi.fn(), vi.fn(), vi.fn(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, placeAt(hub), vi.fn()); page.update(hub, index)
+    expect(page.el.querySelector('.fp-aside')!.textContent).toBe('1 seat · 1 resting')
+    page.el.querySelector('.fp-aside')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+    const words = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.fp-row:not(.fp-head)')]
+      .map(row => [row.querySelector('.fp-name')!.textContent, row.querySelector('.fp-meta')!.textContent!.split(' · ')[0]]))
+    expect(words).toEqual({ [spawned.name]: 'armed', [standing.name]: 'resting', [seat.name]: 'seat', [asking.name]: 'your turn' })
   })
 })
 

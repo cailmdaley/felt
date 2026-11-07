@@ -86,6 +86,6 @@ it.each([false, true])('the count opens the family page on phone=%s', async phon
   row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
   await vi.waitFor(() => expect(inside.workspace.isActive).toBe(true))
   await vi.waitFor(() => expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(`family:${head.originId}:hub-uid`))
-  expect(document.querySelector('.ws-selected .ws-family [aria-current="page"] .kbn-thread-name')?.textContent).toBe(head.name)
+  expect(document.querySelector('.ws-selected .fp-row[data-current] .fp-name')?.textContent).toBe(head.name)
   expect(document.querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).toBe(false)
 })

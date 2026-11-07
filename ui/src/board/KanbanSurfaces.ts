@@ -165,7 +165,6 @@ interface KanbanSurfaceRendererOptions {
    *  render the In flight head title + count alone. */
   onNewIdeaClick?: () => void
   /** Show the Desk as its map — the In flight head's Map control. */
-  onMapClick?: () => void
   getMeeting?: () => MeetingRecord | null
   getPhoneMeeting?: () => PhoneMeeting
   isMeetingStopRequested?: (meeting: MeetingRecord) => boolean
@@ -1150,8 +1149,6 @@ export class KanbanSurfaceRenderer {
     headLabel.className = 'kbn-col-head-label'
     headLabel.append(headTitle, headCount)
     head.append(headLabel)
-    const map = kind === 'inFlight' ? this.makeMapAction() : null
-    if (map) headLabel.append(map)
     const action = this.makeColumnAction(kind)
     if (action) head.append(action)
 
@@ -1295,22 +1292,6 @@ export class KanbanSurfaceRenderer {
       // bubble up to it (or to the column's open-detail / drag wiring).
       e.stopPropagation()
       spec.onClick()
-    })
-    return btn
-  }
-
-  /** The In flight head's way to the map, a word beside its count. */
-  private makeMapAction(): HTMLButtonElement | null {
-    const onClick = this.o.onMapClick
-    if (!onClick) return null
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.className = 'kbn-col-map'
-    btn.textContent = 'Map'
-    btn.title = 'Show everything in flight as a map (m)'
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      onClick()
     })
     return btn
   }
