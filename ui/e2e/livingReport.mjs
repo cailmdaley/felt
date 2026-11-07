@@ -46,7 +46,7 @@ export function registerLivingReportJourneys(test) {
       const errors = []
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
-      await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]').click()
+      await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"] .kbn-card-name').click()
       // The family tree keeps the report's owning constitution at its root.
       await (await familyTree(page)).locator('.kbn-thread-row').first().click()
       await band(page).locator('.ws-band-head').waitFor()
