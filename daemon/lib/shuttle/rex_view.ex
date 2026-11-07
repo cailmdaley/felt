@@ -1,11 +1,12 @@
 defmodule Shuttle.RexView do
   @moduledoc """
-  Keeps Rex's view to what is in focus. A window this daemon opened for a
-  worker, a resumed conversation or a tmux viewer leaves the view once it has
-  stood behind its session's active window for `grace_ms`: its block is
-  detached (`Shuttle.Terminal.Rex.hide/3`), so the window closes and the
-  program in it runs on. Opening the conversation again (`c`, Open in Rex)
-  puts it back in a window of its own.
+  Keeps Rex's view to what is in focus, the workers asking something, and the
+  workers running a turn. Any other window this daemon opened, for a worker
+  waiting at its prompt, a resumed conversation or a tmux viewer, leaves the
+  view once it has stood behind its session's active window for `grace_ms`:
+  its block is detached (`Shuttle.Terminal.Rex.hide/3`), so the window closes
+  and the program in it runs on. A hidden worker that starts a turn or raises
+  an ask comes back, and a click or an open puts it back in a window of its own.
 
   Each session keeps the window it shows. Windows this daemon did not open
   (a human's shell, hark, Remote Control) are never touched.
@@ -39,9 +40,9 @@ defmodule Shuttle.RexView do
   def handle_info(:sweep, state) do
     behind =
       with true <- Shuttle.Terminal.primary() == Shuttle.Terminal.Rex,
-           {:ok, asking} <- asking(),
+           {:ok, shown} <- shown(),
            {:ok, behind} <-
-             sweep(runner(), state.behind, grace_ms: state.grace_ms, asking: asking) do
+             sweep(runner(), state.behind, grace_ms: state.grace_ms, shown: shown) do
         behind
       else
         false ->
@@ -57,10 +58,10 @@ defmodule Shuttle.RexView do
   end
 
   @doc """
-  The terminals whose worker has raised an ask: a question in its fiber, a
-  harness prompt, or a block. Unknown while this host's feed is cold.
+  The terminals that stay in view: a worker that has raised an ask or is
+  running a turn. Unknown while this host's feed is cold.
   """
-  def asking do
+  def shown do
     case Shuttle.Poller.cached_fiber_documents(
            felt_stores: Shuttle.FeltStores.configured_stores()
          ) do
@@ -68,7 +69,7 @@ defmodule Shuttle.RexView do
         {:ok,
          for(
            %{fiber: fiber, runtime: runtime} <- entries,
-           is_binary(runtime[:tmux_session]) and raised?(fiber, runtime),
+           is_binary(runtime[:tmux_session]) and shown?(fiber, runtime),
            into: MapSet.new(),
            do: runtime.tmux_session
          )}
@@ -78,28 +79,32 @@ defmodule Shuttle.RexView do
     end
   end
 
-  @doc "Whether a worker has raised an ask: the red ones on the Desk."
-  def raised?(fiber, runtime) do
+  @doc """
+  Whether a worker stays in view: it has raised an ask (a question in its
+  fiber, a harness prompt or a block, the red ones on the Desk) or is running
+  a turn. One waiting at its prompt does not.
+  """
+  def shown?(fiber, runtime) do
     (fiber["status"] == "active" and is_map(get_in(fiber, ["shuttle", "ask"]))) or
-      runtime[:phase] in ["attention", "blocked", "identity_failed"] or
+      runtime[:phase] in ["working", "attention", "blocked", "identity_failed"] or
       runtime[:state] == "blocked" or is_binary(runtime[:launch_error])
   end
 
   @doc """
   One pass. A window of ours that has stood behind its session's active window
   since `behind[block]` for at least `:grace_ms` (0: at once) leaves the view,
-  unless its terminal is in `:asking`; a hidden one in `:asking` comes back.
+  unless its terminal is in `:shown`; a hidden one in `:shown` comes back.
   Returns when each remaining one was first seen behind.
   """
   def sweep(runner, behind \\ %{}, opts \\ []) do
     now = Keyword.get(opts, :now, System.monotonic_time(:millisecond))
     grace = Keyword.get(opts, :grace_ms, 0)
-    asking = Keyword.get(opts, :asking, MapSet.new())
+    shown = Keyword.get(opts, :shown, MapSet.new())
 
     with {:ok, doc} <- RexBindings.read() do
       ours = Enum.to_list(doc["bindings"]) ++ Enum.to_list(doc["viewers"] || %{})
       names = Map.new(ours, fn {name, b} -> {b["block_id"], name} end)
-      keep = fn bid -> MapSet.member?(asking, names[bid]) end
+      keep = fn bid -> MapSet.member?(shown, names[bid]) end
 
       ours
       |> Enum.map(fn {_, b} -> b["session_id"] end)
@@ -141,7 +146,7 @@ defmodule Shuttle.RexView do
     end
   end
 
-  # A worker that raises an ask while hidden comes back into view.
+  # A hidden worker that raises an ask or starts a turn comes back into view.
   defp bring_back(runner, sid, blocks, names, keep) do
     blocks
     |> Enum.filter(&(&1["placement"] == "detached" and Map.has_key?(names, &1["block_id"])))

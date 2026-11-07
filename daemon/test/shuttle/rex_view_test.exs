@@ -88,31 +88,31 @@ defmodule Shuttle.RexViewTest do
     assert Enum.sort(placed(sid)) == Enum.sort([@kid, "shell"])
   end
 
-  test "a worker with a raised ask stays in view, and one that raises an ask while hidden comes back" do
+  test "a worker asking or mid-turn stays in view, and a hidden one that starts comes back" do
     sid = family()
     show(sid, @hub)
     asking = MapSet.new([@kid])
-    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0, asking: asking)
+    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0, shown: asking)
     assert @kid in placed(sid)
     {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0)
     refute @kid in placed(sid)
-    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0, asking: asking)
+    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0, shown: asking)
     assert @kid in placed(sid)
   end
 
-  test "a raised ask is a question in an active fiber, a harness prompt, or a block; waiting is not" do
+  test "a worker stays in view for a question in an active fiber, a harness prompt, a block or a turn; waiting does not" do
     ask = %{"status" => "active", "shuttle" => %{"ask" => %{"text" => "Which?", "at" => "now"}}}
     plain = %{"status" => "active", "shuttle" => %{}}
-    assert RexView.raised?(ask, %{phase: "waiting"})
-    refute RexView.raised?(%{ask | "status" => "closed"}, %{phase: "waiting"})
+    assert RexView.shown?(ask, %{phase: "waiting"})
+    refute RexView.shown?(%{ask | "status" => "closed"}, %{phase: "waiting"})
 
     for phase <- ["attention", "blocked", "identity_failed"],
-        do: assert(RexView.raised?(plain, %{phase: phase}))
+        do: assert(RexView.shown?(plain, %{phase: phase}))
 
-    assert RexView.raised?(plain, %{state: "blocked"})
-    assert RexView.raised?(plain, %{launch_error: "no such agent"})
-    refute RexView.raised?(plain, %{phase: "waiting", state: "running", launch_error: nil})
-    refute RexView.raised?(plain, %{phase: "working"})
+    assert RexView.shown?(plain, %{state: "blocked"})
+    assert RexView.shown?(plain, %{launch_error: "no such agent"})
+    refute RexView.shown?(plain, %{phase: "waiting", state: "running", launch_error: nil})
+    assert RexView.shown?(plain, %{phase: "working"})
   end
 
   test "a resumed conversation's pane names its fiber, while a worker's keeps its recovery index" do
