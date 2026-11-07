@@ -1020,13 +1020,15 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   assert.match(raised.transform, /0\.94/)
   assert.match(raised.filter, /saturate\(0\.25\)/)
   const next = names[names.indexOf(name) + 1]
-  await p.keyboard.press('j')
+  // On a constitution's page j/k walk its own level; Alt+↓/↑ step the Desk's order.
+  await p.keyboard.press('Alt+ArrowDown')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
   await p.keyboard.press('Escape')
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next, 'Escape selects the last card viewed')
   await land(p)
-  await p.keyboard.press('j')
+  // On a constitution's page j/k walk its own level; Alt+↓/↑ step the Desk's order.
+  await p.keyboard.press('Alt+ArrowDown')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
   await barTab(p, 'desk').click()
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
