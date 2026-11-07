@@ -37,6 +37,8 @@ const WHEEL_RATE = .01, WHEEL_MOST = 60, KEY_ZOOM = 1.6
 const SLOP = 5
 /** A callout's distance from the centre of its marker. */
 const CALLOUT_GAP = 12
+/** How far a name under the focus may stand from its tile's centre to clear a neighbour. */
+const NUDGE = 22
 /** The peek's distance from the stage's foot. */
 const FOOT_GAP = 10
 /** A zoom's limit: the thing under it this many stages wide, or over open water this many spheres. */
@@ -361,8 +363,9 @@ export class GlobeStage {
       body.kids.forEach(visit)
     }
     scene.roots.forEach(visit)
-    const opens = (body: Body): number => body.kind === 'province' || body.kind === 'area' || body.kids.some(kid => kid.kind === 'thread') ? 1 : 0
-    candidates.sort((a, b) => opens(a) - opens(b) || a.urgency - b.urgency || b.cell.order - a.cell.order)
+    const opens = (body: Body): number => this.underFocus(body) ? (body.urgency > ATTENTION.length ? .5 : 0) : body.kind === 'province' || body.kind === 'area' || body.kids.some(kid => kid.kind === 'thread') ? 2 : 1
+    // Under the focus the smallest tiles go first: they have the fewest places a name can go.
+    candidates.sort((a, b) => opens(a) - opens(b) || (this.underFocus(a) ? b.cell.order - a.cell.order : 0) || a.urgency - b.urgency || b.cell.order - a.cell.order)
     const placed = placeNames(this.candidates(candidates, frame, scene), { left: 8, top: this.headHeight + 4, right: width - 8, bottom: height - this.footHeight - 4 }, MOST_NAMES)
     const live = new Set<string>()
     for (const { owner, block, at } of placed) {
@@ -404,6 +407,8 @@ export class GlobeStage {
       yield { owner: body, polygon: null, blocks: options, anchors: options.flatMap(block => [{ x: x + CALLOUT_GAP + block.width / 2, y }, { x: x - CALLOUT_GAP - block.width / 2, y }]) }
     }
   }
+  /** The thread is one of those the view has come to: its name is to be read, whatever the size of its tile. */
+  private underFocus(body: Body): boolean { return body.kind === 'thread' && body.parent?.key === this.place.focus }
   private *candidates(bodies: readonly Body[], frame: Frame, scene: Scene): Generator<Candidate<Body>> {
     yield* this.callouts(frame, scene)
     for (const body of bodies) {
@@ -416,6 +421,12 @@ export class GlobeStage {
       }
       if (hidden) continue
       const middle = project(frame, body.centre)
+      if (this.underFocus(body)) {
+        const nudge = (dy: number, dx = 0): Point => ({ x: middle.x + dx, y: middle.y + dy })
+        yield { owner: body, polygon: brickOf(polygon, middle), anchors: [middle], blocks: this.blocksOf(body) }
+        yield { owner: body, polygon: null, anchors: [middle, nudge(-NUDGE), nudge(NUDGE), nudge(0, 2 * NUDGE), nudge(0, -2 * NUDGE), nudge(-2 * NUDGE), nudge(2 * NUDGE)], blocks: this.blocksOf(body).filter(block => block.role === 'note').reverse() }
+        continue
+      }
       const childless = body.kind === 'thread' && !body.kids.some(kid => kid.kind === 'thread')
       const anchors = childless ? [project(frame, centre(child(body.cell, NORTH))), middle] : [middle]
       yield { owner: body, polygon: body.kind === 'province' || body.kind === 'area' ? polygon : brickOf(polygon, middle), anchors, blocks: this.blocksOf(body) }
