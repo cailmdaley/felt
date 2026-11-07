@@ -652,6 +652,7 @@ export class Workspace {
     state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), card => this.reach(card), card => this.dock.openConversation(card), this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
       () => { if (this.current === state) this.sight(state) })
+    state.familyPage.workerActions ??= card => this.dock.workerActionsFor(card)
     state.familyPage.update(state.card, this.graph())
     return state.familyPage.el
   }
