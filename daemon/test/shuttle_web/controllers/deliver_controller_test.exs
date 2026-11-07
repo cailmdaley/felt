@@ -257,7 +257,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     record.("2026-11-06T10:00:01Z", "aside not sent")
     poll.()
     refute_receive {:message, _}, 20
-    record.("2026-11-06T10:00:02Z", "raw correction needed send")
+    record.("2026-11-06T10:00:02Z", "raw correction needed, send")
     poll.()
     # The owning dispatcher, not the recorder cache, selects the dormant conversation.
     task_refs =

@@ -453,7 +453,8 @@ Hark reads the same file through `--settings`.
 Only the listed top-level settings participate; nested settings do not affect thresholds.
 `{enabled: false}` repairs an invalid file with disabled defaults.
 
-Following drops ordinary batches for a cold target; a batch ending in `send` starts or resumes its worker.
+Following drops ordinary batches for a cold target; a final `send` clause starts or resumes its worker.
+`send` must stand alone at the start of an utterance or after sentence punctuation, a comma, semicolon or colon; “did you send?” does not trigger delivery.
 Pinned listening delivers every batch and starts a cold worker without a trigger.
 Names have no routing or delivery meaning.
 The owner decides resume versus first launch from its current document.

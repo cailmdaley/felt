@@ -269,7 +269,7 @@ The page reads its feeds and repaints only while it is the selected page of an o
 With Follow me on, whichever of Rex and the board had focus last chooses the destination: Rex's selected worker, or the board's viewed card and its nearest constitution.
 Opening a thread or a Globe card moves the destination; hovering, moving a keyboard highlight, or viewing Desk, Chronicle or Board does not.
 With Follow me off, the destination stays pinned while views continue to be remembered; turning it back on resumes the latest view seen while listening.
-Following sends after a short quiet, but words for a card without a live worker go nowhere unless they end with “send”, which starts the worker; pinned listening sends every batch and starts a worker when needed, using its own longer quiet threshold.
+Following sends after a short quiet, but words for a card without a live worker go nowhere unless they end with a standalone “send” clause (for example, “check the plot, send”), which starts the worker; pinned listening sends every batch and starts a worker when needed, using its own longer quiet threshold.
 The recorder's day transcript retains all speech, including unrouted or undelivered words, and every delivered batch points to its time in `shuttle transcript`.
 
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.

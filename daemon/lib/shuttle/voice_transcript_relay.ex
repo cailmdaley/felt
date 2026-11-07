@@ -386,7 +386,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
   use GenServer
   alias Shuttle.FileTail
 
-  @closing ~r/[\s,;:]*\bsend[.!?]*\s*$/iu
+  @closing ~r/(?:^\s*|[,;:.!?]\s*)send[.!?]*\s*$/iu
   @partial_stale_seconds 60
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
