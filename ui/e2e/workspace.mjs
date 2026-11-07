@@ -1039,8 +1039,8 @@ test('Verdicts live in the band, with the undo line on its head; keys reach them
   await open(p)
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
   const pair = band(p).getByRole('group', { name: 'Verdict', exact: true })
-  assert.ok(await pair.getByRole('button', { name: 'Temper', exact: true }).isVisible())
-  assert.ok(await pair.getByRole('button', { name: 'Discard', exact: true }).isVisible())
+  assert.ok(await pair.getByRole('button', { name: 'Temper (t)', exact: true }).isVisible())
+  assert.ok(await pair.getByRole('button', { name: 'Discard (x)', exact: true }).isVisible())
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await appFocus(p); await p.keyboard.press('t')
@@ -1052,9 +1052,9 @@ test('Verdicts live in the band, with the undo line on its head; keys reach them
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  assert.equal(await band(p).locator('.ws-band-acts > .ws-band-open').count(), 1)
-  assert.ok(await band(p).getByRole('button', { name: 'Close for review', exact: true }).isVisible())
-  assert.ok(await band(p).getByRole('button', { name: 'Rest', exact: true }).isVisible())
+  assert.equal(await band(p).locator('.ws-band-open').count(), 0)
+  assert.ok(await band(p).getByRole('button', { name: 'Close for review (a)', exact: true }).isVisible())
+  assert.ok(await band(p).getByRole('button', { name: 'Rest (s)', exact: true }).isVisible())
 })
 
 async function verdictLook(locator) {
@@ -1160,9 +1160,10 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   assert.ok(bar.height <= title.height + 12, `one row: navbar ${bar.height}px for a ${title.height}px title`)
   await headerAction(p, 'Settings')
   await p.locator('.ws-settings-menu:not([hidden])').waitFor()
+  const settings = await band(p).locator('.ws-band-head .ws-band-settings').boundingBox()
   for (const verb of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
     const box = await band(p).locator(`.ws-band-head .kbn-ctl-verdict ${verb}`).boundingBox()
-    assert.ok(box.height >= 44 && box.width >= 44, `${verb} is a full target on the constitution's page: ${JSON.stringify(box)}`)
+    assert.ok(box.height >= 44 && box.width === settings.width, `${verb} is a full-height target the size of the band's other icons: ${JSON.stringify(box)}`)
   }
 }, { width: 844, height: 390 }, 'reduce', true)
 
@@ -1173,10 +1174,10 @@ test('A key discard waits on the constitution in place of the pair; undo, then T
   assert.equal(await isSelected(p, 'calibration-report'), true, 'the key leaves the page in place')
   const pair = band(p).locator('.ws-band-acts')
   assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^DISCARDED/i)
-  assert.ok(await pair.getByRole('button', { name: 'Temper', exact: true }).isHidden(), 'the pair gives way to the line')
+  assert.ok(await pair.getByRole('button', { name: 'Temper (t)', exact: true }).isHidden(), 'the pair gives way to the line')
   await p.clock.runFor(3000)
   await pair.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
-  await pair.getByRole('button', { name: 'Temper', exact: true }).click()
+  await pair.getByRole('button', { name: 'Temper (t)', exact: true }).click()
   assert.equal(await band(p).locator('.ws-fiber-acts .ws-verdict-undo').count(), 1)
   assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^TEMPERED/i)
   await p.clock.runFor(3999)
@@ -1787,9 +1788,10 @@ test('Remote worker conversation records attach handler without launching a term
   assert.match(event.session, /remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle/)
 })
 
-test("Console in the header opens the same remote worker as c", async p => {
+test("c opens the remote worker from its console", async p => {
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  await band(p).getByRole('button', { name: 'Open in Terminal', exact: true }).click()
+  await band(p).locator('.ws-band-head').waitFor()
+  await appFocus(p); await p.keyboard.press('c')
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
   assert.equal(event.host, 'basalt-login-02')
@@ -2187,7 +2189,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.equal(await band(p).locator('.ws-band-acts .kbn-card-worker').count(), 0)
     assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
     if (device === 'phone') await headerAction(p, 'Settings')
-    for (const verb of ['Temper', 'Discard']) {
+    for (const verb of ['Temper (t)', 'Discard (x)']) {
       const button = band(p).getByRole('button', { name: verb, exact: true })
       await button.scrollIntoViewIfNeeded()
       const box = await button.boundingBox()
@@ -2203,36 +2205,21 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await shot('undo-line'); await p.keyboard.press('z'); await leave(p)
     await chooseDeskColumn(p, 1)
     await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-    const state = band(p).locator('.ws-band-state')
-    await poll(p, () => document.querySelector('.ws-stage-band .ws-band-state')?.textContent === 'Working')
-    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 0, 'the state is said once, without a second worker pill')
-    assert.equal(await state.evaluate(el => getComputedStyle(el).animationName), 'none')
+    await poll(p, () => document.querySelector('.ws-stage-band .ws-dock')?.dataset.column === 'inFlight')
+    assert.equal(await band(p).locator('[data-part="lifecycle"]').count(), 0, 'colour carries the state; no word says it')
+    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 0, 'no second worker pill')
     await shot('working')
     await p.evaluate(async () => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
       row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
       await window.__harness.modal.fetchAndRender()
     })
-    await poll(p, () => document.querySelector('.ws-stage-band .ws-band-state')?.textContent === 'Your turn')
     await shot('waiting'); await leave(p); await chooseDeskColumn(p, 0)
     await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     await shot('no-worker')
   }, viewport)
 }
-
-test('The band state word stays still and follows the worker', async p => {
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  const state = band(p).locator('.ws-band-state')
-  await state.waitFor()
-  assert.equal(await state.evaluate(el => getComputedStyle(el).animationName), 'none')
-  await p.evaluate(async () => {
-    const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
-    row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
-    await window.__harness.modal.fetchAndRender()
-  })
-  await poll(p, () => document.querySelector('.ws-stage-band .ws-band-state')?.textContent === 'Your turn')
-}, undefined, 'no-preference')
 
 // Say-it-once checks cover the selected page and its chrome. Tabs and the
 // constitution switcher repeat names as navigation actions. The desktop fiber
@@ -2465,7 +2452,7 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
     probe.remove()
     return color
   }), 'rgb(255, 0, 0)', 'the broad rule is active in the reading zone')
-  const temper = band(p).getByRole('button', { name: 'Temper', exact: true })
+  const temper = band(p).getByRole('button', { name: 'Temper (t)', exact: true })
   const style = await temper.evaluate(el => ({ color: getComputedStyle(el).color, font: getComputedStyle(el).fontFamily, height: getComputedStyle(el).getPropertyValue('--ws-control-height').trim(), agent: getComputedStyle(el).getPropertyValue('--ws-agent').trim(), transform: getComputedStyle(el).textTransform, pigment: getComputedStyle(el).getPropertyValue('--kbn-agent').trim(), mono: getComputedStyle(el).getPropertyValue('--font-mono').trim() }))
   assert.notEqual(style.color, 'rgb(255, 0, 0)', 'button { color: red } cannot reach Temper')
   assert.ok(!style.font.includes('fantasy'))
@@ -2585,7 +2572,7 @@ test('Protected verdict plate and its undo line hold without author CSS', async 
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
   const plate = band(p).locator('.ws-band-acts')
   assert.equal(await plate.evaluate(el => el.closest('[data-part="act"]')?.dataset.act), 'verdict')
-  assert.notEqual(await plate.getByRole('button', { name: 'Temper', exact: true }).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
+  assert.notEqual(await plate.getByRole('button', { name: 'Temper (t)', exact: true }).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
   await appFocus(p); await p.keyboard.press('t')
   const undo = plate.locator('.ws-verdict-undo button')
   await undo.waitFor()
@@ -2676,7 +2663,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   }
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-band-state', '.ws-family-counts', '.fp-title'], settle: 100 })
+  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-family-counts', '.fp-title'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   for (const control of ['.kbn-ctl-review', '.kbn-ctl-rest']) {
     assert.ok(await band(p).locator(control).isVisible())
@@ -2712,7 +2699,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
       row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
     })
     await repaint(p)
-  }, { allow: ['.kbn-card-worker', '.ws-band-state'], settle: 100 })
+  }, { allow: ['.kbn-card-worker'], settle: 100 })
 }, viewport)
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the Desk and the Board (${device})`, async p => {
@@ -2758,7 +2745,7 @@ for (const width of [1440, 1000]) test(`Listening audio stays inside a stable bu
   const arm = band(p).locator('.kbn-ctl-meet-arm')
   const audio = band(p).locator('.kbn-ctl-meet-audio')
   const control = band(p).locator('.kbn-ctl-meet')
-  assert.equal(await arm.textContent(), 'Listen')
+  assert.equal(await arm.getAttribute('aria-label'), 'Listen')
   assert.equal(await audio.count(), 0)
   const before = await control.boundingBox()
   await band(p).locator('.kbn-ctl-meet-dropdown').click()

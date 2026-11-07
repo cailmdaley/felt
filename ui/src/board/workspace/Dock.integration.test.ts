@@ -30,7 +30,7 @@ const session = (label: string): HTMLButtonElement => band.el.querySelector(`.ws
 /** The worker line's verbs, then the band's lifecycle verbs, as drawn. */
 const shownVerbs = (view: Dock): string[] => [
   ...(view.el.querySelector<HTMLElement>('.ws-worker-acts')?.hidden ? [] : [...view.el.querySelectorAll<HTMLButtonElement>('.ws-worker-acts button')].filter(button => !button.hidden).map(button => button.dataset.verb!)),
-  ...[...view.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')].filter(button => !button.hidden).map(button => button.getAttribute('aria-label')!),
+  ...[...view.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')].filter(button => !button.hidden).map(button => button.dataset.verb!),
 ]
 const button = (text: string): HTMLButtonElement => [...band.el.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === text)!
 const select = (label: string): HTMLSelectElement => band.el.querySelector(`select[aria-label="${label}"]`)!
@@ -123,12 +123,13 @@ describe('band header', () => {
     for (const verb of band.head.querySelectorAll('.kbn-ctl-verdict button svg path')) expect(verb.getAttribute('d')).not.toBe('m4 4 8 8m0-8-8 8')
   })
 
-  it('draws each verb with its word, apart from navigation', () => {
+  it('draws the lifecycle verbs as icons like navigation, and the worker line\'s verbs with their words', () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 'words' }))
-    const words = [...band.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button, .ws-worker-acts button')].filter(button => !button.hidden).map(button => button.querySelector('.ws-header-word')?.textContent)
-    expect(words).toEqual(['Close for review', 'Resume', 'New session'])
-    expect(band.el.querySelector('.ws-band-constitution .ws-header-word, .ws-band-settings .ws-header-word')).toBeNull()
+    const words = (selector: string) => [...band.el.querySelectorAll<HTMLButtonElement>(selector)].filter(button => !button.hidden).map(button => button.querySelector('.ws-header-word')?.textContent)
+    expect(words('.ws-worker-acts button')).toEqual(['Resume', 'New session'])
+    expect(band.el.querySelector('.ws-band-head .ws-header-word')).toBeNull()
+    expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-review')!.textContent).toBe('')
   })
 
   it('keeps the verdict inside the verbs and Settings on the title line', () => {
@@ -138,25 +139,6 @@ describe('band header', () => {
     expect(header.querySelector('.kbn-ctl-verdict')?.parentElement).toBe(band.head)
     expect(header.querySelector('.ws-band-settings')?.parentElement).toBe(header)
     expect(band.head.parentElement).toBe(header)
-  })
-
-  it.each([{ phone: true }, { phone: false }])('names the way to the conversation for where it goes (phone=$phone)', ({ phone }) => {
-    vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    dock.reset(); dock = band = new Dock('', saved, undefined, vi.fn())
-    const worker = task({ status: 'active', tmuxSession: 'console-worker', sessionLink: 'https://claude.ai/code/session_console' })
-    dock.open(worker); document.body.append(band.el)
-    const opening = band.el.querySelector<HTMLButtonElement>('.ws-band-open')!
-    expect(opening.parentElement).toBe(band.head)
-    expect(opening.hidden).toBe(false)
-    expect(opening.textContent).toBe(phone ? 'Open in Claude browser' : 'Open in Terminal')
-    expect(opening.title).toBe(opening.textContent)
-    opening.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-    expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(phone ? 1 : 3)
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    if (!phone) {
-      dock.syncRuntime({ ...worker, terminalBackend: 'rex' })
-      expect(opening.textContent).toBe('Open in Rex')
-    }
   })
 
   it('draws the verbs selected for each lifecycle state', () => {
@@ -187,18 +169,14 @@ describe('band header', () => {
     expect(band.el.querySelector<HTMLElement>('.ws-worker-acts')!.hidden).toBe(true)
   })
 
-  it('names the lifecycle beside the title in the rail\'s words, kept current', () => {
+  it('says no state word beside the title, and marks the state for colour, kept current', () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 's', workerState: 'running', tmuxSession: 't', runtimePhase: 'working' }))
-    const chip = band.el.querySelector<HTMLElement>('.ws-band-head .ws-band-state')!
-    expect(band.el.querySelector('.ws-band-head .kbn-card-worker')).toBeNull()
-    expect([chip.hidden, chip.textContent, chip.dataset.state]).toEqual([false, 'Working', 'working'])
-    dock.open(task({ status: 'active', sessionUuid: 's', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
-    expect([chip.hidden, chip.textContent, chip.dataset.state]).toEqual([false, 'Waiting', 'question'])
+    expect([...band.el.querySelector('.ws-band-identity')!.children].map(child => child.className)).toEqual(['ws-band-title', 'ws-band-meter'])
+    expect(band.el.querySelector('.ws-band-head .kbn-card-worker, [data-part="lifecycle"]')).toBeNull()
+    expect(band.el.dataset.column).toBe('inFlight')
     dock.open(task({ status: 'closed', sessionUuid: 's' }))
-    expect([chip.textContent, chip.dataset.state]).toEqual(['To review', 'to-review'])
-    dock.open(task({ status: 'closed', tempered: true, sessionUuid: 's' }))
-    expect([chip.textContent, chip.dataset.state]).toEqual(['Tempered', 'tempered'])
+    expect(band.el.dataset.column).toBe('awaitingReview')
   })
 
   it('lays the band out as a head, its worker\'s line, its settings and its status', () => {
@@ -224,7 +202,8 @@ describe('band header', () => {
     band.setNav({ constitution: vi.fn() })
     document.body.append(band.el)
     const buttons = [...band.el.querySelectorAll<HTMLButtonElement>('.ws-band-head .ws-header-icon')].filter(button => !button.hidden)
-    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Close for review', 'Rest', 'Constitution', 'Settings'])
+    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Close for review (a)', 'Rest (s)', 'Constitution', 'Settings'])
+    expect(band.el.querySelector('.ws-band-open')).toBeNull()
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
       expect(button.tabIndex).toBe(0)
@@ -237,7 +216,7 @@ describe('band header', () => {
       expect(svg.getAttribute('aria-hidden')).toBe('true')
       expect(svg.getAttribute('focusable')).toBe('false')
       expect(svg.querySelector('path, rect, circle')).not.toBeNull()
-      expect(button.textContent).toBe(button.classList.contains('ws-header-verb') ? button.getAttribute('aria-label') : '')
+      expect(button.textContent).toBe('')
       button.focus(); expect(document.activeElement).toBe(button)
     }
     expect(band.head.querySelector('details, summary, [role="dialog"]')).toBeNull()
@@ -247,18 +226,16 @@ describe('band header', () => {
     { phone: true, sessionLink: undefined, visible: false },
     { phone: true, sessionLink: 'https://claude.ai/code/session_abc', visible: true },
     { phone: false, sessionLink: undefined, visible: true },
-  ])('offers the opening only with an actionable destination: %j', ({ phone, sessionLink, visible }) => {
+  ])('opens the conversation only with an actionable destination: %j', ({ phone, sessionLink, visible }) => {
     vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     const openWorker = vi.fn()
     dock.reset(); dock = band = new Dock('', saved, undefined, openWorker)
     const worker = task({ tmuxSession: 'terminal-worker', workerState: 'running', sessionLink })
     dock.open(worker)
     document.body.append(band.el)
-    const opening = band.el.querySelector<HTMLButtonElement>('.ws-band-open')!
-    expect(opening.hidden).toBe(!visible)
     expect(dock.workerPillFor(worker)?.matches('a[href],button')).toBe(visible)
     if (!phone) {
-      opening.click()
+      expect(dock.openConversation(worker)).toBe(true)
       expect(openWorker).toHaveBeenCalledWith('terminal-worker', 'owner')
     } else if (!visible) {
       expect(dock.openConversation(worker)).toBe(false)
@@ -490,17 +467,17 @@ describe('Listen', () => {
     let recording: { title: string; state: 'live' } | null = null
     const { q, listening } = mountListen(task(), { canJoin: () => !recording, current: () => recording })
     const toggle = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    expect([toggle.disabled, toggle.textContent]).toEqual([true, 'Listen'])
+    expect([toggle.disabled, toggle.getAttribute('aria-label')]).toEqual([true, 'Listen'])
     recording = { title: 'Standup', state: 'live' }
     listening.syncMeeting()
-    expect([toggle.disabled, toggle.getAttribute('aria-label')]).toEqual([false, 'Meeting · Standup'])
+    expect([toggle.disabled, toggle.getAttribute('aria-label')]).toEqual([false, 'Mute'])
     expect(toggle.title).toContain('every word goes to Standup')
     listening.reset()
   })
 
-  it('keeps the Listen label and exposes audio in its menu', () => {
+  it('names the mic Listen and exposes audio in its menu', () => {
     const { q, listening } = mountListen(resting(), { modes: () => ['call'], recorder: () => 'recorder-host' })
-    expect(q('.kbn-ctl-meet-arm').textContent).toBe('Listen')
+    expect(q('.kbn-ctl-meet-arm').getAttribute('aria-label')).toBe('Listen')
     expect(listening.el.querySelector('.kbn-ctl-meet-audio')).toBeNull()
     q<HTMLButtonElement>('.kbn-ctl-meet-dropdown').click()
     expect(q('.kbn-ctl-meet-audio')).not.toBeNull()
@@ -520,16 +497,17 @@ describe('Listen', () => {
     listening.reset()
   })
 
-  it('stops with the Stop button and disables repeated stops', () => {
+  it('stops from the menu and disables repeated stops', () => {
     const recording = { title: 'Standup', state: 'live', fiber: 'a/task', tail: [] }
     let requested = false
     const stop = vi.fn(() => { requested = true })
-    const { q, listening } = mountListen(task(), { canJoin: () => false, modes: () => ['call'], current: () => recording, stop, stopRequested: () => requested })
-    const stopButton = q<HTMLButtonElement>('.kbn-ctl-meet-stop')
-    stopButton.click()
+    const { q, item, listening } = mountListen(task(), { canJoin: () => false, modes: () => ['call'], current: () => recording, stop, stopRequested: () => requested })
+    q<HTMLButtonElement>('.kbn-ctl-meet-dropdown').click()
+    item('Stop listening').click()
     expect(stop).toHaveBeenCalledWith(recording)
     listening.syncMeeting()
-    expect(stopButton.disabled).toBe(true)
+    q<HTMLButtonElement>('.kbn-ctl-meet-dropdown').click()
+    expect(item('Stop listening').disabled).toBe(true)
     expect(stop).toHaveBeenCalledTimes(1)
     listening.reset()
   })
@@ -541,9 +519,9 @@ describe('Listen', () => {
     listening.setMeetingHostOpen(openHost, () => 'vizier')
     listening.syncMeeting()
     const chip = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    expect(chip.getAttribute('aria-label')).toBe('Meeting · vizier')
+    expect(chip.title).toContain('every word goes to vizier')
     expect(q('.kbn-ctl-meet').hidden).toBe(false)
-    expect(listening.el.querySelectorAll('.kbn-ctl-meet-stop:not([hidden])')).toHaveLength(1)
+    expect(listening.el.querySelectorAll('.kbn-ctl-meet button')).toHaveLength(2)
     expect(listening.el.querySelector('.kbn-detail-transcript-stop')).toBeNull()
     chip.click()
     item('Open transcript').click()
@@ -556,14 +534,14 @@ describe('Listen', () => {
     const { q, item, listening } = mountListen(task(), { current: () => recording })
     const openFile = vi.fn()
     listening.openFile = openFile
-    listening.setMeetingHostOpen(vi.fn(), meeting => meeting.fiber?.split('/').at(-1))
+    listening.setMeetingHostOpen(vi.fn(), fiber => fiber.split('/').at(-1))
     const strip = q('.ws-voice-strip')
     expect(strip.parentElement).toBe(listening.head)
     expect(strip.previousElementSibling).toBe(q('.kbn-ctl-meet'))
     expect(strip.hidden).toBe(true)
     recording = { launch: 'L1', title: 'Standup', state: 'live', fiber: 'a/task', joined: true, recorder: 'owner', transcript: '/m/standup.txt', tail: ['hello there'] }
     listening.syncMeeting()
-    expect([strip.hidden, strip.textContent]).toEqual([false, 'Meeting → task'])
+    expect([strip.hidden, strip.textContent, strip.dataset.mode]).toEqual([false, 'task', 'meeting'])
     expect(listening.el.textContent).not.toContain('hello there')
     expect(listening.el.querySelector('.kbn-detail-transcript')).toBeNull()
     q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
@@ -571,7 +549,7 @@ describe('Listen', () => {
     expect(openFile).toHaveBeenCalledWith('/m/standup.txt', 'Meeting transcript', 'owner')
     recording = { ...recording, fiber: 'b/elsewhere', paused: true }
     listening.syncMeeting()
-    expect(strip.textContent).toBe('Paused → elsewhere')
+    expect([strip.textContent, strip.hasAttribute('data-paused')]).toEqual(['elsewhere', true])
     recording = null
     listening.syncMeeting()
     expect(strip.hidden).toBe(true)
@@ -1142,7 +1120,7 @@ describe('session usage', () => {
 
   const left = (): number => Number(part('cache').style.getPropertyValue('--ws-cache-left'))
 
-  it('draws the figure and the cache dot beside the state word, with no live worker', async () => {
+  it('draws the figure and the cache dot beside the title, with no live worker', async () => {
     const until = Date.parse('2026-10-09T20:30:00Z')
     answering(() => ({ context: 182_340, cache_warm_until: until, cache_ttl: 3_600_000, hit_share: 0.94 }))
     dock.open(resting())
@@ -1151,7 +1129,7 @@ describe('session usage', () => {
     expect(part('context').textContent).toBe('182k')
     expect(part('context').title).toBe('Context: 182,340 tokens of a 1,000,000-token window (18% full)')
     expect(part('context').style.color).toBe('color-mix(in oklch, var(--kbn-alarm) 18%, var(--kbn-tempered))')
-    expect(part('context-meter').previousElementSibling).toBe(part('lifecycle'))
+    expect(part('context-meter').previousElementSibling).toBe(part('fiber-title'))
     expect(part('cache').dataset.cache).toBe('warm')
     expect(part('cache').textContent).toBe('')
     expect(left()).toBe(0.5)

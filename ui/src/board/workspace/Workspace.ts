@@ -1,3 +1,4 @@
+import { slug } from '../threadOutline.js'
 import { ThreadIndex, cardNamed } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
@@ -175,9 +176,10 @@ export class Workspace {
       const host = meetingHost(meeting)
       if (host) this.open(host, this.origin, undefined, this.overview.hasMetadata(host))
       else if (meeting.mirror_host ?? meeting.recorder) void this.openFiber(meeting.fiber, meeting.mirror_host ?? meeting.recorder!)
-    }, meeting => {
-      const host = meetingHost(meeting)
-      return (host?.id ?? meeting.fiber)?.split('/').at(-1) ?? host?.name
+    }, (fiber, origin) => {
+      const cards = this.opts.cards().filter(card => card.id === fiber || card.uid === fiber)
+      const card = cards.find(card => card.originId === origin) ?? cards[0]
+      return card && slug(card)
     })
     this.dock.setVerdictQueue((card, verdict) => this.queueVerdict(card, verdict))
     this.themes = new ChannelThemes(opts.shuttleBase)

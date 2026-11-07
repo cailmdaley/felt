@@ -23,7 +23,9 @@ async function openRoot(page) {
   await named(page, title)
 }
 const visibleHeaderVerbs = header => header.locator('.kbn-ctl-verdict button').evaluateAll(buttons =>
-  buttons.filter(button => button.checkVisibility()).map(button => button.getAttribute('aria-label')))
+  buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
+/** A band control by its verb, or by its whole label for navigation. */
+const bandControl = (header, name) => header.locator(`.kbn-ctl-verdict button[data-verb="${name}"], button[aria-label="${name}"]`)
 /** The worker line's verbs under the band's head. */
 const workerVerbs = page => page.locator('.ws-stage-band .ws-worker-acts button').evaluateAll(buttons =>
   buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
@@ -39,7 +41,7 @@ const assertLifecycleInk = async (header, scheme) => {
     .map(button => {
       const style = getComputedStyle(button)
       return {
-        label: button.getAttribute('aria-label'),
+        label: button.dataset.verb,
         pigment: style.getPropertyValue('--verdict-pigment').trim(),
         color: style.color,
       }
@@ -108,7 +110,7 @@ export function registerHeaderBarJourneys(test) {
     const header = page.locator('.ws-stage-band .ws-band-head')
     const focused = locator => locator.evaluate(el => el === document.activeElement)
     for (const name of ['Settings', 'Temper', 'Constitution']) {
-      const control = header.getByRole('button', { name, exact: true })
+      const control = bandControl(header, name)
       await control.focus()
       for (const width of [850, 390, 1440]) {
         await page.setViewportSize({ width, height: 900 })
@@ -135,9 +137,9 @@ export function registerHeaderBarJourneys(test) {
     const header = page.locator('.ws-stage-band .ws-band-head')
     let labelSize
     const check = async () => {
-      const sizes = await header.locator('.ws-band-state, .kbn-ctl-verdict button:not([hidden]) .ws-header-word').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => parseFloat(getComputedStyle(el).fontSize)))
+      const sizes = await header.locator('.ws-band-acts button, .ws-band-head > button').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => el.getBoundingClientRect().height))
       labelSize ??= sizes[0]
-      assert.ok(sizes.every(size => size === labelSize), `state and verbs retain the wide header text size: ${sizes}`)
+      assert.ok(sizes.every(size => size === labelSize), `every band control keeps one height: ${sizes}`)
       await page.waitForFunction(() => {
         const title = document.querySelector('.ws-stage-band .ws-band-title')
         const header = title?.closest('header'), box = header?.getBoundingClientRect()
@@ -149,7 +151,7 @@ export function registerHeaderBarJourneys(test) {
       })
       assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= parseFloat(getComputedStyle(el).lineHeight) + 1))
       for (const name of ['Temper', 'Discard']) {
-        const verb = header.getByRole('button', { name, exact: true })
+        const verb = bandControl(header, name)
         assert.ok(await verb.isVisible())
         assert.ok(await verb.evaluate(el => {
           const b = el.getBoundingClientRect(), h = el.closest('header').getBoundingClientRect()
@@ -178,7 +180,7 @@ export function registerHeaderBarJourneys(test) {
       const centers = await header.locator('.ws-band-acts button:visible').evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
       assert.ok(centers.length >= 2 && Math.max(...centers) - Math.min(...centers) < 2, `the verbs share one row: ${centers}`)
       for (const name of [...expected, 'Settings']) {
-        const control = header.getByRole('button', { name, exact: true })
+        const control = bandControl(header, name)
         await control.scrollIntoViewIfNeeded()
         const box = await control.boundingBox()
         assert.ok(box.x >= 0 && box.x + box.width <= width + 1 && box.height >= 44, `${name} scrolls into reach: ${JSON.stringify(box)}`)
@@ -188,7 +190,7 @@ export function registerHeaderBarJourneys(test) {
     await assertBand(['Temper', 'Discard'])
     await openThread(page, threadRow(page, await familyTree(page), 'Response analysis'), 'Response analysis')
     await assertBand(['Close for review', 'Rest'])
-    const reviewInk = await header.getByRole('button', { name: 'Close for review', exact: true }).evaluate(el => {
+    const reviewInk = await bandControl(header, 'Close for review').evaluate(el => {
       const neutral = document.createElement('span')
       neutral.style.color = 'var(--ws-ink-muted, var(--kbn-ink-muted))'
       el.parentElement.append(neutral)
@@ -226,43 +228,45 @@ export function registerHeaderBarJourneys(test) {
       await header.evaluate(el => { el.scrollLeft = 0 })
     }
   }, { width: 1440, height: 900 })
-  test('Listen reads the meeting that holds the mic, with Pause and Stop beside it', async page => {
+  test('Listen reads the meeting that holds the mic, with Stop in its menu', async page => {
     await page.goto(`${url}&meeting=joined`)
     await openRoot(page)
     const band = page.locator('.ws-stage-band')
     const chip = band.locator('.kbn-ctl-meet-arm')
     await chip.waitFor({ state: 'visible' })
-    assert.match(await band.locator('.ws-voice-strip').innerText(), /^Meeting → /)
+    assert.equal(await band.locator('.ws-voice-strip').getAttribute('data-mode'), 'meeting')
     assert.equal(await band.locator('.kbn-ctl-meet').count(), 1)
-    assert.ok(await band.locator('.kbn-ctl-meet-stop').isVisible())
     await band.locator('.kbn-ctl-meet-dropdown').click()
+    assert.ok(await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).isEnabled())
     assert.ok(await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).isEnabled())
     await page.keyboard.press('Escape')
     assert.equal(await page.locator('.ws-stage-band .kbn-detail-transcript').count(), 0)
     await page.locator('.ws-band-leave').click()
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
     const foreign = page.locator('.ws-stage-band')
-    assert.match(await foreign.locator('.ws-voice-strip').innerText(), /^Meeting → /)
+    assert.equal(await foreign.locator('.ws-voice-strip').getAttribute('data-mode'), 'meeting')
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await captureMeetingState(page, 'single-recording-menu', width, 'light')
     }
-    await foreign.locator('.kbn-ctl-meet-stop').click()
+    if (!await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).isVisible()) await foreign.locator('.kbn-ctl-meet-dropdown').click()
+    await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).click()
     await page.waitForFunction(() => window.__harness.requests.some(r => r.url?.includes('/meeting/stop')))
   }, { width: 1000, height: 900 })
-  test('Listen turns following on, and Pause and Stop act on it', async page => {
+  test('Listen turns following on, the mic mutes it, and Stop in the menu ends it', async page => {
     await page.goto(url)
     await openRoot(page)
     const band = page.locator('.ws-stage-band')
     const chip = band.locator('.kbn-ctl-meet-arm')
     await chip.waitFor({ state: 'visible' })
-    assert.equal(await chip.innerText(), 'Listen')
+    assert.equal(await chip.getAttribute('aria-label'), 'Listen')
     await chip.click()
-    await page.waitForFunction(() => document.querySelector('.ws-stage-band .ws-voice-strip')?.textContent?.startsWith('Following → '))
-    await band.locator('.kbn-ctl-meet-pause').click()
-    await page.waitForFunction(() => document.querySelector('.ws-stage-band .kbn-ctl-meet-paused'))
-    await band.locator('.kbn-ctl-meet-stop').click()
-    await page.waitForFunction(() => document.querySelector('.ws-stage-band .kbn-ctl-meet-arm')?.textContent === 'Listen' && document.querySelector('.ws-stage-band .ws-voice-strip')?.hidden)
+    await page.waitForFunction(() => document.querySelector('.ws-stage-band .ws-voice-strip')?.dataset.mode === 'following')
+    await chip.click()
+    await page.waitForFunction(() => document.querySelector('.ws-stage-band .kbn-ctl-meet-muted'))
+    await band.locator('.kbn-ctl-meet-dropdown').click()
+    await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).click()
+    await page.waitForFunction(() => document.querySelector('.ws-stage-band .kbn-ctl-meet-arm')?.getAttribute('aria-label') === 'Listen' && document.querySelector('.ws-stage-band .ws-voice-strip')?.hidden)
     const posts = await page.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.endsWith('/api/v1/voice')).map(r => JSON.parse(r.body)))
     assert.deepEqual(posts, [{ enabled: true, muted: false }, { muted: true }, { enabled: false }])
   }, { width: 1000, height: 900 })
@@ -349,8 +353,8 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
       assert.equal(await page.locator('.ws-report-inset, .ws-header-sheet').count(), 0)
       for (const label of device === 'desktop' ? ['Settings', 'Constitution', 'Temper', 'Discard'] : ['Settings', 'Constitution']) {
-        const icon = header.getByRole('button', { name: label, exact: true })
-        assert.equal(await icon.getAttribute('title'), label)
+        const icon = bandControl(header, label)
+        assert.equal(await icon.getAttribute('title'), await icon.getAttribute('aria-label'))
         assert.deepEqual(await icon.evaluate(el => {
           const svg = el.querySelector('svg'), box = svg?.getBoundingClientRect(), css = svg && getComputedStyle(svg)
           return { viewBox: svg?.getAttribute('viewBox'), inheritsColor: css?.stroke === getComputedStyle(el).color, width: box?.width, height: box?.height, weight: css?.strokeWidth }
@@ -379,7 +383,7 @@ export function registerHeaderBarJourneys(test) {
       await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
       // A verdict leaves settings before opening its undo window.
       await header.getByRole('button', { name: 'Settings', exact: true }).click()
-      await header.getByRole('button', { name: 'Temper', exact: true }).click()
+      await bandControl(header, 'Temper').click()
       assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
       const undo = header.getByRole('button', { name: `Undo verdict on ${title}`, exact: true })
       await undo.waitFor(); await undo.click()

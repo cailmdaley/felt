@@ -1488,7 +1488,6 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(document.querySelector('.ws-stage-band .ws-dock')).toBe(band)
     expect(document.querySelectorAll('.kbn-card-worker:not(.ws-navbar *)')).toHaveLength(0)
-    expect(band.querySelector<HTMLElement>('.ws-band-open')?.hidden).toBe(false)
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^working/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const fresh = band.querySelector<HTMLButtonElement>('.ws-worker-acts button[data-verb="New session"]')!
@@ -1587,13 +1586,8 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await flush()
-    // The band's opening reaches the same conversation as the navbar pill.
-    expect(document.querySelectorAll('.ws-dock .kbn-card-worker')).toHaveLength(0)
-    const opening = document.querySelector<HTMLButtonElement>('.ws-band-head .ws-band-open')!
-    expect(opening.textContent).toBe('Open in Rex')
-    opening.click()
-    expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
-    openWorker.mockClear()
+    // The band draws no opening of its own; the navbar pill and c reach the conversation.
+    expect(document.querySelectorAll('.ws-dock .kbn-card-worker, .ws-band-open')).toHaveLength(0)
     const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!
     head.click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')

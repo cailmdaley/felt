@@ -26,38 +26,44 @@ function mount(initial: VoiceStatus | null = { ...status }) {
   const main = () => root.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
   const dropdown = () => root.querySelector<HTMLButtonElement>('.kbn-ctl-meet-dropdown')!
   const menuItems = () => [...root.querySelectorAll<HTMLButtonElement>('[role=menuitem]')]
-  const pause = () => root.querySelector<HTMLButtonElement>('.kbn-ctl-meet-pause')!
-  const stop = () => root.querySelector<HTMLButtonElement>('.kbn-ctl-meet-stop')!
-  return { voice, meeting, dock, band, root, main, dropdown, menuItems, pause, stop, open, setRecording(value: typeof recording) { recording = value; dock.syncMeeting() } }
+  const menuItem = (label: string) => menuItems().find(x => x.textContent === label)
+  /** Stop, from the ▾ menu that holds it. */
+  const stop = () => { if (!root.querySelector('[role=menu]')) dropdown().click(); return menuItem('Stop listening') }
+  return { voice, meeting, dock, band, root, main, dropdown, menuItems, menuItem, stop, open, setRecording(value: typeof recording) { recording = value; dock.syncMeeting() } }
 }
 
-it('is one Listen that follows, and splits into Pause and Stop once on', async () => {
+it('is one mic toggle: it follows, then mutes with a slash, and Stop is in its menu', async () => {
   const v = mount()
   const set = vi.spyOn(v.voice, 'set').mockImplementation(async values => { v.voice.status = { ...v.voice.status!, ...values, state: 'listening' }; notify(v.voice) })
-  expect(v.root.querySelectorAll('.kbn-ctl-meet')).toHaveLength(1)
-  expect(v.main().textContent).toBe('Listen')
-  expect(v.pause().hidden).toBe(true)
-  expect(v.stop().hidden).toBe(true)
+  expect(v.root.querySelectorAll('.kbn-ctl-meet button')).toHaveLength(2)
+  expect(v.main().getAttribute('aria-label')).toBe('Listen')
+  expect(v.main().hasAttribute('aria-pressed')).toBe(false)
+  expect(v.stop()).toBeUndefined()
+  v.dropdown().click() // folds the menu the look opened
   v.main().click()
   expect(set).toHaveBeenCalledWith({ enabled: true, muted: false })
   expect(v.meeting.join).not.toHaveBeenCalled()
-  await vi.waitFor(() => expect(v.main().getAttribute('aria-label')).toBe('Following · Alpha'))
-  expect(v.pause().hidden).toBe(false)
-  expect(v.stop().hidden).toBe(false)
-  v.pause().click()
+  await vi.waitFor(() => expect(v.main().getAttribute('aria-label')).toBe('Mute'))
+  expect(v.main().getAttribute('aria-pressed')).toBe('false')
+  expect(v.main().querySelectorAll('path')).toHaveLength(1)
+  v.main().click()
   expect(set).toHaveBeenLastCalledWith({ muted: true })
-  await vi.waitFor(() => expect(v.root.querySelector('.kbn-ctl-meet-paused')).not.toBeNull())
-  expect(v.pause().getAttribute('aria-label')).toBe('Resume listening')
-  v.stop().click()
+  await vi.waitFor(() => expect(v.root.querySelector('.kbn-ctl-meet-muted')).not.toBeNull())
+  expect(v.main().getAttribute('aria-label')).toBe('Unmute')
+  expect(v.main().getAttribute('aria-pressed')).toBe('true')
+  expect(v.main().querySelectorAll('path')).toHaveLength(2)
+  v.main().click()
+  expect(set).toHaveBeenLastCalledWith({ muted: false })
+  await vi.waitFor(() => expect(v.root.querySelector('.kbn-ctl-meet-muted')).toBeNull())
+  v.stop()!.click()
   await vi.waitFor(() => expect(set).toHaveBeenLastCalledWith({ enabled: false }))
-  await vi.waitFor(() => expect(v.main().textContent).toBe('Listen'))
+  await vi.waitFor(() => expect(v.main().getAttribute('aria-label')).toBe('Listen'))
   v.dock.reset()
 })
 
 it('names the card words reach while following another', () => {
   const v = mount()
   v.voice.status = { ...status, enabled: true, state: 'listening', target: { fiber_id: 'b', origin: 'local', name: 'Bravo' } }; notify(v.voice)
-  expect(v.main().getAttribute('aria-label')).toBe('Following · Bravo')
   expect(v.main().title).toContain('words go to Bravo')
   v.dock.reset()
 })
@@ -72,7 +78,7 @@ it('keeps the menu quiet: transcript, a meeting here with its audio, and quiet s
   v.dropdown().click()
   v.voice.status = { ...status, enabled: true, state: 'listening' }; notify(v.voice)
   v.dropdown().click()
-  expect(v.menuItems().map(x => x.textContent)).toEqual(['Open transcript', 'Record a meeting on Alpha'])
+  expect(v.menuItems().map(x => x.textContent)).toEqual(['Stop listening', 'Open transcript', 'Record a meeting on Alpha'])
   expect(v.root.textContent).not.toContain('Held')
   v.dock.reset()
 })
@@ -91,48 +97,49 @@ it('turns following off when a meeting starts, so one mode holds the mic', async
 it('reads a meeting as a meeting, wherever it is joined', () => {
   const v = mount()
   v.setRecording({ state: 'live', title: 'Standup', fiber: 'a', tail: [] })
-  expect(v.main().getAttribute('aria-label')).toBe('Meeting · Alpha')
+  expect(v.main().title).toContain('every word goes to a,')
   expect(v.root.querySelector('.kbn-ctl-meet')!.getAttribute('data-mode')).toBe('meeting')
   v.setRecording({ state: 'live', title: 'Call', fiber: 'life/vizier', tail: [] })
-  expect(v.main().getAttribute('aria-label')).toBe('Meeting · vizier')
   expect(v.main().title).toContain('every word goes to vizier')
   v.dock.reset()
 })
 
-it('pauses a meeting, and Stop ends it and leaves the mic off', async () => {
+it('mutes a meeting, and Stop ends it and leaves the mic off', async () => {
   const v = mount()
   const set = vi.spyOn(v.voice, 'set').mockResolvedValue()
   v.voice.status = { ...status, enabled: true, state: 'yielded' }; notify(v.voice)
   v.setRecording({ state: 'live', title: 'Standup', fiber: 'other', tail: [] })
-  v.pause().click()
+  v.main().click()
   expect(v.meeting.pause).toHaveBeenCalledWith(expect.objectContaining({ fiber: 'other' }), true)
-  v.stop().click()
+  v.stop()!.click()
   expect(v.meeting.stop).toHaveBeenCalledWith(expect.objectContaining({ fiber: 'other' }))
   await vi.waitFor(() => expect(set).toHaveBeenCalledWith({ enabled: false }))
   v.dock.reset()
 })
 
-it('disables pause until a meeting is live, and omits it on a phone recording', () => {
+it('opens the menu instead of muting until a meeting is live, and on a phone recording', () => {
   const v = mount()
   v.setRecording({ state: 'loading', title: 'Standup', fiber: 'a', tail: [] })
-  expect(v.pause().disabled).toBe(true)
+  v.main().click()
+  expect(v.meeting.pause).not.toHaveBeenCalled()
+  expect(v.root.querySelector('[role=menu]')).not.toBeNull()
   v.setRecording({ state: 'live', title: 'Call', fiber: 'a', tail: [], phone: true })
-  expect(v.pause().hidden).toBe(true)
+  v.main().click()
+  expect(v.meeting.pause).not.toHaveBeenCalled()
+  expect(v.menuItem('Stop listening')).toBeDefined()
   v.dock.reset()
 })
 
 it('shows a failure beside the mode, never in place of it', async () => {
   const v = mount()
   v.voice.status = { ...status, enabled: true, state: 'listening', muted: true, last: { fiber_id: 'a', at: '2026-11-06T10:00:00Z', status: 'unconfirmed', detail: 'May have arrived' } }; notify(v.voice)
-  expect(v.main().getAttribute('aria-label')).toBe('Paused · Alpha')
+  expect(v.main().getAttribute('aria-label')).toBe('Unmute')
   v.voice.status = { ...v.voice.status!, last: { fiber_id: 'a', at: '2026-11-06T10:00:00Z', status: 'failed', detail: 'worker gone' } }; notify(v.voice)
-  expect(v.main().getAttribute('aria-label')).toBe('Paused · Alpha')
+  expect(v.main().getAttribute('aria-label')).toBe('Unmute')
   expect(v.main().title).toContain('Delivery failed: worker gone')
   expect(v.root.querySelector('.kbn-ctl-meet-failed')).not.toBeNull()
-  expect(v.pause().hidden).toBe(false)
-  const set = vi.spyOn(v.voice, 'set').mockResolvedValue()
-  v.main().click()
-  expect(set).not.toHaveBeenCalled()
+  expect(v.root.querySelector('.kbn-ctl-meet-muted')).not.toBeNull()
+  v.dropdown().click()
   expect(v.root.querySelector('[role=menu]')?.textContent).toContain('worker gone')
   expect(v.root.textContent).not.toContain('May have arrived')
   v.dock.reset()
@@ -144,7 +151,7 @@ it('turns following off even when the meeting refuses to stop', async () => {
   v.voice.status = { ...status, enabled: true, state: 'yielded' }; notify(v.voice)
   v.setRecording({ state: 'live', title: 'Standup', fiber: 'other', tail: [] })
   v.meeting.stop.mockReturnValueOnce(false as never)
-  v.stop().click()
+  v.stop()!.click()
   expect(set).toHaveBeenCalledWith({ enabled: false })
   await vi.waitFor(() => expect(v.main().title).toContain('The recording did not stop'))
   v.dock.reset()

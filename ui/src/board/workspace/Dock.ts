@@ -1,11 +1,8 @@
-import { turnOf } from '../turn.js'
-import { THREAD_LABEL, threadState } from '../threads.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { atDesktop, workerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
-import { attachConversationPicker } from '../conversationMenu.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import type { MeetingRecord } from '../meeting.js'
@@ -18,9 +15,9 @@ import { coarsePointer } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
-import { dressVerb, headerLifecycleVerbsFor } from './lifecycleVerbs.js'
+import { headerLifecycleVerbsFor, verbSpec, type LifecycleVerb } from './lifecycleVerbs.js'
 import { WorkerActions } from './workerActions.js'
-import { VoiceStrip, voiceLine } from './voiceStrip.js'
+import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
@@ -377,16 +374,6 @@ export interface BandNav {
   constitution?: () => void
 }
 
-/** A constitution's lifecycle as the header's chip says it: the family page's state, a waiting one by whose turn, a verdict by its kind. */
-export function lifecycleOf(card: KanbanCard): { state: string; label: string } {
-  const state = threadState(card)
-  if (state === 'waiting') return turnOf(card).turn === 'question' ? { state: 'question', label: 'Waiting' } : { state: 'waiting', label: 'Your turn' }
-  if (state === 'archived') return deskColumn(card) === 'composted' ? { state: 'discarded', label: 'Discarded' } : { state: 'tempered', label: 'Tempered' }
-  if (state === 'drafts') return { state, label: 'Draft' }
-  if (state === 'roles') return { state: 'resting', label: 'Resting' }
-  return { state, label: THREAD_LABEL[state] }
-}
-
 /** Settings provenance: agent, office and host, with no office repeating the name. */
 export function bandFacts(card: KanbanCard): string {
   const slug = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -405,9 +392,9 @@ export interface DockOptions {
 const USAGE_REFRESH_MS = 15_000
 
 /**
- * The band above a constitution's pages: its name and state, the way to its
- * conversation, its session and lifecycle verbs, Listen, and the settings
- * sheet. It stays in place while the pages beneath it change.
+ * The band above a constitution's pages: its name, Listen, its lifecycle
+ * verbs and settings as icons, and its worker line. It stays in place while
+ * the pages beneath it change.
  */
 export class Dock {
   private root: HTMLElement | null = null
@@ -452,7 +439,7 @@ export class Dock {
   private readonly voice: DockOptions['voice']
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
   private onMeetingHostOpen?: (meeting: MeetingRecord) => void
-  private meetingHostName?: (meeting: MeetingRecord) => string | undefined
+  private fiberSlug?: FiberSlug
 
   constructor(
     shuttleBase: string,
@@ -470,9 +457,9 @@ export class Dock {
     this.onRest = opts.onRest
   }
 
-  setMeetingHostOpen(open: (meeting: MeetingRecord) => void, hostName?: (meeting: MeetingRecord) => string | undefined): void {
+  setMeetingHostOpen(open: (meeting: MeetingRecord) => void, fiberSlug?: FiberSlug): void {
     this.onMeetingHostOpen = open
-    this.meetingHostName = hostName
+    this.fiberSlug = fiberSlug
   }
 
   /** The band's element, built on first use so controls can be exercised without a page. */
@@ -604,7 +591,7 @@ export class Dock {
 
   /** Repaint the voice strip from the board's meeting and live voice. */
   private paintVoice(): void {
-    this.voiceStrip?.paint(voiceLine(this.meeting?.current() ?? null, this.voice?.controller.status ?? null, meeting => this.meetingHostName?.(meeting)))
+    this.voiceStrip?.paint(voiceLine(this.meeting?.current() ?? null, this.voice?.controller.status ?? null, (fiber, origin) => this.fiberSlug?.(fiber, origin)))
   }
 
   /**
@@ -621,7 +608,7 @@ export class Dock {
    * terminal on its host. A reopening sends nothing and starts no turn, and it
    * leaves the card's lifecycle alone, so it holds in every column. A card
    * that never ran is launched by name, not by a key. This is the explicit
-   * act (`c`, Open in Rex); a click calls `Workspace.reach` instead.
+   * act (`c`); a click calls `Workspace.reach` instead.
    */
   openConversation(card: KanbanCard): boolean {
     const destination = resolveDestination(conversationDestinations(card, conversationDevice(), this.onOpenWorker))
@@ -657,28 +644,6 @@ export class Dock {
   /** Only the expired undo queue calls this in the workspace. */
   commitVerdict(card: KanbanCard, target: Verdict): void {
     this.onTransition(card, target)
-  }
-
-  verdictControlsFor(card: KanbanCard, restAnchor?: () => HTMLElement): HTMLElement {
-    const row = document.createElement('div')
-    row.className = 'kbn-ctl-verdict'
-    markVerdictHost(row, card)
-    if (this.onRest) {
-      const rest = ctlButton('Rest', 'kbn-ctl-rest')
-      rest.title = 'Rest (s)'
-      rest.setAttribute('aria-label', `Rest ${card.name} (s)`)
-      rest.addEventListener('click', () => this.onRest?.(card, restAnchor?.() ?? rest))
-      row.append(rest)
-    }
-    for (const [label, cls, target] of [
-      ['Temper', 'kbn-ctl-temper', 'tempered'],
-      ['Discard', 'kbn-ctl-discard', 'composted'],
-    ] as const) {
-      const control = ctlButton(label, cls)
-      control.addEventListener('click', () => this.verdict(card, target))
-      row.append(control)
-    }
-    return row
   }
 
   /** Refresh the band without replacing folded fields. */
@@ -816,19 +781,30 @@ export class Dock {
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot ws-band-status'
     foot.append(errorEl, statusEl)
-    const verdict = this.verdictControlsFor(card, (): HTMLElement => rest?.closest('.ws-settings-menu') ? settingsItem : rest!)
+    // The lifecycle verbs are icons like navigation's, each named with its key.
+    // The undo window replaces them in the band's row, which carries the card's verdict key.
+    const verdict = document.createElement('div')
+    verdict.className = 'kbn-ctl-verdict'
     verdict.setAttribute('role', 'group')
     verdict.setAttribute('aria-label', 'Verdict')
-    // The undo window stays visible beside the band's controls.
-    delete verdict.dataset.verdictKey
     markVerdictHost(this.head, card)
-    const rest = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-rest')
-    const temper = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!
-    const discard = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!
-    const review = ctlButton('Close for review', 'kbn-ctl-review')
-    review.title = 'Move to Awaiting review (a)'
-    review.addEventListener('click', () => this.verdict(card, 'awaitingReview'))
-    verdict.prepend(review)
+    const verb = (name: LifecycleVerb, key: string, run: (button: HTMLButtonElement) => void): HTMLButtonElement => {
+      const spec = verbSpec(name)
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = `ws-header-icon ${spec.cls}`
+      button.dataset.verb = spec.label
+      button.title = `${spec.label} (${key})`; button.setAttribute('aria-label', `${spec.label} (${key})`)
+      button.innerHTML = headerIcon(spec.icon)
+      button.addEventListener('click', () => run(button))
+      verdict.append(button)
+      return button
+    }
+    const review = verb('review', 'a', () => this.verdict(card, 'awaitingReview'))
+    const onRest = this.onRest
+    const rest = onRest ? verb('rest', 's', button => onRest(card, button)) : null
+    const temper = verb('temper', 't', () => this.verdict(card, 'tempered'))
+    const discard = verb('discard', 'x', () => this.verdict(card, 'composted'))
     const worker = this.workerActionsFor(card)
     this.disposers.push(() => worker.dispose())
 
@@ -846,10 +822,6 @@ export class Dock {
     if (history) sessionsSection.append(history)
     drawer.append(settingsSection, sessionsSection)
 
-    // Lifecycle verbs carry their word beside the icon; only navigation is drawn bare.
-    for (const [button, verb] of [[review, 'review'], [rest, 'rest'], [temper, 'temper'], [discard, 'discard']] as const) {
-      if (button) dressVerb(button, verb)
-    }
     const item = (label: string, name: HeaderIcon, cls: string, run: () => void): HTMLButtonElement => {
       const button = ctlButton('', cls)
       button.classList.remove('kbn-ctl-btn')
@@ -870,13 +842,6 @@ export class Dock {
     settingsItem.setAttribute('aria-expanded', 'false')
     const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-band-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
-    // The way to the conversation: named for where it goes, and the band's strongest control.
-    const openItem = document.createElement('button')
-    openItem.type = 'button'
-    openItem.className = 'ws-band-open'
-    openItem.addEventListener('click', () => { this.openConversation(card) })
-    const destinations = (): ReturnType<typeof conversationDestinations> => conversationDestinations(card, conversationDevice(), this.onOpenWorker)
-    this.disposers.push(attachConversationPicker(openItem, destinations))
     this.drawerClose = () => {
       if (this.openSettings || drawer.hidden) return false
       drawer.hidden = true; settingsItem.focus({ preventScroll: true }); return true
@@ -892,10 +857,6 @@ export class Dock {
     const ancestry = this.ancestry = document.createElement('nav')
     ancestry.className = 'ws-settings-ancestry'
     ancestry.hidden = true
-    // Where the constitution stands in its lifecycle, in the family page's words and tones.
-    const lifecycle = document.createElement('span')
-    lifecycle.className = 'ws-band-state'
-    lifecycle.dataset.part = 'lifecycle'
     drawer.prepend(ancestry)
     const contextFact = document.createElement('span')
     contextFact.dataset.part = 'context'
@@ -909,7 +870,7 @@ export class Dock {
     const usageRefresh = window.setInterval(() => { if (!document.hidden) void this.readUsage(card) }, USAGE_REFRESH_MS)
     this.disposers.push(() => window.clearInterval(usageRefresh))
     const identity = document.createElement('div'); identity.className = 'ws-band-identity'
-    identity.append(title, lifecycle, meter)
+    identity.append(title, meter)
     const leave = this.leave = document.createElement('button')
     leave.type = 'button'
     leave.className = 'ws-header-icon ws-band-leave'
@@ -919,7 +880,7 @@ export class Dock {
       this.listen = new ListenControl({
         card, meeting: this.meeting, voice: this.voice?.controller, shuttleBase: this.shuttleBase,
         openFile: (path, title, owner) => this.openFile?.(path, title, owner),
-        hostName: meeting => this.meetingHostName?.(meeting),
+        fiberSlug: (fiber, origin) => this.fiberSlug?.(fiber, origin),
         openHost: meeting => this.onMeetingHostOpen?.(meeting),
         showPane: () => {
           const current = this.meeting?.current()
@@ -933,7 +894,7 @@ export class Dock {
     const unsubscribe = this.voice?.controller.subscribe(() => this.paintVoice())
     if (unsubscribe) this.disposers.push(unsubscribe)
     this.paintVoice()
-    this.head.replaceChildren(openItem, ...(this.listen ? [this.listen.el] : []), voiceStrip.el, verdict)
+    this.head.replaceChildren(...(this.listen ? [this.listen.el] : []), voiceStrip.el, verdict)
     header.append(identity, this.head, constitutionItem, settingsItem, leave)
     body.append(header, worker.el, drawer, foot)
     this.actPaint = () => {
@@ -942,10 +903,6 @@ export class Dock {
       this.head.dataset.column = column
       if (title.textContent !== card.name) title.textContent = card.name
       title.title = card.name
-      const stage = lifecycleOf(card)
-      if (lifecycle.textContent !== stage.label) lifecycle.textContent = stage.label
-      lifecycle.dataset.state = stage.state
-      lifecycle.hidden = !shuttleManaged
       const usage = this.usage
       paintUsage(contextFact, cacheFact, usage, card.workerAgent ?? card.shuttleAgent)
       meter.hidden = contextFact.hidden && cacheFact.hidden
@@ -962,12 +919,6 @@ export class Dock {
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')
       review.hidden = !offered.includes('review')
-      const destination = resolveDestination(destinations())
-      const reopening = this.reopens(card, destination)
-      openItem.hidden = !destination && !reopening
-      const openLabel = reopening ? 'Reopen session' : destination ? `Open in ${destination.label}` : ''
-      if (openItem.textContent !== openLabel) openItem.textContent = openLabel
-      openItem.title = reopening ? 'Reopen the past session in a terminal; nothing is sent' : openLabel
       sessionsSection.hidden = !card.uid
     }
     this.actPaint()
