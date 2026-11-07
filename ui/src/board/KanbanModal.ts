@@ -875,20 +875,19 @@ export class KanbanModal {
     find.append(this.findEl, findKey)
     strip.append(find)
 
-    // The centre holds the Desk's cycle lens chips, at its right end. It always
-    // takes the room between Find and Settings, so Settings never moves between views.
+    // The centre always takes the room between Find and Settings, so Settings
+    // never moves between views.
     const centre = document.createElement('div')
     centre.className = 'kbn-viewtabs-centre'
+    strip.append(centre)
     this.lensSlotEl = document.createElement('div')
     this.lensSlotEl.className = 'kbn-viewtabs-lens'
-    centre.append(this.lensSlotEl)
-    strip.append(centre)
+    strip.append(this.lensSlotEl)
 
     // Settings rides the same row as the pages without being one of them. It
     // is deliberately NOT a tab: the tabs are windows onto the work, and
     // a preferences sheet is not a window onto anything — so it wears a glyph
-    // rather than a name and a keycap, and sits past the lens where the row
-    // has already ended. On a phone the row scrolls; the CSS pins this one
+    // rather than a name and a keycap, and sits at the row's end. On a phone the row scrolls; the CSS pins this one
     // element to the right edge, because a settings button you have to scroll
     // sideways to find is a settings button nobody finds.
     if (this.onSettingsClick) {
