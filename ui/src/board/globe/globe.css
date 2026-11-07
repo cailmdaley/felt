@@ -50,7 +50,7 @@
 @keyframes globe-name { from { opacity: 0; } }
 .globe-head { position: absolute; inset: 0 0 auto; padding: 10px 12px 18px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; pointer-events: none; background: linear-gradient(var(--ws-paper) 55%, transparent); }
 .globe-crumbs { display: flex; flex-wrap: wrap; gap: 2px 0; max-width: calc(100% - 170px); pointer-events: auto; }
-.globe-crumb { padding: 0; border: 0; background: none; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); cursor: pointer; }
+.globe-crumb { padding: 0; border: 0; background: none; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); text-align: left; cursor: pointer; }
 .globe-crumb:hover { color: var(--ws-ink); }
 .globe-crumb:last-child { color: var(--ws-ink); }
 .globe-crumb + .globe-crumb::before { content: '›'; margin: 0 6px; color: var(--ws-ink-muted); display: inline-block; }
@@ -78,5 +78,5 @@
 @media (max-width: 560px) {
   .globe-crumb:not(:first-child, :last-child) { display: none; }
   .globe-crumbs { flex-wrap: nowrap; }
-  .globe-crumb:last-child { min-width: 0; text-align: left; }
+  .globe-crumb:last-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 }
