@@ -23,10 +23,10 @@ try {
     })
     await band.locator('.kbn-ctl-meet-arm.kbn-ctl-meet-on').waitFor()
     const geometry = await page.evaluate(() => {
-      const el = document.querySelector('.ws-stage-band .kbn-ctl-meet-label')
-      return { scroll: el.scrollWidth, client: el.clientWidth, text: el.textContent }
+      const label = document.querySelector('.ws-stage-band .kbn-ctl-meet-label'), el = document.querySelector('.ws-stage-band .kbn-ctl-meet-dest')
+      return { scroll: el.scrollWidth, client: el.clientWidth, text: `${label.textContent} → ${el.textContent}` }
     })
-    assert.match(geometry.text, /^Listening/)
+    assert.match(geometry.text, /^Listening → An exceptionally long/)
     assert.ok(geometry.scroll > geometry.client, 'long name is ellipsized')
     assert.ok(await band.locator('.kbn-ctl-meet').isVisible(), 'Listening remains visible')
     await arm.click()
