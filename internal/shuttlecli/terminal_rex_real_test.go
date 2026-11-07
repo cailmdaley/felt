@@ -86,7 +86,7 @@ func TestRexTerminalRealIsolatedServer(t *testing.T) {
 		t.Fatalf("create %s: %v", out, err)
 	}
 	sid, bid := created.SessionID, created.Windows[0].BlockIDs[0]
-	defer r.destroy(sid)
+	defer r.call(sid, "session.destroy", map[string]string{})
 	path := writeRexBindings(t, env, map[string]rexBinding{name: {SessionID: sid, BlockID: bid, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}})
 	before, _ := os.ReadFile(path)
 	if has, err := r.Has(name); !has || err != nil {
@@ -122,11 +122,23 @@ func TestRexTerminalRealIsolatedServer(t *testing.T) {
 	if err != nil || ref.Name != name || ref.NativeSession != sid || ref.NativePane != bid {
 		t.Fatalf("ref %+v: %v", ref, err)
 	}
+	// The daemon has taken the worker out of view beside a family sibling's
+	// window: its block is detached, and Rex lists it without a window.
+	sibling := `{"window_label":"sibling","focus":false,"layout":{"block":{"flavor":"com.superlogical.terminal.shell","options":{"shell":"none","command":["sleep","120"]}}}}`
+	if _, err := r.command(sibling, "api", "call", "-s", sid, "session.new_window", "-"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.call(sid, "session.detach_block", map[string]string{"block_id": bid}); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.Kill(name); err != nil {
 		t.Fatal(err)
 	}
 	if has, err := r.Has(name); has || err != nil {
 		t.Fatalf("killed Has %v: %v", has, err)
+	}
+	if blocks, err := r.blocks(sid); err != nil || len(blocks) != 1 || blocks[0].WindowID == "" {
+		t.Fatalf("the sibling's window must stay: %+v: %v", blocks, err)
 	}
 	if live, err := r.LiveWorkers(); len(live) != 0 || err != nil {
 		t.Fatalf("killed live %v: %v", live, err)

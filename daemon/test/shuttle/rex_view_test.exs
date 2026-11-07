@@ -88,6 +88,50 @@ defmodule Shuttle.RexViewTest do
     assert Enum.sort(placed(sid)) == Enum.sort([@kid, "shell"])
   end
 
+  test "stopping a hidden worker closes its block and binding, and leaves its family's other windows" do
+    sid = family()
+    show(sid, @hub)
+    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0)
+    refute @kid in placed(sid)
+
+    assert :ok = Rex.close(FakeRex, @kid)
+    labels = for b <- FakeRex.state().sessions[sid].blocks, do: b["label"]
+    assert Enum.sort(labels) == Enum.sort([@hub, "shell"])
+    assert [%{"block_id" => "block:kid"}] = requests("block.close")
+    assert requests("session.close_window") == []
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    assert Map.keys(bindings) == [@hub]
+  end
+
+  test "a worker brought back into a new window stops by that window, not the one it launched in" do
+    sid = family()
+    show(sid, @hub)
+    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0)
+    assert {:ok, true} = Opener.select(@kid)
+
+    [%{"window_id" => wid}] =
+      Enum.filter(FakeRex.state().sessions[sid].blocks, &(&1["label"] == @kid))
+
+    refute wid == "window:kid"
+
+    assert :ok = Rex.close(FakeRex, @kid)
+    assert [%{"window_id" => ^wid}] = requests("session.close_window")
+    refute @kid in for(b <- FakeRex.state().sessions[sid].blocks, do: b["label"])
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    refute Map.has_key?(bindings, @kid)
+  end
+
+  test "stopping a family's only worker while hidden removes its session" do
+    assert :ok = Rex.launch(FakeRex, @hub, "/tmp", "worker.sh", [])
+    [{sid, %{blocks: [%{"block_id" => bid}]}}] = Map.to_list(FakeRex.state().sessions)
+    assert {:ok, _} = Rex.hide(FakeRex, sid, bid)
+
+    assert :ok = Rex.close(FakeRex, @hub)
+    assert FakeRex.state().sessions == %{}
+    assert {:ok, doc} = RexBindings.read()
+    assert doc["bindings"] == %{} and doc["families"] == %{}
+  end
+
   test "a worker asking or mid-turn stays in view, and a hidden one that starts comes back" do
     sid = family()
     show(sid, @hub)

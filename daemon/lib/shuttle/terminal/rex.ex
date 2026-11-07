@@ -463,9 +463,9 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp close_owned(runner, name, %{"window_id" => wid, "family" => root} = b) do
+  defp close_owned(runner, name, %{"family" => root} = b) do
     family_lock(root, fn ->
-      case Rex.close_window(runner, b["session_id"], wid) do
+      case close_view(runner, b) do
         {:ok, _} ->
           with :ok <- cleanup_family(runner, root, b["session_id"]),
                do: close_binding(name, b, :ok)
@@ -479,16 +479,13 @@ defmodule Shuttle.Terminal.Rex do
     end)
   end
 
-  defp close_owned(runner, name, %{"session_owned" => false, "window_id" => wid} = b) do
-    case Rex.close_window(runner, b["session_id"], wid) do
+  defp close_owned(runner, name, %{"session_owned" => false} = b) do
+    case close_view(runner, b) do
       {:ok, _} -> close_binding(name, b, :ok)
       {:error, :not_found} -> close_binding(name, b, :absent)
       error -> {:error, "Rex close failed: #{inspect(error)}"}
     end
   end
-
-  defp close_owned(_runner, _name, %{"session_owned" => false}),
-    do: {:error, "Cannot close a captured Rex worker without its window address"}
 
   defp close_owned(runner, name, b) do
     case Rex.destroy(runner, b["session_id"]) do
@@ -500,6 +497,27 @@ defmodule Shuttle.Terminal.Rex do
 
       error ->
         {:error, "Rex close failed: #{inspect(error)}"}
+    end
+  end
+
+  # A binding's saved window is where its worker launched; hiding and placing
+  # move the block, so a close acts on the window Rex reports for it now. A
+  # placed worker closes with its window; a hidden one has none, and closing
+  # its block ends its program.
+  defp close_view(runner, b) do
+    with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
+      case Enum.find(blocks, &(&1["block_id"] == b["block_id"])) do
+        nil ->
+          {:error, :not_found}
+
+        %{"window_id" => wid} when is_binary(wid) ->
+          Rex.close_window(runner, b["session_id"], wid)
+
+        _hidden ->
+          Rex.call(runner, "block.close", %{"block_id" => b["block_id"]},
+            session: b["session_id"]
+          )
+      end
     end
   end
 
