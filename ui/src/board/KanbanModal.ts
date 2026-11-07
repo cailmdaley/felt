@@ -400,6 +400,7 @@ export class KanbanModal {
     // this redraw is rare.
     this.fiberSends = new FiberSends(this.shuttleBase, () => {
       if (this.container && this.lastResponse && this.activeViewId === 'desk') this.render(this.lastResponse)
+      this.workspace?.sendsChanged()
     })
     this.surfaces = new KanbanSurfaceRenderer({
       getLatestReport: card => this.fiberSends?.latest(card),
@@ -411,7 +412,7 @@ export class KanbanModal {
       verdict: (card, verdict) => { if (this.workspace) this.workspace.queueVerdict(card, verdict); else this.transition(card, verdict) },
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       makeSeat: (card, anchor) => this.makeSeat(card, anchor),
-      openDetail: (card, forceRail) => { this.openDocumentChannel(card); if (forceRail) this.workspace?.forceThreadRail() },
+      openDetail: (card, family) => { if (family) this.openDocumentChannel(card, this.workspace?.familyDocument(card)); else this.openDocumentChannel(card) },
       onRest: card => this.openRestPopover(card),
       getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
@@ -561,6 +562,8 @@ export class KanbanModal {
       () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'overview',
     )
     this.workspace = new Workspace(this.container!, {
+      sends: card => this.fiberSends?.sends(card) ?? [],
+      refreshSends: () => { void this.fiberSends?.refresh() },
       shuttleBase: this.shuttleBase,
       cards: () => boardCards(this.lastResponse),
       deskRows: () => this.workspaceCards(),

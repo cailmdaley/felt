@@ -69,7 +69,7 @@
   display: grid; place-items: center; width: var(--ws-control-height); height: var(--ws-control-height); padding: 0;
   border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important;
 }
-.ws-expand-mode .ws-sidebar-toggle { display: none; }
+.ws-expand-mode :is(.ws-sidebar-toggle, .ws-files-toggle) { display: none; }
 .ws-sidebar-toggle svg { fill: none; stroke: currentColor; stroke-width: var(--ws-line-width); }
 .ws-sidebar-toggle .ws-toggle-column { fill: currentColor; stroke: none; opacity: 0; }
 .ws-sidebar-toggle[aria-expanded='true'] .ws-toggle-column { opacity: .35; }
@@ -95,7 +95,7 @@
   transition: left var(--ws-crossing) var(--ws-ease), width var(--ws-crossing) var(--ws-ease), height var(--ws-crossing) var(--ws-ease), transform var(--ws-crossing) var(--ws-ease), opacity var(--ws-crossing) var(--ws-ease);
 }
 .ws-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--ws-paper); }
-/* The sidebar's or the rail's column already draws the hairline at the page's side. */
+/* The sidebar's column already draws the hairline at the page's side. */
 .ws-content { position: relative; flex: 1; display: flex; min-height: 0; min-width: 0; overflow: hidden; background: var(--ws-paper); }
 .ws-content > * { flex: 1; min-height: 0; min-width: 0; }
 .ws-page.ws-receded { transform: translateY(var(--ws-neighbour-drop)) scale(var(--ws-receded-scale)); opacity: var(--ws-receded-opacity); cursor: pointer; }
@@ -252,11 +252,9 @@
 /* A closing sidebar slides out over the stage that has already taken its room. */
 .ws-sidebar-sliding .ws-stage { overflow: visible; }
 .ws-sidebar-leaving .ws-sidebar { display: flex; position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; }
-/* A side column hides the neighbour on its side: the left context page stays under the
-   sidebar, the right one under the threads rail. With neither column, the zen state,
-   the neighbours fade out and the page stands alone. */
+/* The sidebar hides the neighbour on its side. With it closed, the zen state, the
+   neighbours fade out and the page stands alone. */
 .ws-with-sidebar .ws-page.ws-receded.ws-before { clip-path: inset(0 100% 0 0); pointer-events: none; }
-.ws-with-rail .ws-page.ws-receded.ws-after { clip-path: inset(0 0 0 100%); pointer-events: none; }
 .ws-zen .ws-page.ws-receded { opacity: 0; pointer-events: none; }
 .ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -320,7 +318,7 @@
   .ws-return { display: inline-flex; align-items: center; gap: 5px; min-width: var(--ws-phone-target); max-width: calc(100vw / 3); height: var(--ws-phone-target); flex: 0 1 auto; padding: 0 6px; color: var(--ws-ink) !important; }
   .ws-return .ws-back-label { color: var(--ws-ink-muted); }
   .ws-channel-title { display: block; text-align: center; flex: 1; min-height: var(--ws-phone-target); line-height: var(--leading-tight); padding: 0; }
-  .ws-icon-button:not(.ws-phone-document-menu), .ws-sidebar, .ws-sidebar-toggle:not(.ws-rail-toggle) { display: none !important; }
+  .ws-icon-button:not(.ws-phone-document-menu), .ws-sidebar, .ws-sidebar-toggle { display: none !important; }
   .ws-phone-document-menu { display: flex; align-items: center; justify-content: center; width: var(--ws-phone-target); height: var(--ws-phone-target); }
   .ws-label-title { max-width: 50%; }
   .ws-prose, .ws-content .kbn-detail-prose { padding: 24px 16px 48px; }
@@ -342,25 +340,33 @@
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 
-/* The threads rail's toggle mirrors the sidebar's in the opposite corner; hidden, the rail leaves the stage whole. */
-.ws-rail-toggle { left: auto; right: var(--ws-corner-inset); }
-/* A shown column holds its own toggle, so the header line starts or ends at the page's edge;
-   a toggle floating over the stage takes its place at that end of the line. */
+/* A shown column holds its own toggle, so the header line starts at the page's edge. */
 .ws-reader.ws-with-sidebar, .ws-reader.ws-expand-mode { --ws-head-start: var(--ws-inset); }
-.ws-reader.ws-rail-off:has(> .ws-rail-toggle:not([hidden])):not(.ws-expand-mode) { --ws-head-end: var(--ws-toggle-room); }
-.ws-rail-toggle[hidden] { display: none; }
-.ws-rail-toggle .ws-toggle-line { stroke-linecap: round; }
-/* The glyph is a bulleted list. When something in the family waits on the human, or a sent file is unread,
-   its first bullet swells into the board's unread dot, so the mark belongs to the control instead of perching on it. */
-.ws-rail-toggle :is(.ws-toggle-flag, .ws-toggle-bullet) { fill: currentColor; stroke: none; }
-.ws-rail-toggle .ws-toggle-flag { transition: r 160ms var(--ws-ease), fill 160ms var(--ws-ease); }
-.ws-rail-toggle[data-attention] .ws-toggle-flag { r: 2.5px; fill: var(--ws-fresh); }
-.ws-rail-off .ws-thread-rail { display: none; }
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-rail-toggle { top: calc(2px + env(safe-area-inset-top)); right: calc(var(--ws-small-gap) + var(--ws-phone-target)); width: var(--ws-phone-target); height: var(--ws-phone-target); }
-  /* A document's Threads target belongs to its top bar, clear of its content. */
-  .ws-navbar .ws-rail-toggle { position: static; }
-}
+/* The phone's sent files target sits in the top bar; its first bullet swells while a file is unread. */
+.ws-files-toggle { display: grid; place-items: center; width: var(--ws-phone-target); height: var(--ws-phone-target); padding: 0; color: var(--ws-ink-muted); }
+.ws-files-toggle[aria-expanded='true'] { color: var(--ws-ink); }
+.ws-files-toggle[hidden] { display: none; }
+.ws-files-toggle svg { fill: none; stroke: currentColor; stroke-width: var(--ws-line-width); }
+.ws-files-toggle .ws-toggle-line { stroke-linecap: round; }
+.ws-files-toggle :is(.ws-toggle-flag, .ws-toggle-bullet) { fill: currentColor; stroke: none; }
+.ws-files-toggle .ws-toggle-flag { transition: r 160ms var(--ws-ease), fill 160ms var(--ws-ease); }
+.ws-files-toggle[data-attention] .ws-toggle-flag { r: 2.5px; fill: var(--ws-fresh); }
+
+/* The open constitution's sent files stand at the column's foot. */
+.ws-sidebar-files { flex: none; display: flex; flex-direction: column; max-height: 38%; min-height: 0; padding: 8px 8px 6px 10px; border-top: 1px solid var(--ws-hairline-soft); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+.ws-sidebar-files[hidden] { display: none; }
+.ws-sidebar-files h3 { flex: none; margin: 0; padding: 2px 8px 4px; font: inherit; font-variant: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); }
+.ws-sidebar-file-list { min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent; }
+.ws-sidebar-file { display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; padding: 4px 4px 4px 8px; text-align: left; font: inherit; font-size: var(--type-row); color: var(--ws-ink); background: transparent; border: 0; cursor: pointer; }
+.ws-sidebar-file > span:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ws-sidebar-file time { flex: none; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-numeric: tabular-nums; }
+.ws-sidebar-file .ws-sent-new { flex: none; color: var(--ws-fresh); font: var(--type-meta)/var(--leading-tight) var(--font-serif); }
+.ws-sidebar-file:hover { background: var(--ws-hover); }
+.ws-sidebar-file:focus { outline: none; }
+.ws-reader.ws-keyboard .ws-sidebar-file:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
+.ws-sidebar-file[aria-current='page'] { background: var(--ws-paper); box-shadow: inset 0 0 0 1px var(--ws-hairline-soft); }
+.ws-sidebar-files-more { display: block; width: 100%; padding: 6px 12px 6px 16px; text-align: left; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
+.ws-sidebar-files-more:hover { color: var(--ws-ink); }
 
 /* Family folds share the sidebar's quiet type and ink. */
 .ws-sidebar-fold {

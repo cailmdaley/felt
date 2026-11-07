@@ -555,7 +555,7 @@ describe('keyboard help', () => {
     press('?')
     const dialog = document.querySelector('.kbn-keymap-dialog')!
     expect(dialog.getAttribute('role')).toBe('dialog')
-    expect([...dialog.querySelectorAll('h3')].map(el => el.textContent)).toEqual(['Everywhere', 'Moving', 'A constitution', 'Fiber page'])
+    expect([...dialog.querySelectorAll('h3')].map(el => el.textContent)).toEqual(['Everywhere', 'Moving', 'A constitution', 'Fiber page', 'Family map'])
     press('j'); expect(selected()).toBeUndefined()
     press('Tab'); expect(document.activeElement).toBe(dialog.querySelector('button'))
     press('Escape'); expect(document.querySelector('.kbn-keymap-dialog')).toBeNull()

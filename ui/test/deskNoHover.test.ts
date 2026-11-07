@@ -13,6 +13,7 @@ const events = new Set(['pointerenter', 'pointerleave', 'pointerover', 'pointero
 const exceptions = [
   { file: 'workspace/AudioPage.ts', source: "this.waveform.addEventListener('pointerleave', () => { this.hover.hidden = true })", reason: 'The workspace audio waveform clears its time cursor when the pointer leaves.' },
   { file: 'workspace/Depth.ts', source: "document.addEventListener('pointerleave', this.leave)", reason: 'Workspace depth resets its pointer drift when leaving the document, only while the workspace is raised.' },
+  { file: 'workspace/FamilyPage.ts', source: "this.stage.addEventListener('pointerover', event => this.rest(event))", reason: 'The family map peeks at the thread under the pointer; it is a reader page, and the peek is its navigation.' },
   { file: 'views/ChronicleView.ts', source: "el.addEventListener('mouseenter', () => hot(true))", reason: 'Chronicle tints a settled cycle under the pointer without changing its content or geometry.' },
   { file: 'views/ChronicleView.ts', source: "el.addEventListener('mouseleave', () => hot(false))", reason: 'Chronicle restores the settled cycle tint when the pointer leaves.' },
 ] as const

@@ -1,4 +1,5 @@
 import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
+import { ascByKey, instantMs } from './civilDay.js'
 import { deskColumn } from './deskColumn.js'
 import { turnOf } from './turn.js'
 
@@ -33,7 +34,7 @@ const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 
  * In flight split by `turnOf` into Waiting (the human's move) and Working
  * (the worker's, including an armed thread whose worker has not started).
  * A verdict archives; a standing thread asleep on its cron rests; a seat at
- * rest is among the Roles. The rail and mention chips read this.
+ * rest is among the Roles. The family page and mention chips read this.
  */
 export function threadState(card: KanbanCard): ThreadState {
   switch (deskColumn(card)) {
@@ -239,7 +240,7 @@ export class ThreadIndex {
     if (ownNeed) counts[ownNeed]--
     return counts
   }
-  /** Cached parent-chain tooltips keep deep rail rendering linear in graph reads. */
+  /** Cached parent-chain tooltips keep deep family pages linear in graph reads. */
   ancestryTitle(card: KanbanCard): string {
     const key = this.key(card)
     if (this.ancestryTitles.has(key)) return this.ancestryTitles.get(key)!
@@ -269,6 +270,23 @@ export class ThreadIndex {
   /** Waiting first, then review, work, drafts, rest, archive; then name. */
   readonly compare = (a: KanbanCard, b: KanbanCard): number =>
     STATE_ORDER.indexOf(this.state(a)) - STATE_ORDER.indexOf(this.state(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+}
+
+export interface TreeNode { card: KanbanCard; depth: number; hasActiveDescendant: boolean; children: TreeNode[] }
+/** Where a thread is drawn: in the tree while it is in play, else below it with the resting or the archived. */
+export type Shelf = 'tree' | 'resting' | 'archived'
+export function shelfOf(index: ThreadIndex, card: KanbanCard): Shelf {
+  const state = index.state(card)
+  return state === 'archived' ? 'archived' : state === 'resting' || state === 'roles' ? 'resting' : 'tree'
+}
+/** Family shape in creation order, independent of the presentation surface. */
+export function threadTree(index: ThreadIndex, root: KanbanCard): TreeNode {
+  const build = (card: KanbanCard, depth: number): TreeNode => {
+    const sorted = [...index.children(card)].sort((a, b) => ascByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || a.name.localeCompare(b.name) || threadKey(a).localeCompare(threadKey(b)))
+    const children = sorted.map(child => build(child, depth + 1))
+    return { card, depth, children, hasActiveDescendant: children.some(n => shelfOf(index, n.card) === 'tree' || n.hasActiveDescendant) }
+  }
+  return build(root, 0)
 }
 
 const indexes = new WeakMap<KanbanResponse, ThreadIndex>()

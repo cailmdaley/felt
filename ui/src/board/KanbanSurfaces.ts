@@ -140,7 +140,7 @@ interface KanbanSurfaceRendererOptions {
   ) => void | Promise<void>
   /** Make this constitution a seat, choosing an office when it has none. */
   makeSeat?: (card: KanbanCard, anchor: HTMLElement) => void | Promise<void>
-  openDetail: (card: KanbanCard, forceRail?: boolean) => void
+  openDetail: (card: KanbanCard, family?: boolean) => void
   /** The newest report a card sent — the row's mark. */
   getLatestReport?: (card: KanbanCard) => FiberSend | undefined
   /** Opens the Rest popover on the card's own Rest affordance. */
@@ -2110,7 +2110,7 @@ export function findCardById(resp: KanbanResponse | null, id: string): KanbanCar
     resp.timeline.futureDated,
     resp.stash,
     resp.roles,
-    // Folded threads and quiet ancestors stay reachable through the rail and breadcrumbs.
+    // Folded threads and quiet ancestors stay reachable through the family page and breadcrumbs.
     resp.threads ?? [],
   ]) {
     const hit = list.find((c) => c.id === id)

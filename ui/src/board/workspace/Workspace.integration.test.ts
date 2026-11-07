@@ -89,6 +89,7 @@ const changed = vi.fn()
 const visibility = vi.fn<(active: boolean) => void>()
 
 beforeEach(() => {
+  vi.stubGlobal('innerWidth', 1440)
   const stored = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), clear: () => stored.clear() })
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
@@ -133,7 +134,7 @@ afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); docume
 it('routes a linked change to the fiber holding its file on its own host, not the report channel', async () => {
   boardCards = bodyCards = cards.map(c => ({ ...c, workerState: 'running' as const }))
   const send = vi.spyOn(Dock.prototype, 'sendReview').mockResolvedValue(undefined)
-  workspace.open(boardCards[0], 'Desk'); await flush()
+  workspace.open(boardCards[0], 'Desk', docKey('host-a', '/notes/alpha/report.html', 'host-a')); await flush()
   const report = vi.mocked(buildFileViewer).mock.calls.filter(call => call[1] === '/notes/alpha/report.html').at(-1)![5]!
   report.onNavigate!('/api/v1/file?path=%2Fnotes%2Fbeta%2Freview.change.json&origin=host-b')
   await flush()
@@ -825,100 +826,124 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await flush()
     expect(title()).toBe('hub')
-    // The rail stands beside the stage and hides the right neighbour; hiding it leaves the zen state.
+    // With the left column closed the page stands alone: the zen state.
     const reader = document.querySelector<HTMLElement>('.ws-reader')!
-    expect(reader.classList.contains('ws-with-rail')).toBe(true)
-    document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!.click()
-    expect(reader.classList.contains('ws-with-rail')).toBe(false)
+    expect(reader.classList.contains('ws-zen')).toBe(false)
+    document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     expect(reader.classList.contains('ws-zen')).toBe(true)
-    document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!.click()
-    expect(reader.classList.contains('ws-with-rail')).toBe(true)
+    document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     expect(reader.classList.contains('ws-zen')).toBe(false)
   })
-  it('lists a lone constitution\'s sent files in the rail, opens one on click, and brings them back from the menu', async () => {
+  it('lists a lone constitution\'s sent files at the foot of the left column, opens one on click, and brings them back from the menu', async () => {
     const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
     workspace.open(cards[0], 'Desk'); await flush()
-    expect(reader().classList.contains('ws-with-rail')).toBe(true)
-    const rail = reader().querySelector<HTMLElement>('.ws-thread-rail')!
-    expect(rail.querySelector<HTMLElement>('.ws-thread-scroll')!.hidden).toBe(true)
-    const rows = [...rail.querySelectorAll<HTMLButtonElement>('.ws-rail-file')]
+    const files = reader().querySelector<HTMLElement>('.ws-sidebar > .ws-sidebar-files')!
+    expect(files.hidden).toBe(false)
+    const rows = [...files.querySelectorAll<HTMLButtonElement>('.ws-sidebar-file')]
     expect(rows.map(row => row.dataset.key)).toEqual(['host-a:/notes/alpha/table.html', 'host-a:/notes/alpha/report.html'])
     rows[0].click(); await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
-    expect(rail.querySelector('.ws-rail-file[aria-current="page"]')?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
-    document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!.click()
-    expect(reader().classList.contains('ws-with-rail')).toBe(false)
+    expect(files.querySelector('.ws-sidebar-file[aria-current="page"]')?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
+    document.body.focus()
     workspace.reader.showSentFiles()
-    expect(reader().classList.contains('ws-with-rail')).toBe(true)
-    expect(document.activeElement?.textContent).toBe('Sent files')
+    expect(document.activeElement?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
     expect(reader().querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).not.toBe(true)
   })
-  it('re-reads the rail\'s default on every channel: files or an artifact open it, a quiet family without them leaves it closed', async () => {
-    workspace.dispose()
-    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
-      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
-    const feed = [cards[0], thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/kept', orchestrator: 'hub', status: 'closed', tempered: true }), thread({ id: 'lone', status: 'active' }), thread({ id: 'drawn', status: 'active' })]
-    // Only `drawn` keeps the fixture body's embedded report: an artifact the rail leads with.
-    bodyOverrides.set('host-a:hub', 'No artifact here.'); bodyOverrides.set('host-a:lone', 'No artifact here.')
-    bodyCards = feed
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
-    workspace.open(feed[0], 'Desk'); await flush()
-    expect(reader().classList.contains('ws-with-rail')).toBe(true)
-    workspace.open(feed[1], 'Desk'); await flush()
-    expect(reader().classList.contains('ws-with-rail')).toBe(false)
-    expect(reader().querySelectorAll('.ws-rail-file')).toHaveLength(0)
-    workspace.open(feed[0], 'Desk'); await flush()
-    expect(reader().classList.contains('ws-with-rail')).toBe(true)
-    // With neither threads nor files the rail has nothing to draw: the menu entry opens the sheet and stores no rail choice.
-    workspace.open(feed[3], 'Desk'); await flush()
-    expect(reader().querySelector<HTMLElement>('.ws-thread-rail')!.hidden).toBe(true)
-    workspace.open(feed[4], 'Desk'); await flush()
-    expect(reader().classList.contains('ws-with-rail')).toBe(true)
-    expect(reader().querySelector<HTMLElement>('.ws-rail-artifact')!.hidden).toBe(false)
-    workspace.open(feed[3], 'Desk'); await flush()
+  it('opens the sheet of sent files from the menu while the left column is closed', async () => {
+    workspace.open(cards[0], 'Desk'); await flush()
+    document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     const showModal = vi.fn()
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
     try {
       workspace.reader.showSentFiles()
       expect(showModal).toHaveBeenCalledOnce()
-    } finally { delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal }
-    expect(localStorage.getItem('shuttle:workspace:rail')).toBeNull()
+    } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal') }
   })
-  it('persists hiding a quiet rail across forced openings, navigation and reader recreation', async () => {
+  it('hides the sent files for a constitution that has none, and answers the menu with the empty sheet', async () => {
+    workspace.open(cards[1], 'Desk'); await flush()
+    expect(document.querySelector<HTMLElement>('.ws-sidebar-files')!.hidden).toBe(true)
+    const showModal = vi.fn()
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
+    try {
+      workspace.reader.showSentFiles()
+      expect(showModal).toHaveBeenCalledOnce()
+    } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal') }
+  })
+  it('lands a constitution with threads on its family page, first in its run; a leaf thread keeps its landing and has the page', async () => {
     workspace.dispose()
-    localStorage.setItem('shuttle:workspace:rail', 'true')
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
-    const feed = [
-      thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
-      thread({ id: 'hub/kept', orchestrator: 'hub', status: 'closed', tempered: true }),
-      thread({ id: 'hub/dropped', orchestrator: 'hub', status: 'closed', tempered: false }),
-      thread({ id: 'loud', status: 'active', workerState: 'running', runtimePhase: 'working' }),
-      thread({ id: 'loud/sub', orchestrator: 'loud', status: 'active', workerState: 'running', runtimePhase: 'working' }),
-    ]
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/leaf', orchestrator: 'hub', status: 'active' }), thread({ id: 'lone', status: 'active' })]
     bodyCards = feed
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
-    const toggle = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    const pages = (): (string | null)[] => [...document.querySelectorAll('.ws-page')].map(page => page.getAttribute('data-key'))
+
     workspace.open(feed[0], 'Desk'); await flush()
-    expect(reader().classList.contains('ws-with-rail')).toBe(true)
-    workspace.forceThreadRail()
-    toggle().click()
-    expect(reader().classList.contains('ws-with-rail')).toBe(false)
-    expect(localStorage.getItem('shuttle:workspace:rail')).toBe('false')
-    for (const target of [feed[1], feed[3], feed[0]]) {
-      workspace.open(target, 'Desk'); await flush()
-      expect(reader().classList.contains('ws-with-rail')).toBe(false)
-    }
+    expect(selected()).toBe('family:host-a:hub')
+    expect(pages()[0]).toBe('family:host-a:hub')
+    expect(document.querySelector('.ws-selected .ws-family [aria-current="page"] .kbn-thread-name')?.textContent).toBe('hub')
+    expect(document.querySelector('.ws-selected .family-map-sky')).not.toBeNull()
+
+    workspace.open(feed[1], 'Desk'); await flush()
+    expect(selected()).toBe('fiber:host-a:hub-leaf')
+    expect(pages().indexOf('family:host-a:hub-leaf')).toBeGreaterThanOrEqual(0)
+    expect(pages().indexOf('family:host-a:hub-leaf')).toBeLessThan(pages().indexOf('fiber:host-a:hub-leaf'))
+    workspace.open(feed[1], 'Desk', workspace.familyDocument(feed[1])); await flush()
+    expect(selected()).toBe('family:host-a:hub-leaf')
+    const family = document.querySelector('.ws-selected .ws-family')!
+    expect([...family.querySelectorAll('.kbn-thread-name')].map(name => name.textContent)).toEqual(['hub', 'hub/leaf'])
+    expect(family.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('hub/leaf')
+
+    expect(workspace.familyDocument(feed[2])).toBeUndefined()
+    workspace.open(feed[2], 'Desk'); await flush()
+    expect(pages()).not.toContain('family:host-a:lone')
+    expect(selected()).toBe('fiber:host-a:lone')
+  })
+  it('returns to the map with its selection, focus and scroll where they were', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
+    const waiting = { status: 'active', workerState: 'running', runtimePhase: 'waiting' } as const
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/a', orchestrator: 'hub', ...waiting, lastActivityAt: Date.now() }), thread({ id: 'hub/b', orchestrator: 'hub', ...waiting, lastActivityAt: Date.now() - 1000 })]
+    bodyCards = feed
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[0], 'Desk'); await flush()
-    expect([reader().classList.contains('ws-with-rail'), toggle().hidden]).toEqual([false, false])
-    toggle().click()
-    expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
-    workspace.open(feed[1], 'Desk'); await flush()
-    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    const scroller = (): HTMLElement => document.querySelector<HTMLElement>('.ws-selected .ws-family-scroll')!
+    const peek = (): string | null | undefined => document.querySelector('.ws-selected .ws-family-peek-name')?.textContent
+    const walk = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+    document.activeElement!.dispatchEvent(walk)
+    expect(peek()).toBe('hub/b')
+    scroller().scrollTop = 333
+    scroller().dispatchEvent(new Event('scroll'))
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); await flush()
+    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub/b')
+    workspace.open(feed[0], 'Desk'); await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:hub')
+    expect(peek()).toBe('hub/b')
+    expect(scroller().scrollTop).toBe(333)
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^hub\/b,/)
+  })
+  it('opens a family row from the page, and adds the page when a family forms without moving the selection', async () => {
+    workspace.dispose()
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
+    const hub = thread({ id: 'hub', status: 'active' }), leaf = thread({ id: 'hub/leaf', orchestrator: 'hub', status: 'active' })
+    let feed = [hub]
+    bodyCards = [hub, leaf]
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    workspace.open(hub, 'Desk'); await flush()
+    expect(selected()).toBe('fiber:host-a:hub')
+    expect(document.querySelector('.ws-page[data-key="family:host-a:hub"]')).toBeNull()
+    feed = [hub, leaf]
+    workspace.update(); await flush()
+    expect(selected()).toBe('fiber:host-a:hub')
+    expect(document.querySelector('.ws-page[data-key="family:host-a:hub"]')).not.toBeNull()
+    workspace.reader.select('family:host-a:hub'); await flush()
+    const row = [...document.querySelectorAll<HTMLElement>('.ws-selected .kbn-thread-row')].find(el => el.querySelector('.kbn-thread-name')?.textContent === 'hub/leaf')!
+    row.click(); await flush()
+    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub/leaf')
   })
   it('draws one index strip naming each Desk column and its count, marks the open one, and lands a click as J/K would', async () => {
     workspace.dispose()
@@ -1237,17 +1262,17 @@ describe('workspace reader integration', () => {
     const toggle = document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     expect(toggle.querySelector('svg')).not.toBeNull()
     expect(toggle.title).toBe('Constitutions · ⌘[')
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    expect(workspace.reader.el.classList.contains('ws-with-sidebar')).toBe(false)
-    toggle.click()
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(workspace.reader.el.classList.contains('ws-with-sidebar')).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-sidebar')?.getAttribute('aria-label')).toBe('Constitutions')
     expect(workspace.reader.el.querySelector('.ws-sidebar .ws-channel-find')?.getAttribute('aria-label')).toBe('Find a constitution')
-    expect(localStorage.getItem('shuttle:workspace:sidebar')).toBe('true')
+    toggle.click()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(localStorage.getItem('shuttle:workspace:sidebar')).toBe('false')
     expect(frame.content.querySelector('iframe')).toBe(iframe)
     expect(iframe.contentWindow).toBe(innerWindow)
     toggle.click()
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(frame.content.querySelector('iframe')).toBe(iframe)
   })
 

@@ -19,7 +19,7 @@ export function familyCounts(others: Readonly<Record<FamilyNeed, number>>): { wo
  * priority count opens the family page; its tooltip retains the full
  * split between work, turns and reviews.
  */
-export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard, forceRail?: boolean) => void, now = Date.now()): void {
+export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard, family?: boolean) => void, now = Date.now()): void {
   const family = index.family(index.card(card))
   const ancestry = index.ancestry(card)
   if (ancestry.length) {

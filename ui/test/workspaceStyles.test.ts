@@ -7,24 +7,18 @@ const css = read('reader.css').replace(/\/\*[\s\S]*?\*\//g, '')
 const tokens = `${read('tokens.css')}\n${readFileSync(new URL('../src/styles/type.css', import.meta.url), 'utf8')}`
 
 describe('workspace style contracts', () => {
-  it('orders the rail threads, artifact, sent files: lists scroll on their own and a drawn artifact takes the rest', () => {
-    const rules = new Map<string, Map<string, string>>()
-    postcss.parse(read('thread-rail.css')).walkRules(rule => {
-      for (const selector of rule.selectors) {
-        const decls = rules.get(selector) ?? new Map<string, string>()
-        rule.walkDecls(d => { decls.set(d.prop, d.value) })
-        rules.set(selector, decls)
-      }
-    })
-    const tree = rules.get('.ws-thread-tree')!, list = rules.get('.ws-rail-file-list')!
-    for (const scroller of [tree, list]) { expect(scroller.get('overflow')).toBe('auto'); expect(scroller.get('min-height')).toBe('0') }
-    const fill = (region: string, kind: string) => rules.get(`.ws-thread-rail[data-fill='${kind}'] > ${region}`)!
-    expect(rules.get('.ws-thread-scroll')!.get('flex')).toBe('0 1 auto'); expect(rules.get('.ws-thread-scroll')!.get('max-height')).toMatch(/%$/)
-    expect(fill('.ws-rail-artifact', 'artifact').get('flex')).toBe('1 1 0'); expect(parseFloat(fill('.ws-rail-artifact', 'artifact').get('min-height')!)).toBeGreaterThan(0)
-    expect(fill('.ws-rail-files', 'artifact').get('flex')).toBe('0 1 auto'); expect(fill('.ws-rail-files', 'artifact').get('max-height')).toMatch(/%$/)
-    expect(fill('.ws-rail-files', 'files').get('flex')).toBe('1 1 0')
-    expect(rules.get('.ws-thread-rail[data-fill] > [data-sized]')!.get('flex')).toBe('0 0 var(--ws-rail-region-height)')
-    expect(rules.get('.ws-thread-rail')!.get('flex-direction')).toBe('column')
+  it('holds the sent files to the foot of the left column, their list scrolling on its own', () => {
+    const rule = (selector: string): Map<string, string> => {
+      const decls = new Map<string, string>()
+      postcss.parse(read('reader.css')).walkRules(rule => {
+        if (rule.selectors.includes(selector)) rule.walkDecls(d => { decls.set(d.prop, d.value) })
+      })
+      return decls
+    }
+    const files = rule('.ws-sidebar-files'), list = rule('.ws-sidebar-file-list')
+    expect(files.get('flex')).toBe('none'); expect(files.get('max-height')).toMatch(/%$/)
+    expect(list.get('overflow')).toBe('auto'); expect(list.get('min-height')).toBe('0')
+    expect(rule('.ws-sidebar-files[hidden]').get('display')).toBe('none')
   })
   it('keeps the ready PDF thumbnail glyph visible', () => {
     const hidden = read('thumbnail.css').split('}').filter(rule => /display:\s*none/.test(rule)).join('}')

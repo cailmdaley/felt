@@ -28,7 +28,7 @@ const selected = () => document.querySelector<HTMLElement>('.kbn-key-selected')?
 const row = () => document.querySelector<HTMLElement>('.kbn-card[data-card-uid="hub-uid"]')!
 beforeEach(() => {
   mobile = false
-  const stored = new Map<string, string>([['shuttle:workspace:rail', 'false']])
+  const stored = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) })
   vi.stubGlobal('matchMedia', (query: string) => ({ get matches() { return mobile && query === MOBILE_MEDIA }, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function (this: HTMLDialogElement) { this.setAttribute('open', '') } })
@@ -81,28 +81,11 @@ it('Tab reaches the dot and the count, with no menu control and no hidden family
   expect(document.activeElement).toBe(row().querySelector('.kbn-thread-count'))
   expect(row().querySelector('.kbn-card-menu')).toBeNull()
 })
-it('the count explicitly shows the rail and its toggle persists the next hide', async () => {
+it.each([false, true])('the count opens the family page on phone=%s', async phone => {
+  mobile = phone; draw()
   row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
   await vi.waitFor(() => expect(inside.workspace.isActive).toBe(true))
-  const reader = inside.workspace.reader as unknown as { railOpen: boolean }
-  expect(reader.railOpen).toBe(true)
-  expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
-  draw(); expect(reader.railOpen).toBe(true)
-  document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!.click()
-  inside.workspace.returnToOrigin()
-  inside.openDocumentChannel(head)
-  expect(reader.railOpen).toBe(false)
-  expect(localStorage.getItem('shuttle:workspace:rail')).toBe('false')
-})
-it('the phone count opens the existing threads sheet once, not again after dismissal and a refresh', async () => {
-  mobile = true; draw()
-  row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
-  await vi.waitFor(() => expect(document.querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).toBe(true))
-  const reader = inside.workspace.reader as unknown as { phoneRailPending: boolean; pageSheet: { hide(): void } }
-  expect(reader.phoneRailPending).toBe(false)
-  reader.pageSheet.hide()
+  await vi.waitFor(() => expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(`family:${head.originId}:hub-uid`))
+  expect(document.querySelector('.ws-selected .ws-family [aria-current="page"] .kbn-thread-name')?.textContent).toBe(head.name)
   expect(document.querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).toBe(false)
-  draw()
-  expect(document.querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).toBe(false)
-  expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
 })

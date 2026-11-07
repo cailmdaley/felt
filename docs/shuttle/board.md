@@ -194,7 +194,7 @@ Thumbnails load near the viewport under a shared budget and cannot run scripts.
 Confirmed missing fibers' documents gather under **Unfiled** on their byte-owning host; an unreachable owner does not count as a missing fiber.
 
 Opening a folio or receipt enters the reader: one selected page, inert receded neighbours, and a tab strip for the constitution.
-The reader is one frame: beneath the board's bar, the selected page fills the space between the open side columns, with its header line on top and the document below it. The header line holds back, the page's name, its arrival, Expand and the document menu. The corner toggles for the Constitutions sidebar and the threads rail take their own places at the line's ends.
+The reader is one frame: beneath the board's bar, the selected page fills the space between the open side columns, with its header line on top and the document below it. The header line holds back, the page's name, its arrival, Expand and the document menu. The corner toggle for the Constitutions sidebar takes its own place at the line's end. The sidebar opens by default only where the stage keeps about 720 px beside it; closing or opening it is remembered and wins at every width.
 The fiber page anchors its body, embedded files, opened body links and sent documents.
 Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, metadata polls and the optional Constitutions sidebar preserve retained document instances and reading position.
@@ -220,7 +220,7 @@ One Back or root Escape returns from a sidebar scan to its predecessor; returnin
 
 Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions through the sidebar as one flow, across groups and columns, and J/K jump between its columns, landing on the constitution last open in each; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
-The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the band); t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back). ⌘[ and ⌘] toggle the Constitutions sidebar and the threads rail; \\ hides both.
+The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the band); t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back). ⌘[ toggles the Constitutions sidebar.
 s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
 Rest works in any state and stops a live worker through the owning daemon's lifecycle path.
 In flight shows **Your turn** then **Working**; a question card (an ask or a harness prompt) leads Your turn and opens its report when present.
@@ -229,6 +229,22 @@ A plain fiber reached by wikilink keeps the tab label **Note**.
 The tablist keeps one Tab stop and moves focus with its selected tab.
 HTML documents get first refusal on their own keys; native PDF and media viewers keep their controls.
 `?` shows the shared keyboard help.
+
+### The family map
+
+A constitution with threads lands on its family map: one page the board draws for every family, for seeing what is happening and what to look at next. The counts above it say what asks. The peek below it shows the selected thread's ask or outcome and its sent files. **All threads** at the foot folds out the whole tree, drafts, resting and archived included.
+
+What asks comes in one order everywhere: questions, blocked, new since you last opened a file, to review, your turn, then working, newest first within a kind. Drafts and resting threads stay counts rather than competing.
+
+The map has a roster of drawings, kept per browser; `v` or the control above the map changes it.
+
+- **Sky:** centre is now, the rings are square-root time since a thread last moved, the arcs are who launched whom and size is the mass of work. Only what needs you carries colour. A closed thread merges: its work joins its orchestrator's body and only its arc remains.
+- **Rings:** one ring to a generation, with every thread at a place fixed by the tree, so positions can be learned. Heat is drawn in place.
+- **Spiral:** the order wound out from the centre. Inside the horizon things rise to you; past it finished work unwinds. Drag a body to arrange the line; the arrangement stays per family, and a double-click on the field or **Back to attention order** clears it.
+- **Cloth:** rows in attention order, woven across time, with a block where something happened.
+- **Delta:** rows in attention order, each thread leaving its orchestrator where it was born.
+
+With the map focused, the arrow keys walk its threads, Enter opens one, and `h` or Back returns with the selection and scroll as you left them. `l` goes between the map and the family's report. On a touch screen a first tap peeks and a second opens.
 
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
 A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).

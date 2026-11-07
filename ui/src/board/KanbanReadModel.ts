@@ -283,7 +283,7 @@ function assembleSurfaces(
   const threadIndex = new ThreadIndex(allCards);
   const frontier = new Set(threadIndex.frontier());
   for (const card of allCards) card.threadSummary = threadIndex.summary(card);
-  // Keep every non-row available to the constitution view and its rail.
+  // Keep every non-row available to the constitution view and its family page.
   const threads = allCards.filter(card => !frontier.has(card));
   for (const { card, column } of classified) {
     if (frontier.has(card)) buckets[column].push(card);

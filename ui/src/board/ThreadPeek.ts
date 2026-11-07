@@ -3,7 +3,7 @@ import { waitingWords, type ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
 import './threads.css'
 
-/** A constitution-view rail row; pinning stays local to the rail. */
+/** A row of the family page; pinning stays local to the page. */
 export function threadRow(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): HTMLDivElement {
   const state = index.state(card)
   const row = document.createElement('div')

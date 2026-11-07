@@ -53,9 +53,15 @@ export class FiberSends {
   private readonly onChange: () => void
   constructor(base: string, onChange: () => void) { this.base = base; this.onChange = onChange }
 
+  private of(card: KanbanCard): ShelfFile[] {
+    return (card.uid ? this.byFiber.get(card.uid) : undefined) ?? this.byFiber.get(card.id) ?? []
+  }
+  /** This fiber's sent files, newest first. */
+  sends(card: KanbanCard): FiberSend[] {
+    return this.of(card).flatMap(file => resolve(card, file) ?? [])
+  }
   latest(card: KanbanCard): FiberSend | undefined {
-    const files = (card.uid ? this.byFiber.get(card.uid) : undefined) ?? this.byFiber.get(card.id) ?? []
-    const file = newestReport(files)
+    const file = newestReport(this.of(card))
     return file ? resolve(card, file) : undefined
   }
 

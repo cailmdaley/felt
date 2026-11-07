@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
@@ -23,6 +23,7 @@ interface WorkspaceBoard {
   deskEl: HTMLDivElement | null
   workspaceCards(): KanbanCard[]
 }
+beforeEach(() => { vi.stubGlobal('innerWidth', 1440) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const flushTasks = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
 
@@ -162,7 +163,6 @@ describe('Desk rows in the document workspace', () => {
       board.workspace.open(host, 'Desk')
       await flushTasks()
       const sidebar = board.workspace.reader!.el.querySelector<HTMLElement>('.ws-sidebar')!
-      board.workspace.reader!.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
       const groups = (): string[] => [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-group .kbn-flight-caption')].map(el => el.textContent!)
       const rows = (): string[] => [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-row')].map(el => el.dataset.channelUid!)
       expect(groups()).toEqual(['Drafts', 'Working'])
