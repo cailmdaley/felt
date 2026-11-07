@@ -4,7 +4,7 @@ import { htmlEl as el, markPath, shortAgo, svgEl } from '../family/drawing.js'
 import { PERIOD, UPRIGHT, bounded, carried, planeOutline, facing, flight, frameOf, grip, invert, keeping, northUp, project, wholeRadius, type Camera, type Flight, type Frame, type Grip, type Projection, type Viewport } from './camera.js'
 import { forestOf, persistentId } from './forest.js'
 import { NORTH, cellSpan, centre, child, facePoint, inCell, ipixOf, type FacePoint, type Vec } from './healpix.js'
-import { blocks, inscribed, placeNames, within, type Block, type Box, type Candidate, type Point } from './labels.js'
+import { blocks, inscribed, overlaps, placeNames, within, type Block, type Box, type Candidate, type Point } from './labels.js'
 import { BEACON_PX, PREVIEW_PX, paint, paintLeaders, type Leader, type Palette, type Pulse } from './paint.js'
 import { Previews, type Shown } from './previews.js'
 import { askKind, sceneOf, traceOf, type Body, type Scene, type Tone } from './scene.js'
@@ -68,8 +68,14 @@ const CONSTITUTION_PX = 170
 /** An archived thread is named once its tile is this wide, and not as one of the focus's own. */
 const SETTLED_PX = 220
 const MOST_NAMES = 90
-/** The share of its box a preview leaves around itself, and a caption's distance from it. */
-const PREVIEW_INSET = .05, CAPTION_GAP = 4
+/**
+ * How far past its tile a preview may reach, as a scale of the tile about its
+ * centre, where that crosses no other preview: boxes inscribed in a grid of
+ * diamonds leave gaps between them. Then the share of its box a preview leaves
+ * around itself, and a caption's distance from it.
+ */
+const PREVIEW_REACH = 1.2, PREVIEW_INSET = .05, CAPTION_GAP = 4
+const grown = (polygon: readonly number[], { x, y }: Point, scale: number): number[] => polygon.map((value, n) => n % 2 ? y + (value - y) * scale : x + (value - x) * scale)
 const inset = (box: Box, share: number): Box => {
   const dx = (box.right - box.left) * share / 2, dy = (box.bottom - box.top) * share / 2
   return { left: box.left + dx, top: box.top + dy, right: box.right - dx, bottom: box.bottom - dy }
@@ -400,7 +406,7 @@ export class GlobeStage {
 
   /** Lays the previews and the names that fit over the frame, reusing their elements, and gives back the lines from names standing off their tiles. */
   private placeNames(frame: Frame, scene: Scene): Leader[] {
-    const { width, height } = this.viewport, r = frame.r, candidates: Body[] = [], pages: Shown[] = []
+    const { width, height } = this.viewport, r = frame.r, candidates: Body[] = [], pages: Array<Shown & { wide: Box }> = []
     const visit = (body: Body): void => {
       const px = body.span * r
       if (px < NAME_PX) return
@@ -409,8 +415,9 @@ export class GlobeStage {
       if (at.depth < 0 || at.x < -reach || at.x > width + reach || at.y < -reach || at.y > height + reach) return
       if (body.kind === 'thread' && px >= LEAD_PX) this.readLead(body)
       if (body.file && px >= PREVIEW_PX && this.previews.readable(body.file)) {
-        const outline = this.outlineOn(frame, body), box = outline && inscribed(outline, at, this.previews.aspect(body.key, body.file))
-        if (box) pages.push({ key: body.key, file: body.file, box: inset(box, PREVIEW_INSET), title: body.kind === 'lead' ? body.parent!.name : body.file.name })
+        const outline = this.outlineOn(frame, body), aspect = this.previews.aspect(body.key, body.file)
+        const box = outline && inscribed(outline, at, aspect), wide = outline && inscribed(grown(outline, at, PREVIEW_REACH), at, aspect)
+        if (box && wide) pages.push({ key: body.key, file: body.file, box, wide, title: body.kind === 'lead' ? body.parent!.name : body.file.name })
       }
       const page = body.kind === 'constitution' && body.parent!.key !== this.place.focus && px < CONSTITUTION_PX
       const quiet = body.settled && px < SETTLED_PX && !this.within(body)
@@ -424,6 +431,14 @@ export class GlobeStage {
     const box = { left: 8, top: this.headHeight + 4, right: width - 8, bottom: height - this.footHeight - 4 }
     const owed = candidates.filter(body => this.underFocus(body))
     // Thread names in the largest type their tiles allow may crowd out their neighbours; then all of them take the smallest.
+    // Larger previews reach first, each only as far as it crosses no other's own box or reach.
+    pages.sort((a, b) => b.box.right - b.box.left - (a.box.right - a.box.left))
+    const reached: Box[] = []
+    for (const page of pages) {
+      const clear = !pages.some(other => other !== page && overlaps(page.wide, other.box)) && !reached.some(other => overlaps(page.wide, other))
+      if (clear) reached.push(page.wide)
+      page.box = inset(clear ? page.wide : page.box, PREVIEW_INSET)
+    }
     const shown = new Map(pages.map(page => [page.key, page.box])), kept = [...shown.values()]
     let placed = placeNames(this.candidates(candidates, frame, scene, false, shown), box, MOST_NAMES, kept)
     if (owed.some(body => !placed.some(name => name.owner === body))) placed = placeNames(this.candidates(candidates, frame, scene, true, shown), box, MOST_NAMES, kept)
