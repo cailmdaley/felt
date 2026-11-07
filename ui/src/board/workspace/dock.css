@@ -60,7 +60,7 @@
 .ws-dock .ws-worker-acts { padding: 0 16px 6px; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-worker-acts[hidden] { display: none; }
 .ws-worker-message {
-  flex: 1 1 0; min-width: 6em; height: var(--ws-control-height); box-sizing: border-box; padding: 0 10px; margin-right: 4px;
+  flex: 1 1 0; min-width: 6em; max-width: 48rem; height: var(--ws-control-height); box-sizing: border-box; padding: 0 10px; margin-right: 4px;
   border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: transparent;
   color: var(--ws-ink); font: var(--type-label)/var(--leading-solid) var(--font-serif); text-overflow: ellipsis;
 }
