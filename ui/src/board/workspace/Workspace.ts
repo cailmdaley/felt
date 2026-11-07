@@ -214,7 +214,7 @@ export class Workspace {
       onRevisitDocument: key => this.revisit(key),
       workerPill: card => this.dock.workerPillFor(card),
       onVerdict: verdict => this.deferVerdict(verdict),
-      onConversation: card => { this.dock.openConversation(card) },
+      onConversation: card => { this.dock.openConversation(this.mapSelection() ?? card) },
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
@@ -606,9 +606,14 @@ export class Workspace {
     }
     return page
   }
+  /** On the family's map, the thread it has selected. */
+  private mapSelection(): KanbanCard | undefined {
+    const state = this.current
+    return state && state.selected === familyKey(state.channel.owner, state.channel.uid) ? state.familyPage?.selection : undefined
+  }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), {
+    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), card => { this.dock.openConversation(card) }, {
       marks: card => this.activity.of(card.uid ?? card.id),
       files: card => (this.opts.sends?.(card) ?? []).map(send => ({ key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp) })),
       refresh: () => this.refreshFamilyFeeds(),

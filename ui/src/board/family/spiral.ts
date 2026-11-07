@@ -153,7 +153,7 @@ const current = new WeakMap<HTMLElement, { model: FamilyModel; open: OpenThread;
 
 export const spiral: Drawing = {
   name: 'spiral', label: 'Spiral',
-  reading: ['Centre: look here first', 'Inward: rising to you', 'Outward: receding', 'Colour: it needs you', 'Size: its mass of work', 'Drag a body to arrange'],
+  reading: ['Zoom: ⌘ scroll or pinch', 'Centre: look here first', 'Inward: rising to you', 'Outward: receding', 'Colour: it needs you', 'Size: its mass of work', 'Drag a body to arrange'],
   sequence,
   draw(host, model, open, view = WHOLE) {
     const { width, height } = mount(host, 'spiral', model, open)

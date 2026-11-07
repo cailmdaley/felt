@@ -20,7 +20,7 @@ const draft = card({ id: 'hub/draft', name: 'Draft', orchestrator: 'hub', status
 const cards = [root, asked, idle, done, draft]
 
 function page(open = vi.fn(), feed = feeds): { page: FamilyPage; open: typeof open } {
-  const family = new FamilyPage(open, feed, vi.fn())
+  const family = new FamilyPage(open, vi.fn(), feed, vi.fn())
   document.body.append(family.el)
   family.update(root, new ThreadIndex(cards), now)
   return { page: family, open }
@@ -181,7 +181,7 @@ it('keeps the selection and each mark\'s element across a repaint, so a moved th
   expect(mark.getAttribute('aria-selected')).toBe('true')
 })
 it('lands on the open thread on a thread\'s map, and repaints only when something changed', () => {
-  const family = new FamilyPage(vi.fn(), feeds, vi.fn()), index = new ThreadIndex(cards)
+  const family = new FamilyPage(vi.fn(), vi.fn(), feeds, vi.fn()), index = new ThreadIndex(cards)
   family.update(idle, index, now)
   expect(peekName(family)).toBe('Idle')
   const stage = family.el.querySelector('[role="listbox"]')!, marks = stage.querySelector('.fm-stars')
@@ -293,7 +293,7 @@ it('leaves keys on its controls and modified keys alone', () => {
 it('disconnects its observer and tells its owner when its frame is evicted', () => {
   const disconnect = vi.fn(), disposed = vi.fn()
   vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect = disconnect })
-  const family = new FamilyPage(vi.fn(), feeds, disposed)
+  const family = new FamilyPage(vi.fn(), vi.fn(), feeds, disposed)
   disposeFileViewer(family.el)
   expect(disconnect).toHaveBeenCalledOnce()
   expect(disposed).toHaveBeenCalledOnce()
@@ -353,4 +353,16 @@ it('draws a drag with the newest model, not the one it began on', () => {
   window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 500, clientY: 340 }))
   window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 340 }))
   expect(option(family, 'Newcomer')).not.toBeNull()
+})
+
+it('offers a thread with a worker its conversation from the peek', () => {
+  const root = card({ id: 'hub' }), thread = card({ id: 'hub/a', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting', terminalBackend: 'rex' })
+  const converse = vi.fn(), page = new FamilyPage(vi.fn(), converse, { marks: () => undefined, files: () => [], refresh: () => {} }, () => {})
+  document.body.append(page.el)
+  page.update(root, new ThreadIndex([root, thread]))
+  expect(page.selection?.id).toBe('hub/a')
+  const worker = page.el.querySelector<HTMLButtonElement>('.ws-family-peek-worker')!
+  expect(worker.textContent).toBe('Open in Rex')
+  worker.click()
+  expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/a' }))
 })

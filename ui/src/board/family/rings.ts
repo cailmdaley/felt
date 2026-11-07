@@ -57,7 +57,7 @@ export function ringsLayout(model: FamilyModel, width: number, height: number): 
 
 export const rings: Drawing = {
   name: 'rings', label: 'Rings',
-  reading: ['Rings: generations from the constitution', 'Place: fixed by the tree', 'Colour: it needs you', 'Glow: how recently it moved', 'Size: its mass of work', 'Arcs: who launched whom'],
+  reading: ['Zoom: ⌘ scroll or pinch', 'Rings: generations from the constitution', 'Place: fixed by the tree', 'Colour: it needs you', 'Glow: how recently it moved', 'Size: its mass of work', 'Arcs: who launched whom'],
   draw(host, model, open, view) {
     const { width, height } = mount(host, 'rings', model, open)
     paintPlate(host, zoomPlate(ringsLayout(model, width, height), view), model)

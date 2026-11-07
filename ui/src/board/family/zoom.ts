@@ -104,7 +104,7 @@ export class FieldZoom {
   private wheel(event: WheelEvent): void {
     if (!this.inPlate(event.target)) return
     const rows = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1
-    if (event.ctrlKey) {
+    if (event.ctrlKey || event.metaKey) {
       event.preventDefault()
       const at = this.share(event.clientX, event.clientY)
       this.view = zoomAbout(this.view, Math.exp(-within(event.deltaY * rows, -WHEEL_MOST, WHEEL_MOST) * WHEEL_RATE), at.x, at.y)

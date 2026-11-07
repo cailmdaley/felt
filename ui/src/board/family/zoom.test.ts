@@ -23,7 +23,7 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.use
 
 function mapped(drawing = 'sky'): { stage: HTMLElement; plate: HTMLElement } {
   stored.set('shuttle.family.drawing', drawing)
-  const page = new FamilyPage(vi.fn(), feeds, vi.fn())
+  const page = new FamilyPage(vi.fn(), vi.fn(), feeds, vi.fn())
   document.body.append(page.el)
   page.update(root, new ThreadIndex(cards), now)
   const stage = page.el.querySelector<HTMLElement>('[role="listbox"]')!, plate = stage.querySelector<HTMLElement>('.fm-sky-plate')!
@@ -58,6 +58,7 @@ it('leaves the wheel to the page at the base scale, and takes it once zoomed', (
   const { stage, plate } = mapped()
   expect(wheel(plate, { deltaY: 40 }).defaultPrevented).toBe(false)
   expect(wheel(plate, { deltaY: -40, ctrlKey: true }).defaultPrevented).toBe(true)
+  expect(wheel(plate, { deltaY: -40, metaKey: true }).defaultPrevented).toBe(true)
   expect(wheel(plate, { deltaY: 40 }).defaultPrevented).toBe(true)
   expect(stage.classList.contains('family-map-gesturing')).toBe(true)
 })

@@ -1,4 +1,4 @@
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, ATTENTION_WORD, familyModel, isDrawn, needsHuman, type FamilyModel, type MapFeeds, type MapThread } from '../family/model.js'
 import { htmlEl as el, markPath, markSelection, shortAgo, svgEl, type Drawing } from '../family/drawing.js'
 import { ROSTER, chooseDrawing, chosenDrawing } from '../family/roster.js'
@@ -62,8 +62,10 @@ export class FamilyPage {
   private readonly open: (card: KanbanCard, doc?: string) => void
   private readonly feeds: FamilyFeeds
 
-  constructor(open: (card: KanbanCard, doc?: string) => void, feeds: FamilyFeeds, disposed: () => void) {
-    this.open = open; this.feeds = feeds; this.disposed = disposed
+  private readonly converse: (card: KanbanCard) => void
+
+  constructor(open: (card: KanbanCard, doc?: string) => void, converse: (card: KanbanCard) => void, feeds: FamilyFeeds, disposed: () => void) {
+    this.open = open; this.converse = converse; this.feeds = feeds; this.disposed = disposed
     this.stage.setAttribute('role', 'listbox')
     this.stage.setAttribute('aria-label', 'Threads, most urgent first')
     this.scroller.append(this.stage)
@@ -230,6 +232,12 @@ export class FamilyPage {
     const name = el('button', 'ws-family-peek-name', thread.name); name.type = 'button'
     name.addEventListener('click', () => this.open(card()))
     const title = el('div', 'ws-family-peek-title'); title.append(name, el('span', 'ws-family-peek-meta'))
+    if (hasLiveWorker(thread.card) || thread.card.sessionUuid) {
+      const worker = el('button', 'ws-family-peek-worker', thread.card.terminalBackend === 'rex' ? 'Open in Rex' : 'Open conversation'); worker.type = 'button'
+      worker.title = `${worker.textContent} · c`
+      worker.addEventListener('click', () => this.converse(card()))
+      title.append(worker)
+    }
     const note = el('p', 'ws-family-peek-note', thread.note)
     const files = el('div', 'ws-family-peek-files')
     for (const file of thread.files.slice(0, PEEK_FILES)) {
@@ -240,6 +248,10 @@ export class FamilyPage {
     }
     if (thread.files.length > PEEK_FILES) files.append(el('span', 'ws-family-peek-more', `+${thread.files.length - PEEK_FILES}`))
     this.peek.replaceChildren(title, note, files)
+  }
+  /** The thread the map has selected, which `c` opens the worker of. */
+  get selection(): KanbanCard | undefined {
+    return this.selected ? this.model?.threads.get(this.selected)?.card : undefined
   }
   private rest(event: PointerEvent): void {
     this.touch = event.pointerType === 'touch'

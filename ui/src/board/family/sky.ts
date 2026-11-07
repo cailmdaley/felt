@@ -88,7 +88,7 @@ export function skyLayout(model: FamilyModel, width: number, height: number): Pl
 
 export const sky: Drawing = {
   name: 'sky', label: 'Sky',
-  reading: ['Centre: now', 'Rings: since it last moved', 'Arcs: who launched whom', 'Size: its mass of work', 'Colour: it needs you', 'Numbers: the order to look'],
+  reading: ['Zoom: ⌘ scroll or pinch', 'Centre: now', 'Rings: since it last moved', 'Arcs: who launched whom', 'Size: its mass of work', 'Colour: it needs you', 'Numbers: the order to look'],
   draw(host, model, open, view) {
     const { width, height } = mount(host, 'sky', model, open)
     paintPlate(host, zoomPlate(skyLayout(model, width, height), view), model)

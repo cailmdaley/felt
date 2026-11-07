@@ -16,6 +16,8 @@
 .ws-family-peek-name:hover { text-decoration: underline; text-decoration-color: var(--ws-hairline); text-underline-offset: .15em; }
 .ws-family-peek-meta { flex: none; color: var(--fm-tone, var(--ws-ink-muted)); font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
 .ws-family-peek-note { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; margin: 0; overflow: hidden; color: var(--ws-ink-soft); font-size: var(--type-note); }
+.ws-family-peek-worker { flex: none; margin-left: auto; padding: 2px 8px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: transparent; color: var(--ws-ink); font: var(--type-note)/var(--leading-tight) var(--font-serif); cursor: pointer; }
+.ws-family-peek-worker:hover { background: var(--ws-hover); }
 .ws-family-peek-files { display: flex; gap: 12px; min-width: 0; overflow: hidden; color: var(--ws-ink-muted); }
 .ws-family-peek-file { flex: 0 1 auto; min-width: 0; padding: 0; overflow: hidden; border: 0; background: transparent; color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .ws-family-peek-file:hover { color: var(--ws-ink); }
