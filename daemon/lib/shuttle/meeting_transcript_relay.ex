@@ -390,7 +390,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   alias Shuttle.FileTail
 
   @names ~r/\b(?:claude|cloud|clawed|claw|klaud|clot|clock|clod|claud)\b/iu
-  @closing ~r/\bsend[.!?]*\s*$/iu
+  @closing ~r/[\s,;:]*\bsend[.!?]*\s*$/iu
   @partial_stale_seconds 60
   @stamp ~r/^\d{2}:\d{2}:\d{2}(?:-\d{2}:\d{2}:\d{2})?\s+/
 
@@ -980,7 +980,7 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   defp render_lines("meeting", lines, _), do: Enum.join(lines, "\n")
 
   defp render_lines("voice", lines, rows) do
-    rows = rows || voice_rows(lines)
+    rows = unsend(rows || voice_rows(lines))
 
     {paragraphs, _} =
       Enum.reduce(rows, {[], nil}, fn %{"speaker" => speaker, "text" => text},
@@ -992,6 +992,20 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       end)
 
     Enum.join(paragraphs, "\n")
+  end
+
+  # A batch that "send" closed reaches the worker without that final word.
+  defp unsend(rows) do
+    case List.pop_at(rows, -1) do
+      {%{"text" => text} = last, rest} ->
+        case String.trim(Regex.replace(@closing, text, "")) do
+          "" -> rest
+          text -> rest ++ [%{last | "text" => text}]
+        end
+
+      {nil, rest} ->
+        rest
+    end
   end
 
   defp voice_rows(lines) do
