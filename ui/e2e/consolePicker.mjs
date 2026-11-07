@@ -97,8 +97,9 @@ try {
     assert.equal(await p.evaluate(() => localStorage.getItem('shuttle.claude-opening')), phone ? 'browser' : 'app')
     assert.equal(await p.evaluate(() => window.__conversationLinks.at(-1)), phone ? 'https://claude.ai/code/session_fixture' : 'claude://claude.ai/code/session_fixture')
     assert.equal(await consoleButton(p).textContent(), phone ? 'Open in Claude browser' : 'Open in Claude app')
+    const opened = await p.evaluate(() => window.__conversationLinks.length)
     await consoleButton(p).click()
-    assert.equal(await p.evaluate(() => window.__conversationLinks.length), 2)
+    assert.equal(await p.evaluate(() => window.__conversationLinks.length), opened + 1)
     if (phone) {
       await band(p).getByRole('button', { name: 'Constitution', exact: true }).click()
       await selected(p).locator('.ws-fiber-prose').waitFor()

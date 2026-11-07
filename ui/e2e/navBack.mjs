@@ -1,4 +1,4 @@
-import { familyTree } from './familyNav.mjs'
+import { familyTree, openThread } from './familyNav.mjs'
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -57,11 +57,11 @@ export function registerNavigationJourneys(test) {
     const nameBox = await name.boundingBox()
     await name.click({ position: { x: nameBox.width - 6, y: nameBox.height / 2 } })
     await named(page, 'Choose the response cut')
-    await checkBack('Desk')
+    // Back steps out of the map's levels before it leaves the page.
+    await checkBack('Response analysis')
     await shot('01-nested-from-desk')
     const rows = (await familyTree(page)).locator('.kbn-thread-row')
-    await rows.filter({ hasText: 'Review the null tests' }).click()
-    await named(page, 'Review the null tests')
+    await openThread(page, rows.filter({ hasText: 'Review the null tests' }), 'Review the null tests')
     await checkBack('Choose the response cut')
     await shot('02-sibling')
     await selected(page).getByRole('link', { name: 'Open validation', exact: true }).click()
@@ -80,12 +80,14 @@ export function registerNavigationJourneys(test) {
     await shot('05-chevron-to-sibling')
     await page.goBack()
     await named(page, 'Choose the response cut')
-    await checkBack('Constitution')
-    await page.goBack()
-    await checkBack('Desk')
-    // The page announces its selection once the channel's body and receipts settle.
-    await page.waitForFunction(() => document.querySelector('.ws-reader .ws-sr-only')?.textContent === 'Constitution')
     await shot('06-browser-back-to-nested')
+    // Stepping out climbs the map to the whole family, and only then leaves the page.
+    const stepOut = () => phone ? page.locator('.ws-return').click() : page.keyboard.press('Escape')
+    await checkBack('Response analysis')
+    await stepOut()
+    await checkBack('Whole family')
+    await stepOut()
+    await checkBack('Desk')
     if (phone) {
       const cdp = await page.context().newCDPSession(page)
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 60, y: 300 }] })

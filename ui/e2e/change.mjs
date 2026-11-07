@@ -93,6 +93,7 @@ export function registerChangeJourneys(test) {
     })
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+    await page.locator('.ws-selected .fm-held').filter({ hasText: 'Report' }).click()
     const link = page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' })
     await link.waitFor()
     await page.locator('.ws-selected .kbn-fileview-loading').waitFor({ state: 'detached' })

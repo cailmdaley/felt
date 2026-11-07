@@ -37,9 +37,13 @@ async function openPlainThemeMenu(p) {
   await menu.click()
   return p.getByRole('button', { name: plainThemeLabel, exact: true })
 }
-async function open(p, expected = 'calibration-report') {
+/** A Desk click lands on the constitution's map. */
+async function land(p) {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click()
   await selected(p).waitFor()
+}
+async function open(p, expected = 'calibration-report') {
+  await land(p)
   await choose(p, expected)
 }
 async function headerAction(p, label) {
@@ -835,7 +839,7 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
       gear: box(document.querySelector('.kbn-viewtabs-settings')) }
   })
   const desk = await bar()
-  assert.equal(desk.tabs.length, 3)
+  assert.equal(desk.tabs.length, 5)
   await open(p); await reportReady(p)
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'over the reader')
@@ -848,6 +852,14 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
   await p.locator('.chr-name').first().waitFor()
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'on the Chronicle')
+  await barTab(p, 'tree').click()
+  await p.locator('.tree-row').first().waitFor()
+  await p.waitForTimeout(350)
+  assert.deepEqual(await bar(), desk, 'on the Tree')
+  await barTab(p, 'globe').click()
+  await p.locator('.globe-canvas').waitFor()
+  await p.waitForTimeout(350)
+  assert.deepEqual(await bar(), desk, 'on the Globe')
 })
 
 // While the reader is open the bar marks the view it came from: that tab (or
@@ -883,7 +895,7 @@ for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(
     await poll(p, () => !!document.querySelector('.kbn-reader-open'))
     assert.deepEqual(await state(), { open: true, view: origin, selected: [origin] }, `the bar marks ${origin} as the origin`)
     assert.match(await barTab(p, origin).getAttribute('aria-label') ?? '', /^Close reader, back to (Desk|Board|Chronicle)$/, 'the origin tab says it closes the reader')
-    assert.deepEqual(await p.locator('.kbn-viewtabs [role="tablist"]').first().evaluate(list => [...list.children].map(el => el.getAttribute('role'))), ['tab', 'tab', 'tab'], 'the bar\'s tablist holds its tabs alone')
+    assert.deepEqual(await p.locator('.kbn-viewtabs [role="tablist"]').first().evaluate(list => [...list.children].map(el => el.getAttribute('role'))), ['tab', 'tab', 'tab', 'tab', 'tab'], 'the bar\'s tablist holds its tabs alone')
   }
   await opened()
   await barTab(p, origin).click()
@@ -997,7 +1009,7 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   assert.deepEqual([...knownDrafts].sort(), [...deskDrafts].sort())
   const drafts = deskDrafts
   const names = [...drafts, ...flight, ...review]
-  await open(p)
+  await land(p)
   const raised = await p.locator('.kbn-desk').evaluate(e => ({ transform: getComputedStyle(e).transform, filter: getComputedStyle(e).filter }))
   assert.match(raised.transform, /0\.94/)
   assert.match(raised.filter, /saturate\(0\.25\)/)
@@ -1007,7 +1019,7 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   await p.keyboard.press('Escape')
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), next, 'Escape selects the last card viewed')
-  await open(p)
+  await land(p)
   await p.keyboard.press('j')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
   await barTab(p, 'desk').click()
@@ -1293,11 +1305,12 @@ test('Conversation c (and its dot alias) uses the pill destination in reader and
   const remote = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
   await remote.click()
   const opened = n => poll(p, n => window.__harness.events.filter(e => e.type === 'open-worker').length === n, n)
-  await p.keyboard.press('c'); await opened(1)
-  await p.keyboard.press('.'); await opened(2)
+  await opened(1)
+  await p.keyboard.press('c'); await opened(2)
+  await p.keyboard.press('.'); await opened(3)
   await leave(p)
-  await p.keyboard.press('c'); await opened(3)
-  await p.keyboard.press('.'); await opened(4)
+  await p.keyboard.press('c'); await opened(4)
+  await p.keyboard.press('.'); await opened(5)
 })
 
 test('Band settings and history use mocked daemon', async p => {
@@ -1771,8 +1784,8 @@ for (const width of [320, 390]) {
     }
     const type = await p.locator('.kbn-viewtab').first().evaluate(el => {
       const actual = getComputedStyle(el).fontSize
-      const role = innerWidth <= 340 ? '--type-note' : '--type-title'
-      const track = innerWidth <= 340 ? '--track-kicker' : '--track-nav'
+      const role = innerWidth <= 430 ? '--type-note' : '--type-title'
+      const track = innerWidth <= 430 ? '--track-kicker' : '--track-nav'
       const probe = document.createElement('span')
       probe.style.fontSize = `var(${role})`
       probe.style.letterSpacing = `var(${track})`
@@ -2639,7 +2652,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   }
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-band-state'], settle: 100 })
+  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-band-state', '.ws-family-counts', '.ws-family-peek-title'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   for (const control of ['.kbn-ctl-review', '.kbn-ctl-rest']) {
     assert.ok(await band(p).locator(control).isVisible())

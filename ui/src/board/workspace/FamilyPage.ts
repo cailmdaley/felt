@@ -446,11 +446,13 @@ export class FamilyPage {
     const thread = key ? this.model?.threads.get(key) : undefined
     if (thread && isDrawn(thread) && !this.touch) this.select(thread.key)
   }
-  /** A row of the fold or the peek does what a click on its body does; a thread the map has no place for opens on its own. */
+  /** A row of the fold or the peek does what a click on its body does, with the fold out of the way of the flight; a thread the map has no place for opens on its own. */
   private reach(card: KanbanCard): void {
     const thread = this.model?.threads.get(threadKey(card))
-    if (thread && isDrawn(thread)) this.activate(thread)
-    else this.open(card)
+    if (!thread || !isDrawn(thread)) { this.open(card); return }
+    this.all.open = false
+    this.activate(thread)
+    this.focus()
   }
   /** A click or Enter comes to a thread and moves Rex to it; a finger comes to it first and opens the conversation on its second tap. */
   private activate(thread: MapThread): void {

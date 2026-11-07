@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
-import { familyTree, sentFiles } from './familyNav.mjs'
+import { familyTree, openThread, sentFiles } from './familyNav.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
@@ -91,8 +91,7 @@ export function registerHeaderBarJourneys(test) {
       ]
       for (const [name, verbs] of visits) {
         const tree = await familyTree(page)
-        await tree.locator('.kbn-thread-row').filter({ has: page.getByText(name, { exact: true }) }).click()
-        await named(page, name)
+        await openThread(page, tree.locator('.kbn-thread-row').filter({ has: page.getByText(name, { exact: true }) }), name)
         assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
         await assertLifecycleInk(header, scheme)
       }
@@ -182,8 +181,7 @@ export function registerHeaderBarJourneys(test) {
       await header.evaluate(el => { el.scrollLeft = 0 })
     }
     await assertBand(['Resume', 'New session', 'Temper', 'Discard'])
-    await (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: 'Response analysis' }).click()
-    await named(page, 'Response analysis')
+    await openThread(page, (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: 'Response analysis' }), 'Response analysis')
     await assertBand(['New session', 'Close for review', 'Rest'])
     const reviewInk = await header.getByRole('button', { name: 'Close for review', exact: true }).evaluate(el => {
       const neutral = document.createElement('span')
@@ -288,10 +286,9 @@ export function registerHeaderBarJourneys(test) {
     const header = page.locator('.ws-stage-band .ws-band-head')
     const row = async name => (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: name })
     for (const key of ['Enter', 'Space']) {
-      await (await row('Response analysis')).focus(); await page.keyboard.press(key)
-      await named(page, 'Response analysis')
-      await (await row(title)).focus(); await page.keyboard.press(key)
-      await named(page, title)
+      const press = async target => { await target.focus(); await page.keyboard.press(key) }
+      await openThread(page, await row('Response analysis'), 'Response analysis', press)
+      await openThread(page, await row(title), title, press)
     }
     await page.evaluate(() => { document.activeElement?.blur(); document.body.focus() })
     await page.keyboard.press('Enter')
@@ -324,8 +321,7 @@ export function registerHeaderBarJourneys(test) {
       const rootAnchor = () => family.locator('.kbn-thread-row').first()
       for (const name of ['Response analysis', 'Choose the response cut']) {
         await show()
-        await family.locator('.kbn-thread-row').filter({ hasText: name }).click()
-        await named(page, name)
+        await openThread(page, family.locator('.kbn-thread-row').filter({ hasText: name }), name)
         await show()
         assert.equal(await rootAnchor().count(), 1)
         assert.equal(await rootAnchor().locator('.kbn-thread-name').innerText(), title)
@@ -334,8 +330,7 @@ export function registerHeaderBarJourneys(test) {
           await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
           await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `family-${device}-${scheme}.png`) })
         }
-        await rootAnchor().click()
-        await named(page, title)
+        await openThread(page, rootAnchor(), title)
         await show()
         assert.equal(await rootAnchor().count(), 1)
         assert.equal(await rootAnchor().getAttribute('aria-current'), 'page')

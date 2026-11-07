@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
-import { familyTree, sentFiles } from './familyNav.mjs'
+import { familyTree, openThread, sentFiles } from './familyNav.mjs'
 
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
@@ -123,13 +123,11 @@ export function registerLivingReportJourneys(test) {
         assert.equal(await band(page).getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
       }
       // A thread's back returns to the page from which it was opened.
-      await (await familyTree(page)).locator('.kbn-thread-row[data-thread-state="working"]').first().click()
-      await named(page, 'Response analysis')
+      await openThread(page, (await familyTree(page)).locator('.kbn-thread-row[data-thread-state="working"]').first(), 'Response analysis')
       await back(page, phone)
       await named(page, 'Calibrate the shear response')
       // Further ancestors stay reachable from settings without adding a header row.
-      await (await familyTree(page)).locator('.kbn-thread-row[data-thread-state="working"]').first().click()
-      await named(page, 'Response analysis')
+      await openThread(page, (await familyTree(page)).locator('.kbn-thread-row[data-thread-state="working"]').first(), 'Response analysis')
       await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
       await page.locator('.ws-settings-menu:not([hidden]) .ws-settings-ancestry .ws-ancestry-link').click()
       await named(page, 'Calibrate the shear response')
