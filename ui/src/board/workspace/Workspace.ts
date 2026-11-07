@@ -442,7 +442,7 @@ export class Workspace {
   }
   /**
    * The Desk column a card stands in, whichever view opened the reader:
-   * Drafts, In flight, Awaiting review, Roles, then Resting. A page outside
+   * Drafts, In flight, Awaiting review, Resting, then Roles. A page outside
    * the Desk gets its own stop.
    */
   private deskStop(card: KanbanCard): string {

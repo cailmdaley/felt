@@ -633,7 +633,7 @@ export class KanbanSurfaceRenderer {
 
   /**
    * The Roles band: every seat at rest (`shuttle.seat`), as a dense wrap of
-   * launcher chips above Resting. A seat is an office you return to, so the
+   * launcher chips after Resting. A seat is an office you return to, so the
    * chip carries only what finds and starts it: a dot, the constitution's name,
    * and its agent, or its next firing for a standing seat. Every seat renders —
    * no "+N more", because a launcher you reach for daily must never be on page

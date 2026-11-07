@@ -572,7 +572,7 @@ export class KanbanModal {
       sends: card => this.fiberSends?.sends(card) ?? [],
       refreshSends: () => { void this.fiberSends?.refresh() },
       shuttleBase: this.shuttleBase,
-      cards: () => boardCards(this.lastResponse),
+      cards: () => boardCards(this.deskResponse ?? this.lastResponse),
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.deskResponse ?? this.lastResponse),
@@ -1985,8 +1985,8 @@ export class KanbanModal {
     this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
 
-    // Three surfaces, top to bottom: the Now board, the Roles band (when any
-    // seat is at rest), then Resting. The day axis is only the drag-reveal horizon under
+    // Three surfaces, top to bottom: the Now board, Resting, then Roles.
+    // The day axis is only the drag-reveal horizon under
     // the tab strip (see `syncDragHorizon`).
     // The cycle lens: a row of chips above the columns, and — when one is
     // engaged — a lens the Now board is drawn through. Derived fresh from the

@@ -121,7 +121,7 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     }
     return thread
   }
-  const top = walk(threadTree(index, root), null)
+  const top = walk(threadTree(index, index.card(root)), null)
   const all = [...threads.values()]
   const urgency = (thread: MapThread): number => (ATTENTION as readonly string[]).indexOf(thread.standing)
   const newest = (a: MapThread, b: MapThread): number => b.lastMove - a.lastMove || a.name.localeCompare(b.name) || a.key.localeCompare(b.key)

@@ -64,6 +64,14 @@ it('takes the last move from every source it knows, never past now', () => {
   expect(m.attention[0].lastMove).toBe(now - 3 * hour)
   expect(m.attention[0].depth).toBe(1)
 })
+it('uses the index copy of the followed root for family attention', () => {
+  const raw = card({ id: 'hub', ...running('waiting', 1), ask: { text: 'Which?', at: new Date(now - hour).toISOString() } })
+  const index = new ThreadIndex([{ ...raw, followed: true }])
+  const result = familyModel(index, raw, raw, noFeeds, now)
+  expect(result.counts.question).toBe(0)
+  expect(result.counts.turn).toBe(0)
+  expect(result.root.standing).toBe('working')
+})
 it('names the open thread when the family holds it', () => {
   const child = thread('hub/t', running('working', 1)), index = new ThreadIndex([root, child])
   expect(familyModel(index, root, child, noFeeds, now).current).toBe(familyModel(index, root, child, noFeeds, now).attention[0].key)
