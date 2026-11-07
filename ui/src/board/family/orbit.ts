@@ -40,6 +40,10 @@ const NAMED_FILL = .7
 /** How many bodies in view show what they hold. */
 const MINIS = 8
 const ARM_NAME_RISE = 9
+/** A family's count of what needs the human: how far under its body it sits, and its size, as family-map.css sets it. */
+const ASK_DROP = 10
+const ASK_WIDTH = 24
+const ASK_HEIGHT = 14
 const TITLE_MOST = 340
 const TITLE_HEIGHT = 56
 /** A title runs to two lines; this share of them holds whatever words it breaks at. */
@@ -105,6 +109,8 @@ export interface Sky {
   labels: SkyLabel[]
   numerals: SkyNumeral[]
   names: ArmName[]
+  /** Under each queued body that stands for a family, how many of its threads need the human. */
+  asks: SkyNumeral[]
   /** The thread in sight, with its things and its title, once its scene fills the plate. */
   focus: { thread: MapThread; at: Point; held: Satellite[]; title: Point & { width: number } } | null
   minis: Mini[]
@@ -162,6 +168,7 @@ const labelBox = (label: Pick<SkyLabel, 'x' | 'y' | 'width' | 'side'>): Box => (
   left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - LABEL_HEIGHT / 2 + .5, bottom: label.y + LABEL_HEIGHT / 2 - .5,
 })
 
+const askBox = ({ x, y }: Point): Box => ({ left: x - ASK_WIDTH / 2, right: x + ASK_WIDTH / 2, top: y - ASK_HEIGHT / 2, bottom: y + ASK_HEIGHT / 2 })
 const armNameBox = (name: ArmName): Box => ({ left: name.side === 'left' ? name.x - ARM_NAME_WIDTH : name.x, right: name.side === 'left' ? name.x : name.x + ARM_NAME_WIDTH, top: name.y - ARM_NAME_RISE, bottom: name.y + ARM_NAME_RISE })
 
 /** Each name on the side of its body its arm runs out to, else the other, clear of every other name, body and line, or not at all. */
@@ -247,6 +254,8 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   })
   const nameable = stars.filter(star => star.owner && !star.inert && !star.hidden && !star.focus && inView(star)).sort((a, b) => b.owner!.room - a.owner!.room || (a.thread.rank < 0 ? Infinity : a.thread.rank) - (b.thread.rank < 0 ? Infinity : b.thread.rank))
   const sheets = narrow ? [] : nameable.filter(star => star.room >= dotsTo).slice(0, MINIS).map(star => miniature(star.thread, sight?.holds(star.thread) ?? {}, star, star.room))
+  const asks = nameable.filter(star => star.thread.asks && star.arm === 'todo').map((star): SkyNumeral => ({ thread: star.thread, numeral: star.thread.asks!, x: star.x, y: star.y + star.r + ASK_DROP }))
+  if (!narrow) taken.push(...asks.map(ask => askBox(ask)))
   const lines = arms.flatMap(arm => arm.segments.flatMap(segment => segment.way.map(point => ({ x: arm.at.x + point.x * arm.scale, y: arm.at.y + point.y * arm.scale }))))
   const labels = narrow ? [] : nearLabels(stars, nameable, plate, taken, lines)
   const names: ArmName[] = []
@@ -266,7 +275,7 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   for (const star of stars) if (star.inert) star.hidden ||= !open(star, star.r)
   const minis = sheets.map(mini => ({ ...mini, marks: mini.marks.filter(mark => open(mark, MINI_MARK / 2) && inView({ x: mark.x, y: mark.y - MINI_MARK / 2 })) }))
   return {
-    k, frame: plate, stars, arms, names, minis, labels,
+    k, frame: plate, stars, arms, names, asks, minis, labels,
     numerals: narrow ? nameable.filter(star => star.numeral).map(star => {
       const out = Math.hypot(star.x - seen.x, star.y - seen.y) || 1
       return { thread: star.thread, numeral: star.numeral, x: star.x + (star.x - seen.x) / out * (star.r + 9), y: star.y + (star.y - seen.y) / out * (star.r + 9) }
@@ -367,7 +376,7 @@ function heldMark(): SVGSVGElement {
   return sheet
 }
 
-function drawLabels(layer: HTMLElement, numerals: HTMLElement, sky: Sky, model: FamilyModel): void {
+function drawLabels(layer: HTMLElement, numerals: HTMLElement, asks: HTMLElement, sky: Sky, model: FamilyModel): void {
   reconcile(layer, sky.labels, label => label.thread.key, () => {
     const el = htmlEl('div', 'fm-label'), text = htmlEl('div', 'fm-label-text'), files = htmlEl('span', 'fm-label-files')
     files.append(heldMark(), htmlEl('span'))
@@ -385,6 +394,16 @@ function drawLabels(layer: HTMLElement, numerals: HTMLElement, sky: Sky, model: 
     setText(age, label.age ? shortAgo(label.thread.lastMove, model.now) : '')
     ;(files as HTMLElement).hidden = !label.files
     setText(files.lastElementChild!, String(label.thread.files.length))
+  })
+  reconcile(asks, sky.asks, ask => ask.thread.key, () => {
+    const el = htmlEl('div', 'fm-ask')
+    el.setAttribute('aria-hidden', 'true')
+    return el
+  }, (el, ask) => {
+    tagThread(el, ask.thread)
+    setText(el, String(ask.numeral))
+    el.title = `${ask.numeral} ${ask.numeral === 1 ? 'needs' : 'need'} you`
+    el.style.transform = `translate(${(ask.x - ASK_WIDTH / 2).toFixed(1)}px, ${(ask.y - ASK_HEIGHT / 2).toFixed(1)}px)`
   })
   reconcile(numerals, sky.numerals, numeral => numeral.thread.key, () => htmlEl('div', 'fm-numeral'), (el, numeral) => {
     tagThread(el, numeral.thread)
@@ -488,7 +507,7 @@ export function paintPlate(host: HTMLElement, sky: Sky, model: FamilyModel): voi
   drawLife(part(svg, 'fm-lives', cls => svgEl('g', cls)), sky, model)
   drawStars(part(svg, 'fm-stars', cls => svgEl('g', cls)), sky, model)
   drawHeld(part(frame, 'fm-helds', cls => htmlEl('div', cls)), sky, model)
-  drawLabels(part(frame, 'fm-labels', cls => htmlEl('div', cls)), part(frame, 'fm-numerals', cls => htmlEl('div', cls)), sky, model)
+  drawLabels(part(frame, 'fm-labels', cls => htmlEl('div', cls)), part(frame, 'fm-numerals', cls => htmlEl('div', cls)), part(frame, 'fm-asks', cls => htmlEl('div', cls)), sky, model)
   drawArmNames(part(frame, 'fm-arm-names', cls => htmlEl('div', cls)), sky)
   drawLedger(part(host, 'fm-ledger', cls => htmlEl('div', cls)), sky, model)
 }

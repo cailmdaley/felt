@@ -1724,8 +1724,9 @@ function adoptColumnActions(board: HTMLElement, strip: HTMLElement): void {
   const segs = strip.querySelectorAll<HTMLElement>('.kbn-folio-seg')
   const cols = board.querySelectorAll<HTMLElement>('.kbn-col')
   cols.forEach((col, i) => {
+    const action = col.querySelector<HTMLElement>('.kbn-col-action')
     const seg = segs[i]
-    if (seg) seg.append(...col.querySelectorAll<HTMLElement>('.kbn-col-map, .kbn-col-action'))
+    if (action && seg) seg.append(action)
   })
 }
 

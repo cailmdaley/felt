@@ -4,6 +4,7 @@ import { card } from '../testFixtures.js'
 import { ThreadIndex, threadKey } from '../threads.js'
 import { inFlightModel, LATELY_MS } from './inFlight.js'
 import { familyModel, type MapFeeds } from './model.js'
+import { zoomPlate } from './orbit.js'
 import { armsOf, radialLayout } from './radial.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
@@ -61,6 +62,8 @@ describe('everything in flight as one family', () => {
     expect(body.word).toBe('question')
     expect(body.note).toBe('Which one?')
     expect(body.standing).toBe('working')
+    expect(body.asks).toBe(1)
+    expect(model.threads.get(threadKey(quiet))!.asks).toBe(0)
     expect(model.threads.get(threadKey(quiet))!.tone).toBe('working')
   })
   it('puts what asks first along To do, numbered by place', () => {
@@ -70,6 +73,16 @@ describe('everything in flight as one family', () => {
     expect(numbered.map(star => star.numeral)).toEqual([1, 2, 3])
     expect(numbered[0].thread.card.id).toBe('hub')
     expect(families.filter(star => star.arm === 'done').every(star => !star.numeral)).toBe(true)
+  })
+  it('hangs what needs the human under a queued family, and gives a name no room to cross it', () => {
+    const plate = radialLayout(model, 1000, 1000), view = { k: 1, x: 0, y: 0 }
+    const sky = zoomPlate(plate, view, model, null), ask = sky.asks.find(item => item.thread.card.id === 'hub')!, star = sky.stars.find(item => item.thread === ask.thread)!
+    expect(ask.numeral).toBe(1)
+    expect(ask.x).toBe(star.x)
+    expect(ask.y).toBeGreaterThan(star.y + star.r)
+    expect(sky.asks.every(item => item.numeral > 0)).toBe(true)
+    expect(sky.asks.some(item => item.thread.card.id === 'review')).toBe(false)
+    expect(sky.labels.every(label => Math.abs(label.y - ask.y) > 7 || Math.abs(label.x - ask.x) > 12)).toBe(true)
   })
   it('keeps a body of work with nothing in flight off the map', () => {
     expect(inFlightModel({ drafts: [], inFlight: [], awaitingReview: [] }, [resting], new ThreadIndex([resting]), noFeeds, now).threads.size).toBe(1)

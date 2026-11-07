@@ -2,7 +2,7 @@ import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import { isAgentCard } from '../KanbanModalShared.js'
 import { ThreadIndex, threadKey } from '../threads.js'
 import { DAY } from './drawing.js'
-import { familyModel, type FamilyModel, type MapFeeds, type MapThread } from './model.js'
+import { familyModel, needsHuman, type FamilyModel, type MapFeeds, type MapThread } from './model.js'
 
 /** How long a closed family stays on the just-finished arm. */
 export const LATELY_MS = 3 * DAY
@@ -11,10 +11,11 @@ export const LATELY_MS = 3 * DAY
 const CENTRE: KanbanCard = { id: 'in-flight', name: 'In flight', path: '', originId: '', status: 'open', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
 
 const within = (model: FamilyModel, thread: MapThread): MapThread[] => [thread, ...thread.children.flatMap(key => within(model, model.threads.get(key)!))]
-/** A family seen from outside says what its most urgent thread says, and that it holds a new file. */
+/** A family seen from outside says what its most urgent thread says, how many of its threads need the human, and that it holds a new file. */
 function raise(model: FamilyModel, family: MapThread): void {
   const kin = within(model, family), lead = model.attention.find(thread => kin.includes(thread))
   family.fresh = kin.some(thread => thread.fresh)
+  family.asks = kin.filter(needsHuman).length
   if (!lead || lead === family) return
   family.tone = lead.tone
   family.word = lead.word

@@ -51,6 +51,8 @@ export interface MapThread {
   merged: boolean
   /** Its own mass of work and that of every thread merged into it. */
   weight: number
+  /** How many threads a body that stands for a whole family holds that need the human. */
+  asks?: number
 }
 
 export interface FamilyModel {

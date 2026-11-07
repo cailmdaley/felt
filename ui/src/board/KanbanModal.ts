@@ -2334,8 +2334,13 @@ export class KanbanModal {
     }
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
     if (e.key === 'Escape' && this.activeViewId === 'tree' && !keystrokeIsSpokenFor()) { e.preventDefault(); e.stopPropagation(); this.setView('desk'); return }
-    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too.
+    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the map.
     if (this.activeViewId === 'chronicle' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
+      e.preventDefault(); e.stopPropagation()
+      return
+    }
+    if (this.activeViewId === 'map' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find') {
+      if (!this.focusFind()) this.workspace?.findConstitution()
       e.preventDefault(); e.stopPropagation()
       return
     }

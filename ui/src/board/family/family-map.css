@@ -18,7 +18,7 @@
 .family-map .ws-family-count[data-standing='working'] path { fill-opacity: .3; stroke: var(--fm-tone); }
 .family-map .fm-sky-plate { position: relative; width: 100%; touch-action: pan-x pan-y; }
 .family-map .fm-sky-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.family-map .fm-sky-plate > *, .family-map .fm-labels, .family-map .fm-numerals { transform-origin: 0 0; }
+.family-map .fm-sky-plate > *, .family-map .fm-labels, .family-map .fm-numerals, .family-map .fm-asks { transform-origin: 0 0; }
 .family-map-zoomed .fm-sky-plate, .family-map-moving .fm-sky-plate { overflow: hidden; touch-action: none; user-select: none; }
 .family-map-zoomed .fm-sky-plate { cursor: grab; }
 .family-map-radial .fm-star { touch-action: none; }
@@ -55,7 +55,8 @@
 .family-map .fm-star[data-stirred] .fm-star-mark { animation: fm-stir 1.4s ease-in-out 2; }
 .family-map .fm-star[data-standing='review'] .fm-star-mark { fill-opacity: .12; stroke-width: 1.5; }
 .family-map .fm-star-fresh { fill: var(--ws-fresh); stroke: var(--ws-paper); stroke-width: 1.25; paint-order: stroke; }
-.family-map .fm-labels, .family-map .fm-numerals { position: absolute; inset: 0; pointer-events: none; }
+.family-map .fm-labels, .family-map .fm-numerals, .family-map .fm-asks { position: absolute; inset: 0; pointer-events: none; }
+.family-map .fm-ask { position: absolute; top: 0; left: 0; display: flex; width: 24px; height: 14px; color: var(--fm-text); align-items: center; justify-content: center; font: var(--type-meta)/var(--leading-solid) var(--font-mono); pointer-events: auto; }
 .family-map .fm-label { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 6px; height: 24px; white-space: nowrap; line-height: var(--leading-tight); pointer-events: auto; animation: fm-appear .3s ease-out; }
 .family-map .fm-label[data-side='left'] { flex-direction: row-reverse; }
 .family-map .fm-label-rank { flex: none; min-width: 1ch; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }

@@ -377,6 +377,14 @@ describe('the Desk\'s map', () => {
     board.unmount()
     host.remove()
   })
+  it('takes / to Find, the picker where the bar has no field', () => {
+    stored.set('shuttle.desk.map', '1')
+    const { board, host } = opened()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }))
+    expect(document.activeElement).toBeInstanceOf(HTMLInputElement)
+    board.unmount()
+    host.remove()
+  })
   it('comes back to the cards, and stays there', () => {
     stored.set('shuttle.desk.map', '1')
     const { board, host } = opened()

@@ -2227,11 +2227,16 @@
      its count; `adoptColumnActions` puts that lane's named action in the active
      segment. */
   .kbn-col-head { display: none; }
+  /* In flight keeps its Map on the leaf, on the line of its first caption, so
+     the tab strip's room stays the tabs' own. */
+  .kbn-col-inFlight { position: relative; }
+  .kbn-col-inFlight .kbn-col-head { position: absolute; top: 8px; right: 12px; z-index: 1; display: block; width: auto; padding: 0; border: 0; }
+  .kbn-col-inFlight .kbn-col-head :is(.kbn-col-title, .kbn-col-count) { display: none; }
+  .kbn-col-inFlight .kbn-col-map { margin-left: 0; }
   .kbn-col-list { padding-top: 8px; }
   /* Only the active leaf carries its action; the other segments remain page
      marks instead of turning the strip into a toolbar. */
-  .kbn-folio-seg :is(.kbn-col-action, .kbn-col-map) { display: none; }
-  .kbn-folio-seg-active .kbn-col-map { display: inline-flex; flex: 0 0 auto; margin-left: 2px; }
+  .kbn-folio-seg .kbn-col-action { display: none; }
   .kbn-folio-seg-active .kbn-col-action {
     display: inline-flex;
     flex: 0 0 auto;
