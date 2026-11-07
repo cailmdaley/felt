@@ -87,7 +87,8 @@ time.
 
 `GET /voice/transcript?recorder=<host>&date=YYYY-MM-DD&fiber=<id-or-slug>&since=HH:MM[:SS]` returns `{date, rows, recorder}` with `Cache-Control: no-store`.
 All filters are optional: `date` defaults to today on the recorder, `fiber` matches an id or slug, and `since` is an inclusive recorder-local time.
-Rows are `{t, speaker, text, fiber_id, origin, name, launch}`; `t` is the spoken-start ISO 8601 timestamp and the three fiber fields are null when speech had no route.
+Rows are `{t, speaker, text, fiber_id, origin, name, slug, launch}`; `t` is the spoken-start ISO 8601 timestamp and the four fiber fields are null when speech had no route.
+`slug` is the resolved fiber path; transcript readers display its last segment.
 The recorder appends every ingested utterance, including cold-dropped and discarded speech, to `<Shuttle.data_dir()>/transcripts/YYYY-MM-DD.jsonl`, using its local date.
 Rows survive recording stops and launch changes.
 An empty or absent day returns an empty `rows` list, not 404.
@@ -386,29 +387,29 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 ### Listen
 
-`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, source, launch, state, mode, destination, paused, target, cold, pending, pending_words, preview, level, last, error, recorder}`.
+`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, cold, pending, pending_words, preview, level, last, error, recorder}`.
 `recorder=<host>` selects the recording daemon independently of the worker's `origin`; without it, the receiving daemon answers locally.
 `sources` is `[]` without hark, `["desktop", "phone"]` on macOS, and `["phone"]` on other hosts.
 `source` is `desktop` or `phone`; `launch` is the active recorder's `voice-…` identity or null.
 `state` is `off`, `starting`, `listening`, or `failed`.
 `mode` is `off` when disabled, otherwise `following` or `pinned` according to `follow`.
-`target` is `{fiber_id, origin, name, source?}` or null; the optional source names the view that selected it, such as `board` or `rex`.
+`target` is `{fiber_id, origin, name, slug, pinned, source?}` or null; the optional source names the view that selected it, such as `board` or `rex`.
 `destination` is `{fiber_id, origin, name}` while enabled and null otherwise.
 `paused` reflects mic `muted` while enabled and is false when off.
 `cold` says whether the target lacks a live owner-published worker; an idle live worker is warm, while an unreadable owner is cold.
-`pending` is `{fiber_id, words, text}` or null, and `pending_words` totals finalized unsent words across buffers, including speaker labels.
+`pending` is `{fiber_id, words, text}` or null, and `pending_words` totals finalized unsent words across buffers, excluding speaker labels.
 `preview` is `{fiber_id, origin, text}` or null, pinned to the target where the in-progress partial began; it is display-only and clears when muted, disabled, empty or stopped.
 `level` is `{mic, at}` or null, the latest microphone peak in dBFS and its ISO 8601 arrival time, absent after one second without a meter update.
 `last` is `{fiber_id, origin?, text?, at, status, detail?}` or null, with status `delivered`, `unconfirmed` or `failed`.
 `enabled` is persisted intent even when capture fails; invalid settings fail off with a visible configuration error.
 
-`POST /voice` accepts `{enabled?, muted?, follow?, system_audio?, source?, target?, recorder?}` and returns the same state.
+`POST /voice` accepts `{enabled?, muted?, follow?, system_audio?, words?, quiet_seconds?, pinned_quiet_seconds?, source?, target?, recorder?}` and returns the same state.
 The four switch fields must be booleans, and `source`, when supplied, must be `desktop` or `phone`.
 A pin is one request: `{follow: false, target: {fiber_id, origin?, name?}}`.
 `target` requires `follow: false`; omitting it when turning follow off retains the current target.
 A pin can be set while disabled and survives daemon restarts through the route journal and persisted follow setting.
 While pinned, `POST /voice/target` and Rex view changes remember the view but do not move the target.
-`{follow: true}` resumes following the latest observed view.
+`{follow: true}` resumes following the latest view seen while listening.
 Invalid input and control failures return 422; unknown recorder addresses return 400, and unconfirmed remote controls 502.
 
 `{enabled: true, source: "phone"}` starts the same recorder with `hark --voice --phone`.
@@ -420,7 +421,8 @@ Phone audio has no system track; it retains the desktop preference without apply
 Changing source replaces the recorder after stopping the old launch.
 `source` is a runtime choice, not a `voice.json` setting; a surviving phone launch is adopted after daemon restart.
 
-`POST /voice/toggle` starts Listen unmuted when disabled; otherwise it flips mic mute without changing follow or pin.
+`POST /voice/toggle` starts Listen unmuted with the desktop source on a desktop-capable host when disabled; otherwise it flips mic mute without changing follow or pin.
+Any enable without an explicit source selects desktop on a desktop-capable host; stopping Listen clears the phone source.
 `POST /voice/discard` drops unsent buffered words and returns the state plus `discarded`, the number dropped.
 Already-submitted batches still go, and utterances begun before discard stay in the day transcript but do not enter a buffer.
 Mic mute uses `hark pause`/`resume` and survives recorder restarts.
@@ -431,9 +433,9 @@ Disabled idle ticks inspect lifecycle files without shelling out; boot always ob
 
 `POST /voice/target` accepts `{fiber_id, origin?, name?, recorder?}` from the view, returning voice state.
 While following, whichever of Rex and the board had focus last sets the target.
-Routes append `{t, fiber_id, origin, name, source?}` to `<Shuttle.data_dir()>/voice-routes.jsonl` with recorder UTC receipt time.
+Routes append `{t, fiber_id, origin, name, slug, pinned, source?}` to `<Shuttle.data_dir()>/voice-routes.jsonl` with recorder UTC receipt time.
 Each utterance takes the route at its spoken start (`wall_start`, falling back to `wall`), not recognition completion.
-A switch flushes the old target's buffer; a late utterance still uses its spoken-time target.
+A switch flushes the old target's buffer; a late utterance still uses its spoken-time target and follow/pin setting.
 An unreadable or malformed journal fails off with a visible error.
 No route means no delivery; the day transcript still keeps the speech.
 

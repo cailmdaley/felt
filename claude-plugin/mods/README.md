@@ -37,9 +37,9 @@ Each opens its page on the board through `POST /api/v1/board/open`.
 | Listening off | nothing |
 
 The slug is the last segment of the destination's path id, else its name.
-Clicking the glyph toggles the mute
-(`POST /api/v1/voice/toggle`, the route the board's and the global hotkey's
-mute use too); `✕` drops the words not yet sent (`POST /api/v1/voice/discard`).
+Clicking the glyph toggles mute through `POST /api/v1/voice/toggle`, as does the global hotkey.
+The board sets mute through `POST /api/v1/voice {muted}`.
+`✕` drops the words not yet sent (`POST /api/v1/voice/discard`).
 With no pins and no audio the line is not drawn.
 
 **Placement** is the plugin option `placement` (`/config`, row "Voice line
