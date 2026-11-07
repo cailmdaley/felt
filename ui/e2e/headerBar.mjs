@@ -243,7 +243,7 @@ export function registerHeaderBarJourneys(test) {
     await page.locator('.ws-band-leave').click()
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     const foreign = page.locator('.ws-stage-band')
-    assert.match(await foreign.locator('.kbn-ctl-meet-arm').innerText(), /^Meeting · /)
+    assert.match(await foreign.locator('.ws-voice-strip').innerText(), /^Meeting → /)
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await captureMeetingState(page, 'single-recording-menu', width, 'light')

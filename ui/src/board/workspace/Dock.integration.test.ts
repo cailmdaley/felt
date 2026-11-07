@@ -571,7 +571,7 @@ describe('Listen', () => {
     expect(openFile).toHaveBeenCalledWith('/m/standup.txt', 'Meeting transcript', 'owner')
     recording = { ...recording, fiber: 'b/elsewhere', paused: true }
     listening.syncMeeting()
-    expect(strip.textContent).toBe('Meeting → elsewhere · paused')
+    expect(strip.textContent).toBe('Paused → elsewhere')
     recording = null
     listening.syncMeeting()
     expect(strip.hidden).toBe(true)

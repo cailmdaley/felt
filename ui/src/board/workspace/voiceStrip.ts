@@ -30,7 +30,8 @@ export function voiceLine(meeting: MeetingRecord | null, voice: VoiceStatus | nu
 /** The strip's one line, or nothing when the mic is off. */
 export function voiceWords(line: VoiceLine): string {
   if (line.mode === 'off') return ''
-  return `${line.mode === 'meeting' ? 'Meeting' : 'Following'} → ${line.name}${line.paused ? ' · paused' : ''}`
+  // The state leads, so a long name's ellipsis never hides it; Listen's icon tells a meeting from following.
+  return `${line.paused ? 'Paused' : line.mode === 'meeting' ? 'Meeting' : 'Following'} → ${line.name}`
 }
 
 /** The band's voice strip: one line saying where the words go. */

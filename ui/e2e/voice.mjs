@@ -23,14 +23,14 @@ try {
     })
     await band.locator('.kbn-ctl-meet-arm.kbn-ctl-meet-on').waitFor()
     const geometry = await page.evaluate(() => {
-      const el = document.querySelector('.ws-stage-band .kbn-ctl-meet-label')
+      const el = document.querySelector('.ws-stage-band .ws-voice-strip')
       return { scroll: el.scrollWidth, client: el.clientWidth, text: el.textContent }
     })
-    assert.match(geometry.text, /^Following · /)
+    assert.match(geometry.text, /^Following → /)
     assert.ok(geometry.scroll > geometry.client, 'long name is ellipsized')
     assert.ok(await band.locator('.kbn-ctl-meet').isVisible(), 'Listening remains visible')
-    assert.ok(await band.locator('.kbn-ctl-meet-pause').isVisible(), 'Pause sits beside the label')
-    assert.ok(await band.locator('.kbn-ctl-meet-stop').isVisible(), 'Stop sits beside the label')
+    assert.ok(await band.locator('.kbn-ctl-meet-pause').isVisible(), 'Pause sits beside the mic')
+    assert.ok(await band.locator('.kbn-ctl-meet-stop').isVisible(), 'Stop sits beside the mic')
     await arm.click()
     assert.ok(await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).isVisible(), 'a press while listening opens the menu')
     await mkdir(process.env.HARK_SCREENSHOT_DIR || '/tmp', { recursive: true })

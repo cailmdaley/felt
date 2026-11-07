@@ -10,11 +10,11 @@ const said = (m: MeetingRecord | null, v: VoiceStatus | null): string => voiceWo
 describe('the voice strip', () => {
   it('names the live voice target while following', () => {
     expect(said(null, voice())).toBe('Following → Career futures')
-    expect(said(null, voice({ muted: true }))).toBe('Following → Career futures · paused')
+    expect(said(null, voice({ muted: true }))).toBe('Paused → Career futures')
   })
   it('names the meeting\'s fiber while a meeting holds the mic, over the voice target', () => {
     expect(said(meeting(), voice({ state: 'yielded' }))).toBe('Meeting → debug')
-    expect(said(meeting({ paused: true }), null)).toBe('Meeting → debug · paused')
+    expect(said(meeting({ paused: true }), null)).toBe('Paused → debug')
     expect(said(null, voice({ state: 'yielded' }))).toBe('Meeting → a recording')
   })
   it('says nothing when the mic is off or the meeting failed, and holds a stopping meeting until it ends', () => {
@@ -24,7 +24,7 @@ describe('the voice strip', () => {
     expect(said(meeting({ state: 'stopping' }), null)).toBe('Meeting → debug')
   })
   it('reads the daemon\'s mode, destination and paused when it reports them', () => {
-    expect(said(null, voice({ mode: 'meeting', destination: { fiber_id: 'x', origin: 'h', name: 'Standup' }, paused: true }))).toBe('Meeting → Standup · paused')
+    expect(said(null, voice({ mode: 'meeting', destination: { fiber_id: 'x', origin: 'h', name: 'Standup' }, paused: true }))).toBe('Paused → Standup')
     expect(said(null, voice({ mode: 'following', destination: { fiber_id: 'u', origin: 'h', name: 'Two columns' }, paused: false }))).toBe('Following → Two columns')
     expect(said(null, voice({ mode: 'off', enabled: false }))).toBe('')
   })
