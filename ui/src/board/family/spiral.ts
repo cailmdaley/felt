@@ -1,6 +1,7 @@
 import { needsHuman, type FamilyModel, type MapThread } from './model.js'
 import { NARROW, htmlEl, mount, part, type Drawing, type OpenThread } from './drawing.js'
-import { LABEL_MAX, LABEL_ROW, TURN, bodyRadius, paintPlate, type Plate, type SkyLabel, type Star } from './orbit.js'
+import { TURN, bodyRadius, nearLabels, paintPlate, zoomPlate, type Plate, type Star } from './orbit.js'
+import { WHOLE, type View } from './zoom.js'
 
 /** A finished thread's slot along the arc, against one still in play, at most. */
 const TAIL_SLOT = .3
@@ -10,24 +11,20 @@ const HORIZON = .8
 const TURNS = 2.6
 /** How far the line runs out past the last body, as a share of the rim. */
 const FADE_OUT = 1.32
-const CHAR = 6.6
 const DRAG_FROM = 5
 
 type Pins = Record<string, number>
 interface Winding { at: Array<{ angle: number; radius: number }>; rising: string; receding: string }
 
 const pinsKey = (model: FamilyModel): string => `shuttle.family.spiral:${model.root.card.originId}:${model.root.card.uid ?? model.root.card.id}`
-const unstored = new Map<string, Pins>()
 function readPins(model: FamilyModel): Pins {
-  const kept = unstored.get(pinsKey(model))
-  if (kept) return kept
   try { return JSON.parse(localStorage.getItem(pinsKey(model)) ?? '{}') as Pins } catch { return {} }
 }
 function writePins(model: FamilyModel, pins: Pins): void {
   try {
     if (Object.keys(pins).length) localStorage.setItem(pinsKey(model), JSON.stringify(pins))
     else localStorage.removeItem(pinsKey(model))
-  } catch { unstored.set(pinsKey(model), pins) }
+  } catch { /* Storage is optional. */ }
 }
 
 /**
@@ -45,7 +42,14 @@ export function arrange(order: readonly MapThread[], pins: Pins): MapThread[] {
   const rest = order.filter(thread => !slots.includes(thread))
   return Array.from(slots, slot => slot ?? rest.shift()!)
 }
-const sequence = (model: FamilyModel): MapThread[] => arrange(model.order, readPins(model))
+/** Everything in play holds the line inside the horizon, however it is pinned; the rest unwinds past it in the model's order. */
+const sequence = (model: FamilyModel): MapThread[] => [...arrange(model.attention, readPins(model)), ...model.order.slice(model.attention.length)]
+/** A thread keeps its pin while it is in play. */
+function livePins(model: FamilyModel): Pins {
+  const pins = readPins(model), live = Object.fromEntries(Object.entries(pins).filter(([key]) => model.attention.some(thread => thread.key === key)))
+  if (Object.keys(live).length !== Object.keys(pins).length) writePins(model, live)
+  return live
+}
 
 /** Walks an Archimedean spiral of `pitch` per turn, dropping a position at each slot's arc length. */
 function wind(slots: readonly number[], pitch: number, length: number, split: number, limit: number): Winding {
@@ -77,32 +81,6 @@ function fit(slots: readonly number[], split: number, horizon: number, length: n
   return wind(slots, lo, length, split, limit)
 }
 
-/** Each name beside its body, on whichever side and row first keeps clear of every other name and body. */
-function nearLabels(stars: readonly Star[], named: readonly Star[], position: ReadonlyMap<MapThread, number>, cx: number, width: number, height: number): SkyLabel[] {
-  interface Box { left: number; right: number; top: number; bottom: number }
-  const placed: Box[] = [], labels: SkyLabel[] = []
-  const touches = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
-  const clear = (box: Box, own: Star): boolean => !placed.some(other => touches(box, other))
-    && stars.every(star => star === own || !touches(box, { left: star.x - star.r, right: star.x + star.r, top: star.y - star.r, bottom: star.y + star.r }))
-  for (const star of named) {
-    const out = star.x >= cx, wanted = Math.min(LABEL_MAX, star.thread.name.length * CHAR + 58)
-    const options = [out, !out].flatMap(right => {
-      const x = right ? star.x + star.r + 7 : star.x - star.r - 7
-      const room = Math.min(wanted, right ? width - x - 6 : x - 6)
-      return [0, -1, 1, -2, 2, -3, 3, -4, 4, -6, 6, -8, 8].map(row => ({ right, x, room, y: star.y + row * LABEL_ROW }))
-    }).filter(option => option.room >= Math.min(wanted, 150) && option.y >= LABEL_ROW / 2 && option.y <= height - LABEL_ROW / 2)
-    const box = (option: typeof options[number]): Box => ({ left: option.right ? option.x : option.x - option.room, right: option.right ? option.x + option.room : option.x, top: option.y - LABEL_ROW / 2, bottom: option.y + LABEL_ROW / 2 })
-    const chosen = options.find(option => clear(box(option), star))
-    if (!chosen) continue
-    placed.push(box(chosen))
-    labels.push({
-      thread: star.thread, numeral: position.get(star.thread)! + 1, side: chosen.right ? 'right' : 'left', x: chosen.x, y: chosen.y, width: chosen.room,
-      rim: chosen.y === star.y ? undefined : { x: chosen.x + (chosen.right ? -3 : 3), y: chosen.y },
-    })
-  }
-  return labels
-}
-
 /** Where everything goes: the threads along one winding line, first at the centre, what is finished unwinding past the horizon. */
 export function spiralLayout(model: FamilyModel, width: number, height: number): Plate {
   const narrow = width < NARROW
@@ -118,38 +96,44 @@ export function spiralLayout(model: FamilyModel, width: number, height: number):
     x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle),
   }))
   const position = new Map(threads.map((thread, n) => [thread, n]))
+  const place = (thread: MapThread): number => position.get(thread)! + 1
   const rankedNames = stars.slice(0, playing)
   const numerals = narrow ? rankedNames.filter(star => needsHuman(star.thread)).map(star => {
     const out = Math.hypot(star.x - cx, star.y - cy) || 1
-    return { thread: star.thread, numeral: position.get(star.thread)! + 1, x: star.x + (star.x - cx) / out * (star.r + 9), y: star.y + (star.y - cy) / out * (star.r + 9) }
+    return { thread: star.thread, numeral: place(star.thread), x: star.x + (star.x - cx) / out * (star.r + 9), y: star.y + (star.y - cy) / out * (star.r + 9) }
   }) : []
   return {
-    width, height: narrow ? cy + R + 18 : height, cx, cy, R, narrow, stars, links: false,
-    labels: narrow ? [] : nearLabels(stars, rankedNames, position, cx, width, height), numerals, arcs: [],
+    k: 1, width, height: narrow ? cy + R + 18 : height, cx, cy, R, narrow, stars, links: false,
+    labels: narrow ? [] : nearLabels(stars, rankedNames, place, cx, width, height), numerals, arcs: [],
     rings: [{ label: 'horizon', radius: horizon, marked: false }], grid: [], scale: 0, line: { rising, receding },
   }
 }
 
-/** A thread dragged along the line takes the slot nearest the pointer, and the others glide around it. */
-function drag(host: HTMLElement, model: FamilyModel, open: OpenThread, start: PointerEvent): void {
+/** A thread in play dragged along the line takes the slot in play nearest the pointer, and the others glide around it. */
+function drag(host: HTMLElement, start: PointerEvent): void {
   const key = (start.target as Element).closest('.fm-star')?.getAttribute('data-thread')
   if (!key || start.button !== 0) return
   let moving = false
   const move = (event: PointerEvent): void => {
+    if (event.pointerId !== start.pointerId || !host.classList.contains('family-map-spiral') || host.classList.contains('family-map-pinching')) return
+    const { model, open, view } = current.get(host)!
+    if (!model.attention.some(thread => thread.key === key)) return
     if (!moving && Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < DRAG_FROM) return
     moving = true
     host.classList.add('family-map-dragging')
-    const box = host.getBoundingClientRect(), layout = spiralLayout(model, host.clientWidth || 1000, host.clientHeight || 680)
-    const point = { x: event.clientX - box.left + host.scrollLeft, y: event.clientY - box.top + host.scrollTop }
+    const box = host.getBoundingClientRect(), width = host.clientWidth || 1000, height = host.clientHeight || 680
+    const layout = spiralLayout(model, width, height), inPlay = layout.stars.slice(0, model.attention.length)
+    const point = { x: (event.clientX - box.left + host.scrollLeft - view.x * width) / view.k, y: (event.clientY - box.top + host.scrollTop - view.y * layout.height) / view.k }
     const distance = (star: Star): number => Math.hypot(star.x - point.x, star.y - point.y)
-    const nearest = layout.stars.reduce((best, star) => distance(star) < distance(best) ? star : best)
+    const nearest = inPlay.reduce((best, star) => distance(star) < distance(best) ? star : best)
     if (nearest.thread.key === key) return
-    const pins = readPins(model), others = { ...pins }
+    const others = { ...readPins(model) }
     delete others[key]
-    writePins(model, { [key]: layout.stars.indexOf(nearest), ...others })
-    spiral.draw(host, model, open)
+    writePins(model, { [key]: inPlay.indexOf(nearest), ...others })
+    spiral.draw(host, model, open, view)
   }
-  const up = (): void => {
+  const up = (event: PointerEvent): void => {
+    if (event.pointerId !== start.pointerId) return
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
     window.removeEventListener('pointercancel', up)
@@ -164,29 +148,27 @@ function drag(host: HTMLElement, model: FamilyModel, open: OpenThread, start: Po
   window.addEventListener('pointercancel', up)
 }
 
-/** What a host last drew, for the one drag listener it keeps. */
-const current = new WeakMap<HTMLElement, { model: FamilyModel; open: OpenThread }>()
+/** What a host last drew, which the one drag listener it keeps always reads. */
+const current = new WeakMap<HTMLElement, { model: FamilyModel; open: OpenThread; view: View }>()
 
 export const spiral: Drawing = {
   name: 'spiral', label: 'Spiral',
   reading: ['Centre: look here first', 'Inward: rising to you', 'Outward: receding', 'Colour: it needs you', 'Size: its mass of work', 'Drag a body to arrange'],
   sequence,
-  draw(host, model, open) {
+  draw(host, model, open, view = WHOLE) {
     const { width, height } = mount(host, 'spiral', model, open)
-    const plate = spiralLayout(model, width, height), pins = readPins(model)
-    paintPlate(host, plate, model)
+    const pins = livePins(model), plate = spiralLayout(model, width, height)
     const places = new Map(plate.stars.map((star, n) => [star.thread.key, n])), playing = Math.max(1, model.attention.length)
+    paintPlate(host, zoomPlate(plate, view, thread => places.get(thread.key)! + 1), model)
     for (const body of host.querySelectorAll<SVGGElement>('.fm-star')) {
       const key = body.getAttribute('data-thread')!, past = places.get(key)! - playing
       body.toggleAttribute('data-pinned', key in pins)
       body.style.setProperty('--fm-recede', past < 0 ? '1' : (1 - .75 * past / Math.max(1, plate.stars.length - playing)).toFixed(2))
     }
-    const clear = (): void => { writePins(model, {}); spiral.draw(host, model, open) }
-    if (!current.has(host)) host.addEventListener('pointerdown', event => { if (host.classList.contains('family-map-spiral')) drag(host, current.get(host)!.model, current.get(host)!.open, event) })
-    current.set(host, { model, open })
-    host.ondblclick = clear
+    if (!current.has(host)) host.addEventListener('pointerdown', event => { if (host.classList.contains('family-map-spiral')) drag(host, event) })
+    current.set(host, { model, open, view })
     const reset = part(host, 'fm-unpin', cls => { const button = htmlEl('button', cls, 'Back to attention order'); button.type = 'button'; return button })
     reset.hidden = !Object.keys(pins).length
-    reset.onclick = event => { event.stopPropagation(); clear() }
+    reset.onclick = event => { event.stopPropagation(); writePins(model, {}); spiral.draw(host, model, open, view) }
   },
 }

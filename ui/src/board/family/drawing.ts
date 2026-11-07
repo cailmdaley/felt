@@ -1,5 +1,6 @@
 import { ago } from '../civilDay.js'
 import { MAP_WINDOW_MS, type FamilyModel, type MapThread, type Standing } from './model.js'
+import type { View } from './zoom.js'
 import './family-map.css'
 
 export type OpenThread = (thread: MapThread) => void
@@ -11,7 +12,8 @@ export interface Drawing {
   reading: readonly string[]
   /** The order the arrow keys walk, when it is not the model's. */
   sequence?(model: FamilyModel): MapThread[]
-  draw(host: HTMLElement, model: FamilyModel, open: OpenThread): void
+  /** `view` is the field's zoom, where the drawing has a field to zoom. */
+  draw(host: HTMLElement, model: FamilyModel, open: OpenThread, view: View): void
 }
 export interface Stage { width: number; height: number; narrow: boolean }
 export interface Point { x: number; y: number }

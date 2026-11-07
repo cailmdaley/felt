@@ -1,6 +1,6 @@
 import type { FamilyModel, MapThread } from './model.js'
 import { NARROW, mount, type Drawing } from './drawing.js'
-import { TURN, bodyRadius, childrenOf, discRadius, fineGrid, orbitNames, paintPlate, rimLabels, rimNumerals, rootRadius, type Plate, type Star } from './orbit.js'
+import { TURN, bodyRadius, childrenOf, discRadius, fineGrid, orbitNames, paintPlate, rimLabels, rimNumerals, rootRadius, zoomPlate, type Plate, type Star } from './orbit.js'
 
 /**
  * Every thread's learned place: a leaf takes an equal slice of the circle in
@@ -48,7 +48,7 @@ export function ringsLayout(model: FamilyModel, width: number, height: number): 
   const labels = narrow ? [] : rimLabels(drawn, model, cx, cy, R, width, height)
   const numerals = narrow ? rimNumerals(drawn, cx, cy, R) : []
   return {
-    width, height: narrow ? cy + R + 26 : height, cx, cy, R, narrow, stars, links: true, labels, numerals,
+    k: 1, width, height: narrow ? cy + R + 26 : height, cx, cy, R, narrow, stars, links: true, labels, numerals,
     arcs: orbitNames(stars, new Set([...labels, ...numerals].map(mark => mark.thread)), model, cx, cy, R),
     rings: Array.from({ length: deepest }, (_, n) => ({ label: `${n + 1}`, radius: generation(n + 1), marked: false })),
     grid: fineGrid(R * .06, R), scale: -TURN / 4,
@@ -58,8 +58,8 @@ export function ringsLayout(model: FamilyModel, width: number, height: number): 
 export const rings: Drawing = {
   name: 'rings', label: 'Rings',
   reading: ['Rings: generations from the constitution', 'Place: fixed by the tree', 'Colour: it needs you', 'Glow: how recently it moved', 'Size: its mass of work', 'Arcs: who launched whom'],
-  draw(host, model, open) {
+  draw(host, model, open, view) {
     const { width, height } = mount(host, 'rings', model, open)
-    paintPlate(host, ringsLayout(model, width, height), model)
+    paintPlate(host, zoomPlate(ringsLayout(model, width, height), view), model)
   },
 }

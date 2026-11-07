@@ -12,7 +12,7 @@
   min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--ws-ink); font: 500 var(--type-title)/var(--leading-tight) var(--font-serif);
 }
-/* The lifecycle chip: the rail's state word in its tone, at the line's one text size. */
+/* The lifecycle chip: the thread's state word in its tone, at the line's one text size. */
 .ws-band-state {
   --tone: var(--ws-ink-muted);
   flex: none; color: var(--tone);

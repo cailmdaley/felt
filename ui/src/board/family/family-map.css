@@ -16,10 +16,14 @@
 }
 :is(.family-map-sky, .family-map-rings, .family-map-spiral, .family-map:is([data-drawing='sky'], [data-drawing='rings'], [data-drawing='spiral'])) :is([data-standing='question'], [data-standing='blocked'], [data-standing='new'], [data-standing='review'], [data-standing='turn']) { --fm-tone: var(--fm-ask); }
 :is(.family-map-sky, .family-map-rings, .family-map-spiral, .family-map:is([data-drawing='sky'], [data-drawing='rings'], [data-drawing='spiral'])) [data-standing='working'] { --fm-tone: var(--fm-cool); }
-:is(.family-map-sky, .family-map-rings, .family-map-spiral, .family-map:is([data-drawing='sky'], [data-drawing='rings'], [data-drawing='spiral'])) :is([data-standing='quiet'], [data-standing='aside']) { --fm-tone: var(--ws-ink-muted); }
+:is(.family-map-sky, .family-map-rings, .family-map-spiral, .family-map:is([data-drawing='sky'], [data-drawing='rings'], [data-drawing='spiral'])) :is([data-standing='still'], [data-standing='quiet'], [data-standing='aside']) { --fm-tone: var(--ws-ink-muted); }
 .family-map:is([data-drawing='sky'], [data-drawing='rings'], [data-drawing='spiral']) .ws-family-count[data-standing='review'] path { fill: none; stroke: var(--fm-tone); stroke-width: 1.5; }
-.family-map .fm-sky-plate { position: relative; width: 100%; }
+.family-map .fm-sky-plate { position: relative; width: 100%; touch-action: pan-x pan-y; }
 .family-map .fm-sky-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.family-map .fm-sky-plate > *, .family-map .fm-labels, .family-map .fm-numerals { transform-origin: 0 0; }
+.family-map-zoomed .fm-sky-plate, .family-map-gesturing .fm-sky-plate { overflow: hidden; touch-action: none; user-select: none; }
+.family-map-zoomed .fm-sky-plate { cursor: grab; }
+.family-map-gesturing .fm-sky-plate > * { will-change: transform; }
 .family-map .fm-grid circle { fill: none; stroke: var(--ws-hairline-soft); stroke-opacity: .55; stroke-width: .5; }
 .family-map .fm-rings circle { fill: none; stroke: var(--ws-hairline); stroke-opacity: .7; stroke-width: .75; }
 .family-map .fm-rings g:last-child circle { stroke-opacity: 1; stroke-width: 1; }
@@ -29,7 +33,7 @@
 .family-map .fm-link:is([data-standing='quiet'], [data-standing='aside']) { stroke-opacity: .2; }
 .family-map .fm-link[data-merged] { stroke-opacity: .3; stroke-width: .6; }
 .family-map .fm-link[data-chain] { stroke-opacity: .9; stroke-width: 1.25; }
-.family-map .fm-line path { fill: none; stroke-linecap: round; }
+.family-map .fm-line path { fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .family-map .fm-line-rising { stroke: var(--ws-hairline); stroke-width: .9; }
 .family-map .fm-line-receding { stroke: var(--fm-fade); stroke-width: .9; }
 .family-map .fm-line-fade stop { stop-color: var(--ws-hairline); }
@@ -59,6 +63,7 @@
 .family-map-rings .fm-star:not([data-merged]) .fm-star-halo { fill-opacity: calc(.32 * var(--fm-heat, 0)); }
 .family-map-rings .fm-star:is([data-standing='quiet'], [data-standing='aside']) .fm-star-mark { fill-opacity: .1; stroke-opacity: .45; }
 .family-map .fm-star:is([data-standing='quiet'], [data-standing='aside']) .fm-star-mark { fill-opacity: .16; stroke-opacity: .75; stroke-width: .75; }
+.family-map .fm-star[data-standing='still'] .fm-star-mark { fill: none; stroke-opacity: .75; stroke-width: .75; stroke-dasharray: 2 2; }
 .family-map .fm-star[data-standing='working'] .fm-star-mark { fill-opacity: .3; animation: fm-breathe 2.8s ease-in-out infinite; }
 .family-map .fm-star[data-standing='review'] .fm-star-mark { fill-opacity: .12; stroke-width: 1.5; }
 .family-map .fm-star-fresh { fill: var(--fm-ask); }
@@ -135,7 +140,8 @@
 @keyframes fm-rise { to { stroke-dashoffset: 23.5; } }
 @keyframes fm-recede { to { stroke-dashoffset: -23.5; } }
 @keyframes fm-breathe { 50% { opacity: .45; } }
+.family-map-parked, .family-map-parked * { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
-  .family-map { --fm-drift: 0s; }
-  .family-map * { animation: none; }
+  .family-map { --fm-drift: 0s !important; }
+  .family-map * { animation: none !important; transition: none !important; }
 }

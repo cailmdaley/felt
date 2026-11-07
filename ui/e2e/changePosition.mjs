@@ -1,3 +1,4 @@
+import { sentFiles } from './familyNav.mjs'
 import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -27,7 +28,7 @@ try {
   }, source)
   await page.locator('.kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
   const landing = await page.evaluate(() => location.hash)
-  const open = () => page.locator('.ws-rail-files .ws-rail-file[data-key$="/family.change.json"]').click()
+  const open = async () => (await sentFiles(page)).and(page.locator('[data-key$="/family.change.json"]')).click()
   await open()
   await page.locator('.ws-selected .change-reader h1').waitFor()
   await page.locator('.ws-selected details.change-file summary').first().click()
@@ -48,7 +49,7 @@ try {
   })
   await page.waitForTimeout(1000)
   await page.evaluate(hash => { location.hash = hash }, landing)
-  await page.locator('.ws-rail-files .ws-rail-file').first().waitFor()
+  await page.locator('.ws-stage-band .ws-band-head').waitFor()
   assert.equal(await page.locator('.change-reader').count(), 0)
   await open()
   await page.waitForFunction(anchor => {

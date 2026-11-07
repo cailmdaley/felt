@@ -3,12 +3,13 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
+import { familyTree, sentFiles } from './familyNav.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
 const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
 async function openRoot(page) {
-  // Click the row's own name: its crumb leads to the root with the rail forced open.
+  // Click the row's own name: its crumb leads to the root.
   const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
@@ -74,7 +75,6 @@ export function registerHeaderBarJourneys(test) {
       if (window !== window.top) return
       const scheme = new URLSearchParams(location.search).get('e2e-appearance') || 'light'
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'true')
       localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
     })
     for (const scheme of ['light', 'dark']) {
@@ -91,8 +91,9 @@ export function registerHeaderBarJourneys(test) {
         ['Discarded pilot', ['Launch']],
       ]
       for (const [name, verbs] of visits) {
-        if (name === 'Accepted pilot') await page.locator('.ws-thread-rail summary').filter({ hasText: 'Archived' }).click()
-        await page.locator('.ws-thread-rail .kbn-thread-row').filter({ has: page.getByText(name, { exact: true }) }).click()
+        const tree = await familyTree(page)
+        if (name === 'Accepted pilot') await tree.locator('summary').filter({ hasText: 'Archived' }).click()
+        await tree.locator('.kbn-thread-row').filter({ has: page.getByText(name, { exact: true }) }).click()
         await named(page, name)
         assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
         await assertLifecycleInk(header, scheme)
@@ -103,7 +104,6 @@ export function registerHeaderBarJourneys(test) {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'false')
     })
     await page.goto(url)
     await openRoot(page)
@@ -122,7 +122,6 @@ export function registerHeaderBarJourneys(test) {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'false')
     })
     await page.goto(url)
     await openRoot(page)
@@ -140,7 +139,6 @@ export function registerHeaderBarJourneys(test) {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'true')
     })
     await page.goto(url)
     await openRoot(page)
@@ -171,15 +169,13 @@ export function registerHeaderBarJourneys(test) {
     }
     for (const width of [1440, 850, 701, 1440]) {
       await page.setViewportSize({ width, height: 900 }); await check()
-      if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-rail-open-narrow-desktop-light.png') })
+      if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-narrow-desktop-light.png') })
     }
-    await page.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)').click()
+    await page.locator('.ws-sidebar-toggle').click()
     for (const width of [1440, 1000, 850, 701]) {
       await page.setViewportSize({ width, height: 900 }); await check()
-      for (const selector of ['.ws-sidebar', '.ws-thread-rail']) {
-        assert.ok(await page.locator(selector).isVisible())
-        assert.ok(await page.locator(selector).evaluate(el => el.getBoundingClientRect().width >= 100), `${selector} keeps usable rows beside the minimum stage`)
-      }
+      assert.ok(await page.locator('.ws-sidebar').isVisible())
+      assert.ok(await page.locator('.ws-sidebar').evaluate(el => el.getBoundingClientRect().width >= 100), 'the sidebar keeps usable rows beside the minimum stage')
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-both-columns-narrow-desktop-light.png') })
     }
   }, { width: 1440, height: 900 })
@@ -187,7 +183,6 @@ export function registerHeaderBarJourneys(test) {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'false')
       localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
     })
     await page.goto(url)
@@ -209,8 +204,7 @@ export function registerHeaderBarJourneys(test) {
       await header.evaluate(el => { el.scrollLeft = 0 })
     }
     await assertBand(['Resume', 'New session', 'Temper', 'Discard'])
-    await page.locator('.ws-rail-toggle').click()
-    await page.locator('.ws-page-sheet[open] .ws-phone-threads .kbn-thread-row').filter({ hasText: 'Response analysis' }).click()
+    await (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: 'Response analysis' }).click()
     await named(page, 'Response analysis')
     await assertBand(['New session', 'Close for review', 'Rest'])
     const reviewInk = await header.getByRole('button', { name: 'Close for review', exact: true }).evaluate(el => {
@@ -227,8 +221,7 @@ export function registerHeaderBarJourneys(test) {
     })
     assert.equal(reviewInk.pigment, '', `Close for review has no verdict pigment: ${JSON.stringify(reviewInk)}`)
     assert.equal(reviewInk.color, reviewInk.neutral, `Close for review uses neutral lifecycle ink: ${JSON.stringify(reviewInk)}`)
-    await page.locator('.ws-rail-toggle').click()
-    await page.locator('.ws-page-sheet[open] .ws-phone-threads .kbn-thread-row').filter({ hasText: 'Next validation' }).click()
+    await (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: 'Next validation' }).click()
     await named(page, 'Next validation')
     await assertBand(['Launch'])
     if (process.env.WORKSPACE_SHOTS) {
@@ -240,7 +233,6 @@ export function registerHeaderBarJourneys(test) {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'true')
-      localStorage.setItem('shuttle:workspace:rail', 'true')
     })
     await page.goto(url); await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
@@ -308,7 +300,6 @@ export function registerHeaderBarJourneys(test) {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'false')
     })
     await page.goto(url)
     await openRoot(page)
@@ -325,16 +316,15 @@ export function registerHeaderBarJourneys(test) {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      localStorage.setItem('shuttle:workspace:rail', 'true')
     })
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
-    const row = name => page.locator('.ws-thread-rail .kbn-thread-row').filter({ hasText: name })
+    const row = async name => (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: name })
     for (const key of ['Enter', 'Space']) {
-      await row('Response analysis').focus(); await page.keyboard.press(key)
+      await (await row('Response analysis')).focus(); await page.keyboard.press(key)
       await named(page, 'Response analysis')
-      await row(title).focus(); await page.keyboard.press(key)
+      await (await row(title)).focus(); await page.keyboard.press(key)
       await named(page, title)
     }
     await page.evaluate(() => { document.activeElement?.blur(); document.body.focus() })
@@ -354,39 +344,18 @@ export function registerHeaderBarJourneys(test) {
     await page.keyboard.press('Space')
     await page.waitForFunction(() => document.querySelector('.ws-selected .ws-prose-scroll').scrollTop > 0)
   }, { width: 1440, height: 900 })
-  test('The phone family tree keeps an archive fold and focus across a live feed repaint', async page => {
-    await page.goto(url)
-    await openRoot(page)
-    await page.locator('.ws-rail-toggle').click()
-    const sheet = page.locator('.ws-page-sheet[open]'), fold = sheet.locator('.ws-tree-archived').first()
-    await fold.locator('summary').click()
-    await fold.locator('summary').focus()
-    await page.evaluate(async () => {
-      const fixture = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Accepted pilot')
-      fixture.fiber.name = 'Accepted pilot updated'
-      await window.__harness.modal.fetchAndRender()
-    })
-    await sheet.getByText('Accepted pilot updated', { exact: true }).waitFor()
-    assert.equal(await fold.evaluate(el => el.open), true)
-    assert.equal(await fold.locator('summary').evaluate(el => el === document.activeElement), true)
-    await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
-    await sheet.waitFor({ state: 'hidden' })
-    await page.locator('.ws-rail-toggle').click()
-    assert.equal(await page.locator('.ws-page-sheet[open] .ws-tree-archived').first().evaluate(el => el.open), true)
-  }, { width: 390, height: 844 }, 'false', 'reduce', true)
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     for (const scheme of ['light', 'dark']) test(`The family tree keeps its root and marks the open thread (${device}, ${scheme})`, async page => {
       await page.addInitScript(scheme => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
         localStorage.setItem('shuttle:workspace:sidebar', 'false')
-        localStorage.setItem('shuttle:workspace:rail', 'true')
       }, scheme)
       await page.goto(url)
       await openRoot(page)
       const header = page.locator('.ws-stage-band .ws-band-head')
-      const family = page.locator(device === 'phone' ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
-      const show = async () => { if (device === 'phone') await page.locator('.ws-rail-toggle').click() }
+      const family = page.locator('.ws-page.ws-selected .ws-family-all .ws-family')
+      const show = () => familyTree(page)
       const rootAnchor = () => family.locator('.kbn-thread-row').first()
       for (const name of ['Response analysis', 'Choose the response cut']) {
         await show()
@@ -414,7 +383,6 @@ export function registerHeaderBarJourneys(test) {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
         localStorage.setItem('shuttle:workspace:sidebar', 'false')
-        localStorage.setItem('shuttle:workspace:rail', 'false')
       }, scheme)
       await page.goto(url)
       await openRoot(page)
@@ -453,13 +421,10 @@ export function registerHeaderBarJourneys(test) {
       await page.keyboard.press('Escape')
       await sheet.waitFor({ state: 'hidden' })
       assert.equal(await header.getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
-      const threads = page.getByRole('button', { name: 'Show threads and sent files', exact: true })
-      await threads.click()
-      const files = page.locator(device === 'phone' ? '.ws-page-sheet[open] .ws-sent-files' : '.ws-rail-files')
-      await files.waitFor()
-      assert.ok(await files.locator('time').count(), 'sent files carry timestamps in the threads view')
-      if (device === 'phone') await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
-      else await page.getByRole('button', { name: 'Hide threads and sent files', exact: true }).click()
+      const files = await sentFiles(page)
+      assert.ok(await files.locator('time').count(), 'sent files carry timestamps')
+      await page.keyboard.press('Escape')
+      await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
       // A verdict leaves settings before opening its undo window.
       await header.getByRole('button', { name: 'Settings', exact: true }).click()
       await header.getByRole('button', { name: 'Temper', exact: true }).click()

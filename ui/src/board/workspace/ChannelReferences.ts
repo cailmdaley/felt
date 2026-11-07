@@ -16,9 +16,10 @@ export function resolveChannelReference(candidate: string, source: WorkspaceDocu
   const path = candidate.split(/[?#]/)[0]
   let decoded: string
   try { decoded = decodeURIComponent(path) } catch { return }
+  const pages = documents.filter(doc => doc.kind !== 'family')
   const matches = decoded.includes('/')
-    ? documents.filter(doc => doc.owner === source.owner && doc.path === normalizeAbsolutePath(decoded, source.path.slice(0, source.path.lastIndexOf('/')) || '/'))
-    : documents.filter(doc => doc.path.split('/').at(-1) === decoded)
+    ? pages.filter(doc => doc.owner === source.owner && doc.path === normalizeAbsolutePath(decoded, source.path.slice(0, source.path.lastIndexOf('/')) || '/'))
+    : pages.filter(doc => doc.path.split('/').at(-1) === decoded)
   return matches.length === 1 ? matches[0] : undefined
 }
 

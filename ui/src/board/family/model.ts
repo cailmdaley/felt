@@ -6,12 +6,12 @@ import { turnOf } from '../turn.js'
 export const MAP_WINDOW_MS = 14 * 86_400_000
 
 /** What a thread asks of the human, most urgent first. */
-export const ATTENTION = ['question', 'blocked', 'new', 'review', 'turn', 'working'] as const
+export const ATTENTION = ['question', 'blocked', 'new', 'turn', 'review', 'working'] as const
 export type Attention = typeof ATTENTION[number]
-/** A thread's place on the map: asking, quiet history on it, or set aside as a count. */
-export type Standing = Attention | 'quiet' | 'aside'
+/** A thread's place on the map: asking, in flight with no worker running, quiet history on it, or set aside as a count. */
+export type Standing = Attention | 'still' | 'quiet' | 'aside'
 export const ATTENTION_WORD: Readonly<Record<Attention, string>> = {
-  question: 'Questions', blocked: 'Blocked', new: 'New', review: 'To review', turn: 'Your turn', working: 'Working',
+  question: 'Questions', blocked: 'Blocked', new: 'New', turn: 'Your turn', review: 'To review', working: 'Working',
 }
 
 export interface ThreadMarks { launches: number[]; commits: number[] }
@@ -56,7 +56,7 @@ export interface FamilyModel {
   root: MapThread
   /** Every thread of the family, in tree order. */
   threads: ReadonlyMap<string, MapThread>
-  /** Every drawn thread: what asks, by urgency then newest; then quiet history; then the ancestry they need. */
+  /** Every drawn thread: what asks, by urgency then newest; then what is in flight with no worker; then quiet history; then the ancestry they need. */
   order: MapThread[]
   /** The part of `order` that asks something of the human or is at work. */
   attention: MapThread[]
@@ -78,15 +78,18 @@ export const mass = (thread: MapThread): number => thread.launches.length + thre
 function standingOf(card: KanbanCard, index: ThreadIndex, fresh: boolean, lastMove: number, now: number): Standing {
   const state = index.state(card), { turn, yours } = turnOf(card, now)
   if (state === 'archived') return now - lastMove < MAP_WINDOW_MS ? 'quiet' : 'aside'
-  if (turn === 'question' || turn === 'blocked') return turn
+  if (turn === 'question') return turn
   if (state === 'drafts' || state === 'roles' || state === 'resting') return 'aside'
+  if (turn === 'blocked') return turn
   if (fresh) return 'new'
   if (state === 'to-review') return 'review'
   if (yours) return 'turn'
-  return hasLiveWorker(card) ? 'working' : 'quiet'
+  return hasLiveWorker(card) ? 'working' : 'still'
 }
 
 const WORD: Partial<Record<Standing, string>> = { question: 'question', blocked: 'blocked', new: 'new file', review: 'to review', turn: 'your turn' }
+/** What an in-flight thread with no worker is: held by the daemon, stopped after a run, or armed and yet to start. */
+const stillWord = (card: KanbanCard): string => card.held ? 'held' : card.dispatchedAt || card.sessionUuid ? 'stopped' : 'armed'
 
 /** The family under `root`, ready to draw: one model every drawing reads. */
 export function familyModel(index: ThreadIndex, root: KanbanCard, current: KanbanCard, feeds: MapFeeds, now: number): FamilyModel {
@@ -96,13 +99,14 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     const marks = feeds.marks(card), files = feeds.files(card)
     const launches = marks?.launches ?? [], commits = marks?.commits ?? []
     const born = Date.parse(card.createdAt) || now, ended = Date.parse(card.closedAt ?? '') || null
-    const lastMove = Math.min(now, Math.max(card.lastActivityAt ?? 0, ...launches, ...commits, ...files.map(file => file.at), ended ?? 0, born, Date.parse(card.ask?.at ?? '') || 0))
+    const ask = turnOf(card, now).turn === 'question' ? card.ask : undefined
+    const lastMove = Math.min(now, Math.max(card.lastActivityAt ?? 0, ...launches, ...commits, ...files.map(file => file.at), ended ?? 0, born, Date.parse(ask?.at ?? '') || 0))
     const fresh = files.some(file => file.unread)
     const standing = standingOf(card, index, fresh, lastMove, now)
     const thread: MapThread = {
       key: threadKey(card), card, name: card.name, depth, parent, children: [], standing,
-      word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : THREAD_LABEL[index.state(card)].toLowerCase()),
-      note: card.ask?.text ?? card.outcome ?? '', rank: -1, lastMove, born, ended, launches, commits, files, fresh,
+      word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : THREAD_LABEL[index.state(card)].toLowerCase()),
+      note: ask?.text ?? card.outcome ?? '', rank: -1, lastMove, born, ended, launches, commits, files, fresh,
       merged: index.state(card) === 'archived', weight: launches.length + commits.length + files.length,
     }
     threads.set(thread.key, thread)
@@ -118,8 +122,9 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
   const urgency = (thread: MapThread): number => (ATTENTION as readonly string[]).indexOf(thread.standing)
   const newest = (a: MapThread, b: MapThread): number => b.lastMove - a.lastMove || a.name.localeCompare(b.name) || a.key.localeCompare(b.key)
   const attention = all.filter(thread => urgency(thread) >= 0).sort((a, b) => urgency(a) - urgency(b) || newest(a, b))
+  const still = all.filter(thread => thread.standing === 'still').sort(newest)
   const quiet = all.filter(thread => thread.standing === 'quiet').sort(newest)
-  const known = new Set([...attention, ...quiet])
+  const known = new Set([...attention, ...still, ...quiet])
   const context: MapThread[] = []
   for (const thread of known) {
     for (let up = thread.parent; up !== null; up = threads.get(up)!.parent) {
@@ -129,7 +134,7 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     }
   }
   if (!known.has(top) && !context.includes(top)) context.push(top)
-  const order = [...attention, ...quiet, ...context]
+  const order = [...attention, ...still, ...quiet, ...context]
   order.forEach((thread, rank) => { thread.rank = rank })
   const aside = { drafts: 0, resting: 0, archived: 0 }
   for (const thread of all) {

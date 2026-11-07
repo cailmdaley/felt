@@ -73,7 +73,8 @@ interface ChannelState {
   /** The owner file-time reads in flight, at most one per channel. */
   metadataRead?: Promise<boolean>
   selected?: DocKey
-  questionLanding?: boolean
+  /** The next arrival lands on the channel's lead page, whatever it last showed. */
+  leadLanding?: boolean
   routedFile?: DocKey
   loaded: boolean
   familyPage?: FamilyPage
@@ -282,10 +283,26 @@ export class Workspace {
 
   /** A Question card leads with its report, even after a previous visit to prose. */
   openQuestion(card: KanbanCard): void {
-    const state = this.ensure(card)
-    state.questionLanding = true
-    state.selected = undefined
+    this.landOnLead(this.ensure(card))
     this.open(card)
+  }
+  private landOnLead(state: ChannelState): void {
+    state.leadLanding = true
+    state.selected = undefined
+  }
+  /**
+   * A thread opened from the map arrives on its own lead page, the map one key
+   * away; a sent file arrives on that file.
+   */
+  private openFromMap(card: KanbanCard, doc?: DocKey): void {
+    const known = this.overview.hasMetadata(card), state = this.ensure(card, known)
+    if (doc) { this.open(card, this.origin, doc, known); return }
+    if (state === this.current) { this.visit(this.leadPage(state)); return }
+    this.landOnLead(state)
+    this.open(card, this.origin, undefined, known)
+  }
+  private leadPage(state: ChannelState): DocKey {
+    return (channelLead(state.channel) ?? proseDocument(state.channel)!).key
   }
 
   /** The family's view among this card's pages, or none outside a family. */
@@ -330,9 +347,8 @@ export class Workspace {
     const map = state && this.isActive ? this.familyDocument(state.card) : undefined
     if (!state || !map) return false
     const onMap = this.shown(state) === map
-    const target = onMap ? channelLead(state.channel)?.key ?? proseDocument(state.channel)?.key : map
-    if (target) this.visit(target)
-    return !!target
+    this.visit(onMap ? this.leadPage(state) : map)
+    return true
   }
   private cycleDrawing(): boolean {
     const state = this.current
@@ -592,12 +608,12 @@ export class Workspace {
   }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage((card, doc) => this.open(card, this.origin, doc, this.overview.hasMetadata(card)), {
+    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), {
       marks: card => this.activity.of(card.uid ?? card.id),
       files: card => (this.opts.sends?.(card) ?? []).map(send => ({ key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp) })),
-    })
+      refresh: () => this.refreshFamilyFeeds(),
+    }, () => { state.familyPage = undefined })
     state.familyPage.update(state.card, this.graph())
-    this.refreshFamilyFeeds()
     return state.familyPage.el
   }
   private refreshProse(state: ChannelState): void {
@@ -680,7 +696,7 @@ export class Workspace {
     this.overview.setVisible(false)
     // Selection resolves before the first paint; data arriving later never moves it.
     // A constitution with threads lands on their view; any other on its report.
-    const wanted = route.doc ?? state.selected ?? this.familyLanding(state) ?? this.knownReport(state)
+    const wanted = route.doc ?? state.selected ?? (state.leadLanding ? channelLead(state.channel)?.key : this.familyLanding(state)) ?? this.knownReport(state)
     const loadedBefore = state.loaded && state.runFinal
     if (wanted) this.intend(state, wanted)
     this.opts.onVisibility(true)
@@ -694,10 +710,9 @@ export class Workspace {
     }
     await bodyRead
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
-    if (state.questionLanding) {
-      state.questionLanding = false
-      const report = channelLead(state.channel)
-      state.selected = report?.key
+    if (state.leadLanding) {
+      state.leadLanding = false
+      state.selected = channelLead(state.channel)?.key
     }
     this.show(state, loadedBefore)
     this.startTimer()
@@ -730,7 +745,6 @@ export class Workspace {
     this.lastRenderedFamilyRevision = threadFamilyRevision(state.card, this.opts.threadIndex?.() ?? new ThreadIndex(cards))
     if (state.channel.documents.some(doc => doc.kind === 'family') !== this.inFamily(state.card)) this.rebuild(state)
     state.familyPage?.update(state.card, this.graph())
-    if (state.familyPage) this.refreshFamilyFeeds()
     const ch = state.channel
     const selected = this.shown(state)
     this.refreshProse(state)

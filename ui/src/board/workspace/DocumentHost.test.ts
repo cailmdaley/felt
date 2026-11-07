@@ -176,6 +176,15 @@ describe('stable document frames', () => {
     expect(host.get(docs[3].key)!.sheet.inert).toBe(true)
   })
 
+  it('builds a family page only once it is selected', () => {
+    const map = { ...docs[0], key: 'family:host-a:hub', kind: 'family' as const }, fiber = { ...docs[1], kind: 'fiber' as const }
+    buildProse.mockClear()
+    host.setChannel([map, fiber], fiber.key)
+    expect((buildProse.mock.calls as unknown as Array<[WorkspaceDocument]>).map(([doc]) => doc.key)).toEqual([fiber.key])
+    host.select(map.key)
+    expect(buildProse).toHaveBeenCalledTimes(2)
+  })
+
   it('does not reselect a page that recedes in its own document-link handler', () => {
     const fiber = { ...docs[0], kind: 'fiber' as const }
     host.setChannel([fiber, docs[1]], fiber.key)

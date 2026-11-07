@@ -15,7 +15,7 @@ const viewports = { desktop: { width: 1440, height: 900 }, phone: { width: 390, 
 const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))))
 
 async function openRoot(page) {
-  // Click the row's own name: its crumb leads to the root with the rail forced open.
+  // Click the row's own name: its crumb leads to the root.
   const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })

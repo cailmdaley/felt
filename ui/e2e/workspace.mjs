@@ -10,7 +10,7 @@ import { frames, layoutShift, settleTransitions, unexpected } from './layoutShif
 import { registerNavigationJourneys } from './navBack.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
-import { registerRailArtifactJourneys } from './railArtifact.mjs'
+import { sentFiles as sentFileRows } from './familyNav.mjs'
 import { registerCapGeometryJourneys } from './capGeometry.mjs'
 import { registerRenderedTypeJourneys } from './renderedType.mjs'
 
@@ -55,22 +55,11 @@ async function bandMenu(p, label) {
   }
   await headerAction(p, ['Settings', 'Sessions'].includes(label) ? 'Settings' : label)
 }
-/** Sent-file rows: the desktop rail's region beneath the threads, or the phone's sheet. */
+/** Sent-file rows, in the sheet the document menu opens. */
 async function sentFiles(p) {
-  if (p.viewportSize().width > 700) {
-    const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
-    if (await sheet.count()) { await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }) }
-    if (await p.locator('.ws-reader.ws-rail-off').count()) await p.locator('.ws-rail-toggle').click()
-    await p.locator('.ws-rail-files').waitFor()
-    return p.locator('.ws-rail-files .ws-rail-file')
-  }
-  const rows = p.locator('.ws-page-sheet[open] .ws-sent-file')
-  if (await p.locator('.ws-page-sheet[open]').count()) return rows
-  const menu = p.locator('.ws-navbar .ws-phone-document-menu')
-  await menu.focus(); await menu.click()
-  await p.getByRole('button', { name: 'Sent files', exact: true }).click()
-  await p.locator('.ws-page-sheet[open]').waitFor()
-  return rows
+  const settings = p.locator('.ws-settings-menu:not([hidden])')
+  if (await settings.count()) { await p.keyboard.press('Escape'); await settings.waitFor({ state: 'hidden' }) }
+  return sentFileRows(p)
 }
 
 test('The layout-shift guard ignores hidden geometry but catches visible movement', async p => {
@@ -1149,11 +1138,11 @@ test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p =
   assert.equal(entering.duration, 280)
   assert.ok(entering.frames.every(frame => 'transform' in frame && 'opacity' in frame && !('filter' in frame)))
   await p.waitForTimeout(70)
-  await p.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)').click()
+  await p.locator('.ws-sidebar-toggle').click()
   await poll(p, () => !document.querySelector('.ws-sidebar-flight'))
   assert.equal(await p.locator('.ws-sidebar-flight').count(), 0)
   assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
-  await p.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)').click()
+  await p.locator('.ws-sidebar-toggle').click()
   await p.waitForTimeout(330)
   assert.ok(await p.locator('.ws-sidebar-source').count())
   await leave(p)
@@ -1307,7 +1296,7 @@ for (const reducedMotion of ['no-preference', 'reduce']) test(`Sidebar toggle is
       }
       requestAnimationFrame(tick)
     })
-    await p.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)').click()
+    await p.locator('.ws-sidebar-toggle').click()
     if (reducedMotion !== 'reduce') await poll(p, () => document.getAnimations()
       .filter(a => !window.__before.has(a) && a.effect?.target?.closest?.('.ws-reader') && a.constructor.name === 'Animation').length >= 2)
     const all = await p.evaluate(() => document.getAnimations().filter(a => !window.__before.has(a) && a.effect?.target?.closest?.('.ws-reader')).map(a => ({
@@ -1331,7 +1320,7 @@ for (const reducedMotion of ['no-preference', 'reduce']) test(`Sidebar toggle is
     const lefts = samples.map(s => s.page)
     const steps = lefts.slice(1).map((x, i) => Math.sign(Math.round(x - lefts[i])))
     assert.ok(!(steps.includes(1) && steps.includes(-1)), `the page moves one way, without a double jump: ${lefts.map(Math.round).join(',')}`)
-    assert.equal(await p.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)').getAttribute('aria-expanded'), String(opening))
+    assert.equal(await p.locator('.ws-sidebar-toggle').getAttribute('aria-expanded'), String(opening))
   }
 }, undefined, 'false', reducedMotion)
 
@@ -2057,8 +2046,9 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     assert.equal(geometry.border, '0px'); assert.equal(geometry.radius, '0px'); assert.equal(geometry.shadow, 'none')
     assert.equal(await selected(p).locator('.ws-labelbar').isVisible(), false)
     const url = p.url(), key = await selected(p).getAttribute('data-key')
-    const opener = p.locator('.ws-rail-toggle')
+    const opener = p.locator('.ws-navbar .ws-phone-document-menu')
     await opener.click()
+    await p.getByRole('button', { name: 'Sent files', exact: true }).click()
     const sheet = p.getByRole('dialog', { name: 'Sent files', exact: true })
     await sheet.waitFor()
     assert.equal(p.url(), url, 'sheet is a same-address history layer')
@@ -2886,7 +2876,8 @@ for (const theme of ['portolan', 'blueprint', 'laboratory-paper', 'night-chart']
     assert.ok(Math.abs(box.x) < 1 && Math.abs(box.width - 390) < 1)
     assert.deepEqual(await frame.evaluate(el => { const s = getComputedStyle(el); return [s.borderRadius, s.clipPath, s.boxShadow, s.borderTopWidth] }), ['0px', 'none', 'none', '0px'])
     assert.ok(await p.locator('[data-part="phone-topbar"]').isVisible())
-    await p.locator('.ws-rail-toggle').click()
+    await p.locator('.ws-navbar .ws-phone-document-menu').click()
+    await p.getByRole('button', { name: 'Sent files', exact: true }).click()
     assert.ok(await p.locator('[data-part="page-sheet-panel"]').isVisible())
     assert.ok(await p.locator('[data-part="page-sheet-row"]').count() > 1)
     assert.equal(await p.locator('[data-part="page-sheet-panel"]').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()), await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()))
@@ -2951,7 +2942,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the bar, label bar and sidebar (${device})`, async p => {
   await open(p); await reportReady(p)
-  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="shelf"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-sidebar-toggle:not(.ws-rail-toggle)', '.ws-selected .ws-expand-button']) {
+  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="shelf"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-sidebar-toggle', '.ws-selected .ws-expand-button']) {
     await still(p, `hovering ${control}`, () => p.locator(control).hover(), { allow: [control] })
   }
   await p.mouse.move(viewport.width / 2, viewport.height - 4)
@@ -3016,7 +3007,6 @@ registerSidebarTreeJourneys(test)
 registerNavigationJourneys(test)
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)
-registerRailArtifactJourneys(test)
 registerCapGeometryJourneys(test, { open, choose, headerAction })
 registerRenderedTypeJourneys(test, { open, choose, headerAction })
 

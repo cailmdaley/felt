@@ -1,4 +1,5 @@
 import { isDrawn, needsHuman, type FamilyModel, type MapThread } from './model.js'
+import type { View } from './zoom.js'
 import { htmlEl, lay, markPath, optionFor, part, reconcile, shortAgo, spread, svgEl, tagThread, type Point } from './drawing.js'
 
 /** The drawings on a disc share this plate: bodies, fine arcs, names on the rim, a ledger on a phone. */
@@ -20,6 +21,7 @@ const ARCS = 4
 /** Bodies smaller than this at R = 300 stay unnamed until peeked. */
 const ARC_BODY = 6
 const CHAR = 6.3
+const LABEL_CHAR = 6.6
 
 export interface Star extends Point { thread: MapThread; angle: number; r: number }
 export interface SkyLabel extends Point { thread: MapThread; numeral: number; width: number; side: 'left' | 'right'; rim?: Point }
@@ -28,6 +30,8 @@ export interface SkyRing { label: string; radius: number; marked: boolean }
 /** A name laid along an orbit, whole, or not at all. */
 export interface SkyArc { thread: MapThread; d: string; radius: number; from: number; to: number }
 export interface Plate {
+  /** The field's scale; 1 for the whole field. */
+  k: number
   width: number
   height: number
   cx: number
@@ -145,6 +149,50 @@ export function orbitNames(stars: readonly Star[], named: ReadonlySet<MapThread>
   return arcs
 }
 
+/** Each name beside its body, on whichever side and row first keeps clear of every other name and body, whole where it can be. */
+export function nearLabels(stars: readonly Star[], named: readonly Star[], numeral: (thread: MapThread) => number, cx: number, width: number, height: number): SkyLabel[] {
+  interface Box { left: number; right: number; top: number; bottom: number }
+  const placed: Box[] = [], labels: SkyLabel[] = []
+  const touches = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+  const clear = (box: Box, own: Star): boolean => !placed.some(other => touches(box, other))
+    && stars.every(star => star === own || !touches(box, { left: star.x - star.r, right: star.x + star.r, top: star.y - star.r, bottom: star.y + star.r }))
+  for (const star of named) {
+    const out = star.x >= cx, wanted = Math.min(LABEL_MAX, star.thread.name.length * LABEL_CHAR + 58)
+    const options = [out, !out].flatMap(right => {
+      const x = right ? star.x + star.r + 7 : star.x - star.r - 7
+      const room = Math.min(wanted, right ? width - x - 6 : x - 6)
+      return [0, -1, 1, -2, 2, -3, 3, -4, 4, -6, 6, -8, 8].map(row => ({ right, x, room, y: star.y + row * LABEL_ROW }))
+    }).filter(option => option.room >= Math.min(wanted, 150) && option.y >= LABEL_ROW / 2 && option.y <= height - LABEL_ROW / 2)
+    const box = (option: typeof options[number]): Box => ({ left: option.right ? option.x : option.x - option.room, right: option.right ? option.x + option.room : option.x, top: option.y - LABEL_ROW / 2, bottom: option.y + LABEL_ROW / 2 })
+    const chosen = options.find(option => option.room >= wanted && clear(box(option), star)) ?? options.find(option => clear(box(option), star))
+    if (!chosen) continue
+    placed.push(box(chosen))
+    labels.push({
+      thread: star.thread, numeral: numeral(star.thread), side: chosen.right ? 'right' : 'left', x: chosen.x, y: chosen.y, width: chosen.room,
+      rim: chosen.y === star.y ? undefined : { x: chosen.x + (chosen.right ? -3 : 3), y: chosen.y },
+    })
+  }
+  return labels
+}
+
+/**
+ * The plate seen through a zoomed view: its geometry scaled, its marks their
+ * reading size, and a name on every thread in view with room for one.
+ */
+export function zoomPlate(plate: Plate, view: View, numeral: (thread: MapThread) => number = thread => thread.rank + 1): Plate {
+  const { k } = view
+  if (k === 1) return plate
+  const { width, height } = plate, dx = view.x * width, dy = view.y * height
+  const stars = plate.stars.map(star => ({ ...star, x: star.x * k + dx, y: star.y * k + dy }))
+  const inView = stars.filter(star => star.x >= 0 && star.x <= width && star.y >= 0 && star.y <= height)
+  const named = inView.filter(star => isDrawn(star.thread)).sort((a, b) => numeral(a.thread) - numeral(b.thread))
+  const cx = plate.cx * k + dx
+  return {
+    ...plate, k, cx, cy: plate.cy * k + dy, R: plate.R * k, stars, labels: nearLabels(inView, named, numeral, cx, width, height), numerals: [], arcs: [],
+    rings: plate.rings.map(ring => ({ ...ring, radius: ring.radius * k })), grid: plate.grid.map(radius => radius * k),
+  }
+}
+
 function drawLinks(layer: SVGGElement, plate: Plate): void {
   const star = new Map(plate.stars.map(item => [item.thread.key, item]))
   const links = plate.links ? plate.stars.filter(item => item.thread.parent !== null && star.has(item.thread.parent)) : []
@@ -191,6 +239,7 @@ function drawStars(layer: SVGGElement, plate: Plate, model: FamilyModel): void {
     const { thread, r } = item
     tagThread(group, thread)
     if (isDrawn(thread)) optionFor(group, thread, model)
+    else for (const name of ['role', 'aria-label', 'aria-posinset', 'aria-setsize', 'aria-selected', 'tabindex']) group.removeAttribute(name)
     group.toggleAttribute('data-root', thread === model.root)
     group.toggleAttribute('data-merged', thread.merged)
     group.toggleAttribute('data-current', thread.key === model.current && thread !== model.root)
@@ -265,6 +314,7 @@ function drawLedger(layer: HTMLElement, model: FamilyModel, narrow: boolean): vo
 /** Paints a plate into the host, keeping every element it can. */
 export function paintPlate(host: HTMLElement, plate: Plate, model: FamilyModel): void {
   const frame = part(host, 'fm-sky-plate', cls => htmlEl('div', cls))
+  host.classList.toggle('family-map-zoomed', plate.k > 1)
   frame.style.height = `${plate.height}px`
   const svg = part(frame, 'fm-sky-svg', cls => svgEl('svg', cls))
   svg.setAttribute('viewBox', `0 0 ${plate.width} ${plate.height}`)
@@ -283,13 +333,13 @@ export function paintPlate(host: HTMLElement, plate: Plate, model: FamilyModel):
   })
   if (plate.line) {
     const line = part(svg, 'fm-line', cls => svgEl('g', cls))
-    line.setAttribute('transform', `translate(${plate.cx} ${plate.cy})`)
+    line.setAttribute('transform', `translate(${plate.cx} ${plate.cy}) scale(${plate.k})`)
     for (const part_ of ['rising', 'receding'] as const) {
       part(line, `fm-line-${part_}`, cls => svgEl('path', cls)).setAttribute('d', plate.line[part_])
       part(line, `fm-flow-${part_}`, cls => svgEl('path', cls)).setAttribute('d', plate.line[part_])
     }
     const fade = part(svg, 'fm-line-fade', cls => { const el = svgEl('radialGradient', cls); el.id = `fm-fade-${++arcIds}`; el.setAttribute('gradientUnits', 'userSpaceOnUse'); el.append(svgEl('stop'), svgEl('stop')); return el })
-    fade.setAttribute('cx', '0'); fade.setAttribute('cy', '0'); fade.setAttribute('r', String(plate.R * 1.3))
+    fade.setAttribute('cx', '0'); fade.setAttribute('cy', '0'); fade.setAttribute('r', String(plate.R / plate.k * 1.3))
     fade.children[0].setAttribute('offset', '.6'); fade.children[1].setAttribute('offset', '1')
     line.style.setProperty('--fm-fade', `url(#${fade.id})`)
   }

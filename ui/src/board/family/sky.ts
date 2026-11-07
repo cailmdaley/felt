@@ -1,6 +1,6 @@
 import { needsHuman, type FamilyModel, type MapThread } from './model.js'
 import { NARROW, TIME_MARKS, elapsed, mount, type Drawing } from './drawing.js'
-import { TURN, bodyRadius, discRadius, drawnChildren, fineGrid, orbitNames, paintPlate, rimLabels, rimNumerals, rootRadius, type Plate, type SkyRing, type Star } from './orbit.js'
+import { TURN, bodyRadius, discRadius, drawnChildren, fineGrid, orbitNames, paintPlate, rimLabels, rimNumerals, rootRadius, zoomPlate, type Plate, type SkyRing, type Star } from './orbit.js'
 
 /** The least distance between two rings' labels. */
 const RING_LABEL = 34
@@ -80,7 +80,7 @@ export function skyLayout(model: FamilyModel, width: number, height: number): Pl
   const labels = narrow ? [] : rimLabels(stars, model, cx, cy, R, width, height)
   const numerals = narrow ? rimNumerals(stars, cx, cy, R) : []
   return {
-    width, height: narrow ? cy + R + 26 : height, cx, cy, R, narrow, stars, links: true, labels, numerals,
+    k: 1, width, height: narrow ? cy + R + 26 : height, cx, cy, R, narrow, stars, links: true, labels, numerals,
     arcs: orbitNames(stars, new Set([...labels, ...numerals].map(mark => mark.thread)), model, cx, cy, R),
     rings: timeRings(radius, model.now), grid: fineGrid(r0, R), scale: clearing(stars),
   }
@@ -89,8 +89,8 @@ export function skyLayout(model: FamilyModel, width: number, height: number): Pl
 export const sky: Drawing = {
   name: 'sky', label: 'Sky',
   reading: ['Centre: now', 'Rings: since it last moved', 'Arcs: who launched whom', 'Size: its mass of work', 'Colour: it needs you', 'Numbers: the order to look'],
-  draw(host, model, open) {
+  draw(host, model, open, view) {
     const { width, height } = mount(host, 'sky', model, open)
-    paintPlate(host, skyLayout(model, width, height), model)
+    paintPlate(host, zoomPlate(skyLayout(model, width, height), view), model)
   },
 }
