@@ -23,14 +23,13 @@ const px = (value: string): number => {
 }
 
 describe('the Desk reads at the board label size', () => {
-  it('sets a one-line row title at 14px or more, on a row of at least 34px', () => {
+  it('sets a row as one dense mono line: the slug at the meta size, on a row of 22px, cut by an ellipsis', () => {
     const name = rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-name')
-    expect(px(name['font-size'])).toBeGreaterThanOrEqual(14)
+    expect(name.font).toMatch(/var\(--type-meta\).*var\(--font-mono\)/)
     expect(name['white-space']).toBe('nowrap')
     expect(name['text-overflow']).toBe('ellipsis')
-    const row = rule(deskRows, '.kbn-col-list .kbn-card')
-    expect(px(row['min-height'])).toBeGreaterThanOrEqual(34)
-    expect(px(row['min-height'])).toBeLessThanOrEqual(36)
+    expect(rule(deskRows, '.kbn-col-list .kbn-card')['min-height']).toBe('var(--kbn-desk-row)')
+    expect(/--kbn-desk-row:\s*22px/.test(deskRows)).toBe(true)
   })
 
   it('steps the column heads down from the full-size 38px', () => {
@@ -60,8 +59,8 @@ describe('Drafts recede behind the live columns', () => {
   it('sets a draft title in regular weight and softer ink, with no box of its own', () => {
     const live = rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-name')
     const draft = rule(deskRows, '.kbn-col-list .kbn-card.kbn-card-drafts .kbn-card-name')
-    expect(Number(draft['font-weight'])).toBeLessThan(Number(live['font-weight']))
+    expect(Number(draft['font-weight'])).toBeLessThan(Number(/^(\d+)/.exec(live.font)![1]))
     expect(draft.color).toBe('var(--kbn-ink-soft)')
-    expect(rule(deskRows, '.kbn-col-list .kbn-card.kbn-card-drafts')['border-color']).toBe('transparent')
+    expect(rule(deskRows, '.kbn-col-list .kbn-card')['border']).toBe('0')
   })
 })

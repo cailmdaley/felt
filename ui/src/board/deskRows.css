@@ -1,44 +1,45 @@
-/* The Desk is an index of lines: state dot, title, counts and actions.
-   Reading a card or its report opens the document workspace. */
-.kbn-col-list { gap: 3px; padding: 6px; }
-.kbn-flight-band-list { gap: 3px; }
-.kbn-flight-caption { margin-bottom: 3px; }
-.kbn-flight-band + .kbn-flight-band { margin-top: 3px; padding-top: 6px; }
+/* The Desk is an index of lines: state dot, slug, counts and actions, set
+   dense in mono like the constitution page's rows. A family is its root's
+   line and the indented lines beneath it; no box, no rule. Reading a row or
+   its report opens the document workspace. */
+:root { --kbn-desk-row: 22px; --kbn-desk-indent: 16px; }
+.kbn-col-list { gap: 0; padding: 3px 6px; }
+.kbn-flight-band-list { gap: 0; }
+.kbn-flight-caption { margin-bottom: 1px; }
+.kbn-flight-band + .kbn-flight-band { margin-top: 2px; padding-top: 4px; }
 .kbn-col-list .kbn-card {
-  --kbn-row-ground: var(--kbn-paper);
+  --kbn-row-ground: transparent;
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 7px;
+  column-gap: 6px;
   row-gap: 0;
-  min-height: 35px;
+  min-height: var(--kbn-desk-row);
   box-sizing: border-box;
-  padding: 5px 6px 5px 8px;
+  padding: 0 4px 0 2px;
+  border: 0;
+  border-radius: 2px;
+  box-shadow: none;
+  font: var(--type-meta)/var(--leading-tight) var(--font-mono);
   background-color: var(--kbn-row-ground);
 }
+.kbn-col-list .kbn-card > .constitution-state-dot { width: 14px; height: var(--kbn-desk-row); }
+.kbn-col-list .kbn-card + .kbn-card { margin-top: 3px; }
 /* Drafts sit in the recess; live work carries the weight. */
-.kbn-col-list .kbn-card.kbn-card-drafts {
-  --kbn-row-ground: transparent;
-  border-color: transparent;
-  border-bottom-color: color-mix(in srgb, var(--kbn-ink) 9%, transparent);
-  border-radius: 0;
-  box-shadow: none;
-}
+.kbn-col-list .kbn-card.kbn-card-drafts { --kbn-row-ground: transparent; }
 .kbn-col-list .kbn-card.kbn-card-drafts:hover,
 .kbn-col-list .kbn-card.kbn-card-drafts.kbn-key-selected { --kbn-row-ground: color-mix(in srgb, var(--kbn-paper) 60%, transparent); }
 .kbn-col-list .kbn-card.kbn-card-drafts .kbn-card-name { font-weight: 400; color: var(--kbn-ink-soft); }
-.kbn-col-list .kbn-card:hover { --kbn-row-ground: var(--kbn-paper-bright); }
+.kbn-col-list .kbn-card:hover { --kbn-row-ground: color-mix(in srgb, var(--kbn-paper-bright) 70%, transparent); }
 .kbn-col-list .kbn-card.kbn-key-selected {
   --kbn-row-ground: var(--kbn-paper-bright);
-  border-color: color-mix(in srgb, var(--kbn-ink) 34%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kbn-ink) 45%, transparent);
 }
 .kbn-col-list .kbn-card .kbn-card-name {
   flex: 1 1 0;
   min-width: 0;
-  font-size: var(--type-row);
-  font-weight: 500;
-  line-height: var(--leading-tight);
+  font: 600 var(--type-meta)/var(--leading-tight) var(--font-mono);
   display: block;
   white-space: nowrap;
   overflow: hidden;
@@ -83,7 +84,8 @@
 .kbn-card-stale-mark { flex-shrink: 0; color: var(--kbn-ink-muted); font-size: var(--type-meta); }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .kbn-col-list .kbn-card { min-height: 44px; padding: 6px 9px; }
+  :root { --kbn-desk-row: 32px; --kbn-desk-indent: 12px; }
+  .kbn-col-list .kbn-card { padding: 0 6px 0 4px; }
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
   .kbn-folio .kbn-folio-name { font-size: var(--type-note); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; }
