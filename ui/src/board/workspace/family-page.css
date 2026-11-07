@@ -45,3 +45,4 @@
   .ws-family-all { justify-self: end; align-self: center; padding: 0 0 8px; }
   .ws-family .kbn-thread-row { min-height: var(--ws-phone-target); }
 }
+.ws-family-announce { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

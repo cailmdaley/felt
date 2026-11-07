@@ -80,6 +80,8 @@ export function registerNavigationJourneys(test) {
     await shot('05-chevron-to-sibling')
     await page.goBack()
     await named(page, 'Choose the response cut')
+    await checkBack('Constitution')
+    await page.goBack()
     await checkBack('Desk')
     // The page announces its selection once the channel's body and receipts settle.
     await page.waitForFunction(() => document.querySelector('.ws-reader .ws-sr-only')?.textContent === 'Constitution')

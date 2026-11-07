@@ -92,7 +92,6 @@ export function registerHeaderBarJourneys(test) {
       ]
       for (const [name, verbs] of visits) {
         const tree = await familyTree(page)
-        if (name === 'Accepted pilot') await tree.locator('summary').filter({ hasText: 'Archived' }).click()
         await tree.locator('.kbn-thread-row').filter({ has: page.getByText(name, { exact: true }) }).click()
         await named(page, name)
         assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
@@ -374,7 +373,6 @@ export function registerHeaderBarJourneys(test) {
         await show()
         assert.equal(await rootAnchor().count(), 1)
         assert.equal(await rootAnchor().getAttribute('aria-current'), 'page')
-        if (device === 'phone') await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
       }
     }, viewport)
     for (const scheme of ['light', 'dark']) test(`One band (${device}, ${scheme}): long name, icons and unified settings`, async page => {
