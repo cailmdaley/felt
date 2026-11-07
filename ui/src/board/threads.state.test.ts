@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { card, conversations } from './testFixtures.js'
 import { ThreadIndex, threadState } from './threads.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
@@ -50,7 +50,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
   })
   it('the constitution\'s page names each state, the set-aside behind its fold', () => {
     const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-    const page = new FamilyPage(vi.fn(), conversations(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, placeAt(hub), vi.fn()); page.update(hub, index)
+    const page = new FamilyPage(conversations(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }) }, placeAt(hub), () => {}); page.update(hub, index)
     expect(page.el.querySelector('.fp-aside')!.textContent).toBe('1 seat · 1 resting')
     page.el.querySelector('.fp-aside')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
     // A thread in flight is named by the divider it sits under; one set aside, by its own word.

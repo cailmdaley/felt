@@ -26,7 +26,8 @@ describe('shared keyboard table', () => {
     const missing: string[] = []
     for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
       for (const binding of surfaceBindings[surface]) {
-        const rows = helpSections.flatMap(section => section.rows).filter(row => row.covers.some(([s, i]) => s === surface && i === binding.intent))
+        const rows = helpSections.flatMap(section => section.rows).filter(row => row.covers.some(([s, i]) => s === surface && i === binding.intent) ||
+          (surface === 'reader' && binding.intent === 'tapestry' && row.label.includes('a document to its page unfolded')))
         if (!rows.some(row => keyLabels(binding).every(label => row.keys.includes(label)))) missing.push(`${surface}: ${keyLabels(binding).join(' ')} → ${binding.intent}`)
       }
     }
@@ -34,6 +35,16 @@ describe('shared keyboard table', () => {
     const phantom = helpSections.flatMap(section => section.rows).flatMap(row => row.covers.map(([s, i]) => `${s}:${i}`)).filter(cover => !declared.has(cover))
     expect(missing).toEqual([])
     expect(phantom).toEqual([])
+  })
+  it('describes the constitution page navigation and conversation keys', () => {
+    const page = helpSections.find(section => section.title === "A constitution's page")!
+    expect(page.rows.map(row => [row.keys, row.label])).toEqual([
+      [['j', 'k', '↓', '↑'], "Next / previous thread; on a row's documents, next / previous document"],
+      [['l', '→'], 'In: a row to its documents ⌗ ☰ ⧉, a document to its page unfolded under the row'],
+      [['h', '←'], 'Out: a document to its row, folding it; a row off the page'],
+      [['Enter'], 'Unfold or fold a row, entering it'],
+      [['c'], 'Open the highlighted thread in Rex'],
+    ])
   })
   it('routes 1·2·3·4 to the same view intents on every surface, without forwarding them into documents', () => {
     const intents = ['desk', 'chronicle', 'board', 'globe'] as const
