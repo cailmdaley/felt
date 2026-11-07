@@ -129,7 +129,7 @@ export function registerMapViewJourneys(test) {
     }
   })
 
-  test('The Globe names every thread of a crowded family, whole and clear of each other, at half a screen', async page => {
+  test('The Globe names every live thread of a crowded family, whole and clear of each other, at half a screen, and leaves the archived quiet', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
     await page.locator('.kbn-desk .kbn-card').first().waitFor()
     await page.keyboard.press('2')
@@ -138,8 +138,11 @@ export function registerMapViewJourneys(test) {
     await page.evaluate(() => window.__harness.modal.voice.onRex({ fiber_id: 'hub', origin: 'umber-workstation' }))
     await until(page, () => document.querySelector('.globe-peek-name')?.textContent)
     await page.waitForTimeout(1400)
-    const names = await page.evaluate(() => [...document.querySelectorAll('.globe-name[data-thread]')].map(name => { const { left, top, right, bottom } = name.getBoundingClientRect(); return { left, top, right, bottom, text: name.textContent } }))
-    assert.ok(names.length >= 16, `${names.length} threads named`)
+    const names = await page.evaluate(() => [...document.querySelectorAll('.globe-name[data-thread]')].map(name => { const { left, top, right, bottom } = name.getBoundingClientRect(); return { left, top, right, bottom, text: name.getAttribute('aria-label') } }))
+    const named = label => names.some(name => name.text.startsWith(`${label}, `))
+    const live = ['Staging and production runs', 'Weekly coworking', 'Production on the second site', 'Validation repository steward', 'Pipeline repository steward', 'Why the new shapes couple more to PSF model errors', 'Port the validation workflow to the new runner', 'Learn from the blinded full-area run', 'Non-tomographic mock through validation', 'Shear response on the deep tiles', 'Footprint and masks for the release', 'Photometric redshift calibration', 'Notes for the collaboration meeting', 'Calibration of the star catalogue']
+    for (const label of live) assert.ok(named(label), `${label} is named`)
+    for (const label of ['Blinded cosmology on the growing catalogue', 'Add the paper figures to validation', 'Check the second site for blind records', 'Pilot on the early footprint', 'Ingest the new exposures']) assert.ok(!named(label), `archived ${label} stays quiet`)
     for (const [n, a] of names.entries()) for (const b of names.slice(n + 1)) assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.text} overlaps ${b.text}`)
   }, { width: 800, height: 1000 })
 
