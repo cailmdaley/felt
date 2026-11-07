@@ -305,7 +305,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     end
   end
 
-  test "a worker leaves the view behind another window with its program running, and opens back into a window",
+  test "a worker leaves the view behind another window with its program running, opens back into a window, and stops while hidden",
        %{root: root} do
     # Not macOS, so the open never reaches for the operator's Rex app.
     Env.put_app_env(:os_type, {:unix, :linux})
@@ -357,6 +357,20 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert placed["placement"] == "placed"
     assert length(blocks) == 2
     assert {_, 0} = System.cmd("kill", ["-0", pid])
+
+    # Hidden again, the worker stops: its block and program end, the other window stays.
+    assert {:ok, _} =
+             Rex.call(@runner, "session.focus_window", %{"window_id" => other}, session: sid)
+
+    assert {:ok, %{}} = Shuttle.RexView.sweep(@runner, %{}, grace_ms: 0)
+    assert {:ok, blocks} = Rex.blocks(@runner, sid)
+    assert %{"placement" => "detached"} = Enum.find(blocks, &(&1["block_id"] == bid))
+    assert :ok = Backend.close(@runner, name)
+    assert {:ok, [%{"placement" => "placed"}]} = Rex.blocks(@runner, sid)
+    assert {:ok, [%{"window_id" => ^other}]} = Rex.windows(@runner, sid)
+    await(fn -> match?({_, 1}, System.cmd("kill", ["-0", pid], stderr_to_stdout: true)) end)
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    refute Map.has_key?(bindings, name)
   end
 
   test "a 120-character fiber leaf launches with bounded display and block labels", %{root: root} do

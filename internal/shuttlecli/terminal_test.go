@@ -67,7 +67,7 @@ case "$*" in
     cat >/dev/null
     if [ -n "$REX_TEST_FIBER" ]; then cp "$REX_TEST_FIBER" "$REX_TEST_SNAPSHOT" || exit 1; fi
     printf '{}\n' ;;
-  *'session.close_window -') cat >> "$REX_TEST_CALLS"; printf '\n{}\n' ;;
+  *'session.close_window -'|*'block.close -') cat >> "$REX_TEST_CALLS"; printf '\n{}\n' ;;
   *) exit 99 ;;
 esac
 `
@@ -77,7 +77,7 @@ esac
 	env.Set("REX_TEST_CALLS", log)
 	env.Set("REX_TEST_SESSIONS", sessions)
 	env.Set("REX_TEST_EXIT", string(rune('0'+exit)))
-	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound"},{"block_id":"block:own"}]}`)
+	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound","window_id":"window:main"},{"block_id":"block:own","window_id":"window:main"}]}`)
 	return log
 }
 
@@ -266,7 +266,7 @@ func TestRexBindingReadAndTerminalObservations(t *testing.T) {
 	})
 	before, _ := os.ReadFile(path)
 	log := stubRex(t, env, `{"sessions":[{"session_id":"session:bound","label":"renamed display"},{"session_id":"session:recover","label":"`+other+`"}]}`, 0)
-	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound"},{"block_id":"block:recover","label":"`+other+`"}]}`)
+	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound","window_id":"window:own"},{"block_id":"block:recover","label":"`+other+`","window_id":"window:own"}]}`)
 	r := &rexTerminal{a: newApp(env)}
 	if has, err := r.Has(name); !has || err != nil {
 		t.Fatalf("renamed binding %v %v", has, err)
@@ -315,6 +315,30 @@ func TestRexBindingReadAndTerminalObservations(t *testing.T) {
 	calls, _ = os.ReadFile(log)
 	if strings.Contains(string(calls), "session.destroy") || !strings.Contains(string(calls), `session.close_window -`) || !strings.Contains(string(calls), `{"window_id":"window:own"}`) {
 		t.Fatalf("a family member must close only its window: %s", calls)
+	}
+	// A worker the daemon took out of view is detached: Rex lists its block
+	// without a window, so only that block closes, or the session it is alone in.
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound","placement":"detached"},{"block_id":"block:sibling","window_id":"window:sibling"},{"block_id":"block:hidden","placement":"detached"}]}`)
+	if err := r.Kill(name); err != nil {
+		t.Fatal(err)
+	}
+	calls, _ = os.ReadFile(log)
+	if strings.Contains(string(calls), "session.destroy") || strings.Contains(string(calls), "session.close_window") || !strings.Contains(string(calls), "session:bound block.close -\n"+`{"block_id":"block:bound"}`) {
+		t.Fatalf("a detached family member must close only its block: %s", calls)
+	}
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound","placement":"detached"}]}`)
+	if err := r.Kill(name); err != nil {
+		t.Fatal(err)
+	}
+	calls, _ = os.ReadFile(log)
+	if !strings.Contains(string(calls), "session:bound session.destroy -") || strings.Contains(string(calls), "block.close") {
+		t.Fatalf("a detached worker alone in its session must take the session: %s", calls)
 	}
 	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound"}]}`)
 	after, _ := os.ReadFile(path)

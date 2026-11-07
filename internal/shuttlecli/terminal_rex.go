@@ -195,6 +195,8 @@ func (r *rexTerminal) boundBlockPresent(binding rexBinding) (bool, error) {
 	return false, nil
 }
 
+// rexBlock is one entry of a session's block inventory. Rex omits window_id for
+// a detached block, one the daemon took out of view, so WindowID is "" there.
 type rexBlock struct {
 	BlockID  string `json:"block_id"`
 	WindowID string `json:"window_id"`
@@ -234,7 +236,8 @@ func (r *rexTerminal) Kill(name string) error {
 }
 
 // closeBound ends one worker. A family shares a session, so a worker with other
-// windows beside it closes only its own window; the daemon retires an empty session.
+// windows beside it closes only its own window, and a detached worker, which has
+// no window, only its own block; the daemon retires an empty session.
 func (r *rexTerminal) closeBound(binding rexBinding) error {
 	blocks, err := r.blocks(binding.SessionID)
 	if err != nil {
@@ -249,29 +252,28 @@ func (r *rexTerminal) closeBound(binding rexBinding) error {
 	if !present {
 		return nil
 	}
+	// Another block shares the session outside this worker's window; a detached
+	// worker has no window, so every other block is outside it.
 	for _, block := range blocks {
-		shared = shared || block.WindowID != window
+		shared = shared || block.BlockID != binding.BlockID && (window == "" || block.WindowID != window)
 	}
-	if !shared {
-		return r.destroy(binding.SessionID)
+	switch {
+	case !shared:
+		return r.call(binding.SessionID, "session.destroy", map[string]string{})
+	case window == "":
+		return r.call(binding.SessionID, "block.close", map[string]string{"block_id": binding.BlockID})
+	default:
+		return r.call(binding.SessionID, "session.close_window", map[string]string{"window_id": window})
 	}
-	return r.closeWindow(binding.SessionID, window)
 }
 
-func (r *rexTerminal) closeWindow(sid, window string) error {
-	body, err := json.Marshal(map[string]string{"window_id": window})
+// call sends one session-scoped request whose target may already be gone.
+func (r *rexTerminal) call(sid, method string, args map[string]string) error {
+	body, err := json.Marshal(args)
 	if err != nil {
 		return err
 	}
-	_, err = r.command(string(body), "api", "call", "-s", sid, "session.close_window", "-")
-	if errors.Is(err, errRexAbsent) || errors.Is(err, errRexNotFound) {
-		return nil
-	}
-	return err
-}
-
-func (r *rexTerminal) destroy(sid string) error {
-	_, err := r.command("{}", "api", "call", "-s", sid, "session.destroy", "-")
+	_, err = r.command(string(body), "api", "call", "-s", sid, method, "-")
 	if errors.Is(err, errRexAbsent) || errors.Is(err, errRexNotFound) {
 		return nil
 	}

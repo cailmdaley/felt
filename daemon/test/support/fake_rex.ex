@@ -160,12 +160,16 @@ defmodule Shuttle.Test.FakeRex do
         {{"session not found", 3}, state}
 
       session ->
-        session =
-          session
-          |> Map.put(:windows, Enum.reject(windows(session), &(&1["window_id"] == wid)))
-          |> Map.put(:blocks, Enum.reject(session.blocks, &(&1["window_id"] == wid)))
+        if Enum.any?(windows(session), &(&1["window_id"] == wid)) do
+          session =
+            session
+            |> Map.put(:windows, Enum.reject(windows(session), &(&1["window_id"] == wid)))
+            |> Map.put(:blocks, Enum.reject(session.blocks, &(&1["window_id"] == wid)))
 
-        {%{}, put_in(state, [:sessions, sid], session)}
+          {%{}, put_in(state, [:sessions, sid], session)}
+        else
+          {{"window #{wid} not found (status=404 code=not_found)", 3}, state}
+        end
     end
   end
 

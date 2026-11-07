@@ -3,10 +3,11 @@ defmodule Shuttle.RexView do
   Keeps Rex's view to what is in focus, the workers asking something, and the
   workers running a turn. Any other window this daemon opened, for a worker
   waiting at its prompt, a resumed conversation or a tmux viewer, leaves the
-  view once it has stood behind its session's active window for `grace_ms`:
-  its block is detached (`Shuttle.Terminal.Rex.hide/3`), so the window closes
-  and the program in it runs on. A hidden worker that starts a turn or raises
-  an ask comes back, and a click or an open puts it back in a window of its own.
+  view once it has stood behind its session's active window for `grace_ms`
+  (30 minutes): its block is detached (`Shuttle.Terminal.Rex.hide/3`), so the
+  window closes and the program in it runs on. A hidden worker that starts a
+  turn or raises an ask comes back, a click or an open puts it back in a window
+  of its own, and stopping it closes its block.
 
   Each session keeps the window it shows. Windows this daemon did not open
   (a human's shell, hark, Remote Control) are never touched.
@@ -28,7 +29,7 @@ defmodule Shuttle.RexView do
   def init(opts) do
     state = %{
       every_ms: Keyword.get(opts, :every_ms, 30_000),
-      grace_ms: Keyword.get(opts, :grace_ms, 120_000),
+      grace_ms: Keyword.get(opts, :grace_ms, 1_800_000),
       behind: %{}
     }
 
