@@ -81,14 +81,17 @@ export function registerMapViewJourneys(test) {
   }, { width: 390, height: 844 }, 'reduce', true)
 
   test('`l` before the tapestry has been read waits for it, rather than opening the newest file', async page => {
-    await page.goto(`${url.replace('example=threads', 'example=families')}#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub`)
-    await tree(page).locator('.fp-row').first().waitFor()
+    // The page reads every row's tapestry as it paints, so the reads are held from before it opens.
+    await page.goto(url.replace('example=threads', 'example=families'))
+    await page.locator('.kbn-desk .kbn-card').first().waitFor()
     await page.evaluate(() => {
       const fetched = window.fetch, held = []
       window.__landReads = () => held.splice(0).forEach(land => land())
       window.fetch = (input, init) => /tapestry\.html/.test(String(input)) ? new Promise(land => held.push(() => land(fetched(input, init)))) : fetched(input, init)
+      location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub'
     })
-    await row(page, 'Pipeline repository steward').click()
+    await tree(page).locator('.fp-row').first().waitFor()
+    await row(page, 'Pipeline repository steward').locator('.fp-name').click()
     const map = await page.evaluate(() => location.hash)
     await page.keyboard.press('l')
     await page.waitForTimeout(200)
