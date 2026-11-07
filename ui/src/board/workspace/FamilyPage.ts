@@ -6,6 +6,7 @@ import { bindDrawnPage } from '../FileViewerPanel.js'
 import type { Conversations } from '../conversationOpening.js'
 import { threadKey, type ThreadIndex } from '../threads.js'
 import { fiberKey } from './documents.js'
+import type { WorkerActions } from './workerActions.js'
 import './family-page.css'
 
 /** Sent files a thread shows before the earlier ones fold behind a count. */
@@ -72,6 +73,10 @@ export class FamilyPage {
   private readonly place: MapPlace
   private readonly disposed: () => void
   private readonly sighted: () => void
+  /** Builds a thread's own worker line: its opening message, Resume and New session. */
+  workerActions?: (card: KanbanCard) => WorkerActions
+  /** Each unfolded thread's worker line, kept across repaints so a draft survives a poll. */
+  private readonly actions = new Map<string, WorkerActions>()
 
   /**
    * `open` shows a page of a thread on the stage; `conversations` moves Rex
@@ -259,6 +264,18 @@ export class FamilyPage {
     const held = row.querySelector<HTMLElement>('.fp-held')!
     held.hidden = !open
     if (open) this.fillHeld(held, thread)
+    this.seatActions(held, thread, open)
+  }
+  /** An unfolded thread's own worker line ends what it holds; the page's own constitution has its line in the band. */
+  private seatActions(held: HTMLElement, thread: MapThread, open: boolean): void {
+    let line = this.actions.get(thread.key)
+    if (!open || !this.workerActions || thread.key === this.model!.current) {
+      line?.el.remove()
+      return
+    }
+    if (!line) { line = this.workerActions(thread.card); this.actions.set(thread.key, line) }
+    line.update(thread.card)
+    if (line.el.parentElement !== held || held.lastElementChild !== line.el) held.append(line.el)
   }
   /** What a thread holds, in the one order every surface keeps: its tapestry or report, its constitution, its sent files oldest to newest. */
   private fillHeld(held: HTMLElement, thread: MapThread): void {
@@ -318,7 +335,7 @@ export class FamilyPage {
 
   private clicked(event: MouseEvent): void {
     const target = event.target as Element, model = this.model
-    if (!model || event.detail > 1) return
+    if (!model || event.detail > 1 || target.closest('.ws-worker-acts')) return
     const held = target.closest<HTMLElement>('[data-held]'), earlier = target.closest<HTMLElement>('[data-earlier]'), rex = target.closest<HTMLElement>('[data-converse]')
     if (held) { this.open(model.threads.get(held.dataset.owner!)!.card, held.dataset.held); return }
     if (earlier) { this.toggle(`earlier:${earlier.dataset.earlier}`); return }
@@ -410,6 +427,8 @@ export class FamilyPage {
   }
   dispose(): void {
     this.suspend()
+    for (const line of this.actions.values()) line.dispose()
+    this.actions.clear()
     this.disposed()
   }
 }
