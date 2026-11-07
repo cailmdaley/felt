@@ -857,7 +857,7 @@ export class KanbanModal {
     find.className = 'kbn-viewtabs-find'
     this.findEl = document.createElement('input')
     this.findEl.type = 'search'
-    this.findEl.placeholder = 'Find a constitution or transcript'
+    this.findEl.placeholder = 'Find'
     this.findEl.setAttribute('aria-label', 'Find a constitution or transcript')
     this.findEl.addEventListener('focus', () => this.workspace?.find(this.activeViewId === 'shelf'))
     this.findEl.addEventListener('input', () => this.workspace?.find(this.activeViewId === 'shelf'))
