@@ -362,15 +362,24 @@ defmodule Shuttle.Voice do
           {{:error, "voice reconciliation timed out"}, state.snapshot}
 
         {:error, reason} ->
-          enabled =
+          settings =
             case Config.read() do
-              {:ok, settings} -> settings["enabled"]
-              _ -> false
+              {:ok, settings} ->
+                settings
+
+              _ ->
+                %{
+                  "enabled" => false,
+                  "follow" => state.snapshot.follow,
+                  "system_audio" => state.snapshot.system_audio
+                }
             end
 
           snapshot = %{
             state.snapshot
-            | enabled: enabled,
+            | enabled: settings["enabled"],
+              follow: settings["follow"],
+              system_audio: settings["system_audio"],
               muted: Recorder.voice_muted?(state.capture_opts),
               state: "failed",
               error: inspect(reason)

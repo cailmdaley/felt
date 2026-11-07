@@ -149,6 +149,7 @@ defmodule Shuttle.RexFocusTest do
 
     {watcher, active, pids} =
       watcher(c.tmp_dir, true,
+        poll_ms: 60_000,
         title: fn -> Agent.get(title, & &1) end,
         bindings: fn -> {:ok, all_bindings} end,
         fibers: fn -> all_fibers end
