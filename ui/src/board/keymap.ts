@@ -157,7 +157,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['b'], 'Go to its orchestrator', on('reader', 'orchestrator')),
   ] },
   { title: 'Fiber page', rows: [
-    row(['j', 'k', '⌥↓', '⌥↑'], 'Next / previous constitution', on('reader', 'nextChannel', 'prevChannel')),
+    row(['j', 'k', '⌥↓', '⌥↑'], 'Next / previous constitution in Desk order (⌥ only on a constitution\'s page)', on('reader', 'nextChannel', 'prevChannel')),
     row(['⇧J', '⇧K'], 'Next / previous Desk column', on('reader', 'nextGroup', 'prevGroup')),
     row(['h', '←', '‹', '⌥←'], 'Back a page', on('reader', 'back')),
     row(['↓', '↑', 'd', 'u', 'Space', '⇧Space'], 'Scroll: line, half page, page', on('reader', 'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp')),
