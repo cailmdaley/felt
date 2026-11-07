@@ -72,14 +72,14 @@ const assertLifecycleInk = async (header, scheme) => {
     }
   }
 }
-async function captureMeetingState(page, scene, width, scheme) {
+async function captureListenState(page, scene, width, scheme) {
   if (!process.env.WORKSPACE_SHOTS) return
   const height = width < 500 ? 844 : 900
   await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
   await page.waitForFunction(width => window.innerWidth === width, width)
   await page.mouse.move(width - 2, height - 2)
   await page.screenshot({
-    path: resolve(process.env.WORKSPACE_SHOTS, `meeting-${scene}-${width}-${scheme}.png`),
+    path: resolve(process.env.WORKSPACE_SHOTS, `listen-${scene}-${width}-${scheme}.png`),
     animations: 'disabled',
   })
 }
@@ -228,59 +228,58 @@ export function registerHeaderBarJourneys(test) {
     const header = page.locator('.ws-stage-band .ws-band-head')
     for (const width of [1440, 1000, 701, 390, 320]) {
       await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
-      const arm = header.locator('.kbn-ctl-meet-arm')
+      const arm = header.locator('.listen-mic')
       await arm.scrollIntoViewIfNeeded()
-      const [band, control] = await Promise.all([header.boundingBox(), header.locator('.kbn-ctl-meet').boundingBox()])
+      const [band, control] = await Promise.all([header.boundingBox(), header.locator('.listen-control').boundingBox()])
       assert.ok(control.x >= band.x - 1 && control.x + control.width <= band.x + band.width + 1, `Listen sits inside the band at ${width}: ${JSON.stringify({ band, control })}`)
       assert.equal(await arm.getAttribute('aria-label'), 'Listen')
       if (process.env.WORKSPACE_SHOTS && [1440, 390, 320].includes(width)) {
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
-        await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `meeting-band-control-${width}-light.png`) })
+        await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `listen-band-control-${width}-light.png`) })
       }
       await header.evaluate(el => { el.scrollLeft = 0 })
     }
   }, { width: 1440, height: 900 })
-  test('Listen reads the meeting that holds the mic, with Stop in its menu', async page => {
-    await page.goto(`${url}&meeting=joined`)
+  test('Listen keeps its pin while another card is viewed, with Stop in its menu', async page => {
+    await page.goto(`${url}&voice=pinned`)
     await openRoot(page)
     const band = page.locator('.ws-stage-band')
-    const chip = band.locator('.kbn-ctl-meet-arm')
-    await chip.waitFor({ state: 'visible' })
-    assert.equal(await band.locator('.ws-voice-strip').getAttribute('data-mode'), 'meeting')
-    assert.equal(await band.locator('.kbn-ctl-meet').count(), 1)
-    await band.locator('.kbn-ctl-meet-dropdown').click()
+    await band.locator('.listen-mic').waitFor({ state: 'visible' })
+    assert.equal(await band.locator('.ws-voice-strip').getAttribute('data-mode'), 'pinned')
+    assert.match(await band.locator('.ws-voice-strip').textContent(), /^📌 /)
+    assert.equal(await band.locator('.listen-control').count(), 1)
+    await band.locator('.listen-dropdown').click()
     assert.ok(await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).isEnabled())
-    assert.ok(await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).isEnabled())
+    assert.ok(await page.getByRole('menuitem', { name: "Today's transcript", exact: true }).isEnabled())
     await page.keyboard.press('Escape')
-    assert.equal(await page.locator('.ws-stage-band .kbn-detail-transcript').count(), 0)
     await page.locator('.ws-band-leave').click()
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
     const foreign = page.locator('.ws-stage-band')
-    assert.equal(await foreign.locator('.ws-voice-strip').getAttribute('data-mode'), 'meeting')
+    assert.equal(await foreign.locator('.ws-voice-strip').getAttribute('data-mode'), 'pinned')
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-      await captureMeetingState(page, 'single-recording-menu', width, 'light')
+      await captureListenState(page, 'single-recording-menu', width, 'light')
     }
-    if (!await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).isVisible()) await foreign.locator('.kbn-ctl-meet-dropdown').click()
+    await foreign.locator('.listen-dropdown').click()
     await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).click()
-    await page.waitForFunction(() => window.__harness.requests.some(r => r.url?.includes('/meeting/stop')))
+    await page.waitForFunction(() => document.querySelector('.ws-stage-band .listen-mic')?.getAttribute('aria-label') === 'Listen')
   }, { width: 1000, height: 900 })
   test('Listen turns following on, the mic mutes it, and Stop in the menu ends it', async page => {
     await page.goto(url)
     await openRoot(page)
     const band = page.locator('.ws-stage-band')
-    const chip = band.locator('.kbn-ctl-meet-arm')
+    const chip = band.locator('.listen-mic')
     await chip.waitFor({ state: 'visible' })
     assert.equal(await chip.getAttribute('aria-label'), 'Listen')
     await chip.click()
     await page.waitForFunction(() => document.querySelector('.ws-stage-band .ws-voice-strip')?.dataset.mode === 'following')
     await chip.click()
-    await page.waitForFunction(() => document.querySelector('.ws-stage-band .kbn-ctl-meet-muted'))
-    await band.locator('.kbn-ctl-meet-dropdown').click()
+    await page.waitForFunction(() => document.querySelector('.ws-stage-band .listen-muted'))
+    await band.locator('.listen-dropdown').click()
     await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).click()
-    await page.waitForFunction(() => document.querySelector('.ws-stage-band .kbn-ctl-meet-arm')?.getAttribute('aria-label') === 'Listen' && document.querySelector('.ws-stage-band .ws-voice-strip')?.hidden)
+    await page.waitForFunction(() => document.querySelector('.ws-stage-band .listen-mic')?.getAttribute('aria-label') === 'Listen' && document.querySelector('.ws-stage-band .ws-voice-strip')?.hidden)
     const posts = await page.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.endsWith('/api/v1/voice')).map(r => JSON.parse(r.body)))
-    assert.deepEqual(posts, [{ enabled: true, muted: false }, { muted: true }, { enabled: false }])
+    assert.deepEqual(posts, [{ enabled: true, muted: false, source: 'desktop', recorder: 'local' }, { muted: true, recorder: 'local' }, { enabled: false, recorder: 'local' }])
   }, { width: 1000, height: 900 })
   test('× leaves the band for the Desk and writes nothing', async page => {
     await page.goto(url)

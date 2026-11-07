@@ -32,7 +32,7 @@ async function open(p, backend) {
 async function headerFits(p) {
   const geometry = await band(p).locator('.ws-band-head').evaluate(header => {
     const bounds = header.getBoundingClientRect()
-    const controls = [...header.querySelectorAll('.kbn-ctl-meet,.kbn-ctl-verdict,.ws-band-settings,.ws-band-leave,.ws-band-identity')]
+    const controls = [...header.querySelectorAll('.listen-control,.kbn-ctl-verdict,.ws-band-settings,.ws-band-leave,.ws-band-identity')]
       .filter(el => el.checkVisibility()).map(el => ({ name: el.className, rect: el.getBoundingClientRect().toJSON() }))
     return { bounds: bounds.toJSON(), controls, opening: header.querySelectorAll('.ws-band-open').length }
   })

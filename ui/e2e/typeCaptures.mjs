@@ -1,5 +1,5 @@
 // Captures the board's type across its surfaces: the Desk, a constitution
-// under its band, the meeting pane and the settings sheet, at 1440 and 390 in
+// under its band, pinned Listen and the settings sheet, at 1440 and 390 in
 // both colour schemes.
 //
 //   npm run harness:board && node e2e/typeCaptures.mjs <out-dir>
@@ -39,10 +39,10 @@ const surfaces = {
     await page.locator('.ws-stage-band').getByRole('button', { name: 'Constitution', exact: true }).click()
     await page.locator('.ws-selected .ws-fiber-prose').waitFor()
   },
-  async meeting(page) {
-    await page.goto(`${base}?example=threads&meeting=joined&long-title`)
+  async listening(page) {
+    await page.goto(`${base}?example=threads&voice=pinned&long-title`)
     await openRoot(page)
-    await page.locator('.ws-stage-band .ws-voice-strip[data-mode="meeting"]').first().waitFor({ timeout: 5000 }).catch(() => {})
+    await page.locator('.ws-stage-band .ws-voice-strip[data-mode="pinned"]').first().waitFor({ timeout: 5000 })
   },
   async settings(page) {
     await page.goto(`${base}?example=threads`)

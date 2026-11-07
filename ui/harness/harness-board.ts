@@ -37,7 +37,7 @@ import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures } from './thr
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
-import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, LONG_WORKSPACE_NAME, workspaceExample } from './workspace-fixtures.js'
+import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_UID, LONG_WORKSPACE_NAME, workspaceExample } from './workspace-fixtures.js'
 import { WORKSPACE_LATEST_SESSION, transcriptSearchHits } from './transcript-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
@@ -1429,7 +1429,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       { t: iso(-45_000), speaker: 'S1', text: 'The covariance looks fine.', ...voiceTarget, launch: 'voice-harness' },
       { t: iso(-30_000), speaker: 'me', text: 'Save the comparison for tomorrow.', fiber_id: 'research/next', origin: WORKSPACE_HOST, name: 'Next steps', launch: 'voice-harness' },
     ]
-    return json({ date: iso(0).slice(0, 10), rows: rows.filter(row => !filter || row.fiber_id === filter || (filter === '01KVBR6M1GJ0ZRM29956V023R2' && row.fiber_id === WORKSPACE_ID)), recorder: recorderHost })
+    return json({ date: iso(0).slice(0, 10), rows: rows.filter(row => !filter || row.fiber_id === filter || (filter === WORKSPACE_UID && row.fiber_id === WORKSPACE_ID)), recorder: recorderHost })
   }
   // The board's composite feed.
   if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)

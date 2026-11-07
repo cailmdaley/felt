@@ -1,88 +1,122 @@
-// Browser voice journeys use the real board and a synthetic recorder.
+// Headless Listen journeys over the real board, synthetic daemon and browser mic.
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 
-const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args: ['--allow-file-access-from-files'] })
+const out = process.env.LISTEN_SCREENSHOT_DIR
+if (out) await mkdir(out, { recursive: true })
+const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
+// A private headless Chrome supplies fake audio; no operator microphone is opened.
+const browser = await getBrowser({
+  sharedBrowser: { status: async () => ({ running: false }) },
+  executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  args: ['--allow-file-access-from-files', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+})
+async function open(page, state) {
+  await page.goto(`${url}&voice=${state}`)
+  await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header) .kbn-card-name').click()
+  await page.locator('.ws-stage-band .listen-mic').waitFor()
+}
+const band = page => page.locator('.ws-stage-band')
+const mic = page => band(page).locator('.listen-mic')
+const menu = page => band(page).locator('.listen-dropdown').click()
+const shot = async (page, name) => { if (out) await page.screenshot({ path: resolve(out, `listen-${name}.png`), animations: 'disabled' }) }
 try {
-  for (const scheme of ['light', 'dark']) {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme })
+  for (const state of ['off', 'following', 'pinned', 'muted', 'failed', 'phone']) {
+    const phone = state === 'phone'
+    const context = await browser.newContext({ viewport: phone ? { width: 390, height: 844 } : { width: 1440, height: 900 }, hasTouch: phone, isMobile: phone, timezoneId: 'Europe/Paris' })
     const page = await context.newPage()
-    await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=music`)
-    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Music"])`).first().click()
-    const band = page.locator('.ws-stage-band')
-    const arm = band.locator('.kbn-ctl-meet-arm')
-    await arm.waitFor()
-    await page.evaluate(() => {
-      const voice = window.__harness.modal.voice
-      voice.dispose()
-      voice.status = { available: true, enabled: true, muted: false, state: 'listening', target: { fiber_id: 'other', origin: 'other', name: 'An exceptionally long constitution name that must not crowd the band' }, last: null, error: null }
-      voice.notify()
-    })
-    await band.locator('.kbn-ctl-meet-arm.kbn-ctl-meet-on').waitFor()
-    const geometry = await page.evaluate(() => {
-      const el = document.querySelector('.ws-stage-band .ws-voice-strip')
-      return { scroll: el.scrollWidth, client: el.clientWidth, text: el.textContent }
-    })
-    // A card the board does not hold is named by its name; one it holds, by its slug.
-    assert.match(geometry.text, /^An exceptionally long/)
-    assert.ok(geometry.scroll > geometry.client, 'long name is ellipsized')
-    assert.equal(await band.locator('.kbn-ctl-meet button').count(), 2, 'the mic is one toggle and its menu')
-    assert.equal(await arm.getAttribute('aria-pressed'), 'false')
-    await band.locator('.kbn-ctl-meet-dropdown').click()
-    assert.ok(await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).isVisible(), 'Stop is in the menu')
-    assert.ok(await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).isVisible(), 'the menu opens the transcript')
-    await mkdir(process.env.HARK_SCREENSHOT_DIR || '/tmp', { recursive: true })
-    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-${scheme}.png` })
-    await page.keyboard.press('Escape')
-    await page.evaluate(() => {
-      const voice = window.__harness.modal.voice
-      voice.status = { ...voice.status, muted: true }
-      voice.notify()
-    })
-    await band.locator('.kbn-ctl-meet-muted').waitFor()
-    assert.equal(await arm.getAttribute('aria-label'), 'Unmute')
-    assert.equal(await arm.locator('path').count(), 2, 'muted is drawn struck through')
-    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-muted-${scheme}.png` })
+    const errors = []; page.on('pageerror', error => errors.push(error.message))
+    await open(page, state)
+    assert.equal(await mic(page).getAttribute('aria-label'), state === 'off' ? 'Listen' : state === 'muted' ? 'Unmute' : 'Mute')
+    if (state === 'off') assert.equal(await band(page).locator('.ws-voice-strip').isVisible(), false)
+    if (state === 'pinned') assert.match(await band(page).locator('.ws-voice-strip').textContent(), /^📌 /)
+    if (state === 'muted') assert.equal(await mic(page).locator('path').count(), 2)
+    if (state === 'failed') {
+      assert.equal(await band(page).locator('.listen-failed').count(), 1)
+      const ink = await mic(page).evaluate(el => getComputedStyle(el).color)
+      const alarm = await mic(page).evaluate(el => {
+        const probe = document.createElement('span'); probe.style.color = 'var(--ws-stop)'; el.append(probe)
+        const color = getComputedStyle(probe).color; probe.remove(); return color
+      })
+      assert.equal(ink, alarm)
+    }
+    await menu(page)
+    await page.waitForFunction(() => !document.querySelector('.listen-cadence input')?.disabled)
+    assert.equal(await page.getByRole('menuitemcheckbox', { name: 'Follow me', exact: true }).getAttribute('aria-checked'), state === 'pinned' ? 'false' : 'true')
+    assert.equal(await page.getByRole('menuitemcheckbox', { name: 'System audio', exact: true }).count(), phone ? 0 : 1)
+    if (state === 'failed') assert.match(await page.locator('[role=menu]').textContent(), /microphone is unavailable/)
+    await shot(page, state)
+    assert.deepEqual(errors, [])
     await context.close()
   }
-  console.log('voice layout and muted state: ok (light + dark)')
+  console.log('Listen off, following, pinned, muted, failed and phone: ok')
 
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Europe/Paris' })
   const page = await context.newPage()
-  await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=music`)
-  await page.locator('.kbn-desk').waitFor()
-  await page.evaluate(() => {
-    const voice = window.__harness.modal.voice, fetched = window.fetch
-    voice.dispose()
-    voice.status = { available: true, enabled: true, muted: false, state: 'listening', target: { fiber_id: 'other', origin: 'other', name: 'Other' }, last: null, error: null }
-    window.__routes = []
-    window.fetch = (url, init) => {
-      if (!String(url).endsWith('/api/v1/voice/target')) return fetched(url, init)
-      const target = JSON.parse(init.body)
-      window.__routes.push(target)
-      return Promise.resolve(new Response(JSON.stringify({ ...voice.status, target })))
+  await open(page, 'following')
+  await menu(page)
+  await page.getByRole('menuitemcheckbox', { name: 'System audio', exact: true }).click()
+  await menu(page)
+  assert.equal(await page.getByRole('menuitemcheckbox', { name: 'System audio', exact: true }).getAttribute('aria-checked'), 'true')
+  await page.getByRole('menuitem', { name: 'Pin to this card', exact: true }).click()
+  await band(page).locator('.ws-voice-strip[data-mode=pinned]').waitFor()
+  await menu(page)
+  assert.equal(await page.getByRole('menuitem', { name: 'Pin to this card', exact: true }).count(), 0)
+  await page.getByLabel('Quiet seconds (pinned)', { exact: true }).fill('90')
+  await page.getByLabel('Quiet seconds (pinned)', { exact: true }).press('Tab')
+  await page.getByRole('menuitem', { name: "Today's transcript", exact: true }).click()
+  await page.locator('.voice-transcript [role=log] p').first().waitFor()
+  assert.equal(await page.locator('.voice-transcript [role=log] p').count(), 3)
+  assert.match(await page.locator('.voice-transcript [role=log]').textContent(), /\d{2}:\d{2}:\d{2} me → calibration-report:/)
+  await page.getByLabel('This card only', { exact: true }).check()
+  await page.waitForFunction(() => document.querySelectorAll('.voice-transcript [role=log] p').length === 2)
+  await shot(page, 'transcript')
+  await page.keyboard.press('Escape')
+  await page.locator('.voice-transcript').waitFor({ state: 'detached' })
+  await menu(page)
+  await page.getByRole('menuitemcheckbox', { name: 'Follow me', exact: true }).click()
+  await band(page).locator('.ws-voice-strip[data-mode=following]').waitFor()
+  await mic(page).click()
+  await band(page).locator('.listen-muted').waitFor()
+  await menu(page)
+  await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('.ws-stage-band .listen-mic')?.getAttribute('aria-label') === 'Listen')
+  assert.equal(await band(page).locator('.ws-voice-strip').isVisible(), false)
+  const requests = await page.evaluate(() => window.__harness.requests)
+  assert.ok(requests.every(request => !request.url.includes('/meeting')))
+  assert.ok(requests.some(request => request.url.includes('/config/voice') && request.method === 'POST' && JSON.parse(JSON.parse(request.body).text).pinned_quiet_seconds === 90))
+  await context.close()
+  console.log('Follow, pin, system audio, pinned quiet, transcript filter, mute and Stop: ok')
+
+  const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  const phonePage = await mobile.newPage()
+  await phonePage.addInitScript(() => {
+    window.__phoneSockets = []
+    window.WebSocket = class {
+      readyState = 0; bufferedAmount = 0; frames = 0
+      constructor(url) {
+        window.__phoneSockets.push({ url, socket: this })
+        setTimeout(() => { this.readyState = 1; this.onopen?.(new Event('open')); this.onmessage?.(new MessageEvent('message', { data: '{"state":"connected"}' })) }, 0)
+      }
+      send(data) { if (data instanceof ArrayBuffer && data.byteLength) this.frames++ }
+      close() { this.readyState = 3 }
     }
   })
-  await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Music"])`).first().click()
-  await page.waitForFunction(() => window.__routes.length > 0)
-  const [route] = await page.evaluate(() => window.__routes)
-  assert.match(route.name, /Music/)
-  assert.equal(await page.evaluate(() => window.__harness.modal.voice.status.target.fiber_id), route.fiber_id)
-  await context.close()
-  console.log('voice follows the page the board shows: ok')
-
-  const desk = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-  const fromDesk = await desk.newPage()
-  await fromDesk.goto(`${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=music`)
-  await fromDesk.locator('.kbn-desk .kbn-card').first().waitFor()
-  await fromDesk.evaluate(() => {
-    const modal = window.__harness.modal, card = modal.workspaceCards()[0]
-    modal.voice.onRex({ fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name })
-  })
-  await fromDesk.locator('.ws-stage-band').waitFor()
-  await desk.close()
-  console.log('the board goes where Rex went, from the Desk: ok')
+  await open(phonePage, 'off')
+  await mic(phonePage).click()
+  await phonePage.waitForFunction(() => window.__phoneSockets[0]?.socket.frames > 0)
+  const socket = await phonePage.evaluate(() => ({ url: window.__phoneSockets[0].url, frames: window.__phoneSockets[0].socket.frames }))
+  assert.match(socket.url, /\/api\/v1\/voice\/audio\?launch=voice-harness&recorder=local$/)
+  await mic(phonePage).click()
+  await band(phonePage).locator('.listen-muted').waitFor()
+  await mic(phonePage).click()
+  await menu(phonePage)
+  assert.equal(await phonePage.getByRole('menuitemcheckbox', { name: 'System audio', exact: true }).count(), 0)
+  await phonePage.getByRole('menuitem', { name: 'Stop listening', exact: true }).click()
+  await phonePage.waitForFunction(() => window.__phoneSockets[0].socket.readyState === 3)
+  await mobile.close()
+  console.log(`Phone starts through voice, emits PCM and mutes/stops: ok (${socket.frames} synthetic frames)`)
 } finally { await browser.close() }

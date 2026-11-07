@@ -100,14 +100,14 @@ async function openScenario(name, query, openCard) {
   const tick = await page.evaluate(async () => {
     const root = document.body
     let mutations = 0
-    let meetingControlMutations = 0
+    let listenControlMutations = 0
     let revisionChanges = 0
     const mutationTargets = new Map()
     const observer = new MutationObserver(records => {
       for (const record of records) {
         mutations++
-        if (record.target instanceof Element && record.target.closest('.kbn-ctl-meet-arm')) {
-          meetingControlMutations++
+        if (record.target instanceof Element && record.target.closest('.listen-mic')) {
+          listenControlMutations++
         }
         const key = `${record.target.nodeName}.${record.target.className ?? ''}`
         const existing = mutationTargets.get(key)
@@ -130,7 +130,7 @@ async function openScenario(name, query, openCard) {
     return {
       elapsedMs,
       mutations,
-      meetingControlMutations,
+      listenControlMutations,
       revisionChanges,
       mutationTargets: [...mutationTargets.entries()].map(([key, value]) => [key, value]).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
       cardCount: document.querySelectorAll('.kbn-desk .kbn-card').length,
@@ -153,7 +153,7 @@ async function openScenario(name, query, openCard) {
     representedMinutes: 60,
     elapsedMs: tick.elapsedMs,
     mutationRecords: tick.mutations,
-    meetingControlMutations: tick.meetingControlMutations,
+    listenControlMutations: tick.listenControlMutations,
     mutationTargets: tick.mutationTargets,
     cards: tick.cardCount,
     retainedHeapGrowthBytes: heapAfterGc - heapBefore,
@@ -219,7 +219,7 @@ async function measureColdApp() {
         ? { host: 'perf', fibers: [entry], origins: {} }
         : path.endsWith('/fibers') ? { fibers: [{ fiber: { id: 'work/math-note', name: 'Math note' } }] }
         : path.startsWith('/api/v1/fibers/') ? { host: 'perf', fibers: [{ ...entry, fiber: { ...fiber, body: 'A body containing the formula $x^2$.' } }] }
-        : path.endsWith('/meeting') ? { meeting: null } : { fibers: [], files: [], agents: [] }
+        : path.endsWith('/voice') ? { available: false, enabled: false, follow: true, sources: [], source: 'desktop', target: null } : { fibers: [], files: [], agents: [] }
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
     })
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' })
