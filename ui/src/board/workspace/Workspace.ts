@@ -33,6 +33,7 @@ import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { unseenSince } from './DocumentSeen.js'
 import type { FiberSend } from '../fiberSends.js'
+import type { BoardOpen } from '../voice.js'
 import { parseRoute, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import { changeReviewTarget } from './changeReviewTarget.js'
@@ -891,14 +892,19 @@ export class Workspace {
     if (map) this.open(known, this.origin, map)
     else void this.openFiber(id, owner)
   }
-  async openFiber(id: string, owner: string): Promise<void> {
+  /** Opens a fiber, or one of its pages: its constitution, its tapestry, or its row on its constitution's page, unfolded to the files it holds. */
+  async openFiber(id: string, owner: string, page?: BoardOpen['page']): Promise<void> {
     const epoch = this.routeEpoch
-    const known = cardNamed(this.opts.cards(), id, owner)
-    if (known) { this.open(known, this.origin); return }
-    try {
-      const entry = await readFiber(this.opts.shuttleBase, id, owner, undefined, 'discover')
-      if (!this.disposed && epoch === this.routeEpoch) this.open(cardFromCompositeEntry(entry), this.origin)
-    } catch { showToast(`Couldn’t open ${id} on ${owner}`, 'error') }
+    let card = cardNamed(this.opts.cards(), id, owner)
+    if (!card) {
+      try { card = cardFromCompositeEntry(await readFiber(this.opts.shuttleBase, id, owner, undefined, 'discover')) } catch { showToast(`Couldn’t open ${id} on ${owner}`, 'error'); return }
+      if (this.disposed || epoch !== this.routeEpoch) return
+    }
+    const { originId: home, fiberDir: dir } = card
+    const doc = page === 'constitution' ? fiberKey(home, card.uid ?? card.id)
+      : page === 'tapestry' && dir ? docKey(home, `${dir}/tapestry.html`, home, dir)
+      : page && this.landOnMap(card)
+    this.open(card, this.origin, doc)
   }
 
   private readReceipts(state: ChannelState): Promise<void> {

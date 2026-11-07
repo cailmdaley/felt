@@ -589,6 +589,7 @@ export class KanbanModal {
       if (!this.workspace?.isActive && this.activeView?.reveal?.(id, origin)) return
       this.workspace?.follow(id, origin)
     }
+    this.voice.onOpen = ({ fiber_id: id, origin, page }) => { void this.workspace?.openFiber(id, origin, page) }
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)

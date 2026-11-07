@@ -175,6 +175,15 @@ describe('live voice', () => {
       expect(moved).toEqual([move])
       voice.dispose()
     })
+    it('hands on a page a session asked for, on a phone too', async () => {
+      vi.stubGlobal('matchMedia', () => ({ matches: true }) as MediaQueryList)
+      const voice = await start(), opened: unknown[] = []
+      voice.onOpen = event => opened.push(event)
+      const page = { fiber_id: 'uid', origin: 'fir', page: 'tapestry' }
+      live()[0].listeners.get('open')!(new MessageEvent('open', { data: JSON.stringify(page) }))
+      expect(opened).toEqual([page])
+      voice.dispose()
+    })
     it('asks for no Rex moves on a phone', async () => {
       vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('coarse') }) as MediaQueryList)
       const voice = await start()

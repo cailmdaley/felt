@@ -45,13 +45,21 @@ export interface RexMove {
   name: string
 }
 
+/** A page of a fiber a session asked the board to show (`POST /api/v1/board/open`). */
+export interface BoardOpen {
+  fiber_id: string
+  origin: string
+  page: 'constitution' | 'tapestry' | 'files'
+}
+
 const following = (status: VoiceStatus | null): boolean => !!status?.enabled && status.state !== 'yielded'
 
 /**
  * One visible-tab poll, one ordered write stream and one event stream per
  * board, the stream open only while the tab is visible. It carries the voice
  * target and, on a desktop, `onRex`, the board's one signal that Rex's worker
- * changed, voice on or off. A tab coming back moves nothing.
+ * changed, voice on or off, and `onOpen`, a page a session asked for, on any
+ * screen. A tab coming back moves nothing.
  * Whichever of Rex and the board had focus last holds the target: Rex takes it by coming to the front
  * or changing worker, and the board by showing something or regaining focus,
  * while it has the keyboard.
@@ -59,6 +67,7 @@ const following = (status: VoiceStatus | null): boolean => !!status?.enabled && 
 export class Voice {
   status: VoiceStatus | null = null
   onRex: ((move: RexMove) => void) | null = null
+  onOpen: ((open: BoardOpen) => void) | null = null
   /** The card the inbox last set the target to, null for none; undefined before the first status, which moves nothing. */
   private inboxOpened: string | null | undefined
   /** The constitution the board shows, once it speaks to one. */
@@ -105,6 +114,7 @@ export class Voice {
     const events = new EventSource(`${this.base}/api/v1/voice/events${coarsePointer() ? '' : '?rex=1'}`)
     events.addEventListener('target', this.pushed)
     events.addEventListener('focus', this.rexMoved)
+    events.addEventListener('open', event => this.onOpen?.(JSON.parse((event as MessageEvent<string>).data) as BoardOpen))
     events.addEventListener('error', () => {
       if (this.events === events && events.readyState === EventSource.CLOSED && this.eventsTimer === null) {
         this.events = null

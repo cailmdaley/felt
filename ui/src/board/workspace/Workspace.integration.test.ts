@@ -938,6 +938,23 @@ describe('workspace reader integration', () => {
     expect(selected()).toBe('family:host-a:lone')
     expect(conversation).not.toHaveBeenCalled()
   })
+  it('opens the page a session asks for: its constitution, its tapestry, or its row on the family page', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, fiberDir: `/notes/${over.id}`, ...over })
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' })]
+    bodyCards = feed
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    await workspace.openFiber('hub-mid', 'host-a', 'constitution'); await flush()
+    expect(selected()).toBe('fiber:host-a:hub-mid')
+    await workspace.openFiber('hub-mid', 'host-a', 'tapestry'); await flush()
+    expect(selected()).toBe(docKey('host-a', '/notes/hub/mid/tapestry.html', 'host-a', '/notes/hub/mid'))
+    await workspace.openFiber('hub-mid', 'host-a', 'files'); await flush()
+    expect(selected()).toBe('family:host-a:hub-mid')
+    expect(document.querySelector('.ws-selected .fp-row[aria-selected="true"]')?.hasAttribute('data-open')).toBe(true)
+  })
+
   it('moves Rex quietly on a click that unfolds a row at any depth, and not on folding, keys or the way out', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, tmuxSession: `worker-${over.id}`, workerState: 'running', ...over })
