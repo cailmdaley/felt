@@ -23,7 +23,7 @@ const column = (b: KanbanResponse) => ({
 })
 
 describe('a family stands once in each section it has work in', () => {
-  it('a node is a Desk row when no ancestor shares its state, and hangs beneath the nearest one that does otherwise', () => {
+  it('work in flight or in review is a Desk row when no ancestor shares its state, and hangs beneath the nearest one that does otherwise; a thread\'s draft is no row', () => {
     const b = board([
       { id: 'hub', status: 'active', phase: 'working' },
       { id: 'hub/ask', parent: 'hub', status: 'active', ask: true },
@@ -33,7 +33,7 @@ describe('a family stands once in each section it has work in', () => {
       { id: 'hub/quiet/review', parent: 'hub/quiet', status: 'closed' },
       { id: 'hub/quiet/draft', parent: 'hub/quiet', status: 'open' },
     ])
-    expect(column(b)).toEqual({ drafts: ['hub/quiet'], inFlight: ['hub', 'hub/ask'], review: ['hub/quiet/review'], resting: [], roles: [], past: [] })
+    expect(column(b)).toEqual({ drafts: [], inFlight: ['hub', 'hub/ask'], review: ['hub/quiet/review'], resting: [], roles: [], past: [] })
     expect(inFlightBand(b.now.inFlight.find(c => c.id === 'hub/ask')!)).toBe('yourTurn')
     expect(ids(boardCards(b)).sort()).toEqual(['hub', 'hub/ask', 'hub/ask/busy', 'hub/ask/busy/again', 'hub/quiet', 'hub/quiet/draft', 'hub/quiet/review'])
   })

@@ -28,6 +28,8 @@ export interface Family {
   /** Every node of the tree but the row, by need. */
   others: Record<FamilyNeed, number>
 }
+/** States whose threads stand on the Desk only through their family's root. */
+const QUIET: ReadonlySet<ThreadState> = new Set(['drafts', 'resting', 'roles'])
 const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'roles', 'resting', 'archived']
 /**
  * A thread's state: the Desk column it would sit in (`deskColumn`), with
@@ -226,14 +228,16 @@ export class ThreadIndex {
     return this.families.get(this.key(card)) ?? { root: card, lead: card, need: null, askers: [card], others: { yours: 0, review: 0, working: 0 } }
   }
   /**
-   * The Desk's rows: every node with no ancestor in its own state. Each other
-   * node hangs beneath its nearest ancestor that shares its state, so a
-   * family stands once in each section it has work in, and no node twice.
+   * The Desk's rows. Work in flight or awaiting review is a row when no
+   * ancestor shares its state, and otherwise hangs beneath its nearest
+   * ancestor that does, so a family stands once in each such section and no
+   * node twice. Drafts, the resting and the Roles keep only roots as rows.
    */
   frontier(): KanbanCard[] {
     const rows: KanbanCard[] = []
     for (const [key, state] of this.states) {
       let parent = this.parents.get(key)
+      if (parent && QUIET.has(state)) continue
       while (parent && this.state(parent) !== state) parent = this.parentOf(parent)
       if (!parent) rows.push(this.cards.get(key)!)
     }
