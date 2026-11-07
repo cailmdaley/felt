@@ -1,11 +1,11 @@
 // The Shuttle line, read from Shuttle's daemon: on the prompt's hint row
 // (placement `below`) or as a band above the prompt (`above`).
 //
-//   ☰ ⌗ ⧉² 🔊 12 words… ✕
-//   ☰ ⌗ ⧉² 🔈 → voice-modes · 8 words… ✕
-//   ☰ ⌗ ⧉² 🔇
+//   ⧉ ⌗ ☰ 🔊 12 words… ✕
+//   ⧉ ⌗ ☰ 🔈 → voice-modes · 8 words… ✕
+//   ⧉ ⌗ ☰ 🔇
 //
-// Pins at the left open this session's constitution, tapestry and sent files
+// Pins at the left open this session's family page, tapestry and constitution
 // on the board. The audio glyph says what the mic hears: 🔊 sound arriving,
 // 🔈 open and quiet, 🔇 muted; a click toggles the mute. `n words…` counts
 // what was said but not yet sent, and `✕` drops it; `→ <slug>` names the card
@@ -31,7 +31,6 @@ const SLOW = 5000
 const ON = -36
 const OFF = -44
 let sounding = false
-const SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹'
 
 // Module state: a reload starts it over and session.start fills it again.
 let base = 'http://127.0.0.1:4000'
@@ -39,7 +38,6 @@ let self: string[] = []
 let dir = ''
 let voice: Voice | null = null
 let tapestry = false
-let sent = 0
 let seen = ''
 let placement: 'above' | 'below' = 'above'
 let running = false
@@ -61,7 +59,7 @@ async function get<T>($: EngineInterface, path: string): Promise<T | null> {
 }
 
 function redraw($: EngineInterface): void {
-  const key = JSON.stringify([voice, tapestry, sent])
+  const key = JSON.stringify([voice, tapestry])
   if (key === seen) return
   seen = key
   $.ui.invalidate('ui.render')
@@ -77,10 +75,13 @@ async function loop($: EngineInterface): Promise<void> {
   $.clock.after(await poll($), () => loop($))
 }
 
-// The pins' own slow read: whether the fiber has a tapestry, and how many files it sent.
+// The pins' own slow read: whether the fiber has a companion page.
 async function pins($: EngineInterface): Promise<void> {
-  tapestry = await $.fs.exists(dir + '/tapestry.html').catch(() => false)
-  sent = (await get<{ files: unknown[] }>($, '/api/v1/sent-files?uid=' + encodeURIComponent(uid())))?.files.length ?? sent
+  let found = false
+  for (const file of ['tapestry.html', 'artifact.html', 'report.html']) {
+    if (await $.fs.exists(`${dir}/${file}`).catch(() => false)) { found = true; break }
+  }
+  tapestry = found
   redraw($)
   $.clock.after(SLOW, () => pins($))
 }
@@ -103,9 +104,9 @@ function line($: EngineInterface, ui: { Box: any; Button: any; Text: any }) {
   )
   const pinned = self.length
     ? [
-        pin('constitution', '☰'),
+        pin('files', '⧉'),
         tapestry ? pin('tapestry', '⌗') : null,
-        sent ? pin('files', '⧉' + [...String(sent)].map(d => SUP[+d]).join('')) : null,
+        pin('constitution', '☰'),
       ]
     : []
 

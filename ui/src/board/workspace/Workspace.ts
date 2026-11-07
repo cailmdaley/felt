@@ -14,7 +14,7 @@ import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { channelLead, documentActivity, familyKey, fiberKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { COMPANION_NAMES, channelLead, documentActivity, familyKey, fiberKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { meetingHostCard, type MeetingRecord } from '../meeting.js'
 import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
@@ -104,9 +104,6 @@ const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
 }
 /** The Board's Read lately shelf holds this many constitutions. */
 const READ_LATELY = 8
-/** A fiber's companion pages by file name, first the one that leads, with the name each goes by on the map. */
-const COMPANIONS: ReadonlyArray<readonly [string, string]> = [['tapestry.html', 'Tapestry'], ['artifact.html', 'Artifact'], ['report.html', 'Report']]
-
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
   readonly reader: Reader
@@ -352,12 +349,12 @@ export class Workspace {
   }
   /** The first companion page a fiber's directory holds, skipping past any `listed` already names, which ends the search. */
   private async companion(fiberDir: string, owner: string, listed: (path: string) => boolean = () => false): Promise<{ path: string; name: string; modifiedAt?: string } | undefined> {
-    for (const [file, name] of COMPANIONS) {
+    for (const file of COMPANION_NAMES) {
       const path = `${fiberDir}/${file}`
       if (listed(path)) return undefined
       const result = await head(fileBytesUrl(this.opts.shuttleBase, path, owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
       if (this.disposed) return undefined
-      if (result?.exists) return { path, name, modifiedAt: result.modifiedAt ?? undefined }
+      if (result?.exists) return { path, name: file[0].toUpperCase() + file.slice(1, -5), modifiedAt: result.modifiedAt ?? undefined }
     }
     return undefined
   }
@@ -901,8 +898,10 @@ export class Workspace {
       if (this.disposed || epoch !== this.routeEpoch) return
     }
     const { originId: home, fiberDir: dir } = card
+    const companion = page === 'tapestry' && dir ? await this.companion(dir, home) : undefined
+    if (this.disposed || epoch !== this.routeEpoch) return
     const doc = page === 'constitution' ? fiberKey(home, card.uid ?? card.id)
-      : page === 'tapestry' && dir ? docKey(home, `${dir}/tapestry.html`, home, dir)
+      : page === 'tapestry' ? companion && docKey(home, companion.path, home, dir)
       : page && this.landOnMap(card)
     this.open(card, this.origin, doc)
   }

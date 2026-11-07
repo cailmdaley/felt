@@ -10,24 +10,24 @@ One dim line in every Claude session, read from the Shuttle daemon: pins at
 the left, the mic's state beside them.
 
 ```
-☰ ⌗ ⧉² 🔊 12 words… ✕
-☰ ⌗ ⧉² 🔈 → voice-modes · 8 words… ✕
-☰ ⌗ ⧉² 🔇
+⧉ ⌗ ☰ 🔊 12 words… ✕
+⧉ ⌗ ☰ 🔈 → voice-modes · 8 words… ✕
+⧉ ⌗ ☰ 🔇
 ```
 
-**Pins**, in a Shuttle worker's session: `☰` its constitution, `⌗` its
-tapestry (only when the fiber's folder has `tapestry.html`), `⧉n` its sent
-files with their count (only when there are some, from `/api/v1/sent-files`).
-Each opens that page on the board through `POST /api/v1/board/open`: the
-fiber's constitution, its tapestry, or its row on its constitution's page,
-unfolded to the files it holds. Read every 5 s.
+**Pins**, in a Shuttle worker's session: `⧉` its row on the family page,
+unfolded to its files; `⌗` its companion page, when its folder has one; and
+`☰` its constitution.
+The companion is the first available of `tapestry.html`, `artifact.html`, and
+`report.html`, checked every 5 s.
+Each opens its page on the board through `POST /api/v1/board/open`.
 
 **Audio**, from `/api/v1/voice` every 150 ms while words come to this session,
 500 ms otherwise, 5 s while the daemon says unavailable:
 
 | State | Text |
 | --- | --- |
-| sound arriving (mic level above -50 dBFS) | `🔊` |
+| speech (above -36 dBFS; holds until below -44 dBFS) | `🔊` |
 | mic open and quiet | `🔈` |
 | muted, or a meeting paused | `🔇` alone |
 | words said and not yet sent | ` n words…` after the glyph, then `✕` |

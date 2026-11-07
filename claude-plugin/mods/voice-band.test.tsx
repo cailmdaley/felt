@@ -8,22 +8,24 @@ const BAND = {
   props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
 } as const
 
-function daemon(on: any, voice: object, { files = 0, tapestry = false, fiber = true } = {}) {
+function daemon(on: any, voice: object, { companions = [] as string[], fiber = true } = {}) {
   const posts: { url: string; body: string }[] = []
+  const reads: string[] = []
+  const checked: string[] = []
   on('http.fetch', (_: any, e: any) => {
     if (e.init?.method === 'POST') {
       posts.push({ url: e.url, body: e.init.body })
       return { value: { status: 200, ok: true, headers: {}, text: '{}' } }
     }
-    const body = e.url.endsWith('/voice') ? voice : { files: Array.from({ length: files }, (_, i) => ({ basename: `f${i}` })) }
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } }
+    reads.push(e.url)
+    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(voice) } }
   })
   on('fs.read', () => ({ value: `---\nid: ${SELF}\nname: Holistic hark\n---\n` }))
-  on('fs.exists', (_: any, e: any) => ({ value: tapestry && e.path === `${DIR}/tapestry.html` }))
+  on('fs.exists', (_: any, e: any) => { checked.push(e.path); return { value: companions.some(file => e.path === `${DIR}/${file}`) } })
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   mock.env(on, fiber ? { SHUTTLE_FIBER_PATH: `${DIR}/holistic-hark.md` } : {})
   const clock = mock.clock(on)
-  return { posts, clock }
+  return { posts, reads, checked, clock }
 }
 
 const OFF = { available: true, mode: 'off', destination: null, paused: false, pending_words: 0, level: null }
@@ -93,30 +95,47 @@ test('muted is the struck glyph alone', ABOVE, async ($, on) => {
   await ui.unmount()
 })
 
-test('pins open the constitution, tapestry and sent files on the board', ABOVE, async ($, on) => {
-  const { posts, clock } = daemon(on, OFF, { files: 12, tapestry: true })
+test('pins open the family page, tapestry and constitution on the board', ABOVE, async ($, on) => {
+  const { posts, reads, checked, clock } = daemon(on, OFF, { companions: ['tapestry.html', 'report.html'] })
   await start($)
   await clock.advance(0)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'constitution')).toBe('☰')
   expect(await label(ui, 'tapestry')).toBe('⌗')
-  expect(await label(ui, 'files')).toBe('⧉¹²')
+  expect(await label(ui, 'files')).toBe('⧉')
   expect(await label(ui, 'mic')).toBeUndefined()
-  for (const key of ['constitution', 'tapestry', 'files']) await ui.press({ key })
-  expect(posts.map(p => [p.url, JSON.parse(p.body)])).toEqual(['constitution', 'tapestry', 'files'].map(page => [
+  expect(checked).toEqual([`${DIR}/tapestry.html`])
+  expect(reads.every(url => url.endsWith('/voice'))).toBe(true)
+  for (const key of ['files', 'tapestry', 'constitution']) await ui.press({ key })
+  expect(posts.map(p => [p.url, JSON.parse(p.body)])).toEqual(['files', 'tapestry', 'constitution'].map(page => [
     'http://127.0.0.1:4000/api/v1/board/open', { fiber_id: SELF, page },
   ]))
   await ui.unmount()
 })
 
-test('a fiber with no tapestry and no sent files has the constitution pin alone', ABOVE, async ($, on) => {
+for (const [file, checkedNames] of [
+  ['artifact.html', ['tapestry.html', 'artifact.html']],
+  ['report.html', ['tapestry.html', 'artifact.html', 'report.html']],
+] as const) {
+  test(`${file} alone gives the tapestry pin`, ABOVE, async ($, on) => {
+    const { clock, checked } = daemon(on, OFF, { companions: [file] })
+    await start($)
+    await clock.advance(0)
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await label(ui, 'tapestry')).toBe('⌗')
+    expect(checked).toEqual(checkedNames.map(name => `${DIR}/${name}`))
+    await ui.unmount()
+  })
+}
+
+test('a fiber without a companion has the family and constitution pins', ABOVE, async ($, on) => {
   const { clock } = daemon(on, OFF)
   await start($)
   await clock.advance(0)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'constitution')).toBe('☰')
   expect(await label(ui, 'tapestry')).toBeUndefined()
-  expect(await label(ui, 'files')).toBeUndefined()
+  expect(await label(ui, 'files')).toBe('⧉')
   await ui.unmount()
 })
 
@@ -144,9 +163,8 @@ for (const [placement, options, request] of [
   ['below', BELOW, HINT],
 ] as const) {
   for (const [pins, expected] of [
-    [{ files: 2, tapestry: true }, ['constitution', 'tapestry', 'files']],
-    [{ files: 2 }, ['constitution', 'files']],
-    [{}, ['constitution']],
+    [{ companions: ['tapestry.html'] }, ['files', 'tapestry', 'constitution']],
+    [{}, ['files', 'constitution']],
   ] as const) {
     test(`${placement}: ${expected.length} pin${expected.length === 1 ? '' : 's'} and audio form a left-hugged cluster`, options, async ($, on) => {
       const { clock } = daemon(on, { ...HERE, pending_words: 12, level: { mic: -20 } }, pins)

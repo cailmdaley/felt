@@ -943,6 +943,10 @@ describe('workspace reader integration', () => {
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, fiberDir: `/notes/${over.id}`, ...over })
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' })]
     bodyCards = feed
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/file-info?')
+      ? Response.json({ exists: new URL(String(input), 'http://workspace.test').searchParams.get('path') === '/notes/hub/mid/tapestry.html' })
+      : original(input, init))
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
@@ -953,6 +957,54 @@ describe('workspace reader integration', () => {
     await workspace.openFiber('hub-mid', 'host-a', 'files'); await flush()
     expect(selected()).toBe('family:host-a:hub-mid')
     expect(document.querySelector('.ws-selected .fp-row[aria-selected="true"]')?.hasAttribute('data-open')).toBe(true)
+  })
+
+  it.each([
+    [['report.html'], 'report.html'],
+    [['artifact.html', 'report.html'], 'artifact.html'],
+    [['tapestry.html', 'artifact.html', 'report.html'], 'tapestry.html'],
+  ])('opens the first existing companion from %j', async (files, expected) => {
+    const thread = card({ id: 'report-only', uid: 'report-only', originId: 'host-a', fiberDir: '/notes/report-only', path: 'report-only/report-only.md' })
+    bodyCards = [thread]
+    bodyOverrides.set('host-a:report-only', 'No embedded or sent files.')
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = new URL(String(input), 'http://workspace.test')
+      if (url.pathname === '/api/v1/file-info') {
+        return Response.json({ exists: files.some(file => url.searchParams.get('path') === `/notes/report-only/${file}`) })
+      }
+      return original(input, init)
+    })
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [thread], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    await workspace.openFiber('report-only', 'host-a', 'tapestry'); await flush()
+    expect(workspace.reader.document?.key).toBe(docKey('host-a', `/notes/report-only/${expected}`, 'host-a'))
+    expect(workspace.reader.document?.name).toBe(expected)
+  })
+
+  it('does not open a companion after navigation moves on while its owner is answering', async () => {
+    const thread = card({ id: 'slow-pin', uid: 'slow-pin', originId: 'host-a', fiberDir: '/notes/slow-pin', path: 'slow-pin/slow-pin.md' })
+    bodyCards = [thread, ...cards]
+    let answer!: (response: Response) => void
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = new URL(String(input), 'http://workspace.test')
+      if (url.pathname === '/api/v1/file-info' && url.searchParams.get('path') === '/notes/slow-pin/tapestry.html') {
+        return new Promise<Response>(resolve => { answer = resolve })
+      }
+      return original(input, init)
+    })
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [thread, ...cards], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const pending = workspace.openFiber('slow-pin', 'host-a', 'tapestry')
+    await flush()
+    expect(answer).toBeDefined()
+    workspace.open(cards[0], 'Desk'); await flush()
+    const route = window.location.hash
+    expect(route).toContain('alpha@host-a')
+    answer(Response.json({ exists: true }))
+    await pending; await flush()
+    expect(window.location.hash).toBe(route)
   })
 
   it('moves Rex quietly on a click that unfolds a row at any depth, and not on folding, keys or the way out', async () => {
