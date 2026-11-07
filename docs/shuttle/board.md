@@ -89,28 +89,10 @@ anything else.
 
 ### A family's threads
 
-A family of threads has one row on the Desk, in the column of its most urgent
-need: the root, or the thread that leads what the family asks of you, named
-after a quiet crumb to its root. A root led by one of its threads keeps its own
-row where its own state puts it.
+A family appears once in each Desk section its threads are in, and each appearance holds only the threads in that section's state: a thread is a row of its own when no ancestor shares its state, and otherwise hangs beneath its nearest ancestor that does, named by the slug path from that ancestor (`a1/b1` under `a` when `a1` is in another section), while a thread row with no such ancestor is named by its path from the family's root (`a/a1`).
+Names are fiber slugs, as Rex's sidebar shows them, cut short by an ellipsis; the full name is the row's tooltip and the title of the page a thread opens. Archived threads are not on the Desk.
 
-The family's threads hang beneath its row as an outline, each thread under
-its orchestrator, drawn with the same dot and age as a row. It opens by
-default on every thread that needs you, a turn or a verdict, and on the
-threads above it, so what waits on you is visible without opening anything;
-the rest of each level waits behind a quiet "n more", in play first and then
-resting. A level where nothing needs you stays folded, and opens on all of its threads.
-Archived threads are not on the Desk, except as the way to live work beneath
-them; they stay on their constitution's page.
-
-Every level folds. The count at the row's end, which says how many need you
-(in red when one of them is a question), else how many work, else how many
-threads there are, carries the caret that folds the whole family to its
-row; every thread with threads of its own carries a caret of its own. Each
-fold is remembered in this browser, so the whole Desk can be folded down to
-its rows. Shutting a level forgets its "more", so it reopens on what needs
-you. A root's count, on a family a thread leads, opens the outline on the
-leading row instead.
+Every level folds. The count at a row's end says how many threads it holds in its section (in red when one of them is a question) and carries the caret that folds them; every thread holding threads of its own carries a caret of its own. Your turn and Awaiting review stand open by default and the other sections stay folded, and each fold is remembered in this browser, so the whole Desk can be folded down to its rows.
 
 A click on a thread opens its page, as a click on a row does, and `j` / `k`
 walk the threads that are showing as well as the rows.

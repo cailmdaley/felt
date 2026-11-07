@@ -1,15 +1,10 @@
-/* A thread's row names its family quietly, before its own title. */
-.kbn-card-crumb { white-space: nowrap; font-size: var(--type-note); font-weight: 400; color: var(--kbn-ink-muted); }
-.kbn-card-crumb-root { display: inline-block; max-width: 14em; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
-.kbn-card-crumb button { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
-.kbn-card-crumb button:hover { color: var(--kbn-ink); }
 .kbn-thread-count { flex: none; display: inline-flex; font: 600 var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-numeric: tabular-nums; white-space: nowrap; background: transparent; border: 0; padding: 2px 3px; cursor: pointer; }
 .kbn-count-working { color: var(--kbn-agent); }
 .kbn-count-needs { color: var(--kbn-owed); }
-/* A question among the family's threads reddens its count. */
+/* A question among the threads beneath a row reddens its count. */
 .kbn-count-needs[data-asks] { color: var(--kbn-you); }
 .kbn-row-elapsed { flex: none; font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--kbn-ink-muted); white-space: nowrap; }
-/* The quiet count of a family that asks nothing, and the caret every family's count carries. */
+/* The quiet count of a section that asks nothing, and the caret every count carries. */
 .kbn-count-quiet { font-weight: 400; color: var(--kbn-ink-muted); }
 .kbn-thread-caret { display: inline-block; width: 0.9em; margin-left: 3px; color: var(--kbn-ink-muted); text-align: center; transition: transform 120ms; }
 .kbn-thread-caret::before { content: '›'; }
@@ -23,18 +18,13 @@
 .kbn-desk-threads .kbn-thread-name { color: var(--kbn-ink-soft); }
 .kbn-desk-threads .kbn-thread-row:hover .kbn-thread-name, .kbn-desk-threads .kbn-thread-row.kbn-key-selected .kbn-thread-name { color: var(--kbn-ink); }
 .kbn-desk-threads .kbn-thread-row.kbn-key-selected { background: var(--kbn-plate); outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
-.kbn-desk-threads .kbn-thread-row.ws-thread-current .kbn-thread-name { color: var(--kbn-ink); font-weight: 500; }
 /* Every thread with threads of its own folds on its caret; a leaf keeps the caret's room. */
 .kbn-thread-fold { flex: none; display: inline-grid; place-items: center; width: 14px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--kbn-ink-muted); font: inherit; cursor: pointer; }
 button.kbn-thread-fold::before { content: '›'; transition: transform 120ms; }
 button.kbn-thread-fold[aria-expanded='true']::before { transform: rotate(90deg); }
 button.kbn-thread-fold:hover { color: var(--kbn-ink); }
-.kbn-thread-more { align-self: flex-start; margin-left: calc(14px + var(--ws-thread-depth, 0) * var(--ws-thread-indent)); padding: 1px 6px; border: 0; background: transparent; color: var(--kbn-ink-muted); font: inherit; font-size: var(--type-meta); cursor: pointer; }
-.kbn-thread-more:hover { color: var(--kbn-ink); }
-.kbn-thread-count:focus-visible, .kbn-card-crumb button:focus-visible, .kbn-thread-fold:focus-visible, .kbn-thread-more:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+.kbn-thread-count:focus-visible, .kbn-thread-fold:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .kbn-card-crumb-root { max-width: 5em; }
   .kbn-desk-threads .kbn-thread-row { min-height: 32px; font-size: var(--type-note); }
   .kbn-thread-fold { width: 28px; height: 32px; }
-  .kbn-thread-more { min-height: 30px; margin-left: calc(28px + var(--ws-thread-depth, 0) * var(--ws-thread-indent)); font-size: var(--type-note); }
 }

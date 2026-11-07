@@ -1,137 +1,113 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { threadKey, type FamilyNeed, type ThreadIndex } from './threads.js'
+import { threadKey, type ThreadIndex, type ThreadState } from './threads.js'
 import { threadRow } from './ThreadPeek.js'
 import { turnOf } from './turn.js'
-import { outlineOpen, renderOutline, type Fold, type Outline } from './threadOutline.js'
+import { rowLabel, sectionOutline, type OutlineRow } from './threadOutline.js'
 import { workerPlateFacts } from './workspace/workerPlate.js'
 import './deskFrontier.css'
 
-/** The rest of the family as two numbers: threads working, and threads needing the human (a turn or a verdict). */
-export function familyCounts(others: Readonly<Record<FamilyNeed, number>>): { working: number; needs: number } {
-  return { working: others.working, needs: others.yours + others.review }
-}
-
 const FOLDS_KEY = 'shuttle.desk.folds'
-/** The browser's folds by thread, read afresh; this page's own where the browser keeps none. */
-let folds: Record<string, Fold> = {}
-function foldOf(card: KanbanCard): Fold {
-  try { folds = JSON.parse(localStorage.getItem(FOLDS_KEY) ?? '{}') as Record<string, Fold> } catch { /* this page's folds stand */ }
-  return folds[threadKey(card)] ?? {}
+/** The browser's folds by thread, true for shut; this page's own where the browser keeps none. */
+let folds: Record<string, boolean> = {}
+function shut(card: KanbanCard): boolean | undefined {
+  try { folds = JSON.parse(localStorage.getItem(FOLDS_KEY) ?? '{}') as Record<string, boolean> } catch { /* this page's folds stand */ }
+  return folds[threadKey(card)]
 }
-function setFold(card: KanbanCard, fold: Fold): void {
-  foldOf(card)
-  folds[threadKey(card)] = fold
+function setShut(card: KanbanCard, value: boolean): void {
+  shut(card)
+  folds[threadKey(card)] = value
   try { localStorage.setItem(FOLDS_KEY, JSON.stringify(folds)) } catch { /* the fold lasts this page only */ }
 }
 
-const NEEDS_YOU: ReadonlySet<string> = new Set(['waiting', 'to-review'])
+/** Sections that need the human stand open; the rest stay folded until a hand opens them. */
+const OPEN: ReadonlySet<ThreadState> = new Set(['waiting', 'to-review'])
+const COUNT_WORD: Partial<Record<ThreadState, [string, string]>> = { waiting: ['needs you', 'need you'], 'to-review': ['to review', 'to review'], working: ['working', 'working'] }
 
 /**
- * A family's Desk row, shared by desktop and phone. The row is the node that
- * set the family's column: a thread leads with a quiet crumb to its root. The
- * family's threads hang beneath that row as an outline (`renderOutline`),
- * open by default on the threads that need the human, a turn or a verdict as
- * the count says. The count's caret folds the whole, and each thread with
- * threads of its own folds on its own caret. Folds are remembered per
- * browser. A root whose family a thread leads keeps its count, which takes
- * you to that row.
+ * A Desk row and the threads it holds in its section, shared by desktop and
+ * phone. A row is a node with no ancestor in its own state (`frontier`); a
+ * thread row is named by its slug path from the family's root. Beneath it
+ * hang the family's other threads in the same state, each under its nearest
+ * shown ancestor and named by its slug path from there (`sectionOutline`).
+ * The count's caret folds them all, and every thread with threads of its own
+ * folds on its own caret, each remembered per browser.
  */
-export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard, family?: boolean) => void, now = Date.now()): void {
-  const self = index.card(card), family = index.family(self)
-  const ancestry = index.ancestry(card)
-  if (ancestry.length) {
-    const crumb = document.createElement('span'); crumb.className = 'kbn-card-crumb'
-    crumb.title = ancestry.map(part => part.name).join(' › ')
-    const first = ancestry[0]
-    const head = document.createElement(first.card ? 'button' : 'span')
-    head.className = 'kbn-card-crumb-root'
-    head.textContent = first.name
-    if (first.card) {
-      (head as HTMLButtonElement).type = 'button'
-      head.addEventListener('click', event => { event.stopPropagation(); open(first.card!, true) })
-    }
-    crumb.append(head, ancestry.length > 1 ? ' / … / ' : ' / ')
-    const title = host.querySelector('.kbn-card-name, .kbn-cluster-item-title')
-    if (title) title.prepend(crumb)
-    else host.prepend(crumb)
+export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, now = Date.now()): void {
+  const self = index.card(card), state = index.state(self)
+  if (index.ancestry(self).length) {
+    const title = host.querySelector<HTMLElement>('.kbn-card-name, .kbn-cluster-item-title')
+    if (title) { title.textContent = rowLabel(index, self); title.title = card.name }
   }
-  const carries = family.lead === self
-  if (!carries && family.root !== self) return
-  if (family.root !== self) host.setAttribute('aria-label', `${family.root.name} / ${host.getAttribute('aria-label') ?? card.name}`)
-  // Every unarchived thread of the family but this row; a thread's root has a row of its own.
-  const kin = index.summary(family.root).unfinished - (self === family.root || index.state(self) === 'archived' ? 0 : 1)
-  const familyKey = threadKey(family.root)
-  const others = index.others(card)
-  const { working, needs } = familyCounts(others)
-  if (kin > 0 && (carries || working || needs)) {
-    const count = document.createElement('button'); count.type = 'button'; count.className = 'kbn-thread-count'
-    count.dataset.family = familyKey
-    const label = document.createElement('span')
-    label.className = needs ? 'kbn-count-needs' : working ? 'kbn-count-working' : 'kbn-count-quiet'
-    label.textContent = needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : working ? `${working} working` : `${kin} ${kin === 1 ? 'thread' : 'threads'}`
-    if (needs && index.subtree(family.root).some(thread => thread !== self && turnOf(thread).turn === 'question')) label.dataset.asks = ''
-    count.append(label)
-    count.title = [
-      others.yours > 0 && `${others.yours} your turn`,
-      others.review > 0 && `${others.review} awaiting review`,
-      working > 0 && `${working} working elsewhere in this family`,
-    ].filter(Boolean).join(', ') || label.textContent
-    end.prepend(count)
-    if (carries) installThreads(host, count, self, index, open, now)
-    else count.addEventListener('click', event => { event.stopPropagation(); reachLead(familyKey, () => open(family.root, true)) })
-  }
+  const outline = sectionOutline(index, self, state)
   const { elapsed } = workerPlateFacts(card, now)
-  if (elapsed) {
-    const age = document.createElement('span'); age.className = 'kbn-row-elapsed'; age.textContent = elapsed
-    end.prepend(age)
+  const age = (): void => {
+    if (!elapsed) return
+    const el = document.createElement('span'); el.className = 'kbn-row-elapsed'; el.textContent = elapsed
+    end.prepend(el)
   }
-}
-
-/** The family's threads under its row, the count the caret of the whole. */
-function installThreads(host: HTMLElement, count: HTMLButtonElement, self: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, now: number): void {
-  const family = index.family(self)
+  if (!outline.length) { age(); return }
+  const count = document.createElement('button'); count.type = 'button'; count.className = 'kbn-thread-count'
+  const label = document.createElement('span'), words = COUNT_WORD[state] ?? ['thread', 'threads']
+  label.className = OPEN.has(state) ? 'kbn-count-needs' : state === 'working' ? 'kbn-count-working' : 'kbn-count-quiet'
+  label.textContent = `${outline.length} ${words[outline.length === 1 ? 0 : 1]}`
+  if (outline.some(row => turnOf(row.card).turn === 'question')) label.dataset.asks = ''
   const caret = document.createElement('span'); caret.className = 'kbn-thread-caret'; caret.setAttribute('aria-hidden', 'true')
-  count.append(caret)
+  count.append(label, caret)
+  count.title = `${label.textContent} beneath this row`
+  end.prepend(count)
+  age()
+
   const list = document.createElement('div'); list.className = 'kbn-desk-threads'
-  list.setAttribute('role', 'group'); list.setAttribute('aria-label', `Threads of ${family.root.name}`)
+  list.setAttribute('role', 'group'); list.setAttribute('aria-label', `Threads of ${card.name}`)
   // The threads are their own nodes: nothing on them reaches the row's click, drag, selection or long press.
   for (const type of ['click', 'pointerdown', 'mousedown', 'touchstart'] as const) list.addEventListener(type, event => event.stopPropagation())
   list.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation() })
   list.addEventListener('dragstart', event => { event.preventDefault(); event.stopPropagation() })
-  const outline: Outline = {
-    index, root: family.root, current: self,
-    needs: thread => thread !== self && NEEDS_YOU.has(index.state(thread)),
-    fold: foldOf, setFold,
-    row: thread => {
-      const row = threadRow(thread, index, open)
-      const { elapsed } = workerPlateFacts(thread, now)
-      if (elapsed) { const age = document.createElement('span'); age.className = 'kbn-row-elapsed'; age.textContent = elapsed; row.append(age) }
-      return row
-    },
-  }
+  const isOpen = (node: KanbanCard): boolean => { const value = shut(node); return value === undefined ? OPEN.has(state) : !value }
+  const parents = new Set(outline.map(row => threadKey(row.parent)))
   const draw = (): void => {
     const active = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement.dataset.threadFocus : undefined
-    const opened = outlineOpen(outline)
+    const opened = isOpen(self)
     count.setAttribute('aria-expanded', String(opened))
-    count.setAttribute('aria-label', `${count.title}; ${opened ? 'fold' : 'unfold'} the family's threads`)
-    list.replaceChildren(...opened ? renderOutline(outline, draw) : [])
-    list.hidden = !list.childElementCount
+    count.setAttribute('aria-label', `${count.title}; ${opened ? 'fold' : 'unfold'} them`)
+    const visible = new Set<string>(opened ? [threadKey(self)] : [])
+    const rows: HTMLElement[] = []
+    for (const row of outline) {
+      if (!visible.has(threadKey(row.parent))) continue
+      const fold = parents.has(threadKey(row.card)) ? isOpen(row.card) : null
+      if (fold) visible.add(threadKey(row.card))
+      rows.push(threadLine(row, fold, index, open, now, draw))
+    }
+    list.replaceChildren(...rows)
+    list.hidden = !rows.length
     if (active) [...list.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === active)?.focus({ preventScroll: true })
   }
-  count.addEventListener('click', event => {
-    event.stopPropagation()
-    setFold(family.root, count.getAttribute('aria-expanded') === 'true' ? { collapsed: true } : { collapsed: false })
-    draw()
-  })
+  count.addEventListener('click', event => { event.stopPropagation(); setShut(self, isOpen(self)); draw() })
   draw()
   host.append(list)
 }
 
-/** Opens the threads under the family's leading row and brings it into view; `elsewhere` when it is not drawn. */
-function reachLead(familyKey: string, elsewhere: () => void): void {
-  const lead = [...document.querySelectorAll<HTMLButtonElement>('.kbn-thread-count[aria-expanded]')].find(other => other.dataset.family === familyKey)
-  if (!lead) { elsewhere(); return }
-  if (lead.getAttribute('aria-expanded') !== 'true') lead.click()
-  lead.focus({ preventScroll: true })
-  lead.closest('[data-card-uid]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+/** One thread in a row's outline: its caret when it holds threads, its dot, its slug path and its age. */
+function threadLine({ card, depth, path }: OutlineRow, fold: boolean | null, index: ThreadIndex, open: (card: KanbanCard) => void, now: number, redraw: () => void): HTMLElement {
+  const row = threadRow(card, index, open), key = threadKey(card)
+  row.querySelector('.kbn-thread-name')!.textContent = path
+  row.title = card.name
+  row.style.setProperty('--ws-thread-depth', String(depth)); row.dataset.depth = String(depth)
+  row.dataset.threadFocus = JSON.stringify(['row', key])
+  row.setAttribute('aria-level', String(depth + 1))
+  row.setAttribute('aria-label', `${card.name}, ${turnOf(card).word}`)
+  const caret = document.createElement(fold === null ? 'span' : 'button'); caret.className = 'kbn-thread-fold'
+  if (fold !== null) {
+    const button = caret as HTMLButtonElement
+    button.type = 'button'
+    button.dataset.threadFocus = JSON.stringify(['fold', key])
+    button.setAttribute('aria-expanded', String(fold))
+    button.setAttribute('aria-label', `${fold ? 'Fold' : 'Unfold'} the threads of ${card.name}`)
+    button.addEventListener('click', event => { event.stopPropagation(); setShut(card, fold); redraw() })
+    button.addEventListener('pointerdown', event => event.stopPropagation())
+  }
+  row.prepend(caret)
+  const { elapsed } = workerPlateFacts(card, now)
+  if (elapsed) { const age = document.createElement('span'); age.className = 'kbn-row-elapsed'; age.textContent = elapsed; row.append(age) }
+  return row
 }

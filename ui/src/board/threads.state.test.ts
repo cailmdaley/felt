@@ -69,9 +69,7 @@ describe('a family sits where the most urgent need in its tree puts it', () => {
   const yours = (id: string) => kid(id, { workerState: 'running', runtimePhase: 'waiting' })
   const review = (id: string) => kid(id, { status: 'closed' })
   const place = (cards: KanbanCard[]) => {
-    const index = new ThreadIndex(cards), rows = index.frontier()
-    const family = index.family(rows[0])
-    expect(rows).toEqual(family.root === family.lead ? [family.root] : [family.root, family.lead])
+    const index = new ThreadIndex(cards), family = index.family(cards[0])
     return { lead: family.lead.id, need: family.need, askers: family.askers.map(c => c.id), others: family.others }
   }
   it('Your turn outranks a verdict, which outranks a live worker', () => {

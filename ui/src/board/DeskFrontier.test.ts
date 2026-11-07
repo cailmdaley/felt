@@ -7,9 +7,9 @@ import { card } from './testFixtures.js'
 const now = Date.parse('2026-07-02T12:00:00Z')
 it.each([
   ['waiting', 7, '7m'], ['identity_pending', 4, '4m'], ['waiting', 420, '7h'], ['working', 11, '11m'],
-])('keeps the %s age before the family tail and menu without a state word or dot', (phase, minutes, elapsed) => {
+])('keeps the %s age before the count and menu without a state word or dot', (phase, minutes, elapsed) => {
   const parent = card({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: phase, lastActivityAt: now - minutes * 60000, workerStartedAt: now - minutes * 60000 })
-  const child = card({ id: 'hub/work', orchestrator: parent.id, status: 'active', workerState: 'running', runtimePhase: 'working' })
+  const child = card({ id: 'hub/work', orchestrator: parent.id, status: 'active', workerState: 'running', runtimePhase: phase === 'waiting' ? 'waiting' : 'working' })
   const host = document.createElement('div'), end = document.createElement('div'), menu = document.createElement('button')
   menu.className = 'kbn-card-menu'; menu.textContent = '•••'; end.append(menu); host.append(end)
   installFrontierDetails(host, end, parent, new ThreadIndex([parent, child]), vi.fn(), now)
@@ -30,12 +30,11 @@ it('draws an age without descendants, and omits it when the pill has no age', ()
   expect(end.children).toHaveLength(0)
 })
 
-it('uses agreement in the family count and omits empty tooltip categories', () => {
+it('uses agreement in the count', () => {
   const parent = card({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
   const child = card({ id: 'hub/ask', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
   const host = document.createElement('div'), end = document.createElement('div')
   installFrontierDetails(host, end, parent, new ThreadIndex([parent, child]), vi.fn(), now)
   const count = end.querySelector<HTMLButtonElement>('.kbn-thread-count')!
   expect(count.querySelector('.kbn-count-needs')?.textContent).toBe('1 needs you')
-  expect(count.title).toBe('1 your turn')
 })

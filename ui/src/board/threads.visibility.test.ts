@@ -17,76 +17,53 @@ export function board(rows: Row[]): KanbanResponse {
 export const ids = (cards: readonly { id: string }[]) => cards.map(c => c.id)
 const desk = (b: KanbanResponse) => [...b.now.drafts, ...b.now.inFlight, ...b.now.awaitingReview, ...b.stash, ...b.roles, ...b.timeline.past, ...b.timeline.futureDated]
 
-describe('the Desk keeps roots beside the threads leading their needs', () => {
-  it('a quiet root stays in Resting beside a deeper question with its crumb', () => {
+const column = (b: KanbanResponse) => ({
+  drafts: ids(b.now.drafts).sort(), inFlight: ids(b.now.inFlight).sort(), review: ids(b.now.awaitingReview).sort(),
+  resting: ids(b.stash).sort(), roles: ids(b.roles).sort(), past: ids(b.timeline.past).sort(),
+})
+
+describe('a family stands once in each section it has work in', () => {
+  it('a node is a Desk row when no ancestor shares its state, and hangs beneath the nearest one that does otherwise', () => {
+    const b = board([
+      { id: 'hub', status: 'active', phase: 'working' },
+      { id: 'hub/ask', parent: 'hub', status: 'active', ask: true },
+      { id: 'hub/ask/busy', parent: 'hub/ask', status: 'active', phase: 'working' },
+      { id: 'hub/ask/busy/again', parent: 'hub/ask/busy', status: 'active', phase: 'waiting' },
+      { id: 'hub/quiet', parent: 'hub', status: 'open' },
+      { id: 'hub/quiet/review', parent: 'hub/quiet', status: 'closed' },
+      { id: 'hub/quiet/draft', parent: 'hub/quiet', status: 'open' },
+    ])
+    expect(column(b)).toEqual({ drafts: ['hub/quiet'], inFlight: ['hub', 'hub/ask'], review: ['hub/quiet/review'], resting: [], roles: [], past: [] })
+    expect(inFlightBand(b.now.inFlight.find(c => c.id === 'hub/ask')!)).toBe('yourTurn')
+    expect(ids(boardCards(b)).sort()).toEqual(['hub', 'hub/ask', 'hub/ask/busy', 'hub/ask/busy/again', 'hub/quiet', 'hub/quiet/draft', 'hub/quiet/review'])
+  })
+  it('a quiet root keeps its own place while its threads stand in theirs', () => {
     const b = board([
       { id: 'hub', status: 'open', horizon: 'stashed' },
       { id: 'hub/review', parent: 'hub', status: 'closed' },
       { id: 'hub/mid', parent: 'hub', status: 'closed', tempered: true },
       { id: 'hub/mid/ask', parent: 'hub/mid', status: 'active', ask: true },
     ])
-    expect(ids(desk(b))).toStrictEqual(['hub/mid/ask', 'hub'])
-    expect(inFlightBand(b.now.inFlight[0])).toBe('yourTurn')
-    const index = threadIndexFor(b)
-    expect(index.ancestry(b.now.inFlight[0]).map(a => [a.name, a.card?.id])).toEqual([['hub', 'hub'], ['hub/mid', 'hub/mid']])
-    expect(index.family(b.now.inFlight[0]).others).toEqual({ yours: 0, review: 1, working: 0 })
-    expect(ids(boardCards(b)).sort()).toEqual(['hub', 'hub/mid', 'hub/mid/ask', 'hub/review'])
+    expect(column(b)).toEqual({ drafts: [], inFlight: ['hub/mid/ask'], review: ['hub/review'], resting: ['hub'], roles: [], past: ['hub/mid'] })
+    expect(threadIndexFor(b).ancestry(b.now.inFlight[0]).map(a => [a.name, a.card?.id])).toEqual([['hub', 'hub'], ['hub/mid', 'hub/mid']])
   })
-  it('a working root stays in Working beside its thread in Your turn', () => {
+  it('a seat keeps its place in the Roles while its threads stand in their sections', () => {
     const b = board([
-      { id: 'hub', status: 'active', phase: 'working' },
-      { id: 'hub/ask', parent: 'hub', status: 'active', ask: true },
-      { id: 'hub/quiet', parent: 'hub', status: 'open' },
-      { id: 'hub/quiet/review', parent: 'hub/quiet', status: 'closed' },
-      { id: 'hub/draft', parent: 'hub', status: 'open' },
+      { id: 'working-seat', seat: true, status: 'active', phase: 'working' },
+      { id: 'working-seat/ask', parent: 'working-seat', status: 'active', ask: true },
+      { id: 'resting-seat', seat: true, status: 'open', horizon: 'stashed' },
+      { id: 'resting-seat/review', parent: 'resting-seat', status: 'closed' },
     ])
-    expect(ids(desk(b))).toStrictEqual(['hub/ask', 'hub'])
-    expect(inFlightBand(b.now.inFlight[0])).toBe('yourTurn')
-    expect(threadIndexFor(b).family(b.now.inFlight[0]).others).toEqual({ yours: 0, review: 1, working: 1 })
-  })
-  for (const root of [
-    { status: 'open' }, { status: 'open', horizon: 'stashed' },
-    { status: 'closed', tempered: true }, { status: 'closed', tempered: false },
-    { status: 'open', seat: true },
-  ]) it(`an all-quiet tree keeps only its root in its own place: ${JSON.stringify(root)}`, () => {
-    const alone = board([{ id: 'hub', ...root }])
-    const b = board([{ id: 'hub', ...root }, { id: 'hub/draft', parent: 'hub', status: 'open' }, { id: 'hub/rest', parent: 'hub', status: 'open', horizon: 'stashed' }])
-    expect(ids(desk(b))).toStrictEqual(ids(desk(alone)))
-    expect(threadIndexFor(b).family(desk(b)[0]).others).toEqual({ yours: 0, review: 0, working: 0 })
-  })
-  it('an armed workerless node asks nothing; a prompt and an idle turn both ask, and the prompt leads', () => {
-    const b = board([{ id: 'hub', status: 'active' }, { id: 'hub/idle', parent: 'hub', status: 'active', phase: 'waiting' }, { id: 'hub/prompt', parent: 'hub', status: 'open', phase: 'attention' }])
-    expect(ids(desk(b))).toStrictEqual(['hub/prompt', 'hub'])
-    expect(ids(threadIndexFor(b).family(b.now.inFlight[0]).askers)).toStrictEqual(['hub/prompt', 'hub/idle'])
-  })
-  it('a root that asks leads its row over a thread\'s question, so it is never both crumb and sub-line', () => {
-    const b = board([{ id: 'hub', status: 'active', phase: 'waiting' }, { id: 'hub/idle', parent: 'hub', status: 'active', phase: 'waiting' }, { id: 'hub/prompt', parent: 'hub', status: 'open', phase: 'attention' }])
-    expect(ids(desk(b))).toStrictEqual(['hub'])
-    expect(ids(threadIndexFor(b).family(b.now.inFlight[0]).askers)).toStrictEqual(['hub', 'hub/prompt', 'hub/idle'])
+    expect(column(b)).toEqual({ drafts: [], inFlight: ['working-seat', 'working-seat/ask'], review: ['resting-seat/review'], resting: [], roles: ['resting-seat'], past: [] })
   })
   it('a missing orchestrator is an ordinary root with path-only ancestry', () => {
     const b = board([{ id: 'gone/folder/child', parent: 'missing-uid', status: 'active', ask: true }, { id: 'gone/folder/child/deep', parent: 'gone/folder/child', status: 'closed' }])
-    expect(ids(desk(b))).toStrictEqual(['gone/folder/child'])
+    expect(column(b).inFlight).toEqual(['gone/folder/child'])
+    expect(column(b).review).toEqual(['gone/folder/child/deep'])
     expect(threadIndexFor(b).ancestry(b.now.inFlight[0])).toEqual([{ name: 'gone' }, { name: 'folder' }])
-    expect(threadIndexFor(b).family(b.now.inFlight[0]).others).toEqual({ yours: 0, review: 1, working: 0 })
   })
   it('breaks a malformed cycle and retains every conversation', () => {
     const b = board([{ id: 'a', parent: 'b', status: 'active', ask: true }, { id: 'b', parent: 'a', status: 'active', phase: 'working' }])
     expect(desk(b)).toHaveLength(2); expect(boardCards(b)).toHaveLength(2)
   })
-})
-
-it('keeps a working seat beside its asking thread and a resting seat beside its review', () => {
-  const b = board([
-    { id: 'working-seat', seat: true, status: 'active', phase: 'working' },
-    { id: 'working-seat/ask', parent: 'working-seat', status: 'active', ask: true },
-    { id: 'resting-seat', seat: true, status: 'open', horizon: 'stashed' },
-    { id: 'resting-seat/review', parent: 'resting-seat', status: 'closed' },
-  ])
-  expect(ids(b.now.inFlight)).toEqual(['working-seat/ask', 'working-seat'])
-  expect(ids(b.roles)).toEqual(['resting-seat'])
-  expect(ids(b.now.awaitingReview)).toEqual(['resting-seat/review'])
-  const index = threadIndexFor(b)
-  expect(index.others(b.now.inFlight[1])).toEqual({ yours: 1, review: 0, working: 0 })
-  expect(index.others(b.now.inFlight[0])).toEqual({ yours: 0, review: 0, working: 1 })
 })

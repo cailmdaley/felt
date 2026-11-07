@@ -4,7 +4,7 @@ import { buildKanbanResponseFromComposite, cardFromCompositeEntry } from './Kanb
 import { parseCompositeFeed } from './KanbanComposite.js'
 
 describe('constitution roll-up', () => {
-  it('keeps quiet ancestry searchable while a deep review earns its own Desk row', () => {
+  it('stands each thread in its own section when no ancestor shares its state', () => {
     const fibers = [
       ['hub', null, 'active', undefined],
       ['hub/folder/child', 'hub', 'open', undefined],
@@ -18,11 +18,12 @@ describe('constitution roll-up', () => {
     }))
     const board = buildKanbanResponseFromComposite(parseCompositeFeed({ host: 'local', fibers }))
     expect(board.now.inFlight.map(c => c.id)).toEqual(['hub'])
-    expect(board.now.drafts.map(c => c.id)).toStrictEqual(['hub-lookalike'])
+    expect(board.now.drafts.map(c => c.id).sort()).toStrictEqual(['hub-lookalike', 'hub/folder/child'])
     expect(board.now.awaitingReview.map(c => c.id)).toStrictEqual(['hub/folder/child/deep'])
-    expect(board.threads).toHaveLength(3)
+    expect(board.timeline.past.map(c => c.id).sort()).toStrictEqual(['hub/accepted', 'hub/discarded'])
+    expect(board.threads).toHaveLength(0)
     expect(board.now.inFlight.find(c => c.id === 'hub')?.threadSummary).toEqual({ unfinished: 2, waiting: 0, working: 0, toReview: 1, drafts: 1, archived: 2 })
-    expect(board.threads?.find(c => c.id.endsWith('/child'))?.threadSummary?.toReview).toBe(1)
+    expect(board.now.drafts.find(c => c.id.endsWith('/child'))?.threadSummary?.toReview).toBe(1)
     expect(board.totals.inFlight).toBe(1)
   })
 })

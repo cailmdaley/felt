@@ -49,33 +49,30 @@ function counted<T extends object>(target: T, names: readonly (keyof T)[], run: 
 /** Growing the input fourfold grows linear work about fourfold; a quadratic regression gives about sixteen. */
 const LINEAR = 6
 
-describe('a family keeps its root and its leading request', () => {
-  // A root in Your turn over ten working threads; a working root over twelve threads in Your turn.
+describe('a family splits across the sections its threads stand in', () => {
+  // A root in Your turn over ten working threads; a working root over twelve threads in Your turn; a waiting hub over twelve waiting threads.
   const family = (rootPhase: string, threadPhase: string, n: number) => parseCompositeFeed({ host: 'owner', fibers: [['cmbx', null, rootPhase], ...Array.from({ length: n }, (_, k) => [`cmbx/t${k}`, 'cmbx', threadPhase])]
     .map(([id, parent, phase]) => ({ origin: 'owner', felt_store: '/store', path: `${id}.md`, orchestrator: parent,
       fiber: { id, name: id, status: 'active', created_at: '2026-10-01T09:00:00Z', shuttle: { kind: 'oneshot' } },
       runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) })
   const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} }).renderNowSection(board.now, {})
-  it('a root in Your turn over ten working threads shows the working count', () => {
-    const board = buildKanbanResponseFromComposite(family('waiting', 'working', 10))
-    const desk = draw(board)
-    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
-    expect(desk.querySelector('.kbn-card')!.getAttribute('data-fiber-id')).toBe('cmbx')
-    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('10 working')
-    expect(desk.querySelector('.kbn-count-needs')).toBeNull()
-    expect(desk.querySelector<HTMLElement>('.kbn-desk-threads')!.hidden).toBe(true)
+  it('threads in another state stand in their own section, each named by its slug path from the root', () => {
+    const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'working', 10)))
+    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(11)
+    expect(desk.querySelectorAll('.kbn-desk-threads')).toHaveLength(0)
+    expect([...desk.querySelectorAll('.kbn-card-name')].map(el => el.textContent)).toContain('cmbx/t3')
   })
-  it('a working root over twelve askers leads with the first and lists the other eleven', () => {
-    const board = buildKanbanResponseFromComposite(family('working', 'waiting', 12))
-    const desk = draw(board)
-    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(2)
-    expect([...desk.querySelectorAll('.kbn-card')].map(el => el.getAttribute('data-fiber-id'))).toEqual(['cmbx/t0', 'cmbx'])
-    expect(desk.querySelector('.kbn-card-crumb')!.textContent).toBe('cmbx /\u00a0')
-    expect([...desk.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(el => el.textContent)).toEqual(Array.from({ length: 11 }, (_, k) => `cmbx/t${k + 1}`).sort())
-    expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('11 need you')
-    expect(desk.querySelector('.kbn-count-working')).toBeNull()
-    expect(desk.querySelector('.kbn-thread-count')!.getAttribute('title')).toBe('11 your turn, 1 working elsewhere in this family')
+  it('threads in the row\'s own state hang beneath it, open where they need you', () => {
+    const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'waiting', 12)))
+    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
+    expect([...desk.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(el => el.textContent)).toEqual(Array.from({ length: 12 }, (_, k) => `t${k}`).sort())
+    expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('12 need you')
+  })
+  it('working threads beneath a working row stay folded until opened', () => {
+    const desk = draw(buildKanbanResponseFromComposite(family('working', 'working', 3)))
+    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('3 working')
+    expect(desk.querySelector<HTMLElement>('.kbn-desk-threads')!.hidden).toBe(true)
   })
 })
 

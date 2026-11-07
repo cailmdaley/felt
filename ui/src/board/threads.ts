@@ -225,23 +225,19 @@ export class ThreadIndex {
   family(card: KanbanCard): Family {
     return this.families.get(this.key(card)) ?? { root: card, lead: card, need: null, askers: [card], others: { yours: 0, review: 0, working: 0 } }
   }
-  /** The Desk keeps each root and the thread leading its family's need, in root order. */
+  /**
+   * The Desk's rows: every node with no ancestor in its own state. Each other
+   * node hangs beneath its nearest ancestor that shares its state, so a
+   * family stands once in each section it has work in, and no node twice.
+   */
   frontier(): KanbanCard[] {
     const rows: KanbanCard[] = []
-    for (const key of this.states.keys()) if (!this.parents.has(key)) {
-      const { root, lead } = this.families.get(key)!
-      rows.push(root)
-      if (lead !== root) rows.push(lead)
+    for (const [key, state] of this.states) {
+      let parent = this.parents.get(key)
+      while (parent && this.state(parent) !== state) parent = this.parentOf(parent)
+      if (!parent) rows.push(this.cards.get(key)!)
     }
     return rows
-  }
-  /** Every other family node, counted relative to the row displaying the count. */
-  others(card: KanbanCard): Record<FamilyNeed, number> {
-    const family = this.family(card), counts = { ...family.others }
-    const leadNeed = this.need(family.lead), ownNeed = this.need(this.card(card))
-    if (leadNeed) counts[leadNeed]++
-    if (ownNeed) counts[ownNeed]--
-    return counts
   }
   /** Cached parent-chain tooltips keep deep family pages linear in graph reads. */
   ancestryTitle(card: KanbanCard): string {

@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 const sheet = (name: string): string => readFileSync(resolve(__dirname, '../src/board', name), 'utf8')
 const deskRows = sheet('deskRows.css')
 const frontier = sheet('deskFrontier.css')
+const threads = sheet('threads.css')
 
 /** The declarations of the first rule whose selector is exactly `selector`. */
 function rule(css: string, selector: string): Record<string, string> {
@@ -36,11 +37,11 @@ describe('the Desk reads at the board label size', () => {
     expect(px(rule(deskRows, '.kbn-now-board .kbn-col-title')['font-size'])).toBeLessThan(38)
   })
 
-  it('draws a thread crumb smaller than the name and keeps it on one line', () => {
-    const row = rule(frontier, '.kbn-card-crumb')
-    expect(px(row['font-size'])).toBeLessThan(px(rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-name')['font-size']))
-    expect(row['white-space']).toBe('nowrap')
-    expect(row.color).toBe('var(--kbn-ink-muted)')
+  it('names a thread by its slug path on one line, cut short by an ellipsis', () => {
+    const name = rule(frontier, '.kbn-desk-threads .kbn-thread-name')
+    expect(name.color).toBe('var(--kbn-ink-soft)')
+    const row = rule(threads, '.kbn-thread-name')
+    expect([row['white-space'], row['text-overflow']]).toEqual(['nowrap', 'ellipsis'])
   })
 })
 

@@ -1,72 +1,32 @@
 // @vitest-environment jsdom
-import { expect, it, vi } from 'vitest'
+import { expect, it } from 'vitest'
 import { card } from './testFixtures.js'
-import { ThreadIndex, threadKey } from './threads.js'
-import { threadRow } from './ThreadPeek.js'
-import { renderOutline, outlineOpen, type Fold, type Outline } from './threadOutline.js'
+import { ThreadIndex } from './threads.js'
+import { rowLabel, sectionOutline } from './threadOutline.js'
 
 const waiting = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const }
 const working = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'working' as const }
-const at = (n: number) => `2026-10-0${n}T00:00:00Z`
-const root = card({ id: 'r', name: 'Root', ...working })
-const asks = card({ id: 'r/a', name: 'Asks', orchestrator: 'r', createdAt: at(1), ...waiting })
-const hub = card({ id: 'r/b', name: 'Hub', orchestrator: 'r', createdAt: at(2), ...working })
-const deep = card({ id: 'r/b/1', name: 'Deep ask', orchestrator: 'r/b', createdAt: at(3), ...waiting })
-const busy = card({ id: 'r/b/2', name: 'Busy', orchestrator: 'r/b', createdAt: at(4), ...working })
-const draft = card({ id: 'r/c', name: 'Draft', orchestrator: 'r', createdAt: at(5), status: 'open' })
-const parked = card({ id: 'r/d', name: 'Parked', orchestrator: 'r', createdAt: at(1), status: 'open', effectiveHorizon: 'stashed' })
-const done = card({ id: 'r/e', name: 'Done', orchestrator: 'r', createdAt: at(6), status: 'closed', tempered: true })
+// Cail's example: A is your turn, A1 under it is working, B1 under A1 is your turn.
+const a = card({ id: 'proj/a', name: 'A', ...waiting })
+const a1 = card({ id: 'proj/a/a1', name: 'A1', orchestrator: 'proj/a', ...working })
+const b1 = card({ id: 'proj/a/a1/b1', name: 'B1', orchestrator: 'proj/a/a1', ...waiting })
+const b2 = card({ id: 'proj/a/a1/b2', name: 'B2', orchestrator: 'proj/a/a1', ...working })
+const index = new ThreadIndex([a, a1, b1, b2])
 
-function outline() {
-  const index = new ThreadIndex([root, asks, hub, deep, busy, draft, parked, done]), folds = new Map<string, Fold>()
-  const o: Outline = {
-    index, root, current: root,
-    needs: c => index.state(c) === 'waiting',
-    fold: c => folds.get(threadKey(c)) ?? {},
-    setFold: (c, fold) => folds.set(threadKey(c), fold),
-    row: c => threadRow(c, index, vi.fn()),
-  }
-  const host = document.createElement('div')
-  const draw = (): void => { host.replaceChildren(...outlineOpen(o) ? renderOutline(o, draw) : []) }
-  draw()
-  const shown = () => [...host.children].map(el => `${'  '.repeat(Number((el as HTMLElement).dataset.depth))}${el.matches('.kbn-thread-row') ? el.querySelector('.kbn-thread-name')!.textContent : el.textContent}`)
-  const caret = (name: string) => [...host.querySelectorAll<HTMLElement>('.kbn-thread-row')].find(row => row.querySelector('.kbn-thread-name')!.textContent === name)!.querySelector<HTMLButtonElement>('button.kbn-thread-fold')!
-  return { o, host, shown, caret, draw, folds }
-}
-
-it('opens on the way to what needs you, the rest behind a quiet count, and never the archived', () => {
-  const { shown, host, o } = outline()
-  expect(outlineOpen(o)).toBe(true)
-  expect(shown()).toEqual(['Asks', 'Hub', '  Deep ask', '  1 more', '2 more'])
-  host.querySelectorAll<HTMLButtonElement>('.kbn-thread-more')[1].click()
-  // Every child at that level, those in play before the resting; still no archived thread.
-  expect(shown()).toEqual(['Asks', 'Hub', '  Deep ask', '  1 more', 'Draft', 'Parked'])
+it('splits a family by state: each section holds its own threads, the ones between named in the slug path', () => {
+  expect(index.frontier().map(c => c.name)).toEqual(['A', 'A1'])
+  // Your turn: A, and under it a1/b1, with no row for A1.
+  expect(sectionOutline(index, a).map(row => [row.path, row.depth, row.parent.name])).toEqual([['a1/b1', 0, 'A']])
+  // Working: A1 stands as a top row named from the root, B2 under it.
+  expect(rowLabel(index, a1)).toBe('a/a1')
+  expect(sectionOutline(index, a1).map(row => [row.path, row.depth])).toEqual([['b2', 0]])
+  expect(rowLabel(index, a)).toBe('A')
 })
 
-it('folds each level on its own caret, remembers it, and a shut level reopens on what needs you', () => {
-  const { shown, caret, host, o, folds } = outline()
-  host.querySelector<HTMLButtonElement>('.kbn-thread-more')!.click()
-  expect(shown()).toEqual(['Asks', 'Hub', '  Deep ask', '  Busy', '2 more'])
-  caret('Hub').click()
-  expect(caret('Hub').getAttribute('aria-expanded')).toBe('false')
-  expect(shown()).toEqual(['Asks', 'Hub', '2 more'])
-  caret('Hub').click()
-  expect(shown()).toEqual(['Asks', 'Hub', '  Deep ask', '  1 more', '2 more'])
-  // The whole family folds to its row.
-  o.setFold(root, { collapsed: true })
-  expect(outlineOpen(o)).toBe(false)
-  expect(folds.get(threadKey(hub))).toEqual({ collapsed: false })
-  expect(caret('Asks')?.matches('button')).toBeFalsy()
-})
-
-it('a family that asks nothing stays folded, and opens on every child at once', () => {
-  const { o, shown, draw, caret } = outline()
-  o.needs = () => false
-  draw()
-  expect(shown()).toEqual([])
-  o.setFold(root, { collapsed: false })
-  draw()
-  expect(shown()).toEqual(['Asks', 'Hub', 'Draft', 'Parked'])
-  caret('Hub').click()
-  expect(shown()).toEqual(['Asks', 'Hub', '  Deep ask', '  Busy', 'Draft', 'Parked'])
+it('nests a thread under its nearest shown ancestor, indenting only by the rows shown', () => {
+  const c1 = card({ id: 'proj/a/a1/b1/c1', name: 'C1', orchestrator: 'proj/a/a1/b1', ...working })
+  const d1 = card({ id: 'proj/a/a1/b1/c1/d1', name: 'D1', orchestrator: 'proj/a/a1/b1/c1', ...waiting })
+  const deep = new ThreadIndex([a, a1, b1, b2, c1, d1])
+  expect(sectionOutline(deep, a).map(row => [row.path, row.depth, row.parent.name])).toEqual([['a1/b1', 0, 'A'], ['c1/d1', 1, 'B1']])
+  expect(deep.frontier().map(c => c.name)).toEqual(['A', 'A1'])
 })
