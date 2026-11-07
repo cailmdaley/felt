@@ -39,7 +39,7 @@ func (a *app) spokenTranscript(cmd *cobra.Command) error {
 			Speaker string    `json:"speaker"`
 			Text    string    `json:"text"`
 			FiberID string    `json:"fiber_id"`
-			Name    string    `json:"name"`
+			Slug    string    `json:"slug"`
 		} `json:"rows"`
 	}
 	if err := json.Unmarshal(body, &answer); err != nil {
@@ -48,12 +48,10 @@ func (a *app) spokenTranscript(cmd *cobra.Command) error {
 	lineBreaks := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 	for _, row := range answer.Rows {
 		card := "—"
-		if strings.Contains(row.FiberID, "/") {
-			card = row.FiberID[strings.LastIndex(row.FiberID, "/")+1:]
-		} else if row.Name != "" {
-			card = row.Name[strings.LastIndex(row.Name, "/")+1:]
+		if row.Slug != "" {
+			card = row.Slug[strings.LastIndex(row.Slug, "/")+1:]
 		} else if row.FiberID != "" {
-			card = row.FiberID
+			card = row.FiberID[strings.LastIndex(row.FiberID, "/")+1:]
 		}
 		text := lineBreaks.Replace(row.Text)
 		fmt.Fprintf(a.env.Stdout, "%s %s → %s: %s\n", row.Time.Format("15:04:05"), row.Speaker, card, text)

@@ -219,12 +219,15 @@ defmodule Shuttle.Voice do
     if state.route_error do
       {:error, state.route_error}
     else
+      fiber = target_fiber(id, origin) || %{}
+
       target = %{
         "fiber_id" => id,
+        "slug" => fiber["slug"] || fiber["id"] || params["slug"] || id,
         "origin" => origin || Shuttle.RecorderRouter.own_host(),
         "pinned" => not state.snapshot.follow,
         "name" =>
-          target_name(id, origin) || params["name"] || known_name(state.target, id) ||
+          fiber["name"] || params["name"] || known_name(state.target, id) ||
             Path.basename(id)
       }
 
@@ -750,7 +753,7 @@ defmodule Shuttle.Voice do
       Enum.reduce_while(lines, {:ok, nil}, fn line, _ ->
         case Jason.decode(line) do
           {:ok, %{"fiber_id" => id} = row} when is_binary(id) and id != "" ->
-            {:cont, {:ok, Map.take(row, ~w(fiber_id origin name))}}
+            {:cont, {:ok, Map.take(row, ~w(fiber_id origin name slug pinned))}}
 
           _ ->
             {:halt, {:error, "invalid voice route journal"}}
@@ -784,7 +787,9 @@ defmodule Shuttle.Voice do
 
   defp known_name(_target, _id), do: nil
 
-  defp target_name(id, origin) do
+  defp target_name(id, origin), do: (target_fiber(id, origin) || %{})["name"]
+
+  defp target_fiber(id, origin) do
     fibers =
       Shuttle.Env.app(:voice_fibers, fn ->
         Shuttle.ServedFibers.all(&Shuttle.RemoteFiberRegistry.cached_feeds/0)
@@ -793,7 +798,7 @@ defmodule Shuttle.Voice do
     Enum.find_value(fibers.(), fn fiber ->
       if id in [fiber["uid"], fiber["id"], fiber["slug"]] and
            (origin in [nil, ""] or get_in(fiber, ["shuttle", "host"]) == origin),
-         do: fiber["name"]
+         do: fiber
     end)
   end
 

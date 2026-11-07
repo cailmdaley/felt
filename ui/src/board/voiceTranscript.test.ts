@@ -23,6 +23,7 @@ it('renders time, speaker, slug and text, including speech with no route', () =>
   expect(transcriptLine(row, slug)).toBe('18:30:04 me → a-card: A thought <not markup>')
   expect(transcriptLine({ ...row, fiber_id: null }, slug)).toContain('me → —:')
   expect(transcriptLine({ ...row, fiber_id: 'outside/card' }, slug)).toContain('me → card:')
+  expect(transcriptLine({ ...row, slug: 'outside/stored-card' }, () => undefined)).toContain('me → stored-card:')
 })
 it('opens a readable day panel, filters only when asked, and treats speech as text', async () => {
   const opener = document.createElement('button'); document.body.append(opener)

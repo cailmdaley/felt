@@ -737,6 +737,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       "fiber_id" => target && target["fiber_id"],
       "origin" => target && target["origin"],
       "name" => target && target["name"],
+      "slug" => target && target["slug"],
       "launch" => config["launch"]
     }
 

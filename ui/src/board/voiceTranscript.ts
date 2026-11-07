@@ -9,6 +9,7 @@ export interface VoiceTranscriptRow {
   fiber_id: string | null
   origin: string | null
   name: string | null
+  slug?: string | null
   launch: string
 }
 export interface VoiceTranscript {
@@ -30,7 +31,7 @@ export async function readVoiceTranscript(base: string, recorder?: string, fiber
 
 export function transcriptLine(row: VoiceTranscriptRow, slugOf: FiberSlug): string {
   const time = clockSeconds(Date.parse(row.t))
-  const slug = row.fiber_id ? slugOf(row.fiber_id, row.origin) ?? row.fiber_id.split('/').at(-1) : '—'
+  const slug = row.fiber_id ? (row.slug ?? slugOf(row.fiber_id, row.origin) ?? row.fiber_id).split('/').at(-1) : '—'
   return `${time} ${row.speaker} → ${slug}: ${row.text}`
 }
 

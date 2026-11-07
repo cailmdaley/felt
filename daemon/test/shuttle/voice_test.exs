@@ -493,6 +493,50 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{target: %{"name" => "The card"}}} = Voice.target(%{"fiber_id" => "01CARD"})
   end
 
+  test "UID routes carry the resolved fiber slug into the day transcript", c do
+    id = "01CARD"
+
+    Env.put_app_env(:voice_fibers, fn ->
+      [%{"uid" => id, "id" => "project/short-card", "name" => "Full card name"}]
+    end)
+
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
+    assert {:ok, _} = Voice.target(%{"fiber_id" => id})
+
+    assert %{"slug" => "project/short-card"} =
+             Voice.routes_path() |> File.read!() |> String.trim() |> Jason.decode!()
+
+    transcript = Path.join(c.root, "voice.txt")
+    at = DateTime.to_iso8601(DateTime.utc_now())
+
+    File.write!(
+      Path.rootname(transcript) <> ".jsonl",
+      Jason.encode!(%{wall: at, speaker: "me", text: "words"}) <> "\n"
+    )
+
+    name = Module.concat(__MODULE__, "Relay#{System.unique_integer([:positive])}")
+
+    start_supervised!(
+      {Voice.TranscriptRelay,
+       name: name,
+       observe: fn -> {:ok, %{capture: %{launch: "launch", state: "live", error: nil}}} end}
+    )
+
+    assert :ok =
+             Voice.TranscriptRelay.start(
+               %{
+                 launch: "launch",
+                 transcript: transcript,
+                 routes_path: Voice.routes_path(),
+                 started_at: at
+               }, server: name)
+
+    assert %{error: nil} = Voice.TranscriptRelay.status("launch", server: name)
+
+    assert {:ok, %{rows: [%{"fiber_id" => ^id, "slug" => "project/short-card"}]}} =
+             Voice.Transcript.read()
+  end
+
   test "target receipt time is durable and restored by a fresh supervisor", c do
     assert {:ok, _} = Voice.update(%{"enabled" => true})
 
