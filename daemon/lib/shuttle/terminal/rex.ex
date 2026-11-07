@@ -769,11 +769,52 @@ defmodule Shuttle.Terminal.Rex do
     do: reveal_session(runner, b["session_id"], wid, opts)
 
   def reveal_binding(runner, b, opts) do
-    with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
-      block = Enum.find(blocks, &(&1["block_id"] == b["block_id"]))
-      reveal_session(runner, b["session_id"], block && block["window_id"], opts)
+    with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]),
+         {:ok, wid} <-
+           window_for(runner, b, Enum.find(blocks, &(&1["block_id"] == b["block_id"]))) do
+      reveal_session(runner, b["session_id"], wid, opts)
     else
       error -> open_error(error)
+    end
+  end
+
+  defp window_for(_runner, _b, nil), do: {:error, :not_found}
+  defp window_for(_runner, _b, %{"window_id" => wid}) when is_binary(wid), do: {:ok, wid}
+  defp window_for(runner, b, block), do: place(runner, b["session_id"], block)
+
+  @doc """
+  Take a worker's block out of view: its window closes with it and its program
+  keeps running. `place/3` (through an open) puts it back in a window of its own.
+  """
+  def hide(runner, sid, bid),
+    do: Rex.call(runner, "session.detach_block", %{"block_id" => bid}, session: sid)
+
+  # Rex places a detached block only beside a placed one, so a placeholder
+  # window holds the spot until the block is beside it, then closes. The tree
+  # refresh gives the window its label and place among the family's tabs.
+  defp place(runner, sid, block) do
+    holder = %{
+      "window_label" => block["label"],
+      "layout" => %{
+        "block" => %{
+          "flavor" => "com.superlogical.terminal.shell",
+          "options" => %{"shell" => "none", "command" => ["sleep", "60"]}
+        }
+      }
+    }
+
+    with {:ok, %{"window_id" => wid, "block_ids" => [placeholder]}} <-
+           Rex.new_window(runner, sid, holder),
+         {:ok, _} <-
+           Rex.call(
+             runner,
+             "session.move_block",
+             %{"block_id" => block["block_id"], "anchor_block_id" => placeholder},
+             session: sid
+           ),
+         {:ok, _} <- Rex.call(runner, "block.close", %{"block_id" => placeholder}, session: sid) do
+      Shuttle.Terminal.RexTree.refresh(runner)
+      {:ok, wid}
     end
   end
 
@@ -795,7 +836,10 @@ defmodule Shuttle.Terminal.Rex do
   Select a located worker's window in an app client already attached, launching
   nothing; `{:ok, true}` when the app moved.
   """
-  def select_binding(runner, b), do: select_existing(runner, b["session_id"], b["window_id"])
+  def select_binding(runner, %{"window_id" => wid} = b) when is_binary(wid),
+    do: select_existing(runner, b["session_id"], wid)
+
+  def select_binding(_runner, _hidden), do: {:ok, false}
 
   @doc "Select the live viewer of a tmux worker by its `name@host` label, creating none."
   def select_viewer(runner, label) do
@@ -1209,11 +1253,7 @@ defmodule Shuttle.Terminal.Rex do
   defp live_block(runner, name, b, opts \\ []) do
     with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
       if block = Enum.find(blocks, &(&1["block_id"] == b["block_id"])) do
-        {:ok,
-         if(opts[:live_window],
-           do: Map.put(b, "window_id", block["window_id"] || b["window_id"]),
-           else: b
-         )}
+        {:ok, if(opts[:live_window], do: Map.put(b, "window_id", block["window_id"]), else: b)}
       else
         if is_binary(b["family"]) and is_binary(b["window_id"]) and name != nil do
           with :ok <- retire_worker_window(runner, b),

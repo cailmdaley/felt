@@ -140,7 +140,7 @@ defmodule Shuttle.Terminal.RexTree do
               entry = %{
                 fiber: b["fiber"],
                 session_id: b["session_id"],
-                window_id: b["window_id"] || block["window_id"],
+                window_id: block["window_id"],
                 family: root,
                 depth: depth,
                 suffix: b["suffix"] || ""

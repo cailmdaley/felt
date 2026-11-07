@@ -124,6 +124,7 @@ defmodule Shuttle.Application do
     {Shuttle.Local, :start_claude_mail_recovery, Shuttle.ClaudeMailRecovery},
     {Shuttle.Local, :start_log_rotator, Shuttle.LogRotator},
     {Shuttle.Local, :start_remote_control, Shuttle.RemoteControl},
+    {Shuttle.Local, :start_rex_view, Shuttle.RexView},
     {Shuttle.Local, :start_transcript_indexer, Shuttle.TranscriptIndexer},
     {Shuttle.Local, :start_poller, Shuttle.Poller}
   ]

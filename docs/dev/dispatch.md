@@ -201,6 +201,7 @@ The family is the topmost constitution ancestor in the fiber tree at launch, or 
 The session label is the family's last two path segments.
 Tabs sort by fiber path and display each leaf, with `└ ` and em-space indentation for constitution levels below the root, plus ` @host` for remote viewers.
 A daemon-written binding from worker name to session, window and block IDs is authoritative; only the block label retains the worker name for recovery.
+Rex's view holds what is in focus: `Shuttle.RexView` sweeps this host's Rex server every 30 seconds, and a worker, resumed conversation or viewer window that has stood behind its session's active window for two minutes leaves the view. Its block is detached (`session.detach_block`), so the window closes while the program runs on; the session stays, and a session whose windows have all left keeps its blocks. Opening the conversation (`c`, Open in Rex) puts the block back in a window of its own, through a placeholder window it is moved beside. A click selects only a window that exists, so it leaves a hidden worker hidden. Windows the daemon did not open, such as a human's shell, hark or Remote Control, are never touched.
 Launches and empty-session cleanup share a per-family lock.
 Stop closes the worker's window and destroys an empty session only when Shuttle created it; human and label-recovered sessions are preserved.
 Per-worker session bindings retain their addresses until their workers end, and refiling a live worker does not move it into another family.

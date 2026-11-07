@@ -6,6 +6,7 @@ config :shuttle,
   scoped_env: true,
   start_poller: false,
   start_remote_control: false,
+  start_rex_view: false,
   # Only scoped indexer tests may scan synthetic transcripts.
   start_transcript_indexer: false,
   # Tests boot pollers constantly; quarantining every one would park the very

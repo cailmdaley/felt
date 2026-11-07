@@ -139,8 +139,18 @@ defmodule Shuttle.Test.FakeRex do
 
   defp run("session.view", _, sid, state) do
     case state.sessions[sid] do
-      nil -> {{"session not found", 3}, state}
-      session -> {%{"session_id" => sid, "windows" => windows(session)}, state}
+      nil ->
+        {{"session not found", 3}, state}
+
+      session ->
+        windows =
+          Enum.map(windows(session), fn w ->
+            blocks = Enum.filter(session.blocks, &(&1["window_id"] == w["window_id"]))
+            Map.put(w, "layers", [%{"blocks" => blocks}])
+          end)
+
+        active = Map.get(session, :active) || get_in(windows, [Access.at(0), "window_id"])
+        {%{"session_id" => sid, "windows" => windows, "active_window_id" => active}, state}
     end
   end
 
@@ -167,10 +177,32 @@ defmodule Shuttle.Test.FakeRex do
     {%{}, put_in(state, [:sessions, sid], Map.put(session, :windows, windows))}
   end
 
+  defp run("session.detach_block", %{"block_id" => bid}, sid, state),
+    do: {%{"revision" => 5}, update_block(state, sid, bid, &Map.put(&1, "window_id", nil))}
+
+  defp run("session.move_block", %{"block_id" => bid, "anchor_block_id" => anchor}, sid, state) do
+    wid = Enum.find(state.sessions[sid].blocks, &(&1["block_id"] == anchor))["window_id"]
+    {%{"revision" => 6}, update_block(state, sid, bid, &Map.put(&1, "window_id", wid))}
+  end
+
+  defp run("block.close", %{"block_id" => bid}, sid, state) do
+    blocks = Enum.reject(state.sessions[sid].blocks, &(&1["block_id"] == bid))
+    {%{"block_id" => bid}, put_in(state, [:sessions, sid, :blocks], blocks)}
+  end
+
   defp run("session.list_blocks", _, sid, state) do
     case state.sessions[sid] do
-      nil -> {{"session not found", 3}, state}
-      session -> {%{"blocks" => session.blocks}, state}
+      nil ->
+        {{"session not found", 3}, state}
+
+      session ->
+        {%{
+           "blocks" =>
+             Enum.map(
+               session.blocks,
+               &Map.put(&1, "placement", if(&1["window_id"], do: "placed", else: "detached"))
+             )
+         }, state}
     end
   end
 
@@ -231,6 +263,13 @@ defmodule Shuttle.Test.FakeRex do
 
   defp run("server.apple.privacy_status", _, _, state),
     do: {%{"full_disk_access" => "granted"}, state}
+
+  defp update_block(state, sid, bid, fun) do
+    blocks =
+      Enum.map(state.sessions[sid].blocks, &if(&1["block_id"] == bid, do: fun.(&1), else: &1))
+
+    put_in(state, [:sessions, sid, :blocks], blocks)
+  end
 
   defp windows(session) do
     live = MapSet.new(session.blocks, & &1["window_id"])

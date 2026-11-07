@@ -305,6 +305,60 @@ defmodule Shuttle.Terminal.RexRealTest do
     end
   end
 
+  test "a worker leaves the view behind another window with its program running, and opens back into a window",
+       %{root: root} do
+    # Not macOS, so the open never reaches for the operator's Rex app.
+    Env.put_app_env(:os_type, {:unix, :linux})
+    Env.put_app_env(:terminal_backend, Backend)
+    name = "hide-#{System.unique_integer([:positive])}-shuttle"
+    path = WorkerProcess.script_path(name)
+    pidfile = Path.join(root, "hidden-pid")
+    File.write!(path, Backend.script(name).env <> "echo $$ > '#{pidfile}'\nsleep 300\n")
+    on_exit(fn -> File.rm(path) end)
+    assert :ok = Backend.launch(@runner, name, root, path, [])
+    await(fn -> File.exists?(pidfile) end)
+    pid = File.read!(pidfile) |> String.trim()
+
+    {:ok, %{"bindings" => %{^name => %{"session_id" => sid, "block_id" => bid}}}} =
+      RexBindings.read()
+
+    shell = %{
+      "window_label" => "shell",
+      "layout" => %{
+        "block" => %{
+          "flavor" => "com.superlogical.terminal.shell",
+          "options" => %{"shell" => "none", "command" => ["sleep", "300"]}
+        }
+      }
+    }
+
+    assert {:ok, %{"window_id" => other}} =
+             Rex.call(@runner, "session.new_window", shell, session: sid)
+
+    assert {:ok, _} =
+             Rex.call(@runner, "session.focus_window", %{"window_id" => other}, session: sid)
+
+    assert {:ok, %{}} = Shuttle.RexView.sweep(@runner, %{}, grace_ms: 0)
+    assert {:ok, [%{"window_id" => ^other}]} = Rex.windows(@runner, sid)
+    assert {:ok, blocks} = Rex.blocks(@runner, sid)
+    assert %{"placement" => "detached"} = Enum.find(blocks, &(&1["block_id"] == bid))
+    assert {_, 0} = System.cmd("kill", ["-0", pid])
+
+    assert {:ok, names} = Backend.list(@runner)
+    assert name in names
+
+    # No app client is attached to the isolated server, so the open stops short
+    # of selecting, after putting the worker back in a window of its own.
+    assert {:error, _no_app_client} = Shuttle.Opener.open(name)
+    assert {:ok, windows} = Rex.windows(@runner, sid)
+    assert length(windows) == 2
+    assert {:ok, blocks} = Rex.blocks(@runner, sid)
+    placed = Enum.find(blocks, &(&1["block_id"] == bid))
+    assert placed["placement"] == "placed"
+    assert length(blocks) == 2
+    assert {_, 0} = System.cmd("kill", ["-0", pid])
+  end
+
   test "a 120-character fiber leaf launches with bounded display and block labels", %{root: root} do
     Env.put_app_env(:terminal_backend, Backend)
     fiber = "work/" <> String.duplicate("x", 120)
@@ -498,7 +552,10 @@ defmodule Shuttle.Terminal.RexRealTest do
       Env.put_app_env(:terminal_backend, Backend)
       FeltStoreRunner.set_fiber("native-capture", make_fiber("native-capture"))
       FeltStoreRunner.set_shuttle("native-capture", "kind: oneshot\nhost: test-host\n", "open")
-      {:ok, p} = start_poller!(runner: ClaimRunner, own_host_id: "test-host", felt_stores: [store])
+
+      {:ok, p} =
+        start_poller!(runner: ClaimRunner, own_host_id: "test-host", felt_stores: [store])
+
       await_boot_cycle!(p)
       source = "capture-native"
 

@@ -142,6 +142,23 @@ defmodule Shuttle.OpenerTest do
       refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
     end
 
+    test "a hidden worker has no window to select, and an open puts it back in one" do
+      assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+      sid = FakeRex.fixture("session_create")["session_id"]
+      [%{"block_id" => bid}] = FakeRex.state().sessions[sid].blocks
+      assert {:ok, _} = Rex.hide(FakeRex, sid, bid)
+      assert {:ok, false} = Opener.select(@name)
+      assert requests("client.perform") == []
+
+      assert :ok = Opener.open(@name)
+      [placed] = FakeRex.state().sessions[sid].blocks
+      assert placed["block_id"] == bid and is_binary(placed["window_id"])
+      assert [select] = requests("client.perform")
+      assert select["args"]["window_id"] == placed["window_id"]
+      assert [_] = requests("block.close")
+      assert {:ok, true} = Opener.select(@name)
+    end
+
     test "a kitty display never moves for a click" do
       Env.put_app_env(:terminal_backend, Tmux)
       assert {:ok, false} = Opener.select(@name)
