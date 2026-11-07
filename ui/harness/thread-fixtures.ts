@@ -113,6 +113,9 @@ export function addFamilyFixtures(example: WorkspaceExample, now: number): void 
   addHubFixture(example, now)
 }
 
+/** The hub threads that carry a tapestry in their fiber directory. */
+const HUB_TAPESTRIES: readonly string[] = ['hub/pipeline-steward', 'hub/cosmology', 'hub/psf-coupling']
+
 /** The hub family, with its ledgers and sent files; the map's unread marks count from three hours back. */
 function addHubFixture(example: WorkspaceExample, now: number): void {
   const hour = 3_600_000
@@ -122,7 +125,7 @@ function addHubFixture(example: WorkspaceExample, now: number): void {
     const moved = now - row.hours * hour, closed = ['review', 'done', 'discard'].includes(row.state)
     const session = `session-${row.id}`, launches = hubTimes(row, row.launches, now)
     example.feed.fibers.push({
-      origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/constitution.md`, orchestrator: row.parent,
+      origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/constitution.md`, dir: `/fixture-store/workspace/${row.id}`, orchestrator: row.parent,
       fiber: { id: row.id, uid: row.id, name: row.name, status: closed ? 'closed' : row.state === 'draft' || row.state === 'rest' ? 'open' : 'active',
         horizon: row.state === 'rest' ? 'stashed' : undefined, tempered: row.state === 'done' ? true : row.state === 'discard' ? false : undefined,
         outcome: row.note && row.state !== 'ask' ? row.note : undefined,
@@ -132,10 +135,14 @@ function addHubFixture(example: WorkspaceExample, now: number): void {
       runtime: phases[row.state] ? { state: 'running', phase: phases[row.state], session_uuid: session, last_activity_at: moved } : null,
     })
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\n${row.note}`
+    if (HUB_TAPESTRIES.includes(row.id)) {
+      const page = `<!doctype html><html><head><meta charset="utf-8"><title>${row.name}</title></head><body><h1>${row.name}</h1><p>${row.note}</p></body></html>`
+      example.files.push({ owner: WORKSPACE_HOST, path: `/fixture-store/workspace/${row.id}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
+    }
     launches.forEach((at, n) => example.sessions.push({ at, fiber: row.id, uid: row.id, session, harness: 'codex', agent: 'codex-sol', host: WORKSPACE_HOST, tmux: null, kind: n === launches.length - 1 ? 'dispatch' : 'resume' }))
     for (const at of hubTimes(row, row.commits, now)) example.commits.push({ at, session, host: WORKSPACE_HOST })
     hubTimes(row, row.files, now).forEach((at, n) => {
-      const fullPath = `/fixture-project/${row.id}/${['report.html', 'summary.png', 'figure.png', 'notes.md'][n % 4]}`
+      const fullPath = `/fixture-project/${row.id}/${['report.html', 'summary.png', 'figure.png', 'notes.md', 'leakage-by-tile.pdf', 'psf-residuals.png'][n % 6].replace(/^(?=.)/, n >= 6 ? `run-${n}-` : '')}`
       example.receipts.push({ fullPath, basename: fullPath.split('/').at(-1), timestamp: at, sessionId: session, uid: row.id, host: WORKSPACE_HOST })
     })
   }

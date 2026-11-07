@@ -69,7 +69,7 @@ import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, isQuestion, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
 import { threadKey } from './threads.js'
 import {
   dueBouncesFromResting,
@@ -723,8 +723,7 @@ export class KanbanModal {
       : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId }
     if (doc) this.workspace?.open(card, undefined, doc)
-    else if (card.status === 'active' && isQuestion(card)) this.workspace?.openQuestion(card)
-    else this.workspace?.open(card)
+    else this.workspace?.openFromDesk(card)
   }
 
   /** Focus the bar's Find, where the bar carries one (the phone's bottom bar does not). */

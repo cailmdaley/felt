@@ -3,10 +3,10 @@ import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ThreadIndex } from '../threads.js'
 import { HUB_ROWS, hubTimes, type HubRow } from '../../../harness/hub-family.js'
-import { familyModel, needsHuman, type FamilyModel } from './model.js'
+import { familyModel, needsHuman, timeOpen, type FamilyModel, type MapThread } from './model.js'
 import { skyLayout } from './sky.js'
 import { ringsLayout } from './rings.js'
-import { arrange, spiral, spiralLayout } from './spiral.js'
+import { armsOf, arrange, spiral, spiralLayout } from './spiral.js'
 import { spread } from './drawing.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
@@ -62,38 +62,56 @@ describe.each(SIZES)('the sky at %i by %i', (width, height) => {
   })
 })
 
-it('keeps every thread of rings at its place while its activity changes, and on its generation', () => {
+it('keeps every thread of rings at its direction while its activity changes, and sets it outward by how long it has been open', () => {
   const quiet = hub(), busy = hub(HUB_ROWS.map(row => ({ ...row, launches: row.launches + 3, state: row.state === 'done' ? 'work' as const : row.state === 'work' ? 'done' as const : row.state })))
-  const place = (model: FamilyModel) => new Map(ringsLayout(model, 800, 720).stars.map(star => [star.thread.key, [star.x, star.y]]))
-  expect(place(busy)).toEqual(place(quiet))
-  const layout = ringsLayout(quiet, 800, 720), depth = new Map(layout.stars.map(star => [star.thread.depth, Math.hypot(star.x - layout.cx, star.y - layout.cy)]))
-  expect(depth.get(0)).toBe(0)
-  expect(depth.get(1)!).toBeLessThan(depth.get(2)!)
+  const directions = (model: FamilyModel) => new Map(ringsLayout(model, 800, 720).stars.map(star => [star.thread.key, star.angle]))
+  expect(directions(busy)).toEqual(directions(quiet))
+  const layout = ringsLayout(quiet, 800, 720), out = (star: { x: number; y: number }): number => Math.hypot(star.x - layout.cx, star.y - layout.cy)
+  const others = layout.stars.filter(star => star.thread !== quiet.root).sort((a, b) => timeOpen(a.thread, now) - timeOpen(b.thread, now))
+  expect(layout.stars.find(star => star.thread === quiet.root)!.x).toBe(layout.cx)
+  expect(out(others.at(-1)!)).toBeGreaterThan(out(others[0]))
   expect(layout.stars.map(star => star.thread)).toEqual(expect.arrayContaining([...quiet.threads.values()]))
 })
-describe.each([[800, 720], [1056, 640], [416, 720]])('the spiral at %i by %i', (width, height) => {
-  const model = hub(), layout = spiralLayout(model, width, height)
-  it('winds the order out from the centre, evenly along the arc', () => {
-    const distance = layout.stars.map(star => Math.hypot(star.x - layout.cx, star.y - layout.cy))
-    expect(distance[0]).toBeLessThan(40)
-    distance.forEach((d, n) => { if (n) expect(d).toBeGreaterThanOrEqual(distance[n - 1]) })
-    expect(Math.max(...distance)).toBeLessThanOrEqual(layout.R + 1)
-    const asking = layout.stars.slice(0, model.attention.length)
-    const gaps = asking.slice(2).map((star, n) => Math.hypot(star.x - asking[n + 1].x, star.y - asking[n + 1].y))
-    expect(Math.max(...gaps) / Math.min(...gaps)).toBeLessThan(1.4)
+it('spreads a flat family across the rings, however shallow it is', () => {
+  const flat = HUB_ROWS.filter(row => !row.parent || row.parent === 'hub'), layout = ringsLayout(hub(flat), 800, 720)
+  const out = layout.stars.filter(star => star.thread.parent).map(star => Math.hypot(star.x - layout.cx, star.y - layout.cy))
+  expect(Math.max(...out) - Math.min(...out)).toBeGreaterThan(layout.R * .3)
+  expect(layout.rings.some(ring => ring.marked)).toBe(true)
+})
+describe.each([[800, 720], [1056, 640], [416, 720]])('the double spiral at %i by %i', (width, height) => {
+  const model = hub(), layout = spiralLayout(model, width, height), arms = armsOf(model)
+  const out = (star: { x: number; y: number }): number => Math.hypot(star.x - layout.cx, star.y - layout.cy)
+  const on = (arm: readonly MapThread[]) => arm.map(thread => layout.stars.find(star => star.thread === thread)!)
+  it('sets the root at the centre with every other drawn thread on one of two arms', () => {
+    expect(layout.stars[0].thread).toBe(model.root)
+    expect(out(layout.stars[0])).toBe(0)
+    expect(new Set([...arms.todo, ...arms.done]).size).toBe(model.order.length - 1)
+    expect(arms.done.every(thread => thread.standing === 'quiet' || !model.attention.includes(thread))).toBe(true)
+    expect(arms.todo.filter(thread => model.attention.includes(thread))).toEqual(model.attention.filter(thread => thread !== model.root))
+  })
+  it('winds each arm out from the centre, first at the centre, in two different directions', () => {
+    for (const arm of [arms.todo, arms.done]) {
+      const reach = on(arm).map(out)
+      reach.forEach((d, n) => { if (n) expect(d).toBeGreaterThan(reach[n - 1]) })
+      expect(Math.max(...reach)).toBeLessThanOrEqual(layout.R + 1)
+    }
+    const [a, b] = [on(arms.todo)[0], on(arms.done)[0]]
+    expect(a.y).toBeLessThan(layout.cy)
+    expect(b.y).toBeGreaterThan(layout.cy)
+    expect(layout.line?.rising).toBeTruthy()
+    expect(layout.line?.receding).toBeTruthy()
+  })
+  it('orders the finished arm newest first and names both arms where there is room', () => {
+    const quiet = arms.done.filter(thread => thread.standing === 'quiet')
+    quiet.forEach((thread, n) => { if (n) expect(thread.lastMove).toBeLessThanOrEqual(quiet[n - 1].lastMove) })
+    if (layout.narrow) return
+    expect(layout.arms?.map(arm => arm.label)).toEqual([`To do · ${arms.todo.length}`, `Just finished · ${arms.done.length}`])
   })
   it('names what needs the human without two names touching', () => {
-    if (layout.narrow) return expect(layout.numerals).toHaveLength(model.attention.filter(needsHuman).length)
-    expect(layout.labels.map(label => label.thread)).toEqual(expect.arrayContaining(model.attention))
+    if (layout.narrow) return expect(layout.numerals).toHaveLength(arms.todo.filter(needsHuman).length)
+    expect(layout.labels.map(label => label.thread)).toEqual(expect.arrayContaining(arms.todo.filter(needsHuman)))
     const boxes = layout.labels.map(l => ({ left: l.side === 'right' ? l.x : l.x - l.width, right: l.side === 'right' ? l.x + l.width : l.x, top: l.y - 12, bottom: l.y + 12 }))
     boxes.forEach((a, n) => { for (const b of boxes.slice(n + 1)) expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true) })
-  })
-  it('lands what is in play inside the horizon and lets the rest unwind past it', () => {
-    const horizon = layout.rings[0].radius, distance = (star: { x: number; y: number }): number => Math.hypot(star.x - layout.cx, star.y - layout.cy)
-    const playing = layout.stars.slice(0, model.attention.length), tail = layout.stars.slice(model.attention.length)
-    expect(Math.max(...playing.map(distance))).toBeLessThanOrEqual(horizon + 2)
-    expect(Math.min(...tail.map(distance))).toBeGreaterThanOrEqual(Math.max(...playing.map(distance)))
-    expect(layout.line?.receding).toBeTruthy()
   })
 })
 describe('arranging the spiral', () => {
@@ -106,6 +124,13 @@ describe('arranging the spiral', () => {
   it('lets the first pin win a contested slot, and forgets pins for threads that left', () => {
     expect(names(arrange(threads, { [threads[4].key]: 1, [threads[3].key]: 1, gone: 0 }))).toEqual([0, 4, 3, 1, 2, 5])
     expect(names(arrange(threads, { [threads[1].key]: 99 }))).toEqual([0, 2, 3, 4, 5, 1])
+  })
+  it('moves a thread pinned across, to the slot it was given on that arm', () => {
+    const model = hub(), asking = model.attention[0], done = armsOf(model).done[0]
+    const crossed = armsOf(model, { [asking.key]: { arm: 'done', slot: 1, standing: asking.standing }, [done.key]: { arm: 'todo', slot: 0, standing: done.standing } })
+    expect(crossed.done[1]).toBe(asking)
+    expect(crossed.todo[0]).toBe(done)
+    expect(crossed.todo).not.toContain(asking)
   })
 })
 it('stores no pin for a family that has none, and draws its pins on the sequence', () => {

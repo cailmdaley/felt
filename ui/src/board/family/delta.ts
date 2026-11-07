@@ -18,7 +18,7 @@ function strand(group: SVGGElement, { thread, loud }: Row, y: number, parentY: n
   group.querySelector('.fm-strand-commits')!.setAttribute('d', marks(thread.commits, px => `M${(px - 2).toFixed(1)} ${y}a2 2 0 1 0 4 0a2 2 0 1 0-4 0`))
   group.querySelector('.fm-strand-files')!.setAttribute('d', marks(thread.files.map(file => file.at), px => `M${px.toFixed(1)} ${y - 3.5}l3.5 3.5l-3.5 3.5l-3.5-3.5z`))
   const tip = group.querySelector('.fm-strand-tip')!
-  tip.setAttribute('d', loud ? markPath(thread.standing, 5) : '')
+  tip.setAttribute('d', loud ? markPath(thread.tone, 5) : '')
   tip.setAttribute('transform', `translate(${end} ${y})`)
 }
 
@@ -40,7 +40,7 @@ function drawStrands(layer: SVGGElement, rows: readonly Row[], model: FamilyMode
 
 export const delta: Drawing = {
   name: 'delta', label: 'Delta',
-  reading: ['Branches: a thread leaves its orchestrator when born', 'Right edge: now', 'Ticks: launches', 'Dots: commits', 'Diamonds: files', 'Thin lines: finished, flowing back'],
+  reading: ['Branches: a thread leaves its orchestrator when born', 'Right edge: now', 'Ticks: launches', 'Dots: commits', 'Diamonds: files', 'Colour: its state', 'Thin lines: finished, flowing back'],
   draw(host, model, open) {
     const { width, narrow } = mount(host, 'delta', model, open)
     const chart = narrow ? width : Math.max(280, width - LABEL), end = chart - 12

@@ -1,8 +1,9 @@
 /**
  * The field's zoom: a scale and a shift, as shares of the plate. Geometry scales
  * about the pointer; marks and text stay their reading size because a drawing
- * repaints at the settled view. Between paints the plate's layers are moved by
- * transform alone, so a gesture costs no layout.
+ * repaints at the settled view. Between paints a gesture moves the plate's
+ * layers by transform alone, so it costs no layout; a flight is one repaint at
+ * its end, which every element drifts to together.
  */
 export interface View { k: number; x: number; y: number }
 export const WHOLE: View = { k: 1, x: 0, y: 0 }
@@ -15,12 +16,16 @@ const TAP_MS = 300
 const TAP_REACH = 30
 const WHEEL_RATE = .01
 const WHEEL_MOST = 60
+/** A flight's length, which family-map.css gives its drift. */
+const FLY_MS = 400
 
 const within = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value))
-/** Keeps the field over the whole plate: at the base scale, no shift at all. */
+/** How far past the plate's edge a field at this scale may go, so a body at its rim can reach the middle. */
+const overrun = (k: number): number => Math.min(.5, (k - 1) / 2)
+/** Keeps the field over the plate, give or take its overrun: at the base scale, no shift at all. */
 export const held = ({ k, x, y }: View): View => {
-  const scale = within(k, 1, MOST)
-  return { k: scale, x: within(x, 1 - scale, 0), y: within(y, 1 - scale, 0) }
+  const scale = within(k, 1, MOST), past = overrun(scale)
+  return { k: scale, x: within(x, 1 - scale - past, past), y: within(y, 1 - scale - past, past) }
 }
 /** `view` scaled by `factor` with the plate's point at `px`, `py` staying where it is. */
 export function zoomAbout(view: View, factor: number, px: number, py: number): View {
@@ -39,6 +44,7 @@ export class FieldZoom {
   drawn: View = WHOLE
   private readonly host: HTMLElement
   private readonly settled: () => void
+  private readonly stepOut: () => void
   private readonly listening = new AbortController()
   private readonly fingers = new Map<number, Finger>()
   private pinch: { view: View; gap: number; middle: Finger } | null = null
@@ -47,14 +53,16 @@ export class FieldZoom {
   private tap: Finger & { at: number } | null = null
   private frame = 0
   private timer: ReturnType<typeof setTimeout> | null = null
+  private flight: ReturnType<typeof setTimeout> | null = null
 
-  constructor(host: HTMLElement, settled: () => void) {
-    this.host = host; this.settled = settled
+  /** `settled` hears a gesture end, repainted by it; `stepOut` hears a double-click or double-tap on the field. */
+  constructor(host: HTMLElement, settled: () => void, stepOut: () => void) {
+    this.host = host; this.settled = settled; this.stepOut = stepOut
     const signal = this.listening.signal
     host.addEventListener('wheel', event => this.wheel(event), { passive: false, signal })
     host.addEventListener('pointerdown', event => this.down(event), { signal })
     host.addEventListener('touchmove', event => this.claim(event), { passive: false, signal })
-    host.addEventListener('dblclick', event => { if (this.onField(event.target)) this.reset() }, { signal })
+    host.addEventListener('dblclick', event => { if (this.onField(event.target)) this.stepOut() }, { signal })
     host.addEventListener('gesturestart', event => this.gestureStart(event as GestureEvent), { signal })
     host.addEventListener('gesturechange', event => this.gestureChange(event as GestureEvent), { signal })
     host.addEventListener('gestureend', () => { this.gesture = null; this.settle() }, { signal })
@@ -67,16 +75,20 @@ export class FieldZoom {
     this.listening.abort()
     cancelAnimationFrame(this.frame)
     if (this.timer !== null) clearTimeout(this.timer)
+    if (this.flight !== null) clearTimeout(this.flight)
   }
-  /** Back to the whole field, painting it. */
-  reset(): void {
-    if (this.drawn.k === 1 && this.view.k === 1) return
-    this.view = WHOLE
-    this.settle()
+  /** Takes up a view without moving: the caller's next paint is at it. */
+  jump(view: View): void { this.view = this.drawn = held(view) }
+  /** As `jump`, with the caller's next paint drifting there as one flight. */
+  fly(view: View): void {
+    this.jump(view)
+    this.host.classList.add('family-map-flying')
+    if (this.flight !== null) clearTimeout(this.flight)
+    this.flight = setTimeout(() => { this.flight = null; this.host.classList.remove('family-map-flying') }, FLY_MS)
   }
   /** Forgets the view, for a stage a new drawing is taking. */
   forget(): void {
-    this.view = this.drawn = WHOLE
+    this.jump(WHOLE)
     this.pinch = this.pan = this.gesture = null
     this.host.classList.remove('family-map-gesturing', 'family-map-pinching')
   }
@@ -93,8 +105,8 @@ export class FieldZoom {
 
   private plate(): HTMLElement | null { return this.host.querySelector<HTMLElement>('.fm-sky-plate') }
   private inPlate(target: EventTarget | null): boolean { return !!(target as Element | null)?.closest?.('.fm-sky-plate') }
-  /** The empty field: the plate, not one of its threads. */
-  private onField(target: EventTarget | null): boolean { return this.inPlate(target) && !(target as Element).closest('[data-thread]') }
+  /** The empty field: the plate, not one of its threads or what a thread holds. */
+  private onField(target: EventTarget | null): boolean { return this.inPlate(target) && !(target as Element).closest('[data-thread], [data-held]') }
   /** A point as shares of the plate, from the plate as painted. */
   private share(x: number, y: number): Finger {
     const box = this.plate()!.getBoundingClientRect()
@@ -173,12 +185,12 @@ export class FieldZoom {
       setTimeout(() => this.host.removeEventListener('click', swallow, { capture: true }))
     } else if (event.pointerType === 'touch' && event.type === 'pointerup') this.tapped(event)
   }
-  /** A second tap on the field where the first landed resets, as a double-click does. */
+  /** A second tap on the field where the first landed steps out, as a double-click does. */
   private tapped(event: PointerEvent): void {
     const tap = this.tap, at = event.timeStamp
     this.tap = null
     if (!this.onField(event.target)) return
-    if (tap && at - tap.at < TAP_MS && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) < TAP_REACH) this.reset()
+    if (tap && at - tap.at < TAP_MS && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) < TAP_REACH) this.stepOut()
     else this.tap = { x: event.clientX, y: event.clientY, at }
   }
   /** A pinch, or any touch on a zoomed plate, is the map's and not the page's. */

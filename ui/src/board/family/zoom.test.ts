@@ -6,14 +6,14 @@ import { FamilyPage } from '../workspace/FamilyPage.js'
 import { WHOLE, held, zoomAbout, type View } from './zoom.js'
 import { familyModel } from './model.js'
 import { skyLayout } from './sky.js'
-import { zoomPlate } from './orbit.js'
+import { aim, sighted, zoomPlate } from './orbit.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
 const when = (back: number): string => new Date(now - back * hour).toISOString()
 const root = card({ id: 'hub', name: 'Hub', createdAt: when(300), status: 'active' })
 const threads = Array.from({ length: 30 }, (_, n) => card({ id: `hub/t${n}`, name: `Thread ${n}`, orchestrator: 'hub', status: 'active', createdAt: when(50), workerState: 'running', runtimePhase: n % 3 ? 'working' : 'waiting', lastActivityAt: now - n * hour }))
 const cards = [root, ...threads]
-const feeds = { marks: () => undefined, files: () => [], refresh: () => {} }
+const feeds = { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }
 const stored = new Map<string, string>()
 beforeEach(() => {
   stored.clear()
@@ -23,7 +23,7 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.use
 
 function mapped(drawing = 'sky'): { stage: HTMLElement; plate: HTMLElement } {
   stored.set('shuttle.family.drawing', drawing)
-  const page = new FamilyPage(vi.fn(), vi.fn(), feeds, vi.fn())
+  const page = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, vi.fn())
   document.body.append(page.el)
   page.update(root, new ThreadIndex(cards), now)
   const stage = page.el.querySelector<HTMLElement>('[role="listbox"]')!, plate = stage.querySelector<HTMLElement>('.fm-sky-plate')!
@@ -37,14 +37,15 @@ it('keeps the point under the pointer where it is, and the field over the plate'
   expect(view).toEqual({ k: 2, x: -.25, y: -.75 })
   expect(.25 * view.k + view.x).toBeCloseTo(.25)
   expect(zoomAbout(view, .25, .25, .75)).toEqual(WHOLE)
-  expect(held({ k: 3, x: .4, y: -9 })).toEqual({ k: 3, x: 0, y: -2 })
+  expect(held({ k: 3, x: .9, y: -9 })).toEqual({ k: 3, x: .5, y: -2.5 })
+  expect(held({ k: 1, x: .4, y: -.4 })).toEqual(WHOLE)
   expect(held({ k: 99, x: 0, y: 0 }).k).toBe(8)
 })
 it('scales the geometry, keeps every mark its size, and names more threads as room opens', () => {
   const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now)
   const base = skyLayout(model, 1000, 680), view: View = { k: 3, x: -1, y: -1 }
-  const plate = zoomPlate(base, view)
-  expect(zoomPlate(base, WHOLE)).toBe(base)
+  const plate = zoomPlate(base, view, model, null)
+  expect(zoomPlate(base, WHOLE, model, null)).toBe(base)
   expect(plate.R).toBeCloseTo(base.R * 3)
   plate.stars.forEach((star, n) => {
     expect(star.r).toBe(base.stars[n].r)
@@ -75,7 +76,31 @@ it('moves layers while a wheel runs and paints only when it settles', async () =
   expect((svg as SVGElement).style.transform).toBe('')
   expect(plate.querySelectorAll('.fm-label').length).toBeGreaterThan(0)
 })
-it('resets on a double-click of the field, not of a thread, and leaves the spiral\'s pins', () => {
+it('reaches past the plate\'s edge once zoomed, so a body on the rim can come to the middle', () => {
+  const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now)
+  const base = skyLayout(model, 800, 720), rim = [...base.stars].sort((a, b) => a.x - b.x)[0], view = aim(base, rim.thread)
+  expect(rim.x / 800 * view.k + view.x).toBeCloseTo(.5)
+  const plate = zoomPlate(base, view, model, null)
+  expect(plate.stars.find(star => star.thread === rim.thread)!.x).toBeCloseTo(400)
+})
+it('flies deeper for a deeper thread, up to the most the field goes', () => {
+  const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now), base = skyLayout(model, 800, 720), star = base.stars[1]
+  expect(aim(base, star.thread).k).toBe(3)
+  const deep = { ...star.thread, depth: 2 }, deeper = { ...star.thread, depth: 9 }
+  expect(aim({ ...base, stars: [{ ...star, thread: deep }] }, deep).k).toBeCloseTo(4.05)
+  expect(aim({ ...base, stars: [{ ...star, thread: deeper }] }, deeper).k).toBe(8)
+  expect(aim({ ...base, stars: [] }, star.thread)).toEqual(WHOLE)
+})
+it('comes to the body nearest the middle as a hand zooms past the reveal, keeping the one it holds, and none short of it', () => {
+  const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now), base = skyLayout(model, 800, 720)
+  const star = base.stars[3], view = aim(base, star.thread)
+  expect(sighted(base, { ...view, k: 2 }, null)).toBeNull()
+  expect(sighted(base, view, null)).toBe(star.thread.key)
+  const near = base.stars.find(item => item !== star && sighted(base, view, item.thread.key) === item.thread.key)
+  if (near) expect(sighted(base, view, near.thread.key)).toBe(near.thread.key)
+  expect(sighted(base, { k: 3, x: 40, y: 40 }, star.thread.key)).toBeNull()
+})
+it('steps out on a double-click of the field, not of a thread, and leaves the spiral\'s pins', () => {
   vi.useFakeTimers()
   const { stage, plate } = mapped('spiral')
   stored.set(`shuttle.family.spiral:${root.originId}:${root.uid ?? root.id}`, '{}')

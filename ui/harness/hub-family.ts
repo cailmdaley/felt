@@ -35,7 +35,7 @@ export const HUB_ROWS: readonly HubRow[] = [
   row('hub/validation-steward', 'Validation repository steward', HUB, 'work', .3, 1, 0, 0, 'Reviewing the open pull requests.'),
   row('hub/validation-steward/leakage', 'Leakage estimator and the star mask', 'hub/validation-steward', 'done', 175, 1, 0, 0, 'Merged with the star-contamination mask.'),
   row('hub/validation-steward/blends', 'Blends in the bound-nine selection', 'hub/validation-steward', 'done', 167, 1, 0, 1, 'Admitting them costs two percent of the sample.'),
-  row('hub/pipeline-steward', 'Pipeline repository steward', HUB, 'ask', 3, 32, 0, 1, 'Should the workflow rewrite land before the cut, or after it?'),
+  row('hub/pipeline-steward', 'Pipeline repository steward', HUB, 'ask', 3, 32, 0, 5, 'Should the workflow rewrite land before the cut, or after it?'),
   row('hub/pipeline-steward/simplify', 'Workflow simplification', 'hub/pipeline-steward', 'review', 103, 1, 0, 0, 'The operational path is down to six steps; ready for a verdict.'),
   row('hub/pipeline-steward/flags', 'Propagate defect flags from exposure to tile', 'hub/pipeline-steward', 'done', 319, 1, 6, 0, 'Flags survive stacking.'),
   row('hub/pipeline-steward/match', 'Should the catalogue cut tiles on the match fraction?', 'hub/pipeline-steward', 'review', 104, 4, 0, 0, 'The cut removes three percent of the area and no bias; read the summary.'),

@@ -1,9 +1,12 @@
 import { ago } from '../civilDay.js'
-import { MAP_WINDOW_MS, type FamilyModel, type MapThread, type Standing } from './model.js'
+import { MAP_WINDOW_MS, type FamilyModel, type MapFile, type MapThread, type Standing } from './model.js'
 import type { View } from './zoom.js'
+import type { Plate } from './orbit.js'
 import './family-map.css'
 
 export type OpenThread = (thread: MapThread) => void
+/** The thread the map has come to, and what is known of its tapestry. */
+export interface Focus { key: string; lead?: MapFile }
 /** One way of drawing the family: repainting into the same host keeps its elements, so they can move. */
 export interface Drawing {
   name: string
@@ -12,8 +15,10 @@ export interface Drawing {
   reading: readonly string[]
   /** The order the arrow keys walk, when it is not the model's. */
   sequence?(model: FamilyModel): MapThread[]
-  /** `view` is the field's zoom, where the drawing has a field to zoom. */
-  draw(host: HTMLElement, model: FamilyModel, open: OpenThread, view: View): void
+  /** Where everything sits at the whole field, on a drawing with a field to zoom. */
+  layout?(model: FamilyModel, width: number, height: number): Plate
+  /** `view` is the field's zoom, where the drawing has a field to zoom; `focus` the thread it unfolds. */
+  draw(host: HTMLElement, model: FamilyModel, open: OpenThread, view: View, focus: Focus | null): void
 }
 export interface Stage { width: number; height: number; narrow: boolean }
 export interface Point { x: number; y: number }
@@ -44,7 +49,9 @@ export function mount(host: HTMLElement, name: string, model: FamilyModel, open:
   host.classList.add('family-map', `family-map-${name}`)
   host.classList.toggle('family-map-narrow', narrow)
   host.onclick = event => {
-    const key = (event.target as Element).closest<Element>('[data-thread]')?.getAttribute('data-thread')
+    const target = event.target as Element
+    if (event.detail > 1 || target.closest('[data-held]')) return
+    const key = target.closest('[data-thread]')?.getAttribute('data-thread')
     const thread = key ? model.threads.get(key) : undefined
     if (thread) open(thread)
   }
@@ -58,23 +65,28 @@ export function part<E extends Element>(parent: Element, cls: string, make: (cls
 }
 
 const pools = new WeakMap<Element, Map<string, Element>>()
-/** Keeps one element per key under `parent`, so a repaint moves what persists instead of redrawing it. */
+/**
+ * Keeps one element per key under `parent`, so a repaint moves what persists
+ * instead of redrawing it; a new element goes in its items' place, and one
+ * that stays is never reinserted, which would end its transition.
+ */
 export function reconcile<T, E extends Element>(parent: Element, items: readonly T[], key: (item: T) => string, make: (item: T) => E, fill: (el: E, item: T) => void): void {
   const before = pools.get(parent) ?? new Map<string, Element>(), after = new Map<string, Element>()
   for (const item of items) {
     const id = key(item), el = (before.get(id) ?? make(item)) as E
     after.set(id, el)
     fill(el, item)
-    if (el.parentNode !== parent) parent.append(el)
   }
   for (const [id, el] of before) if (!after.has(id)) el.remove()
+  const order = [...after.values()]
+  for (let n = order.length - 1; n >= 0; n--) if (order[n].parentNode !== parent) parent.insertBefore(order[n], order[n + 1] ?? null)
   pools.set(parent, after)
 }
 
-/** Marks an element as a thread's way in: its identity, its standing's tone. */
+/** Marks an element as a thread's way in: its identity and the state its colour says. */
 export function tagThread(el: Element, thread: MapThread): void {
   el.setAttribute('data-thread', thread.key)
-  el.setAttribute('data-standing', thread.standing)
+  el.setAttribute('data-standing', thread.tone)
 }
 /** The one focusable element a thread has in a drawing. */
 export function optionFor(el: Element, thread: MapThread, model: FamilyModel): void {

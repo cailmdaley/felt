@@ -31,6 +31,8 @@ export interface MapThread {
   parent: string | null
   children: string[]
   standing: Standing
+  /** The state its colour says: its standing, with a new file left to the mark on top. */
+  tone: Exclude<Standing, 'new'>
   /** The standing in a word or two, for a label. */
   word: string
   /** What it asks, else what it came to. */
@@ -70,6 +72,8 @@ export interface FamilyModel {
   current: string | null
 }
 
+/** A thread's time open, to its close or to now. */
+export const timeOpen = (thread: MapThread, now: number): number => Math.max(0, (thread.ended ?? now) - thread.born)
 export const needsHuman = (thread: MapThread): boolean => (ATTENTION as readonly string[]).includes(thread.standing) && thread.standing !== 'working'
 export const isDrawn = (thread: MapThread): boolean => thread.rank >= 0
 /** A thread's mass of work: its launches, commits and files. */
@@ -102,9 +106,9 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     const ask = turnOf(card, now).turn === 'question' ? card.ask : undefined
     const lastMove = Math.min(now, Math.max(card.lastActivityAt ?? 0, ...launches, ...commits, ...files.map(file => file.at), ended ?? 0, born, Date.parse(ask?.at ?? '') || 0))
     const fresh = files.some(file => file.unread)
-    const standing = standingOf(card, index, fresh, lastMove, now)
+    const standing = standingOf(card, index, fresh, lastMove, now), tone = standingOf(card, index, false, lastMove, now) as MapThread['tone']
     const thread: MapThread = {
-      key: threadKey(card), card, name: card.name, depth, parent, children: [], standing,
+      key: threadKey(card), card, name: card.name, depth, parent, children: [], standing, tone,
       word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : THREAD_LABEL[index.state(card)].toLowerCase()),
       note: ask?.text ?? card.outcome ?? '', rank: -1, lastMove, born, ended, launches, commits, files, fresh,
       merged: index.state(card) === 'archived', weight: launches.length + commits.length + files.length,

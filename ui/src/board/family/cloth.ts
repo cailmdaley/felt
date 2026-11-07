@@ -1,6 +1,6 @@
 import { MAP_WINDOW_MS } from './model.js'
 import { elapsed, htmlEl, mount, part, reconcile, svgEl, type Drawing } from './drawing.js'
-import { axis, drawHeads, fillRow, heading, makeRow, planRows, type Row } from './rows.js'
+import { axis, drawFold, drawHeads, fillRow, heading, makeRow, planRows, type Row } from './rows.js'
 
 /** Column pitch of the weave. */
 const CELL = 8
@@ -29,11 +29,11 @@ function weave(strip: SVGSVGElement, { thread, loud }: Row, chart: number, heigh
 
 export const cloth: Drawing = {
   name: 'cloth', label: 'Cloth',
-  reading: ['Rows: most urgent first', 'Right edge: now', 'Dashes: a thread’s life', 'Blocks: launches, commits, files', 'Thin rows: finished lately'],
-  draw(host, model, open) {
+  reading: ['Rows: most urgent first', 'Right edge: now', 'Dashes: a thread’s life', 'Blocks: launches, commits, files', 'Colour: its state', 'Diamond: a new file', 'Thin rows: finished lately'],
+  draw(host, model, open, _view, focus) {
     const { width, narrow } = mount(host, 'cloth', model, open)
     const chart = narrow ? width : Math.max(260, width - LABEL)
-    const plan = planRows(model.order, thread => heading(model, thread), 26, narrow ? 46 : 42, 6)
+    const plan = planRows(model.order, thread => heading(model, thread), 26, narrow ? 46 : 42, 6, focus?.key ?? null)
     const cloth = part(host, 'fm-rows', cls => htmlEl('div', cls))
     cloth.style.height = `${plan.height}px`
     cloth.style.setProperty('--fm-chart', `${chart}px`)
@@ -49,7 +49,9 @@ export const cloth: Drawing = {
     }, (el, row) => {
       fillRow(el, row, model)
       const strip = el.querySelector<SVGSVGElement>('.fm-strip')!
+      strip.style.height = `${narrow && row.loud ? STRIP : row.height}px`
       weave(strip, row, chart, narrow && row.loud ? STRIP : row.height, model.now)
+      drawFold(el, row, focus, model)
     })
   },
 }

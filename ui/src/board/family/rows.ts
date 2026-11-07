@@ -1,11 +1,15 @@
-import { ATTENTION_WORD, type Attention, type FamilyModel, type MapThread } from './model.js'
-import { HOUR, TIME_MARKS, htmlEl, optionFor, reconcile, shortAgo, tagThread } from './drawing.js'
+import { ATTENTION_WORD, type Attention, type FamilyModel, type MapFile, type MapThread } from './model.js'
+import { HOUR, TIME_MARKS, htmlEl, optionFor, reconcile, shortAgo, tagThread, type Focus } from './drawing.js'
 
-export interface Row { thread: MapThread; y: number; height: number; loud: boolean }
+/** A focused row's fold, where what its thread holds lies. */
+const FOLD = 34
+const FOLD_FILES = 6
+
+export interface Row { thread: MapThread; y: number; height: number; loud: boolean; fold: number }
 export interface Head { label: string; y: number }
 export interface RowPlan { rows: Row[]; heads: Head[]; height: number }
-/** Rows in attention order under their kind's head, then quiet history as thin lines. */
-export function planRows(threads: readonly MapThread[], heading: (thread: MapThread) => string | null, top: number, row: number, thin: number): RowPlan {
+/** Rows in attention order under their kind's head, then quiet history as thin lines; the focused row opens a fold. */
+export function planRows(threads: readonly MapThread[], heading: (thread: MapThread) => string | null, top: number, row: number, thin: number, focus: string | null = null): RowPlan {
   const rows: Row[] = [], heads: Head[] = []
   let y = top, last: string | null = null
   for (const thread of threads) {
@@ -13,9 +17,10 @@ export function planRows(threads: readonly MapThread[], heading: (thread: MapThr
     if (head && head !== last) { if (last) y += 10; heads.push({ label: head, y }); y += 22 }
     if (!head && last) y += 14
     last = head
-    const height = head ? row : thin
-    rows.push({ thread, y, height, loud: !!head })
-    y += height
+    const focused = thread.key === focus
+    const height = head || focused ? row : thin, fold = focused ? FOLD : 0
+    rows.push({ thread, y, height, loud: !!head || focused, fold })
+    y += height + fold
   }
   return { rows, heads, height: y + 10 }
 }
@@ -34,17 +39,37 @@ export function axis(layer: HTMLElement, x: (at: number) => number, now: number)
 export function makeRow(): HTMLElement {
   const row = htmlEl('div', 'fm-row'), label = htmlEl('div', 'fm-row-label')
   label.append(htmlEl('span', 'fm-row-name'), htmlEl('span', 'fm-row-note'))
-  row.append(label, htmlEl('span', 'fm-row-age'))
+  row.append(label, htmlEl('span', 'fm-row-age'), htmlEl('div', 'fm-row-fold'))
   return row
 }
-export function fillRow(row: HTMLElement, { thread, y, height, loud }: Row, model: FamilyModel): void {
+export function fillRow(row: HTMLElement, { thread, y, height, loud, fold }: Row, model: FamilyModel): void {
   tagThread(row, thread); optionFor(row, thread, model)
   row.toggleAttribute('data-loud', loud)
-  row.style.height = `${height}px`
+  row.toggleAttribute('data-fresh', thread.fresh)
+  row.style.height = `${height + fold}px`
   row.style.transform = `translateY(${y}px)`
   row.querySelector('.fm-row-name')!.textContent = thread.name
   row.querySelector('.fm-row-note')!.textContent = thread.note
   row.querySelector('.fm-row-age')!.textContent = loud ? shortAgo(thread.lastMove, model.now) : ''
+}
+/** The fold of a focused row: its tapestry and newest files, each a way in. */
+export function drawFold(row: HTMLElement, { thread, fold }: Row, focus: Focus | null, model: FamilyModel): void {
+  const files = fold ? [...(focus?.lead ? [focus.lead] : []), ...thread.files.filter(file => file.key !== focus?.lead?.key)] : []
+  const shown = files.slice(0, FOLD_FILES), rest = files.length - shown.length
+  const layer = row.querySelector<HTMLElement>('.fm-row-fold')!
+  layer.toggleAttribute('data-empty', !!fold && !files.length)
+  layer.dataset.count = rest ? `+${rest}` : ''
+  reconcile<MapFile, HTMLButtonElement>(layer, shown, file => file.key, () => {
+    const way = htmlEl('button', 'fm-fold-file'); way.type = 'button'
+    way.append(htmlEl('span', 'fm-fold-name'), htmlEl('span', 'fm-fold-age'))
+    return way
+  }, (way, file) => {
+    way.dataset.held = file.key
+    way.toggleAttribute('data-unread', file.unread)
+    way.toggleAttribute('data-lead', file === focus?.lead)
+    way.firstElementChild!.textContent = file.name
+    way.lastElementChild!.textContent = file.at ? shortAgo(file.at, model.now) : ''
+  })
 }
 /** The heads of the attention kinds, as rows of their own. */
 export function drawHeads(layer: HTMLElement, plan: RowPlan): void {

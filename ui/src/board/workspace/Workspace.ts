@@ -1,4 +1,4 @@
-import { ThreadIndex } from '../threads.js'
+import { ThreadIndex, threadKey } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
@@ -7,14 +7,14 @@ import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
-import { cardFromCompositeEntry } from '../KanbanReadModel.js'
+import { cardFromCompositeEntry, isQuestion } from '../KanbanReadModel.js'
 import { deskColumn, ownColumn } from '../deskColumn.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { channelLead, familyKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, documentActivity, familyKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { meetingHostCard, type MeetingRecord } from '../meeting.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
@@ -25,7 +25,8 @@ import { WorkspaceDepth } from './Depth.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
 import { Overview } from './Overview.js'
-import { FamilyPage } from './FamilyPage.js'
+import { FamilyPage, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
+import { familyModel, isDrawn as onTheMap, type MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { unseenSince } from './DocumentSeen.js'
 import type { FiberSend } from '../fiberSends.js'
@@ -75,6 +76,8 @@ interface ChannelState {
   routedFile?: DocKey
   loaded: boolean
   familyPage?: FamilyPage
+  /** Where its family's map stands, kept across the page's frames. */
+  mapPlace: MapPlace
   /** The run is final: body and receipts are both in, or the body read failed. The strip waits for it. */
   runFinal: boolean
   metadataKnown: boolean
@@ -94,6 +97,8 @@ const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
 }
 /** The Board's Read lately shelf holds this many constitutions. */
 const READ_LATELY = 8
+/** A fiber's companion pages by file name, first the one that leads, with the name each goes by on the map. */
+const COMPANIONS: ReadonlyArray<readonly [string, string]> = [['tapestry.html', 'Tapestry'], ['artifact.html', 'Artifact'], ['report.html', 'Report']]
 
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
@@ -128,11 +133,18 @@ export class Workspace {
   /** The complete board-card payload used by the reader's thread and runtime surfaces. */
   private lastUpdateRevision = ''
   private lastRenderedFamilyRevision = ''
+  private readonly mapFeeds: FamilyFeeds
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.root = root
     this.activity = new FamilyActivity(opts.shuttleBase, () => { if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph()) })
+    this.mapFeeds = {
+      marks: card => this.activity.of(card.uid ?? card.id),
+      files: card => this.mapFiles(card),
+      refresh: () => this.refreshFamilyFeeds(),
+      lead: card => this.mapLead(card),
+    }
     this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {
       shuttleBase: opts.shuttleBase, frameActive: frame => frameBridge(frame)?.active ?? null,
     })
@@ -203,7 +215,7 @@ export class Workspace {
         await this.dock.sendReview(target.card, message)
       },
       onCrossing: travel => this.depth.cross(travel),
-      onReturn: () => this.history.back(),
+      onReturn: () => { if (!this.mapPage(this.current)?.stepOut()) this.history.back() },
       onOpenDocument: key => this.visit(key),
       onRevisitDocument: key => this.revisit(key),
       workerPill: card => this.dock.workerPillFor(card),
@@ -281,19 +293,72 @@ export class Workspace {
     state.leadLanding = true
     state.selected = undefined
   }
-  /**
-   * A thread opened from the map arrives on its own lead page, the map one key
-   * away; a sent file arrives on that file.
-   */
+  /** A file opens on its thread's channel, leaving the map where it stands; a thread the map has no place for opens on its own landing. */
   private openFromMap(card: KanbanCard, doc?: DocKey): void {
-    const known = this.overview.hasMetadata(card), state = this.ensure(card, known)
-    if (doc) { this.open(card, this.origin, doc, known); return }
-    if (state === this.current) { this.visit(this.leadPage(state)); return }
-    this.landOnLead(state)
-    this.open(card, this.origin, undefined, known)
+    this.open(card, this.origin, doc, this.overview.hasMetadata(card))
   }
-  private leadPage(state: ChannelState): DocKey {
-    return (channelLead(state.channel) ?? proseDocument(state.channel)!).key
+  /** A Desk or Chronicle click: a fiber on a family's map lands there, at its thread; a Question card elsewhere on its report. */
+  openFromDesk(card: KanbanCard): void {
+    const map = this.landOnMap(card)
+    if (map) this.open(card, undefined, map)
+    else if (card.status === 'active' && isQuestion(card)) this.openQuestion(card)
+    else this.open(card)
+  }
+  /** Readies a fiber on a family's map to land there, at its thread, and names the page; undefined for one the map has no place for. */
+  private landOnMap(card: KanbanCard): DocKey | undefined {
+    if (!this.onFamilyMap(card)) return undefined
+    const state = this.ensure(card)
+    if (!state.familyPage?.flyTo(card)) state.mapPlace = this.landingPlace(card)
+    return familyKey(state.channel.owner, state.channel.uid)
+  }
+  /** A thread lands flown to itself; a family's root, on the whole. */
+  private landingPlace(card: KanbanCard): MapPlace {
+    const index = this.graph(), current = index.card(card)
+    return { focus: index.parentOf(current) ? threadKey(current) : null, view: null }
+  }
+  /** The fiber has a family and a place on its map. */
+  private onFamilyMap(card: KanbanCard): boolean {
+    if (!this.inFamily(card)) return false
+    const index = this.graph(), current = index.card(card)
+    const thread = familyModel(index, index.family(current).root, current, this.mapFeeds, Date.now()).threads.get(threadKey(current))
+    return !!thread && onTheMap(thread)
+  }
+  /** The map, while it is what the reader shows. */
+  private mapPage(state: ChannelState | null): FamilyPage | undefined {
+    return state && this.isActive && this.shown(state) === this.familyDocument(state.card) ? state.familyPage : undefined
+  }
+  /** Back steps out of the map's levels before it leaves the page. */
+  private backDestination(state: ChannelState): string {
+    return this.mapPage(state)?.outward ?? this.history.backLabel
+  }
+  /** A card's sent files, and the open channel's other documents, newest first. */
+  private mapFiles(card: KanbanCard): MapFile[] {
+    const files = new Map((this.opts.sends?.(card) ?? []).map(send => [send.key, { key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp) }]))
+    const documents = this.channels.get(channelId(card.uid ?? card.id, card.originId))?.channel.documents ?? []
+    for (const doc of documents) {
+      const at = documentActivity(doc)
+      if (!isDrawn(doc) && at !== undefined && !files.has(doc.key)) files.set(doc.key, { key: doc.key, name: doc.name, at, unread: unseenSince(doc.key, at) })
+    }
+    return [...files.values()].sort((a, b) => b.at - a.at)
+  }
+  /** The first companion page a fiber's directory holds, skipping past any `listed` already names, which ends the search. */
+  private async companion(fiberDir: string, owner: string, listed: (path: string) => boolean = () => false): Promise<{ path: string; name: string; modifiedAt?: string } | undefined> {
+    for (const [file, name] of COMPANIONS) {
+      const path = `${fiberDir}/${file}`
+      if (listed(path)) return undefined
+      const result = await head(fileBytesUrl(this.opts.shuttleBase, path, owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
+      if (this.disposed) return undefined
+      if (result?.exists) return { path, name, modifiedAt: result.modifiedAt ?? undefined }
+    }
+    return undefined
+  }
+  /** A thread's tapestry or report, by its fiber's directory. */
+  private async mapLead(card: KanbanCard): Promise<MapFile | undefined> {
+    if (!card.fiberDir) return undefined
+    const found = await this.companion(card.fiberDir, card.originId)
+    if (!found) return undefined
+    const key = docKey(card.originId, found.path, card.originId, card.fiberDir), at = Date.parse(found.modifiedAt ?? '') || 0
+    return { key, name: found.name, at, unread: at > 0 && unseenSince(key, at) }
   }
 
   /** The family's view among this card's pages, or none outside a family. */
@@ -314,10 +379,9 @@ export class Workspace {
     const index = this.graph(), current = index.card(card)
     return index.children(index.family(current).root).length > 0
   }
-  /** The constitution's own threads make the family's view its landing. */
+  /** A fiber on a family's map lands there. */
   private familyLanding(state: ChannelState): DocKey | undefined {
-    const index = this.graph()
-    return index.children(index.card(state.card)).length ? familyKey(state.channel.owner, state.channel.uid) : undefined
+    return this.onFamilyMap(state.card) ? familyKey(state.channel.owner, state.channel.uid) : undefined
   }
 
   /** The open thread's orchestrator; false outside a thread. */
@@ -332,13 +396,15 @@ export class Workspace {
     return true
   }
 
-  /** The map's page to its report or constitution, any other page of the channel to the map. */
+  /** The map to its focused thread's tapestry or newest file, else the channel's; any other page of the channel to the map. */
   private toggleMap(): boolean {
     const state = this.current
     const map = state && this.isActive ? this.familyDocument(state.card) : undefined
     if (!state || !map) return false
-    const onMap = this.shown(state) === map
-    this.visit(onMap ? this.leadPage(state) : map)
+    if (this.shown(state) !== map) { this.visit(map); return true }
+    const page = state.familyPage, leading = page?.leading, lead = channelLead(state.channel)
+    if (leading) this.openFromMap(leading.card, leading.doc)
+    else if (lead && !page?.atThread) this.visit(lead.key)
     return true
   }
   private cycleDrawing(): boolean {
@@ -566,16 +632,13 @@ export class Workspace {
   }
   /** On the family's map, the thread it has selected. */
   private mapSelection(): KanbanCard | undefined {
-    const state = this.current
-    return state && state.selected === familyKey(state.channel.owner, state.channel.uid) ? state.familyPage?.selection : undefined
+    return this.mapPage(this.current)?.selection
   }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), card => { this.dock.openConversation(card) }, {
-      marks: card => this.activity.of(card.uid ?? card.id),
-      files: card => (this.opts.sends?.(card) ?? []).map(send => ({ key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp) })),
-      refresh: () => this.refreshFamilyFeeds(),
-    }, () => { state.familyPage = undefined })
+    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), card => { this.dock.openConversation(card) }, this.mapFeeds, state.mapPlace,
+      () => { state.familyPage = undefined },
+      () => { if (this.current === state) this.reader.setBackDestination(this.backDestination(state)) })
     state.familyPage.update(state.card, this.graph())
     return state.familyPage.el
   }
@@ -593,7 +656,7 @@ export class Workspace {
       state = {
         card,
         channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, family: this.inFamily(card), modifiedAt: card.modifiedAt }),
-        links: [], fileModifiedAt: new Map(), loaded: false, runFinal: false, metadataKnown,
+        links: [], fileModifiedAt: new Map(), loaded: false, runFinal: false, metadataKnown, mapPlace: this.landingPlace(card),
       }
       this.channels.set(key, state)
     } else { state.card = card; state.metadataKnown ||= metadataKnown }
@@ -637,7 +700,7 @@ export class Workspace {
     const sameChannel = this.current === state && this.isActive
     if (sameChannel && state.loaded && state.runFinal && route.doc && state.channel.documents.some(doc => doc.key === route.doc)) {
       this.select(route.doc)
-      this.reader.setBackDestination(this.history.backLabel)
+      this.reader.setBackDestination(this.backDestination(state))
       this.startTimer()
       return
     }
@@ -712,8 +775,8 @@ export class Workspace {
     const selected = this.shown(state)
     this.refreshProse(state)
     this.namePage(state, selected)
-    this.reader.setBackDestination(this.history.backLabel)
     this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
+    this.reader.setBackDestination(this.backDestination(state))
     if (selected === this.familyDocument(state.card)) this.focusMap(state)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.seatBand(state)
@@ -788,11 +851,20 @@ export class Workspace {
       if (this.current === state && this.isActive && !this.disposed) { this.rebuild(state); this.show(state, false) }
     })
   }
-  /** Show a fiber unless the reader already shows it. */
+  /**
+   * Rex's focus moved to a fiber. A fiber on the open map is flown to in place;
+   * one on another family's map lands there, through its own channel so the
+   * voice recognises what it followed and reveals nothing back; a page of the
+   * fiber's own channel stands, as a reveal answers to it; anything else opens.
+   */
   follow(id: string, owner: string): void {
-    const card = this.current?.card
-    if (this.isActive && card && card.originId === owner && (card.uid === id || card.id === id)) return
-    void this.openFiber(id, owner)
+    const state = this.current, known = this.opts.cards().find(card => (card.uid === id || card.id === id) && card.originId === owner)
+    if (known && this.mapPage(state)?.flyTo(known)) return
+    const shown = state?.card
+    if (this.isActive && shown && shown.originId === owner && (shown.uid === id || shown.id === id)) return
+    const map = known && this.landOnMap(known)
+    if (map) this.open(known, this.origin, map)
+    else void this.openFiber(id, owner)
   }
   async openFiber(id: string, owner: string): Promise<void> {
     const epoch = this.routeEpoch
@@ -895,21 +967,11 @@ export class Workspace {
       if (this.disposed) return
       const fiberDir = state.card.fiberDir
       if (fiberDir) {
-        void (async () => {
-          for (const name of ['tapestry.html', 'artifact.html', 'report.html']) {
-            const path = `${fiberDir}/${name}`
-            if (state.channel.documents.some(d => d.path === path)) return
-            const result = await head(fileBytesUrl(this.opts.shuttleBase, path, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true })
-            if (this.disposed) return
-            if (result?.exists) {
-              if (!state.links.some(link => link.path === path)) {
-                state.links.push({ path }); this.rebuild(state)
-                if (this.current === state && this.isActive) this.show(state, false)
-              }
-              return
-            }
-          }
-        })()
+        void this.companion(fiberDir, state.card.originId, path => state.channel.documents.some(d => d.path === path)).then(found => {
+          if (!found || state.links.some(link => link.path === found.path)) return
+          state.links.push({ path: found.path }); this.rebuild(state)
+          if (this.current === state && this.isActive) this.show(state, false)
+        })
       }
       state.runFinal = true
       this.rebuild(state)
