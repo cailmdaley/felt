@@ -70,6 +70,20 @@ describe('a Desk row and the threads it holds in its section', () => {
     const orphan = card({ id: 'missing/folder/work', orchestrator: 'missing-uid', status: 'active' })
     expect(row(orphan, [orphan]).name.textContent).toBe('missing/folder/work')
   })
+  it('draws a lone thread as its own path, dot and age instead of a root header', () => {
+    const child = { ...asks, ask: undefined, ...waiting, lastActivityAt: Date.now() - 7 * 60_000 }
+    const data = projectDeskFrontier(response({ now: { drafts: [], inFlight: [{ ...root, ...working }, busy], awaitingReview: [] }, threads: [child] }))
+    const open = vi.fn()
+    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+      stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: open })
+    const section = renderer.renderNowSection(data.now, {})
+    const line = section.querySelector<HTMLElement>(`[data-fiber-id="${child.id}"]`)!
+    expect(line.querySelector('.kbn-card-name')?.textContent).toBe('hub/busy/asks')
+    expect(line.querySelector('.constitution-state-dot')?.getAttribute('data-turn')).toBe('idle')
+    expect(line.querySelector('.kbn-row-elapsed')?.textContent).toBe('7m')
+    expect(line.querySelector('.kbn-desk-threads')).toBeNull()
+    line.click(); expect(open).toHaveBeenCalledWith(child)
+  })
   for (const mobile of [false, true]) it(`draws the same row on ${mobile ? 'phone' : 'desktop'}`, () => {
     vi.stubGlobal('matchMedia', () => ({ matches: mobile }))
     const data = projectDeskFrontier(response({ now: { drafts: [], inFlight: [root, busy], awaitingReview: [] }, threads: [asks, deeper, helper] }))

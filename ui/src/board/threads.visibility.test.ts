@@ -35,7 +35,7 @@ describe('a family\'s root heads its threads in each section of work they stand 
       { id: 'hub/quiet/review', parent: 'hub/quiet', status: 'closed' },
       { id: 'hub/quiet/draft', parent: 'hub/quiet', status: 'open' },
     ])
-    expect(column(b)).toEqual({ drafts: [], inFlight: ['hub', 'hub*'], review: ['hub*'], resting: [], roles: [], past: [] })
+    expect(column(b)).toEqual({ drafts: [], inFlight: ['hub', 'hub*'], review: ['hub/quiet/review'], resting: [], roles: [], past: [] })
     expect(b.now.inFlight.map(c => inFlightBand(c)).sort()).toEqual(['working', 'yourTurn'])
     expect(ids(boardCards(b)).sort()).toEqual(['hub', 'hub/ask', 'hub/ask/busy', 'hub/ask/busy/again', 'hub/quiet', 'hub/quiet/draft', 'hub/quiet/review'])
   })
@@ -46,7 +46,7 @@ describe('a family\'s root heads its threads in each section of work they stand 
       { id: 'hub/mid', parent: 'hub', status: 'closed', tempered: true },
       { id: 'hub/mid/ask', parent: 'hub/mid', status: 'active', ask: true },
     ])
-    expect(column(b)).toEqual({ drafts: [], inFlight: ['hub*'], review: ['hub*'], resting: ['hub'], roles: [], past: [] })
+    expect(column(b)).toEqual({ drafts: [], inFlight: ['hub/mid/ask'], review: ['hub/review'], resting: ['hub'], roles: [], past: [] })
   })
   it('a seat keeps its place in the Roles and heads its threads where they stand', () => {
     const b = board([
@@ -55,12 +55,12 @@ describe('a family\'s root heads its threads in each section of work they stand 
       { id: 'resting-seat', seat: true, status: 'open', horizon: 'stashed' },
       { id: 'resting-seat/review', parent: 'resting-seat', status: 'closed' },
     ])
-    expect(column(b)).toEqual({ drafts: [], inFlight: ['working-seat', 'working-seat*'], review: ['resting-seat*'], resting: [], roles: ['resting-seat'], past: [] })
+    expect(column(b)).toEqual({ drafts: [], inFlight: ['working-seat', 'working-seat/ask'], review: ['resting-seat/review'], resting: [], roles: ['resting-seat'], past: [] })
   })
   it('a missing orchestrator is an ordinary root with path-only ancestry', () => {
     const b = board([{ id: 'gone/folder/child', parent: 'missing-uid', status: 'active', ask: true }, { id: 'gone/folder/child/deep', parent: 'gone/folder/child', status: 'closed' }])
     expect(column(b).inFlight).toEqual(['gone/folder/child'])
-    expect(column(b).review).toEqual(['gone/folder/child*'])
+    expect(column(b).review).toEqual(['gone/folder/child/deep'])
     expect(threadIndexFor(b).ancestry(b.now.inFlight[0])).toEqual([{ name: 'gone' }, { name: 'folder' }])
   })
   it('breaks a malformed cycle and retains every conversation', () => {

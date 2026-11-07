@@ -36,7 +36,7 @@ import type {
 import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 import { turnOf } from './turn.js';
-import { adoptThreadIndex, ThreadIndex, threadKey } from './threads.js';
+import { adoptThreadIndex, ThreadIndex, threadKey, threadState } from './threads.js';
 import { deskColumn } from './deskColumn.js';
 
 export interface BuildKanbanResponseOptions {
@@ -73,8 +73,8 @@ export function shouldIncludeInKanban(fiber: Fiber): boolean {
   return isCycleFiber(fiber);
 }
 
-/** The Desk column a family root's header stands in. */
-const sectionColumn = (card: KanbanCard): 'inFlight' | 'awaitingReview' => card.deskSection === 'to-review' ? 'awaitingReview' : 'inFlight';
+/** The Desk column a family section stands in. */
+const sectionColumn = (card: KanbanCard): 'inFlight' | 'awaitingReview' => (card.deskSection ?? threadState(card)) === 'to-review' ? 'awaitingReview' : 'inFlight';
 
 /** Reproject optimistic lifecycle edits through the same frontier as a fresh feed. */
 export function projectDeskFrontier(response: KanbanResponse): KanbanResponse {

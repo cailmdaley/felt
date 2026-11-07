@@ -232,17 +232,18 @@ export class ThreadIndex {
   frontier(): KanbanCard[] {
     return [...this.states.keys()].filter(key => !this.parents.has(key)).map(key => this.cards.get(key)!)
   }
-  /**
-   * A copy of a family's root heading each section of work in flight or
-   * awaiting review that its threads stand in and its own state does not, so
-   * the family's threads in that section group beneath it. Built once.
-   */
+  /** A root heads each other work section with several threads; a lone thread stands on its own. */
   headers(): KanbanCard[] {
     if (this.heads) return this.heads
     this.heads = []
     for (const root of this.frontier()) {
-      const own = this.state(root), held = new Set(this.subtree(root).map(card => this.state(card)))
-      for (const section of SPLIT) if (section !== own && held.has(section)) this.heads.push({ ...root, deskSection: section })
+      const own = this.state(root), threads = this.subtree(root)
+      for (const section of SPLIT) {
+        if (section === own) continue
+        const held = threads.filter(card => this.state(card) === section)
+        if (held.length === 1) this.heads.push(held[0])
+        else if (held.length > 1) this.heads.push({ ...root, deskSection: section })
+      }
     }
     return this.heads
   }

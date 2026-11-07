@@ -19,7 +19,7 @@ describe('constitution roll-up', () => {
     const board = buildKanbanResponseFromComposite(parseCompositeFeed({ host: 'local', fibers }))
     expect(board.now.inFlight.map(c => c.id)).toEqual(['hub'])
     expect(board.now.drafts.map(c => c.id)).toStrictEqual(['hub-lookalike'])
-    expect(board.now.awaitingReview.map(c => [c.id, c.deskSection])).toStrictEqual([['hub', 'to-review']])
+    expect(board.now.awaitingReview.map(c => [c.id, c.deskSection])).toStrictEqual([['hub/folder/child/deep', undefined]])
     expect(board.timeline.past).toStrictEqual([])
     expect(board.threads?.map(c => c.id).sort()).toStrictEqual(['hub/accepted', 'hub/discarded', 'hub/folder/child', 'hub/folder/child/deep'])
     expect(board.now.inFlight.find(c => c.id === 'hub')?.threadSummary).toEqual({ unfinished: 2, waiting: 0, working: 0, toReview: 1, drafts: 1, archived: 2 })
