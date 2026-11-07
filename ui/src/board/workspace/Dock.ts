@@ -19,7 +19,6 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
 import { dressVerb, headerLifecycleVerbsFor } from './lifecycleVerbs.js'
-import { onDesk } from './fiberPageState.js'
 import { WorkerActions } from './workerActions.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { deskColumn } from '../deskColumn.js'
@@ -941,7 +940,6 @@ export class Dock {
       facts.hidden = !facts.textContent
       const offered = headerLifecycleVerbsFor(card, !!this.onRest)
       verdict.hidden = !offered.length
-      worker.el.hidden = !shuttleManaged || !onDesk(card)
       worker.update(card, warm === undefined ? '' : `cache warm until ${clockTime(warm)}`)
       if (rest) rest.hidden = !offered.includes('rest')
       temper.hidden = !offered.includes('temper')
