@@ -28,9 +28,10 @@ Mic side, at the left:
 
 | State | Text |
 | --- | --- |
-| target is this session | `▁▁▂▅▇▅▃▂▁▁▁▁▁▁▁▁▁▁▁▁` (the last twenty mic levels, about 3 s, scrolling left; no words, which the transcript and the board show) |
-| target is another card (a meeting holds the mic, or Listen here elsewhere) | `🎤 → <card name>` |
-| muted | `🎤 muted` |
+| words come to this session | `▁▁▂▅▇▅▃▂▁▁▁▁▁▁▁▁▁▁▁▁` (the last twenty mic levels, about 3 s, scrolling left; no words, which the transcript and the board show), led by `● ` in a meeting |
+| following, words go to another card | `🎤 → <card name>` |
+| a meeting joined to another card | `● meeting → <card name>` |
+| paused | `🎤 paused`, or `● meeting paused` |
 | Listening off | nothing |
 
 Speaker side, right-aligned; the line itself is never shown:

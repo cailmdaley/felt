@@ -37,7 +37,8 @@ try {
       await page.screenshot({ path: `${process.env.MEETING_SCREENSHOT_DIR}/meeting-${mobile ? 'phone' : 'desktop'}.png` })
     }
     if (!mobile) {
-      await toggle.click()
+      await page.locator('.kbn-ctl-meet-dropdown').first().click()
+      await page.getByRole('menuitem').filter({ hasText: /^Record a meeting on / }).click()
       await page.waitForFunction(() => window.joins?.length === 1)
       const [join] = await page.evaluate(() => window.joins)
       assert.equal(join.meeting.mode, 'call')

@@ -79,7 +79,6 @@ function plainButton(className: string): HTMLButtonElement {
 /** What the mic is doing, as the control draws it. */
 type Mode =
   | { kind: 'off' }
-  | { kind: 'failed'; error: string }
   | { kind: 'following'; paused: boolean; name: string }
   | { kind: 'meeting'; paused: boolean; name: string; meeting: MeetingRecord }
 
@@ -125,8 +124,7 @@ export class ListenControl {
     this.dropdown.setAttribute('aria-expanded', 'false')
     this.dropdown.addEventListener('click', () => this.showMenu())
     this.button.addEventListener('click', () => {
-      const kind = this.mode().kind
-      if (kind === 'off' || kind === 'failed') this.listen()
+      if (this.mode().kind === 'off') this.listen()
       else this.showMenu()
     })
     this.pauseButton.addEventListener('click', () => this.pause())
@@ -159,17 +157,22 @@ export class ListenControl {
     this.paint()
   }
 
+  /** A definite failure to show beside the mode; it never hides what holds the mic. */
+  private failure(): string | null {
+    const current = this.opts.meeting.current()
+    const voice = this.opts.voice?.status
+    return this.localError
+      ?? (current?.state === 'failed' ? current.error ?? 'The recording failed' : null)
+      ?? (current?.handoff?.status === 'reported-failure' ? 'Delivery failed' : null)
+      ?? (!current && voice?.enabled && voice.state === 'failed' ? voice.error ?? 'Listening failed' : null)
+      ?? (!current && voice?.enabled && voice.last?.status === 'failed' ? `Delivery failed${voice.last.detail ? `: ${voice.last.detail}` : ''}` : null)
+  }
+
   private mode(): Mode {
     const { card, meeting } = this.opts
     const current = meeting.current()
     const voice = this.opts.voice?.status
-    const failure = this.localError
-      ?? (current?.state === 'failed' ? current.error ?? 'The recording failed' : null)
-      ?? (current?.handoff?.status === 'reported-failure' ? 'Delivery failed' : null)
-      ?? (voice?.enabled && voice.state === 'failed' ? voice.error ?? 'Listening failed' : null)
-      ?? (voice?.enabled && voice.last?.status === 'failed' ? `Delivery failed${voice.last.detail ? `: ${voice.last.detail}` : ''}` : null)
-    if (failure) return { kind: 'failed', error: failure }
-    if (current) {
+    if (current && current.state !== 'failed') {
       const hosted = meetingHostCard(current, [card]) !== null
       const name = hosted ? card.name : this.opts.hostName(current) ?? current.fiber?.split('/').at(-1) ?? current.title?.trim() ?? 'a card'
       return { kind: 'meeting', paused: !!current.paused, name, meeting: current }
@@ -221,18 +224,16 @@ export class ListenControl {
     else if (mode.kind === 'following') done(this.opts.voice?.set({ muted: !mode.paused }))
   }
 
-  /** Stop: whatever holds the mic stops, and nothing takes over. */
+  /** Stop: whatever holds the mic stops, and nothing takes over. Following turns off first, whatever the meeting's stop says. */
   private stop(): void {
     const { meeting, voice } = this.opts
     const current = meeting.current()
     this.localError = null
-    void (async () => {
-      if (current && meeting.stop) {
-        const stopped = await meeting.stop(current)
-        if (stopped === false) throw new Error('The recording did not stop')
-      }
-      if (voice?.status?.enabled) await voice.set({ enabled: false })
-    })().catch((error: unknown) => { this.localError = message(error) }).finally(() => this.paint())
+    const following = voice?.status?.enabled ? voice.set({ enabled: false }) : Promise.resolve()
+    const recording = current && meeting.stop
+      ? Promise.resolve(meeting.stop(current)).then(stopped => { if (stopped === false) throw new Error('The recording did not stop') })
+      : Promise.resolve()
+    void Promise.all([following, recording]).catch((error: unknown) => { this.localError = message(error) }).finally(() => this.paint())
   }
 
   private closeMenu(): void {
@@ -254,6 +255,7 @@ export class ListenControl {
 
   private paint(): void {
     const mode = this.mode()
+    const failure = this.failure()
     const voice = this.opts.voice?.status
     const on = mode.kind === 'following' || mode.kind === 'meeting'
     if (this.menu && this.signature() !== this.menuState) this.closeMenu()
@@ -264,12 +266,8 @@ export class ListenControl {
     let title: string
     switch (mode.kind) {
       case 'off':
-        label = 'Listen'
-        title = this.phone ? 'Listen: record on this phone, joined to this card' : 'Listen: your words go to whatever card you are looking at'
-        break
-      case 'failed':
-        label = 'Failed'
-        title = mode.error
+        label = failure ? 'Failed' : 'Listen'
+        title = failure ?? (this.phone ? 'Listen: record on this phone, joined to this card' : 'Listen: your words go to whatever card you are looking at')
         break
       case 'following':
         label = `${mode.paused ? 'Paused' : 'Following'} · ${mode.name}`
@@ -280,14 +278,16 @@ export class ListenControl {
         title = `${mode.paused ? 'Paused. ' : ''}Recording a meeting: every word goes to ${mode.name}, wherever you look`
         break
     }
-    this.button.disabled = (mode.kind === 'off' || mode.kind === 'failed') && (this.starting || (this.phone
+    if (on && failure) title = `${failure}. ${title}`
+    this.button.disabled = mode.kind === 'off' && (this.starting || (this.phone
       ? !this.opts.meeting.canJoin() || !this.opts.meeting.modes().includes('phone')
       : !voice?.available))
-    if (this.button.disabled && !this.phone && !this.starting) title = voice?.error ? `Listening is unavailable: ${voice.error}` : 'Listening is unavailable on this host'
+    if (this.button.disabled && !this.phone && !this.starting && !failure) title = voice?.error ? `Listening is unavailable: ${voice.error}` : 'Listening is unavailable on this host'
     if (this.word.textContent !== label) this.word.textContent = label
     this.button.title = title
     this.button.setAttribute('aria-label', label)
     this.el.dataset.mode = mode.kind
+    this.el.classList.toggle('kbn-ctl-meet-failed', !!failure)
     this.el.classList.toggle('kbn-ctl-meet-paused', on && mode.paused)
     this.button.classList.toggle('kbn-ctl-meet-on', on)
 
@@ -300,7 +300,7 @@ export class ListenControl {
       this.pauseButton.title = mode.paused ? 'Resume' : 'Pause: words go nowhere until you resume'
       this.pauseButton.disabled = mode.kind === 'meeting' && mode.meeting.state !== 'live'
     }
-    this.stopButton.hidden = !on && !this.opts.meeting.current() && !voice?.enabled
+    this.stopButton.hidden = !on && !this.opts.meeting.current()
     this.stopButton.disabled = mode.kind === 'meeting'
       && (!this.opts.meeting.stop || meetingActions(mode.meeting, this.opts.meeting.stopRequested?.(mode.meeting) ?? false).stopDisabled)
   }
@@ -318,7 +318,6 @@ export class ListenControl {
     if (this.menu) { this.closeMenu(); return }
     const { card, meeting } = this.opts
     const state = this.opts.voice?.status
-    const mode = this.mode()
     const menu = this.menu = document.createElement('div')
     menu.className = 'ws-select-picker'
     menu.setAttribute('role', 'menu')
@@ -345,10 +344,11 @@ export class ListenControl {
     }
     const cadence = this.cadence(current ? current.recorder : state?.recorder)
     menu.append(cadence.el)
-    if (mode.kind === 'failed') {
+    const failure = this.failure()
+    if (failure) {
       const note = document.createElement('div')
       note.className = 'voice-error'
-      note.textContent = mode.error
+      note.textContent = failure
       menu.append(note)
     }
 
@@ -387,7 +387,8 @@ export class ListenControl {
       if (!response.ok) throw new Error('Could not read listening settings')
       const file = await response.json() as { text: string; digest: string | null }
       const doc = file.text.trim() ? JSON.parse(file.text) as Record<string, unknown> : {}
-      quiet.value = String(doc.quiet_seconds ?? 15)
+      const nested = (key: string) => (doc[key] as { quiet_seconds?: number } | undefined)?.quiet_seconds
+      quiet.value = String(doc.quiet_seconds ?? nested('voice') ?? nested('meeting') ?? 15)
       quiet.disabled = false
       quiet.addEventListener('change', () => {
         const value = Number(quiet.value)

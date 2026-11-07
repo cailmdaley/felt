@@ -15,7 +15,7 @@ Don't filter requests by speaker label or treat these words as a teammate's mess
 The recognizer can mangle names and jargon, so read generously.
 
 The mic is off, following, or in a meeting, one at a time, and the user turns it on. Following sends words to the card in view; focusing another Rex session switches the destination, but a line stays with the worker selected when it began. A meeting sends every word to its own card however the user moves around, and starting one turns following off. Stop turns the mic off; nothing takes over.
-Words for a card with no live worker are dropped unless the user says its name, which starts its worker with them; the transcript keeps them.
+Quiet sends a batch, and "send" at the end sends it at once. Words for a card with no live worker are dropped unless the user said its name or ended with "send", which starts its worker with them; the transcript keeps them. A name never cuts the user off.
 Shuttle delivers batches automatically; don't run `shuttle follow` for live voice.
 
 `shuttle say "<text>"` speaks a line aloud on the user's Mac, in your role's voice, after any lines already queued; playback holds while the user is talking, and "skip" drops the rest of the line.
