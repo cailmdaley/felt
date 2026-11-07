@@ -42,7 +42,7 @@ const surfaces = {
   async meeting(page) {
     await page.goto(`${base}?example=threads&meeting=joined&long-title`)
     await openRoot(page)
-    await page.locator('.ws-stage-band .kbn-ctl-meet[data-voice="recording"]').first().waitFor({ timeout: 5000 }).catch(() => {})
+    await page.locator('.ws-stage-band .ws-voice-strip[data-mode="meeting"]').first().waitFor({ timeout: 5000 }).catch(() => {})
   },
   async settings(page) {
     await page.goto(`${base}?example=threads`)

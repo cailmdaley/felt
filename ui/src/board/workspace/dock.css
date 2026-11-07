@@ -69,6 +69,11 @@
 .ws-worker-receipt { flex: none; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
 .ws-worker-receipt:empty { display: none; }
 
+/* Where spoken words go, beside Listen: Following or Meeting, then the fiber. */
+.ws-voice-strip { flex: 0 1 auto; min-width: 0; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-solid) var(--font-serif); }
+.ws-voice-strip[hidden] { display: none; }
+.ws-voice-strip[data-mode='meeting']:not([data-paused])::before { content: '●'; margin-right: 5px; color: var(--ws-state-working); }
+
 /* Immediate actions use a shared stroke-icon grid and native keyboard focus. */
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon {
   display: inline-grid; place-items: center; flex: none; width: 32px; height: 36px; padding: 0; margin: 0;
@@ -251,17 +256,11 @@
 .ws-dock .kbn-ctl-toggle:has(input:checked) { background: var(--ws-fill); border-color: var(--ws-hairline); }
 .ws-dock .kbn-ctl-toggle:has(input:checked) span::before { background: var(--ws-ink); }
 .ws-dock .kbn-ctl-toggle:has(input:focus-visible) { outline: var(--ws-focus-width) solid var(--ws-ink); }
-.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; align-items: center; max-width: 340px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
+.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; align-items: center; max-width: 240px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
 .ws-dock .kbn-ctl-meet .kbn-ctl-btn { border: 0; }
 .ws-dock .kbn-ctl-meet-arm { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; min-height: 0; padding: 2px 4px 2px 8px; border: 0; background: transparent; color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-meet-arm.kbn-ctl-meet-on { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-dock .kbn-ctl-meet-label { flex: none; white-space: nowrap; }
-/* Where the words go: the meeting's fiber or the voice target, after the mic's state. */
-.ws-dock .kbn-ctl-meet-dest { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-dock .kbn-ctl-meet-dest::before { content: '→ '; color: var(--ws-ink-muted); }
-.ws-dock .kbn-ctl-meet-dest[hidden] { display: none; }
-.ws-dock .kbn-ctl-meet[data-voice='recording'] .kbn-ctl-meet-label::before { content: '●'; margin-right: 5px; color: var(--ws-state-working); }
-.ws-dock .kbn-ctl-meet[data-voice='failed'] .kbn-ctl-meet-arm { color: var(--ws-red); }
+.ws-dock .kbn-ctl-meet-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-dock .kbn-ctl-meet-arm svg { display: block; flex: none; width: 16px; height: 16px; }
 .ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
 .ws-dock .kbn-ctl-meet-dropdown { flex: none; width: 25px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); cursor: pointer; }
