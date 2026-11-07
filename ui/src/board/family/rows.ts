@@ -52,21 +52,26 @@ export function fillRow(row: HTMLElement, { thread, y, height, loud, fold }: Row
   row.querySelector('.fm-row-note')!.textContent = thread.note
   row.querySelector('.fm-row-age')!.textContent = loud ? shortAgo(thread.lastMove, model.now) : ''
 }
-/** The fold of a focused row: its tapestry and newest files, each a way in. */
+/** The fold of a focused row, in the unfolded thread's order: its tapestry's place, its newest files, its constitution at the end. */
 export function drawFold(row: HTMLElement, { thread, fold }: Row, focus: Focus | null, model: FamilyModel): void {
-  const files = fold ? [...(focus?.lead ? [focus.lead] : []), ...thread.files.filter(file => file.key !== focus?.lead?.key)] : []
+  const files = fold ? thread.files.filter(file => file.key !== focus?.lead?.key) : []
   const shown = files.slice(0, FOLD_FILES), rest = files.length - shown.length
+  const held: Array<{ file: MapFile; kind: string }> = fold ? [
+    ...(focus?.lead ? [{ file: focus.lead, kind: 'lead' }] : []),
+    ...shown.map(file => ({ file, kind: 'file' })),
+    ...(focus?.constitution ? [{ file: focus.constitution, kind: 'constitution' }] : []),
+  ] : []
   const layer = row.querySelector<HTMLElement>('.fm-row-fold')!
-  layer.toggleAttribute('data-empty', !!fold && !files.length)
+  layer.toggleAttribute('data-no-lead', !!fold && !focus?.lead)
   layer.dataset.count = rest ? `+${rest}` : ''
-  reconcile<MapFile, HTMLButtonElement>(layer, shown, file => file.key, () => {
+  reconcile(layer, held, item => item.file.key, () => {
     const way = htmlEl('button', 'fm-fold-file'); way.type = 'button'
     way.append(htmlEl('span', 'fm-fold-name'), htmlEl('span', 'fm-fold-age'))
     return way
-  }, (way, file) => {
+  }, (way, { file, kind }) => {
     way.dataset.held = file.key
+    way.dataset.kind = kind
     way.toggleAttribute('data-unread', file.unread)
-    way.toggleAttribute('data-lead', file === focus?.lead)
     way.firstElementChild!.textContent = file.name
     way.lastElementChild!.textContent = file.at ? shortAgo(file.at, model.now) : ''
   })

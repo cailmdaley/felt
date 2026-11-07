@@ -1,5 +1,5 @@
-import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
-import { ATTENTION, ATTENTION_WORD, familyModel, isDrawn, needsHuman, type FamilyModel, type MapFeeds, type MapFile, type MapThread } from '../family/model.js'
+import type { KanbanCard } from '../KanbanTypes.js'
+import { ATTENTION, ATTENTION_WORD, conversable, familyModel, isDrawn, needsHuman, type FamilyModel, type MapFeeds, type MapFile, type MapThread } from '../family/model.js'
 import { htmlEl as el, markPath, markSelection, shortAgo, svgEl, type Drawing, type Focus } from '../family/drawing.js'
 import { aim, sighted } from '../family/orbit.js'
 import { ROSTER, chooseDrawing, chosenDrawing } from '../family/roster.js'
@@ -7,6 +7,7 @@ import { FieldZoom, WHOLE, type View } from '../family/zoom.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import { threadItem } from '../ThreadPeek.js'
 import { threadKey, type ThreadIndex } from '../threads.js'
+import { fiberKey } from './documents.js'
 import { renderThreadTree } from './ThreadTree.js'
 import './family-page.css'
 
@@ -25,18 +26,34 @@ export interface FamilyFeeds extends MapFeeds {
 
 /**
  * Where a map stands, kept by its channel so it outlives the page's frame:
- * the thread it has come to, and the view a hand left it at, or null while
+ * the thread it has unfolded, and the view a hand left it at, or null while
  * it holds that thread (or the whole family) in frame.
  */
-export interface MapPlace { focus: string | null; view: View | null }
+export interface MapPlace {
+  focus: string | null
+  view: View | null
+  /** The thread whose conversation Rex holds: moved by a click on a body or by Rex, never by a view. */
+  worker?: string
+}
+
+/** The map's way to Rex. */
+export interface MapRex {
+  /** Shows a card's conversation now. */
+  open(card: KanbanCard): void
+  /** Shows a card's conversation once the map has rested on it. */
+  settle(card: KanbanCard): void
+  /** Drops a `settle` still waiting. */
+  hold(): void
+}
 
 /**
  * The family's page in the reader: the map on its stage with a roster of
  * drawings, the counts of what asks above it, and a peek at the selected
  * thread below it. Selection follows the pointer, the arrows and a first tap.
- * A click or Enter comes to a thread: the map unfolds it in place and its
- * conversation opens beside the map, and stepping out retraces the tree; a
- * finger comes to it on a first tap and opens the conversation on a second.
+ * A click or Enter comes to a thread: the map unfolds it in place, and once
+ * the map rests its conversation shows beside the map. Stepping out retraces
+ * the tree and leaves the conversation alone. A finger comes to a thread on a
+ * first tap and opens the conversation on a second.
  * Where the map stands survives leaving and coming back; the tree of every
  * thread folds at the foot. It reads feeds, repaints and animates only while
  * its frame is selected in an open reader; its frame's eviction ends it.
@@ -82,11 +99,11 @@ export class FamilyPage {
   private readonly place: MapPlace
   private readonly levelled: () => void
 
-  private readonly converse: (card: KanbanCard) => void
+  private readonly rex: MapRex
 
   /** `open` leaves for a document, or a thread the map has no place for; `levelled` hears the map change level. */
-  constructor(open: (card: KanbanCard, doc?: string) => void, converse: (card: KanbanCard) => void, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, levelled: () => void = () => {}) {
-    this.open = open; this.converse = converse; this.feeds = feeds; this.place = place; this.disposed = disposed; this.levelled = levelled
+  constructor(open: (card: KanbanCard, doc?: string) => void, rex: MapRex, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, levelled: () => void = () => {}) {
+    this.open = open; this.rex = rex; this.feeds = feeds; this.place = place; this.disposed = disposed; this.levelled = levelled
     this.stage.setAttribute('role', 'listbox')
     this.stage.setAttribute('aria-label', 'Threads, most urgent first')
     this.scroller.append(this.stage)
@@ -129,6 +146,7 @@ export class FamilyPage {
     this.signature = signature
     this.model = familyModel(index, root, index.card(card), this.feeds, now)
     if (this.place.focus && !this.model.threads.has(this.place.focus)) this.place.focus = null
+    if (this.lone) this.place.focus = this.model.root.key
     this.paint()
     this.readLead()
     this.paintTree(index, root, index.card(card))
@@ -138,17 +156,19 @@ export class FamilyPage {
   /** Takes the keys, on the selected thread. */
   focus(): void { this.option()?.focus({ preventScroll: true }) }
 
-  /** Comes to a card's thread with no conversation opened, for a voice that already moved; false off this map. */
+  /** Comes to the thread Rex moved to, leaving Rex be; false off this map. */
   flyTo(card: KanbanCard): boolean {
     const thread = this.model?.threads.get(threadKey(card))
     if (!thread || !isDrawn(thread)) return false
+    this.place.worker = thread.key
     this.come(thread)
     return true
   }
   /** One level out, along the tree to the whole family; false once it is whole. */
   stepOut(): boolean {
     const model = this.model, focus = this.focused
-    if (!model || (!focus && this.zoom.drawn.k === 1)) return false
+    if (!model || !this.outward) return false
+    this.rex.hold()
     const parent = focus?.parent && focus.depth > 1 ? model.threads.get(focus.parent) : undefined
     if (parent) this.come(parent)
     else {
@@ -163,20 +183,29 @@ export class FamilyPage {
   /** The name of the level stepping out reaches, while there is one to reach. */
   get outward(): string | undefined {
     const focus = this.focused
-    if (!focus && this.zoom.drawn.k === 1) return undefined
+    if (!this.unfolds || this.lone || (!focus && this.zoom.drawn.k === 1)) return undefined
     const parent = focus?.parent && focus.depth > 1 ? this.model?.threads.get(focus.parent) : undefined
     return parent?.name ?? 'Whole family'
   }
-  /** The map has come to a thread rather than standing over the family. */
-  get atThread(): boolean { return !!this.focused }
+  /** The map has come to a thread other than its page's own. */
+  get elsewhere(): boolean { return !!this.focused && this.focused.key !== this.model?.current }
   /** What `l` opens from a thread: its tapestry, else its newest file. */
   get leading(): { card: KanbanCard; doc: string } | undefined {
     const focus = this.focused, file = this.lead ?? focus?.files[0]
     return focus && file ? { card: focus.card, doc: file.key } : undefined
   }
 
+  /** A constitution with no threads: one body, held unfolded, with no level above it. */
+  private get lone(): boolean { return this.model?.threads.size === 1 }
+  /** The drawing has somewhere to unfold a thread: a field, or a fold in its rows. */
+  private get unfolds(): boolean { return !!this.drawing.layout || !!this.drawing.folds }
   private get focused(): MapThread | undefined { return this.place.focus ? this.model?.threads.get(this.place.focus) : undefined }
-  private get sight(): Focus | null { return this.place.focus ? { key: this.place.focus, lead: this.lead } : null }
+  private get sight(): Focus | null {
+    const thread = this.focused
+    if (!thread) return null
+    const constitution = { key: fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id), name: 'Constitution', at: 0, unread: false }
+    return { key: thread.key, lead: this.lead, constitution }
+  }
   private stageSize(): { width: number; height: number } { return { width: this.stage.clientWidth || 1000, height: this.stage.clientHeight || 680 } }
   /** The view that holds the focused thread in frame, or the whole family. */
   private aimed(): View {
@@ -197,16 +226,17 @@ export class FamilyPage {
     if (!thread || this.leadOf === thread.key) { if (!thread) this.leadOf = null; return }
     this.leadOf = thread.key
     void this.feeds.lead(thread.card).then(lead => {
-      if (!lead || this.place.focus !== thread.key || !this.awake) return
+      if (!lead || this.place.focus !== thread.key) return
       this.lead = lead
-      this.drawField()
+      if (this.awake) this.drawField()
     })
   }
   /** Comes to a thread: the map flies to it, and whatever it holds unfolds. */
   private come(thread: MapThread): void {
+    this.select(thread.key)
+    if (!this.unfolds) return
     this.setFocus(thread.key)
     this.place.view = null
-    this.select(thread.key)
     if (this.drawing.layout) this.zoom.fly(this.aimed())
     this.drawField()
     this.levelled()
@@ -214,13 +244,15 @@ export class FamilyPage {
   /** A hand has moved the field: the map stands where it left it, on whichever thread that reaches. */
   private gestured(): void {
     const model = this.model, layout = this.drawing.layout
+    if (this.lone) { this.zoom.jump(this.aimed()); this.repaintStill(); return }
     this.place.view = this.zoom.drawn.k === 1 ? null : this.zoom.drawn
+    const before = this.place.focus
     if (model && layout) {
       const { width, height } = this.stageSize()
-      this.setFocus(sighted(layout(model, width, height), this.zoom.drawn, this.place.focus))
+      this.setFocus(sighted(layout(model, width, height), this.zoom.drawn, before))
     }
     this.repaintStill()
-    if (this.place.focus) this.select(this.place.focus)
+    if (this.place.focus && this.place.focus !== before) this.select(this.place.focus)
     this.levelled()
   }
   /** A thing the focused thread holds opens on the stage, leaving the map standing where it is. */
@@ -319,6 +351,7 @@ export class FamilyPage {
     if (!model) return
     this.drawing.draw(this.stage, model, thread => this.activate(thread), this.zoom.drawn, this.sight)
     markSelection(this.stage, model, this.selected)
+    for (const body of this.stage.querySelectorAll('.fm-star, .fm-row')) body.toggleAttribute('data-worker', body.getAttribute('data-thread') === this.place.worker)
   }
   private paintTree(index: ThreadIndex, root: KanbanCard, current: KanbanCard): void {
     for (const fold of this.allBody.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')) this.openFolds.set(fold.dataset.threadDetails!, fold.open)
@@ -358,10 +391,10 @@ export class FamilyPage {
     const name = el('button', 'ws-family-peek-name', thread.name); name.type = 'button'
     name.addEventListener('click', () => this.reach(card()))
     const title = el('div', 'ws-family-peek-title'); title.append(name, el('span', 'ws-family-peek-meta'))
-    if (hasLiveWorker(thread.card) || thread.card.sessionUuid) {
+    if (conversable(thread.card)) {
       const worker = el('button', 'ws-family-peek-worker', thread.card.terminalBackend === 'rex' ? 'Open in Rex' : 'Open conversation'); worker.type = 'button'
       worker.title = `${worker.textContent} · c`
-      worker.addEventListener('click', () => this.converse(card()))
+      worker.addEventListener('click', () => this.rex.open(card()))
       title.append(worker)
     }
     const note = el('p', 'ws-family-peek-note', thread.note)
@@ -385,11 +418,13 @@ export class FamilyPage {
     const thread = key ? this.model?.threads.get(key) : undefined
     if (thread && isDrawn(thread) && !this.touch) this.select(thread.key)
   }
-  /** A row of the fold or the peek: the map comes to a thread it draws, and any other opens on its own. */
+  /** A row of the fold or the peek does what a click on its body does; a thread the map has no place for opens on its own. */
   private reach(card: KanbanCard): void {
-    if (!this.flyTo(card)) this.open(card)
+    const thread = this.model?.threads.get(threadKey(card))
+    if (thread && isDrawn(thread)) this.activate(thread)
+    else this.open(card)
   }
-  /** A click or Enter comes to a thread and opens its conversation; a finger comes to it first and converses on its second tap. */
+  /** A click or Enter comes to a thread and moves Rex to it as the map rests; a finger comes to it first and opens the conversation on its second tap. */
   private activate(thread: MapThread): void {
     if (!isDrawn(thread)) { this.open(thread.card); return }
     if (this.touch && this.peeked !== thread.key) {
@@ -399,7 +434,10 @@ export class FamilyPage {
     }
     this.peeked = null
     this.come(thread)
-    if (hasLiveWorker(thread.card) || thread.card.sessionUuid) this.converse(thread.card)
+    if (!conversable(thread.card)) return
+    this.place.worker = thread.key
+    this.rex.settle(thread.card)
+    this.drawField()
   }
   /** The keys of the listbox: its options', unmodified, leaving any control beside them its own. */
   private key(event: KeyboardEvent): void {

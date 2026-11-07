@@ -74,6 +74,8 @@ export interface FamilyModel {
 
 /** A thread's time open, to its close or to now. */
 export const timeOpen = (thread: MapThread, now: number): number => Math.max(0, (thread.ended ?? now) - thread.born)
+/** The card has a conversation to open: a live worker, or a past session. */
+export const conversable = (card: KanbanCard): boolean => hasLiveWorker(card) || !!card.sessionUuid
 export const needsHuman = (thread: MapThread): boolean => (ATTENTION as readonly string[]).includes(thread.standing) && thread.standing !== 'working'
 export const isDrawn = (thread: MapThread): boolean => thread.rank >= 0
 /** A thread's mass of work: its launches, commits and files. */

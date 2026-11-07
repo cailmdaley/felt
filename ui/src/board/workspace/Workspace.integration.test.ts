@@ -827,10 +827,9 @@ describe('workspace reader integration', () => {
     expect([...family.querySelectorAll('.kbn-thread-name')].map(name => name.textContent)).toEqual(['hub', 'hub/leaf'])
     expect(family.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('hub/leaf')
 
-    expect(workspace.familyDocument(feed[2])).toBeUndefined()
     workspace.open(feed[2], 'Desk'); await flush()
-    expect(pages()).not.toContain('family:host-a:lone')
-    expect(selected()).toBe('fiber:host-a:lone')
+    expect(selected()).toBe('family:host-a:lone')
+    expect(workspace.familyDocument(card({ id: 'note', originId: 'host-a' }))).toBeUndefined()
   })
   it('returns to the map with its selection, focus and scroll where they were', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -843,8 +842,8 @@ describe('workspace reader integration', () => {
     workspace.open(feed[0], 'Desk'); await flush()
     const scroller = (): HTMLElement => document.querySelector<HTMLElement>('.ws-selected .ws-family-scroll')!
     const peek = (): string | null | undefined => document.querySelector('.ws-selected .ws-family-peek-name')?.textContent
-    const walk = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
-    document.activeElement!.dispatchEvent(walk)
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
     expect(peek()).toBe('hub/b')
     scroller().scrollTop = 333
     scroller().dispatchEvent(new Event('scroll'))
@@ -905,7 +904,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected .fm-star[data-focus]')?.getAttribute('aria-label')).toMatch(/^hub\/mid,/)
     workspace.openFromDesk(feed[0]); await flush()
     expect(selected()).toBe('family:host-a:hub')
-    expect(document.querySelector('.ws-selected .fm-star[data-focus]')).toBeNull()
+    expect(document.querySelector('.ws-selected .fm-star[data-focus]')?.getAttribute('aria-label')).toMatch(/^hub,/)
     workspace.openFromDesk(feed[2]); await flush()
     expect(selected()).toBe('fiber:host-a:hub-draft')
   })
@@ -915,27 +914,64 @@ describe('workspace reader integration', () => {
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), thread({ id: 'other', status: 'active' }), thread({ id: 'other/kid', orchestrator: 'other', status: 'active' }), thread({ id: 'lone', status: 'active' })]
     bodyCards = feed
     workspace.dispose()
-    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation'), voice = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock, onVoiceCard: voice })
+    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation')
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     const focused = (): string | undefined => document.querySelector('.ws-selected .fm-star[data-focus]')?.getAttribute('aria-label')?.split(',')[0]
     workspace.open(feed[0], 'Desk'); await flush()
-    voice.mockClear()
     workspace.follow('hub-mid', 'host-a'); await flush()
     expect(selected()).toBe('family:host-a:hub')
     expect(focused()).toBe('hub/mid')
-    expect(voice).not.toHaveBeenCalled()
-    expect(conversation).not.toHaveBeenCalled()
     workspace.follow('other-kid', 'host-a'); await flush()
     expect(selected()).toBe('family:host-a:other-kid')
     expect(focused()).toBe('other/kid')
-    expect(voice.mock.calls.every(([card]) => card?.id === 'other/kid')).toBe(true)
     workspace.open(feed[3], 'Desk', 'fiber:host-a:other-kid'); await flush()
     workspace.follow('other-kid', 'host-a'); await flush()
     expect(selected()).toBe('fiber:host-a:other-kid')
     workspace.follow('lone', 'host-a'); await flush()
     expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('lone')
-    expect(selected()).toBe('fiber:host-a:lone')
+    expect(selected()).toBe('family:host-a:lone')
+    expect(conversation).not.toHaveBeenCalled()
+  })
+  it('moves Rex once the map rests on a click, once for a drill down, and not at all on the way out', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), thread({ id: 'hub/mid/leaf', orchestrator: 'hub-mid', status: 'active' })]
+    bodyCards = feed
+    workspace.dispose()
+    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true)
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
+    workspace.openFromDesk(feed[0]); await flush()
+    const body = (name: string): Element => document.querySelector(`.ws-selected [role="option"][aria-label^="${name},"]`)!
+    vi.useFakeTimers()
+    try {
+      body('hub/mid').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      vi.advanceTimersByTime(300)
+      body('hub/mid/leaf').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      vi.advanceTimersByTime(699)
+      conversation.mockClear()
+      vi.advanceTimersByTime(1)
+      expect(conversation.mock.calls.map(([opened]) => opened.id)).toEqual(['hub/mid/leaf'])
+      conversation.mockClear()
+      body('hub/mid').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      workspace.reader.back()
+      vi.advanceTimersByTime(2000)
+      expect(conversation).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+  it('draws a lone constitution as one body with what it holds, and a draft on its own page', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
+    const feed = [thread({ id: 'lone', status: 'active' }), thread({ id: 'draft', status: 'open' })]
+    bodyCards = feed
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.openFromDesk(feed[0]); await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:lone')
+    expect(document.querySelector('.ws-selected .fm-star[data-focus]')).not.toBeNull()
+    expect(document.querySelector('.ws-selected .fm-held[data-kind="constitution"]')).not.toBeNull()
+    workspace.openFromDesk(feed[1]); await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:draft')
   })
   it('sends `l` from the map to its thread\'s lead, never to a constitution, and back from a lead to the map', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -969,7 +1005,7 @@ describe('workspace reader integration', () => {
     expect(items).not.toContain('Download')
     expect(items).not.toContain('Refresh')
   })
-  it('comes to a family row from the page, and adds the page when a family forms without moving the selection', async () => {
+  it('comes to a family row from the page, on a map that was one body until the family formed', async () => {
     workspace.dispose()
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
@@ -979,13 +1015,10 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     workspace.open(hub, 'Desk'); await flush()
-    expect(selected()).toBe('fiber:host-a:hub')
-    expect(document.querySelector('.ws-page[data-key="family:host-a:hub"]')).toBeNull()
+    expect(selected()).toBe('family:host-a:hub')
     feed = [hub, leaf]
     workspace.update(); await flush()
-    expect(selected()).toBe('fiber:host-a:hub')
-    expect(document.querySelector('.ws-page[data-key="family:host-a:hub"]')).not.toBeNull()
-    workspace.reader.select('family:host-a:hub'); await flush()
+    expect(selected()).toBe('family:host-a:hub')
     const row = [...document.querySelectorAll<HTMLElement>('.ws-selected .kbn-thread-row')].find(el => el.querySelector('.kbn-thread-name')?.textContent === 'hub/leaf')!
     row.click(); await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:hub')

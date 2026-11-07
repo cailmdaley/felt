@@ -16,7 +16,8 @@ function weave(strip: SVGSVGElement, { thread, loud }: Row, chart: number, heigh
     if (now - at > 0 && column(at) >= 0) counts.set(column(at), (counts.get(column(at)) ?? 0) + 1)
   }
   const block = (n: number): string => `M${n * CELL} 1h${CELL - 1}v${height - 2}h${-(CELL - 1)}z`
-  const [life, light, dense, end] = strip.children
+  const diamond = (at: number): string => `M${(column(at) + .5) * CELL} ${height / 2 - 4}l3 4l-3 4l-3 -4z`
+  const [life, light, dense, end, files, fresh] = strip.children
   const from = column(Math.max(thread.born, now - MAP_WINDOW_MS)) * CELL
   const to = thread.ended && thread.standing === 'quiet' ? column(thread.ended) * CELL + CELL : columns * CELL
   strip.setAttribute('viewBox', `0 0 ${chart} ${height}`)
@@ -25,11 +26,14 @@ function weave(strip: SVGSVGElement, { thread, loud }: Row, chart: number, heigh
   light.setAttribute('d', [...counts].filter(([, n]) => n < 3).map(([n]) => block(n)).join(''))
   dense.setAttribute('d', [...counts].filter(([, n]) => n >= 3).map(([n]) => block(n)).join(''))
   end.setAttribute('d', loud ? `M${columns * CELL} ${height / 2}q7 -4 14 0` : '')
+  const sent = loud ? thread.files.filter(file => now > file.at && column(file.at) >= 0) : []
+  files.setAttribute('d', sent.filter(file => !file.unread).map(file => diamond(file.at)).join(''))
+  fresh.setAttribute('d', sent.filter(file => file.unread).map(file => diamond(file.at)).join(''))
 }
 
 export const cloth: Drawing = {
-  name: 'cloth', label: 'Cloth',
-  reading: ['Rows: most urgent first', 'Right edge: now', 'Dashes: a thread’s life', 'Blocks: launches, commits, files', 'Colour: its state', 'Diamond: a new file', 'Thin rows: finished lately'],
+  name: 'cloth', label: 'Cloth', folds: true,
+  reading: ['Rows: most urgent first', 'Right edge: now', 'Dashes: a thread’s life', 'Blocks: launches, commits, files', 'Dark blocks: a busy day', 'Colour: its state', 'Small diamonds: sent files, bright when new', 'Thin rows: finished lately'],
   draw(host, model, open, _view, focus) {
     const { width, narrow } = mount(host, 'cloth', model, open)
     const chart = narrow ? width : Math.max(260, width - LABEL)
@@ -43,7 +47,7 @@ export const cloth: Drawing = {
     reconcile(part(cloth, 'fm-row-list', cls => htmlEl('div', cls)), plan.rows, row => row.thread.key, () => {
       const row = makeRow(), strip = svgEl('svg', 'fm-strip')
       strip.setAttribute('preserveAspectRatio', 'none')
-      strip.append(svgEl('line', 'fm-strip-life'), svgEl('path', 'fm-strip-light'), svgEl('path', 'fm-strip-dense'), svgEl('path', 'fm-strip-end'))
+      strip.append(svgEl('line', 'fm-strip-life'), svgEl('path', 'fm-strip-light'), svgEl('path', 'fm-strip-dense'), svgEl('path', 'fm-strip-end'), svgEl('path', 'fm-strip-files'), svgEl('path', 'fm-strip-fresh'))
       row.prepend(strip)
       return row
     }, (el, row) => {

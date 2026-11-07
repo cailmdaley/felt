@@ -5,8 +5,8 @@ import type { Plate } from './orbit.js'
 import './family-map.css'
 
 export type OpenThread = (thread: MapThread) => void
-/** The thread the map has come to, and what is known of its tapestry. */
-export interface Focus { key: string; lead?: MapFile }
+/** The thread the map has come to, what is known of its tapestry, and its constitution's page. */
+export interface Focus { key: string; lead?: MapFile; constitution?: MapFile }
 /** One way of drawing the family: repainting into the same host keeps its elements, so they can move. */
 export interface Drawing {
   name: string
@@ -15,6 +15,8 @@ export interface Drawing {
   reading: readonly string[]
   /** The order the arrow keys walk, when it is not the model's. */
   sequence?(model: FamilyModel): MapThread[]
+  /** A focused thread opens where the drawing lists it, on a drawing with no field. */
+  folds?: boolean
   /** Where everything sits at the whole field, on a drawing with a field to zoom. */
   layout?(model: FamilyModel, width: number, height: number): Plate
   /** `view` is the field's zoom, where the drawing has a field to zoom; `focus` the thread it unfolds. */

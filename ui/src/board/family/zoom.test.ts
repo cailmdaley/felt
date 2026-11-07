@@ -23,7 +23,7 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.use
 
 function mapped(drawing = 'sky'): { stage: HTMLElement; plate: HTMLElement } {
   stored.set('shuttle.family.drawing', drawing)
-  const page = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, vi.fn())
+  const page = new FamilyPage(vi.fn(), { open: vi.fn(), settle: vi.fn(), hold: vi.fn() }, feeds, { focus: null, view: null }, vi.fn())
   document.body.append(page.el)
   page.update(root, new ThreadIndex(cards), now)
   const stage = page.el.querySelector<HTMLElement>('[role="listbox"]')!, plate = stage.querySelector<HTMLElement>('.fm-sky-plate')!

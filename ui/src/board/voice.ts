@@ -1,5 +1,3 @@
-import type { KanbanCard } from './KanbanTypes.js'
-import { isAgentCard } from './KanbanModalShared.js'
 import { isMobileViewport } from './mobile.js'
 
 /** Words spoken to a constitution with no live worker, waiting for its next voice message. */
@@ -21,18 +19,6 @@ export interface VoiceStatus {
   held?: VoiceHeld[]
 }
 
-/** The constitution a card's page speaks to: the card itself, or the nearest constitution above it by path on the same host. */
-export const constitutionFor = (card: KanbanCard, cards: readonly KanbanCard[]): KanbanCard => {
-  if (isAgentCard(card)) return card
-  const parts = card.id.split('/')
-  for (let n = parts.length - 1; n > 0; n--) {
-    const id = parts.slice(0, n).join('/')
-    const found = cards.find(c => c.id === id && c.originId === card.originId && isAgentCard(c))
-    if (found) return found
-  }
-  return card
-}
-
 export const voicePollDelay = (visible: boolean, success: boolean, status: VoiceStatus | null): number | null =>
   !visible ? null : success && status?.enabled && status.state !== 'failed' ? 2_000 : 15_000
 
@@ -44,8 +30,6 @@ export class Voice {
   onFollow: ((target: VoiceTarget) => void) | null = null
   /** The target last read from the daemon; undefined until the first read. */
   private seen: string | null | undefined = undefined
-  private followed: VoiceTarget | null = null
-  private revealed = ''
   private events: EventSource | null = null
   private eventsTimer: number | null = null
   private timer: number | null = null
@@ -91,22 +75,6 @@ export class Voice {
     this.read?.abort()
     this.read = null
   }
-  /** A newly opened constitution's worker shows in Rex, which routes the mic from there. A card opened to follow Rex is already there. */
-  select(card: KanbanCard | null): void {
-    const agent = card && isAgentCard(card) ? card : null
-    const key = agent ? JSON.stringify([agent.uid ?? agent.id, agent.originId]) : ''
-    const followed = this.followed
-    this.followed = null
-    if (agent && followed && agent.originId === followed.origin && [agent.uid, agent.id].includes(followed.fiber_id)) {
-      this.revealed = key
-      return
-    }
-    if (key === this.revealed) return
-    this.revealed = key
-    if (!agent || !this.status?.enabled || document.hidden || isMobileViewport()) return
-    const body = { fiber_id: agent.uid ?? agent.id, origin: agent.originId }
-    void fetch(`${this.base}/api/v1/voice/reveal`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {})
-  }
   /** A pushed route follows at once; a read already in flight is stale and dropped. */
   private pushed = (event: Event): void => {
     if (!this.status) return
@@ -151,7 +119,6 @@ export class Voice {
     const known = this.seen
     this.seen = key
     if (known === undefined || key === known || !status.enabled || !status.target || isMobileViewport()) return
-    this.followed = status.target
     this.onFollow?.(status.target)
   }
   private async poll(): Promise<void> {

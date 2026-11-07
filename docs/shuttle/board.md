@@ -201,7 +201,7 @@ The fiber page anchors its body, embedded files, opened body links and sent docu
 Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, and metadata polls preserve retained document instances and reading position.
 The board renders no conversation. Conversation lives in Rex, on the desktop and on the phone; the board keeps the map, and a constitution's page is its threads, its tapestry and documents, its sent files, its change reader and its lifecycle.
-A constitution with threads opens on its family map; any other opens on its tapestry (its report, else its newest sent file, else its fiber page). A thread opened from the map arrives on its tapestry, the map one `l` away.
+Every constitution past its draft opens on the map, flown to its own body at whatever level it sits, and a lone constitution is a map of one body. A draft opens on its fiber page. Clicking a body stays on the map and moves Rex to it. A file, the tapestry or the constitution drawn around the body opens on the stage, and Back returns to the same zoom.
 One band stays above every page of a fiber on the Desk's lifecycle. It holds the constitution's name and state, **Open in Rex** (or wherever the conversation opens; right-click or long-press to choose), Listen, the session verbs (Launch, Resume, New session, by what the card can do), the lifecycle verbs (Close for review, Rest, Temper, Discard, by state), and the Constitution, Settings and × icons; × returns to Desk and never changes the fiber. Beside the state word it shows the session's context size, tinted from verdigris toward red as it fills the window, and Claude's estimated prompt cache as a dot that drains as the entry ages and turns into a red ring once cold; hover either for the numbers. Resume's tooltip says until when the cache is warm, and Settings adds the share of recent context read from the cache. These facts come from the session's transcript on its host, so they hold with no worker running. On a phone the top bar names the page and the band is one row of verbs that scrolls sideways.
 A session verb starts the worker and, on the desktop, opens it. Listen starts a recording joined to this constitution; while one runs, its words show under the band. Its menu holds Follow me, which sends your voice to the focused Rex session, along with the recording's pause and stop and the listening cadence.
 The fiber header shows status alone. Agent, effort, cadence, host and project directory belong to the folded settings line; the band's worker line is only its conversation action.
@@ -217,7 +217,7 @@ Reselecting the same page leaves history untouched.
 Stepping between constitutions with j/k or J/K replaces the current visit.
 One Back or root Escape returns from a step to its predecessor; returning to Desk selects the last card viewed.
 
-Bare reader keys work outside editable fields: h/l or left/right step pages, and on a family page `l` goes between the map and the tapestry; j/k step constitutions in the Desk's order as one flow, across its columns (Drafts, In flight, Awaiting review, Roles and Resting), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands beside its family's row; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+Bare reader keys work outside editable fields: h/l or left/right step pages, and on the map `l` goes to the focused thread's tapestry or newest file, from the whole family to its report, and back to the map; j/k step constitutions in the Desk's order as one flow, across its columns (Drafts, In flight, Awaiting review, Roles and Resting), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands beside its family's row; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
 The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the band); t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back).
 s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
@@ -231,21 +231,35 @@ HTML documents get first refusal on their own keys; native PDF and media viewers
 
 ### The family map
 
-A constitution with threads lands on its family map: one page the board draws for every family, for seeing what is happening and what to look at next. The counts above it say what asks. The peek below it shows the selected thread's ask or outcome and its sent files. **All threads** at the foot folds out the whole tree, drafts, resting and archived included.
+The map is one page the board draws for every family, for seeing what is happening and what to look at next. Rex holds the conversation; the map is the stage. The counts above it say what asks. The peek below it shows the selected thread's ask or outcome and its sent files. **All threads** at the foot folds out the whole tree, drafts, resting and archived included.
 
 What asks comes in one order everywhere: questions, blocked, new since you last opened a file, your turn, to review, then working, newest first within a kind. A thread in flight with no worker reads as armed, stopped or held and follows them, ahead of finished work. Drafts and resting threads stay counts rather than competing.
 
-The map has a roster of drawings, kept per browser; `v` or the control above the map changes it.
+Colour says state in every drawing, as on the Desk: red for questions and blocks, amber for your turn, teal for to review, blue for working, and muted for the quiet. A question carries a halo and the strongest body. New is a small bright diamond on top of a thread or file, whatever its state.
 
-- **Sky:** centre is now, the rings are square-root time since a thread last moved, the arcs are who launched whom and size is the mass of work. Only what needs you carries colour. A closed thread merges: its work joins its orchestrator's body and only its arc remains.
-- **Rings:** one ring to a generation, with every thread at a place fixed by the tree, so positions can be learned. Heat is drawn in place.
-- **Spiral:** the order wound out from the centre. Inside the horizon things rise to you; past it finished work unwinds. Drag a thread in play to arrange the line; the arrangement stays per family, what is in play stays inside the horizon, a thread that finishes loses its place, and **Back to attention order** clears it.
-- **Cloth:** rows in attention order, woven across time, with a block where something happened.
+The map has a roster of drawings, kept per browser; `v` or the control above the map changes it. Each carries several fields at once, and every axis is real data.
+
+- **Sky:** centre is now, the rings are square-root time since a thread last moved, direction is its branch of the tree, the arcs are who launched whom, size is the mass of work and the dots are its sent files. A closed thread merges: its work joins its orchestrator's body and only its arc remains.
+- **Rings:** outward is how long a thread has been open, on a log scale between the family's youngest and oldest thread, so a flat family spreads as far as a deep one. Direction is fixed by the tree, so places can be learned, and glow shows how recently it moved.
+- **Spiral:** two arms wind out of the constitution at the centre. **To do** runs in attention order, next at the centre, flowing in; **Just finished** runs newest at the centre, flowing out. Any body but the constitution can be dragged, along an arm to reorder it or across to the other arm, and the map remembers per family. A move across changes only the drawing: bringing a finished thread to To do keeps it in view, and setting something on Just finished parks it. A placement lasts while the thread's state does, so a parked thread comes back when it next asks, and **Back to attention order** clears them all.
+- **Cloth:** rows in attention order, a thread's launches, commits and sent files woven along time, with sent files as small diamonds.
 - **Delta:** rows in attention order, each thread leaving its orchestrator where it was born.
 
-The sky, rings and spiral zoom about the pointer: pinch, or trackpad pinch or ctrl+wheel on the desktop. Geometry scales while marks and text keep their size, and more names appear as room opens. Once zoomed, the wheel and a drag on the field pan it and the page swipe rests; a double-click or double-tap on the field returns to the whole.
+### Coming to a thread
 
-With the map focused, the arrow keys walk its threads, Enter opens one (a thread's report, else its fiber page), and `h` or Back returns with the selection and scroll as you left them. `l` goes between the map and the family's report. On a touch screen a first tap peeks and a second opens.
+The map has one focus at a time, and Rex follows it. Clicking a body, or Enter on it, or clicking a card on the Desk, comes to that thread: the sky, rings and spiral fly into its locality, about 400 ms and at once under reduced motion, and the page does not change. Rex moves to the thread once the map has rested on it for about 700 ms, if it has a worker or a past session, so drilling down through a parent to a child switches Rex once. A ring marks the thread Rex holds at every zoom.
+
+Every thread unfolds the same way at every level, in fixed places, so the shape can be learned. The tapestry or report sits at the upper right of the orbit and is the largest thing there. The constitution sits small at the upper left. Sent files run down the right, newest first, with a mark on what is new. The thread's own threads gather down the left. Something a thread lacks leaves its place empty and nothing shifts; what does not fit is counted in the last place of its side. The rest of the family steps back without leaving. On a phone the same places run down one column. The cloth folds the row open in the same order, and the delta only selects the thread.
+
+A file, the tapestry or the constitution opens on the stage, and Back returns to exactly that zoom. A thread among them is a body like any other.
+
+Escape, `h`, Back and a double-click or double-tap on the field step out one level: to the thread's orchestrator, then to the whole family, and only then off the page. Stepping out, zooming and panning change the view and leave Rex alone. A move that has not reached Rex yet is dropped when you step out.
+
+When Rex's focus moves to a thread on the open map, the map flies to it without speaking back. A thread on another map lands there. A page of the same fiber's channel stands, so opening a file does not bounce back to the map. Opening a page does not change what Rex shows.
+
+The sky, rings and spiral also zoom about the pointer: pinch, or trackpad pinch or ctrl+wheel on the desktop. Geometry scales while marks and text keep their size, and more names appear as room opens. Zoomed in far enough, the body nearest the middle unfolds as if you had come to it, without moving Rex. Once zoomed, the wheel and a drag on the field pan it and the page swipe rests.
+
+With the map focused, the arrow keys walk its threads and Enter comes to one. `l` opens the thread's tapestry. On a touch screen a first tap comes to a thread and a second moves Rex to it.
 
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
 A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).

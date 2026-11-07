@@ -246,7 +246,7 @@ const gatheredBody = (r: number, slot: number): number => Math.max(GATHERED_LEAS
 function gathered(plate: Plate, stars: Star[], model: FamilyModel, focus: Focus): Pick<Plate, 'stars' | 'locality' | 'labels'> | null {
   const thread = model.threads.get(focus.key), centre = stars.find(star => star.thread === thread)
   if (!thread || !centre) return null
-  const locality = unfold(model, thread, focus.lead, plate, centre, centre.r, new Set(stars.map(star => star.thread.key)))
+  const locality = unfold(model, thread, focus, plate, centre, centre.r, new Set(stars.map(star => star.thread.key)))
   const slots = new Map(locality.kids.map(slot => [slot.thread, slot]))
   return {
     locality,
@@ -428,7 +428,7 @@ function heldMark(): SVGSVGElement {
   mark.append(sheet, fresh)
   return mark
 }
-const heldId = (item: Satellite): string => item.file?.key ?? 'more'
+const heldId = (item: Satellite): string => item.file?.key ?? `more:${item.side}`
 /** What the focused thread holds: an orbit and its tethers in the field, a named way to each thing over it. */
 function drawHeld(svg: SVGSVGElement, layer: HTMLElement, plate: Plate, model: FamilyModel): void {
   const local = plate.locality, at = local?.at ?? { x: 0, y: 0 }
@@ -448,7 +448,7 @@ function drawHeld(svg: SVGSVGElement, layer: HTMLElement, plate: Plate, model: F
   }, (way, item) => {
     const right = item.side === 'right', width = Math.round(item.room) + 8
     way.dataset.side = item.side
-    way.toggleAttribute('data-lead', item.lead)
+    way.dataset.kind = item.kind
     way.toggleAttribute('data-unread', !!item.file?.unread)
     if (item.file) way.dataset.held = item.file.key
     way.style.width = `${width}px`
@@ -462,7 +462,7 @@ function drawHeld(svg: SVGSVGElement, layer: HTMLElement, plate: Plate, model: F
   reconcile(part(layer.parentElement!, 'fm-kickers', cls => htmlEl('div', cls)), local?.kickers ?? [], kicker => kicker.side, () => htmlEl('div', 'fm-held-kicker'), (el, kicker) => {
     el.textContent = kicker.label
     el.dataset.side = kicker.side
-    el.style.transform = `translate(${kicker.x.toFixed(1)}px, ${(kicker.y - 8).toFixed(1)}px)`
+    el.style.transform = `translate(${(kicker.x + (kicker.side === 'right' ? 8 : -8)).toFixed(1)}px, ${(kicker.y - 8).toFixed(1)}px)`
   })
   const named = part(layer.parentElement!, 'fm-focus-names', cls => htmlEl('div', cls))
   reconcile(named, local ? [local] : [], () => 'focus', () => {
