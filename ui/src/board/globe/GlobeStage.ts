@@ -4,8 +4,8 @@ import { htmlEl as el, markPath, shortAgo, svgEl } from '../family/drawing.js'
 import { flight, frameOf, invert, keeping, lonLat, project, wholeRadius, type Camera, type Flight, type Frame, type Projection, type Viewport } from './camera.js'
 import { forestOf, persistentId } from './forest.js'
 import { NORTH, cellSpan, centre, child, facePoint, inCell, ipixOf, type FacePoint, type Vec } from './healpix.js'
-import { blocks, placeNames, type Block, type Candidate, type Point } from './labels.js'
-import { BEACON_PX, paint, type Palette, type Pulse } from './paint.js'
+import { blocks, placeNames, within, type Block, type Candidate, type Point } from './labels.js'
+import { BEACON_PX, paint, paintLeaders, type Leader, type Palette, type Pulse } from './paint.js'
 import { askKind, sceneOf, traceOf, type Body, type Scene, type Tone } from './scene.js'
 import { cardNamed, type ThreadIndex } from '../threads.js'
 import { keystrokeIsSpokenFor } from '../views/ViewRegistry.js'
@@ -40,8 +40,8 @@ const WHEEL_RATE = .01, WHEEL_MOST = 60, KEY_ZOOM = 1.6
 const SLOP = 5
 /** A callout's distance from the centre of its marker. */
 const CALLOUT_GAP = 12
-/** How far a name under the focus may stand from its tile's centre to clear a neighbour. */
-const NUDGE = 22
+/** The step of the rings a name under the focus searches for room, how many it keeps to before leaving the tile for the open water beside it, and how many in all. */
+const NUDGE = 22, NEAR_RINGS = 2, NUDGE_RINGS = 6
 /** The peek's distance from the stage's foot. */
 const FOOT_GAP = 10
 /** A zoom's limit: the thing under it this many stages wide, or over open water this many spheres. */
@@ -84,6 +84,19 @@ function brickOf(polygon: readonly number[], { x, y }: Point): number[] {
   }
   const halfWidth = Math.min(x - left, right - x), halfHeight = Math.min(y - top, bottom - y) / 2
   return [x - halfWidth, y - halfHeight, x + halfWidth, y - halfHeight, x + halfWidth, y + halfHeight, x - halfWidth, y + halfHeight]
+}
+
+/** A point and the rings around it, nearest first; flattened, as names are wider than they are tall. */
+function ringsAround({ x, y }: Point, step: number, rings: number): Point[] {
+  const points = [{ x, y }]
+  for (let ring = 1; ring <= rings; ring++) {
+    const count = 12 * ring
+    for (let n = 0; n < count; n++) {
+      const angle = -Math.PI / 2 + 2 * Math.PI * n / count
+      points.push({ x: x + 2 * ring * step * Math.cos(angle), y: y + ring * step * Math.sin(angle) })
+    }
+  }
+  return points
 }
 
 /** The sphere with nothing placed yet. */
@@ -335,7 +348,7 @@ export class GlobeStage {
     if (this.bloom && now - this.bloom < BLOOM_MS) this.request()
     this.paintCrumbs()
     this.paintPeek()
-    this.placeNames(frame, scene)
+    paintLeaders(c, this.placeNames(frame, scene), this.palette!)
     for (const button of this.toggle.children) button.setAttribute('aria-pressed', String((button as HTMLElement).dataset.projection === this.place.projection))
     this.el.dataset.projection = this.place.projection
   }
@@ -351,8 +364,8 @@ export class GlobeStage {
     }
   }
 
-  /** Lays the names that fit over the frame, reusing their elements. */
-  private placeNames(frame: Frame, scene: Scene): void {
+  /** Lays the names that fit over the frame, reusing their elements, and gives back the lines from those standing off their tiles. */
+  private placeNames(frame: Frame, scene: Scene): Leader[] {
     const { width, height } = this.viewport, r = frame.r, candidates: Body[] = []
     const visit = (body: Body): void => {
       const px = body.span * r
@@ -369,9 +382,13 @@ export class GlobeStage {
     const opens = (body: Body): number => this.underFocus(body) ? (body.urgency > ATTENTION.length ? .5 : 0) : body.kind === 'province' || body.kind === 'area' || body.kids.some(kid => kid.kind === 'thread') ? 2 : 1
     // Under the focus the smallest tiles go first: they have the fewest places a name can go.
     candidates.sort((a, b) => opens(a) - opens(b) || (this.underFocus(a) ? b.cell.order - a.cell.order : 0) || a.urgency - b.urgency || b.cell.order - a.cell.order)
-    const placed = placeNames(this.candidates(candidates, frame, scene), { left: 8, top: this.headHeight + 4, right: width - 8, bottom: height - this.footHeight - 4 }, MOST_NAMES)
-    const live = new Set<string>()
-    for (const { owner, block, at } of placed) {
+    const box = { left: 8, top: this.headHeight + 4, right: width - 8, bottom: height - this.footHeight - 4 }
+    const owed = candidates.filter(body => this.underFocus(body))
+    // Thread names in the largest type their tiles allow may crowd out their neighbours; then all of them take the smallest.
+    let placed = placeNames(this.candidates(candidates, frame, scene, false), box, MOST_NAMES)
+    if (owed.some(body => !placed.some(name => name.owner === body))) placed = placeNames(this.candidates(candidates, frame, scene, true), box, MOST_NAMES)
+    const live = new Set<string>(), leaders: Leader[] = []
+    for (const { owner, block, at, box } of placed) {
       live.add(owner.key)
       let name = this.nameEls.get(owner.key)
       // A flight passes more names than anyone can read: new ones wait for it to land.
@@ -396,8 +413,11 @@ export class GlobeStage {
       name.style.transform = `translate(${(at.x - block.width / 2).toFixed(1)}px, ${(at.y - block.height / 2).toFixed(1)}px)`
       name.style.width = `${block.width + 1}px`
       name.dataset.size = block.role
+      const outline = this.underFocus(owner) && !this.flying ? this.outlineOn(frame, owner) : null
+      if (outline && !within(outline, at.x, at.y)) leaders.push({ box, to: project(frame, owner.centre) })
     }
     for (const [key, name] of this.nameEls) if (!live.has(key)) { name.remove(); this.nameEls.delete(key) }
+    return leaders
   }
   /** What asks in earnest is named beside its marker while its tile is too small to hold the name. */
   private *callouts(frame: Frame, scene: Scene): Generator<Candidate<Body>> {
@@ -412,22 +432,30 @@ export class GlobeStage {
   }
   /** The thread is one of those the view has come to: its name is to be read, whatever the size of its tile. */
   private underFocus(body: Body): boolean { return body.kind === 'thread' && body.parent?.key === this.place.focus }
-  private *candidates(bodies: readonly Body[], frame: Frame, scene: Scene): Generator<Candidate<Body>> {
+  /** A tile's outline on the screen; null while any of it is over the horizon. */
+  private outlineOn(frame: Frame, body: Body): number[] | null {
+    const trace = traceOf(body, 4).points, polygon: number[] = []
+    for (let n = 0; n < trace.length; n += 3) {
+      const point = project(frame, [trace[n], trace[n + 1], trace[n + 2]])
+      if (point.depth < 0) return null
+      polygon.push(point.x, point.y)
+    }
+    return polygon
+  }
+  private *candidates(bodies: readonly Body[], frame: Frame, scene: Scene, small: boolean): Generator<Candidate<Body>> {
     yield* this.callouts(frame, scene)
+    const focus = this.place.focus ? scene.byKey.get(this.place.focus) : undefined, room = focus ? this.outlineOn(frame, focus) : null
     for (const body of bodies) {
-      const trace = traceOf(body, 4).points, polygon: number[] = []
-      let hidden = false
-      for (let n = 0; n < trace.length; n += 3) {
-        const point = project(frame, [trace[n], trace[n + 1], trace[n + 2]])
-        if (point.depth < 0) { hidden = true; break }
-        polygon.push(point.x, point.y)
-      }
-      if (hidden) continue
+      const polygon = this.outlineOn(frame, body)
+      if (!polygon) continue
       const middle = project(frame, body.centre)
       if (this.underFocus(body)) {
-        const nudge = (dy: number, dx = 0): Point => ({ x: middle.x + dx, y: middle.y + dy })
-        yield { owner: body, polygon: brickOf(polygon, middle), anchors: [middle], blocks: this.blocksOf(body) }
-        yield { owner: body, polygon: null, anchors: [middle, nudge(-NUDGE), nudge(NUDGE), nudge(0, 2 * NUDGE), nudge(0, -2 * NUDGE), nudge(-2 * NUDGE), nudge(2 * NUDGE)], blocks: this.blocksOf(body).filter(block => block.role === 'note').reverse() }
+        const notes = this.blocksOf(body).filter(block => block.role === 'note').reverse()
+        yield { owner: body, polygon: brickOf(polygon, middle), anchors: [middle], blocks: small ? notes : this.blocksOf(body) }
+        const reach = ringsAround(middle, NUDGE, NUDGE_RINGS)
+        yield { owner: body, polygon: room, anchors: ringsAround(middle, NUDGE, NEAR_RINGS), blocks: notes }
+        if (room) yield { owner: body, polygon: null, clear: room, anchors: reach, blocks: notes }
+        yield { owner: body, polygon: room, anchors: reach, blocks: notes }
         continue
       }
       const childless = body.kind === 'thread' && !body.kids.some(kid => kid.kind === 'thread')

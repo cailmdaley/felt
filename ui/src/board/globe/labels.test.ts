@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { blocks, boxFits, overlaps, placeNames, within, wrap } from './labels.js'
+import { blocks, boxClear, boxFits, overlaps, placeNames, within, wrap } from './labels.js'
 
 const measure = (text: string): number => text.length * 7
 const diamond = (x: number, y: number, r: number): number[] => [x, y - r, x - r, y, x, y + r, x + r, y]
 
 describe('laying a name into a tile', () => {
+  it('tells a box wholly out of a shape from one crossing its edge, or holding its corner', () => {
+    const tile = diamond(100, 100, 50)
+    expect(boxClear(tile, { x: 100, y: 200 }, 40, 20)).toBe(true)
+    expect(boxClear(tile, { x: 100, y: 155 }, 40, 20)).toBe(false)
+    expect(boxClear(tile, { x: 158, y: 100 }, 20, 40)).toBe(false)
+  })
+  it('sets a name that crowds its tile out on the open water, clear of the tile\'s edge', () => {
+    const tile = diamond(200, 200, 60), block = { lines: ['A long name'], width: 100, height: 20, role: 'note' }
+    const near = [{ x: 200, y: 200 }, { x: 200, y: 245 }, { x: 200, y: 290 }]
+    const [{ at }] = placeNames([{ owner: 'a', polygon: tile, anchors: near, blocks: [block] }, { owner: 'a', polygon: null, clear: tile, anchors: near, blocks: [block] }], { left: 0, top: 0, right: 400, bottom: 400 }, 9, [{ left: 150, top: 180, right: 250, bottom: 220 }])
+    expect(at).toEqual({ x: 200, y: 290 })
+  })
   it('wraps greedily and never splits a word', () => {
     expect(wrap('Audit the tile manifest', 80, measure)).toEqual(['Audit the', 'tile', 'manifest'])
     expect(wrap('supercalifragilistic', 10, measure)).toEqual(['supercalifragilistic'])

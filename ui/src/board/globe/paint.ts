@@ -6,7 +6,11 @@
 import { markPath } from '../family/drawing.js'
 import { fromCentre, mollweideAngle, project, type Frame, type Viewport } from './camera.js'
 import { baseCell, cellRadius, cellSpan, centre as cellCentre, child, outline, type Cell, type Digit } from './healpix.js'
+import type { Box, Point } from './labels.js'
 import { askKind, chart, traceOf, type Body, type Scene, type Tone, type Trace } from './scene.js'
+
+/** A leader's strength and the radius of the dot on its tile. */
+const LEADER_ALPHA = .45, LEADER_DOT = 2
 
 export interface Palette {
   ocean: string; deep: string; glow: string; grid: string; ink: string; paper: string; land: string; shade: string
@@ -270,4 +274,23 @@ export function paint(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport,
   c.restore()
   c.globalAlpha = shown
   beacons(c, f, scene, palette, shown)
+}
+
+/** The line from a name standing off its tile to the tile's centre. */
+export interface Leader { box: Box; to: Point }
+/** Draws each leader from the name's nearest edge, ending in a dot at the tile. */
+export function paintLeaders(c: CanvasRenderingContext2D, leaders: readonly Leader[], palette: Palette): void {
+  c.strokeStyle = c.fillStyle = palette.ink
+  c.lineWidth = 1
+  c.globalAlpha = LEADER_ALPHA
+  for (const { box, to } of leaders) {
+    c.beginPath()
+    c.moveTo(Math.max(box.left, Math.min(box.right, to.x)), Math.max(box.top, Math.min(box.bottom, to.y)))
+    c.lineTo(to.x, to.y)
+    c.stroke()
+    c.beginPath()
+    c.arc(to.x, to.y, LEADER_DOT, 0, 2 * Math.PI)
+    c.fill()
+  }
+  c.globalAlpha = 1
 }

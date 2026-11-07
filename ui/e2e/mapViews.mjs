@@ -134,6 +134,20 @@ export function registerMapViewJourneys(test) {
     }
   })
 
+  test('The Globe names every thread of a crowded family, whole and clear of each other, at half a screen', async page => {
+    await page.goto(url.replace('example=threads', 'example=families'))
+    await page.locator('.kbn-desk .kbn-card').first().waitFor()
+    await page.keyboard.press('5')
+    await page.locator('.globe canvas').waitFor()
+    await page.waitForTimeout(1400)
+    await page.evaluate(() => window.__harness.modal.voice.onRex({ fiber_id: 'hub', origin: 'umber-workstation' }))
+    await until(page, () => document.querySelector('.globe-peek-name')?.textContent)
+    await page.waitForTimeout(1400)
+    const names = await page.evaluate(() => [...document.querySelectorAll('.globe-name[data-thread]')].map(name => { const { left, top, right, bottom } = name.getBoundingClientRect(); return { left, top, right, bottom, text: name.textContent } }))
+    assert.ok(names.length >= 16, `${names.length} threads named`)
+    for (const [n, a] of names.entries()) for (const b of names.slice(n + 1)) assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.text} overlaps ${b.text}`)
+  }, { width: 800, height: 1000 })
+
   test('The Tree: hotkey 4, keys move without Rex, a thread opens its chat, a file opens and Back returns to its row', async page => {
     await board(page)
     await page.keyboard.press('4')

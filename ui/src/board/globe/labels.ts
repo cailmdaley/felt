@@ -55,6 +55,15 @@ export function boxFits(polygon: Polygon, { x, y }: Point, width: number, height
   return within(polygon, x - w, y) && within(polygon, x + w, y)
 }
 
+/** A box at a point stands wholly outside the polygon: none of its edge in the polygon, none of the polygon in it. */
+export function boxClear(polygon: Polygon, { x, y }: Point, width: number, height: number): boolean {
+  const w = width / 2 + PAD, h = height / 2 + PAD
+  for (const tx of [-1, -.5, 0, .5, 1]) if (within(polygon, x + tx * w, y - h) || within(polygon, x + tx * w, y + h)) return false
+  if (within(polygon, x - w, y) || within(polygon, x + w, y)) return false
+  for (let n = 0; n < polygon.length; n += 2) if (Math.abs(polygon[n] - x) < w && Math.abs(polygon[n + 1] - y) < h) return false
+  return true
+}
+
 export const overlaps = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 export const boxAt = ({ x, y }: Point, width: number, height: number): Box => ({ left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 })
 
@@ -62,6 +71,8 @@ export interface Candidate<T> {
   owner: T
   /** The shape the name must stay inside, or null for one set beside its mark and free of any tile. */
   polygon: Polygon | null
+  /** A shape the name must stay wholly out of. */
+  clear?: Polygon
   /** Where the name would go, best first. */
   anchors: readonly Point[]
   blocks: readonly Block[]
@@ -71,15 +82,16 @@ export interface Placed<T> { owner: T; block: Block; at: Point; box: Box }
 /** Takes candidates in order, first come first placed, each in the first spot it fits clear of the rest and the frame. */
 export function placeNames<T>(candidates: Iterable<Candidate<T>>, frame: Box, most: number, kept: readonly Box[] = []): Placed<T>[] {
   const placed: Placed<T>[] = []
-  for (const { owner, polygon, anchors, blocks: options } of candidates) {
+  for (const { owner, polygon, clear, anchors, blocks: options } of candidates) {
     if (placed.length >= most) break
     search: for (const block of options) {
       for (const at of anchors) {
         const box = boxAt(at, block.width, block.height)
         if (box.left < frame.left || box.top < frame.top || box.right > frame.right || box.bottom > frame.bottom) continue
-        if (polygon && !boxFits(polygon, at, block.width, block.height)) continue
         const bigger: Box = { left: box.left - 4, top: box.top - 2, right: box.right + 4, bottom: box.bottom + 2 }
         if (kept.some(other => overlaps(bigger, other)) || placed.some(other => other.owner === owner || overlaps(bigger, other.box))) continue
+        if (polygon && !boxFits(polygon, at, block.width, block.height)) continue
+        if (clear && !boxClear(clear, at, block.width, block.height)) continue
         placed.push({ owner, block, at, box })
         break search
       }
