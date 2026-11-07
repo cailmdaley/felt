@@ -74,6 +74,18 @@ it('repaints every frame a wheel runs, with no transition, and rests when it set
   expect(stage.classList.contains('family-map-moving')).toBe(false)
   expect(plate.querySelectorAll('.fm-label, .fm-focus').length).toBeGreaterThan(0)
 })
+it('rests a zoom inward on the scene it reached, with the title and the arc of that thread, and neighbours off the stage', () => {
+  vi.useFakeTimers()
+  const { stage, plate } = mapped()
+  const body = stage.querySelector<SVGElement>('[aria-label^="Thread 3,"]')!
+  const [, x, y] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(body.style.transform)!
+  for (let n = 0; n < 8; n++) wheel(plate, { deltaY: -60, ctrlKey: true, clientX: Number(x), clientY: Number(y) })
+  vi.advanceTimersByTime(400)
+  expect(stage.querySelector('.fm-focus-name')?.textContent).toBe('Thread 3')
+  expect(body.hasAttribute('data-focus')).toBe(true)
+  expect(body.style.transform).toBe('translate(500.0px, 340.0px)')
+  expect(stage.querySelector('[aria-label^="Thread 2,"]')!.hasAttribute('data-hidden')).toBe(true)
+})
 it('reaches past the plate\'s edge once zoomed, so a body on the rim can come to the middle', () => {
   const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now)
   const base = radialLayout(model, 800, 720), rim = [...base.stars].sort((a, b) => a.x - b.x)[0], view = aim(base, rim.thread)

@@ -881,7 +881,7 @@ describe('workspace reader integration', () => {
     expect(focused()).toBe('hub/mid')
     expect(document.querySelector('.ws-selected .ws-document-back')?.textContent).toContain('Whole family')
     workspace.reader.back(); await flush()
-    expect(focused()).toBeUndefined()
+    expect(focused()).toBe('hub')
     expect(selected()).toBe('family:host-a:hub')
     const leave = vi.spyOn(window.history, 'back')
     expect(leave).not.toHaveBeenCalled()

@@ -118,7 +118,7 @@ export class FamilyPage {
     this.stage.addEventListener('pointerdown', event => { this.touch = event.pointerType === 'touch' })
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.resized())
     this.observer?.observe(this.stage)
-    this.zoom = new FieldZoom(this.stage, () => this.moved(), () => this.gestured(), () => this.stepOut())
+    this.zoom = new FieldZoom(this.stage, () => this.moved(), inward => this.gestured(inward), () => this.stepOut())
     if (place.view) this.zoom.jump(place.view)
     bindDrawnPage(this.el, { suspend: () => this.suspend(), resume: () => this.resume(), dispose: () => this.dispose() })
   }
@@ -238,25 +238,32 @@ export class FamilyPage {
   }
   /** The field has moved a frame, by a hand or a flight: everything on it follows, to whichever thread a hand has reached. */
   private moved(): void {
-    if (!this.awake) return
-    if (this.lone) return
-    if (this.hand) this.sightFocus()
+    if (!this.awake || this.lone) return
+    if (!this.zoom.flying) this.sightFocus()
     this.drawField()
   }
-  /** Whether a hand, not a flight, has the field. */
-  private get hand(): boolean { return !this.zoom.flying }
   private sightFocus(): void {
     const model = this.model, layout = this.drawing.layout
     if (!model || !layout) return
     const { width, height } = this.stageSize()
     this.setFocus(sighted(layout(model, width, height), this.zoom.drawn, this.place.focus))
   }
-  /** A hand has let go of the field: the map stands where it left it, on whichever thread that reaches. */
-  private gestured(): void {
+  /** A hand has let go of the field: the map stands where it left it, except that a zoom inward comes to rest on the scene of the thread it reached. */
+  private gestured(inward: boolean): void {
     if (this.lone) { this.zoom.jump(this.aimed()); this.repaintStill(); return }
+    this.sightFocus()
+    const thread = this.focused
+    if (inward && thread && thread !== this.model?.root) {
+      this.place.view = null
+      this.select(thread.key)
+      this.zoom.fly(this.aimed())
+      this.drawField()
+      this.readLead()
+      this.levelled()
+      return
+    }
     this.place.view = this.zoom.drawn.k === 1 ? null : this.zoom.drawn
     const before = this.selected
-    this.sightFocus()
     this.repaintStill()
     this.readLead()
     if (this.place.focus && this.place.focus !== before) this.select(this.place.focus)

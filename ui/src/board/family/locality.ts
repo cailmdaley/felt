@@ -11,8 +11,8 @@ const TITLE_RISE = 56
 const NAME_MOST = 300
 const MARGIN = 14
 /** A file's name per character, and what its sheet and age add. */
-const CHAR = 6.9
-const MARKS = 62
+const CHAR = 6.6
+const MARKS = 54
 /** A body's holdings in miniature: how many files show before they have names. */
 const MINI_FILES = 5
 

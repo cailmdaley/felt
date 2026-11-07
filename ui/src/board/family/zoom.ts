@@ -46,15 +46,17 @@ export class FieldZoom {
   private readonly canvas: Selection<HTMLElement, unknown, null, undefined>
   private readonly behavior: ZoomBehavior<HTMLElement, unknown>
   private readonly moved: () => void
-  private readonly settled: () => void
+  private readonly settled: (inward: boolean) => void
   private readonly listening = new AbortController()
   private gesture: View | null = null
   private silent = false
+  /** The scale a hand last left the field at. */
+  private grasped = 1
   private frame = 0
   private timer: ReturnType<typeof setTimeout> | null = null
 
-  /** `moved` hears each frame of the field moving; `settled` a hand letting go of it; `stepOut` a double-click or double-tap on the field. */
-  constructor(host: HTMLElement, moved: () => void, settled: () => void, stepOut: () => void) {
+  /** `moved` hears each frame of the field moving; `settled` a hand letting go of it, and whether it went in; `stepOut` a double-click or double-tap on the field. */
+  constructor(host: HTMLElement, moved: () => void, settled: (inward: boolean) => void, stepOut: () => void) {
     this.host = host; this.moved = moved; this.settled = settled
     this.canvas = select(host)
     this.behavior = zoom<HTMLElement, unknown>()
@@ -84,6 +86,7 @@ export class FieldZoom {
   jump(view: View): void {
     this.canvas.interrupt()
     this.drawn = held(view)
+    this.grasped = this.drawn.k
     this.silent = true
     this.behavior.transform(this.canvas, this.transform(this.drawn))
     this.silent = false
@@ -97,6 +100,7 @@ export class FieldZoom {
     this.canvas.interrupt().transition().duration(FLY_MS).call(this.behavior.transform, end)
       .on('end interrupt', () => {
         this.flying = false
+        this.grasped = this.drawn.k
         this.moved()
         this.rest()
       })
@@ -183,7 +187,9 @@ export class FieldZoom {
     this.timer = null
     cancelAnimationFrame(this.frame)
     this.frame = 0
-    this.settled()
+    const inward = this.drawn.k > this.grasped
+    this.grasped = this.drawn.k
+    this.settled(inward)
     if (!this.flying) this.rest()
   }
   /** Whatever was painted last stands, and later changes glide again. */

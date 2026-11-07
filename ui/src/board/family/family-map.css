@@ -35,6 +35,11 @@
 .family-map .fm-star[data-inert] { pointer-events: none; }
 .family-map .fm-star[data-hidden]:not([data-selected], :focus-visible) { opacity: 0; }
 .family-map .fm-star-hit { fill: transparent; }
+.family-map .fm-life { pointer-events: none; animation: fm-appear .3s ease-out; }
+.family-map .fm-life path { fill: none; stroke-width: 1; }
+.family-map .fm-life-launches { stroke: var(--ws-ink-soft); }
+.family-map .fm-life-commits { stroke: var(--fm-tone); stroke-opacity: .8; }
+.family-map .fm-life-files { stroke: var(--fm-text); stroke-width: 2; }
 .family-map .fm-star-halo { fill: var(--fm-tone); fill-opacity: 0; }
 .family-map .fm-star:not([data-focus]) .fm-star-ring { fill: none; }
 .family-map .fm-star:is([data-standing='question'], [data-standing='blocked']) .fm-star-halo { fill-opacity: .24; }
@@ -42,7 +47,7 @@
 .family-map .fm-star[data-selected] .fm-star-ring, .family-map .fm-star:focus-visible .fm-star-ring { stroke: var(--ws-ink); stroke-width: 1; }
 .family-map .fm-star[data-current]:not([data-selected]) .fm-star-ring { stroke: var(--ws-ink-muted); stroke-width: 1; stroke-dasharray: 2 2; }
 .family-map .fm-star-mark { fill: var(--fm-tone); stroke: var(--fm-tone); stroke-width: 1; }
-.family-map .fm-star[data-root] .fm-star-mark { fill-opacity: .2; stroke-width: 1.25; }
+.family-map .fm-star[data-root] .fm-star-mark { fill-opacity: .4; stroke-width: 1.25; }
 .family-map .fm-star:is([data-standing='quiet'], [data-standing='aside']) .fm-star-mark { fill-opacity: .16; stroke-opacity: .9; stroke-width: 1; }
 .family-map .fm-star[data-standing='still'] .fm-star-mark { fill: none; stroke-opacity: .75; stroke-width: .75; stroke-dasharray: 2 2; }
 .family-map .fm-star[data-standing='turn']:not([data-focus]) .fm-star-mark { fill-opacity: .6; stroke: var(--fm-text); }
@@ -51,19 +56,19 @@
 .family-map .fm-star[data-standing='review'] .fm-star-mark { fill-opacity: .12; stroke-width: 1.5; }
 .family-map .fm-star-fresh { fill: var(--ws-fresh); stroke: var(--ws-paper); stroke-width: 1.25; paint-order: stroke; }
 .family-map .fm-labels, .family-map .fm-numerals { position: absolute; inset: 0; pointer-events: none; }
-.family-map .fm-label { position: absolute; top: 0; left: 0; display: flex; align-items: flex-start; gap: 6px; padding-top: 3px; box-sizing: border-box; line-height: 17px; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; }
+.family-map .fm-label { position: absolute; top: 0; left: 0; display: flex; align-items: flex-start; gap: 6px; padding-top: 3px; box-sizing: border-box; line-height: var(--leading-tight); pointer-events: auto; animation: fm-appear .3s ease-out; }
 .family-map .fm-label[data-side='left'] { flex-direction: row-reverse; }
-.family-map .fm-label-rank { flex: none; min-width: 1ch; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
-.family-map .fm-label-text { flex: 1; min-width: 0; color: var(--ws-ink); line-height: 17px; }
+.family-map .fm-label-rank { flex: none; min-width: 1ch; margin-top: 3px; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
+.family-map .fm-label-text { flex: 1; min-width: 0; line-height: var(--leading-tight); }
+.family-map .fm-label-name { color: var(--ws-ink); }
 .family-map .fm-label[data-side='left'] .fm-label-text { text-align: right; }
-.family-map .fm-label-rank, .family-map .fm-label-age { line-height: 17px; }
 .family-map .fm-label-age { white-space: nowrap; }
-.family-map .fm-label-files { display: inline-flex; align-items: center; gap: 1px; color: var(--ws-ink-muted); font: var(--type-meta)/17px var(--font-mono); }
+.family-map .fm-label-files { display: inline-flex; align-items: center; gap: 1px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
 .family-map .fm-label-files[hidden] { display: none; }
 .family-map .fm-label-files .fm-held-mark { width: 12px; height: 12px; }
 .family-map .fm-label-age { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
 .family-map .fm-label[data-selected] .fm-label-name { text-decoration: underline; text-decoration-color: var(--fm-tone); text-underline-offset: .18em; }
-.family-map .fm-numeral { position: absolute; top: 0; left: 0; display: flex; align-items: center; justify-content: center; width: 19px; height: 19px; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; }
+.family-map .fm-numeral { position: absolute; top: 0; left: 0; display: flex; align-items: center; justify-content: center; width: 19px; height: 19px; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); pointer-events: auto; }
 .family-map .fm-ledger { display: flex; flex-direction: column; padding: 2px 16px 8px; }
 .family-map .fm-ledger-held { display: flex; flex-direction: column; }
 .family-map .fm-ledger-held .fm-held { position: static; width: auto; height: var(--ws-phone-target); animation: none; }
@@ -81,7 +86,7 @@
 /* A thread unfolded: what it holds on one orbit, its threads gathered to the other side of it, the rest of the field stepped back. */
 .family-map .fm-star[data-focus] .fm-star-ring { fill: var(--ws-paper); stroke: var(--ws-ink); stroke-width: 1; }
 .family-map .fm-star[data-focus] .fm-star-halo { fill-opacity: .16; }
-.family-map .fm-helds, .family-map .fm-kickers, .family-map .fm-minis, .family-map .fm-focus-names, .family-map .fm-arm-names { position: absolute; inset: 0; pointer-events: none; }
+.family-map .fm-helds, .family-map .fm-minis, .family-map .fm-focus-names, .family-map .fm-arm-names { position: absolute; inset: 0; pointer-events: none; }
 .family-map .fm-held { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 7px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); text-align: left; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; animation: fm-emerge .34s ease-out .14s backwards; }
 button.fm-held { cursor: pointer; }
 .family-map .fm-held[data-side='left'] { flex-direction: row-reverse; text-align: right; }
@@ -111,7 +116,7 @@ button.fm-held { cursor: pointer; }
 .family-map .fm-focus { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; gap: 2px; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .3s ease-out .14s backwards; }
 .family-map .fm-focus-name { color: var(--ws-ink); font: var(--type-row)/var(--leading-tight) var(--font-serif); }
 .family-map .fm-focus-state { color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
-.family-map .fm-arm-name { position: absolute; top: -8px; left: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; transition: transform var(--fm-drift) ease-in-out; }
+.family-map .fm-arm-name { position: absolute; top: -8px; left: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; }
 .family-map .fm-arm-name[data-side='right'] { translate: -100% 0; }
 
 /* The rows shared by the cloth and the delta */

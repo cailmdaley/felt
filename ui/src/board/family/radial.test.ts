@@ -34,7 +34,7 @@ const SIZES = [[800, 720], [800, 1000], [1600, 1000], [1056, 640], [416, 720]] a
 const out = (layout: ReturnType<typeof radialLayout>, star: { x: number; y: number }): number => Math.hypot(star.x - layout.cx, star.y - layout.cy)
 
 const scene = (model: FamilyModel, width: number, height: number) => zoomPlate(radialLayout(model, width, height), WHOLE, model, null)
-const boxOf = (label: { x: number; y: number; width: number; lines: number; side: string }) => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - (label.lines * 17 + 7) / 2, bottom: label.y + (label.lines * 17 + 7) / 2 })
+const boxOf = (label: { x: number; y: number; width: number; lines: number; side: string }) => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - (label.lines * 18 + 7) / 2, bottom: label.y + (label.lines * 18 + 7) / 2 })
 
 describe.each(SIZES)('the radial drawing at %i by %i', (width, height) => {
   const model = hub(), layout = radialLayout(model, width, height), arms = armsOf(model), sky = scene(model, width, height)

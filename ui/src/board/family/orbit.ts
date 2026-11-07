@@ -1,11 +1,11 @@
 import { needsHuman, type FamilyModel, type MapThread } from './model.js'
 import { held, WHOLE, type View } from './zoom.js'
 import { heldTitle, miniature, unfold, type Mini, type Satellite } from './locality.js'
-import { htmlEl, markPath, optionFor, part, reconcile, shortAgo, svgEl, tagThread, type Point, type Sight } from './drawing.js'
+import { elapsed, htmlEl, markPath, optionFor, part, reconcile, shortAgo, svgEl, tagThread, type Point, type Sight } from './drawing.js'
 
 /** The radial drawing's plate and its painting: bodies, arms, names, and what the focused thread holds. */
 export const TURN = 2 * Math.PI
-const LABEL_LINE = 17
+const LABEL_LINE = 18
 const LABEL_PAD = 7
 const LABEL_MOST_LINES = 4
 /** A serif name's width per character, kept generous so a whole name always fits on the lines counted for it. */
@@ -17,8 +17,9 @@ const LABEL_FILES = 30
 const LABEL_GAP = 7
 const MARGIN = 8
 const NUMERAL = 19
-/** A nameless body's step along an arm. */
+/** A nameless body's step along an arm, and along the rim past its end. */
 export const QUIET_STEP = 14
+export const RIM_STEP = 24
 /** A miniature's button, as family-map.css sets it. */
 const MINI_MARK = 14
 const BODY_MAX = 15
@@ -33,13 +34,15 @@ const ARMS_FROM = 16
 const ARMS_FADE = 1.3
 const ARMS_GONE = 2.4
 /** How far from the plate's middle a body can be and still be the one a hand has zoomed to, as a share of the plate. */
-const SIGHT = .3
+const SIGHT = .45
 /** How much of the plate a thread's scene must fill to be the one in sight, and for its things to take their names. */
 const SIGHT_FILL = .55
 const NAMED_FILL = .7
 /** How many bodies in view show what they hold. */
 const MINIS = 8
 const ARM_NAME_RISE = 9
+/** How far out from a focused body its life begins. */
+const LIFE_GAP = 9
 const ARM_NAME_WIDTH = 110
 
 export type Side = 'left' | 'right'
@@ -198,8 +201,10 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
     }
   })
   const seen = stars.find(star => star.focus) ?? stars[0]
+  const under = (star: Star): boolean => star.thread === seen.thread || (!!star.owner && under(star.owner))
   const inView = (star: Point): boolean => star.x >= 0 && star.x <= width && star.y >= 0 && star.y <= height
   const fill = seen.room / reach, named = fill >= NAMED_FILL && !narrow && (inView(seen))
+  if (named) for (const star of stars) star.hidden ||= !under(star)
   const holds = sight?.holds(seen.thread) ?? {}
   const held = narrow ? unfold(seen.thread, holds, plate, { x: 0, y: 0 }, reach) : named ? unfold(seen.thread, holds, plate, seen, reach).filter(item => inView(item)) : []
   const title = named ? { ...heldTitle(seen, reach), width: 300 } : null
@@ -208,12 +213,12 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
     ...held.map(item => ({ left: item.side === 'right' ? item.x - 8 : item.x - item.room, right: item.side === 'right' ? item.x + item.room : item.x + 8, top: item.y - 12, bottom: item.y + 12 })),
     ...(titled ? [{ left: titled.x, right: titled.x + titled.width, top: titled.y - 4, bottom: titled.y + 40 }] : []),
   ]
-  const arms = stars.filter(star => star.segments.length && star.room >= ARMS_FROM && star.room < ARMS_GONE * reach).map((star): SkyArm => {
+  const arms = stars.filter(star => star.segments.length && !star.hidden && star.room >= ARMS_FROM && star.room < ARMS_GONE * reach).map((star): SkyArm => {
     const small = star.room < BODIES_FROM ? (star.r + LABEL_GAP) / reach : k * star.scale
     return { key: star.thread.key, at: star, scale: Math.min(small, k * star.scale), segments: star.segments, opacity: Math.min(1, (ARMS_GONE * reach - star.room) / ((ARMS_GONE - ARMS_FADE) * reach)) }
   })
-  const nameable = stars.filter(star => star.owner && !star.inert && !star.focus && inView(star)).sort((a, b) => b.owner!.room - a.owner!.room || (a.thread.rank < 0 ? Infinity : a.thread.rank) - (b.thread.rank < 0 ? Infinity : b.thread.rank))
-  const asking = stars.filter(star => star.owner && !star.inert && needsHuman(star.thread) && inView(star))
+  const nameable = stars.filter(star => star.owner && !star.inert && !star.hidden && !star.focus && inView(star)).sort((a, b) => b.owner!.room - a.owner!.room || (a.thread.rank < 0 ? Infinity : a.thread.rank) - (b.thread.rank < 0 ? Infinity : b.thread.rank))
+  const asking = nameable.filter(star => needsHuman(star.thread))
   const minis = narrow ? [] : nameable.filter(star => star.room >= MINIS_FROM).slice(0, MINIS).map(star => miniature(star.thread, sight?.holds(star.thread) ?? {}, star, star.room))
   const labels = narrow ? [] : nearLabels(stars, nameable, plate, taken)
   const names: ArmName[] = []
@@ -289,6 +294,31 @@ function drawStars(layer: SVGGElement, sky: Sky, model: FamilyModel): void {
     body.setAttribute('d', markPath(thread.standing === 'blocked' ? 'blocked' : 'turn', r))
     fresh.setAttribute('d', thread.fresh && !item.inert ? markPath('new', 3.6) : '')
     fresh.setAttribute('transform', `translate(${(r * .75 + 3).toFixed(1)} ${(-r * .75 - 3).toFixed(1)})`)
+  })
+}
+
+/** Radial ticks for moments around a body, clockwise from now at the top, on the map's square-root time. */
+function lifePath(times: readonly number[], now: number, inner: number, outer: number): string {
+  return times.map(at => {
+    const angle = TURN * (elapsed(at, now) - .25), x = Math.cos(angle), y = Math.sin(angle)
+    return `M${(x * inner).toFixed(1)} ${(y * inner).toFixed(1)}L${(x * outer).toFixed(1)} ${(y * outer).toFixed(1)}`
+  }).join('')
+}
+/** The focused thread's life as a ring about its body: launches outermost, commits within them, sent files bright between. */
+function drawLife(layer: SVGGElement, sky: Sky, model: FamilyModel): void {
+  const local = sky.focus, body = local ? sky.stars.find(star => star.thread === local.thread)! : null
+  reconcile(layer, local ? [local] : [], () => 'life', () => {
+    const group = svgEl('g', 'fm-life')
+    group.append(svgEl('path', 'fm-life-commits'), svgEl('path', 'fm-life-launches'), svgEl('path', 'fm-life-files'))
+    return group
+  }, (group, item) => {
+    const base = body!.r + LIFE_GAP, [commits, launches, files] = group.children, { thread, at } = item
+    tagThread(group, thread)
+    group.removeAttribute('data-thread')
+    group.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)`
+    commits.setAttribute('d', lifePath(thread.commits, model.now, base, base + 4))
+    files.setAttribute('d', lifePath(thread.files.map(file => file.at), model.now, base + 4.5, base + 7.5))
+    launches.setAttribute('d', lifePath(thread.launches, model.now, base + 8, base + 13))
   })
 }
 
@@ -419,16 +449,16 @@ function drawLedger(layer: HTMLElement, sky: Sky, model: FamilyModel): void {
 
 /** Paints the plate through a view into the host, keeping every element it can. */
 export function paintPlate(host: HTMLElement, sky: Sky, model: FamilyModel): void {
-  const frame = part(host, 'fm-sky-plate', cls => htmlEl('div', cls)), { width, height, narrow } = sky.frame
+  const frame = part(host, 'fm-sky-plate', cls => htmlEl('div', cls)), { width, height } = sky.frame
   host.classList.toggle('family-map-zoomed', sky.k > 1)
   frame.style.height = `${height}px`
   const svg = part(frame, 'fm-sky-svg', cls => svgEl('svg', cls))
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
   drawArms(part(svg, 'fm-arms', cls => svgEl('g', cls)), sky)
+  drawLife(part(svg, 'fm-lives', cls => svgEl('g', cls)), sky, model)
   drawStars(part(svg, 'fm-stars', cls => svgEl('g', cls)), sky, model)
   drawHeld(part(frame, 'fm-helds', cls => htmlEl('div', cls)), sky, model)
   drawLabels(part(frame, 'fm-labels', cls => htmlEl('div', cls)), part(frame, 'fm-numerals', cls => htmlEl('div', cls)), sky, model)
   drawArmNames(part(frame, 'fm-arm-names', cls => htmlEl('div', cls)), sky)
-  host.classList.toggle('family-map-narrow', narrow)
   drawLedger(part(host, 'fm-ledger', cls => htmlEl('div', cls)), sky, model)
 }

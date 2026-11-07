@@ -19,6 +19,9 @@ it('scopes every drawing style under the family map root', () => {
   expect(rules.length).toBeGreaterThan(50)
   expect(rules.filter(rule => !/^(:is\()?\.family-map/.test(rule))).toEqual([])
 })
+it('runs nothing forever, so a map left open costs nothing', () => {
+  expect(readFileSync(join(FAMILY, 'family-map.css'), 'utf8')).not.toMatch(/\binfinite\b/)
+})
 it('truncates no name by style', () => {
   const css = readFileSync(join(FAMILY, 'family-map.css'), 'utf8')
   for (const name of ['fm-label-name', 'fm-held-name', 'fm-focus-name', 'fm-row-name', 'fm-fold-name', 'fm-ledger-name']) {

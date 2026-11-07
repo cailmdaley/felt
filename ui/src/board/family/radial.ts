@@ -1,6 +1,6 @@
 import { isDrawn, type FamilyModel, type MapThread, type Standing } from './model.js'
 import { NARROW, HOUR, DAY, htmlEl, mount, part, type Drawing, type OpenThread, type Point, type Sight } from './drawing.js'
-import { QUIET_STEP, TURN, bodyRadius, labelFit, labelHeight, labelRoom, ownRadius, paintPlate, rootRadius, zoomPlate, type Frame, type Plate, type Segment, type Star } from './orbit.js'
+import { QUIET_STEP, RIM_STEP, TURN, bodyRadius, labelFit, labelHeight, labelRoom, ownRadius, paintPlate, rootRadius, zoomPlate, type Frame, type Plate, type Segment, type Star } from './orbit.js'
 import { WHOLE, type View } from './zoom.js'
 
 export type Arm = 'todo' | 'done'
@@ -159,13 +159,13 @@ function layArm(kids: readonly MapThread[], arm: Arm, frame: Frame, curve: Curve
   const gaps = kids.map((kid, n) => n && arm === 'todo' && kid.standing !== kids[n - 1].standing ? KIND_GAP : 0)
   const needAt = (n: number, up: number): number => {
     const { x } = pointAt(curve, indexAt(curve, footY - up)), fit = frame.narrow ? undefined : labelFit(kids[n], labelRoom(frame.width / 2, Math.abs(x), radii[n]))
-    return Math.max(fit ? labelHeight(fit.lines) : QUIET_STEP, 2 * radii[n] + 4, count(kids[n]) > 1 ? rooms[n] * 1.4 : 0)
+    return Math.max(fit ? labelHeight(fit.lines) : frame.narrow ? RIM_STEP : QUIET_STEP, 2 * radii[n] + 4, count(kids[n]) > 1 ? rooms[n] * 1.4 : 0)
   }
   let ups = kids.map(() => 0)
   for (let round = 0; round < ROUNDS; round++) ups = stationsOf(kids.map((_, n) => needAt(n, ups[n] ?? run)), gaps, wants, run)
   const pitch = Math.hypot(curve.points[curve.tip + 1].x - curve.points[curve.tip].x, curve.points[curve.tip + 1].y - curve.points[curve.tip].y)
-  const stations = kids.map((_, n) => n < ups.length ? indexAt(curve, footY - ups[n]) : curve.tip + (n - ups.length + 1) * QUIET_STEP / pitch)
-  const within = stations.map(index => Math.min(index, SAMPLES))
+  const step = Math.min(RIM_STEP / pitch, (SAMPLES - curve.tip) / Math.max(1, kids.length - ups.length))
+  const within = kids.map((_, n) => n < ups.length ? indexAt(curve, footY - ups[n]) : curve.tip + (n - ups.length + 1) * step)
   const spots = kids.map((thread, n): Spot => {
     const { x, y } = pointAt(curve, within[n]), tail = n >= ups.length
     return { thread, arm, side: tail === (arm === 'todo') ? 'right' : 'left', x: sign * x, y: sign * y, r: tail ? Math.min(radii[n], 3) : radii[n], room: rooms[n] }
