@@ -419,17 +419,18 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 ### Live voice
 
-`GET /voice` returns `{available, enabled, muted, state, target, cold, held, pending, preview, level, last, error, recorder}`.
+`GET /voice` returns `{available, enabled, muted, state, mode, destination, paused, target, cold, pending, preview, level, last, error, recorder}`.
 An optional `recorder` selects the recording daemon, independently of the receiving worker's `origin`.
 Without it, the receiving daemon is the recorder.
 `state` is `off`, `starting`, `listening`, `yielded` (a meeting owns the microphone), or `failed`.
 `target` is `{fiber_id, origin, name}` or `null`.
 `cold` says whether the selected target has no live worker. A live worker is warm, however long it has been idle; a target whose owner cannot be read is cold.
-`held` is a list of `{id, fiber_id, origin, after, through, text, segments}`, speech waiting for a cold target, retained across target switches, mute, recorder replacement and daemon restart.
+`mode` says where spoken words go: `meeting` while a meeting recording is starting or live, whether or not Follow me is on; `following` while Follow me is on and no meeting holds the microphone; otherwise `off`.
+`destination` is `{fiber_id, name, origin}` of that place (the meeting's card, or the followed target) or `null`, and `paused` is the meeting's pause in `meeting` mode, `muted` in `following` mode, and `false` when `off`.
 `pending` is `{fiber_id, words, text}` or `null`, holding finalized warm speech before a delivery trigger.
 `preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.
 Missing or empty partials, mute, disabled voice and recorder exit clear the preview.
-Preview words never enter the relay, held speech or delivery.
+Preview words never enter the relay or delivery.
 `level` is `{mic, at}` or `null`: the recorder mic's peak over hark's newest 100 ms block in dBFS (`mic`, a float; about -90 is digital silence, 0 is full scale) and the ISO 8601 time that block arrived (`at`), read from hark's `level.json` on each request and `null` when that file is missing or more than a second old.
 `last` is `{fiber_id, at, status, detail?}` or `null`, with `status` `delivered`, `unconfirmed` or `failed`.
 `enabled` reports the persisted intent even if recording fails. Invalid or unreadable `voice.json` fails off: `enabled: false`, `state: "failed"`, and `error` describes the configuration failure while the daemon stops any live voice recorder.
@@ -447,7 +448,7 @@ Disabled, idle voice checks lifecycle-file changes without polling the terminal;
 While following is on, the destination is whichever of Rex and the board had focus last. `Shuttle.RexFocus` routes Rex's worker when Rex comes to the front or changes worker, and the board posts what it shows to `POST /voice/target` while it has the keyboard, on regaining it included. Each route durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
 `t` is the recorder's UTC receipt time, not the time reconciliation finishes.
 Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
-A target switch flushes warm pending words to the old target immediately; cold speech stays with its card.
+A target switch flushes warm pending words to the old target immediately and drops unsummoned cold speech.
 No selected target means no delivery; the recording still retains the words.
 An unreadable or malformed route journal, or a failed recovery truncation, leaves voice failed off with a visible `error`; repair the journal and restart the daemon before recording or selecting a target.
 
@@ -471,11 +472,10 @@ Comments travel with the next batch and `# ended` closes the monitor.
 An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.
 The monitor persists read offsets, buffers and stable message IDs before delivery, so restart recovery doesn't replay confirmed speech.
 
-Cold speech doesn't deliver on word count, quiet, switching target or capture end; it is held for its target.
-Saying a name consumes everything held through that utterance and uses the default delivery verb: paste to a live worker, resume a dormant conversation, or start a never-run card.
+Waking a worker is deliberate: speech to a cold target is delivered only when summoned by a name or the closing `send`, which sends the target's pending words through that utterance with the default delivery verb: paste to a live worker, resume a dormant conversation, or start a never-run card.
+Otherwise the word limit, quiet, a target switch or capture end drops cold speech; the transcript on disk keeps the words, and nothing is stored for later.
 The owning daemon resolves resume versus first start from its current document, independently of recorder caches.
-A failed or interrupted name delivery retains the resolved text in durable recovery state and exposes it in `last.detail` for an explicit retry; it never automatically resubmits an uncertain attempt.
-A worker warmed through any path gets ordinary triggers on its next speech.
+A worker warmed through any path gets ordinary triggers on its pending and next speech.
 
 Voice batches contain speaker-labelled paragraphs, joining consecutive lines by one speaker, with no header or timestamp.
 Live workers take them as terminal input through `/deliver` with `live_input: true`; dormant targets receive the same text as their launch directive.

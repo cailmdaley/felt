@@ -983,7 +983,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert text =~ "healthy relay"
   end
 
-  test "cold voice holds word, quiet, switch and end triggers across a relay restart", c do
+  test "unsummoned cold voice drops on word, quiet, switch and end triggers", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
@@ -994,59 +994,58 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
       "one two three four five six seven eight nine ten eleven"
     )
 
-    File.write!(
-      Path.rootname(c.path) <> ".partial",
-      "me: Claude do not deliver this unfinished sentence"
-    )
-
     start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
-    poll(c)
-    [first] = TranscriptRelay.held(server: c.name)
-    assert first["text"] == "me: one two three four five six seven eight nine ten eleven"
+    assert %{pending: nil, error: nil} = poll(c)
+    record(c.path, "2026-11-06T10:00:02Z", "quiet words")
+    assert %{pending: %{fiber_id: "fiber-a"}} = poll(c)
     Agent.update(c.now, fn _ -> 90_000 end)
-    poll(c)
+    assert %{pending: nil} = poll(c)
+    record(c.path, "2026-11-06T10:00:03Z", "switched away")
     route(routes, "2026-11-06T10:00:10Z", "fiber-b")
     record(c.path, "2026-11-06T10:00:11Z", "another card")
-    poll(c)
-    assert length(TranscriptRelay.held(server: c.name)) == 2
+    assert %{pending: %{fiber_id: "fiber-b"}} = poll(c)
     Agent.update(c.observation, fn _ -> {:ok, %{meeting: nil}} end)
     monitor = Process.monitor(worker(c))
     send(worker(c), :poll)
     assert_receive {:DOWN, ^monitor, :process, _, :normal}
     refute_receive {:delivery, _}, 20
-    assert :ok = stop_supervised(TranscriptRelay)
-    start_supervised!({TranscriptRelay, c.opts})
-    held = TranscriptRelay.held(server: c.name)
-    assert Enum.find(held, &(&1["fiber_id"] == "fiber-a")) == first
-    assert Enum.find(held, &(&1["fiber_id"] == "fiber-b"))["text"] == "me: another card"
   end
 
   for spoken_name <- ~w(claude cloud clawed klaud clot clod claud) do
-    test "cold name #{spoken_name} sends the held speech once in warm voice format", c do
+    test "cold name #{spoken_name} sends the buffered speech once in warm voice format", c do
       routes = Path.join(c.root, "routes.jsonl")
       route(routes, "2026-11-06T10:00:00Z", "fiber-a")
       File.write!(c.path, "")
       record(c.path, "2026-11-06T10:00:01Z", "first words")
       start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
       poll(c)
-      assert [_] = TranscriptRelay.held(server: c.name)
+      refute_receive {:delivery, _}, 20
       record(c.path, "2026-11-06T10:00:02Z", "please #{unquote(spoken_name)}")
       poll(c)
       assert_receive {:delivery, %{kind: "voice", text: text}}, 1_000
       assert text == "me: first words please #{unquote(spoken_name)}\n"
       sync_tasks(c)
       poll(c)
-      assert TranscriptRelay.held(server: c.name) == []
       refute_receive {:delivery, _}, 20
     end
   end
 
-  test "a worker warming by another path resumes ordinary quiet triggers with its held speech",
+  test "the closing phrase summons a cold target like a name", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
+    record(c.path, "2026-11-06T10:00:01Z", "open the notebook, send.")
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: "me: open the notebook, send.\n"}}
+  end
+
+  test "a worker warming by another path resumes ordinary quiet triggers with its buffered speech",
        c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "held words")
+    record(c.path, "2026-11-06T10:00:01Z", "early words")
     cold = start_supervised!(Supervisor.child_spec({Agent, fn -> true end}, id: :cold))
     start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> Agent.get(cold, & &1) end)
     poll(c)
@@ -1056,177 +1055,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     refute_receive {:delivery, _}, 20
     Agent.update(c.now, fn _ -> 5_000 end)
     poll(c)
-    assert_receive {:delivery, %{text: "me: held words warm words\n"}}, 1_000
-    assert TranscriptRelay.held(server: c.name) == []
-  end
-
-  test "an unavailable held store doesn't advance transcript offsets", c do
-    routes = Path.join(c.root, "routes.jsonl")
-    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-    File.write!(c.path, "")
-    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
-    poll(c)
-    held_path = Path.join([c.root, "relays", "voice", "held.json"])
-    File.mkdir_p!(held_path)
-    record(c.path, "2026-11-06T10:00:01Z", "held words")
-    assert %{error: error} = poll(c)
-    assert error =~ "cannot hold voice"
-    assert TranscriptRelay.held(server: c.name) == []
-    assert Jason.decode!(File.read!(relay_path(c, "launch")))["json_offset"] == 0
-    assert Process.alive?(Process.whereis(Module.concat(c.name, Coordinator)))
-  end
-
-  test "held source replay stays deduplicated after restart warm", c do
-    routes = Path.join(c.root, "routes.jsonl")
-    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-    File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "held words")
-    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
-    poll(c)
-    assert [_] = TranscriptRelay.held(server: c.name)
-    assert :ok = stop_supervised(TranscriptRelay)
-    rewind_voice(c, 0)
-    start_supervised!({TranscriptRelay, c.opts})
-    TranscriptRelay.status("launch", server: c.name)
-    poll(c)
-    refute_receive {:delivery, _}, 20
-    record(c.path, "2026-11-06T10:00:02Z", "Claude fresh words")
-    poll(c)
-    assert_receive {:delivery, %{text: "me: held words Claude fresh words\n"}}, 1_000
-    sync_tasks(c)
-    assert TranscriptRelay.held(server: c.name) == []
-    refute_receive {:delivery, _}, 20
-  end
-
-  test "a persisted warm buffer already moved into held cannot reenter delivery", c do
-    routes = Path.join(c.root, "routes.jsonl")
-    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-    File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "warm before hold")
-    cold = start_supervised!(Supervisor.child_spec({Agent, fn -> false end}, id: :cold))
-    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> Agent.get(cold, & &1) end)
-    poll(c)
-    old = File.read!(relay_path(c, "launch"))
-    Agent.update(cold, fn _ -> true end)
-    record(c.path, "2026-11-06T10:00:02Z", "cold suffix")
-    poll(c)
-
-    assert [%{"text" => "me: warm before hold cold suffix"}] =
-             TranscriptRelay.held(server: c.name)
-
-    assert :ok = stop_supervised(TranscriptRelay)
-    File.write!(relay_path(c, "launch"), old)
-    start_supervised!({TranscriptRelay, c.opts})
-    TranscriptRelay.status("launch", server: c.name)
-    poll(c)
-    record(c.path, "2026-11-06T10:00:03Z", "Claude")
-    poll(c)
-    assert_receive {:delivery, %{text: "me: warm before hold cold suffix Claude\n"}}, 1_000
-    refute_receive {:delivery, _}, 20
-  end
-
-  test "a held name reread before its reader commit wakes once without adding its words again",
-       c do
-    routes = Path.join(c.root, "routes.jsonl")
-    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-    File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "Claude held once")
-    directory = Path.join(c.root, "relays")
-    File.mkdir_p!(Path.join(directory, "voice"))
-    source = Path.rootname(c.path) <> ".jsonl"
-    held = Shuttle.Voice.Held.load(Path.join([directory, "voice", "held.json"]))
-
-    {held, _} =
-      Shuttle.Voice.Held.append(
-        held,
-        "launch",
-        File.stat!(source).size,
-        %{"fiber_id" => "fiber-a", "origin" => "owner"},
-        [%{"speaker" => "me", "text" => "Claude held once"}]
-      )
-
-    Shuttle.Voice.Held.save!(Path.join([directory, "voice", "held.json"]), held)
-    start_monitor(c, kind: "voice", routes: routes)
-    poll(c)
-    assert_receive {:delivery, %{text: "me: Claude held once\n"}}, 1_000
-    sync_tasks(c)
-    poll(c)
-    assert TranscriptRelay.held(server: c.name) == []
-    refute_receive {:delivery, _}, 20
-  end
-
-  for failure <- [:refused, :crash] do
-    test "name payload survives #{failure} and restart without an automatic retry", c do
-      routes = Path.join(c.root, "routes.jsonl")
-      route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-      File.write!(c.path, "")
-      record(c.path, "2026-11-06T10:00:01Z", "raw original")
-      parent = self()
-
-      deliver = fn message ->
-        send(parent, {:delivery, message})
-
-        case unquote(failure) do
-          :refused -> {503, %{delivered: false}}
-          :crash -> exit(:lost_after_submit)
-        end
-      end
-
-      opts = Keyword.merge(c.opts, cold: fn _ -> true end, deliver: deliver)
-      start_monitor(%{c | opts: opts}, kind: "voice", routes: routes)
-      poll(c)
-      assert [_] = TranscriptRelay.held(server: c.name)
-      record(c.path, "2026-11-06T10:00:02Z", "Claude")
-      poll(c)
-      assert_receive {:delivery, %{text: "me: raw original Claude\n"}}, 1_000
-      sync_tasks(c)
-      assert TranscriptRelay.held(server: c.name) == []
-      recovery = TranscriptRelay.recovery(server: c.name)
-      expected = if unquote(failure) == :crash, do: "unconfirmed", else: "failed"
-      assert recovery["status"] == expected
-      assert recovery["detail"] =~ "me: raw original Claude"
-      assert :ok = stop_supervised(TranscriptRelay)
-      start_supervised!({TranscriptRelay, opts})
-      TranscriptRelay.status("launch", server: c.name)
-      poll(c)
-      assert TranscriptRelay.recovery(server: c.name)["detail"] == recovery["detail"]
-      refute_receive {:delivery, _}, 20
-    end
-  end
-
-  test "an interrupted name submission retains its text without replay", c do
-    routes = Path.join(c.root, "routes.jsonl")
-    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-    File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "raw words")
-    parent = self()
-
-    deliver = fn message ->
-      send(parent, {:submitting, message})
-
-      receive do
-        :finish -> {200, %{delivered: true}}
-      end
-    end
-
-    opts = Keyword.merge(c.opts, cold: fn _ -> true end, deliver: deliver)
-    start_monitor(%{c | opts: opts}, kind: "voice", routes: routes)
-    poll(c)
-    assert [_] = TranscriptRelay.held(server: c.name)
-    record(c.path, "2026-11-06T10:00:02Z", "Claude")
-    poll(c)
-    assert_receive {:submitting, %{text: "me: raw words Claude\n"}}, 1_000
-    assert :ok = stop_supervised(TranscriptRelay)
-    start_supervised!({TranscriptRelay, opts})
-    TranscriptRelay.status("launch", server: c.name)
-    poll(c)
-
-    assert %{"status" => "unconfirmed", "detail" => detail} =
-             TranscriptRelay.recovery(server: c.name)
-
-    assert detail =~ "me: raw words Claude"
-    assert TranscriptRelay.held(server: c.name) == []
-    refute_receive {:submitting, _}, 20
+    assert_receive {:delivery, %{text: "me: early words warm words\n"}}, 1_000
   end
 
   test "a name stays explicit if the target crosses the cold threshold during ingestion", c do
@@ -1239,7 +1068,6 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     start_monitor(c, kind: "voice", routes: routes, cold: cold)
     poll(c)
     assert_receive {:delivery, %{text: "me: Claude wake\n"}}, 1_000
-    assert TranscriptRelay.held(server: c.name) == []
   end
 
   test "meeting delivery task exits retain their batch for retry", c do
@@ -1265,7 +1093,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert second == first
   end
 
-  test "voice speaker comments never strand a source-less buffer before finalized speech", c do
+  test "voice speaker comments never strand a buffer before finalized speech", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "# S2 = colleague\n")
@@ -1274,51 +1102,8 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert %{error: nil} = poll(c)
     assert %{error: nil} = poll(c)
     record(c.path, "2026-11-06T10:00:01Z", "final words")
-    assert %{error: nil} = poll(c)
-    assert [%{"text" => "me: final words"}] = TranscriptRelay.held(server: c.name)
+    assert %{error: nil, pending: %{fiber_id: "fiber-a", text: "me final words"}} = poll(c)
     refute_receive {:delivery, _}, 20
-  end
-
-  test "a recovered voice buffer without per-buffer source metadata holds and reloads safely",
-       c do
-    routes = Path.join(c.root, "routes.jsonl")
-    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-    File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "old warm words")
-    start_monitor(c, kind: "voice", routes: routes)
-    poll(c)
-    assert :ok = stop_supervised(TranscriptRelay)
-    file = relay_path(c, "launch")
-
-    config =
-      file
-      |> File.read!()
-      |> Jason.decode!()
-      |> Map.update!("buffers", fn [buffer] ->
-        [Map.drop(buffer, ~w(source_offset voice_rows))]
-      end)
-
-    File.write!(file, Jason.encode!(config))
-    Agent.update(c.now, fn _ -> 10_000 end)
-    opts = Keyword.put(c.opts, :cold, fn _ -> true end)
-    start_supervised!({TranscriptRelay, opts})
-    TranscriptRelay.status("launch", server: c.name)
-    poll(c)
-    assert [%{"text" => "me: old warm words"}] = TranscriptRelay.held(server: c.name)
-    record(c.path, "2026-11-06T10:00:02Z", "new words")
-    poll(c)
-    assert [%{"text" => "me: old warm words new words"}] = TranscriptRelay.held(server: c.name)
-    assert :ok = stop_supervised(TranscriptRelay)
-    start_supervised!({TranscriptRelay, opts})
-    TranscriptRelay.status("launch", server: c.name)
-    assert [%{"text" => "me: old warm words new words"}] = TranscriptRelay.held(server: c.name)
-    refute_receive {:delivery, _}, 20
-  end
-
-  defp rewind_voice(c, offset) do
-    file = relay_path(c, "launch")
-    config = file |> File.read!() |> Jason.decode!() |> Map.put("json_offset", offset)
-    File.write!(file, Jason.encode!(config))
   end
 
   defp relay_path(c, launch) do

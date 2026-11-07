@@ -53,9 +53,8 @@ defmodule Shuttle.Voice do
       capture_opts: Keyword.get(opts, :capture_opts, []),
       relay: Keyword.get(opts, :relay, &start_relay/2),
       monitor: Keyword.get(opts, :monitor, &monitor/1),
-      held: Keyword.get(opts, :held, &Shuttle.Meeting.TranscriptRelay.held/0),
-      recovery: Keyword.get(opts, :recovery, &Shuttle.Meeting.TranscriptRelay.recovery/0),
       cold: Keyword.get(opts, :cold, &cold?/1),
+      meeting: nil,
       snapshot: %{
         available: false,
         enabled: false,
@@ -74,7 +73,8 @@ defmodule Shuttle.Voice do
   end
 
   @impl true
-  def handle_call(:snapshot, _from, state), do: {:reply, state.snapshot, state}
+  def handle_call(:snapshot, _from, state),
+    do: {:reply, put_mode(state.snapshot, state.meeting), state}
 
   def handle_call(:show, _from, state) do
     state = name_target(state)
@@ -88,7 +88,7 @@ defmodule Shuttle.Voice do
 
     case route_check(state, origin) do
       :not_following ->
-        {:reply, {:ok, state.snapshot}, state}
+        {:reply, {:ok, put_mode(state.snapshot, state.meeting)}, state}
 
       {:error, {:routes, reason}} ->
         {:reply, {:error, reason}, state}
@@ -160,31 +160,47 @@ defmodule Shuttle.Voice do
   end
 
   defp live_drafts(snapshot, state) do
-    snapshot =
-      case state.held.() do
-        {:error, reason} -> Map.merge(snapshot, %{held: [], state: "failed", error: reason})
-        held -> Map.put(snapshot, :held, held)
-      end
-
     preview =
       if snapshot.enabled && not snapshot.muted && snapshot.state == "listening",
         do: snapshot.preview
 
     snapshot
-    |> Map.put(:last, recovery_last(snapshot.last, state.recovery.()))
     |> Map.put(:preview, preview)
     |> Map.put(:cold, not is_nil(snapshot.target) and state.cold.(snapshot.target))
     |> Map.put(:level, Meeting.mic_level(state.capture_opts))
+    |> put_mode(state.meeting)
   end
 
-  defp recovery_last(last, nil), do: last
-  defp recovery_last(nil, recovery), do: recovery
+  # Where spoken words go right now: a meeting joined to a card holds the mic
+  # whether or not Follow me is on; otherwise Follow me routes to its target.
+  defp put_mode(snapshot, %{destination: destination, paused: paused}),
+    do: Map.merge(snapshot, %{mode: "meeting", destination: destination, paused: paused})
 
-  defp recovery_last(last, recovery) do
-    if recovery["at"] > (last["at"] || last[:at] || "") or
-         (recovery["fiber_id"] == (last["fiber_id"] || last[:fiber_id]) and
-            (last["status"] || last[:status]) != "delivered"), do: recovery, else: last
+  defp put_mode(%{enabled: true, state: phase} = snapshot, nil) when phase != "yielded" do
+    destination = snapshot.target && Map.take(snapshot.target, ~w(fiber_id name origin))
+    Map.merge(snapshot, %{mode: "following", destination: destination, paused: snapshot.muted})
   end
+
+  defp put_mode(snapshot, _meeting),
+    do: Map.merge(snapshot, %{mode: "off", destination: nil, paused: false})
+
+  # A recording other than voice that is not failed is a meeting in progress.
+  defp meeting_view(%{kind: kind, state: phase} = row) when kind != "voice" and phase != "failed" do
+    destination =
+      if row[:fiber] do
+        origin = row[:origin] || row[:mirror_host] || Shuttle.MeetingRouter.own_host()
+
+        %{
+          "fiber_id" => row.fiber,
+          "name" => target_name(row.fiber, origin) || row[:title] || Path.basename(row.fiber),
+          "origin" => origin
+        }
+      end
+
+    %{destination: destination, paused: row[:paused] == true}
+  end
+
+  defp meeting_view(_row), do: nil
 
   @impl true
   def handle_cast({:focus_error, message}, state), do: {:noreply, %{state | focus_error: message}}
@@ -225,7 +241,8 @@ defmodule Shuttle.Voice do
               :idle,
               :idle_key,
               :capture_error,
-              :preview_pin
+              :preview_pin,
+              :meeting
             ])
           )
 
@@ -369,6 +386,7 @@ defmodule Shuttle.Voice do
       {:ok, observed} ->
         row = observed.meeting
         voice = not is_nil(row) and row[:kind] == "voice"
+        meeting = meeting_view(row)
         retry = track_retry(retry, row, now)
 
         relay_result =
@@ -439,7 +457,8 @@ defmodule Shuttle.Voice do
           | snapshot: snapshot,
             retry: retry,
             preview_pin: preview_pin,
-            idle: is_nil(row) or (not enabled and not voice),
+            meeting: meeting,
+            idle: is_nil(row) or (not enabled and not voice and is_nil(meeting)),
             idle_key: key,
             capture_error: nil
         }

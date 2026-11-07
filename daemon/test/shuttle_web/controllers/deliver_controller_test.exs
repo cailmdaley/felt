@@ -151,10 +151,10 @@ defmodule ShuttleWeb.DeliverControllerTest do
                origin: nil,
                kind: "voice",
                message_id: "voice-name",
-               text: "me: held words Claude\n"
+               text: "me: spoken words Claude\n"
              })
 
-    assert run_script() =~ "me: held words Claude"
+    assert run_script() =~ "me: spoken words Claude"
   end
 
   test "a voice name wake resumes a dormant prior conversation even after a handoff" do
@@ -173,15 +173,15 @@ defmodule ShuttleWeb.DeliverControllerTest do
                origin: nil,
                kind: "voice",
                message_id: "voice-name",
-               text: "me: held words Claude\n"
+               text: "me: spoken words Claude\n"
              })
 
     script = run_script()
     assert script =~ "--resume '#{session}'"
-    assert script =~ "me: held words Claude"
+    assert script =~ "me: spoken words Claude"
   end
 
-  test "finalized voice traverses the relay, cold hold, dormant resume and live messaging" do
+  test "finalized voice traverses the relay, cold drop, dormant resume and live messaging" do
     alias Shuttle.Meeting.TranscriptRelay
     dormant = "tests/voice-pipeline-dormant"
     live = "tests/voice-pipeline-live"
@@ -254,12 +254,10 @@ defmodule ShuttleWeb.DeliverControllerTest do
       GenServer.call(worker, :status)
     end
 
-    record.("2026-11-06T10:00:01Z", "raw correction needed")
+    record.("2026-11-06T10:00:01Z", "aside nobody summoned")
     poll.()
-    [held] = TranscriptRelay.held()
-    assert held["text"] == "S1: raw correction needed"
     refute_receive {:message, _}, 20
-    record.("2026-11-06T10:00:02Z", "Claude")
+    record.("2026-11-06T10:00:02Z", "raw correction needed Claude")
     poll.()
     # The owning dispatcher, not the recorder cache, selects the dormant conversation.
     task_refs =
@@ -270,14 +268,13 @@ defmodule ShuttleWeb.DeliverControllerTest do
     script = run_script()
     assert script =~ "--resume '#{session}'"
     assert script =~ "S1: raw correction needed Claude"
-    assert TranscriptRelay.held() == []
+    refute script =~ "aside nobody summoned"
     write_route.("2026-11-06T10:00:03Z", live)
     record.("2026-11-06T10:00:04Z", "ordinary live words")
     poll.()
     assert_receive {:paste, "S1: ordinary live words\n"}, 30_000
     refute_receive {:paste, _}, 20
     refute_receive {:message, _}, 20
-    assert TranscriptRelay.held() == []
 
     assert Enum.count(MockRunner.commands(), fn {command, args} ->
              command == "tmux" and match?(["new-session" | _], args)

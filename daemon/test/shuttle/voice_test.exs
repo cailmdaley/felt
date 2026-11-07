@@ -38,8 +38,6 @@ defmodule Shuttle.VoiceTest do
       name: Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}"),
       poll_ms: 60_000,
       reconcile: reconcile,
-      held: fn -> [] end,
-      recovery: fn -> nil end,
       cold: fn _ -> false end,
       relay: fn _, _ -> :ok end,
       monitor: fn _ -> %{pending: nil, last: nil} end
@@ -114,7 +112,7 @@ defmodule Shuttle.VoiceTest do
     assert %{target: %{"fiber_id" => "pushed/two"}} = Voice.snapshot()
   end
 
-  test "coldness follows owner runtime activity, with dormant and unknown targets held" do
+  test "coldness follows owner runtime activity, with dormant and unknown targets cold" do
     alias Shuttle.Voice.Target
 
     entries = [
@@ -139,69 +137,6 @@ defmodule Shuttle.VoiceTest do
     refute Target.cold?(%{"fiber_id" => "idle", "origin" => "owner"})
   end
 
-  test "resolved edited-payload recovery is exposed instead of a generic failed delivery", c do
-    recovery = %{
-      "fiber_id" => "a",
-      "status" => "unconfirmed",
-      "at" => "2026-11-06T10:00:01Z",
-      "detail" => "Copy retained correction"
-    }
-
-    :sys.replace_state(c.pid, fn state ->
-      %{
-        state
-        | recovery: fn -> recovery end,
-          snapshot: %{
-            state.snapshot
-            | last: %{
-                "fiber_id" => "a",
-                "status" => "failed",
-                "at" => "2026-11-06T10:00:02Z",
-                "detail" => "generic"
-              }
-          }
-      }
-    end)
-
-    assert %{last: ^recovery} = Voice.show()
-    delivered = %{"fiber_id" => "a", "status" => "delivered", "at" => "2026-11-06T10:00:03Z"}
-
-    :sys.replace_state(c.pid, fn state ->
-      %{state | snapshot: %{state.snapshot | last: delivered}}
-    end)
-
-    assert %{last: ^delivered} = Voice.show()
-  end
-
-  test "corrupt held metadata fails visibly instead of losing drafts", c do
-    alias Shuttle.Voice.Held
-    file = Path.join(c.root, "held.json")
-
-    {state, _} =
-      Held.append(Held.load(file), "launch", 42, %{"fiber_id" => "a", "origin" => "owner"}, [
-        %{"speaker" => "S1", "text" => "words"}
-      ])
-
-    for offset <- [nil, -1, "42"] do
-      assert_raise ArgumentError, "invalid held source offset", fn ->
-        Held.append(state, "launch", offset, %{"fiber_id" => "a"}, [])
-      end
-
-      assert {:error, "invalid held source offset"} =
-               Held.lookup(state, "launch", offset, %{"fiber_id" => "a"})
-    end
-
-    for invalid <- [
-          put_in(state, ["cards", Access.at(0), "segments", Access.at(0), "speaker"], nil),
-          put_in(state, ["cards", Access.at(0), "checkpoints"], []),
-          put_in(state, ["cards", Access.at(0), "after"], 99),
-          Map.put(state, "attempts", %{"id" => %{"status" => "failed", "text" => "edits"}})
-        ] do
-      File.write!(file, Jason.encode!(invalid))
-      assert {:error, "invalid held voice state"} = Held.list(Held.load(file))
-    end
-  end
-
   test "partial words are a display-only preview pinned to the target they began under",
        c do
     transcript = Path.join(c.root, "voice.txt")
@@ -221,8 +156,7 @@ defmodule Shuttle.VoiceTest do
     assert {:ok,
             %{
               preview: %{"fiber_id" => "a", "text" => "S1: Claude these are provisional"},
-              pending: nil,
-              held: []
+              pending: nil
             }} = Voice.update(%{})
 
     assert {:ok, %{preview: %{"fiber_id" => "a"}}} = Voice.target(%{"fiber_id" => "b"})
@@ -246,57 +180,6 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{preview: nil}} = Voice.update(%{})
   end
 
-  test "public held segments accumulate and a take leaves the later speech", c do
-    alias Shuttle.Voice.Held
-    target = %{"fiber_id" => "a", "origin" => "owner"}
-    state = Held.load(Path.join(c.root, "segments.json"))
-
-    {state, first} =
-      Held.append(state, "launch", 42, target, [%{"speaker" => "S1", "text" => "hello world"}])
-
-    assert first["segments"] == [%{"through" => 1, "text" => "S1: hello world"}]
-
-    {state, grown} =
-      Held.append(state, "launch", 84, target, [%{"speaker" => "S1", "text" => "world"}])
-
-    assert grown["segments"] == [
-             %{"through" => 1, "text" => "S1: hello world"},
-             %{"through" => 2, "text" => " world"}
-           ]
-
-    {state, _} =
-      Held.append(state, "launch", 126, target, [%{"speaker" => "S1", "text" => "suffix"}])
-
-    assert {:ok, state, "S1: hello world world"} = Held.take(state, first["id"], 2)
-
-    assert [
-             %{
-               "after" => 2,
-               "through" => 3,
-               "text" => "S1: suffix",
-               "segments" => [%{"through" => 3, "text" => "S1: suffix"}]
-             }
-           ] = Held.list(state)
-  end
-
-  test "held draft APIs consume once and report claim conflicts without launching", c do
-    alias Shuttle.Meeting.TranscriptRelay
-    name = Module.concat(__MODULE__, "Relay#{System.unique_integer([:positive])}")
-    start_supervised!({TranscriptRelay, name: name, directory: Path.join(c.root, "relays")})
-    Env.put_server(TranscriptRelay, name)
-    :sys.replace_state(c.pid, fn state -> %{state | held: fn -> TranscriptRelay.held() end} end)
-    coordinator = Module.concat(name, Coordinator)
-
-    held =
-      GenServer.call(
-        coordinator,
-        {:hold, "launch", 42, %{"fiber_id" => "a", "origin" => "owner"},
-         [%{"speaker" => "me", "text" => "first words"}]}
-      )
-
-    assert %{"held" => [^held]} = json_response(get(api_conn(), "/api/v1/voice"), 200)
-  end
-
   test "meeting ownership yields voice and it returns once the meeting ends", c do
     Agent.update(c.observed, fn _ ->
       %{available: true, meeting: %{kind: "meeting", launch: "meeting", state: "live"}}
@@ -309,6 +192,93 @@ defmodule Shuttle.VoiceTest do
     end)
 
     assert {:ok, %{state: "listening"}} = Voice.update(%{})
+  end
+
+  test "mode names where words go: nowhere, the followed target, or the meeting's card", c do
+    host = Shuttle.MeetingRouter.own_host()
+    card = %{"uid" => "01CARD", "name" => "The card", "shuttle" => %{"host" => host}}
+    Env.put_app_env(:meeting_fibers, fn -> [card] end)
+
+    assert %{mode: "off", destination: nil, paused: false} = Voice.snapshot()
+
+    Agent.update(c.observed, fn _ ->
+      %{available: true, meeting: %{kind: "voice", launch: "voice", state: "live", error: nil}}
+    end)
+
+    assert {:ok, %{mode: "following", destination: nil}} = Voice.update(%{"enabled" => true})
+
+    assert {:ok, %{mode: "following", destination: %{"fiber_id" => "01CARD"} = following}} =
+             Voice.target(%{"fiber_id" => "01CARD", "origin" => host})
+
+    assert following == %{"fiber_id" => "01CARD", "name" => "The card", "origin" => host}
+    assert {:ok, %{mode: "following", paused: true}} = Voice.update(%{"muted" => true})
+    assert {:ok, _} = Voice.update(%{"muted" => false})
+
+    meeting = %{
+      kind: "meeting",
+      launch: "meeting",
+      state: "live",
+      title: "Weekly sync",
+      fiber: "01CARD",
+      mirror_host: host,
+      paused: true
+    }
+
+    Agent.update(c.observed, fn _ -> %{available: true, meeting: meeting} end)
+
+    assert {:ok,
+            %{
+              state: "yielded",
+              mode: "meeting",
+              paused: true,
+              destination: %{"fiber_id" => "01CARD", "name" => "The card", "origin" => ^host}
+            }} = Voice.update(%{})
+
+    assert %{"mode" => "meeting", "destination" => %{"fiber_id" => "01CARD"}, "paused" => true} =
+             api_conn() |> get("/api/v1/voice") |> json_response(200)
+
+    Agent.update(c.observed, fn _ -> %{available: true, meeting: %{meeting | state: "failed"}} end)
+    assert {:ok, %{mode: "off", destination: nil, paused: false}} = Voice.update(%{})
+  end
+
+  test "a meeting is the mode while Follow me is off, observed on every tick until it ends", c do
+    Env.put_app_env(:meeting_fibers, fn -> [] end)
+
+    meeting = %{
+      kind: "meeting",
+      launch: "meeting",
+      state: "starting",
+      title: "Weekly sync",
+      fiber: "project/sync",
+      paused: false
+    }
+
+    # Idle, disabled voice wakes on hark's lifecycle file, which a meeting start writes.
+    lifecycle = Path.join([c.root, "hark", "meeting.json"])
+    File.mkdir_p!(Path.dirname(lifecycle))
+    File.write!(lifecycle, ~s({"phase":"loading","launch":"meeting"}))
+    Agent.update(c.observed, fn _ -> %{available: true, meeting: meeting} end)
+    assert {:ok, %{enabled: false, mode: "meeting", paused: false} = first} = Voice.update(%{})
+
+    assert first.destination == %{
+             "fiber_id" => "project/sync",
+             "name" => "Weekly sync",
+             "origin" => Shuttle.MeetingRouter.own_host()
+           }
+
+    Agent.update(c.observed, fn _ ->
+      %{available: true, meeting: %{meeting | state: "live", paused: true}}
+    end)
+
+    flush_reconciled()
+    assert {:ok, %{mode: "meeting", paused: true}} = Voice.update(%{})
+    assert_received {:reconciled, false}
+    Agent.update(c.observed, fn _ -> %{available: true, meeting: nil} end)
+    File.write!(lifecycle, ~s({"phase":"ended","launch":"meeting"}))
+    assert {:ok, %{mode: "off", destination: nil}} = Voice.update(%{})
+    flush_reconciled()
+    assert {:ok, %{mode: "off"}} = Voice.update(%{})
+    refute_received {:reconciled, _}
   end
 
   test "a relay status timeout preserves the last listening snapshot", c do
@@ -770,5 +740,13 @@ defmodule Shuttle.VoiceTest do
              api_conn() |> get("/api/v1/voice") |> Map.get(:resp_body) |> Jason.decode!()
 
     assert (api_conn() |> post("/api/v1/voice", ~s({"muted":3}))).status == 422
+  end
+
+  defp flush_reconciled do
+    receive do
+      {:reconciled, _} -> flush_reconciled()
+    after
+      0 -> :ok
+    end
   end
 end
