@@ -416,7 +416,7 @@ Invalid input and control failures return 422; unknown recorder addresses return
 Without an explicit recorder it prefers a reachable desktop-capable fleet recorder, while an explicit `recorder` pins the request.
 Desktop starts use `hark --voice`, adding `--system-audio` when the setting is on.
 The desktop recorder retains system audio as its echo-cancellation reference even when system transcription is off.
-`system_audio` toggles live through `hark pause --system` or `hark resume --system` and persists across launches.
+`system_audio` toggles live through hark's `system-paused` flag file and persists across launches.
 Phone audio has no system track; it retains the desktop preference without applying a system gate.
 Changing source replaces the recorder after stopping the old launch.
 `source` is a runtime choice, not a `voice.json` setting; a surviving phone launch is adopted after daemon restart.
@@ -425,7 +425,7 @@ Changing source replaces the recorder after stopping the old launch.
 Any enable without an explicit source selects desktop on a desktop-capable host; stopping Listen clears the phone source.
 `POST /voice/discard` drops unsent buffered words and returns the state plus `discarded`, the number dropped.
 Already-submitted batches still go, and utterances begun before discard stay in the day transcript but do not enter a buffer.
-Mic mute uses `hark pause`/`resume` and survives recorder restarts.
+Mic mute sets hark's `paused` flag file and survives recorder restarts.
 There is one retained terminal launch, `hark-voice`, and no scheduled recorder restart.
 Crash retries wait 1, 2, 4 and 8 seconds; five failures latch until enabled is toggled off and on.
 Thirty stable seconds reset that budget; a daemon restart starts a fresh budget.
