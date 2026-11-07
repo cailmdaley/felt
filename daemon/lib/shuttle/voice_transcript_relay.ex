@@ -417,13 +417,6 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       end,
       observe: Keyword.get(opts, :observe, &Shuttle.Recorder.show/0),
       thresholds: Keyword.get(opts, :thresholds, &Shuttle.Voice.Config.thresholds/0),
-      follow:
-        Keyword.get(opts, :follow, fn ->
-          case Shuttle.Voice.Config.read() do
-            {:ok, config} -> config["follow"]
-            _ -> true
-          end
-        end),
       cold: Keyword.get(opts, :cold, &Shuttle.Voice.cold?/1),
       clock: Keyword.get(opts, :clock, fn -> System.system_time(:millisecond) end),
       tasks: %{},
@@ -778,7 +771,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     do: if(String.starts_with?(line, "# ended"), do: Map.put(config, "ended", true), else: config)
 
   defp add_line(config, target, line, state, voice) do
-    target = Map.take(target, ~w(fiber_id origin))
+    target = target |> Map.take(~w(fiber_id origin pinned)) |> Map.put_new("pinned", false)
 
     buffer =
       Enum.find(config["buffers"], &same_target?(&1, target)) ||
@@ -880,7 +873,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
   # becomes a batch only when it ended with "send" (a batch made at once by
   # `@closing`), and is otherwise dropped here. The transcript keeps the words.
   defp flush_buffer(config, buffer, state) do
-    if state.follow.() and state.cold.(buffer),
+    if not buffer["pinned"] and state.cold.(buffer),
       do: Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer))),
       else: make_batch(config, buffer)
   end
@@ -964,7 +957,11 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
 
   defp same_target?(nil, _), do: false
   defp same_target?(_, nil), do: false
-  defp same_target?(a, b), do: a["fiber_id"] == b["fiber_id"] and a["origin"] == b["origin"]
+
+  defp same_target?(a, b),
+    do:
+      a["fiber_id"] == b["fiber_id"] and a["origin"] == b["origin"] and
+        (a["pinned"] || false) == (b["pinned"] || false)
 
   defp maybe_end(config, state) do
     case state.observe.() do

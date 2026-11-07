@@ -6,6 +6,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
 
   setup %{tmp_dir: root} do
     Env.put_env("SHUTTLE_DATA_DIR", root)
+    Env.put_env("SHUTTLE_VOICE_FILE", Path.join(root, "voice.json"))
     now = start_supervised!(Supervisor.child_spec({Agent, fn -> 1_000 end}, id: :clock))
 
     observation =
@@ -115,7 +116,9 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     File.write!(c.path, "")
     record(c.path, "2026-11-06T10:00:01Z", "one phrase")
     record(c.path, "2026-11-06T10:00:02Z", "two phrases")
-    start_monitor(c, routes: routes, cold: fn _ -> true end, follow: fn -> false end)
+    File.write!(routes, "")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a", true)
+    start_monitor(c, routes: routes, cold: fn _ -> true end)
     poll(c)
     Agent.update(c.now, fn _ -> 6_000 end)
     poll(c)
@@ -123,6 +126,34 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
 
     assert text ==
              "me: one phrase two phrases\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
+  end
+
+  test "following to pin drops A's cold buffer even after global settings change", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    record(c.path, "2026-11-06T10:00:01Z", "cold chit chat")
+    start_monitor(c, routes: routes, cold: fn _ -> true end)
+    assert %{pending: %{fiber_id: "fiber-a"}} = poll(c)
+    assert :ok = Shuttle.Voice.Config.update(%{"follow" => false})
+    route(routes, "2026-11-06T10:00:02Z", "fiber-b", true)
+    # A late finalized utterance still uses the spoken-time following route.
+    record(c.path, "2026-11-06T10:00:01.500Z", "late chit chat")
+    assert %{pending: nil} = poll(c)
+    refute_receive {:delivery, _}, 50
+  end
+
+  test "pin to following delivers B's pending cold buffer after global settings change", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-b", true)
+    record(c.path, "2026-11-06T10:00:01Z", "meeting words")
+    start_monitor(c, routes: routes, cold: fn _ -> true end)
+    assert %{pending: %{fiber_id: "fiber-b"}} = poll(c)
+    assert :ok = Shuttle.Voice.Config.update(%{"follow" => true})
+    # A mode change on the same card is also a buffer boundary.
+    route(routes, "2026-11-06T10:00:02Z", "fiber-b")
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: text}}, 1_000
+    assert text =~ "meeting words"
   end
 
   test "a relay ignores the port exits its trapped shell calls leave behind" do
@@ -1063,7 +1094,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
       route(Path.join(c.root, "routes.jsonl"), "2026-11-06T10:00:00Z", "fiber-a")
     end
 
-    opts = Keyword.merge(c.opts, Keyword.take(extra, [:deliver, :cold, :follow]))
+    opts = Keyword.merge(c.opts, Keyword.take(extra, [:deliver, :cold]))
     start_supervised!({TranscriptRelay, opts})
 
     row = %{
@@ -1136,11 +1167,12 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     GenServer.call(pid, :status)
   end
 
-  defp route(path, at, fiber),
+  defp route(path, at, fiber, pinned \\ false),
     do:
       File.write!(
         path,
-        Jason.encode!(%{"t" => at, "fiber_id" => fiber, "origin" => "owner"}) <> "\n",
+        Jason.encode!(%{"t" => at, "fiber_id" => fiber, "origin" => "owner", "pinned" => pinned}) <>
+          "\n",
         [:append]
       )
 

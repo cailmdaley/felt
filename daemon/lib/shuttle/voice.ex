@@ -183,7 +183,11 @@ defmodule Shuttle.Voice do
   end
 
   defp update_target(state, params) do
-    target = params["target"] || if(params["follow"] == true, do: state.viewed)
+    target =
+      params["target"] ||
+        if(Map.has_key?(params, "follow"),
+          do: if(params["follow"], do: state.viewed || state.target, else: state.target)
+        )
 
     state =
       if Map.has_key?(params, "follow"),
@@ -218,6 +222,7 @@ defmodule Shuttle.Voice do
       target = %{
         "fiber_id" => id,
         "origin" => origin || Shuttle.RecorderRouter.own_host(),
+        "pinned" => not state.snapshot.follow,
         "name" =>
           target_name(id, origin) || params["name"] || known_name(state.target, id) ||
             Path.basename(id)
@@ -259,8 +264,7 @@ defmodule Shuttle.Voice do
   end
 
   defp following?(state) do
-    state.snapshot.enabled and state.snapshot.follow and
-      match?({:ok, %{"enabled" => true, "follow" => true}}, Config.read())
+    state.snapshot.enabled and state.snapshot.follow
   end
 
   defp live_drafts(snapshot, state) do
@@ -407,10 +411,20 @@ defmodule Shuttle.Voice do
     do: %{state | queue: state.queue ++ [operation]}
 
   defp enqueue(state, {params, from}) do
-    case update_target(state, params) do
-      {:ok, state} ->
-        launch_update(state, params, from)
-
+    with :ok <- Config.update(Map.take(params, ~w(enabled follow system_audio))),
+         state <- %{
+           state
+           | snapshot:
+               Map.merge(
+                 state.snapshot,
+                 Map.new(Map.take(params, ~w(enabled follow system_audio)), fn {key, value} ->
+                   {String.to_existing_atom(key), value}
+                 end)
+               )
+         },
+         {:ok, state} <- update_target(state, params) do
+      launch_update(state, params, from)
+    else
       {:error, reason} ->
         if from, do: GenServer.reply(from, {:error, reason})
 
@@ -424,8 +438,7 @@ defmodule Shuttle.Voice do
   defp launch_update(state, params, from) do
     task =
       Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
-        with :ok <- Config.update(Map.take(params, ~w(enabled follow system_audio))),
-             :ok <-
+        with :ok <-
                if(Map.has_key?(params, "muted"),
                  do: Recorder.mute_voice(params["muted"], state.capture_opts),
                  else: :ok

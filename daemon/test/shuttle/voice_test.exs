@@ -120,6 +120,25 @@ defmodule Shuttle.VoiceTest do
     assert {:error, _} = Voice.update(%{"follow" => false, "target" => %{}})
   end
 
+  test "settings persist before the pin route is published", c do
+    {:ok, _} = Voice.update(%{"enabled" => true})
+    {:ok, _} = Voice.subscribe()
+    parent = self()
+    stop_supervised!(Voice)
+
+    reconcile = fn _, _ ->
+      send(parent, {:settings_at_reconcile, Config.read(), File.read(Voice.routes_path())})
+      {:ok, Agent.get(c.observed, & &1)}
+    end
+
+    Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
+    {:ok, _} = Voice.update(%{"follow" => false, "target" => %{"fiber_id" => "pinned/card"}})
+    assert_received {:settings_at_reconcile, {:ok, %{"follow" => false}}, {:ok, bytes}}
+
+    assert %{"fiber_id" => "pinned/card", "pinned" => true} =
+             bytes |> String.trim() |> Jason.decode!()
+  end
+
   test "follow chooses its own quiet threshold and discarded nested keys do not affect it", c do
     File.write!(Config.path(), ~s({"voice":{"quiet_seconds":2},"meeting":{"words":8}}))
     assert Config.thresholds() == %{"words" => 200, "quiet_seconds" => 15}
@@ -414,8 +433,7 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{target: %{"fiber_id" => "project/rex"}}} = Voice.target(params)
     bytes = File.read!(Voice.routes_path())
 
-    # Persisted off wins even before recorder reconciliation updates the snapshot.
-    assert :ok = Config.enable(false)
+    assert {:ok, _} = Voice.update(%{"enabled" => false})
     assert {:ok, _} = Voice.target(%{params | "fiber_id" => "project/off"})
     assert bytes == File.read!(Voice.routes_path())
 
@@ -426,8 +444,9 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{enabled: true, state: "listening"}} =
              Voice.update(%{"enabled" => true, "follow" => false})
 
+    pinned = File.read!(Voice.routes_path())
     assert {:ok, _} = Voice.target(%{params | "fiber_id" => "project/fixed"})
-    assert bytes == File.read!(Voice.routes_path())
+    assert pinned == File.read!(Voice.routes_path())
   end
 
   test "a target is named from served fibers, even when the lookup missed at the switch" do
