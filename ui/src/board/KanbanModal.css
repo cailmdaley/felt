@@ -538,9 +538,11 @@
 
 /* The tabs keep the bar's spacing inside their own tablist. */
 .kbn-viewtabs-views { flex: none; display: flex; align-items: center; gap: 6px; }
-/* Find follows the tabs: a field in the tabs' hairline, its key set as a keycap. */
+/* Find follows the tabs: a field in the tabs' hairline, its key set as a keycap.
+   Its basis is its least width, since a wrapping row breaks on the basis: it grows
+   into what the row has spare, and the bar holds one row down to half a screen. */
 .kbn-viewtabs-find {
-  flex: 0 1 220px; min-width: 120px; position: relative; display: flex; align-items: center; box-sizing: border-box; height: 26px;
+  flex: 1 1 120px; min-width: 120px; max-width: 220px; position: relative; display: flex; align-items: center; box-sizing: border-box; height: 26px;
   margin-left: 6px; border: 1px solid color-mix(in srgb, var(--kbn-ink-muted) 28%, transparent); border-radius: 4px;
   transition: border-color 120ms ease, background-color 120ms ease;
 }
@@ -554,6 +556,13 @@
 .kbn-viewtabs-find input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .kbn-viewtabs-find-key { margin-right: 5px; font-family: var(--font-mono); font-size: var(--type-meta); }
 .kbn-viewtabs-find:focus-within .kbn-viewtabs-find-key { visibility: hidden; }
+/* Narrower than half a screen the tabs give up their keycaps. */
+@media (max-width: 780px) {
+  .kbn-viewtab { padding: 3px 7px; }
+  .kbn-viewtab .kbn-viewtab-hotkey { display: none; }
+  .kbn-viewtabs-views { gap: 4px; }
+  .kbn-viewtabs-find { margin-left: 2px; }
+}
 /* The centre holds the Desk's lens chips, at its right end. It always spans
    Find to Settings, so the gear stands still across views. */
 .kbn-viewtabs-centre { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; align-items: center; position: relative; }
@@ -2048,10 +2057,11 @@
     flex: 0 0 auto;
     box-sizing: border-box;
     min-height: var(--ws-phone-target, 44px);
-    padding: 7px 9px;
+    padding: 7px 6px;
   }
   .kbn-viewtab-hotkey { display: none; }
-  .kbn-viewtabs-views { gap: 4px; }
+  /* The tabs fit a phone; on a narrower one they scroll, and Settings stays in reach. */
+  .kbn-viewtabs-views { gap: 4px; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   /* The phone's bar is its bottom nav; the reader covers it and keeps its own bars. */
   .kbn-viewtabs-find { display: none !important; }
   .kbn-reader-open .kbn-viewtabs { z-index: 20; }
@@ -2338,7 +2348,7 @@
   .kbn-role-chip { max-width: none; width: 100%; min-height: 44px; box-sizing: border-box; }
 }
 
-@media (max-width: 340px) {
+@media (max-width: 430px) {
   .kbn-viewtab { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 }
 
