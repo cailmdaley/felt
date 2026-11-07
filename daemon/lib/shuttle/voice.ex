@@ -449,7 +449,19 @@ defmodule Shuttle.Voice do
                  else: :ok
                ) do
           state =
-            if params["source"], do: %{state | source: params["source"], idle: false}, else: state
+            cond do
+              params["enabled"] == false ->
+                %{state | source: nil}
+
+              params["source"] ->
+                %{state | source: params["source"], idle: false}
+
+              params["enabled"] == true and "desktop" in state.snapshot.sources ->
+                %{state | source: "desktop", idle: false}
+
+              true ->
+                state
+            end
 
           {:ok, reconcile(state)}
         end
@@ -615,7 +627,12 @@ defmodule Shuttle.Voice do
           | snapshot: snapshot,
             retry: retry,
             preview_pin: preview_pin,
-            source: if(row && row.state != "starting", do: snapshot.source, else: state.source),
+            source:
+              cond do
+                not enabled -> nil
+                row && row.state != "starting" -> snapshot.source
+                true -> state.source
+              end,
             launch: if(row && not match?({:error, _}, relay_result), do: row.launch),
             observed_at: now,
             idle: is_nil(row) or not enabled,

@@ -154,6 +154,34 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{mode: "pinned", muted: false}} = Voice.toggle()
   end
 
+  for control <- [:toggle, :enable] do
+    test "#{control} defaults to desktop after phone listening and clears phone on stop", c do
+      stop_supervised!(Voice)
+      parent = self()
+
+      reconcile = fn enabled, opts ->
+        send(parent, {:source_used, enabled, opts[:source]})
+        {:ok, %{available: true, sources: ~w(desktop phone), capture: nil}}
+      end
+
+      Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
+      assert {:ok, _} = Voice.update(%{"enabled" => true, "source" => "phone"})
+      assert_received {:source_used, true, "phone"}
+      assert {:ok, _} = Voice.update(%{"enabled" => false})
+      assert :sys.get_state(Env.server!(Voice)).source == nil
+
+      result =
+        case unquote(control) do
+          :toggle -> Voice.toggle()
+          :enable -> Voice.update(%{"enabled" => true})
+        end
+
+      assert {:ok, _} = result
+
+      assert_received {:source_used, true, "desktop"}
+    end
+  end
+
   test "subscribers receive each new route as it is appended" do
     assert {:ok, _} = Voice.update(%{"enabled" => true})
     {:ok, _} = Voice.subscribe()
