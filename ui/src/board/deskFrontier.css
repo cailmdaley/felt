@@ -1,7 +1,7 @@
 .kbn-thread-count { flex: none; display: inline-flex; font: 600 var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; background: transparent; border: 0; padding: 2px 3px; cursor: pointer; }
 .kbn-count-working { color: var(--kbn-agent); }
 .kbn-count-needs { color: var(--kbn-owed); }
-/* A question among the threads beneath a row reddens its count. */
+/* A question in the family reddens its count. */
 .kbn-count-needs[data-asks] { color: var(--kbn-you); }
 .kbn-row-elapsed { flex: none; font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--kbn-ink-muted); white-space: nowrap; }
 /* The quiet count of a section that asks nothing, and the caret every count carries. */
@@ -13,19 +13,19 @@
 /* The family's threads, nested under the title. */
 .kbn-desk-threads { grid-column: 1 / -1; flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; margin: 0; padding-left: var(--kbn-desk-indent); }
 .kbn-desk-threads[hidden] { display: none; }
-.kbn-desk-threads .kbn-thread-row { box-sizing: border-box; gap: 6px; min-height: var(--kbn-desk-row); padding: 0 4px 0 calc(var(--ws-thread-depth, 0) * var(--kbn-desk-indent)); font: 400 var(--type-meta)/var(--leading-tight) var(--font-mono); border-radius: 2px; }
+.kbn-desk-threads .kbn-thread-row { position: relative; box-sizing: border-box; gap: 6px; min-height: var(--kbn-desk-row); padding: 0 4px 0 calc(var(--ws-thread-depth, 0) * var(--kbn-desk-indent)); font: 400 var(--type-meta)/var(--leading-tight) var(--font-mono); border-radius: 2px; }
 .kbn-desk-threads .kbn-thread-row .constitution-state-dot { width: 14px; height: var(--kbn-desk-row); }
 .kbn-desk-threads .kbn-thread-name { color: var(--kbn-ink-soft); }
 .kbn-desk-threads .kbn-thread-row:hover .kbn-thread-name, .kbn-desk-threads .kbn-thread-row.kbn-key-selected .kbn-thread-name { color: var(--kbn-ink); }
 .kbn-desk-threads .kbn-thread-row.kbn-key-selected { background: var(--kbn-plate); outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
-/* Every thread with threads of its own folds on its caret; a leaf keeps the caret's room. */
-.kbn-thread-fold { flex: none; display: inline-grid; place-items: center; width: 12px; height: var(--kbn-desk-row); padding: 0; border: 0; background: transparent; color: var(--kbn-ink-muted); font: inherit; cursor: pointer; }
+/* The caret sits in the indentation, leaving each dot one level from its parent. */
+.kbn-thread-fold { position: absolute; left: calc(var(--ws-thread-depth, 0) * var(--kbn-desk-indent) - 12px); display: inline-grid; place-items: center; width: 12px; height: var(--kbn-desk-row); padding: 0; border: 0; background: transparent; color: var(--kbn-ink-muted); font: inherit; cursor: pointer; }
 button.kbn-thread-fold::before { content: '›'; transition: transform 120ms; }
 button.kbn-thread-fold[aria-expanded='true']::before { transform: rotate(90deg); }
 button.kbn-thread-fold:hover { color: var(--kbn-ink); }
 .kbn-thread-count:focus-visible, .kbn-thread-fold:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .kbn-thread-fold { width: 24px; }
+  .kbn-thread-fold { width: 24px; left: calc(var(--ws-thread-depth, 0) * var(--kbn-desk-indent) - 24px); }
 }
 /* A root heading a section its own state is not in: its own mark, faint. */
 .kbn-card-header > .constitution-state-dot { opacity: 0.4; }
