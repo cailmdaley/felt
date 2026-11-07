@@ -86,6 +86,14 @@ describe('buildTree', () => {
     expect(hub.threads).toBe(1)
     expect(hub.files).toBe(1)
   })
+  it('holds every card exactly once, however the families and paths nest', () => {
+    const cards = [
+      working('a/b/hub'), card('a/b/hub/one', { orchestrator: 'a/b/hub' }), draft('a/b/hub/two'), resting('a/b/hub/two/three'),
+      card('a/lone'), working('c'), card('c/d/e/f'), card('c/d/e/g'), asking('c/d/e/f/h', { orchestrator: 'c/d/e/f' }),
+    ]
+    const rows = visibleRows(tree(cards), () => true).filter(row => row.item.thread)
+    expect(rows.map(row => row.item.thread!.card.id).sort()).toEqual(cards.map(c => c.id).sort())
+  })
   it('rolls up what asks through collapsed rows, itself not counted', () => {
     const top = tree([asking('a/b/x'), asking('a/b/y'), working('a/c/z'), working('a/c/w')])
     const a = top.children[0]

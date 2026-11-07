@@ -25,7 +25,7 @@ let view: TemporalView
 let host: HTMLElement
 const list = (): HTMLElement => host.querySelector('[role="tree"]')!
 const rows = (): string[] => [...host.querySelectorAll('.tree-name')].map(el => el.textContent!)
-const row = (name: string): HTMLElement => [...host.querySelectorAll<HTMLElement>('.tree-row')].findLast(el => el.querySelector('.tree-name')?.textContent === name)!
+const row = (name: string): HTMLElement => [...host.querySelectorAll<HTMLElement>('.tree-row')].filter(el => el.querySelector('.tree-name')?.textContent === name).at(-1)!
 const selected = (): HTMLElement[] => [...host.querySelectorAll<HTMLElement>('[aria-selected="true"]')]
 const key = (name: string): void => { view.keydown!(new KeyboardEvent('keydown', { key: name, bubbles: true })) }
 
