@@ -1,8 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ownColumn } from '../deskColumn.js'
-import type { ThreadIndex } from '../threads.js'
+import { threadTree, type ThreadIndex, type TreeNode } from '../threads.js'
 import { cardIdentity } from './SidebarFlight.js'
-import { threadTree, type TreeNode } from './ThreadTree.js'
 
 export type Fold = 'collapsed' | 'more' | 'working'
 export type SidebarFolds = Record<string, Partial<Record<Fold, boolean>>>

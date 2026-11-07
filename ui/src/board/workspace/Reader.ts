@@ -1,5 +1,6 @@
 import { sidebarOutline, SidebarPreferences, rootIdentity, type Fold } from './SidebarOutline.js'
-import { ThreadRail } from './ThreadRail.js'
+import { SidebarFiles } from './SidebarFiles.js'
+import { sentDocuments } from './SentFiles.js'
 import { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
@@ -13,7 +14,7 @@ import { fileBytesUrl, showToast } from '../utils.js'
 import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
-import { channelLead, documentLabels, documentLabelMetadata, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { documentLabels, documentLabelMetadata, isDrawn, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { probeDocumentTitles } from './titleProbe.js'
@@ -28,7 +29,6 @@ import { type Verdict } from './Verdicts.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
 import { SettingsMenu } from './SettingsMenu.js'
-import { PhoneThreads } from './PhoneThreads.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 
 export interface ReaderOptions {
@@ -45,6 +45,10 @@ export interface ReaderOptions {
   onReturn(): void
   onOpenDocument(key: DocKey): void
   onRevisitDocument(key: DocKey): void
+  /** Between the family's map and its tapestry; false outside a family. */
+  onTapestry?(): boolean
+  /** The next drawing of the map; false off the map. */
+  onDrawing?(): boolean
   workerPill?(card: KanbanCard): HTMLElement | null
   onVerdict?(verdict: Verdict): void
   onConversation?(card: KanbanCard): void
@@ -56,7 +60,7 @@ export interface ReaderOptions {
   /** Open the open thread's orchestrator; false outside a thread. */
   onOrchestrator?(): boolean
   cards(): KanbanCard[]
-  /** The thread graph the rail reads; absent, one is built from `cards`. */
+  /** The thread graph the reader reads; absent, one is built from `cards`. */
   threadIndex?(): ThreadIndex
   /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
@@ -92,10 +96,10 @@ function button(cls: string, text: string, action: () => void, label = text): HT
 
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
 const SIDEBAR_WIDTH_STORAGE = 'shuttle:workspace:sidebar-width'
-/** The viewer's threads-rail choice; absent, the rail shows wherever it has threads. */
-const RAIL_STORAGE = 'shuttle:workspace:rail'
 /** One arrow press resizes the sidebar by this much; with Shift, four times as much. */
 const SIDEBAR_STEP = 16
+/** The stage's least width for the sidebar to open by default beside it. */
+const STAGE_BESIDE_SIDEBAR = 720
 /** A latched swipe that neither moves nor releases for this long has lost its release. */
 const SWIPE_QUIET = 500
 
@@ -106,7 +110,7 @@ export class Reader {
   private readonly veil = element('div', 'ws-veil')
   private departure: ReturnType<typeof setTimeout> | null = null
   private arrival = 0
-  private readonly threadRail: ThreadRail
+  private readonly sidebarFiles = new SidebarFiles()
   readonly track = element('div', 'ws-track')
   readonly stage = element('div', 'ws-stage')
   private readonly parallax = element('div', 'ws-parallax')
@@ -136,7 +140,6 @@ export class Reader {
   private swiping = false
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
-  private readonly phoneThreads = new PhoneThreads()
   private readonly settingsMenu: SettingsMenu
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly observer: ResizeObserver | null
@@ -164,11 +167,8 @@ export class Reader {
   /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
-  /** The rail's toggle, the sidebar's mirror in the opposite corner. */
-  private readonly railToggle: HTMLButtonElement
-  private railChoice: boolean | null = null
-  /** This view's own answer for a quiet rail, set by its toggle and kept until another thread opens; the stored choice stays untouched. */
-  private phoneRailPending = false
+  /** The phone's way to the sheet of sent files, marked while one is unread. */
+  private readonly filesToggle: HTMLButtonElement
   /** The sidebar's edge: a separator that resizes it by pointer or keys. */
   private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
   /** The viewer's chosen width; absent, the measure's default. */
@@ -193,9 +193,8 @@ export class Reader {
     this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Constitutions')
     this.sidebarToggle.title = 'Constitutions · ⌘['
     this.sidebarToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="1.5" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>'
-    this.railToggle = button('ws-sidebar-toggle ws-rail-toggle', '', () => this.toggleRail(), 'Threads')
-    this.railToggle.title = 'Threads and sent files · ⌘]'
-    this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M6.5 3.5h7M6.5 8h7M6.5 12.5h7"/><circle class="ws-toggle-flag" cx="3" cy="3.5" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="8" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="12.5" r="1"/></svg>'
+    this.filesToggle = button('ws-files-toggle', '', () => this.openFilesSheet(), 'Sent files')
+    this.filesToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M6.5 3.5h7M6.5 8h7M6.5 12.5h7"/><circle class="ws-toggle-flag" cx="3" cy="3.5" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="8" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="12.5" r="1"/></svg>'
     this.returnButton = button('ws-return', '', () => this.back(), 'Back to Desk')
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
@@ -207,14 +206,14 @@ export class Reader {
       const doc = this.document
       if (doc) this.openMenu(doc, documentMenu)
     }, 'Document menu')
-    trail.append(this.headWorker, documentMenu)
+    trail.append(this.headWorker, this.filesToggle, documentMenu)
     // The phone's top bar owns return, the fiber's name, its worker and document actions.
     // The desktop draws no head of its own.
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
     this.navbar.append(this.lead, trail)
     this.settingsMenu = new SettingsMenu()
-    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key), () => this.paintRail())
+    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key), () => this.paintFilesToggle())
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
@@ -256,14 +255,13 @@ export class Reader {
     this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null, true))
     this.sidebarIndex.setAttribute('aria-label', 'Constitution columns')
     this.sidebarIndex.title = ROW_MARKS
-    this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
+    this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarFiles.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
-    this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) }, opts.shuttleBase, (source, href) => this.opts.onNavigate?.(source, href))
     this.band.hidden = true
     column.append(this.band, this.stage)
     const main = element('div', 'ws-stage-row')
-    main.append(this.sidebar, column, this.threadRail.el)
-    this.el.append(this.veil, this.navbar, this.sidebarToggle, this.railToggle, main, this.announcement, this.pageSheet.el)
+    main.append(this.sidebar, column)
+    this.el.append(this.veil, this.navbar, this.sidebarToggle, main, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -295,8 +293,6 @@ export class Reader {
     try {
       const choice = localStorage.getItem(SIDEBAR_STORAGE)
       if (choice === 'true' || choice === 'false') this.sidebarChoice = choice === 'true'
-      const rail = localStorage.getItem(RAIL_STORAGE)
-      this.railChoice = rail === null ? null : rail !== 'false'
       const width = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE))
       if (Number.isFinite(width) && width > 0) this.sidebarWidthChoice = width
     } catch { /* Storage is optional. */ }
@@ -320,7 +316,7 @@ export class Reader {
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
-    if (switching) { this.phoneRailPending = false; if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide(); this.settingsMenu.hide() }
+    if (switching) { if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide(); this.settingsMenu.hide() }
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
     this.settleRun(settled)
@@ -328,9 +324,6 @@ export class Reader {
     probeDocumentTitles(this.opts.shuttleBase, channel.documents)
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
-    this.feedFamily()
-    this.paintRail()
-    if (this.phoneRailPending && this.phone.matches && settled) { this.phoneRailPending = false; this.openPhonePage() }
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true
@@ -365,13 +358,11 @@ export class Reader {
    * sheet wears the same veil, it goes at once.
    */
   hide(animate = false): void {
-    this.phoneRailPending = false
     window.clearInterval(this.workerClock); this.workerClock = 0
     this.cancelSwipe()
     this.setSidebarVisible(false, animate)
     if (this.expanded) this.setExpanded(false)
     this.active = false
-    this.threadRail.setArtifactLive(false)
     this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
     this.pageSheet.hide()
@@ -416,15 +407,6 @@ export class Reader {
     this.runSettled = settled
     if (!settled) this.pageSheet.hide()
   }
-  /** The phone's sheet leads with the whole family, then its sent files. */
-  private openPhonePage(): void {
-    const card = this.currentCard
-    if (!this.runSettled) return
-    this.closeMenu()
-    const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
-    this.el.append(this.pageSheet.el)
-    this.pageSheet.show(this.railToggle, !card ? null : this.phoneThreads.render(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
-  }
   /** Open a file over the current page, preserving its exact return point. */
   openDocument(key: DocKey): void {
     if (key === this.selected) return
@@ -445,17 +427,17 @@ export class Reader {
     this.closeMenu()
     this.settingsMenu.show(content, opener, opener.closest<HTMLElement>('.ws-dock') ?? this.el)
   }
-  /** On the desktop the sent files live in the rail; the phone, which has none, and a rail with nothing to draw open the sheet. */
+  /** The sent files stand at the foot of the left column; the phone, a closed column and an empty list open the sheet. */
   showSentFiles(): void {
     this.closeMenu()
-    if (!this.phone.matches && this.threadRail.present) {
-      if (!this.railOpen) this.setRailVisible(true)
-      this.threadRail.focusFiles()
-      return
-    }
-    this.el.append(this.pageSheet.el)
+    if (this.sidebarShown && !this.sidebarFiles.el.hidden) { this.sidebarFiles.focus(); return }
     const opener = this.phone.matches ? this.navbar.querySelector<HTMLElement>('.ws-phone-document-menu') : this.host.get(this.selected ?? '')?.label.querySelector<HTMLElement>('.ws-menu-button')
-    this.pageSheet.show(opener ?? this.railToggle)
+    this.openFilesSheet(opener ?? undefined)
+  }
+  private openFilesSheet(opener: HTMLElement = this.filesToggle): void {
+    if (!this.runSettled) return
+    this.el.append(this.pageSheet.el)
+    this.pageSheet.show(opener)
   }
   private get swipeable(): boolean {
     return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu
@@ -547,7 +529,7 @@ export class Reader {
     this.layout(animate)
   }
   private prepareFrame(frame: DocumentFrame): void {
-    frame.el.classList.toggle('ws-text-page', ['fiber', 'text', 'markdown', 'code'].includes(frame.doc.kind))
+    frame.el.classList.toggle('ws-text-page', ['fiber', 'family', 'text', 'markdown', 'code'].includes(frame.doc.kind))
     frame.el.classList.toggle('ws-native-page', ['audio', 'video', 'pdf'].includes(frame.doc.kind))
     if (frame.doc.kind === 'audio' || frame.doc.kind === 'video') frame.el.classList.add('ws-media-page')
     frame.el.setAttribute('role', 'tabpanel')
@@ -569,12 +551,12 @@ export class Reader {
   private fillLabel(frame: DocumentFrame, label: string): void {
     const doc = frame.doc
     const metadata = documentLabelMetadata(doc, label, this.channel?.owner ?? doc.owner)
-    const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□', change: '±' }[doc.kind]
+    const glyph = { fiber: '▤', family: '⋔', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□', change: '±' }[doc.kind]
     const parts = this.labels.get(frame)
     if (!parts) return
-    parts.glyph.hidden = doc.kind === 'fiber'
-    parts.glyph.textContent = doc.kind === 'fiber' ? '' : glyph
-    parts.title.hidden = doc.kind === 'fiber'
+    parts.glyph.hidden = isDrawn(doc)
+    parts.glyph.textContent = isDrawn(doc) ? '' : glyph
+    parts.title.hidden = isDrawn(doc)
     parts.title.textContent = metadata.title
     parts.title.title = doc.path
     parts.title.classList.toggle('ws-declared-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title))
@@ -601,12 +583,6 @@ export class Reader {
     return Math.min(max, width)
   }
   private layoutNavbar(): void {
-    const trail = this.navbar.querySelector('.ws-nav-trail')!
-    const parent = this.phone.matches ? trail : this.el
-    if (this.railToggle.parentElement !== parent) {
-      if (parent === trail) trail.insertBefore(this.railToggle, trail.querySelector('.ws-phone-document-menu'))
-      else this.el.insertBefore(this.railToggle, this.navbar.nextSibling)
-    }
     if (this.phone.matches) this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
   }
   private layout(animate: boolean): void {
@@ -658,39 +634,18 @@ export class Reader {
       frame.el.style.setProperty('--ws-neighbour-fade-end', `${end}%`)
     }
   }
-  /** The rail's threads region: the open card's family, or none. */
-  private feedFamily(): void {
-    if (this.currentCard) {
-      const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
-      this.threadRail.show(this.currentCard, index)
-      if (this.pageSheet.isOpen) this.pageSheet.updateThreads(this.phoneThreads.render(this.currentCard, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
-    } else {
-      this.threadRail.clearFamily()
-      if (this.pageSheet.isOpen) this.pageSheet.updateThreads(null)
-    }
-  }
-  /** The rail's files region; a change in what the rail holds can change whether it stands open. */
+  /** The left column's files; the phone's toggle marks an unread one. */
   private feedFiles(): void {
     if (!this.channel) return
-    const before = [this.threadRail.present, this.threadRail.quiet, this.railShown].join()
-    this.threadRail.showFiles(this.channel, this.selected ?? '', this.fresh, key => this.openDocument(key))
-    // The rail leads with the artifact; while the artifact itself fills the stage it keeps only its heading.
-    const lead = channelLead(this.channel) ?? null
-    this.threadRail.showArtifact(lead, key => this.openDocument(key), !!lead && lead.key === this.selected, () => {
-      const home = proseDocument(this.channel!)
-      if (home) this.opts.onRevisitDocument(home.key)
-    })
-    this.paintRail()
-    if (before !== [this.threadRail.present, this.threadRail.quiet, this.railShown].join()) this.layout(false)
+    this.sidebarFiles.show(this.channel, this.selected ?? '', this.fresh, key => this.openDocument(key))
+    this.paintFilesToggle()
   }
   private readonly relayout = (): void => {
     invalidateWorkspaceMeasures(this.el)
-    // The rail empties itself on the phone; back on the desktop it is drawn again.
-    if (this.active) { this.feedFamily(); this.feedFiles() }
+    if (this.active) this.feedFiles()
     if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
     this.applySidebarWidth()
     this.renderSidebar()
-    this.paintRail()
     this.layout(false)
   }
   /** Expand takes the whole window: the board bar and the sidebar step aside until it is restored. */
@@ -712,10 +667,10 @@ export class Reader {
     const menu = element('div', 'ws-menu')
     menu.setAttribute('aria-label', 'Document and constitution actions')
     menu.append(button('ws-menu-item', 'Sent files', () => this.showSentFiles()))
-    const url = doc.kind === 'fiber' ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
+    const url = isDrawn(doc) ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
     for (const [label, download] of [['Open in new tab', false], ['Download', true]] as const) {
       const a = element('a', 'ws-menu-item', label)
-      a.href = doc.kind === 'fiber' && download ? fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner) : url
+      a.href = isDrawn(doc) && download ? fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner) : url
       if (download) a.download = doc.name
       else { a.target = '_blank'; a.rel = 'noopener' }
       menu.append(a)
@@ -866,9 +821,9 @@ export class Reader {
     if (this.active && this.sidebarShown) this.fillSidebar()
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
-  /** The sidebar opens only when this viewer has asked for it; the pages have the room by default. */
+  /** The viewer's choice stands; with none, the sidebar opens only where the stage keeps its working width beside it. */
   private get sidebarShown(): boolean {
-    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? false)
+    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? window.innerWidth - this.sidebarPixels() >= STAGE_BESIDE_SIDEBAR)
   }
   /**
    * Opening or closing the sidebar is one coordinated motion: the column
@@ -889,60 +844,15 @@ export class Reader {
     this.renderSidebar(); this.layout(false)
     if (before) this.slideSidebar(shown, before)
   }
-  /** Either side column showing hides both; neither showing shows both. */
-  private toggleZen(): void {
-    if (this.phone.matches) return
-    const show = !this.sidebarShown && !this.railShown
-    if (this.threadRail.present && this.railOpen !== show) this.setRailVisible(show)
-    if (this.sidebarShown !== show) this.toggleSidebar()
+  private paintFilesToggle(): void {
+    const documents = this.channel ? sentDocuments(this.channel) : []
+    this.filesToggle.hidden = !this.phone.matches || !documents.length
+    this.filesToggle.setAttribute('aria-expanded', String(this.pageSheet.isOpen))
+    this.filesToggle.toggleAttribute('data-attention', this.fresh.size > 0)
   }
-  /** The viewer's choice persists across families, navigation and reloads. */
-  private toggleRail(): void {
-    if (this.phone.matches) {
-      if (this.pageSheet.isOpen) { this.setRailVisible(false); this.pageSheet.close() }
-      else { this.setRailVisible(true); this.openPhonePage() }
-    } else this.setRailVisible(!this.railOpen)
-  }
-  private setRailVisible(open: boolean): void {
-    this.railChoice = open
-    try { localStorage.setItem(RAIL_STORAGE, String(open)) } catch { /* Storage is optional. */ }
-    this.paintRail()
-    this.layout(false)
-  }
-  /** An explicit Desk count asks to show the family, just like its toggle. */
-  forceThreadRail(): void {
-    if (!this.currentCard) return
-    this.setRailVisible(true)
-    if (this.phone.matches) {
-      this.phoneRailPending = !this.runSettled
-      if (!this.phoneRailPending) this.openPhonePage()
-    }
-    this.layout(false)
-  }
-
-  /** Whether the rail is wanted: this visit's explicit opening, else the viewer's choice. */
-  private get railOpen(): boolean {
-    return this.railChoice ?? !this.threadRail.quiet
-  }
-  /** Whether the rail stands beside the stage: wanted, with threads or files to show, off the phone. */
-  private get railShown(): boolean {
-    return !this.phone.matches && this.railOpen && !this.threadRail.el.hidden
-  }
-  /** Zen: on the desktop with neither side column, the page stands alone and its neighbours fade. */
+  /** Zen: with the left column closed, the page stands alone and its neighbours fade. */
   private paintZen(): void {
-    this.el.classList.toggle('ws-zen', !this.phone.matches && !this.el.classList.contains('ws-with-sidebar') && !this.el.classList.contains('ws-with-rail'))
-  }
-  private paintRail(): void {
-    const has = this.threadRail.present
-    const open = this.phone.matches ? this.pageSheet.isOpen : this.railOpen
-    this.el.classList.toggle('ws-rail-off', !open)
-    this.el.classList.toggle('ws-with-rail', this.railShown)
-    this.paintZen()
-    this.railToggle.hidden = !has
-    this.railToggle.setAttribute('aria-expanded', String(open))
-    this.railToggle.setAttribute('aria-label', open ? 'Hide threads and sent files' : 'Show threads and sent files')
-    this.threadRail.setArtifactLive(this.railShown)
-    this.railToggle.toggleAttribute('data-attention', has && (this.threadRail.needsHuman || this.fresh.size > 0))
+    this.el.classList.toggle('ws-zen', !this.phone.matches && !this.el.classList.contains('ws-with-sidebar'))
   }
   private stagePlaces(): { page: number; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
@@ -986,10 +896,14 @@ export class Reader {
     const max = Math.max(min, Math.floor(window.innerWidth * this.measure('sidebar-max-share', 0.4)))
     return { min, max, preferred: Math.min(max, Math.max(min, this.measure('sidebar-default', 384))) }
   }
+  private sidebarPixels(width = this.sidebarWidthChoice): number {
+    const { min, max, preferred } = this.sidebarBounds()
+    return Math.round(width === null ? preferred : Math.min(max, Math.max(min, width)))
+  }
   /** The width the sidebar wears now: the viewer's choice clamped to the viewport, else the default. */
   private applySidebarWidth(width = this.sidebarWidthChoice): number {
-    const { min, max, preferred } = this.sidebarBounds()
-    const px = Math.round(width === null ? preferred : Math.min(max, Math.max(min, width)))
+    const { min, max } = this.sidebarBounds()
+    const px = this.sidebarPixels(width)
     this.el.style.setProperty('--ws-sidebar-width', `${px}px`)
     this.sidebarHandle.setAttribute('aria-valuemin', String(min))
     this.sidebarHandle.setAttribute('aria-valuemax', String(max))
@@ -1090,7 +1004,7 @@ export class Reader {
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
     // Each column's edge takes its own arrows, Home, End and Enter.
-    if ((e.target === this.sidebarHandle || e.target === this.threadRail.handle) && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)) return
+    if (e.target === this.sidebarHandle && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)) return
     // Activation belongs to the focused control, including command-modified keys.
     if (['Enter', ' '].includes(e.key) && !shouldForwardDocumentKey({ target: e.target, defaultPrevented: false, key: e.key })) return
     // Alt chords never bypass editable/native control guards; command shortcuts may.
@@ -1115,14 +1029,14 @@ export class Reader {
       return true
     }
     if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false
+    if (intent === 'tapestry') return this.opts.onTapestry?.() ?? false
+    if (intent === 'drawing') return this.opts.onDrawing?.() ?? false
     if (constitutionAction(intent, this.currentCard, {
       verdict: (_, verdict) => this.opts.onVerdict?.(verdict),
       conversation: card => this.opts.onConversation?.(card),
       rest: card => this.opts.onRest?.(card, this.el),
     })) return true
     if (intent === 'sidebar') this.toggleSidebar()
-    else if (intent === 'zen') this.toggleZen()
-    else if (intent === 'rail') { if (this.threadRail.present) this.toggleRail() }
     else if (intent === 'find') {
       if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }
       else if (this.sidebarShown) this.sidebarPicker.focus()
@@ -1220,9 +1134,9 @@ export class Reader {
   private scrollDocument(intent: KeyIntent, repeat: boolean): void {
     const doc = this.document
     const viewer = doc && this.host.get(doc.key)?.viewer
-    if (!doc || !viewer || !['fiber', 'html', 'markdown', 'text', 'code', 'change'].includes(doc.kind)) return
-    let scroller = viewer.querySelector<HTMLElement>('.ws-prose-scroll,.kbn-fileview-text,.change-scroll')
-    if (doc.kind === 'fiber') scroller = viewer.matches('.ws-prose-scroll') ? viewer : scroller
+    if (!doc || !viewer || !['fiber', 'family', 'html', 'markdown', 'text', 'code', 'change'].includes(doc.kind)) return
+    let scroller = viewer.querySelector<HTMLElement>('.ws-prose-scroll,.ws-family-scroll,.kbn-fileview-text,.change-scroll')
+    if (isDrawn(doc)) scroller = viewer.matches('.ws-prose-scroll') ? viewer : scroller
     if (doc.kind === 'html') {
       scrollHtmlViewer(viewer, intent, this.motion.matches || repeat)
       return
@@ -1234,7 +1148,6 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
-    this.threadRail.dispose()
     window.clearInterval(this.workerClock)
     this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)

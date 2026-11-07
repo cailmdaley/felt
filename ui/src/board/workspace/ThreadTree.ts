@@ -1,26 +1,8 @@
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
-import { ascByKey, instantMs } from '../civilDay.js'
 import { deskColumn } from '../deskColumn.js'
-import { THREAD_LABEL, threadKey, type ThreadIndex } from '../threads.js'
+import { THREAD_LABEL, shelfOf, threadKey, threadTree, type ThreadIndex, type TreeNode } from '../threads.js'
 import { turnOf } from '../turn.js'
 import './thread-tree.css'
-
-export interface TreeNode { card: KanbanCard; depth: number; hasActiveDescendant: boolean; children: TreeNode[] }
-/** Where a thread is drawn: in the tree while it is in play, else below it with the resting or the archived. */
-export type Shelf = 'tree' | 'resting' | 'archived'
-export function shelfOf(index: ThreadIndex, card: KanbanCard): Shelf {
-  const state = index.state(card)
-  return state === 'archived' ? 'archived' : state === 'resting' || state === 'roles' ? 'resting' : 'tree'
-}
-/** Family shape in creation order, independent of the presentation surface. */
-export function threadTree(index: ThreadIndex, root: KanbanCard): TreeNode {
-  const build = (card: KanbanCard, depth: number): TreeNode => {
-    const sorted = [...index.children(card)].sort((a, b) => ascByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || a.name.localeCompare(b.name) || threadKey(a).localeCompare(threadKey(b)))
-    const children = sorted.map(child => build(child, depth + 1))
-    return { card, depth, children, hasActiveDescendant: children.some(n => shelfOf(index, n.card) === 'tree' || n.hasActiveDescendant) }
-  }
-  return build(root, 0)
-}
 
 /**
  * The family as drawn: the root, then a tree of the threads in play (a resting

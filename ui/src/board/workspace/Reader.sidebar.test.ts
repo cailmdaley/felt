@@ -65,6 +65,7 @@ function rowNames(reader: Reader): string[] {
 }
 
 beforeEach(() => {
+  vi.stubGlobal('innerWidth', 1440)
   viewport = { phone: false }
   reduced = false
   scrollCurrent.mockClear()
@@ -173,7 +174,7 @@ describe('Reader channel sidebar', () => {
     expect(head.hidden).toBe(false)
     expect(head.dataset.part).toBe('act')
     // Document actions stay reachable from the phone's top bar, without a map or count.
-    expect(head.nextElementSibling?.getAttribute('aria-label')).toBe('Document menu')
+    expect(head.parentElement?.lastElementChild?.getAttribute('aria-label')).toBe('Document menu')
     expect(reader.el.querySelector('.ws-head-position')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar [data-part="page-band"]')).toBeNull()
     expect(reader.el.querySelector('.ws-stage-column > [data-part="page-band"]')).toBeNull()
@@ -265,22 +266,38 @@ describe('Reader channel sidebar', () => {
     }
   })
 
-  it('defaults closed until the viewer opens it, with a labelled Constitutions lead control', () => {
+  it('opens by default only where the stage keeps its working width, and an explicit choice wins either way', () => {
+    storage.clear()
+    vi.stubGlobal('innerWidth', 1000)
+    const narrow = makeReader()
+    expect(narrow.el.classList.contains('ws-with-sidebar')).toBe(false)
+    expect(storage.has('shuttle:workspace:sidebar')).toBe(false)
+    narrow.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
+    expect(narrow.el.classList.contains('ws-with-sidebar')).toBe(true)
+    disposeReader(narrow)
+    expect(makeReader().el.classList.contains('ws-with-sidebar')).toBe(true)
+    storage.set('shuttle:workspace:sidebar', 'false')
+    vi.stubGlobal('innerWidth', 1600)
+    expect(makeReader().el.classList.contains('ws-with-sidebar')).toBe(false)
+    storage.clear()
+    expect(makeReader().el.classList.contains('ws-with-sidebar')).toBe(true)
+  })
+  it('defaults open until the viewer closes it, with a labelled Constitutions lead control', () => {
     storage.clear()
     const fresh = makeReader()
     const toggle = fresh.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-    expect(fresh.el.classList.contains('ws-with-sidebar')).toBe(false)
+    expect(fresh.el.classList.contains('ws-with-sidebar')).toBe(true)
     expect(toggle.textContent).toBe('')
     expect(toggle.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
     expect(toggle.title).toBe('Constitutions · ⌘[')
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
     toggle.click()
-    expect(storage.get('shuttle:workspace:sidebar')).toBe('true')
+    expect(storage.get('shuttle:workspace:sidebar')).toBe('false')
     disposeReader(fresh)
 
     const remembered = makeReader()
-    expect(remembered.el.classList.contains('ws-with-sidebar')).toBe(true)
-    expect(remembered.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('true')
+    expect(remembered.el.classList.contains('ws-with-sidebar')).toBe(false)
+    expect(remembered.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('toggles by click and Cmd+[, persists the choice, and applies stored choices at any desktop width', () => {
@@ -569,6 +586,47 @@ describe('Reader channel sidebar', () => {
   })
 
 
+
+  it('scrolls the family page with the reader\'s scroll keys', () => {
+    const scroller = document.createElement('div')
+    scroller.className = 'ws-family-scroll'
+    scroller.scrollBy = vi.fn()
+    Object.defineProperty(scroller, 'scrollHeight', { value: 2000 })
+    Object.defineProperty(scroller, 'clientHeight', { value: 400 })
+    const family: Channel = { ...channel(alpha), documents: [{ key: 'family:host-a:alpha', owner: 'host-a', path: alpha.path, name: 'Family', kind: 'family', provenance: [{ kind: 'family' }] }, ...channel(alpha).documents], labels: ['Family', 'Note'] }
+    const page = document.createElement('div'); page.append(scroller)
+    const reader = makeReader(alpha, undefined, undefined, { buildProse: doc => doc.kind === 'family' ? page : document.createElement('div') })
+    reader.show(family, 'family:host-a:alpha', 'Board', alpha)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }))
+    expect(scroller.scrollBy).toHaveBeenCalledOnce()
+  })
+
+  it('gives the phone a sent-files toggle only while there are files, and opens the sheet from it', () => {
+    viewport.phone = true
+    const sent = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha.md', fiberDir: '/notes', body: '', sent: [{ path: '/notes/plot.png', time: 1 }] })
+    const reader = makeReader()
+    const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-files-toggle')!
+    expect(toggle.hidden).toBe(true)
+    reader.show(sent, sent.documents[0].key, 'Board', alpha)
+    expect(toggle.hidden).toBe(false)
+    const showModal = vi.fn(function (this: HTMLDialogElement) { this.setAttribute('open', '') })
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', { value(this: HTMLDialogElement) { this.removeAttribute('open') }, configurable: true })
+    try {
+      toggle.click()
+      expect(showModal).toHaveBeenCalledOnce()
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      expect(reader.el.querySelector('.ws-page-sheet [data-part="page-sheet-row"]')?.getAttribute('data-key')).toBe('host-a:/notes/plot.png')
+      disposeReader(reader)
+    } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close') }
+  })
+
+  it('draws no sent-files toggle off the phone', () => {
+    const sent = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha.md', fiberDir: '/notes', body: '', sent: [{ path: '/notes/plot.png', time: 1 }] })
+    const reader = makeReader()
+    reader.show(sent, sent.documents[0].key, 'Board', alpha)
+    expect(reader.el.querySelector<HTMLButtonElement>('.ws-files-toggle')!.hidden).toBe(true)
+  })
 
   it('keeps all sent attachments available without drawing page chrome', () => {
     const big = buildChannel({

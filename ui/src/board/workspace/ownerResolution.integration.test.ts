@@ -299,7 +299,6 @@ describe('Workspace owner integration', () => {
     reader('#/board/alpha@owner'); await settle()
     expect(fiberReads()).toHaveLength(1)
     expect(overview!.orderedCards()[0].name).toBe('alpha')
-    document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     expect(document.querySelector('.ws-sidebar')?.textContent).toContain('alpha')
     const visits = localStorage.getItem('shuttle.workspace.overview.visits')
     vi.setSystemTime(Date.now() + 500)

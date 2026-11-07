@@ -374,7 +374,7 @@ export interface BandNav {
   constitution?: () => void
 }
 
-/** A constitution's lifecycle as the header's chip says it: the rail's state, a waiting one by whose turn, a verdict by its kind. */
+/** A constitution's lifecycle as the header's chip says it: the family page's state, a waiting one by whose turn, a verdict by its kind. */
 export function lifecycleOf(card: KanbanCard): { state: string; label: string } {
   const state = threadState(card)
   if (state === 'waiting') return turnOf(card).turn === 'question' ? { state: 'question', label: 'Waiting' } : { state: 'waiting', label: 'Your turn' }
@@ -914,7 +914,7 @@ export class Dock {
     const ancestry = this.ancestry = document.createElement('nav')
     ancestry.className = 'ws-settings-ancestry'
     ancestry.hidden = true
-    // Where the constitution stands in its lifecycle, in the rail's words and tones.
+    // Where the constitution stands in its lifecycle, in the family page's words and tones.
     const lifecycle = document.createElement('span')
     lifecycle.className = 'ws-band-state'
     lifecycle.dataset.part = 'lifecycle'

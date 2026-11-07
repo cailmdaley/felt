@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { card } from './testFixtures.js'
 import { ThreadIndex, threadState } from './threads.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
-import { ThreadRail } from './workspace/ThreadRail.js'
+import { FamilyPage } from './workspace/FamilyPage.js'
 import { deskColumn } from './deskColumn.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
@@ -33,7 +33,7 @@ describe('thread state honours the live worker before the draft rule', () => {
 
 describe('every thread surface names a thread the way the Desk files it', () => {
   // The three shapes a browser review caught disagreeing: the Desk said one
-  // thing, the rail, peek, sub-entry or chip another.
+  // thing, the family page, peek, sub-entry or chip another.
   const spawned = thread({ id: 'hub/spawned', orchestrator: 'hub', status: 'active' })
   const standing = thread({ id: 'hub/standing', orchestrator: 'hub', status: 'active', shuttleKind: 'standing' })
   const seat = thread({ id: 'hub/seat', orchestrator: 'hub', status: 'open', shuttleSeat: true, shuttleRole: 'chair' })
@@ -48,12 +48,12 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       expect(constitutionMentions([c])[0].state).toBe(label)
     }
   })
-  it('the rail draws each state label', () => {
+  it('the family page draws each state label', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false }))
     try {
       const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-      const rail = new ThreadRail(vi.fn(), vi.fn()); rail.show(hub, index)
-      const labels = Object.fromEntries([...rail.el.querySelectorAll<HTMLElement>('.kbn-thread-row')]
+      const page = new FamilyPage(vi.fn(), { marks: () => undefined, files: () => [] }); page.update(hub, index)
+      const labels = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.kbn-thread-row')]
         .filter(row => row.querySelector('.kbn-thread-name')!.textContent !== hub.name)
         .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('.ws-tree-state')!.textContent]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))

@@ -6,6 +6,7 @@ export type DocKey = string
 
 export type Provenance =
   | { kind: 'fiber' }
+  | { kind: 'family' }
   | { kind: 'embed'; title?: string }
   | { kind: 'sent'; session?: string; time: number; worker?: string }
   | { kind: 'link'; title?: string }
@@ -17,8 +18,8 @@ export interface WorkspaceDocument {
   owner: string
   path: string
   name: string
-  /** `fiber` is the fiber's own prose. */
-  kind: 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other' | 'change'
+  /** `fiber` is the fiber's own prose; `family` the board-drawn view of its threads. */
+  kind: 'fiber' | 'family' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other' | 'change'
   provenance: Provenance[]
   /** Owner-daemon file modification time; absent when unknown. */
   modifiedAt?: string
@@ -45,6 +46,8 @@ export interface ChannelInput {
   outcome?: string
   /** True when the fiber carries a `shuttle:` block. */
   isConstitution?: boolean
+  /** The fiber belongs to a family of threads, whose view leads its run of pages. */
+  family?: boolean
   /** The fiber's genuine owner-daemon modification time, never its creation time. */
   modifiedAt?: string
   embeds?: { path: string; title?: string }[]
@@ -107,12 +110,17 @@ export function parseDocKey(key: DocKey): ParsedDocKey | null {
 export function fiberKey(owner: string, uid: string): DocKey {
   return `fiber:${owner}:${uid}`
 }
+export function familyKey(owner: string, uid: string): DocKey {
+  return `family:${owner}:${uid}`
+}
+/** A page the board draws itself, with no file behind it. */
+export const isDrawn = (doc: Pick<WorkspaceDocument, 'kind'>): boolean => doc.kind === 'fiber' || doc.kind === 'family'
 
 /** Each kind of page's mark, shared by thumbnails and the reader's tabs. */
-export const KIND_GLYPH: Record<WorkspaceDocument['kind'], string> = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□', change: '±' }
+export const KIND_GLYPH: Record<WorkspaceDocument['kind'], string> = { fiber: '§', family: '⋔', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□', change: '±' }
 
 /** Reuse the extension vocabulary that drives FileViewerPanel. */
-export function documentKind(path: string): WorkspaceDocument['kind'] {
+export function documentKind(path: string): Exclude<WorkspaceDocument['kind'], 'family'> {
   if (/\.change\.json$/i.test(path)) return 'change'
   const kind = fileKind(path)
   if (kind === 'markdown' || kind === 'text') return 'text'
@@ -121,7 +129,7 @@ export function documentKind(path: string): WorkspaceDocument['kind'] {
 
 function provenanceKey(p: Provenance): string {
   switch (p.kind) {
-    case 'fiber': return 'fiber'
+    case 'fiber': case 'family': return p.kind
     case 'embed': case 'link': return JSON.stringify([p.kind, p.title ?? ''])
     case 'routed': return 'routed'
     case 'sent': return JSON.stringify([p.kind, p.session ?? '', p.time, p.worker ?? ''])
@@ -213,7 +221,7 @@ export function proseDocument(channel: Channel): WorkspaceDocument | undefined {
 export function channelLead(channel: Channel): WorkspaceDocument | undefined {
   const prose = proseDocument(channel)
   const dir = prose?.path.slice(0, prose.path.lastIndexOf('/')) || '/'
-  const files = channel.documents.filter(d => d.kind !== 'fiber')
+  const files = channel.documents.filter(d => !isDrawn(d))
   const sent = files.filter(d => lastSent(d) !== undefined).sort((a, b) => (lastSent(b) ?? 0) - (lastSent(a) ?? 0))
   const companions = files.filter(d => d.owner === channel.owner && isReport(d) && normalizeAbsolutePath(d.path.slice(0, d.path.lastIndexOf('/')) || '/') === normalizeAbsolutePath(dir))
   return leadReceipt([...sent, ...companions.filter(d => !sent.includes(d))], dir, d => d.path, d => d.owner === channel.owner)
@@ -296,7 +304,8 @@ export function buildChannel(input: ChannelInput): Channel {
   }
 
   documents.delete(prose.key)
-  const run = arrangeDocuments(prose, documents.values(), declared)
+  const pages = arrangeDocuments(prose, documents.values(), declared)
+  const run = input.family ? [{ key: familyKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: 'Family', kind: 'family' as const, provenance: [{ kind: 'family' as const }] }, ...pages] : pages
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
     documents: run, labels: documentLabels(run, input.isConstitution), body: input.body,
@@ -308,6 +317,7 @@ export function buildChannel(input: ChannelInput): Channel {
 /** The frame owns document naming and arrival metadata; renderers own content only. */
 export function documentLabelMetadata(doc: WorkspaceDocument, label: string, channelOwner: string, now = Date.now()): { title: string; summary: string } {
   const age = (time: number): string => ago(time, now)
+  if (doc.kind === 'family') return { title: '', summary: 'Threads' }
   if (doc.kind === 'fiber') {
     const time = doc.modifiedAt ? Date.parse(doc.modifiedAt) : NaN
     return { title: '', summary: Number.isFinite(time) ? `Last changed ${age(time)}` : 'Last changed unknown' }
@@ -357,6 +367,7 @@ export function documentLabels(documents: WorkspaceDocument[], isConstitution = 
   const candidates = documents.map((document) => {
     const labels: string[] = []
     const add = (label: string): void => { if (label && !labels.includes(label)) labels.push(label) }
+    if (document.kind === 'family') return ['Family']
     if (document.kind === 'fiber') {
       add(isConstitution ? 'Constitution' : 'Note')
       return labels
@@ -397,6 +408,7 @@ export function documentLabels(documents: WorkspaceDocument[], isConstitution = 
   const fallback = documents.map(() => false)
   const labelAt = (index: number): string => {
     const document = documents[index]
+    if (document.kind === 'family') return 'Family'
     if (fallback[index]) return document.kind === 'fiber'
       ? `${document.owner}:${isConstitution ? 'Constitution' : 'Note'}`
       : `${document.owner}:${document.path}`

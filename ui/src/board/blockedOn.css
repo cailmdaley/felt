@@ -12,8 +12,8 @@
   border: 1px solid var(--kbn-rule); border-radius: 3px; padding: 0 4px;
 }
 .kbn-until-chip:hover { color: var(--kbn-ink); border-color: var(--kbn-rule-strong); }
-/* In the thread rail it is its own line under the name. */
-.ws-thread-tree .kbn-until { grid-column: 2; max-width: none; margin-top: 2px; font-size: var(--type-note); }
+/* In the family's tree it is its own line under the name. */
+.ws-family .kbn-until { grid-column: 2; max-width: none; margin-top: 2px; font-size: var(--type-note); }
 /* On a Resting line it sits under the title, which keeps its width. */
 .kbn-cluster-item:has(> .kbn-until) { flex-wrap: wrap; }
 .kbn-cluster-item > .kbn-until { order: 9; flex: 1 0 100%; max-width: none; padding-left: 16px; margin-top: -1px; }

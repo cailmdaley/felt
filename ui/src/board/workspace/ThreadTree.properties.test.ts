@@ -3,8 +3,8 @@ import { expect, it } from 'vitest'
 import fc from 'fast-check'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { ThreadIndex, threadKey } from '../threads.js'
-import { renderThreadTree, shelfOf, threadTree, type TreeNode } from './ThreadTree.js'
+import { ThreadIndex, shelfOf, threadKey, threadTree, type TreeNode } from '../threads.js'
+import { renderThreadTree } from './ThreadTree.js'
 
 const dates = ['', '2026-11-02T09:00:00-08:00', '2026-11-02T10:00:00+01:00', '2026-11-02T09:00:00Z', '2026-11-02T17:00:00Z', '2026-11-01T23:00:00-08:00']
 const spec = fc.array(fc.record({ parent: fc.nat(), age: fc.integer({ min: 0, max: 5 }), state: fc.integer({ min: 0, max: 4 }) }), { minLength: 1, maxLength: 30 })

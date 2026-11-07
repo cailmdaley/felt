@@ -1,3 +1,4 @@
+import { HUB_ROWS, hubTimes, type HubRow } from './hub-family.js'
 import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_UID, type WorkspaceExample } from './workspace-fixtures.js'
 
 /** Family stories: a question under quiet ancestry, a working root over an asker, an orphan, and an entirely quiet tree. */
@@ -108,6 +109,35 @@ export function addFamilyFixtures(example: WorkspaceExample, now: number): void 
       runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `session-${row.id}`, last_activity_at: at.getTime() } : null,
     })
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\nFamily fixture.`
+  }
+  addHubFixture(example, now)
+}
+
+/** The hub family, with its ledgers and sent files; the map's unread marks count from three hours back. */
+function addHubFixture(example: WorkspaceExample, now: number): void {
+  const hour = 3_600_000
+  const phases: Partial<Record<HubRow['state'], string>> = { work: 'working', turn: 'waiting', ask: 'attention', new: 'waiting', blocked: 'blocked' }
+  try { localStorage.setItem('shuttle.workspace.document-seen-baseline', String(now - 3 * hour)) } catch { /* The harness runs without storage too. */ }
+  for (const row of HUB_ROWS) {
+    const moved = now - row.hours * hour, closed = ['review', 'done', 'discard'].includes(row.state)
+    const session = `session-${row.id}`, launches = hubTimes(row, row.launches, now)
+    example.feed.fibers.push({
+      origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/constitution.md`, orchestrator: row.parent,
+      fiber: { id: row.id, uid: row.id, name: row.name, status: closed ? 'closed' : row.state === 'draft' || row.state === 'rest' ? 'open' : 'active',
+        horizon: row.state === 'rest' ? 'stashed' : undefined, tempered: row.state === 'done' ? true : row.state === 'discard' ? false : undefined,
+        outcome: row.note && row.state !== 'ask' ? row.note : undefined,
+        created_at: new Date(moved - (row.parent ? row.hours / 2 + 20 + row.launches * 9 : 30 * 24) * hour).toISOString(), closed_at: closed ? new Date(moved).toISOString() : undefined,
+        shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'codex-sol', project_dir: '/fixture-project',
+          ask: row.state === 'ask' ? { text: row.note, at: new Date(moved).toISOString() } : undefined } },
+      runtime: phases[row.state] ? { state: 'running', phase: phases[row.state], session_uuid: session, last_activity_at: moved } : null,
+    })
+    example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\n${row.note}`
+    launches.forEach((at, n) => example.sessions.push({ at, fiber: row.id, uid: row.id, session, harness: 'codex', agent: 'codex-sol', host: WORKSPACE_HOST, tmux: null, kind: n === launches.length - 1 ? 'dispatch' : 'resume' }))
+    for (const at of hubTimes(row, row.commits, now)) example.commits.push({ at, session, host: WORKSPACE_HOST })
+    hubTimes(row, row.files, now).forEach((at, n) => {
+      const fullPath = `/fixture-project/${row.id}/${['report.html', 'summary.png', 'figure.png', 'notes.md'][n % 4]}`
+      example.receipts.push({ fullPath, basename: fullPath.split('/').at(-1), timestamp: at, sessionId: session, uid: row.id, host: WORKSPACE_HOST })
+    })
   }
 }
 

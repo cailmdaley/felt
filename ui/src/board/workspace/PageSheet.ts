@@ -4,11 +4,10 @@ import './page-sheet.css'
 
 const HISTORY_KEY = 'shuttlePageSheet'
 
-/** The phone's threads panel: the family, then its sent files, with modal focus containment and a browser-Back entry. */
+/** The sheet of sent files, with modal focus containment and a browser-Back entry. */
 export class PageSheet {
   readonly el = document.createElement('dialog')
   private readonly body = document.createElement('div')
-  private readonly threads = document.createElement('div')
   private readonly list = document.createElement('div')
   private readonly heading = document.createElement('h2')
   private readonly token = `files:${Math.random().toString(36).slice(2)}`
@@ -25,14 +24,14 @@ export class PageSheet {
     this.onVisibility = onVisibility
     this.el.className = 'ws-page-sheet'
     this.el.dataset.part = 'page-sheet'
-    this.el.setAttribute('aria-label', 'Threads and sent files')
+    this.el.setAttribute('aria-label', 'Sent files')
     const panel = document.createElement('section'); panel.className = 'ws-page-sheet-panel'; panel.dataset.part = 'page-sheet-panel'
     const close = document.createElement('button'); close.type = 'button'; close.className = 'ws-page-sheet-grabber'
     close.setAttribute('aria-label', 'Close sent files'); close.addEventListener('click', () => this.close())
     const head = document.createElement('div'); head.className = 'ws-page-sheet-head'; head.append(this.heading)
     this.body.className = 'ws-page-sheet-body'
-    this.threads.className = 'ws-page-sheet-threads'
-    this.body.append(this.threads, this.list); panel.append(close, head, this.body); this.el.append(panel)
+    this.heading.textContent = 'Sent files'
+    this.body.append(this.list); panel.append(close, head, this.body); this.el.append(panel)
     this.el.addEventListener('click', event => { if (event.target === this.el) this.close() })
     this.el.addEventListener('cancel', event => { event.preventDefault(); this.close() })
     let start: number | null = null
@@ -49,37 +48,17 @@ export class PageSheet {
     this.model = { channel, selected, fresh }
     if (this.isOpen) this.render()
   }
-  show(opener: HTMLElement, threads: HTMLElement | null = null): void {
+  show(opener: HTMLElement): void {
     if (this.isOpen || this.pendingBack || !this.model) return
     this.opener = opener
-    this.updateThreads(threads)
-    this.el.querySelector('button')?.setAttribute('aria-label', 'Close threads and files')
     window.history.pushState({ ...window.history.state, [HISTORY_KEY]: this.token }, '')
     this.open()
-  }
-  /** Refresh the family without losing a disclosure's focus or the sheet's scroll position. */
-  updateThreads(threads: HTMLElement | null): void {
-    if (this.threads.firstElementChild === threads && this.threads.hidden === !threads) return
-    const active = document.activeElement
-    const focus = active instanceof HTMLElement && this.threads.contains(active) ? active.dataset.threadFocus : undefined
-    const scroll = this.body.scrollTop
-    this.threads.replaceChildren(...(threads ? [threads] : [])); this.threads.hidden = !threads
-    const filesHeading = this.list.querySelector<HTMLElement>('h3')
-    if (filesHeading) filesHeading.hidden = !threads
-    this.heading.textContent = threads ? 'Threads and sent files' : 'Sent files'
-    this.el.setAttribute('aria-label', this.heading.textContent)
-    this.body.scrollTop = scroll
-    if (focus) {
-      const target = [...this.threads.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === focus)
-      ;(target ?? this.el.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true })
-    }
   }
   private render(): void {
     if (!this.model) return
     const { channel, selected, fresh } = this.model
     const files = sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key)), this.expanded, expanded => { this.expanded = expanded; this.render(); this.list.querySelector<HTMLElement>('[data-part="sent-files-more"]')?.focus({ preventScroll: true }) })
-    const filesHeading = files.querySelector('h3')
-    if (filesHeading) filesHeading.hidden = this.threads.hidden
+    files.querySelector('h3')?.setAttribute('hidden', '')
     this.list.replaceChildren(files)
   }
   private open(): void {

@@ -1,4 +1,4 @@
-import type { WorkspaceDocument, DocKey } from './documents.js'
+import { isDrawn, type WorkspaceDocument, type DocKey } from './documents.js'
 import { DOCUMENT_KEY_INTENTS, keyIntent } from '../keymap.js'
 import { frameBridge, type DocumentKey } from './DocumentBridge.js'
 import type { SwipeSignal } from './PhoneGestures.js'
@@ -223,6 +223,7 @@ export class DocumentHost {
       this.mount(state)
       return
     }
+    if (state.frame.doc.kind === 'family') return
     if (state.frame.doc.kind === 'fiber') {
       if (this.options.onRefreshProse) void this.refreshProse(state)
       else this.updateProse(key, this.options.buildProse(state.frame.doc))
@@ -313,12 +314,12 @@ export class DocumentHost {
       }
       return
     }
-    if (state.frame.doc.kind === 'fiber') {
+    if (isDrawn(state.frame.doc)) {
       const prose = this.options.buildProse(state.frame.doc)
       state.frame.content.replaceChildren(prose)
       state.frame.viewer = prose
       state.loaded = true
-      this.bindScroller(state, prose)
+      this.bindScroller(state, prose.querySelector<HTMLElement>('.ws-family-scroll') ?? prose)
       this.bindReferences(state, prose)
     } else {
       this.buildViewer(state, false)
@@ -357,7 +358,7 @@ export class DocumentHost {
         canReview: this.options.canReview ? () => this.options.canReview!(doc) : undefined,
         reviewTarget: this.options.reviewTarget ? () => this.options.reviewTarget!(doc) : undefined,
         active: state.active,
-        kind: doc.kind === 'fiber' ? undefined : doc.kind,
+        kind: doc.kind === 'fiber' || doc.kind === 'family' ? undefined : doc.kind,
         decorateAudio: audio => {
           const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect,
             (peaks, duration) => {

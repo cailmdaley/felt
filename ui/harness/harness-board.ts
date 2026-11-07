@@ -87,7 +87,7 @@ if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixtur
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'families') addFamilyFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'sidebar-tree') addSidebarFixtures(workspaceFixture, now)
-// `manyFiles` lengthens the open constitution's sent-files trail so the rail's file region has to scroll.
+// `manyFiles` lengthens the open constitution's sent-files trail so the sidebar's file list has to scroll.
 if (workspaceFixture && search.has('manyFiles')) {
   const first = workspaceFixture.receipts[0], dir = String(first.fullPath).slice(0, String(first.fullPath).lastIndexOf('/'))
   for (let i = 1; i <= 28; i++) {
@@ -1707,6 +1707,12 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
     const records = [...MOCK_SESSIONS, ...APP_SESSIONS].filter((r) => !uid || r.uid === uid)
     return json({ host: LOCAL_HOST, records, origins: MOCK_ORIGINS })
+  }
+
+  if (url.includes('/api/v1/commits/composite')) {
+    if (workspaceFixture) return json({ host: workspaceFixture.host, records: workspaceFixture.commits, origins: workspaceFixture.feed.origins })
+    if (docsExample) return json({ host: docsExample.feed.host, records: [], origins: docsExample.feed.origins })
+    return json({ host: LOCAL_HOST, records: [], origins: MOCK_ORIGINS })
   }
 
   if (url.includes('/api/v1/sent-files/clear') && method === 'POST') {

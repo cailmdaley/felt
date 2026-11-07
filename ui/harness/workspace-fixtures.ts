@@ -35,6 +35,7 @@ export interface WorkspaceExample {
   }
   bodies: Record<string, string>
   sessions: SessionRecord[]
+  commits: Array<Pick<CommitRecord, 'at' | 'session' | 'host'>>
   temporal: TemporalFetchers
   files: WorkspaceFileFixture[]
   receipts: Array<Record<string, unknown>>
@@ -434,7 +435,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     { at: now - 8 * 60 * minute, fiber: WORKSPACE_ID, uid: WORKSPACE_UID, session: WORKSPACE_EARLIER_SESSION, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'resume' },
   ]
   const buckets: ActivityBucket[] = []
-  const commits: CommitRecord[] = []
+  const commits = [] as CommitRecord[]
   const temporal: TemporalFetchers = {
     activity: async (fromMs, toMs) => ({ host: WORKSPACE_HOST, from_ms: fromMs, to_ms: toMs, buckets, origins }),
     sessions: async sinceMs => ({ host: WORKSPACE_HOST, records: sessions.filter(record => record.at >= sinceMs), origins }),
@@ -491,6 +492,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     feed,
     bodies,
     sessions,
+    commits,
     temporal,
     files,
     receipts,
