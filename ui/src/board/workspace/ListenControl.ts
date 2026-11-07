@@ -199,15 +199,18 @@ export class ListenControl {
     } else if (recording) {
       const hosted = meetingHostCard(current, [card]) !== null
       const host = this.opts.hostName(current) ?? (hosted ? card.name : current.fiber?.split('/').at(-1)) ?? current.title?.trim() ?? 'card'
-      label = `${current.paused ? 'Paused' : 'Listening'} · ${host}`
+      label = current.paused ? 'Paused' : 'Listening'
+      if (!hosted) label += ` · ${host}`
       if (!hosted && current.state !== 'stopping') elsewhere = current.paused ? `The mic is paused for ${host}.` : `Your voice is going to ${host}.`
     } else if (voice?.available && voice.enabled) {
-      label = `${voice.muted ? 'Paused' : 'Listening'} · ${voice.target?.name ?? 'Rex'}`
+      label = voice.muted ? 'Paused' : 'Listening'
+      if (voice.target?.fiber_id !== (card.uid ?? card.id)) label += ` · ${voice.target?.name ?? 'Rex'}`
       if (voice.state === 'yielded') elsewhere = 'Your voice is going to a recording.'
     }
     if (this.word.textContent !== label) this.word.textContent = label
-    this.button.title = elsewhere ?? label
-    this.button.setAttribute('aria-label', label)
+    const whole = /^(Listening|Paused)$/.test(label) ? `${label} · ${card.name}` : label
+    this.button.title = elsewhere ?? whole
+    this.button.setAttribute('aria-label', whole)
     this.button.classList.toggle('kbn-ctl-meet-on', recording || !!voice?.enabled)
   }
 
