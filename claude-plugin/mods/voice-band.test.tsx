@@ -75,6 +75,16 @@ test('a meeting reads as a meeting, and names its card', ABOVE, async ($, on) =>
   await ui.unmount()
 })
 
+test('words waiting to be sent show a discard', ABOVE, async ($, on) => {
+  const { posts } = daemon(on, { ...VOICE, target: { fiber_id: 'X', name: 'Civbench' }, pending_words: 12 }, SPEAK)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await label(ui, 'discard')).toBe('✕ 12 words')
+  await ui.press({ key: 'discard' })
+  expect(posts).toEqual([{ url: 'http://127.0.0.1:4000/api/v1/voice/discard', body: undefined }])
+  await ui.unmount()
+})
+
 test('muted mic and speaker say so, and a click toggles each', ABOVE, async ($, on) => {
   const { posts } = daemon(on, { ...VOICE, muted: true, target: { fiber_id: SELF } }, { ...SPEAK, muted: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -84,7 +94,7 @@ test('muted mic and speaker say so, and a click toggles each', ABOVE, async ($, 
   await ui.press({ key: 'mic' })
   await ui.press({ key: 'speaker' })
   expect(posts).toEqual([
-    { url: 'http://127.0.0.1:4000/api/v1/voice', body: '{"muted":false}' },
+    { url: 'http://127.0.0.1:4000/api/v1/voice/toggle', body: undefined },
     { url: 'http://127.0.0.1:4000/api/v1/speak', body: '{"muted":false}' },
   ])
   await ui.unmount()

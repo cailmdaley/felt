@@ -12,8 +12,8 @@
 // level ticker, its last twenty readings scrolling left; Listening off draws no mic side and
 // an idle speaker no speaker side. Lines other cards hold until they are in
 // view follow the speaker's state, named, the two with most first. The mic and speaker texts are buttons: a
-// click, or Enter once the band has the focus (ctrl+x tab), toggles that mute;
-// a meeting pauses from the board.
+// click, or Enter once the band has the focus (ctrl+x tab), pauses or resumes
+// that side; `✕ n words` after the mic drops what was said but not yet sent.
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 type Ref = { fiber_id: string; name?: string } | null
@@ -27,6 +27,8 @@ type Voice = {
   mode?: 'off' | 'following' | 'meeting'
   destination?: Ref
   paused?: boolean
+  /** Words said but not yet sent; discard drops them. */
+  pending_words?: number
   level?: { mic: number; at: string } | null
 }
 type Held = { fiber_id: string; origin?: string | null; name?: string | null; n: number }
@@ -99,6 +101,27 @@ async function reveal($: EngineInterface, card: Held): Promise<void> {
     body: JSON.stringify(card.origin ? { fiber_id: card.fiber_id, origin: card.origin } : { fiber_id: card.fiber_id }),
   })
   await poll($)
+}
+
+async function voiceVerb($: EngineInterface, verb: 'toggle' | 'discard'): Promise<void> {
+  await $.http.fetch(base + '/api/v1/voice/' + verb, { method: 'POST' })
+  await poll($)
+}
+
+// The mic button pauses or resumes; the ✕ after it drops words not yet sent.
+function micSide($: EngineInterface, ui: { Box: any; Button: any; Text: any }, mic: string, parts: RenderChildren[]) {
+  const { Box, Button, Text } = ui
+  const pending = voice?.pending_words ?? 0
+  return (
+    <Box flexDirection="row">
+      <Button key="mic" plain label={mic} onPress={() => voiceVerb($, 'toggle')}>
+        {parts}
+      </Button>
+      {pending ? (
+        <Button key="discard" plain dimColor label={`✕ ${pending} words`} onPress={() => voiceVerb($, 'discard')} />
+      ) : null}
+    </Box>
+  )
 }
 
 async function setMuted($: EngineInterface, path: string, muted: boolean): Promise<void> {
@@ -218,11 +241,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="row" width={width}>
         <Box flexGrow={1}>
-          {mic ? (
-            <Button key="mic" plain label={mic} onPress={() => voice && modeOf(voice) === 'following' && setMuted($, '/api/v1/voice', !voice.muted)}>
-              {parts}
-            </Button>
-          ) : null}
+          {mic ? micSide($, { Box, Button, Text }, mic, parts) : null}
         </Box>
         {spk ? speakerSide($, { Box, Button, Text }, side) : null}
       </Box>
@@ -241,11 +260,7 @@ export const register: Register = (on, options) => {
     if (!mic && !spk) return next(e)
     return (
       <Box flexDirection="row">
-        {mic ? (
-          <Button key="mic" plain label={mic} onPress={() => voice && modeOf(voice) === 'following' && setMuted($, '/api/v1/voice', !voice.muted)}>
-            {parts}
-          </Button>
-        ) : null}
+        {mic ? micSide($, { Box, Button, Text }, mic, parts) : null}
         {mic && spk ? <Text dimColor>{'  '}</Text> : null}
         {spk ? speakerSide($, { Box, Button, Text }, side) : null}
       </Box>
