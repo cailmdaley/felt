@@ -78,7 +78,7 @@ function instant(value: string | undefined): number | undefined {
  * card draws it; a closed card's leftover ask is nobody's move.
  */
 export function turnOf(
-  card: Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale'>,
+  card: Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale' | 'followed'>,
   nowMs: number = Date.now(),
 ): TurnState {
   const phase = card.runtimePhase
@@ -87,6 +87,8 @@ export function turnOf(
   const ask = card.status === 'active' ? card.ask : undefined
   const state = (turn: Turn, detail: string, since?: number): TurnState =>
     ({ turn, yours: YOURS.includes(turn), busy, word: TURN_WORD[turn], detail, since })
+
+  if (card.followed && live) return state('working', 'You are following this conversation.', card.lastActivityAt)
 
   // An unreachable owner's runtime is frozen at its last poll: no evidence of
   // a turn. The ask lives in the synced fiber, so it is still owed.
