@@ -8,6 +8,7 @@ import { getBrowser } from './browser.mjs'
 import { frames, layoutShift, settleTransitions, unexpected } from './layoutShift.mjs'
 import { registerMapViewJourneys } from './mapViews.mjs'
 import { registerNavigationJourneys } from './navBack.mjs'
+import { registerDeskThreadJourneys } from './deskThreads.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
 import { sentFiles as sentFileRows } from './familyNav.mjs'
@@ -2732,6 +2733,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 }, viewport)
 
 registerNavigationJourneys(test)
+registerDeskThreadJourneys(test)
 registerMapViewJourneys(test)
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)
