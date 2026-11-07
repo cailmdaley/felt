@@ -1,5 +1,5 @@
 import { needsHuman, type FamilyModel, type MapThread, type Standing } from './model.js'
-import { NARROW, htmlEl, mount, part, type Drawing, type Focus, type OpenThread, type Point } from './drawing.js'
+import { NARROW, htmlEl, mount, part, type Drawing, type OpenThread, type Point, type Sight } from './drawing.js'
 import { NEAR_ROWS, TURN, bodyRadius, bodySize, nearLabels, paintPlate, rootRadius, zoomPlate, type ArmName, type Box, type Plate, type Star } from './orbit.js'
 import { WHOLE, type View } from './zoom.js'
 
@@ -142,7 +142,7 @@ function drag(host: HTMLElement, start: PointerEvent): void {
   let moving = false
   const move = (event: PointerEvent): void => {
     if (event.pointerId !== start.pointerId || !host.classList.contains('family-map-spiral') || host.classList.contains('family-map-pinching')) return
-    const { model, open, view, focus } = current.get(host)!
+    const { model, open, view, sight } = current.get(host)!
     const thread = model.threads.get(key)
     if (!thread || thread === model.root) return
     if (!moving && Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < DRAG_FROM) return
@@ -159,7 +159,7 @@ function drag(host: HTMLElement, start: PointerEvent): void {
       const others = { ...readPins(model) }
       delete others[key]
       writePins(model, { [key]: { arm, slot: arms[arm].indexOf(nearest.thread), standing: thread.standing }, ...others })
-      spiral.draw(host, model, open, view, focus)
+      spiral.draw(host, model, open, view, sight)
     }
     body.setAttribute('data-dragged', '')
     body.style.transform = `translate(${own.x.toFixed(1)}px, ${own.y.toFixed(1)}px)`
@@ -172,8 +172,8 @@ function drag(host: HTMLElement, start: PointerEvent): void {
     host.classList.remove('family-map-dragging')
     body.removeAttribute('data-dragged')
     if (!moving) return
-    const { model, open, view, focus } = current.get(host)!
-    spiral.draw(host, model, open, view, focus)
+    const { model, open, view, sight } = current.get(host)!
+    spiral.draw(host, model, open, view, sight)
     const swallow = (event: Event): void => { event.stopPropagation() }
     host.addEventListener('click', swallow, { capture: true, once: true })
     setTimeout(() => host.removeEventListener('click', swallow, { capture: true }))
@@ -184,26 +184,26 @@ function drag(host: HTMLElement, start: PointerEvent): void {
 }
 
 /** What a host last drew, which the one drag listener it keeps always reads. */
-const current = new WeakMap<HTMLElement, { model: FamilyModel; open: OpenThread; view: View; focus: Focus | null }>()
+const current = new WeakMap<HTMLElement, { model: FamilyModel; open: OpenThread; view: View; sight: Sight | null }>()
 
 export const spiral: Drawing = {
   name: 'spiral', label: 'Spiral',
   reading: ['Zoom: ⌘ scroll or pinch', 'Centre: the constitution', 'One arm: to do, next at the centre', 'Other arm: just finished, newest at the centre', 'Flow: rising to you, or receding', 'Size: its mass of work', 'Dots: sent files', 'Colour: its state', 'Diamond: a new file', 'Drag a body along or across the arms'],
   sequence,
   layout: spiralLayout,
-  draw(host, model, open, view = WHOLE, focus = null) {
+  draw(host, model, open, view = WHOLE, sight = null) {
     const { width, height } = mount(host, 'spiral', model, open)
     const pins = livePins(model), plate = spiralLayout(model, width, height), { todo, done } = armsOf(model, pins)
-    paintPlate(host, zoomPlate(plate, view, model, focus, thread => todo.indexOf(thread) + 1), model)
+    paintPlate(host, zoomPlate(plate, view, model, sight, thread => todo.indexOf(thread) + 1), model)
     for (const body of host.querySelectorAll<SVGGElement>('.fm-star')) {
       const key = body.getAttribute('data-thread')!, past = done.findIndex(thread => thread.key === key)
       body.toggleAttribute('data-pinned', key in pins)
       body.style.setProperty('--fm-recede', past < 0 ? '1' : (1 - .55 * past / Math.max(1, done.length)).toFixed(2))
     }
     if (!current.has(host)) host.addEventListener('pointerdown', event => { if (host.classList.contains('family-map-spiral')) drag(host, event) })
-    current.set(host, { model, open, view, focus })
+    current.set(host, { model, open, view, sight })
     const reset = part(host, 'fm-unpin', cls => { const button = htmlEl('button', cls, 'Back to attention order'); button.type = 'button'; return button })
     reset.hidden = !Object.keys(pins).length
-    reset.onclick = event => { event.stopPropagation(); writePins(model, {}); spiral.draw(host, model, open, view, focus) }
+    reset.onclick = event => { event.stopPropagation(); writePins(model, {}); spiral.draw(host, model, open, view, sight) }
   },
 }

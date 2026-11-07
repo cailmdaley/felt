@@ -23,7 +23,7 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.use
 
 function mapped(drawing = 'sky'): { stage: HTMLElement; plate: HTMLElement } {
   stored.set('shuttle.family.drawing', drawing)
-  const page = new FamilyPage(vi.fn(), { open: vi.fn(), settle: vi.fn(), hold: vi.fn() }, feeds, { focus: null, view: null }, vi.fn())
+  const page = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, vi.fn())
   document.body.append(page.el)
   page.update(root, new ThreadIndex(cards), now)
   const stage = page.el.querySelector<HTMLElement>('[role="listbox"]')!, plate = stage.querySelector<HTMLElement>('.fm-sky-plate')!
@@ -74,7 +74,7 @@ it('moves layers while a wheel runs and paints only when it settles', async () =
   expect(stage.classList.contains('family-map-zoomed')).toBe(true)
   expect(stage.classList.contains('family-map-gesturing')).toBe(false)
   expect((svg as SVGElement).style.transform).toBe('')
-  expect(plate.querySelectorAll('.fm-label').length).toBeGreaterThan(0)
+  expect(plate.querySelectorAll('.fm-label, .fm-focus').length).toBeGreaterThan(0)
 })
 it('reaches past the plate\'s edge once zoomed, so a body on the rim can come to the middle', () => {
   const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now)

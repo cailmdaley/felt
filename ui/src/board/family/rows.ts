@@ -1,5 +1,5 @@
 import { ATTENTION_WORD, type Attention, type FamilyModel, type MapFile, type MapThread } from './model.js'
-import { HOUR, TIME_MARKS, htmlEl, optionFor, reconcile, shortAgo, tagThread, type Focus } from './drawing.js'
+import { HOUR, TIME_MARKS, htmlEl, optionFor, reconcile, shortAgo, tagThread, type Sight } from './drawing.js'
 
 /** A focused row's fold, where what its thread holds lies. */
 const FOLD = 34
@@ -53,16 +53,17 @@ export function fillRow(row: HTMLElement, { thread, y, height, loud, fold }: Row
   row.querySelector('.fm-row-age')!.textContent = loud ? shortAgo(thread.lastMove, model.now) : ''
 }
 /** The fold of a focused row, in the unfolded thread's order: its tapestry's place, its newest files, its constitution at the end. */
-export function drawFold(row: HTMLElement, { thread, fold }: Row, focus: Focus | null, model: FamilyModel): void {
-  const files = fold ? thread.files.filter(file => file.key !== focus?.lead?.key) : []
+export function drawFold(row: HTMLElement, { thread, fold }: Row, sight: Sight | null, model: FamilyModel): void {
+  const { lead, constitution } = fold && sight ? sight.holds(thread) : {}
+  const files = fold ? thread.files.filter(file => file.key !== lead?.key) : []
   const shown = files.slice(0, FOLD_FILES), rest = files.length - shown.length
   const held: Array<{ file: MapFile; kind: string }> = fold ? [
-    ...(focus?.lead ? [{ file: focus.lead, kind: 'lead' }] : []),
+    ...(lead ? [{ file: lead, kind: 'lead' }] : []),
     ...shown.map(file => ({ file, kind: 'file' })),
-    ...(focus?.constitution ? [{ file: focus.constitution, kind: 'constitution' }] : []),
+    ...(constitution ? [{ file: constitution, kind: 'constitution' }] : []),
   ] : []
   const layer = row.querySelector<HTMLElement>('.fm-row-fold')!
-  layer.toggleAttribute('data-no-lead', !!fold && !focus?.lead)
+  layer.toggleAttribute('data-no-lead', !!fold && !lead)
   layer.dataset.count = rest ? `+${rest}` : ''
   reconcile(layer, held, item => item.file.key, () => {
     const way = htmlEl('button', 'fm-fold-file'); way.type = 'button'
@@ -70,6 +71,7 @@ export function drawFold(row: HTMLElement, { thread, fold }: Row, focus: Focus |
     return way
   }, (way, { file, kind }) => {
     way.dataset.held = file.key
+    way.dataset.owner = thread.key
     way.dataset.kind = kind
     way.toggleAttribute('data-unread', file.unread)
     way.firstElementChild!.textContent = file.name

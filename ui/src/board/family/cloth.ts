@@ -34,10 +34,10 @@ function weave(strip: SVGSVGElement, { thread, loud }: Row, chart: number, heigh
 export const cloth: Drawing = {
   name: 'cloth', label: 'Cloth', folds: true,
   reading: ['Rows: most urgent first', 'Right edge: now', 'Dashes: a thread’s life', 'Blocks: launches, commits, files', 'Dark blocks: a busy day', 'Colour: its state', 'Small diamonds: sent files, bright when new', 'Thin rows: finished lately'],
-  draw(host, model, open, _view, focus) {
+  draw(host, model, open, _view, sight) {
     const { width, narrow } = mount(host, 'cloth', model, open)
     const chart = narrow ? width : Math.max(260, width - LABEL)
-    const plan = planRows(model.order, thread => heading(model, thread), 26, narrow ? 46 : 42, 6, focus?.key ?? null)
+    const plan = planRows(model.order, thread => heading(model, thread), 26, narrow ? 46 : 42, 6, sight?.key ?? null)
     const cloth = part(host, 'fm-rows', cls => htmlEl('div', cls))
     cloth.style.height = `${plan.height}px`
     cloth.style.setProperty('--fm-chart', `${chart}px`)
@@ -55,7 +55,7 @@ export const cloth: Drawing = {
       const strip = el.querySelector<SVGSVGElement>('.fm-strip')!
       strip.style.height = `${narrow && row.loud ? STRIP : row.height}px`
       weave(strip, row, chart, narrow && row.loud ? STRIP : row.height, model.now)
-      drawFold(el, row, focus, model)
+      drawFold(el, row, sight, model)
     })
   },
 }

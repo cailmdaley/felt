@@ -63,8 +63,8 @@ export const sky: Drawing = {
   name: 'sky', label: 'Sky',
   reading: ['Zoom: ⌘ scroll or pinch', 'Centre: now', 'Rings: since it last moved', 'Direction: its branch', 'Arcs: who launched whom', 'Size: its mass of work', 'Dots: sent files', 'Colour: its state', 'Diamond: a new file', 'Numbers: the order to look'],
   layout: skyLayout,
-  draw(host, model, open, view, focus) {
+  draw(host, model, open, view, sight) {
     const { width, height } = mount(host, 'sky', model, open)
-    paintPlate(host, zoomPlate(skyLayout(model, width, height), view, model, focus), model)
+    paintPlate(host, zoomPlate(skyLayout(model, width, height), view, model, sight), model)
   },
 }

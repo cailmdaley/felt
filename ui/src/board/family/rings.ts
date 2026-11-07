@@ -69,8 +69,8 @@ export const rings: Drawing = {
   name: 'rings', label: 'Rings',
   reading: ['Zoom: ⌘ scroll or pinch', 'Outward: how long it has been open', 'Direction: fixed by the tree', 'Arcs: who launched whom', 'Size: its mass of work', 'Dots: sent files', 'Colour: its state', 'Glow: how recently it moved', 'Diamond: a new file'],
   layout: ringsLayout,
-  draw(host, model, open, view, focus) {
+  draw(host, model, open, view, sight) {
     const { width, height } = mount(host, 'rings', model, open)
-    paintPlate(host, zoomPlate(ringsLayout(model, width, height), view, model, focus), model)
+    paintPlate(host, zoomPlate(ringsLayout(model, width, height), view, model, sight), model)
   },
 }

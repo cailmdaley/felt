@@ -25,7 +25,7 @@ import { WorkspaceDepth } from './Depth.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
 import { Overview } from './Overview.js'
-import { FamilyPage, type FamilyFeeds, type MapPlace, type MapRex } from './FamilyPage.js'
+import { FamilyPage, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
 import { conversable, familyModel, isDrawn as onTheMap, type MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { unseenSince } from './DocumentSeen.js'
@@ -98,8 +98,6 @@ const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
 const READ_LATELY = 8
 /** A fiber's companion pages by file name, first the one that leads, with the name each goes by on the map. */
 const COMPANIONS: ReadonlyArray<readonly [string, string]> = [['tapestry.html', 'Tapestry'], ['artifact.html', 'Artifact'], ['report.html', 'Report']]
-/** How long the map must rest on a thread before Rex moves to it, so a drill down through threads switches Rex once. */
-const REX_SETTLE_MS = 700
 
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
@@ -135,18 +133,6 @@ export class Workspace {
   private lastUpdateRevision = ''
   private lastRenderedFamilyRevision = ''
   private readonly mapFeeds: FamilyFeeds
-  private rexWait: ReturnType<typeof setTimeout> | null = null
-  private readonly rex: MapRex = {
-    open: card => { this.rex.hold(); this.dock.openConversation(card) },
-    settle: card => {
-      this.rex.hold()
-      this.rexWait = setTimeout(() => { this.rexWait = null; this.dock.openConversation(card) }, REX_SETTLE_MS)
-    },
-    hold: () => {
-      if (this.rexWait !== null) clearTimeout(this.rexWait)
-      this.rexWait = null
-    },
-  }
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
@@ -310,13 +296,13 @@ export class Workspace {
   private openFromMap(card: KanbanCard, doc?: DocKey): void {
     this.open(card, this.origin, doc, this.overview.hasMetadata(card))
   }
-  /** A Desk or Chronicle click lands on the fiber's map, at its body, and moves Rex there as the map rests. */
+  /** A Desk or Chronicle click lands on the fiber's map, at its body, and moves Rex there. */
   openFromDesk(card: KanbanCard): void {
     const map = this.landOnMap(card)
     if (map) this.open(card, undefined, map)
     else if (card.status === 'active' && isQuestion(card)) this.openQuestion(card)
     else this.open(card)
-    if (map && conversable(card)) this.rex.settle(card)
+    if (map && conversable(card)) this.dock.openConversation(card)
   }
   /** Readies a fiber on a family's map to land there, at its thread, and names the page; undefined for one the map has no place for. */
   private landOnMap(card: KanbanCard): DocKey | undefined {
@@ -650,7 +636,7 @@ export class Workspace {
   }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), this.rex, this.mapFeeds, state.mapPlace,
+    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), card => { this.dock.openConversation(card) }, this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
       () => { if (this.current === state) this.reader.setBackDestination(this.backDestination(state)) })
     state.familyPage.update(state.card, this.graph())
@@ -864,13 +850,11 @@ export class Workspace {
     })
   }
   /**
-   * Rex's focus moved to a fiber, which outranks any move still waiting to reach
-   * Rex. A fiber on the open map is flown to in place; one on another map lands
-   * there; a page of the fiber's own channel stands; anything else opens. None
-   * of these speaks back to Rex.
+   * Rex's focus moved to a fiber. A fiber on the open map is flown to in place;
+   * one on another map lands there; a page of the fiber's own channel stands;
+   * anything else opens. None of these speaks back to Rex.
    */
   follow(id: string, owner: string): void {
-    this.rex.hold()
     const state = this.current, known = this.opts.cards().find(card => (card.uid === id || card.id === id) && card.originId === owner)
     if (known && this.mapPage(state)?.flyTo(known)) return
     const shown = state?.card
@@ -1060,7 +1044,6 @@ export class Workspace {
   private stopTimer(): void { if (this.timer !== null) window.clearTimeout(this.timer); this.timer = null }
   private readonly visibility = (): void => { if (document.hidden) this.stopTimer(); else if (this.isActive) this.startTimer() }
   dispose(): void {
-    this.rex.hold()
     this.mentions.dispose()
     this.disposed = true
     this.routeEpoch++

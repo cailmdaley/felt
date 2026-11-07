@@ -20,12 +20,11 @@ const done = card({ id: 'hub/d', name: 'Done', orchestrator: 'hub', status: 'clo
 const draft = card({ id: 'hub/draft', name: 'Draft', orchestrator: 'hub', status: 'open', createdAt: when(50) })
 const cards = [root, asked, idle, done, draft]
 
-const rexMock = (): { open: Mock; settle: Mock; hold: Mock } => ({ open: vi.fn(), settle: vi.fn(), hold: vi.fn() })
-function page(open = vi.fn(), feed = feeds, place: MapPlace = { focus: null, view: null }, known = cards): { page: FamilyPage; open: typeof open; rex: ReturnType<typeof rexMock>; place: MapPlace } {
-  const rex = rexMock(), family = new FamilyPage(open, rex, feed, place, vi.fn())
+function page(open = vi.fn(), feed = feeds, place: MapPlace = { focus: null, view: null }, known = cards): { page: FamilyPage; open: typeof open; converse: Mock; place: MapPlace } {
+  const converse = vi.fn(), family = new FamilyPage(open, converse, feed, place, vi.fn())
   document.body.append(family.el)
   family.update(root, new ThreadIndex(known), now)
-  return { page: family, open, rex, place }
+  return { page: family, open, converse, place }
 }
 const stageOf = (family: FamilyPage): HTMLElement => family.el.querySelector<HTMLElement>('[role="listbox"]')!
 const click = (el: Element): void => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })) }
@@ -155,16 +154,16 @@ it('peeks as the pointer rests on a thread, and keeps it after the pointer leave
 })
 it('comes to a thread on a first tap and opens its conversation on the second', () => {
   const held = card({ ...idle, sessionUuid: 'session-idle' })
-  const { page: family, rex, place } = page(vi.fn(), feeds, undefined, [root, asked, held, done, draft])
+  const { page: family, converse, place } = page(vi.fn(), feeds, undefined, [root, asked, held, done, draft])
   const mark = option(family, 'Idle')
   pointer(mark, 'pointerdown', 'touch')
   click(mark)
-  expect(rex.settle).not.toHaveBeenCalled()
+  expect(converse).not.toHaveBeenCalled()
   expect(place.focus).toContain('hub/w')
   expect(peekName(family)).toBe('Idle')
   pointer(mark, 'pointerdown', 'touch')
   click(mark)
-  expect(rex.settle).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/w' }))
+  expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/w' }))
 })
 it('shows the selected thread\'s sent files in the peek, marks the unread, and opens one', () => {
   const files = Array.from({ length: 6 }, (_, n) => ({ key: `doc-${n}`, name: `f${n}.html`, at: now - n * hour, unread: n === 0 }))
@@ -189,7 +188,7 @@ it('keeps the selection and each mark\'s element across a repaint, so a moved th
   expect(mark.getAttribute('aria-selected')).toBe('true')
 })
 it('lands on the open thread on a thread\'s map, and repaints only when something changed', () => {
-  const family = new FamilyPage(vi.fn(), rexMock(), feeds, { focus: null, view: null }, vi.fn()), index = new ThreadIndex(cards)
+  const family = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, vi.fn()), index = new ThreadIndex(cards)
   family.update(idle, index, now)
   expect(peekName(family)).toBe('Idle')
   const stage = family.el.querySelector('[role="listbox"]')!, marks = stage.querySelector('.fm-stars')
@@ -305,7 +304,7 @@ it('leaves keys on its controls and modified keys alone', () => {
 it('disconnects its observer and tells its owner when its frame is evicted', () => {
   const disconnect = vi.fn(), disposed = vi.fn()
   vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect = disconnect })
-  const family = new FamilyPage(vi.fn(), rexMock(), feeds, { focus: null, view: null }, disposed)
+  const family = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, disposed)
   disposeFileViewer(family.el)
   expect(disconnect).toHaveBeenCalledOnce()
   expect(disposed).toHaveBeenCalledOnce()
@@ -369,7 +368,7 @@ it('draws a drag with the newest model, not the one it began on', () => {
 
 it('offers a thread with a worker its conversation from the peek', () => {
   const root = card({ id: 'hub' }), thread = card({ id: 'hub/a', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting', terminalBackend: 'rex' })
-  const rex = rexMock(), converse = rex.open, page = new FamilyPage(vi.fn(), rex, { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, () => {})
+  const converse = vi.fn(), page = new FamilyPage(vi.fn(), converse, { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, () => {})
   document.body.append(page.el)
   page.update(root, new ThreadIndex([root, thread]))
   expect(page.selection?.id).toBe('hub/a')
@@ -393,15 +392,14 @@ describe('coming to a thread', () => {
 
   it.each(['sky', 'rings', 'spiral'])('flies the %s to the thread and opens its conversation, staying on the page', async drawing => {
     stored.set('shuttle.family.drawing', drawing)
-    const { page: family, open, rex, place } = page(vi.fn(), holding, undefined, tree)
+    const { page: family, open, converse, place } = page(vi.fn(), holding, undefined, tree)
     const stage = stageOf(family)
     expect(stage.classList.contains('family-map-zoomed')).toBe(false)
     click(option(family, 'Mid'))
     expect(stage.classList.contains('family-map-flying')).toBe(true)
     expect(stage.classList.contains('family-map-zoomed')).toBe(true)
-    expect(rex.settle).toHaveBeenCalledTimes(1)
-    expect(rex.settle).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }))
-    expect(rex.open).not.toHaveBeenCalled()
+    expect(converse).toHaveBeenCalledTimes(1)
+    expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }))
     expect(open).not.toHaveBeenCalled()
     expect(place.focus).toContain('hub/mid')
     expect(option(family, 'Mid').hasAttribute('data-focus')).toBe(true)
@@ -410,16 +408,16 @@ describe('coming to a thread', () => {
     expect(named(family)).toEqual(['Tapestry', 'Constitution', 'fresh.png', 'notes.md'])
   })
   it('counts a body\'s double-click as one coming, so one conversation opens', () => {
-    const { page: family, rex } = page(vi.fn(), holding, undefined, tree)
+    const { page: family, converse } = page(vi.fn(), holding, undefined, tree)
     const mark = option(family, 'Mid')
     mark.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
     mark.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
-    expect(rex.settle).toHaveBeenCalledTimes(1)
+    expect(converse).toHaveBeenCalledTimes(1)
   })
   it('opens no conversation for a thread that has neither worker nor session', () => {
-    const { page: family, rex } = page()
+    const { page: family, converse } = page()
     click(option(family, 'Asked'))
-    expect(rex.settle).not.toHaveBeenCalled()
+    expect(converse).not.toHaveBeenCalled()
   })
   it('unfolds a thread in fixed places: tapestry largest, constitution small, files newest first, its threads opposite', async () => {
     const { page: family } = page(vi.fn(), holding, undefined, tree)
@@ -453,38 +451,36 @@ describe('coming to a thread', () => {
     expect(bare.get('fiber:local:hub/mid')).toBe(whole.get('fiber:local:hub/mid'))
   })
   it('opens the constitution from its place, and no conversation', async () => {
-    const open = vi.fn(), { page: family, rex } = page(open, holding, undefined, tree)
+    const open = vi.fn(), { page: family, converse } = page(open, holding, undefined, tree)
     click(option(family, 'Mid'))
     await settled()
-    rex.settle.mockClear()
+    converse.mockClear()
     family.el.querySelector<HTMLElement>('.fm-held[data-kind="constitution"]')!.click()
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }), expect.stringMatching(/^fiber:/))
-    expect(rex.settle).not.toHaveBeenCalled()
+    expect(converse).not.toHaveBeenCalled()
   })
   it('opens a held file on the stage, leaving the place it left for Back to find', async () => {
-    const open = vi.fn(), { page: family, place, rex } = page(open, holding, undefined, tree)
+    const open = vi.fn(), { page: family, place, converse } = page(open, holding, undefined, tree)
     click(option(family, 'Mid'))
-    rex.settle.mockClear()
+    converse.mockClear()
     await settled()
     const way = [...family.el.querySelectorAll<HTMLElement>('.fm-held')].find(el => el.textContent?.includes('notes.md'))!
     way.click()
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }), 'doc:notes.md')
-    expect(rex.settle).not.toHaveBeenCalled()
+    expect(converse).not.toHaveBeenCalled()
     expect(place.focus).toContain('hub/mid')
-    const again = new FamilyPage(open, rexMock(), holding, place, vi.fn())
+    const again = new FamilyPage(open, vi.fn(), holding, place, vi.fn())
     document.body.append(again.el)
     again.update(root, new ThreadIndex(tree), now)
     expect(again.el.querySelector('[role="listbox"]')!.classList.contains('family-map-zoomed')).toBe(true)
     expect(option(again, 'Mid').hasAttribute('data-focus')).toBe(true)
   })
   it('steps out one level at a time, along the tree, to the whole; then has nowhere further', () => {
-    const { page: family, place, rex } = page(vi.fn(), holding, undefined, tree)
+    const { page: family, place } = page(vi.fn(), holding, undefined, tree)
     click(option(family, 'Leaf a'))
     expect(place.focus).toContain('hub/mid/a')
     expect(family.outward).toBe('Mid')
-    rex.hold.mockClear()
     expect(family.stepOut()).toBe(true)
-    expect(rex.hold).toHaveBeenCalledOnce()
     expect(place.focus?.endsWith('hub/mid')).toBe(true)
     expect(family.outward).toBe('Whole family')
     expect(family.stepOut()).toBe(true)
@@ -503,30 +499,29 @@ describe('coming to a thread', () => {
     expect(place.focus).toBeNull()
   })
   it('flies for Rex without speaking to Rex, and refuses a thread it has no place for', () => {
-    const { page: family, rex, place } = page(vi.fn(), holding, undefined, tree)
+    const { page: family, converse, place } = page(vi.fn(), holding, undefined, tree)
     expect(family.flyTo(hubMid)).toBe(true)
     expect(place.focus).toContain('hub/mid')
     expect(place.worker).toContain('hub/mid')
-    expect(rex.settle).not.toHaveBeenCalled()
-    expect(rex.open).not.toHaveBeenCalled()
+    expect(converse).not.toHaveBeenCalled()
     expect(family.flyTo(card({ id: 'elsewhere' }))).toBe(false)
   })
   it('marks the worker Rex holds wherever the view goes, stepping out and panning leaving it be', () => {
-    const { page: family, rex, place } = page(vi.fn(), holding, undefined, tree)
+    const { page: family, converse, place } = page(vi.fn(), holding, undefined, tree)
     click(option(family, 'Mid'))
     expect(option(family, 'Mid').hasAttribute('data-worker')).toBe(true)
-    rex.settle.mockClear()
+    converse.mockClear()
     family.stepOut()
     expect(place.focus).toBeNull()
     expect(place.worker).toContain('hub/mid')
     expect(option(family, 'Mid').hasAttribute('data-worker')).toBe(true)
-    expect(rex.settle).not.toHaveBeenCalled()
+    expect(converse).not.toHaveBeenCalled()
   })
   it('holds a constitution with no threads unfolded, with nowhere to step out to', async () => {
     const lone = card({ id: 'lone', name: 'Lone', status: 'active', createdAt: when(30), sessionUuid: 'session-lone' })
     const feed: FamilyFeeds = { ...holding, files: () => sent, lead: async () => lead }
     const place: MapPlace = { focus: null, view: null }
-    const family = new FamilyPage(vi.fn(), rexMock(), feed, place, vi.fn())
+    const family = new FamilyPage(vi.fn(), vi.fn(), feed, place, vi.fn())
     document.body.append(family.el)
     family.update(lone, new ThreadIndex([lone]), now)
     await settled()
@@ -535,6 +530,31 @@ describe('coming to a thread', () => {
     expect(named(family)).toEqual(['Tapestry', 'Constitution', 'fresh.png', 'notes.md'])
     expect(family.outward).toBeUndefined()
     expect(family.stepOut()).toBe(false)
+  })
+  it('shows every body in view what it holds as a hand zooms, moving none of them and leaving Rex alone', async () => {
+    const reads = vi.fn(async () => lead)
+    const { page: family, converse, place } = page(vi.fn(), { ...holding, files: () => sent, lead: reads }, undefined, tree)
+    const stage = stageOf(family), plate = stage.querySelector<HTMLElement>('.fm-sky-plate')!
+    plate.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 680, width: 1000, height: 680 }) as DOMRect
+    const before = option(family, 'Leaf a').style.transform
+    vi.useFakeTimers()
+    for (let n = 0; n < 12; n++) plate.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -60, clientX: 500, clientY: 340 }))
+    vi.advanceTimersByTime(300)
+    vi.useRealTimers()
+    await settled()
+    expect(place.view).not.toBeNull()
+    expect(stage.querySelectorAll('.fm-mini').length + stage.querySelectorAll('.fm-held').length).toBeGreaterThan(0)
+    expect(stage.querySelector('.fm-star[data-far]')).toBeNull()
+    expect(option(family, 'Leaf a').hasAttribute('data-near')).toBe(false)
+    expect(before).not.toBe('')
+    expect(converse).not.toHaveBeenCalled()
+  })
+  it('opens a body\'s file from its miniature, for that body', async () => {
+    const open = vi.fn(), place: MapPlace = { focus: null, view: { k: 3, x: -1, y: -1 } }
+    const family = page(open, { ...holding, files: () => sent, lead: async () => lead }, place, tree).page
+    await settled()
+    const way = family.el.querySelector<HTMLElement>('.fm-mini')
+    if (way) { way.click(); expect(open).toHaveBeenCalledWith(expect.anything(), way.dataset.held) }
   })
   it('keeps the thread in frame as the family moves, and leaves the view where a hand put it', () => {
     const { page: family, place } = page(vi.fn(), holding, undefined, tree)
@@ -547,17 +567,17 @@ describe('coming to a thread', () => {
   })
   it('opens a row\'s fold in the cloth, with the conversation, and leaves each file a way in', async () => {
     stored.set('shuttle.family.drawing', 'cloth')
-    const open = vi.fn(), { page: family, rex, place } = page(open, holding, undefined, tree)
+    const open = vi.fn(), { page: family, converse, place } = page(open, holding, undefined, tree)
     click(option(family, 'Mid'))
-    expect(rex.settle).toHaveBeenCalledTimes(1)
+    expect(converse).toHaveBeenCalledTimes(1)
     await settled()
     const files = [...family.el.querySelectorAll<HTMLElement>('.fm-fold-file')]
     expect(files.map(way => way.querySelector('.fm-fold-name')?.textContent)).toEqual(['Tapestry', 'fresh.png', 'notes.md', 'Constitution'])
     expect(files[1].hasAttribute('data-unread')).toBe(true)
-    rex.settle.mockClear()
+    converse.mockClear()
     files[0].click()
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }), 'doc:tapestry')
-    expect(rex.settle).not.toHaveBeenCalled()
+    expect(converse).not.toHaveBeenCalled()
     expect(family.stepOut()).toBe(true)
     expect(place.focus).toBeNull()
     expect(family.el.querySelector('.fm-fold-file')).toBeNull()

@@ -5,8 +5,10 @@ import type { Plate } from './orbit.js'
 import './family-map.css'
 
 export type OpenThread = (thread: MapThread) => void
-/** The thread the map has come to, what is known of its tapestry, and its constitution's page. */
-export interface Focus { key: string; lead?: MapFile; constitution?: MapFile }
+/** The pages every thread has a place for, as far as they are known. */
+export interface Holds { lead?: MapFile; constitution?: MapFile }
+/** What the map shows beyond its bodies: the thread it has unfolded, whether that thread's own threads gather to it, and what any thread holds. */
+export interface Sight { key: string | null; gather: boolean; holds(thread: MapThread): Holds }
 /** One way of drawing the family: repainting into the same host keeps its elements, so they can move. */
 export interface Drawing {
   name: string
@@ -19,8 +21,8 @@ export interface Drawing {
   folds?: boolean
   /** Where everything sits at the whole field, on a drawing with a field to zoom. */
   layout?(model: FamilyModel, width: number, height: number): Plate
-  /** `view` is the field's zoom, where the drawing has a field to zoom; `focus` the thread it unfolds. */
-  draw(host: HTMLElement, model: FamilyModel, open: OpenThread, view: View, focus: Focus | null): void
+  /** `view` is the field's zoom, where the drawing has a field to zoom; `sight` what it shows beyond its bodies. */
+  draw(host: HTMLElement, model: FamilyModel, open: OpenThread, view: View, sight: Sight | null): void
 }
 export interface Stage { width: number; height: number; narrow: boolean }
 export interface Point { x: number; y: number }

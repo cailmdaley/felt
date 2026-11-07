@@ -1,5 +1,5 @@
 import type { FamilyModel, MapFile, MapThread } from './model.js'
-import type { Focus, Point } from './drawing.js'
+import type { Holds, Point } from './drawing.js'
 
 /** The scale from which a focused thread unfolds what it holds. */
 export const REVEAL = 2.4
@@ -18,6 +18,11 @@ const SLOT_TOP = -.5
 const SLOT_STEP = .225
 /** A side's heading sits between the crown and the first place. */
 const KICKER = -.68
+/** How many files a body in view shows before its names do, and how far out from it they sit, growing with the view. */
+const MINI_FILES = 5
+const MINI_REACH = 12
+const MINI_GROWTH = 9
+const MINI_MOST = 36
 /** A phone stacks every place in a column below the thread's name: one row each for the tapestry and the constitution, then these for files. */
 const ROW = 27
 const NARROW_DROP = 62
@@ -44,9 +49,15 @@ export interface Locality {
   r: number
   reach: number
   held: Satellite[]
-  /** The thread's own threads, gathered to their places. */
+  /** The thread's own threads, gathered to their places; none when a hand brought the view here, so nothing moves under it. */
   kids: Slot[]
+  gathered: boolean
   kickers: Kicker[]
+}
+/** A body in view with what it holds at its fixed places, in small and unnamed. */
+export interface Mini {
+  thread: MapThread
+  marks: Array<Point & { file: MapFile; kind: HeldKind }>
 }
 
 /** A thread's own threads the plate draws, most urgent first. */
@@ -61,10 +72,10 @@ const kidsOf = (model: FamilyModel, thread: MapThread, drawn: ReadonlySet<string
  * left, what does not fit counted in a side's last place. On a phone the same
  * places run down one column, below the thread's name.
  */
-export function unfold(model: FamilyModel, thread: MapThread, focus: Focus, frame: { width: number; height: number; narrow: boolean }, at: Point, body: number, drawn: ReadonlySet<string>): Locality {
-  const { width, height, narrow } = frame, { lead, constitution } = focus
+export function unfold(model: FamilyModel, thread: MapThread, holds: Holds, gather: boolean, frame: { width: number; height: number; narrow: boolean }, at: Point, body: number, drawn: ReadonlySet<string>): Locality {
+  const { width, height, narrow } = frame, { lead, constitution } = holds
   const files = thread.files.filter(file => file.key !== lead?.key)
-  const r = Math.max(body, FOCUS_BODY), kids = kidsOf(model, thread, drawn)
+  const r = Math.max(body, FOCUS_BODY), kids = gather ? kidsOf(model, thread, drawn) : []
   const reach = narrow ? 0 : Math.round(Math.min(REACH_MOST, Math.max(REACH_LEAST, Math.min(width, height) * .24)))
   const satellite = (place: Point, side: 'left' | 'right', kind: HeldKind, room: number, file?: MapFile, more = 0): Satellite => ({ ...place, file, kind, more, side, room })
   if (narrow) {
@@ -78,7 +89,7 @@ export function unfold(model: FamilyModel, thread: MapThread, focus: Focus, fram
       ...(files.length > shown.length ? [satellite(row(2 + shown.length), 'right', 'file', room, undefined, files.length - shown.length)] : []),
     ]
     const places = Math.max(0, Math.floor((height - row(2 + NARROW_FILES).y) / ROW))
-    return { thread, at, r, reach, held, kickers: [], kids: kids.slice(0, places).map((kid, n) => ({ ...row(2 + NARROW_FILES + n), thread: kid, r: 7, room, side: 'right' })) }
+    return { thread, at, r, reach, held, kickers: [], gathered: gather, kids: kids.slice(0, places).map((kid, n) => ({ ...row(2 + NARROW_FILES + n), thread: kid, r: 7, room, side: 'right' })) }
   }
   const place = (share: number, side: 'left' | 'right'): Point => ({ x: at.x + (side === 'right' ? 1 : -1) * reach * Math.sqrt(1 - share ** 2), y: at.y + reach * share })
   const slot = (n: number, side: 'left' | 'right'): Point => place(SLOT_TOP + n * SLOT_STEP, side)
@@ -97,7 +108,22 @@ export function unfold(model: FamilyModel, thread: MapThread, focus: Focus, fram
     ...(kids.length ? [{ label: `Threads · ${kids.length}`, side: 'left' as const, ...place(KICKER, 'left') }] : []),
   ]
   return {
-    thread, at, r, reach, held, kickers,
+    thread, at, r, reach, held, kickers, gathered: gather,
     kids: gathered.map((kid, n) => ({ ...slot(n, 'left'), thread: kid, r: KID_MOST, room: room(slot(n, 'left'), 'left'), side: 'left' })),
+  }
+}
+
+/** A body's holdings in miniature, at the same places as when it unfolds, nearer it the shallower the view. */
+export function miniature(thread: MapThread, holds: Holds, at: Point, body: number, k: number): Mini {
+  const reach = body + Math.min(MINI_MOST, MINI_REACH + (k - REVEAL) * MINI_GROWTH)
+  const place = (share: number, side: 'left' | 'right'): Point => ({ x: at.x + (side === 'right' ? 1 : -1) * reach * Math.sqrt(1 - share ** 2), y: at.y + reach * share })
+  const files = thread.files.filter(file => file.key !== holds.lead?.key).slice(0, MINI_FILES)
+  return {
+    thread,
+    marks: [
+      ...(holds.lead ? [{ ...place(CROWN, 'right'), file: holds.lead, kind: 'lead' as const }] : []),
+      ...(holds.constitution ? [{ ...place(CROWN, 'left'), file: holds.constitution, kind: 'constitution' as const }] : []),
+      ...files.map((file, n) => ({ ...place(SLOT_TOP + n * SLOT_STEP, 'right'), file, kind: 'file' as const })),
+    ],
   }
 }

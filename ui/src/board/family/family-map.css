@@ -101,7 +101,7 @@
 .family-map .fm-star[data-focus] .fm-star-halo { fill-opacity: .16; }
 .family-map .fm-orbit { fill: none; stroke: var(--ws-hairline); stroke-width: .75; stroke-dasharray: 1 5; stroke-linecap: round; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .4s ease-out; }
 .family-map .fm-tether { fill: none; stroke: var(--ws-ink-muted); stroke-opacity: .45; stroke-width: .75; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .4s ease-out; }
-.family-map .fm-helds, .family-map .fm-kickers, .family-map .fm-focus-names, .family-map .fm-arm-names { position: absolute; inset: 0; pointer-events: none; }
+.family-map .fm-helds, .family-map .fm-kickers, .family-map .fm-minis, .family-map .fm-focus-names, .family-map .fm-arm-names { position: absolute; inset: 0; pointer-events: none; }
 .family-map .fm-held { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 7px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); text-align: left; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; animation: fm-emerge .34s ease-out .14s backwards; }
 button.fm-held { cursor: pointer; }
 .family-map .fm-held[data-side='left'] { flex-direction: row-reverse; text-align: right; }
@@ -122,6 +122,11 @@ button.fm-held { cursor: pointer; }
 .family-map div.fm-held .fm-held-mark { visibility: hidden; }
 .family-map button.fm-held:hover { background: var(--ws-hover); }
 .family-map button.fm-held:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
+.family-map .fm-mini { position: absolute; top: 0; left: 0; width: 14px; height: 14px; padding: 0; border: 0; background: transparent; cursor: pointer; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .3s ease-out; }
+.family-map .fm-mini .fm-held-mark { width: 14px; height: 14px; }
+.family-map .fm-mini[data-kind='lead'] .fm-held-sheet { fill: var(--ws-ink); stroke: var(--ws-paper); stroke-width: .75; }
+.family-map .fm-mini[data-unread] .fm-held-new { fill: var(--ws-fresh); stroke: var(--ws-paper); stroke-width: 1; paint-order: stroke; }
+.family-map .fm-mini:hover { background: var(--ws-hover); }
 .family-map .fm-held-kicker { position: absolute; top: 0; left: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .4s ease-out; }
 .family-map .fm-held-kicker[data-side='left'] { translate: -100% 0; }
 .family-map .fm-star[data-worker] .fm-star-ring { stroke: var(--fm-tone); stroke-width: 2; stroke-dasharray: none; }

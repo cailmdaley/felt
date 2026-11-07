@@ -1,7 +1,7 @@
 import { isDrawn, needsHuman, type FamilyModel, type MapThread } from './model.js'
 import { WHOLE, held, type View } from './zoom.js'
-import { REVEAL, unfold, type Locality, type Satellite } from './locality.js'
-import { TIME_MARKS, htmlEl, lay, markPath, optionFor, part, reconcile, shortAgo, spread, svgEl, tagThread, type Focus, type Point } from './drawing.js'
+import { REVEAL, miniature, unfold, type Locality, type Mini, type Satellite } from './locality.js'
+import { TIME_MARKS, htmlEl, lay, markPath, optionFor, part, reconcile, shortAgo, spread, svgEl, tagThread, type Point, type Sight } from './drawing.js'
 
 /** The drawings on a disc share this plate: bodies, fine arcs, names on the rim, a ledger on a phone, and a focused thread unfolded in place. */
 export const TURN = 2 * Math.PI
@@ -18,6 +18,8 @@ const DISC_MIN = 120
 /** A satellite's row, as family-map.css sets it. */
 const HELD_ROW = 24
 const FOCUS_NAME = 190
+/** A miniature's button, as family-map.css sets it. */
+const MINI_MARK = 14
 const BODY_MAX = 15
 /** The field's fine grid. */
 const GRID_RINGS = 22
@@ -40,6 +42,8 @@ const FOCUS_Y_NARROW = .14
 /** How far from the plate's middle a body can be and still be the one a hand has zoomed to, as a share of the plate. */
 const SIGHT = .3
 const GATHERED_LEAST = 4
+/** How many bodies in view show what they hold. */
+const MINIS = 8
 
 export interface Star extends Point { thread: MapThread; angle: number; r: number }
 export interface SkyLabel extends Point { thread: MapThread; numeral: number; width: number; side: 'left' | 'right'; rim?: Point }
@@ -72,6 +76,8 @@ export interface Plate {
   arms?: ArmName[]
   /** The thread unfolded around its body, and the threads gathered to it. */
   locality?: Locality
+  /** Bodies in view with what they hold, in miniature. */
+  minis?: Mini[]
 }
 export interface ArmName extends Point { label: string; side: 'left' | 'right' }
 
@@ -242,11 +248,11 @@ export function sighted(plate: Plate, view: View, kept: string | null): string |
 
 /** A gathered thread's body: its own, within its slot, and never too small to see. */
 const gatheredBody = (r: number, slot: number): number => Math.max(GATHERED_LEAST, Math.min(r, slot))
-/** Unfolds the focused thread where it now sits, its threads gathered from the field onto its orbit. */
-function gathered(plate: Plate, stars: Star[], model: FamilyModel, focus: Focus): Pick<Plate, 'stars' | 'locality' | 'labels'> | null {
-  const thread = model.threads.get(focus.key), centre = stars.find(star => star.thread === thread)
+/** Unfolds the focused thread where it now sits, its threads gathered from the field onto its places when the map flew there. */
+function gathered(plate: Plate, stars: Star[], model: FamilyModel, sight: Sight): Pick<Plate, 'stars' | 'locality' | 'labels'> | null {
+  const thread = sight.key ? model.threads.get(sight.key) : undefined, centre = stars.find(star => star.thread === thread)
   if (!thread || !centre) return null
-  const locality = unfold(model, thread, focus, plate, centre, centre.r, new Set(stars.map(star => star.thread.key)))
+  const locality = unfold(model, thread, sight.holds(thread), sight.gather, plate, centre, centre.r, new Set(stars.map(star => star.thread.key)))
   const slots = new Map(locality.kids.map(slot => [slot.thread, slot]))
   return {
     locality,
@@ -261,13 +267,21 @@ function gathered(plate: Plate, stars: Star[], model: FamilyModel, focus: Focus)
     }),
   }
 }
+/** What an unfolded thread's names take up, for other names to keep clear of. */
+const heldBoxes = (locality: Locality): Box[] => [
+  ...locality.held.map(item => ({ left: item.side === 'right' ? item.x - 8 : item.x - item.room, right: item.side === 'right' ? item.x + item.room : item.x + 8, top: item.y - HELD_ROW / 2, bottom: item.y + HELD_ROW / 2 })),
+  { left: locality.at.x - FOCUS_NAME / 2, right: locality.at.x + FOCUS_NAME / 2, top: locality.at.y + locality.r, bottom: locality.at.y + locality.r + 3 * LABEL_ROW },
+]
 
 /**
  * The plate seen through a zoomed view: its geometry scaled, its marks their
- * reading size, a name on every thread in view with room for one, and past
- * `REVEAL` the focused thread unfolded in place of those names.
+ * reading size, and what shows growing with the scale. Every body in view takes
+ * a name where it has room. From `REVEAL` the focused thread unfolds at full
+ * size and the bodies nearest the middle show what they hold in miniature, the
+ * bodies staying where they are; a flight's arrival instead gathers the
+ * thread's own threads, steps the field back and gives the stage to that thread.
  */
-export function zoomPlate(plate: Plate, view: View, model: FamilyModel, focus: Focus | null, numeral: (thread: MapThread) => number = thread => thread.rank + 1): Plate {
+export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: Sight | null, numeral: (thread: MapThread) => number = thread => thread.rank + 1): Plate {
   const { k } = view
   if (k === 1) return plate
   const { width, height } = plate, dx = view.x * width, dy = view.y * height
@@ -278,11 +292,15 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, focus: F
     rings: plate.rings.map(ring => ({ ...ring, radius: ring.radius * k })), grid: plate.grid.map(radius => radius * k),
     arms: plate.arms?.map(arm => ({ ...arm, x: arm.x * k + dx, y: arm.y * k + dy })),
   }
-  const unfolded = focus && k >= REVEAL ? gathered(zoomed, stars, model, focus) : null
-  if (unfolded) return { ...zoomed, ...unfolded }
+  const deep = sight && k >= REVEAL ? sight : null
+  const unfolded = deep ? gathered(zoomed, stars, model, deep) : null
+  if (unfolded?.locality?.gathered) return { ...zoomed, ...unfolded }
+  const focused = unfolded?.locality?.thread
   const inView = stars.filter(star => star.x >= 0 && star.x <= width && star.y >= 0 && star.y <= height)
-  const named = inView.filter(star => isDrawn(star.thread)).sort((a, b) => numeral(a.thread) - numeral(b.thread))
-  return { ...zoomed, labels: nearLabels(inView, named, numeral, cx, width, height) }
+  const named = inView.filter(star => isDrawn(star.thread) && star.thread !== focused).sort((a, b) => numeral(a.thread) - numeral(b.thread))
+  const middle = (star: Star): number => Math.hypot(star.x - width / 2, star.y - height / 2)
+  const minis = deep ? named.slice().sort((a, b) => middle(a) - middle(b)).slice(0, MINIS).map(star => miniature(star.thread, deep.holds(star.thread), star, star.r, k)) : []
+  return { ...zoomed, ...unfolded, minis, labels: nearLabels(inView, named, numeral, cx, width, height, unfolded?.locality ? heldBoxes(unfolded.locality) : []) }
 }
 
 function drawLinks(layer: SVGGElement, plate: Plate): void {
@@ -296,7 +314,7 @@ function drawLinks(layer: SVGGElement, plate: Plate): void {
     path.setAttribute('data-link', item.thread.key)
     path.setAttribute('data-standing', item.thread.tone)
     path.toggleAttribute('data-merged', item.thread.merged)
-    path.toggleAttribute('data-far', !!plate.locality && !near.has(item.thread))
+    path.toggleAttribute('data-far', !!plate.locality?.gathered && !near.has(item.thread))
     lay(path, star.get(item.thread.parent!)!, item)
   })
 }
@@ -347,7 +365,7 @@ function drawStars(layer: SVGGElement, plate: Plate, model: FamilyModel): void {
     group.toggleAttribute('data-root', thread === model.root)
     group.toggleAttribute('data-merged', thread.merged)
     group.toggleAttribute('data-focus', thread === plate.locality?.thread)
-    group.toggleAttribute('data-far', !!plate.locality && thread !== plate.locality.thread && !near.has(thread))
+    group.toggleAttribute('data-far', !!plate.locality?.gathered && thread !== plate.locality.thread && !near.has(thread))
     group.toggleAttribute('data-near', near.has(thread))
     group.toggleAttribute('data-current', thread.key === model.current && thread !== model.root)
     group.style.transform = `translate(${item.x.toFixed(1)}px, ${item.y.toFixed(1)}px)`
@@ -450,7 +468,7 @@ function drawHeld(svg: SVGSVGElement, layer: HTMLElement, plate: Plate, model: F
     way.dataset.side = item.side
     way.dataset.kind = item.kind
     way.toggleAttribute('data-unread', !!item.file?.unread)
-    if (item.file) way.dataset.held = item.file.key
+    if (item.file) { way.dataset.held = item.file.key; way.dataset.owner = local!.thread.key }
     way.style.width = `${width}px`
     way.style.transform = `translate(${(right ? item.x - 8 : item.x + 8 - width).toFixed(1)}px, ${(item.y - HELD_ROW / 2).toFixed(1)}px)`
     way.style.setProperty('--fm-from-x', `${(at.x - item.x).toFixed(1)}px`)
@@ -463,6 +481,22 @@ function drawHeld(svg: SVGSVGElement, layer: HTMLElement, plate: Plate, model: F
     el.textContent = kicker.label
     el.dataset.side = kicker.side
     el.style.transform = `translate(${(kicker.x + (kicker.side === 'right' ? 8 : -8)).toFixed(1)}px, ${(kicker.y - 8).toFixed(1)}px)`
+  })
+  reconcile(part(layer.parentElement!, 'fm-minis', cls => htmlEl('div', cls)), plate.minis ?? [], mini => mini.thread.key, () => htmlEl('div', 'fm-mini-set'), (set, mini) => {
+    set.dataset.owner = mini.thread.key
+    reconcile(set, mini.marks, mark => mark.file.key, () => {
+      const way = htmlEl('button', 'fm-mini'); way.type = 'button'
+      way.append(heldMark())
+      return way
+    }, (way, mark) => {
+      way.dataset.held = mark.file.key
+      way.dataset.owner = mini.thread.key
+      way.dataset.kind = mark.kind
+      way.title = mark.file.name
+      way.setAttribute('aria-label', `${mark.file.name}, ${mini.thread.name}`)
+      way.toggleAttribute('data-unread', mark.file.unread)
+      way.style.transform = `translate(${(mark.x - MINI_MARK / 2).toFixed(1)}px, ${(mark.y - MINI_MARK / 2).toFixed(1)}px)`
+    })
   })
   const named = part(layer.parentElement!, 'fm-focus-names', cls => htmlEl('div', cls))
   reconcile(named, local ? [local] : [], () => 'focus', () => {

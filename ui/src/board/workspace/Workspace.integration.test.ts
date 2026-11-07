@@ -933,7 +933,7 @@ describe('workspace reader integration', () => {
     expect(selected()).toBe('family:host-a:lone')
     expect(conversation).not.toHaveBeenCalled()
   })
-  it('moves Rex once the map rests on a click, once for a drill down, and not at all on the way out', async () => {
+  it('moves Rex at once on a click at any depth, and not at all on the way out', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), thread({ id: 'hub/mid/leaf', orchestrator: 'hub-mid', status: 'active' })]
@@ -942,22 +942,15 @@ describe('workspace reader integration', () => {
     const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true)
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
     workspace.openFromDesk(feed[0]); await flush()
+    expect(conversation.mock.calls.map(([opened]) => opened.id)).toEqual(['hub'])
+    conversation.mockClear()
     const body = (name: string): Element => document.querySelector(`.ws-selected [role="option"][aria-label^="${name},"]`)!
-    vi.useFakeTimers()
-    try {
-      body('hub/mid').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      vi.advanceTimersByTime(300)
-      body('hub/mid/leaf').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      vi.advanceTimersByTime(699)
-      conversation.mockClear()
-      vi.advanceTimersByTime(1)
-      expect(conversation.mock.calls.map(([opened]) => opened.id)).toEqual(['hub/mid/leaf'])
-      conversation.mockClear()
-      body('hub/mid').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      workspace.reader.back()
-      vi.advanceTimersByTime(2000)
-      expect(conversation).not.toHaveBeenCalled()
-    } finally { vi.useRealTimers() }
+    body('hub/mid/leaf').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(conversation.mock.calls.map(([opened]) => opened.id)).toEqual(['hub/mid/leaf'])
+    conversation.mockClear()
+    workspace.reader.back(); await flush()
+    workspace.reader.back(); await flush()
+    expect(conversation).not.toHaveBeenCalled()
   })
   it('draws a lone constitution as one body with what it holds, and a draft on its own page', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
