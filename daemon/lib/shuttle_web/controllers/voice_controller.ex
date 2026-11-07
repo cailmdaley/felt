@@ -63,13 +63,13 @@ defmodule ShuttleWeb.VoiceController do
     do: conn |> put_status(400) |> json(%{error: "fiber_id and page are required"})
 
   defp forward_open(open) do
-    own = MeetingRouter.own_host()
+    own = RecorderRouter.own_host()
     body = open |> Map.put(:forwarded, true) |> Jason.encode!()
-    client = OriginRouter.forward_client()
+    client = Shuttle.OriginRouter.forward_client()
 
     for remote <- Shuttle.RegistryCommon.configured_remotes(), remote.name != own do
       Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-        client.post(Remote.url_for(remote, "/api/v1/board/open"), body, "application/json", 2_000)
+        client.post(Shuttle.Remote.url_for(remote, "/api/v1/board/open"), body, "application/json", 2_000)
       end)
     end
   end
