@@ -17,12 +17,12 @@
  * The page's own controls (its segmented settings) keep the act
  * zone's materials and take only a firmer edge, at the end of this sheet. */
 
-:root[data-ws-appearance='dark'] :is(.form-cancel, .set-btn:not(.set-btn-primary, .set-btn-drop), .projpick-addpath-cancel, .capture-meeting-toggle:not([aria-pressed='true'])) {
+:root[data-ws-appearance='dark'] :is(.form-cancel, .set-btn:not(.set-btn-primary, .set-btn-drop), .projpick-addpath-cancel) {
   background: var(--kbn-lift);
   border-color: var(--kbn-lift-edge);
   color: var(--kbn-ink-soft);
 }
-:root[data-ws-appearance='dark'] :is(.form-cancel, .set-btn:not(.set-btn-primary, .set-btn-drop), .projpick-addpath-cancel, .capture-meeting-toggle:not([aria-pressed='true'])):hover:not(:disabled) {
+:root[data-ws-appearance='dark'] :is(.form-cancel, .set-btn:not(.set-btn-primary, .set-btn-drop), .projpick-addpath-cancel):hover:not(:disabled) {
   background: var(--kbn-lift-hover);
   color: var(--kbn-ink);
 }
@@ -30,7 +30,7 @@
   background: var(--kbn-lift);
 }
 
-:root[data-ws-appearance='dark'] :is(.form-btn, .set-btn, .projpick-addpath-go, .projpick-addpath-cancel, .capture-meeting-toggle):disabled {
+:root[data-ws-appearance='dark'] :is(.form-btn, .set-btn, .projpick-addpath-go, .projpick-addpath-cancel):disabled {
   opacity: 1;
   background: transparent;
   border: 1px dashed var(--kbn-lift-edge);

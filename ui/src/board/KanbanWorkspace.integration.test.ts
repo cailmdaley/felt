@@ -4,7 +4,6 @@ import { KanbanModal } from './KanbanModal.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { deskOrder } from './deskOrdering.js'
-import type { MeetingRecord } from './meeting.js'
 import { card, response } from './testFixtures.js'
 
 interface WorkspaceBoard {
@@ -17,9 +16,7 @@ interface WorkspaceBoard {
   workspace: { update(): void; open(card: KanbanCard, origin?: string): void; returnToOrigin(): void; escapeHome(): void; reader?: { el: HTMLElement } }
   lastResponse: KanbanResponse | null
   pendingDeskData: KanbanResponse | null
-  meetingStatus: { meeting: MeetingRecord | null }
   deskProjection: ReturnType<typeof deskOrder>
-  presentMeeting(): void
   deskEl: HTMLDivElement | null
   workspaceCards(): KanbanCard[]
 }
@@ -112,80 +109,6 @@ describe('Desk rows in the document workspace', () => {
     }
   })
 
-  it('keeps a hosted meeting card in the same Desk and Reader position', async () => {
-    const host = card({ id: 'draft' })
-    const otherDraft = card({ id: 'other-draft' })
-    const working = card({ id: 'working', status: 'active', workerState: 'running', runtimePhase: 'working' })
-    const turn = card({ id: 'turn', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
-    const review = card({ id: 'review', status: 'closed' })
-    const data = response({ now: { drafts: [otherDraft, host], inFlight: [working, turn], awaitingReview: [review] } })
-    const meeting: MeetingRecord = {
-      state: 'live', title: null, started_at: null, tail: [], transcript: null, mirror_host: null,
-      fiber: host.id, joined: false, phone: false, launch: null, tmux_session: null, error: null,
-    }
-    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
-    board.fetchAndRender = vi.fn(async () => {})
-    window.history.replaceState(null, '', '#/desk')
-    board.mount(document.body)
-    try {
-      board.meetingStatus.meeting = meeting
-      board.lastResponse = data
-      board.render(data)
-      const drawn = [...board.deskEl!.querySelectorAll<HTMLElement>('[data-fiber-id]')].map(el => el.dataset.fiberId)
-      board.workspace.open(host, 'Desk')
-      await flushTasks()
-      expect(drawn).toEqual(['other-draft', 'turn', 'draft', 'working', 'review'])
-      expect(readerRows(board)).toEqual(drawn)
-    } finally {
-      board.unmount()
-    }
-  })
-
-  it('refreshes Reader columns through meeting start and end without changing row order', async () => {
-    const host = card({ id: 'draft-host' })
-    const working = card({ id: 'working', status: 'active', workerState: 'running', runtimePhase: 'working' })
-    const data = response({ now: { drafts: [host], inFlight: [working], awaitingReview: [] } })
-    const meeting: MeetingRecord = {
-      state: 'live', title: null, started_at: null, tail: [], transcript: null, mirror_host: null,
-      fiber: host.id, joined: false, phone: false, launch: null, tmux_session: null, error: null,
-    }
-    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
-    board.fetchAndRender = vi.fn(async () => {})
-    window.history.replaceState(null, '', '#/desk')
-    board.mount(document.body)
-    try {
-      board.lastResponse = data
-      board.render(data)
-      board.workspace.open(host, 'Desk')
-      await flushTasks()
-      const stops = board.workspace as unknown as { deskStop(card: KanbanCard): string }
-      expect(stops.deskStop(host)).toBe('Drafts')
-      expect(readerRows(board)).toEqual(['draft-host', 'working'])
-
-      const rolePage = card({ id: 'roles/editor', shuttleSeat: true, shuttleRole: 'editor' })
-      board.workspace.open(rolePage, 'Desk')
-      await flushTasks()
-      expect(stops.deskStop(host)).toBe('Drafts')
-
-      board.workspace.update()
-      board.meetingStatus.meeting = meeting
-      board.presentMeeting()
-
-      expect(readerRows(board).filter(id => id !== rolePage.id)).toEqual(['draft-host', 'working'])
-      expect(stops.deskStop(host)).toBe('In flight')
-
-      board.meetingStatus.meeting = null
-      board.presentMeeting()
-
-      expect(readerRows(board).filter(id => id !== rolePage.id)).toEqual(['draft-host', 'working'])
-      expect(stops.deskStop(host)).toBe('Drafts')
-    } finally {
-      board.unmount()
-    }
-  })
-
   it('keeps Desk order and gives an unplaced Reader page an Open stop', async () => {
     const data = response({
       now: {
@@ -211,82 +134,6 @@ describe('Desk rows in the document workspace', () => {
         expect(readerRows(board)).toEqual(['draft', 'working', 'review', 'resting/item', 'roles/seat', page.id])
         expect(stops.deskStop(page)).toBe('Open')
       }
-    } finally {
-      board.unmount()
-    }
-  })
-
-  it('reuses the current projection on a same-host meeting poll and redraws only if the Desk has no list', () => {
-    const host = card({ id: 'meeting-host' })
-    const data = response({ now: { drafts: [host], inFlight: [], awaitingReview: [] } })
-    const meeting: MeetingRecord = {
-      state: 'live', title: null, started_at: null, tail: [], transcript: null, mirror_host: null,
-      fiber: host.id, joined: false, phone: false, launch: null, tmux_session: null, error: null,
-    }
-    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
-    board.fetchAndRender = vi.fn(async () => {})
-    window.history.replaceState(null, '', '#/desk')
-    board.mount(document.body)
-    try {
-      board.meetingStatus.meeting = meeting
-      board.lastResponse = data
-      board.render(data)
-      expect(board.deskEl!.hasChildNodes()).toBe(true)
-      expect(board.deskEl!.querySelector('.kbn-card--meeting')).not.toBeNull()
-      const projection = board.deskProjection
-      const sync = vi.spyOn(board as any, 'syncWorkspaceRuntime')
-
-      board.meetingStatus.meeting = { ...meeting, tail: ['12:00:00 S1  Still recording'] }
-      board.presentMeeting()
-
-      expect(board.deskProjection).toBe(projection)
-      expect(sync).not.toHaveBeenCalled()
-
-      board.deskEl!.replaceChildren()
-      board.presentMeeting()
-
-      expect(sync).toHaveBeenCalledOnce()
-      expect(board.deskEl!.querySelector('.kbn-section-now')).not.toBeNull()
-    } finally {
-      board.unmount()
-    }
-  })
-
-  it('keeps the Desk projection stable across same-host meeting polls while Reader defers the draw', async () => {
-    const host = card({ id: 'meeting-host' })
-    const data = response({ now: { drafts: [host], inFlight: [], awaitingReview: [] } })
-    const meeting: MeetingRecord = {
-      state: 'live', title: null, started_at: null, tail: [], transcript: null, mirror_host: null,
-      fiber: host.id, joined: false, phone: false, launch: null, tmux_session: null, error: null,
-    }
-    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
-    board.fetchAndRender = vi.fn(async () => {})
-    window.history.replaceState(null, '', '#/desk')
-    board.mount(document.body)
-    try {
-      board.lastResponse = data
-      board.render(data)
-      board.workspace.open(host, 'Desk')
-      await flushTasks()
-      const sync = vi.spyOn(board as any, 'syncWorkspaceRuntime')
-
-      board.meetingStatus.meeting = meeting
-      board.presentMeeting()
-      const projection = board.deskProjection
-      expect(sync).toHaveBeenCalledOnce()
-
-      board.meetingStatus.meeting = { ...meeting, tail: ['12:00:00 S1  Still recording'] }
-      board.presentMeeting()
-
-      expect(board.deskProjection).toBe(projection)
-      expect(sync).toHaveBeenCalledOnce()
-
-      board.workspace.escapeHome()
-      await flushTasks()
-      expect(board.deskEl!.querySelector('.kbn-card--meeting')).not.toBeNull()
-      expect(sync).toHaveBeenCalledTimes(2)
     } finally {
       board.unmount()
     }

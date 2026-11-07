@@ -19,11 +19,10 @@
  * Built on AppDialog (Radix) — focus trap, Esc, portal, scroll lock for free.
  * Cmd/Ctrl+Enter submits. The column, the control row, the session and
  * `--chrome` controls and the footer are formKit's, shared with StashForm;
- * the yap (17px, the one field the dialog exists for) and the meeting row are
- * Capture's own.
+ * the yap (17px, the one field the dialog exists for) is Capture's own.
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AppDialog } from './AppDialog'
 import { injectStyles } from './injectStyles'
 import {
@@ -35,11 +34,6 @@ import {
 } from './captureApi'
 import { daemonErrorMessage } from '../board/daemonApi'
 import { isMobileViewport } from '../board/mobile'
-import type { PhoneCaptureAttempt, PhoneCaptureHooks } from '../board/phoneMeeting'
-import { meetingStatusUrl, parseMeetingRecord, type MeetingRecord } from '../board/meeting'
-import { rememberedMeetingProject, rememberMeetingProject } from './meetingProject'
-import { parseCaptureMeetingCapabilities, type MeetingLanguage, type MeetingMode } from './meetingApi'
-import { holdRecordingStart, recordingStartHold, resolveRecordingStart, subscribeRecordingStart } from './recordingStart'
 import { agentGroups, resolveEffort, type AgentEntry } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'
 import type { Host, Project } from './projectModel'
@@ -79,14 +73,10 @@ export interface CaptureFormProps {
   onProjectAdded?: (path: string) => Promise<Project[]>
   /** Called after an ordinary successful launch. */
   onSpawned: (launch: { tmuxSession: string }) => void
-  /** Called once the daemon confirms meeting recording began. */
-  onMeetingResult: (result: { host: string; error?: string; meeting: MeetingRecord | null }) => void
   /** Called on cancel / Esc / overlay click. */
   onCancel: () => void
   /** Shuttle daemon base. Defaults to `''` (relative / same-origin). */
   shuttleBase?: string
-  /** Audio belongs to the board, never to this sheet's mount lifetime. */
-  phoneAudio?: PhoneCaptureHooks
 }
 
 export function CaptureForm({
@@ -94,10 +84,8 @@ export function CaptureForm({
   hosts,
   onProjectAdded,
   onSpawned,
-  onMeetingResult,
   onCancel,
   shuttleBase = '',
-  phoneAudio,
 }: CaptureFormProps): JSX.Element {
   const [prompt, setPrompt] = useState('')
   const [agent, setAgent] = useState<string>(CAPTURE_DEFAULT_AGENT)
@@ -109,32 +97,11 @@ export function CaptureForm({
   // the chosen agent's own default_effort thereafter.
   const [effort, setEffort] = useState<string>(CAPTURE_DEFAULT_EFFORT)
   const [chrome, setChrome] = useState<boolean>(false)
-  const [mobileMeeting] = useState(() => isMobileViewport())
-  const [meetingIntent, setMeetingIntent] = useState(false)
-  const [meetingLanguage, setMeetingLanguage] = useState<MeetingLanguage>('auto')
-  const [systemAudio, setSystemAudio] = useState(true)
-  const [meetingCapabilities, setMeetingCapabilities] = useState({
-    loading: true,
-    available: false,
-    modes: [] as MeetingMode[],
-    recorder: null as string | null,
-  })
-  const [initialSelection] = useState(() => mobileMeeting ? rememberedMeetingProject(hosts, availableProjects) : undefined)
+  const [mobile] = useState(() => isMobileViewport())
   const [submitting, setSubmitting] = useState(false)
-  const heldRecorder = useSyncExternalStore(subscribeRecordingStart, () => recordingStartHold(shuttleBase))
-  const startUncertain = heldRecorder !== null
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const mounted = useRef(true)
-  const pendingAudio = useRef<PhoneCaptureAttempt | null>(null)
   const submittingRef = useRef(false)
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-      pendingAudio.current?.cancel()
-    }
-  }, [phoneAudio])
   const {
     selectedHostId,
     selectedHost,
@@ -150,38 +117,11 @@ export function CaptureForm({
     projects: availableProjects,
     hosts,
     onProjectAdded,
-    initialSelection,
   })
 
-  const selectedMeetingMode: MeetingMode = mobileMeeting ? 'phone' : 'call'
-  const meetingAvailable = meetingCapabilities.available && meetingCapabilities.modes.includes(selectedMeetingMode)
-  const meetingEnabled = meetingIntent && meetingAvailable
-  const recorderHost = hosts.find(host => host.id === meetingCapabilities.recorder)
-  const recorderLabel = recorderHost?.label ?? meetingCapabilities.recorder
-  const meetingHostLabel = recorderLabel
-    ? `Records on ${recorderLabel} · scribe on ${selectedHost.label}`
-    : undefined
-
   useEffect(() => {
-    if (!mobileMeeting) textareaRef.current?.focus()
-  }, [mobileMeeting])
-
-  useEffect(() => {
-    let cancelled = false
-    setMeetingCapabilities({ loading: true, available: false, modes: [], recorder: null })
-    fetch(meetingStatusUrl(shuttleBase, null, mobileMeeting))
-      .then((response) => response.ok ? response.json() as Promise<unknown> : null)
-      .then((status) => {
-        if (!cancelled) {
-          const parsed = parseCaptureMeetingCapabilities(status)
-          setMeetingCapabilities({ loading: false, ...parsed })
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setMeetingCapabilities({ loading: false, available: false, modes: [], recorder: null })
-      })
-    return () => { cancelled = true }
-  }, [shuttleBase, mobileMeeting])
+    if (!mobile) textareaRef.current?.focus()
+  }, [mobile])
 
   const agentRec = agents.find((a) => a.id === agent)
   const effectiveEffort = resolveEffort(agentRec, effort)
@@ -204,13 +144,9 @@ export function CaptureForm({
   }
 
   const submit = async (): Promise<void> => {
-    if (submittingRef.current || (meetingEnabled && (startUncertain || recordingStartHold(shuttleBase)))) return
+    if (submittingRef.current) return
     const trimmed = prompt.trim()
-    if (meetingIntent && meetingCapabilities.loading) {
-      setError('Listening availability is still loading.')
-      return
-    }
-    if (!trimmed && !meetingEnabled) {
+    if (!trimmed) {
       setError('Say something first — the session needs a yap to work with.')
       textareaRef.current?.focus()
       return
@@ -222,23 +158,7 @@ export function CaptureForm({
     submittingRef.current = true
     setSubmitting(true)
     setError(null)
-    const requestedMeetingMode = meetingEnabled ? selectedMeetingMode : null
-    const phone = requestedMeetingMode === 'phone'
-    let startSent = false
-    let startAnswered = false
     try {
-      // begin reaches AudioContext creation/resume and getUserMedia in this tap,
-      // before the first await. The daemon is asked only after the mic succeeds.
-      const opening = phone ? phoneAudio?.begin() : null
-      if (phone && !opening) throw new Error('Phone audio is unavailable on this board.')
-      pendingAudio.current = opening ?? null
-      const generation = opening ? await opening.ready : null
-      if (!mounted.current) return
-      if (requestedMeetingMode && recordingStartHold(shuttleBase)) {
-        throw new Error('Could not confirm whether listening started. Check the recorder before trying again.')
-      }
-      startSent = true
-      if (requestedMeetingMode) holdRecordingStart(shuttleBase, meetingCapabilities.recorder)
       const res = await fetch(`${shuttleBase}/api/v1/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -249,53 +169,17 @@ export function CaptureForm({
           agent,
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
           chrome: chrome && chromeCapable,
-          meetingMode: requestedMeetingMode,
-          meetingLanguage,
-          systemAudio,
-          recorder: meetingCapabilities.recorder,
         })),
       })
-      const data = (await (requestedMeetingMode ? res.json() : res.json().catch(() => ({})))) as CaptureResponseData
-      startAnswered = true
-      const outcome = captureOutcome(res, data, {
-        projectDir: selectedProject.path,
-        meetingMode: requestedMeetingMode,
-        host: selectedHost.label,
-      })
-      if (requestedMeetingMode && !(outcome.kind === 'error' && outcome.uncertain)) resolveRecordingStart(shuttleBase)
-      if (outcome.kind === 'error') {
-        if (outcome.uncertain) {
-          holdRecordingStart(shuttleBase, typeof data.recorder === 'string' ? data.recorder : meetingCapabilities.recorder)
-        }
-        throw new Error(outcome.message)
-      }
-      if (outcome.kind === 'meeting-recording') {
-        let recordingError = outcome.error
-        try {
-          if (phone && generation !== null) {
-            if (!mounted.current) throw new Error('Listening started after Capture closed; the mic is off. Connect it from In flight.')
-            opening!.bind(generation, data.meeting)
-          }
-          if (!outcome.error) rememberMeetingProject(selectedProject)
-        } catch (err) {
-          recordingError = [recordingError, daemonErrorMessage(err)].filter(Boolean).join(' ')
-        }
-        pendingAudio.current = null
-        onMeetingResult({ host: outcome.host, error: recordingError, meeting: parseMeetingRecord(data.meeting) })
-        return
-      }
+      const data = await res.json().catch(() => ({})) as CaptureResponseData
+      const outcome = captureOutcome(res, data, { projectDir: selectedProject.path })
+      if (outcome.kind === 'error') throw new Error(outcome.message)
       onSpawned({
         tmuxSession: outcome.tmuxSession,
       })
     } catch (err) {
-      pendingAudio.current?.cancel()
-      pendingAudio.current = null
       submittingRef.current = false
-      const uncertain = requestedMeetingMode !== null && startSent && !startAnswered
-      if (uncertain) holdRecordingStart(shuttleBase, meetingCapabilities.recorder)
-      setError(uncertain
-        ? 'Could not confirm whether listening started. Check the recorder before trying again; this form will not retry.'
-        : daemonErrorMessage(err))
+      setError(daemonErrorMessage(err))
       setSubmitting(false)
     }
   }
@@ -313,31 +197,18 @@ export function CaptureForm({
       onOpenChange={(next) => {
         if (!next && !submitting) onCancel()
       }}
-      title={meetingEnabled ? 'Start listening' : 'New idea'}
+      title="New idea"
       eyebrow="shuttle · capture"
-      onOpenAutoFocus={mobileMeeting ? (event) => event.preventDefault() : undefined}
+      onOpenAutoFocus={mobile ? (event) => event.preventDefault() : undefined}
     >
-      <div className={`form-sheet${mobileMeeting && meetingEnabled ? ' capture-mobile-meeting' : ''}`}  onKeyDown={handleKeyDown}>
-        {startUncertain && !submitting && <div className="form-error" role="alert">
-          <p>Could not confirm whether listening started on {heldRecorder}. Check the recorder before trying again.</p>
-          <button type="button" className="form-btn form-cancel" data-resolve-recording onClick={() => {
-            resolveRecordingStart(shuttleBase)
-            setError(null)
-          }}>I inspected the recorder; release the hold</button>
-        </div>}
+      <div className="form-sheet" onKeyDown={handleKeyDown}>
         <textarea
           ref={textareaRef}
           className="capture-yap"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder={meetingEnabled ? 'Optional — the scribe works it out as you talk' : 'Speak the idea — a session will write the card'}
-          rows={mobileMeeting && meetingEnabled ? 2 : 6}
-        />
-        <MeetingControl
-          enabled={meetingEnabled}
-          disabled={submitting || meetingCapabilities.loading || !meetingAvailable}
-          onChange={setMeetingIntent}
-          hostLabel={meetingAvailable ? meetingHostLabel : undefined}
+          placeholder="Speak the idea — a session will write the card"
+          rows={6}
         />
         <div className="form-controls">
           {(projects.length > 0 || onProjectAdded) && (
@@ -369,34 +240,6 @@ export function CaptureForm({
             </select>
           </Field>
           <EffortField agent={agentRec} effort={effort} onChange={setEffort} />
-          {meetingEnabled && (
-            <Field label="Language">
-              <select
-                className="form-select"
-                aria-label="Language"
-                value={meetingLanguage}
-                disabled={submitting}
-                onChange={(e) => setMeetingLanguage(e.target.value as MeetingLanguage)}
-              >
-                <option value="auto">Auto-detect</option>
-                <option value="fr">Français</option>
-                <option value="en">English</option>
-              </select>
-            </Field>
-          )}
-          {meetingEnabled && !mobileMeeting && (
-            <Field label="Audio">
-              <select
-                aria-label="Listening audio"
-                value={systemAudio ? 'system' : 'mic'}
-                disabled={submitting}
-                onChange={(event) => setSystemAudio(event.target.value === 'system')}
-              >
-                <option value="system">Mic + system</option>
-                <option value="mic">Mic only</option>
-              </select>
-            </Field>
-          )}
         </div>
         {addProject.pathOpen && onProjectAdded && (
           <AddProjectPath
@@ -410,10 +253,10 @@ export function CaptureForm({
         <ChromeFlag checked={chrome} capable={chromeCapable} onChange={setChrome} />
         <FormError error={error} />
         <FormFoot
-          verb={meetingEnabled ? 'start listening' : 'spawn'}
-          submitLabel={submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start listening' : 'Spawn'}
+          verb="spawn"
+          submitLabel={submitting ? 'Spawning…' : 'Spawn'}
           submitting={submitting}
-          disabled={submitting || (meetingEnabled && startUncertain) || (meetingIntent && !meetingAvailable) || (!meetingEnabled && !prompt.trim())}
+          disabled={submitting || !prompt.trim()}
           tone="cobalt"
           onCancel={onCancel}
           onSubmit={() => void submit()}
@@ -423,44 +266,10 @@ export function CaptureForm({
   )
 }
 
-/** One toggle; the device determines the audio source. */
-export function MeetingControl({ enabled, disabled, onChange, hostLabel }: {
-  enabled: boolean
-  disabled: boolean
-  onChange: (enabled: boolean) => void
-  hostLabel?: string
-}): JSX.Element {
-  return (
-    <div className="capture-meeting-control">
-      <div className="capture-meeting-row">
-        <button
-          type="button"
-          className="capture-meeting-toggle"
-          aria-pressed={enabled}
-          disabled={disabled}
-          onClick={() => onChange(!enabled)}
-        >
-          Listening
-        </button>
-      </div>
-      {hostLabel && <span className="capture-meeting-host-label">{hostLabel}</span>}
-    </div>
-  )
-}
-
-/**
- * Inject the Capture dialog's CSS: the shared form sheet, plus the two parts
- * only Capture has — the yap and the meeting row.
- */
+/** The shared form sheet and Capture's prose field. */
 export function injectCaptureFormStyles(): void {
   injectFormKitStyles()
   injectStyles('capture-form-styles', `
-    @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-      .capture-mobile-meeting .capture-yap { min-height: 3.5rem; resize: none; }
-      .capture-mobile-meeting { gap: 10px; }
-      .capture-mobile-meeting .capture-meeting-row { min-height: 48px; height: auto; gap: 6px; }
-      .capture-mobile-meeting .capture-meeting-toggle { height: 48px; }
-    }
     /* The yap. 17px because this is the dialog's one piece of prose — the
        controls beneath it read at 15px, the labels at 11px. */
     .capture-yap {
@@ -486,74 +295,6 @@ export function injectCaptureFormStyles(): void {
       outline: none;
       border-color: color-mix(in srgb, var(--kbn-agent) 70%, var(--kbn-blank));
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-agent) 16%, transparent);
-    }
-    /* Keep the toggle and recorder label together. */
-    .capture-meeting-control {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 4px;
-      min-width: 0;
-    }
-    .capture-meeting-host-label {
-      max-width: 100%;
-      color: var(--kbn-graphite-muted);
-      font-size: var(--type-meta);
-      line-height: var(--leading-tight);
-      overflow-wrap: anywhere;
-    }
-    .capture-meeting-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      height: 32px;
-    }
-    .capture-meeting-toggle {
-      box-sizing: border-box;
-      height: 32px;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 0 14px 0 12px;
-      font-family: var(--font-serif);
-      font-size: var(--type-label);
-      color: var(--kbn-graphite-soft);
-      background: var(--kbn-blank);
-      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
-      border-radius: 3px;
-      cursor: pointer;
-      user-select: none;
-      transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
-    }
-    /* A ring that fills when the meeting is on. */
-    .capture-meeting-toggle::before {
-      content: '';
-      box-sizing: border-box;
-      width: 10px;
-      height: 10px;
-      border: 1.5px solid currentColor;
-      border-radius: 50%;
-    }
-    .capture-meeting-toggle:hover:not(:disabled) {
-      color: var(--kbn-graphite);
-      background: color-mix(in srgb, var(--kbn-graphite) 4%, transparent);
-    }
-    .capture-meeting-toggle[aria-pressed="true"] {
-      color: var(--kbn-tempered-ink);
-      background: color-mix(in srgb, var(--kbn-tempered) 10%, transparent);
-      border-color: color-mix(in srgb, var(--kbn-tempered) 55%, transparent);
-    }
-    .capture-meeting-toggle[aria-pressed="true"]::before {
-      background: var(--kbn-tempered);
-      border-color: var(--kbn-tempered);
-    }
-    .capture-meeting-toggle:focus-visible {
-      outline: 2px solid color-mix(in srgb, var(--kbn-owed) 45%, transparent);
-      outline-offset: 1px;
-    }
-    .capture-meeting-toggle:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
     }
   `)
 }

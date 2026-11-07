@@ -11,13 +11,18 @@ export interface VoiceStatus {
   available: boolean
   enabled: boolean
   muted: boolean
-  state: 'off' | 'starting' | 'listening' | 'yielded' | 'failed'
+  state: 'off' | 'starting' | 'listening' | 'failed'
+  follow: boolean
+  system_audio: boolean
+  sources: Array<'desktop' | 'phone'>
+  source: 'desktop' | 'phone'
+  launch: string | null
   /** Where live voice goes; `source` names what set it, when that was not a board or Rex. */
   target: (RexMove & { source?: string }) | null
   last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string } | null
   error: string | null
-  /** What holds the mic: following the card in view, a meeting joined to one card, or nothing. */
-  mode?: 'off' | 'following' | 'meeting'
+  /** Whether Listen follows the view or stays pinned to a card. */
+  mode?: 'off' | 'following' | 'pinned'
   /** Where words go right now. */
   destination?: RexMove | null
   paused?: boolean
@@ -52,7 +57,16 @@ export interface BoardOpen {
   page: 'constitution' | 'tapestry' | 'files'
 }
 
-const following = (status: VoiceStatus | null): boolean => !!status?.enabled && status.state !== 'yielded'
+const observing = (status: VoiceStatus | null): boolean => !!status?.enabled
+
+export interface VoiceUpdate {
+  enabled?: boolean
+  muted?: boolean
+  follow?: boolean
+  system_audio?: boolean
+  source?: 'desktop' | 'phone'
+  target?: RexMove
+}
 
 /**
  * One visible-tab poll, one ordered write stream and one event stream per
@@ -75,6 +89,9 @@ export class Voice {
   private sightTimer: number | null = null
   private couldClaim = false
   private events: EventSource | null = null
+  private eventsRecorder: string | undefined
+  private recorder: string | undefined
+  private observedView = ''
   private eventsTimer: number | null = null
   private timer: number | null = null
   private expectedEnabled: boolean | null = null
@@ -88,7 +105,12 @@ export class Voice {
   constructor(base: string) { this.base = base }
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn) }
   private notify(): void {
+    this.recorder = this.status?.recorder ?? this.recorder
     this.followInbox()
+    if (this.status && this.eventsRecorder !== this.status.recorder) {
+      this.closeEvents()
+      this.openEvents()
+    }
     this.listeners.forEach(fn => fn())
   }
   /** A card the inbox opens moves the board as Rex does, from any status that shows it: the recorder's daemon may be another host's, whose stream this board does not hear. */
@@ -111,7 +133,11 @@ export class Voice {
   private openEvents = (): void => {
     this.eventsTimer = null
     if (!this.mounted || this.events || document.hidden || typeof EventSource === 'undefined') return
-    const events = new EventSource(`${this.base}/api/v1/voice/events${coarsePointer() ? '' : '?rex=1'}`)
+    this.eventsRecorder = this.recorder
+    const query = new URLSearchParams()
+    if (!coarsePointer()) query.set('rex', '1')
+    if (this.eventsRecorder) query.set('recorder', this.eventsRecorder)
+    const events = new EventSource(`${this.base}/api/v1/voice/events${query.size ? `?${query}` : ''}`)
     events.addEventListener('target', this.pushed)
     events.addEventListener('focus', this.rexMoved)
     events.addEventListener('open', event => this.onOpen?.(JSON.parse((event as MessageEvent<string>).data) as BoardOpen))
@@ -150,14 +176,17 @@ export class Voice {
   /** What the board shows takes the target, while the board has the keyboard. */
   private claim = (): void => {
     const card = this.sighted, status = this.status
-    if (!card || !isAgentCard(card) || !following(status) || !document.hasFocus() || isMobileViewport()) return
-    if (status?.target?.origin === card.originId && [card.uid, card.id].includes(status.target.fiber_id)) return
-    const target = { fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name }
+    if (!card || !isAgentCard(card) || !observing(status) || !document.hasFocus()) return
+    const viewKey = JSON.stringify([status?.recorder, card.originId, card.uid ?? card.id])
+    if (status?.follow && status.target?.origin === card.originId && [card.uid, card.id].includes(status.target.fiber_id)) return
+    if (!status?.follow && this.observedView === viewKey) return
+    const target = { fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name, ...(status?.recorder ? { recorder: status.recorder } : {}) }
     this.revision++
     const task = this.writes.then(async () => {
       const response = await fetch(`${this.base}/api/v1/voice/target`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target) })
       if (!response.ok) throw new Error(`Voice request failed (${response.status})`)
       this.revision++
+      this.observedView = viewKey
       this.status = await response.json() as VoiceStatus
       this.notify()
     })
@@ -170,7 +199,8 @@ export class Voice {
   private pushed = (event: Event): void => {
     if (!this.status) return
     this.revision++
-    this.status = { ...this.status, target: JSON.parse((event as MessageEvent<string>).data) as VoiceStatus['target'] }
+    const target = JSON.parse((event as MessageEvent<string>).data) as VoiceStatus['target']
+    this.status = { ...this.status, target, destination: this.status.enabled ? target : null }
     this.notify()
   }
   private settingsSaved = (event: Event): void => {
@@ -195,13 +225,19 @@ export class Voice {
       this.openEvents()
     }
   }
-  async set(values: { enabled?: boolean; muted?: boolean }): Promise<void> {
+  async set(values: VoiceUpdate): Promise<void> {
     const task = this.writes.then(async () => {
-      const response = await fetch(`${this.base}/api/v1/voice`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) })
-      if (!response.ok) throw new Error(`Voice request failed (${response.status})`)
+      // Let a phone start select its recorder; every later control stays there.
+      const recorder = values.source === 'phone' && values.enabled ? undefined : this.status?.recorder ?? this.recorder
+      const response = await fetch(`${this.base}/api/v1/voice`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...values, ...(recorder ? { recorder } : {}) }) })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(body.error ?? `Voice request failed (${response.status})`)
+      }
       this.revision++
       this.status = await response.json() as VoiceStatus
       this.notify()
+      this.claim()
     })
     this.writes = task.catch(() => {})
     return task
@@ -215,7 +251,8 @@ export class Voice {
     const revision = this.revision
     let success = false
     try {
-      const response = await fetch(`${this.base}/api/v1/voice`, { signal: controller.signal })
+      const query = this.recorder ? `?${new URLSearchParams({ recorder: this.recorder })}` : ''
+      const response = await fetch(`${this.base}/api/v1/voice${query}`, { signal: controller.signal })
       if (!response.ok) throw new Error('voice unavailable')
       const status = await response.json() as VoiceStatus
       if (!controller.signal.aborted && revision === this.revision) {
@@ -223,7 +260,7 @@ export class Voice {
         if (this.expectedEnabled === status.enabled) this.expectedEnabled = null
         this.notify()
         // Following returning, or focus landing in a report's frame, which fires no window focus.
-        const canClaim = following(status) && document.hasFocus()
+        const canClaim = observing(status) && document.hasFocus()
         if (canClaim && !this.couldClaim) this.claim()
         this.couldClaim = canClaim
       }

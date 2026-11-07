@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
 import { type KanbanResponse } from './KanbanTypes.js'
-import { card, response } from './testFixtures.js'
+import { card, response, voiceStatus } from './testFixtures.js'
 import type { Workspace } from './workspace/Workspace.js'
 import { MOBILE_MEDIA } from './mobile.js'
 import type { VoiceStatus } from './voice.js'
@@ -88,7 +88,7 @@ function activate(button: HTMLButtonElement, key: 'Enter' | ' '): void {
 it('repaints the Desk as the voice target changes', () => {
   const band = () => document.querySelector<HTMLElement>('[data-card-uid="head-uid"]')!.closest<HTMLElement>('[data-flight-band]')!.dataset.flightBand
   expect(band()).toBe('yourTurn')
-  inside.voice.status = { available: true, enabled: false, muted: false, state: 'off', target: { fiber_id: 'head-uid', origin: head.originId, name: head.name }, last: null, error: null }
+  inside.voice.status = voiceStatus({ target: { fiber_id: 'head-uid', origin: head.originId, name: head.name } })
   inside.voice.notify()
   expect(band()).toBe('working')
   expect(document.querySelector('[data-card-uid="head-uid"] .constitution-state-dot')?.getAttribute('data-turn')).toBe('working')

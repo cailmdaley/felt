@@ -16,7 +16,6 @@ import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { COMPANION_NAMES, channelLead, documentActivity, familyKey, fiberKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
-import { meetingHostCard, type MeetingRecord } from '../meeting.js'
 import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
@@ -172,13 +171,7 @@ export class Workspace {
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
     this.dock = opts.dock
-    const meetingHost = (meeting: MeetingRecord): KanbanCard | undefined => meetingHostCard(meeting, this.opts.cards()) ?? undefined
-    this.dock.setMeetingHostOpen(meeting => {
-      if (!meeting.fiber) return
-      const host = meetingHost(meeting)
-      if (host) this.open(host, this.origin, undefined, this.overview.hasMetadata(host))
-      else if (meeting.mirror_host ?? meeting.recorder) void this.openFiber(meeting.fiber, meeting.mirror_host ?? meeting.recorder!)
-    }, (fiber, origin) => {
+    this.dock.setFiberSlug((fiber, origin) => {
       const cards = this.opts.cards().filter(card => card.id === fiber || card.uid === fiber)
       const card = cards.find(card => card.originId === origin) ?? cards[0]
       return card && slug(card)

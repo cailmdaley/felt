@@ -20,7 +20,7 @@ describe('relay status frames', () => {
   })
 
   it('a close is terminal when the last frame or the code says so, else worth a reconnect', () => {
-    const ended = parseRelayStatus('{"state":"ended","reason":"the meeting has ended"}')
+    const ended = parseRelayStatus('{"state":"ended","reason":"listening has ended"}')
     expect(closeMeaning(1006, ended)).toBe('ended')
     expect(closeMeaning(4409, null)).toBe('replaced')
     expect(closeMeaning(4404, null)).toBe('refused')
@@ -43,7 +43,7 @@ describe('the status line', () => {
     expect(linkWords('reconnecting', null, since)).toBe('Reconnecting — audio lost since 14:03:07')
     expect(linkWords('waiting', null, since)).toBe('Reconnecting — audio lost since 14:03:07')
     expect(linkWords('connected', null, since)).toMatch(/audio lost since 14:03:07/)
-    expect(linkWords('ended', 'the meeting has ended', since)).toBe('Ended: the meeting has ended')
+    expect(linkWords('ended', 'listening has ended', since)).toBe('Ended: listening has ended')
   })
 })
 
@@ -57,9 +57,9 @@ describe('audio health and the relay URL', () => {
     expect(audioHealth('missing', false, 'running')).toBe('ended')
   })
 
-  it('puts the relay beside the page, secure when the page is, bound to the meeting', () => {
-    expect(relayUrl('', { protocol: 'https:', host: 'mac.tailnet.example' }, 'a+b/c')).toBe('wss://mac.tailnet.example/api/v1/meeting/audio?launch=a%2Bb%2Fc')
-    expect(relayUrl('', { protocol: 'http:', host: '127.0.0.1:4000' }, null)).toBe('ws://127.0.0.1:4000/api/v1/meeting/audio')
-    expect(relayUrl('http://127.0.0.1:4000/', { protocol: 'https:', host: 'x' }, 'L1')).toBe('ws://127.0.0.1:4000/api/v1/meeting/audio?launch=L1')
+  it('puts the relay beside the page, secure when the page is, bound to the recording', () => {
+    expect(relayUrl('', { protocol: 'https:', host: 'mac.tailnet.example' }, 'a+b/c')).toBe('wss://mac.tailnet.example/api/v1/voice/audio?launch=a%2Bb%2Fc')
+    expect(relayUrl('', { protocol: 'http:', host: '127.0.0.1:4000' }, null)).toBe('ws://127.0.0.1:4000/api/v1/voice/audio')
+    expect(relayUrl('http://127.0.0.1:4000/', { protocol: 'https:', host: 'x' }, 'L1')).toBe('ws://127.0.0.1:4000/api/v1/voice/audio?launch=L1')
   })
 })

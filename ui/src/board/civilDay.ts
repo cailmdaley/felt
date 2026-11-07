@@ -156,6 +156,11 @@ export function clockTime(ms: number, z = hostZone()): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
 }
 
+/** Format an instant's wall clock as zero-padded 24-hour HH:MM:SS. */
+export function clockSeconds(ms: number, z = hostZone()): string {
+  return `${clockTime(ms, z)}:${String(wall(ms, z).getUTCSeconds()).padStart(2, '0')}`
+}
+
 /** A calendar day in front of a clock time, `30 Oct 03:31`: for when a bare time would not say which day it names. */
 export function dayClock(ms: number, z = hostZone()): string {
   return `${formatInstant(ms, { day: 'numeric', month: 'short' }, z)} ${clockTime(ms, z)}`

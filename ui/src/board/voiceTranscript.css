@@ -1,0 +1,7 @@
+.voice-transcript { width: min(760px, calc(100vw - 32px)); max-height: 80dvh; padding: 20px; box-sizing: border-box; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); color: var(--ws-ink); box-shadow: var(--ws-float); }
+.voice-transcript::backdrop { background: color-mix(in srgb, var(--ws-ink) 30%, transparent); }
+.voice-transcript header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.voice-transcript h2 { margin: 0; font: var(--type-title)/var(--leading-tight) var(--font-serif); }
+.voice-transcript label { display: flex; align-items: center; gap: 8px; margin: 16px 0; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+.voice-transcript [role='log'] { font: var(--type-label)/var(--leading-prose) var(--font-mono); overflow-wrap: anywhere; }
+.voice-transcript p { padding: 10px 0; margin: 0; border-top: 1px solid var(--ws-hairline); white-space: pre-wrap; }

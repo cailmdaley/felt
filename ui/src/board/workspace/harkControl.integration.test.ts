@@ -1,278 +1,133 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Dock } from './Dock.js'
-import { card } from '../testFixtures.js'
+import { card, voiceStatus } from '../testFixtures.js'
 import { Voice, type VoiceStatus } from '../voice.js'
 
-const status: VoiceStatus = { available: true, enabled: false, muted: false, state: 'off', target: { fiber_id: 'a', origin: 'local', name: 'Alpha' }, last: null, error: null }
-const notify = (voice: Voice): void => (voice as unknown as { notify: () => void }).notify()
+const target = { fiber_id: 'a', origin: 'owner', name: 'Alpha' }
+let current: VoiceStatus
+let dock: Dock
+let voice: Voice
+const fetcher = vi.fn()
+const notify = () => (voice as unknown as { notify(): void }).notify()
+const q = <T extends HTMLElement = HTMLElement>(selector: string) => dock.el.querySelector<T>(selector)!
+const dropdown = () => q<HTMLButtonElement>('.listen-dropdown').click()
+const mic = () => q<HTMLButtonElement>('.listen-mic')
+const items = () => [...dock.el.querySelectorAll<HTMLButtonElement>('[role^=menuitem]')]
+const item = (label: string) => items().find(button => button.textContent === label)!
+function mount(over: Partial<VoiceStatus> = {}) {
+  current = voiceStatus({ target, ...over })
+  voice = new Voice(''); voice.status = current
+  dock = new Dock('', vi.fn(), undefined, undefined, { voice: { controller: voice } })
+  dock.setFiberSlug(id => id.split('/').at(-1))
+  dock.open(card({ id: 'work/a', uid: 'a', originId: 'owner', name: 'Alpha', shuttleKind: 'oneshot' }))
+  document.body.append(dock.el)
+  fetcher.mockClear()
+}
 beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ text: '{}', digest: null })))
+  fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/agents')) return Response.json([])
+    if (url.includes('/config/voice')) return Response.json(init?.method === 'POST' ? { digest: 'after' } : { text: '{"quiet_seconds":15,"pinned_quiet_seconds":120,"words":200}', digest: 'before' })
+    if (init?.method === 'POST') {
+      current = { ...current, ...JSON.parse(String(init.body)) }
+      current.state = current.enabled ? 'listening' : 'off'
+    }
+    return Response.json(current)
+  })
+  vi.stubGlobal('fetch', fetcher)
 })
-afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { dock?.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllGlobals() })
 
-function mount(initial: VoiceStatus | null = { ...status }) {
-  const voice = new Voice(''); voice.status = initial
-  let recording: { state: 'starting' | 'loading' | 'live' | 'stopping'; title: string; fiber: string; tail: never[]; paused?: boolean; phone?: boolean; recorder?: string; handoff?: { status: string; kind: null; target: null; origin: null; prompt: null } } | null = null
-  const meeting = { current: () => recording, canJoin: () => !recording, modes: () => ['call', 'phone'], join: vi.fn(async () => null), stop: vi.fn(), pause: vi.fn(async () => {}) }
-  const open = vi.fn()
-  const dock = new Dock('', vi.fn(), undefined, undefined, { meeting: meeting as never, voice: { controller: voice } })
-  dock.open(card({ id: 'a', name: 'Alpha', uid: 'a', originId: 'local', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', shuttleHost: 'local' }))
-  const band = dock
-  band.openFile = open
-  document.body.append(band.el)
-  const root = band.el
-  const main = () => root.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
-  const dropdown = () => root.querySelector<HTMLButtonElement>('.kbn-ctl-meet-dropdown')!
-  const menuItems = () => [...root.querySelectorAll<HTMLButtonElement>('[role=menuitem]')]
-  const menuItem = (label: string) => menuItems().find(x => x.textContent === label)
-  /** Stop, from the ▾ menu that holds it. */
-  const stop = () => { if (!root.querySelector('[role=menu]')) dropdown().click(); return menuItem('Stop listening') }
-  return { voice, meeting, dock, band, root, main, dropdown, menuItems, menuItem, stop, open, setRecording(value: typeof recording) { recording = value; dock.syncMeeting() } }
-}
-
-it('is one mic toggle: it follows, then mutes with a slash, and Stop is in its menu', async () => {
-  const v = mount()
-  const set = vi.spyOn(v.voice, 'set').mockImplementation(async values => { v.voice.status = { ...v.voice.status!, ...values, state: 'listening' }; notify(v.voice) })
-  expect(v.root.querySelectorAll('.kbn-ctl-meet button')).toHaveLength(2)
-  expect(v.main().getAttribute('aria-label')).toBe('Listen')
-  expect(v.main().hasAttribute('aria-pressed')).toBe(false)
-  expect(v.stop()).toBeUndefined()
-  v.dropdown().click() // folds the menu the look opened
-  v.main().click()
-  expect(set).toHaveBeenCalledWith({ enabled: true, muted: false })
-  expect(v.meeting.join).not.toHaveBeenCalled()
-  await vi.waitFor(() => expect(v.main().getAttribute('aria-label')).toBe('Mute'))
-  expect(v.main().getAttribute('aria-pressed')).toBe('false')
-  expect(v.main().querySelectorAll('path')).toHaveLength(1)
-  v.main().click()
-  expect(set).toHaveBeenLastCalledWith({ muted: true })
-  await vi.waitFor(() => expect(v.root.querySelector('.kbn-ctl-meet-muted')).not.toBeNull())
-  expect(v.main().getAttribute('aria-label')).toBe('Unmute')
-  expect(v.main().getAttribute('aria-pressed')).toBe('true')
-  expect(v.main().querySelectorAll('path')).toHaveLength(2)
-  v.main().click()
-  expect(set).toHaveBeenLastCalledWith({ muted: false })
-  await vi.waitFor(() => expect(v.root.querySelector('.kbn-ctl-meet-muted')).toBeNull())
-  v.stop()!.click()
-  await vi.waitFor(() => expect(set).toHaveBeenLastCalledWith({ enabled: false }))
-  await vi.waitFor(() => expect(v.main().getAttribute('aria-label')).toBe('Listen'))
-  v.dock.reset()
+it('starts unmuted, mutes with a slash, unmutes, and stops only from the menu', async () => {
+  mount({ muted: true })
+  expect(mic().getAttribute('aria-label')).toBe('Listen')
+  expect(q('.ws-voice-strip').hidden).toBe(true)
+  mic().click()
+  await vi.waitFor(() => expect(mic().getAttribute('aria-label')).toBe('Mute'))
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ enabled: true, muted: false, source: 'desktop' })
+  expect(mic().querySelectorAll('path')).toHaveLength(1)
+  mic().click()
+  await vi.waitFor(() => expect(mic().getAttribute('aria-label')).toBe('Unmute'))
+  expect(mic().querySelectorAll('path')).toHaveLength(2)
+  mic().click()
+  await vi.waitFor(() => expect(mic().getAttribute('aria-label')).toBe('Mute'))
+  dropdown(); item('Stop listening').click()
+  await vi.waitFor(() => expect(mic().getAttribute('aria-label')).toBe('Listen'))
+  expect(q('.ws-voice-strip').hidden).toBe(true)
 })
-
-it('names the card words reach while following another', () => {
-  const v = mount()
-  v.voice.status = { ...status, enabled: true, state: 'listening', target: { fiber_id: 'b', origin: 'local', name: 'Bravo' } }; notify(v.voice)
-  expect(v.main().title).toContain('words go to Bravo')
-  v.dock.reset()
+it('offers only routing, cadence, day transcript and Stop', () => {
+  mount(); dropdown()
+  expect(items().map(item => item.textContent)).toEqual(['Follow me', 'System audio', 'Pin to this card', "Today's transcript", 'Stop listening'])
+  expect(item('Follow me').getAttribute('aria-checked')).toBe('true')
+  expect(item('System audio').getAttribute('aria-checked')).toBe('false')
+  expect(item('Stop listening').disabled).toBe(true)
+  expect(q('[aria-label="Quiet seconds (following)"]')).not.toBeNull()
 })
-
-it('keeps the menu quiet: transcript, a meeting here with its audio, and quiet seconds', () => {
-  const v = mount()
-  v.dropdown().click()
-  expect(v.menuItems().map(x => x.textContent)).toEqual(['Record a meeting on Alpha'])
-  expect(v.root.querySelector('[aria-label="Meeting audio"]')).not.toBeNull()
-  expect(v.root.querySelector('[aria-label="Quiet seconds"]')).not.toBeNull()
-  expect(v.root.querySelector('[role=menuitemcheckbox]')).toBeNull()
-  v.dropdown().click()
-  v.voice.status = { ...status, enabled: true, state: 'listening' }; notify(v.voice)
-  v.dropdown().click()
-  expect(v.menuItems().map(x => x.textContent)).toEqual(['Stop listening', 'Open transcript', 'Record a meeting on Alpha'])
-  expect(v.root.textContent).not.toContain('Held')
-  v.dock.reset()
+it('pins atomically to this card and resumes following without disabling Listen', async () => {
+  mount({ enabled: true, state: 'listening', recorder: 'recorder' })
+  dropdown(); item('Pin to this card').click()
+  await vi.waitFor(() => expect(voice.status?.follow).toBe(false))
+  expect(JSON.parse(fetcher.mock.calls.find(([url, init]) => url === '/api/v1/voice' && init?.method === 'POST')![1].body))
+    .toEqual({ follow: false, target, recorder: 'recorder' })
+  expect(q('.ws-voice-strip').textContent).toBe('📌 a')
+  dropdown()
+  expect(items().some(item => item.textContent === 'Pin to this card')).toBe(false)
+  expect(item('Follow me').getAttribute('aria-checked')).toBe('false')
+  item('Follow me').click()
+  await vi.waitFor(() => expect(voice.status?.follow).toBe(true))
+  expect(voice.status?.enabled).toBe(true)
+  expect(q('.ws-voice-strip').textContent).toBe('a')
 })
-
-it('turns following off when a meeting starts, so one mode holds the mic', async () => {
-  const v = mount()
-  const set = vi.spyOn(v.voice, 'set').mockResolvedValue()
-  v.voice.status = { ...status, enabled: true, state: 'listening' }; notify(v.voice)
-  v.dropdown().click()
-  v.menuItems().find(x => x.textContent === 'Record a meeting on Alpha')!.click()
-  expect(v.meeting.join).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }), 'call', expect.objectContaining({ systemAudio: true }))
-  await vi.waitFor(() => expect(set).toHaveBeenCalledWith({ enabled: false }))
-  v.dock.reset()
+it('offers pin here when pinned elsewhere, including another host with the same id', () => {
+  mount({ follow: false, target: { ...target, origin: 'elsewhere' } }); dropdown()
+  expect(item('Pin to this card')).toBeDefined()
 })
-
-it('reads a meeting as a meeting, wherever it is joined', () => {
-  const v = mount()
-  v.setRecording({ state: 'live', title: 'Standup', fiber: 'a', tail: [] })
-  expect(v.main().title).toContain('every word goes to a,')
-  expect(v.root.querySelector('.kbn-ctl-meet')!.getAttribute('data-mode')).toBe('meeting')
-  v.setRecording({ state: 'live', title: 'Call', fiber: 'life/vizier', tail: [] })
-  expect(v.main().title).toContain('every word goes to vizier')
-  v.dock.reset()
+it('toggles system transcription live on the recorder, retaining mute and pin', async () => {
+  mount({ enabled: true, muted: true, follow: false, recorder: 'audio-host' }); dropdown()
+  item('System audio').click()
+  await vi.waitFor(() => expect(voice.status?.system_audio).toBe(true))
+  expect(voice.status).toMatchObject({ enabled: true, muted: true, follow: false })
+  const write = fetcher.mock.calls.find(([url]) => url === '/api/v1/voice')!
+  expect(JSON.parse(write[1].body)).toEqual({ system_audio: true, recorder: 'audio-host' })
 })
-
-it('mutes a meeting, and Stop ends it and leaves the mic off', async () => {
-  const v = mount()
-  const set = vi.spyOn(v.voice, 'set').mockResolvedValue()
-  v.voice.status = { ...status, enabled: true, state: 'yielded' }; notify(v.voice)
-  v.setRecording({ state: 'live', title: 'Standup', fiber: 'other', tail: [] })
-  v.main().click()
-  expect(v.meeting.pause).toHaveBeenCalledWith(expect.objectContaining({ fiber: 'other' }), true)
-  v.stop()!.click()
-  expect(v.meeting.stop).toHaveBeenCalledWith(expect.objectContaining({ fiber: 'other' }))
-  await vi.waitFor(() => expect(set).toHaveBeenCalledWith({ enabled: false }))
-  v.dock.reset()
+it.each([{ source: 'phone' as const }, { sources: ['phone'] as VoiceStatus['sources'] }])('hides System audio when the recorder cannot use it: %j', over => {
+  mount(over); dropdown(); expect(items().some(item => item.textContent === 'System audio')).toBe(false)
 })
-
-it('opens the menu instead of muting until a meeting is live, and on a phone recording', () => {
-  const v = mount()
-  v.setRecording({ state: 'loading', title: 'Standup', fiber: 'a', tail: [] })
-  v.main().click()
-  expect(v.meeting.pause).not.toHaveBeenCalled()
-  expect(v.root.querySelector('[role=menu]')).not.toBeNull()
-  v.setRecording({ state: 'live', title: 'Call', fiber: 'a', tail: [], phone: true })
-  v.main().click()
-  expect(v.meeting.pause).not.toHaveBeenCalled()
-  expect(v.menuItem('Stop listening')).toBeDefined()
-  v.dock.reset()
-})
-
-it('shows a failure beside the mode, never in place of it', async () => {
-  const v = mount()
-  v.voice.status = { ...status, enabled: true, state: 'listening', muted: true, last: { fiber_id: 'a', at: '2026-11-06T10:00:00Z', status: 'unconfirmed', detail: 'May have arrived' } }; notify(v.voice)
-  expect(v.main().getAttribute('aria-label')).toBe('Unmute')
-  v.voice.status = { ...v.voice.status!, last: { fiber_id: 'a', at: '2026-11-06T10:00:00Z', status: 'failed', detail: 'worker gone' } }; notify(v.voice)
-  expect(v.main().getAttribute('aria-label')).toBe('Unmute')
-  expect(v.main().title).toContain('Delivery failed: worker gone')
-  expect(v.root.querySelector('.kbn-ctl-meet-failed')).not.toBeNull()
-  expect(v.root.querySelector('.kbn-ctl-meet-muted')).not.toBeNull()
-  v.dropdown().click()
-  expect(v.root.querySelector('[role=menu]')?.textContent).toContain('worker gone')
-  expect(v.root.textContent).not.toContain('May have arrived')
-  v.dock.reset()
-})
-
-it('turns following off even when the meeting refuses to stop', async () => {
-  const v = mount()
-  const set = vi.spyOn(v.voice, 'set').mockResolvedValue()
-  v.voice.status = { ...status, enabled: true, state: 'yielded' }; notify(v.voice)
-  v.setRecording({ state: 'live', title: 'Standup', fiber: 'other', tail: [] })
-  v.meeting.stop.mockReturnValueOnce(false as never)
-  v.stop()!.click()
-  expect(set).toHaveBeenCalledWith({ enabled: false })
-  await vi.waitFor(() => expect(v.main().title).toContain('The recording did not stop'))
-  v.dock.reset()
-})
-
-it('closes a stale menu when the meeting changes', () => {
-  const v = mount()
-  const recording = { state: 'live' as const, title: 'Standup', fiber: 'other', tail: [] as never[] }
-  v.setRecording(recording)
-  v.dropdown().click()
-  expect(v.root.querySelector('[role=menu]')).not.toBeNull()
-  v.setRecording({ ...recording, paused: true })
-  expect(v.root.querySelector('[role=menu]')).toBeNull()
-  v.dock.reset()
-})
-
-it('routes cadence edits to the active recorder', async () => {
-  const v = mount()
-  const fetcher = vi.mocked(fetch)
-  fetcher.mockClear()
-  fetcher.mockResolvedValueOnce(Response.json({ text: '{}', digest: 'before' }))
-  fetcher.mockResolvedValueOnce(Response.json({ digest: 'after' }))
-  v.setRecording({ state: 'live', title: 'Standup', fiber: 'other', tail: [], recorder: 'recorder host' })
-  v.dropdown().click()
-  await vi.waitFor(() => expect(v.root.querySelector<HTMLInputElement>('[aria-label="Quiet seconds"]')?.disabled).toBe(false))
-  expect(fetcher.mock.calls[0][0]).toBe('/api/v1/config/voice?origin=recorder%20host')
-  const quiet = v.root.querySelector<HTMLInputElement>('[aria-label="Quiet seconds"]')!
-  quiet.value = '8'; quiet.dispatchEvent(new Event('change', { bubbles: true }))
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
-  const body = JSON.parse(fetcher.mock.calls[1][1]!.body as string)
-  expect(body.origin).toBe('recorder host')
-  expect(body.expected_digest).toBe('before')
-  v.dock.reset()
-})
-
-it('closes the open menu when focus and click return to the trigger', () => {
-  const v = mount()
-  v.dropdown().click()
-  expect(v.root.querySelector('[role=menu]')).not.toBeNull()
-  v.dropdown().focus()
-  v.dropdown().click()
-  expect(v.root.querySelector('[role=menu]')).toBeNull()
-  v.dock.reset()
-})
-
-it('closes the menu when the following recorder changes', () => {
-  const v = mount()
-  v.voice.status = { ...status, enabled: true, state: 'listening', recorder: 'first' }; notify(v.voice)
-  v.dropdown().click()
-  expect(v.root.querySelector('[role=menu]')).not.toBeNull()
-  v.voice.status = { ...v.voice.status, recorder: 'second' }; notify(v.voice)
-  expect(v.root.querySelector('[role=menu]')).toBeNull()
-  v.dock.reset()
-})
-
-it('routes following cadence edits to the recorder, not the board host', async () => {
-  const v = mount()
-  v.voice.status = { ...status, enabled: true, state: 'listening', recorder: 'audio-host' }; notify(v.voice)
-  const fetcher = vi.mocked(fetch)
-  fetcher.mockClear()
-  fetcher.mockResolvedValueOnce(Response.json({ text: '{}', digest: 'before' }))
-  fetcher.mockResolvedValueOnce(Response.json({ digest: 'after' }))
-  v.dropdown().click()
-  await vi.waitFor(() => expect(v.root.querySelector<HTMLInputElement>('[aria-label="Quiet seconds"]')?.disabled).toBe(false))
-  expect(fetcher.mock.calls[0][0]).toBe('/api/v1/config/voice?origin=audio-host')
-  const quiet = v.root.querySelector<HTMLInputElement>('[aria-label="Quiet seconds"]')!
-  quiet.value = '7'; quiet.dispatchEvent(new Event('change', { bubbles: true }))
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
-  const body = JSON.parse(fetcher.mock.calls[1][1]!.body as string)
-  expect(body.origin).toBe('audio-host')
-  expect(body.expected_digest).toBe('before')
-  v.dock.reset()
-})
-
-it('opens the actual following transcript on its recorder even without a target', async () => {
-  const v = mount()
-  v.voice.status = { ...status, enabled: true, state: 'listening', target: null, recorder: 'audio-host' }; notify(v.voice)
-  const fetcher = vi.mocked(fetch)
-  fetcher.mockImplementation(async (url: RequestInfo | URL) => String(url).includes('/voice/transcript')
-    ? Response.json({ path: '/hark/voice/current.txt', launch: 'voice-1', recorder: 'audio-host' })
-    : Response.json({ text: '{}', digest: null }))
-  v.dropdown().click()
-  v.menuItems().find(x => x.textContent === 'Open transcript')!.click()
-  await vi.waitFor(() => expect(v.open).toHaveBeenCalledWith('/hark/voice/current.txt', 'Listening transcript', 'audio-host'))
-  v.dock.reset()
-})
-
-it('saves quiet seconds without replacing other settings', async () => {
-  const v = mount()
-  v.voice.status = { ...status, enabled: true, state: 'listening' }; notify(v.voice)
-  const fetcher = vi.mocked(fetch)
-  fetcher.mockClear()
-  fetcher.mockResolvedValueOnce(Response.json({ text: JSON.stringify({ enabled: true, words: 42, run_quiet_seconds: 5 }), digest: 'before' }))
-  fetcher.mockResolvedValueOnce(Response.json({ digest: 'after' }))
-  fetcher.mockResolvedValueOnce(Response.json({ digest: 'again' }))
-  v.dropdown().click()
-  await vi.waitFor(() => expect(v.root.querySelector<HTMLInputElement>('[aria-label="Quiet seconds"]')?.disabled).toBe(false))
-  const quiet = v.root.querySelector<HTMLInputElement>('[aria-label="Quiet seconds"]')!
-  expect(quiet.value).toBe('15')
-  quiet.value = '7'
-  quiet.dispatchEvent(new Event('change', { bubbles: true }))
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
-  const body = JSON.parse(fetcher.mock.calls[1][1]!.body as string)
-  expect(body.expected_digest).toBe('before')
-  expect(JSON.parse(body.text)).toEqual({ enabled: true, words: 42, quiet_seconds: 7 })
+it.each([true, false])('edits only the current quiet threshold on the recorder (follow=%s)', async follow => {
+  mount({ follow, recorder: 'audio host' }); dropdown()
+  const quiet = q<HTMLInputElement>('input[type=number]')
   await vi.waitFor(() => expect(quiet.disabled).toBe(false))
-  quiet.value = '3'
-  quiet.dispatchEvent(new Event('change', { bubbles: true }))
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
-  const again = JSON.parse(fetcher.mock.calls[2][1]!.body as string)
-  expect(again.expected_digest).toBe('after')
-  expect(JSON.parse(again.text)).toEqual({ enabled: true, words: 42, quiet_seconds: 3 })
-  v.dock.reset()
+  expect(quiet.value).toBe(follow ? '15' : '120')
+  expect(fetcher.mock.calls[0][0]).toBe('/api/v1/config/voice?origin=audio%20host')
+  quiet.value = '0.5'; quiet.dispatchEvent(new Event('change', { bubbles: true }))
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
+  const request = JSON.parse(fetcher.mock.calls[1][1].body)
+  expect(request).toMatchObject({ origin: 'audio host', expected_digest: 'before' })
+  expect(JSON.parse(request.text)).toEqual({ quiet_seconds: follow ? 0.5 : 15, pinned_quiet_seconds: follow ? 120 : 0.5, words: 200 })
 })
-
-it('lets the audio select handle arrow keys', () => {
-  const v = mount()
-  v.dropdown().click()
-  const audio = v.root.querySelector<HTMLSelectElement>('.kbn-ctl-meet-audio')!
-  const event = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
-  audio.dispatchEvent(event)
-  expect(event.defaultPrevented).toBe(false)
-  v.dock.reset()
+it('shows recorder and delivery failures in red without hiding mute or destination', () => {
+  mount({ enabled: true, muted: true, state: 'failed', error: 'Mic refused' })
+  expect(q('.listen-control').classList.contains('listen-failed')).toBe(true)
+  expect(mic().getAttribute('aria-label')).toBe('Unmute')
+  expect(q('.ws-voice-strip').textContent).toBe('a')
+  dropdown(); expect(q('.voice-error').textContent).toBe('Mic refused')
+  voice.status = { ...voice.status!, state: 'listening', error: null, last: { fiber_id: 'a', at: '', status: 'failed', detail: 'Worker gone' } }; notify()
+  dropdown(); expect(q('.voice-error').textContent).toContain('Worker gone')
+})
+it('surfaces the daemon reason for a rejected control', async () => {
+  mount()
+  fetcher.mockResolvedValue(Response.json({ error: 'Hark unavailable' }, { status: 422 }))
+  mic().click()
+  await vi.waitFor(() => expect(mic().title).toContain('Hark unavailable'))
+  expect(q('.listen-failed')).not.toBeNull()
+})
+it('closes a stale menu on target or recorder changes and restores focus on Escape', () => {
+  mount(); dropdown()
+  voice.status = { ...voice.status!, recorder: 'different' }; notify()
+  expect(q('[role=menu]')).toBeNull()
+  dropdown()
+  q('[role=menu]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  expect(q('[role=menu]')).toBeNull()
+  expect(document.activeElement).toBe(q('.listen-dropdown'))
 })

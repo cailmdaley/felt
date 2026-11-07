@@ -5,7 +5,6 @@ import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
-import type { MeetingRecord } from '../meeting.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
@@ -23,7 +22,8 @@ import { deskColumn } from '../deskColumn.js'
 import { slug } from '../threadOutline.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
-import { ListenControl, type MeetingJoinControl } from './ListenControl.js'
+import { ListenControl } from './ListenControl.js'
+import type { PhoneListening } from '../phoneListening.js'
 import './tokens.css'
 import './dock.css'
 
@@ -384,7 +384,7 @@ export function bandFacts(card: KanbanCard): string {
 
 export interface DockOptions {
   voice?: { controller: import('../voice.js').Voice }
-  meeting?: MeetingJoinControl
+  phone?: PhoneListening
   /** Opens the Rest popover on the button that asked for it. */
   onRest?: (card: KanbanCard, anchor: HTMLElement) => void
 }
@@ -437,10 +437,9 @@ export class Dock {
   private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
   private queueVerdict?: (card: KanbanCard, target: Verdict) => void
   private readonly onOpenWorker?: WorkerOpener
-  private readonly meeting: MeetingJoinControl | null
+  private readonly phone: PhoneListening | undefined
   private readonly voice: DockOptions['voice']
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
-  private onMeetingHostOpen?: (meeting: MeetingRecord) => void
   private fiberSlug?: FiberSlug
 
   constructor(
@@ -454,15 +453,12 @@ export class Dock {
     this.onSaved = onChanged
     this.onTransition = onTransition ?? (() => {})
     this.onOpenWorker = onWorkerOpen
-    this.meeting = opts.meeting ?? null
+    this.phone = opts.phone
     this.voice = opts.voice
     this.onRest = opts.onRest
   }
 
-  setMeetingHostOpen(open: (meeting: MeetingRecord) => void, fiberSlug?: FiberSlug): void {
-    this.onMeetingHostOpen = open
-    this.fiberSlug = fiberSlug
-  }
+  setFiberSlug(fiberSlug: FiberSlug): void { this.fiberSlug = fiberSlug }
 
   /** The band's element, built on first use so controls can be exercised without a page. */
   get el(): HTMLElement {
@@ -585,15 +581,9 @@ export class Dock {
     return this.drawerClose?.() ?? false
   }
 
-  /** Repaint Listen from the board's current meeting. */
-  syncMeeting(): void {
-    this.listen?.meetingChanged()
-    this.paintVoice()
-  }
-
-  /** Repaint the voice strip from the board's meeting and live voice. */
+  /** Repaint the destination beside Listen. */
   private paintVoice(): void {
-    this.voiceStrip?.paint(voiceLine(this.meeting?.current() ?? null, this.voice?.controller.status ?? null, (fiber, origin) => this.fiberSlug?.(fiber, origin)))
+    this.voiceStrip?.paint(voiceLine(this.voice?.controller.status ?? null, (fiber, origin) => this.fiberSlug?.(fiber, origin)))
   }
 
   /**
@@ -884,17 +874,10 @@ export class Dock {
     leave.className = 'ws-header-icon ws-band-leave'
     leave.hidden = true
     leave.innerHTML = headerIcon('leave')
-    if (this.meeting && shuttleManaged) {
+    if (this.voice && shuttleManaged) {
       this.listen = new ListenControl({
-        card, meeting: this.meeting, voice: this.voice?.controller, shuttleBase: this.shuttleBase,
-        openFile: (path, title, owner) => this.openFile?.(path, title, owner),
+        card, voice: this.voice.controller, phone: this.phone, shuttleBase: this.shuttleBase,
         fiberSlug: (fiber, origin) => this.fiberSlug?.(fiber, origin),
-        openHost: meeting => this.onMeetingHostOpen?.(meeting),
-        showPane: () => {
-          const current = this.meeting?.current()
-          if (current?.transcript) this.openFile?.(current.transcript, 'Meeting transcript', current.recorder ?? undefined)
-        },
-        onError: showError,
       })
     }
     // Listen keeps its own slot; the strip beside it says where the words go.

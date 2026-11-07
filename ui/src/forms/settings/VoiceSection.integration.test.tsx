@@ -10,7 +10,7 @@ const host = { origin: 'recorder', label: 'recorder', isLocal: false, stale: fal
 afterEach(() => { document.body.replaceChildren(); vi.clearAllMocks(); vi.unstubAllGlobals() })
 it('saves shared listening settings on the selected host without dropping other keys', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  api.load.mockResolvedValue({ text: JSON.stringify({ enabled: false, voice: { words: 23 }, meeting: { words: 50, quiet_seconds: 8 }, other: true }), digest: 'before' })
+  api.load.mockResolvedValue({ text: JSON.stringify({ enabled: false, follow: false, system_audio: true, words: 23, quiet_seconds: 8, pinned_quiet_seconds: 90, other: true }), digest: 'before' })
   api.save.mockResolvedValue({ digest: 'after' })
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container)
@@ -18,7 +18,7 @@ it('saves shared listening settings on the selected host without dropping other 
   expect(container.querySelector('input[type=checkbox]')).toBeNull()
   expect(container.textContent).toContain('Quiet seconds')
   expect(container.textContent).not.toContain('Cold-worker minutes')
-  expect(container.querySelectorAll<HTMLInputElement>('input[type=number]')).toHaveLength(2)
+  expect(container.querySelectorAll<HTMLInputElement>('input[type=number]')).toHaveLength(3)
   const quiet = container.querySelectorAll<HTMLInputElement>('input[type=number]')[1]
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(quiet, '0.5')
@@ -29,7 +29,7 @@ it('saves shared listening settings on the selected host without dropping other 
   expect(api.save).toHaveBeenCalledOnce()
   const [, owner, id, text, digest] = api.save.mock.calls[0]
   expect(owner).toEqual(host); expect(id).toBe('voice'); expect(digest).toBe('before')
-  expect(JSON.parse(text)).toEqual({ enabled: false, words: 23, quiet_seconds: 0.5, other: true })
+  expect(JSON.parse(text)).toEqual({ enabled: false, follow: false, system_audio: true, words: 23, quiet_seconds: 0.5, pinned_quiet_seconds: 90, other: true })
   expect(api.load).toHaveBeenCalledTimes(1)
   act(() => root.unmount())
 })

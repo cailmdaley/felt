@@ -2,29 +2,24 @@ import { Mic, ScreenLock, audioContextForGesture } from '../phone/mic'
 import { RelayLink } from '../phone/relay'
 import { AudioSession } from '../phone/session'
 import { relayUrl } from '../phone/phoneState'
-import { parseMeetingRecord, type MeetingRecord } from './meeting'
+import type { VoiceStatus } from './voice'
 
-/** Capture opens audio in its submit gesture; the board keeps it after the sheet closes. */
-export interface PhoneCaptureAttempt {
+export interface PhoneListeningAttempt {
   ready: Promise<number>
-  bind(generation: number, meeting: unknown): void
+  bind(generation: number, voice: VoiceStatus): void
   cancel(): void
 }
 
-export interface PhoneCaptureHooks {
-  begin(): PhoneCaptureAttempt
-}
-
-export class PhoneMeeting implements PhoneCaptureHooks {
+/** The board owns the phone mic across card and console changes. */
+export class PhoneListening {
   readonly session: AudioSession
-  readonly lock: ScreenLock
-  peak = 0
   private launch: string | null = null
   private recorder: string | null = null
   private attempt = 0
   private checkTimer: number | null = null
   private mounted = false
-  private readonly changed: () => void
+  private listeners = new Set<() => void>()
+  private readonly changed = (): void => { this.listeners.forEach(fn => fn()) }
   private readonly visibilityChanged = (): void => {
     if (document.visibilityState === 'visible') this.session.returned()
     else this.session.backgrounded()
@@ -34,82 +29,60 @@ export class PhoneMeeting implements PhoneCaptureHooks {
     if (!event.persisted) this.cancel()
   }
 
-  constructor(shuttleBase: string, changed: () => void, level: () => void) {
-    this.changed = changed
-    this.lock = new ScreenLock()
+  constructor(shuttleBase: string) {
     this.session = new AudioSession({
-      openMic: (handlers) => {
+      openMic: handlers => {
         const context = audioContextForGesture()
         return Mic.open(context, handlers).catch((error: unknown) => {
           void context.close().catch(() => {})
           throw error
         })
       },
-      // The scribe's project origin does not own this meeting's audio.
       createRelay: (launch, events) => new RelayLink({
         url: relayUrl(shuttleBase, window.location, launch, this.recorder), ...events,
       }),
-      lock: this.lock,
-      onChange: changed,
-      onLevel: (peak) => { this.peak = peak; level() },
+      lock: new ScreenLock(),
+      onChange: this.changed,
+      onLevel: () => {},
     })
   }
 
-  begin(): PhoneCaptureAttempt {
-    // A sheet must not take ownership of audio another gesture already owns.
+  subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn) }
+
+  /** Reaches getUserMedia before returning, inside the Listen click. */
+  begin(): PhoneListeningAttempt {
     if (this.session.busy) throw new Error('The microphone is already opening or in use.')
     const attempt = ++this.attempt
     const opening = this.session.begin()
     this.watch()
     return {
-      ready: opening.then((generation) => {
+      ready: opening.then(generation => {
         if (generation === null) throw new Error(this.session.error ?? 'The microphone opening was cancelled.')
         return generation
       }),
-      bind: (generation, meeting) => {
+      bind: (generation, voice) => {
         if (attempt !== this.attempt) throw new Error('The microphone opening was cancelled.')
-        this.bind(generation, meeting)
+        if (!voice.enabled || voice.source !== 'phone' || !voice.launch || !voice.recorder || voice.state === 'failed') {
+          this.cancel()
+          throw new Error('The recorder did not return a phone listening launch. The mic is off.')
+        }
+        this.launch = voice.launch
+        this.recorder = voice.recorder
+        this.session.stream(generation, voice.launch)
       },
       cancel: () => { if (attempt === this.attempt) this.cancel() },
     }
   }
 
-  bind(generation: number, value: unknown): void {
-    const meeting = parseMeetingRecord(value)
-    if (!meeting?.phone || !meeting.launch?.trim() || meeting.state === 'failed' || meeting.state === 'stopping') {
-      this.cancel()
-      throw new Error('Recording started, but the daemon did not return a phone meeting launch. The mic is off; reconnect when the meeting is available.')
-    }
-    this.launch = meeting.launch
-    this.recorder = meeting.recorder ?? null
-    this.session.stream(generation, meeting.launch)
-  }
-
-  async connect(meeting: MeetingRecord): Promise<void> {
-    // Refuse before asking for audio when there is no identity to bind it to.
-    if (!meeting.launch?.trim()) {
-      this.session.error = 'The meeting has no launch id. The mic is off.'
-      this.changed()
-      return
-    }
-    try {
-      const opening = this.begin()
-      opening.bind(await opening.ready, meeting)
-    } catch (error) {
-      this.session.error ??= (error as Error).message
-    } finally { this.changed() }
-  }
-
   cancel(): void {
-    this.attempt += 1
-    this.launch = null
-    this.recorder = null
-    this.peak = 0
+    this.attempt++
+    this.launch = this.recorder = null
     this.session.stop()
   }
 
-  observe(meeting: MeetingRecord | null): void {
-    if (this.launch && (!meeting || meeting.launch !== this.launch || (meeting.recorder ?? null) !== this.recorder || meeting.state === 'failed' || meeting.state === 'stopping')) this.cancel()
+  observe(voice: VoiceStatus | null): void {
+    // An unavailable status is not evidence that the launch ended.
+    if (this.launch && voice && (!voice.enabled || voice.source !== 'phone' || voice.launch !== this.launch || voice.recorder !== this.recorder || voice.state === 'failed')) this.cancel()
   }
 
   mount(): void {
@@ -120,7 +93,6 @@ export class PhoneMeeting implements PhoneCaptureHooks {
     this.watch()
   }
 
-  /** Look at the mic once a second while the tab holds or opens one; an idle board sets no timer. */
   private watch(): void {
     if (!this.mounted || this.checkTimer !== null || !this.session.busy) return
     this.checkTimer = window.setTimeout(() => {

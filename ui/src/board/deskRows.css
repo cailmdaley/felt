@@ -48,7 +48,6 @@
 .kbn-now-board .kbn-col-title { font-size: var(--type-display); }
 .kbn-col-list .kbn-card > .kbn-card-meta { position: relative; flex: 0 0 auto; flex-wrap: nowrap; gap: 5px; margin: 0; }
 .kbn-col-list .kbn-card > .kbn-card-meta[data-verdict-pending] { min-width: 10.5rem; }
-.kbn-col-list .kbn-card--meeting .kbn-meeting { grid-column: 1 / -1; }
 
 .kbn-cluster-item-verdicts { position: relative; margin-left: auto; }
 .kbn-cluster-item-verdicts[data-verdict-pending] { min-width: 10.5rem; min-height: 19px; }

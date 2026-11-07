@@ -148,7 +148,7 @@ describe('audio session ownership', () => {
     expect(relays[1].sent).toBe(1)
   })
 
-  it('binds the relay to the meeting’s launch', async () => {
+  it('binds the relay to the recording’s launch', async () => {
     const { session, relays, grant } = harness()
     const pending = session.begin()
     grant()
@@ -164,7 +164,7 @@ describe('audio session ownership', () => {
     session.stream((await pending)!, 'L1')
     await settle()
     expect(lock.held).toBe(1)
-    relays[0].emit('ended', 'the meeting has ended')
+    relays[0].emit('ended', 'listening has ended')
     expect(mic.closed).toBe(true)
     expect(relays[0].closed).toBe(true)
     expect(lock.held).toBe(0)

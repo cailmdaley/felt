@@ -7,7 +7,7 @@
  * keyboard line on the left and Cancel · submit on the right. Every part of
  * that rhythm lives here, so the two forms are siblings by construction rather
  * than by two style sheets agreeing. What only one form has — the yap and the
- * meeting row, the slug receipt, tags, parent picker and kind segments — stays
+ * the slug receipt, tags, parent picker and kind segments — stays
  * in that form's own sheet.
  *
  * Type comes from styles/type.css: the lead field at --type-prose, controls at
@@ -407,7 +407,7 @@ export function injectFormKitStyles(): void {
       background: color-mix(in srgb, var(--kbn-graphite) 6%, transparent);
       color: var(--kbn-graphite);
     }
-    /* Wide enough for "Start meeting", so a longer label leaves Cancel where
+    /* Wide enough for "Start listening", so a longer label leaves Cancel where
        it was. */
     .form-submit {
       min-width: 8em;

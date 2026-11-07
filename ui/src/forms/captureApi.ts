@@ -1,9 +1,4 @@
-import type { MeetingLanguage, MeetingMode } from './meetingApi'
-
-// Capture's default worker: claude-opus at xhigh reasoning. A captured yap is
-// often a real piece of thinking to crystallize, not throwaway — worth the
-// strong model. Capture seeds from these; effort resolves against the agent's
-// registry record.
+// Capture seeds effort from the selected agent's registry record.
 export const CAPTURE_DEFAULT_AGENT = 'claude-opus'
 export const CAPTURE_DEFAULT_EFFORT = 'xhigh'
 
@@ -14,10 +9,6 @@ export interface CaptureRequestInput {
   agent: string
   effort?: string
   chrome?: boolean
-  meetingMode?: MeetingMode | null
-  meetingLanguage?: MeetingLanguage
-  systemAudio?: boolean
-  recorder?: string | null
 }
 
 export interface CaptureResponseData {
@@ -26,76 +17,30 @@ export interface CaptureResponseData {
   reason?: string
   error?: string
   message?: string
-  recording?: boolean
-  recording_unknown?: boolean
-  recorder?: string
-  meeting?: unknown
 }
 
 export type CaptureOutcome =
   | { kind: 'spawned'; tmuxSession: string }
-  | { kind: 'meeting-recording'; host: string; error?: string }
-  | { kind: 'error'; message: string; uncertain?: boolean }
+  | { kind: 'error'; message: string }
 
 export function captureRequestBody(input: CaptureRequestInput): Record<string, unknown> {
-  const prompt = input.prompt.trim()
   return {
-    ...(prompt || !input.meetingMode ? { prompt } : {}),
+    prompt: input.prompt.trim(),
     project_dir: input.projectDir,
     origin: input.origin,
     agent: input.agent,
     ...(input.effort ? { effort: input.effort } : {}),
     ...(input.chrome ? { chrome: true } : {}),
-    ...(input.meetingMode
-      ? { meeting: { mode: input.meetingMode, language: input.meetingLanguage ?? 'auto', ...(input.meetingMode === 'call' && input.systemAudio === false ? { system_audio: false } : {}) }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
-      : {}),
   }
 }
 
 export function captureOutcome(
   response: Pick<Response, 'ok' | 'status'>,
   data: CaptureResponseData,
-  options: { projectDir: string; meetingMode?: MeetingMode | null; host: string },
+  options: { projectDir: string },
 ): CaptureOutcome {
-  if (data.recording_unknown === true) return {
-    kind: 'error', uncertain: true,
-    message: data.error || data.message || 'Could not confirm whether listening started. Check the recorder before trying again.',
-  }
-  const spawned = response.ok && data.spawned === true
-  const hasMeetingRow = !!data.meeting && typeof data.meeting === 'object' && !Array.isArray(data.meeting)
-  const recording = data.recording === true || (response.ok && hasMeetingRow)
-
-  if (options.meetingMode && recording) {
-    const explicitError = data.error || data.reason
-    const meeting = data.meeting as { handoff?: { status?: string } } | null | undefined
-    if (meeting?.handoff?.status === 'unconfirmed' || (spawned && !explicitError)) {
-      return { kind: 'meeting-recording', host: options.host }
-    }
-    return {
-      kind: 'meeting-recording',
-      host: options.host,
-      error: `Listening; the scribe didn't start: ${captureError(response.status, data, options.projectDir)}`,
-    }
-  }
-
-  if (!spawned) return { kind: 'error', message: captureError(response.status, data, options.projectDir) }
-  if (options.meetingMode) {
-    return { kind: 'error', message: 'The daemon did not confirm that meeting recording started.' }
-  }
-  return {
-    kind: 'spawned',
-    tmuxSession: data.tmux_session ?? '',
-  }
-}
-
-function captureError(status: number, data: CaptureResponseData, projectDir: string): string {
-  if (data.reason === 'project_dir_missing') {
-    return `Project directory not found on the daemon: ${projectDir}`
-  }
-  if (data.message) return data.message
-  if (data.error) return data.error
-  if (status === 409) return 'A meeting is already starting or running.'
-  if (status === 503) return 'Hark is unavailable on this daemon.'
-  if (data.reason) return data.reason
-  return `Capture failed (${status})`
+  if (response.ok && data.spawned === true) return { kind: 'spawned', tmuxSession: data.tmux_session ?? '' }
+  return { kind: 'error', message: data.reason === 'project_dir_missing'
+    ? `Project directory not found on the daemon: ${options.projectDir}`
+    : data.message || data.error || data.reason || `Capture failed (${response.status})` }
 }

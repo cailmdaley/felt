@@ -1,33 +1,25 @@
-import { describe, expect, it } from 'vitest'
-import { voiceLine } from './voiceStrip.js'
-import type { MeetingRecord } from '../meeting.js'
-import type { VoiceStatus } from '../voice.js'
-
-const voice = (patch: Partial<VoiceStatus> = {}): VoiceStatus => ({ available: true, enabled: true, muted: false, state: 'listening', target: { fiber_id: 'U1', origin: 'h', name: 'Career futures' }, last: null, error: null, ...patch })
-const meeting = (patch: Partial<MeetingRecord> = {}): MeetingRecord => ({ state: 'live', title: 'Call', started_at: null, tail: [], transcript: null, mirror_host: null, fiber: 'ai-futures/felt/debug', joined: true, phone: false, launch: 'L', tmux_session: null, error: null, ...patch })
-const slugs: Record<string, string> = { U1: 'career', U2: 'two-columns' }
-const line = (m: MeetingRecord | null, v: VoiceStatus | null) => voiceLine(m, v, fiber => slugs[fiber])
-
-describe('the voice strip', () => {
-  it('names the live voice target by its slug while following, and its name when the board does not know it', () => {
-    expect(line(null, voice())).toEqual({ mode: 'following', name: 'career', paused: false })
-    expect(line(null, voice({ muted: true }))).toEqual({ mode: 'following', name: 'career', paused: true })
-    expect(line(null, voice({ target: { fiber_id: 'U9', origin: 'h', name: 'Unknown card' } })).name).toBe('Unknown card')
-  })
-  it('names the meeting\'s fiber while a meeting holds the mic, over the voice target', () => {
-    expect(line(meeting(), voice({ state: 'yielded' }))).toEqual({ mode: 'meeting', name: 'debug', paused: false })
-    expect(line(meeting({ paused: true }), null)).toEqual({ mode: 'meeting', name: 'debug', paused: true })
-    expect(line(null, voice({ state: 'yielded' }))).toEqual({ mode: 'meeting', name: 'a recording', paused: false })
-  })
-  it('says nothing when the mic is off or the meeting failed, and holds a stopping meeting until it ends', () => {
-    expect(line(null, null).mode).toBe('off')
-    expect(line(null, voice({ enabled: false })).mode).toBe('off')
-    expect(line(meeting({ state: 'failed' }), null).mode).toBe('off')
-    expect(line(meeting({ state: 'stopping' }), null).name).toBe('debug')
-  })
-  it('reads the daemon\'s mode, destination and paused when it reports them', () => {
-    expect(line(null, voice({ mode: 'meeting', destination: { fiber_id: 'x', origin: 'h', name: 'Standup' }, paused: true }))).toEqual({ mode: 'meeting', name: 'Standup', paused: true })
-    expect(line(null, voice({ mode: 'following', destination: { fiber_id: 'U2', origin: 'h', name: 'Two columns' }, paused: false }))).toEqual({ mode: 'following', name: 'two-columns', paused: false })
-    expect(line(null, voice({ mode: 'off', enabled: false })).mode).toBe('off')
-  })
+// @vitest-environment jsdom
+import { expect, it } from 'vitest'
+import { VoiceStrip, voiceLine } from './voiceStrip'
+import { voiceStatus } from '../testFixtures'
+const target = { fiber_id: 'uid', origin: 'owner', name: 'Card name' }
+const slug = (id: string) => id === 'uid' ? 'the-card' : undefined
+it('shows no destination when off, and the target slug when following', () => {
+  const strip = new VoiceStrip()
+  strip.paint(voiceLine(voiceStatus({ target }), slug))
+  expect(strip.el.hidden).toBe(true)
+  strip.paint(voiceLine(voiceStatus({ enabled: true, target }), slug))
+  expect(strip.el.textContent).toBe('the-card')
+  expect(strip.el.dataset.mode).toBe('following')
+})
+it('keeps the pin mark and destination while muted or failed', () => {
+  const strip = new VoiceStrip()
+  strip.paint(voiceLine(voiceStatus({ enabled: true, follow: false, muted: true, state: 'failed', target }), slug))
+  expect(strip.el.textContent).toBe('📌 the-card')
+  expect(strip.el.dataset.mode).toBe('pinned')
+  expect(strip.el.hasAttribute('data-paused')).toBe(true)
+  expect(strip.el.title).toBe('Pinned: words go to the-card once unmuted')
+})
+it('uses the current destination and a path slug for a card outside the board', () => {
+  expect(voiceLine(voiceStatus({ enabled: true, target, destination: { ...target, fiber_id: 'outside/other' } }), slug).name).toBe('other')
 })

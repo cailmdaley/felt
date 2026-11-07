@@ -54,9 +54,6 @@ const board = new KanbanModal({
     withForms(({ openCapture }) => openCapture({
       shuttleBase,
       onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error'),
-      onMeetingResult: (msg, tone) => showToast(msg, tone),
-      phoneAudio: board.phoneAudio,
-      onMeetingStarted: (meeting) => board.meetingStarted(meeting),
     }))
   },
   // ⚙︎ at the right end of the tab strip, and ⌘, / , — the operator files of

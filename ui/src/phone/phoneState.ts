@@ -20,7 +20,7 @@ export type LinkState =
 /** A terminal link state: the relay closed for a reason a retry won't change. */
 export const TERMINAL_LINKS: ReadonlySet<LinkState> = new Set(['refused', 'ended', 'replaced'])
 
-/** The relay's close codes (`ShuttleWeb.MeetingAudioSocket.close_code/1`). */
+/** The relay's close codes (`ShuttleWeb.PhoneAudioSocket.close_code/1`). */
 export const RELAY_CLOSE_CODES: Readonly<Record<number, LinkState>> = {
   4404: 'refused',
   4409: 'replaced',
@@ -86,7 +86,7 @@ export function audioHealth(
 
 /**
  * The relay socket's URL beside the page (or beside an absolute API base),
- * bound to the meeting with launch id `launch`.
+ * bound to the recording with launch id `launch`.
  */
 export function relayUrl(
   shuttleBase: string,
@@ -102,7 +102,7 @@ export function relayUrl(
   if (launch) params.set('launch', launch)
   if (recorder) params.set('recorder', recorder)
   const query = params.size ? `?${params.toString()}` : ''
-  return `${protocol}//${host}${prefix}/api/v1/meeting/audio${query}`
+  return `${protocol}//${host}${prefix}/api/v1/voice/audio${query}`
 }
 
 /** A wall-clock time as HH:MM:SS, in the reader's zone. */
@@ -130,7 +130,7 @@ export function linkWords(link: LinkState, reason: string | null, lostSince: num
     case 'connected': return 'Listening'
     case 'reconnecting': return 'Reconnecting — speech isn’t captured until Listening'
     case 'refused': return reason ? `Refused: ${reason}` : 'The relay refused the mic'
-    case 'ended': return reason ? `Ended: ${reason}` : 'The meeting ended'
+    case 'ended': return reason ? `Ended: ${reason}` : 'Listening ended'
     case 'replaced': return reason ?? 'Another device is now the microphone'
   }
 }

@@ -29,19 +29,12 @@ import { StashForm, injectStashFormStyles } from './StashForm'
 import { CaptureForm, injectCaptureFormStyles } from './CaptureForm'
 import { SettingsDialog } from './settings/SettingsDialog'
 import { loadHosts } from './settings/settingsApi'
-import type { PhoneCaptureHooks } from '../board/phoneMeeting'
-import type { MeetingRecord } from '../board/meeting'
 
 export interface OpenFormOptions {
   /** Shuttle daemon base — `''` (relative) in the standalone bundle. */
   shuttleBase: string
   /** Surface a result (success or failure) to the user, e.g. a board toast. */
   onResult?: (message: string, ok: boolean) => void
-  /** Meeting recording outcomes distinguish a continuing recording from failure. */
-  onMeetingResult?: (message: string, tone: 'success' | 'warning') => void
-  /** Refresh the local meeting row as soon as recording is confirmed. */
-  onMeetingStarted?: (meeting: MeetingRecord | null) => void
-  phoneAudio?: PhoneCaptureHooks
 }
 
 let container: HTMLElement | null = null
@@ -113,18 +106,9 @@ export async function openCapture(opts: OpenFormOptions): Promise<void> {
       shuttleBase={opts.shuttleBase}
       onProjectAdded={() => refreshProjects(opts.shuttleBase)}
       onCancel={close}
-      phoneAudio={opts.phoneAudio}
       onSpawned={({ tmuxSession: session }) => {
         close()
         opts.onResult?.(`Capture session spawned${session ? ` · ${session}` : ''}`, true)
-      }}
-      onMeetingResult={({ host, error, meeting }) => {
-        close()
-        opts.onMeetingStarted?.(meeting)
-        const tone = error ? 'warning' : 'success'
-        const message = error ?? `Recording started; the scribe is starting on ${host}.`
-        if (opts.onMeetingResult) opts.onMeetingResult(message, tone)
-        else opts.onResult?.(message, tone === 'success')
       }}
     />,
   )

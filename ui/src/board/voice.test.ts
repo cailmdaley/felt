@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { card } from './testFixtures.js'
+import { card, voiceStatus } from './testFixtures.js'
 import { Voice, constitutionFor, voicePollDelay, type VoiceStatus } from './voice'
 
-const status = (changes: Partial<VoiceStatus> = {}): VoiceStatus => ({ available: true, enabled: true, muted: false, state: 'listening', target: null, last: null, error: null, ...changes })
+const status = (changes: Partial<VoiceStatus> = {}): VoiceStatus => voiceStatus({ enabled: true, state: 'listening', ...changes })
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -288,7 +288,7 @@ describe('live voice', () => {
       vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
         if (init?.method === 'POST') {
           posts.push(JSON.parse(String(init.body)))
-          current = { ...current, target: JSON.parse(String(init.body)) as VoiceStatus['target'] }
+          if (current.follow) current = { ...current, target: JSON.parse(String(init.body)) as VoiceStatus['target'] }
         }
         return { ok: true, json: async () => current }
       }))
@@ -308,6 +308,24 @@ describe('live voice', () => {
       await vi.advanceTimersByTimeAsync(400); await flush()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
       await vi.advanceTimersByTimeAsync(2_000); await flush()
+      voice.dispose()
+    })
+    it('remembers a board view while pinned without moving the target or repeating the write', async () => {
+      const voice = await mounted(status({ follow: false, target: held, recorder: 'audio-host' }))
+      voice.see(worker)
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A', recorder: 'audio-host' }])
+      expect(voice.status?.target).toEqual(held)
+      window.dispatchEvent(new Event('focus')); await flush()
+      expect(posts).toHaveLength(1)
+      voice.dispose()
+    })
+    it('routes the page viewed on a phone to its recorder', async () => {
+      vi.stubGlobal('matchMedia', () => ({ matches: true }) as MediaQueryList)
+      const voice = await mounted(status({ source: 'phone', target: held, recorder: 'audio-host' }))
+      voice.see(worker)
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A', recorder: 'audio-host' }])
       voice.dispose()
     })
     it('lets the last focused of Rex and the board decide', async () => {
@@ -338,7 +356,6 @@ describe('live voice', () => {
     })
     it.each([
       ['voice is off', status({ enabled: false, target: held })],
-      ['a meeting holds the mic', status({ state: 'yielded', target: held })],
     ])('changes nothing while %s, and claims the view when following returns', async (_, start) => {
       const voice = await mounted(start)
       voice.see(worker)

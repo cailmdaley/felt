@@ -5,11 +5,8 @@
  * against mocked daemon routes, then opens from `file://`. The feed still runs
  * through the board's real classifier (`parseCompositeFeed` →
  * `buildKanbanResponseFromComposite`), so the DOM and CSS are production code.
- * Query `?meeting=` to stage a meeting: `joined` (folded into the constitution
- * it joined), `scribe` (a capture whose scribe has claimed, found by its
- * session), `live` (a capture not yet claimed, on its own card) or `failed`;
- * leave it unset to exercise the idle board. Add `?capture=meeting` to open
- * Capture with the daemon reporting meeting support.
+ * `?voice=off|following|pinned|muted|failed|phone` stages Listen.
+ * `?capture` opens ordinary Capture.
  * `?example=workspace` selects the fictional documentation example; add
  * `?transcript=live` to give its constitution a live worker, or
  * `?example=workspace&transcript=search` stages the bar Find's constitutions and grouped transcript hits for "mask".
@@ -97,63 +94,19 @@ if (workspaceFixture && search.has('manyFiles')) {
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
-const meetingScenario = search.get('meeting')
 const recorderHost = search.get('recorder') ?? 'local'
-const systemAudioEnabled = search.get('system_audio') !== 'off'
-// `?voice=following|paused` stages live voice following a card; unset, it is available and off.
-const voiceScenario = search.get('voice')
+const voiceScenario = search.get('voice') ?? 'off'
+const voiceTarget = { fiber_id: workspaceFixture ? WORKSPACE_ID : 'work/spt3g_papers/bmodes-2d/run', origin: workspaceFixture ? WORKSPACE_HOST : FOREIGN_HOST, name: 'Null tests' }
 let mockVoice: Record<string, unknown> = {
-  available: true, enabled: !!voiceScenario, muted: voiceScenario === 'paused', state: voiceScenario ? 'listening' : 'off',
-  target: { fiber_id: 'harness-voice-target', origin: 'local', name: 'Two columns and a family view' },
-  last: null, error: null, recorder: 'local',
+  available: true, sources: ['desktop', 'phone'], enabled: voiceScenario !== 'off', muted: voiceScenario === 'muted',
+  follow: voiceScenario !== 'pinned', system_audio: search.get('system_audio') === 'on',
+  source: voiceScenario === 'phone' ? 'phone' : 'desktop', launch: voiceScenario === 'off' ? null : 'voice-harness',
+  state: voiceScenario === 'off' ? 'off' : voiceScenario === 'failed' ? 'failed' : 'listening',
+  mode: voiceScenario === 'off' ? 'off' : voiceScenario === 'pinned' ? 'pinned' : 'following',
+  target: voiceTarget, destination: voiceScenario === 'off' ? null : voiceTarget,
+  last: null, error: voiceScenario === 'failed' ? 'The microphone is unavailable.' : null, recorder: recorderHost,
 }
-const MOCK_TAIL = [
-  '14:02:51 me  okay, I think everyone is here, let us start with the null tests',
-  '14:03:12 S1  so the chi-squared for the B-modes came back at forty-one for thirty-six bins',
-  '14:03:30 S2  that is a PTE of about a quarter, which is fine',
-  '14:03:44 me  and the Hartlap factor is in there?',
-  '14:03:49 S1  yes, with the three hundred simulations',
-  '14:04:10 S2  what worries me more is the mask split, the north patch looks a bit high',
-  '14:04:31 me  Claude, can you pull up the per-patch PTEs from last week?',
-  '14:04:58 S1  I would not over-read one patch out of six',
-  '14:05:20 me  fair, but let us rerun it with the updated mask before we call it',
-  '14:05:40 S2  the covariance looks fine, but we should rerun the mask split before calling the comparison settled',
-]
-let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || meetingScenario === 'joined' || meetingScenario === 'scribe'
-  ? {
-      state: 'live',
-      title: 'Shear telecon',
-      recorder: recorderHost,
-      launch: 'harness-meeting',
-      handoff: search.has('handoff') ? {
-        status: search.get('handoff'), kind: 'capture', target: '/work/shear',
-        origin: 'project-host', prompt: 'Follow the shear telecon transcript.',
-      } : null,
-      phone: search.get('audio') === 'phone',
-      system_audio: systemAudioEnabled,
-      mirror_host: meetingScenario === 'joined' ? (workspaceFixture ? WORKSPACE_HOST : FOREIGN_HOST) : 'project-host',
-      fiber: meetingScenario === 'joined' ? (workspaceFixture ? WORKSPACE_ID : 'work/spt3g_papers/bmodes-2d/run') : null,
-      scribe_session_uuid: meetingScenario === 'scribe' ? '6bc045dc-92e0-473a-bf9e-e1cc263223bc' : null,
-      started_at: iso(-13 * 60_000 - 12_000),
-      tail: MOCK_TAIL,
-      transcript: null,
-      tmux_session: 'hark-meeting',
-      error: null,
-    }
-  : meetingScenario === 'failed'
-    ? {
-        state: 'failed',
-        title: 'Shear telecon',
-        mirror_host: null,
-        fiber: null,
-        scribe_session_uuid: null,
-        started_at: iso(-2 * 60_000),
-        tail: [],
-        transcript: null,
-        tmux_session: 'hark-meeting',
-        error: 'Could not connect to the selected scribe host.',
-      }
-    : null
+let mockViewed = voiceTarget
 
 const shuttleBlock = (kind = 'oneshot') => ({
   kind,
@@ -1452,10 +1405,33 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const bodyOrigin = (): string => (body().origin as string) || LOCAL_HOST
 
   if (url.split('?')[0].endsWith('/api/v1/voice')) {
-    if (init?.method === 'POST') mockVoice = { ...mockVoice, ...body(), state: body().enabled === false ? 'off' : 'listening' }
+    if (init?.method === 'POST') {
+      const request = body()
+      mockVoice = { ...mockVoice, ...request, error: null }
+      if (request.follow === true) mockVoice.target = mockViewed
+      mockVoice.state = mockVoice.enabled ? 'listening' : 'off'
+      mockVoice.mode = mockVoice.enabled ? mockVoice.follow ? 'following' : 'pinned' : 'off'
+      mockVoice.destination = mockVoice.enabled ? mockVoice.target : null
+      mockVoice.launch = mockVoice.enabled ? 'voice-harness' : null
+    }
     return json(mockVoice)
   }
-  // The board's composite feed and the local-only meeting control plane.
+  if (url.split('?')[0].endsWith('/api/v1/voice/target')) {
+    mockViewed = body() as typeof voiceTarget
+    if (mockVoice.follow) mockVoice.target = mockVoice.enabled ? mockViewed : mockVoice.target
+    mockVoice.destination = mockVoice.enabled ? mockVoice.target : null
+    return json(mockVoice)
+  }
+  if (url.split('?')[0].endsWith('/api/v1/voice/transcript')) {
+    const filter = new URL(url, 'http://harness').searchParams.get('fiber')
+    const rows = [
+      { t: iso(-60_000), speaker: 'me', text: 'Let us check the mask split before calling it settled.', ...voiceTarget, launch: 'voice-harness' },
+      { t: iso(-45_000), speaker: 'S1', text: 'The covariance looks fine.', ...voiceTarget, launch: 'voice-harness' },
+      { t: iso(-30_000), speaker: 'me', text: 'Save the comparison for tomorrow.', fiber_id: 'research/next', origin: WORKSPACE_HOST, name: 'Next steps', launch: 'voice-harness' },
+    ]
+    return json({ date: iso(0).slice(0, 10), rows: rows.filter(row => !filter || row.fiber_id === filter || (filter === '01KVBR6M1GJ0ZRM29956V023R2' && row.fiber_id === WORKSPACE_ID)), recorder: recorderHost })
+  }
+  // The board's composite feed.
   if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)
   if (workspaceFixture && url.includes('/api/v1/fibers/') && url.includes('body=true')) {
     const id = decodeURIComponent(url.split('/api/v1/fibers/')[1].split('?')[0])
@@ -1519,68 +1495,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (docsExample) return json({ fibers: docsExample.feed.fibers })
     return json({ fibers: [...MOCK_FEED.fibers, { fiber: { id: 'work/spt3g_papers/bmodes-2d/null-suite', name: 'Null-test suite' } }] })
   }
-  if (url.endsWith('/api/v1/meeting/stop')) {
-    if (!mockMeeting) return json({ error: 'No meeting to stop' }, 404)
-    mockMeeting = mockMeeting.state === 'failed' ? null : { ...mockMeeting, state: 'stopping' }
-    return json({ meeting: mockMeeting }, 202)
-  }
-  if (url.endsWith('/api/v1/meeting/system-audio') && init?.method === 'POST') {
-    const request = body()
-    if (!mockMeeting) return json({ error: 'No meeting to control' }, 404)
-    mockMeeting = { ...mockMeeting, system_audio: request.enabled === true }
-    return json({ meeting: mockMeeting }, 202)
-  }
-  if (url.split('?')[0].endsWith('/api/v1/meeting')) {
-    const observed = mockMeeting
-    if (mockMeeting?.state === 'stopping') mockMeeting = null
-    return json({
-      available: true, modes: ['call', 'phone'], recorder: recorderHost, meeting: observed,
-    })
-  }
-  if (url.endsWith('/api/v1/meeting/join') && init?.method === 'POST') {
-    const request = body()
-    if (mockMeeting && mockMeeting.state !== 'failed') return json({ error: 'a meeting is already active', meeting: mockMeeting }, 409)
-    const fiber = String(request.fiber_id ?? '')
-    mockMeeting = {
-      recorder: recorderHost,
-      launch: 'harness-join',
-      phone: (request.meeting as Record<string, unknown>)?.mode === 'phone',
-      system_audio: (request.meeting as Record<string, unknown>)?.system_audio !== false,
-      state: 'live',
-      title: String(request.note ?? '').split('\n')[0] || fiber.split('/').pop() || 'Meeting',
-      started_at: iso(0),
-      tail: [],
-      scribe_session_uuid: null,
-      transcript: null,
-      mirror_host: request.origin === 'local' ? null : request.origin,
-      fiber,
-      tmux_session: 'hark-meeting',
-      error: null,
-    }
-    return json({ meeting: mockMeeting, delivery: { delivered: true, delivery: 'message' } })
-  }
-  if (url.endsWith('/api/v1/capture') && init?.method === 'POST') {
-    const request = body()
-    if (request.meeting && typeof request.meeting === 'object') {
-      const prompt = String(request.prompt ?? '').trim()
-      mockMeeting = {
-        state: 'starting',
-        title: prompt.split('\n')[0] || 'Meeting',
-        started_at: null,
-        tail: [],
-        scribe_session_uuid: null,
-        phone: (request.meeting as Record<string, unknown>).mode === 'phone',
-        system_audio: (request.meeting as Record<string, unknown>).system_audio !== false,
-        transcript: null,
-        mirror_host: request.origin === 'local' ? null : 'project-host',
-        fiber: null,
-        tmux_session: 'hark-meeting',
-        error: null,
-      }
-      return json({ spawned: true, tmux_session: 'capture-scribe', meeting: mockMeeting }, 202)
-    }
-    return json({ spawned: true, tmux_session: 'capture-session' }, 202)
-  }
+  if (url.endsWith('/api/v1/capture') && init?.method === 'POST') return json({ spawned: true, tmux_session: 'capture-session' }, 202)
 
   // ── The settings plane ─────────────────────────────────────────────────
   // Before the catch-all below, which would otherwise answer every one of
@@ -1788,12 +1703,7 @@ try {
   assertUlids()
   const modal = new KanbanModal({
     onStashClick: () => { void openStash({ shuttleBase: '' }) },
-    onNewIdeaClick: () => { void openCapture({
-      shuttleBase: '',
-      onResult: (message, ok) => showToast(message, ok ? 'success' : 'error'),
-      onMeetingResult: (message, tone) => showToast(message, tone),
-      onMeetingStarted: () => { void modal.refreshMeeting() },
-    }) },
+    onNewIdeaClick: () => { void openCapture({ shuttleBase: '', onResult: (message, ok) => showToast(message, ok ? 'success' : 'error') }) },
     onOpenWorker: (session, host) => {
       document.body.dataset.harnessTerminalSession = session
       harnessEvents.push({ type: 'open-worker', session, host: host ?? null })
@@ -1815,14 +1725,7 @@ try {
       if (find) { find.value = 'mask'; find.focus(); find.dispatchEvent(new Event('input', { bubbles: true })) }
     }, 500)
   }
-  if (new URLSearchParams(window.location.search).get('capture') === 'meeting') {
-    void openCapture({
-      shuttleBase: '',
-      onResult: (message, ok) => showToast(message, ok ? 'success' : 'error'),
-      onMeetingResult: (message, tone) => showToast(message, tone),
-      onMeetingStarted: () => { void modal.refreshMeeting() },
-    })
-  }
+  if (search.has('capture')) void openCapture({ shuttleBase: '', onResult: (message, ok) => showToast(message, ok ? 'success' : 'error') })
 
   // expose for agent-browser-driven interaction. `feedSpanMs` is the window the
   // mock activity/commits cover, so a driving script can ask for exactly the

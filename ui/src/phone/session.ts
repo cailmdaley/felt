@@ -140,7 +140,7 @@ export class AudioSession {
     return generation
   }
 
-  /** Stream the open mic into the meeting `launch`, unless the session moved on. */
+  /** Stream the open mic into the recording `launch`, unless the session moved on. */
   stream(generation: number, launch: string | null): void {
     if (generation !== this.generation || !this.mic || this.relay) return
     const relay: RelayLike = this.deps.createRelay(launch, {

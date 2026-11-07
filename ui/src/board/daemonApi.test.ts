@@ -30,13 +30,11 @@ describe('daemonFetch conditional responses', () => {
     })
     const board = new KanbanModal({ shuttleBase: '' }) as unknown as {
       fetchAndRender(): Promise<void>
-      fetchMeetingStatus(): Promise<void>
       compositeEtag: string | null
       lastFetchFailed: boolean
       daemonBooting: boolean
     }
     board.compositeEtag = 'W/"feed"'
-    board.fetchMeetingStatus = async () => {}
     const response = new Response(null, { status: 304, headers: { ETag: 'W/"feed"' } })
     const json = vi.spyOn(response, 'json')
     vi.stubGlobal('fetch', vi.fn(async () => response))

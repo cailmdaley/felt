@@ -2,7 +2,6 @@ import { IN_FLIGHT_BANDS, inFlightBand, restingCards } from './KanbanReadModel.j
 import { restingOrder, type RestingOrder } from './KanbanSurfaces.js'
 import { hostZone, type Zone } from './civilDay.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { seatMeetingHost, type MeetingRecord } from './meeting.js'
 
 /** The Desk's visible order, including the Resting grouping used to draw it. */
 export interface DeskOrder {
@@ -35,13 +34,11 @@ export function deskCardKey(card: KanbanCard): string {
 export function deskOrder(
   resp: KanbanResponse | null,
   zone: Zone = hostZone(),
-  meeting: MeetingRecord | null = null,
 ): DeskOrder {
   const source = resp?.now ?? { drafts: [], inFlight: [], awaitingReview: [] }
-  const seated = seatMeetingHost(source, meeting).now
   const now = {
-    ...seated,
-    inFlight: IN_FLIGHT_BANDS.flatMap(([band]) => seated.inFlight.filter(card => inFlightBand(card) === band)),
+    ...source,
+    inFlight: IN_FLIGHT_BANDS.flatMap(([band]) => source.inFlight.filter(card => inFlightBand(card) === band)),
   }
   const roles = resp?.roles ?? []
   const resting = restingOrder(restingCards(resp), zone)

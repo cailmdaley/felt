@@ -43,7 +43,6 @@ import './KanbanModal.css'
 import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock } from './workspace/Dock.js'
-import type { MeetingJoinOptions } from './workspace/ListenControl.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { constitutionAction } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
@@ -79,10 +78,7 @@ import {
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
-import { joinDeliveryPhrase, meetingStatusUrl, supportedMeetingModes, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
-import { joinMeeting as requestMeetingJoin, setMeetingPaused as requestMeetingPaused, setMeetingSystemAudio as requestMeetingSystemAudio, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
-import { recordingStartHold } from '../forms/recordingStart'
-import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
+import { PhoneListening } from './phoneListening'
 import { Voice, constitutionFor } from './voice.js'
 import type { WorkerOpener } from './conversationOpening.js'
 import {
@@ -175,25 +171,11 @@ interface KanbanScrollSnapshot {
 export class KanbanModal {
   private readonly onOpenWorker?: WorkerOpener
   private readonly openWorkerAfterGesture?: WorkerOpener
-  private readonly openMeetingTerminalAfterGesture?: (tmuxSessionName: string) => void
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
   private readonly onSettingsClick?: () => void
   private readonly shuttleBase: string
   private readonly handleDocumentKeyDown = (e: KeyboardEvent): void => this.handleKanbanKeyDown(e)
-  private readonly handleMeetingVisibilityChange = (): void => {
-    if (document.hidden) {
-      if (this.meetingPollTimer !== null) window.clearTimeout(this.meetingPollTimer)
-      this.meetingPollTimer = null
-      this.meetingFetchController?.abort()
-    } else if (this.meetingFetchPromise) {
-      const pending = this.meetingFetchPromise
-      this.meetingFetchController?.abort()
-      void pending.then(() => this.fetchMeetingStatus())
-    } else {
-      void this.fetchMeetingStatus()
-    }
-  }
 
   private readonly temporal: TemporalFetchers
 
@@ -281,15 +263,7 @@ export class KanbanModal {
   private readonly pollIntervalMs = 15_000
   private lastFetchStartedAt: number | null = null
   private compositeEtag: string | null = null
-  private meetingStatus: MeetingStatus = { available: false, modes: [], recorder: null, meeting: null }
-  private meetingRecorder: string | null = null
-  private meetingPollTimer: number | null = null
-  private meetingClockTimer: number | null = null
-  private meetingFetchPromise: Promise<void> | null = null
-  private meetingFetchController: AbortController | null = null
-  private readonly meetingStopGuard = new MeetingStopGuard()
-  readonly phoneAudio: PhoneMeeting
-  private meetingReadEpoch = 0
+  readonly phoneAudio: PhoneListening
   /**
    * How many multi-write gestures are still landing.
    *
@@ -362,19 +336,16 @@ export class KanbanModal {
           window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost), 0)
         }
       : undefined
-    // Meeting Terminal is an explicit request for the daemon-local hark pane.
-    // Unlike a worker tap on a phone, it has no app-session link to open.
-    this.openMeetingTerminalAfterGesture = this.onOpenWorker
-      ? (session) => window.setTimeout(() => this.onOpenWorker?.(session), 0)
-      : undefined
     this.onStashClick = options.onStashClick
     this.onNewIdeaClick = options.onNewIdeaClick
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
     this.voice = new Voice(this.shuttleBase)
+    this.phoneAudio = new PhoneListening(this.shuttleBase)
     let targetKey = ''
     this.voice.subscribe(() => {
+      this.phoneAudio.observe(this.voice.status)
       const target = this.voice.status?.target
       const key = target ? JSON.stringify([target.origin, target.fiber_id]) : ''
       if (key === targetKey) return
@@ -389,16 +360,7 @@ export class KanbanModal {
       this.openWorkerAfterGesture,
       {
         voice: { controller: this.voice },
-        meeting: {
-          canJoin: () => !recordingStartHold(this.shuttleBase) && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
-          modes: () => supportedMeetingModes(this.meetingStatus, isMobileViewport()),
-          recorder: () => this.meetingStatus.recorder ?? null,
-          join: (card, mode, options) => this.joinCardMeeting(card, mode, options),
-          current: () => this.meetingStatus.meeting,
-          stop: (meeting) => this.stopCurrentMeeting(meeting),
-          pause: async (meeting, paused) => { await requestMeetingPaused(this.shuttleBase, meeting, paused); await this.fetchMeetingStatus() },
-          stopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
-        },
+        phone: this.phoneAudio,
         onRest: card => this.openRestPopover(card),
       },
     )
@@ -426,119 +388,7 @@ export class KanbanModal {
       releaseQuarantine: (host) => this.releaseQuarantine(host),
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
-      getMeeting: () => this.meetingStatus.meeting,
-      getPhoneMeeting: () => this.phoneAudio,
-      isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
-      onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
-      onMeetingStop: async (meeting) => { await this.stopCurrentMeeting(meeting) },
-      onMeetingSystemAudio: (meeting, enabled) => this.setCurrentMeetingSystemAudio(meeting, enabled),
     })
-    this.phoneAudio = new PhoneMeeting(this.shuttleBase, () => this.presentMeeting(), () => this.surfaces.updatePhoneLevel())
-  }
-
-  /** Capture's response supersedes reads that began before recording started. */
-  meetingStarted(meeting: MeetingRecord | null): void {
-    this.meetingReadEpoch += 1
-    if (meeting) {
-      this.meetingRecorder = meeting.recorder ?? this.meetingStatus.recorder ?? null
-      this.meetingStatus = { ...this.meetingStatus, available: true, recorder: this.meetingRecorder, meeting }
-    }
-    this.presentMeeting()
-    this.surfaces.selectInFlight()
-    void this.refreshMeeting()
-  }
-
-  /** Refresh local meeting availability and lifecycle independently of the fiber feed. */
-  async refreshMeeting(): Promise<void> {
-    if (this.meetingFetchPromise) {
-      const pending = this.meetingFetchPromise
-      this.meetingFetchController?.abort()
-      await pending
-    }
-    await this.fetchMeetingStatus()
-  }
-
-  /**
-   * Record a meeting on this machine and join it to `card`'s constitution. The
-   * banner says how its worker received the meeting; the returned string is
-   * the error to show beside the control, or null once recording began.
-   */
-  private async joinCardMeeting(
-    card: KanbanCard,
-    mode: MeetingMode,
-    { session, systemAudio = true }: MeetingJoinOptions,
-  ): Promise<string | null> {
-    if (recordingStartHold(this.shuttleBase)) return 'Could not confirm whether listening started. Check the recorder before trying again.'
-    const recorder = this.meetingStatus.recorder
-    let opening: PhoneCaptureAttempt | undefined
-    let generation: number | undefined
-    if (mode === 'phone') {
-      try {
-        opening = this.phoneAudio.begin()
-        generation = await opening.ready
-      } catch (error) {
-        opening?.cancel()
-        const message = errText(error)
-        this.showBanner(`Couldn't start listening: ${message}`, 'error')
-        return message
-      }
-    }
-    const outcome = await requestMeetingJoin(this.shuttleBase, {
-      fiberId: card.id,
-      origin: card.originId,
-      recorder,
-      mode,
-      systemAudio,
-      session,
-    })
-    if (outcome.kind === 'error') {
-      if (outcome.uncertain) {
-        this.meetingRecorder = outcome.recorder ?? recorder ?? null
-        void this.refreshMeeting()
-      }
-      opening?.cancel()
-      this.showBanner(`Couldn't start listening: ${outcome.message}`, 'error')
-      return outcome.message
-    }
-    if (outcome.kind === 'joined') {
-      this.showBanner(`Listening — “${card.name}” ${joinDeliveryPhrase(outcome.delivery)}.`, 'info')
-    } else if (outcome.kind === 'recording') {
-      this.showBanner(`Listening, but “${card.name}” could not join: ${outcome.error}`, 'error')
-    }
-    let audioError: string | null = null
-    if (opening && generation !== undefined) {
-      try { opening.bind(generation, outcome.meeting) } catch (error) {
-        audioError = errText(error)
-        this.showBanner(audioError, 'error')
-      }
-    }
-    this.meetingStarted(outcome.meeting)
-    void this.fetchAndRender()
-    return audioError
-  }
-
-  private async stopCurrentMeeting(meeting: MeetingRecord): Promise<boolean> {
-    if (!this.meetingStopGuard.request(meeting)) return false
-    this.presentMeeting()
-    try {
-      await requestMeetingStop(this.shuttleBase, fetch, meeting)
-      if (meeting.phone) this.phoneAudio.cancel()
-    } catch (error) {
-      this.showBanner(`Couldn't stop the meeting: ${errText(error)}`, 'error')
-      await this.refreshMeeting()
-      return false
-    }
-    await this.refreshMeeting()
-    return true
-  }
-
-  private async setCurrentMeetingSystemAudio(meeting: MeetingRecord, enabled: boolean): Promise<void> {
-    try {
-      await requestMeetingSystemAudio(this.shuttleBase, meeting, enabled)
-    } catch (error) {
-      this.showBanner(`Couldn't ${enabled ? 'turn on' : 'turn off'} system audio: ${errText(error)}`, 'error')
-    }
-    await this.refreshMeeting()
   }
 
   /**
@@ -599,7 +449,6 @@ export class KanbanModal {
     }
     this.voice.onOpen = ({ fiber_id: id, origin, page }) => { void this.workspace?.openFiber(id, origin, page) }
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
-    document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     document.addEventListener(THREAD_PIN, this.handleThreadPin)
@@ -632,7 +481,6 @@ export class KanbanModal {
     this.closeRestPopover?.()
     this.closeRolePopover?.()
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
-    document.removeEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.removeEventListener('resize', this.handleResize)
     window.removeEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     document.removeEventListener(THREAD_PIN, this.handleThreadPin)
@@ -1703,91 +1551,8 @@ export class KanbanModal {
     this.render(data)
   }
 
-  private async fetchMeetingStatus(): Promise<void> {
-    if (!this.container || !shouldRunVisiblePoll(null, Date.now(), this.pollIntervalMs)) return
-    if (this.meetingFetchPromise) return this.meetingFetchPromise
-    if (this.meetingPollTimer !== null) {
-      window.clearTimeout(this.meetingPollTimer)
-      this.meetingPollTimer = null
-    }
-
-    const controller = new AbortController()
-    const epoch = this.meetingReadEpoch
-    this.meetingFetchController = controller
-    const timeout = window.setTimeout(() => controller.abort(), 10_000)
-    let succeeded = false
-    const pending = (async () => {
-      try {
-        const response = await fetch(meetingStatusUrl(this.shuttleBase, this.meetingRecorder, isMobileViewport()), { signal: controller.signal })
-        if (!response.ok || !this.container) return
-        const status = parseMeetingStatus(await response.json())
-        if (!status || epoch !== this.meetingReadEpoch) return
-        succeeded = true
-        this.meetingStopGuard.observe(status.meeting)
-        const availabilityChanged = status.available !== this.meetingStatus.available
-        this.meetingStatus = status
-        if (status.meeting) this.meetingRecorder = status.recorder ?? status.meeting.recorder ?? null
-        else if (!recordingStartHold(this.shuttleBase)) this.meetingRecorder = null
-        this.phoneAudio.observe(status.meeting)
-        this.syncMeetingClock()
-        this.dock.syncMeeting()
-        if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
-        else this.presentMeeting()
-      } catch {
-        // An unavailable service or a timed-out read backs off to the board cadence.
-      } finally {
-        window.clearTimeout(timeout)
-        if (this.meetingFetchController === controller) this.meetingFetchController = null
-        this.meetingFetchPromise = null
-        this.scheduleMeetingPoll(succeeded)
-      }
-    })()
-    this.meetingFetchPromise = pending
-    return pending
-  }
-
-  /** Update the drawn meeting in place, or redraw the desk when it moved
-   *  onto or off its card. */
-  private presentMeeting(): void {
-    const updated = this.surfaces.updateMeetingPresentation()
-    const meetingFiber = this.meetingStatus.meeting?.fiber ?? null
-    const hostChanged = meetingFiber !== this.deskMeetingFiber
-    const deskVisible = this.activeViewId === 'desk' && !this.workspace?.isActive
-    const missingList = deskVisible && !this.deskEl?.hasChildNodes()
-    if (this.lastResponse && (hostChanged || (deskVisible && (!updated || missingList)))) this.render(this.lastResponse)
-  }
-
-  private scheduleMeetingPoll(succeeded = true): void {
-    if (this.meetingPollTimer !== null) {
-      window.clearTimeout(this.meetingPollTimer)
-      this.meetingPollTimer = null
-    }
-    if (!this.container) return
-    // Use the board's visibility gate without its unfocused-window slowdown;
-    // meeting status is lightweight and runs at the contract's visible cadence.
-    const visible = shouldRunVisiblePoll(null, Date.now(), this.pollIntervalMs)
-    const delay = meetingPollDelay(visible, succeeded, this.meetingStatus.meeting)
-    if (delay === null) return
-    this.meetingPollTimer = window.setTimeout(() => {
-      this.meetingPollTimer = null
-      void this.fetchMeetingStatus()
-    }, delay)
-  }
-
-  private syncMeetingClock(): void {
-    const meeting = this.meetingStatus.meeting
-    const ticking = meeting !== null && meeting.state !== 'failed' && meeting.state !== 'starting' && meeting.started_at !== null
-    if (!ticking && this.meetingClockTimer !== null) {
-      window.clearInterval(this.meetingClockTimer)
-      this.meetingClockTimer = null
-    } else if (ticking && this.meetingClockTimer === null) {
-      this.meetingClockTimer = window.setInterval(() => this.surfaces.updateMeetingDuration(), 1_000)
-    }
-  }
-
   private async fetchAndRender(): Promise<void> {
     if (this.gestureDepth > 0) return
-    void this.fetchMeetingStatus()
     this.terminalHost.refresh()
     this.lastFetchStartedAt = Date.now()
     const token = ++this.inflightFetchToken
@@ -1946,9 +1711,8 @@ export class KanbanModal {
     this.surfaces.closeMenu()
     if (!this.body || !this.deskEl) return
     this.deskResponse = projectDeskFollowing(data, this.voice.status?.target)
-    const order = deskOrder(this.deskResponse, undefined, this.meetingStatus.meeting)
+    const order = deskOrder(this.deskResponse)
     this.deskProjection = order
-    this.deskMeetingFiber = this.meetingStatus.meeting?.fiber ?? null
     this.ensureFleetMetadata(data)
     this.syncWorkspaceRuntime()
     if (this.workspace?.isActive) {
@@ -2086,8 +1850,6 @@ export class KanbanModal {
   private lastResponse: KanbanResponse | null = null
   private deskResponse: KanbanResponse | null = null
   private deskProjection: DeskOrder = deskOrder(null)
-  /** Meeting fiber used to build the current Desk projection. */
-  private deskMeetingFiber: string | null = null
   /** The last parsed composite feed, redrawn when the hub's terminal is learned. */
   private lastFeed: CompositeFeed | null = null
   /** The hub's terminal backs runtimes that report none; learning it redraws the last feed. */
@@ -2184,7 +1946,6 @@ export class KanbanModal {
   /** Lightweight auto-poll while mounted. 15s interval. */
   private startPolling(): void {
     this.stopPolling()
-    this.scheduleMeetingPoll()
     this.pollTimer = window.setInterval(() => {
       if (this.surfaces.isDragging()) return
       if (this.gestureDepth > 0) return
@@ -2199,16 +1960,6 @@ export class KanbanModal {
     if (this.pollTimer !== null) {
       window.clearInterval(this.pollTimer)
       this.pollTimer = null
-    }
-    this.meetingFetchController?.abort()
-    this.meetingFetchController = null
-    if (this.meetingPollTimer !== null) {
-      window.clearTimeout(this.meetingPollTimer)
-      this.meetingPollTimer = null
-    }
-    if (this.meetingClockTimer !== null) {
-      window.clearInterval(this.meetingClockTimer)
-      this.meetingClockTimer = null
     }
   }
 

@@ -1,95 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { captureOutcome, captureRequestBody } from './captureApi'
 
-const common = {
-  prompt: '  UNIONS shear telecon  ',
-  projectDir: '/projects/shear',
-  origin: 'remote-project',
-  agent: 'claude-opus',
-  effort: 'high',
-}
-
-describe('meeting capture request', () => {
-  it('adds the mode to an ordinary capture body and permits an empty note', () => {
-    expect(captureRequestBody({ ...common, prompt: '  ', meetingMode: 'call' })).toEqual({
-      project_dir: '/projects/shear',
-      origin: 'remote-project',
-      agent: 'claude-opus',
-      effort: 'high',
-      meeting: { mode: 'call', language: 'auto' },
-    })
-    expect(captureRequestBody({ ...common, meetingMode: 'call' })).toEqual({
-      prompt: 'UNIONS shear telecon',
-      project_dir: '/projects/shear',
-      origin: 'remote-project',
-      agent: 'claude-opus',
-      effort: 'high',
-      meeting: { mode: 'call', language: 'auto' },
-    })
-  })
-
-  it.each(['call', 'phone'] as const)('includes the language for %s but not ordinary captures', meetingMode => {
-    for (const meetingLanguage of ['auto', 'fr', 'en'] as const) {
-      expect(captureRequestBody({ ...common, meetingMode, meetingLanguage })).toMatchObject({
-        meeting: { mode: meetingMode, language: meetingLanguage },
-      })
-      expect(captureRequestBody({ ...common, meetingLanguage })).not.toHaveProperty('meeting')
-    }
-  })
-
-  it('requests mic-only audio for a desktop call', () => {
-    expect(captureRequestBody({ ...common, meetingMode: 'call', systemAudio: false }))
-      .toMatchObject({ meeting: { mode: 'call', system_audio: false } })
-    expect(captureRequestBody({ ...common, meetingMode: 'phone', systemAudio: false }))
-      .not.toHaveProperty('meeting.system_audio')
-  })
+it('sends a trimmed note to the project owner with the chosen agent', () => {
+  expect(captureRequestBody({ prompt: '  A thought  ', projectDir: '/work', origin: 'owner', agent: 'claude-opus', effort: 'high', chrome: true }))
+    .toEqual({ prompt: 'A thought', project_dir: '/work', origin: 'owner', agent: 'claude-opus', effort: 'high', chrome: true })
 })
-
-describe('meeting capture response', () => {
-  it('reports recording and the selected scribe host when capture succeeds', () => {
-    expect(captureOutcome(
-      { ok: true, status: 202 },
-      { spawned: true, tmux_session: 'capture-scribe', meeting: { state: 'starting' } },
-      { projectDir: common.projectDir, meetingMode: 'call', host: 'project host' },
-    )).toEqual({ kind: 'meeting-recording', host: 'project host' })
-  })
-
-  it('does not report an unconfirmed scribe handoff as a failure', () => {
-    expect(captureOutcome(
-      { ok: false, status: 502 },
-      { recording: true, error: 'response lost', meeting: { state: 'live', handoff: { status: 'unconfirmed' } } },
-      { projectDir: common.projectDir, meetingMode: 'call', host: 'project host' },
-    )).toEqual({ kind: 'meeting-recording', host: 'project host' })
-  })
-
-  it('keeps a locally recording meeting as a warning when the scribe fails', () => {
-    expect(captureOutcome(
-      { ok: false, status: 502 },
-      { recording: true, error: 'owner host is unreachable', meeting: { state: 'live', handoff: { status: 'reported-failure' } } },
-      { projectDir: common.projectDir, meetingMode: 'call', host: 'project host' },
-    )).toEqual({
-      kind: 'meeting-recording',
-      host: 'project host',
-      error: 'Listening; the scribe didn\'t start: owner host is unreachable',
-    })
-  })
-
-  it.each([
-    [409, 'A meeting is already starting or running.'],
-    [503, 'Hark is unavailable on this daemon.'],
-  ])('keeps HTTP %i errors inline when no recording began', (status, message) => {
-    expect(captureOutcome(
-      { ok: false, status },
-      {},
-      { projectDir: common.projectDir, meetingMode: 'call', host: 'project host' },
-    )).toEqual({ kind: 'error', message })
-  })
-
-  it('keeps conflicts inline even when the daemon includes the active meeting row', () => {
-    expect(captureOutcome(
-      { ok: false, status: 409 },
-      { spawned: false, meeting: { state: 'live' }, reason: 'meeting_already_running' },
-      { projectDir: common.projectDir, meetingMode: 'call', host: 'project host' },
-    )).toEqual({ kind: 'error', message: 'A meeting is already starting or running.' })
-  })
+it('requires a confirmed spawn and keeps failures inline', () => {
+  const options = { projectDir: '/work' }
+  expect(captureOutcome({ ok: true, status: 202 }, { spawned: true, tmux_session: 'worker' }, options)).toEqual({ kind: 'spawned', tmuxSession: 'worker' })
+  expect(captureOutcome({ ok: true, status: 200 }, {}, options)).toEqual({ kind: 'error', message: 'Capture failed (200)' })
+  expect(captureOutcome({ ok: false, status: 422 }, { reason: 'project_dir_missing' }, options)).toEqual({ kind: 'error', message: 'Project directory not found on the daemon: /work' })
+  expect(captureOutcome({ ok: false, status: 502 }, { error: 'Owner unreachable' }, options)).toEqual({ kind: 'error', message: 'Owner unreachable' })
 })

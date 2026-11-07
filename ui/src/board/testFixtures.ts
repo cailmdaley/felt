@@ -10,8 +10,13 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { surfaceTotals } from './KanbanReadModel.js'
 import { buildTimelineDays } from './KanbanSurfaces.js'
 import { civilDayAt, hostZone } from './civilDay.js'
+import type { VoiceStatus } from './voice.js'
 import type { Conversations } from './conversationOpening.js'
 import type { CommitRecord, SessionPairing } from './views/TemporalData.js'
+
+export function voiceStatus(over: Partial<VoiceStatus> = {}): VoiceStatus {
+  return { available: true, enabled: false, muted: false, follow: true, system_audio: false, sources: ['desktop', 'phone'], source: 'desktop', launch: null, state: 'off', target: null, last: null, error: null, ...over }
+}
 
 /**
  * A minimally-real KanbanCard: every field the type requires, with an

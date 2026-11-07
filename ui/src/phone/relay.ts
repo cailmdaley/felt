@@ -1,5 +1,5 @@
 /**
- * The page's end of `/api/v1/meeting/audio`: at most one WebSocket at a time,
+ * The page's end of `/api/v1/voice/audio`: at most one WebSocket at a time,
  * binary frames of PCM out, the relay's status frames in.
  *
  * Nothing is held for later. A chunk goes out only while the relay reports
