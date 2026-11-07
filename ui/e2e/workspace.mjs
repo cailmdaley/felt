@@ -382,7 +382,8 @@ test('Desk family action menus preserve native activation and Resting row stacki
   const fixture = new URL(url); fixture.searchParams.set('example', 'threads'); await p.goto(fixture.href)
   const family = p.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header)')
   await family.waitFor()
-  await p.keyboard.press('j'); await p.keyboard.press('h'); await p.keyboard.press('h'); await p.keyboard.press('l'); await p.keyboard.press('l')
+  await p.keyboard.press('j')
+  for (let row = 0; row < 20; row++) await p.keyboard.press('k')
   for (let row = 0; row < 20 && !await family.evaluate(el => el.classList.contains('kbn-key-selected')); row++) await p.keyboard.press('j')
   assert.ok(await family.evaluate(el => el === document.activeElement && el.classList.contains('kbn-key-selected')))
   for (const key of ['Enter', 'Space']) {

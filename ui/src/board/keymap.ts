@@ -43,11 +43,11 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   desk: [
     bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'),
     bind(['/'], 'find', 'Find a card or constitution'),
-    bind(['h', 'ArrowLeft'], 'left', 'Previous column / region'), bind(['l', 'ArrowRight'], 'right', 'Next column / region'),
-    bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
+    bind(['h', 'ArrowLeft'], 'back', 'Clear selection'),
+    bind(['j', 'ArrowDown'], 'down', 'Next visible row'), bind(['k', 'ArrowUp'], 'up', 'Previous visible row'),
     bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
     ...constitutionBindings('the selected card'),
-    bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
+    bind(['l', 'ArrowRight', 'Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
     bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'),
@@ -143,9 +143,11 @@ export const helpSections: readonly HelpSection[] = [
   ] },
   { title: 'Moving', note: 'On the Desk and the Board.', rows: [
     row(['j', 'k', '↓', '↑'], 'Next / previous card or folio', [...on('desk', 'down', 'up'), ...on('overview', 'down', 'up')]),
-    row(['h', 'l', '←', '→'], 'Previous / next column', [...on('desk', 'left', 'right'), ...on('overview', 'left', 'right')]),
+    row(['h', 'l', '←', '→'], 'Board: move between folios', on('overview', 'left', 'right')),
+    row(['h', '←'], 'Desk: clear selection', on('desk', 'back')),
     row(['g', 'G'], 'First / last in the column', [...on('desk', 'first', 'last'), ...on('overview', 'first', 'last')]),
-    row(['Enter', 'o'], 'Open; on a fiber page, expand it', everywhere('open')),
+    row(['l', '→', 'Enter', 'o'], 'Desk: open the selected constitution', on('desk', 'open')),
+    row(['Enter', 'o'], 'Open; on a fiber page, expand it', [...on('overview', 'open'), ...on('reader', 'open')]),
   ] },
   { title: 'A constitution', note: `The selected card, or the open fiber. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
     row(['c', '.'], 'Open its conversation', everywhere('conversation')),

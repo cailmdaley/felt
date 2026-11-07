@@ -14,6 +14,26 @@ const shown = card => card.locator('.kbn-desk-threads .kbn-thread-row').evaluate
 const whole = async card => assert.deepEqual((await shown(card)).filter(row => row.outside || row.clipped), [], 'no thread reaches past its row')
 
 export function registerDeskThreadJourneys(test) {
+  test('Desk keys cross sections, skip folds, and enter the selected row', async page => {
+    const selected = () => page.locator('.kbn-desk .kbn-key-selected')
+    const draftHead = page.locator('[data-column="drafts"] .kbn-col-head')
+    const flightHead = page.locator('[data-column="inFlight"] .kbn-col-head')
+    await draftHead.click()
+    await flightHead.click()
+    await page.keyboard.press('j')
+    assert.equal(await selected().locator('xpath=ancestor::section[@data-column]').getAttribute('data-column'), 'awaitingReview')
+    await page.keyboard.press('k')
+    assert.equal(await selected().locator('xpath=ancestor::section[@data-column]').getAttribute('data-column'), 'drafts')
+    await page.keyboard.press('j')
+    assert.equal(await selected().locator('xpath=ancestor::section[@data-column]').getAttribute('data-column'), 'awaitingReview')
+    await page.keyboard.press('h')
+    assert.equal(await selected().count(), 0)
+    await page.keyboard.press('j')
+    const uid = await selected().getAttribute('data-card-uid')
+    await page.keyboard.press('l')
+    await page.locator('.kbn-reader-open .ws-page.ws-selected').waitFor()
+    assert.ok(page.url().includes(uid), 'l opens the selected constitution')
+  }, { width: 800, height: 1000 })
   for (const [device, viewport] of [['half a screen', { width: 800, height: 1000 }], ['phone', { width: 390, height: 844 }]]) test(`The Desk holds a family's threads in each section, folds every level and remembers it (${device})`, async page => {
     await page.goto(url)
     await carrier(page).waitFor()

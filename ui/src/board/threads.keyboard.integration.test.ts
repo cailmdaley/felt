@@ -45,11 +45,18 @@ beforeEach(() => {
 })
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal'); Reflect.deleteProperty(HTMLDialogElement.prototype, 'close'); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it('Enter opens the selected constitution on the first press, never a family', () => {
+it.each(['Enter', 'l', 'ArrowRight'])('%s opens the selected constitution on the first press', key => {
   const open = vi.spyOn(inside, 'openDocumentChannel').mockImplementation(() => {})
-  press('j'); press('Enter', row())
+  press('j'); press(key, row())
   expect(open).toHaveBeenCalledExactlyOnceWith(head)
   expect(row().querySelector('.kbn-thread-peek')).toBeNull()
+})
+it('l opens a selected nested thread, not its family root', () => {
+  const open = vi.spyOn(inside, 'openDocumentChannel').mockImplementation(() => {})
+  row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
+  press('j'); expect(selected()).toBe('ask-uid')
+  press('l')
+  expect(open).toHaveBeenCalledExactlyOnceWith(ask)
 })
 it.each([false, true])('the state dot opens the constitution once on phone=%s, without pills or glyphs', phone => {
   mobile = phone; draw()
@@ -62,8 +69,8 @@ it('arrows navigate and Escape clears selection without family state', () => {
   press('j'); expect(selected()).toBe('hub-uid')
   press('j'); expect(selected()).toBe('after-uid')
   press('k'); expect(selected()).toBe('hub-uid')
-  press('ArrowRight'); expect(selected()).toBe('hub-uid')
-  press('ArrowLeft'); expect(selected()).toBe('hub-uid')
+  press('ArrowLeft'); expect(selected()).toBeUndefined()
+  press('j'); expect(selected()).toBe('hub-uid')
   press('Escape'); expect(selected()).toBeUndefined()
   expect(document.querySelector('.kbn-thread-peek, .kbn-thread-subentries')).toBeNull()
 })

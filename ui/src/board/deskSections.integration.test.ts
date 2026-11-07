@@ -42,7 +42,7 @@ it('skips paginated resting rows when the whole Resting section is folded', () =
   const keyboard = new DeskKeyboard(root, vi.fn())
   keyboard.handle('down')
   expect(keyboard.selection?.uid).toBe('review')
-  keyboard.handle('right')
+  keyboard.handle('down')
   expect(keyboard.selection?.uid).toBe('role')
   keyboard.dispose()
 })

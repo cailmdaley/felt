@@ -35,7 +35,7 @@ export class DeskKeyboard {
 
   private regions(): HTMLElement[][] {
     return DESK_REGION_SELECTORS.map(selector => [...this.root.querySelectorAll<HTMLElement>(`${selector} [data-card-uid]`)]
-      .filter(el => !el.closest('[hidden]') || (el.matches('.kbn-cluster-item[hidden]') && !el.parentElement?.closest('[hidden]'))))
+      .filter(el => !el.closest('[hidden]')))
       .filter(region => region.length > 0)
   }
   private node(): HTMLElement | undefined {
@@ -70,17 +70,20 @@ export class DeskKeyboard {
     const current = this.node()
     const initial = ['awaitingReview', 'inFlight', 'drafts'].map(kind =>
       regions.findIndex(region => region[0].closest(`[data-column="${kind}"]`))).find(index => index >= 0) ?? 0
-    let column = current ? regions.findIndex(region => region.includes(current)) : initial
+    const column = current ? regions.findIndex(region => region.includes(current)) : initial
     let row = current ? regions[column].indexOf(current) : 0
     if (intent === 'open') {
       if (!this.selected || !current) return false
       this.open(this.selected)
       return true
     }
-    if (!['left', 'right', 'up', 'down', 'first', 'last'].includes(intent)) return false
-    if (current) {
-      if (intent === 'left' || intent === 'right') column = Math.max(0, Math.min(regions.length - 1, column + (intent === 'left' ? -1 : 1)))
-      if (intent === 'up' || intent === 'down') row += intent === 'up' ? -1 : 1
+    if (!['up', 'down', 'first', 'last'].includes(intent)) return false
+    if (current && (intent === 'up' || intent === 'down')) {
+      const rows = regions.flat()
+      const index = Math.max(0, Math.min(rows.length - 1, rows.indexOf(current) + (intent === 'up' ? -1 : 1)))
+      this.select(identity(rows[index]))
+      this.focusSelection()
+      return true
     }
     if (intent === 'first') row = 0
     if (intent === 'last') row = regions[column].length - 1

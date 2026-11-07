@@ -156,7 +156,10 @@ See [Opening conversations](conversations.md) for the choices, prerequisites, an
 
 ### Desk keyboard
 
-Bare keys act on the Desk when focus is outside an editable field. `h` / `←` and `l` / `→` move between columns and regions; `j` / `↓` and `k` / `↑` select the next or previous card. `g` and `G` select the first or last card in the current column. `Enter` / `o` opens the constitution, `Esc` / `u` clears selection, `/` opens Find, and `?` shows keyboard help. Movement skips empty regions and stops at the ends.
+Bare keys act on the Desk when focus is outside an editable field.
+`j` / `↓` and `k` / `↑` select the next or previous visible row across sections, skipping folded sections and stopping at the ends.
+`g` and `G` select the first or last row in the current section.
+`l` / `→` or `Enter` / `o` opens the constitution, `h` / `←` or `Esc` clears selection, `/` opens Find, and `?` shows keyboard help.
 
 ## Chronicle — where the time went
 
