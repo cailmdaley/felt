@@ -3,8 +3,10 @@ import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ThreadIndex } from '../threads.js'
 import { HUB_ROWS, hubTimes, type HubRow } from '../../../harness/hub-family.js'
-import { familyModel, needsHuman, type FamilyModel, type MapThread } from './model.js'
+import { familyModel, type FamilyModel, type MapThread } from './model.js'
 import { armsOf, arrange, radialLayout } from './radial.js'
+import { zoomPlate } from './orbit.js'
+import { WHOLE } from './zoom.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
 function hubCard(row: HubRow): KanbanCard {
@@ -31,55 +33,63 @@ function hub(rows: readonly HubRow[] = HUB_ROWS): FamilyModel {
 const SIZES = [[800, 720], [800, 1000], [1600, 1000], [1056, 640], [416, 720]] as const
 const out = (layout: ReturnType<typeof radialLayout>, star: { x: number; y: number }): number => Math.hypot(star.x - layout.cx, star.y - layout.cy)
 
+const scene = (model: FamilyModel, width: number, height: number) => zoomPlate(radialLayout(model, width, height), WHOLE, model, null)
+const boxOf = (label: { x: number; y: number; width: number; lines: number; side: string }) => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - (label.lines * 17 + 7) / 2, bottom: label.y + (label.lines * 17 + 7) / 2 })
+
 describe.each(SIZES)('the radial drawing at %i by %i', (width, height) => {
-  const model = hub(), layout = radialLayout(model, width, height), arms = armsOf(model)
+  const model = hub(), layout = radialLayout(model, width, height), arms = armsOf(model), sky = scene(model, width, height)
   const on = (arm: readonly MapThread[]) => arm.map(thread => layout.stars.find(star => star.thread === thread)!)
   it('sets the constitution at the centre and every thread on an arm of its orchestrator', () => {
     expect(layout.stars[0].thread).toBe(model.root)
     expect(out(layout, layout.stars[0])).toBe(0)
     expect(new Set(layout.stars.map(star => star.thread))).toEqual(new Set(model.order))
     for (const star of layout.stars.slice(1)) {
-      const parent = layout.stars.find(item => item.thread.key === star.thread.parent)!, own = armsOf(model, parent.thread)
+      const own = armsOf(model, star.owner!.thread)
       expect([...own.todo, ...own.done]).toContain(star.thread)
     }
   })
-  it('winds to-do and just-finished out from the centre, first at the centre', () => {
-    for (const arm of [arms.todo, arms.done]) {
-      const reach = on(arm).map(star => out(layout, star))
-      reach.forEach((d, n) => { if (n) expect(d).toBeGreaterThan(reach[n - 1]) })
-      expect(Math.max(...reach)).toBeLessThanOrEqual(layout.R + 1)
-    }
-    expect(layout.line?.rising).toBeTruthy()
-    expect(layout.line?.receding).toBeTruthy()
+  it('runs to do up the left and just finished down the right, first at the foot of each, reaching no further than the arm', () => {
+    const rising = on(arms.todo).filter(star => star.side === 'left'), falling = on(arms.done).filter(star => star.side === 'right')
+    rising.forEach((star, n) => { expect(star.x).toBeLessThan(layout.cx + 1); if (n) expect(star.y).toBeLessThan(rising[n - 1].y) })
+    falling.forEach((star, n) => { expect(star.x).toBeGreaterThan(layout.cx - 1); if (n) expect(star.y).toBeGreaterThan(falling[n - 1].y) })
+    for (const star of [...rising, ...falling]) expect(Math.abs(star.y - layout.cy)).toBeLessThanOrEqual(layout.reach + 1)
+    expect(rising.length).toBeGreaterThan(3)
   })
-  it('keeps every thread within its orchestrator\'s room, so a body holds its own threads and they zoom with it', () => {
+  it('keeps every thread\'s scene inside its orchestrator\'s room, so zooming in arrives at it', () => {
     for (const star of layout.stars) {
-      if (star.thread.depth < 2) continue
-      const parent = layout.stars.find(item => item.thread.key === star.thread.parent)!
-      expect(Math.hypot(star.x - parent.x, star.y - parent.y)).toBeLessThanOrEqual(parent.reach + 1)
-      expect(star.reach).toBeLessThanOrEqual(parent.reach)
+      if (!star.owner) continue
+      expect(star.room).toBeLessThan(star.owner.room)
+      expect(star.scale).toBeCloseTo(star.room / layout.reach)
+      expect(Math.hypot(star.x - star.owner.x, star.y - star.owner.y)).toBeLessThanOrEqual(star.owner.room * Math.max(1.02, layout.stretch * 1.02))
     }
   })
-  it('sets every name whole, inside the plate, touching no other name', () => {
-    if (layout.narrow) return expect(layout.numerals).toHaveLength(model.attention.filter(needsHuman).length)
-    expect(layout.labels.length).toBeGreaterThan(3)
-    const boxes = layout.labels.map(l => ({ left: l.side === 'right' ? l.x : l.x - l.width, right: l.side === 'right' ? l.x + l.width : l.x, top: l.y - 12, bottom: l.y + 12 }))
-    for (const label of layout.labels) expect(label.width).toBeGreaterThanOrEqual(label.thread.name.length * 7.4)
+  it('sets every name whole, inside the plate, touching no other name and no line of its own arm', () => {
+    if (layout.narrow) return expect(sky.numerals.length).toBeGreaterThan(0)
+    expect(sky.labels.length).toBeGreaterThan(6)
+    const boxes = sky.labels.map(boxOf)
     boxes.forEach((a, n) => {
       expect(a.left).toBeGreaterThanOrEqual(0); expect(a.right).toBeLessThanOrEqual(width)
+      expect(a.top).toBeGreaterThanOrEqual(0); expect(a.bottom).toBeLessThanOrEqual(layout.height)
       for (const b of boxes.slice(n + 1)) expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(true)
     })
   })
-  it('names what asks at any depth, where a whole name fits', () => {
+  it('names every first-generation thread with a row, and what asks first', () => {
     if (layout.narrow) return
-    const named = layout.labels.map(label => label.thread), asking = model.attention.filter(needsHuman)
-    expect(asking.filter(thread => named.includes(thread)).length).toBeGreaterThanOrEqual(asking.length - 2)
+    const named = new Set(sky.labels.map(label => label.thread))
+    for (const star of on([...arms.todo, ...arms.done])) if (star.side === (star.arm === 'todo' ? 'left' : 'right') && star.r > 2) expect(named.has(star.thread) || star.thread.name.length > 60).toBe(true)
   })
 })
 it('holds a family of one to a single body', () => {
   const only = HUB_ROWS.filter(row => row.id === 'hub'), layout = radialLayout(hub(only), 800, 720)
   expect(layout.stars).toHaveLength(1)
-  expect(layout.labels).toEqual([])
+  expect(zoomPlate(layout, WHOLE, hub(only), null).labels).toEqual([])
+})
+it('sets just-finished threads by age on a log scale, and a long name takes more of the arm', () => {
+  const rows = (hours: readonly number[]): HubRow[] => [HUB_ROWS[0], ...hours.map((age, n): HubRow => ({ ...HUB_ROWS[1], id: `hub/d${n}`, parent: 'hub', name: `Done ${n}`, state: 'done', hours: age, launches: 1, commits: 0, files: 0 }))]
+  const early = radialLayout(hub(rows([2, 100])), 800, 1000), late = radialLayout(hub(rows([20, 100])), 800, 1000)
+  const body = (layout: ReturnType<typeof radialLayout>, name: string) => layout.stars.find(star => star.thread.name === name)!
+  expect(body(late, 'Done 0').y).toBeGreaterThan(body(early, 'Done 0').y + 30)
+  expect(body(late, 'Done 1').y).toBeCloseTo(body(early, 'Done 1').y, 0)
 })
 describe('arranging the arms', () => {
   const threads = hub().order.slice(0, 6)

@@ -6,7 +6,7 @@ import { FamilyPage } from '../workspace/FamilyPage.js'
 import { WHOLE, held, zoomAbout, type View } from './zoom.js'
 import { familyModel } from './model.js'
 import { radialLayout } from './radial.js'
-import { aim, sighted, zoomPlate } from './orbit.js'
+import { aim, labelFit, sighted, zoomPlate } from './orbit.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
 const when = (back: number): string => new Date(now - back * hour).toISOString()
@@ -17,6 +17,7 @@ const feeds = { marks: () => undefined, files: () => [], refresh: () => {}, lead
 const stored = new Map<string, string>()
 beforeEach(() => {
   stored.clear()
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduced-motion') }))
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) })
 })
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -39,19 +40,18 @@ it('keeps the point under the pointer where it is, and the field over the plate'
   expect(zoomAbout(view, .25, .25, .75)).toEqual(WHOLE)
   expect(held({ k: 3, x: .9, y: -9 })).toEqual({ k: 3, x: .5, y: -2.5 })
   expect(held({ k: 1, x: .4, y: -.4 })).toEqual(WHOLE)
-  expect(held({ k: 99, x: 0, y: 0 }).k).toBe(64)
+  expect(held({ k: 1e6, x: 0, y: 0 }).k).toBe(4096)
 })
-it('scales the geometry, grows marks to their reading size, and names more threads as room opens', () => {
+it('scales the geometry, keeps marks their reading size, and names more threads as room opens', () => {
   const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now)
   const base = radialLayout(model, 1000, 680), view: View = { k: 3, x: -1, y: -1 }
-  const plate = zoomPlate(base, view, model, null)
-  expect(zoomPlate(base, WHOLE, model, null)).toBe(base)
-  expect(plate.R).toBeCloseTo(base.R * 3)
-  plate.stars.forEach((star, n) => {
-    expect(star.r).toBe(Math.min(base.stars[n].full, base.stars[n].r * 3))
-    expect(star.x).toBeCloseTo(base.stars[n].x * 3 - 1000)
-  })
-    const names = plate.labels.map(label => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, y: label.y }))
+  const sky = zoomPlate(base, view, model, null)
+  const seen = (key: string) => sky.stars.find(star => star.thread.key === key)!
+  for (const star of base.stars) {
+    expect(seen(star.thread.key).x).toBeCloseTo(star.x * 3 - 1000)
+    expect(seen(star.thread.key).r).toBeLessThanOrEqual(Math.max(star.full, star.own))
+  }
+  const names = sky.labels.map(label => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, y: label.y }))
   for (const a of names) for (const b of names) if (a !== b) expect(a.left < b.right && b.left < a.right && Math.abs(a.y - b.y) < 24).toBe(false)
 })
 it('leaves the wheel to the page at the base scale, and takes it once zoomed', () => {
@@ -60,19 +60,18 @@ it('leaves the wheel to the page at the base scale, and takes it once zoomed', (
   expect(wheel(plate, { deltaY: -40, ctrlKey: true }).defaultPrevented).toBe(true)
   expect(wheel(plate, { deltaY: -40, metaKey: true }).defaultPrevented).toBe(true)
   expect(wheel(plate, { deltaY: 40 }).defaultPrevented).toBe(true)
-  expect(stage.classList.contains('family-map-gesturing')).toBe(true)
+  expect(stage.classList.contains('family-map-moving')).toBe(true)
 })
-it('moves layers while a wheel runs and paints only when it settles', async () => {
+it('repaints every frame a wheel runs, with no transition, and rests when it settles', async () => {
   vi.useFakeTimers()
   const { stage, plate } = mapped()
-  const svg = plate.querySelector('.fm-sky-svg')!, first = svg.querySelector('.fm-star')!
-  const transform = (first as SVGElement).style.transform
-  for (let n = 0; n < 5; n++) { wheel(plate, { deltaY: -40, ctrlKey: true }); vi.advanceTimersByTime(20) }
-  expect((first as SVGElement).style.transform).toBe(transform)
-  vi.advanceTimersByTime(300)
+  const first = plate.querySelector<SVGElement>('.fm-star[data-root]')!, transform = first.style.transform
+  for (let n = 0; n < 5; n++) { wheel(plate, { deltaY: -40, ctrlKey: true, clientX: 200, clientY: 200 }); vi.advanceTimersByTime(20) }
+  expect(stage.classList.contains('family-map-moving')).toBe(true)
+  expect(first.style.transform).not.toBe(transform)
+  vi.advanceTimersByTime(400)
   expect(stage.classList.contains('family-map-zoomed')).toBe(true)
-  expect(stage.classList.contains('family-map-gesturing')).toBe(false)
-  expect((svg as SVGElement).style.transform).toBe('')
+  expect(stage.classList.contains('family-map-moving')).toBe(false)
   expect(plate.querySelectorAll('.fm-label, .fm-focus').length).toBeGreaterThan(0)
 })
 it('reaches past the plate\'s edge once zoomed, so a body on the rim can come to the middle', () => {
@@ -82,26 +81,39 @@ it('reaches past the plate\'s edge once zoomed, so a body on the rim can come to
   const plate = zoomPlate(base, view, model, null)
   expect(plate.stars.find(star => star.thread === rim.thread)!.x).toBeCloseTo(400)
 })
-it('flies deeper for a thread with less room, from the least a flight goes', () => {
-  const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now), base = radialLayout(model, 800, 720), star = base.stars[1]
-  expect(aim(base, star.thread).k).toBeGreaterThanOrEqual(3)
-  expect(aim({ ...base, stars: [{ ...star, reach: 12 }] }, star.thread).k).toBeCloseTo(18)
-  expect(aim({ ...base, stars: [] }, star.thread)).toEqual(WHOLE)
+it('brings a thread\'s own scene to the plate at the size of every scene, whatever its depth', () => {
+  const nested = [root, card({ id: 'hub/a', name: 'A', orchestrator: 'hub', status: 'active', workerState: 'running' }), card({ id: 'hub/a/b', name: 'B', orchestrator: 'hub/a', status: 'active', workerState: 'running' }), card({ id: 'hub/a/b/c', name: 'C', orchestrator: 'hub/a/b', status: 'active', workerState: 'running' })]
+  const index = new ThreadIndex(nested), model = familyModel(index, root, root, feeds, now), base = radialLayout(model, 800, 720)
+  const star = (name: string) => base.stars.find(item => item.thread.name === name)!
+  expect(aim(base, model.root)).toEqual(WHOLE)
+  const view = aim(base, star('B').thread), of = (item: { x: number; y: number }) => ({ x: item.x * view.k + view.x * 800, y: item.y * view.k + view.y * 720 })
+  expect(view.k).toBeCloseTo(1 / star('B').scale)
+  expect(of(star('B')).x).toBeCloseTo(400)
+  expect(of(star('B')).y).toBeCloseTo(360)
+  const rootScene = radialLayout(familyModel(new ThreadIndex(nested.slice(2).map((item, n) => n ? item : { ...item, orchestrator: undefined })), nested[2], nested[2], feeds, now), 800, 720)
+  expect(of(star('C')).y - of(star('B')).y).toBeCloseTo(rootScene.stars[1].y - rootScene.stars[0].y, 0)
 })
-it('comes to the body nearest the middle as a hand zooms past the reveal, keeping the one it holds, and none short of it', () => {
+it('comes to the thread whose scene fills the plate around its middle as a hand zooms, keeping the one it holds, and the whole family short of any', () => {
   const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now), base = radialLayout(model, 800, 720)
   const star = base.stars[3], view = aim(base, star.thread)
-  expect(sighted(base, { ...view, k: 2 }, null)).toBeNull()
+  expect(sighted(base, WHOLE, null)).toBeNull()
+  expect(sighted(base, { ...view, k: 1.1 }, null)).toBeNull()
   expect(sighted(base, view, null)).toBe(star.thread.key)
-  const near = base.stars.find(item => item !== star && sighted(base, view, item.thread.key) === item.thread.key)
-  if (near) expect(sighted(base, view, near.thread.key)).toBe(near.thread.key)
   expect(sighted(base, { k: 3, x: 40, y: 40 }, star.thread.key)).toBeNull()
+})
+it('fits a name by words, and leaves out one that cannot be whole', () => {
+  const thread = (name: string, files = 0) => ({ name, files: new Array(files) }) as never
+  expect(labelFit(thread('Short name'), 300)?.lines).toBe(1)
+  expect(labelFit(thread('A name long enough that it has to run on to a second line'), 300)?.lines).toBe(2)
+  expect(labelFit(thread('x'.repeat(80)), 300)).toBeUndefined()
+  expect(labelFit(thread('word '.repeat(120)), 300)).toBeUndefined()
+  expect(labelFit(thread('Short name', 3), 300)!.width).toBeGreaterThan(labelFit(thread('Short name'), 300)!.width)
 })
 it('steps out on a double-click of the field, not of a thread, and leaves the spiral\'s pins', () => {
   vi.useFakeTimers()
   const { stage, plate } = mapped('radial')
   stored.set(`shuttle.family.spiral:${root.originId}:${root.uid ?? root.id}`, '{}')
-  wheel(plate, { deltaY: -40, ctrlKey: true }); vi.advanceTimersByTime(300)
+  wheel(plate, { deltaY: -40, ctrlKey: true }); vi.advanceTimersByTime(400)
   expect(stage.classList.contains('family-map-zoomed')).toBe(true)
   stage.querySelector('.fm-star')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
   expect(stage.classList.contains('family-map-zoomed')).toBe(true)
@@ -111,13 +123,15 @@ it('steps out on a double-click of the field, not of a thread, and leaves the sp
 it('pans a zoomed field by dragging it, and leaves the base field to the page', () => {
   vi.useFakeTimers()
   const { stage, plate } = mapped()
-  const mouse = (target: EventTarget, type: string, x: number): void => { target.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: 340 }), { pointerId: 1, pointerType: 'mouse' })) }
-  mouse(plate, 'pointerdown', 500); mouse(window, 'pointermove', 400)
-  expect(stage.classList.contains('family-map-gesturing')).toBe(false)
-  mouse(window, 'pointerup', 400)
-  wheel(plate, { deltaY: -60, ctrlKey: true }); vi.advanceTimersByTime(300)
-  mouse(plate, 'pointerdown', 500); mouse(window, 'pointermove', 400)
-  expect(stage.classList.contains('family-map-gesturing')).toBe(true)
-  mouse(window, 'pointerup', 400)
-  expect(stage.classList.contains('family-map-gesturing')).toBe(false)
+  const mouse = (target: EventTarget, type: string, x: number): void => { target.dispatchEvent(Object.defineProperty(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 340 }), 'view', { value: window })) }
+  mouse(plate, 'mousedown', 500); mouse(window, 'mousemove', 400)
+  expect(stage.classList.contains('family-map-moving')).toBe(false)
+  mouse(window, 'mouseup', 400)
+  wheel(plate, { deltaY: -60, ctrlKey: true }); vi.advanceTimersByTime(400)
+  const root = () => plate.querySelector<SVGElement>('.fm-star[data-root]')!.style.transform, before = root()
+  mouse(plate, 'mousedown', 500); mouse(window, 'mousemove', 400); vi.advanceTimersByTime(20)
+  expect(stage.classList.contains('family-map-moving')).toBe(true)
+  expect(root()).not.toBe(before)
+  mouse(window, 'mouseup', 400); vi.advanceTimersByTime(40)
+  expect(stage.classList.contains('family-map-moving')).toBe(false)
 })

@@ -7,8 +7,8 @@ import './family-map.css'
 export type OpenThread = (thread: MapThread) => void
 /** The pages every thread has a place for, as far as they are known. */
 export interface Holds { lead?: MapFile; constitution?: MapFile }
-/** What the map shows beyond its bodies: the thread it has unfolded, whether that thread's own threads gather to it, and what any thread holds. */
-export interface Sight { key: string | null; gather: boolean; holds(thread: MapThread): Holds }
+/** What the map shows beyond its bodies: the thread it has unfolded, and what any thread holds. */
+export interface Sight { key: string | null; holds(thread: MapThread): Holds }
 /** One way of drawing the family: repainting into the same host keeps its elements, so they can move. */
 export interface Drawing {
   name: string
@@ -115,8 +115,7 @@ export function markSelection(host: HTMLElement, model: FamilyModel, selected: s
     el.setAttribute('tabindex', on ? '0' : '-1')
     el.setAttribute('aria-selected', String(on))
   }
-  for (const el of host.querySelectorAll('[data-link]')) el.toggleAttribute('data-chain', chain.has(el.getAttribute('data-link')!))
-  for (const el of host.querySelectorAll('[data-leader]')) el.toggleAttribute('data-selected', el.getAttribute('data-leader') === selected)
+  for (const el of host.querySelectorAll('[data-link]')) el.toggleAttribute('data-chain', el.getAttribute('data-link')!.split('\n').some(key => chain.has(key)))
 }
 
 /** A mark's outline around its centre: the tone says whose move, the shape tells kinds of the same tone apart. */
@@ -124,16 +123,6 @@ export function markPath(standing: Standing, r: number): string {
   if (standing === 'new') { const d = r * 1.3; return `M0 ${-d}L${d} 0L0 ${d}L${-d} 0Z` }
   if (standing === 'blocked') { const d = r * .9; return `M${-d} ${-d}H${d}V${d}H${-d}Z` }
   return `M${-r} 0A${r} ${r} 0 1 0 ${r} 0A${r} ${r} 0 1 0 ${-r} 0Z`
-}
-
-/** A unit stroke laid from `a` to `b` by transform, so its ends can glide with what they join. */
-export function lay(el: SVGElement, a: Point, b: Point): void {
-  const length = Math.hypot(b.x - a.x, b.y - a.y)
-  const turn = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI
-  const previous = Number(el.getAttribute('data-turn') ?? turn)
-  const nearest = turn + 360 * Math.round((previous - turn) / 360)
-  el.setAttribute('data-turn', String(nearest))
-  el.style.transform = `translate(${a.x.toFixed(1)}px, ${a.y.toFixed(1)}px) rotate(${nearest.toFixed(2)}deg) scale(${Math.max(length, .001).toFixed(1)})`
 }
 
 /** Square-root time: how far a moment sits from now, 0 to 1 across the map's window. */

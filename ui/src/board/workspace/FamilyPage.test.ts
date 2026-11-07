@@ -9,6 +9,7 @@ import { shouldForwardDocumentKey } from '../keymap.js'
 import { radial } from '../family/radial.js'
 import { disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { FamilyPage } from './FamilyPage.js'
+import { threadKey as threadKeyOf } from '../threads.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
 const feeds: FamilyFeeds = { marks: () => undefined, files: () => [], refresh: vi.fn(), lead: async () => undefined }
@@ -39,7 +40,7 @@ const stored = new Map<string, string>()
 beforeEach(() => {
   stored.clear()
   vi.stubGlobal('localStorage', { getItem: vi.fn((key: string) => stored.get(key) ?? null), setItem: vi.fn((key: string, value: string) => stored.set(key, value)), removeItem: vi.fn((key: string) => stored.delete(key)) })
-  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduced-motion') }))
 })
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
@@ -112,7 +113,7 @@ it('arranges the arms by dragging, per family, with a way back', () => {
   expect(sequence()).toContain('Idle')
   const from = at('Idle'), to = at('Asked')
   mouse(option(family, 'Idle'), 'pointerdown', from)
-  mouse(window, 'pointermove', to)
+  mouse(window, 'pointermove', { x: to.x, y: to.y + 10 })
   mouse(window, 'pointerup', to)
   option(family, 'Idle').dispatchEvent(new MouseEvent('click', { bubbles: true }))
   expect(open).not.toHaveBeenCalled()
@@ -373,7 +374,6 @@ describe('coming to a thread', () => {
     const stage = stageOf(family)
     expect(stage.classList.contains('family-map-zoomed')).toBe(false)
     click(option(family, 'Mid'))
-    expect(stage.classList.contains('family-map-flying')).toBe(true)
     expect(stage.classList.contains('family-map-zoomed')).toBe(true)
     expect(converse).toHaveBeenCalledTimes(1)
     expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }))
@@ -382,7 +382,7 @@ describe('coming to a thread', () => {
     expect(option(family, 'Mid').hasAttribute('data-focus')).toBe(true)
     expect(family.el.querySelector('.fm-focus-name')?.textContent).toBe('Mid')
     await settled()
-    expect(named(family)).toEqual(['Tapestry', 'Constitution', 'fresh.png', 'notes.md'])
+    expect(named(family)).toEqual(['Tapestry', 'fresh.png', 'notes.md', 'Constitution'])
   })
   it('counts a body\'s double-click as one coming, so one conversation opens', () => {
     const { page: family, converse } = page(vi.fn(), holding, undefined, tree)
@@ -396,20 +396,26 @@ describe('coming to a thread', () => {
     click(option(family, 'Asked'))
     expect(converse).not.toHaveBeenCalled()
   })
-  it('unfolds a thread in fixed places: tapestry largest, constitution small, files newest first, its threads opposite', async () => {
+  it('lands a click in one kind of place: the whole family is a scene like any thread\'s, with what it holds and no level above it', async () => {
+    const { page: family } = page(vi.fn(), { ...holding, lead: async () => lead }, { focus: threadKeyOf(root), view: null }, tree)
+    await settled()
+    await settled()
+    expect(stageOf(family).classList.contains('family-map-zoomed')).toBe(false)
+    expect(family.el.querySelector('.fm-focus-name')?.textContent).toBe(root.name)
+    expect(named(family)).toEqual(['Tapestry', 'Constitution'])
+    expect(family.outward).toBeUndefined()
+  })
+  it('unfolds a thread in fixed places: tapestry first and largest, files newest first, the constitution small and across, its threads on their arms', async () => {
     const { page: family } = page(vi.fn(), holding, undefined, tree)
     click(option(family, 'Mid'))
     await settled()
     const held = [...family.el.querySelectorAll<HTMLElement>('.fm-held')]
-    expect(held.map(way => way.dataset.kind)).toEqual(['lead', 'constitution', 'file', 'file'])
-    expect(held.map(way => way.hasAttribute('data-unread'))).toEqual([false, false, true, false])
+    expect(held.map(way => way.dataset.kind)).toEqual(['lead', 'file', 'file', 'constitution'])
+    expect(held.map(way => way.hasAttribute('data-unread'))).toEqual([false, true, false, false])
     expect(held[0].dataset.side).toBe('right')
-    expect(held[1].dataset.side).toBe('left')
-    expect(family.el.querySelectorAll('.fm-tether')).toHaveLength(4)
-    expect(family.el.querySelector('.fm-orbit')).not.toBeNull()
+    expect(held[3].dataset.side).toBe('left')
     expect([...family.el.querySelectorAll('.fm-label-name')].map(el => el.textContent)).toEqual(['Leaf a', 'Leaf b'])
-    expect(option(family, 'Leaf a').hasAttribute('data-near')).toBe(true)
-    expect(option(family, root.name).hasAttribute('data-far')).toBe(true)
+    expect(family.el.querySelectorAll('.fm-reach').length).toBeGreaterThanOrEqual(2)
   })
   it('keeps every place where it is when a thread lacks what fills another', async () => {
     const plain: FamilyFeeds = { ...holding, lead: async () => undefined }
@@ -504,7 +510,7 @@ describe('coming to a thread', () => {
     await settled()
     expect(place.focus).toContain('lone')
     expect(option(family, 'Lone').hasAttribute('data-focus')).toBe(true)
-    expect(named(family)).toEqual(['Tapestry', 'Constitution', 'fresh.png', 'notes.md'])
+    expect(named(family)).toEqual(['Tapestry', 'fresh.png', 'notes.md', 'Constitution'])
     expect(family.outward).toBeUndefined()
     expect(family.stepOut()).toBe(false)
   })
@@ -515,14 +521,12 @@ describe('coming to a thread', () => {
     plate.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 680, width: 1000, height: 680 }) as DOMRect
     const before = option(family, 'Leaf a').style.transform
     vi.useFakeTimers()
-    for (let n = 0; n < 12; n++) plate.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -60, clientX: 500, clientY: 340 }))
+    for (let n = 0; n < 40; n++) plate.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -60, clientX: 500, clientY: 340 }))
     vi.advanceTimersByTime(300)
     vi.useRealTimers()
     await settled()
     expect(place.view).not.toBeNull()
     expect(stage.querySelectorAll('.fm-mini').length + stage.querySelectorAll('.fm-held').length).toBeGreaterThan(0)
-    expect(stage.querySelector('.fm-star[data-far]')).toBeNull()
-    expect(option(family, 'Leaf a').hasAttribute('data-near')).toBe(false)
     expect(before).not.toBe('')
     expect(converse).not.toHaveBeenCalled()
   })
@@ -533,15 +537,12 @@ describe('coming to a thread', () => {
     const way = family.el.querySelector<HTMLElement>('.fm-mini')
     if (way) { way.click(); expect(open).toHaveBeenCalledWith(expect.anything(), way.dataset.held) }
   })
-  it('draws lineage only where it says something: deeper threads, the selected path, what came back', () => {
-    const closed = card({ id: 'hub/c', name: 'Closed', orchestrator: 'hub', status: 'closed', tempered: true, createdAt: when(30), closedAt: when(2) })
-    const { page: family } = page(vi.fn(), feeds, undefined, [...tree, closed])
-    const link = (id: string): Element => [...family.el.querySelectorAll('.fm-link')].find(el => el.getAttribute('data-link')?.endsWith(id))!
-    expect(link('hub/mid/a').hasAttribute('data-says')).toBe(true)
-    expect(link('hub/c').hasAttribute('data-says')).toBe(true)
-    expect(link('hub/mid').hasAttribute('data-says')).toBe(false)
-    pointer(option(family, 'Leaf a'), 'pointerover', 'mouse')
-    expect(link('hub/mid').hasAttribute('data-chain')).toBe(true)
+  it('draws the way to a thread along its arm: one kind of line, lit from the body back to the centre', () => {
+    const { page: family } = page(vi.fn(), feeds, undefined, tree)
+    const lit = (): number => family.el.querySelectorAll('.fm-reach[data-chain]').length
+    expect(family.el.querySelector('.fm-link, .fm-leader, .fm-orbit, .fm-tether')).toBeNull()
+    pointer(option(family, 'Mid'), 'pointerover', 'mouse')
+    expect(lit()).toBeGreaterThan(0)
   })
   it('keeps the thread in frame as the family moves, and leaves the view where a hand put it', () => {
     const { page: family, place } = page(vi.fn(), holding, undefined, tree)
@@ -576,7 +577,7 @@ describe('coming to a thread', () => {
     expect(family.leading?.doc).toBe('doc:fresh.png')
     await settled()
     expect(family.leading?.doc).toBe('doc:tapestry')
-    expect(reads).toHaveBeenCalledTimes(1)
+    expect(reads.mock.calls.filter(([thread]) => thread.id === 'hub/mid')).toHaveLength(1)
     click(option(family, 'Leaf a'))
     await settled()
     expect(family.leading).toBeUndefined()

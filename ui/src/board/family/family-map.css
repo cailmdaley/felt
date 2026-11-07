@@ -9,28 +9,18 @@
 .family-map [data-thread] { cursor: pointer; }
 .family-map [role='option'] { outline: none; }
 
-/* The field: quiet paper and hairlines, with colour left to what each thread's state says. */
+/* The field: quiet paper, and one kind of line, each length of arm in the state of the thread it reaches. */
+.family-map .fm-arm { transform-origin: 0 0; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .4s ease-out; }
+.family-map .fm-reach { fill: none; stroke: var(--fm-tone); stroke-opacity: .5; stroke-width: 1; stroke-linecap: round; transition: stroke-opacity .2s; }
+.family-map .fm-reach[data-quiet] { stroke-opacity: .2; }
+.family-map .fm-reach[data-chain] { stroke-opacity: 1; stroke-width: 1.75; }
 .family-map .ws-family-count[data-standing='review'] path { fill: none; stroke: var(--fm-tone); stroke-width: 1.5; }
 .family-map .ws-family-count[data-standing='working'] path { fill-opacity: .3; stroke: var(--fm-tone); }
 .family-map .fm-sky-plate { position: relative; width: 100%; touch-action: pan-x pan-y; }
 .family-map .fm-sky-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .family-map .fm-sky-plate > *, .family-map .fm-labels, .family-map .fm-numerals { transform-origin: 0 0; }
-.family-map-zoomed .fm-sky-plate, .family-map-gesturing .fm-sky-plate, .family-map-flying .fm-sky-plate { overflow: hidden; touch-action: none; user-select: none; }
+.family-map-zoomed .fm-sky-plate, .family-map-moving .fm-sky-plate { overflow: hidden; touch-action: none; user-select: none; }
 .family-map-zoomed .fm-sky-plate { cursor: grab; }
-.family-map-gesturing .fm-sky-plate > * { will-change: transform; }
-.family-map .fm-link { fill: none; stroke: var(--ws-ink); stroke-opacity: .42; stroke-width: .75; transition: transform var(--fm-drift) ease-in-out, stroke-opacity .2s; }
-.family-map .fm-link:is([data-standing='quiet'], [data-standing='aside']) { stroke-opacity: .2; }
-.family-map .fm-link[data-merged] { stroke-opacity: .3; stroke-width: .6; }
-.family-map .fm-link:not([data-says], [data-chain]) { stroke-opacity: 0; }
-.family-map .fm-link[data-chain] { stroke-opacity: .9; stroke-width: 1.25; }
-.family-map .fm-line path { fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.family-map .fm-line-rising { stroke: var(--ws-ink-muted); stroke-opacity: .6; stroke-width: 1; }
-.family-map .fm-line-receding { stroke: var(--fm-fade); stroke-width: .9; }
-.family-map .fm-line-fade stop { stop-color: var(--ws-ink-muted); stop-opacity: .45; }
-.family-map .fm-line-fade stop:last-child { stop-opacity: 0; }
-.family-map .fm-flow-rising, .family-map .fm-flow-receding { stroke-width: 1.5; stroke-dasharray: 1.5 22; }
-.family-map .fm-flow-rising { stroke: var(--ws-state-working); stroke-opacity: .7; }
-.family-map .fm-flow-receding { stroke: var(--fm-fade); }
 .family-map-radial .fm-star { touch-action: none; }
 .family-map-radial .fm-star:not([data-merged], [data-standing='question'], [data-standing='blocked']) .fm-star-halo { fill-opacity: calc(.3 * var(--fm-heat, 0)); }
 .family-map-radial .fm-star[role='option']:not([data-root]) { cursor: grab; }
@@ -41,38 +31,43 @@
 .family-map-dragging, .family-map-dragging * { cursor: grabbing !important; user-select: none; }
 .family-map .fm-unpin { position: absolute; top: 4px; left: 16px; z-index: 1; padding: 0; border: 0; background: transparent; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); cursor: pointer; }
 .family-map .fm-unpin[hidden] { display: none; }
-.family-map .fm-leader { stroke: var(--ws-ink-muted); stroke-opacity: .25; stroke-width: .75; stroke-dasharray: 1 4; transition: transform var(--fm-drift) ease-in-out; }
-.family-map .fm-leader[data-selected] { stroke-opacity: .6; }
 .family-map .fm-star { transition: transform var(--fm-drift) ease-in-out, opacity .3s; animation: fm-appear .6s ease-out; }
+.family-map .fm-star[data-inert] { pointer-events: none; }
+.family-map .fm-star[data-hidden]:not([data-selected], :focus-visible) { opacity: 0; }
 .family-map .fm-star-hit { fill: transparent; }
 .family-map .fm-star-halo { fill: var(--fm-tone); fill-opacity: 0; }
+.family-map .fm-star:not([data-focus]) .fm-star-ring { fill: none; }
 .family-map .fm-star:is([data-standing='question'], [data-standing='blocked']) .fm-star-halo { fill-opacity: .24; }
 .family-map .fm-star-ring { fill: none; stroke: none; }
 .family-map .fm-star[data-selected] .fm-star-ring, .family-map .fm-star:focus-visible .fm-star-ring { stroke: var(--ws-ink); stroke-width: 1; }
 .family-map .fm-star[data-current]:not([data-selected]) .fm-star-ring { stroke: var(--ws-ink-muted); stroke-width: 1; stroke-dasharray: 2 2; }
 .family-map .fm-star-mark { fill: var(--fm-tone); stroke: var(--fm-tone); stroke-width: 1; }
-.family-map .fm-star[data-merged]:not([data-selected]) .fm-star-mark { opacity: 0; }
-.family-map .fm-star[data-merged] .fm-star-ring { stroke-dasharray: none; }
-.family-map-radial .fm-star[data-merged] .fm-star-mark { opacity: 1; }
 .family-map .fm-star[data-root] .fm-star-mark { fill-opacity: .2; stroke-width: 1.25; }
-.family-map .fm-star:is([data-standing='quiet'], [data-standing='aside']) .fm-star-mark { fill-opacity: .16; stroke-opacity: .75; stroke-width: .75; }
+.family-map .fm-star:is([data-standing='quiet'], [data-standing='aside']) .fm-star-mark { fill-opacity: .16; stroke-opacity: .9; stroke-width: 1; }
 .family-map .fm-star[data-standing='still'] .fm-star-mark { fill: none; stroke-opacity: .75; stroke-width: .75; stroke-dasharray: 2 2; }
 .family-map .fm-star[data-standing='turn']:not([data-focus]) .fm-star-mark { fill-opacity: .6; stroke: var(--fm-text); }
-.family-map .fm-star[data-standing='working'] .fm-star-mark { fill-opacity: .4; animation: fm-breathe 2.8s ease-in-out infinite; }
+.family-map .fm-star[data-standing='working'] .fm-star-mark { fill-opacity: .4; }
+.family-map .fm-star[data-stirred] .fm-star-mark { animation: fm-stir 1.4s ease-in-out 2; }
 .family-map .fm-star[data-standing='review'] .fm-star-mark { fill-opacity: .12; stroke-width: 1.5; }
-.family-map .fm-star-moons { fill: var(--ws-ink-soft); }
-.family-map .fm-star[data-far] .fm-star-moons, .family-map .fm-star[data-merged]:not([data-near]) .fm-star-moons { fill-opacity: 0; }
 .family-map .fm-star-fresh { fill: var(--ws-fresh); stroke: var(--ws-paper); stroke-width: 1.25; paint-order: stroke; }
-.family-map .fm-labels, .family-map .fm-numerals { position: absolute; inset: 0; pointer-events: none; transition: opacity .16s ease-out; }
-.family-map-flying :is(.fm-labels, .fm-numerals) { opacity: 0; }
-.family-map .fm-label { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 6px; height: 24px; line-height: var(--leading-tight); pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; }
-.family-map .fm-label[data-side='left'] { flex-direction: row-reverse; text-align: right; }
+.family-map .fm-labels, .family-map .fm-numerals { position: absolute; inset: 0; pointer-events: none; }
+.family-map .fm-label { position: absolute; top: 0; left: 0; display: flex; align-items: flex-start; gap: 6px; padding-top: 3px; box-sizing: border-box; line-height: 17px; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; }
+.family-map .fm-label[data-side='left'] { flex-direction: row-reverse; }
 .family-map .fm-label-rank { flex: none; min-width: 1ch; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
-.family-map .fm-label-name { min-width: 0; color: var(--ws-ink); line-height: var(--leading-tight); }
-.family-map .fm-label-age { flex: none; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
+.family-map .fm-label-text { flex: 1; min-width: 0; color: var(--ws-ink); line-height: 17px; }
+.family-map .fm-label[data-side='left'] .fm-label-text { text-align: right; }
+.family-map .fm-label-rank, .family-map .fm-label-age { line-height: 17px; }
+.family-map .fm-label-age { white-space: nowrap; }
+.family-map .fm-label-files { display: inline-flex; align-items: center; gap: 1px; color: var(--ws-ink-muted); font: var(--type-meta)/17px var(--font-mono); }
+.family-map .fm-label-files[hidden] { display: none; }
+.family-map .fm-label-files .fm-held-mark { width: 12px; height: 12px; }
+.family-map .fm-label-age { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
 .family-map .fm-label[data-selected] .fm-label-name { text-decoration: underline; text-decoration-color: var(--fm-tone); text-underline-offset: .18em; }
 .family-map .fm-numeral { position: absolute; top: 0; left: 0; display: flex; align-items: center; justify-content: center; width: 19px; height: 19px; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; }
 .family-map .fm-ledger { display: flex; flex-direction: column; padding: 2px 16px 8px; }
+.family-map .fm-ledger-held { display: flex; flex-direction: column; }
+.family-map .fm-ledger-held .fm-held { position: static; width: auto; height: var(--ws-phone-target); animation: none; }
+.family-map .fm-ledger-held .fm-held[data-side='left'] { flex-direction: row; text-align: left; }
 .family-map .fm-ledger-row { display: flex; align-items: center; gap: 8px; min-height: var(--ws-phone-target); border-top: 1px solid var(--ws-hairline-soft); }
 .family-map .fm-ledger-rank { flex: none; width: 2ch; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); text-align: right; }
 .family-map .fm-ledger-mark { flex: none; width: 13px; height: 13px; }
@@ -84,13 +79,8 @@
 .family-map .fm-ledger-row[data-selected] { background: var(--ws-hover); }
 
 /* A thread unfolded: what it holds on one orbit, its threads gathered to the other side of it, the rest of the field stepped back. */
-.family-map .fm-star[data-far] { opacity: .32; }
-.family-map .fm-star[data-near][data-merged] .fm-star-mark { opacity: 1; fill-opacity: .16; stroke-opacity: .75; }
-.family-map .fm-link[data-far] { stroke-opacity: .12; }
-.family-map .fm-star[data-focus] .fm-star-ring { stroke: var(--ws-ink); stroke-width: 1; }
+.family-map .fm-star[data-focus] .fm-star-ring { fill: var(--ws-paper); stroke: var(--ws-ink); stroke-width: 1; }
 .family-map .fm-star[data-focus] .fm-star-halo { fill-opacity: .16; }
-.family-map .fm-orbit { fill: none; stroke: var(--ws-hairline); stroke-width: .75; stroke-dasharray: 1 5; stroke-linecap: round; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .4s ease-out; }
-.family-map .fm-tether { fill: none; stroke: var(--ws-ink-muted); stroke-opacity: .45; stroke-width: .75; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .4s ease-out; }
 .family-map .fm-helds, .family-map .fm-kickers, .family-map .fm-minis, .family-map .fm-focus-names, .family-map .fm-arm-names { position: absolute; inset: 0; pointer-events: none; }
 .family-map .fm-held { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 7px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); text-align: left; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; animation: fm-emerge .34s ease-out .14s backwards; }
 button.fm-held { cursor: pointer; }
@@ -117,10 +107,8 @@ button.fm-held { cursor: pointer; }
 .family-map .fm-mini[data-kind='lead'] .fm-held-sheet { fill: var(--ws-ink); stroke: var(--ws-paper); stroke-width: .75; }
 .family-map .fm-mini[data-unread] .fm-held-new { fill: var(--ws-fresh); stroke: var(--ws-paper); stroke-width: 1; paint-order: stroke; }
 .family-map .fm-mini:hover { background: var(--ws-hover); }
-.family-map .fm-held-kicker { position: absolute; top: 0; left: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .4s ease-out; }
-.family-map .fm-held-kicker[data-side='left'] { translate: -100% 0; }
 .family-map .fm-star[data-worker] .fm-star-ring { stroke: var(--fm-tone); stroke-width: 2; stroke-dasharray: none; }
-.family-map .fm-focus { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .3s ease-out .14s backwards; }
+.family-map .fm-focus { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; gap: 2px; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; animation: fm-appear .3s ease-out .14s backwards; }
 .family-map .fm-focus-name { color: var(--ws-ink); font: var(--type-row)/var(--leading-tight) var(--font-serif); }
 .family-map .fm-focus-state { color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
 .family-map .fm-arm-name { position: absolute; top: -8px; left: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; transition: transform var(--fm-drift) ease-in-out; }
@@ -176,7 +164,7 @@ button.fm-held { cursor: pointer; }
 
 .family-map { --fm-drift: 1.4s; }
 .family-map.family-map-still { --fm-drift: 0s; }
-.family-map.family-map-flying { --fm-drift: .4s; }
+.family-map.family-map-moving { --fm-drift: 0s; }
 .family-map.family-map-dragging { --fm-drift: .28s; }
 .family-map-narrow .fm-head { left: 16px; }
 .family-map-narrow .fm-row { flex-direction: column-reverse; }
@@ -186,8 +174,8 @@ button.fm-held { cursor: pointer; }
 .family-map-narrow .fm-row-age { bottom: 14px; }
 .family-map-narrow .fm-row[data-loud] .fm-strip { height: 14px; }
 @keyframes fm-appear { from { opacity: 0; } }
-@keyframes fm-emerge { from { opacity: 0; translate: var(--fm-from-x, 0) var(--fm-from-y, 0); } }
-@keyframes fm-breathe { 50% { opacity: .45; } }
+@keyframes fm-emerge { from { opacity: 0; } }
+@keyframes fm-stir { 40% { opacity: .35; } }
 .family-map-parked, .family-map-parked * { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
   .family-map { --fm-drift: 0s !important; }

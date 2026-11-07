@@ -118,7 +118,7 @@ export class FamilyPage {
     this.stage.addEventListener('pointerdown', event => { this.touch = event.pointerType === 'touch' })
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.resized())
     this.observer?.observe(this.stage)
-    this.zoom = new FieldZoom(this.stage, () => this.gestured(), () => this.stepOut())
+    this.zoom = new FieldZoom(this.stage, () => this.moved(), () => this.gestured(), () => this.stepOut())
     if (place.view) this.zoom.jump(place.view)
     bindDrawnPage(this.el, { suspend: () => this.suspend(), resume: () => this.resume(), dispose: () => this.dispose() })
   }
@@ -171,7 +171,8 @@ export class FamilyPage {
   /** The name of the level stepping out reaches, while there is one to reach. */
   get outward(): string | undefined {
     const focus = this.focused
-    if (!this.unfolds || this.lone || (!focus && this.zoom.drawn.k === 1)) return undefined
+    const whole = this.zoom.drawn.k === 1 && (!focus || (focus === this.model?.root && !!this.drawing.layout))
+    if (!this.unfolds || this.lone || whole) return undefined
     const parent = focus?.parent && focus.depth > 1 ? this.model?.threads.get(focus.parent) : undefined
     return parent?.name ?? 'Whole family'
   }
@@ -179,7 +180,7 @@ export class FamilyPage {
   get elsewhere(): boolean { return !!this.focused && this.focused.key !== this.model?.current }
   /** What `l` opens from a thread: its tapestry, else its newest file. */
   get leading(): { card: KanbanCard; doc: string } | undefined {
-    const focus = this.focused, file = (focus && this.leads.get(focus.key)) ?? focus?.files[0]
+    const focus = this.focused ?? (this.drawing.layout ? this.model?.root : undefined), file = (focus && this.leads.get(focus.key)) ?? focus?.files[0]
     return focus && file ? { card: focus.card, doc: file.key } : undefined
   }
 
@@ -188,9 +189,8 @@ export class FamilyPage {
   /** The drawing has somewhere to unfold a thread: a field, or a fold in its rows. */
   private get unfolds(): boolean { return !!this.drawing.layout || !!this.drawing.folds }
   private get focused(): MapThread | undefined { return this.place.focus ? this.model?.threads.get(this.place.focus) : undefined }
-  /** A flight's arrival gathers a thread's threads; a hand's view leaves every body where it is. */
   private get sight(): Sight {
-    return { key: this.focused?.key ?? null, gather: !this.place.view, holds: thread => this.holds(thread) }
+    return { key: this.focused?.key ?? null, holds: thread => this.holds(thread) }
   }
   private holds(thread: MapThread): Holds {
     return {
@@ -215,7 +215,7 @@ export class FamilyPage {
   /** Reads the tapestry of the focused thread and of each body showing what it holds, once each. */
   private readLead(): void {
     const owners = [...this.stage.querySelectorAll<HTMLElement>('.fm-mini-set')].map(set => set.dataset.owner!)
-    for (const key of [this.focused?.key, ...owners]) {
+    for (const key of [this.focused?.key ?? this.model?.root.key, ...owners]) {
       const thread = key ? this.model?.threads.get(key) : undefined
       if (!thread || this.leads.has(thread.key)) continue
       this.leads.set(thread.key, null)
@@ -236,16 +236,27 @@ export class FamilyPage {
     this.drawField()
     this.levelled()
   }
-  /** A hand has moved the field: the map stands where it left it, on whichever thread that reaches. */
-  private gestured(): void {
+  /** The field has moved a frame, by a hand or a flight: everything on it follows, to whichever thread a hand has reached. */
+  private moved(): void {
+    if (!this.awake) return
+    if (this.lone) return
+    if (this.hand) this.sightFocus()
+    this.drawField()
+  }
+  /** Whether a hand, not a flight, has the field. */
+  private get hand(): boolean { return !this.zoom.flying }
+  private sightFocus(): void {
     const model = this.model, layout = this.drawing.layout
+    if (!model || !layout) return
+    const { width, height } = this.stageSize()
+    this.setFocus(sighted(layout(model, width, height), this.zoom.drawn, this.place.focus))
+  }
+  /** A hand has let go of the field: the map stands where it left it, on whichever thread that reaches. */
+  private gestured(): void {
     if (this.lone) { this.zoom.jump(this.aimed()); this.repaintStill(); return }
     this.place.view = this.zoom.drawn.k === 1 ? null : this.zoom.drawn
-    const before = this.place.focus
-    if (model && layout) {
-      const { width, height } = this.stageSize()
-      this.setFocus(sighted(layout(model, width, height), this.zoom.drawn, before))
-    }
+    const before = this.selected
+    this.sightFocus()
     this.repaintStill()
     this.readLead()
     if (this.place.focus && this.place.focus !== before) this.select(this.place.focus)
@@ -330,7 +341,7 @@ export class FamilyPage {
       return [count]
     }))
     for (const button of this.roster.querySelectorAll<HTMLElement>('button')) button.setAttribute('aria-pressed', String(button.dataset.drawing === this.drawing.name))
-    if (!this.place.view) this.zoom.jump(this.aimed())
+    if (!this.zoom.flying) this.zoom.jump(this.place.view ?? this.aimed())
     this.drawField()
     this.reading.replaceChildren(...this.drawing.reading.map(phrase => el('span', '', phrase)))
     const { drafts, resting, archived } = model.aside
