@@ -350,17 +350,129 @@ defmodule Shuttle.RexFocusTest do
     tick.()
     refute_receive {:published, _}, 30
 
-    # A selection the board makes behind its own window does not come back.
+    # A selection the board makes behind its own window does not come back,
+    # and Rex coming forward on it moves nothing.
     Agent.update(front, fn _ -> false end)
     tick.()
     Agent.update(title, fn _ -> {:ok, "task - project/task"} end)
     tick.()
     refute_receive {:published, _}, 30
-
     Agent.update(front, fn _ -> true end)
     tick.()
-    assert_receive {:published, %{"fiber_id" => "project/task"}}
+    refute_receive {:published, _}, 30
+
+    # A click on Rex's sidebar from behind changes the worker as it comes forward.
+    Agent.update(front, fn _ -> false end)
+    tick.()
+    Agent.update(front, fn _ -> true end)
+    Agent.update(title, fn _ -> {:ok, "work - other/work"} end)
+    tick.()
+    assert_receive {:published, %{"fiber_id" => "other/work"}}
+
+    # The bare app name, as a locked screen shows, is no worker.
+    Agent.update(front, fn _ -> false end)
+    Agent.update(title, fn _ -> {:ok, "Rex Beta"} end)
+    tick.()
+    Agent.update(front, fn _ -> true end)
+    Agent.update(title, fn _ -> {:ok, "work - other/work"} end)
+    tick.()
+    refute_receive {:published, _}, 30
     refute_receive {:selected, _}, 30
+  end
+
+  test "following that starts with Rex in front routes its worker to voice at once", c do
+    following = start_supervised!({Agent, fn -> false end}, id: :following)
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, false,
+        poll_ms: 60_000,
+        watched?: fn -> true end,
+        active?: fn -> Agent.get(following, & &1) end,
+        title: fn -> {:ok, "task - project/task"} end
+      )
+
+    tick = fn ->
+      send(watcher, :tick)
+      :sys.get_state(watcher)
+    end
+
+    tick.()
+    refute_receive {:selected, _}, 30
+    Agent.update(following, fn _ -> true end)
+    tick.()
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+    refute_receive {:published, _}, 30
+    tick.()
+    refute_receive {:selected, _}, 30
+  end
+
+  test "behind, the title is read only now and then, and an unmatched one retries slowly", c do
+    parent = self()
+    front = start_supervised!({Agent, fn -> false end}, id: :front)
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, false,
+        poll_ms: 60_000,
+        slow_every: 4,
+        watched?: fn -> true end,
+        front?: fn -> Agent.get(front, & &1) end,
+        title: fn ->
+          send(parent, :title_read)
+          {:ok, "nobody - nowhere"}
+        end,
+        fibers: fn ->
+          send(parent, :fibers_read)
+          []
+        end
+      )
+
+    ticks = fn n ->
+      for _ <- 1..n, do: send(watcher, :tick)
+      :sys.get_state(watcher)
+    end
+
+    drain = fn drain, tag, n ->
+      receive do
+        ^tag -> drain.(drain, tag, n + 1)
+      after
+        0 -> n
+      end
+    end
+
+    ticks.(1)
+    assert drain.(drain, :title_read, 0) >= 1
+    ticks.(8)
+    assert drain.(drain, :title_read, 0) == 2
+
+    Agent.update(front, fn _ -> true end)
+    ticks.(1)
+    drain.(drain, :fibers_read, 0)
+    ticks.(8)
+    assert drain.(drain, :fibers_read, 0) == 2
+  end
+
+  test "a watch with no title source starts no event stream", c do
+    {watcher, _, _} =
+      watcher(c.tmp_dir, false, poll_ms: 60_000, title: nil, watched?: fn -> true end)
+
+    send(watcher, :tick)
+    assert %{port: nil} = :sys.get_state(watcher)
+  end
+
+  test "a missing grant warns voice, not a board watching with voice off", c do
+    parent = self()
+
+    {watcher, _, _} =
+      watcher(c.tmp_dir, false,
+        poll_ms: 60_000,
+        watched?: fn -> true end,
+        title: fn -> {:error, :accessibility} end,
+        warn: fn message -> send(parent, {:warned, message}) end
+      )
+
+    send(watcher, :tick)
+    assert %{port: nil, title_ready: false} = :sys.get_state(watcher)
+    refute_receive {:warned, "Rex" <> _}, 30
   end
 
   test "nobody watching and voice off polls nothing", c do
@@ -554,8 +666,8 @@ defmodule Shuttle.RexFocusTest do
     )
 
     assert RexFocus.rex_front?(Shuttle.Test.RexTitleRunner)
-    assert_receive {:title_command, "sh", ["-c", script], _}
-    assert script =~ "lsappinfo front"
+    assert_receive {:title_command, "/usr/bin/lsappinfo", ["front"], _}
+    assert_receive {:title_command, "/usr/bin/lsappinfo", ["info", "-only", "bundleid", _], _}
     Shuttle.Test.Env.put_app_env(:rex_title_result, {~s(    bundleID="com.apple.Safari"\n), 0})
     refute RexFocus.rex_front?(Shuttle.Test.RexTitleRunner)
     Shuttle.Test.Env.put_app_env(:rex_title_result, {"timed out", :timeout})
@@ -701,6 +813,7 @@ defmodule Shuttle.RexFocusTest do
              poll_ms: 25,
              active?: fn -> Agent.get(active, & &1) end,
              watched?: fn -> false end,
+             slow_every: 1,
              publish: fn target -> send(parent, {:published, target}) end,
              command: fn -> {script, [pids, event_file]} end,
              bindings: fn -> {:ok, bindings()} end,

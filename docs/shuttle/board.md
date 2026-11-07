@@ -256,15 +256,15 @@ A file, the tapestry or the constitution opens on the stage, and Back returns to
 
 Escape, `h`, Back and a double-click or double-tap on the field step out one level: to the thread's orchestrator, then to the whole family, and only then off the page. Stepping out, zooming and panning change the view and leave Rex alone.
 
-When Rex's worker changes while Rex is in front, from its sidebar or by Rex coming forward, the board goes there, with voice on or off. A thread on the open map is flown to, without speaking back to Rex or to voice. A thread on another map lands there, on any host, from any view; Tree and Globe show it in place. A page of the same fiber's channel stands, so opening a file does not bounce back to the map. Opening a page does not change what Rex shows.
-
-### Where voice goes
-
-With Follow me on, voice goes to what you are looking at, and whichever of Rex and the board had focus last decides. While the board has the keyboard, voice goes to what it shows: on the map, the thread the map has come to rest on after a click, a flight or a zoom, or the family's root when it stands whole; on any other page, that page's constitution, the nearest one above a plain fiber. A pan moves it only once the view holds for a moment, and a hover never does. Rex takes voice by coming to the front or changing worker, and the board takes it back by regaining focus. Zooming and stepping out can move voice this way while Rex stays put. The Desk, Chronicle and Board views show no one fiber, so they leave voice where it is. While a meeting holds the mic, nothing moves.
+When Rex's worker changes, from its sidebar or otherwise, the board goes there, with voice on or off. Rex merely coming to the front moves nothing on the board. A thread on the open map is flown to, without speaking back to Rex or to voice. A thread on another map lands there, on any host, from any view; Tree and Globe show it in place. A page of the same fiber's channel stands, so opening a file does not bounce back to the map. Opening a page does not change what Rex shows.
 
 The radial zooms about the pointer: pinch, or trackpad pinch, ctrl+wheel or ⌘+wheel on the desktop. Everything follows every frame: geometry scales, marks and text keep their reading size, and more names appear as room opens. A body with threads of its own shows its arms in small, which grow into dots, then bodies, then a scene as its room does; bodies with room show what they hold as small sheets at the same fixed places, each a way in. Letting go of a zoom inward rests on the scene it reached, or the nearest one to where it ended. Once zoomed, the wheel and a drag on the field pan it and the page swipe rests.
 
 With the map focused, the arrow keys walk its threads and Enter comes to one. `l` opens the thread's tapestry. On a touch screen a first tap comes to a thread and a second moves Rex to it.
+
+### Where voice goes
+
+With Follow me on, voice goes to what you are looking at, and whichever of Rex and the board had focus last decides. While the board has the keyboard, voice goes to what it shows: on the map, the thread the map has come to rest on after a click, a flight or a zoom, or the family's root when it stands whole; on any other page, that page's constitution, the nearest one above a plain fiber. A pan moves it only once the view holds for a moment, and a hover never does. Rex takes voice by coming to the front or changing worker, and the board takes it back by regaining focus. A click in Tree or Globe takes voice along with it. Zooming and stepping out can move voice this way while Rex stays put. The Desk, Chronicle and Board views show no one fiber, so they leave voice where it is. While a meeting holds the mic, nothing moves.
 
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
 A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).

@@ -77,6 +77,25 @@ defmodule Shuttle.OpenerTest do
     refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
   end
 
+  test "a quiet open launches a closed Rex behind the frontmost app" do
+    Env.put_app_env(:os_type, {:unix, :darwin})
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+    FakeRex.clients([])
+
+    Env.put_app_env(:fake_rex_hook, fn
+      "open" ->
+        FakeRex.clients([%{"client_id" => "client:app", "info" => %{"kind" => "app"}}])
+
+      _ ->
+        :ok
+    end)
+
+    assert :ok = Opener.open(@name, nil, quiet: true)
+
+    assert [{"open", ["-g", "-b", "com.superlogical.rex"], _}] =
+             Enum.filter(FakeRex.calls(), &match?({"open", _, _}, &1))
+  end
+
   test "an owner selects its worker for the display hub without activating its own app" do
     Env.put_app_env(:os_type, {:unix, :darwin})
     assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])

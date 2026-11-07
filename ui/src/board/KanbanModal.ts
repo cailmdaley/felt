@@ -84,7 +84,6 @@ import { joinMeeting as requestMeetingJoin, setMeetingPaused as requestMeetingPa
 import { recordingStartHold } from '../forms/recordingStart'
 import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
 import { Voice, constitutionFor } from './voice.js'
-import { RexFocus } from './rexFocus.js'
 import type { WorkerOpener } from './conversationOpening.js'
 import {
   collectCards,
@@ -301,7 +300,6 @@ export class KanbanModal {
   private workspace: Workspace | null = null
   private readonly dock: Dock
   private readonly voice: Voice
-  private rexFocus?: RexFocus
   private deskKeyboard: DeskKeyboard | null = null
   /** Each fiber's newest report, for the rows' marks. */
   private fiberSends: FiberSends | null = null
@@ -587,10 +585,10 @@ export class KanbanModal {
       onRest: card => this.openRestPopover(card),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
-    this.rexFocus = new RexFocus(this.shuttleBase, ({ fiber_id: id, origin }) => {
+    this.voice.onRex = ({ fiber_id: id, origin }) => {
       if (!this.workspace?.isActive && this.activeView?.reveal?.(id, origin)) return
       this.workspace?.follow(id, origin)
-    })
+    }
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
@@ -598,7 +596,6 @@ export class KanbanModal {
     document.addEventListener(THREAD_PIN, this.handleThreadPin)
     this.startPolling()
     this.voice.mount()
-    if (!isMobileViewport()) this.rexFocus.mount()
     void this.fetchAndRender()
   }
 
@@ -618,7 +615,6 @@ export class KanbanModal {
     this.workspace = null
     this.dock.reset()
     this.voice.dispose()
-    this.rexFocus?.dispose()
     this.phoneAudio.unmount()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.
@@ -922,6 +918,7 @@ export class KanbanModal {
     }
     if (id === this.activeViewId) return
     this.workspace?.clearFind()
+    if (!this.workspace?.isActive) this.voice.see(null)
     this.activeView?.unmount()
     this.activeView = null
     if (this.viewHostEl) this.viewHostEl.innerHTML = ''

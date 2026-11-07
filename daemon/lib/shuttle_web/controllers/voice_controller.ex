@@ -8,54 +8,52 @@ defmodule ShuttleWeb.VoiceController do
   def target(conn, params), do: route(conn, params, :target, "/api/v1/voice/target")
 
   @doc """
-  Streams the target as server-sent `target` events: the current one on
-  connect, then each new route, with a comment every 15 s to hold the
-  connection. A recorder on another host answers 501, and the board polls.
+  The board's one live stream. Streams the target as server-sent `target` events,
+  the current one on connect, while the recorder is on this host. With `rex=1`
+  it also streams each worker Rex moves to as `focus` events, whether or not
+  voice is on; Rex's app is on this daemon's host, whatever the recorder, and
+  nothing is sent for it on connect. A comment every 15 s holds the connection.
+  A stream with nothing to carry answers 501, and the board polls.
   """
   def events(conn, params) do
-    case MeetingRouter.select_start(Map.delete(params, "prefer")) do
-      {:ok, :local} ->
-        Voice.subscribe()
+    rex = params["rex"] == "1"
 
-        case conn |> open_stream() |> chunk(event("target", Voice.snapshot().target)) do
-          {:ok, conn} -> stream(conn, :voice_target, "target")
-          {:error, _} -> conn
-        end
+    recorder =
+      match?({:ok, :local}, MeetingRouter.select_start(Map.drop(params, ["prefer", "rex"])))
 
-      _ ->
-        conn |> put_status(501) |> json(%{error: "voice events stream from the recorder's host"})
+    if recorder or rex do
+      if recorder, do: Voice.subscribe()
+      if rex, do: Shuttle.RexFocus.subscribe()
+
+      conn =
+        conn
+        |> put_resp_content_type("text/event-stream")
+        |> put_resp_header("cache-control", "no-cache, no-transform")
+        |> put_resp_header("x-accel-buffering", "no")
+        |> send_chunked(200)
+
+      first = if recorder, do: event("target", Voice.snapshot().target), else: ": open\n\n"
+
+      case chunk(conn, first) do
+        {:ok, conn} -> stream(conn)
+        {:error, _} -> conn
+      end
+    else
+      conn |> put_status(501) |> json(%{error: "voice events stream from the recorder's host"})
     end
   end
 
-  @doc """
-  Streams each worker Rex moves to as a server-sent `focus` event, whether or
-  not voice is on. Rex's app is on this daemon's host, so it never routes to a
-  recorder. Nothing is sent on connect; a comment every 15 s holds the
-  connection.
-  """
-  def rex_focus(conn, _params) do
-    Shuttle.RexFocus.subscribe()
-    conn |> open_stream() |> stream(:rex_focus, "focus")
-  end
-
-  defp open_stream(conn) do
-    conn
-    |> put_resp_content_type("text/event-stream")
-    |> put_resp_header("cache-control", "no-cache, no-transform")
-    |> put_resp_header("x-accel-buffering", "no")
-    |> send_chunked(200)
-  end
-
-  defp stream(conn, message, name) do
+  defp stream(conn) do
     next =
       receive do
-        {^message, payload} -> event(name, payload)
+        {:voice_target, target} -> event("target", target)
+        {:rex_focus, target} -> event("focus", target)
       after
         15_000 -> ": keepalive\n\n"
       end
 
     case chunk(conn, next) do
-      {:ok, conn} -> stream(conn, message, name)
+      {:ok, conn} -> stream(conn)
       {:error, _} -> conn
     end
   end

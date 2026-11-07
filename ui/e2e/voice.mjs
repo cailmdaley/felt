@@ -75,7 +75,7 @@ try {
   await fromDesk.locator('.kbn-desk .kbn-card').first().waitFor()
   await fromDesk.evaluate(() => {
     const modal = window.__harness.modal, card = modal.workspaceCards()[0]
-    modal.rexFocus.moved({ fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name })
+    modal.voice.onRex({ fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name })
   })
   await fromDesk.locator('.ws-stage-band').waitFor()
   await desk.close()

@@ -781,7 +781,7 @@ defmodule Shuttle.Terminal.Rex do
   defp reveal_session(runner, sid, wid, opts) do
     alias Shuttle.OpenTrace
 
-    with {:ok, client} <- OpenTrace.step(:app_client, fn -> ensure_app_client(runner) end),
+    with {:ok, client} <- OpenTrace.step(:app_client, fn -> ensure_app_client(runner, opts) end),
          {:ok, _} <- OpenTrace.step(:select, fn -> Rex.select(runner, client, sid, wid) end),
          :ok <- if(opts[:quiet], do: :ok, else: activate_app(runner)) do
       :ok
@@ -948,11 +948,14 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp ensure_app_client(runner) do
+  # A quiet open launches a closed app behind the frontmost one.
+  defp ensure_app_client(runner, opts) do
     case Rex.app_client(runner) do
       {:error, :not_found} ->
         if Rex.macos?() do
-          case runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true) do
+          open = if opts[:quiet], do: ["-g", "-b"], else: ["-b"]
+
+          case runner.cmd("open", open ++ ["com.superlogical.rex"], stderr_to_stdout: true) do
             {_, 0} -> await(fn -> Rex.app_client(runner) end, 5_000)
             error -> {:error, {:unknown, inspect(error)}}
           end

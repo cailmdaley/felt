@@ -66,7 +66,7 @@ describe('live voice', () => {
     }))
     const voice = new Voice('')
     voice.mount(); await flush()
-    expect(sources.map(s => s.url)).toEqual(['/api/v1/voice/events'])
+    expect(sources.map(s => s.url)).toEqual(['/api/v1/voice/events?rex=1'])
     sources[0].emit(null)
 
     slow = true
@@ -77,6 +77,85 @@ describe('live voice', () => {
     expect(voice.status?.target?.fiber_id).toBe('rex/worker')
     sources[0].emit({ fiber_id: 'rex/worker', origin: 'local', name: 'Worker' })
     voice.dispose()
+  })
+  describe('the one event stream', () => {
+    class Source {
+      static all: Source[] = []
+      static readonly CLOSED = 2
+      readyState = 1
+      closed = false
+      url: string
+      listeners = new Map<string, (event: Event) => void>()
+      constructor(url: string) { this.url = url; Source.all.push(this) }
+      addEventListener(type: string, fn: (event: Event) => void): void { this.listeners.set(type, fn) }
+      close(): void { this.closed = true }
+    }
+    const live = (): Source[] => Source.all.filter(source => !source.closed)
+    const start = async (): Promise<Voice> => {
+      vi.useFakeTimers()
+      Source.all = []
+      vi.stubGlobal('EventSource', Source)
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => status() })))
+      const voice = new Voice('')
+      voice.mount(); await flush()
+      return voice
+    }
+    const move = { fiber_id: 'uid', origin: 'fir', name: 'Worker' }
+    const emit = (source: Source): void => source.listeners.get('focus')!(new MessageEvent('focus', { data: JSON.stringify(move) }))
+
+    it('hands on what Rex moved to, voice on or off, over a single stream', async () => {
+      const voice = await start(), moved: unknown[] = []
+      voice.onRex = event => moved.push(event)
+      expect(live()).toHaveLength(1)
+      emit(live()[0])
+      await voice.set({ enabled: false })
+      emit(live()[0])
+      expect(moved).toEqual([move, move])
+      voice.dispose()
+      expect(live()).toHaveLength(0)
+    })
+    it('closes while hidden, reopens on return, and moves nothing for it', async () => {
+      let hidden = false
+      vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+      const voice = await start(), moved: unknown[] = []
+      voice.onRex = event => moved.push(event)
+      hidden = true
+      document.dispatchEvent(new Event('visibilitychange')); await flush()
+      expect(live()).toHaveLength(0)
+      hidden = false
+      document.dispatchEvent(new Event('visibilitychange')); await flush()
+      expect(live()).toHaveLength(1)
+      expect(moved).toEqual([])
+      voice.dispose()
+    })
+    it('opens nothing for a tab loaded hidden, until it is shown', async () => {
+      let hidden = true
+      vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)
+      const voice = await start()
+      expect(Source.all).toHaveLength(0)
+      hidden = false
+      document.dispatchEvent(new Event('visibilitychange')); await flush()
+      expect(live()).toHaveLength(1)
+      voice.dispose()
+    })
+    it('ignores a move while the window is phone-narrow, and hears the next once it widens', async () => {
+      const voice = await start(), moved: unknown[] = []
+      voice.onRex = event => moved.push(event)
+      let narrow = true
+      vi.stubGlobal('matchMedia', (query: string) => ({ matches: narrow && query.includes('max-width') }) as MediaQueryList)
+      emit(live()[0])
+      expect(moved).toEqual([])
+      narrow = false
+      emit(live()[0])
+      expect(moved).toEqual([move])
+      voice.dispose()
+    })
+    it('asks for no Rex moves on a phone', async () => {
+      vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('coarse') }) as MediaQueryList)
+      const voice = await start()
+      expect(live()[0].url).toBe('/api/v1/voice/events')
+      voice.dispose()
+    })
   })
   it('reopens the event stream after the daemon refuses it', async () => {
     vi.useFakeTimers()
@@ -233,6 +312,17 @@ describe('live voice', () => {
       expect(posts).toEqual([])
       current = status({ target: held })
       await vi.advanceTimersByTimeAsync(15_000); await flush()
+      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
+      voice.dispose()
+    })
+    it('claims the view when focus lands in a report frame, with no window focus event', async () => {
+      const voice = await mounted(status({ target: held }))
+      focused = false
+      voice.see(worker)
+      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      expect(posts).toEqual([])
+      focused = true
+      await vi.advanceTimersByTimeAsync(2_000); await flush()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
       voice.dispose()
     })

@@ -971,6 +971,19 @@ describe('workspace reader integration', () => {
     expect(sight.mock.lastCall?.[0].id).toBe('far')
     expect(conversation).not.toHaveBeenCalled()
   })
+  it('reaches a thread from a view that stays in place: Rex quietly, and voice with it', async () => {
+    const worker = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleKind: 'oneshot', status: 'active', sessionUuid: 'session-hub' })
+    const plain = card({ id: 'notes', originId: 'host-a', status: 'active' })
+    workspace.dispose()
+    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true), sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker, plain], origin: () => 'Tree', onVisibility: visibility, onSight: sight, dock })
+    workspace.reach(worker)
+    expect(conversation).toHaveBeenCalledExactlyOnceWith(worker, true)
+    expect(sight).toHaveBeenLastCalledWith(worker)
+    workspace.globeHost.converse(plain)
+    expect(conversation).toHaveBeenCalledTimes(1)
+    expect(sight).toHaveBeenLastCalledWith(plain)
+  })
   it('tells voice what it shows: the thread the map rests on, the page elsewhere, and opens quietly from a click', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })

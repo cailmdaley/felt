@@ -155,7 +155,7 @@ export class Workspace {
     this.globeHost = {
       feeds: this.mapFeeds,
       openDocument: (card, doc) => this.openFromMap(card, doc),
-      converse: card => { this.dock.openConversation(card) },
+      converse: card => this.reach(card),
       constitutionKey: card => fiberKey(card.originId, card.uid ?? card.id),
     }
     this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {
@@ -650,6 +650,11 @@ export class Workspace {
       page.querySelector('.ws-prose')?.append(note)
     }
     return page
+  }
+  /** A click in a view that stays in place moves Rex behind it and takes voice along. */
+  reach(card: KanbanCard): void {
+    if (conversable(card)) this.dock.openConversation(card, true)
+    this.opts.onSight?.(card)
   }
   /** Voice follows the page: on the map, the thread it rests on; anywhere else, the page's fiber. */
   private sight(state: ChannelState): void {

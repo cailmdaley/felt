@@ -69,6 +69,7 @@ export interface ViewContext extends TemporalFetchers {
     hideOverview(): void
     readonly isActive: boolean
     readonly dock: { openConversation(card: KanbanCard): unknown }
+    reach(card: KanbanCard): void
     openFromDesk(card: KanbanCard): void
     openPage(card: KanbanCard, doc: DocKey): void
     readLead(card: KanbanCard): Promise<MapFile | undefined>

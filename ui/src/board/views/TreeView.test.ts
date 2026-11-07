@@ -18,7 +18,7 @@ const response = (list = cards): KanbanResponse => ({
 
 const workspace = {
   mountOverview: vi.fn(), hideOverview: vi.fn(), isActive: false,
-  dock: { openConversation: vi.fn() }, openFromDesk: vi.fn(), openPage: vi.fn(), readLead: vi.fn(async () => undefined),
+  dock: { openConversation: vi.fn() }, reach: vi.fn(), openFromDesk: vi.fn(), openPage: vi.fn(), readLead: vi.fn(async () => undefined),
 }
 const context = (list = cards): ViewContext => ({ response: response(list), cards: list, workspace, shuttleBase: '' } as unknown as ViewContext)
 let view: TemporalView
@@ -78,14 +78,17 @@ describe('the Tree', () => {
     expect(selected()[0]).toBe(row('A form'))
     expect(workspace.dock.openConversation).not.toHaveBeenCalled()
   })
-  it('opens a thread\'s chat on a click or Enter, moving selection; a caret only folds', () => {
+  it('reaches a thread quietly on a click or Enter, moving selection; a caret only folds; c brings Rex forward', () => {
     row('Asked').querySelector<HTMLElement>('.tree-name')!.click()
-    expect(workspace.dock.openConversation).toHaveBeenCalledWith(asked)
+    expect(workspace.reach).toHaveBeenCalledWith(asked)
     expect(selected()[0]).toBe(row('Asked'))
-    workspace.dock.openConversation.mockClear()
+    workspace.reach.mockClear()
     row('Hub').querySelector<HTMLElement>('.tree-caret')!.click()
-    expect(workspace.dock.openConversation).not.toHaveBeenCalled()
+    expect(workspace.reach).not.toHaveBeenCalled()
     key('Enter')
+    expect(workspace.reach).toHaveBeenCalledWith(hub)
+    expect(workspace.dock.openConversation).not.toHaveBeenCalled()
+    key('c')
     expect(workspace.dock.openConversation).toHaveBeenCalledWith(hub)
   })
   it('opens a file on the stage and a thread\'s map from its row', () => {

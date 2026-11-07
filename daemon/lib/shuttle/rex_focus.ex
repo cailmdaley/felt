@@ -1,8 +1,8 @@
 defmodule Shuttle.RexFocus do
   @moduledoc """
   Follows the worker on Rex's screen: it streams to the board through
-  `subscribe/0`, and routes the spoken-time voice journal while voice follows.
-  The watch runs while either wants it.
+  `subscribe/0` when that worker changes, and routes the spoken-time voice
+  journal while voice follows. The watch runs while either wants it.
 
   macOS accessibility window titles identify the app's selected worker across
   sessions, read through `~/.local/bin/shuttle-rex-title`, which holds the
@@ -10,11 +10,13 @@ defmodule Shuttle.RexFocus do
   Rex is the frontmost app, and Rex coming to the front re-asserts the worker
   its title names; `lsappinfo` reports the frontmost app without a grant.
   Other hosts, and macOS without that grant, use Rex's per-session
-  active-window events.
+  active-window events, for voice alone.
 
-  The stream carries only what Rex itself chooses, so a selection the board
-  makes behind its own window never comes back to it. A daemon starting up, or
-  a board connecting, learns where Rex stands without announcing it.
+  While Rex is behind, its title is read every `slow_every` ticks, only to keep
+  up with selections the board makes there. The board hears of a worker change
+  made with Rex in front, or the one a click on Rex's sidebar brings it forward
+  with; Rex merely coming forward re-asserts voice and tells the board nothing.
+  A watch that begins learns where Rex stands without announcing it.
 
   `reveal/2` moves Rex's selection behind whatever has the keyboard, for a
   caller that sets the voice target itself. Selecting never activates the app.
@@ -47,7 +49,11 @@ defmodule Shuttle.RexFocus do
       discard: false,
       title: Keyword.get(opts, :title, if(Shuttle.Rex.macos?(), do: &read_title/0)),
       front?: Keyword.get(opts, :front?, &rex_front?/0),
+      following: false,
+      ticks: 0,
+      slow_every: Keyword.get(opts, :slow_every, 8),
       last_front: nil,
+      seen_title: nil,
       last_title: nil,
       last_bindings: nil,
       last_target: nil,
@@ -74,16 +80,26 @@ defmodule Shuttle.RexFocus do
 
   @impl true
   def handle_info(:tick, state) do
+    following = state.active?.()
+
     state =
-      if state.active?.() or state.watched?.() do
+      if following and not state.following,
+        do: %{state | last_title: nil, last_bindings: nil, last_target: nil},
+        else: state
+
+    state = %{state | following: following, ticks: state.ticks + 1}
+
+    state =
+      if following or (state.title != nil and state.watched?.()) do
         state = poll_title(state)
-        if state.title_ready, do: stop_stream(state), else: ensure_stream(state)
+        if state.title_ready or not following, do: stop_stream(state), else: ensure_stream(state)
       else
         state
         |> stop_stream()
         |> warning(nil)
         |> Map.merge(%{
           last_front: nil,
+          seen_title: nil,
           last_title: nil,
           last_bindings: nil,
           last_target: nil,
@@ -102,11 +118,10 @@ defmodule Shuttle.RexFocus do
     if not state.discard and not state.title_ready do
       with {:ok, %{"payload" => %{"event" => %{"type" => "active_window_changed"}}} = event} <-
              Jason.decode(line),
-           true <- state.active?.() or state.watched?.(),
+           true <- state.active?.(),
            {:ok, bindings} <- state.bindings.(),
            target when not is_nil(target) <- target(event, bindings, state.fibers.()) do
-        state.publish.(target)
-        route(state, target)
+        state.target.(target)
       end
     end
 
@@ -379,29 +394,40 @@ defmodule Shuttle.RexFocus do
   defp poll_title(%{title: nil} = state), do: state
 
   defp poll_title(state) do
+    front = state.front?.()
+
+    if state.title_ready and not front and rem(state.ticks, state.slow_every) != 0,
+      do: %{state | last_front: false},
+      else: observe_title(state, front)
+  end
+
+  defp observe_title(state, front) do
     case state.title.() do
       {:ok, title} ->
         state = state |> warning(nil) |> Map.put(:title_ready, true)
 
-        front = state.front?.()
         raised = front and state.last_front != true
-        arrived = not is_nil(state.last_front)
-        state = %{state | last_front: front}
+        # A window's title joins its labels; the bare app name is no worker.
+        named = String.contains?(title, " - ")
+        moved = named and not is_nil(state.seen_title) and title != state.seen_title
+        seen = if named, do: title, else: state.seen_title
+        state = %{state | last_front: front, seen_title: seen}
 
         if not front or String.trim(title) == "" do
           state
         else
           case state.bindings.() do
             {:ok, bindings} ->
-              if raised or title != state.last_title or bindings != state.last_bindings or
-                   is_nil(state.last_target) do
+              retry = is_nil(state.last_target) and rem(state.ticks, state.slow_every) == 0
+
+              if raised or title != state.last_title or bindings != state.last_bindings or retry do
                 target = title_target(title, bindings, state.fibers.())
                 identity = target_identity(target)
 
                 if target &&
                      (raised or title != state.last_title or identity != state.last_target) do
-                  if arrived, do: state.publish.(target)
-                  route(state, target)
+                  if moved, do: state.publish.(target)
+                  if state.following, do: state.target.(target)
                 end
 
                 %{state | last_title: title, last_bindings: bindings, last_target: identity}
@@ -428,12 +454,10 @@ defmodule Shuttle.RexFocus do
           end
 
         state
-        |> warning(message)
+        |> warning(if(state.following, do: message))
         |> Map.put(:title_ready, false)
     end
   end
-
-  defp route(state, target), do: if(state.active?.(), do: state.target.(target))
 
   defp target_identity(nil), do: nil
   defp target_identity(target), do: {target["fiber_id"], target["origin"]}
@@ -465,11 +489,12 @@ defmodule Shuttle.RexFocus do
   # An unreadable frontmost app counts as Rex, so routing falls back to title changes.
   @doc false
   def rex_front?(runner \\ Shuttle.Runner.Default) do
-    case runner.cmd("sh", ["-c", ~s{lsappinfo info -only bundleid "$(lsappinfo front)"}],
-           timeout_ms: 1_500,
-           max_output_bytes: 4_096
-         ) do
-      {out, 0} -> out =~ ~s{bundleID="com.superlogical.rex}
+    lsappinfo = &runner.cmd("/usr/bin/lsappinfo", &1, timeout_ms: 1_500, max_output_bytes: 4_096)
+
+    with {front, 0} <- lsappinfo.(["front"]),
+         {out, 0} <- lsappinfo.(["info", "-only", "bundleid", String.trim(front)]) do
+      out =~ ~s{bundleID="com.superlogical.rex}
+    else
       _ -> true
     end
   end
