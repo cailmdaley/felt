@@ -2447,17 +2447,22 @@
   }
 }
 
-/* Half a screen, beside Rex: In flight takes the width it needs, and the two
-   columns that wait on it stack at its side, what awaits review first. The Desk
-   grows and the page scrolls, so no column cuts a card off at its foot. */
+/* Half a screen, beside Rex: the Desk is a scroll. In flight runs the full
+   width, and what waits on it follows beneath, each column only as tall as its
+   entries, so no column cuts a card off at its foot. */
 @media (min-width: 701px) and (max-width: 1180px) {
   .kbn-section-now { flex: none; min-height: 0; }
-  .kbn-now-board { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .kbn-now-board { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto auto; align-items: start; }
   .kbn-now-board .kbn-col { max-height: none; }
   .kbn-now-board .kbn-col-list { overflow: visible; }
-  .kbn-col-inFlight { grid-column: 1; grid-row: 1 / span 2; }
-  .kbn-col-awaitingReview { grid-column: 2; grid-row: 1; }
+  .kbn-col-inFlight { grid-column: 1 / -1; grid-row: 1; }
+  .kbn-col-awaitingReview { grid-column: 1; grid-row: 2; }
   .kbn-col-drafts { grid-column: 2; grid-row: 2; }
-  .kbn-now-board .kbn-col-title { font-size: var(--type-prose); letter-spacing: normal; white-space: nowrap; }
+  .kbn-now-board .kbn-col-title { font-size: var(--type-title); white-space: nowrap; }
   .kbn-viewtabs-lens .kbn-lens-chip { flex: none; }
+}
+/* Narrower still, one column. */
+@media (min-width: 701px) and (max-width: 860px) {
+  .kbn-now-board { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .kbn-col-awaitingReview, .kbn-col-drafts { grid-column: 1; grid-row: auto; }
 }
