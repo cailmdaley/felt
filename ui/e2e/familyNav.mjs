@@ -6,10 +6,14 @@ export async function familyTree(page) {
     await page.keyboard.press('l')
     await fold.waitFor()
   }
-  if (!await fold.evaluate(el => el.open)) await fold.locator('summary').click()
+  if (!await fold.evaluate(el => el.open)) await fold.locator('.ws-family-all-label').click()
+  await fold.evaluate(el => { for (const inner of el.querySelectorAll('details')) inner.open = true })
   return fold.locator('.ws-family')
 }
+/** The open left column's list when it has one, else the sheet. */
 export async function sentFiles(page) {
+  const column = page.locator('.ws-sidebar-file:visible')
+  if (await column.count()) return column
   const sheet = page.locator('.ws-page-sheet[open]')
   if (!await sheet.count()) {
     if (page.viewportSize().width <= 700) await page.locator('.ws-navbar .ws-files-toggle').click()

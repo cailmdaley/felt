@@ -40,7 +40,7 @@ export class FamilyPage {
   private readonly allShort = el('span', 'ws-family-all-short')
   private readonly allBody = el('div', 'ws-family')
   private readonly openFolds = new Map<string, boolean>([['resting', false]])
-  private readonly announcement = el('p', 'ws-sr-only')
+  private readonly announcement = el('p', 'ws-family-announce')
   private readonly observer: ResizeObserver | null
   private readonly zoom: FieldZoom
   private readonly disposed: () => void
