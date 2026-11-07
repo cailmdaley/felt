@@ -71,10 +71,10 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     :ok = :sys.resume(pid)
   end
 
-  test "word and name triggers preserve comments, ranges and the closing marker", c do
+  test "word and quiet triggers preserve comments, ranges and the closing marker", c do
     File.write!(
       c.path,
-      "# S2 = Martin\n10:00:01-10:00:04 S2 one two three four five six seven eight nine\n10:00:05 me hey Klaud\n# ended 10:00:06\n"
+      "# S2 = Martin\n10:00:01-10:00:04 S2 one two three four five six seven eight nine\n10:00:05 me hey Claude\n"
     )
 
     start_monitor(c)
@@ -83,10 +83,14 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert words =~ "# S2 = Martin"
     assert words =~ "10:00:01-10:00:04 S2 one two"
     sync_tasks(c)
+    assert %{pending: %{text: "10:00:05 me hey Claude"}} = poll(c)
+    refute_receive {:delivery, _}, 20
+    Agent.update(c.now, fn _ -> 5_000 end)
     poll(c)
-    assert_receive {:delivery, %{text: name}}, 1_000
-    assert name =~ "hey Klaud"
+    assert_receive {:delivery, %{text: quiet}}, 1_000
+    assert quiet =~ "hey Claude"
     sync_tasks(c)
+    File.write!(c.path, "# ended 10:00:06\n", [:append])
     poll(c)
     assert_receive {:delivery, %{text: ended}}, 1_000
     assert ended =~ "# ended"
@@ -484,7 +488,13 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     start_monitor(c, fiber: nil)
     poll(c)
     Agent.update(fiber, &Map.put(&1, "slug", "meetings/real-title"))
-    File.write!(c.path, "10:00:02 me Claude\n", [:append])
+
+    File.write!(
+      c.path,
+      "10:00:02 me the meeting continues with enough words to reach the limit\n",
+      [:append]
+    )
+
     poll(c)
     assert_receive {:delivery, %{fiber_id: ^uid, text: text}}, 1_000
     assert text =~ "early words"
@@ -495,11 +505,15 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     start_monitor(c)
     poll(c)
     stop_supervised!(TranscriptRelay)
-    File.write!(c.path, "10:00:02 me after restart Claude\n", [:append])
+
+    File.write!(c.path, "10:00:02 me after restart the meeting continues with more words\n", [
+      :append
+    ])
+
     start_supervised!({TranscriptRelay, c.opts})
     assert_receive {:delivery, %{text: text}}, 1_000
     assert text =~ "before crash"
-    assert text =~ "after restart Claude"
+    assert text =~ "after restart the meeting continues"
     assert length(Regex.scan(~r/before crash/, text)) == 1
   end
 
@@ -579,7 +593,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
   end
 
   test "partial lines stay unconsumed and the reader never rereads the consumed prefix", c do
-    File.write!(c.path, "10:00:01 me buffered\n10:00:02 me Cla")
+    File.write!(c.path, "10:00:01 me buffered\n10:00:02 me more")
     start_monitor(c)
     poll(c)
     refute_receive {:delivery, _}, 20
@@ -587,10 +601,10 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     {:ok, file} = :file.open(c.path, [:read, :write, :binary])
     :ok = :file.pwrite(file, 0, String.duplicate("X", byte_size("10:00:01 me buffered")))
     :ok = :file.close(file)
-    File.write!(c.path, "ude\n", [:append])
+    File.write!(c.path, " words are added until the word limit is reached\n", [:append])
     poll(c)
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert text =~ "buffered\n10:00:02 me Claude"
+    assert text =~ "buffered\n10:00:02 me more words are added"
     refute text =~ "XXXXX"
   end
 
@@ -641,17 +655,17 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
              config["routes"]
 
     stop_supervised!(TranscriptRelay)
-    record(c.path, "2026-11-06T10:00:01Z", "late anchor Claude")
-    record(c.path, "2026-11-06T10:00:12Z", "late middle Claude")
+    record(c.path, "2026-11-06T10:00:01Z", "late anchor send")
+    record(c.path, "2026-11-06T10:00:12Z", "late middle send")
     start_supervised!({TranscriptRelay, c.opts})
     assert_receive {:delivery, %{fiber_id: "anchor", text: anchor}}, 1_000
-    assert anchor =~ "late anchor Claude"
+    assert anchor =~ "late anchor"
     assert_receive {:delivery, %{fiber_id: "fiber-b", text: initial}}, 1_000
     assert initial =~ "initial words"
     sync_tasks(c)
     poll(c)
     assert_receive {:delivery, %{fiber_id: "fiber-b", text: middle}}, 1_000
-    assert middle =~ "late middle Claude"
+    assert middle =~ "late middle"
     refute middle =~ "late anchor"
   end
 
@@ -704,7 +718,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     test "malformed durable #{label} is isolated during recovery and start returns an error", c do
       File.mkdir_p!(Path.join(c.root, "relays"))
       File.write!(relay_path(c, "broken"), unquote(bytes))
-      File.write!(c.path, "Claude healthy\n")
+      File.write!(c.path, "healthy meeting words one two three four five six seven\n")
       start_monitor(c)
       assert_receive {:delivery, %{text: text}}, 1_000
       assert text =~ "healthy"
@@ -736,7 +750,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert is_binary(error)
     assert Process.alive?(coordinator)
     File.rm!(directory)
-    File.write!(c.path, "Claude still healthy\n")
+    File.write!(c.path, "still healthy meeting words one two three four five six\n")
 
     assert :ok =
              TranscriptRelay.start(%{launch: "healthy", transcript: c.path}, "fiber-a", "owner",
@@ -756,7 +770,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     bytes = File.read!(path)
     File.rename!(path, path <> ".saved")
     File.mkdir!(path)
-    File.write!(c.path, "Claude trigger\n", [:append])
+    File.write!(c.path, "more words are added to reach the word limit here\n", [:append])
     assert %{error: error} = poll(c)
     assert is_binary(error) and error != ""
     refute_receive {:delivery, _}, 20
@@ -768,7 +782,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     File.rename!(path <> ".saved", path)
     start_supervised!({TranscriptRelay, c.opts})
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert text =~ "buffered words\nClaude trigger"
+    assert text =~ "buffered words\nmore words are added"
   end
 
   test "a failed acknowledgement write does not replay voice after restart", c do
@@ -972,7 +986,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert Process.whereis(Module.concat(c.name, Coordinator)) == coordinator
     assert Process.alive?(pid)
     healthy = Path.join(c.root, "healthy.txt")
-    File.write!(healthy, "Claude healthy relay\n")
+    File.write!(healthy, "healthy relay words one two three four five six seven\n")
 
     assert :ok =
              TranscriptRelay.start(%{launch: "healthy", transcript: healthy}, "other", "owner",
@@ -983,7 +997,7 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert text =~ "healthy relay"
   end
 
-  test "unsummoned cold voice drops on word, quiet, switch and end triggers", c do
+  test "cold voice drops on word, quiet, switch and end triggers", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
@@ -1011,55 +1025,28 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     refute_receive {:delivery, _}, 20
   end
 
-  for spoken_name <- ~w(claude cloud clawed klaud clot clod claud) do
-    test "cold name #{spoken_name} sends the buffered speech once in warm voice format", c do
-      routes = Path.join(c.root, "routes.jsonl")
-      route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-      File.write!(c.path, "")
-      record(c.path, "2026-11-06T10:00:01Z", "first words")
-      start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
-      poll(c)
-      refute_receive {:delivery, _}, 20
-      record(c.path, "2026-11-06T10:00:02Z", "please #{unquote(spoken_name)}")
-      poll(c)
-      refute_receive {:delivery, _}, 20
-      Agent.update(c.now, fn _ -> 5_000 end)
-      poll(c)
-      assert_receive {:delivery, %{kind: "voice", text: text}}, 1_000
-      assert text == "me: first words please #{unquote(spoken_name)}\n"
-      sync_tasks(c)
-      poll(c)
-      refute_receive {:delivery, _}, 20
-    end
-  end
-
-  test "a name mid-sentence waits for quiet: warm speech batches as usual, cold speech is let through",
-       c do
+  test "a cold target drops a name after quiet but delivers a closing send", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
     File.write!(c.path, "")
-    cold = start_supervised!(Supervisor.child_spec({Agent, fn -> false end}, id: :cold))
-    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> Agent.get(cold, & &1) end)
-    record(c.path, "2026-11-06T10:00:01Z", "the Claude Island part is next")
-    poll(c)
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
+
+    record(c.path, "2026-11-06T10:00:01Z", "Claude check the plot")
+    assert %{pending: %{text: "me Claude check the plot"}} = poll(c)
     refute_receive {:delivery, _}, 20
     Agent.update(c.now, fn _ -> 5_000 end)
-    poll(c)
-    assert_receive {:delivery, %{text: "me: the Claude Island part is next\n"}}, 1_000
-    sync_tasks(c)
+    assert %{pending: nil} = poll(c)
+    refute_receive {:delivery, _}, 20
 
-    Agent.update(cold, fn _ -> true end)
-    record(c.path, "2026-11-06T10:00:02Z", "unnamed aside")
+    record(c.path, "2026-11-06T10:00:02Z", "check the plot send")
     poll(c)
-    Agent.update(c.now, fn _ -> 10_000 end)
-    poll(c)
+
+    assert_receive {:delivery,
+                    %{fiber_id: "fiber-a", kind: "voice", text: "me: check the plot\n"}},
+                   1_000
+
+    sync_tasks(c)
     refute_receive {:delivery, _}, 20
-    record(c.path, "2026-11-06T10:00:03Z", "ask Claude about the plot")
-    poll(c)
-    refute_receive {:delivery, _}, 20
-    Agent.update(c.now, fn _ -> 15_000 end)
-    poll(c)
-    assert_receive {:delivery, %{text: "me: ask Claude about the plot\n"}}, 1_000
   end
 
   test "the closing phrase summons a cold target at once", c do
@@ -1114,22 +1101,8 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert_receive {:delivery, %{text: "me: early words warm words\n"}}, 1_000
   end
 
-  test "a named buffer still delivers if the target turns cold before quiet", c do
-    routes = Path.join(c.root, "routes.jsonl")
-    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
-    File.write!(c.path, "")
-    record(c.path, "2026-11-06T10:00:01Z", "Claude wake")
-    cold = start_supervised!(Supervisor.child_spec({Agent, fn -> false end}, id: :cold))
-    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> Agent.get(cold, & &1) end)
-    poll(c)
-    Agent.update(cold, fn _ -> true end)
-    Agent.update(c.now, fn _ -> 5_000 end)
-    poll(c)
-    assert_receive {:delivery, %{text: "me: Claude wake\n"}}, 1_000
-  end
-
   test "meeting delivery task exits retain their batch for retry", c do
-    File.write!(c.path, "Claude meeting words\n")
+    File.write!(c.path, "meeting words one two three four five six seven eight\n")
     parent = self()
     calls = start_supervised!(Supervisor.child_spec({Agent, fn -> 0 end}, id: :attempts))
 

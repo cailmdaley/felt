@@ -628,7 +628,7 @@ at the first read is printed at once. After that, new complete lines are held
 until a line addresses the agent (a whole word from `--names`, case-insensitive,
 default `claude,cloud,clawed,claw,klaud,clot,clock,clod,claud`, matched after any leading `HH:MM:SS`
 timestamp or `HH:MM:SS-HH:MM:SS` range), the pending utterance text reaches `--words` (default 150), or
-`--seconds` (default 15) pass since the first pending line arrived. A line
+`--seconds` (default 30) pass since the last utterance arrived. A line
 starting `# ended` flushes and ends the follow with exit 0. Lines starting `#`
 ride along without counting words or addressing the agent. A partial trailing
 line waits for its newline, a file that shrinks is read again from the start,

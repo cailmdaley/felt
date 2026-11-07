@@ -141,8 +141,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
     refute run_script() =~ "me: Claude hello"
   end
 
-  test "a voice name wake starts a never-run card with the same plain text as a composer send" do
-    fiber = "tests/voice-name-fresh"
+  test "voice delivery starts a never-run card with the same plain text as a composer send" do
+    fiber = "tests/voice-fresh"
     put_constitution(fiber)
 
     assert {200, %{delivered: true, delivery: "dispatch"}} =
@@ -150,15 +150,15 @@ defmodule ShuttleWeb.DeliverControllerTest do
                fiber_id: fiber,
                origin: nil,
                kind: "voice",
-               message_id: "voice-name",
-               text: "me: spoken words Claude\n"
+               message_id: "voice-send",
+               text: "me: spoken words\n"
              })
 
-    assert run_script() =~ "me: spoken words Claude"
+    assert run_script() =~ "me: spoken words"
   end
 
-  test "a voice name wake resumes a dormant prior conversation even after a handoff" do
-    fiber = "tests/voice-name-previous"
+  test "voice delivery resumes a dormant prior conversation even after a handoff" do
+    fiber = "tests/voice-previous"
     session = "de11ae00-0000-4000-8000-000000000099"
 
     put_previous_run(fiber, session, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
@@ -172,13 +172,13 @@ defmodule ShuttleWeb.DeliverControllerTest do
                fiber_id: fiber,
                origin: nil,
                kind: "voice",
-               message_id: "voice-name",
-               text: "me: spoken words Claude\n"
+               message_id: "voice-send",
+               text: "me: spoken words\n"
              })
 
     script = run_script()
     assert script =~ "--resume '#{session}'"
-    assert script =~ "me: spoken words Claude"
+    assert script =~ "me: spoken words"
   end
 
   test "finalized voice traverses the relay, cold drop, dormant resume and live messaging" do
@@ -254,10 +254,10 @@ defmodule ShuttleWeb.DeliverControllerTest do
       GenServer.call(worker, :status)
     end
 
-    record.("2026-11-06T10:00:01Z", "aside nobody summoned")
+    record.("2026-11-06T10:00:01Z", "aside not sent")
     poll.()
     refute_receive {:message, _}, 20
-    record.("2026-11-06T10:00:02Z", "raw correction needed Claude")
+    record.("2026-11-06T10:00:02Z", "raw correction needed send")
     poll.()
     # The owning dispatcher, not the recorder cache, selects the dormant conversation.
     task_refs =
@@ -267,8 +267,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
     GenServer.call(worker, :status)
     script = run_script()
     assert script =~ "--resume '#{session}'"
-    assert script =~ "S1: raw correction needed Claude"
-    refute script =~ "aside nobody summoned"
+    assert script =~ "S1: raw correction needed"
+    refute script =~ "aside not sent"
     write_route.("2026-11-06T10:00:03Z", live)
     record.("2026-11-06T10:00:04Z", "ordinary live words")
     poll.()

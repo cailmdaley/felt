@@ -6,7 +6,7 @@ What people say in a conversation is a candidate, not a decision: propose promot
 
 ## Live voice
 
-Live voice sends microphone speech to the constitution most recently viewed on the board, and a switch cuts the speech at that moment. Ending with the word `send` delivers at once. Aqua seconds of quiet send the words to Aqua, and Quiet seconds, counted from the last spoken word, send them to you.
+Live voice sends microphone speech to the constitution most recently viewed on the board, and a switch cuts the speech at that moment. Ending with the word `send` delivers at once. Quiet, counted from the last spoken word, sends the words to a live worker.
 You stay that constitution's worker; this is conversational input, not a request to file a meeting.
 Each batch arrives as ordinary input, with a speaker label on every spoken line and no timestamps. The family board counts these turns per worker, like typed ones, and leaves the words to `shuttle board --turns`; meeting batches stay off it.
 `me` identifies a voiceprint match to the enrolled user; other labels may be the user or people in the room.
@@ -15,7 +15,7 @@ Don't filter requests by speaker label or treat these words as a teammate's mess
 The recognizer can mangle names and jargon, so read generously.
 
 The mic is off, following, or in a meeting, one at a time, and the user turns it on. Following sends words to the card in view; focusing another Rex session switches the destination, but a line stays with the worker selected when it began. A meeting sends every word to its own card however the user moves around, and starting one turns following off. Stop turns the mic off; nothing takes over.
-Quiet sends a batch, and "send" at the end sends it at once. Words for a card with no live worker are dropped unless the user said its name or ended with "send", which starts its worker with them; the transcript keeps them. A name never cuts the user off.
+Quiet sends a batch to a live worker, and "send" at the end sends it at once. Words for a card with no live worker are dropped unless they end with "send", which starts its worker with them; the transcript keeps them.
 Shuttle delivers batches automatically; don't run `shuttle follow` for live voice.
 
 `shuttle say "<text>"` speaks a line aloud on the user's Mac, in your role's voice, after any lines already queued; playback holds while the user is talking, and "skip" drops the rest of the line.
@@ -32,7 +32,7 @@ The user starts a meeting from the board, either from the Capture form in meetin
 Shuttle sends transcript batches and `# ended` automatically for board meetings.
 A capture receives everything from the beginning once the scribe claims its fiber; a joined constitution receives batches immediately.
 Don't run `shuttle follow` for either.
-The daemon flushes after enough words, a quiet interval since the last speech, or a name mention (`claude`, `cloud`, `clawed`, `claw`, `klaud`, `clot`, `clock`, `clod`, `claud`).
+The daemon flushes after enough words, a quiet interval since the last speech, or the end of the meeting.
 Voice and meeting word limits and quiet intervals live in Settings → Voice.
 Comments beginning with `#` ride along, including speaker aliases and `# ended`.
 
@@ -44,7 +44,7 @@ You can name a speaker yourself by appending a line such as `# S2 = Martin` once
 
 1. **Capture as usual, with two meeting specifics** ([capture.md](capture.md), steps 1–5). The fiber is the meeting: file it where the project keeps meetings, conventionally `<hub>/meetings/<YYYY-MM-DD-HHMM>-<slug>`, choosing the hub from the note and the project's tree, and give its body the time, the mode and the transcript path. With an empty note a provisional name is fine; rename it once the first minutes make the subject clear. Your role is `scribe`. This page defines the office; the `roles/scribe` charter holds only the user's conventions and what past meetings taught, and outranks this page where they differ. If the store has none, create it with just its name and an empty working-knowledge section. Post the supplied `Claim` as given, after the install; it carries the meeting's launch id, and the board seats the meeting on your fiber's card.
 2. **Read quietly, from the moment you've claimed.** Automatic batches begin with the recording's first words; don't delay the claim while polishing the fiber. Keep running notes in the fiber — what was discussed, decisions, action items by owner, open questions — each with its timestamp and speaker label. Don't narrate.
-3. **Act when addressed.** A line spoken to you by name is a request (the monitor also catches "Cloud", "Clawed", "Claw", "Klaud", "Clot" and "Clock"). Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
+3. **Act when addressed.** A line spoken to you by name is a request. Do it — retrieve a plot, a number or a past decision, make a quick plot, record something — and deliver it where the user can see it mid-call with `shuttle send-file <path>`. If it will take more than a couple of minutes, say so and keep following.
 4. **Keep the report live.** Keep `tapestry.html` in the fiber folder as the meeting's current state — summary, decisions, action items, figures — rewritten whole and self-contained ([tapestry.md](tapestry.md)). Send it once with `send-file` so it sits on the Board, then rewrite it in place after each substantive change.
 5. **Consolidate at `# ended`**: write the notes document and propose the fiber extraction ([below](#from-transcript-to-notes)), rewrite the report, then run `shuttle close <meeting-fiber>`.
 
