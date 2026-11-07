@@ -1,17 +1,17 @@
 /**
  * ViewRegistry — the contract between KanbanModal and the temporal views.
  *
- * The board is five full-page views behind one hotkey row:
+ * The board is four full-page views behind one hotkey row:
  *
  *   1  desk       the kanban page (Now board + Resting). Owned by
  *                 KanbanModal itself, NOT a TemporalView.
- *   2  chronicle  ┐
- *   3  board      │ registered views — each mounts into a full-width host
- *   4  tree       ┘ where the Desk surfaces would otherwise be.
+ *   2  globe      ┐
+ *   3  chronicle  │ registered views — each mounts into a full-width host
+ *   4  board      ┘ where the Desk surfaces would otherwise be.
  *
- * Chronicle holds the record in time. Board is the document workspace's
- * contact sheet, grouped by recent work, project or host. Tree is the whole
- * hierarchy with its files.
+ * The Globe is all the work on a sphere. Chronicle holds the record in time.
+ * Board is the document workspace's contact sheet, grouped by recent work,
+ * project or host.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.
@@ -27,14 +27,13 @@
  * (./chronicleFeeds.ts) rather than refetching per poll.
  */
 
-import type { MapFile } from '../family/model.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type { DocKey } from '../workspace/documents.js'
 import type { TemporalFetchers } from './TemporalData.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'shelf' | 'tree' | 'globe' | 'map'
+  id: 'chronicle' | 'shelf' | 'globe' | 'map'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void
@@ -72,7 +71,6 @@ export interface ViewContext extends TemporalFetchers {
     reach(card: KanbanCard): Promise<boolean>
     openFromDesk(card: KanbanCard): void
     openPage(card: KanbanCard, doc: DocKey): void
-    readLead(card: KanbanCard): Promise<MapFile | undefined>
     readonly globeHost: GlobeHost
   }
   /**

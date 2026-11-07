@@ -1,8 +1,8 @@
 /**
  * The view barrel. Importing this module is what puts the views in the
  * registry — each view file calls `registerView` at module scope, so IMPORT
- * ORDER HERE IS TAB ORDER (chronicle · board · tree), which follows the strip
- * after Desk and matches the `1`-`5` hotkeys. A view with no hotkey has no tab:
+ * ORDER HERE IS TAB ORDER (globe · chronicle · board), which follows the strip
+ * after Desk and matches the `1`-`4` hotkeys. A view with no hotkey has no tab:
  * the map is the Desk's other posture.
  *
  * KanbanModal imports this one module; nothing else needs to know the view
@@ -12,10 +12,9 @@
 
 import './views.css'
 
+import './GlobeView.js'
 import './ChronicleView.js'
 import './BoardView.js'
-import './TreeView.js'
-import './GlobeView.js'
 import './MapView.js'
 
 export {

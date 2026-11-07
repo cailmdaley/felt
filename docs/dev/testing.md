@@ -6,7 +6,7 @@ fixture or generator to reuse, and how to write a property. The commands for
 running each suite are in [layout.md](layout.md#tests).
 
 Run `cd ui && npm test` for the board's unit and integration tests.
-Run `cd ui && npm run e2e` for every headless harness browser journey: workspace (including header, living-report, radial, Tree and Globe journeys), document request budgets, and performance budgets.
+Run `cd ui && npm run e2e` for every headless harness browser journey: workspace (including header, living-report, radial and Globe journeys), document request budgets, and performance budgets.
 The command builds both bundles, runs every suite even when one fails, and exits nonzero on any failure.
 It reuses the shared headless browser when available; `SHARED_BROWSER=1` starts or reuses it explicitly.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.

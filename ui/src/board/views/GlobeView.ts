@@ -9,7 +9,7 @@ const everyCard = (context: ViewContext): KanbanCard[] => [...context.cards, ...
 class GlobeView implements TemporalView {
   readonly id = 'globe' as const
   readonly title = 'Globe'
-  readonly hotkey = '5'
+  readonly hotkey = '2'
   private stage: GlobeStage | null = null
   private context: ViewContext | null = null
   private readonly place = freshPlace()

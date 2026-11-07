@@ -281,7 +281,7 @@ describe('Desk keyboard selection', () => {
       press('Enter')
       expect(inside.workspace.isActive).toBe(true)
     }
-    const key = to === 'desk' ? '1' : to === 'chronicle' ? '2' : '3'
+    const key = to === 'desk' ? '1' : to === 'chronicle' ? '3' : '4'
     expect(press(key).defaultPrevented).toBe(true)
     expect(inside.activeViewId).toBe(to)
     if (to === 'desk') expect(selected()).toBe('review')
@@ -536,7 +536,7 @@ describe('keyboard help', () => {
     press('?')
     const dialog = document.querySelector('.kbn-keymap-dialog')!
     expect(dialog.getAttribute('role')).toBe('dialog')
-    expect([...dialog.querySelectorAll('h3')].map(el => el.textContent)).toEqual(['Everywhere', 'Moving', 'Tree', 'A constitution', 'Fiber page', 'Family map'])
+    expect([...dialog.querySelectorAll('h3')].map(el => el.textContent)).toEqual(['Everywhere', 'Moving', 'A constitution', 'Fiber page', 'Family map'])
     press('j'); expect(selected()).toBeUndefined()
     press('Tab'); expect(document.activeElement).toBe(dialog.querySelector('button'))
     press('Escape'); expect(document.querySelector('.kbn-keymap-dialog')).toBeNull()

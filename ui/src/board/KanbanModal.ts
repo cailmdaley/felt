@@ -559,10 +559,9 @@ export class KanbanModal {
     else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
     else if (window.location.hash === '#/map' || (deskIsMap() && ['', '#/desk'].includes(window.location.hash))) this.setView('map')
     else if (window.location.hash === '#/chronicle') this.setView('chronicle')
-    else if (window.location.hash === '#/tree') this.setView('tree')
     else if (window.location.hash === '#/globe') this.setView('globe')
     this.keymapHelp = new KeymapHelp(
-      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' || this.activeViewId === 'map' ? 'desk' : this.activeViewId === 'tree' ? 'tree' : 'overview',
+      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' || this.activeViewId === 'map' ? 'desk' : 'overview',
     )
     this.workspace = new Workspace(this.container!, {
       sends: card => this.fiberSends?.sends(card) ?? [],
@@ -572,7 +571,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'tree' ? 'Tree' : this.activeViewId === 'globe' ? 'Globe' : this.activeViewId === 'map' ? 'Map' : 'Board',
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'globe' ? 'Globe' : this.activeViewId === 'map' ? 'Map' : 'Board',
       onVisibility: (active) => { this.showWorkspace(active); if (!active) this.voice.see(null) },
       onSight: card => this.voice.see(card && constitutionFor(card, boardCards(this.lastResponse))),
       onReturnCard: card => {
@@ -1153,7 +1152,7 @@ export class KanbanModal {
       this.setDeskMap(this.activeViewId === 'desk')
       return true
     }
-    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'tree' && intent !== 'globe') return false
+    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'globe') return false
     if (keystrokeIsSpokenFor()) return false
     const id: BoardViewId = intent === 'board' ? 'shelf' : intent
     e.preventDefault()
@@ -2333,7 +2332,6 @@ export class KanbanModal {
       e.preventDefault(); e.stopPropagation(); this.setView('desk'); return
     }
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
-    if (e.key === 'Escape' && this.activeViewId === 'tree' && !keystrokeIsSpokenFor()) { e.preventDefault(); e.stopPropagation(); this.setView('desk'); return }
     // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the map.
     if (this.activeViewId === 'chronicle' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()

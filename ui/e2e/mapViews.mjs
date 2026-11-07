@@ -109,7 +109,7 @@ export function registerMapViewJourneys(test) {
     await until(page, () => /tapestry\.html/.test(decodeURIComponent(location.hash)))
   })
 
-  test('Rex naming a fiber on two hosts reveals that host\'s copy on the Tree and the Globe', async page => {
+  test('Rex naming a fiber on two hosts reveals that host\'s copy on the Globe', async page => {
     await board(page)
     await page.evaluate(async () => {
       const rows = window.__harness.MOCK_FEED.fibers, row = rows.find(({ fiber }) => fiber.name === 'Response analysis')
@@ -120,15 +120,7 @@ export function registerMapViewJourneys(test) {
     const id = await page.evaluate(() => window.__harness.MOCK_FEED.fibers.at(-1).fiber.id)
     const rex = origin => page.evaluate(([origin, id]) => window.__harness.modal.voice.onRex({ fiber_id: id, origin }), [origin, id])
     const here = await page.evaluate(() => window.__harness.MOCK_FEED.fibers.find(({ fiber }) => fiber.name === 'Response analysis').origin)
-    await page.keyboard.press('4')
-    await page.locator('.tree-page .tree-row').first().waitFor()
-    const chosen = page.locator('.tree-row[aria-selected="true"] .tree-name')
-    await rex('other-host')
-    await until(page, () => document.querySelector('.tree-row[aria-selected="true"] .tree-name')?.textContent === 'Response analysis elsewhere')
-    await rex(here)
-    await until(page, () => document.querySelector('.tree-row[aria-selected="true"] .tree-name')?.textContent === 'Response analysis')
-    assert.equal(await chosen.count(), 1)
-    await page.keyboard.press('5')
+    await page.keyboard.press('2')
     await page.locator('.globe canvas').waitFor()
     await page.waitForTimeout(1300)
     for (const [origin, name] of [['other-host', 'Response analysis elsewhere'], [here, 'Response analysis']]) {
@@ -140,7 +132,7 @@ export function registerMapViewJourneys(test) {
   test('The Globe names every thread of a crowded family, whole and clear of each other, at half a screen', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
     await page.locator('.kbn-desk .kbn-card').first().waitFor()
-    await page.keyboard.press('5')
+    await page.keyboard.press('2')
     await page.locator('.globe canvas').waitFor()
     await page.waitForTimeout(1400)
     await page.evaluate(() => window.__harness.modal.voice.onRex({ fiber_id: 'hub', origin: 'umber-workstation' }))
@@ -151,41 +143,9 @@ export function registerMapViewJourneys(test) {
     for (const [n, a] of names.entries()) for (const b of names.slice(n + 1)) assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.text} overlaps ${b.text}`)
   }, { width: 800, height: 1000 })
 
-  test('The Tree: hotkey 4, keys move without Rex, a thread opens its chat, a file opens and Back returns to its row', async page => {
+  test('The Globe: hotkey 2, keys and a drag move without Rex, a click moves Rex to its thread, a file opens and Back returns as it stood', async page => {
     await board(page)
-    await page.keyboard.press('4')
-    const rows = page.locator('.tree-page .tree-row')
-    await rows.first().waitFor()
-    assert.equal(new URL(page.url()).hash, '#/tree')
-    const chosen = () => page.locator('.tree-row[aria-selected="true"]')
-    const before = await asked(page)
-    await page.keyboard.press('j')
-    await page.keyboard.press('j')
-    assert.equal(await chosen().getAttribute('id'), await rows.nth(2).getAttribute('id'), 'j walks the rows')
-    assert.deepEqual(await asked(page), before, 'moving never reaches Rex')
-    while (await chosen().locator('.tree-name').textContent() !== 'Response analysis') await page.keyboard.press('j')
-    await page.keyboard.press('Enter')
-    await asks(page, before.length + 1)
-    assert.deepEqual(await asked(page), [...before, 'select:session-analysis'], 'Enter moves Rex to a thread\'s window')
-    assert.equal(await page.locator('.kbn-reader-open').count(), 0, 'a thread stays on the Tree')
-
-    const file = rows.and(page.locator('[data-kind="file"]')).last()
-    const key = await file.getAttribute('data-key')
-    await file.click()
-    await page.locator('.ws-page.ws-selected .ws-document-back').waitFor()
-    assert.equal(await page.locator('.ws-stage-band .ws-band-title').textContent(), 'Response analysis')
-    const scrolled = await page.locator('.tree-list').evaluate(list => list.scrollTop)
-    assert.ok(scrolled > 0, 'the file was far enough down to scroll to it')
-    await page.locator('.ws-page.ws-selected .ws-document-back').click()
-    await until(page, () => !document.querySelector('.kbn-reader-open'))
-    assert.equal(new URL(page.url()).hash, '#/tree')
-    assert.equal(await chosen().getAttribute('data-key'), key, 'Back keeps the selection')
-    assert.equal(await page.locator('.tree-list').evaluate(list => list.scrollTop), scrolled, 'Back keeps the scroll')
-  }, { width: 1440, height: 420 })
-
-  test('The Globe: hotkey 5, keys and a drag move without Rex, a click moves Rex to its thread, a file opens and Back returns as it stood', async page => {
-    await board(page)
-    await page.keyboard.press('5')
+    await page.keyboard.press('2')
     const canvas = page.locator('.globe-canvas')
     await canvas.waitFor()
     assert.equal(new URL(page.url()).hash, '#/globe')

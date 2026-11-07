@@ -118,14 +118,15 @@ previously running oneshots as described below.
 
 ## The board
 
-The daemon serves a board at `http://127.0.0.1:4000/`: one page, three full-page
+The daemon serves a board at `http://127.0.0.1:4000/`: one page, four full-page
 views behind a hotkey row.
 
 | Key | View | What it answers |
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now — the kanban |
-| `2` | **Chronicle** | What a stretch of weeks was about, under a strip of cycle bands |
-| `3` | **Board** | Documents produced by the work, in an overview and reader |
+| `2` | **Globe** | Everything at once, as one place to move through |
+| `3` | **Chronicle** | What a stretch of weeks was about, under a strip of cycle bands |
+| `4` | **Board** | Documents produced by the work, in an overview and reader |
 
 The Board opens on a document overview and a reader for one fiber's channel.
 The fiber page carries its controls inline, and its worker pill opens the conversation.

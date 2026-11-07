@@ -35,12 +35,13 @@ describe('shared keyboard table', () => {
     expect(missing).toEqual([])
     expect(phantom).toEqual([])
   })
-  it('routes 1·2·3 to the same view intents on every surface, without forwarding them into documents', () => {
-    const intents = ['desk', 'chronicle', 'board'] as const
+  it('routes 1·2·3·4 to the same view intents on every surface, without forwarding them into documents', () => {
+    const intents = ['desk', 'globe', 'chronicle', 'board'] as const
     for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
       for (const [index, intent] of intents.entries()) expect(keyIntent(event(String(index + 1)), surface)).toBe(intent)
     }
     expect(DOCUMENT_KEY_INTENTS).toContain('desk')
+    expect(DOCUMENT_KEY_INTENTS).toContain('globe')
     expect(DOCUMENT_KEY_INTENTS).toContain('chronicle')
     expect(DOCUMENT_KEY_INTENTS).toContain('board')
     expect(keyIntent(event('Tab'), 'desk')).toBeNull()

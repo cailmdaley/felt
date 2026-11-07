@@ -1,20 +1,19 @@
 # The board
 
 The daemon serves the board at `http://127.0.0.1:4000/`. It is one page with
-five full-page views behind a hotkey row, `1`–`5`, and a settings sheet on
+four full-page views behind a hotkey row, `1`–`4`, and a settings sheet on
 `⌘,`. Everything on it is a view over fibers the daemon already polls, plus
 the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
 | Key | View | What it answers |
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now |
-| `2` | **Chronicle** | What a stretch of weeks was about |
-| `3` | **Board** | What the work produced |
-| `4` | **Tree** | Where everything is |
-| `5` | **Globe** | Everything at once, as one place to move through |
+| `2` | **Globe** | Everything at once, as one place to move through |
+| `3` | **Chronicle** | What a stretch of weeks was about |
+| `4` | **Board** | What the work produced |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
-`#/desk`, `#/chronicle`, `#/board`, `#/tree` and `#/globe` deep-link the views.
+`#/desk`, `#/globe`, `#/chronicle` and `#/board` deep-link the views.
 A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
 ## Desk — the kanban
@@ -87,6 +86,27 @@ Drafts forever.
 Apart from that one tag, the classifier reads only `status`, `tempered`,
 `kind`, and tmux liveness. Neither the daemon nor the board reads tags for
 anything else.
+
+### A family's threads
+
+A family of threads has one row on the Desk, in the column of its most urgent
+need: the root, or the thread that leads what the family asks of you, named
+after a quiet crumb to its root. A root led by one of its threads keeps its own
+row where its own state puts it.
+
+The family's threads hang beneath its row as a tree, each thread under its
+orchestrator, drawn with the same dot and age as a row. Folded, the tree shows
+every thread that needs you, a turn or a verdict, with the threads above it
+for context, so what waits on you is visible without opening anything. The
+count at the row's end says how many need you, else how many work, else how
+many threads there are; its caret opens the whole tree, with the resting
+threads and the archived ones on folds of their own beneath it, the archived
+always folded until you open them. A root's count, on a family a thread
+leads, opens the tree on the leading row instead. Each fold is remembered in
+this browser.
+
+A click on a thread opens its page, as a click on a row does, and `j` / `k`
+walk the threads that are showing as well as the rows.
 
 ### Horizon
 
@@ -182,7 +202,7 @@ data while Chronicle is closed.
 
 ## Board — what the work produced
 
-Hotkey `3` opens a contact sheet of constitutions with documents sent in the last 30 days.
+Hotkey `4` opens a contact sheet of constitutions with documents sent in the last 30 days.
 A ribbon shows the twelve latest documents across the fleet.
 Beneath it, **Read lately** names the constitutions opened in the reader this session, most recent first; each opens in the reader.
 Below it, each fiber has a folio with a live thumbnail, name, outcome, document count and host marks.
@@ -254,7 +274,7 @@ A file, the tapestry or the constitution opens on the stage, and Back returns to
 
 Escape, `h`, Back and a double-click or double-tap on the field step out one level: to the thread's orchestrator, then to the whole family, and only then off the page. Stepping out, zooming and panning change the view and leave Rex alone.
 
-When Rex's worker changes, from its sidebar or otherwise, the board goes there, with voice on or off. Rex merely coming to the front moves nothing on the board. A thread on the open map is flown to, without speaking back to Rex or to voice. A thread on another map lands there, on any host, from any view; Tree and Globe show it in place. A page of the same fiber's channel stands, so opening a file does not bounce back to the map. Opening a page does not change what Rex shows.
+When Rex's worker changes, from its sidebar or otherwise, the board goes there, with voice on or off. Rex merely coming to the front moves nothing on the board. A thread on the open map is flown to, without speaking back to Rex or to voice. A thread on another map lands there, on any host, from any view; the Globe shows it in place. A page of the same fiber's channel stands, so opening a file does not bounce back to the map. Opening a page does not change what Rex shows.
 
 The radial zooms about the pointer: pinch, or trackpad pinch, ctrl+wheel or ⌘+wheel on the desktop. Everything follows every frame: geometry scales, marks and text keep their reading size, and more names appear as room opens. Every scene opens with its own bodies alone. As a body's room grows past what a scene gives it, its arms fade in with its threads as dots, which become bodies and then a scene, and it shows what it holds as small sheets at the same fixed places, each a way in. Letting go of a zoom inward rests on the scene it reached, or the nearest one to where it ended. Once zoomed, the wheel and a drag on the field pan it and the page swipe rests.
 
@@ -262,38 +282,10 @@ With the map focused, the arrow keys walk its threads and Enter comes to one. `l
 
 ### Where voice goes
 
-While Listen is following, voice goes to what you are looking at, and whichever of Rex and the board had focus last decides. While the board has the keyboard, voice goes to what it shows: on the map, the thread the map has come to rest on after a click, a flight or a zoom, or the family's root when it stands whole; on any other page, that page's constitution, the nearest one above a plain fiber. A pan moves it only once the view holds for a moment, and a hover never does. Rex takes voice by coming to the front or changing worker, and the board takes it back by regaining focus. A click in Tree or Globe takes voice along with it. Zooming and stepping out can move voice this way while Rex stays put. The Desk, Chronicle and Board views show no one fiber, so they leave voice where it is. While a meeting holds the mic, nothing moves: its words go to its card.
+While Listen is following, voice goes to what you are looking at, and whichever of Rex and the board had focus last decides. While the board has the keyboard, voice goes to what it shows: on the map, the thread the map has come to rest on after a click, a flight or a zoom, or the family's root when it stands whole; on any other page, that page's constitution, the nearest one above a plain fiber. A pan moves it only once the view holds for a moment, and a hover never does. Rex takes voice by coming to the front or changing worker, and the board takes it back by regaining focus. A click on the Globe takes voice along with it. Zooming and stepping out can move voice this way while Rex stays put. The Desk, Chronicle and Board views show no one fiber, so they leave voice where it is. While a meeting holds the mic, nothing moves: its words go to its card.
 
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
 A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).
-
-## Tree — where everything is
-
-Hotkey `4` opens the whole hierarchy on one page: every family on every host, threads at any depth, and each thread's files.
-
-A thread hangs from its orchestrator. A family's root hangs from the nearest card along its fiber path, else from groups named by the path, and a group holding one thing gives way to it, so `life/admin/forms/one-form` alone reads as its own row.
-Each row shows a caret, a state mark in the Desk's colours, its name, a count of the threads and files under it, the host where it differs from the row above and from this daemon, and the age of its newest move. A collapsed row also counts what is under it by kind: asking, new, your turn, to review and working. The head totals the same counts for the fleet, and each one steps to the next row of its kind; `n` steps through everything that asks of you.
-
-Places are stable: groups by name, then threads newest-born first. In-play threads stand in their parent; its drafts, resting and archived threads wait dim in folds of those names, newest move first, and a parent with nothing else to show lists them without a fold.
-A thread's rows run tapestry or report first, sent files newest first, its threads and folds, and its constitution last. A thread with threads of its own keeps its sent files in a **Files** fold. Sent files reach back to the fleet's first record; a tapestry is read when its thread is first open.
-
-By default, whatever holds live work is open far enough to show it. What a hand opens or shuts is remembered in this browser. Rex moving to a worker selects that row, holding the way to it open until the next such move, and leaves anything already filtered alone.
-
-| Key | What it does |
-|---|---|
-| `j` `k` `↓` `↑` | Next or previous row, without touching Rex |
-| `l` `→` | Expand, or step to the first child |
-| `h` `←` | Collapse, or step to the parent |
-| `g` `G` `Home` `End` | First or last row |
-| `PgDn` `PgUp` | A page down or up |
-| `Enter` `o` | Act: a thread opens its Rex chat, a file opens on the stage, a group or fold toggles |
-| `c` `.` | Open the chat of the row's thread |
-| `m` | Open the thread's map |
-| `/` | Filter by name or fiber path; matches keep their ancestors. A letter no key here takes starts the filter too |
-| `Esc` | Clear the filter, then return to the Desk |
-
-A click does the same as `Enter`, and also opens a thread with its row collapsed; the caret only folds, and a row's **map** button opens its map. On a touch screen the first tap comes to a thread and the second opens its chat.
-The bar at the foot names the selected row's path, and each step of it selects that row. Going to a page and coming Back keeps the selection and the scroll position.
 
 ## Globe — everything on one sphere
 
