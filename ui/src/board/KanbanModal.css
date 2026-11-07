@@ -2446,3 +2446,13 @@
     gap: 4px;
   }
 }
+
+/* Half a screen, beside Rex: In flight takes the width it needs, and the two
+   columns that wait on it stack at its side, what awaits review first. */
+@media (min-width: 701px) and (max-width: 1180px) {
+  .kbn-now-board { grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); grid-template-rows: minmax(0, auto) minmax(0, 1fr); }
+  .kbn-col-inFlight { grid-column: 1; grid-row: 1 / span 2; max-height: none; }
+  .kbn-col-awaitingReview { grid-column: 2; grid-row: 1; max-height: min(44vh, 480px); }
+  .kbn-col-drafts { grid-column: 2; grid-row: 2; }
+  .kbn-now-board .kbn-col-title { font-size: var(--type-title); white-space: nowrap; }
+}
