@@ -55,17 +55,15 @@ time.
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
 | `POST /claim` | owner-routed | Associate a terminal worker or a verified native app conversation with a fiber |
 | `POST /migrate` | local owner | Move a live worker from one installed fiber to another on the same host, without ending its conversation |
-| `POST /capture` | recorder-routed meeting; owner-routed agent | Launch a session from a free-text prompt; meeting mode starts hark on the selected recorder before routing the scribe capture |
-| `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
-| `POST /meeting/start` | recorder-routed | Record on the selected recorder, mirrored toward `origin`, with no agent; answers the transcript's path on `origin` |
-| `POST /meeting/system-audio` | recorder-addressed | Enable or mute system transcription in an unpaused live desktop meeting with `{recorder?, launch, enabled}` |
-| `POST /meeting/pause` | recorder-addressed | Pause or resume both desktop tracks with `{recorder?, launch, paused}` |
-| `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
-| `GET /voice/transcript` | recorder-addressed | Resolve the current following transcript as `{path, launch, recorder}` for the file reader; no capture control |
-| `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
+| `POST /capture` | owner-routed | Launch an agent from a free-text prompt to file and claim a constitution |
+| `GET /voice` | recorder-routed | Listen settings, source, launch, selected target, pending speech and last delivery |
+| `GET /voice/audio` | recorder-addressed | Launch-bound phone PCM WebSocket, optionally relayed through a hub |
+| `POST /voice/toggle` | recorder-routed | Start Listen unmuted when off; otherwise flip mic mute |
+| `POST /voice/discard` | recorder-routed | Drop unsent buffered words and return the number discarded |
+| `GET /voice/transcript` | recorder-addressed | Read the recorder-local day transcript as `{date, rows, recorder}`; filters `date`, `fiber`, `since` |
+| `POST /voice` | recorder-routed | Update `{enabled?, muted?, follow?, system_audio?, source?, target?}`; returns voice state |
 | `GET /voice/events` | recorder-routed for `target`, local for `focus` | The board's one live stream: server-sent `target` events, and with `rex=1` `focus` events `{fiber_id, origin, name}` when Rex's worker changes, voice on or off; every stream carries `open` events from `POST /board/open` |
 | `POST /voice/target` | recorder-routed | Route following to `{fiber_id, origin?, name?}`, the board's view; returns voice state, unchanged unless following |
-| `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
@@ -85,15 +83,16 @@ time.
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
-### Following transcript
+### Day transcript
 
-`GET /voice/transcript?recorder=<host>` resolves hark's current following transcript on the selected recorder.
-An absent recorder means this daemon; `origin` names the speech recipient and does not select the recorder.
-The response is `{path, launch, recorder}` with `Cache-Control: no-store`.
-Open `path` through `/file?path=<path>&origin=<recorder>` so the reader fetches the recorder's bytes, not the target card's files.
-The resolver only accepts the launch's regular `.txt` file inside hark's `voice` directory and refuses symlinks at the directory or file.
-It returns 404 when no transcript is available, 400 for an unknown recorder, and 502 when that recorder cannot be reached; it never falls back to another host.
-Resolving the transcript does not start, stop, or reconcile audio capture.
+`GET /voice/transcript?recorder=<host>&date=YYYY-MM-DD&fiber=<id-or-slug>&since=HH:MM[:SS]` returns `{date, rows, recorder}` with `Cache-Control: no-store`.
+All filters are optional: `date` defaults to today on the recorder, `fiber` matches an id or slug, and `since` is an inclusive recorder-local time.
+Rows are `{t, speaker, text, fiber_id, origin, name, launch}`; `t` is the spoken-start ISO 8601 timestamp and the three fiber fields are null when speech had no route.
+The recorder appends every ingested utterance, including cold-dropped and discarded speech, to `<Shuttle.data_dir()>/transcripts/YYYY-MM-DD.jsonl`, using its local date.
+Rows survive recording stops and launch changes.
+An empty or absent day returns an empty `rows` list, not 404.
+Invalid filters return 422, an unknown recorder 400, and an unreachable recorder 502; reads never fall back to another host.
+`origin` does not select the recorder, and reading the transcript does not control capture.
 
 ### Fiber creation
 
@@ -194,29 +193,13 @@ Messages to the destination follow the moved session; messages to the source wai
 Messages to the exact session address keep reaching the same conversation.
 No conversation context is copied or merged.
 
-### Capture and meeting mode
+### Capture
 
-`POST /capture` accepts an optional `meeting: {mode: "call" | "phone"}` object
-and an optional `recorder` host id. Workers run through the selected terminal
-backend, including Codex CLI workers.
-Meeting mode starts hark on the selected recorder before owner-routing the capture, so recording and the scribe can run on different hosts.
-Meeting mode allows `prompt` to be omitted and replaces the prompt with the meeting's facts
-(mode and transcript path, plus a pointer to the shuttle skill's
-`references/meeting.md`) followed by the user's note.
-The capture scribe infers the meeting's identity, participants, and filing location from the transcript and felt tree; it doesn't require a title before recording.
-It replaces `meeting` with
-`meeting_launch`, the recording's launch id, before forwarding, so the owner
-handles an ordinary terminal capture whose supplied `Claim` body carries
-`meeting: <launch id>`. The transcript is mirrored to the
-remote project host when `origin` names a configured remote with an SSH alias.
-A successful terminal capture answers with `session_uuid` when the launch
-assigned the harness session. A successful meeting capture adds `meeting`; if capture fails after recording
-starts, its status and error body also include `meeting` and `recording: true`.
-Each meeting gets a transcript name no earlier recording used. The daemon watches
-the new recording for a few seconds: if hark exits before it starts recording, the
-scribe is not launched and the response is **503** with the failed `meeting` row
-and `recording: false`. A recording that is still loading, or whose state tmux
-can't report yet, counts as started (`state: "starting"`).
+`POST /capture` accepts `{prompt, project_dir, agent?, effort?, chrome?, origin?}` and launches an agent through the selected terminal backend.
+The prompt and project directory are required; the agent files a constitution and claims it through `/claim`.
+A successful response includes `spawned: true`, `agent`, terminal coordinates, and `session_uuid` when the launch assigned a harness session.
+Capture does not start or control recording.
+To listen to a new topic, capture its card, then pin Listen to that card with `POST /voice`.
 
 ### Codex terminal workers
 
@@ -277,8 +260,6 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /transcript/usage` | host-routed | A session's latest context and cache facts, read from the transcript's tail |
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
-| `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
-| `GET /meeting/audio` | recorder-addressed | WebSocket: relay a phone's microphone through the serving hub to the selected recorder |
 
 `GET /fibers/composite` and `/state/composite` return a weak `ETag` and
 `Cache-Control: no-cache`. Their validators exclude the volatile `generated_at`
@@ -314,25 +295,11 @@ The asynchronous daemon poll reads Claude Code's session task directory in numer
 Missing or malformed task records yield no tasks; a worker without a checklist has `tasks: []`.
 The snapshot's running-worker rows carry the same checklist, and the owner feed performs no harness filesystem reads while serving a request.
 
-`GET /meeting?recorder=<host>` returns `{available, modes, recorder, meeting}` from the addressed daemon.
-`origin=<host>` also supports host-addressed reads.
-A meeting's optional `handoff` receipt retains its intended `kind` (`capture`, `fiber`, or `record`), `target` (project directory or fiber), `origin`, and full agent `prompt` for manual recovery.
-The recorder saves this host-local, launch-keyed receipt before launching hark, under its Hark directory's `handoffs/<launch>.json`.
-Reads expose a pending delivery as `status: "unconfirmed"`; completed requests report `reported-success` or `reported-failure`, while intentional recording without a scribe reports `record-only`.
-Reported success describes the delivery response, not whether a worker followed the transcript.
-The board warns on unconfirmed or failed delivery; inspect the intended worker before manually sending the saved prompt, because an interrupted request may already have delivered it.
-The daemon never automatically replays a handoff.
-`modes` lists the recording inputs that host supports: `call` (its microphone and system audio) or `phone` (streamed phone microphone).
-Without hark, the list is empty.
-`GET /meeting?prefer=phone` asks the serving daemon to select a reachable remote recorder advertising `available: true` and `call`; it uses the local recorder if no remote qualifies.
-Capability probes belong to the daemon and have short bounded deadlines; the browser never probes remote hosts.
-Capture and Join offer one Meeting toggle: desktop uses `call`, and mobile uses `phone`.
-The toggle is disabled when the selected recorder lacks the device's required mode; desktop never falls back to `phone`.
-A remote Mac still records in `phone` mode when the microphone is on the phone.
-The board's host picker chooses the scribe host, not the recorder, and the controls name the selected recorder.
-The preview recorder is advisory for a new phone start: Capture and Join omit an explicit recorder so the daemon checks reachability again before recording.
-The returned meeting's recorder is authoritative.
-An active recording pins polling and Stop to that recorder instead of selecting again.
+Listen's recorder and the receiving worker's owner are separate addresses.
+Use the `recorder` returned by `/voice` for subsequent polling, controls, transcript reads and phone audio.
+A phone-source request without an explicit recorder probes reachable fleet daemons and prefers an available desktop-capable recorder; it defaults to this daemon when none qualifies.
+Probes are addressed reads of `/voice`, bounded to 800 ms, and cannot recursively select another recorder.
+All recorder control forwarding is one-hop and single-attempt; an uncertain response never causes a fallback start.
 
 Each origin in `GET /felt-stores` also reports `browser_capable`.
 It is true only for a macOS daemon whose user has an active GUI session.
@@ -417,160 +384,87 @@ may total at most 20 MiB. Successful receipts include
 copy. File-bearing envelopes are refused on `/messages`; this dedicated route
 prevents an older daemon from silently dropping fields it does not recognize.
 
-### Live voice
+### Listen
 
-`GET /voice` returns `{available, enabled, muted, state, mode, destination, paused, target, cold, pending, pending_words, preview, level, last, error, recorder}`.
-An optional `recorder` selects the recording daemon, independently of the receiving worker's `origin`.
-Without it, the receiving daemon is the recorder.
-`state` is `off`, `starting`, `listening`, `yielded` (a meeting owns the microphone), or `failed`.
-`target` is `{fiber_id, origin, name}` or `null`.
-`cold` says whether the selected target has no live worker. A live worker is warm, however long it has been idle; a target whose owner cannot be read is cold.
-`mode` says where spoken words go: `meeting` while a meeting recording is loading, starting, live or stopping (any state but failed); `following` while Follow me is on and no meeting holds the microphone; otherwise `off`.
-`destination` is `{fiber_id, name, origin}` of that place (the meeting's card, or the followed target) or `null`, and `paused` is the meeting's pause in `meeting` mode, `muted` in `following` mode, and `false` when `off`.
-`pending` is `{fiber_id, words, text}` or `null`, holding finalized warm speech before a delivery trigger.
-`pending_words` is the word count the live recording's relay holds unsent across all targets, voice or meeting (speaker labels count, as for the word limit), read from the relay on each request; `0` when none.
-`preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.
-Missing or empty partials, mute, disabled voice and recorder exit clear the preview.
-Preview words never enter the relay or delivery.
-`level` is `{mic, at}` or `null`: the recorder mic's peak over hark's newest 100 ms block in dBFS (`mic`, a float; about -90 is digital silence, 0 is full scale) and the ISO 8601 time that block arrived (`at`), read from hark's `level.json` on each request and `null` when that file is missing or more than a second old.
-`last` is `{fiber_id, at, status, detail?}` or `null`, with `status` `delivered`, `unconfirmed` or `failed`.
-`enabled` reports the persisted intent even if recording fails. Invalid or unreadable `voice.json` fails off: `enabled: false`, `state: "failed"`, and `error` describes the configuration failure while the daemon stops any live voice recorder.
+`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, source, launch, state, mode, destination, paused, target, cold, pending, pending_words, preview, level, last, error, recorder}`.
+`recorder=<host>` selects the recording daemon independently of the worker's `origin`; without it, the receiving daemon answers locally.
+`sources` is `[]` without hark, `["desktop", "phone"]` on macOS, and `["phone"]` on other hosts.
+`source` is `desktop` or `phone`; `launch` is the active recorder's `voice-…` identity or null.
+`state` is `off`, `starting`, `listening`, or `failed`.
+`mode` is `off` when disabled, otherwise `following` or `pinned` according to `follow`.
+`target` is `{fiber_id, origin, name, source?}` or null; the optional source names the view that selected it, such as `board` or `rex`.
+`destination` is `{fiber_id, origin, name}` while enabled and null otherwise.
+`paused` reflects mic `muted` while enabled and is false when off.
+`cold` says whether the target lacks a live owner-published worker; an idle live worker is warm, while an unreadable owner is cold.
+`pending` is `{fiber_id, words, text}` or null, and `pending_words` totals finalized unsent words across buffers, including speaker labels.
+`preview` is `{fiber_id, origin, text}` or null, pinned to the target where the in-progress partial began; it is display-only and clears when muted, disabled, empty or stopped.
+`level` is `{mic, at}` or null, the latest microphone peak in dBFS and its ISO 8601 arrival time, absent after one second without a meter update.
+`last` is `{fiber_id, origin?, text?, at, status, detail?}` or null, with status `delivered`, `unconfirmed` or `failed`.
+`enabled` is persisted intent even when capture fails; invalid settings fail off with a visible configuration error.
 
-`POST /voice` accepts `{enabled?, muted?, recorder?}` and returns the same state.
-Both control fields must be booleans; invalid input returns **422**, as does `enabled: true` while a meeting holds the microphone.
-`POST /voice/toggle` is the one mic key: in mode `off` it turns following on unmuted, in `following` it flips `muted`, and in `meeting` it flips the meeting's pause (as `POST /meeting/pause` does); it returns the same state, or **422** with the pause's error.
-`POST /voice/discard` drops every word the live recording's relay holds but has not sent, voice or meeting, and returns the same state with `discarded`, the number of words dropped; batches already being delivered still go, the transcript on disk keeps every word, and in live voice an utterance begun before the discard is dropped when it finishes.
-Enabling persists to `voice.json`; muting uses `hark pause` and survives recorder restarts.
-The daemon keeps one retained `hark --voice` running while enabled and adopts it after daemon restarts.
-Crash retries wait 1, 2, 4 and 8 seconds; five failures latch `failed` until enabled is toggled off and on. A recorder stable for 30 seconds resets the failure budget. This retry budget belongs to the running daemon; a daemon restart starts a fresh budget.
-There is no scheduled recorder restart.
-Every meeting start stops live voice, verifies the recorder has exited and switches following off (`enabled: false`) before opening another capture, so one mode holds the microphone at a time; following does not resume when the meeting ends.
-Voice captures are hidden from `/meeting`, its stop, pause and system-audio controls, including stale-launch errors.
-Disabled voice with no recording, or with a meeting recording, checks hark's lifecycle file and pause flags each second without polling the terminal, and observes the recorder again when they change; during a meeting it also observes every ten seconds, so a recorder that died without writing its lifecycle file is seen. Startup always observes retained captures so an orphan voice recorder is stopped.
+`POST /voice` accepts `{enabled?, muted?, follow?, system_audio?, source?, target?, recorder?}` and returns the same state.
+The four switch fields must be booleans, and `source`, when supplied, must be `desktop` or `phone`.
+A pin is one request: `{follow: false, target: {fiber_id, origin?, name?}}`.
+`target` requires `follow: false`; omitting it when turning follow off retains the current target.
+A pin can be set while disabled and survives daemon restarts through the route journal and persisted follow setting.
+While pinned, `POST /voice/target` and Rex view changes remember the view but do not move the target.
+`{follow: true}` resumes following the latest observed view.
+Invalid input and control failures return 422; unknown recorder addresses return 400, and unconfirmed remote controls 502.
 
-While following is on, the destination is whichever of Rex and the board had focus last. `Shuttle.RexFocus` routes Rex's worker when Rex comes to the front or changes worker, and the board posts what it shows to `POST /voice/target` while it has the keyboard, on regaining it included. Each route durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
-`t` is the recorder's UTC receipt time, not the time reconciliation finishes.
-Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
-A target switch flushes pending words to a live worker immediately; words for a cold target are dropped.
-No selected target means no delivery; the recording still retains the words.
-An unreadable or malformed route journal, or a failed recovery truncation, leaves voice failed off with a visible `error`; repair the journal and restart the daemon before recording or selecting a target.
+`{enabled: true, source: "phone"}` starts the same recorder with `hark --voice --phone`.
+Without an explicit recorder it prefers a reachable desktop-capable fleet recorder, while an explicit `recorder` pins the request.
+Desktop starts use `hark --voice`, adding `--system-audio` when the setting is on.
+The desktop recorder retains system audio as its echo-cancellation reference even when system transcription is off.
+`system_audio` toggles live through `hark pause --system` or `hark resume --system` and persists across launches.
+Phone audio has no system track; it retains the desktop preference without applying a system gate.
+Changing source replaces the recorder after stopping the old launch.
+`source` is a runtime choice, not a `voice.json` setting; a surviving phone launch is adopted after daemon restart.
 
-`voice.json` is an operator file exposed by the config API as id `voice`, beside `host`.
-It defaults to:
+`POST /voice/toggle` starts Listen unmuted when disabled; otherwise it flips mic mute without changing follow or pin.
+`POST /voice/discard` drops unsent buffered words and returns the state plus `discarded`, the number dropped.
+Already-submitted batches still go, and utterances begun before discard stay in the day transcript but do not enter a buffer.
+Mic mute uses `hark pause`/`resume` and survives recorder restarts.
+There is one retained terminal launch, `hark-voice`, and no scheduled recorder restart.
+Crash retries wait 1, 2, 4 and 8 seconds; five failures latch until enabled is toggled off and on.
+Thirty stable seconds reset that budget; a daemon restart starts a fresh budget.
+Disabled idle ticks inspect lifecycle files without shelling out; boot always observes retained captures and stops an orphan when disabled.
+
+`POST /voice/target` accepts `{fiber_id, origin?, name?, recorder?}` from the view, returning voice state.
+While following, whichever of Rex and the board had focus last sets the target.
+Routes append `{t, fiber_id, origin, name, source?}` to `<Shuttle.data_dir()>/voice-routes.jsonl` with recorder UTC receipt time.
+Each utterance takes the route at its spoken start (`wall_start`, falling back to `wall`), not recognition completion.
+A switch flushes the old target's buffer; a late utterance still uses its spoken-time target.
+An unreadable or malformed journal fails off with a visible error.
+No route means no delivery; the day transcript still keeps the speech.
+
+`voice.json`, exposed by the config API as `voice`, defaults to:
 
 ```json
-{"enabled": false, "words": 200, "quiet_seconds": 15}
+{"enabled": false, "follow": true, "system_audio": false, "words": 200, "quiet_seconds": 15, "pinned_quiet_seconds": 120}
 ```
 
-The word limit is a positive integer; the quiet interval is a positive number of seconds.
-Both apply to voice and meetings.
-The quiet interval is the one pause that means the speaker is done. Shuttle launches hark with `--settings` pointing at this file, so hark closes a speech run and sends it to the external ear after that quiet, and the monitor delivers once the same quiet has passed since the last spoken word: delivery follows the pause by the quiet plus the ear's call.
-A `run_quiet_seconds` key is dropped when the file is read and when it is saved.
-For existing nested settings, each top-level value takes precedence, followed by `voice`, then `meeting`, then the default.
-Saving Listening settings replaces the nested `voice` and `meeting` objects with the shared top-level values, preserving other top-level fields.
-`POST /voice` with `enabled: false` can repair an invalid operator file by replacing it with disabled defaults. Valid files retain their thresholds and unknown keys.
-The daemon's shared monitor checks once a second and flushes on the word limit or quiet since the last spoken line.
-In live voice, `send` as the last word sends the batch at once.
-Comments travel with the next batch and `# ended` closes the monitor.
-An incomplete final voice JSON row is retained on disk and reported in a closing comment rather than held open indefinitely.
-The monitor persists read offsets, buffers and stable message IDs before delivery, so restart recovery doesn't replay confirmed speech.
+`words` must be a positive integer and both quiet intervals positive numbers of seconds.
+The relay polls every 250 ms and flushes on the word limit, a closing `send`, target switch, capture end, or quiet since the last spoken end.
+Following uses `quiet_seconds`; pinned listening uses `pinned_quiet_seconds`.
+A nonempty fresh Hark partial holds quiet-triggered delivery until the utterance finishes.
+Hark reads the same file through `--settings`.
+Only the listed top-level settings participate; nested settings do not affect thresholds.
+`{enabled: false}` repairs an invalid file with disabled defaults.
 
-Waking a worker is deliberate: speech to a cold target is delivered only when its pending words end with `send`, using the default delivery verb to resume a dormant conversation or start a never-run card.
-Cold speech without a closing `send` is dropped when the word limit, quiet, a target switch or capture end flushes it; the transcript on disk keeps the words, and nothing is stored for later.
-The owning daemon resolves resume versus first start from its current document, independently of recorder caches.
-A worker warmed through any path gets ordinary triggers on its pending and next speech.
+Following drops ordinary batches for a cold target; a batch ending in `send` starts or resumes its worker.
+Pinned listening delivers every batch and starts a cold worker without a trigger.
+Names have no routing or delivery meaning.
+The owner decides resume versus first launch from its current document.
+Speaker-labelled paragraphs merge adjacent utterances by the same speaker, without a header, and omit a final `send`.
+A bare `send` delivers nothing.
+Each delivered batch ends with `— shuttle transcript --since HH:MM:SS`, using its first spoken time on the recorder.
+The `/voice/transcript` endpoint reads the corresponding day rows.
+Live workers take terminal input through `/deliver` with `live_input: true`; cold workers receive the same text as their launch directive, with `message_after_launch: false`.
+Batches stay ordered per destination; different destinations proceed independently.
+The relay checkpoints attempts before delivery and never automatically replays them, including definite failures.
+A 202 with `delivered: null` or an interrupted delivery is unconfirmed; `last` explains that the words remain in the transcript.
 
-Voice batches contain speaker-labelled paragraphs, joining consecutive lines by one speaker, with no header or timestamp.
-Live workers take them as terminal input through `/deliver` with `live_input: true`; dormant targets receive the same text as their launch directive.
-A prior conversation uses `resume_mode: "previous"`; a never-run card starts fresh.
-Registered batches stay ordered per destination, while different destinations can proceed independently.
-A failed voice delivery is recorded in `last` and dropped from the delivery queue; it isn't retried indefinitely, and its words remain in the transcript.
-A **202** response with `delivered: null` is unconfirmed, not sent.
-`last` reports `status: "unconfirmed"` and explains that the message may have arrived and the transcript retains the words.
-The relay does not automatically replay an unconfirmed voice batch, since doing so could duplicate speech already delivered.
-Only an explicit `delivered: false` or a non-2xx response is a failed send.
-Meeting batches retain their stable IDs and retry definite failures.
-
-### Meetings
-
-`GET /meeting` without a selector reports local capabilities and recording state, so daemon capability probes cannot recursively select another recorder.
-The answer includes `{available, modes, recorder, meeting}`.
-Use `recorder=<host>` for an explicit read, or `prefer=phone` for capability-based selection.
-Hark exposes no capability-reporting CLI protocol, and its help includes device flags even on Linux.
-The daemon therefore derives `modes` from hark availability and the OS: macOS offers call/phone; other hosts offer phone.
-The row is `null` when the addressed daemon has no meeting capture to report. Otherwise it carries
-`state`, `title`, `started_at`, `tail`, `transcript`, `mirror_host`,
-`fiber`, `joined`, `phone`, `launch`, `recorder`, `tmux_session`, and `error`.
-`recorder` names the daemon that owns the recording, independently of the agent's owner. `phone` is
-true when the meeting takes its audio from a phone (`mode: "phone"`), so a page
-can offer to connect one; `launch` is the recording's launch id, which a phone's
-audio socket binds to. `tail` is the
-transcript's last spoken lines (at most 30, oldest first, `#` lines left out),
-read from the end of the file on each request, so the route stays cheap to
-poll. `fiber` names the fiber whose card the meeting rides on. For a joined
-meeting (`joined: true`) it is the constitution. For a capture meeting it is
-`null` until the scribe claims, then the fiber whose `shuttle.runtime.meeting`
-equals the recording's launch id, looked up on each request across this
-daemon's fibers and the remote feeds it polls. The scribe's host never has to
-reach this daemon, and a renamed fiber is still found. `mirror_host` is the configured remote name when
-the transcript mirror's SSH alias matches a remote; otherwise it is the alias.
-A `null` mirror host means the transcript is local.
-
-`POST /capture` accepts `meeting: {mode: "call" | "phone"}`.
-`call` records this machine's microphone and system audio, including in-person meetings with silent system audio.
-`phone` records a phone's microphone streamed in over `GET /meeting/audio` (hark `--phone`).
-The daemon derives
-the meeting title and transcript name from the first line of `prompt`, or uses
-`Meeting` when no note is supplied.
-It starts hark in the selected recorder's `hark-meeting` terminal launch, then continues the ordinary owner-routed capture flow.
-A `phone` start without an explicit `recorder` uses capability-based selection; other modes default to the receiving daemon.
-The `origin` remains the agent's owner when the request crosses to a recorder, including when the owner is the requesting hub.
-For a remote `origin`, hark writes locally and mirrors to
-`~/.hark/meetings/<name>.txt` through that remote's configured SSH alias.
-The capture agent receives the scribe message and the optional user note as its
-prompt. `project_dir` remains required by the ordinary capture flow.
-
-An unavailable hark executable returns **503**. An existing meeting in
-`starting`, `loading`, `live`, or `stopping` returns **409** with its row.
-Meeting mode rejects an invalid mode or a mode unsupported by the recorder with **422**.
-If capture fails after hark starts, the capture's status and error body include
-the meeting row and `recording: true`; recording continues on its recorder.
-The capture transcript monitor starts only after successful scribe dispatch, including a forwarded owner's `spawned: true` response. If monitor startup fails, the successful capture response and recording are preserved; `meeting.relay_error` reports the monitor failure.
-A transport failure after forwarding a start returns `recording_unknown: true` and the recorder address.
-The hub never retries or falls back to another recorder after attempting that write: the first recorder may already be recording.
-Capture and Join hold further starts after an ambiguous answer and instruct the operator to inspect the recorder before starting another meeting.
-
-`POST /meeting/join` accepts `{fiber_id, origin?, recorder?, meeting: {mode, system_audio?}, note?, resume_mode?}`. It
-starts hark exactly as meeting capture does, mirrored toward `origin`, and names
-the recording after the note's first line or, with no note, the fiber's leaf.
-The meeting message (the same facts as a meeting capture's, plus a line saying
-the meeting joins this constitution) and the note go to the fiber's worker
-through `/deliver` on its owner. `resume_mode` selects the session as it does
-for `/dispatch`: `previous` messages a live worker or resumes a dormant one, and
-`fresh` starts a new session, cutting a live worker. The answer is `{meeting, delivery}`, where
-`delivery` is `/deliver`'s body; if delivery fails after hark starts, it carries
-the delivery's status with `recording: true` and `error`, and the recording
-continues.
-Shuttle also sends transcript batches and the end marker to the worker while hark records.
-Capture meetings use the same monitor after the scribe claims its fiber, beginning at the transcript's first line.
-Neither board flow needs `shuttle follow`.
-Start errors are the same as meeting capture's.
-
-`POST /meeting/start` accepts `{origin?, recorder?, meeting: {mode, system_audio?}, note?}`
-and records without any agent: no capture is routed and nothing goes to
-`/deliver`. It is for a caller that follows the transcript itself, such as a
-session the daemon did not launch (`shuttle meeting start`, then
-`shuttle follow`). It selects the recorder and starts hark exactly as Join
-does, mirrored toward `origin`, which defaults to the receiving daemon, and
-names the recording after the note's first line or `Meeting`. The answer is
-`{meeting, recorder, origin, transcript}`: `transcript` is the path a follower
-reads on `origin`. When the recorder is the origin it is the local transcript.
-Otherwise the recorder can only name the mirror as
-`~/.hark/meetings/<name>.txt`, and the origin's own daemon expands that `~` as
-the answer passes back through it, so a caller asking its local daemon always
-gets an absolute path. A path on an `origin` other than the answering daemon
-stays `~/`-relative. Start errors are the same as meeting capture's, including
-`recording_unknown` after an unconfirmed forwarded start.
+### Worker delivery
 
 `POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
 user_message?, project_dir?, release_launch_reservation?, existing_only?}` (plus `origin` to forward).
@@ -604,60 +498,20 @@ With `message_after_launch: true`, the owner instead starts the dormant worker w
 This keeps transcript-batch deduplication identical for live and dormant workers.
 An address timeout returns **503** rather than claiming delivery.
 
-Desktop meeting requests accept `meeting.system_audio` (boolean, default `true`).
-Set it to `false` to start with only mic transcription.
-`POST /meeting/system-audio` accepts `{recorder?, launch, enabled}` and changes system transcription during the addressed live desktop meeting.
-The raw system reference remains available for mic echo cancellation.
-A stale launch returns 409; phone meetings reject this control.
-The meeting row reports `system_audio` from hark’s lifecycle state.
+### Phone audio
 
-`POST /meeting/pause` accepts `{recorder?, launch, paused}` with a boolean `paused` and a nonempty launch id.
-It returns HTTP 200 with `{recorder, meeting}`; the meeting keeps `state: "live"` and reports `paused` separately.
-Pause mutes both mic and system transcription through hark's two manual pause flags; Resume restores the system-audio choice from before Pause.
-The restore choice is stored locally with the launch id, so repeated requests and daemon restarts preserve Mic only.
-`GET /meeting` and control replies derive `meeting.paused` from both flags, not from the saved restore choice or the last request.
-This reports the manual gate, not an acknowledgement from the audio thread; hark polls the flags and may finish transcribing audio heard before the pause.
-A stale launch returns **409**, invalid input or a non-live, phone or voice capture returns **422**, and a failed hark command returns **503**.
-System-audio changes are refused while paused.
-Recorder selection and one-hop forwarding match Stop: control addresses the recorder, not the worker's owner, and never falls back to another host.
-
-`POST /meeting/stop` accepts `{recorder, launch}` and returns HTTP 202 with `{meeting}` or 404 when no meeting exists.
-The recorder checks the launch identity inside the same lock as Stop; a stale control cannot stop a replacement recording.
-An unknown recorder is refused rather than falling through to the hub's local meeting.
-It sends at most one SIGINT to a live hark process, even while hark's
-lifecycle file still reports `loading` or `live`. A `stopping` meeting is a
-no-op; a `starting` or `failed` meeting dismisses its tmux session.
-
-`GET /meeting/audio?recorder=<host>&launch=<id>` upgrades on the serving hub and feeds the addressed `phone` recording.
-For a remote recorder, the hub opens that daemon's `/meeting/audio` WebSocket and relays binary audio, status text and closure; the phone only connects to the hub.
-The recorder's socket validates `launch`, and an explicit one-hop route prevents recursive relay.
-A disconnected or slow relay closes rather than buffering or replaying microphone audio.
-The page sends
-binary frames of raw s16le 16 kHz mono PCM, which the daemon writes unchanged
-into hark's Unix socket, the path `meeting.json` names as `phone`. Nothing is
-buffered: hark places phone audio on its own wall clock and pads gaps with
-silence, so audio replayed late would be counted twice and shift every later
-timestamp. Until hark's socket accepts a connection (it binds once the models
-load), frames are discarded and the daemon retries every half second. hark
-takes one sender; a new connection replaces the old one. The daemon answers in
-small JSON text frames: `{"state":"waiting","reason"}` while there is no socket
-yet (audio is dropped), `{"state":"connected"}` once audio reaches hark, and
-before closing, `{"state":"refused","reason"}` (close code 4404: no meeting, a
-different meeting than `launch`, or one recording this machine's microphone),
-`{"state":"ended","reason"}` (4410: the meeting stopped, failed, or gave way to
-another), or `{"state":"replaced","reason"}` (4409: hark took another sender).
-The frame carries the full reason; the close frame's reason is cut, on a
-character boundary, to the 123 bytes a close frame holds. Without `launch` the
-socket feeds whichever phone meeting is live. Every meeting state upgrades, so
-the page can read why; a request that is not a WebSocket upgrade gets **426**.
-Browsers open WebSockets cross-site without CORS, so the upgrade takes the same
-origin rule as a write: no `Origin`, an allowlisted dev origin, or the page's
-own; any other origin gets **403**. An idle socket closes after a minute.
-
-Recorder routing and agent ownership are separate.
-`POST /capture` and `POST /meeting/join` select recording first, preserve the agent's `origin`, and route the scribe or delivery to that owner after hark starts.
-Show, Stop and audio carry the recorder address; changing the project host never moves a live recording.
-Recorder forwarding terminates after one hop, while ordinary agent forwarding strips `origin` at its owner.
+`GET /voice/audio?recorder=<host>&launch=<voice-launch>` upgrades to a phone PCM WebSocket on the serving hub.
+`launch` is required for local and remote connections; missing launch returns 409.
+The hub relays one hop to the addressed recorder's `/voice/audio`, and that recorder validates the voice launch before feeding hark's Unix socket.
+Binary frames are raw signed 16-bit little-endian 16 kHz mono PCM.
+No audio is replayed: frames are dropped until hark's socket accepts, and the daemon retries connection every 500 ms while models load.
+Hark places audio on its own wall clock and pads gaps with silence; a new sender replaces the old one.
+Status text frames are `{"state":"waiting","reason":…}`, `{"state":"connected"}`, or a terminal status before closure.
+Terminal states are `refused` (4404: absent, different launch or desktop source), `ended` (4410: stopped or failed), and `replaced` (4409: another sender).
+Close reasons are clipped to 123 bytes at a character boundary; the status frame contains the full reason.
+A non-upgrade request returns 426; a disallowed browser Origin returns 403.
+An idle socket closes after one minute.
+Remote connection/send deadlines are bounded, closure propagates both ways, and slow or disconnected relays close rather than queue audio.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
@@ -908,18 +762,9 @@ curl -s http://127.0.0.1:4000/api/v1/agents  | jq
 
 `GET /` outside `/api/v1` serves the board's `index.html`, or a 404 with a build hint when `ui/dist` has never been built.
 `GET /phone` redirects to `/`.
-Capture starts a `phone` meeting with an optional prompt; the scribe infers the meeting and where to file it from the transcript.
-On a mobile viewport, Capture defaults to Meeting with phone audio and no mode selector, and remembers the scribe host and project from the last meeting start.
-Desktop Capture defaults to an ordinary idea; enabling Meeting uses the recorder's first supported mode and shows a selector only when several modes are available.
-The Start tap opens the microphone, then binds its audio session to the returned meeting's launch id at `GET /api/v1/meeting/audio`.
-The live card offers Connect mic when this tab isn't streaming, a level meter, Restore mic after an interruption, and Stop.
-Keep the screen on and the browser in front; on iOS, screen lock stops the microphone.
-The tab requests a screen wake lock to prevent auto-lock where supported.
-A background-interruption warning retains the time the tab went hidden even when timers were suspended; Restore mic may ask for permission again.
-
-Audio is sent only while hark listens, and the card says when it doesn't: "Loading models — speech isn't captured until Listening" while hark loads, "Reconnecting — audio lost since HH:MM:SS" after a drop.
-Nothing is queued for later, and an open socket more than about 2 s behind drops audio rather than queueing it.
-Browsers grant the microphone only in a secure context, so reach the board from a phone through an HTTPS front such as `tailscale serve`.
+The phone enables Listen with `source: "phone"`, then binds its microphone stream to the returned `recorder` and `launch` at `/api/v1/voice/audio`.
+A secure context such as a tailnet HTTPS front is required for browser microphone access.
+iOS screen lock or backgrounding can interrupt the microphone; the transport never queues missed audio for later.
 
 ### POST /api/v1/thread-signals/current
 

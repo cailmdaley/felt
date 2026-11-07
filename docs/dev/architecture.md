@@ -264,27 +264,36 @@ within one second. Binding mutations read the current file under their write
 lock. Kernel process evidence and socket authorization bypass these snapshots.
 Expired runtime cache entries are reclaimed every minute.
 
-## Meeting recorder routing
+## Listen and recorder routing
 
-A meeting has two independent host addresses: the **recorder** runs hark, and the agent's **origin** owns the scribe or joined constitution.
-Capture and Join preserve that origin when forwarding to a recorder, so transcript mirrors and agent delivery point to the correct owner even when the owner is the requesting hub.
-A record-only start (`POST /meeting/start`) has an origin and no agent: the requesting daemon is the origin, receives the mirror, and answers its own path to the transcript.
+`Shuttle.Voice` owns one Listen switch, its follow/pin target, and the spoken-time route journal.
+`Shuttle.Recorder` controls one retained `hark --voice` launch, named `hark-voice`; desktop and phone are sources of that same recorder.
+Follow, system transcription and relay thresholds live in `voice.json`.
+Following targets the latest board or Rex view, while pinning keeps a target until follow is enabled again.
+A pin selects its target and disables follow in one `/voice` request.
+The recorder runs independently of the target worker's owner; delivery routes to that owner through `/deliver`.
+There is no separate recording lifecycle attached to Capture or a scribe claim.
 
-A phone board asks its serving daemon for `GET /api/v1/meeting?prefer=phone`.
-The daemon probes the configured fleet with short bounded local-capability reads and prefers a reachable recorder advertising hark availability and macOS device modes.
-It falls back to local recording only before a start is attempted.
-Plain `GET /meeting` reports local capabilities and cannot trigger another selection round.
-An explicit recorder address terminates forwarding after one hop.
+`Shuttle.Voice.TranscriptRelay` ingests Hark JSONL, assigns routes by spoken start, and appends every utterance to recorder-local day files under `<Shuttle.data_dir()>/transcripts/`.
+Cold-dropped, unrouted and discarded words remain readable through `/api/v1/voice/transcript?date&fiber&since`.
+Every delivered batch points at its first spoken time with `shuttle transcript --since HH:MM:SS`.
+Following drops cold batches unless they close with `send`; pinned batches start cold workers without a trigger.
+Both use at-most-once automatic delivery attempts, with durable offsets, buffers, outboxes and per-destination FIFO ordering under `voice-transcript-relays/`.
+No transcript mirror or worker claim is needed to route speech.
+`Shuttle.ServedFibers` supplies the fiber documents that voice name resolution and spoken output share.
 
-The selected recorder is visible in the UI and travels with the returned meeting row.
-Active polling and Stop remain pinned to that recorder; Stop checks the launch identity under the meeting lock, so stale controls cannot stop another recording.
-After an ambiguous forwarded start, the daemon reports uncertainty and does not retry or select a fallback.
-The UI holds another start until the operator inspects the recorder.
+`Shuttle.RecorderRouter` selects a recorder independently of the worker origin.
+Desktop requests default to the receiving daemon; `source: "phone"` prefers a reachable desktop-capable remote before starting, and an explicit recorder always wins.
+Capability probes are bounded addressed `/voice` reads, so they cannot recurse into another selection round.
+Every response names its recorder; later polling, control, transcript reads and phone audio carry that address.
+Controls forward once without automatic retries or fallback after an uncertain response.
 
 Phone audio stays phone audio even when a remote Mac records it.
-The phone connects only to the hub's `/meeting/audio` WebSocket, which relays to the selected recorder's `/meeting/audio` endpoint.
-The recorder validates the launch id and feeds its local hark socket.
-Relay connections have bounded connection and send deadlines, propagate status and closure, and never replay audio after a disconnect.
+The browser connects only to the hub's `/voice/audio?recorder&launch` WebSocket, relayed one hop to the recorder's endpoint.
+`Shuttle.PhoneAudioRelay` and the phone socket modules retain the launch-bound transport; `Shuttle.Recorder.phone_socket/1` resolves the local Hark socket.
+The recorder runs `hark --voice --phone` and validates the launch before accepting audio.
+Connections have bounded connection and send deadlines, propagate status and closure, and never replay audio after a disconnect.
+Desktop voice starts with `--system-audio` when enabled and toggles live through Hark's system gate, independently of the system reference used for mic echo cancellation.
 
 ## Platform story
 
