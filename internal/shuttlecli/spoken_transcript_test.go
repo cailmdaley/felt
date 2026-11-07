@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const spokenAnswer = `{"date":"2026-11-07","rows":[{"t":"2026-11-07T10:23:41.123+01:00","speaker":"me","text":"Hello","fiber_id":"project/card","origin":"cluster","name":"Card title","launch":"voice-1"},{"t":"2026-11-07T10:24:02+01:00","speaker":"S2","text":"Yes","fiber_id":"01ABC","name":"Card title"},{"t":"2026-11-07T10:24:03+01:00","speaker":"S3","text":"Unrouted","fiber_id":null,"name":null}],"recorder":"recorder-host"}`
+const spokenAnswer = `{"date":"2026-11-07","rows":[{"t":"2026-11-07T10:23:41.123+01:00","speaker":"me","text":"Hello","fiber_id":"project/card","origin":"cluster","name":"Card title","launch":"voice-1"},{"t":"2026-11-07T10:24:02+01:00","speaker":"S2","text":"Yes\nindeed","fiber_id":"01ABC","name":"Card title"},{"t":"2026-11-07T10:24:03+01:00","speaker":"S3","text":"Unrouted","fiber_id":null,"name":null}],"recorder":"recorder-host"}`
 
 func TestSpokenTranscriptFiltersAndRendering(t *testing.T) {
 	t.Parallel()
@@ -30,7 +30,7 @@ func TestSpokenTranscriptFiltersAndRendering(t *testing.T) {
 	if !reflect.DeepEqual(query, wantQuery) {
 		t.Fatalf("query %v, want %v", query, wantQuery)
 	}
-	want := "10:23:41 me → card: Hello\n10:24:02 S2 → Card title: Yes\n10:24:03 S3 → —: Unrouted\n"
+	want := "10:23:41 me → card: Hello\n10:24:02 S2 → Card title: Yes indeed\n10:24:03 S3 → —: Unrouted\n"
 	if out != want {
 		t.Fatalf("output %q, want %q", out, want)
 	}

@@ -45,6 +45,7 @@ func (a *app) spokenTranscript(cmd *cobra.Command) error {
 	if err := json.Unmarshal(body, &answer); err != nil {
 		return fmt.Errorf("decoding spoken transcript: %w", err)
 	}
+	lineBreaks := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 	for _, row := range answer.Rows {
 		card := "—"
 		if strings.Contains(row.FiberID, "/") {
@@ -54,7 +55,8 @@ func (a *app) spokenTranscript(cmd *cobra.Command) error {
 		} else if row.FiberID != "" {
 			card = row.FiberID
 		}
-		fmt.Fprintf(a.env.Stdout, "%s %s → %s: %s\n", row.Time.Format("15:04:05"), row.Speaker, card, row.Text)
+		text := lineBreaks.Replace(row.Text)
+		fmt.Fprintf(a.env.Stdout, "%s %s → %s: %s\n", row.Time.Format("15:04:05"), row.Speaker, card, text)
 	}
 	return nil
 }
