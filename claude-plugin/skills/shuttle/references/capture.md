@@ -1,6 +1,6 @@
 # Capture
 
-A capture starts from the user's idea rather than an existing constitution: you turn it into a fiber, install and claim that fiber, then work it. `From User` is the current request; discuss scope with the user where it is unresolved. The launch gives you the owning felt store, the project directory, the install settings, and an exact claim endpoint and JSON body. If `From User` opens with `Meeting mode`, read [meeting.md](meeting.md) as well; it extends these steps.
+A capture starts from the user's idea rather than an existing constitution: you turn it into a fiber, install and claim that fiber, then work it. `From User` is the current request; discuss scope with the user where it is unresolved. The launch gives you the owning felt store, the project directory, the install settings, and an exact claim endpoint and JSON body. For a call, the user can pin Listen to the claimed card; see [listening.md](listening.md).
 
 1. **Crystallize.** Search for related fibers, choose the right parent, and file the idea with a lede and a Desired State proportionate to what the user actually asked. Keep its status `open`.
 2. **Take up a role.** Choose the role that fits, or create one, and assign it with `shuttle role` ([roles.md](roles.md)); read its charter before you start the work.

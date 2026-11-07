@@ -122,5 +122,5 @@ Fallback failures return a notice to the sender; native delivery still respects 
 | A standing constitution's runs | [references/standing-roles.md](references/standing-roles.md) |
 | Getting a branch ready for the human to read before a PR | [references/change-review.md](references/change-review.md) |
 | Capturing an idea into a fiber | [references/capture.md](references/capture.md) |
-| A meeting, a transcript, or a predecessor's session | [references/meeting.md](references/meeting.md) |
+| Listening, notes from a call, or a predecessor's session | [references/listening.md](references/listening.md) |
 | Installing Shuttle or adding a remote | [references/setup.md](references/setup.md) |
