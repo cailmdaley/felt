@@ -4,10 +4,10 @@
  * in as it grows and its parent gives way to it, so zooming is continuous.
  */
 import { markPath } from '../family/drawing.js'
-import { fromCentre, mollweideAngle, project, type Frame, type Viewport } from './camera.js'
-import { baseCell, cellRadius, cellSpan, centre as cellCentre, child, outline, type Cell, type Digit } from './healpix.js'
+import { PERIOD, PLANE_SCALE, planeOffset, project, type Frame, type Viewport } from './camera.js'
+import { baseCell, cellRadius, cellSpan, centre as cellCentre, child, nside, outline, planeOf, type Cell, type Digit, type Vec } from './healpix.js'
 import type { Box, Point } from './labels.js'
-import { askKind, chart, traceOf, type Body, type Scene, type Tone, type Trace } from './scene.js'
+import { askKind, traceOf, type Body, type Scene, type Tone } from './scene.js'
 
 /** A leader's strength and the radius of the dot on its tile. */
 const LEADER_ALPHA = .45, LEADER_DOT = 2
@@ -20,7 +20,6 @@ export interface Palette {
 export interface Pulse { body: Body; age: number }
 export interface Marks { hover: Body | null; focus: Body | null; worker: Body | null; pulses: readonly Pulse[] }
 
-const EDGE = 2 * Math.SQRT2
 /** Pixels of a tile below which it is not drawn at all, and the width over which it fades in. */
 const LEAST_PX = 2, FADE_PX = 8
 /** Grid cells narrower than this are not drawn. */
@@ -46,7 +45,7 @@ function traceGlobe(c: CanvasRenderingContext2D, f: Frame, points: Float64Array)
   for (let n = 0; n < count; n++) {
     const x = points[3 * n], y = points[3 * n + 1], z = points[3 * n + 2]
     const depth = x * f.fwdX + y * f.fwdY + z * f.fwdZ
-    xs[n] = f.cx + f.r * (x * f.rightX + y * f.rightY)
+    xs[n] = f.cx + f.r * (x * f.rightX + y * f.rightY + z * f.rightZ)
     ys[n] = f.cy - f.r * (x * f.upX + y * f.upY + z * f.upZ)
     ds[n] = depth
     if (depth >= 0) { if (first < 0) first = n } else behind++
@@ -76,44 +75,43 @@ function traceGlobe(c: CanvasRenderingContext2D, f: Frame, points: Float64Array)
   return true
 }
 
-/** Traces an outline on the Mollweide plane, and once more shifted by a turn where it crosses the map's seam. */
-function traceChart(c: CanvasRenderingContext2D, f: Frame, trace: Trace): boolean {
-  const { phi, sin, cos } = chart(trace), count = phi.length, rate = f.r * EDGE / Math.PI
-  const lons = new Float64Array(count)
-  lons[0] = fromCentre(f, phi[0])
-  let low = lons[0], high = lons[0]
-  for (let n = 1; n < count; n++) {
-    const step = phi[n] - phi[n - 1]
-    lons[n] = lons[n - 1] + step - 2 * Math.PI * Math.round(step / (2 * Math.PI))
-    low = Math.min(low, lons[n]); high = Math.max(high, lons[n])
+/** A cell's place on the plane: its four corners, north, west, south and east, and its centre, in the plane's units. */
+function onPlane({ order, face, x, y }: Cell): { corners: number[]; mx: number; my: number } {
+  const side = nside(order), corners: number[] = []
+  for (const [a, b] of [[x + 1, y + 1], [x, y + 1], [x, y], [x + 1, y]]) {
+    const [xs, ys] = planeOf({ face, fx: a / side, fy: b / side })
+    corners.push(xs * PLANE_SCALE, ys * PLANE_SCALE)
   }
+  return { corners, mx: (corners[2] + corners[6]) / 2, my: (corners[1] + corners[5]) / 2 }
+}
+/** Traces a cell's diamond on the plane at the copy nearest the centre, and at the next copy too where it reaches the edge of one turn. */
+function tracePlane(c: CanvasRenderingContext2D, f: Frame, cell: Cell): boolean {
+  const { corners, mx } = onPlane(cell), offset = planeOffset(f, mx), half = (corners[6] - corners[2]) / 2
   const draw = (shift: number): void => {
-    for (let n = 0; n < count; n++) {
-      const x = f.cx + rate * (lons[n] + shift) * cos[n], y = f.cy - f.r * (Math.SQRT2 * sin[n] - f.rise)
+    for (let n = 0; n < 8; n += 2) {
+      const x = f.cx + f.r * (corners[n] - mx + shift), y = f.cy - f.r * (corners[n + 1] - f.atY)
       if (n) c.lineTo(x, y); else c.moveTo(x, y)
     }
     c.closePath()
   }
-  draw(0)
-  if (high > Math.PI) draw(-2 * Math.PI)
-  if (low < -Math.PI) draw(2 * Math.PI)
+  draw(offset)
+  if (Math.abs(offset) + half > PERIOD / 2) draw(offset - Math.sign(offset) * PERIOD)
   return true
 }
-const traceAny = (c: CanvasRenderingContext2D, f: Frame, trace: Trace): boolean => f.projection === 'globe' ? traceGlobe(c, f, trace.points) : traceChart(c, f, trace)
+const traceAny = (c: CanvasRenderingContext2D, f: Frame, cell: Cell, points: () => Float64Array): boolean => f.projection === 'globe' ? traceGlobe(c, f, points()) : tracePlane(c, f, cell)
 
 /** The tile is on screen, near enough. */
-function seen(f: Frame, viewport: Viewport, body: { centre: readonly [number, number, number]; radius: number }): boolean {
-  const [x, y, z] = body.centre
-  if (f.projection === 'mollweide') {
-    const angle = mollweideAngle(z), lon = fromCentre(f, Math.atan2(y, x))
-    const reach = 3 * body.radius * f.r + (body.radius > .1 ? f.r : 0)
-    const sx = f.r * EDGE / Math.PI * lon * Math.cos(angle), sy = f.r * (Math.SQRT2 * Math.sin(angle) - f.rise)
-    return Math.abs(sx) < viewport.width / 2 + reach && Math.abs(sy) < viewport.height / 2 + reach
+function seen(f: Frame, viewport: Viewport, cell: Cell, centre: Vec, radius: number): boolean {
+  let sx: number, sy: number
+  if (f.projection === 'plane') {
+    const { mx, my } = onPlane(cell)
+    sx = f.cx + f.r * planeOffset(f, mx); sy = f.cy - f.r * (my - f.atY)
+  } else {
+    const [x, y, z] = centre
+    if (x * f.fwdX + y * f.fwdY + z * f.fwdZ < -Math.sin(Math.min(1.5, radius))) return false
+    sx = f.cx + f.r * (x * f.rightX + y * f.rightY + z * f.rightZ); sy = f.cy - f.r * (x * f.upX + y * f.upY + z * f.upZ)
   }
-  const depth = x * f.fwdX + y * f.fwdY + z * f.fwdZ
-  if (depth < -Math.sin(Math.min(1.5, body.radius))) return false
-  const sx = f.cx + f.r * (x * f.rightX + y * f.rightY), sy = f.cy - f.r * (x * f.upX + y * f.upY + z * f.upZ)
-  const reach = body.radius * f.r
+  const reach = 1.5 * radius * f.r
   return sx > -reach && sx < viewport.width + reach && sy > -reach && sy < viewport.height + reach
 }
 
@@ -123,14 +121,13 @@ function grid(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, palette
   const coarsest = Math.max(0, finest - 2)
   const walk = (cell: Cell): void => {
     const span = cellSpan(cell.order) * f.r
-    const look = { centre: cellCentre(cell), radius: cellRadius(cell.order) }
-    if (!seen(f, viewport, look)) return
+    if (!seen(f, viewport, cell, cellCentre(cell), cellRadius(cell.order))) return
     if (cell.order >= coarsest) {
       const fade = smooth(GRID_PX, GRID_PX * 3.2, span)
       c.globalAlpha = cell.order === 0 ? .34 : .04 + .1 * fade
       c.lineWidth = cell.order === 0 ? 1 : .5
       c.beginPath()
-      if (traceAny(c, f, { points: outline(cell, stepFor(span)) })) c.stroke()
+      if (traceAny(c, f, cell, () => outline(cell, stepFor(span)))) c.stroke()
     }
     if (cell.order < finest) for (const digit of [0, 1, 2, 3] as Digit[]) walk(child(cell, digit))
   }
@@ -141,15 +138,14 @@ function grid(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, palette
 
 function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene: Scene, palette: Palette, shown: number, leads: (body: Body) => boolean): void {
   const visit = (body: Body, fade: number): void => {
-    if (!seen(f, viewport, body)) return
+    if (!seen(f, viewport, body.cell, body.centre, body.radius)) return
     const px = body.span * f.r
     if (px < LEAST_PX) return
     if ((body.kind === 'lead' && !leads(body))) return
     const appear = fade * smooth(LEAST_PX, FADE_PX, px)
     const opened = body.kids.length ? smooth(8, 56, px) : 1
-    const trace = traceOf(body, stepFor(px))
     c.beginPath()
-    if (traceAny(c, f, trace)) {
+    if (traceAny(c, f, body.cell, () => traceOf(body, stepFor(px)).points)) {
       const strength = STRENGTH[body.tone] * body.heat, ground = !body.thread ? 1 : body.kids.some(kid => kid.kind === 'thread') ? 1 - .55 * smooth(40, 220, px) : 1 - .25 * smooth(40, 220, px)
       if (opened < 1 && body.hottest !== body.tone) {
         c.fillStyle = palette.tones[body.hottest]
@@ -174,9 +170,9 @@ function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene:
 }
 
 function ring(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, body: Body, colour: string, width: number, dash: number[]): void {
-  if (!seen(f, viewport, body)) return
+  if (!seen(f, viewport, body.cell, body.centre, body.radius)) return
   c.beginPath()
-  if (!traceAny(c, f, traceOf(body, stepFor(body.span * f.r)))) return
+  if (!traceAny(c, f, body.cell, () => traceOf(body, stepFor(body.span * f.r)).points)) return
   c.strokeStyle = colour; c.lineWidth = width; c.setLineDash(dash)
   c.stroke()
   c.setLineDash([])
@@ -195,20 +191,12 @@ function beacons(c: CanvasRenderingContext2D, f: Frame, scene: Scene, palette: P
   const globe = f.projection === 'globe'
   for (const body of [...scene.asks].reverse()) {
     if (body.span * f.r > BEACON_PX) continue
-    const [x, y, z] = body.centre, kind = askKind(body)
+    const kind = askKind(body)
     const urgent = kind === 'question' || kind === 'blocked'
-    let sx: number, sy: number, away = false
-    if (globe) {
-      sx = f.r * (x * f.rightX + y * f.rightY); sy = -f.r * (x * f.upX + y * f.upY + z * f.upZ)
-      if (x * f.fwdX + y * f.fwdY + z * f.fwdZ < 0) {
-        const off = Math.hypot(sx, sy) || 1
-        sx *= (f.r + 7) / off; sy *= (f.r + 7) / off; away = true
-      }
-      sx += f.cx; sy += f.cy
-    } else {
-      const a = mollweideAngle(z)
-      sx = f.cx + f.r * EDGE / Math.PI * fromCentre(f, Math.atan2(y, x)) * Math.cos(a)
-      sy = f.cy - f.r * (Math.SQRT2 * Math.sin(a) - f.rise)
+    let { x: sx, y: sy, depth } = project(f, body.centre), away = false
+    if (globe && depth < 0) {
+      const off = Math.hypot(sx - f.cx, sy - f.cy) || 1
+      sx = f.cx + (sx - f.cx) * (f.r + 7) / off; sy = f.cy + (sy - f.cy) * (f.r + 7) / off; away = true
     }
     const r = urgent ? 4.5 : 3
     c.setTransform(c.getTransform().a, 0, 0, c.getTransform().d, sx * c.getTransform().a, sy * c.getTransform().d)
@@ -243,8 +231,19 @@ export function paint(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport,
     c.fillStyle = sea
     c.beginPath(); c.arc(f.cx, f.cy, f.r, 0, 2 * Math.PI); c.fill(); c.clip()
   } else {
+    // The twelve diamonds, cut to one turn of the plane around the centre.
     c.beginPath()
-    c.ellipse(f.cx, f.cy + f.rise * f.r, EDGE * f.r, Math.SQRT2 * f.r, 0, 0, 2 * Math.PI)
+    c.rect(f.cx - f.r * PERIOD / 2, 0, f.r * PERIOD, viewport.height)
+    c.clip()
+    c.beginPath()
+    for (let face = 0; face < 12; face++) for (const turn of [-PERIOD, 0, PERIOD]) {
+      const { corners, mx } = onPlane(baseCell(face)), shift = planeOffset(f, mx) + turn
+      for (let n = 0; n < 8; n += 2) {
+        const x = f.cx + f.r * (corners[n] - mx + shift), y = f.cy - f.r * (corners[n + 1] - f.atY)
+        if (n) c.lineTo(x, y); else c.moveTo(x, y)
+      }
+      c.closePath()
+    }
     c.fillStyle = palette.deep; c.fill(); c.clip()
   }
   tiles(c, f, viewport, scene, palette, shown, leads)

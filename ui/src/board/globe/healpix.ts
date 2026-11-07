@@ -68,10 +68,30 @@ const faceCentre = (face: number): readonly [number, number] => {
   return band === 1 ? [k, 0] : [k + .5, band === 0 ? .5 : -.5]
 }
 
-/** A point of a face on the sphere. */
-export function vecOf({ face, fx, fy }: FacePoint): Vec {
+/**
+ * A place on a face in the HEALPix plane, in radians: `xs` runs east from 0 to
+ * 2π with the face 4 astride the seam at nought, `ys` north from -π/2 to π/2.
+ * Every cell is a square diamond there.
+ */
+export function planeOf({ face, fx, fy }: FacePoint): [xs: number, ys: number] {
   const [cx, cy] = faceCentre(face)
-  const xs = HALF_PI * cx + (fx - fy) * QUARTER_PI, ys = HALF_PI * cy + (fx + fy - 1) * QUARTER_PI
+  return [HALF_PI * cx + (fx - fy) * QUARTER_PI, HALF_PI * cy + (fx + fy - 1) * QUARTER_PI]
+}
+/** The face and place at a point of the plane, its east wrapped; null in the notches between the polar faces. */
+export function faceAt(xs: number, ys: number): FacePoint | null {
+  const t = xs / HALF_PI, w = ys / HALF_PI
+  for (let face = 0; face < 12; face++) {
+    const [cx, cy] = faceCentre(face)
+    const dt = t - cx - 4 * Math.round((t - cx) / 4), dw = w - cy
+    const fx = dt + dw + .5, fy = dw - dt + .5
+    if (fx >= 0 && fx <= 1 && fy >= 0 && fy <= 1) return { face, fx, fy }
+  }
+  return null
+}
+
+/** A point of a face on the sphere. */
+export function vecOf(point: FacePoint): Vec {
+  const [xs, ys] = planeOf(point)
   if (Math.abs(ys) <= QUARTER_PI) {
     const z = ys * 8 / (3 * Math.PI), sin = Math.sqrt((1 - z) * (1 + z))
     return [sin * Math.cos(xs), sin * Math.sin(xs), z]

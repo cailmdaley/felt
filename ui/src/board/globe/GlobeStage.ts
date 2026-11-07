@@ -1,7 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, ATTENTION_WORD, conversable, type MapFeeds, type MapFile } from '../family/model.js'
 import { htmlEl as el, markPath, shortAgo, svgEl } from '../family/drawing.js'
-import { flight, frameOf, invert, keeping, lonLat, project, wholeRadius, type Camera, type Flight, type Frame, type Projection, type Viewport } from './camera.js'
+import { PERIOD, UPRIGHT, bounded, carried, facing, flight, frameOf, grip, invert, keeping, northUp, project, wholeRadius, type Camera, type Flight, type Frame, type Grip, type Projection, type Viewport } from './camera.js'
 import { forestOf, persistentId } from './forest.js'
 import { NORTH, cellSpan, centre, child, facePoint, inCell, ipixOf, type FacePoint, type Vec } from './healpix.js'
 import { blocks, placeNames, within, type Block, type Candidate, type Point } from './labels.js'
@@ -33,10 +33,11 @@ export interface GlobePlace {
 export const freshPlace = (): GlobePlace => ({ camera: null, projection: 'globe', focus: null, worker: null, fed: false })
 
 /** The opening looks straight down on the north, where everything in flight is, with its four base pixels square to the stage. */
-const OPENING_LAT = Math.PI / 2 - 1e-6, OPENING_LON = Math.PI / 4
+const OPENING = northUp(Math.PI / 4, Math.PI / 2)
 /** The pixels left around a tile flown to, and the least the foot of the stage is kept for the peek. */
 const FRAME_MARGIN = 10, MIN_FOOT = 70
-const WHEEL_RATE = .01, WHEEL_MOST = 60, KEY_ZOOM = 1.6
+/** Doublings of zoom for each pixel a wheel or a pinch turns, and the most one event may turn. */
+const WHEEL_RATE = .004, PINCH_RATE = .02, WHEEL_MOST = 120, KEY_ZOOM = 1.6
 const SLOP = 5
 /** A callout's distance from the centre of its marker. */
 const CALLOUT_GAP = 12
@@ -131,15 +132,15 @@ export class GlobeStage {
   private frame = 0
   /** The surface still sliding after a drag let go. */
   private readonly pulses = new Map<string, number>()
-  private coast: { grabbed: Vec; x: number; y: number; vx: number; vy: number; last: number } | null = null
+  private coast: { grabbed: Grip; x: number; y: number; vx: number; vy: number; last: number } | null = null
   /** The pointer's last moves in a drag, for the speed it let go at. */
   private trail: Array<Point & { at: number }> = []
   /** When the tiles began to appear. */
   private bloom = 0
   private hover: Body | null = null
   private readonly fingers = new Map<number, Point>()
-  private drag: { grabbed: Vec | null; from: Point; camera: Camera; moved: boolean; touch: boolean } | null = null
-  private pinch: { gap: number; radius: number; grabbed: Vec | null } | null = null
+  private drag: { grabbed: Grip; from: Point; moved: boolean; touch: boolean } | null = null
+  private pinch: { gap: number; radius: number; grabbed: Grip; under: Vec | null } | null = null
   /** The thread a first tap came to, which a second tap converses with. */
   private tapped: string | null = null
   private readonly leads = new Map<string, MapFile | null>()
@@ -165,7 +166,7 @@ export class GlobeStage {
     this.peek.setAttribute('aria-live', 'polite')
     const head = el('div', 'globe-head')
     head.append(this.crumbs, this.counts)
-    for (const [projection, label] of [['globe', 'Globe'], ['mollweide', 'Mollweide']] as const) {
+    for (const [projection, label] of [['globe', 'Globe'], ['plane', 'Plane']] as const) {
       const button = el('button', 'globe-toggle-option', label); button.type = 'button'
       button.dataset.projection = projection
       button.title = 'Change the projection (m)'
@@ -239,9 +240,13 @@ export class GlobeStage {
     return Math.max(this.whole * 4, Math.min(this.viewport.width, this.viewport.height) * 1.2 / cellSpan(this.scene.deepest + 1))
   }
   /** The whole sphere from over the north, or the whole sky on the map. */
-  private opening(): Camera { return { lon: OPENING_LON, lat: this.place.projection === 'globe' ? OPENING_LAT : 0, radius: this.whole } }
+  private opening(): Camera { return { turn: OPENING, at: [PERIOD / 2, 0], radius: this.whole } }
   private frameNow(): Frame { return frameOf(this.camera, this.place.projection, this.viewport) }
-  private held(camera: Camera): Camera { return { ...camera, radius: Math.max(this.whole, Math.min(this.closest, camera.radius)) } }
+  /** A camera within the zoom's bounds, and on the plane, over it. */
+  private held(camera: Camera): Camera {
+    const radius = Math.max(this.whole, Math.min(this.closest, camera.radius))
+    return this.place.projection === 'plane' ? bounded({ ...camera, radius }, this.viewport) : { ...camera, radius }
+  }
   private request(): void { if (!this.frame) this.frame = requestAnimationFrame(now => this.draw(now)) }
   private stopFlight(): void { this.flying = null; this.coast = null }
 
@@ -249,13 +254,13 @@ export class GlobeStage {
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       this.camera = this.held(to); this.request(); return
     }
-    this.flying = { path: flight(this.camera, this.held(to), this.viewport, this.whole), started: performance.now() }
+    this.flying = { path: flight(this.camera, this.held(to), this.place.projection, this.viewport, this.whole), started: performance.now() }
     this.request()
   }
   /** The camera that holds a tile's whole outline in the stage clear of the head and foot, as large as that allows. */
   private framing(body: Body): Camera {
     const { width, height } = this.viewport, top = this.headHeight, bottom = height - Math.max(this.footHeight, MIN_FOOT)
-    const centred: Camera = { ...lonLat(body.centre), radius: 1 }
+    const centred = facing(body.centre, 1)
     const unit = frameOf(centred, this.place.projection, this.viewport), points = traceOf(body, 8).points
     let left = Infinity, right = -Infinity, up = Infinity, down = -Infinity
     for (let n = 0; n < points.length; n += 3) {
@@ -265,7 +270,7 @@ export class GlobeStage {
     const radius = Math.min((width - 2 * FRAME_MARGIN) / (right - left), (bottom - top - 2 * FRAME_MARGIN) / (down - up))
     const sized: Camera = { ...centred, radius }
     const shiftX = width / 2 - radius * ((left + right) / 2 - unit.cx), shiftY = (top + bottom) / 2 - radius * ((up + down) / 2 - unit.cy)
-    return keeping(sized, this.place.projection, this.viewport, body.centre, shiftX, shiftY)
+    return keeping(sized, this.place.projection, this.viewport, this.place.projection === 'globe' ? body.centre : sized.at, shiftX, shiftY)
   }
   private come(body: Body): void {
     this.place.focus = body.key
@@ -289,7 +294,7 @@ export class GlobeStage {
     const camera = this.camera, wasWhole = camera.radius <= this.whole * 1.01
     this.stopFlight()
     this.place.projection = projection
-    this.camera = wasWhole ? { ...camera, radius: this.whole, lat: projection === 'globe' ? OPENING_LAT : 0 } : this.held(camera)
+    this.camera = wasWhole ? this.opening() : this.held(carried(camera, projection))
     this.request()
   }
   /** The deepest tile at a screen point that is wide enough to aim at. */
@@ -315,7 +320,7 @@ export class GlobeStage {
     coast.last = now
     coast.x += coast.vx * dt; coast.y += coast.vy * dt
     coast.vx *= decay; coast.vy *= decay
-    this.camera = keeping(this.camera, this.place.projection, this.viewport, coast.grabbed, coast.x, coast.y)
+    this.camera = keeping(this.camera, this.place.projection, this.viewport, coast.grabbed, coast.x, coast.y, UPRIGHT)
     if (Math.hypot(coast.vx, coast.vy) < COAST_LEAST) this.coast = null
     else this.request()
   }
@@ -589,14 +594,10 @@ export class GlobeStage {
     if ((event.target as Element).closest('.globe-head, .globe-toggle')) return
     event.preventDefault()
     this.stopFlight()
-    const rows = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1, at = this.local(event)
-    if (event.ctrlKey || event.metaKey) {
-      const change = Math.exp(-Math.max(-WHEEL_MOST, Math.min(WHEEL_MOST, event.deltaY * rows)) * WHEEL_RATE)
-      this.zoomAbout(this.camera.radius * change, at)
-    } else {
-      const { width, height } = this.viewport, middle = invert(this.frameNow(), width / 2, height / 2)
-      if (middle) this.camera = keeping(this.camera, this.place.projection, this.viewport, middle, width / 2 - event.deltaX * rows, height / 2 - event.deltaY * rows)
-    }
+    // Scrolling zooms, and so does a trackpad's pinch, which arrives as a wheel with control held.
+    const rows = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 400 : 1
+    const turned = Math.max(-WHEEL_MOST, Math.min(WHEEL_MOST, event.deltaY * rows))
+    this.zoomAbout(this.camera.radius * 2 ** (-turned * (event.ctrlKey ? PINCH_RATE : WHEEL_RATE)), this.local(event))
     this.request()
   }
   /** The closest a zoom may come here: until the smallest thing under it fills the stage, so it never ends in featureless ground. */
@@ -607,8 +608,12 @@ export class GlobeStage {
   }
   private zoomAbout(radius: number, at: Point): void {
     const under = invert(this.frameNow(), at.x, at.y)
+    this.zoomTo(radius, under, under || this.place.projection === 'plane' ? grip(this.camera, this.place.projection, this.viewport, at.x, at.y) : null, at)
+  }
+  /** Zooms to a radius, no closer than what is under the pointer allows, keeping a held point where it is. */
+  private zoomTo(radius: number, under: Vec | null, held: Grip | null, at: Point): void {
     const next = this.held({ ...this.camera, radius: radius > this.camera.radius ? Math.min(radius, Math.max(this.camera.radius, this.reach(under))) : radius })
-    this.camera = under ? keeping(next, this.place.projection, this.viewport, under, at.x, at.y) : next
+    this.camera = held ? keeping(next, this.place.projection, this.viewport, held, at.x, at.y, UPRIGHT) : next
   }
   private down(event: PointerEvent): void {
     if (event.button) return
@@ -617,21 +622,19 @@ export class GlobeStage {
     this.fingers.set(event.pointerId, at)
     this.canvas.setPointerCapture?.(event.pointerId)
     if (this.fingers.size === 2) {
-      const [a, b] = [...this.fingers.values()]
-      this.pinch = { gap: Math.hypot(a.x - b.x, a.y - b.y), radius: this.camera.radius, grabbed: invert(this.frameNow(), (a.x + b.x) / 2, (a.y + b.y) / 2) }
+      const [a, b] = [...this.fingers.values()], x = (a.x + b.x) / 2, y = (a.y + b.y) / 2
+      this.pinch = { gap: Math.hypot(a.x - b.x, a.y - b.y), radius: this.camera.radius, grabbed: grip(this.camera, this.place.projection, this.viewport, x, y), under: invert(this.frameNow(), x, y) }
       this.drag = null
       return
     }
-    this.drag = { grabbed: invert(this.frameNow(), at.x, at.y), from: at, camera: this.camera, moved: false, touch: event.pointerType === 'touch' }
+    this.drag = { grabbed: grip(this.camera, this.place.projection, this.viewport, at.x, at.y), from: at, moved: false, touch: event.pointerType === 'touch' }
   }
   private move(event: PointerEvent): void {
     const at = this.local(event)
     if (this.fingers.has(event.pointerId)) this.fingers.set(event.pointerId, at)
     if (this.pinch && this.fingers.size === 2) {
       const [a, b] = [...this.fingers.values()], middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-      const radius = this.pinch.radius * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(1, this.pinch.gap)
-      this.camera = this.held({ ...this.camera, radius: radius > this.camera.radius ? Math.min(radius, Math.max(this.camera.radius, this.reach(this.pinch.grabbed))) : radius })
-      if (this.pinch.grabbed) this.camera = keeping(this.camera, this.place.projection, this.viewport, this.pinch.grabbed, middle.x, middle.y)
+      this.zoomTo(this.pinch.radius * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(1, this.pinch.gap), this.pinch.under, this.pinch.grabbed, middle)
       this.request()
       return
     }
@@ -645,9 +648,7 @@ export class GlobeStage {
     this.trail = [...this.trail.filter(point => time - point.at < TRAIL_MS), { ...at, at: time }]
     this.setHover(null)
     this.el.classList.add('globe-dragging')
-    const { grabbed, from, camera } = this.drag
-    if (grabbed) this.camera = keeping(this.camera, this.place.projection, this.viewport, grabbed, at.x, at.y)
-    else this.camera = { ...camera, lon: camera.lon - (at.x - from.x) / camera.radius, lat: Math.max(-1.55, Math.min(1.55, camera.lat + (at.y - from.y) / camera.radius)) }
+    this.camera = keeping(this.camera, this.place.projection, this.viewport, this.drag.grabbed, at.x, at.y, UPRIGHT)
     this.request()
   }
   private up(event: PointerEvent): void {
@@ -657,7 +658,7 @@ export class GlobeStage {
     this.drag = null
     this.el.classList.remove('globe-dragging')
     const at = this.local(event)
-    if (drag?.moved && drag.grabbed && this.trail.length > 1 && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    if (drag?.moved && this.trail.length > 1 && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       const first = this.trail[0], last = this.trail.at(-1)!, span = Math.max(1, last.at - first.at), time = performance.now()
       if (time - last.at < TRAIL_MS) {
         this.coast = { grabbed: drag.grabbed, x: at.x, y: at.y, vx: (last.x - first.x) / span, vy: (last.y - first.y) / span, last: time }
@@ -695,7 +696,7 @@ export class GlobeStage {
     const { width, height } = this.viewport, middle = { x: width / 2, y: height / 2 }
     switch (event.key) {
       case 'Escape': case 'h': return this.stepOut()
-      case 'm': this.project(this.place.projection === 'globe' ? 'mollweide' : 'globe'); return true
+      case 'm': this.project(this.place.projection === 'globe' ? 'plane' : 'globe'); return true
       case '+': case '=': this.stopFlight(); this.zoomAbout(this.camera.radius * KEY_ZOOM, middle); this.request(); return true
       case '-': case '_': this.stopFlight(); this.zoomAbout(this.camera.radius / KEY_ZOOM, middle); this.request(); return true
       case 'ArrowRight': case 'ArrowDown': this.nextAsk(); return true
