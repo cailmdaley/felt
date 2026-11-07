@@ -66,7 +66,7 @@ Put the notes in the meeting fiber or where the project keeps them, and show the
 
 For extraction, identify decisions, real action items, open questions and news about existing fibers; re-scan the transcript for ideas the notes compressed away.
 Present what to file and what to skip, and wait for approval.
-Then file and update fibers using the felt skill.
+Then file and update fibers using the felt skill; edit `.felt/<path>/<slug>.md` directly for narrative updates.
 
 ## A predecessor's session
 

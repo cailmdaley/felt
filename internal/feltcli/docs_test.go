@@ -164,20 +164,20 @@ func TestPluginSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
 	t.Parallel()
 	skillsRoot := pluginSkillsRoot(t)
 
-	data, err := os.ReadFile(filepath.Join(skillsRoot, "shuttle", "references", "meeting.md"))
+	data, err := os.ReadFile(filepath.Join(skillsRoot, "shuttle", "references", "listening.md"))
 	if err != nil {
-		t.Fatalf("read meeting reference: %v", err)
+		t.Fatalf("read listening reference: %v", err)
 	}
 	text := string(data)
 
 	if strings.Contains(text, `felt edit <id> --body "$(felt show <id> --body)`) {
-		t.Fatal("meeting reference still teaches legacy body-overwrite comment editing")
+		t.Fatal("listening reference still teaches legacy body-overwrite comment editing")
 	}
 	if strings.Contains(text, `felt edit <id> --comment`) {
-		t.Fatal("meeting reference should not teach legacy comment mutation")
+		t.Fatal("listening reference should not teach legacy comment mutation")
 	}
 	if !strings.Contains(text, "edit `.felt/<path>/<slug>.md` directly") {
-		t.Fatal("meeting reference should teach direct file edits for narrative updates")
+		t.Fatal("listening reference should teach direct file edits for narrative updates")
 	}
 }
 
