@@ -33,7 +33,7 @@ export function registerChangeJourneys(test) {
     if (viewport.width <= 700) {
       assert.equal(await reader.locator('.change-file-head .change-role').first().isVisible(), true, 'file roles stay visible on phones too')
       assert.equal(await page.locator('.ws-reader').evaluate(node => node.classList.contains('ws-topbar-hidden')), false, 'review navigation stays visible while virtual windows resize')
-      const [icon, tabs] = await Promise.all([page.locator('.ws-navbar .ws-phone-document-menu').boundingBox(), reader.locator('.change-contents').boundingBox()])
+      const [icon, tabs] = await Promise.all([page.locator('.ws-navbar .ws-files-toggle').boundingBox(), reader.locator('.change-contents').boundingBox()])
       assert.ok(icon && tabs && icon.y + icon.height <= tabs.y + 1, 'the contents control belongs above the chapter tabs, not on top of them')
     }
     await reader.locator('.change-chapter-link').filter({ hasText: 'Keep the root in sight' }).click()

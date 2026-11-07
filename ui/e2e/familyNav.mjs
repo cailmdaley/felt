@@ -12,9 +12,11 @@ export async function familyTree(page) {
 export async function sentFiles(page) {
   const sheet = page.locator('.ws-page-sheet[open]')
   if (!await sheet.count()) {
-    const menu = page.locator(page.viewportSize().width <= 700 ? '.ws-navbar .ws-phone-document-menu' : '.ws-page.ws-selected .ws-menu-button')
-    await menu.focus(); await menu.click()
-    await page.getByRole('button', { name: 'Sent files', exact: true }).click()
+    if (page.viewportSize().width <= 700) await page.locator('.ws-navbar .ws-files-toggle').click()
+    else {
+      await page.locator('.ws-page.ws-selected .ws-menu-button').click()
+      await page.locator('.ws-menu').getByRole('button', { name: 'Sent files', exact: true }).click()
+    }
     await sheet.waitFor()
   }
   return sheet.locator('.ws-sent-file')
