@@ -53,14 +53,14 @@ describe('every thread surface names a thread the way the Desk files it', () => 
     const page = new FamilyPage(conversations(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }) }, placeAt(hub), () => {}); page.update(hub, index)
     expect(page.el.querySelector('.fp-aside')!.textContent).toBe('1 seat · 1 resting')
     page.el.querySelector('.fp-aside')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
-    // A thread in flight is named by the divider it sits under; one set aside, by its own word.
+    // Every thread is named by the divider it sits under, in flight or set aside.
     let divider = ''
     const words: Record<string, string> = {}
     for (const el of page.el.querySelector('.fp-tree')!.children) {
-      if (el.classList.contains('fp-section')) divider = el.textContent!
-      else if (el.matches('.fp-row:not(.fp-head)')) words[el.querySelector<HTMLElement>('.fp-name')!.title] = el.getAttribute('data-standing') === 'aside' ? el.querySelector('.fp-meta')!.textContent!.split(' · ')[0] : divider
+      if (el.classList.contains('fp-section')) divider = el.textContent!.toLowerCase()
+      else if (el.matches('.fp-row:not(.fp-head)')) words[el.querySelector<HTMLElement>('.fp-name')!.title] = divider
     }
-    expect(words).toEqual({ [spawned.name]: 'No worker', [standing.name]: 'resting', [seat.name]: 'seat', [asking.name]: 'Your turn' })
+    expect(words).toEqual({ [spawned.name]: 'no worker', [standing.name]: 'resting', [seat.name]: 'seats', [asking.name]: 'your turn' })
   })
 })
 

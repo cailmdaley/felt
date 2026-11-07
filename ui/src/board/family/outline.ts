@@ -14,7 +14,7 @@ export const SECTION_WORD: Readonly<Record<Section | AsideSection, string>> = {
 /** One line of the page under its head: the family's section of a kind of attention, a thread's row, or the fold that holds a level's threads set aside. */
 export type Line =
   | { kind: 'section'; key: string; section: Section | AsideSection; level: number }
-  | { kind: 'thread'; key: string; thread: MapThread; level: number; section: Section | undefined; open: boolean }
+  | { kind: 'thread'; key: string; thread: MapThread; level: number; section: Section | undefined; open: boolean; divided: boolean }
   | { kind: 'aside'; key: string; owner: string; level: number; threads: MapThread[]; open: boolean }
 
 /** What a row says of the threads under it. */
@@ -70,7 +70,7 @@ export function outline(model: FamilyModel, open: ReadonlySet<string>, under: Re
       const section = under.get(kid.key)!.section!
       if (depth === 0 && section !== last) lines.push({ kind: 'section', key: `section:${section}`, section, level: depth })
       last = section
-      row(kid, depth, section)
+      row(kid, depth, section, depth === 0)
     }
     if (!aside.length) return
     const key = `aside:${owner.key}`, unfolded = open.has(key)
@@ -79,12 +79,13 @@ export function outline(model: FamilyModel, open: ReadonlySet<string>, under: Re
       const group = aside.filter(kid => threadState(kid.card) === section)
       if (!group.length) continue
       lines.push({ kind: 'section', key: `aside-section:${owner.key}:${section}`, section, level: depth })
-      for (const kid of group) row(kid, depth, undefined)
+      for (const kid of group) row(kid, depth, undefined, true)
     }
   }
-  const row = (thread: MapThread, depth: number, section: Section | undefined): void => {
+  /** `divided`: the row sits directly under a divider that already names its kind. */
+  const row = (thread: MapThread, depth: number, section: Section | undefined, divided: boolean): void => {
     const unfolded = open.has(thread.key)
-    lines.push({ kind: 'thread', key: thread.key, thread, level: depth, section, open: unfolded })
+    lines.push({ kind: 'thread', key: thread.key, thread, level: depth, section, open: unfolded, divided })
     if (unfolded) level(thread, depth + 1)
   }
   level(model.root, 0)

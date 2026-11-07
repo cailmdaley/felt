@@ -237,8 +237,8 @@ export class FamilyPage {
       return row
     }
     this.fillThread(row, line.thread, line.section ?? 'aside', line.open)
-    // The family's own threads sit under a divider that already names their kind, so their meta is the age alone.
-    if (line.level === 0 && line.section) row.querySelector('.fp-meta')!.textContent = shortAgo(line.thread.lastMove, this.model!.now)
+    // A row under a divider that already names its kind keeps the age alone.
+    if (line.divided) row.querySelector('.fp-meta')!.textContent = shortAgo(line.thread.lastMove, this.model!.now)
     const { threads, asks } = this.under.get(line.thread.key)!
     row.querySelector('.fp-count')!.textContent = !threads ? '' : asks ? `${asks} of ${threads} ask` : `${threads} ${threads === 1 ? 'thread' : 'threads'}`
     return row
