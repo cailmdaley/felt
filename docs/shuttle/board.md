@@ -122,21 +122,8 @@ re-arms, on a oneshot it writes the terminus. The outcome stays: the last run's 
 the next run writes its own.
 
 Opening a Desk card enters its constitution's documents.
-The fiber's own page carries a compact control band above the outcome: worker pill, message box with New session, Resume and Listen, folded settings and session history, and Temper / Discard.
-Listen arms a session with listening; its menu lets the transcript follow the card in view or stay on one card.
-The message box starts at one line and grows on focus or with a draft.
-Settings include the next launch's agent, effort, surface and kind, plus the card's due day and parent.
+The constitution's band (see [the reader](#board--what-the-work-produced)) carries its worker's line and Listen; the folded settings hold the next launch's agent, effort, surface and kind, plus the card's due day and parent.
 The Desk also offers Stash and Capture dialogs and Attach.
-
-Files pasted or dropped into the message box wait there, each with a × to
-remove it (images as thumbnails, other types as a name chip): any type, at most 10 MB each, 8 per send
-and 25 MB in total. New session and Resume, with or without listening, first store them on the
-host that owns the fiber (under its data directory's `attachments/`), then
-send the message followed by one `[Image: <path>]` line per image (`[File: <path>]` for other types), so the
-worker opens each by path. If the upload fails nothing is sent and the box
-says why. While a send is in flight every verb waits and the thumbnails are
-frozen. A paste that carries text stays a text paste, even when the copying
-app put an image beside it.
 
 <a id="attach"></a>
 ### Open a worker
@@ -204,8 +191,9 @@ Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, and metadata polls preserve retained document instances and reading position.
 The board renders no conversation. Conversation lives in Rex, on the desktop and on the phone; the board keeps a constitution's threads, its tapestry and documents, its sent files, its change reader and its lifecycle.
 Every constitution past its draft opens on [its family's page](#a-constitutions-page), at its own row, unfolded, whatever level it sits at; a lone constitution's page is that constitution alone. A draft opens on its fiber page. A tapestry, report, sent file or constitution opens on the stage, and Back returns to the page as it stood.
-One band stays above every page of a fiber on the Desk's lifecycle. It holds the constitution's name and state, **Open in Rex** (or wherever the conversation opens; right-click or long-press to choose), Listen, the session verbs (Launch, Resume, New session, by what the card can do), the lifecycle verbs (Close for review, Rest, Temper, Discard, by state), and the Constitution, Settings and × icons; × returns to Desk and never changes the fiber. Beside the state word it shows the session's context size, tinted from verdigris toward red as it fills the window, and Claude's estimated prompt cache as a dot that drains as the entry ages and turns into a red ring once cold; hover either for the numbers. Resume's tooltip says until when the cache is warm, and Settings adds the share of recent context read from the cache. These facts come from the session's transcript on its host, so they hold with no worker running. On a phone the top bar names the page and the band is one row of verbs that scrolls sideways.
-A session verb starts the worker and, on the desktop, opens it. Listen starts a recording joined to this constitution; while one runs, its words show under the band. Its menu holds Follow me, which sends your voice to whatever you are looking at, along with the recording's pause and stop and the listening cadence.
+One band stays above every page of a fiber on the Desk's lifecycle. Its head holds the constitution's name and state, **Open in Rex** (or wherever the conversation opens; right-click or long-press to choose), Listen, the lifecycle verbs (Close for review, Rest, Temper, Discard, by state), and the Constitution, Settings and × icons; × returns to Desk and never changes the fiber. Beside the state word it shows the session's context size, tinted from verdigris toward red as it fills the window, and Claude's estimated prompt cache as a dot that drains as the entry ages and turns into a red ring once cold; hover either for the numbers. Resume's tooltip says until when the cache is warm, and Settings adds the share of recent context read from the cache. These facts come from the session's transcript on its host, so they hold with no worker running. On a phone the top bar names the page and the head is one row of verbs that scrolls sideways.
+Under the head, the worker's line acts on the constitution's own worker, which its placeholder names: a one-line message field, then Resume (Send when the worker is live, Start when it never ran) and New session. Enter takes the first verb. The text is the opening message of the resumed or new session or, for a live worker, is typed into its conversation; an empty line resumes or starts with nothing said, and Send waits for words. New session over a live worker asks before cutting it. After a send the line says Sent, Resumed or Started, and shows no transcript; a start opens the worker on the desktop. A thread's own line sits with that thread on the family page, so every line acts on the worker beside it.
+Listen reads as one line: the mic's state (Listen, Listening, Recording with a dot, Paused, Failed) and, after an arrow, the fiber the words reach: the meeting's constitution while a meeting holds the mic, otherwise the live voice target by name. Pressing it starts a recording joined to this constitution; once something is listening it opens its menu: Follow me, which sends your voice to whatever you are looking at, Open transcript, the recording's pause and stop, and the listening cadence.
 The fiber header shows status alone. Agent, effort, cadence, host and project directory belong to the folded settings line; the band's worker line is only its conversation action.
 Document header lines show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.

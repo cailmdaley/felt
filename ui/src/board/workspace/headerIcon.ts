@@ -12,6 +12,8 @@ const shapes = {
   leave: '<path d="m4 4 8 8m0-8-8 8"/>',
   resume: '<path d="M13 7V3l-2 2a5.5 5.5 0 1 0 2.2 6.5"/>',
   newSession: '<path d="M8 2v12M2 8h12"/>',
+  start: '<path d="M4.5 2.5v11l9-5.5Z"/>',
+  send: '<path d="M2 8h11M9 4l4 4-4 4"/>',
 } as const
 
 export type HeaderIcon = keyof typeof shapes

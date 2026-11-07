@@ -56,7 +56,8 @@
 
 /* The worker's line under the band's head: an opening message and the verbs that send it. */
 .ws-band-head:has(+ .ws-worker-acts:not([hidden])) { border-bottom: 0; }
-.ws-worker-acts { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 0 16px 6px; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-worker-acts { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ws-dock .ws-worker-acts { padding: 0 16px 6px; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-worker-acts[hidden] { display: none; }
 .ws-worker-message {
   flex: 1 1 0; min-width: 6em; height: var(--ws-control-height); box-sizing: border-box; padding: 0 10px; margin-right: 4px;
@@ -119,7 +120,7 @@
   .kbn-verb-menu [role='menuitem'] { min-height: 44px; height: 44px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
   .ws-band-head { gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
-  .ws-worker-acts { padding: 0 8px 6px; }
+  .ws-dock .ws-worker-acts { padding: 0 8px 6px; }
   .ws-band-identity { flex: none; }
   /* The verbs hold still when the state word changes. */
   .ws-band-state { min-width: 5.5em; }
