@@ -44,9 +44,9 @@ const press = (el: Element, key: string): KeyboardEvent => { const event = new K
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('the page', () => {
-  it('heads with the constitution and its outcome, then its threads in sections by attention, the set-aside behind one fold', () => {
+  it('heads with the constitution and its outcome, then its threads most urgent first, the set-aside behind one fold', () => {
     const { family } = made()
-    expect(said(family)).toEqual(['hub', '[Questions]', 'Asked', '[Your turn]', 'Mid', 'Idle', '(1 archived · 1 draft)'])
+    expect(said(family)).toEqual(['hub', 'Asked', 'Mid', 'Idle', '(1 archived · 1 draft)'])
     expect(family.el.querySelector('.fp-head .fp-note')!.textContent).toBe('The hub came to this.')
     expect(row(family, 'Asked').querySelector('.fp-note')!.textContent).toBe('Which one?')
     expect(row(family, 'Idle').querySelector('.fp-note')!.textContent).toBe('Needs a look')
@@ -159,32 +159,45 @@ describe('a row', () => {
 
 describe('keys', () => {
   const at = (): string => (document.activeElement as HTMLElement).querySelector('.fp-name')?.textContent ?? document.activeElement!.textContent!
-  it('walk the rows with the arrows, unfold and fold with → and ←, and leave Rex be', () => {
+  const keys = (...names: string[]): void => { for (const name of names) press(document.activeElement!, name) }
+  it('step through one level with j and k, go down with l and up with h, and leave Rex be', async () => {
     const { family, reach } = made()
+    await settled()
     family.focus()
     expect(at()).toBe('hub')
-    for (let n = 0; n < 2; n++) press(document.activeElement!, 'ArrowDown')
+    keys('j')
+    expect(at()).toBe('Constitution')
+    keys('j', 'j')
     expect(at()).toBe('Mid')
-    press(document.activeElement!, 'ArrowRight')
+    keys('j', 'k')
+    expect(at()).toBe('Mid')
+    keys('l')
     expect(said(family)).toContain('Leaf')
-    press(document.activeElement!, 'ArrowRight')
+    expect(at()).toBe('Tapestry')
+    keys('j', 'j', 'j', 'j', 'j')
+    expect(at()).toBe('Open conversation')
+    keys('j')
     expect(at()).toBe('Leaf')
-    press(document.activeElement!, 'ArrowLeft')
+    keys('h')
     expect(at()).toBe('Mid')
-    press(document.activeElement!, 'ArrowLeft')
+    keys('h')
     expect(said(family)).not.toContain('Leaf')
-    press(document.activeElement!, 'End')
+    expect(at()).toBe('hub')
+    keys('ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown')
     expect(at()).toBe('1 archived · 1 draft')
+    keys('l')
+    expect(at()).toBe('Done')
     expect(reach).not.toHaveBeenCalled()
   })
   it('do what a click does on Enter; Escape folds the open row around the selection', () => {
     const { family, reach } = made()
     family.focus()
-    for (let n = 0; n < 2; n++) press(document.activeElement!, 'ArrowDown')
-    press(document.activeElement!, 'Enter')
+    keys('j', 'j', 'j')
+    expect(at()).toBe('Mid')
+    keys('Enter')
     expect(reach).toHaveBeenCalledOnce()
-    press(document.activeElement!, 'ArrowDown')
-    expect(at()).toBe('Leaf')
+    keys('l')
+    keys('k')
     expect(family.foldOut()).toBe(true)
     expect(said(family)).not.toContain('Leaf')
     expect(at()).toBe('Mid')
@@ -270,7 +283,7 @@ describe('its frame', () => {
   it('keeps each row\'s element and the focus across a repaint', () => {
     const { family } = made()
     family.focus()
-    for (let n = 0; n < 3; n++) press(document.activeElement!, 'ArrowDown')
+    for (let n = 0; n < 4; n++) press(document.activeElement!, 'ArrowDown')
     const before = row(family, 'Idle')
     expect(document.activeElement).toBe(before)
     family.update(root, new ThreadIndex([...cards, card({ id: 'hub/new', name: 'New', orchestrator: 'hub', status: 'active', ask: { text: 'New?', at: when(0) } })]), now + 120_000)

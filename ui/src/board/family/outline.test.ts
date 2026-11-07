@@ -12,7 +12,7 @@ const running = (phase: string, age: number): Partial<KanbanCard> => ({ status: 
 const thread = (id: string, over: Partial<KanbanCard>, orchestrator = 'hub'): KanbanCard => card({ id, orchestrator, createdAt: at(200), ...over })
 const root = card({ id: 'hub', createdAt: at(300), ...running('working', 0) })
 const model = (cards: KanbanCard[]) => familyModel(new ThreadIndex(cards), cards[0], cards[0], noFeeds, now)
-const said = (lines: Line[]): string[] => lines.map(line => line.kind === 'section' ? `[${line.section}]` : line.kind === 'aside' ? `${'  '.repeat(line.level)}(${line.threads.length} aside)` : `${'  '.repeat(line.level)}${line.thread.card.id.split('/').at(-1)}`)
+const said = (lines: Line[]): string[] => lines.map(line => line.kind === 'aside' ? `${'  '.repeat(line.level)}(${line.threads.length} aside)` : `${'  '.repeat(line.level)}${line.thread.card.id.split('/').at(-1)}`)
 
 const family = [root,
   thread('hub/review', { status: 'closed', closedAt: at(1) }),
@@ -26,14 +26,8 @@ const family = [root,
   thread('hub/draft', { status: 'open' }),
 ]
 
-it('lists the root\'s threads in sections in attention order, each section once, newest first within one, and the set-aside behind one fold at the end', () => {
-  expect(said(outline(model(family), new Set()))).toEqual([
-    '[question]', 'lead',
-    '[turn]', 'turn-new', 'turn-old',
-    '[review]', 'review',
-    '[working]', 'working',
-    '(2 aside)',
-  ])
+it('lists the root\'s threads by the most urgent thing each holds, newest first within a kind, and the set-aside behind one fold at the end', () => {
+  expect(said(outline(model(family), new Set()))).toEqual(['lead', 'turn-new', 'turn-old', 'review', 'working', '(2 aside)'])
 })
 it('puts a row in the section of the most urgent thing it holds, and counts what asks under it', () => {
   const m = model(family), under = underAll(m), lead = [...m.threads.values()].find(t => t.card.id === 'hub/lead')!
@@ -41,15 +35,9 @@ it('puts a row in the section of the most urgent thing it holds, and counts what
   expect(under.get(lead.key)!.from!.card.id).toBe('hub/lead/asks')
   expect(under.get(m.root.key)!.section).toBe('question')
 })
-it('unfolds an open row to its own threads beneath it, without section names, its set-aside behind its own fold', () => {
+it('unfolds an open row to its own threads beneath it, its set-aside behind its own fold', () => {
   const m = model(family), lead = [...m.threads.values()].find(t => t.card.id === 'hub/lead')!
-  expect(said(outline(m, new Set([lead.key])))).toEqual([
-    '[question]', 'lead', '  asks', '  (1 aside)',
-    '[turn]', 'turn-new', 'turn-old',
-    '[review]', 'review',
-    '[working]', 'working',
-    '(2 aside)',
-  ])
+  expect(said(outline(m, new Set([lead.key])))).toEqual(['lead', '  asks', '  (1 aside)', 'turn-new', 'turn-old', 'review', 'working', '(2 aside)'])
   expect(said(outline(m, new Set([lead.key, `aside:${lead.key}`])))).toContain('  done')
 })
 it('opens every fold above a thread to show it, the set-aside fold that hides it included', () => {

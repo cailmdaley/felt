@@ -41,8 +41,8 @@ export const placeAt = (card: KanbanCard): MapPlace => ({ open: new Set(), selec
 
 /**
  * A constitution's page: the family's root heads it with its outcome and what
- * it holds, and its threads follow as rows, one section per kind of attention
- * in the order they ask for it, then the threads set aside behind one fold.
+ * it holds, and its threads follow as rows, the tree whole, siblings in the
+ * order they ask for attention, then the threads set aside behind one fold.
  * A row leads with its name and what it came to (or what it asks); a click
  * unfolds it to what it holds (tapestry or report, constitution, sent files
  * oldest to newest) and its own threads, laid out the same way, and a second
@@ -208,16 +208,12 @@ export class FamilyPage {
     return row
   }
   private fill(line: Line): HTMLElement {
-    if (line.kind === 'section') {
-      const head = this.made(line.key, () => { const head = el('div', 'fp-section', SECTION_WORD[line.section]); head.setAttribute('role', 'presentation'); return head })
-      head.dataset.standing = line.section
-      return head
-    }
     const row = line.kind === 'aside' ? this.made(line.key, () => {
       const row = el('div', 'fp-aside'); row.setAttribute('role', 'treeitem'); row.tabIndex = -1
       row.append(el('span', 'fp-aside-words'))
       return row
     }) : this.made(line.key, () => this.makeRow('fp-row'))
+    row.dataset.level = line.kind === 'aside' ? line.owner : line.thread.parent!
     row.setAttribute('aria-expanded', String(line.open))
     row.setAttribute('aria-level', String(line.level + 2))
     row.style.setProperty('--fp-level', String(line.level))
@@ -287,7 +283,7 @@ export class FamilyPage {
     held.dataset.shape = shape
     const way = (file: MapFile, kind: string): HTMLButtonElement => {
       const button = el('button', 'fp-file'); button.type = 'button'
-      button.dataset.held = file.key; button.dataset.owner = thread.key; button.dataset.kind = kind
+      button.dataset.held = file.key; button.dataset.owner = thread.key; button.dataset.kind = kind; button.dataset.level = thread.key
       button.toggleAttribute('data-unread', file.unread)
       button.append(el('span', 'fp-file-name', file.name))
       if (file.at && kind === 'file') button.append(el('span', 'fp-file-age', shortAgo(file.at, this.model!.now)))
@@ -298,14 +294,14 @@ export class FamilyPage {
     if (thread.card.path) items.push(way({ key: fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id), name: 'Constitution', at: 0, unread: false }, 'constitution'))
     if (earlier) {
       const more = el('button', 'fp-earlier', `${earlier} earlier`); more.type = 'button'
-      more.dataset.earlier = thread.key
+      more.dataset.earlier = more.dataset.level = thread.key
       items.push(more)
     }
     items.push(...files.slice(earlier).map(file => way(file, 'file')))
     if (conversable(thread.card)) {
       const rex = el('button', 'fp-converse', thread.card.terminalBackend === 'rex' ? 'Open in Rex' : 'Open conversation'); rex.type = 'button'
       rex.title = `${rex.textContent} · c`
-      rex.dataset.converse = thread.key
+      rex.dataset.converse = rex.dataset.level = thread.key
       items.push(rex)
     }
     held.replaceChildren(...items)
@@ -385,38 +381,57 @@ export class FamilyPage {
     }
     return false
   }
-  /** The tree's keys, unmodified: arrows walk and fold, and Enter does what a click does, the only key to reach Rex. */
+  /**
+   * The tree's keys, unmodified, a level at a time. A level is the head's
+   * holdings and the family's threads, or, inside an unfolded thread, its
+   * holdings and its own threads. j and k (or down and up) step between the
+   * pieces of the level; l (or right) unfolds a row and steps into it; h (or
+   * left) steps out to the thread above and folds it, and from the family's
+   * threads to the head. Enter does what a click does, the only key to reach Rex.
+   */
   private key(event: KeyboardEvent): void {
     const model = this.model, target = event.target as HTMLElement
-    if (!model || !target.matches('[role="treeitem"]') || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
-    this.select(target.dataset.row!)
-    const items = [model.root.key, ...this.lines.filter(line => line.kind !== 'section').map(line => line.key)]
-    const at = items.indexOf(this.selectedKey ?? '')
-    const line = this.lines.find(item => item.key === this.selectedKey && item.kind !== 'section') as Exclude<Line, { kind: 'section' }> | undefined
-    let next: string | undefined
-    if (event.key === 'ArrowDown') next = items[Math.min(items.length - 1, at + 1)]
-    else if (event.key === 'ArrowUp') next = items[Math.max(0, at - 1)]
-    else if (event.key === 'Home') next = items[0]
-    else if (event.key === 'End') next = items.at(-1)
-    else if (event.key === 'ArrowRight' && line) {
-      if (line.open) next = items[at + 1]
-      else { event.preventDefault(); this.toggle(line.key); return }
-    } else if (event.key === 'ArrowLeft' && line) {
-      if (line.open) { event.preventDefault(); this.toggle(line.key); return }
-      next = line.kind === 'aside' ? line.owner : model.threads.get(line.key)?.parent ?? undefined
-    } else if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault()
-      this.activate(items[at])
-      return
+    if (!model || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+    const head = this.row(model.root.key)!
+    const item = target === head ? head : target.closest<HTMLElement>('[data-level]')
+    if (!item || item.closest('.ws-worker-acts')) return
+    const owner = item === head ? undefined : item.dataset.level!, row = item.dataset.row
+    if (row) this.select(row)
+    else if (owner) this.select(owner)
+    const level = (key: string): HTMLElement[] => [...this.tree.querySelectorAll<HTMLElement>('[data-level]')].filter(el => el.dataset.level === key && !el.hidden && !el.closest('[hidden]'))
+    const down = (): HTMLElement | undefined => {
+      if (item === head) return level(model.root.key)[0]
+      if (!row) return undefined
+      if (!this.place.open.has(row)) this.toggle(row)
+      if (!row.startsWith('aside:')) return level(row)[0]
+      const peers = level(owner!)
+      return peers[peers.indexOf(item) + 1]
     }
-    if (!next) return
+    let next: HTMLElement | undefined
+    const step = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 }[event.key]
+    if (step) {
+      if (owner === undefined) next = step > 0 ? level(model.root.key)[0] : undefined
+      else { const peers = level(owner); next = peers[peers.indexOf(item) + step] }
+    } else if (event.key === 'l' || event.key === 'ArrowRight') {
+      if (!row && item !== head) { event.preventDefault(); item.click(); return }
+      next = down()
+    } else if (event.key === 'h' || event.key === 'ArrowLeft') {
+      if (owner === undefined) return
+      if (owner === model.root.key) next = head
+      else { next = this.row(owner); if (this.place.open.has(owner)) this.toggle(owner) }
+      if (next) this.select(next.dataset.row ?? model.root.key)
+    } else if ((event.key === 'Enter' || event.key === ' ') && (row || item === head)) {
+      event.preventDefault()
+      this.activate(row ?? model.root.key)
+      return
+    } else return
     event.preventDefault()
-    this.select(next)
-    const row = this.row(next)!
-    row.focus({ preventScroll: true })
-    this.reveal(row, false)
-    const thread = model.threads.get(next)
-    this.announcement.textContent = thread ? [thread.note, thread.files.length ? `${thread.files.length} sent ${thread.files.length === 1 ? 'file' : 'files'}` : ''].filter(Boolean).join('. ') : row.textContent ?? ''
+    if (!next) return
+    if (next.dataset.row) this.select(next.dataset.row)
+    next.focus({ preventScroll: true })
+    this.reveal(next, false)
+    const thread = next.dataset.row ? model.threads.get(next.dataset.row) : undefined
+    this.announcement.textContent = thread ? [thread.name, thread.note].filter(Boolean).join('. ') : next.textContent ?? ''
   }
 
   /** The page stops where it is, reading and drawing nothing, until its frame is selected again. */

@@ -94,6 +94,8 @@ export function shouldForwardDocumentKey(event: Pick<KeyboardEvent, 'defaultPrev
   if (!event.altKey && !event.ctrlKey && !event.metaKey) {
     if (['Enter', ' '].includes(event.key ?? '') && el?.closest?.('button,a[href],summary,[role="link"],[role="button"],[role="option"],[role="treeitem"],[role="checkbox"],[role="radio"],[role="switch"],[role="tab"]')) return false
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key ?? '') && el?.closest?.('[role="menu"],[role="radiogroup"],[role="tablist"],[role="slider"],[role="listbox"],[role="tree"]')) return false
+    // A constitution's page walks its tree a level at a time with these letters.
+    if (['j', 'k', 'h', 'l'].includes(event.key ?? '') && el?.closest?.('[role="tree"]')) return false
   }
   return true
 }
@@ -161,7 +163,10 @@ export const helpSections: readonly HelpSection[] = [
     row(['↓', '↑', 'd', 'u', 'Space', '⇧Space'], 'Scroll: line, half page, page', on('reader', 'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp')),
     row(['p', '[', ']'], 'Audio: play or pause, back or forward 5 s', on('reader', 'audioPlay', 'audioBack', 'audioForward')),
   ] },
-  { title: 'A constitution\'s page', note: 'With a row focused, the arrows walk the rows, → and ← unfold and fold, Escape folds the open row around it, and Enter unfolds a row and moves Rex to its worker.', rows: [
-    row(['l'], 'To the selected thread\'s tapestry, and back to the page', on('reader', 'tapestry')),
+  { title: 'A constitution\'s page', note: 'With a row focused, keys move a level at a time: the head\'s holdings and the family\'s threads, or an unfolded thread\'s holdings and threads. Enter unfolds a row and moves Rex to its worker; Escape folds outward, then goes back.', rows: [
+    row(['j', 'k', '↓', '↑'], 'Next / previous piece of the level', []),
+    row(['l', '→'], 'Unfold a row and step into it; open a holding', []),
+    row(['h', '←'], 'Step out to the thread above, folding it', []),
+    row(['l'], 'Outside the rows: the selected thread\'s tapestry, and back to the page', on('reader', 'tapestry')),
   ] },
 ]

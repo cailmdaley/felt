@@ -1,15 +1,14 @@
 import { needsHuman, type FamilyModel, type MapThread } from './model.js'
 
-/** The sections of a constitution's page, in the order they ask for attention. */
+/** The kinds of attention a thread can ask for, most urgent first: the order of the rows and the words of the counts. */
 export const SECTIONS = ['question', 'blocked', 'turn', 'review', 'working', 'still'] as const
 export type Section = typeof SECTIONS[number]
 export const SECTION_WORD: Readonly<Record<Section, string>> = {
   question: 'Questions', blocked: 'Blocked', turn: 'Your turn', review: 'To review', working: 'Working', still: 'No worker',
 }
 
-/** One line of the page under its head: a section's name, a thread's row, or the fold that holds a level's threads set aside. */
+/** One line of the page under its head: a thread's row, or the fold that holds a level's threads set aside. */
 export type Line =
-  | { kind: 'section'; key: string; section: Section }
   | { kind: 'thread'; key: string; thread: MapThread; level: number; section: Section | undefined; open: boolean }
   | { kind: 'aside'; key: string; owner: string; level: number; threads: MapThread[]; open: boolean }
 
@@ -45,12 +44,11 @@ export function underAll(model: FamilyModel): ReadonlyMap<string, Under> {
 }
 
 /**
- * The page under its head, which is the family's root. The root's threads sit
- * in sections in attention order, each section once, by the most urgent thing
- * each holds, newest first within a section; the threads set aside (archived,
- * resting, drafts) wait behind one fold at the end. An open row lists its own
- * threads beneath it the same way, without section names, since its rows'
- * marks already say them.
+ * The page under its head, which is the family's root: the tree whole, every
+ * thread under its orchestrator. Siblings run by the most urgent thing each
+ * holds, then newest first; the threads set aside (archived, resting, drafts)
+ * wait behind one fold at the end of their level. An open row lists its own
+ * threads beneath it the same way.
  */
 export function outline(model: FamilyModel, open: ReadonlySet<string>, under: ReadonlyMap<string, Under> = underAll(model)): Line[] {
   const lines: Line[] = []
@@ -61,13 +59,7 @@ export function outline(model: FamilyModel, open: ReadonlySet<string>, under: Re
   const level = (owner: MapThread, depth: number): void => {
     const kids = owner.children.map(key => model.threads.get(key)!).sort(byUrgency)
     const live = kids.filter(kid => under.get(kid.key)!.section), aside = kids.filter(kid => !under.get(kid.key)!.section)
-    let last: Section | undefined
-    for (const kid of live) {
-      const section = under.get(kid.key)!.section!
-      if (depth === 0 && section !== last) lines.push({ kind: 'section', key: `section:${section}`, section })
-      last = section
-      row(kid, depth, section)
-    }
+    for (const kid of live) row(kid, depth, under.get(kid.key)!.section)
     if (!aside.length) return
     const key = `aside:${owner.key}`, unfolded = open.has(key)
     lines.push({ kind: 'aside', key, owner: owner.key, level: depth, threads: aside, open: unfolded })

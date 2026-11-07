@@ -33,7 +33,7 @@
 .fp-file-name { min-width: 0; overflow-wrap: anywhere; }
 .fp-file-age { flex: none; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
 .fp-file[data-kind='lead'] { border-color: var(--ws-hairline); background: var(--ws-fill); font-weight: 600; }
-.fp-file[data-kind='constitution'] { color: var(--ws-ink-soft); }
+.fp-file[data-kind='constitution'] { border-color: transparent; background: none; color: var(--ws-ink-muted); }
 .fp-file[data-unread]::before { content: ''; flex: none; align-self: center; width: 6px; height: 6px; background: var(--ws-fresh); transform: rotate(45deg); }
 .fp-earlier { border-style: dashed; color: var(--ws-ink-muted); }
 .fp-converse { margin-left: auto; color: var(--ws-ink-soft); }
@@ -42,7 +42,6 @@
 .fp-head .fp-name { font-size: var(--type-title); }
 .fp-head .fp-note { -webkit-line-clamp: 5; color: var(--ws-ink); font-size: var(--type-row); }
 .fp-row[data-open].fp-head .fp-note { -webkit-line-clamp: 5; }
-.fp-section { padding: 16px var(--fp-gutter) 5px; color: var(--fm-text); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .fp-aside { padding: 9px var(--fp-gutter) 9px calc(var(--fp-gutter) + 22px + var(--fp-level, 0) * 22px); border-top: 1px solid var(--ws-hairline-soft); color: var(--ws-ink-muted); font-size: var(--type-note); cursor: pointer; outline: none; }
 .fp-aside::before { content: '▸'; display: inline-block; width: 1.2em; margin-left: -1.2em; transition: transform .15s; }
 .fp-aside[aria-expanded='true']::before { transform: rotate(90deg); }

@@ -984,14 +984,21 @@ test('j/k step constitutions in Desk order from a Board-opened reader, J/K step 
   // Drafts lands on the card last open there, the one the Board opened first.
   const read = drafts.indexOf('Weekly shear summary')
   await p.keyboard.press('Shift+K'); await title(drafts[read]); await landing(`Drafts · ${drafts[read]}`)
-  await p.keyboard.press('j'); await title(names[read + 1])
+  // A constitution's page keeps j and k for its rows while they have the keys; from elsewhere they step constitutions.
+  const away = () => p.evaluate(() => { document.activeElement?.blur() })
+  await away(); await p.keyboard.press('j'); await title(names[read + 1])
   await p.keyboard.press('Shift+J'); await title(flight[0])
   await p.keyboard.press('Shift+K'); await title(names[read + 1])
   await p.keyboard.press('Shift+J'); await title(flight[0])
   await p.keyboard.press('Shift+J'); await title(name)
-  await p.keyboard.press('k'); await title(names[at - 1])
-  await p.keyboard.press('k'); await title(names[at - 2])
-  await p.keyboard.press('j'); await title(names[at - 1])
+  if (await p.locator('.ws-selected .fp-tree').count()) {
+    await p.locator('.ws-selected .fp-tree [role="treeitem"]').first().focus()
+    await p.keyboard.press('j'); await p.waitForTimeout(200)
+    assert.equal(await p.locator('.ws-channel-title').textContent(), name, 'j inside the rows stays on the page')
+  }
+  await away(); await p.keyboard.press('k'); await title(names[at - 1])
+  await away(); await p.keyboard.press('k'); await title(names[at - 2])
+  await away(); await p.keyboard.press('j'); await title(names[at - 1])
   // The Board's shelf holds every constitution opened, most recent first, and opens one in the reader.
   await leave(p)
   const shelf = await p.locator('.ws-overview-read-name').allTextContents()

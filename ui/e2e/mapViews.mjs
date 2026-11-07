@@ -48,7 +48,7 @@ export function registerMapViewJourneys(test) {
     await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-worker] .fp-name')?.textContent === 'Response analysis')
     assert.equal(await band(), root, 'the page does not change')
     await analysis.locator('[data-kind="constitution"]').waitFor()
-    const order = await analysis.locator('.fp-held button').evaluateAll(buttons => buttons.map(button => button.dataset.kind ?? button.className))
+    const order = await analysis.locator('.fp-held > button').evaluateAll(buttons => buttons.map(button => button.dataset.kind ?? button.className))
     assert.deepEqual(order.filter(kind => kind !== 'fp-earlier'), [...(order[0] === 'lead' ? ['lead'] : []), 'constitution', ...order.filter(kind => kind === 'file'), 'fp-converse'], 'tapestry, constitution, then sent files, then Rex')
 
     const scroll = await page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => el.scrollTop)
@@ -92,6 +92,8 @@ export function registerMapViewJourneys(test) {
     })
     await tree(page).locator('.fp-row').first().waitFor()
     await row(page, 'Pipeline repository steward').locator('.fp-name').click()
+    // Away from the rows, where `l` steps down a level, it opens the selected thread's tapestry.
+    await page.evaluate(() => { document.activeElement?.blur() })
     const map = await page.evaluate(() => location.hash)
     await page.keyboard.press('l')
     await page.waitForTimeout(200)
