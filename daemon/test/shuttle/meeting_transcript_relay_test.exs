@@ -1083,6 +1083,19 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: "me: send Ana the plot\n"}}, 1_000
   end
 
+  test "a batch that was only the closing send delivers nothing", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    start_monitor(c, kind: "voice", routes: routes)
+    record(c.path, "2026-11-06T10:00:01Z", "Send.")
+    poll(c)
+    refute_receive {:delivery, _}, 300
+    record(c.path, "2026-11-06T10:00:02Z", "then this, send")
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: "me: then this\n"}}, 1_000
+  end
+
   test "a worker warming by another path resumes ordinary quiet triggers with its buffered speech",
        c do
     routes = Path.join(c.root, "routes.jsonl")

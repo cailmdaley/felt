@@ -963,18 +963,22 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       )
       |> Base.url_encode64(padding: false)
 
-    batch =
-      buffer
-      |> Map.take(~w(fiber_id origin))
-      |> Map.merge(%{
-        "text" => header <> render_lines(config["kind"], lines, buffer["voice_rows"]) <> "\n",
-        "message_id" => "meeting-" <> id
-      })
+    rendered = render_lines(config["kind"], lines, buffer["voice_rows"])
+    config = Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
 
-    config
-    |> Map.put("buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
-    |> Map.update!("outbox", &(&1 ++ [batch]))
-    |> Map.put("sequence", (config["sequence"] || 0) + 1)
+    # A batch that was only "send" has nothing left to deliver.
+    if String.trim(rendered) == "" do
+      config
+    else
+      batch =
+        buffer
+        |> Map.take(~w(fiber_id origin))
+        |> Map.merge(%{"text" => header <> rendered <> "\n", "message_id" => "meeting-" <> id})
+
+      config
+      |> Map.update!("outbox", &(&1 ++ [batch]))
+      |> Map.put("sequence", (config["sequence"] || 0) + 1)
+    end
   end
 
   defp render_lines("meeting", lines, _), do: Enum.join(lines, "\n")
