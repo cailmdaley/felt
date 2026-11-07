@@ -795,6 +795,20 @@ describe('session verbs', () => {
     expect(openWorker).toHaveBeenCalledWith('worker', 'owner')
   })
 
+  it('repairs a highlighted thread\'s refused start in the band, and clears its prompt on retargeting', async () => {
+    const page = task(), thread = task({ id: 'a/task/thread', uid: 'thread', inheritedProjectDir: { path: '/srv/thread', from: 'work' } })
+    dock.open(page); dock.setActionCard(thread)
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValueOnce(response({ reason: 'arm_refused', needs: 'project_dir', host: 'owner' }, 422))
+      .mockResolvedValueOnce(response({ dispatched: true }))
+    session('Start').click(); await flush()
+    expect(band.el.querySelector<HTMLInputElement>('.kbn-start-prompt-input')?.value).toBe('/srv/thread')
+    band.el.querySelector<HTMLButtonElement>('.kbn-start-prompt .kbn-ctl-send')!.click(); await flush()
+    expect(writes()[1]).toMatchObject({ fiber_id: 'a/task/thread', project_dir: '/srv/thread' })
+    dock.setActionCard(page)
+    expect(band.el.querySelector('.kbn-start-prompt')).toBeNull()
+  })
+
   it('shows any other refused start as its reason, with no prompt', async () => {
     const message = 'cannot arm: agent claude-retired is not in the registry (shuttle set-agent to pick a current one)'
     dock.open(task())

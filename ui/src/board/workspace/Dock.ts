@@ -635,6 +635,11 @@ export class Dock {
 
   /** Retarget the band's lifecycle and worker controls without changing its identity or settings. */
   setActionCard(card: KanbanCard): void {
+    const previous = this.actionCard ?? this.card
+    if (previous && ((previous.uid ?? previous.id) !== (card.uid ?? card.id) || previous.originId !== card.originId) && this.errorEl) {
+      this.errorEl.replaceChildren()
+      this.errorEl.style.display = 'none'
+    }
     this.actionCard = card
     this.actPaint?.()
   }
@@ -1501,14 +1506,17 @@ export class Dock {
     if (word) word.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
     this.starting = true
     this.actPaint?.()
-    const inBand = this.card?.uid === card.uid && this.card?.originId === card.originId
+    const inBand = (): boolean => {
+      const target = this.actionCard ?? this.card
+      return !!target && (target.uid ?? target.id) === (card.uid ?? card.id) && target.originId === card.originId
+    }
     const showError = (message: string): void => {
-      if (!inBand) { showToast(message, 'error'); return }
+      if (!inBand()) { showToast(message, 'error'); return }
       if (epoch !== this.epoch || !this.errorEl) return
       this.errorEl.textContent = message
       this.errorEl.style.display = ''
     }
-    if (inBand && this.errorEl) this.errorEl.style.display = 'none'
+    if (inBand() && this.errorEl) this.errorEl.style.display = 'none'
     try {
       let res: Response
       try {
@@ -1524,7 +1532,7 @@ export class Dock {
         return true
       }
       if (res.status === 409) showError('A worker is already running for this fiber.')
-      else if (inBand && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode, message)
+      else if (inBand() && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode, message)
       else showError(dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
       return false
     } finally {
