@@ -1,6 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { familyModel, type FamilyModel, type MapFeeds, type MapFile, type MapThread, type Standing } from '../family/model.js'
-import { htmlEl as el, markPath, markSvg, shortAgo, standingLine } from '../family/drawing.js'
+import { htmlEl as el, markPath, markSvg, shortAgo } from '../family/drawing.js'
 import { SECTION_WORD, opening, outline, underAll, type Line, type Under } from '../family/outline.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import type { Conversations } from '../conversationOpening.js'
@@ -238,7 +238,7 @@ export class FamilyPage {
     }
     this.fillThread(row, line.thread, line.section ?? 'aside', line.open)
     // A row under a divider that already names its kind keeps the age alone.
-    if (line.divided) row.querySelector('.fp-meta')!.textContent = shortAgo(line.thread.lastMove, this.model!.now)
+    if (line.divided) row.querySelector('.fp-word')!.textContent = ''
     const { threads, asks } = this.under.get(line.thread.key)!
     row.querySelector('.fp-count')!.textContent = !threads ? '' : asks ? `${asks} of ${threads} ask` : `${threads} ${threads === 1 ? 'thread' : 'threads'}`
     return row
@@ -246,11 +246,11 @@ export class FamilyPage {
   private makeRow(cls: string): HTMLElement {
     const row = el('div', cls); row.setAttribute('role', 'treeitem'); row.tabIndex = -1
     const title = el('div', 'fp-title')
-    title.append(markSvg('fp-mark', 'working'), el('span', 'fp-name'), el('span', 'fp-docs'), el('span', 'fp-meta'), el('span', 'fp-count'), el('span', 'fp-verbs'))
-    row.append(title, el('p', 'fp-note'), el('div', 'fp-files'), el('div', 'fp-doc'))
+    title.append(markSvg('fp-mark', 'working'), el('span', 'fp-name'), el('span', 'fp-word'), el('span', 'fp-docs'), el('span', 'fp-verbs'), el('span', 'fp-meta'))
+    row.append(title, el('p', 'fp-note'), el('span', 'fp-count'), el('div', 'fp-files'), el('div', 'fp-doc'))
     return row
   }
-  /** A thread's row: one mark, the state its section says; its slug, the name in its tooltip as on the Desk; what it holds; its last move; what it came to or asks. */
+  /** A thread's row: one mark, the state its section says; its slug, the name in its tooltip as on the Desk; what it holds; its verbs; its last move at the very right; below, what it came to or asks and how many threads it holds. */
   private fillThread(row: HTMLElement, thread: MapThread, standing: Standing, open: boolean): void {
     const model = this.model!
     row.dataset.thread = thread.key
@@ -263,7 +263,8 @@ export class FamilyPage {
     const name = row.querySelector<HTMLElement>('.fp-name')!
     name.textContent = thread === model.root ? thread.name : slug(thread.card)
     name.title = thread.name
-    row.querySelector('.fp-meta')!.textContent = standingLine(thread, model.now) || shortAgo(thread.lastMove, model.now)
+    row.querySelector('.fp-word')!.textContent = thread.word
+    row.querySelector('.fp-meta')!.textContent = shortAgo(thread.lastMove, model.now)
     const note = row.querySelector<HTMLElement>('.fp-note')!
     note.textContent = thread.note
     note.hidden = !thread.note
