@@ -52,11 +52,13 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
   const count = document.createElement('button'); count.type = 'button'; count.className = 'kbn-thread-count'
   const label = document.createElement('span'), words = COUNT_WORD[state] ?? ['thread', 'threads']
   label.className = OPEN.has(state) ? 'kbn-count-needs' : state === 'working' ? 'kbn-count-working' : 'kbn-count-quiet'
-  label.textContent = `${outline.length} ${words[outline.length === 1 ? 0 : 1]}`
-  if (outline.some(row => turnOf(row.card).turn === 'question')) label.dataset.asks = ''
+  const own = index.state(self) === state
+  const total = outline.length + (own ? 1 : 0)
+  label.textContent = `${total} ${words[total === 1 ? 0 : 1]}`
+  if ((own && turnOf(self).turn === 'question') || outline.some(row => turnOf(row.card).turn === 'question')) label.dataset.asks = ''
   const caret = document.createElement('span'); caret.className = 'kbn-thread-caret'; caret.setAttribute('aria-hidden', 'true')
   count.append(label, caret)
-  count.title = `${label.textContent} beneath this row`
+  count.title = `${label.textContent} in this family`
   end.prepend(count)
   age()
 

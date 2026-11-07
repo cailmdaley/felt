@@ -66,11 +66,11 @@ describe('a family splits across the sections its threads stand in', () => {
     const desk = draw(buildKanbanResponseFromComposite(family('waiting', 'waiting', 12)))
     expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
     expect([...desk.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(el => el.textContent)).toEqual(Array.from({ length: 12 }, (_, k) => `t${k}`).sort())
-    expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('12 need you')
+    expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('13 need you')
   })
   it('working threads beneath a working row stay folded until opened', () => {
     const desk = draw(buildKanbanResponseFromComposite(family('working', 'working', 3)))
-    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('3 working')
+    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('4 working')
     expect(desk.querySelector<HTMLElement>('.kbn-desk-threads')!.hidden).toBe(true)
   })
 })

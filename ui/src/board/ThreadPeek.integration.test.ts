@@ -34,7 +34,7 @@ describe('a Desk row and the threads it holds in its section', () => {
   it('in Your turn, holds the threads that wait on you beneath their nearest shown ancestor, open, named by slug path', () => {
     const { names, count, host, open } = row(root)
     expect(names()).toEqual(['busy/asks', '  deeper'])
-    expect(count!.querySelector('.kbn-count-needs')?.textContent).toBe('2 need you')
+    expect(count!.querySelector('.kbn-count-needs')?.textContent).toBe('3 need you')
     expect(count!.querySelector('[data-asks]')).not.toBeNull()
     const line = host.querySelector<HTMLElement>('.kbn-desk-threads .kbn-thread-row')!
     expect(line.title).toBe('Choose a cut')
