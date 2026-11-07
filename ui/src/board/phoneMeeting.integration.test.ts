@@ -112,7 +112,7 @@ describe('board phone meeting card wiring', () => {
       ? { meeting: current, delivery: { delivered: true, delivery: 'message' } }
       : { available: true, modes: ['call', 'phone'], recorder: 'mac-recorder', meeting: current } }))
     const control = listen(card({ id: 'science/task', originId: 'agent-owner', shuttleKind: 'oneshot' }))
-    expect(control.button.textContent).toBe('Listen')
+    expect(control.button.getAttribute('aria-label')).toBe('Listen')
     expect(control.el.querySelector('.kbn-ctl-meet [role="radio"]')).toBeNull()
     control.press()
     await flush()

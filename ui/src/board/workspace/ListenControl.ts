@@ -3,7 +3,9 @@ import type { MeetingMode } from '../../forms/meetingApi.js'
 import { meetingActions, meetingHostCard, type MeetingRecord } from '../meeting.js'
 import { isMobileViewport } from '../mobile.js'
 import { openVoiceTranscript } from '../voiceTranscript.js'
+import { slug } from '../threadOutline.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
+import type { FiberSlug } from './voiceStrip.js'
 
 /** Which session takes a joined meeting, and whether it records system audio. */
 export interface MeetingJoinOptions {
@@ -36,7 +38,7 @@ export interface ListenOptions {
   voice?: import('../voice.js').Voice
   shuttleBase: string
   openFile(path: string, title?: string, owner?: string): void
-  hostName(meeting: MeetingRecord): string | undefined
+  fiberSlug: FiberSlug
   openHost(meeting: MeetingRecord): void
   /** Show the hosted meeting's transcript pane under the band. */
   showPane(): void
@@ -48,25 +50,37 @@ const message = (error: unknown): string => error instanceof Error ? error.messa
 const ICONS = {
   mic: 'M8 1.5a2 2 0 0 0-2 2v4.25a2 2 0 0 0 4 0V3.5a2 2 0 0 0-2-2ZM3.5 7.75a4.5 4.5 0 0 0 9 0M8 12.25v2.25M5.5 14.5h5',
   meeting: 'M8 3.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 1 0 0-9ZM8 6.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3Z',
-  pause: 'M5.5 3.5v9M10.5 3.5v9',
-  resume: 'M5 3.25v9.5L12.5 8Z',
-  stop: 'M4 4h8v8H4Z',
+  /** Muted: the mode's icon, struck through. */
+  slash: 'M2.5 1.5l11 13',
+  menu: 'm5 6.75 3 3 3-3',
 }
 
-function svg(d: string): SVGSVGElement {
+/** A stroke icon on the header icons' 16-pixel grid and weight. */
+function svg(...paths: string[]): SVGSVGElement {
   const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
   icon.setAttribute('viewBox', '0 0 16 16')
+  icon.setAttribute('width', '16')
+  icon.setAttribute('height', '16')
   icon.setAttribute('aria-hidden', 'true')
   icon.setAttribute('focusable', 'false')
-  const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-  glyph.setAttribute('d', d)
-  glyph.setAttribute('fill', 'none')
-  glyph.setAttribute('stroke', 'currentColor')
-  glyph.setAttribute('stroke-width', '1.35')
-  glyph.setAttribute('stroke-linecap', 'round')
-  glyph.setAttribute('stroke-linejoin', 'round')
-  icon.append(glyph)
+  for (const d of paths) {
+    const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    glyph.setAttribute('d', d)
+    glyph.setAttribute('fill', 'none')
+    glyph.setAttribute('stroke', 'currentColor')
+    glyph.setAttribute('stroke-width', '1.5')
+    glyph.setAttribute('stroke-linecap', 'round')
+    glyph.setAttribute('stroke-linejoin', 'round')
+    icon.append(glyph)
+  }
   return icon
+}
+
+function iconButton(className: string): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = `ws-header-icon ${className}`
+  return button
 }
 
 function plainButton(className: string): HTMLButtonElement {
@@ -83,21 +97,18 @@ type Mode =
   | { kind: 'meeting'; paused: boolean; name: string; meeting: MeetingRecord }
 
 /**
- * The band's Listening control. The mic does one thing at a time: off,
- * following the card in view, or recording a meeting joined to one card.
- * Listen turns following on; once anything is on, the control draws the
- * mode's icon (a mic, or a red dot for a meeting) and offers Pause and Stop,
- * and the band's voice strip beside it names where words go. Stop always turns the mic off. The ▾
- * menu holds what is rarer: recording a meeting here, the transcript, and the
- * quiet before a batch is sent.
+ * The band's Listening control: one mic toggle and a ▾ menu. The mic does one
+ * thing at a time: off, following the card in view, or recording a meeting
+ * joined to one card. Off, pressing the mic turns following on; on, it mutes
+ * and unmutes, and muted is drawn struck through. The icon is a mic, or a red
+ * dot for a meeting, and the band's voice strip beside it names where words
+ * go. The ▾ menu holds Stop, which turns the mic off, and what is rarer:
+ * recording a meeting here, the transcript, and the quiet before a batch is sent.
  */
 export class ListenControl {
   readonly el = document.createElement('span')
-  private readonly button = plainButton('kbn-ctl-meet-arm')
-  private readonly word = document.createElement('span')
-  private readonly pauseButton = plainButton('kbn-ctl-meet-pause')
-  private readonly stopButton = plainButton('kbn-ctl-meet-stop')
-  private readonly dropdown = plainButton('kbn-ctl-meet-dropdown')
+  private readonly button = iconButton('kbn-ctl-meet-arm')
+  private readonly dropdown = iconButton('kbn-ctl-meet-dropdown')
   private readonly audio = document.createElement('select')
   private readonly opts: ListenOptions
   private readonly unsubscribe?: () => void
@@ -106,32 +117,28 @@ export class ListenControl {
   private menuState = ''
   private release: Release | null = null
   private localError: string | null = null
-  private paintedIcon = ICONS.mic
+  private paintedIcon = ''
 
   constructor(opts: ListenOptions) {
     this.opts = opts
     this.el.className = 'kbn-ctl-meet'
-    this.word.className = 'kbn-ctl-meet-label'
-    this.button.append(svg(ICONS.mic), this.word)
-    this.stopButton.append(svg(ICONS.stop))
-    this.stopButton.setAttribute('aria-label', 'Stop listening')
-    this.stopButton.title = 'Stop: the mic goes off'
     this.audio.className = 'kbn-ctl-select kbn-ctl-meet-audio'
     this.audio.setAttribute('aria-label', 'Meeting audio')
     this.audio.append(new Option('Mic + system', 'system'), new Option('Mic only', 'mic'))
-    this.dropdown.textContent = '▾'
+    this.dropdown.append(svg(ICONS.menu))
     this.dropdown.setAttribute('aria-label', 'Listening options')
+    this.dropdown.title = 'Listening options'
     this.dropdown.setAttribute('aria-haspopup', 'menu')
     this.dropdown.setAttribute('aria-expanded', 'false')
     this.dropdown.addEventListener('click', () => this.showMenu())
     this.button.addEventListener('click', () => {
-      if (this.mode().kind === 'off') this.listen()
+      const mode = this.mode()
+      if (mode.kind === 'off') this.listen()
+      else if (this.mutable(mode)) this.mute(mode)
       else this.showMenu()
     })
-    this.pauseButton.addEventListener('click', () => this.pause())
-    this.stopButton.addEventListener('click', () => this.stop())
     this.unsubscribe = opts.voice?.subscribe(() => this.paint())
-    this.el.append(this.button, this.pauseButton, this.stopButton, this.dropdown)
+    this.el.append(this.button, this.dropdown)
     this.paint()
   }
 
@@ -175,10 +182,12 @@ export class ListenControl {
     const voice = this.opts.voice?.status
     if (current && current.state !== 'failed') {
       const hosted = meetingHostCard(current, [card]) !== null
-      const name = hosted ? card.name : this.opts.hostName(current) ?? current.fiber?.split('/').at(-1) ?? current.title?.trim() ?? 'a card'
+      const fiber = current.fiber
+      const name = hosted ? slug(card) : (fiber ? this.opts.fiberSlug(fiber, current.mirror_host ?? current.recorder) ?? fiber.split('/').at(-1) : current.title?.trim()) || 'a card'
       return { kind: 'meeting', paused: !!current.paused, name, meeting: current }
     }
-    if (voice?.enabled) return { kind: 'following', paused: voice.muted, name: voice.target?.name ?? 'nothing yet' }
+    const target = voice?.target
+    if (voice?.enabled) return { kind: 'following', paused: voice.muted, name: target ? this.opts.fiberSlug(target.fiber_id, target.origin) ?? target.name : 'nothing yet' }
     return { kind: 'off' }
   }
 
@@ -216,8 +225,12 @@ export class ListenControl {
       .finally(() => { this.starting = false; this.paint() })
   }
 
-  private pause(): void {
-    const mode = this.mode()
+  /** Whether the mic can be muted now: a phone's recording and a meeting not yet live cannot. */
+  private mutable(mode: Mode): boolean {
+    return mode.kind === 'following' || (mode.kind === 'meeting' && !mode.meeting.phone && !!this.opts.meeting.pause && mode.meeting.state === 'live')
+  }
+
+  private mute(mode: Mode): void {
     const done = (task: Promise<void> | undefined): void => {
       void task?.then(() => { this.localError = null; this.paint() }).catch((error: unknown) => this.fail(error))
     }
@@ -259,24 +272,26 @@ export class ListenControl {
     const failure = this.failure()
     const voice = this.opts.voice?.status
     const on = mode.kind === 'following' || mode.kind === 'meeting'
+    const muted = on && mode.paused
     if (this.menu && this.signature() !== this.menuState) this.closeMenu()
 
     const icon = mode.kind === 'meeting' ? ICONS.meeting : ICONS.mic
-    if (icon !== this.paintedIcon) { this.button.firstElementChild?.replaceWith(svg(icon)); this.paintedIcon = icon }
+    const drawn = `${icon}${muted ? ICONS.slash : ''}`
+    if (drawn !== this.paintedIcon) { this.button.replaceChildren(muted ? svg(icon, ICONS.slash) : svg(icon)); this.paintedIcon = drawn }
     let label: string
     let title: string
     switch (mode.kind) {
       case 'off':
-        label = failure ? 'Failed' : 'Listen'
+        label = 'Listen'
         title = failure ?? (this.phone ? 'Listen: record on this phone, joined to this card' : 'Listen: your words go to whatever card you are looking at')
         break
       case 'following':
-        label = `${mode.paused ? 'Paused' : 'Following'} · ${mode.name}`
-        title = `${mode.paused ? 'Paused. ' : ''}Following you: words go to ${mode.name}, the card you are looking at`
+        label = mode.paused ? 'Unmute' : 'Mute'
+        title = `${mode.paused ? 'Muted. ' : ''}Following you: words go to ${mode.name}, the card you are looking at`
         break
       case 'meeting':
-        label = `${mode.paused ? 'Paused' : 'Meeting'} · ${mode.name}`
-        title = `${mode.paused ? 'Paused. ' : ''}Recording a meeting: every word goes to ${mode.name}, wherever you look`
+        label = mode.paused ? 'Unmute' : 'Mute'
+        title = `${mode.paused ? 'Muted. ' : ''}Recording a meeting: every word goes to ${mode.name}, wherever you look`
         break
     }
     if (on && failure) title = `${failure}. ${title}`
@@ -284,29 +299,24 @@ export class ListenControl {
       ? !this.opts.meeting.canJoin() || !this.opts.meeting.modes().includes('phone')
       : !voice?.available))
     if (this.button.disabled && !this.phone && !this.starting && !failure) title = voice?.error ? `Listening is unavailable: ${voice.error}` : 'Listening is unavailable on this host'
-    // While on, the band's voice strip names where words go; the control keeps only its icon.
-    const shown = on ? '' : label
-    if (this.word.textContent !== shown) this.word.textContent = shown
-    this.word.hidden = on
     this.button.title = title
     this.button.setAttribute('aria-label', label)
+    if (on) this.button.setAttribute('aria-pressed', String(muted))
+    else this.button.removeAttribute('aria-pressed')
     this.el.dataset.mode = mode.kind
     this.el.classList.toggle('kbn-ctl-meet-failed', !!failure)
-    this.el.classList.toggle('kbn-ctl-meet-paused', on && mode.paused)
+    this.el.classList.toggle('kbn-ctl-meet-muted', muted)
     this.button.classList.toggle('kbn-ctl-meet-on', on)
+  }
 
-    const pausable = mode.kind === 'following' || (mode.kind === 'meeting' && !mode.meeting.phone && !!this.opts.meeting.pause)
-    this.pauseButton.hidden = !pausable
-    if (pausable) {
-      const want = mode.paused ? ICONS.resume : ICONS.pause
-      if (this.pauseButton.dataset.icon !== want) { this.pauseButton.replaceChildren(svg(want)); this.pauseButton.dataset.icon = want }
-      this.pauseButton.setAttribute('aria-label', mode.paused ? 'Resume listening' : 'Pause listening')
-      this.pauseButton.title = mode.paused ? 'Resume' : 'Pause: words go nowhere until you resume'
-      this.pauseButton.disabled = mode.kind === 'meeting' && mode.meeting.state !== 'live'
+  /** Stop is offered while anything holds the mic, or a failed meeting waits to be dismissed. */
+  private stoppable(): { offered: boolean; disabled: boolean } {
+    const mode = this.mode()
+    return {
+      offered: mode.kind !== 'off' || !!this.opts.meeting.current(),
+      disabled: mode.kind === 'meeting'
+        && (!this.opts.meeting.stop || meetingActions(mode.meeting, this.opts.meeting.stopRequested?.(mode.meeting) ?? false).stopDisabled),
     }
-    this.stopButton.hidden = !on && !this.opts.meeting.current()
-    this.stopButton.disabled = mode.kind === 'meeting'
-      && (!this.opts.meeting.stop || meetingActions(mode.meeting, this.opts.meeting.stopRequested?.(mode.meeting) ?? false).stopDisabled)
   }
 
   private item(label: string, act: () => void, disabled = false): void {
@@ -328,6 +338,8 @@ export class ListenControl {
     menu.setAttribute('aria-label', 'Listening options')
     this.menuState = this.signature()
 
+    const stop = this.stoppable()
+    if (stop.offered) this.item('Stop listening', () => this.stop(), stop.disabled)
     const current = meeting.current()
     if (current) {
       const hosted = meetingHostCard(current, [card]) !== null

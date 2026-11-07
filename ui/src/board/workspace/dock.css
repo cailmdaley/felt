@@ -1,5 +1,5 @@
-/* The band over a constitution's pages: its name and state, the way to its
-   conversation, its verbs, and settings. One row where all of it fits, else two. */
+/* The band over a constitution's pages: its name, then Listen and every verb as
+   icons of one size and weight, in one row; the name gives way when it is tight. */
 .ws-stage-band { flex: none; min-width: 0; container: band / inline-size; }
 .ws-stage-band[hidden] { display: none; }
 .ws-band-head {
@@ -12,19 +12,6 @@
   min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--ws-ink); font: 500 var(--type-title)/var(--leading-tight) var(--font-serif);
 }
-/* The lifecycle chip: the thread's state word in its tone, at the line's one text size. */
-.ws-band-state {
-  --tone: var(--ws-ink-muted);
-  flex: none; color: var(--tone);
-  font: 500 var(--type-label)/var(--leading-prose) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap;
-}
-.ws-band-state[data-state='question'] { --tone: var(--ws-state-question); }
-.ws-band-state[data-state='waiting'] { --tone: var(--ws-state-idle); }
-.ws-band-state[data-state='working'] { --tone: var(--ws-state-working); }
-.ws-band-state[data-state='to-review'] { --tone: var(--ws-state-review); }
-.ws-band-state[data-state='drafts'] { --tone: var(--ws-state-drafts); }
-.ws-band-state[data-state='resting'] { --tone: var(--ws-state-resting); color: var(--ws-ink-muted); }
-.ws-band-state:is([data-state='tempered'], [data-state='discarded']) { --tone: var(--ws-state-tempered); }
 /* One context figure and the cache's warmth: a verdigris dot draining clockwise
    as the entry ages; cold, an alarm-red ring. Context carries its own tint (paintUsage). */
 .ws-band-meter { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; color: var(--ws-ink-muted); white-space: nowrap; font: var(--type-label)/var(--leading-prose) var(--font-mono); }
@@ -37,14 +24,8 @@
 }
 .ws-band-cache[data-cache='cold'] { border-color: var(--ws-cache-cold); background: transparent; }
 .ws-band-acts { position: relative; flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 2px 8px; min-width: 0; min-height: 36px; }
-/* Conversation lives in Rex: the band's one filled control goes there. */
-.ws-dock .ws-band-open {
-  flex: none; min-height: 30px; padding: 0 12px; border: 0; border-radius: var(--ws-control-radius);
-  background: var(--ws-ink); color: var(--ws-paper) !important; font: 500 var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap;
-}
-.ws-dock .ws-band-open:hover { background: var(--ws-agent); }
-/* The lifecycle group is set apart by a rule and its tone, not by distance. */
-.ws-band-acts > .kbn-ctl-verdict { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 6px; margin: 0; padding-left: 12px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
+/* The lifecycle icons sit with the navigation icons after them, set apart by a rule. */
+.ws-band-acts > .kbn-ctl-verdict { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 2px; margin: 0; padding-left: 8px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-band-acts > .kbn-ctl-verdict[hidden] { display: none; }
 .ws-band-acts > .ws-verdict-undo { justify-content: flex-end; }
 /* Settings keeps the further ancestors reachable without a second header row. */
@@ -69,7 +50,7 @@
 .ws-worker-receipt { flex: none; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
 .ws-worker-receipt:empty { display: none; }
 
-/* Where spoken words go, beside Listen: Following or Meeting, then the fiber. */
+/* Where spoken words go, beside Listen: the destination's slug, a meeting's marked with a dot. */
 .ws-voice-strip { flex: 0 1 auto; min-width: 0; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-solid) var(--font-serif); }
 .ws-voice-strip[hidden] { display: none; }
 .ws-voice-strip[data-mode='meeting']:not([data-paused])::before { content: '●'; margin-right: 5px; color: var(--ws-state-working); }
@@ -100,21 +81,10 @@
 .ws-header-facts { margin: 12px 0 0; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); overflow-wrap: anywhere; }
 .ws-header-facts[hidden] { display: none; }
 
-/* Without room for a whole name beside the actions, the band is two rows: the
-   name with its icons, then the actions. Where even those are tight the verbs
-   keep their icons and titles. */
+/* Where the band is narrow the name steps down a size. */
 @media (min-width: 701px) {
-  @container band (max-width: 1320px) {
-    .ws-band-head { flex-wrap: wrap; gap: 0 4px; }
-    .ws-band-acts { order: 1; flex: 1 0 100%; gap: 2px 6px; }
-    .ws-band-acts > .kbn-ctl-verdict { gap: 2px; padding-left: 6px; }
-  }
   @container band (max-width: 760px) {
     .ws-band-title { font-size: var(--type-prose); }
-  }
-  @container band (max-width: 560px) {
-    .ws-band-acts .ws-header-word, .ws-band-acts .kbn-ctl-meet-label { display: none; }
-    :is(.ws-reader, .kbn-verb-menu) .ws-band-acts .ws-header-icon.ws-header-verb { padding: 0 6px; }
   }
 }
 
@@ -126,8 +96,6 @@
   .ws-band-head { gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
   .ws-dock .ws-worker-acts { padding: 0 8px 6px; }
   .ws-band-identity { flex: none; }
-  /* The verbs hold still when the state word changes. */
-  .ws-band-state { min-width: 5.5em; }
   .ws-band-title { display: none; }
   .ws-band-acts { flex-wrap: nowrap; flex: none; }
   .ws-band-acts > .kbn-ctl-verdict { flex: none; flex-wrap: nowrap; white-space: nowrap; padding-left: 0; border-left: 0; }
@@ -256,23 +224,13 @@
 .ws-dock .kbn-ctl-toggle:has(input:checked) { background: var(--ws-fill); border-color: var(--ws-hairline); }
 .ws-dock .kbn-ctl-toggle:has(input:checked) span::before { background: var(--ws-ink); }
 .ws-dock .kbn-ctl-toggle:has(input:focus-visible) { outline: var(--ws-focus-width) solid var(--ws-ink); }
-.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; align-items: center; max-width: 240px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
-.ws-dock .kbn-ctl-meet .kbn-ctl-btn { border: 0; }
-.ws-dock .kbn-ctl-meet-arm { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; min-height: 0; padding: 2px 4px 2px 8px; border: 0; background: transparent; color: var(--ws-ink-muted); }
-.ws-dock .kbn-ctl-meet-arm.kbn-ctl-meet-on { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-dock .kbn-ctl-meet-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-dock .kbn-ctl-meet-arm svg { display: block; flex: none; width: 16px; height: 16px; }
-.ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
-.ws-dock .kbn-ctl-meet-dropdown { flex: none; width: 25px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); cursor: pointer; }
-.ws-dock .kbn-ctl-meet-dropdown[hidden] { display: none; }
-.ws-dock :is(.kbn-ctl-meet-pause, .kbn-ctl-meet-stop) { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 25px; padding: 0; background: transparent; color: var(--ws-ink); }
-.ws-dock :is(.kbn-ctl-meet-pause, .kbn-ctl-meet-stop)[hidden] { display: none; }
-.ws-dock :is(.kbn-ctl-meet-pause, .kbn-ctl-meet-stop) svg { display: block; width: 14px; height: 14px; }
-.ws-dock :is(.kbn-ctl-meet-pause, .kbn-ctl-meet-stop):hover:not(:disabled) { background: var(--ws-hover); }
-.ws-dock .kbn-ctl-meet[data-mode=meeting] .kbn-ctl-meet-arm svg { color: var(--ws-red); }
-.ws-dock .kbn-ctl-meet-failed .kbn-ctl-meet-label { color: var(--ws-red); }
-.ws-dock .kbn-ctl-meet-paused .kbn-ctl-meet-arm { color: var(--ws-ink-muted); background: transparent; }
-@media (pointer: coarse) { .ws-dock .kbn-ctl-meet-dropdown { width: 44px; min-height: 44px; } }
+/* Listen is a header icon (mic, a red dot for a meeting, struck through when muted) with a narrow ▾ beside it. */
+.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; align-items: center; }
+.ws-reader .ws-dock .kbn-ctl-meet-dropdown { width: 18px; }
+.ws-reader .ws-dock .kbn-ctl-meet-arm.kbn-ctl-meet-on { color: var(--ws-ink); }
+.ws-reader .ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
+.ws-reader .ws-dock .kbn-ctl-meet[data-mode=meeting] .kbn-ctl-meet-arm, .ws-reader .ws-dock .kbn-ctl-meet-failed .kbn-ctl-meet-arm { color: var(--ws-red); }
+@media (pointer: coarse) { .ws-reader .ws-dock .kbn-ctl-meet-dropdown { width: 32px; } }
 .ws-dock .kbn-ctl-meet-audio-label { display: grid; gap: 4px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-listen-cadence { display: flex; gap: 8px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-listen-cadence label { display: grid; gap: 4px; min-width: 0; }
@@ -282,9 +240,6 @@
 .ws-dock .kbn-ctl-meet [role="menuitemcheckbox"]::after { content: '○'; }
 .ws-dock .kbn-ctl-meet [role="menuitemcheckbox"][aria-checked="true"]::after { content: '●'; }
 .voice-error { padding: 8px 10px; max-width: 260px; font-size: var(--type-note); color: var(--ws-ink-muted); white-space: normal; }
-@media (hover: hover) {
-  .ws-dock .kbn-ctl-meet-arm:hover:not(:disabled) { color: var(--ws-ink); background: var(--ws-hover); }
-}
 .ws-dock .kbn-detail-error { color: var(--ws-red); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .ws-dock .kbn-start-prompt { display: flex; flex-direction: column; gap: var(--ws-small-gap); color: var(--ws-ink); }
 .ws-dock .kbn-start-prompt-reason { margin: 0; color: var(--ws-red); }

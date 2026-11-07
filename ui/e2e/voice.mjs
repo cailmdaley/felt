@@ -26,13 +26,14 @@ try {
       const el = document.querySelector('.ws-stage-band .ws-voice-strip')
       return { scroll: el.scrollWidth, client: el.clientWidth, text: el.textContent }
     })
-    assert.match(geometry.text, /^Following → /)
+    // A card the board does not hold is named by its name; one it holds, by its slug.
+    assert.match(geometry.text, /^An exceptionally long/)
     assert.ok(geometry.scroll > geometry.client, 'long name is ellipsized')
-    assert.ok(await band.locator('.kbn-ctl-meet').isVisible(), 'Listening remains visible')
-    assert.ok(await band.locator('.kbn-ctl-meet-pause').isVisible(), 'Pause sits beside the mic')
-    assert.ok(await band.locator('.kbn-ctl-meet-stop').isVisible(), 'Stop sits beside the mic')
-    await arm.click()
-    assert.ok(await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).isVisible(), 'a press while listening opens the menu')
+    assert.equal(await band.locator('.kbn-ctl-meet button').count(), 2, 'the mic is one toggle and its menu')
+    assert.equal(await arm.getAttribute('aria-pressed'), 'false')
+    await band.locator('.kbn-ctl-meet-dropdown').click()
+    assert.ok(await page.getByRole('menuitem', { name: 'Stop listening', exact: true }).isVisible(), 'Stop is in the menu')
+    assert.ok(await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).isVisible(), 'the menu opens the transcript')
     await mkdir(process.env.HARK_SCREENSHOT_DIR || '/tmp', { recursive: true })
     await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-${scheme}.png` })
     await page.keyboard.press('Escape')
@@ -41,12 +42,13 @@ try {
       voice.status = { ...voice.status, muted: true }
       voice.notify()
     })
-    await band.locator('.kbn-ctl-meet-paused').waitFor()
-    assert.equal(await band.locator('.kbn-ctl-meet-pause').getAttribute('aria-label'), 'Resume listening')
-    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-paused-${scheme}.png` })
+    await band.locator('.kbn-ctl-meet-muted').waitFor()
+    assert.equal(await arm.getAttribute('aria-label'), 'Unmute')
+    assert.equal(await arm.locator('path').count(), 2, 'muted is drawn struck through')
+    await page.screenshot({ path: `${process.env.HARK_SCREENSHOT_DIR || '/tmp'}/hark-muted-${scheme}.png` })
     await context.close()
   }
-  console.log('voice layout and paused state: ok (light + dark)')
+  console.log('voice layout and muted state: ok (light + dark)')
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const page = await context.newPage()

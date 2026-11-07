@@ -10,7 +10,7 @@ const shots = process.env.CONSOLE_PICKER_SHOTS
 if (shots) await mkdir(shots, { recursive: true })
 const selected = p => p.locator('.ws-page.ws-selected')
 const band = p => p.locator('.ws-stage-band')
-const consoleButton = p => band(p).locator('.ws-band-open')
+const pill = p => p.locator('.ws-navbar .ws-head-worker .kbn-card-worker')
 const items = p => p.getByRole('menuitemradio')
 async function shot(p, name) {
   if (await items(p).count()) await pickerReadable(p, false)
@@ -27,23 +27,22 @@ async function pickerReadable(p, requireFocus = true) {
 async function open(p, backend) {
   await p.goto(`${base}&console=${backend}`)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
-  await consoleButton(p).waitFor({ state: 'visible' })
+  await band(p).locator('.ws-band-head').waitFor({ state: 'visible' })
 }
 async function headerFits(p) {
   const geometry = await band(p).locator('.ws-band-head').evaluate(header => {
     const bounds = header.getBoundingClientRect()
-    const controls = [...header.querySelectorAll('.ws-band-open,.ws-band-settings,.ws-band-leave,.ws-band-identity')]
+    const controls = [...header.querySelectorAll('.kbn-ctl-meet,.kbn-ctl-verdict,.ws-band-settings,.ws-band-leave,.ws-band-identity')]
       .filter(el => el.checkVisibility()).map(el => ({ name: el.className, rect: el.getBoundingClientRect().toJSON() }))
-    return { bounds: bounds.toJSON(), controls }
+    return { bounds: bounds.toJSON(), controls, opening: header.querySelectorAll('.ws-band-open').length }
   })
+  assert.equal(geometry.opening, 0, 'the console draws no opening; following and c reach the conversation')
   const controls = geometry.controls
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
     const a = controls[i].rect, b = controls[j].rect
     assert.ok(Math.min(a.right, b.right) - Math.max(a.x, b.x) <= 1 || Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y) <= 1,
       `${controls[i].name} and ${controls[j].name} do not overlap`)
   }
-  const opening = await consoleButton(p).boundingBox()
-  assert.ok(opening.x >= geometry.bounds.x - 1 && opening.x + opening.width <= geometry.bounds.right + 1, 'the opening fits the band')
 }
 async function longPress(p, context, locator) {
   await locator.click({ trial: true })
@@ -85,30 +84,18 @@ try {
     p.setDefaultTimeout(10000)
     await open(p, phone ? 'tmux' : 'rex')
     await headerFits(p)
-    assert.equal(await consoleButton(p).textContent(), 'Open in Claude browser')
     await shot(p, phone ? 'phone-header' : 'desktop-header')
-    if (phone) await longPress(p, context, consoleButton(p))
-    else await consoleButton(p).click({ button: 'right' })
-    assert.equal(await items(p).count(), phone ? 1 : 3)
-    assert.equal(await items(p).filter({ hasText: 'Claude browser' }).getAttribute('aria-checked'), 'true')
-    if (!phone) assert.match(await items(p).first().innerText(), /Rex/)
-    await shot(p, phone ? 'phone-picker-long-press' : 'desktop-picker-rex')
-    await items(p).filter({ hasText: phone ? 'Claude browser' : 'Claude app' }).click()
-    assert.equal(await p.evaluate(() => localStorage.getItem('shuttle.claude-opening')), phone ? 'browser' : 'app')
-    assert.equal(await p.evaluate(() => window.__conversationLinks.at(-1)), phone ? 'https://claude.ai/code/session_fixture' : 'claude://claude.ai/code/session_fixture')
-    assert.equal(await consoleButton(p).textContent(), phone ? 'Open in Claude browser' : 'Open in Claude app')
-    const opened = await p.evaluate(() => window.__conversationLinks.length)
-    await consoleButton(p).click()
-    assert.equal(await p.evaluate(() => window.__conversationLinks.length), opened + 1)
+    // c opens the conversation where the remembered opening says.
+    await p.keyboard.press('c')
+    assert.equal(await p.evaluate(() => window.__conversationLinks.at(-1)), 'https://claude.ai/code/session_fixture')
     if (phone) {
       await band(p).getByRole('button', { name: 'Constitution', exact: true }).click()
       await selected(p).locator('.ws-fiber-prose').waitFor()
-      const pill = p.locator('.ws-navbar .ws-head-worker .kbn-card-worker')
-      assert.match(await pill.getAttribute('aria-label'), /^\w+\. Open in Claude browser$/, 'the pill names its turn')
-      assert.equal(await pill.getAttribute('target'), null, 'a phone opens Claude in place so iOS can hand it to the app')
-      assert.equal(await pill.evaluate(el => getComputedStyle(el).userSelect), 'none', 'the held pill is a picker anchor, not text')
+      assert.match(await pill(p).getAttribute('aria-label'), /^\w+\. Open in Claude browser$/, 'the pill names its turn')
+      assert.equal(await pill(p).getAttribute('target'), null, 'a phone opens Claude in place so iOS can hand it to the app')
+      assert.equal(await pill(p).evaluate(el => getComputedStyle(el).userSelect), 'none', 'the held pill is a picker anchor, not text')
       await shot(p, 'phone-reader-pill')
-      await longPress(p, context, pill)
+      await longPress(p, context, pill(p))
       assert.equal(await items(p).count(), 1)
       await shot(p, 'phone-reader-pill-picker')
       await p.keyboard.press('Escape')
@@ -126,13 +113,7 @@ try {
       await shot(p, 'desktop-settings-guidance')
       await p.keyboard.press('Escape')
     }
-    if (!phone) {
-      await open(p, 'tmux')
-      await consoleButton(p).click({ button: 'right' })
-      assert.match(await items(p).first().innerText(), /Terminal/)
-      await shot(p, 'desktop-picker-terminal')
-    }
     await context.close()
-    console.log(`PASS Console header, picker and remembered opening (${phone ? 'phone' : 'desktop'})`)
+    console.log(`PASS Console header, c, picker and remembered opening (${phone ? 'phone' : 'desktop'})`)
   }
 } finally { await browser.close() }
