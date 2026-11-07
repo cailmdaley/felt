@@ -6,61 +6,57 @@ sees it.
 
 ## Voice band (`voice-band.tsx`)
 
-One dim voice line in every Claude session, read from the Shuttle
-daemon's `/api/v1/voice` and `/api/v1/speak`: every 150 ms while the mic is
-here (the level ticker moves), 500 ms otherwise, 5 s while both say
-unavailable.
+One dim line in every Claude session, read from the Shuttle daemon: pins at
+the left, the mic's state beside them.
+
+```
+☰  ⌗  ⧉²          🔊 12 words… ✕
+☰  ⌗  ⧉²          🔈 → voice-modes · 8 words… ✕
+☰  ⌗  ⧉²          🔇
+```
+
+**Pins**, in a Shuttle worker's session: `☰` its constitution, `⌗` its
+tapestry (only when the fiber's folder has `tapestry.html`), `⧉n` its sent
+files with their count (only when there are some, from `/api/v1/sent-files`).
+Each opens that page on the board through `POST /api/v1/board/open`: the
+fiber's constitution, its tapestry, or its row on its constitution's page,
+unfolded to the files it holds. Read every 5 s.
+
+**Audio**, from `/api/v1/voice` every 150 ms while words come to this session,
+500 ms otherwise, 5 s while the daemon says unavailable:
+
+| State | Text |
+| --- | --- |
+| sound arriving (mic level above -50 dBFS) | `🔊` |
+| mic open and quiet | `🔈` |
+| muted, or a meeting paused | `🔇` alone |
+| words said and not yet sent | ` n words…` after the glyph, then `✕` |
+| words go to another card | ` → <slug>`, then ` · n words…` when there are some |
+| Listening off | nothing |
+
+The slug is the last segment of the destination's path id, else its name. A
+meeting reads as following. Clicking the glyph toggles the mute
+(`POST /api/v1/voice/toggle`, the route the board's and the global hotkey's
+mute use too); `✕` drops the words not yet sent (`POST /api/v1/voice/discard`).
+With no pins and no audio the line is not drawn.
 
 **Placement** is the plugin option `placement` (`/config`, row "Voice line
 placement", or `pluginConfigs` in settings):
 
-- `above` (default): its own band above the prompt, the speaker
-  right-aligned. Claude Code draws its `[-]` collapse control beside it and
-  keeps its status row between the band and the input.
+- `above` (default): its own band above the prompt, the audio centred in the
+  room the pins leave. Claude Code draws its `[-]` collapse control beside it
+  (`ctrl+x ctrl+a`); no mod can remove it.
 - `below`: on the hint row under the prompt, in place of the engine's hint
   text (`(shift+tab to cycle)`, `esc to interrupt`), costing no line. The
-  engine still draws its permission-mode pill and a ` · ` before the voice
-  line (`⏵⏵ auto mode on · ▁▂▃…  🔈 felt debug 1`); no hook or setting removes
-  them. With nothing to show, the engine's own hint returns. The voice line
-  is not right-aligned there, and the keyboard focus path does not reach it.
+  engine still draws its permission-mode pill and a ` · ` before the line; no
+  hook or setting removes them. With nothing to show, the engine's own hint
+  returns.
 
-Mic side, at the left:
-
-| State | Text |
-| --- | --- |
-| words come to this session | `▁▁▂▅▇▅▃▂▁▁▁▁▁▁▁▁▁▁▁▁` (the last twenty mic levels, about 3 s, scrolling left; no words, which the transcript and the board show), led by `● ` in a meeting |
-| following, words go to another card | `🎤 → <card name>` |
-| a meeting joined to another card | `● meeting → <card name>` |
-| paused | `🎤 paused`, or `● meeting paused` |
-| Listening off | nothing |
-
-Speaker side, right-aligned; the line itself is never shown:
-
-| State | Text |
-| --- | --- |
-| speaking | `🔈 <voice>` |
-| held while the human talks | `🔈 paused` |
-| lines held for this card | `🔈 <n> waiting` |
-| muted | `🔈 muted` |
-| idle | nothing |
-| lines other cards hold until they are in view | `🔈 Civbench 2, felt debug 1 +1` after any state above (`🔈 aria · Civbench 2`), the two cards with most first, named by the daemon; each card is its own chip |
-
-With nothing on either side the band is not drawn.
-
-**Colour**, from the theme so light and dark both hold: a ticker glyph at the
-floor is dim, green (`success`) through the middle, amber (`warning`) from
--20 dBFS; every other state is dim, except `🔈 <voice>` while speaking, in
-`claude`.
-
-**Keys.** Click the mic text or the speaker's state to toggle that mute. Click a held card's chip to open that card, as a click on the board does (`POST /api/v1/voice/reveal`): Rex selects its session, the mic follows, and its held lines play. From the
-keyboard: `ctrl+x tab` focuses the band, `tab` moves between the two, and
-Enter toggles the focused one. A single-letter hotkey would make the
-terminal draw a `m:` caption, so there is none. The `[-]` at the band's right
-end is Claude Code's own: it collapses the band (`ctrl+x ctrl+a`), and no mod
-can remove it.
+From the keyboard, `ctrl+x tab` focuses the band, `tab` moves between its
+buttons, and Enter presses the focused one.
 
 The session's fiber comes from `SHUTTLE_FIBER_PATH` (its path id and its
-frontmatter `id`); a session that is not a Shuttle worker never reads as
-`here`. `SHUTTLE_DAEMON_URL` overrides `http://127.0.0.1:4000`.
+frontmatter `id`); a session that is not a Shuttle worker has no pins.
+`SHUTTLE_DAEMON_URL` overrides `http://127.0.0.1:4000`.
 
 Tests: `claude plugin test claude-plugin`.
