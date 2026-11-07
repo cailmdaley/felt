@@ -140,6 +140,7 @@ defmodule ShuttleWeb.Router do
     # (unlike /file, which serves raw bytes).
     get("/board/family", BoardController, :family)
     get("/board", BoardController, :show)
+    post("/board/open", VoiceController, :open)
     get("/sent-files", SentFilesController, :show)
     post("/sent-files/clear", SentFilesController, :clear)
     # The global sent-files feed, HOST-scoped like /commits (not owner-routed):

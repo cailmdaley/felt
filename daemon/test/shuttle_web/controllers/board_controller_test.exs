@@ -205,4 +205,16 @@ defmodule ShuttleWeb.BoardControllerTest do
     assert %{"records" => []} =
              api_conn() |> get("/api/v1/board?since_ms=#{now + 1}") |> json_response(200)
   end
+
+  test "open asks every board on the stream to show a page of a fiber" do
+    {:ok, _} = Registry.register(Shuttle.Voice.Streams, :board_open, nil)
+
+    body = %{fiber_id: "01FIBER", origin: "fir", page: "tapestry"}
+    assert %{"ok" => true} = api_conn() |> post("/api/v1/board/open", body) |> json_response(200)
+    assert_receive {:board_open, %{fiber_id: "01FIBER", origin: "fir", page: "tapestry"}}
+
+    assert 400 == post(api_conn(), "/api/v1/board/open", %{fiber_id: "01FIBER", page: "x"}).status
+    assert 400 == post(api_conn(), "/api/v1/board/open", %{page: "files"}).status
+    refute_receive {:board_open, _}, 30
+  end
 end

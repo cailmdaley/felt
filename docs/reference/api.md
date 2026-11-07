@@ -63,7 +63,7 @@ time.
 | `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
 | `GET /voice/transcript` | recorder-addressed | Resolve the current following transcript as `{path, launch, recorder}` for the file reader; no capture control |
 | `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
-| `GET /voice/events` | recorder-routed for `target`, local for `focus` | The board's one live stream: server-sent `target` events, and with `rex=1` `focus` events `{fiber_id, origin, name}` when Rex's worker changes, voice on or off; 501 with nothing to carry |
+| `GET /voice/events` | recorder-routed for `target`, local for `focus` | The board's one live stream: server-sent `target` events, and with `rex=1` `focus` events `{fiber_id, origin, name}` when Rex's worker changes, voice on or off; every stream carries `open` events from `POST /board/open` |
 | `POST /voice/target` | recorder-routed | Route following to `{fiber_id, origin?, name?}`, the board's view; returns voice state, unchanged unless following |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
@@ -724,6 +724,7 @@ ledgers](../shuttle/telemetry.md) for what writes the files underneath.
 | `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |
 | `GET /board` | `events.jsonl` | Host-local board records since `since_ms`, oldest first; ETag/304 supported |
 | `GET /board/family` | local and remote board feeds | Current family board, resolved against constitution containment |
+| `POST /board/open` | this daemon's boards | `{fiber_id, origin?, page}` asks every board on this daemon's `/voice/events` stream to show that fiber's `constitution`, `tapestry` or `files` page; `origin` defaults to this host |
 
 `/activity` takes `from_ms` and `to_ms` and answers
 `{host, from_ms, to_ms, buckets}`. It rounds the window inward to whole minutes

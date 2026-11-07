@@ -14,42 +14,57 @@ defmodule ShuttleWeb.VoiceController do
   the current one on connect, while the recorder is on this host. With `rex=1`
   it also streams each worker Rex moves to as `focus` events, whether or not
   voice is on; Rex's app is on this daemon's host, whatever the recorder, and
-  nothing is sent for it on connect. A comment every 15 s holds the connection.
-  A stream with nothing to carry answers 501, and the board polls.
+  nothing is sent for it on connect. Every stream carries `open` events from
+  `open/2`. A comment every 15 s holds the connection.
   """
   def events(conn, params) do
-    rex = params["rex"] == "1"
-
     recorder =
       match?({:ok, :local}, MeetingRouter.select_start(Map.drop(params, ["prefer", "rex"])))
 
-    if recorder or rex do
-      if recorder, do: Voice.subscribe()
-      if rex, do: Shuttle.RexFocus.subscribe()
+    if recorder, do: Voice.subscribe()
+    if params["rex"] == "1", do: Shuttle.RexFocus.subscribe()
+    Registry.register(Shuttle.Voice.Streams, :board_open, nil)
 
-      conn =
-        conn
-        |> put_resp_content_type("text/event-stream")
-        |> put_resp_header("cache-control", "no-cache, no-transform")
-        |> put_resp_header("x-accel-buffering", "no")
-        |> send_chunked(200)
+    conn =
+      conn
+      |> put_resp_content_type("text/event-stream")
+      |> put_resp_header("cache-control", "no-cache, no-transform")
+      |> put_resp_header("x-accel-buffering", "no")
+      |> send_chunked(200)
 
-      first = if recorder, do: event("target", Voice.snapshot().target), else: ": open\n\n"
+    first = if recorder, do: event("target", Voice.snapshot().target), else: ": open\n\n"
 
-      case chunk(conn, first) do
-        {:ok, conn} -> stream(conn)
-        {:error, _} -> conn
-      end
-    else
-      conn |> put_status(501) |> json(%{error: "voice events stream from the recorder's host"})
+    case chunk(conn, first) do
+      {:ok, conn} -> stream(conn)
+      {:error, _} -> conn
     end
   end
+
+  @doc """
+  `POST /api/v1/board/open {fiber_id, origin?, page}` asks every board on this
+  daemon's stream to show a page of a fiber: `constitution`, `tapestry` or
+  `files`. The origin defaults to this host.
+  """
+  def open(conn, %{"fiber_id" => id, "page" => page} = params)
+      when is_binary(id) and id != "" and page in ~w(constitution tapestry files) do
+    open = %{fiber_id: id, origin: params["origin"] || MeetingRouter.own_host(), page: page}
+
+    Registry.dispatch(Shuttle.Voice.Streams, :board_open, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:board_open, open})
+    end)
+
+    json(conn, %{ok: true})
+  end
+
+  def open(conn, _params),
+    do: conn |> put_status(400) |> json(%{error: "fiber_id and page are required"})
 
   defp stream(conn) do
     next =
       receive do
         {:voice_target, target} -> event("target", target)
         {:rex_focus, target} -> event("focus", target)
+        {:board_open, open} -> event("open", open)
       after
         15_000 -> ": keepalive\n\n"
       end
