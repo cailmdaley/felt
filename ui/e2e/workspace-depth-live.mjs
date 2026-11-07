@@ -21,7 +21,7 @@ async function pageFor(viewport) {
     return route.abort()
   })
   await page.goto(url)
-  await page.locator('.kbn-desk .kbn-card').filter({ hasText: name }).waitFor()
+  await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).waitFor()
   await page.waitForTimeout(500)
   return page
 }
@@ -49,7 +49,7 @@ async function shot(page, file) {
   await page.screenshot({ path })
   evidence.screenshots.push(path)
 }
-async function clickCard(page) { await page.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click() }
+async function clickCard(page) { await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click() }
 try {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
     const page = await pageFor(viewport), size = `${viewport.width}x${viewport.height}`

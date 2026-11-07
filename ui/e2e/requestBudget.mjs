@@ -51,7 +51,7 @@ p.on('pageerror', error => errors.push(error.message))
 try {
   await p.clock.install()
   await p.goto(url)
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Music' }).first().click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Music"])`).first().click()
   const selected = () => p.locator('.ws-page.ws-selected')
   // A Desk click lands on the thread's row on its constitution's page, where its report opens.
   await selected().locator('.fp-row[aria-selected="true"] [data-kind="lead"]').filter({ hasText: 'Report' }).click()

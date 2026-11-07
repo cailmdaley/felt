@@ -26,7 +26,7 @@ async function pickerReadable(p, requireFocus = true) {
 }
 async function open(p, backend) {
   await p.goto(`${base}&console=${backend}`)
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
   await consoleButton(p).waitFor({ state: 'visible' })
 }
 async function headerFits(p) {

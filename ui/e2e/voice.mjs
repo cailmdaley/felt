@@ -11,7 +11,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme })
     const page = await context.newPage()
     await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=music`)
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Music' }).first().click()
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Music"])`).first().click()
     const band = page.locator('.ws-stage-band')
     const arm = band.locator('.kbn-ctl-meet-arm')
     await arm.waitFor()
@@ -64,7 +64,7 @@ try {
       return Promise.resolve(new Response(JSON.stringify({ ...voice.status, target })))
     }
   })
-  await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Music' }).first().click()
+  await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Music"])`).first().click()
   await page.waitForFunction(() => window.__routes.length > 0)
   const [route] = await page.evaluate(() => window.__routes)
   assert.match(route.name, /Music/)

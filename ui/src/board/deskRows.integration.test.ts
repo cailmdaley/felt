@@ -27,7 +27,8 @@ describe('a Desk row is a line, not a card', () => {
 
   it('carries the title and the glance facts, and nothing read', () => {
     const root = draw()
-    expect(root.querySelector('[data-fiber-id="work/run"] .kbn-card-name')?.textContent).toBe(review.name)
+    expect(root.querySelector('[data-fiber-id="work/run"] .kbn-card-name')?.textContent).toBe('run')
+    expect(root.querySelector<HTMLElement>('[data-fiber-id="work/run"] .kbn-card-name')?.title).toBe(review.name)
     for (const heavy of ['.kbn-card-outcome', '.kbn-card-id', '.kbn-card-question', '.kbn-card-actor', '.kbn-card-due', '.ws-thumbnail']) expect(root.querySelector(heavy), heavy).toBeNull()
     expect(root.querySelector('.kbn-card-report')).toBeNull()
   })

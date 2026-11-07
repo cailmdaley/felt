@@ -27,7 +27,7 @@ const COUNT_WORD: Partial<Record<ThreadState, [string, string]>> = { waiting: ['
 
 /**
  * A Desk row and the threads it holds in its section, shared by desktop and
- * phone. A row is a family's root, in its own state's section and heading
+ * phone, named by its slug with its name in the tooltip. A row is a family's root, in its own state's section and heading
  * each section of work its threads stand in (`frontier`, `headers`). Beneath
  * it hang the family's threads in that section, each under its nearest shown
  * ancestor and named by its slug path from there (`sectionOutline`).
@@ -39,10 +39,8 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
   // A root heading a section its own state is not in keeps its own mark, faintly.
   host.classList.toggle('kbn-card-header', !!card.deskSection)
   if (card.deskSection) host.dataset.deskSection = card.deskSection
-  if (index.ancestry(self).length) {
-    const title = host.querySelector<HTMLElement>('.kbn-card-name, .kbn-cluster-item-title')
-    if (title) { title.textContent = rowLabel(index, self); title.title = card.name }
-  }
+  const title = host.querySelector<HTMLElement>('.kbn-card-name, .kbn-cluster-item-title')
+  if (title) { title.textContent = rowLabel(index, self); title.title = card.name }
   const outline = sectionOutline(index, self, state)
   const { elapsed } = workerPlateFacts(card, now)
   const age = (): void => {

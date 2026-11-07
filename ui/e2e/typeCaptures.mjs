@@ -16,7 +16,7 @@ const settle = page => page.evaluate(() => new Promise(r => requestAnimationFram
 
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
-  const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).first().locator('.kbn-card-name')
+  const name = page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   const header = page.locator('.ws-stage-band .ws-band-head')

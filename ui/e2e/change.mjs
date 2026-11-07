@@ -9,7 +9,7 @@ export function registerChangeJourneys(test) {
   const open = async page => {
     page.setDefaultTimeout(30_000)
     await page.goto(page.url().replace('example=workspace', 'example=change'))
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
     await page.locator('.ws-stage-band .ws-band-head').waitFor()
     await sent(page, '/family.change.json')
     await page.locator('.ws-selected .change-reader').waitFor()
@@ -92,7 +92,7 @@ export function registerChangeJourneys(test) {
       })
     })
     await page.goto(page.url().replace('example=workspace', 'example=change'))
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
     await page.locator('.ws-selected .fp-row[aria-selected="true"] [data-kind="lead"]').filter({ hasText: 'Report' }).click()
     const link = page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' })
     await link.waitFor()

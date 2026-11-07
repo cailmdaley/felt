@@ -10,7 +10,7 @@ const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?exa
 const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
-  const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).first().locator('.kbn-card-name')
+  const name = page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${title}"])`).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   const header = page.locator('.ws-stage-band .ws-band-head')
@@ -240,7 +240,7 @@ export function registerHeaderBarJourneys(test) {
     await page.keyboard.press('Escape')
     assert.equal(await page.locator('.ws-stage-band .kbn-detail-transcript').count(), 0)
     await page.locator('.ws-band-leave').click()
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
     const foreign = page.locator('.ws-stage-band')
     assert.match(await foreign.locator('.ws-voice-strip').innerText(), /^Meeting → /)
     for (const width of [1440, 390]) {

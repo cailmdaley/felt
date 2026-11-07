@@ -26,7 +26,7 @@ try {
       return new Response(source, { headers })
     }
   }, source)
-  await page.locator('.kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+  await page.locator(`.kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
   const landing = await page.evaluate(() => location.hash)
   const open = async () => (await sentFiles(page)).and(page.locator('[data-key$="/family.change.json"]')).click()
   await open()

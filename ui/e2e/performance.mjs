@@ -40,7 +40,7 @@ async function openScenario(name, query, openCard) {
   await page.locator('.kbn-desk').waitFor()
   const harnessReadyMs = await page.evaluate(() => performance.now() - window.__perfNavigationStart)
   if (openCard) {
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
     await page.locator('.ws-stage-band .ws-band-head').waitFor()
   }
   await page.screenshot({ path: join(screenshotDir, `${name}.png`) })
@@ -246,7 +246,7 @@ async function measureColdApp() {
     }
     const main = initial.find(entry => /^index-.*\.js$/.test(entry.name))
     if (process.env.REPORT_ONLY !== '1') assert.ok(main && main.transferBytes < 260_000, 'cold main script stays below 260 KB transferred')
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Math note' }).click()
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Math note"])`).click()
     await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => /katex/.test(new URL(entry.name).pathname)))
     const afterMathUse = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => ({
       name: new URL(entry.name).pathname.split('/').at(-1), transferBytes: entry.transferSize, encodedBytes: entry.encodedBodySize,

@@ -28,9 +28,7 @@ export function sectionOutline(index: ThreadIndex, row: KanbanCard, state: Threa
   return rows
 }
 
-/** A Desk row's own label: its name at a family's root, else its slug path from the root, a missing ancestor named by its path. */
+/** A Desk row's own label: its slug, after the path of any ancestor missing from the board. */
 export function rowLabel(index: ThreadIndex, card: KanbanCard): string {
-  const ancestry = index.ancestry(card)
-  if (!ancestry.length) return card.name
-  return [...ancestry.map(step => step.card ? slug(step.card) : step.name), slug(card)].join('/')
+  return [...index.ancestry(card).map(step => step.card ? slug(step.card) : step.name), slug(card)].join('/')
 }

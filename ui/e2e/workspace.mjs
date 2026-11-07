@@ -41,7 +41,7 @@ async function openPlainThemeMenu(p) {
 }
 /** A Desk click lands on the constitution's map. */
 async function land(p) {
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click()
   await selected(p).waitFor()
 }
 async function open(p, expected = 'calibration-report') {
@@ -401,7 +401,7 @@ test('Desk family action menus preserve native activation and Resting row stacki
     }
     await window.__harness.modal.fetchAndRender()
   })
-  const resting = p.locator('.kbn-cluster-item').filter({ hasText: name })
+  const resting = p.locator(`.kbn-cluster-item:has(.kbn-cluster-item-title[title*="${name}"])`)
   const geometry = await resting.evaluate(row => {
     const title = row.querySelector('.kbn-cluster-item-title').getBoundingClientRect()
     const rect = row.getBoundingClientRect()
@@ -863,7 +863,7 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
 // While the reader is open the bar marks the view it came from: that tab (or
 // its key) closes the reader back to it; another tab switches and closes.
 const origins = {
-  desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click() } },
+  desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click() } },
   shelf: { other: 'desk', open: async p => { await barTab(p, 'shelf').click(); await p.locator('.ws-overview-folio').filter({ hasText: name }).click() } },
   chronicle: { other: 'shelf', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
 }
@@ -1041,7 +1041,7 @@ test('Verdicts live in the band, with the undo line on its head; keys reach them
   await p.clock.runFor(6000)
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
   await leave(p); await chooseDeskColumn(p, 1)
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   assert.equal(await band(p).locator('.ws-band-acts > .ws-band-open').count(), 1)
   assert.ok(await band(p).getByRole('button', { name: 'Close for review', exact: true }).isVisible())
   assert.ok(await band(p).getByRole('button', { name: 'Rest', exact: true }).isVisible())
@@ -1080,7 +1080,7 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
   if (!theme) {
     await p.keyboard.press('z')
     await p.goto(url)
-    const card = p.locator('.kbn-desk .kbn-card').filter({ hasText: name })
+    const card = p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`)
     await card.click({ button: 'right' })
     const desk = [await verdictLook(p.getByRole('menuitem', { name: 'Temper', exact: true })), await verdictLook(p.getByRole('menuitem', { name: 'Discard', exact: true }))]
     assert.ok(desk.every(look => look.ratio >= 4.5), 'Desk menu verdict labels stay legible')
@@ -1184,7 +1184,7 @@ test('a moves in-flight work to review through the Desk drag\'s transition, afte
   await p.evaluate(() => { window.confirm = () => true })
   const posts = async () => (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
   await chooseDeskColumn(p, 1)
-  const card = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
+  const card = p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`)
   await card.click()
   await appFocus(p); await p.keyboard.press('a')
   const line = band(p).locator('.ws-band-acts > .ws-verdict-undo')
@@ -1211,9 +1211,9 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
   const controls = surface === 'Desk'
     ? p.getByRole('menu')
     : band(p).locator('.ws-band-acts')
-  if (surface === 'Desk') await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click({ button: 'right' })
+  if (surface === 'Desk') await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click({ button: 'right' })
   await controls.getByRole(surface === 'Desk' ? 'menuitem' : 'button', { name: /Discard/ }).click()
-  const host = surface === 'Desk' ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-meta') : controls
+  const host = surface === 'Desk' ? p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).locator('.kbn-card-meta') : controls
   assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
   assert.equal(await p.locator('.ws-verdict-toasts').count(), 0, 'no floating line')
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
@@ -1259,7 +1259,7 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
 
 test('Temper remains available by key for drafts and work in flight through the undo queue', async p => {
   await chooseDeskColumn(p, 0)
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
   assert.equal(await band(p).locator('.ws-fiber-acts .kbn-ctl-temper').isVisible(), false, 'draft headers reserve their space for session actions')
   await p.keyboard.press('t')
   await band(p).locator('.ws-fiber-acts .ws-verdict-undo').waitFor()
@@ -1267,7 +1267,7 @@ test('Temper remains available by key for drafts and work in flight through the 
   await poll(p, () => !document.querySelector('.ws-verdict-undo'))
   await leave(p)
   await chooseDeskColumn(p, 1)
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   // A live worker asks once at the gesture; declining queues nothing.
   const asked = [], dialogErrors = []
   let finishDialog
@@ -1292,7 +1292,7 @@ test('Pending verdicts on two fibers commit independently', async p => {
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await p.keyboard.press('t')
   await leave(p)
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Mask validation notes' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Mask validation notes"])`).click()
   await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Mask validation notes')
   await p.keyboard.press('x')
   assert.equal(await p.evaluate(() => new Set([...document.querySelectorAll('[data-verdict-pending]')].map(el => el.dataset.verdictKey)).size), 2)
@@ -1301,7 +1301,7 @@ test('Pending verdicts on two fibers commit independently', async p => {
 })
 
 test('Conversation c (and its dot alias) uses the pill destination in reader and selected Desk card', async p => {
-  const remote = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
+  const remote = p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`)
   await remote.click()
   const opened = n => poll(p, n => window.__harness.events.filter(e => e.type === 'open-worker').length === n, n)
   await p.keyboard.press('c'); await opened(1)
@@ -1312,7 +1312,7 @@ test('Conversation c (and its dot alias) uses the pill destination in reader and
 })
 
 test('A click on a thread only asks Rex to select its window, and opens nothing when it has none; c opens it', async p => {
-  const remote = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
+  const remote = p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`)
   const session = 'remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle'
   await p.evaluate(session => window.__harness.windowless.add(session), session)
   const attaches = () => p.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.endsWith('/api/v1/attach')).map(r => JSON.parse(r.body)))
@@ -1364,7 +1364,7 @@ test('Overview first visit names its window and a numeric stored visit survives 
   assert.equal(typeof await readSeen(), 'number', 'the visit is stored as a JSON number')
   assert.equal(await readSeen(), seen)
   await p.reload()
-  await p.locator('.kbn-card').filter({ hasText: name }).waitFor()
+  await p.locator(`.kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).waitFor()
   assert.equal(await readSeen(), seen, 'reload retains the seeded visit timestamp')
 })
 
@@ -1769,7 +1769,7 @@ test('A PDF iframe in a report is rendered by the trusted reader inside the opaq
 })
 
 test('Remote worker conversation records attach handler without launching a terminal', async p => {
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   await p.keyboard.press('c')
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
@@ -1778,7 +1778,7 @@ test('Remote worker conversation records attach handler without launching a term
 })
 
 test("Console in the header opens the same remote worker as c", async p => {
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   await band(p).getByRole('button', { name: 'Open in Terminal', exact: true }).click()
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
@@ -2191,7 +2191,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     if (device === 'phone') assert.ok((await line.getByRole('button').boundingBox()).height >= 44)
     await shot('undo-line'); await p.keyboard.press('z'); await leave(p)
     await chooseDeskColumn(p, 1)
-    await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
     const state = band(p).locator('.ws-band-state')
     await poll(p, () => document.querySelector('.ws-stage-band .ws-band-state')?.textContent === 'Working')
     assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 0, 'the state is said once, without a second worker pill')
@@ -2204,14 +2204,14 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     })
     await poll(p, () => document.querySelector('.ws-stage-band .ws-band-state')?.textContent === 'Your turn')
     await shot('waiting'); await leave(p); await chooseDeskColumn(p, 0)
-    await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
+    await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     await shot('no-worker')
   }, viewport)
 }
 
 test('The band state word stays still and follows the worker', async p => {
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   const state = band(p).locator('.ws-band-state')
   await state.waitFor()
   assert.equal(await state.evaluate(el => getComputedStyle(el).animationName), 'none')
@@ -2280,7 +2280,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /basalt-login-02/)
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await leave(p); await chooseDeskColumn(p, 1)
-    await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
     assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 0)
     await bandMenu(p, 'Settings')
     const cadence = band(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
@@ -2434,7 +2434,7 @@ test('Plain removes custom and bundled styling, persists, and can restore custom
 })
 
 test('Broken theme falls back to its bundled base', async p => {
-  await p.locator('.kbn-card').filter({ hasText: 'Mask validation notes' }).click()
+  await p.locator(`.kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Mask validation notes"])`).click()
   await choose(p, 'Constitution')
   await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'laboratory-paper')
   const theme = await p.locator('.ws-reader').getAttribute('data-ws-theme')
@@ -2480,7 +2480,7 @@ for (const [label, theme] of [['Night Chart', 'night-chart'], ['Lamplight', 'lam
   // Remote covariance review declares Night Chart: a dark system shows it, and a Lamplight choice leaves a declared dark theme alone.
   await p.emulateMedia({ colorScheme: 'dark' })
   if (theme === 'lamplight') await chooseAppearance(p, 'dark', 'lamplight')
-  await p.locator('.kbn-card').filter({ hasText: theme === 'lamplight' ? name : 'Remote covariance review' }).click()
+  await p.locator(`.kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${theme === 'lamplight' ? name : 'Remote covariance review'}"])`).click()
   await choose(p, 'Constitution')
   await poll(p, theme => document.querySelector('.ws-reader')?.dataset.wsThemeName === theme, theme)
   const contrasts = await p.locator('.ws-stage-column').evaluate(column => {
@@ -2664,7 +2664,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     await p.keyboard.press('Escape')
   }
   await leave(p); await chooseDeskColumn(p, 1)
-  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-band-state', '.ws-family-counts', '.fp-title'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   for (const control of ['.kbn-ctl-review', '.kbn-ctl-rest']) {
@@ -2777,7 +2777,7 @@ try {
     try {
       await page.clock.install({ time: new Date('2026-10-04T14:00:00Z') })
       await page.goto(url, { timeout: 15000 })
-      await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor({ state: 'attached', timeout: 15000 })
+      await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).waitFor({ state: 'attached', timeout: 15000 })
       await run(page)
     } catch (error) { failure = error; await mkdir(shots, { recursive: true }); await page.screenshot({ path: resolve(shots, 'failure-' + name.replace(/[^a-z0-9]+/gi, '-').slice(0, 100) + '.png') }).catch(() => {}) }
     finally {

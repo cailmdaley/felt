@@ -47,7 +47,7 @@ describe('a Desk row and the threads it holds in its section', () => {
   })
   it('heads Working with the root when its own state is another, faint, its working threads folded until opened, each level on its own', () => {
     const { host, name, names, count } = row({ ...root, deskSection: 'working' })
-    expect(name.textContent).toBe('Hub')
+    expect([name.textContent, name.title]).toEqual(['hub', 'Hub'])
     expect(host.classList.contains('kbn-card-header')).toBe(true)
     expect(count!.querySelector('.kbn-count-working')?.textContent).toBe('2 working')
     expect(names()).toEqual([])
@@ -76,7 +76,7 @@ describe('a Desk row and the threads it holds in its section', () => {
     const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
       stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn() })
     const section = renderer.renderNowSection(data.now, {})
-    expect([...section.querySelectorAll('.kbn-card .kbn-card-name')].map(n => n.textContent)).toEqual(['Hub', 'Hub'])
+    expect([...section.querySelectorAll('.kbn-card .kbn-card-name')].map(n => n.textContent)).toEqual(['hub', 'hub'])
     expect([...section.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(n => n.textContent)).toEqual(['busy/asks', 'deeper'])
   })
 })

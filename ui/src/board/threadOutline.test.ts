@@ -20,7 +20,7 @@ it('groups a family\'s threads beneath its root in each section, the ones betwee
   expect(sectionOutline(index, a).map(row => [row.path, row.depth, row.parent.name])).toEqual([['a1/b1', 0, 'A']])
   // Working: A heads it, with a1 beneath and A1's own working thread under that.
   expect(sectionOutline(index, a, 'working').map(row => [row.path, row.depth, row.parent.name])).toEqual([['a1', 0, 'A'], ['b2', 1, 'A1']])
-  expect(rowLabel(index, a)).toBe('A')
+  expect(rowLabel(index, a)).toBe('a')
 })
 
 it('nests a thread under its nearest shown ancestor, indenting only by the rows shown', () => {

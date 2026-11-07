@@ -11,7 +11,7 @@ const root = 'Calibrate the shear response'
 /** The family's board, with a terminal behind every worker, so asking Rex leaves an event. */
 async function board(page) {
   await page.goto(url)
-  await page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).first().waitFor()
+  await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).first().waitFor()
   await page.evaluate(async () => {
     for (const { runtime } of window.__harness.MOCK_FEED.fibers) if (runtime) runtime.tmux_session = runtime.session_uuid
     await window.__harness.modal.fetchAndRender()
@@ -30,7 +30,7 @@ export function registerMapViewJourneys(test) {
   const row = (page, name) => tree(page).locator('.fp-row').filter({ has: page.locator('.fp-name').getByText(name, { exact: true }) })
   const landed = async page => {
     await board(page)
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).last().locator('.kbn-card-name').click()
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).last().locator('.kbn-card-name').click()
     await tree(page).waitFor()
   }
 
