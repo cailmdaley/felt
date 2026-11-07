@@ -7,6 +7,7 @@ import { familyModel, type FamilyModel, type MapFeeds, type MapThread } from './
 /** How long a closed family stays on the just-finished arm. */
 export const LATELY_MS = 3 * DAY
 
+/** The Desk as a thread: no fiber, no state and, at mass nothing, a small quiet body. */
 const CENTRE: KanbanCard = { id: 'in-flight', name: 'In flight', path: '', originId: '', status: 'open', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
 
 const within = (model: FamilyModel, thread: MapThread): MapThread[] => [thread, ...thread.children.flatMap(key => within(model, model.threads.get(key)!))]
@@ -35,8 +36,7 @@ export function inFlightModel(desk: KanbanResponse['now'], cards: readonly Kanba
   const hung = cards.map(card => families.has(index.card(card)) ? { ...card, orchestrator: CENTRE.id } : card)
   const model = familyModel(new ThreadIndex([CENTRE, ...hung]), CENTRE, CENTRE, feeds, now)
   for (const key of model.root.children) raise(model, model.threads.get(key)!)
-  model.root.word = `${desk.inFlight.length} in flight`
-  model.root.launches = [...model.threads.values()].flatMap(thread => thread.launches)
-  model.root.commits = [...model.threads.values()].flatMap(thread => thread.commits)
-  return { ...model, finished: new Set([...finished].map(threadKey)) }
+  model.root.name = `In flight · ${desk.inFlight.length}`
+  model.root.word = ''
+  return { ...model, mass: 0, finished: new Set([...finished].map(threadKey)) }
 }

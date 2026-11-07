@@ -47,6 +47,9 @@ export const htmlEl = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: stri
 }
 export const shortAgo = (at: number, now: number): string => ago(at, now).replace(/ ago$/, '').replace('just now', 'now')
 
+/** A thread's state and last move, in a line; nothing for a centre with no state of its own. */
+export const standingLine = (thread: MapThread, now: number): string => thread.word ? `${thread.word} · ${shortAgo(thread.lastMove, now)}` : ''
+
 /** The host's stage for a drawing, with a click on any thread's mark wired to `open`. */
 export function mount(host: HTMLElement, name: string, model: FamilyModel, open: OpenThread): Stage {
   const width = host.clientWidth || 1000, height = host.clientHeight || 680, narrow = width < NARROW
@@ -95,7 +98,7 @@ export function tagThread(el: Element, thread: MapThread): void {
 /** The one focusable element a thread has in a drawing. */
 export function optionFor(el: Element, thread: MapThread, model: FamilyModel): void {
   el.setAttribute('role', 'option')
-  el.setAttribute('aria-label', `${thread.name}, ${thread.word}, ${shortAgo(thread.lastMove, model.now)}`)
+  el.setAttribute('aria-label', `${[thread.name, thread.word].filter(Boolean).join(', ')}, ${shortAgo(thread.lastMove, model.now)}`)
   el.setAttribute('aria-posinset', String(thread.rank + 1))
   el.setAttribute('aria-setsize', String(model.order.length))
   if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1')

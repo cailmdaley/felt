@@ -149,17 +149,22 @@ const ageShare = (age: number): number => Math.max(0, Math.min(1, Math.log(1 + a
  * room needs, so its name runs out from the arm on a line of its own:
  * to do from the foot, in order, its kinds set apart; just finished where its
  * age falls on the log scale, pushed along only as far as its neighbours need.
- * A short queue spreads to fill its arm. What has no row runs on around the
- * rim, small and for the zoom to name.
+ * A short queue spreads to fill its arm, and a long one gives up its scenes'
+ * room before anyone's row. What has no row runs on around the rim, small and
+ * for the zoom to name.
  */
 function layArm(kids: readonly MapThread[], arm: Arm, frame: Frame, curve: Curve, count: (kid: MapThread) => number, now: number): { spots: Spot[]; segments: Segment[] } {
   const sign = arm === 'todo' ? 1 : -1, { reach } = frame
   const footY = curve.points[curve.foot].y, run = footY - curve.points[curve.tip].y - LABEL_HEIGHT
-  const rooms = kids.map(kid => count(kid) > 1 ? Math.min(reach * ROOM_MOST, ROOM_LEAF + ROOM_GROWTH * Math.sqrt(count(kid) - 1)) : ROOM_LEAF)
+  const wanted = kids.map(kid => count(kid) > 1 ? Math.min(reach * ROOM_MOST, ROOM_LEAF + ROOM_GROWTH * Math.sqrt(count(kid) - 1)) : ROOM_LEAF)
   const radii = kids.map(kid => bodyRadius(kid, 1))
+  const row = frame.narrow ? RIM_STEP : LABEL_HEIGHT
+  const needOf = (room: number, n: number): number => Math.max(row, 2 * radii[n] + 4, count(kids[n]) > 1 ? room * 1.4 : 0)
+  const squeeze = Math.min(1, run / wanted.reduce((sum, room, n) => sum + needOf(room, n), 0))
+  const rooms = wanted.map(room => Math.max(ROOM_LEAF, room * squeeze))
   const wants = kids.map(kid => arm === 'done' ? run * ageShare(now - kid.lastMove) : 0)
   const gaps = kids.map((kid, n) => n && arm === 'todo' && kid.standing !== kids[n - 1].standing ? KIND_GAP : 0)
-  const needs = kids.map((_, n) => Math.max(frame.narrow ? RIM_STEP : LABEL_HEIGHT, 2 * radii[n] + 4, count(kids[n]) > 1 ? rooms[n] * 1.4 : 0))
+  const needs = rooms.map(needOf)
   const roomy = Math.min(ROOMY, (run + needs[0]) / (kids.length + 1))
   const ups = stationsOf(needs.map(need => Math.max(need, arm === 'todo' ? roomy : need)), gaps, wants, run)
   const pitch = Math.hypot(curve.points[curve.tip + 1].x - curve.points[curve.tip].x, curve.points[curve.tip + 1].y - curve.points[curve.tip].y)

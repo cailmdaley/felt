@@ -33,7 +33,7 @@
 .family-map .fm-unpin[hidden] { display: none; }
 .family-map .fm-star { transition: transform var(--fm-drift) ease-in-out, opacity .3s; animation: fm-appear .6s ease-out; }
 .family-map .fm-star[data-inert] { pointer-events: none; }
-.family-map .fm-star[data-hidden]:not([data-selected], :focus-visible) { opacity: 0; }
+.family-map .fm-star[data-hidden]:not(:focus-visible) { opacity: 0; }
 .family-map .fm-star-hit { fill: transparent; }
 .family-map .fm-life { pointer-events: none; animation: fm-appear .3s ease-out; }
 .family-map .fm-life path { fill: none; stroke-width: 1; }

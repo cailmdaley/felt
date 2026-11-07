@@ -1,6 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, ATTENTION_WORD, conversable, familyModel, isDrawn, needsHuman, type FamilyModel, type MapFeeds, type MapFile, type MapThread } from '../family/model.js'
-import { htmlEl as el, markPath, markSelection, shortAgo, svgEl, type Drawing, type Holds, type Sight } from '../family/drawing.js'
+import { htmlEl as el, markPath, markSelection, standingLine, svgEl, type Drawing, type Holds, type Sight } from '../family/drawing.js'
 import { aim, arrival, sighted } from '../family/orbit.js'
 import { ROSTER, chooseDrawing, chosenDrawing } from '../family/roster.js'
 import { FieldZoom, WHOLE, type View } from '../family/zoom.js'
@@ -439,7 +439,7 @@ export class FamilyPage {
     title.querySelector('.ws-family-peek-meta')!.textContent = this.peekMeta(thread)
     this.peek.dataset.asks = String(needsHuman(thread))
   }
-  private peekMeta(thread: MapThread): string { return [thread.word, shortAgo(thread.lastMove, this.model!.now)].join(' · ') }
+  private peekMeta(thread: MapThread): string { return standingLine(thread, this.model!.now) }
   private buildPeek(thread: MapThread): void {
     const live = (): MapThread => this.model!.threads.get(thread.key)!
     const card = (): KanbanCard => live().card

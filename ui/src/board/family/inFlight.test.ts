@@ -46,8 +46,9 @@ describe('everything in flight as one family', () => {
     expect(model.threads.get(threadKey(nested))!.depth).toBe(3)
     expect(on.children).toEqual(own.root.children)
     expect(model.root.card.path).toBe('')
-    expect(model.root.name).toBe('In flight')
-    expect(model.root.word).toBe('3 in flight')
+    expect(model.root.name).toBe('In flight · 3')
+    expect(model.root.word).toBe('')
+    expect(model.root.launches).toEqual([])
     expect(model.current).toBe(model.root.key)
   })
   it('leaves the board\'s own index as it was', () => {
@@ -62,16 +63,13 @@ describe('everything in flight as one family', () => {
     expect(body.standing).toBe('working')
     expect(model.threads.get(threadKey(quiet))!.tone).toBe('working')
   })
-  it('puts what asks first along To do, numbered by place, and rings the centre with the fleet\'s work', () => {
-    const fed: MapFeeds = { ...noFeeds, marks: thread => thread.id === 'quiet' ? { launches: [now - hour], commits: [now - 2 * hour] } : undefined }
-    const plate = radialLayout(inFlightModel(desk, cards, index, fed, now), 800, 1000)
+  it('puts what asks first along To do, numbered by place', () => {
+    const plate = radialLayout(model, 800, 1000)
     const families = plate.stars.filter(star => star.owner === plate.stars[0])
     const numbered = families.filter(star => star.numeral).sort((a, b) => a.numeral - b.numeral)
     expect(numbered.map(star => star.numeral)).toEqual([1, 2, 3])
     expect(numbered[0].thread.card.id).toBe('hub')
     expect(families.filter(star => star.arm === 'done').every(star => !star.numeral)).toBe(true)
-    expect(plate.stars[0].thread.launches).toEqual([now - hour])
-    expect(plate.stars[0].thread.commits).toEqual([now - 2 * hour])
   })
   it('keeps a body of work with nothing in flight off the map', () => {
     expect(inFlightModel({ drafts: [], inFlight: [], awaitingReview: [] }, [resting], new ThreadIndex([resting]), noFeeds, now).threads.size).toBe(1)

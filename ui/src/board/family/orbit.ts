@@ -1,7 +1,7 @@
 import { needsHuman, type FamilyModel, type MapThread } from './model.js'
 import { held, WHOLE, type View } from './zoom.js'
 import { heldTitle, miniature, unfold, type Mini, type Satellite } from './locality.js'
-import { elapsed, htmlEl, markPath, optionFor, part, reconcile, shortAgo, svgEl, tagThread, type Point, type Sight } from './drawing.js'
+import { elapsed, htmlEl, markPath, optionFor, part, reconcile, shortAgo, standingLine, svgEl, tagThread, type Point, type Sight } from './drawing.js'
 
 /** The radial drawing's plate and its painting: bodies, arms, names, and what the focused thread holds. */
 export const TURN = 2 * Math.PI
@@ -25,12 +25,11 @@ const MINI_MARK = 14
 const BODY_MAX = 15
 const BODY_LEAST = 2
 const DOT_LEAST = 1.2
-/** The room a body has on the plate, in pixels, before its threads show as dots, as bodies with arms, and with what it holds in miniature. */
-const DOTS_FROM = 60
-const BODIES_FROM = 110
-const MINIS_FROM = 60
-/** A body's arms take their true size from this room, and fade out once their scene outgrows this many plates. */
-const ARMS_FROM = 16
+/** The share of a plate a body's room must fill before its arms and dots grow in, and before its threads are bodies and what it holds shows in miniature: above any room a scene gives, so every scene opens with its own bodies alone. */
+const DOTS_FROM = .3
+const BODIES_FROM = .45
+/** How much more of the plate its arms take to reach full strength, and how many plates its scene outgrows before they fade out. */
+const ARMS_RISE = .1
 const ARMS_FADE = 1.3
 const ARMS_GONE = 2.4
 /** How far from the plate's middle a body can be and still be the one a hand has zoomed to, as a share of the plate. */
@@ -221,13 +220,13 @@ export function arrival(plate: Plate, view: View, kept: string | null): string |
  */
 export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: Sight | null): Sky {
   const { k } = view, { width, height, reach, narrow } = plate, dx = view.x * width, dy = view.y * height
-  const onPlate = (star: Star): Point => ({ x: star.x * k + dx, y: star.y * k + dy })
+  const onPlate = (star: Star): Point => ({ x: star.x * k + dx, y: star.y * k + dy }), dotsTo = BODIES_FROM * reach
   const focusKey = sight?.key ?? model.root.key
   const stars = plate.stars.map((star): Seen => {
-    const room = star.room * k, fill = room / reach, inert = !!star.owner && star.owner.room * k < BODIES_FROM
+    const room = star.room * k, fill = room / reach, inert = !!star.owner && star.owner.room * k < dotsTo
     return {
-      ...star, ...onPlate(star), room, inert, focus: star.thread.key === focusKey, hidden: !!star.owner && star.owner.room * k < DOTS_FROM,
-      r: Math.max(inert ? DOT_LEAST : BODY_LEAST, Math.min(star.r * k, Math.max(inert ? star.full * star.owner!.room * k / BODIES_FROM : star.full, star.own * Math.min(1, fill)))),
+      ...star, ...onPlate(star), room, inert, focus: star.thread.key === focusKey, hidden: !!star.owner && star.owner.room * k < DOTS_FROM * reach,
+      r: Math.max(inert ? DOT_LEAST : BODY_LEAST, Math.min(star.r * k, Math.max(inert ? star.full * star.owner!.room * k / dotsTo : star.full, star.own * Math.min(1, fill)))),
     }
   })
   const seen = stars.find(star => star.focus) ?? stars[0]
@@ -243,12 +242,11 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
     ...held.map(item => ({ left: item.side === 'right' ? item.x - 8 : item.x - item.room, right: item.side === 'right' ? item.x + item.room : item.x + 8, top: item.y - 12, bottom: item.y + 12 })),
     ...(titled ? [{ left: titled.x, right: titled.x + titled.width, top: titled.y - 4, bottom: titled.y + TITLE_HEIGHT }] : []),
   ]
-  const arms = stars.filter(star => star.segments.length && !star.hidden && star.room >= ARMS_FROM && star.room < ARMS_GONE * reach).map((star): SkyArm => {
-    const small = star.room < BODIES_FROM ? (star.r + LABEL_GAP) / reach : k * star.scale
-    return { key: star.thread.key, at: star, scale: Math.min(small, k * star.scale), segments: star.segments, opacity: Math.min(1, (ARMS_GONE * reach - star.room) / ((ARMS_GONE - ARMS_FADE) * reach)) }
+  const arms = stars.filter(star => star.segments.length && !star.hidden && star.room >= DOTS_FROM * reach && star.room < ARMS_GONE * reach).map((star): SkyArm => {
+    return { key: star.thread.key, at: star, scale: k * star.scale, segments: star.segments, opacity: Math.min(1, (star.room / reach - DOTS_FROM) / ARMS_RISE, (ARMS_GONE * reach - star.room) / ((ARMS_GONE - ARMS_FADE) * reach)) }
   })
   const nameable = stars.filter(star => star.owner && !star.inert && !star.hidden && !star.focus && inView(star)).sort((a, b) => b.owner!.room - a.owner!.room || (a.thread.rank < 0 ? Infinity : a.thread.rank) - (b.thread.rank < 0 ? Infinity : b.thread.rank))
-  const sheets = narrow ? [] : nameable.filter(star => star.room >= MINIS_FROM).slice(0, MINIS).map(star => miniature(star.thread, sight?.holds(star.thread) ?? {}, star, star.room))
+  const sheets = narrow ? [] : nameable.filter(star => star.room >= dotsTo).slice(0, MINIS).map(star => miniature(star.thread, sight?.holds(star.thread) ?? {}, star, star.room))
   const lines = arms.flatMap(arm => arm.segments.flatMap(segment => segment.way.map(point => ({ x: arm.at.x + point.x * arm.scale, y: arm.at.y + point.y * arm.scale }))))
   const labels = narrow ? [] : nearLabels(stars, nameable, plate, taken, lines)
   const names: ArmName[] = []
@@ -446,7 +444,7 @@ function drawHeld(layer: HTMLElement, sky: Sky, model: FamilyModel): void {
     el.style.transform = `translate(${item.title.x.toFixed(1)}px, ${item.title.y.toFixed(1)}px)`
     const [name, state] = el.children
     setText(name, spokenName(item.thread.name, Math.floor(2 * item.title.width / LABEL_CHAR * TITLE_FILL)))
-    setText(state, `${item.thread.word} · ${shortAgo(item.thread.lastMove, model.now)}`)
+    setText(state, standingLine(item.thread, model.now))
   })
 }
 
