@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.VoiceController do
   @moduledoc "Recorder-addressed live voice state and controls."
   use Phoenix.Controller, formats: [:json]
-  alias Shuttle.{RecorderRouter, OriginRouter, Remote, Voice}
+  alias Shuttle.{RecorderRouter, Voice}
 
   def show(conn, params), do: route(conn, params, :show, "/api/v1/voice")
   def update(conn, params), do: route(conn, params, :update, "/api/v1/voice")
@@ -117,7 +117,12 @@ defmodule ShuttleWeb.VoiceController do
       {:ok, {:remote, remote}} ->
         {status, body} =
           if action in [:show, :transcript],
-            do: forward_read(remote, path, params),
+            do:
+              RecorderRouter.forward_read(
+                remote,
+                path,
+                params |> Map.take(~w(date fiber since)) |> Map.put("recorder", remote.name)
+              ),
             else: RecorderRouter.forward_control(remote, path, params)
 
         conn |> put_status(status) |> json(body)
@@ -137,26 +142,4 @@ defmodule ShuttleWeb.VoiceController do
   defp local(:update, params), do: Voice.update(params)
   defp local(:toggle, _params), do: Voice.toggle()
   defp local(:discard, _params), do: Voice.discard()
-
-  defp forward_read(remote, path, params) do
-    query =
-      params
-      |> Map.take(~w(date fiber since))
-      |> Map.put("recorder", remote.name)
-      |> URI.encode_query()
-
-    case OriginRouter.forward_client().get_file(
-           Remote.url_for(remote, path) <> "?" <> query,
-           2_000
-         ) do
-      {:ok, status, _type, bytes} ->
-        case Jason.decode(bytes) do
-          {:ok, body} when is_map(body) -> {status, Map.put(body, "recorder", remote.name)}
-          _ -> {502, %{error: "recorder returned invalid voice state"}}
-        end
-
-      {:error, reason} ->
-        {502, %{error: "cannot inspect recorder: #{inspect(reason)}", recorder: remote.name}}
-    end
-  end
 end

@@ -136,8 +136,11 @@ defmodule Shuttle.RecorderRouter do
 
   def stamp(body, recorder \\ own_host()), do: Map.put(body, "recorder", recorder)
 
-  def forward_read(remote, path) do
-    case OriginRouter.forward_client().get_file(Remote.url_for(remote, path), 2_000) do
+  def forward_read(remote, path, query \\ %{}) do
+    url = Remote.url_for(remote, path)
+    url = if map_size(query) == 0, do: url, else: url <> "?" <> URI.encode_query(query)
+
+    case OriginRouter.forward_client().get_file(url, 2_000) do
       {:ok, status, _type, body} ->
         {status, stamp(decode(body), remote.name)}
 
