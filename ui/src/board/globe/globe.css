@@ -33,7 +33,7 @@
 .globe-previews { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .globe-preview { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
 .globe-preview[hidden] { display: none; }
-.globe-preview-thumb { border: 1px solid color-mix(in srgb, var(--ws-ink) 22%, transparent); box-shadow: 0 2px 10px color-mix(in srgb, black 30%, transparent); }
+.globe-preview-thumb { border: 1px solid color-mix(in srgb, var(--ws-ink) 22%, transparent); box-shadow: var(--ws-shadow-contact); }
 .globe-names { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .globe-name {
   position: absolute; top: 0; left: 0; display: block; padding: 0; border: 0; background: none; color: var(--ws-ink);

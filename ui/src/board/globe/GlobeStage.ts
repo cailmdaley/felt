@@ -5,7 +5,7 @@ import { PERIOD, UPRIGHT, bounded, carried, planeOutline, facing, flight, frameO
 import { forestOf, persistentId } from './forest.js'
 import { NORTH, cellSpan, centre, child, facePoint, inCell, ipixOf, type FacePoint, type Vec } from './healpix.js'
 import { blocks, inscribed, overlaps, placeNames, within, type Block, type Box, type Candidate, type Point } from './labels.js'
-import { BEACON_PX, PREVIEW_PX, paint, paintLeaders, type Leader, type Palette, type Pulse } from './paint.js'
+import { BEACON_PX, PREVIEW_PX, markOf, paint, paintLeaders, type Leader, type Palette, type Pulse } from './paint.js'
 import { Previews, type Shown } from './previews.js'
 import { askKind, sceneOf, traceOf, type Body, type Scene, type Tone } from './scene.js'
 import { cardNamed, type ThreadIndex } from '../threads.js'
@@ -86,7 +86,7 @@ type Role = keyof typeof ROLE_SIZE
 const LEADING = 1.2
 /** Roles for each kind of tile, the largest that fits winning, so a name grows as its tile does. */
 const ROLES: Record<Body['kind'], readonly Role[]> = {
-  province: ['display', 'title', 'row'], area: ['title', 'row', 'note'], thread: ['display', 'title', 'row', 'note'], lead: ['title', 'row', 'note'], constitution: ['row', 'note'], file: ['title', 'row', 'note'],
+  province: ['display', 'title', 'row'], area: ['title', 'row', 'note'], thread: ['display', 'title', 'row', 'note'], lead: ['note'], constitution: ['note'], file: ['note'],
 }
 const TONES: readonly Tone[] = ['question', 'blocked', 'new', 'turn', 'review', 'working', 'still', 'quiet', 'aside', 'land', 'page']
 /**
@@ -135,6 +135,8 @@ export class GlobeStage {
   private readonly probe = el('span', 'globe-probe')
   /** A hidden name in each type role in turn, which the measurer takes its font from. */
   private readonly ruler = el('span', 'globe-name globe-probe')
+  /** A hidden name in the display role, whose font the marks on pages are drawn in. */
+  private readonly marker = el('span', 'globe-name globe-probe')
   private readonly listening = new AbortController()
   private readonly observer: ResizeObserver
   private readonly measurer = document.createElement('canvas').getContext('2d')!
@@ -198,7 +200,8 @@ export class GlobeStage {
     }
     this.toggle.setAttribute('role', 'group')
     this.toggle.setAttribute('aria-label', 'Projection')
-    this.el.append(this.canvas, this.previews.el, this.names, head, this.toggle, this.peek, this.probe, this.ruler)
+    this.marker.dataset.size = 'display'
+    this.el.append(this.canvas, this.previews.el, this.names, head, this.toggle, this.peek, this.probe, this.ruler, this.marker)
     const signal = this.listening.signal
     this.el.addEventListener('wheel', event => this.wheel(event), { passive: false, signal })
     this.canvas.addEventListener('pointerdown', event => this.down(event), { signal })
@@ -367,6 +370,7 @@ export class GlobeStage {
     if (scene !== BARE) this.bloom ||= now
     const frame = this.frameNow(), c = this.context, ratio = window.devicePixelRatio || 1
     c.setTransform(ratio, 0, 0, ratio, 0, 0)
+    c.font = getComputedStyle(this.marker).font
     const by = scene.byKey
     const pulses: Pulse[] = []
     for (const [key, started] of this.pulses) {
@@ -400,13 +404,13 @@ export class GlobeStage {
     this.palette = {
       ocean: colour('ocean'), deep: colour('deep'), glow: colour('glow'), grid: colour('grid'), ink: colour('ink'), paper: colour('paper'), land: colour('land'), shade: colour('shade'),
       tones: Object.fromEntries(TONES.map(tone => [tone, colour(`tone-${tone}`)])) as Record<Tone, string>,
-      serif: getComputedStyle(this.el).fontFamily,
+      markSize: parseFloat(getComputedStyle(this.marker).fontSize) || ROLE_SIZE.display,
     }
   }
 
   /** Lays the previews and the names that fit over the frame, reusing their elements, and gives back the lines from names standing off their tiles. */
   private placeNames(frame: Frame, scene: Scene): Leader[] {
-    const { width, height } = this.viewport, r = frame.r, candidates: Body[] = [], pages: Array<Shown & { wide: Box }> = []
+    const { width, height } = this.viewport, r = frame.r, candidates: Body[] = [], pages: Array<Shown & { wide: Box }> = [], marks: Box[] = []
     const visit = (body: Body): void => {
       const px = body.span * r
       if (px < NAME_PX) return
@@ -414,6 +418,8 @@ export class GlobeStage {
       const reach = body.radius * r
       if (at.depth < 0 || at.x < -reach || at.x > width + reach || at.y < -reach || at.y > height + reach) return
       if (body.kind === 'thread' && px >= LEAD_PX) this.readLead(body)
+      const mark = markOf(frame, body, px)
+      if (mark) marks.push({ left: mark.x - mark.size / 2, top: mark.y - mark.size / 2, right: mark.x + mark.size / 2, bottom: mark.y + mark.size / 2 })
       if (body.file && px >= PREVIEW_PX && this.previews.readable(body.file)) {
         const outline = this.outlineOn(frame, body), aspect = this.previews.aspect(body.key, body.file)
         const box = outline && inscribed(outline, at, aspect), wide = outline && inscribed(grown(outline, at, PREVIEW_REACH), at, aspect)
@@ -425,7 +431,8 @@ export class GlobeStage {
       body.kids.forEach(visit)
     }
     scene.roots.forEach(visit)
-    const opens = (body: Body): number => this.underFocus(body) ? (body.urgency > ATTENTION.length ? .5 : 0) : body.kind === 'province' || body.kind === 'area' || body.kids.some(kid => kid.kind === 'thread') ? 2 : 1
+    // The tile in focus is named last: the trail and the peek already name it, and what it holds comes first.
+    const opens = (body: Body): number => body.key === this.place.focus ? 3 : this.underFocus(body) ? (body.urgency > ATTENTION.length ? .5 : 0) : body.kind === 'province' || body.kind === 'area' || body.kids.some(kid => kid.kind === 'thread') ? 2 : 1
     // Under the focus the smallest tiles go first: they have the fewest places a name can go.
     candidates.sort((a, b) => opens(a) - opens(b) || (this.underFocus(a) ? b.cell.order - a.cell.order : 0) || a.urgency - b.urgency || b.cell.order - a.cell.order)
     const box = { left: 8, top: this.headHeight + 4, right: width - 8, bottom: height - this.footHeight - 4 }
@@ -439,7 +446,7 @@ export class GlobeStage {
       if (clear) reached.push(page.wide)
       page.box = inset(clear ? page.wide : page.box, PREVIEW_INSET)
     }
-    const shown = new Map(pages.map(page => [page.key, page.box])), kept = [...shown.values()]
+    const shown = new Map(pages.map(page => [page.key, page.box])), kept = [...shown.values(), ...marks]
     let placed = placeNames(this.candidates(candidates, frame, scene, false, shown), box, MOST_NAMES, kept)
     if (owed.some(body => !placed.some(name => name.owner === body))) placed = placeNames(this.candidates(candidates, frame, scene, true, shown), box, MOST_NAMES, kept)
     this.previews.show(pages, { x: width / 2, y: height / 2 }, !this.flying)

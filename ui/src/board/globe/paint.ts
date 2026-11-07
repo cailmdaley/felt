@@ -16,8 +16,8 @@ const LEADER_ALPHA = .45, LEADER_DOT = 2
 export interface Palette {
   ocean: string; deep: string; glow: string; grid: string; ink: string; paper: string; land: string; shade: string
   tones: Record<Tone, string>
-  /** The board's serif, for the marks drawn on pages. */
-  serif: string
+  /** The size in pixels of the font the caller leaves set, which a page's mark is drawn in, scaled to its tile. */
+  markSize: number
 }
 /** A tile ringing because it just changed, `age` from nought to one. */
 export interface Pulse { body: Body; age: number }
@@ -159,16 +159,22 @@ function glyphOf(body: Body): string | null {
   }
   return mark
 }
-/** A page's mark in its tile's north quarter, clear of its name at the centre, until what it holds shows instead. */
-function glyph(c: CanvasRenderingContext2D, f: Frame, body: Body, px: number, palette: Palette, appear: number): void {
-  if (px < GLYPH_PX || (px >= PREVIEW_PX && body.kind !== 'constitution')) return
+/** A page's mark, in its tile's north quarter clear of its name at the centre, and its size; null while the tile is too small, or shows what it holds instead. */
+export function markOf(f: Frame, body: Body, px: number): { mark: string; x: number; y: number; size: number } | null {
+  if (px < GLYPH_PX || (px >= PREVIEW_PX && body.kind !== 'constitution')) return null
   const mark = glyphOf(body)
-  if (!mark) return
+  if (!mark) return null
   const at = project(f, cellCentre(child(body.cell, NORTH)))
-  if (at.depth <= 0) return
-  c.font = `${Math.min(40, Math.round(px * .26))}px ${palette.serif}`
+  return at.depth > 0 ? { mark, x: at.x, y: at.y, size: Math.min(40, px * .26) } : null
+}
+function glyph(c: CanvasRenderingContext2D, f: Frame, body: Body, px: number, palette: Palette, appear: number): void {
+  const found = markOf(f, body, px)
+  if (!found) return
+  const scale = found.size / palette.markSize, ratio = c.getTransform().a
   c.globalAlpha = appear * .6 * smooth(GLYPH_PX, GLYPH_PX * 1.6, px)
-  c.fillText(mark, at.x, at.y)
+  c.setTransform(ratio * scale, 0, 0, ratio * scale, ratio * found.x, ratio * found.y)
+  c.fillText(found.mark, 0, 0)
+  c.setTransform(ratio, 0, 0, ratio, 0, 0)
 }
 
 /** Paints every tile big enough to see; an archived one quietly, unless the view has come to it or to the archived thread it lies in. */
@@ -253,7 +259,7 @@ function beacons(c: CanvasRenderingContext2D, f: Frame, scene: Scene, palette: P
   }
 }
 
-/** Paints one frame. The caller holds the context scaled to CSS pixels. */
+/** Paints one frame. The caller holds the context scaled to CSS pixels, its font the one marks are drawn in. */
 export function paint(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene: Scene, palette: Palette, marked: Marks, shown: number, leads: (body: Body) => boolean): void {
   c.clearRect(0, 0, viewport.width, viewport.height)
   const globe = f.projection === 'globe'
