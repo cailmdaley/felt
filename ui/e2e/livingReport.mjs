@@ -135,7 +135,7 @@ export function registerLivingReportJourneys(test) {
       await named(page, 'Calibrate the shear response')
       assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
       assert.equal(errors.length, 0, errors.join('\n'))
-    }, viewport, 'false', 'reduce', phone)
+    }, viewport, 'reduce', phone)
   }
 }
 

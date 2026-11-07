@@ -7,28 +7,10 @@ const css = read('reader.css').replace(/\/\*[\s\S]*?\*\//g, '')
 const tokens = `${read('tokens.css')}\n${readFileSync(new URL('../src/styles/type.css', import.meta.url), 'utf8')}`
 
 describe('workspace style contracts', () => {
-  it('holds the sent files to the foot of the left column, their list scrolling on its own', () => {
-    const rule = (selector: string): Map<string, string> => {
-      const decls = new Map<string, string>()
-      postcss.parse(read('reader.css')).walkRules(rule => {
-        if (rule.selectors.includes(selector)) rule.walkDecls(d => { decls.set(d.prop, d.value) })
-      })
-      return decls
-    }
-    const files = rule('.ws-sidebar-files'), list = rule('.ws-sidebar-file-list')
-    expect(files.get('flex')).toBe('none'); expect(files.get('max-height')).toMatch(/%$/)
-    expect(list.get('overflow')).toBe('auto'); expect(list.get('min-height')).toBe('0')
-    expect(rule('.ws-sidebar-files[hidden]').get('display')).toBe('none')
-  })
   it('keeps the ready PDF thumbnail glyph visible', () => {
     const hidden = read('thumbnail.css').split('}').filter(rule => /display:\s*none/.test(rule)).join('}')
     expect(read('thumbnail.css').length).toBeGreaterThan(0)
     expect(hidden).not.toContain('.kbn-thumbnail-pdf')
-  })
-  it('leaves the reader sidebar rows to the sidebar: no theme styles them', () => {
-    const themes = readdirSync(new URL('../src/board/workspace/themes/', import.meta.url)).filter(name => name.endsWith('.css'))
-    expect(themes.length).toBeGreaterThan(0)
-    for (const theme of themes) expect(read(`themes/${theme}`), theme).not.toContain('sidebar-card')
   })
   it('gives back controls a hover background only on hover-capable devices', () => {
     let controls = 0

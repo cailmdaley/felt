@@ -44,9 +44,6 @@ try {
       await page.locator('.ws-selected .ws-prose').waitFor()
       await page.waitForFunction(theme => document.querySelector('.ws-reader')?.dataset.wsThemeName === theme, theme)
       await page.waitForFunction(() => !document.querySelector('.ws-selected .ws-body-status'))
-      // Keep private project names out of artifacts using the ordinary sidebar finder.
-      const finder = page.locator('.ws-sidebar .ws-channel-find')
-      if (isLive && await finder.isVisible()) await finder.fill('Shuttle')
       await capture(page, `${theme}-${device}.png`, isLive ? 'live-vite' : 'fixture-harness', { uid, owner, theme })
       await context.close()
     }

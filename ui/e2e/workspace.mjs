@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { registerChangeJourneys } from './change.mjs'
-import { registerSidebarTreeJourneys } from './sidebarTree.mjs'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
@@ -19,7 +18,7 @@ const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
 const name = 'Calibrate the shear response'
 const tests = []
-const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce', touch = false) => tests.push({ name, run, viewport, sidebarChoice, reducedMotion, touch })
+const test = (name, run, viewport, reducedMotion = 'reduce', touch = false) => tests.push({ name, run, viewport, reducedMotion, touch })
 registerChangeJourneys(test)
 const selected = p => p.locator('.ws-page.ws-selected')
 const band = p => p.locator('.ws-stage-band')
@@ -450,17 +449,12 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   await p.locator('.ws-page.ws-expanded .ws-labelbar').dblclick()
   assert.equal(await p.locator('.ws-page.ws-expanded').count(), 0)
   await choose(p, 'brief.md')
-  // One frame: the page fills the stage, and no corner toggle lands on the header line's contents.
+  // One frame: the page fills the stage.
   const frame = await selected(p).evaluate(el => {
-    const box = r => { const b = r.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom } }
-    const stage = box(el.closest('.ws-stage')), page = box(el)
-    const parts = [...el.querySelectorAll('.ws-labelbar > :not([hidden])')].map(box).filter(b => b.r > b.l)
-    const toggles = [...document.querySelectorAll('.ws-reader > .ws-sidebar-toggle')].filter(t => getComputedStyle(t).display !== 'none').map(box)
-    const overlaps = toggles.flatMap(t => parts.filter(b => b.l < t.r && t.l < b.r && b.t < t.b && t.t < b.b))
-    return { fills: Math.abs(page.l - stage.l) < 1 && Math.abs(page.r - stage.r) < 1, overlaps: overlaps.length }
+    const stage = el.closest('.ws-stage').getBoundingClientRect(), page = el.getBoundingClientRect()
+    return Math.abs(page.left - stage.left) < 1 && Math.abs(page.right - stage.right) < 1
   })
-  assert.ok(frame.fills, 'the selected page fills the stage')
-  assert.equal(frame.overlaps, 0, 'corner toggles keep their own places in the header line')
+  assert.ok(frame, 'the selected page fills the stage')
   await choose(p, 'calibration-report')
   await p.setViewportSize({ width: 1250, height: 760 })
   assert.ok(await iframe.evaluate(f => f === window.__reportFrame && f.contentWindow === window.__reportWindow), 'browser resize must retain the iframe')
@@ -908,62 +902,19 @@ for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(
   await p.locator('.ws-page.ws-selected:visible').waitFor({ state: 'hidden' })
 })
 
-test('The sidebar edge resizes the column by drag and keys, persists per viewer, and resets on double-click', async p => {
+for (const width of [701, 1000, 1440, 1920]) test(`The page fills the window between its edges (${width})`, async p => {
   await open(p); await reportReady(p)
-  const edge = p.getByRole('separator', { name: 'Resize constitutions' })
-  const width = () => p.evaluate(() => {
-    const sidebar = document.querySelector('.ws-sidebar').getBoundingClientRect(), page = document.querySelector('.ws-page.ws-selected').getBoundingClientRect()
-    return { sidebar: Math.round(sidebar.width), gutter: Math.round(page.left - sidebar.right), now: Number(document.querySelector('.ws-sidebar-handle').getAttribute('aria-valuenow')) }
-  })
-  const start = await width()
-  assert.equal(start.sidebar, 384, 'the column opens at its default width')
-  assert.equal(start.now, 384)
-  assert.equal(await edge.getAttribute('aria-valuemin'), '320')
-  assert.equal(await edge.getAttribute('aria-valuemax'), String(Math.floor(1440 * 0.4)))
-  // A drag reflows the stage live and keeps the page against the column.
-  const box = await edge.boundingBox()
-  await p.mouse.move(box.x + box.width / 2, 400); await p.mouse.down()
-  await p.mouse.move(box.x + 80, 400, { steps: 4 })
-  const live = await width()
-  assert.ok(live.sidebar > start.sidebar + 60 && Math.abs(live.gutter) <= 1, `the stage follows the drag: ${JSON.stringify(live)}`)
-  await p.mouse.move(box.x + 2000, 400, { steps: 4 })
-  await p.mouse.up()
-  assert.equal((await width()).sidebar, Math.floor(1440 * 0.4), 'the drag stops at its share of the viewport')
-  assert.equal(await p.evaluate(() => localStorage.getItem('shuttle:workspace:sidebar-width')), String(Math.floor(1440 * 0.4)))
-  // Keys step it, held to its floor.
-  await edge.focus()
-  await p.keyboard.press('Home')
-  assert.equal((await width()).sidebar, 320)
-  await p.keyboard.press('ArrowRight')
-  assert.equal((await width()).sidebar, 336, 'an arrow steps 16 px and does not step pages')
-  assert.equal(await isSelected(p, 'calibration-report'), true)
-  await p.reload()
-  await reportReady(p)
-  assert.equal((await width()).sidebar, 336, 'the width survives a reload')
-  await edge.dblclick()
-  assert.equal((await width()).sidebar, 384, 'double-click resets the default')
-  assert.equal(await p.evaluate(() => localStorage.getItem('shuttle:workspace:sidebar-width')), null)
-}, undefined, 'true')
-
-for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page fills the stage (${width})`, async p => {
-  await open(p); await reportReady(p)
-  const geometry = async () => p.evaluate(() => {
-    const rect = el => el.getBoundingClientRect()
-    const page = rect(document.querySelector('.ws-page.ws-selected')), sidebar = rect(document.querySelector('.ws-sidebar'))
-    const stage = rect(document.querySelector('.ws-stage'))
-    return { gutter: page.left - sidebar.right, right: stage.right - page.right,
-      ground: getComputedStyle(document.querySelector('.ws-sidebar')).backgroundColor }
-  })
+  assert.equal(await p.locator('.ws-sidebar, .ws-sidebar-toggle, aside').count(), 0, 'nothing stands beside the stage')
   for (const label of ['calibration-report', 'Constitution', 'remote-summary.pdf']) {
     await choose(p, label)
     await p.waitForTimeout(350)
-    const at = await geometry()
-    // One frame: the page meets the column and runs to the stage's far edge.
-    assert.ok(Math.abs(at.gutter) <= 1, `${label}: the page meets the sidebar: ${JSON.stringify(at)}`)
-    assert.ok(Math.abs(at.right) <= 1, `${label}: the page reaches the stage's far edge: ${JSON.stringify(at)}`)
-    assert.notEqual(at.ground, 'rgba(0, 0, 0, 0)', 'the sidebar column has its own ground')
+    const at = await p.evaluate(() => {
+      const box = document.querySelector('.ws-page.ws-selected').getBoundingClientRect()
+      return { left: box.left, right: innerWidth - box.right }
+    })
+    assert.ok(Math.abs(at.left) <= 1 && Math.abs(at.right) <= 1, `${label}: the page meets both edges of the window: ${JSON.stringify(at)}`)
   }
-}, { width, height: 900 }, 'true')
+}, { width, height: 900 })
 
 for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals update the sent list and move only their folio (${reducedMotion})`, async p => {
   await open(p); await reportReady(p)
@@ -1000,9 +951,14 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
     assert.equal(folios[0].frames[1].transform, 'translateY(-4px)')
     assert.notEqual(folios[0].frames[1].boxShadow, 'none')
   }
-}, undefined, 'false', reducedMotion)
+}, undefined, reducedMotion)
 
-test('j/k step constitutions in the sidebar order from a Board-opened reader, the sidebar shut; the Board shelves what was read', async p => {
+test('j/k step constitutions in Desk order from a Board-opened reader, J/K step its columns, and each landing is named; the Board shelves what was read', async p => {
+  const column = id => p.locator(`[data-column="${id}"] .kbn-card > .kbn-card-name`).allTextContents()
+  const drafts = await column('drafts'), flight = await column('inFlight'), review = await column('awaitingReview')
+  const names = [...drafts, ...flight, ...review], at = names.indexOf(name)
+  const title = expected => poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, expected)
+  const landing = expected => poll(p, text => document.querySelector('.toast-message')?.textContent === text, expected)
   await barTab(p, 'shelf').click()
   assert.ok(await p.locator('.ws-overview-read').isHidden(), 'nothing read yet, no shelf')
   await p.locator('.ws-overview-folio').filter({ hasText: 'Weekly shear summary' }).click()
@@ -1014,84 +970,27 @@ test('j/k step constitutions in the sidebar order from a Board-opened reader, th
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await reportReady(p)
   await appFocus(p)
-  await p.keyboard.press('Meta+[')
-  const sidebar = p.locator('.ws-sidebar')
-  await sidebar.waitFor()
-  // One grouped list wherever the reader opens: drafts, work in flight, then review.
-  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Working', 'Awaiting review'])
-  const rows = sidebar.locator('.ws-channel-row')
-  const names = await rows.locator('.ws-channel-name').allTextContents()
-  await rows.first().click()
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[0])
-  await p.keyboard.press('Meta+[')
-  await poll(p, () => !document.querySelector('.ws-sidebar')?.checkVisibility())
-  await p.keyboard.press('j')
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[1])
-  await p.keyboard.press('j')
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[2])
-  await p.keyboard.press('k')
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[1])
+  await p.keyboard.press('Shift+K'); await title(flight[0]); await landing(`In flight · ${flight[0]}`)
+  // Drafts lands on the card last open there, the one the Board opened first.
+  const read = drafts.indexOf('Weekly shear summary')
+  await p.keyboard.press('Shift+K'); await title(drafts[read]); await landing(`Drafts · ${drafts[read]}`)
+  await p.keyboard.press('j'); await title(names[read + 1])
+  await p.keyboard.press('Shift+J'); await title(flight[0])
+  await p.keyboard.press('Shift+K'); await title(names[read + 1])
+  await p.keyboard.press('Shift+J'); await title(flight[0])
+  await p.keyboard.press('Shift+J'); await title(name)
+  await p.keyboard.press('k'); await title(names[at - 1])
+  await p.keyboard.press('k'); await title(names[at - 2])
+  await p.keyboard.press('j'); await title(names[at - 1])
   // The Board's shelf holds every constitution opened, most recent first, and opens one in the reader.
   await leave(p)
-  assert.deepEqual(await p.locator('.ws-overview-read-name').allTextContents(), [names[1], names[2], names[0], name])
+  const shelf = await p.locator('.ws-overview-read-name').allTextContents()
+  assert.deepEqual(shelf.slice(0, 3), [names[at - 1], names[at - 2], name])
   await p.locator('.ws-overview-read-item').nth(1).click()
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[2])
+  await title(names[at - 2])
 })
 
-test('The sidebar strip names the J/K stops; every jump and strip click shows the landed card under its caption', async p => {
-  const deskNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
-  const deskDrafts = await deskNames('drafts'), flight = await deskNames('inFlight'), review = await deskNames('awaitingReview')
-  const knownDrafts = ['Weekly shear summary', 'Transfer-function check', 'Validate the summary against simulations']
-  assert.deepEqual([...knownDrafts].sort(), [...deskDrafts].sort())
-  const drafts = deskDrafts
-  await open(p)
-  const sidebar = p.locator('.ws-sidebar').first()
-  const strip = sidebar.locator('.ws-sidebar-index-entry')
-  assert.deepEqual(await strip.allTextContents(), [`Drafts${drafts.length}`, `In flight${flight.length}`, `Awaiting review${review.length}`])
-  assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Awaiting review${review.length}`])
-  const list = sidebar.locator('.ws-channel-list')
-  assert.ok(await list.evaluate(el => el.scrollHeight > el.clientHeight), 'the short viewport makes the list scroll')
-  // The landed card and its group's caption both sit inside the list's box, the card clear of the caption.
-  const landed = async (title, group) => {
-    await poll(p, title => document.querySelector('.ws-channel-title')?.textContent === title, title)
-    await p.waitForTimeout(60)
-    const view = await list.evaluate(el => {
-      const box = el.getBoundingClientRect()
-      const row = el.querySelector('.ws-channel-row[aria-current="true"]')
-      const caption = row.closest('.ws-channel-group').querySelector('.kbn-flight-caption')
-      const r = row.getBoundingClientRect(), c = caption.getBoundingClientRect()
-      return { group: caption.textContent, inside: c.top >= box.top - 0.5 && c.bottom <= r.top + 0.5 && r.bottom <= box.bottom + 0.5, scrolled: el.scrollTop }
-    })
-    assert.equal(view.group, group)
-    assert.ok(view.inside, `${title} and its caption ${group} are in view`)
-    return view
-  }
-  await appFocus(p)
-  await p.keyboard.press('Shift+K'); await landed(flight[0], 'Working')
-  await p.keyboard.press('Shift+K'); await landed(drafts[0], 'Drafts')
-  await p.keyboard.press('j'); await landed(drafts[1], 'Drafts')
-  await p.keyboard.press('Shift+J'); await p.keyboard.press('Shift+J')
-  const atReview = await landed(name, 'Awaiting review')
-  assert.ok(atReview.scrolled > 0, 'the list scrolled down to reach review')
-  // Upward from review, K must bring Working's caption back into view, not just its card.
-  await p.keyboard.press('Shift+K'); await landed(flight[0], 'Working')
-  await strip.filter({ hasText: 'Drafts' }).click(); await landed(drafts[1], 'Drafts')
-  assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Drafts${drafts.length}`])
-  await strip.filter({ hasText: 'Awaiting review' }).click(); await landed(name, 'Awaiting review')
-  // Mid-group, the group's caption holds the top of the list while its cards
-  // pass beneath; past its group, it leaves with it.
-  const stuck = scrollTop => list.evaluate((el, scrollTop) => {
-    el.scrollTop = scrollTop
-    const top = el.getBoundingClientRect().top
-    return [...el.querySelectorAll('.kbn-flight-caption')].filter(c => Math.abs(c.getBoundingClientRect().top - top) < 1)
-      .map(c => { const group = c.parentElement.getBoundingClientRect(); return { caption: c.textContent, holds: group.top <= top && group.bottom > c.getBoundingClientRect().bottom } })
-  }, scrollTop)
-  assert.deepEqual(await stuck(80), [{ caption: 'Drafts', holds: true }])
-  for (const scrollTop of [200, 400, 1e6]) for (const { caption, holds } of await stuck(scrollTop)) assert.ok(holds, `${caption} sticks only inside its own group`)
-}, { width: 1440, height: 360 }, 'true')
-
 test('Wide reader scans Desk cards and returns the last viewed card with one Escape or its origin tab', async p => {
-  const column = p.locator('[data-column="awaitingReview"]')
   const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
   const deskDrafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
   const knownDrafts = ['Weekly shear summary', 'Transfer-function check', 'Validate the summary against simulations']
@@ -1099,24 +998,14 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   const drafts = deskDrafts
   const names = [...drafts, ...flight, ...review]
   await open(p)
-  const sidebar = p.locator('.ws-sidebar').first()
-  assert.ok(await sidebar.isVisible(), 'wide desktop defaults open')
-  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Working', 'Awaiting review'], 'the sidebar groups drafts, work in flight and review')
-  assert.deepEqual(await sidebar.locator('.ws-channel-name').allTextContents(), names, 'in canonical group order')
-  assert.equal(await sidebar.locator('.kbn-card').count(), names.length, 'sidebar uses the Desk paper renderer')
-  assert.equal(await column.locator('.ws-sidebar-source').count(), review.length, "the opened card's column flies its cards into their places")
   const raised = await p.locator('.kbn-desk').evaluate(e => ({ transform: getComputedStyle(e).transform, filter: getComputedStyle(e).filter }))
   assert.match(raised.transform, /0\.94/)
   assert.match(raised.filter, /saturate\(0\.25\)/)
   const next = names[names.indexOf(name) + 1]
   await p.keyboard.press('j')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
-  const current = sidebar.locator('.ws-channel-row[aria-current="true"]')
-  assert.equal(await current.locator('.ws-channel-name').innerText(), next)
-  assert.ok(await current.evaluate(e => { const r = e.getBoundingClientRect(), col = e.closest('.ws-sidebar').getBoundingClientRect(); return r.left >= col.left && r.right <= col.right && r.width >= col.width * .9 }), 'the selected card occupies the sidebar without obscuring the reader')
   await p.keyboard.press('Escape')
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
-  assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), next, 'Escape selects the last card viewed')
   await open(p)
   await p.keyboard.press('j')
@@ -1124,31 +1013,7 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   await barTab(p, 'desk').click()
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), next)
-}, undefined, 'true')
-
-test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p => {
-  const entering = await p.evaluate(name => {
-    const card = [...document.querySelectorAll('.kbn-desk .kbn-card')].find(card => card.textContent.includes(name))
-    const rect = card.getBoundingClientRect()
-    card.click()
-    const ghost = document.querySelector('.ws-sidebar-flight .ws-channel-row')
-    const animation = ghost?.getAnimations()[0]
-    return { source: { left: rect.left, top: rect.top }, frames: animation?.effect.getKeyframes(), duration: animation?.effect.getTiming().duration }
-  }, name)
-  assert.equal(entering.duration, 280)
-  assert.ok(entering.frames.every(frame => 'transform' in frame && 'opacity' in frame && !('filter' in frame)))
-  await p.waitForTimeout(70)
-  await p.locator('.ws-sidebar-toggle').click()
-  await poll(p, () => !document.querySelector('.ws-sidebar-flight'))
-  assert.equal(await p.locator('.ws-sidebar-flight').count(), 0)
-  assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
-  await p.locator('.ws-sidebar-toggle').click()
-  await p.waitForTimeout(330)
-  assert.ok(await p.locator('.ws-sidebar-source').count())
-  await leave(p)
-  await p.waitForTimeout(330)
-  assert.equal(await p.locator('.ws-sidebar-source,.ws-card-travelling,.ws-sidebar-flight').count(), 0)
-}, undefined, 'true', 'no-preference')
+})
 
 test('Verdicts live in the band, with the undo line on its head; keys reach them from a report', async p => {
   await open(p)
@@ -1279,50 +1144,7 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
     const box = await band(p).locator(`.ws-band-head .kbn-ctl-verdict ${verb}`).boundingBox()
     assert.ok(box.height >= 44 && box.width >= 44, `${verb} is a full target on the constitution's page: ${JSON.stringify(box)}`)
   }
-}, { width: 844, height: 390 }, 'false', 'reduce', true)
-
-for (const reducedMotion of ['no-preference', 'reduce']) test(`Sidebar toggle is one transform slide (${reducedMotion})`, async p => {
-  await open(p); await reportReady(p)
-  await p.waitForTimeout(500) // the reader's own arrival settles first
-  for (const opening of [true, false]) {
-    await p.evaluate(() => {
-      window.__before = new Set(document.getAnimations())
-      window.__slide = []
-      const t0 = performance.now()
-      const tick = () => {
-        const page = document.querySelector('.ws-page.ws-selected').getBoundingClientRect()
-        window.__slide.push({ t: performance.now() - t0, page: page.left, width: page.width })
-        if (performance.now() - t0 < 500) requestAnimationFrame(tick)
-      }
-      requestAnimationFrame(tick)
-    })
-    await p.locator('.ws-sidebar-toggle').click()
-    if (reducedMotion !== 'reduce') await poll(p, () => document.getAnimations()
-      .filter(a => !window.__before.has(a) && a.effect?.target?.closest?.('.ws-reader') && a.constructor.name === 'Animation').length >= 2)
-    const all = await p.evaluate(() => document.getAnimations().filter(a => !window.__before.has(a) && a.effect?.target?.closest?.('.ws-reader')).map(a => ({
-      target: String(a.effect.target.className), kind: a.constructor.name, duration: a.effect.getTiming().duration, properties: [...new Set(a.effect.getKeyframes().flatMap(k => Object.keys(k).filter(key => !['offset', 'easing', 'composite', 'computedOffset'].includes(key))))],
-    })))
-    const animations = all.filter(a => a.kind === 'Animation')
-    assert.deepEqual(all.filter(a => a.kind !== 'Animation' && a.properties.some(name => ['left', 'width', 'transform'].includes(name))), [], 'no layout property transitions run')
-    if (reducedMotion === 'reduce') assert.deepEqual(animations, [], 'reduced motion lands instantly')
-    else {
-      assert.ok(animations.length >= 2, 'the sidebar and the stage move together')
-      for (const a of animations) {
-        assert.ok(a.duration >= 200 && a.duration <= 240, `slide lasts ${a.duration} ms: ${JSON.stringify(a)}`)
-        assert.ok(a.properties.every(name => ['translate', 'opacity', 'clipPath'].includes(name)), `only compositor properties animate: ${a.properties}`)
-      }
-    }
-    await p.waitForTimeout(600)
-    const samples = await p.evaluate(() => window.__slide)
-    // Where the column takes the page's preferred width, the page lands at its new width in one step and never reflows per frame.
-    const widths = samples.map(s => Math.round(s.width)), changes = widths.slice(1).filter((w, i) => Math.abs(w - widths[i]) >= 1).length
-    assert.ok(changes <= 1, `the page changes width at most once, in one step: ${widths.join(',')}`)
-    const lefts = samples.map(s => s.page)
-    const steps = lefts.slice(1).map((x, i) => Math.sign(Math.round(x - lefts[i])))
-    assert.ok(!(steps.includes(1) && steps.includes(-1)), `the page moves one way, without a double jump: ${lefts.map(Math.round).join(',')}`)
-    assert.equal(await p.locator('.ws-sidebar-toggle').getAttribute('aria-expanded'), String(opening))
-  }
-}, undefined, 'false', reducedMotion)
+}, { width: 844, height: 390 }, 'reduce', true)
 
 test('A key discard waits on the constitution in place of the pair; undo, then Temper, makes one delayed write', async p => {
   await open(p); await reportReady(p)
@@ -1472,7 +1294,6 @@ test('Conversation c (and its dot alias) uses the pill destination in reader and
   await remote.click()
   const opened = n => poll(p, n => window.__harness.events.filter(e => e.type === 'open-worker').length === n, n)
   await p.keyboard.press('c'); await opened(1)
-  assert.ok(!await p.locator('.ws-sidebar').isVisible(), 'c no longer toggles the sidebar')
   await p.keyboard.press('.'); await opened(2)
   await leave(p)
   await p.keyboard.press('c'); await opened(3)
@@ -2012,7 +1833,7 @@ test('Phone audio page taller than the screen scrolls from its top to its bottom
   await scroller.evaluate(el => { el.scrollTop = el.scrollHeight })
   assert.ok((await reach()).bottom >= -0.5, 'the page\'s end scrolls into view')
   assert.equal(await selected(p).locator('.ws-audio-waveform').evaluate(el => getComputedStyle(el).touchAction), 'pan-y', 'a vertical pan on the waveform scrolls the page')
-}, { width: 390, height: 420 }, 'false', 'reduce', true)
+}, { width: 390, height: 420 }, 'reduce', true)
 
 test('Phone HTML reader retains its opaque frame and reading position', async p => {
   await open(p); const frame = await reportReady(p)
@@ -2155,7 +1976,7 @@ test('Phone page swipe follows the finger, snaps back short of the threshold and
   await poll(p, original => document.querySelector('.ws-selected')?.dataset.key !== original, original)
   assert.ok(await p.locator('.ws-stage').evaluate(el => el.classList.contains('ws-swipe-release')), 'the commit settles on the release curve')
   await cdp.detach()
-}, { width: 390, height: 844 }, 'false', 'no-preference')
+}, { width: 390, height: 844 }, 'no-preference')
 
 async function swipe(p, x, y, endX, endY, cancel = false) {
   const cdp = await p.context().newCDPSession(p)
@@ -2209,46 +2030,31 @@ async function exerciseTrackSettlementWait(p) {
   }, saved)
 }
 
-test('Reader Cmd-[ toggles the sidebar; slash focuses the bar Find, which filters the sidebar in place, and Enter selects', async p => {
+test('Reader slash focuses the bar Find, whose list matches by name, path and file, and Enter selects', async p => {
   await open(p)
-  const sidebar = p.locator('.ws-sidebar')
-  const find = barFind(p)
+  const find = barFind(p), picker = p.locator('.ws-menu.ws-switcher')
+  assert.equal(await p.locator('.ws-page.ws-receded:visible').count(), 0, 'no neighbouring page shows')
   await appFocus(p)
   await p.keyboard.press('Meta+[')
-  await sidebar.waitFor()
-  assert.ok(await sidebar.isVisible())
-  assert.equal(await p.locator('.ws-page.ws-receded:visible').count(), 0, 'the sidebar does not reveal a retired page strip')
-  assert.equal(await p.getByRole('button', { name: 'Hide constitutions', exact: true }).getAttribute('aria-expanded'), 'true')
-  assert.equal(await sidebar.locator('input').count(), 0, 'the sidebar has no find field of its own')
-  await appFocus(p)
+  assert.equal(await picker.count(), 0, 'Cmd-[ is free')
   await p.keyboard.press('/')
   assert.ok(await find.evaluate(e => e === document.activeElement), '/ focuses the bar Find')
   for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report', 'TONE.MP3']) {
     await find.fill(query)
-    if (!query.includes('/')) assert.equal(await sidebar.locator('.ws-channel-row:visible').count(), 1, `sidebar matches ${query}`)
-    assert.ok((await sidebar.locator('.ws-channel-row:visible .ws-channel-name').allTextContents()).includes(name), `sidebar includes the constitution matching ${query}`)
-    assert.equal(await p.locator('.ws-switcher').count(), 0, 'with the sidebar open, Find filters it in place')
+    await picker.waitFor()
+    if (!query.includes('/')) assert.equal(await picker.locator('.ws-channel-row:visible').count(), 1, `the list matches ${query}`)
+    assert.ok((await picker.locator('.ws-channel-row:visible .ws-channel-name').allTextContents()).includes(name), `the list includes the constitution matching ${query}`)
   }
   await find.press('Enter')
   assert.equal(await p.locator('.ws-channel-title').textContent(), name)
-  assert.ok(await sidebar.isVisible(), 'selection keeps the sidebar open')
   await appFocus(p); await p.keyboard.press('/')
   assert.ok(await find.evaluate(e => e === document.activeElement))
   await find.press('Escape')
-  assert.ok(await sidebar.isVisible(), 'Escape from Find does not leave the reader or hide the sidebar')
-  assert.ok(await p.locator('.kbn-modal').evaluate(el => el.classList.contains('kbn-reader-open')))
+  assert.ok(await p.locator('.kbn-modal').evaluate(el => el.classList.contains('kbn-reader-open')), 'Escape from Find does not leave the reader')
   assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'one Escape clears and blurs Find')
-  assert.equal(await sidebar.locator('.ws-channel-row:visible').count(), await sidebar.locator('.ws-channel-row').count(), 'the cleared query shows every row again')
-  await reportReady(p)
-  await p.keyboard.press('Meta+[')
-  assert.equal(await sidebar.isVisible(), false)
-  await p.keyboard.press('Meta+[')
-  assert.ok(await sidebar.isVisible(), 'Cmd-[ toggles the sidebar')
-  await p.keyboard.press('Meta+[')
-  assert.equal(await sidebar.isVisible(), false)
 })
 
-test('Reader slash with the sidebar shut hangs the constitution list under the bar Find; Escape puts it away and Enter chooses a file match', async p => {
+test('Reader slash hangs the constitution list under the bar Find; Escape puts it away and Enter chooses a file match', async p => {
   await open(p); await revisitReport(p)
   const find = barFind(p)
   await appFocus(p); await p.keyboard.press('/')
@@ -2272,23 +2078,6 @@ test('Reader slash with the sidebar shut hangs the constitution list under the b
   assert.equal(await picker.count(), 0, 'Escape on a row closes the list')
   assert.equal(await find.inputValue(), '', 'and empties Find')
   assert.ok(await p.locator('.kbn-reader-open').count(), 'and leaves the reader open')
-  // Escape on a sidebar card returns from the file to the page behind it; the next return leaves the reader.
-  await p.keyboard.press('Meta+[')
-  await poll(p, () => document.querySelector('.ws-sidebar')?.checkVisibility())
-  await p.locator('.ws-sidebar .ws-channel-row').first().focus()
-  await p.keyboard.press('Escape')
-  await poll(p, () => document.querySelector('.ws-selected')?.dataset.key.startsWith('fiber:'))
-  await leave(p)
-  await open(p)
-  if (!await p.evaluate(() => document.querySelector('.ws-sidebar')?.checkVisibility())) await p.keyboard.press('Meta+[')
-  await poll(p, () => document.querySelector('.ws-sidebar')?.checkVisibility())
-  await p.keyboard.press('Meta+[')
-  await poll(p, () => !document.querySelector('.ws-sidebar')?.checkVisibility())
-  await p.keyboard.press('Meta+[')
-  await poll(p, () => document.querySelector('.ws-sidebar')?.checkVisibility())
-  assert.equal(await find.inputValue(), '', 'bare keys act on the app again: Cmd-[ toggles the sidebar, not the field')
-  await p.keyboard.press('Meta+[')
-  await poll(p, () => !document.querySelector('.ws-sidebar')?.checkVisibility())
   await p.keyboard.press('/')
   await find.fill('transfer.txt')
   assert.equal(await picker.locator('.ws-channel-row').count(), 1)
@@ -2298,61 +2087,24 @@ test('Reader slash with the sidebar shut hangs the constitution list under the b
   assert.equal(await picker.count(), 0)
 })
 
-test('Sidebar current card follows j/k and Alt scans immediately; browser Back returns to Board', async p => {
+test('j/k and Alt scans land immediately; browser Back returns to Board', async p => {
+  const column = id => p.locator(`[data-column="${id}"] .kbn-card > .kbn-card-name`).allTextContents()
+  const names = [...await column('drafts'), ...await column('inFlight'), ...await column('awaitingReview')]
+  assert.ok(names.length >= 3, 'navigation exercises several constitutions')
   await p.locator('[data-view="shelf"]').click()
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
-  await reportReady(p)
+  await poll(p, first => document.querySelector('.ws-channel-title')?.textContent === first, name)
   await appFocus(p)
-  await p.keyboard.press('Meta+[')
-  const sidebar = p.locator('.ws-sidebar')
-  const rows = sidebar.locator('.ws-channel-row')
-  await sidebar.waitFor()
-  assert.ok(await sidebar.isVisible())
-  const names = await rows.locator('.ws-channel-name').allTextContents()
-  assert.ok(names.length >= 3, 'navigation exercises several constitutions')
-  await rows.first().click()
-  await poll(p, first => document.querySelector('.ws-channel-title')?.textContent === first, names[0])
-  await assertCurrent(names[0])
-  let index = 0
-  for (const [key, delta] of [['j', 1], ['j', 1], ['k', -1], ['k', -1], ['Alt+ArrowDown', 1], ['Alt+ArrowDown', 1], ['Alt+ArrowUp', -1]]) {
+  let index = names.indexOf(name)
+  for (const [key, delta] of [['k', -1], ['k', -1], ['j', 1], ['j', 1], ['Alt+ArrowUp', -1], ['Alt+ArrowUp', -1], ['Alt+ArrowDown', 1]]) {
     await p.keyboard.press(key)
     index += delta
-    await assertCurrent(names[index])
-    // A keyboard switch hands focus to the selected tile in the bar's map.
+    await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[index])
     if (key.startsWith('Alt+')) assert.ok(await selected(p).count(), 'keyboard channel navigation retains a selected page')
   }
   await p.goBack()
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.equal(new URL(p.url()).hash, '#/board')
-
-  async function assertCurrent(expected) {
-    // One browser observation after each key: title and current row must agree
-    // together, without polling away a stale selection marker.
-    const state = await sidebar.evaluate(sidebar => {
-      const current = [...sidebar.querySelectorAll('.ws-channel-row[aria-current="true"]')]
-      const row = current[0]
-      const list = sidebar.querySelector('.ws-channel-list')
-      const bounds = row?.getBoundingClientRect()
-      const viewport = list.getBoundingClientRect()
-      const other = sidebar.querySelector('.ws-channel-row:not([aria-current="true"])')
-      const material = el => {
-        const css = getComputedStyle(el)
-        return [css.backgroundColor, css.boxShadow, css.transform].join('|')
-      }
-      return {
-        count: current.length,
-        name: row?.querySelector('.ws-channel-name')?.textContent,
-        reader: document.querySelector('.ws-channel-title')?.textContent,
-        distinguished: !!row && !!other && material(row) !== material(other),
-        inView: !!bounds && bounds.top >= viewport.top - 1 && bounds.bottom <= viewport.bottom + 1,
-      }
-    })
-    assert.equal(state.count, 1)
-    assert.equal(state.name, expected)
-    assert.equal(state.reader, expected)
-    assert.ok(state.distinguished, 'current row has a distinct selected surface')
-    assert.ok(state.inView, 'reduced-motion nearest scrolling keeps the current row visible')
-  }
 }, { width: 1440, height: 460 })
 
 for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Chronicle'} slash hangs the constitution list under the bar Find without opening the reader; Escape and Enter work`, async p => {
@@ -2432,30 +2184,18 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   }, viewport)
 }
 
-test('The band state word stays still while the sidebar worker breathes', async p => {
+test('The band state word stays still and follows the worker', async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   const state = band(p).locator('.ws-band-state')
   await state.waitFor()
   assert.equal(await state.evaluate(el => getComputedStyle(el).animationName), 'none')
-  const dot = p.locator('.ws-sidebar:not([inert]) .kbn-card').filter({ hasText: 'Remote covariance review' }).locator('.constitution-state-dot')
-  await dot.waitFor()
-  assert.deepEqual(await dot.evaluate(el => {
-    const css = getComputedStyle(el, '::before')
-    return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction, iterations: css.animationIterationCount }
-  }), { name: 'kbn-worker-breathe', duration: '2.4s', easing: 'ease-in-out', iterations: 'infinite' }, 'the working sidebar dot breathes on the shared opacity cycle')
-  assert.deepEqual(await dot.evaluate(el => el.getAnimations({ subtree: true }).find(animation => animation.animationName === 'kbn-worker-breathe')?.effect?.getKeyframes().map(frame => frame.opacity)), ['1', '0.5', '1'], 'the running animation changes opacity, not geometry')
-  await p.emulateMedia({ reducedMotion: 'reduce' })
-  assert.equal(await dot.evaluate(el => getComputedStyle(el, '::before').animationName), 'none', 'reduced motion suppresses the sidebar cycle')
-  await p.emulateMedia({ reducedMotion: 'no-preference' })
-  assert.equal(await dot.evaluate(el => getComputedStyle(el, '::before').animationName), 'kbn-worker-breathe')
   await p.evaluate(async () => {
     const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
     row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
     await window.__harness.modal.fetchAndRender()
   })
   await poll(p, () => document.querySelector('.ws-stage-band .ws-band-state')?.textContent === 'Your turn')
-  assert.equal(await dot.evaluate(el => getComputedStyle(el, '::before').animationName), 'none', 'the sidebar dot stops breathing when the worker yields')
-}, undefined, 'true', 'no-preference')
+}, undefined, 'no-preference')
 
 // Say-it-once checks cover the selected page and its chrome. Tabs and the
 // constitution switcher repeat names as navigation actions. The desktop fiber
@@ -2772,7 +2512,7 @@ test('Appearance gives declared themes way, and embedded reports read their fram
   assert.equal(await p.evaluate(() => document.documentElement.dataset.wsAppearance), 'light', 'the choice survives a reload')
 })
 
-test('Overview and sidebar never fan out theme.css probes; folios reuse the reader ETag cache', async p => {
+test('Overview never fans out theme.css probes; folios reuse the reader ETag cache', async p => {
   const themeReads = async () => (await records(p)).filter(r => r.url.includes('/api/v1/file?') && decodeURIComponent(r.url).includes('/theme.css'))
   await p.locator('[data-view="shelf"]').click()
   await p.locator('.ws-overview-folio').first().waitFor()
@@ -2802,37 +2542,6 @@ test('Theme refresh uses ETag on the ordinary cadence, not on selection frames',
   await poll(p, () => window.__harness.requests.some(r => decodeURIComponent(r.url).includes('calibration-report/theme.css') && r.headers?.['if-none-match']))
   assert.ok((await reads()).at(-1).headers['if-none-match'])
 })
-
-test('Nested sidebar cards reset foreign variables, including cards in Plain', async p => {
-  await open(p); await choose(p, 'Constitution')
-  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
-  const foreign = p.locator('[data-part="sidebar-card"]').filter({ hasText: 'Mask validation notes' })
-  await foreign.waitFor()
-  assert.equal(await foreign.getAttribute('data-ws-theme'), null, 'sidebar cards keep neutral paper')
-  const own = p.locator('[data-part="sidebar-card"]').filter({ hasText: name })
-  assert.equal(await own.getAttribute('data-ws-theme'), null, 'the current sidebar card is neutral too')
-  const assertNeutral = async () => {
-    const values = await foreign.evaluate(el => {
-      const s = getComputedStyle(el)
-      return { ready: s.getPropertyValue('--ws-custom-ready').trim(), after: s.getPropertyValue('--ws-after-nested').trim(), mono: s.getPropertyValue('--font-mono').trim(), transform: s.textTransform, height: s.getPropertyValue('--ws-control-height').trim() }
-    })
-    assert.equal(values.ready, '', 'unknown custom variables stop at the nested boundary')
-    assert.equal(values.after, '')
-    assert.ok(!values.mono.includes('fantasy'))
-    assert.equal(values.transform, 'none')
-    assert.equal(values.height, '32px')
-  }
-  await assertNeutral()
-  await foreign.click(); await choose(p, 'Constitution')
-  const plain = await openPlainThemeMenu(p)
-  await plain.click()
-  assert.equal(await foreign.getAttribute('data-ws-theme'), null)
-  assert.ok(await foreign.getAttribute('data-ws-theme-boundary') !== null)
-  await p.locator('.ws-sidebar').getByRole('button', { name, exact: true }).click()
-  await choose(p, 'Constitution')
-  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
-  await assertNeutral()
-}, { width: 1379, height: 900 }, 'true')
 
 test('Protected verdict plate and its undo line hold without author CSS', async p => {
   await open(p)
@@ -2938,9 +2647,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   }
 }, viewport)
 
-for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the bar, label bar and sidebar (${device})`, async p => {
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the bar and label bar (${device})`, async p => {
   await open(p); await reportReady(p)
-  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="shelf"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-sidebar-toggle', '.ws-selected .ws-expand-button']) {
+  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="shelf"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-selected .ws-expand-button']) {
     await still(p, `hovering ${control}`, () => p.locator(control).hover(), { allow: [control] })
   }
   await p.mouse.move(viewport.width / 2, viewport.height - 4)
@@ -2950,10 +2659,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   assert.deepEqual(await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-reader'], act: () => p.keyboard.type('cal'), allow: ['.kbn-viewtabs-find'] }), [])
   await barFind(p).press('Escape')
   assert.deepEqual(unexpected(await layoutShift(p, { regions: ['.kbn-viewtabs'], act: () => choose(p, 'brief.md'), settle: 400 })), [], 'selecting a file holds the board bar')
-  await still(p, 'a poll repaint', () => repaint(p), { regions: ['.kbn-viewtabs', '.ws-selected', '.ws-sidebar'] })
-  await appFocus(p); await p.keyboard.press('Meta+['); await p.locator('.ws-sidebar .kbn-card').nth(1).waitFor(); await p.waitForTimeout(400)
-  await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover())
-  await still(p, 'a sidebar poll repaint', () => repaint(p))
+  await still(p, 'a poll repaint', () => repaint(p), { regions: ['.kbn-viewtabs', '.ws-selected'] })
   await choose(p, 'calibration-report')
   assert.deepEqual(await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-selected'], act: async () => {
     await p.evaluate(() => {
@@ -2970,7 +2676,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     })
     await repaint(p)
   }, { allow: ['.kbn-card-worker', '.ws-band-state'], settle: 100 })
-  await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control', '.ws-sidebar-index'], settle: 100 })
 }, viewport)
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the Desk and the Board (${device})`, async p => {
@@ -3001,7 +2706,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await still(p, 'summoning Find', () => p.keyboard.press('/'))
 }, viewport)
 
-registerSidebarTreeJourneys(test)
 registerNavigationJourneys(test)
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)
@@ -3032,7 +2736,7 @@ const runnable = tests.filter(test => !process.env.E2E_ONLY || new RegExp(proces
 const started = performance.now()
 let passed = 0
 try {
-  for (const { name, run, viewport, sidebarChoice, reducedMotion, touch } of runnable) {
+  for (const { name, run, viewport, reducedMotion, touch } of runnable) {
     const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
       hasTouch: !!touch || (!!viewport && viewport.width <= 700), isMobile: !!touch || (!!viewport && viewport.width <= 700),
       reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
@@ -3044,9 +2748,6 @@ try {
     let failure
     try {
       await page.clock.install({ time: new Date('2026-10-04T14:00:00Z') })
-      if (sidebarChoice !== null) await page.addInitScript(choice => {
-        if (window === window.top) localStorage.setItem('shuttle:workspace:sidebar', choice)
-      }, sidebarChoice)
       await page.goto(url, { timeout: 15000 })
       await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor({ state: 'attached', timeout: 15000 })
       await run(page)

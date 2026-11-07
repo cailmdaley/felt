@@ -35,7 +35,6 @@
   --ws-shadow-low: 0 2px 5px color-mix(in srgb, var(--ws-ink) 10%, transparent);
   --ws-chrome-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 8%, transparent),
     0 8px 18px -6px color-mix(in srgb, var(--ws-ink) 18%, transparent);
-  --ws-mask: var(--kbn-ink);
   --ws-agent: var(--kbn-agent);
   --ws-verdict: var(--kbn-tempered);
   /* The prompt cache: warm in the meter's verdigris, cold in alarm red. */
@@ -62,14 +61,9 @@
   --ws-ease: ease;
   --ws-receded-scale: 0.94;
   --ws-receded-opacity: 0.55;
-  --ws-receded-text-opacity: 0.42;
-  --ws-neighbour-fade: 45%;
-  --ws-neighbour-edge: 0%;
-  --ws-neighbour-fade-end: var(--ws-neighbour-fade);
   --ws-gap: 24px;
   --ws-inset: 12px;
   --ws-tile-radius: 3px;
-  --ws-drag-latch: 4px;
 
   --ws-reader-layer: 9000;
   --ws-line-width: 1px;
@@ -84,8 +78,8 @@
   --ws-stage-top: var(--ws-stage-gap);
   --ws-neighbour-drop: 8px;
   --ws-phone-nav-height: 48px;
-  /* The page's header line: the corner toggles' height with their inset above and below. */
-  --ws-label-height: calc(var(--ws-control-height) + 2 * var(--ws-corner-inset, 8px));
+  /* The page's header line: a control's height with 8 px above and below. */
+  --ws-label-height: calc(var(--ws-control-height) + 16px);
   --ws-dot-size: 8px;
   --ws-parking-x: -20000px;
   --ws-small-gap: 6px;
@@ -96,24 +90,10 @@
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
-  /* The sidebar: a default the viewer can drag between its floor and a share of the viewport. */
-  --ws-sidebar-default: 384px;
-  --ws-sidebar-min: 320px;
-  --ws-sidebar-max-share: 0.4;
-  --ws-sidebar-width: var(--ws-sidebar-default);
-  --ws-sidebar-handle: 9px;
-  /* The sidebar's open and close: one slide, on the standard curve. */
-  --ws-sidebar-time: 220ms;
-  --ws-sidebar-ease: cubic-bezier(0.2, 0, 0, 1);
-  --ws-sidebar-overflow: 32px;
-  --ws-sidebar-bottom: 40px;
-  /* A sidebar card's meta row: host mark and worker pill on one 19 px line, the Desk's chip height. */
-  --ws-meta-row: 19px;
-  --ws-sidebar-dot-size: 10px;
   /* A thread tree's tone bar, mark column and indent step. */
   --ws-thread-bar: 3px;
   --ws-thread-indent: 14px;
-  /* Each thread state's tone, in the sidebar's and the Desk's vocabulary: the
+  /* Each thread state's tone, in the Desk's vocabulary: the
      human's move in cinnabar (a question) or gold (idle), the worker's in
      cobalt, a verdict to read in verdigris, and the quiet states in ink. */
   --ws-state-question: var(--ws-you);
@@ -123,7 +103,6 @@
   --ws-state-drafts: var(--kbn-ink-muted);
   --ws-state-resting: var(--kbn-ink-faint);
   --ws-state-tempered: color-mix(in srgb, var(--kbn-tempered) 40%, var(--kbn-ink-faint));
-  --ws-sidebar-outcome-lines: 2;
   --ws-html-width: 1040px;
   --ws-pdf-width: 900px;
 }

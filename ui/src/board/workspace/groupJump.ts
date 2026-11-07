@@ -6,7 +6,7 @@ export function groupRunKey(caption: string, occurrence: number): string {
   return JSON.stringify([caption, occurrence])
 }
 
-/** The sidebar's group stops in drawn order; an empty group never forms one. */
+/** The group stops in order; an empty group never forms one. */
 export function groupStops<T>(cards: readonly T[], stopOf: (card: T) => string): Array<GroupStop<T>> {
   const stops: Array<GroupStop<T>> = []
   const occurrences = new Map<string, number>()

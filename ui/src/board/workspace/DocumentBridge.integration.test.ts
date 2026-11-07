@@ -200,7 +200,6 @@ describe('minified production document keyboard bridge', () => {
       ['j', {}, 'nextChannel'], ['k', {}, 'prevChannel'],
       ['J', { shiftKey: true }, 'nextGroup'], ['K', { shiftKey: true }, 'prevGroup'],
       ['ArrowDown', { repeat: true }, 'scrollDown'], ['?', { shiftKey: true }, 'help'],
-      ['[', { metaKey: true }, 'sidebar'], ['[', { ctrlKey: true }, 'sidebar'],
     ]
     for (const [key, init, intent] of keys) {
       expect(press(frame, key, init).defaultPrevented).toBe(true)

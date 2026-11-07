@@ -36,7 +36,7 @@
  */
 import { addChangeFixtures } from './change-fixtures.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
-import { addSidebarFixtures, addFamilyFixtures, addFrontierFixtures, addThreadFixtures } from './thread-fixtures.js'
+import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures } from './thread-fixtures.js'
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
@@ -66,7 +66,7 @@ const search = new URLSearchParams(window.location.search)
 const example = search.get('example')
 const transcriptScenario = search.get('transcript')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
-const workspaceFixture = example === 'change' || example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' || example === 'sidebar-tree' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
+const workspaceFixture = example === 'change' || example === 'workspace' || example === 'music' || example === 'nav-back' || example === 'threads' || example === 'frontier' || example === 'families' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
 if (workspaceFixture && search.has('long-title')) {
   const fiber = workspaceFixture.feed.fibers.find(row => (row.fiber as Record<string, unknown>).id === WORKSPACE_ID)!.fiber as Record<string, unknown>
   fiber.name = LONG_WORKSPACE_NAME
@@ -86,8 +86,7 @@ if (workspaceFixture && example === 'nav-back') addNavigationFixtures(workspaceF
 if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'families') addFamilyFixtures(workspaceFixture, now)
-if (workspaceFixture && example === 'sidebar-tree') addSidebarFixtures(workspaceFixture, now)
-// `manyFiles` lengthens the open constitution's sent-files trail so the sidebar's file list has to scroll.
+// `manyFiles` lengthens the open constitution's sent-files trail so the sheet's list has to fold and scroll.
 if (workspaceFixture && search.has('manyFiles')) {
   const first = workspaceFixture.receipts[0], dir = String(first.fullPath).slice(0, String(first.fullPath).lastIndexOf('/'))
   for (let i = 1; i <= 28; i++) {

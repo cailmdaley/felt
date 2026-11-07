@@ -7,6 +7,7 @@ import { ThreadIndex } from '../threads.js'
 import { projectDeskFrontier } from '../KanbanReadModel.js'
 import { deskOrder } from '../deskOrdering.js'
 import { response as boardResponse } from '../testFixtures.js'
+import type { Reader } from './Reader.js'
 import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
@@ -236,7 +237,7 @@ it('gives r no work on a constitution', async () => {
   expect(document.querySelector('.ws-reader textarea')).toBeNull()
 })
 
-it('scans sidebar cards in one history entry and returns the last viewed card to Desk', async () => {
+it('steps constitutions in one history entry and returns the last viewed card to Desk', async () => {
   workspace.dispose()
   bodyCards = [0, 1, 2, 3].map(i => ({ ...cards[0], id: `work/scan-${i}`, uid: `scan-${i}`, name: `Scan ${i}` }))
   const returned = vi.fn()
@@ -440,7 +441,7 @@ describe('bar Find transcripts', () => {
 })
 
 describe('workspace reader integration', () => {
-  it('s on the constitution page requests rest, not the sidebar', async () => {
+  it('s on the constitution page requests rest', async () => {
     workspace.dispose()
     const onRest = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), onRest })
@@ -678,9 +679,13 @@ describe('workspace reader integration', () => {
     if (result === 'same identity') expect(commit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: linked.uid, id: renamed.id, originId: linked.originId }), 'tempered')
     else expect(commit).not.toHaveBeenCalled()
   })
-  it('groups the sidebar as Drafts, In flight\'s bands and Awaiting review wherever it opens, skipping an empty band, stepping it with j/k', async () => {
+  const reader = (): Reader => workspace.reader
+  const walked = (): string[] => (reader() as unknown as { deskCards(): KanbanCard[] }).deskCards().map(row => row.uid ?? row.id)
+  const landed = (): string | null | undefined => document.querySelector('.shuttle-toast .toast-message')?.textContent
+  const titled = (): string | null | undefined => document.querySelector('.ws-channel-title')?.textContent
+  const step = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key !== key.toLowerCase(), bubbles: true, cancelable: true })); await flush() }
+  it('steps the Desk with j/k wherever it opens', async () => {
     workspace.dispose()
-    localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const returned = vi.fn()
     const grouped = [{ ...cards[0], status: 'closed' }, { ...cards[1], status: 'active' }]
     workspace = makeWorkspace(document.body, {
@@ -688,41 +693,34 @@ describe('workspace reader integration', () => {
       deskRows: () => [grouped[1], grouped[0]], onReturnCard: returned, dock: new Dock('', changed),
     })
     workspace.open(grouped[0], 'Board'); await flush()
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Working', 'Awaiting review'])
-    expect(document.querySelectorAll('.ws-sidebar .kbn-card')).toHaveLength(2)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true })); await flush()
-    expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
+    expect(walked()).toEqual(['beta', 'alpha'])
+    await step('k')
+    expect(titled()).toBe('Beta')
     await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(workspace.isActive).toBe(false)
     expect(returned).not.toHaveBeenCalled()
   })
-  it('captions In flight as its Your turn and Working bands even from an interleaved feed; j/k walk one flow and J/K stop at each column', async () => {
+  it('walks In flight\'s bands as one flow with j/k, and stops J/K at each column', async () => {
     workspace.dispose()
-    localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
       ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', workerState: 'running', runtimePhase })
     const feed = [{ ...cards[0], status: 'closed' }, flight('w1', 'working'), flight('n1', 'waiting'), flight('w2', 'working'), flight('n2', 'blocked'), { ...cards[1], uid: 'draft', id: 'work/draft', name: 'draft' }]
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[5], feed[2], feed[4], feed[1], feed[3], feed[0]], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[0], 'Desk'); await flush()
-    const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
-    const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush() }
-    await press('K'); expect(current()).toBe('n1')
-    await press('j'); expect(current()).toBe('n2')
+    expect(walked()).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
+    await step('K'); expect(titled()).toBe('n1')
+    await step('j'); expect(titled()).toBe('n2')
     // Off the end of one band, j goes on into the next, and on across columns.
-    await press('j'); expect(current()).toBe('w1')
-    await press('K'); expect(current()).toBe('draft')
-    await press('j'); expect(current()).toBe('n1')
-    await press('k'); expect(current()).toBe('draft')
-    await press('J'); expect(current()).toBe('n1')
-    await press('J'); expect(current()).toBe('alpha')
-    await press('K'); expect(current()).toBe('n1')
+    await step('j'); expect(titled()).toBe('w1')
+    await step('K'); expect(titled()).toBe('draft')
+    await step('j'); expect(titled()).toBe('n1')
+    await step('k'); expect(titled()).toBe('draft')
+    await step('J'); expect(titled()).toBe('n1')
+    await step('J'); expect(titled()).toBe('Alpha')
+    await step('K'); expect(titled()).toBe('n1')
   })
-  it('files frontier rows where their own state places them, with a family at its awake thread when its root rests', async () => {
+  it('keeps an off-Desk thread beside its family\'s Desk row, in that row\'s column', async () => {
     workspace.dispose()
-    localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
     const raw = [
@@ -731,81 +729,21 @@ describe('workspace reader integration', () => {
       thread({ id: 'hub/sub', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
       thread({ id: 'settled', status: 'closed', tempered: true }),
       thread({ id: 'settled/ask', orchestrator: 'settled', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }),
-      thread({ id: 'resting', status: 'open', effectiveHorizon: 'stashed' }),
-      thread({ id: 'resting/done', orchestrator: 'resting', status: 'closed' }),
       thread({ id: 'review', status: 'closed' }),
-      thread({ id: 'lone', status: 'active', ask: { text: 'Choose?', at: '' } }),
-      thread({ id: 'resting/ask', orchestrator: 'resting', status: 'active', ask: { text: 'Choose?', at: '' } }),
-      thread({ id: 'quiet', status: 'closed', tempered: true }),
-      thread({ id: 'quiet/draft', orchestrator: 'quiet', status: 'open' }),
     ]
     const index = new ThreadIndex(raw)
     const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c) }))
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[4], feed[9], feed[8], feed[1], feed[7], feed[5]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    const rows = (): (string | undefined)[] => [...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)
-    const strip = (): (string | null)[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')].map(entry => entry.getAttribute('aria-label'))
-    workspace.open(feed[0], 'Desk'); await flush()
-    expect(rows()).toEqual(['draft', 'settled', 'settled-ask', 'resting', 'resting-ask', 'resting-done', 'lone', 'hub', 'hub-sub', 'review'])
-    expect(strip()).toEqual(['Drafts, 1', 'In flight, 4', 'Awaiting review, 1'])
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[4], feed[1], feed[5]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[2], 'Desk'); await flush()
-    expect(rows()).toEqual(['draft', 'settled', 'settled-ask', 'resting', 'resting-ask', 'resting-done', 'lone', 'hub', 'hub-sub', 'review'])
-    expect(strip()).toEqual(['Drafts, 1', 'In flight, 4', 'Awaiting review, 1'])
-    const captions = () => [...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)
-    expect(captions()).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
-    expect(new Set(captions()).size).toBe(captions().length)
-    const toggle = document.querySelector<HTMLButtonElement>('.ws-sidebar [data-root="hub"][data-fold="collapsed"]')!
-    toggle.focus(); workspace.reader.refreshChannels()
-    expect(document.activeElement).toBe(toggle)
-    toggle.click()
-    expect(strip()).toEqual(['Drafts, 1', 'In flight, 4', 'Awaiting review, 1'])
+    expect(walked()).toEqual(['draft', 'settled-ask', 'hub', 'hub-sub', 'review'])
+    await step('k')
+    expect(landed()).toBe('In flight · hub')
     workspace.open(feed[3], 'Desk'); await flush()
-    expect(captions()).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
-    expect(document.querySelector('.ws-sidebar [data-channel-uid="settled"]')?.getAttribute('aria-current')).toBe('true')
-    const find = document.querySelector<HTMLInputElement>('.ws-sidebar .ws-channel-find')!
-    find.value = 'quiet/draft'; find.dispatchEvent(new Event('input'))
-    expect(rows()).toEqual(['quiet-draft'])
-    expect(strip()).toEqual(['Drafts, 1', 'In flight, 4', 'Awaiting review, 1'])
-    find.value = '/ask'; find.dispatchEvent(new Event('input'))
-    workspace.open(feed[4], 'Desk'); await flush()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
-    expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('resting-ask')
-    expect(find.value).toBe('/ask')
-  })
-  it('restores folded rows immediately when external navigation clears Find', async () => {
-    workspace.dispose()
-    localStorage.setItem('shuttle:workspace:sidebar', 'true')
-    localStorage.setItem('shuttle.sidebar.tree', JSON.stringify({ hub: { collapsed: true } }))
-    const feed = [
-      card({ id: 'hub', uid: 'hub', name: 'Hub', status: 'active' }),
-      card({ id: 'child', uid: 'child', name: 'Child', orchestrator: 'hub', status: 'active' }),
-      card({ id: 'other', uid: 'other', name: 'Other', status: 'active' }),
-    ]
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[2]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(feed[0], 'Desk'); await flush()
-    const find = document.querySelector<HTMLInputElement>('.ws-sidebar .ws-channel-find')!
-    find.value = 'Child'; find.dispatchEvent(new Event('input'))
-    expect(document.querySelector('.ws-sidebar [data-channel-uid="child"]')).not.toBeNull()
-    workspace.open(feed[2], 'Desk'); await flush()
-    expect(find.value).toBe('')
-    expect(document.querySelector('.ws-sidebar [data-channel-uid="child"]')).toBeNull()
-    expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('other')
-  })
-  it('shows a crumb when a Working parent was separated from its child by another ask', async () => {
-    workspace.dispose()
-    localStorage.setItem('shuttle:workspace:sidebar', 'true')
-    localStorage.setItem('shuttle.sidebar.tree', JSON.stringify({ hub: { working: true } }))
-    const feed = [
-      card({ id: 'hub', uid: 'hub', status: 'active' }),
-      card({ id: 'a', uid: 'a', name: 'A', orchestrator: 'hub', status: 'active', ask: { text: 'Choose', at: '' } }),
-      card({ id: 'b', uid: 'b', name: 'B', orchestrator: 'a', status: 'active' }),
-      card({ id: 'z', uid: 'z', name: 'Z', orchestrator: 'hub', status: 'active', ask: { text: 'Choose', at: '' } }),
-      card({ id: 'c', uid: 'c', name: 'C', orchestrator: 'hub', status: 'active' }),
-    ]
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[1], feed[0]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(feed[0], 'Desk'); await flush()
-    const row = document.querySelector('.ws-sidebar [data-channel-uid="b"]')!
-    expect(row.getAttribute('aria-level')).toBe('2')
-    expect(row.querySelector('.ws-sidebar-crumb')?.textContent).toBe('A / ')
+    expect(walked()).toEqual(['draft', 'settled-ask', 'settled', 'hub', 'review'])
+    await step('j')
+    expect(landed()).toBe('In flight · hub')
+    await step('J')
+    expect(landed()).toBe('Awaiting review · review')
   })
   it("leads a thread up its ancestry, by the band's trail and by b", async () => {
     workspace.dispose()
@@ -841,42 +779,23 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await flush()
     expect(title()).toBe('hub')
-    // With the left column closed the page stands alone: the zen state.
-    const reader = document.querySelector<HTMLElement>('.ws-reader')!
-    expect(reader.classList.contains('ws-zen')).toBe(false)
-    document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
-    expect(reader.classList.contains('ws-zen')).toBe(true)
-    document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
-    expect(reader.classList.contains('ws-zen')).toBe(false)
   })
-  it('lists a lone constitution\'s sent files at the foot of the left column, opens one on click, and brings them back from the menu', async () => {
-    const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
+  it('opens the sheet of sent files from the toggle, newest first', async () => {
     workspace.open(cards[0], 'Desk'); await flush()
-    const files = reader().querySelector<HTMLElement>('.ws-sidebar > .ws-sidebar-files')!
-    expect(files.hidden).toBe(false)
-    const rows = [...files.querySelectorAll<HTMLButtonElement>('.ws-sidebar-file')]
-    expect(rows.map(row => row.dataset.key)).toEqual(['host-a:/notes/alpha/table.html', 'host-a:/notes/alpha/report.html'])
-    rows[0].click(); await flush()
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
-    expect(files.querySelector('.ws-sidebar-file[aria-current="page"]')?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
-    document.body.focus()
-    workspace.reader.showSentFiles()
-    expect(document.activeElement?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
-    expect(reader().querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).not.toBe(true)
-  })
-  it('opens the sheet of sent files from the menu while the left column is closed', async () => {
-    workspace.open(cards[0], 'Desk'); await flush()
-    document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
+    const toggle = document.querySelector<HTMLButtonElement>('.ws-files-toggle')!
+    expect(toggle.hidden).toBe(false)
     const showModal = vi.fn()
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
     try {
-      workspace.reader.showSentFiles()
+      toggle.click()
       expect(showModal).toHaveBeenCalledOnce()
+      const rows = [...document.querySelectorAll<HTMLButtonElement>('.ws-page-sheet [data-part="page-sheet-row"]')]
+      expect(rows.map(row => row.dataset.key)).toEqual(['host-a:/notes/alpha/table.html', 'host-a:/notes/alpha/report.html'])
     } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal') }
   })
-  it('hides the sent files for a constitution that has none, and answers the menu with the empty sheet', async () => {
+  it('hides the toggle for a constitution with no sent files, and answers the menu with the empty sheet', async () => {
     workspace.open(cards[1], 'Desk'); await flush()
-    expect(document.querySelector<HTMLElement>('.ws-sidebar-files')!.hidden).toBe(true)
+    expect(document.querySelector<HTMLElement>('.ws-files-toggle')!.hidden).toBe(true)
     const showModal = vi.fn()
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
     try {
@@ -994,35 +913,8 @@ describe('workspace reader integration', () => {
     row.click(); await flush()
     expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub/leaf')
   })
-  it('draws one index strip naming each Desk column and its count, marks the open one, and lands a click as J/K would', async () => {
+  it('steps the columns of the Desk projection, including scheduled work in Resting', async () => {
     workspace.dispose()
-    localStorage.setItem('shuttle:workspace:sidebar', 'true')
-    const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
-      ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', workerState: 'running', runtimePhase })
-    const feed = [flight('w1', 'working'), flight('w2', 'working'), flight('n1', 'waiting'), { ...cards[0], status: 'closed' }]
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[2], feed[0], feed[1], feed[3]], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(feed[3], 'Desk'); await flush()
-    const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
-    const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
-    // Empty columns draw no entry; In flight is one entry over its two bands.
-    expect(entries().map(entry => entry.textContent)).toEqual(['In flight3', 'Awaiting review1'])
-    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['In flight, 3', 'Awaiting review, 1'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Your turn', 'Working', 'Awaiting review'])
-    expect(entries().filter(entry => entry.getAttribute('aria-current') === 'location').map(entry => entry.title.split('\n')[0])).toEqual(['Awaiting review'])
-    entries()[0].click(); await flush()
-    expect(current()).toBe('n1')
-    expect(entries().find(entry => entry.getAttribute('aria-current') === 'location')?.title.split('\n')[0]).toBe('In flight')
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
-    expect(current()).toBe('w1')
-    entries()[1].click(); await flush()
-    expect(current()).toBe('alpha')
-    // Back in In flight, the click lands on the card last open there.
-    entries()[0].click(); await flush()
-    expect(current()).toBe('w1')
-  })
-  it('takes the sidebar rows and counts from the Desk projection, including scheduled work in Resting', async () => {
-    workspace.dispose()
-    localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const draft = card({ id: 'desk/draft', shuttleKind: 'oneshot' })
     const turn = card({ id: 'desk/turn', status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'waiting' })
     const working = card({ id: 'desk/working', status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'working' })
@@ -1041,10 +933,10 @@ describe('workspace reader integration', () => {
       onVisibility: visibility, dock: new Dock('', changed),
     })
     workspace.open(rows[0], 'Desk'); await flush()
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid))
-      .toEqual(rows.map(row => row.uid ?? row.id))
-    expect([...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')].map(entry => entry.getAttribute('aria-label')))
-      .toEqual(['Drafts, 1', 'In flight, 2', 'Awaiting review, 1', 'Roles, 1', 'Resting, 2'])
+    expect(walked()).toEqual(rows.map(row => row.uid ?? row.id))
+    const columns: string[] = []
+    for (let n = 0; n < 4; n++) { await step('J'); columns.push(landed()!.split(' · ')[0]) }
+    expect(columns).toEqual(['In flight', 'Awaiting review', 'Roles', 'Resting'])
   })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()
@@ -1301,30 +1193,6 @@ describe('workspace reader integration', () => {
     expect(band.hidden).toBe(false)
   })
 
-  it('toggles the sidebar without replacing the selected iframe or its window', async () => {
-    await feedNamesReport()
-    workspace.open(cards[0])
-    await flush()
-    const frame = workspace.reader.host.get(docKey('host-a', '/notes/alpha/report.html', 'host-a'))!
-    const iframe = frame.content.querySelector('iframe')!
-    const innerWindow = iframe.contentWindow
-    const toggle = document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-    expect(toggle.querySelector('svg')).not.toBeNull()
-    expect(toggle.title).toBe('Constitutions · ⌘[')
-    expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(workspace.reader.el.classList.contains('ws-with-sidebar')).toBe(true)
-    expect(workspace.reader.el.querySelector('.ws-sidebar')?.getAttribute('aria-label')).toBe('Constitutions')
-    expect(workspace.reader.el.querySelector('.ws-sidebar .ws-channel-find')?.getAttribute('aria-label')).toBe('Find a constitution')
-    toggle.click()
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    expect(localStorage.getItem('shuttle:workspace:sidebar')).toBe('false')
-    expect(frame.content.querySelector('iframe')).toBe(iframe)
-    expect(iframe.contentWindow).toBe(innerWindow)
-    toggle.click()
-    expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(frame.content.querySelector('iframe')).toBe(iframe)
-  })
-
   it('seats one band over each channel by owner and uid, and clears it for a note', async () => {
     const ownerCards = [
       card({ id: 'work/shared', uid: 'same-uid', name: 'Alpha copy', originId: 'host-a', fiberDir: '/notes/a', path: 'work/shared/shared.md', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' }),
@@ -1374,7 +1242,7 @@ describe('workspace reader integration', () => {
       workerState: 'running', tmuxSession: 'new-worker', sessionUuid: 'new-session', runtimePhase: 'working' }]
     workspace.update()
     expect(document.querySelector('.ws-stage-band .ws-dock')).toBe(band)
-    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *)')).toHaveLength(0)
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-navbar *)')).toHaveLength(0)
     expect(band.querySelector<HTMLElement>('.ws-band-open')?.hidden).toBe(false)
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^working/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -1733,7 +1601,7 @@ describe('workspace reader integration', () => {
     expect(document.activeElement).toBe(document.querySelector('.ws-return'))
   })
 
-  it('keeps Alt-arrow stepping in sidebar order and ignores messages from unrelated frames', async () => {
+  it('keeps Alt-arrow stepping in Desk order and ignores messages from unrelated frames', async () => {
     workspace.open(cards[1])
     await flush()
     const ordered = [cards[0], cards[1]]

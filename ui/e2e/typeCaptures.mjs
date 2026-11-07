@@ -61,10 +61,6 @@ try {
     for (const [name, open] of Object.entries(surfaces)) {
       if (only && !only.includes(name)) continue
       const page = await browser.newPage({ viewport, colorScheme: scheme, deviceScaleFactor: 2 })
-      await page.addInitScript(() => {
-        if (window !== window.top) return
-        localStorage.setItem('shuttle:workspace:sidebar', 'false')
-      })
       try {
         await open(page)
         await page.waitForTimeout(400)

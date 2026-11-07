@@ -189,7 +189,7 @@ describe('workspace routes', () => {
     expect(window.location.hash).toBe('#/desk')
   })
 
-  it('names the same predecessor by page or constitution as a sidebar scan changes channel', async () => {
+  it('names the same predecessor by page or constitution as a step changes channel', async () => {
     resetHash('#/desk')
     const history = create()
     history.start()
@@ -247,7 +247,7 @@ describe('workspace routes', () => {
     expect(onRoute).toHaveBeenCalledTimes(3)
   })
 
-  it('pops when a sidebar scan would duplicate the preceding channel address', async () => {
+  it('pops when a step would duplicate the preceding channel address', async () => {
     resetHash('#/desk')
     const history = create()
     history.start()

@@ -3,7 +3,6 @@
 A constitution can give its Shuttle channel a visual identity without changing its documents or the Desk.
 Its theme reaches the reader's veil, thumbnail paper, page frames, label bars, fiber header and prose, Markdown or text pages, and audio waveform ink.
 On the Board overview, its changed-work rows and every folio density wear the same paper and accents.
-Its sidebar card has its own channel boundary, even inside another constitution's reader.
 Phone top and bottom bars and the page sheet use the channel's materials without adding a card frame around the edge-to-edge page.
 HTML reports, PDFs, images and other documents keep their own styling.
 The board's bar, with the reader's map of pages, stays the Desk's on every view.
@@ -30,7 +29,7 @@ CSS uses the browser's error recovery: malformed individual declarations are ign
 
 The page's **⋯** menu includes **Plain (drop this constitution's theme)** when the constitution declares a theme or has a sibling `theme.css`.
 Its check state shows whether Plain is selected.
-It removes both the bundled theme and custom CSS for this viewer, including sidebar cards, changed-work rows and folios, without editing the fiber.
+It removes both the bundled theme and custom CSS for this viewer, including changed-work rows and folios, without editing the fiber.
 The choice is stored locally by channel and host; blocked browser storage doesn't prevent the toggle from working for the current session.
 
 ## CSS boundary
@@ -46,12 +45,12 @@ Shuttle parses the file with a constructable `CSSStyleSheet` and scopes style ru
 Selector lists, functional selectors and CSS nesting retain their browser-defined meaning.
 Rules inside `@media`, `@supports` and `@layer` retain their conditions and are scoped recursively.
 Rules can't select the Desk or an adjacent channel; arbitrary selectors such as `body` don't escape the boundary.
-Each sidebar card, changed-work row and folio is an independent root for its own constitution.
+Each changed-work row and folio is an independent root for its own constitution.
 Nested roots reset inherited typography and custom properties, so a foreign card or a card in Plain mode doesn't inherit the open reader's theme.
 
 ### Act zone
 
-The band and its verbs, Temper/Discard, verdict plates (and the undo line that takes their place while a verdict waits), and the fiber page and sidebar worker controls are **act zones**, marked `data-part="act"`.
+The band and its verbs, Temper/Discard, verdict plates (and the undo line that takes their place while a verdict waits), and the fiber page's worker control are **act zones**, marked `data-part="act"`.
 The `data-act` attribute identifies `band`, `verdict` or `worker`; it isn't permission for theme rules to enter.
 Each generated CSS scope stops before that zone, so even a broad `button { color: red }` rule can't select Temper or the worker control.
 The zone also resets inherited UI variables and typography to the unthemed defaults, accepting only `--ws-paper` and `--ws-ink` from the channel.
@@ -65,7 +64,7 @@ Other global at-rules are omitted with a console note.
 Relative URLs resolve against the board page; use absolute URLs or data URIs for ornaments and fonts.
 Custom themes are CSS, not a sandbox for untrusted network resources.
 
-Stylesheets are removed when no reader, sidebar card, changed-work row or folio uses them.
+Stylesheets are removed when no reader, changed-work row or folio uses them.
 Changing a theme repaints a paused audio waveform without replacing its player or losing playback position.
 Channel selection and page styling change immediately; only the veil's tint crosses over 280 ms.
 Reduced motion disables theme animations and transitions, and reduced transparency makes the veil opaque.
@@ -114,7 +113,6 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | `[data-part='prose'] h1`, `h2`, `h3`, `p`, `blockquote`, `code`, `table`, `hr` | Prose elements; prefix each with the prose selector |
 | `[data-part='thumbnail']` | Shared preview's UI paper in folios and changed-work rows |
 | `[data-part='thumbnail-face']` | Designed text face beneath a loaded preview |
-| `:scope[data-part='sidebar-card']` | Channel's Desk-card face in the reader sidebar |
 | `:scope[data-part='since-row']` | Channel's since-you-were-here row |
 | `:scope[data-part='folio']` | Channel's overview folio |
 | `:scope[data-part='folio'][data-density='full']` | Full-height folio |

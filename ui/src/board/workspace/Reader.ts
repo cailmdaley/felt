@@ -1,11 +1,8 @@
-import { sidebarOutline, SidebarPreferences, rootIdentity, type Fold } from './SidebarOutline.js'
-import { SidebarFiles } from './SidebarFiles.js'
 import { sentDocuments } from './SentFiles.js'
-import { ThreadIndex } from '../threads.js'
+import type { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { sidebarRevision } from './sidebarRevision.js'
 import { constitutionAction } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
@@ -20,11 +17,10 @@ import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { probeDocumentTitles } from './titleProbe.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import type { ChannelThemes } from './ChannelThemes.js'
-import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
-import { groupJump, groupStops, stopLanding } from './groupJump.js'
-import { invalidateWorkspaceMeasures, workspaceMeasure, workspaceToken } from './measures.js'
+import { deskCardKey } from '../deskOrdering.js'
+import { groupJump, groupStops } from './groupJump.js'
+import { invalidateWorkspaceMeasures, workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
-import { stateDot } from '../stateDot.js'
 import { type Verdict } from './Verdicts.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
@@ -55,22 +51,19 @@ export interface ReaderOptions {
   onRest?(card: KanbanCard, anchor: HTMLElement): void
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
-  /** Sidebar scanning replaces the open history entry. */
+  /** Stepping between constitutions replaces the open history entry. */
   onScan?(card: KanbanCard): void
   /** Open the open thread's orchestrator; false outside a thread. */
   onOrchestrator?(): boolean
   cards(): KanbanCard[]
-  /** The thread graph the reader reads; absent, one is built from `cards`. */
+  /** The thread graph that places an off-Desk constitution beside its family. */
   threadIndex?(): ThreadIndex
-  /** The sidebar's order, shared by every constitution-stepping binding. */
-  switcherCards?(): KanbanCard[]
+  /** The Desk's reading order, which every constitution-stepping binding walks. */
+  deskCards?(): KanbanCard[]
   pickerCards?(): KanbanCard[]
-  sidebarBand?(card: KanbanCard): string | undefined
-  /** The column a sidebar card stands in, which may hold several bands; the J/K stops and index entries. Absent, each band is a stop. */
-  sidebarColumn?(card: KanbanCard): string | undefined
+  /** The Desk column a card stands in: the J/K stops. */
+  deskStop?(card: KanbanCard): string
   files?(card: KanbanCard): string[]
-  /** The board bar's Find field: on the desktop it filters the open sidebar. */
-  find?: HTMLInputElement
   /** Summon the board bar's Find (desktop), in place of the phone's switcher. */
   onFind?(): boolean
   /** Expand has taken, or given back, the whole window. */
@@ -83,8 +76,6 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   if (text) el.textContent = text
   return el
 }
-/** The index strip explains the single state mark shared by constitution rows. */
-const ROW_MARKS = 'State dot: gold your turn · blue working · muted starting · paper no live worker'
 
 function button(cls: string, text: string, action: () => void, label = text): HTMLButtonElement {
   const b = element('button', cls, text)
@@ -94,14 +85,10 @@ function button(cls: string, text: string, action: () => void, label = text): HT
   return b
 }
 
-const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
-const SIDEBAR_WIDTH_STORAGE = 'shuttle:workspace:sidebar-width'
-/** One arrow press resizes the sidebar by this much; with Shift, four times as much. */
-const SIDEBAR_STEP = 16
-/** The stage's least width for the sidebar to open by default beside it. */
-const STAGE_BESIDE_SIDEBAR = 720
 /** A latched swipe that neither moves nor releases for this long has lost its release. */
 const SWIPE_QUIET = 500
+/** How long the landing toast of a constitution step stands. */
+const STEP_CUE = 1200
 
 /** A single stage whose identity-keyed pages stay attached across channels. */
 export class Reader {
@@ -110,7 +97,6 @@ export class Reader {
   private readonly veil = element('div', 'ws-veil')
   private departure: ReturnType<typeof setTimeout> | null = null
   private arrival = 0
-  private readonly sidebarFiles = new SidebarFiles()
   readonly track = element('div', 'ws-track')
   readonly stage = element('div', 'ws-stage')
   private readonly parallax = element('div', 'ws-parallax')
@@ -124,6 +110,7 @@ export class Reader {
   private runSettled = true
   private readonly navbar: HTMLElement
   private readonly lead: HTMLElement
+  private readonly trail = element('div', 'ws-nav-trail')
   private keyboardInput = false
   private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
@@ -147,7 +134,7 @@ export class Reader {
   private channel: Channel | null = null
   private fresh: ReadonlySet<DocKey> = new Set()
   private currentCard: KanbanCard | null = null
-  /** The constitution last open in each sidebar column, for this session. */
+  /** The constitution last open in each Desk column, for this session. */
   private readonly groupMemory = new Map<string, string>()
   private selected: DocKey | null = null
   private expanded = false
@@ -155,25 +142,9 @@ export class Reader {
   private menu: HTMLElement | null = null
   private menuRelease: Release | null = null
   private menuAnchor: HTMLElement | null = null
-  private sidebar = element('aside', 'ws-sidebar')
-  /** One row naming each sidebar column with its count; its entries are the J/K stops. */
-  private readonly sidebarIndex = element('nav', 'ws-sidebar-index')
-  private readonly indexEntries = new Map<string, HTMLButtonElement>()
-  private readonly sidebarPicker: ConstitutionPicker
   private readonly picker: ConstitutionPicker
-  private readonly sidebarFlight: SidebarFlight
-  private readonly sidebarRows = new Map<HTMLElement, KanbanCard>()
-  private readonly flightRoots = new Set<HTMLElement>()
-  /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
-  private sidebarChoice: boolean | null = null
-  private readonly sidebarToggle: HTMLButtonElement
-  /** The phone's way to the sheet of sent files, marked while one is unread. */
+  /** The way to the sheet of sent files, marked while one is unread. */
   private readonly filesToggle: HTMLButtonElement
-  /** The sidebar's edge: a separator that resizes it by pointer or keys. */
-  private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
-  /** The viewer's chosen width; absent, the measure's default. */
-  private sidebarWidthChoice: number | null = null
-  private cancelSidebarSlide: (() => void) | null = null
   private instantRaf = 0
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   private readonly phone = window.matchMedia(MOBILE_MEDIA)
@@ -190,9 +161,6 @@ export class Reader {
     this.el.dataset.wsThemeBoundary = ''
     this.veil.dataset.part = 'veil'
     this.el.inert = true
-    this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Constitutions')
-    this.sidebarToggle.title = 'Constitutions · ⌘['
-    this.sidebarToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="1.5" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>'
     this.filesToggle = button('ws-files-toggle', '', () => this.openFilesSheet(), 'Sent files')
     this.filesToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M6.5 3.5h7M6.5 8h7M6.5 12.5h7"/><circle class="ws-toggle-flag" cx="3" cy="3.5" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="8" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="12.5" r="1"/></svg>'
     this.returnButton = button('ws-return', '', () => this.back(), 'Back to Desk')
@@ -201,67 +169,32 @@ export class Reader {
     this.lead.append(this.returnButton, this.title)
     this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
     this.headWorker.hidden = true
-    const trail = element('div', 'ws-nav-trail')
     const documentMenu = button('ws-icon-button ws-phone-document-menu', '⋯', () => {
       const doc = this.document
       if (doc) this.openMenu(doc, documentMenu)
     }, 'Document menu')
-    trail.append(this.headWorker, this.filesToggle, documentMenu)
+    this.trail.append(this.headWorker, this.filesToggle, documentMenu)
     // The phone's top bar owns return, the fiber's name, its worker and document actions.
     // The desktop draws no head of its own.
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
-    this.navbar.append(this.lead, trail)
+    this.navbar.append(this.lead, this.trail)
     this.settingsMenu = new SettingsMenu()
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key), () => this.paintFilesToggle())
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
     this.stage.append(this.parallax)
-    this.sidebar.setAttribute('aria-label', 'Constitutions')
-    const pickerOptions = {
-      cards: () => this.withCurrent(this.opts.pickerCards?.() ?? this.sidebarCards()),
+    this.picker = new ConstitutionPicker({
+      cards: () => this.withCurrent(this.opts.pickerCards?.() ?? this.opts.cards()),
       files: opts.files,
-      current: (card: KanbanCard) => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner,
-      onOpen: (card: KanbanCard) => { this.closeMenu(); this.opts.onChannel(card) },
-    }
-    this.sidebarPicker = new ConstitutionPicker({
-      ...pickerOptions, cards: () => this.sidebarFamilies().flatMap(family => family.rows), revealCurrent: true,
-      decorate: el => this.decorateSidebar(el),
-      files: card => [...(opts.files?.(card) ?? []), ...(this.opts.threadIndex?.()?.ancestry(card).map(part => part.name) ?? [])],
-      onOpen: card => this.scan(card),
-      find: opts.find, active: () => this.active && this.sidebarShown,
-      // Escape on a sidebar row follows the reader's back chain.
-      onEscape: () => { this.handleIntent('back', false, true) },
-      renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
-      revision: sidebarRevision,
-      onRow: (el, card) => {
-        // A row is plain type in the sidebar's own ink: only the travelling copy of a card takes its theme.
-        this.sidebarRows.set(el, card)
-      },
-      onRemove: el => { this.sidebarRows.delete(el) },
-      onRefresh: () => this.renderIndex(),
+      current: card => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner,
+      onOpen: card => { this.closeMenu(); this.opts.onChannel(card) },
     })
-    this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
-    this.picker = new ConstitutionPicker(pickerOptions)
-    this.sidebarPicker.el.style.display = 'contents'
-    this.sidebarHandle.setAttribute('role', 'separator')
-    this.sidebarHandle.setAttribute('aria-orientation', 'vertical')
-    this.sidebarHandle.setAttribute('aria-label', 'Resize constitutions')
-    this.sidebarHandle.title = 'Drag to resize · double-click to reset'
-    this.sidebarHandle.tabIndex = 0
-    this.sidebarHandle.addEventListener('pointerdown', e => this.sidebarResizeStart(e))
-    this.sidebarHandle.addEventListener('keydown', e => this.sidebarResizeKey(e))
-    this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null, true))
-    this.sidebarIndex.setAttribute('aria-label', 'Constitution columns')
-    this.sidebarIndex.title = ROW_MARKS
-    this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarFiles.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     this.band.hidden = true
     column.append(this.band, this.stage)
-    const main = element('div', 'ws-stage-row')
-    main.append(this.sidebar, column)
-    this.el.append(this.veil, this.navbar, this.sidebarToggle, main, this.announcement, this.pageSheet.el)
+    this.el.append(this.veil, this.navbar, column, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -290,17 +223,8 @@ export class Reader {
     this.el.addEventListener('mousedown', e => {
       if (e.button === 0 && (e.target as Element).closest('button')) e.preventDefault()
     })
-    try {
-      const choice = localStorage.getItem(SIDEBAR_STORAGE)
-      if (choice === 'true' || choice === 'false') this.sidebarChoice = choice === 'true'
-      const width = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE))
-      if (Number.isFinite(width) && width > 0) this.sidebarWidthChoice = width
-    } catch { /* Storage is optional. */ }
-    this.applySidebarWidth()
   }
 
-  /** Whether the sidebar's list is on screen, where the board bar's Find filters it. */
-  get sidebarVisible(): boolean { return this.active && this.sidebarShown }
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
   setBackDestination(label: string): void {
@@ -334,10 +258,8 @@ export class Reader {
     this.title.textContent = channel.name
     this.title.title = channel.name
     if (!this.workerClock) this.workerClock = window.setInterval(() => this.paintWorker(), 30000)
-    this.renderSidebar()
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)
-    if (arriving) this.setSidebarVisible(this.sidebarShown)
     if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
@@ -360,10 +282,8 @@ export class Reader {
   hide(animate = false): void {
     window.clearInterval(this.workerClock); this.workerClock = 0
     this.cancelSwipe()
-    this.setSidebarVisible(false, animate)
     if (this.expanded) this.setExpanded(false)
     this.active = false
-    this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
     this.pageSheet.hide()
     this.closeMenu()
@@ -427,10 +347,9 @@ export class Reader {
     this.closeMenu()
     this.settingsMenu.show(content, opener, opener.closest<HTMLElement>('.ws-dock') ?? this.el)
   }
-  /** The sent files stand at the foot of the left column; the phone, a closed column and an empty list open the sheet. */
+  /** The sheet of sent files, returning to the menu that opened it. */
   showSentFiles(): void {
     this.closeMenu()
-    if (this.sidebarShown && !this.sidebarFiles.el.hidden) { this.sidebarFiles.focus(); return }
     const opener = this.phone.matches ? this.navbar.querySelector<HTMLElement>('.ws-phone-document-menu') : this.host.get(this.selected ?? '')?.label.querySelector<HTMLElement>('.ws-menu-button')
     this.openFilesSheet(opener ?? undefined)
   }
@@ -508,15 +427,13 @@ export class Reader {
     ch.documents.forEach((doc, i) => {
       const frame = this.host.get(doc.key)
       if (!frame) return
-      frame.el.classList.toggle('ws-before', i < index)
-      frame.el.classList.toggle('ws-after', i > index)
       frame.el.classList.toggle('ws-expanded', doc.key === this.selected && this.expanded)
       this.fillLabel(frame, ch.labels[i])
     })
     const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.fresh = fresh
-    this.feedFiles()
+    this.paintFilesToggle()
     const doc = ch.documents[index]
     if (doc) this.el.dataset.page = doc.kind
     else delete this.el.dataset.page
@@ -529,8 +446,6 @@ export class Reader {
     this.layout(animate)
   }
   private prepareFrame(frame: DocumentFrame): void {
-    frame.el.classList.toggle('ws-text-page', ['fiber', 'family', 'text', 'markdown', 'code'].includes(frame.doc.kind))
-    frame.el.classList.toggle('ws-native-page', ['audio', 'video', 'pdf'].includes(frame.doc.kind))
     if (frame.doc.kind === 'audio' || frame.doc.kind === 'video') frame.el.classList.add('ws-media-page')
     frame.el.setAttribute('role', 'tabpanel')
     frame.el.setAttribute('aria-label', frame.doc.name)
@@ -618,37 +533,14 @@ export class Reader {
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
     if (!this.swiping) this.track.style.transform = `translateX(${target}px)`
-    // Fade the visible margin, not an outer edge already clipped off-screen.
-    for (const doc of ch.documents) {
-      const frame = this.host.get(doc.key)
-      if (!frame || doc.key === this.selected) continue
-      const width = parseFloat(frame.el.style.width)
-      const before = frame.el.classList.contains('ws-before')
-      const scale = this.measure('receded-scale', 0.94)
-      const left = target + parseFloat(frame.el.style.left) + (before ? width * (1 - scale) : 0)
-      const right = left + width * scale
-      const visible = Math.max(0, Math.min(W, right) - Math.max(0, left))
-      const edge = Math.min(100, Math.max(0, before ? -left : right - W) / (width * scale) * 100)
-      const end = Math.min(100, edge + visible / (width * scale) * this.measure('neighbour-fade', 45))
-      frame.el.style.setProperty('--ws-neighbour-edge', `${edge}%`)
-      frame.el.style.setProperty('--ws-neighbour-fade-end', `${end}%`)
-    }
-  }
-  /** The left column's files; the phone's toggle marks an unread one. */
-  private feedFiles(): void {
-    if (!this.channel) return
-    this.sidebarFiles.show(this.channel, this.selected ?? '', this.fresh, key => this.openDocument(key))
-    this.paintFilesToggle()
   }
   private readonly relayout = (): void => {
     invalidateWorkspaceMeasures(this.el)
-    if (this.active) this.feedFiles()
-    if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
-    this.applySidebarWidth()
-    this.renderSidebar()
+    if (this.active) this.paintFilesToggle()
+    if (!this.phone.matches) this.el.classList.remove('ws-topbar-hidden')
     this.layout(false)
   }
-  /** Expand takes the whole window: the board bar and the sidebar step aside until it is restored. */
+  /** Expand takes the whole window: the board bar steps aside until it is restored. */
   private toggleExpand(): void {
     this.setExpanded(!this.expanded)
     this.paint(true)
@@ -658,7 +550,6 @@ export class Reader {
     this.el.classList.toggle('ws-expand-mode', expanded)
     invalidateWorkspaceMeasures(this.el)
     this.opts.onExpand?.(expanded)
-    this.renderSidebar()
   }
   private openMenu(doc: WorkspaceDocument, anchor: HTMLElement): void {
     const same = this.menuAnchor === anchor
@@ -729,282 +620,28 @@ export class Reader {
   }
   private openSwitcher(): void {
     if (!this.phone.matches && this.opts.onFind?.()) return
-    if (this.sidebarShown) { this.sidebarPicker.focus(); return }
     if (this.picker.isOpen) { this.picker.close(); return }
     this.closeMenu()
     this.picker.show(this.el, this.title)
   }
-  /** The source column is captured before the live Desk starts receding. */
-  captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
-  private readonly sidebarPreferences = new SidebarPreferences((() => { try { return localStorage } catch { return null } })())
-  private sidebarFamilies(query = this.sidebarPicker?.find.value.trim() ?? '') {
-    const desk = this.opts.switcherCards?.() ?? this.opts.cards()
-    const index = this.opts.threadIndex?.() ?? new ThreadIndex([...desk, ...this.opts.cards()])
-    return sidebarOutline(index, desk, this.currentCard ?? undefined, this.sidebarPreferences.folds, query)
-  }
-  private readonly sidebarControls = new Map<string, HTMLButtonElement>()
-  private decorateSidebar(list: HTMLElement): void {
-    list.querySelectorAll('.ws-sidebar-fold, .ws-sidebar-crumb, .ws-sidebar-count').forEach(el => el.remove())
-    const liveControls = new Set<string>()
-    const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
-    const rows = [...list.querySelectorAll<HTMLElement>('.ws-channel-row')]
-    const byIdentity = new Map(rows.map(row => [JSON.stringify([row.dataset.channelOwner, row.dataset.channelUid]), row]))
-    const rowFor = (card: KanbanCard) => byIdentity.get(cardIdentity(card))
-    const query = !!this.sidebarPicker.find.value.trim()
-    const toggle = (root: KanbanCard, fold: Fold, label: string, expanded: boolean): HTMLButtonElement => {
-      const key = JSON.stringify([rootIdentity(root), fold])
-      liveControls.add(key)
-      let control = this.sidebarControls.get(key)
-      if (!control) {
-        control = button('ws-sidebar-fold', label, () => {
-          this.sidebarPreferences.toggle(root, fold)
-          this.sidebarPicker.refresh(false)
-        })
-        this.sidebarControls.set(key, control)
-      }
-      control.textContent = label
-      control.dataset.fold = fold; control.dataset.root = rootIdentity(root)
-      control.setAttribute('aria-expanded', String(expanded))
-      return control
-    }
-    for (const family of this.sidebarFamilies()) {
-      const { root, asks, working } = family, rootRow = rowFor(root)
-      const workingCount = working.filter(item => index.state(item.card) === 'working').length
-      rootRow?.setAttribute('aria-level', '1')
-      if (rootRow && family.expandable && !query) {
-        const fold = toggle(root, 'collapsed', family.folded ? '▸' : '▾', !family.folded)
-        fold.setAttribute('aria-label', `${family.folded ? 'Expand' : 'Collapse'} ${root.name}`)
-        rootRow.prepend(fold)
-      }
-      if (rootRow && family.folded && (asks.length || workingCount)) rootRow.append(element('span', 'ws-sidebar-count', asks.length ? `${asks.length} ${asks.length === 1 ? 'needs' : 'need'} you` : `${workingCount} working`))
-      const workingRows = new Set(working.map(item => cardIdentity(item.card)))
-      const drawnPath = [root]
-      for (const card of family.rows) {
-        if (rootIdentity(card) === rootIdentity(root)) continue
-        const row = rowFor(card)
-        if (!row) continue
-        const inWorkingTree = !query && (this.sidebarPreferences.folds[rootIdentity(root)]?.working || workingCount === 1) && workingRows.has(cardIdentity(card))
-        const parent = index.parentOf(card)
-        const parentDepth = parent ? drawnPath.indexOf(parent) : -1
-        const parentDrawn = inWorkingTree && parentDepth >= 0
-        const depth = parentDrawn ? parentDepth + 1 : 1
-        drawnPath.length = depth
-        drawnPath[depth] = card
-        row.setAttribute('aria-level', String(depth + 1))
-        row.style.setProperty('--sidebar-depth', String(depth))
-        const ancestors = parentDrawn ? [] : index.ancestry(card).filter(part => part.card && (query || rootIdentity(part.card) !== rootIdentity(root)))
-        if (ancestors.length) row.querySelector('.ws-channel-name')?.prepend(element('span', 'ws-sidebar-crumb kbn-card-crumb', `${ancestors.map(part => part.name).join(' / ')} / `))
-      }
-      if (query || family.folded || !rootRow) continue
-      let anchor = [...(this.sidebarPreferences.folds[rootIdentity(root)]?.more || asks.length === 4 ? asks : asks.slice(0, 3))].reverse().map(rowFor).find(Boolean) ?? rootRow
-      if (family.more) {
-        const open = this.sidebarPreferences.folds[rootIdentity(root)]?.more ?? false
-        const more = toggle(root, 'more', open ? 'Show fewer' : `+${family.more} more`, open)
-        anchor.after(more); anchor = more
-      }
-      if (workingCount > 1) anchor.after(toggle(root, 'working', `Working ${workingCount}`, this.sidebarPreferences.folds[rootIdentity(root)]?.working ?? false))
-    }
-    for (const key of this.sidebarControls.keys()) if (!liveControls.has(key)) this.sidebarControls.delete(key)
-  }
-  /** One state dot and the name; details belong to the open page. */
-  private sidebarCard(card: KanbanCard): HTMLElement {
-    const face = element('div', 'kbn-card ws-constitution-card ws-constitution-row')
-    const header = element('div', 'kbn-card-header')
-    header.append(stateDot(card, c => this.scan(c)), element('span', 'kbn-card-name ws-channel-name', card.name))
-    face.append(header)
-    face.dataset.part = 'sidebar-card'
-    face.dataset.wsThemeBoundary = ''
-    return face
-  }
   /** Re-list the channel rows after the overview's order changes. */
   refreshChannels(): void {
-    if (this.active && this.sidebarShown) this.fillSidebar()
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
-  /** The viewer's choice stands; with none, the window's width decides whether the stage keeps its working width beside the default sidebar. */
-  private get sidebarShown(): boolean {
-    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? window.innerWidth - this.sidebarPixels(null) >= STAGE_BESIDE_SIDEBAR)
-  }
-  /**
-   * Opening or closing the sidebar is one coordinated motion: the column
-   * slides in or out while the stage glides to its new
-   * places. The layout lands at once and only `translate` and `opacity`
-   * animate back from where things were, so nothing reflows per frame.
-   * Under reduced motion it lands instantly.
-   */
-  private toggleSidebar(): void {
-    this.sidebarChoice = !this.sidebarShown
-    try { localStorage.setItem(SIDEBAR_STORAGE, String(this.sidebarChoice)) } catch { /* Storage is optional. */ }
-    this.closeMenu()
-    this.cancelSidebarSlide?.()
-    const shown = this.sidebarShown
-    const slide = !this.motion.matches && typeof this.sidebar.animate === 'function' && this.active
-    const before = slide ? this.stagePlaces() : null
-    this.setSidebarVisible(shown, false)
-    this.renderSidebar(); this.layout(false)
-    if (before) this.slideSidebar(shown, before)
-  }
+  /** The toggle stands in the phone's top bar, or in the selected page's header line before Expand. */
   private paintFilesToggle(): void {
     const documents = this.channel ? sentDocuments(this.channel) : []
-    this.filesToggle.hidden = !this.phone.matches || !documents.length
+    const line = this.phone.matches ? this.trail : this.host.get(this.selected ?? '')?.label
+    if (line && this.filesToggle.parentElement !== line) line.insertBefore(this.filesToggle, line.querySelector('.ws-expand-button, .ws-phone-document-menu'))
+    this.filesToggle.hidden = !documents.length
     this.filesToggle.setAttribute('aria-expanded', String(this.pageSheet.isOpen))
     this.filesToggle.toggleAttribute('data-attention', this.fresh.size > 0)
-  }
-  /** Zen: with the left column closed, the page stands alone and its neighbours fade. */
-  private paintZen(): void {
-    this.el.classList.toggle('ws-zen', !this.phone.matches && !this.el.classList.contains('ws-with-sidebar'))
-  }
-  private stagePlaces(): { page: number; sidebar: number } {
-    const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
-    return { page, sidebar: this.sidebar.offsetWidth }
-  }
-  private slideSidebar(shown: boolean, before: { page: number; sidebar: number }): void {
-    const after = this.stagePlaces()
-    const options: KeyframeAnimationOptions = {
-      duration: this.measure('sidebar-time', 220),
-      easing: workspaceToken(this.el, 'sidebar-ease') || 'ease',
-    }
-    const animations: Animation[] = []
-    const glide = (el: Element | null, from: number): void => {
-      if (el && Math.abs(from) >= 1) animations.push(el.animate([{ translate: `${from}px 0` }, { translate: '0 0' }], options))
-    }
-    glide(this.parallax, before.page - after.page)
-    const width = Math.max(before.sidebar, after.sidebar)
-    const hidden = { translate: `${-width}px 0`, opacity: 0 }, rest = { translate: '0 0', opacity: 1 }
-    this.el.classList.add('ws-sidebar-sliding')
-    if (!shown) this.el.classList.add('ws-sidebar-leaving')
-    animations.push(this.sidebar.animate(shown ? [hidden, rest] : [rest, hidden], options))
-    // The left neighbour the sidebar covers fades with it instead of blinking.
-    for (const page of this.track.querySelectorAll<HTMLElement>('.ws-page.ws-receded.ws-before')) {
-      const opacity = getComputedStyle(page).opacity
-      animations.push(page.animate(shown
-        ? [{ clipPath: 'none', opacity }, { clipPath: 'none', opacity: 0 }]
-        : [{ opacity: 0 }, { opacity }], options))
-    }
-    const finish = (): void => {
-      if (this.cancelSidebarSlide !== cancel) return
-      this.cancelSidebarSlide = null
-      this.el.classList.remove('ws-sidebar-leaving', 'ws-sidebar-sliding')
-    }
-    const cancel = (): void => { for (const animation of animations) animation.cancel(); finish() }
-    this.cancelSidebarSlide = cancel
-    void Promise.allSettled(animations.map(animation => animation.finished)).then(finish)
-  }
-  /** The sidebar's bounds: the measure's floor, up to a share of the viewport. */
-  private sidebarBounds(): { min: number; max: number; preferred: number } {
-    const min = this.measure('sidebar-min', 320)
-    const max = Math.max(min, Math.floor(window.innerWidth * this.measure('sidebar-max-share', 0.4)))
-    return { min, max, preferred: Math.min(max, Math.max(min, this.measure('sidebar-default', 384))) }
-  }
-  private sidebarPixels(width = this.sidebarWidthChoice): number {
-    const { min, max, preferred } = this.sidebarBounds()
-    return Math.round(width === null ? preferred : Math.min(max, Math.max(min, width)))
-  }
-  /** The width the sidebar wears now: the viewer's choice clamped to the viewport, else the default. */
-  private applySidebarWidth(width = this.sidebarWidthChoice): number {
-    const { min, max } = this.sidebarBounds()
-    const px = this.sidebarPixels(width)
-    this.el.style.setProperty('--ws-sidebar-width', `${px}px`)
-    this.sidebarHandle.setAttribute('aria-valuemin', String(min))
-    this.sidebarHandle.setAttribute('aria-valuemax', String(max))
-    this.sidebarHandle.setAttribute('aria-valuenow', String(px))
-    return px
-  }
-  /** Set (or with null, reset) the viewer's width; the stage reflows at once, without a crossing. */
-  private setSidebarWidth(width: number | null, persist: boolean): void {
-    this.sidebarWidthChoice = width
-    this.applySidebarWidth()
-    this.layout(false)
-    if (!persist) return
-    try {
-      if (width === null) localStorage.removeItem(SIDEBAR_WIDTH_STORAGE)
-      else localStorage.setItem(SIDEBAR_WIDTH_STORAGE, String(Math.round(width)))
-    } catch { /* Storage is optional. */ }
-  }
-  private sidebarResizeStart(e: PointerEvent): void {
-    if (e.button !== 0 || !this.sidebarShown) return
-    e.preventDefault()
-    const handle = this.sidebarHandle
-    handle.setPointerCapture(e.pointerId)
-    const startX = e.clientX, startWidth = this.sidebar.offsetWidth, before = this.sidebarWidthChoice
-    let latched = false
-    this.el.classList.add('ws-sidebar-resizing')
-    this.stage.classList.add('ws-resizing')
-    const move = (ev: PointerEvent): void => {
-      const delta = ev.clientX - startX
-      if (!latched && Math.abs(delta) < this.measure('drag-latch', 4)) return
-      latched = true
-      const { min, max } = this.sidebarBounds()
-      this.setSidebarWidth(Math.min(max, Math.max(min, startWidth + delta)), false)
-    }
-    const finish = (commit: boolean): void => {
-      handle.removeEventListener('pointermove', move)
-      handle.removeEventListener('pointerup', up)
-      handle.removeEventListener('pointercancel', cancel)
-      window.removeEventListener('keydown', key, true)
-      this.el.classList.remove('ws-sidebar-resizing')
-      this.stage.classList.remove('ws-resizing')
-      if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId)
-      if (!latched) return
-      if (commit) this.setSidebarWidth(this.sidebarWidthChoice, true)
-      else this.setSidebarWidth(before, false)
-    }
-    const up = (): void => finish(true)
-    const cancel = (): void => finish(false)
-    const key = (ev: KeyboardEvent): void => {
-      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); finish(false) }
-    }
-    handle.addEventListener('pointermove', move)
-    handle.addEventListener('pointerup', up)
-    handle.addEventListener('pointercancel', cancel)
-    window.addEventListener('keydown', key, true)
-  }
-  private sidebarResizeKey(e: KeyboardEvent): void {
-    const { min, max } = this.sidebarBounds()
-    const now = this.sidebar.offsetWidth, step = SIDEBAR_STEP * (e.shiftKey ? 4 : 1)
-    const next = e.key === 'ArrowLeft' ? now - step : e.key === 'ArrowRight' ? now + step
-      : e.key === 'Home' ? min : e.key === 'End' ? max : e.key === 'Enter' ? null : undefined
-    if (next === undefined) return
-    e.preventDefault()
-    e.stopPropagation()
-    this.setSidebarWidth(next === null ? null : Math.min(max, Math.max(min, next)), true)
-  }
-  private renderSidebar(): void {
-    const shown = this.sidebarShown
-    this.el.classList.toggle('ws-with-sidebar', shown)
-    this.paintZen()
-    this.sidebarToggle.setAttribute('aria-expanded', String(shown))
-    this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide constitutions' : 'Show constitutions')
-    this.sidebar.inert = !shown
-    this.sidebarPicker.refresh(shown)
-    this.sidebarFlight.refresh()
-    if (!shown) this.setSidebarVisible(false, false)
-  }
-  /** Travelling copies keep their channel's stylesheet until their own flight ends. */
-  private setSidebarVisible(visible: boolean, animate = true): void {
-    this.sidebarFlight.setVisible(visible, animate)
-    if (!this.opts.themes) return
-    for (const [ghost, finished] of this.sidebarFlight.flights) {
-      if (this.flightRoots.has(ghost)) continue
-      const card = [...this.sidebarRows.values()].find(card => (card.uid ?? card.id) === ghost.dataset.channelUid && card.originId === ghost.dataset.channelOwner)
-      if (!card) continue
-      this.flightRoots.add(ghost); this.opts.themes.bind(ghost, card)
-      void Promise.allSettled([finished]).then(() => {
-        if (this.flightRoots.delete(ghost)) this.opts.themes?.unbind(ghost)
-      })
-    }
-  }
-  /** Rows refresh in place; the list keeps its scroll and the find its text. */
-  private fillSidebar(): void {
-    this.sidebarPicker.refresh(this.sidebarShown)
   }
   private readonly keydown = (e: KeyboardEvent): void => {
     if (this.pageSheet.isOpen || this.settingsMenu.isOpen) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
-    if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
-    // Each column's edge takes its own arrows, Home, End and Enter.
-    if (e.target === this.sidebarHandle && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)) return
+    if ((e.key === 'Enter' || e.key === 'Escape') && this.picker.el.contains(e.target as Node)) return
     // Activation belongs to the focused control, including command-modified keys.
     if (['Enter', ' '].includes(e.key) && !shouldForwardDocumentKey({ target: e.target, defaultPrevented: false, key: e.key })) return
     // Alt chords never bypass editable/native control guards; command shortcuts may.
@@ -1036,35 +673,33 @@ export class Reader {
       conversation: card => this.opts.onConversation?.(card),
       rest: card => this.opts.onRest?.(card, this.el),
     })) return true
-    if (intent === 'sidebar') this.toggleSidebar()
-    else if (intent === 'find') {
+    if (intent === 'find') {
       if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }
-      else if (this.sidebarShown) this.sidebarPicker.focus()
       else if (this.picker.isOpen) this.picker.focus()
       else this.openSwitcher()
     }
     else if (intent === 'open') this.toggleExpand()
     else if (intent === 'prevChannel' || intent === 'nextChannel') {
-      const cards = this.sidebarCards()
-      const index = this.sidebarPosition(cards)
+      const cards = this.deskCards()
+      const index = this.deskPosition(cards)
       const card = cards[index + (intent === 'prevChannel' ? -1 : 1)]
-      if (index >= 0 && card) this.scan(card)
+      if (index >= 0 && card) this.step(card)
     } else if (intent === 'prevGroup' || intent === 'nextGroup') {
-      const cards = this.sidebarCards()
-      const index = this.sidebarPosition(cards)
+      const cards = this.deskCards()
+      const index = this.deskPosition(cards)
       this.rememberStop()
-      const card = groupJump(cards, index, intent === 'prevGroup' ? -1 : 1, this.stopOf, cardIdentity, this.groupMemory)
-      if (card) this.scan(card)
+      const card = groupJump(cards, index, intent === 'prevGroup' ? -1 : 1, this.stopOf, deskCardKey, this.groupMemory)
+      if (card) this.step(card)
     } else if (['scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp'].includes(intent)) this.scrollDocument(intent, repeat)
     else return false
     return true
   }
 
-  private readonly stopOf = (card: KanbanCard): string => (this.opts.sidebarColumn ?? this.opts.sidebarBand)?.(card) ?? ''
+  private readonly stopOf = (card: KanbanCard): string => this.opts.deskStop?.(card) ?? ''
   private rememberStop(): void {
     if (!this.currentCard) return
-    const identity = cardIdentity(this.currentCard)
-    const stop = groupStops(this.sidebarCards(), this.stopOf).find(run => run.cards.some(card => cardIdentity(card) === identity))
+    const identity = deskCardKey(this.currentCard)
+    const stop = groupStops(this.deskCards(), this.stopOf).find(run => run.cards.some(card => deskCardKey(card) === identity))
     if (stop) this.groupMemory.set(stop.key, identity)
   }
   /**
@@ -1074,62 +709,27 @@ export class Reader {
    */
   private withCurrent(cards: KanbanCard[]): KanbanCard[] {
     const current = this.currentCard
-    if (!current || cards.some(card => cardIdentity(card) === cardIdentity(current))) return cards
+    if (!current || cards.some(card => deskCardKey(card) === deskCardKey(current))) return cards
     const index = this.opts.threadIndex?.()
     const lead = index?.family(index.card(current)).lead
-    const row = lead ? cards.findIndex(card => cardIdentity(card) === cardIdentity(lead)) : -1
+    const row = lead ? cards.findIndex(card => deskCardKey(card) === deskCardKey(lead)) : -1
     if (row >= 0) return [...cards.slice(0, row + 1), current, ...cards.slice(row + 1)]
     for (let parent = index?.parentOf(current); parent; parent = index!.parentOf(parent)) {
-      const at = cards.findIndex(card => cardIdentity(card) === cardIdentity(parent!))
+      const at = cards.findIndex(card => deskCardKey(card) === deskCardKey(parent!))
       if (at >= 0) return [...cards.slice(0, at + 1), current, ...cards.slice(at + 1)]
     }
     return [...cards, current]
   }
-  private sidebarPosition(cards: KanbanCard[]): number {
+  private deskPosition(cards: KanbanCard[]): number {
     return cards.findIndex(card => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner)
   }
-  /** The sidebar's visible rows, which j/k and J/K walk whether or not it is shown. */
-  private sidebarCards(): KanbanCard[] {
-    const query = this.sidebarPicker?.find.value.trim().toLowerCase() ?? ''
-    return this.sidebarFamilies().flatMap(family => family.rows).filter(card => !query || [card.name, card.path, ...(this.opts.files?.(card) ?? []), ...(this.opts.threadIndex?.()?.ancestry(card).map(part => part.name) ?? [])].some(value => value.toLowerCase().includes(query)))
+  /** The Desk's rows, which j/k and J/K walk, with the open constitution among them. */
+  private deskCards(): KanbanCard[] { return this.withCurrent(this.opts.deskCards?.() ?? this.opts.cards()) }
+  /** With no list on screen, a brief toast says where the step landed. */
+  private step(card: KanbanCard): void {
+    showToast([this.stopOf(card), card.name].filter(Boolean).join(' · '), 'success', STEP_CUE)
+    ;(this.opts.onScan ?? this.opts.onChannel)(card)
   }
-  /** The index strip names every column, unfiltered by Find, and marks the open constitution's. */
-  private renderIndex(): void {
-    const stops = (this.opts.sidebarColumn ?? this.opts.sidebarBand) ? groupStops(this.sidebarFamilies('').map(family => family.root), this.stopOf).filter(stop => stop.caption) : []
-    const index = this.opts.threadIndex?.()
-    const current = this.currentCard && cardIdentity(index?.family(this.currentCard).root ?? this.currentCard)
-    const keys = new Set(stops.map(stop => stop.key))
-    for (const [key, entry] of this.indexEntries) if (!keys.has(key)) { entry.remove(); this.indexEntries.delete(key) }
-    stops.forEach((stop, i) => {
-      let entry = this.indexEntries.get(stop.key)
-      if (!entry) {
-        const runKey = stop.key
-        entry = button('ws-sidebar-index-entry', '', () => this.jumpToStop(runKey))
-        entry.append(element('span', 'ws-sidebar-index-name', stop.caption), element('span', 'ws-sidebar-index-count'))
-        this.indexEntries.set(runKey, entry)
-      }
-      const name = entry.firstElementChild as HTMLElement
-      if (name.textContent !== stop.caption) name.textContent = stop.caption
-      const count = String(stop.cards.length)
-      const tally = entry.lastElementChild as HTMLElement
-      if (tally.textContent !== count) tally.textContent = count
-      entry.setAttribute('aria-label', `${stop.caption}, ${count}`)
-      entry.title = `${stop.caption}\n${ROW_MARKS}`
-      if (stop.cards.some(card => cardIdentity(card) === current)) entry.setAttribute('aria-current', 'location')
-      else entry.removeAttribute('aria-current')
-      if (this.sidebarIndex.children[i] !== entry) this.sidebarIndex.insertBefore(entry, this.sidebarIndex.children[i] ?? null)
-    })
-  }
-  /** A strip entry lands as J/K would: on the stop's remembered card, else its first. */
-  private jumpToStop(key: string): void {
-    const stop = groupStops(this.sidebarCards(), this.stopOf).find(stop => stop.key === key)
-    if (!stop) return
-    this.rememberStop()
-    const card = stopLanding(stop, cardIdentity, this.groupMemory)
-    if (this.currentCard && cardIdentity(card) === cardIdentity(this.currentCard)) this.sidebarPicker.reveal()
-    else this.scan(card)
-  }
-  private scan(card: KanbanCard): void { (this.opts.onScan ?? this.opts.onChannel)(card) }
 
   private scrollDocument(intent: KeyIntent, repeat: boolean): void {
     const doc = this.document
@@ -1149,7 +749,6 @@ export class Reader {
   }
   dispose(): void {
     window.clearInterval(this.workerClock)
-    this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)
     this.closeMenu()
     this.stopSwipe()
@@ -1163,10 +762,6 @@ export class Reader {
     if (this.departure !== null) clearTimeout(this.departure)
     this.stopTitles()
     this.picker.dispose()
-    this.sidebarPicker.dispose()
-    for (const ghost of this.flightRoots) this.opts.themes?.unbind(ghost)
-    this.flightRoots.clear()
-    this.sidebarFlight.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)

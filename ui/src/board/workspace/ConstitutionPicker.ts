@@ -1,23 +1,11 @@
 import type { KanbanCard } from '../KanbanTypes.js'
+import { deskCardKey } from '../deskOrdering.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
-import { groupRunKey } from './groupJump.js'
 
 export interface ConstitutionPickerOptions {
   cards(): KanbanCard[]
-  /** Place sidebar-only folds after retained rows have been patched. */
-  decorate?(el: HTMLElement): void
   files?(card: KanbanCard): string[]
   current?(card: KanbanCard): boolean
-  revealCurrent?: boolean
-  renderCard?(card: KanbanCard): HTMLElement
-  /** Includes external data used by a retained card's face, such as its queue. */
-  revision?(card: KanbanCard): string
-  group?(card: KanbanCard): string | undefined
-  /** The retained root, after placement and revision patching, on every refresh. */
-  onRow?(el: HTMLElement, card: KanbanCard): void
-  onRemove?(el: HTMLElement): void
-  /** After every refresh, once rows and captions are placed, or once a row pass has thrown. */
-  onRefresh?(): void
   onOpen(card: KanbanCard): void
   /** Extra results after constitution rows, used only by the desktop bar Find. */
   supplement?: { el: HTMLElement; refresh(query: string): void; close(): void; dispose(): void }
@@ -28,7 +16,7 @@ export interface ConstitutionPickerOptions {
   onEscape?(): void
 }
 
-/** Shared constitution rows and Find behavior for the sidebar and floating picker. */
+/** The floating list of constitutions, filtered by Find. */
 export class ConstitutionPicker {
   readonly el = document.createElement('div')
   readonly find: HTMLInputElement
@@ -36,12 +24,7 @@ export class ConstitutionPicker {
   private previous: HTMLElement | null = null
   private popup = false
   private release: Release | null = null
-  private selected: string | null = null
-  private revealed: string | null = null
-  private revealFrame = 0
-  private readonly rows = new Map<string, { el: HTMLElement; name: HTMLElement; owner: HTMLElement; card: KanbanCard; revision: string }>()
-  /** Each group's box: its caption, then its rows, so a sticky caption leaves with its group. */
-  private readonly groups = new Map<string, HTMLElement>()
+  private readonly rows = new Map<string, { el: HTMLButtonElement; name: HTMLElement; owner: HTMLElement; card: KanbanCard }>()
   private readonly opts: ConstitutionPickerOptions
   constructor(opts: ConstitutionPickerOptions) {
     this.opts = opts
@@ -85,137 +68,46 @@ export class ConstitutionPicker {
     if (restore && this.previous?.isConnected) this.previous.focus({ preventScroll: true })
     this.previous = null
   }
-  refresh(reveal = true): void {
+  refresh(): void {
     if (this.listening) this.opts.supplement?.refresh(this.find.value)
     const focused = this.el.contains(document.activeElement) ? document.activeElement as HTMLElement : null
-    try {
-      this.placeRows(reveal)
-      if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true })
-    } finally { this.opts.onRefresh?.() }
+    this.placeRows()
+    if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true })
   }
-  private placeRows(reveal: boolean): void {
-    const identity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])
-    const collect = () => [...new Map(this.opts.cards().map(card => [identity(card), card])).values()]
-    let cards = collect()
-    const current = cards.find(card => this.opts.current?.(card))
-    const selected = current ? identity(current) : null
-    let query = this.find.value.trim().toLowerCase()
+  private placeRows(): void {
+    const cards = [...new Map(this.opts.cards().map(card => [deskCardKey(card), card])).values()]
+    const query = this.find.value.trim().toLowerCase()
     const matches = (card: KanbanCard): boolean => !query || [card.name, card.path, ...(this.opts.files?.(card) ?? [])].some(v => v.toLowerCase().includes(query))
-    // A navigation choice supersedes sidebar Find only when it hides that choice;
-    // the visible indicator and Enter's first filtered match must agree.
-    if (selected !== this.selected && current && this.opts.revealCurrent && !matches(current)) {
-      this.find.value = ''; query = ''; cards = collect()
-    }
-    if (selected !== this.selected) { cancelAnimationFrame(this.revealFrame); this.revealFrame = 0 }
-    this.selected = selected
     const visible = cards.filter(matches)
-    const keys = new Set(visible.map(identity))
-    for (const [key, row] of this.rows) if (!keys.has(key)) { row.el.remove(); this.opts.onRemove?.(row.el); this.rows.delete(key) }
-    const grouped: Array<{ card: KanbanCard; group?: string; groupKey?: string }> = []
-    const liveGroups = new Set<string>()
-    const occurrences = new Map<string, number>()
-    let previousGroup: string | undefined
-    let groupKey: string | undefined
+    const keys = new Set(visible.map(deskCardKey))
+    for (const [key, row] of this.rows) if (!keys.has(key)) { row.el.remove(); this.rows.delete(key) }
+    let cursor = this.list.firstChild
     for (const card of visible) {
-      const group = this.opts.group?.(card)
-      if (group !== previousGroup) {
-        if (group) {
-          const occurrence = (occurrences.get(group) ?? 0) + 1
-          occurrences.set(group, occurrence)
-          groupKey = groupRunKey(group, occurrence)
-          liveGroups.add(groupKey)
-        } else groupKey = undefined
-      }
-      grouped.push({ card, group, groupKey })
-      previousGroup = group
-    }
-    for (const [key, box] of this.groups) if (!liveGroups.has(key)) { box.remove(); this.groups.delete(key) }
-    let listCursor = this.list.firstChild
-    let parent: HTMLElement = this.list
-    let cursor = listCursor
-    previousGroup = undefined
-    groupKey = undefined
-    for (const { card, group, groupKey: runKey } of grouped) {
-      if (group !== previousGroup) {
-        if (group) {
-          const key = runKey!
-          groupKey = key
-          let box = this.groups.get(key)
-          if (!box) {
-            box = document.createElement('div'); box.className = 'ws-channel-group'
-            box.append(document.createElement('h3')); this.groups.set(key, box)
-          }
-          box.firstElementChild!.className = 'kbn-flight-caption'
-          box.firstElementChild!.textContent = group
-          if (box !== listCursor) this.list.insertBefore(box, listCursor)
-          listCursor = box.nextSibling
-          parent = box; cursor = box.firstChild!.nextSibling
-        } else { groupKey = undefined; parent = this.list; cursor = listCursor }
-      }
-      previousGroup = group
-      const key = identity(card)
-      const revision = this.opts.revision?.(card) ?? JSON.stringify(card)
+      const key = deskCardKey(card)
       let row = this.rows.get(key)
       if (!row) {
-        const el = this.opts.renderCard?.(card) ?? document.createElement('button')
-        el.classList.add('ws-channel-row')
-        if (el instanceof HTMLButtonElement) el.type = 'button'
-        else { el.setAttribute('role', 'button'); el.tabIndex = 0 }
-        const name = el.querySelector<HTMLElement>('.ws-channel-name') ?? document.createElement('span'); name.classList.add('ws-channel-name')
-        const owner = el.querySelector<HTMLElement>('.ws-channel-owner') ?? document.createElement('small')
-        if (!this.opts.renderCard) el.append(name, owner)
-        row = { el, name, owner, card, revision }
+        const el = document.createElement('button')
+        el.type = 'button'
+        el.className = 'ws-channel-row'
+        const name = document.createElement('span'); name.className = 'ws-channel-name'
+        const owner = document.createElement('small')
+        el.append(name, owner)
+        row = { el, name, owner, card }
         const record = row
-        const open = (): void => { this.close(); this.opts.onOpen(record.card) }
-        el.addEventListener('click', event => {
-          const control = (event.target as Element).closest('button,a')
-          if (control && control !== el) return
-          open()
-        })
-        if (!(el instanceof HTMLButtonElement)) el.addEventListener('keydown', event => {
-          if (event.target !== el || !['Enter', ' '].includes(event.key) || event.isComposing || event.repeat) return
-          event.preventDefault(); open()
-        })
+        el.addEventListener('click', () => { this.close(); this.opts.onOpen(record.card) })
         this.rows.set(key, row)
       }
-      if (this.opts.renderCard && row.revision !== revision) {
-        const face = this.opts.renderCard(card)
-        row.el.replaceChildren(...face.childNodes)
-        row.name = row.el.querySelector<HTMLElement>('.ws-channel-name')!
-      }
-      row.revision = revision
       row.card = card
       row.el.dataset.channelUid = card.uid ?? card.id
       row.el.dataset.channelOwner = card.originId
       row.el.setAttribute('aria-label', card.name)
-      row.el.setAttribute('aria-current', String(key === selected))
+      row.el.setAttribute('aria-current', String(!!this.opts.current?.(card)))
       row.el.title = card.outcome ?? card.path
       if (row.name.textContent !== card.name) row.name.textContent = card.name
-      if (!this.opts.renderCard && row.owner.textContent !== card.originId) row.owner.textContent = card.originId
-      if (row.el !== cursor) parent.insertBefore(row.el, cursor)
+      if (row.owner.textContent !== card.originId) row.owner.textContent = card.originId
+      if (row.el !== cursor) this.list.insertBefore(row.el, cursor)
       cursor = row.el.nextSibling
-      if (parent === this.list) listCursor = cursor
-      this.opts.onRow?.(row.el, card)
     }
-    this.opts.decorate?.(this.list)
-    if (reveal && selected && selected !== this.revealed) this.reveal()
-  }
-  /** Scroll the current row into view; its scroll margin keeps its group's caption in sight above it. */
-  reveal(): void {
-    const selected = this.selected
-    const row = selected ? this.rows.get(selected) : undefined
-    if (!row) return
-    cancelAnimationFrame(this.revealFrame)
-    this.revealFrame = requestAnimationFrame(() => {
-      this.revealFrame = 0
-      if (this.selected !== selected || !row.el.isConnected || this.opts.active?.() === false) return
-      const bounds = this.list.getBoundingClientRect(), rect = row.el.getBoundingClientRect()
-      const margin = Number.parseFloat(getComputedStyle(row.el).scrollMarginTop) || 0
-      if (!rect.height || !bounds.height || rect.top - margin < bounds.top || rect.bottom > bounds.bottom || rect.left < bounds.left || rect.right > bounds.right) {
-        row.el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
-      }
-      this.revealed = selected
-    })
   }
   private readonly keydown = (event: KeyboardEvent): void => {
     const mine = this.el.contains(event.target as Node) || (event.target === this.find && this.listening)
@@ -243,13 +135,11 @@ export class ConstitutionPicker {
     if (this.isOpen && !this.el.contains(event.target as Node) && event.target !== this.find) this.close()
   }
   dispose(): void {
-    cancelAnimationFrame(this.revealFrame)
     this.find.removeEventListener('input', this.input)
     this.opts.supplement?.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
     this.el.remove()
-    for (const row of this.rows.values()) this.opts.onRemove?.(row.el)
     this.rows.clear()
   }
 }

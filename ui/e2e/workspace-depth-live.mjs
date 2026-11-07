@@ -65,7 +65,7 @@ try {
     await shot(page, `${size}-mid-open.png`)
     await page.evaluate(() => { for (const animation of document.getAnimations()) if (animation.playState === 'paused') animation.play() })
     await page.waitForTimeout(550)
-    await shot(page, `${size}-sidebar.png`)
+    await shot(page, `${size}-open.png`)
     await page.locator('.ws-channel-title').focus()
     await page.keyboard.press('j'); await page.waitForTimeout(350)
     await page.keyboard.press('j'); await page.waitForTimeout(350)
@@ -80,7 +80,6 @@ try {
   const phone = await pageFor({ width: 390, height: 844 })
   await clickCard(phone); await phone.waitForTimeout(650)
   await shot(phone, '390x844-phone.png')
-  assert.equal(await phone.locator('.ws-sidebar').first().isVisible(), false)
   assert.equal(await phone.locator('.ws-veil').evaluate(el => getComputedStyle(el).backdropFilter), 'none')
   await phone.close()
 

@@ -21,7 +21,7 @@ export interface DeskPlacement {
   group: string
 }
 
-/** Identity shared by a Desk row and its Reader/sidebar projection. */
+/** Identity shared by a Desk row and its Reader projection. */
 export function deskCardKey(card: KanbanCard): string {
   return JSON.stringify([card.originId, card.uid ?? card.id])
 }

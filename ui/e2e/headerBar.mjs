@@ -74,7 +74,6 @@ export function registerHeaderBarJourneys(test) {
     await page.addInitScript(() => {
       if (window !== window.top) return
       const scheme = new URLSearchParams(location.search).get('e2e-appearance') || 'light'
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
       localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
     })
     for (const scheme of ['light', 'dark']) {
@@ -100,10 +99,6 @@ export function registerHeaderBarJourneys(test) {
     }
   }, { width: 1000, height: 900 })
   test('Width changes keep visible focus on the band', async page => {
-    await page.addInitScript(() => {
-      if (window !== window.top) return
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
-    })
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
@@ -118,10 +113,6 @@ export function registerHeaderBarJourneys(test) {
     }
   }, { width: 1440, height: 900 })
   test('The band title holds one line down to a 701px viewport, with the verbs its state selects', async page => {
-    await page.addInitScript(() => {
-      if (window !== window.top) return
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
-    })
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
@@ -135,10 +126,6 @@ export function registerHeaderBarJourneys(test) {
     }
   }, { width: 1440, height: 900 })
   test('The band keeps its title and every verb inside open desktop columns', async page => {
-    await page.addInitScript(() => {
-      if (window !== window.top) return
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
-    })
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
@@ -170,18 +157,10 @@ export function registerHeaderBarJourneys(test) {
       await page.setViewportSize({ width, height: 900 }); await check()
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-narrow-desktop-light.png') })
     }
-    await page.locator('.ws-sidebar-toggle').click()
-    for (const width of [1440, 1000, 850, 701]) {
-      await page.setViewportSize({ width, height: 900 }); await check()
-      assert.ok(await page.locator('.ws-sidebar').isVisible())
-      assert.ok(await page.locator('.ws-sidebar').evaluate(el => el.getBoundingClientRect().width >= 100), 'the sidebar keeps usable rows beside the minimum stage')
-      if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-both-columns-narrow-desktop-light.png') })
-    }
   }, { width: 1440, height: 900 })
   test('The 390px phone band is one row of verbs that slides sideways, leaving the name to the top bar', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
       localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
     })
     await page.goto(url)
@@ -229,10 +208,6 @@ export function registerHeaderBarJourneys(test) {
     }
   }, { width: 390, height: 844 })
   test('Listen stays one control inside the band at every width', async page => {
-    await page.addInitScript(() => {
-      if (window !== window.top) return
-      localStorage.setItem('shuttle:workspace:sidebar', 'true')
-    })
     await page.goto(url); await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
     for (const width of [1440, 1000, 701, 390, 320]) {
@@ -296,10 +271,6 @@ export function registerHeaderBarJourneys(test) {
     assert.equal(await page.locator('.ws-stage-band .kbn-ctl-meet-arm').isVisible(), true)
   }, { width: 1000, height: 900 })
   test('× leaves the band for the Desk and writes nothing', async page => {
-    await page.addInitScript(() => {
-      if (window !== window.top) return
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
-    })
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
@@ -312,10 +283,6 @@ export function registerHeaderBarJourneys(test) {
     assert.equal(await posts(), before, '× sends no write')
   }, { width: 1440, height: 900 })
   test('Thread rows own Enter and Space while body focus keeps expand and paging shortcuts', async page => {
-    await page.addInitScript(() => {
-      if (window !== window.top) return
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
-    })
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
@@ -348,7 +315,6 @@ export function registerHeaderBarJourneys(test) {
       await page.addInitScript(scheme => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
-        localStorage.setItem('shuttle:workspace:sidebar', 'false')
       }, scheme)
       await page.goto(url)
       await openRoot(page)
@@ -380,7 +346,6 @@ export function registerHeaderBarJourneys(test) {
       await page.addInitScript(scheme => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
-        localStorage.setItem('shuttle:workspace:sidebar', 'false')
       }, scheme)
       await page.goto(url)
       await openRoot(page)

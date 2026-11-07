@@ -111,5 +111,5 @@ export function registerNavigationJourneys(test) {
     await page.locator('.ws-reader.ws-dormant').waitFor()
     assert.equal(new URL(page.url()).hash, '#/board')
     await shot('09-deep-link-to-board')
-  }, viewport, 'false', 'reduce', phone)
+  }, viewport, 'reduce', phone)
 }

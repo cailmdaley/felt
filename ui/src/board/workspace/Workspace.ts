@@ -7,13 +7,12 @@ import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
-import { cardFromCompositeEntry, IN_FLIGHT_BANDS, inFlightBand } from '../KanbanReadModel.js'
-import { deskColumn } from '../deskColumn.js'
-import { sidebarAnchor } from './SidebarOutline.js'
+import { cardFromCompositeEntry } from '../KanbanReadModel.js'
+import { deskColumn, ownColumn } from '../deskColumn.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
-import type { DeskPlacement } from '../deskOrdering.js'
+import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { channelLead, familyKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { meetingHostCard, type MeetingRecord } from '../meeting.js'
@@ -23,7 +22,6 @@ import { frameBridge } from './DocumentBridge.js'
 import './mentions.css'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
-import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
 import { Overview } from './Overview.js'
@@ -47,7 +45,6 @@ export interface WorkspaceOptions {
   origin(): string
   onVisibility(active: boolean): void
   onVoiceCard?(card: KanbanCard | null): void
-  deskColumn?(card: KanbanCard): SidebarEntry[]
   onReturnCard?(card: KanbanCard): void
   onEscapeHome?(): void
   /** A history entry addressed a board view or channel origin; switch to it without pushing. */
@@ -118,7 +115,6 @@ export class Workspace {
   private current: ChannelState | null = null
   /** Constitutions opened in this session, most recent first. */
   private readLately: string[] = []
-  private column: SidebarEntry[] | null = null
   private origin = 'Board'
   private readonly receipts = new Map<string, { files: ShelfFile[]; etag?: string }>()
   private readonly receiptsRead = new Map<string, Promise<void>>()
@@ -148,7 +144,7 @@ export class Workspace {
     this.dock.setMeetingHostOpen(meeting => {
       if (!meeting.fiber) return
       const host = meetingHost(meeting)
-      if (host) this.open(host, this.origin, undefined, this.overview.hasMetadata(host), false)
+      if (host) this.open(host, this.origin, undefined, this.overview.hasMetadata(host))
       else if (meeting.mirror_host ?? meeting.recorder) void this.openFiber(meeting.fiber, meeting.mirror_host ?? meeting.recorder!)
     }, meeting => {
       const host = meetingHost(meeting)
@@ -176,7 +172,7 @@ export class Workspace {
       files: (card: KanbanCard) => this.overview.fileNames(card),
       onOpen: (card: KanbanCard) => {
         this.clearFind()
-        this.open(card, this.isActive ? this.origin : opts.origin(), undefined, this.overview.hasMetadata(card), false)
+        this.open(card, this.isActive ? this.origin : opts.origin(), undefined, this.overview.hasMetadata(card))
       },
     }
     this.picker = new ConstitutionPicker(pickerOptions)
@@ -191,12 +187,10 @@ export class Workspace {
       themes: this.themes,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
       threadIndex: () => opts.threadIndex?.() ?? new ThreadIndex(opts.cards()),
-      switcherCards: () => this.sidebarCards(),
+      deskCards: () => this.opts.deskRows(),
       pickerCards: () => this.overview.orderedCards(),
-      sidebarBand: card => this.sidebarGroup(card),
-      sidebarColumn: card => this.sidebarColumn(card),
+      deskStop: card => this.deskStop(card),
       files: card => this.overview.fileNames(card),
-      find: opts.find,
       onFind: () => opts.focusFind?.() ?? false,
       onExpand: expanded => opts.onExpand?.(expanded),
       onSelect: key => this.visit(key),
@@ -218,7 +212,7 @@ export class Workspace {
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
-      onScan: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card), true, true),
+      onScan: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card), true),
       onOrchestrator: () => this.openOrchestrator(),
       onTapestry: () => this.toggleMap(),
       onDrawing: () => this.cycleDrawing(),
@@ -238,14 +232,12 @@ export class Workspace {
 
   get isActive(): boolean { return this.reader.isActive }
   /**
-   * The board bar's Find, routed by what it serves now: the open sidebar's
-   * list in the reader, the sheet's folios on the Board, and otherwise a
-   * list of constitutions hung beneath the field.
+   * The board bar's Find, routed by what it serves now: the sheet's folios on
+   * the Board, and otherwise a list of constitutions hung beneath the field.
    */
   find(board: boolean): void {
     const input = this.opts.find
     if (!input) return
-    if (this.isActive && this.reader.sidebarVisible) return
     if (!this.isActive && board) { this.overview.setQuery(input.value); return }
     if (!this.barPicker.isOpen) this.barPicker.show(this.root, input)
     else this.barPicker.refresh()
@@ -260,7 +252,6 @@ export class Workspace {
     if (!input?.value) return
     input.value = ''
     this.overview.setQuery('')
-    this.reader.refreshChannels()
   }
   /** Return from the reader to the view it was opened from, as Escape does. */
   returnToOrigin(): void {
@@ -357,82 +348,49 @@ export class Workspace {
     return true
   }
 
-  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true, scan = false): void {
-    const outsideColumn = this.isActive && this.column && !this.column.some(entry => cardIdentity(entry.card) === cardIdentity(card))
-    if (!this.isActive || origin !== this.origin || outsideColumn || !fromDeskColumn) {
-      const column = fromDeskColumn && !outsideColumn && origin === 'Desk' ? this.opts.deskColumn?.(card) : undefined
-      this.column = column?.length ? column : null
-      this.reader.captureSidebar(this.column ?? [])
-    }
+  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, scan = false): void {
     this.origin = origin
-    const id = cardIdentity(card)
+    const id = deskCardKey(card)
     this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin), scan)
   }
 
-  /**
-   * The sidebar is one grouped list wherever the reader was opened from, in
-   * the Desk's reading order: Drafts, In flight's Your turn and Working bands,
-   * Awaiting review, Roles, then Resting, each in the Desk's own order. j/k
-   * walk it as one flow; J/K and the index strip step its columns.
-   */
-  private sidebarCards(): KanbanCard[] {
-    return this.opts.deskRows()
-  }
-  /** Resolve a family page through its root, regardless of which thread leads its need. */
-  private sidebarRoot(card: KanbanCard): KanbanCard {
+  /** The family's Desk row: its root's, or its lead's while the root itself rests. */
+  private deskAnchor(card: KanbanCard): KanbanCard {
     const index = this.opts.threadIndex?.()
-    return index ? index.family(index.card(card)).root : card
+    if (!index) return card
+    const { root, lead } = index.family(index.card(card))
+    const onDesk = (candidate: KanbanCard) => this.opts.deskRows().some(row => deskCardKey(row) === deskCardKey(candidate))
+    return [ownColumn(root) ? root : lead, root].find(onDesk) ?? lead
   }
-  private sidebarCaptionCard(card: KanbanCard): KanbanCard {
-    const root = this.sidebarRoot(card), index = this.opts.threadIndex?.()
-    const onDesk = (candidate: KanbanCard) => this.opts.deskRows().some(row => cardIdentity(row) === cardIdentity(candidate))
-    const anchor = index ? sidebarAnchor(index, root) : root
-    if (onDesk(anchor)) return anchor
-    if (onDesk(root)) return root
-    return index?.family(root).lead ?? root
-  }
-  /** Resolve the root's Desk column, or its lead's when the root is absent. */
-  private sidebarPlace(card: KanbanCard): string {
-    const root = this.sidebarCaptionCard(card)
-    const column = this.opts.deskPlacement?.(root)?.column ?? deskColumn(root)
-    return column === 'scheduled' ? 'resting' : column
-  }
-  /** A Desk row keeps its Desk caption; an unplaced current page gets its own run. */
-  private sidebarGroup(card: KanbanCard): string {
-    const root = this.sidebarCaptionCard(card)
-    const placement = this.opts.deskPlacement?.(root)
-    if (placement) return placement.group
-    if (this.isOpenPage(card)) return 'Open'
-    if (this.sidebarPlace(root) === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(root))![1]
-    return this.sidebarColumn(card)
-  }
-  /** A card's Desk column: In flight holds both its bands' groups. */
-  private sidebarColumn(card: KanbanCard): string {
-    const root = this.sidebarCaptionCard(card)
+  /**
+   * The Desk column a card stands in, whichever view opened the reader:
+   * Drafts, In flight, Awaiting review, Roles, then Resting. A page outside
+   * the Desk gets its own stop.
+   */
+  private deskStop(card: KanbanCard): string {
+    const root = this.deskAnchor(card)
     const placement = this.opts.deskPlacement?.(root)
     if (!placement && this.isOpenPage(card)) return 'Open'
-    const column = placement?.column ?? this.sidebarPlace(root)
+    const column = placement?.column ?? deskColumn(root)
     if (column === 'inFlight') return 'In flight'
     if (column === 'drafts') return 'Drafts'
     if (column === 'awaitingReview') return 'Awaiting review'
     if (column === 'roles') return 'Roles'
-    if (column === 'resting') return 'Resting'
+    if (column === 'resting' || column === 'scheduled') return 'Resting'
     return fiberPageKicker(card) || 'Reading'
   }
   /** The current Reader page is outside the drawn Desk projection. */
   private isOpenPage(card: KanbanCard): boolean {
     const current = this.current?.card
-    if (!current || cardIdentity(current) !== cardIdentity(card)) return false
-    const root = this.sidebarCaptionCard(card)
-    if (this.opts.deskPlacement?.(root)) return false
-    return !this.opts.deskRows().some(row => cardIdentity(row) === cardIdentity(root))
+    if (!current || deskCardKey(current) !== deskCardKey(card)) return false
+    return !this.opts.deskRows().some(row => deskCardKey(row) === deskCardKey(this.deskAnchor(card)))
   }
   /** The constitutions opened in this session, most recent first, for the Board's Read lately shelf. */
   private readLatelyCards(): KanbanCard[] {
-    const live = new Map(this.opts.cards().map(card => [cardIdentity(card), card]))
+    const live = new Map(this.opts.cards().map(card => [deskCardKey(card), card]))
     return this.readLately.flatMap(id => {
       const card = live.get(id) ?? this.channels.get(id)?.card
       return card ? [card] : []
@@ -693,7 +651,7 @@ export class Workspace {
     if (this.origin === 'Board') this.lastBoardRoute = route
     // Document navigation shares an in-flight channel read without starting another.
     const bodyRead = sameChannel ? this.loads.get(channelId(route.uid, route.owner)) ?? Promise.resolve() : this.load(state)
-    // The sidebar and switcher list the overview's rows, so a channel entry reads them too.
+    // The switcher lists the overview's rows, so a channel entry reads them too.
     if (!sameChannel) {
       this.overview.opened(state.card, state.metadataKnown)
       this.overview.refresh()
@@ -837,8 +795,6 @@ export class Workspace {
     void this.openFiber(id, owner)
   }
   async openFiber(id: string, owner: string): Promise<void> {
-    this.column = null
-    this.reader.captureSidebar([])
     const epoch = this.routeEpoch
     const known = this.opts.cards().find(c => (c.id === id || c.uid === id) && c.originId === owner)
       ?? this.opts.cards().find(c => c.uid === id)

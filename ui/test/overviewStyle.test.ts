@@ -68,8 +68,7 @@ describe('workspace palette follows the Desk', () => {
     const blurred = [...`${reader}\n${css}`.matchAll(/([^{}]+)\{[^{}]*backdrop-filter:\s*var\(--ws-veil-filter\)/g)].map(m => m[1].trim())
     expect(blurred).toEqual(['.ws-veil', '.ws-overview'])
     expect(tokens).toContain('--ws-desk-filter: saturate(0.25) brightness(1.04)')
-    expect(reader).toMatch(/\.ws-page\.ws-receded\.ws-before\s*\{[^}]*mask-image: linear-gradient/)
-    expect(reader).toMatch(/\.ws-page\.ws-receded\.ws-after\s*\{[^}]*mask-image: linear-gradient/)
+    expect(reader.match(/\.ws-page\.ws-receded[^{]*\{/g)).toEqual(['.ws-page.ws-receded {', '.ws-page.ws-receded {'])
     // The selected page is one frame: the sheet draws no box of its own, and its header line is ruled beneath.
     expect(reader).not.toMatch(/\.ws-sheet\s*\{[^}]*(box-shadow|border|border-radius):/)
     expect(reader).toMatch(/\.ws-labelbar\s*\{[^}]*border-bottom:/)

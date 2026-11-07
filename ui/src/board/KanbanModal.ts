@@ -49,7 +49,6 @@ import { constitutionAction } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
-import type { SidebarEntry } from './workspace/SidebarFlight.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
@@ -214,10 +213,8 @@ export class KanbanModal {
    * Desk by `syncViewChrome`, since a lens is a Desk posture.
    */
   private lensSlotEl: HTMLDivElement | null = null
-  /** The bar's Find: one field on every view (constitutions; the Board's folios; the reader's sidebar). */
+  /** The bar's Find: one field on every view (constitutions; the Board's folios). */
   private findEl: HTMLInputElement | null = null
-  /** The bar's centre while the reader is open: its map of pages. */
-  /** The bar's right end while the reader is open: its page count, before Settings. */
   /**
    * Wrapper around the Desk surfaces (Now + Resting).
    * `display: contents` in CSS, so it adds a toggle handle WITHOUT adding a
@@ -572,7 +569,6 @@ export class KanbanModal {
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
       onVoiceCard: card => this.voice.select(card && constitutionFor(card, boardCards(this.lastResponse))),
-      deskColumn: card => this.workspaceColumn(card),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
         this.workspaceReturnFocus = null
@@ -785,18 +781,7 @@ export class KanbanModal {
     target?.focus({ preventScroll: true })
   }
 
-  /** The reader takes the opened card's actual drawn region, preserving the flight seam. */
-  private workspaceColumn(card: KanbanCard): SidebarEntry[] {
-    const sources = this.deskKeyboard?.columnFor({ uid: card.uid ?? card.id, origin: card.originId }) ?? []
-    const cards = new Map(this.workspaceCards().map(row => [JSON.stringify([row.originId, row.uid ?? row.id]), row]))
-    return sources.flatMap(source => {
-      const card = cards.get(JSON.stringify([source.dataset.cardOrigin, source.dataset.cardUid]))
-      if (!card) return []
-      return [{ card, source }]
-    })
-  }
-
-  /** The current Desk rows shared by sidebar ordering and Desk lookup. */
+  /** The current Desk rows shared by the reader's stepping and Desk lookup. */
   private workspaceCards(): KanbanCard[] {
     return this.deskProjection.rows
   }

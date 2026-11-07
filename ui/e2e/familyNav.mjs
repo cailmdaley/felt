@@ -10,17 +10,11 @@ export async function familyTree(page) {
   await fold.evaluate(el => { for (const inner of el.querySelectorAll('details')) inner.open = true })
   return fold.locator('.ws-family')
 }
-/** The open left column's list when it has one, else the sheet. */
+/** The sent files, in the sheet the bar's toggle opens. */
 export async function sentFiles(page) {
-  const column = page.locator('.ws-sidebar-file:visible')
-  if (await column.count()) return column
   const sheet = page.locator('.ws-page-sheet[open]')
   if (!await sheet.count()) {
-    if (page.viewportSize().width <= 700) await page.locator('.ws-navbar .ws-files-toggle').click()
-    else {
-      await page.locator('.ws-page.ws-selected .ws-menu-button').click()
-      await page.locator('.ws-menu').getByRole('button', { name: 'Sent files', exact: true }).click()
-    }
+    await page.locator(page.viewportSize().width <= 700 ? '.ws-navbar .ws-files-toggle' : '.ws-page.ws-selected .ws-files-toggle').click()
     await sheet.waitFor()
   }
   return sheet.locator('.ws-sent-file')

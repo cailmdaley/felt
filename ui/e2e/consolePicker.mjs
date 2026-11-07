@@ -66,7 +66,6 @@ try {
       hasTouch: phone, isMobile: phone, reducedMotion: 'reduce', colorScheme: 'light' })
     await context.addInitScript(() => {
       localStorage.setItem('shuttle.claude-opening', 'browser')
-      localStorage.setItem('shuttle:workspace:sidebar', 'false')
       // Observe external opening without invoking installed apps or leaving the fixture.
       window.__conversationLinks = []
       const click = HTMLAnchorElement.prototype.click

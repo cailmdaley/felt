@@ -23,11 +23,6 @@ export class DeskKeyboard {
   /** The row drawn for the selection, when one is on the Desk. */
   get selectedRow(): HTMLElement | null { return this.node() ?? null }
 
-  /** The reader's column is exactly the Desk's navigable order, without hidden family rows. */
-  columnFor(address: DeskAddress): HTMLElement[] {
-    return this.regions().find(region => region.some(el => matches(el, address))) ?? []
-  }
-
   /** Restore focus without adding every card to the tab sequence. */
   focusSelection(): boolean {
     const el = this.node()

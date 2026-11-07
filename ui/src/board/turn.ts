@@ -4,7 +4,7 @@ import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
  * Whose move a card is, and why: the one derivation every surface reads.
  *
  * The In flight band, the order within it, the worker pill's word, pigment and
- * age, the reader's sidebar groups and the dock's control all come from
+ * age, the Desk's groups and the dock's control all come from
  * `turnOf`, so no two of them can tell a different story about one card.
  *
  * Two questions are kept apart. The TURN says whose move it is; `busy` says

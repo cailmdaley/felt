@@ -330,21 +330,6 @@ describe('Desk keyboard selection', () => {
     expect(inside.deskKeyboard.selection?.uid).toBe('review')
   })
 
-  it('Escape from a Reader sidebar row returns to its Board origin and preserves the Desk selection', async () => {
-    press('j'); expect(selected()).toBe('review')
-    inside.setView('shelf')
-    inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
-    for (let i = 0; i < 100; i++) await Promise.resolve()
-    expect(inside.workspace.isActive).toBe(true)
-    const row = document.querySelector<HTMLElement>('.ws-sidebar .ws-channel-row')
-    expect(row).not.toBeNull()
-    row!.focus()
-    await pop(() => { expect(press('Escape', {}, row!).defaultPrevented).toBe(true) })
-    expect(inside.workspace.isActive).toBe(false)
-    expect(inside.activeViewId).toBe('shelf')
-    expect(inside.deskKeyboard.selection?.uid).toBe('review')
-  })
-
   it.each([
     ['h', {}], ['ArrowLeft', {}], ['‹', {}], ['ArrowLeft', { altKey: true }],
   ] as const)('%s and Escape both return to the non-Desk origin', async (key, init) => {
@@ -436,14 +421,11 @@ describe('Desk keyboard selection', () => {
     press('u'); expect(selected()).toBe('review')
     press('Escape'); expect(selected()).toBeUndefined()
   })
-  it('opens the reader on one grouped sidebar of the Desk\'s columns, and keeps the flight column for the cards that fly', async () => {
+  it('opens the reader stepping the Desk\'s columns', async () => {
     press('j'); press('h'); press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review', 'resting'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review', 'Resting'])
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar-index-entry')].map(el => el.getAttribute('aria-label'))).toEqual(['Drafts, 2', 'In flight, 2', 'Awaiting review, 1', 'Resting, 1'])
+    expect((inside.workspace.reader as unknown as { deskCards(): Array<{ id: string; uid?: string }> }).deskCards().map(row => row.uid ?? row.id)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review', 'resting'])
     await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
     expect(inside.workspace.isActive).toBe(false)
-    expect(inside.workspaceColumn(head).map(entry => entry.card.uid ?? entry.card.id)).toEqual(['head-uid', 'working'])
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
     press('j'); press('h'); press('h')
@@ -454,7 +436,7 @@ describe('Desk keyboard selection', () => {
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.fiberId).toBe('renamed')
     press('k'); expect(selected()).toBe('d2')
   })
-  it.each([['j', 'head-uid'], ['J', 'review']])('%s scans two sidebar stops and one Escape selects the last viewed Desk card', async (key, expected) => {
+  it.each([['j', 'head-uid'], ['J', 'review']])('%s scans two stops and one Escape selects the last viewed Desk card', async (key, expected) => {
     press('j'); press('h'); press('h'); press('Enter')
     for (let i = 0; i < 200; i++) await Promise.resolve()
     for (let step = 0; step < 2; step++) {

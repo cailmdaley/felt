@@ -139,7 +139,7 @@ app put an image beside it.
 <a id="attach"></a>
 ### Open a worker
 
-Worker pills on Desk cards, the reader's sidebar cards, and the fiber page open the worker's conversation.
+Worker pills on Desk cards and the fiber page open the worker's conversation.
 The constitution header also offers Console on every layout, including phones, whenever a destination is available.
 Tap to open; long-press or right-click Console or a pill to choose a destination.
 A choice between alternatives is remembered; opening a sole destination leaves the preference unchanged.
@@ -193,11 +193,13 @@ Recent work, Projects and Hosts regroup the sheet; Find filters names, paths and
 Thumbnails load near the viewport under a shared budget and cannot run scripts.
 Confirmed missing fibers' documents gather under **Unfiled** on their byte-owning host; an unreachable owner does not count as a missing fiber.
 
-Opening a folio or receipt enters the reader: one selected page, inert receded neighbours, and a tab strip for the constitution.
-The reader is one frame: beneath the board's bar, the selected page fills the space between the open side columns, with its header line on top and the document below it. The header line holds back, the page's name, its arrival, Expand and the document menu. The corner toggle for the Constitutions sidebar takes its own place at the line's end. The sidebar opens by default only where the stage keeps about 720 px beside it; closing or opening it is remembered and wins at every width.
+Opening a folio or receipt enters the reader: one selected page, its neighbours waiting hidden, and no column beside it.
+The reader is one frame: beneath the board's bar, the selected page fills the window, with its header line on top and the document below it. The header line holds back, the page's name, its arrival, the sent files toggle, Expand and the document menu.
+The sent files toggle appears at every width when the constitution has sent files, on the phone in the top bar, and its first bullet swells while one is unread; it opens the sheet of sent files, as the document menu's Sent files does.
+In the reader, as on the Desk and Chronicle, the board bar's Find hangs a list of constitutions beneath itself, matching names, paths, filenames and transcripts. On the phone the title opens a switcher of constitutions instead.
 The fiber page anchors its body, embedded files, opened body links and sent documents.
 Repeated sends of the same owner/path are one page with multiple receipts.
-Selection, constitution changes, metadata polls and the optional Constitutions sidebar preserve retained document instances and reading position.
+Selection, constitution changes, and metadata polls preserve retained document instances and reading position.
 The board renders no conversation. Conversation lives in Rex, on the desktop and on the phone; the board keeps the map, and a constitution's page is its threads, its tapestry and documents, its sent files, its change reader and its lifecycle.
 A constitution with threads opens on its family map; any other opens on its tapestry (its report, else its newest sent file, else its fiber page). A thread opened from the map arrives on its tapestry, the map one `l` away.
 One band stays above every page of a fiber on the Desk's lifecycle. It holds the constitution's name and state, **Open in Rex** (or wherever the conversation opens; right-click or long-press to choose), Listen, the session verbs (Launch, Resume, New session, by what the card can do), the lifecycle verbs (Close for review, Rest, Temper, Discard, by state), and the Constitution, Settings and × icons; × returns to Desk and never changes the fiber. Beside the state word it shows the session's context size, tinted from verdigris toward red as it fills the window, and Claude's estimated prompt cache as a dot that drains as the entry ages and turns into a red ring once cold; hover either for the numbers. Resume's tooltip says until when the cache is warm, and Settings adds the share of recent context read from the cache. These facts come from the session's transcript on its host, so they hold with no worker running. On a phone the top bar names the page and the band is one row of verbs that scrolls sideways.
@@ -205,9 +207,6 @@ A session verb starts the worker and, on the desktop, opens it. Listen starts a 
 The fiber header shows status alone. Agent, effort, cadence, host and project directory belong to the folded settings line; the band's worker line is only its conversation action.
 Document header lines show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
-The Constitutions sidebar starts closed and remembers an explicit choice.
-It lists the Desk's columns in the Desk's order: Drafts, In flight (as its Your turn and Working groups), Awaiting review, Roles and Resting; each group's caption holds the top of the list while you scroll through it.
-An index strip at its top names each non-empty column with its count and marks the open constitution's; clicking an entry jumps there as J/K does.
 The ‹ button, browser Back and the phone's right swipe follow the pages you visited, across constitutions and linked files.
 The back control names the constitution across channels, or the page within the same channel: Constitution or the file's name.
 A direct address without a visited page behind it returns to its origin view (Desk, Chronicle or Board).
@@ -215,12 +214,12 @@ Reloads retain this path in browser history.
 Ancestry links and `b` go up the thread tree separately.
 Opening a different page adds a history stop, including a link to a page just visited.
 Reselecting the same page leaves history untouched.
-Sidebar scanning, including j/k, J/K and the column index, replaces the current visit.
-One Back or root Escape returns from a sidebar scan to its predecessor; returning to Desk selects the last card viewed.
+Stepping between constitutions with j/k or J/K replaces the current visit.
+One Back or root Escape returns from a step to its predecessor; returning to Desk selects the last card viewed.
 
-Bare reader keys work outside editable fields: h/l or left/right step pages, and on a family page `l` goes between the map and the tapestry; j/k step constitutions through the sidebar as one flow, across groups and columns, and J/K jump between its columns, landing on the constitution last open in each; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+Bare reader keys work outside editable fields: h/l or left/right step pages, and on a family page `l` goes between the map and the tapestry; j/k step constitutions in the Desk's order as one flow, across its columns (Drafts, In flight, Awaiting review, Roles and Resting), and J/K jump between those columns, landing on the constitution last open in each; a brief toast names the column and constitution a step lands on, and a constitution outside the Desk stands beside its family's row; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
-The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the band); t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back). ⌘[ toggles the Constitutions sidebar.
+The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does, and with no worker up reopens its past session in a terminal on its host, in any column: nothing is sent, no turn starts, and the card's lifecycle does not move (a card that never ran is launched from the band); t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back).
 s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
 Rest works in any state and stops a live worker through the owning daemon's lifecycle path.
 In flight shows **Your turn** then **Working**; a question card (an ask or a harness prompt) leads Your turn and opens its report when present.

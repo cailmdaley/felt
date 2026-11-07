@@ -1,13 +1,7 @@
 /* On the desktop the reader starts beneath the board's bar. Its frame is the
    tab bar, the page's one header line and the document: the selected page
-   fills the stage beneath the bar, and the corner toggles take places at the
-   ends of its header line. */
+   fills the stage beneath the bar. */
 .ws-reader {
-  --ws-corner-inset: 8px;
-  /* Room a header line keeps at each end for a toggle floating over the stage. */
-  --ws-toggle-room: calc(var(--ws-corner-inset) + var(--ws-control-height) + var(--ws-small-gap));
-  --ws-head-start: var(--ws-toggle-room);
-  --ws-head-end: var(--ws-small-gap);
   --ws-stage-top: var(--ws-stage-gap);
   position: fixed; inset: 0; top: var(--kbn-bar-bottom, 0px); z-index: var(--ws-reader-layer);
   display: flex; flex-direction: column; min-width: 0;
@@ -22,16 +16,13 @@
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
   background: var(--ws-veil); -webkit-backdrop-filter: var(--ws-veil-filter); backdrop-filter: var(--ws-veil-filter);
 }
-.ws-stage-row { position: relative; z-index: 1; }
-/* Hidden ancestors retain their viewport, so a live iframe keeps its reading point. */
-.ws-page.ws-receded { visibility: hidden; }
-.ws-veil, .ws-navbar, .ws-stage-row { transition: opacity var(--ws-veil-time) var(--ws-ease); }
+.ws-veil, .ws-navbar, .ws-stage-column { transition: opacity var(--ws-veil-time) var(--ws-ease); }
 .ws-stage { transition: transform var(--ws-veil-time) var(--ws-ease); }
 .ws-reader.ws-arriving .ws-veil, .ws-reader.ws-departing .ws-veil,
 .ws-reader.ws-arriving .ws-navbar, .ws-reader.ws-departing .ws-navbar,
-.ws-reader.ws-arriving .ws-stage-row, .ws-reader.ws-departing .ws-stage-row,
+.ws-reader.ws-arriving .ws-stage-column, .ws-reader.ws-departing .ws-stage-column,
 .ws-reader.ws-veil-held .ws-veil { opacity: 1; transition: none; }
-.ws-reader.ws-dormant .ws-veil, .ws-reader.ws-dormant .ws-navbar, .ws-reader.ws-dormant .ws-stage-row,
+.ws-reader.ws-dormant .ws-veil, .ws-reader.ws-dormant .ws-navbar, .ws-reader.ws-dormant .ws-stage-column,
 .ws-reader.ws-dormant .ws-stage { transition: none; }
 .ws-reader.ws-arriving .ws-stage, .ws-reader.ws-departing .ws-stage { transform: var(--ws-settle); }
 :where(.ws-reader button) { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; }
@@ -47,8 +38,8 @@
 .ws-mono, .ws-labelbar, .ws-receipts {
   font-family: var(--font-mono);
 }
-/* Expand takes the whole window: no bar above, no sidebar beside. */
-.ws-reader.ws-expand-mode { top: 0; --ws-stage-top: var(--ws-stage-gap); }
+/* Expand takes the whole window: no bar above. */
+.ws-reader.ws-expand-mode { top: 0; }
 /* The phone's top bar (back, name, worker dot); the desktop has no head of its own. */
 .ws-navbar { display: none; position: relative; z-index: 3; flex: none; }
 .ws-nav-lead { display: flex; min-width: 0; }
@@ -62,26 +53,12 @@
 .ws-head-worker[hidden] { display: none; }
 /* The top bar's worker dot is the card's own pill, bare. */
 .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { border: 0; background: transparent; }
-/* The constitutions glyph sits snug in the corner beneath the bar, inset as
-   the bar insets its own controls; with the sidebar hidden it sits there alone. */
-.ws-sidebar-toggle {
-  position: absolute; z-index: 4; left: var(--ws-corner-inset); top: var(--ws-corner-inset);
-  display: grid; place-items: center; width: var(--ws-control-height); height: var(--ws-control-height); padding: 0;
-  border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important;
-}
-.ws-expand-mode :is(.ws-sidebar-toggle, .ws-files-toggle) { display: none; }
-.ws-sidebar-toggle svg { fill: none; stroke: currentColor; stroke-width: var(--ws-line-width); }
-.ws-sidebar-toggle .ws-toggle-column { fill: currentColor; stroke: none; opacity: 0; }
-.ws-sidebar-toggle[aria-expanded='true'] .ws-toggle-column { opacity: .35; }
-.ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
-.ws-sidebar-toggle:hover { background: var(--ws-hover); }
 /* In the reader the worker state is mono capitals and the dot takes the room's own pigments. */
 .ws-reader .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-machine); }
 .ws-reader .kbn-card-worker[data-turn='idle'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
 .ws-reader .kbn-card-worker[data-turn='question'] .ws-worker-dot { --worker-dot: var(--ws-you); }
 .ws-reader .kbn-card-worker:is([data-turn='none'], [data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked']) .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
-.ws-stage-row { display: flex; flex: 1; min-height: 0; }
-.ws-stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.ws-stage-column { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .ws-stage {
   /* Pages clip at the stage's sides; their shadows still fall below it. */
   position: relative; overflow-x: clip; overflow-y: visible; flex: 1; min-height: 0; min-width: 0;
@@ -95,14 +72,10 @@
   transition: left var(--ws-crossing) var(--ws-ease), width var(--ws-crossing) var(--ws-ease), height var(--ws-crossing) var(--ws-ease), transform var(--ws-crossing) var(--ws-ease), opacity var(--ws-crossing) var(--ws-ease);
 }
 .ws-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--ws-paper); }
-/* The sidebar's column already draws the hairline at the page's side. */
 .ws-content { position: relative; flex: 1; display: flex; min-height: 0; min-width: 0; overflow: hidden; background: var(--ws-paper); }
 .ws-content > * { flex: 1; min-height: 0; min-width: 0; }
-.ws-page.ws-receded { transform: translateY(var(--ws-neighbour-drop)) scale(var(--ws-receded-scale)); opacity: var(--ws-receded-opacity); cursor: pointer; }
-.ws-page.ws-receded.ws-text-page { opacity: var(--ws-receded-text-opacity); }
-.ws-page.ws-receded.ws-before { transform-origin: right center; mask-image: linear-gradient(90deg, transparent var(--ws-neighbour-edge), var(--ws-mask) var(--ws-neighbour-fade-end)); }
-.ws-page.ws-receded.ws-after { transform-origin: left center; mask-image: linear-gradient(270deg, transparent var(--ws-neighbour-edge), var(--ws-mask) var(--ws-neighbour-fade-end)); }
-.ws-page.ws-receded .ws-sheet { pointer-events: none; }
+/* The page stands alone. Its neighbours wait hidden, retaining their viewports so a live iframe keeps its reading point, and rise from this pose when selected. */
+.ws-page.ws-receded { visibility: hidden; transform: translateY(var(--ws-neighbour-drop)) scale(var(--ws-receded-scale)); opacity: 0; }
 .ws-page.ws-parked { left: var(--ws-parking-x) !important; transition: none; pointer-events: none; }
 .ws-page.ws-parked::after { content: ''; position: absolute; inset: 0; background: var(--ws-paper); z-index: 4; }
 .ws-stage.ws-instant .ws-track, .ws-stage.ws-instant .ws-page, .ws-stage.ws-resizing .ws-track, .ws-stage.ws-resizing .ws-page { transition: none; }
@@ -112,11 +85,11 @@
 .ws-stage.ws-resizing iframe { pointer-events: none; }
 .ws-labelbar {
   display: flex; align-items: center; flex: none; height: var(--ws-label-height); gap: var(--ws-small-gap);
-  padding: 0 var(--ws-head-end) 0 var(--ws-head-start); border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
+  padding: 0 var(--ws-small-gap) 0 var(--ws-inset); border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
   color: var(--ws-ink-muted); background: var(--ws-paper); font-size: var(--type-meta); user-select: none;
 }
 .ws-kind-glyph { flex: none; color: var(--ws-ink-muted); }
-/* The header line's controls speak at the chrome's own size, as the corner toggles do. */
+/* The header line's controls speak at the chrome's own size. */
 .ws-labelbar .ws-icon-button { font: var(--type-row)/var(--leading-solid) var(--font-serif); color: var(--ws-ink-muted); }
 .ws-document-back { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 32px; max-width: 150px; height: var(--ws-control-height); padding: 0 6px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 @media (hover: hover) {
@@ -150,112 +123,6 @@
 .ws-channel-row small { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-faint); }
 .ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-channel-row[aria-current='true'] { background: var(--ws-paper); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent), 0 6px 12px color-mix(in srgb, var(--ws-ink) 12%, transparent); }
-/* The column travels as cards; the current slip reaches toward the reading stage. */
-.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-corner-inset) var(--ws-inset) 0; position: relative; z-index: 2; }
-.ws-sidebar .ws-channel-find { flex: none; box-shadow: var(--ws-chrome-shadow); }
-/* The index strip holds the toggle's row, on its centre line: each Desk
-   column and its count in plain serif, set tight so all five fit the default
-   width (a narrower sidebar scrolls it sideways), the open constitution's
-   column in full ink. Its entries are the J/K stops, and a click lands as
-   J/K would. */
-.ws-sidebar-index {
-  flex: none; display: flex; align-items: center; min-width: 0; height: var(--ws-control-height);
-  margin-bottom: calc(-1 * var(--ws-small-gap));
-  padding-left: calc(var(--ws-corner-inset) + var(--ws-control-height) + var(--ws-small-gap) - var(--ws-inset));
-  overflow: auto hidden; scrollbar-width: none; white-space: nowrap;
-}
-.ws-sidebar-index-entry {
-  display: inline-flex; align-items: center; gap: .35em; height: 100%; padding: 0; border: 0; background: none; cursor: pointer;
-  color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-tight) var(--font-serif);
-}
-.ws-sidebar-index-entry + .ws-sidebar-index-entry { margin-left: .35em; }
-.ws-sidebar-index-entry + .ws-sidebar-index-entry::before { content: '·'; margin-right: .05em; color: var(--ws-ink-muted); }
-.ws-sidebar-index-count { font-variant-numeric: tabular-nums; }
-.ws-sidebar-index-entry:hover, .ws-sidebar-index-entry[aria-current='location'] { color: var(--ws-ink); }
-.ws-sidebar-index-entry[aria-current='location'] .ws-sidebar-index-name { text-decoration: underline; text-decoration-thickness: var(--ws-line-width); text-underline-offset: 4px; }
-.ws-sidebar-index-entry:focus { outline: none; }
-.ws-reader.ws-keyboard .ws-sidebar-index-entry:focus-visible { outline: var(--ws-focus-width) dashed var(--ws-focus); outline-offset: 2px; }
-/* The sidebar's edge resizes it: a hairline that darkens under the pointer, the keyboard or a drag. */
-.ws-sidebar-handle {
-  position: absolute; top: 0; bottom: 0; right: calc(var(--ws-sidebar-handle) / -2); z-index: 3; width: var(--ws-sidebar-handle);
-  cursor: col-resize; touch-action: none;
-}
-.ws-sidebar-handle::after {
-  content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: var(--ws-line-width); transform: translateX(-50%);
-  background: transparent; transition: background-color 120ms var(--ws-ease), width 120ms var(--ws-ease);
-}
-.ws-sidebar-handle:hover::after, .ws-sidebar-resizing .ws-sidebar-handle::after { width: 2px; background: var(--ws-hairline); }
-.ws-sidebar-handle:focus { outline: none; }
-.ws-reader.ws-keyboard .ws-sidebar-handle:focus-visible::after { width: 2px; background: var(--ws-focus); }
-.ws-sidebar-resizing, .ws-sidebar-resizing * { cursor: col-resize !important; user-select: none; }
-.ws-sidebar-resizing iframe { pointer-events: none; }
-.ws-sidebar .ws-channel-list {
-  flex: 1; min-height: 0; width: calc(100% + var(--ws-sidebar-overflow)); margin-right: calc(-1 * var(--ws-sidebar-overflow));
-  padding: 0 var(--ws-sidebar-overflow) var(--ws-sidebar-bottom) 0;
-  scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent;
-}
-/* Rows are plain type on the column's ground; only the open one is set off. */
-.ws-sidebar .ws-constitution-card {
-  width: 100%; margin-bottom: 1px; padding: var(--ws-inset); gap: var(--ws-small-gap);
-  background: transparent; border: 0; border-radius: var(--ws-control-radius);
-  box-shadow: none; color: var(--ws-ink-soft); cursor: pointer;
-  font-family: var(--font-serif); transition: background-color var(--ws-crossing) var(--ws-ease);
-}
-.ws-sidebar .ws-constitution-card .kbn-card-id { display: none; }
-.ws-sidebar .ws-constitution-card .kbn-card-name { font: 400 var(--type-row)/var(--leading-tight) var(--font-serif); color: var(--ws-ink-soft); }
-/* A theme may dress the name; the column keeps the board's plain serif. */
-.ws-sidebar .ws-constitution-row .kbn-card-name { font-family: var(--font-serif) !important; font-variant-caps: normal !important; text-transform: none !important; letter-spacing: 0 !important; }
-.ws-sidebar .ws-constitution-card .kbn-card-outcome { -webkit-line-clamp: var(--ws-sidebar-outcome-lines); font: var(--type-note)/var(--leading-ui) var(--font-serif); pointer-events: none; }
-.ws-sidebar .ws-constitution-card .kbn-card-meta { justify-content: space-between; gap: var(--ws-small-gap); font: var(--type-meta)/var(--leading-ui) var(--font-mono); }
-/* The meta row's line box is the worker pill's, held whether or not a worker runs, so one starting moves nothing. */
-.ws-sidebar .ws-constitution-card .kbn-card-meta { min-height: var(--ws-meta-row); }
-.ws-sidebar .ws-constitution-card .kbn-card-meta > * { max-height: var(--ws-meta-row); }
-/* A compact row: one state dot and the name on one line. */
-.ws-sidebar .ws-constitution-row { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; padding: var(--ws-small-gap) var(--ws-inset); }
-.ws-sidebar .ws-constitution-row > .kbn-card-header { flex: 1 1 0; min-width: 0; }
-.ws-sidebar .ws-constitution-row .kbn-card-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-sidebar .ws-constitution-row > .kbn-card-meta { flex: 0 1 auto; min-width: 0; }
-.ws-sidebar .ws-constitution-card .kbn-review-meta-btn { font: var(--type-label)/var(--leading-tight) var(--font-serif); letter-spacing: 0; text-transform: none; }
-.ws-sidebar .ws-constitution-card:hover { background: var(--ws-hover); }
-.ws-sidebar .ws-constitution-card[aria-current='true'] { background: var(--ws-fill); color: var(--ws-ink); }
-.ws-sidebar .ws-constitution-card[aria-current='true'] .kbn-card-name { color: var(--ws-ink); }
-/* Each group's caption holds the top of the list while its cards pass beneath,
-   and a card scrolled into view keeps clear of it, so a landing shows both.
-   Its ground and the fade below it show only while it is stuck, where the
-   browser can tell; elsewhere they stay, so cards never run through its text. */
-.ws-sidebar .kbn-flight-caption {
-  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; height: var(--ws-control-height);
-  margin: var(--ws-small-gap) 0;
-}
-.ws-sidebar .kbn-flight-caption { font: 400 var(--type-note)/var(--leading-tight) var(--font-serif); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; }
-.ws-sidebar .ws-channel-group:first-child > .kbn-flight-caption { margin-top: 0; }
-.ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { content: ''; position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none; }
-.ws-sidebar .kbn-flight-caption::before { top: 0; bottom: 0; background: var(--ws-ground); }
-.ws-sidebar .kbn-flight-caption::after { top: 100%; height: var(--ws-small-gap); background: linear-gradient(var(--ws-ground), transparent); }
-@supports (container-type: scroll-state) {
-  .ws-sidebar .kbn-flight-caption { container-type: scroll-state; }
-  .ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { opacity: 0; }
-  @container scroll-state(stuck: top) {
-    .ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { opacity: 1; }
-  }
-}
-.ws-sidebar .ws-channel-row { scroll-margin-top: calc(var(--ws-control-height) + var(--ws-small-gap)); }
-.ws-sidebar-source, .ws-sidebar .ws-card-travelling { opacity: 0 !important; }
-.ws-sidebar.ws-sidebar-flight { display: block; position: fixed; inset: 0; width: auto; padding: 0; pointer-events: none; z-index: calc(var(--ws-reader-layer) + 1); }
-.ws-sidebar-flight .ws-constitution-card { overflow: hidden; pointer-events: none; transition: none; }
-.ws-sidebar-flight .ws-flight-current { background: var(--ws-fill); color: var(--ws-ink); }
-/* The column has its own ground: the reader's paper ground, held over the veil so
-   the blurred Desk stops at its edge, and one hairline where it meets the stage.
-   The current card still reaches across that line toward the page. */
-.ws-with-sidebar .ws-sidebar { display: flex; }
-:is(.ws-with-sidebar, .ws-sidebar-leaving) .ws-sidebar:not(.ws-sidebar-flight) { background: var(--ws-ground); box-shadow: inset calc(-1 * var(--ws-line-width)) 0 0 var(--ws-hairline-soft); }
-/* A closing sidebar slides out over the stage that has already taken its room. */
-.ws-sidebar-sliding .ws-stage { overflow: visible; }
-.ws-sidebar-leaving .ws-sidebar { display: flex; position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; }
-/* The sidebar hides the neighbour on its side. With it closed, the zen state, the
-   neighbours fade out and the page stands alone. */
-.ws-with-sidebar .ws-page.ws-receded.ws-before { clip-path: inset(0 100% 0 0); pointer-events: none; }
-.ws-zen .ws-page.ws-receded { opacity: 0; pointer-events: none; }
 .ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .ws-placeholder { background: var(--ws-paper); }
@@ -303,7 +170,7 @@
   .ws-navbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0; column-gap: 0; height: auto; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
   .ws-topbar-hidden:not(:has(> .ws-menu)) .ws-navbar:not(:focus-within) { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
   /* Hidden pages keep unscaled geometry on phones. */
-  .ws-page.ws-receded, .ws-page.ws-receded:is(.ws-text-page, .ws-before, .ws-after) { transform: none; opacity: 1; mask-image: none; }
+  .ws-page.ws-receded { transform: none; opacity: 1; }
   .ws-labelbar { display: none; }
   .ws-media-poster { inset: 0; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
@@ -318,7 +185,7 @@
   .ws-return { display: inline-flex; align-items: center; gap: 5px; min-width: var(--ws-phone-target); max-width: calc(100vw / 3); height: var(--ws-phone-target); flex: 0 1 auto; padding: 0 6px; color: var(--ws-ink) !important; }
   .ws-return .ws-back-label { color: var(--ws-ink-muted); }
   .ws-channel-title { display: block; text-align: center; flex: 1; min-height: var(--ws-phone-target); line-height: var(--leading-tight); padding: 0; }
-  .ws-icon-button:not(.ws-phone-document-menu), .ws-sidebar, .ws-sidebar-toggle { display: none !important; }
+  .ws-icon-button:not(.ws-phone-document-menu) { display: none !important; }
   .ws-phone-document-menu { display: flex; align-items: center; justify-content: center; width: var(--ws-phone-target); height: var(--ws-phone-target); }
   .ws-label-title { max-width: 50%; }
   .ws-prose, .ws-content .kbn-detail-prose { padding: 24px 16px 48px; }
@@ -334,16 +201,15 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .ws-track, .ws-page { transition: none !important; }
-  .ws-veil, .ws-navbar, .ws-stage-row, .ws-stage, .ws-sheet, .ws-sidebar .ws-constitution-card { transition: none !important; }
+  .ws-veil, .ws-navbar, .ws-stage-column, .ws-stage, .ws-sheet { transition: none !important; }
 }
 @media (prefers-reduced-transparency: reduce) {
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 
-/* A shown column holds its own toggle, so the header line starts at the page's edge. */
-.ws-reader.ws-with-sidebar, .ws-reader.ws-expand-mode { --ws-head-start: var(--ws-inset); }
-/* The phone's sent files target sits in the top bar; its first bullet swells while a file is unread. */
-.ws-files-toggle { display: grid; place-items: center; width: var(--ws-phone-target); height: var(--ws-phone-target); padding: 0; color: var(--ws-ink-muted); }
+/* The sent files target stands in the header line, in the phone's top bar a full touch target; its first bullet swells while a file is unread. */
+.ws-files-toggle { display: grid; place-items: center; flex: none; width: var(--ws-control-height); height: var(--ws-control-height); padding: 0; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); }
+.ws-files-toggle:hover { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-files-toggle[aria-expanded='true'] { color: var(--ws-ink); }
 .ws-files-toggle[hidden] { display: none; }
 .ws-files-toggle svg { fill: none; stroke: currentColor; stroke-width: var(--ws-line-width); }
@@ -351,44 +217,6 @@
 .ws-files-toggle :is(.ws-toggle-flag, .ws-toggle-bullet) { fill: currentColor; stroke: none; }
 .ws-files-toggle .ws-toggle-flag { transition: r 160ms var(--ws-ease), fill 160ms var(--ws-ease); }
 .ws-files-toggle[data-attention] .ws-toggle-flag { r: 2.5px; fill: var(--ws-fresh); }
-
-/* The open constitution's sent files stand at the column's foot. */
-.ws-sidebar-files { flex: none; display: flex; flex-direction: column; max-height: 38%; min-height: 0; padding: 8px 8px 6px 10px; border-top: 1px solid var(--ws-hairline-soft); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
-.ws-sidebar-files[hidden] { display: none; }
-.ws-sidebar-files h3 { flex: none; margin: 0; padding: 2px 8px 4px; font: inherit; font-variant: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); }
-.ws-sidebar-file-list { min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent; }
-.ws-sidebar-file { display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; padding: 4px 4px 4px 8px; text-align: left; font: inherit; font-size: var(--type-row); color: var(--ws-ink); background: transparent; border: 0; cursor: pointer; }
-.ws-sidebar-file > span:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ws-sidebar-file time { flex: none; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-numeric: tabular-nums; }
-.ws-sidebar-file .ws-sent-new { flex: none; color: var(--ws-fresh); font: var(--type-meta)/var(--leading-tight) var(--font-serif); }
-.ws-sidebar-file:hover { background: var(--ws-hover); }
-.ws-sidebar-file:focus { outline: none; }
-.ws-reader.ws-keyboard .ws-sidebar-file:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
-.ws-sidebar-file[aria-current='page'] { background: var(--ws-paper); box-shadow: inset 0 0 0 1px var(--ws-hairline-soft); }
-.ws-sidebar-files-more { display: block; width: 100%; padding: 6px 12px 6px 16px; text-align: left; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
-.ws-sidebar-files-more:hover { color: var(--ws-ink); }
-
-/* Family folds share the sidebar's quiet type and ink. */
-.ws-sidebar-fold {
-  font-family: var(--font-serif);
-  font-size: var(--type-label);
-  color: inherit;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  padding: 4px 8px;
-  text-align: left;
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-files-toggle { width: var(--ws-phone-target); height: var(--ws-phone-target); }
 }
-.ws-channel-list > .ws-sidebar-fold,
-.ws-channel-group > .ws-sidebar-fold { display: block; margin-left: 22px; opacity: .65; }
-.ws-channel-row[aria-level]:not([aria-level="1"]) { padding-left: calc(16px + var(--sidebar-depth, 1) * 12px); }
-.ws-sidebar-count, .ws-sidebar-crumb { opacity: .6; font-family: var(--font-serif);
-  font-size: var(--type-note); }
-.ws-sidebar-count { flex: none; margin-left: auto; white-space: nowrap; }
-/* A family's caret hangs in the row's gutter, so every root's dot shares one edge and only depth moves a row. */
-.ws-sidebar .ws-channel-row[aria-level="1"] { position: relative; }
-.ws-sidebar-fold[data-fold="collapsed"] { position: absolute; inset: 0 auto 0 0; width: var(--ws-inset); padding: 0; text-align: center; opacity: .65; }
-.ws-sidebar-fold[data-fold="collapsed"]:hover { opacity: 1; }
-
-.ws-sidebar-fold[data-fold="working"]::before { content: '▸ '; }
-.ws-sidebar-fold[data-fold="working"][aria-expanded="true"]::before { content: '▾ '; }

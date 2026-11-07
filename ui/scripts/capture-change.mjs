@@ -16,7 +16,6 @@ try {
       await context.addInitScript(() => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
-        localStorage.setItem('shuttle:workspace:sidebar', 'false')
       })
       const page = await context.newPage(), errors = []
       page.setDefaultTimeout(60_000)

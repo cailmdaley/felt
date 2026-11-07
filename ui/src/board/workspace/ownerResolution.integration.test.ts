@@ -290,7 +290,7 @@ describe('Workspace owner integration', () => {
     healthy = true; overview!.refresh(); await settle()
     expect(overview!.orderedCards()[0].name).toBe('Resolved alpha')
   })
-  it('publishes cold-route body metadata to the sidebar without another visit or duplicate preload', async () => {
+  it('publishes cold-route body metadata without another visit or duplicate preload', async () => {
     files = [receipt('alpha')]
     const pending = deferred<Response>()
     reads.mockImplementation(url => url.includes('/sent-files/all/')
@@ -299,13 +299,11 @@ describe('Workspace owner integration', () => {
     reader('#/board/alpha@owner'); await settle()
     expect(fiberReads()).toHaveLength(1)
     expect(overview!.orderedCards()[0].name).toBe('alpha')
-    expect(document.querySelector('.ws-sidebar')?.textContent).toContain('alpha')
     const visits = localStorage.getItem('shuttle.workspace.overview.visits')
     vi.setSystemTime(Date.now() + 500)
     pending.resolve(json(envelope('alpha', 'hub'))); await settle()
     expect(overview!.orderedCards()[0].name).toBe('Resolved alpha')
     expect(overview!.orderedCards()[0].originId).toBe('owner')
-    expect(document.querySelector('.ws-sidebar')?.textContent).toContain('Resolved alpha')
     expect(localStorage.getItem('shuttle.workspace.overview.visits')).toBe(visits)
     expect(fiberReads()).toHaveLength(1)
   })

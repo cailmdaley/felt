@@ -147,7 +147,6 @@ if (mode === 'cold') {
   await span('scrollColumn', async () => { await p.mouse.move(300, 500); for (let i = 0; i < 20; i++) { await p.mouse.wheel(0, 120); await p.waitForTimeout(16) } for (let i = 0; i < 20; i++) { await p.mouse.wheel(0, -120); await p.waitForTimeout(16) } })
   await span('openChannel', async () => { await openChannel(p) })
   await span('stepPages', async () => { for (let i = 0; i < 5; i++) { await p.keyboard.press('ArrowRight'); await p.waitForTimeout(400) } })
-  await span('sidebar', async () => { await p.keyboard.press('Tab'); await p.waitForTimeout(300); const b = p.locator('[aria-label*="sidebar" i]').first(); if (await b.count()) { await b.click(); await p.waitForTimeout(500); await b.click(); await p.waitForTimeout(500) } })
   await span('deskReaderSwitch', async () => { for (let i = 0; i < 3; i++) { await p.keyboard.press('Escape'); await p.waitForSelector('.kbn-desk .kbn-card'); await p.waitForTimeout(300); await openChannel(p); await p.waitForTimeout(300) } })
   out.spans = res
   await s.context.close()

@@ -6,136 +6,32 @@ import { ConstitutionPicker } from './ConstitutionPicker.js'
 let picker: ConstitutionPicker | undefined
 afterEach(() => { picker?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it('defers reveal layout to a frame and does not scroll an already-visible row', () => {
-  let frame!: FrameRequestCallback
-  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1 })
-  vi.stubGlobal('cancelAnimationFrame', vi.fn())
-  vi.stubGlobal('matchMedia', () => ({ matches: false }))
-  const current = card({ id: 'visible' })
-  picker = new ConstitutionPicker({ cards: () => [current], current: () => true, onOpen: vi.fn() })
+it('keeps a row and its focus across a refresh, in the order of its cards', () => {
+  const alpha = card({ id: 'alpha' }), beta = card({ id: 'beta' })
+  let cards = [alpha, beta]
+  picker = new ConstitutionPicker({ cards: () => cards, onOpen: vi.fn() })
   document.body.append(picker.el)
-  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 500))
   picker.refresh()
-  expect(rect).not.toHaveBeenCalled()
-  const row = picker.el.querySelector<HTMLElement>('.ws-channel-row')!
-  const scroll = vi.fn()
-  row.scrollIntoView = scroll
-  let top = 100
-  rect.mockImplementation(function (this: HTMLElement) { return this === row ? new DOMRect(10, top, 250, 50) : new DOMRect(0, 0, 300, 500) })
-  frame(0)
-  expect(scroll).not.toHaveBeenCalled()
-  top = 600
-  picker.reveal()
-  expect(scroll).not.toHaveBeenCalled()
-  frame(16)
-  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
-})
-
-it('cancels a deferred reveal when selection returns to the already-revealed row', () => {
-  const frames = new Map<number, FrameRequestCallback>()
-  let nextFrame = 0
-  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame })
-  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
-  vi.stubGlobal('matchMedia', () => ({ matches: false }))
-  const cards = [card({ id: 'a' }), card({ id: 'b' })]
-  let current = cards[0]
-  picker = new ConstitutionPicker({ cards: () => cards, current: card => card === current, onOpen: vi.fn() })
-  document.body.append(picker.el)
-  const scroll = vi.fn()
-  picker.refresh()
-  for (const row of picker.el.querySelectorAll<HTMLElement>('.ws-channel-row')) row.scrollIntoView = scroll
-  for (const callback of frames.values()) callback(0)
-  frames.clear(); scroll.mockClear()
-  current = cards[1]; picker.refresh()
-  current = cards[0]; picker.refresh()
-  for (const callback of frames.values()) callback(16)
-  expect(scroll).not.toHaveBeenCalled()
-})
-
-it('closes every refresh it opens, including one whose row pass throws', () => {
-  const onRefresh = vi.fn()
-  let broken = true
-  const subject = picker = new ConstitutionPicker({ cards: () => [card({ id: 'a', uid: 'a', name: 'Alpha' })], onOpen: vi.fn(), onRefresh,
-    renderCard: () => { if (broken) throw new Error('face failed'); return document.createElement('div') },
-  })
-  expect(() => subject.refresh(false)).toThrow('face failed')
-  expect(onRefresh).toHaveBeenCalledOnce()
-  broken = false
-  subject.refresh(false)
-  expect(onRefresh).toHaveBeenCalledTimes(2)
-})
-
-it('reports only retained, placed rows after every refresh and revision patch, then removes them once', () => {
-  let cards = [card({ id: 'a', uid: 'a', name: 'Alpha' }), card({ id: 'b', uid: 'b', name: 'Beta' })]
-  const faces: HTMLElement[] = []
-  const onRow = vi.fn((el: HTMLElement) => expect(el.parentElement?.className).toBe('ws-channel-list'))
-  const onRemove = vi.fn((el: HTMLElement) => expect(el.isConnected).toBe(false))
-  picker = new ConstitutionPicker({ cards: () => cards, onOpen: vi.fn(), onRow, onRemove,
-    renderCard: card => {
-      const el = document.createElement('div')
-      el.innerHTML = `<span class="ws-channel-name">${card.name}</span><small class="ws-channel-owner"></small>`
-      faces.push(el)
-      return el
-    },
-  })
-  document.body.append(picker.el)
-  picker.refresh(false)
-  const [alpha, beta] = [...picker.el.querySelectorAll<HTMLElement>('.ws-channel-row')]
-  expect(onRow.mock.calls.map(([el]) => el)).toEqual([alpha, beta])
-  cards = [{ ...cards[0], name: 'Revised Alpha' }, cards[1]]
-  picker.refresh(false)
-  expect(onRow.mock.calls.map(([el]) => el)).toEqual([alpha, beta, alpha, beta])
-  expect(alpha.textContent).toContain('Revised Alpha')
-  expect(onRow).not.toHaveBeenCalledWith(faces[2], expect.anything())
-  picker.find.value = 'Alpha'; picker.refresh(false)
-  expect(onRemove).toHaveBeenCalledExactlyOnceWith(beta)
-  picker.dispose()
-  expect(onRemove.mock.calls.map(([el]) => el)).toEqual([beta, alpha])
-  picker.dispose()
-  expect(onRemove).toHaveBeenCalledTimes(2)
-})
-
-it('keeps Desk row order when the current page repeats a caption at the end', () => {
-  const cards = [card({ id: 'draft' }), card({ id: 'working' }), card({ id: 'reader-only' })]
-  picker = new ConstitutionPicker({
-    cards: () => cards,
-    onOpen: vi.fn(),
-    group: item => item.id === 'working' ? 'Working' : 'Drafts',
-  })
-  document.body.append(picker.el)
-  picker.refresh(false)
-  const rowIds = (): string[] => [...picker!.el.querySelectorAll<HTMLElement>('.ws-channel-row')]
-    .map(row => row.dataset.channelUid!)
-  const groupNames = (): string[] => [...picker!.el.querySelectorAll<HTMLElement>('.ws-channel-group .kbn-flight-caption')]
-    .map(caption => caption.textContent!)
-
-  expect(rowIds()).toEqual(['draft', 'working', 'reader-only'])
-  expect(groupNames()).toEqual(['Drafts', 'Working', 'Drafts'])
-  picker.refresh(false)
-  expect(rowIds()).toEqual(['draft', 'working', 'reader-only'])
-  expect(groupNames()).toEqual(['Drafts', 'Working', 'Drafts'])
-})
-
-it('keeps a focused row when a draft joins the existing Working run', () => {
-  const draft = card({ id: 'draft' })
-  const worker = card({ id: 'worker', status: 'active', workerState: 'running', runtimePhase: 'working' })
-  let launched = false
-  picker = new ConstitutionPicker({
-    cards: () => [draft, worker],
-    onOpen: vi.fn(),
-    group: item => item.id === 'draft' ? launched ? 'Working' : 'Drafts' : 'Working',
-  })
-  document.body.append(picker.el)
-  picker.refresh(false)
-  const row = picker.el.querySelector<HTMLElement>('[data-channel-uid="worker"]')!
+  const row = picker.el.querySelector<HTMLElement>('[data-channel-uid="beta"]')!
   row.focus()
+  cards = [beta, alpha]
+  picker.refresh()
+  expect(picker.el.querySelector('[data-channel-uid="beta"]')).toBe(row)
   expect(document.activeElement).toBe(row)
+  expect([...picker.el.querySelectorAll<HTMLElement>('.ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['beta', 'alpha'])
+})
 
-  launched = true
-  picker.refresh(false)
-
-  expect(picker.el.querySelector<HTMLElement>('[data-channel-uid="worker"]')).toBe(row)
-  expect(document.activeElement).toBe(row)
-  expect([...picker.el.querySelectorAll<HTMLElement>('.ws-channel-group .kbn-flight-caption')].map(el => el.textContent))
-    .toEqual(['Working'])
+it('sets its rows before a supplement, and drops rows Find no longer matches', () => {
+  const supplement = { el: document.createElement('section'), refresh: vi.fn(), close: vi.fn(), dispose: vi.fn() }
+  const find = document.createElement('input')
+  picker = new ConstitutionPicker({ cards: () => [card({ id: 'alpha', name: 'Alpha' }), card({ id: 'beta', name: 'Beta' })], onOpen: vi.fn(), find, supplement })
+  document.body.append(picker.el)
+  picker.refresh()
+  const list = picker.el.querySelector('.ws-channel-list')!
+  expect([...list.children].at(-1)).toBe(supplement.el)
+  expect(list.querySelectorAll('.ws-channel-row')).toHaveLength(2)
+  find.value = 'beta'
+  picker.refresh()
+  expect([...list.querySelectorAll<HTMLElement>('.ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['beta'])
+  expect(supplement.refresh).toHaveBeenLastCalledWith('beta')
 })

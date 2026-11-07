@@ -52,6 +52,9 @@ describe('Desk dispatch into the document workspace', () => {
 })
 
 describe('Desk rows in the document workspace', () => {
+  const readerRows = (board: WorkspaceBoard): string[] =>
+    (board.workspace.reader as unknown as { deskCards(): KanbanCard[] }).deskCards().map(item => item.id)
+
   it('keeps Reader navigation in Desk order before, during, and after a poll', () => {
     const make = (lateDue: string): KanbanResponse => response({
       now: {
@@ -82,9 +85,6 @@ describe('Desk rows in the document workspace', () => {
       root.append(renderer.renderStashSection(order.resting, data.staleness))
       return [...root.querySelectorAll<HTMLElement>('[data-fiber-id]')].map(el => el.dataset.fiberId!)
     }
-    const readerRows = (board: WorkspaceBoard): string[] =>
-      (board.workspace as unknown as { sidebarCards(): KanbanCard[] }).sidebarCards().map(item => item.id)
-
     const first = make('2026-11-02')
     const next = make('2026-10-31')
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
@@ -135,16 +135,14 @@ describe('Desk rows in the document workspace', () => {
       const drawn = [...board.deskEl!.querySelectorAll<HTMLElement>('[data-fiber-id]')].map(el => el.dataset.fiberId)
       board.workspace.open(host, 'Desk')
       await flushTasks()
-      const sidebar = board.workspace.reader!.el.querySelector<HTMLElement>('.ws-sidebar')!
-      const reader = [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-row')].map(row => row.dataset.channelUid)
       expect(drawn).toEqual(['other-draft', 'turn', 'draft', 'working', 'review'])
-      expect(reader).toEqual(drawn)
+      expect(readerRows(board)).toEqual(drawn)
     } finally {
       board.unmount()
     }
   })
 
-  it('refreshes Reader groups through meeting start and end without changing row order', async () => {
+  it('refreshes Reader columns through meeting start and end without changing row order', async () => {
     const host = card({ id: 'draft-host' })
     const working = card({ id: 'working', status: 'active', workerState: 'running', runtimePhase: 'working' })
     const data = response({ now: { drafts: [host], inFlight: [working], awaitingReview: [] } })
@@ -162,40 +160,33 @@ describe('Desk rows in the document workspace', () => {
       board.render(data)
       board.workspace.open(host, 'Desk')
       await flushTasks()
-      const sidebar = board.workspace.reader!.el.querySelector<HTMLElement>('.ws-sidebar')!
-      const groups = (): string[] => [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-group .kbn-flight-caption')].map(el => el.textContent!)
-      const rows = (): string[] => [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-row')].map(el => el.dataset.channelUid!)
-      expect(groups()).toEqual(['Drafts', 'Working'])
-      expect(rows()).toEqual(['draft-host', 'working'])
+      const stops = board.workspace as unknown as { deskStop(card: KanbanCard): string }
+      expect(stops.deskStop(host)).toBe('Drafts')
+      expect(readerRows(board)).toEqual(['draft-host', 'working'])
 
-      const groupFor = (id: string): string | undefined => sidebar
-        .querySelector<HTMLElement>(`.ws-channel-row[data-channel-uid="${id}"]`)
-        ?.closest<HTMLElement>('.ws-channel-group')
-        ?.querySelector<HTMLElement>('.kbn-flight-caption')?.textContent
-      const deskRows = (): string[] => rows().filter(id => id === 'draft-host' || id === 'working')
       const rolePage = card({ id: 'roles/editor', shuttleSeat: true, shuttleRole: 'editor' })
       board.workspace.open(rolePage, 'Desk')
       await flushTasks()
-      expect(groupFor('draft-host')).toBe('Drafts')
+      expect(stops.deskStop(host)).toBe('Drafts')
 
       board.workspace.update()
       board.meetingStatus.meeting = meeting
       board.presentMeeting()
 
-      expect(deskRows()).toEqual(['draft-host', 'working'])
-      expect(groupFor('draft-host')).toBe('Working')
+      expect(readerRows(board).filter(id => id !== rolePage.id)).toEqual(['draft-host', 'working'])
+      expect(stops.deskStop(host)).toBe('In flight')
 
       board.meetingStatus.meeting = null
       board.presentMeeting()
 
-      expect(deskRows()).toEqual(['draft-host', 'working'])
-      expect(groupFor('draft-host')).toBe('Drafts')
+      expect(readerRows(board).filter(id => id !== rolePage.id)).toEqual(['draft-host', 'working'])
+      expect(stops.deskStop(host)).toBe('Drafts')
     } finally {
       board.unmount()
     }
   })
 
-  it('keeps the index in Desk order and gives an unplaced Reader page an Open run', async () => {
+  it('keeps Desk order and gives an unplaced Reader page an Open stop', async () => {
     const data = response({
       now: {
         drafts: [card({ id: 'draft' })],
@@ -216,17 +207,9 @@ describe('Desk rows in the document workspace', () => {
       for (const page of [card({ id: 'notes/x' }), card({ id: 'roles/editor' })]) {
         board.workspace.open(page, 'Desk')
         await flushTasks()
-        const reader = board.workspace.reader!.el
-        const captions = [...reader.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-group .kbn-flight-caption')]
-          .map(caption => caption.textContent)
-        const rows = [...reader.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')]
-          .map(row => row.dataset.channelUid)
-        const index = [...reader.querySelectorAll<HTMLElement>('.ws-sidebar-index-entry')]
-          .map(entry => entry.getAttribute('aria-label'))
-
-        expect(captions).toEqual(['Drafts', 'Working', 'Awaiting review', 'Roles', 'Resting', 'Open'])
-        expect(rows).toEqual(['draft', 'working', 'review', 'roles/seat', 'resting/item', page.id])
-        expect(index).toEqual(['Drafts, 1', 'In flight, 1', 'Awaiting review, 1', 'Roles, 1', 'Resting, 1', 'Open, 1'])
+        const stops = board.workspace as unknown as { deskStop(card: KanbanCard): string }
+        expect(readerRows(board)).toEqual(['draft', 'working', 'review', 'roles/seat', 'resting/item', page.id])
+        expect(stops.deskStop(page)).toBe('Open')
       }
     } finally {
       board.unmount()
@@ -309,7 +292,7 @@ describe('Desk rows in the document workspace', () => {
     }
   })
 
-  it('keeps cycle ghosts out of the sidebar order', () => {
+  it('keeps cycle ghosts out of the stepping order', () => {
     const draft = card({ id: 'draft' })
     const restingFirst = card({ id: 'resting/first', effectiveHorizon: 'stashed' })
     const restingSecond = card({ id: 'resting/second', effectiveHorizon: 'stashed' })

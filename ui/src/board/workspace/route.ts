@@ -172,7 +172,7 @@ export class WorkspaceHistory {
     this.onRoute(route)
   }
 
-  /** Sidebar scans replace the current visit; other channel and page moves push. */
+  /** Constitution steps replace the current visit; other channel and page moves push. */
   enter(uid: string, owner: string, doc?: DocKey, originView?: WorkspaceOriginView, replace = false, pageLabel?: string): void {
     this.ensureStarted()
     const route: Extract<WorkspaceRoute, { kind: 'channel' }> = { kind: 'channel', uid, owner, ...(doc === undefined ? {} : { doc }) }
