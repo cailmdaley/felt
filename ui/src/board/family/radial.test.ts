@@ -34,7 +34,7 @@ const SIZES = [[800, 720], [800, 1000], [1600, 1000], [1056, 640], [416, 720]] a
 const out = (layout: ReturnType<typeof radialLayout>, star: { x: number; y: number }): number => Math.hypot(star.x - layout.cx, star.y - layout.cy)
 
 const scene = (model: FamilyModel, width: number, height: number) => zoomPlate(radialLayout(model, width, height), WHOLE, model, null)
-const boxOf = (label: { x: number; y: number; width: number; lines: number; side: string }) => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - (label.lines * 18 + 7) / 2, bottom: label.y + (label.lines * 18 + 7) / 2 })
+const boxOf = (label: { x: number; y: number; width: number; side: string }) => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - 12, bottom: label.y + 12 })
 
 describe.each(SIZES)('the radial drawing at %i by %i', (width, height) => {
   const model = hub(), layout = radialLayout(model, width, height), arms = armsOf(model), sky = scene(model, width, height)
@@ -76,7 +76,7 @@ describe.each(SIZES)('the radial drawing at %i by %i', (width, height) => {
   it('names every first-generation thread with a row, and what asks first', () => {
     if (layout.narrow) return
     const named = new Set(sky.labels.map(label => label.thread))
-    for (const star of on([...arms.todo, ...arms.done])) if (star.side === (star.arm === 'todo' ? 'left' : 'right') && star.r > 2) expect(named.has(star.thread) || star.thread.name.length > 60).toBe(true)
+    for (const star of on([...arms.todo, ...arms.done])) if (star.side === (star.arm === 'todo' ? 'left' : 'right') && star.r > 2) expect(named.has(star.thread)).toBe(true)
   })
 })
 it('holds a family of one to a single body', () => {
@@ -84,7 +84,7 @@ it('holds a family of one to a single body', () => {
   expect(layout.stars).toHaveLength(1)
   expect(zoomPlate(layout, WHOLE, hub(only), null).labels).toEqual([])
 })
-it('sets just-finished threads by age on a log scale, and a long name takes more of the arm', () => {
+it('sets just-finished threads by age on a log scale', () => {
   const rows = (hours: readonly number[]): HubRow[] => [HUB_ROWS[0], ...hours.map((age, n): HubRow => ({ ...HUB_ROWS[1], id: `hub/d${n}`, parent: 'hub', name: `Done ${n}`, state: 'done', hours: age, launches: 1, commits: 0, files: 0 }))]
   const early = radialLayout(hub(rows([2, 100])), 800, 1000), late = radialLayout(hub(rows([20, 100])), 800, 1000)
   const body = (layout: ReturnType<typeof radialLayout>, name: string) => layout.stars.find(star => star.thread.name === name)!

@@ -56,9 +56,9 @@
 .family-map .fm-star[data-standing='review'] .fm-star-mark { fill-opacity: .12; stroke-width: 1.5; }
 .family-map .fm-star-fresh { fill: var(--ws-fresh); stroke: var(--ws-paper); stroke-width: 1.25; paint-order: stroke; }
 .family-map .fm-labels, .family-map .fm-numerals { position: absolute; inset: 0; pointer-events: none; }
-.family-map .fm-label { position: absolute; top: 0; left: 0; display: flex; align-items: flex-start; gap: 6px; padding-top: 3px; box-sizing: border-box; line-height: var(--leading-tight); pointer-events: auto; animation: fm-appear .3s ease-out; }
+.family-map .fm-label { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 6px; height: 24px; white-space: nowrap; line-height: var(--leading-tight); pointer-events: auto; animation: fm-appear .3s ease-out; }
 .family-map .fm-label[data-side='left'] { flex-direction: row-reverse; }
-.family-map .fm-label-rank { flex: none; min-width: 1ch; margin-top: 3px; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
+.family-map .fm-label-rank { flex: none; min-width: 1ch; color: var(--fm-text); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
 .family-map .fm-label-text { flex: 1; min-width: 0; line-height: var(--leading-tight); }
 .family-map .fm-label-name { color: var(--ws-ink); }
 .family-map .fm-label[data-side='left'] .fm-label-text { text-align: right; }
@@ -87,7 +87,7 @@
 .family-map .fm-star[data-focus] .fm-star-ring { fill: var(--ws-paper); stroke: var(--ws-ink); stroke-width: 1; }
 .family-map .fm-star[data-focus] .fm-star-halo { fill-opacity: .16; }
 .family-map .fm-helds, .family-map .fm-minis, .family-map .fm-focus-names, .family-map .fm-arm-names { position: absolute; inset: 0; pointer-events: none; }
-.family-map .fm-held { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 7px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); text-align: left; pointer-events: auto; transition: transform var(--fm-drift) ease-in-out; animation: fm-emerge .34s ease-out .14s backwards; }
+.family-map .fm-held { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 7px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); text-align: left; pointer-events: auto; animation: fm-appear .3s ease-out; }
 button.fm-held { cursor: pointer; }
 .family-map .fm-held[data-side='left'] { flex-direction: row-reverse; text-align: right; }
 .family-map .fm-held-mark { flex: none; width: 16px; height: 16px; overflow: visible; }
@@ -179,7 +179,6 @@ button.fm-held { cursor: pointer; }
 .family-map-narrow .fm-row-age { bottom: 14px; }
 .family-map-narrow .fm-row[data-loud] .fm-strip { height: 14px; }
 @keyframes fm-appear { from { opacity: 0; } }
-@keyframes fm-emerge { from { opacity: 0; } }
 @keyframes fm-stir { 40% { opacity: .35; } }
 .family-map-parked, .family-map-parked * { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {

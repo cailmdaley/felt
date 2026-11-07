@@ -6,7 +6,7 @@ import { FamilyPage } from '../workspace/FamilyPage.js'
 import { WHOLE, held, zoomAbout, type View } from './zoom.js'
 import { familyModel } from './model.js'
 import { radialLayout } from './radial.js'
-import { aim, labelFit, sighted, zoomPlate } from './orbit.js'
+import { aim, labelFit, sighted, spokenName, zoomPlate } from './orbit.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
 const when = (back: number): string => new Date(now - back * hour).toISOString()
@@ -113,13 +113,21 @@ it('comes to the thread whose scene fills the plate around its middle as a hand 
   expect(sighted(base, view, null)).toBe(star.thread.key)
   expect(sighted(base, { k: 3, x: 40, y: 40 }, star.thread.key)).toBeNull()
 })
-it('fits a name by words, and leaves out one that cannot be whole', () => {
+it('tells a long name up to its last clause that fits, and never ends it on a dangling word', () => {
+  expect(spokenName('Short name', 40)).toBe('Short name')
+  expect(spokenName('sp_validation GitHub steward — CosmoStat PRs, issues and board', 40)).toBe('sp_validation GitHub steward')
+  expect(spokenName('Data ↔ pipeline: the blinded vector on current develop', 30)).toBe('Data ↔ pipeline')
+  expect(spokenName('Establish what causes the smooth droop of measured over model', 44)).toBe('Establish what causes the smooth droop')
+  expect(spokenName('Explain the BB rise near the wall and the low-ell residual structure', 40)).toBe('Explain the BB rise near the wall')
+  expect(spokenName('Run the very long pipeline again tomorrow morning please', 30)).toBe('Run the very long pipeline')
+  expect(spokenName('x'.repeat(80), 40)).toBe('')
+})
+it('fits a name to one line, its marks after it while there is room', () => {
   const thread = (name: string, files = 0) => ({ name, files: new Array(files) }) as never
-  expect(labelFit(thread('Short name'), 300)?.lines).toBe(1)
-  expect(labelFit(thread('A name long enough that it has to run on to a second line'), 300)?.lines).toBe(2)
+  expect(labelFit(thread('Short name'), 300)?.text).toBe('Short name')
+  expect(labelFit(thread('Short name', 3), 300)?.files).toBe(true)
+  expect(labelFit(thread('A name of just the length that fills', 300), 300)?.files).toBe(false)
   expect(labelFit(thread('x'.repeat(80)), 300)).toBeUndefined()
-  expect(labelFit(thread('word '.repeat(120)), 300)).toBeUndefined()
-  expect(labelFit(thread('Short name', 3), 300)!.width).toBeGreaterThan(labelFit(thread('Short name'), 300)!.width)
 })
 it('steps out on a double-click of the field, not of a thread, and leaves the spiral\'s pins', () => {
   vi.useFakeTimers()

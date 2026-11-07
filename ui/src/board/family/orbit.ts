@@ -5,20 +5,17 @@ import { elapsed, htmlEl, markPath, optionFor, part, reconcile, shortAgo, svgEl,
 
 /** The radial drawing's plate and its painting: bodies, arms, names, and what the focused thread holds. */
 export const TURN = 2 * Math.PI
-const LABEL_LINE = 18
-const LABEL_PAD = 7
-const LABEL_MOST_LINES = 4
-/** A serif name's width per character, kept generous so a whole name always fits on the lines counted for it. */
-const LABEL_CHAR = 6.9
+export const LABEL_HEIGHT = 24
+/** A serif name's width per character, kept generous so its line always holds it. */
+const LABEL_CHAR = 6.5
 /** What a name's numeral takes beside it, and what its age and file count take at its end. */
 const LABEL_RANK = 22
 const LABEL_AGE = 34
-const LABEL_FILES = 30
+const LABEL_FILES = 28
 const LABEL_GAP = 7
 const MARGIN = 8
 const NUMERAL = 19
-/** A nameless body's step along an arm, and along the rim past its end. */
-export const QUIET_STEP = 14
+/** A body's step along the rim past its arm's end, and along a phone's arm. */
 export const RIM_STEP = 24
 /** A miniature's button, as family-map.css sets it. */
 const MINI_MARK = 14
@@ -41,6 +38,7 @@ const NAMED_FILL = .7
 /** How many bodies in view show what they hold. */
 const MINIS = 8
 const ARM_NAME_RISE = 9
+const TITLE_MOST = 340
 /** How far out from a focused body its life begins. */
 const LIFE_GAP = 9
 const ARM_NAME_WIDTH = 110
@@ -89,7 +87,7 @@ export interface Seen extends Star {
   hidden: boolean
   focus: boolean
 }
-export interface SkyLabel extends Point { thread: MapThread; numeral: number; width: number; lines: number; side: Side }
+export interface SkyLabel extends Point, Fit { thread: MapThread; numeral: number; side: Side }
 export interface SkyNumeral extends Point { thread: MapThread; numeral: number }
 export interface SkyArm { key: string; at: Point; scale: number; opacity: number; segments: Segment[] }
 export interface ArmName extends Point { label: string; side: Side }
@@ -118,33 +116,40 @@ export const bodyRadius = (thread: MapThread, unit: number): number => {
 export const ownRadius = (thread: MapThread): number => Math.min(28, 10 + bodySize(thread.weight) * .8)
 export const rootRadius = (model: FamilyModel, unit: number): number => unit * Math.min(28, 8 + bodySize(model.mass) * .8)
 
-/** A label's height for its lines of name. */
-export const labelHeight = (lines: number): number => lines * LABEL_LINE + LABEL_PAD
-/** The room beside a body `offset` from the centre line of a plate half this wide. */
-export const labelRoom = (half: number, offset: number, r: number): number => half - offset - r - LABEL_GAP - MARGIN
-/** How a name and its marks wrap in a label of this width, word by word; undefined when it does not fit whole. */
-export function labelFit(thread: MapThread, room: number): { lines: number; width: number } | undefined {
-  const most = room - LABEL_RANK
-  const tail = (thread.files.length ? LABEL_FILES : 0) + LABEL_AGE
-  let lines = 1, used = 0, widest = 0
-  const put = (width: number): void => {
-    if (used && used + width > most) { widest = Math.max(widest, used); lines++; used = width } else used += width
-  }
-  for (const word of thread.name.split(/\s+/)) {
-    const width = (word.length + 1) * LABEL_CHAR
-    if (width > most) return undefined
-    put(width)
-  }
-  put(tail)
-  return lines <= LABEL_MOST_LINES ? { lines, width: Math.max(widest, used) + LABEL_RANK } : undefined
+/** Where a long name may stop and still read whole: at its punctuation, else ahead of a joining word. */
+const CLAUSE = /\s[—–-]\s|\s·\s|[:;,.]\s|\s\(|\s↔\s/g
+const JOIN = /\s(?:and|with|on|for|in|to|through|from|by|at|into|via|under|after|before|that|so|while|against|across|of|or|as)\s/g
+/** Words a stopped name must not end on. */
+const DANGLING = /\s(?:the|a|an|its|their|our|and|or|of|to|in|on|for|with)$/
+const SHORTEST = 12
+const stops = (name: string, pattern: RegExp, most: number): number[] => [...name.matchAll(pattern)].map(match => match.index).filter(at => at >= SHORTEST && at <= most)
+
+/**
+ * A name told in at most `most` characters: whole when it fits, else up to the
+ * last clause that does, else up to a joining word, else up to a word. Thread
+ * names are often sentences; the first clause says what the thread is, and the
+ * peek and the page carry the rest.
+ */
+export function spokenName(name: string, most: number): string {
+  if (name.length <= most) return name
+  const at = stops(name, CLAUSE, most).at(-1) ?? stops(name, JOIN, most).at(-1) ?? name.lastIndexOf(' ', most)
+  return at < SHORTEST ? '' : name.slice(0, at).replace(DANGLING, '')
+}
+
+/** A name's line in a label of this width: what it says, and the marks beside it there is room for. */
+export interface Fit { text: string; width: number; files: boolean }
+export function labelFit(thread: MapThread, room: number): Fit | undefined {
+  const text = spokenName(thread.name, Math.floor((room - LABEL_RANK - LABEL_AGE) / LABEL_CHAR))
+  if (!text) return undefined
+  const used = LABEL_RANK + LABEL_AGE + text.length * LABEL_CHAR, files = !!thread.files.length && used + LABEL_FILES <= room
+  return { text, files, width: used + (files ? LABEL_FILES : 0) }
 }
 
 interface Box { left: number; right: number; top: number; bottom: number }
 const touches = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
-const labelBox = (label: Pick<SkyLabel, 'x' | 'y' | 'width' | 'lines' | 'side'>): Box => {
-  const half = labelHeight(label.lines) / 2
-  return { left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - half, bottom: label.y + half }
-}
+const labelBox = (label: Pick<SkyLabel, 'x' | 'y' | 'width' | 'side'>): Box => ({
+  left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, top: label.y - LABEL_HEIGHT / 2 + .5, bottom: label.y + LABEL_HEIGHT / 2 - .5,
+})
 
 /** Each name on the side of its body its arm runs out to, else the other, whole and clear of every other name and body, or not at all. */
 export function nearLabels(stars: readonly Seen[], named: readonly Seen[], frame: Frame, reserved: readonly Box[]): SkyLabel[] {
@@ -207,7 +212,7 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   if (named) for (const star of stars) star.hidden ||= !under(star)
   const holds = sight?.holds(seen.thread) ?? {}
   const held = narrow ? unfold(seen.thread, holds, plate, { x: 0, y: 0 }, reach) : named ? unfold(seen.thread, holds, plate, seen, reach).filter(item => inView(item)) : []
-  const title = named ? { ...heldTitle(seen, reach), width: 300 } : null
+  const title = named ? { ...heldTitle(seen, reach), width: Math.min(TITLE_MOST, width - seen.x - MARGIN) } : null
   const titled = named && title && title.y >= 0 ? title : null
   const taken: Box[] = narrow ? [] : [
     ...held.map(item => ({ left: item.side === 'right' ? item.x - 8 : item.x - item.room, right: item.side === 'right' ? item.x + item.room : item.x + 8, top: item.y - 12, bottom: item.y + 12 })),
@@ -345,15 +350,13 @@ function drawLabels(layer: HTMLElement, numerals: HTMLElement, sky: Sky, model: 
   }, (el, label) => {
     tagThread(el, label.thread)
     el.dataset.side = label.side
-    const height = labelHeight(label.lines)
+    el.style.transform = `translate(${(label.side === 'right' ? label.x : label.x - label.width).toFixed(1)}px, ${(label.y - LABEL_HEIGHT / 2).toFixed(1)}px)`
     el.style.width = `${Math.round(label.width)}px`
-    el.style.height = `${height}px`
-    el.style.transform = `translate(${(label.side === 'right' ? label.x : label.x - label.width).toFixed(1)}px, ${(label.y - height / 2).toFixed(1)}px)`
     const [rank, text] = el.children, [name, age, files] = text.children
     setText(rank, label.numeral ? String(label.numeral) : '')
-    setText(name, label.thread.name)
+    setText(name, label.text)
     setText(age, shortAgo(label.thread.lastMove, model.now))
-    ;(files as HTMLElement).hidden = !label.thread.files.length
+    ;(files as HTMLElement).hidden = !label.files
     setText(files.lastElementChild!, String(label.thread.files.length))
   })
   reconcile(numerals, sky.numerals, numeral => numeral.thread.key, () => htmlEl('div', 'fm-numeral'), (el, numeral) => {
@@ -413,7 +416,7 @@ function drawHeld(layer: HTMLElement, sky: Sky, model: FamilyModel): void {
     el.style.width = `${Math.round(item.title.width)}px`
     el.style.transform = `translate(${item.title.x.toFixed(1)}px, ${item.title.y.toFixed(1)}px)`
     const [name, state] = el.children
-    setText(name, item.thread.name)
+    setText(name, spokenName(item.thread.name, Math.floor(item.title.width / LABEL_CHAR)) || item.thread.name)
     setText(state, `${item.thread.word} · ${shortAgo(item.thread.lastMove, model.now)}`)
   })
 }

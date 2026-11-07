@@ -1,6 +1,6 @@
 import { isDrawn, type FamilyModel, type MapThread, type Standing } from './model.js'
 import { NARROW, HOUR, DAY, htmlEl, mount, part, type Drawing, type OpenThread, type Point, type Sight } from './drawing.js'
-import { QUIET_STEP, RIM_STEP, TURN, bodyRadius, labelFit, labelHeight, labelRoom, ownRadius, paintPlate, rootRadius, zoomPlate, type Frame, type Plate, type Segment, type Star } from './orbit.js'
+import { LABEL_HEIGHT, RIM_STEP, TURN, bodyRadius, ownRadius, paintPlate, rootRadius, zoomPlate, type Frame, type Plate, type Segment, type Star } from './orbit.js'
 import { WHOLE, type View } from './zoom.js'
 
 export type Arm = 'todo' | 'done'
@@ -14,8 +14,8 @@ const ARM_START = 16
 /** The arm's radius at its waist, due west, as a share of its reach. */
 const WAIST = .5
 const SAMPLES = 240
-/** How many passes settle a station's height against the name it leaves room for. */
-const ROUNDS = 3
+/** The most a to-do arm spreads out, so a small family fills its frame and a short queue stays a queue. */
+const ROOMY = 76
 /** A to-do arm's extra gap where the kind of ask changes. */
 const KIND_GAP = 8
 /** The room inside a body for its own threads: a leaf's, and how it grows with what is under it. */
@@ -145,24 +145,22 @@ const ageShare = (age: number): number => Math.max(0, Math.min(1, Math.log(1 + a
 
 /**
  * One arm of a scene. Each thread takes a station up the arm with the height its
- * name and room need, so its name runs out from the arm on a line of its own:
+ * room needs, so its name runs out from the arm on a line of its own:
  * to do from the foot, in order, its kinds set apart; just finished where its
  * age falls on the log scale, pushed along only as far as its neighbours need.
- * What has no row runs on around the rim, small and for the zoom to name.
+ * A short queue spreads to fill its arm. What has no row runs on around the
+ * rim, small and for the zoom to name.
  */
 function layArm(kids: readonly MapThread[], arm: Arm, frame: Frame, curve: Curve, count: (kid: MapThread) => number, now: number): { spots: Spot[]; segments: Segment[] } {
   const sign = arm === 'todo' ? 1 : -1, { reach } = frame
-  const footY = curve.points[curve.foot].y, run = footY - curve.points[curve.tip].y - labelHeight(1)
+  const footY = curve.points[curve.foot].y, run = footY - curve.points[curve.tip].y - LABEL_HEIGHT
   const rooms = kids.map(kid => count(kid) > 1 ? Math.min(reach * ROOM_MOST, ROOM_LEAF + ROOM_GROWTH * Math.sqrt(count(kid) - 1)) : ROOM_LEAF)
   const radii = kids.map(kid => bodyRadius(kid, 1))
   const wants = kids.map(kid => arm === 'done' ? run * ageShare(now - kid.lastMove) : 0)
   const gaps = kids.map((kid, n) => n && arm === 'todo' && kid.standing !== kids[n - 1].standing ? KIND_GAP : 0)
-  const needAt = (n: number, up: number): number => {
-    const { x } = pointAt(curve, indexAt(curve, footY - up)), fit = frame.narrow ? undefined : labelFit(kids[n], labelRoom(frame.width / 2, Math.abs(x), radii[n]))
-    return Math.max(fit ? labelHeight(fit.lines) : frame.narrow ? RIM_STEP : QUIET_STEP, 2 * radii[n] + 4, count(kids[n]) > 1 ? rooms[n] * 1.4 : 0)
-  }
-  let ups = kids.map(() => 0)
-  for (let round = 0; round < ROUNDS; round++) ups = stationsOf(kids.map((_, n) => needAt(n, ups[n] ?? run)), gaps, wants, run)
+  const needs = kids.map((_, n) => Math.max(frame.narrow ? RIM_STEP : LABEL_HEIGHT, 2 * radii[n] + 4, count(kids[n]) > 1 ? rooms[n] * 1.4 : 0))
+  const roomy = Math.min(ROOMY, (run + needs[0]) / (kids.length + 1))
+  const ups = stationsOf(needs.map(need => Math.max(need, arm === 'todo' ? roomy : need)), gaps, wants, run)
   const pitch = Math.hypot(curve.points[curve.tip + 1].x - curve.points[curve.tip].x, curve.points[curve.tip + 1].y - curve.points[curve.tip].y)
   const step = Math.min(RIM_STEP / pitch, (SAMPLES - curve.tip) / Math.max(1, kids.length - ups.length))
   const within = kids.map((_, n) => n < ups.length ? indexAt(curve, footY - ups[n]) : curve.tip + (n - ups.length + 1) * step)
