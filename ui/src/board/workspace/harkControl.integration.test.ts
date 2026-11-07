@@ -28,7 +28,6 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
   fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/agents')) return Response.json([])
-    if (url.includes('/config/voice')) return Response.json(init?.method === 'POST' ? { digest: 'after' } : { text: '{"quiet_seconds":15,"pinned_quiet_seconds":120,"words":200}', digest: 'before' })
     if (init?.method === 'POST') {
       current = { ...current, ...JSON.parse(String(init.body)) }
       current.state = current.enabled ? 'listening' : 'off'
@@ -99,12 +98,11 @@ it.each([true, false])('edits only the current quiet threshold on the recorder (
   const quiet = q<HTMLInputElement>('input[type=number]')
   await vi.waitFor(() => expect(quiet.disabled).toBe(false))
   expect(quiet.value).toBe(follow ? '15' : '120')
-  expect(fetcher.mock.calls[0][0]).toBe('/api/v1/config/voice?origin=audio%20host')
+  expect(fetcher).not.toHaveBeenCalled()
   quiet.value = '0.5'; quiet.dispatchEvent(new Event('change', { bubbles: true }))
-  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2))
-  const request = JSON.parse(fetcher.mock.calls[1][1].body)
-  expect(request).toMatchObject({ origin: 'audio host', expected_digest: 'before' })
-  expect(JSON.parse(request.text)).toEqual({ quiet_seconds: follow ? 0.5 : 15, pinned_quiet_seconds: follow ? 120 : 0.5, words: 200 })
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1))
+  expect(fetcher.mock.calls[0][0]).toBe('/api/v1/voice')
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ [follow ? 'quiet_seconds' : 'pinned_quiet_seconds']: 0.5, recorder: 'audio host' })
 })
 it('shows recorder and delivery failures in red without hiding mute or destination', () => {
   mount({ enabled: true, muted: true, state: 'failed', error: 'Mic refused' })

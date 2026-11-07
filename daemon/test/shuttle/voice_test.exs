@@ -529,7 +529,9 @@ defmodule Shuttle.VoiceTest do
                  transcript: transcript,
                  routes_path: Voice.routes_path(),
                  started_at: at
-               }, server: name)
+               },
+               server: name
+             )
 
     assert %{error: nil} = Voice.TranscriptRelay.status("launch", server: name)
 
@@ -785,6 +787,40 @@ defmodule Shuttle.VoiceTest do
              Voice.routes_path() |> File.read!() |> String.trim() |> Jason.decode!()
 
     assert (api_conn() |> post("/api/v1/voice/target", "{}")).status == 422
+  end
+
+  test "voice API edits cadence without replacing switches or targets" do
+    assert {:ok, _} =
+             Voice.update(%{
+               "enabled" => true,
+               "follow" => false,
+               "system_audio" => true,
+               "target" => %{"fiber_id" => "pin"}
+             })
+
+    response =
+      api_conn()
+      |> post("/api/v1/voice", ~s({"words":42,"quiet_seconds":0.5,"pinned_quiet_seconds":90}))
+      |> json_response(200)
+
+    assert %{
+             "words" => 42,
+             "quiet_seconds" => 0.5,
+             "pinned_quiet_seconds" => 90,
+             "enabled" => true,
+             "follow" => false,
+             "system_audio" => true,
+             "target" => %{"fiber_id" => "pin"}
+           } = response
+
+    assert {:ok, %{"words" => 42, "quiet_seconds" => 0.5, "pinned_quiet_seconds" => 90}} =
+             Config.read()
+
+    for invalid <- [~s({"words":0}), ~s({"quiet_seconds":0}), ~s({"pinned_quiet_seconds":"no"})] do
+      assert (api_conn() |> post("/api/v1/voice", invalid)).status == 422
+    end
+
+    assert {:ok, %{"words" => 42}} = Config.read()
   end
 
   test "voice API answers from the local recorder" do

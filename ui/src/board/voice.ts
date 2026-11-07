@@ -14,6 +14,9 @@ export interface VoiceStatus {
   state: 'off' | 'starting' | 'listening' | 'failed'
   follow: boolean
   system_audio: boolean
+  words?: number
+  quiet_seconds?: number
+  pinned_quiet_seconds?: number
   sources: Array<'desktop' | 'phone'>
   source: 'desktop' | 'phone'
   launch: string | null
@@ -64,6 +67,9 @@ export interface VoiceUpdate {
   muted?: boolean
   follow?: boolean
   system_audio?: boolean
+  words?: number
+  quiet_seconds?: number
+  pinned_quiet_seconds?: number
   source?: 'desktop' | 'phone'
   target?: RexMove
 }

@@ -77,6 +77,9 @@ defmodule Shuttle.Voice do
         enabled: false,
         follow: true,
         system_audio: false,
+        words: 200,
+        quiet_seconds: 15,
+        pinned_quiet_seconds: 120,
         source: "desktop",
         launch: nil,
         muted: Recorder.voice_muted?(Keyword.get(opts, :capture_opts, [])),
@@ -152,7 +155,8 @@ defmodule Shuttle.Voice do
     do: {:reply, {:error, "fiber_id is required"}, state}
 
   def handle_call({:update, params}, from, state) do
-    with :ok <- validate_update(params) do
+    with :ok <- validate_update(params),
+         :ok <- Config.validate(Map.take(params, ~w(words quiet_seconds pinned_quiet_seconds))) do
       {:noreply, enqueue(state, {params, from})}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -414,7 +418,13 @@ defmodule Shuttle.Voice do
     do: %{state | queue: state.queue ++ [operation]}
 
   defp enqueue(state, {params, from}) do
-    with :ok <- Config.update(Map.take(params, ~w(enabled follow system_audio))),
+    with :ok <-
+           Config.update(
+             Map.take(
+               params,
+               ~w(enabled follow system_audio words quiet_seconds pinned_quiet_seconds)
+             )
+           ),
          state <- %{
            state
            | snapshot:
@@ -486,7 +496,10 @@ defmodule Shuttle.Voice do
             | snapshot:
                 Map.merge(state.snapshot, %{
                   follow: settings["follow"],
-                  system_audio: settings["system_audio"]
+                  system_audio: settings["system_audio"],
+                  words: settings["words"],
+                  quiet_seconds: settings["quiet_seconds"],
+                  pinned_quiet_seconds: settings["pinned_quiet_seconds"]
                 })
           }
 
@@ -606,6 +619,9 @@ defmodule Shuttle.Voice do
           enabled: enabled,
           follow: state.snapshot.follow,
           system_audio: state.snapshot.system_audio,
+          words: state.snapshot.words,
+          quiet_seconds: state.snapshot.quiet_seconds,
+          pinned_quiet_seconds: state.snapshot.pinned_quiet_seconds,
           source: if(row && row[:phone], do: "phone", else: state.source || "desktop"),
           launch: row && row.launch,
           muted: Recorder.voice_muted?(state.capture_opts),

@@ -189,7 +189,7 @@ export class ListenControl {
     const target = state?.target
     const here = target?.origin === card.originId && [card.uid, card.id].includes(target?.fiber_id)
     if (state?.follow || !here) this.item('Pin to this card', () => this.change({ follow: false, target: { fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name } }))
-    const quiet = this.cadence(state?.recorder, state?.follow ?? true)
+    const quiet = this.cadence(state?.follow ?? true)
     menu.append(quiet)
     this.item("Today's transcript", () => {
       this.transcript?.dispose()
@@ -215,36 +215,24 @@ export class ListenControl {
     window.addEventListener('pointerdown', this.outside, true)
   }
 
-  private cadence(recorder: string | undefined, following: boolean): HTMLElement {
+  private cadence(following: boolean): HTMLElement {
     const el = document.createElement('label')
     el.className = 'listen-cadence'
     const label = `Quiet seconds (${following ? 'following' : 'pinned'})`
     el.textContent = label
     const quiet = document.createElement('input')
-    quiet.type = 'number'; quiet.min = '0.001'; quiet.step = 'any'; quiet.disabled = true
+    quiet.type = 'number'; quiet.min = '0.001'; quiet.step = 'any'
     quiet.setAttribute('aria-label', label); el.append(quiet)
     const key = following ? 'quiet_seconds' : 'pinned_quiet_seconds'
-    const origin = recorder ?? ''
-    const base = `${this.opts.shuttleBase}/api/v1/config/voice`
-    void fetch(`${base}${origin ? `?origin=${encodeURIComponent(origin)}` : ''}`).then(async response => {
-      if (!response.ok) throw new Error('Could not read listening settings')
-      const file = await response.json() as { text: string; digest: string | null }
-      const doc = file.text.trim() ? JSON.parse(file.text) as Record<string, unknown> : {}
-      quiet.value = String(doc[key] ?? (following ? 15 : 120)); quiet.disabled = false
-      quiet.addEventListener('change', () => {
-        const value = Number(quiet.value)
-        if (!quiet.validity.valid || !Number.isFinite(value) || value <= 0) return
-        quiet.disabled = true
-        void fetch(base, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: JSON.stringify({ ...doc, [key]: value }, null, 2) + '\n', origin, expected_digest: file.digest }),
-        }).then(async saved => {
-          if (!saved.ok) throw new Error('Could not save listening settings')
-          file.digest = (await saved.json() as { digest: string | null }).digest
-          doc[key] = value; this.localError = null
-        }).catch(error => this.fail(error)).finally(() => { quiet.disabled = false })
-      })
-    }).catch(error => this.fail(error))
+    quiet.value = String(this.opts.voice.status?.[key] ?? (following ? 15 : 120))
+    quiet.addEventListener('change', () => {
+      const value = Number(quiet.value)
+      if (!quiet.validity.valid || !Number.isFinite(value) || value <= 0) return
+      quiet.disabled = true
+      this.localError = null
+      void this.opts.voice.set({ [key]: value })
+        .catch(error => this.fail(error)).finally(() => { quiet.disabled = false })
+    })
     return el
   }
 }

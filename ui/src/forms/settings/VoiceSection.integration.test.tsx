@@ -4,14 +4,13 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { VoiceSection } from './VoiceSection'
 
-const api = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }))
-vi.mock('./settingsApi', async original => ({ ...await original<object>(), loadConfigFile: api.load, saveConfigFile: api.save }))
+const fetcher = vi.fn()
 const host = { origin: 'recorder', label: 'recorder', isLocal: false, stale: false, host: 'recorder', hubHost: 'hub', nativeFolderPicker: false, expandedFeltStores: [] }
 afterEach(() => { document.body.replaceChildren(); vi.clearAllMocks(); vi.unstubAllGlobals() })
 it('saves shared listening settings on the selected host without dropping other keys', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  api.load.mockResolvedValue({ text: JSON.stringify({ enabled: false, follow: false, system_audio: true, words: 23, quiet_seconds: 8, pinned_quiet_seconds: 90, other: true }), digest: 'before' })
-  api.save.mockResolvedValue({ digest: 'after' })
+  fetcher.mockImplementation(async () => Response.json({ enabled: false, follow: false, system_audio: true, words: 23, quiet_seconds: 8, pinned_quiet_seconds: 90 }))
+  vi.stubGlobal('fetch', fetcher)
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container)
   await act(async () => { root.render(<VoiceSection shuttleBase="" host={host} onChanged={vi.fn()} />) })
@@ -26,10 +25,10 @@ it('saves shared listening settings on the selected host without dropping other 
   })
   expect(quiet.validity.valid).toBe(true)
   await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
-  expect(api.save).toHaveBeenCalledOnce()
-  const [, owner, id, text, digest] = api.save.mock.calls[0]
-  expect(owner).toEqual(host); expect(id).toBe('voice'); expect(digest).toBe('before')
-  expect(JSON.parse(text)).toEqual({ enabled: false, follow: false, system_audio: true, words: 23, quiet_seconds: 0.5, pinned_quiet_seconds: 90, other: true })
-  expect(api.load).toHaveBeenCalledTimes(1)
+  expect(fetcher).toHaveBeenCalledTimes(2)
+  expect(fetcher.mock.calls[0][0]).toBe('/api/v1/voice?recorder=recorder')
+  const [url, request] = fetcher.mock.calls[1]
+  expect(url).toBe('/api/v1/voice'); expect(request.method).toBe('POST')
+  expect(JSON.parse(request.body)).toEqual({ words: 23, quiet_seconds: 0.5, pinned_quiet_seconds: 90, recorder: 'recorder' })
   act(() => root.unmount())
 })

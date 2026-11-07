@@ -87,7 +87,7 @@ try {
   assert.equal(await band(page).locator('.ws-voice-strip').isVisible(), false)
   const requests = await page.evaluate(() => window.__harness.requests)
   assert.ok(requests.every(request => !request.url.includes('/meeting')))
-  assert.ok(requests.some(request => request.url.includes('/config/voice') && request.method === 'POST' && JSON.parse(JSON.parse(request.body).text).pinned_quiet_seconds === 90))
+  assert.ok(requests.some(request => request.url.includes('/api/v1/voice') && request.method === 'POST' && JSON.parse(request.body).pinned_quiet_seconds === 90))
   await context.close()
   console.log('Follow, pin, system audio, pinned quiet, transcript filter, mute and Stop: ok')
 
