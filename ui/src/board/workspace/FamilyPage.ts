@@ -43,7 +43,8 @@ export const placeAt = (card: KanbanCard): MapPlace => ({ open: new Set(), selec
 /**
  * A constitution's page: the family's root heads it with its outcome and what
  * it holds, and its threads follow as rows, the tree whole, siblings in the
- * order they ask for attention, then the threads set aside behind one fold.
+ * order they ask for attention under one divider per kind, then the threads
+ * set aside behind one fold.
  * A row leads with its name and what it came to (or what it asks); a click
  * unfolds it to what it holds (tapestry or report, constitution, sent files
  * oldest to newest) and its own threads, laid out the same way, and a second
@@ -209,6 +210,11 @@ export class FamilyPage {
     return row
   }
   private fill(line: Line): HTMLElement {
+    if (line.kind === 'section') {
+      const head = this.made(line.key, () => { const head = el('div', 'fp-section', SECTION_WORD[line.section]); head.setAttribute('role', 'presentation'); return head })
+      head.dataset.standing = line.section
+      return head
+    }
     const row = line.kind === 'aside' ? this.made(line.key, () => {
       const row = el('div', 'fp-aside'); row.setAttribute('role', 'treeitem'); row.tabIndex = -1
       row.append(el('span', 'fp-aside-words'))
@@ -225,6 +231,8 @@ export class FamilyPage {
       return row
     }
     this.fillThread(row, line.thread, line.section ?? 'aside', line.open)
+    // The family's own threads sit under a divider that already names their kind, so their meta is the age alone.
+    if (line.level === 0 && line.section) row.querySelector('.fp-meta')!.textContent = shortAgo(line.thread.lastMove, this.model!.now)
     const { threads, asks } = this.under.get(line.thread.key)!
     row.querySelector('.fp-count')!.textContent = !threads ? '' : asks ? `${asks} of ${threads} ask` : `${threads} ${threads === 1 ? 'thread' : 'threads'}`
     return row

@@ -43,6 +43,7 @@
 .fp-head .fp-name { font: var(--type-title)/var(--leading-tight) var(--font-serif); }
 .fp-head .fp-note { -webkit-line-clamp: 5; color: var(--ws-ink); font-size: var(--type-row); }
 .fp-row[data-open].fp-head .fp-note { -webkit-line-clamp: 5; }
+.fp-section { margin-bottom: 2px; padding: 12px var(--fp-gutter) 3px; border-bottom: 1px solid var(--ws-hairline-soft); color: var(--fm-text); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .fp-aside { padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + 20px + var(--fp-level, 0) * 16px); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); cursor: pointer; outline: none; }
 .fp-aside::before { content: '▸'; display: inline-block; width: 1.2em; margin-left: -1.2em; transition: transform .15s; }
 .fp-aside[aria-expanded='true']::before { transform: rotate(90deg); }
