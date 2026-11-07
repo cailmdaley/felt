@@ -20,6 +20,7 @@ import { WorkerActions } from './workerActions.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
 import { deskColumn } from '../deskColumn.js'
+import { slug } from '../threadOutline.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import { ListenControl, type MeetingJoinControl } from './ListenControl.js'
@@ -404,6 +405,7 @@ export class Dock {
   private ancestry: HTMLElement | null = null
   private drawerClose: (() => boolean) | null = null
   private card: KanbanCard | null = null
+  private actionCard: KanbanCard | null = null
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
   private searchRenderToken = 0
@@ -556,7 +558,7 @@ export class Dock {
     this.searchDebounce = null
     this.searchRenderToken++
     this.fiberIndex = null
-    this.card = this.workerPillCard = null
+    this.card = this.actionCard = this.workerPillCard = null
     this.constitutionButton = this.openConstitution = null
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
@@ -629,6 +631,12 @@ export class Dock {
   /** A worker's own line for an opening message, Resume and New session, for a page to seat beside that worker. */
   workerActionsFor(card: KanbanCard): WorkerActions {
     return new WorkerActions(card, (target, mode, message, word) => this.startSession(target, mode, word, undefined, message))
+  }
+
+  /** Retarget the band's lifecycle and worker controls without changing its identity or settings. */
+  setActionCard(card: KanbanCard): void {
+    this.actionCard = card
+    this.actPaint?.()
   }
 
   /** The band shares the workspace's identity-keyed undo queue. */
@@ -800,11 +808,12 @@ export class Dock {
       verdict.append(button)
       return button
     }
-    const review = verb('review', 'a', () => this.verdict(card, 'awaitingReview'))
+    const target = (): KanbanCard => this.actionCard ?? card
+    const review = verb('review', 'a', () => this.verdict(target(), 'awaitingReview'))
     const onRest = this.onRest
-    const rest = onRest ? verb('rest', 's', button => onRest(card, button)) : null
-    const temper = verb('temper', 't', () => this.verdict(card, 'tempered'))
-    const discard = verb('discard', 'x', () => this.verdict(card, 'composted'))
+    const rest = onRest ? verb('rest', 's', button => onRest(target(), button)) : null
+    const temper = verb('temper', 't', () => this.verdict(target(), 'tempered'))
+    const discard = verb('discard', 'x', () => this.verdict(target(), 'composted'))
     const worker = this.workerActionsFor(card)
     this.disposers.push(() => worker.dispose())
 
@@ -912,9 +921,17 @@ export class Dock {
       if (facts.textContent !== saidFacts) facts.textContent = saidFacts
       facts.title = hit === undefined ? '' : `The session's recent turns read ${hit}% of their context tokens from the prompt cache`
       facts.hidden = !facts.textContent
-      const offered = headerLifecycleVerbsFor(card, !!this.onRest)
+      const act = target()
+      const same = (act.uid ?? act.id) === (card.uid ?? card.id) && act.originId === card.originId
+      markVerdictHost(this.head, act)
+      for (const [button, verb, key] of [[review, 'review', 'a'], [rest, 'rest', 's'], [temper, 'temper', 't'], [discard, 'discard', 'x']] as const) {
+        if (!button) continue
+        const label = `${verbSpec(verb).label}${same ? '' : ` ${slug(act)}`} (${key})`
+        button.title = label; button.setAttribute('aria-label', label)
+      }
+      const offered = headerLifecycleVerbsFor(act, !!this.onRest)
       verdict.hidden = !offered.length
-      worker.update(card, warm === undefined ? '' : `cache warm until ${clockTime(warm)}`)
+      worker.update(act, same && warm !== undefined ? `cache warm until ${clockTime(warm)}` : '')
       if (rest) rest.hidden = !offered.includes('rest')
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')

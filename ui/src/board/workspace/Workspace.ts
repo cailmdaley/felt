@@ -241,8 +241,9 @@ export class Workspace {
       onOpenDocument: key => this.visit(key),
       onRevisitDocument: key => this.revisit(key),
       workerPill: card => this.dock.workerPillFor(card),
+      actionCard: card => this.actionCard(card),
       onVerdict: verdict => this.deferVerdict(verdict),
-      onConversation: card => { this.dock.openConversation(this.mapSelection() ?? card) },
+      onConversation: card => { this.dock.openConversation(card) },
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() || (this.mapPage(this.current)?.foldOut() ?? false),
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
@@ -537,8 +538,10 @@ export class Workspace {
 
   private deferVerdict(verdict: Verdict): void {
     const state = this.current
-    if (!state?.metadataKnown || !verdictReachable(state.card)) return
-    this.queueVerdict(state.card, verdict)
+    if (!state?.metadataKnown) return
+    const card = this.actionCard(state.card)
+    if (!verdictReachable(card)) return
+    this.queueVerdict(card, verdict)
   }
   /** Desk, plates, act-zone buttons and keys authorize the same delayed write.
    * Answers whether the verdict entered its undo window. */
@@ -588,6 +591,7 @@ export class Workspace {
   private controls(state: ChannelState | null): Dock | undefined {
     if (!state?.metadataKnown || state.channel.uid.startsWith('other:') || !onDesk(state.card)) return undefined
     this.dock.open(state.card)
+    this.dock.setActionCard(this.actionCard(state.card))
     return this.dock
   }
   /** Seat the band over the channel's pages, with its links. */
@@ -677,15 +681,16 @@ export class Workspace {
   private sight(state: ChannelState): void {
     this.opts.onSight?.(this.mapPage(state)?.settled ?? state.card)
   }
-  /** On a constitution's page, the thread it has selected. */
-  private mapSelection(): KanbanCard | undefined {
-    return this.mapPage(this.current)?.selection
+  /** Lifecycle and conversation acts follow the highlighted thread, else the page's card. */
+  private actionCard(card: KanbanCard): KanbanCard {
+    return this.mapPage(this.current)?.selection ?? card
   }
   private family(): HTMLElement {
     const state = this.current!
     state.familyPage ??= new FamilyPage({ reach: card => this.reach(card) }, this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
-      () => { if (this.current === state) this.sight(state) })
+      () => { if (this.current === state) this.sight(state) },
+      () => { if (this.current === state && this.isActive) this.dock.setActionCard(this.actionCard(state.card)) })
     state.familyPage.leave ??= () => this.returnToOrigin()
     state.familyPage.update(state.card, this.graph())
     return state.familyPage.el
@@ -851,6 +856,7 @@ export class Workspace {
     state.selected = key
     state.routedFile = undefined
     this.reader.select(key)
+    this.dock.setActionCard(this.actionCard(state.card))
     if (key === this.familyDocument(state.card)) this.focusMap(state)
     this.namePage(state, key)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }

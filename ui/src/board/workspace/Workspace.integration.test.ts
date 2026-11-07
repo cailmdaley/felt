@@ -807,6 +807,39 @@ describe('workspace reader integration', () => {
       expect(showModal).toHaveBeenCalledOnce()
     } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal') }
   })
+  it('routes lifecycle keys, console verbs and the worker line to the highlighted thread', async () => {
+    workspace.dispose()
+    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', name: 'Hub', status: 'closed', shuttleKind: 'oneshot' })
+    const leaf = card({ id: 'hub/notch', uid: 'notch', originId: 'host-a', name: 'Notch', orchestrator: 'hub', status: 'active', shuttleKind: 'oneshot', sessionUuid: 'notch-session' })
+    const feed = [hub, leaf], onRest = vi.fn(), dock = new Dock('', changed, undefined, undefined, { onRest })
+    bodyCards = feed
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock, onRest })
+    const queue = vi.spyOn(workspace, 'queueVerdict').mockReturnValue(true)
+    workspace.open(hub, 'Desk'); await flush()
+    const row = document.querySelector<HTMLElement>('.ws-selected .fp-row:not(.fp-head)')!
+    document.querySelector<HTMLElement>('.ws-selected .fp-head')!.focus()
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
+    expect(row.getAttribute('aria-selected')).toBe('true')
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub')
+    const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+    press('a'); expect(queue).toHaveBeenLastCalledWith(leaf, 'awaitingReview')
+    press('x'); expect(queue).toHaveBeenLastCalledWith(leaf, 'composted')
+    press('t'); expect(queue).toHaveBeenLastCalledWith(leaf, 'tempered')
+    press('s'); expect(onRest).toHaveBeenLastCalledWith(leaf, workspace.reader.el)
+    const rest = document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-rest')!
+    expect(rest.title).toBe('Rest notch (s)')
+    rest.click(); expect(onRest).toHaveBeenLastCalledWith(leaf, rest)
+    document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-review')!.click()
+    expect(queue).toHaveBeenLastCalledWith(leaf, 'awaitingReview')
+    const primary = document.querySelector<HTMLButtonElement>('.ws-worker-primary')!
+    expect(primary.getAttribute('aria-label')).toBe('Resume Notch')
+    primary.click(); await flush()
+    const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
+    expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/notch', resume_mode: 'previous' })
+    document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click()
+    press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }), 'composted')
+    expect(document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-discard')!.title).toBe('Discard (x)')
+  })
   it('lands a family\'s constitution on its page, first in its run, a leaf thread there too at its unfolded row, and one outside a family on its own page', async () => {
     workspace.dispose()
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>

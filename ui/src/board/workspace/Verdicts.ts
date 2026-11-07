@@ -83,7 +83,7 @@ export class Verdicts {
       const key = host.dataset.verdictKey!
       const pending = this.pending.get(key)
       const line = host.querySelector<HTMLElement>(':scope > .ws-verdict-undo')
-      if (line?.dataset.verdict === pending?.verdict) continue
+      if (line?.dataset.verdict === pending?.verdict && line?.dataset.key === key) continue
       const focused = host.contains(document.activeElement)
       line?.remove()
       if (!pending) {
@@ -97,12 +97,13 @@ export class Verdicts {
       // The control that gave the verdict gives way; its focus moves to undo.
       if (focused) next.querySelector('button')!.focus()
     }
-    if (this.pending.size) this.observer.observe(document.body, { childList: true, subtree: true })
+    if (this.pending.size) this.observer.observe(document.body, { childList: true, attributes: true, attributeFilter: ['data-verdict-key'], subtree: true })
   }
   private line(key: string, pending: Pending): HTMLElement {
     const line = document.createElement('span')
     line.className = 'ws-verdict-undo'
     line.dataset.verdict = pending.verdict
+    line.dataset.key = key
     // A host rebuilt mid-window joins the fade where it stands.
     const left = Math.max(0, pending.due - Date.now())
     line.style.setProperty('--ws-verdict-left', `${left}ms`)

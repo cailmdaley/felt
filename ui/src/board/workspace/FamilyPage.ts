@@ -81,6 +81,7 @@ export class FamilyPage {
   private readonly place: MapPlace
   private readonly disposed: () => void
   private readonly sighted: () => void
+  private readonly selectionChanged: () => void
   /** `h` from a row: off the page, back where it was opened from. */
   leave?: () => void
   /** Each unfolded document, by thread, kept across repaints so a page holds its place. */
@@ -90,8 +91,8 @@ export class FamilyPage {
    * `conversations` moves Rex quietly to a thread's existing window;
    * `sighted` hears the selection move.
    */
-  constructor(conversations: Pick<Conversations, 'reach'>, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, sighted: () => void = () => {}) {
-    this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.sighted = sighted
+  constructor(conversations: Pick<Conversations, 'reach'>, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, sighted: () => void = () => {}, selectionChanged: () => void = () => {}) {
+    this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.sighted = sighted; this.selectionChanged = selectionChanged
     this.place.docs ??= new Map()
     this.tree.setAttribute('role', 'tree')
     this.tree.setAttribute('aria-label', 'The constitution and its threads, most urgent first')
@@ -149,8 +150,8 @@ export class FamilyPage {
   }
   /** The thread the page rests on, which voice follows: the thread last entered, else the constitution heading it. */
   get settled(): KanbanCard | undefined { return (this.model?.threads.get(this.place.entered ?? '') ?? this.model?.root)?.card }
-  /** The thread the page has highlighted, which `c` opens the worker of. */
-  get selection(): KanbanCard | undefined { return this.selectedThread?.card }
+  /** The highlighted thread, excluding the head and the set-aside fold. */
+  get selection(): KanbanCard | undefined { return this.place.selected ? this.model?.threads.get(this.place.selected)?.card : undefined }
 
   private get selectedKey(): string | null { return this.place.selected ?? this.model?.root.key ?? null }
   private get selectedThread(): MapThread | undefined { return this.model?.threads.get(this.selectedKey ?? '') }
@@ -181,6 +182,7 @@ export class FamilyPage {
     const row = this.row(thread.key)
     if (row && thread !== this.model!.root) this.reveal(row, true)
     this.sighted()
+    this.selectionChanged()
   }
 
   private paint(): void {
@@ -188,12 +190,14 @@ export class FamilyPage {
     if (!model) return
     this.lines = outline(model, this.place.open, this.under)
     const keys = new Set([model.root.key, ...this.lines.map(line => line.key)])
-    if (!keys.has(this.place.selected ?? '')) this.place.selected = null
+    const lostSelection = this.place.selected !== null && !keys.has(this.place.selected)
+    if (lostSelection) this.place.selected = null
     const order = [this.fillHead(model.root), ...this.lines.map(line => this.fill(line))]
     for (const [key, row] of this.rows) if (!keys.has(key)) { row.remove(); this.rows.delete(key) }
     for (const key of this.embedded.keys()) if (!keys.has(key)) this.dropDoc(key)
     order.forEach((row, n) => { if (this.tree.children[n] !== row) this.tree.insertBefore(row, this.tree.children[n] ?? null) })
     this.markSelected()
+    if (lostSelection) this.selectionChanged()
     for (const thread of [model.root, ...this.lines.flatMap(line => line.kind === 'thread' ? [line.thread] : [])]) this.readLead(thread)
   }
   private made(key: string, make: () => HTMLElement): HTMLElement {
@@ -396,6 +400,7 @@ export class FamilyPage {
     if (key === this.selectedKey) return
     this.place.selected = key === this.model?.root.key ? null : key
     this.markSelected()
+    this.selectionChanged()
   }
   /** Escape: folds the open row the selection sits in, selecting it; false when nothing is open around it. */
   foldOut(): boolean {

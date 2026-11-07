@@ -45,6 +45,7 @@ export interface ReaderOptions {
   onTapestry?(): boolean
   /** The next drawing of the map; false off the map. */
   workerPill?(card: KanbanCard): HTMLElement | null
+  actionCard?(card: KanbanCard): KanbanCard
   onVerdict?(verdict: Verdict): void
   onConversation?(card: KanbanCard): void
   onRest?(card: KanbanCard, anchor: HTMLElement): void
@@ -666,7 +667,8 @@ export class Reader {
     }
     if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false
     if (intent === 'tapestry') return this.opts.onTapestry?.() ?? false
-    if (constitutionAction(intent, this.currentCard, {
+    const actionCard = this.currentCard && (this.opts.actionCard?.(this.currentCard) ?? this.currentCard)
+    if (constitutionAction(intent, actionCard, {
       verdict: (_, verdict) => this.opts.onVerdict?.(verdict),
       conversation: card => this.opts.onConversation?.(card),
       rest: card => this.opts.onRest?.(card, this.el),
