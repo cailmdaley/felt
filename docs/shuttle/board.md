@@ -303,6 +303,7 @@ The tile's colour is its state, in the Desk's pigments, and it fades with age. A
 | `Esc`, `h` | One level out |
 | `←` `→` `↑` `↓` | The previous or next thing that asks, most urgent first |
 | `Enter` | What a click does, on the tile in focus |
+| `/` | Find; picking a thread flies the Globe to it, leaving Rex and the stage be, and a fiber the Globe has no tile for opens its page |
 | `+`, `-` | Zoom |
 | `m` | Globe or the HEALPix plane |
 

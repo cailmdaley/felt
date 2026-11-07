@@ -584,6 +584,7 @@ export class KanbanModal {
       dock: this.dock,
       find: this.findEl ?? undefined,
       focusFind: () => this.focusFind(),
+      reveal: card => !!this.activeView?.reveal?.(card.uid ?? card.id, card.originId),
       onRest: card => this.openRestPopover(card),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
@@ -2332,8 +2333,8 @@ export class KanbanModal {
       e.preventDefault(); e.stopPropagation(); this.setView('desk'); return
     }
     if (this.activeView?.keydown?.(e)) { e.preventDefault(); e.stopPropagation(); return }
-    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the map.
-    if (this.activeViewId === 'chronicle' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
+    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too, as on the map and the Globe.
+    if ((this.activeViewId === 'chronicle' || this.activeViewId === 'globe') && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()
       return
     }

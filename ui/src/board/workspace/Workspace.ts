@@ -59,6 +59,8 @@ export interface WorkspaceOptions {
   find?: HTMLInputElement
   /** Focus the board bar's Find; false where the bar has none (the phone). */
   focusFind?(): boolean
+  /** Brings the view standing behind the stage to a fiber Find picked; false when it holds no place for it, and the fiber's page opens. */
+  reveal?(card: KanbanCard): boolean
   /** Expand has taken, or given back, the whole window. */
   onExpand?(expanded: boolean): void
   onRest?(card: KanbanCard, anchor: HTMLElement): void
@@ -201,6 +203,7 @@ export class Workspace {
       files: (card: KanbanCard) => this.overview.fileNames(card),
       onOpen: (card: KanbanCard) => {
         this.clearFind()
+        if (!this.isActive && opts.reveal?.(card)) { opts.find?.blur(); return }
         this.open(card, this.isActive ? this.origin : opts.origin(), undefined, this.overview.hasMetadata(card))
       },
     }

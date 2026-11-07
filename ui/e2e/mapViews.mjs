@@ -146,6 +146,22 @@ export function registerMapViewJourneys(test) {
     for (const [n, a] of names.entries()) for (const b of names.slice(n + 1)) assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.text} overlaps ${b.text}`)
   }, { width: 800, height: 1000 })
 
+  test('On the Globe, / opens Find and a pick flies the Globe to that thread, leaving Rex and the stage be', async page => {
+    await board(page)
+    await page.keyboard.press('2')
+    await page.locator('.globe-canvas').waitFor()
+    await page.waitForTimeout(1300)
+    const before = await asked(page)
+    await page.keyboard.press('/')
+    await page.keyboard.type('Deep follow-up')
+    await page.locator('.ws-channel-row').filter({ hasText: 'Deep follow-up' }).first().waitFor()
+    await page.keyboard.press('Enter')
+    await page.locator('.globe-peek-name').filter({ hasText: 'Deep follow-up on the response cut' }).waitFor()
+    assert.equal(await page.locator('.kbn-reader-open').count(), 0, 'the constitution page stays shut')
+    assert.equal(new URL(page.url()).hash, '#/globe')
+    assert.deepEqual(await asked(page), before, 'a pick never reaches Rex')
+  })
+
   test('The Globe: hotkey 2, keys and a drag move without Rex, a click moves Rex to its thread, a file opens and Back returns as it stood', async page => {
     await board(page)
     await page.keyboard.press('2')
