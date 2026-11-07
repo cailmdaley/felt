@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl } from './FileViewerPanel.js'
+import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl, pinViewportUnits } from './FileViewerPanel.js'
 import { envelope } from './workspace/DocumentBridge.js'
 import { resetDocumentResources } from './documentResources.js'
 const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
@@ -34,6 +34,10 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('pins viewport-height units in styles, leaving prose untouched', () => {
+    const html = `<style>.a { height: 100vh; min-height: 12.5svh; max-height: .5dvh }</style><p style="height: 25lvh; margin: -1.25vh">100vh</p>`
+    expect(pinViewportUnits(html, 800)).toBe(`<style>.a { height: 800px; min-height: 100px; max-height: 4px }</style><p style="height: 200px; margin: -10px">100vh</p>`)
+  })
   it('resolves Markdown images against the deliverable directory and byte-owning host', () => {
     const viewer = buildFileViewer('', '/reports/run/notes.md', 'host-b')
     watch.content!('![Plot](figures/wide.png)')

@@ -1049,27 +1049,35 @@ describe('workspace reader integration', () => {
     workspace.openFromDesk(feed[0]); await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:lone')
     expect(document.querySelectorAll('.ws-selected .fp-row')).toHaveLength(1)
-    expect(document.querySelector('.ws-selected .fp-head [data-kind="constitution"]')).not.toBeNull()
+    expect(document.querySelector('.ws-selected .fp-head .fp-constitution')).not.toBeNull()
     workspace.openFromDesk(feed[1]); await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:draft')
   })
-  it('sends `l` from the map to its thread\'s lead, never to a constitution, and back from a lead to the map', async () => {
+  it('toggles the selected thread\'s lead inline on the family page', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
-    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' })]
+    const feed = [thread({ id: 'hub', status: 'active', fiberDir: '/notes/hub' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' })]
     bodyCards = feed
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/file-info?')
+      ? Response.json({ exists: new URL(String(input), 'http://workspace.test').searchParams.get('path') === '/notes/hub/report.html' })
+      : original(input, init))
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     const press = async (): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true })); await flush() }
     workspace.open(feed[0], 'Desk'); await flush()
     await press()
-    expect(selected()).toBe('host-a:/notes/report.html')
+    expect(selected()).toBe('family:host-a:hub')
+    expect(document.querySelector<HTMLElement>('.ws-selected .fp-head .fp-doc')!.hidden).toBe(false)
+    expect(document.querySelector<HTMLIFrameElement>('.ws-selected .fp-head .fp-doc iframe')!.title).toBe('/notes/hub/report.html')
     await press()
     expect(selected()).toBe('family:host-a:hub')
+    expect(document.querySelector<HTMLElement>('.ws-selected .fp-head .fp-doc')!.hidden).toBe(true)
     workspace.follow('hub-mid', 'host-a'); await flush()
     await press()
     expect(selected()).toBe('family:host-a:hub')
+    expect(document.querySelector<HTMLElement>('.ws-selected .fp-row[aria-selected="true"] .fp-doc')!.hidden).toBe(true)
   })
   it('leaves Download and Refresh off the map\'s document menu', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
