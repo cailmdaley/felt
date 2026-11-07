@@ -86,6 +86,8 @@ export class ListenControl {
       ?? (state?.state === 'failed' ? state.error ?? 'Listening failed' : null)
       ?? (state?.enabled && state.last?.status === 'failed' ? `Delivery failed${state.last.detail ? `: ${state.last.detail}` : ''}` : null)
       ?? phone?.error
+      ?? (phone?.needsRestore ? phone.warning ?? 'Phone microphone interrupted' : null)
+      ?? (phone && ['refused', 'ended', 'replaced'].includes(phone.link) ? phone.linkReason ?? 'Phone audio ended' : null)
       ?? (phone?.lostSince !== null && phone?.lostSince !== undefined ? phone.linkReason ?? 'Phone audio disconnected' : null)
       ?? null
   }
@@ -101,7 +103,7 @@ export class ListenControl {
       const start = !state?.enabled
       const unmute = start || !!state?.muted
       const usePhone = start ? isMobileViewport() : state?.source === 'phone'
-      if (usePhone && unmute) {
+      if (usePhone && isMobileViewport() && unmute) {
         if (!phone) throw new Error('Phone audio is unavailable on this board.')
         if (!phone.session.busy) opening = phone.begin()
         else if (phone.session.needsRestore) await phone.session.restore()
@@ -143,7 +145,7 @@ export class ListenControl {
     const title = on ? `${muted ? 'Muted. ' : ''}${state?.follow ? 'Following you: words go to' : 'Pinned: words go to'} ${name}`
       : isMobileViewport() ? 'Listen with this phone’s mic' : 'Listen: words go to the card in view'
     this.button.disabled = this.starting || (!on && (isMobileViewport() ? !this.opts.phone : !state?.available || !state.sources.includes('desktop')))
-    this.button.title = failure ? `${failure}. ${title}` : title
+    this.button.title = failure ? `${failure} — ${title}` : title
     this.button.setAttribute('aria-label', label)
     if (on) this.button.setAttribute('aria-pressed', String(muted))
     else this.button.removeAttribute('aria-pressed')
@@ -164,7 +166,8 @@ export class ListenControl {
   }
   private item(label: string, act: () => void, checked?: boolean, disabled = false): void {
     const button = document.createElement('button')
-    button.type = 'button'; button.className = 'kbn-ctl-btn ws-select-option'; button.textContent = label
+    button.type = 'button'; button.className = 'ws-select-option'; button.textContent = label
+    button.setAttribute('aria-label', label)
     button.setAttribute('role', checked === undefined ? 'menuitem' : 'menuitemcheckbox')
     if (checked !== undefined) button.setAttribute('aria-checked', String(checked))
     button.disabled = disabled

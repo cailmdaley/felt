@@ -115,6 +115,13 @@ it('shows recorder and delivery failures in red without hiding mute or destinati
   voice.status = { ...voice.status!, state: 'listening', error: null, last: { fiber_id: 'a', at: '', status: 'failed', detail: 'Worker gone' } }; notify()
   dropdown(); expect(q('.voice-error').textContent).toContain('Worker gone')
 })
+it('controls a phone recording from desktop without acquiring this browser’s mic', async () => {
+  mount({ enabled: true, source: 'phone', muted: true, recorder: 'phone-recorder' })
+  mic().click()
+  await vi.waitFor(() => expect(voice.status?.muted).toBe(false))
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ muted: false, recorder: 'phone-recorder' })
+  expect(q('.listen-failed')).toBeNull()
+})
 it('surfaces the daemon reason for a rejected control', async () => {
   mount()
   fetcher.mockResolvedValue(Response.json({ error: 'Hark unavailable' }, { status: 422 }))

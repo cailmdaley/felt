@@ -104,6 +104,15 @@ it('rejects an unbound launch and releases audio on replacement', async () => {
   phone.observe({ ...voice.status!, launch: 'voice-replacement' })
   expect(opened.close).toHaveBeenCalledOnce()
 })
+it('shows a terminal PCM refusal as a red mic with the relay reason', async () => {
+  mic().click(); await flush()
+  const options = vi.mocked(RelayLink).mock.calls[0][0]
+  options.onLink('refused', 'Launch no longer accepts audio')
+  expect(dock.el.querySelector('.listen-failed')).not.toBeNull()
+  dock.el.querySelector<HTMLButtonElement>('.listen-dropdown')!.click()
+  expect(dock.el.querySelector('.voice-error')!.textContent).toBe('Launch no longer accepts audio')
+  expect(opened.close).toHaveBeenCalledOnce()
+})
 it('keeps its audio when the console changes cards', async () => {
   mic().click(); await flush()
   dock.open(card({ id: 'elsewhere', shuttleKind: 'oneshot' }))

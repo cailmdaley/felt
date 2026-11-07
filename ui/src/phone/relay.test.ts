@@ -57,7 +57,7 @@ function harness() {
   const losses: [number, number | null][] = []
   let clock = 1_000
   const relay = new RelayLink({
-    url: 'wss://example/api/v1/meeting/audio?launch=L1',
+    url: 'wss://example/api/v1/voice/audio?launch=L1',
     onLink: (link, reason) => links.push([link, reason]),
     onLoss: (since, until) => losses.push([since, until]),
     createSocket: () => {
@@ -180,10 +180,10 @@ describe('relay link', () => {
     const { relay, sockets, links, backoffs } = harness()
     relay.open()
     sockets[0].listening()
-    sockets[0].status({ state: 'ended', reason: 'the meeting has ended' })
-    sockets[0].drop(4410, 'the meeting has ended')
+    sockets[0].status({ state: 'ended', reason: 'listening has ended' })
+    sockets[0].drop(4410, 'listening has ended')
     expect(relay.link).toBe('ended')
-    expect(links.at(-1)).toEqual(['ended', 'the meeting has ended'])
+    expect(links.at(-1)).toEqual(['ended', 'listening has ended'])
     expect(backoffs()).toHaveLength(0)
     relay.close()
     expect(relay.link).toBe('ended')
@@ -193,7 +193,7 @@ describe('relay link', () => {
     const { relay, sockets, backoffs } = harness()
     relay.open()
     sockets[0].open()
-    sockets[0].drop(4409, 'another device is now the meeting’s microphone')
+    sockets[0].drop(4409, 'another device is now the recorder’s microphone')
     expect(relay.link).toBe('replaced')
     expect(backoffs()).toHaveLength(0)
   })

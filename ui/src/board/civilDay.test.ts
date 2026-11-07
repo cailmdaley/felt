@@ -3,6 +3,7 @@ import {
   ascByKey,
   civilDayAt,
   civilDaySpan,
+  clockSeconds,
   descByKey,
   dueCivilDay,
   formatSpanMinutes,
@@ -29,6 +30,12 @@ import type { KanbanCard } from './KanbanTypes.js';
 // in.
 const LA = zone('America/Los_Angeles');
 const PARIS = zone('Europe/Paris');
+
+it('formats transcript clocks with seconds in the requested zone', () => {
+  const instant = Date.parse('2026-11-08T02:03:04Z');
+  expect(clockSeconds(instant, LA)).toBe('18:03:04');
+  expect(clockSeconds(instant, PARIS)).toBe('03:03:04');
+});
 
 describe('civil-day handling of a `due:` value', () => {
   it('reads felt’s storage of a civil day as that day west of Greenwich', () => {
