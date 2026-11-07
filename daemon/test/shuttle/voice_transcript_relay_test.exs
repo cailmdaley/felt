@@ -109,6 +109,19 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     refute_receive {:delivery, _}, 20
   end
 
+  test "day append deduplicates checkpoint replay against only the bounded tail" do
+    row = %{"t" => "2026-11-06T10:00:01Z", "text" => "old"}
+    recent = %{row | "text" => "recent"}
+    assert :ok = Shuttle.Voice.Transcript.append([row])
+    path = Path.join(Shuttle.Voice.Transcript.directory(), "2026-11-06.jsonl")
+    File.write!(path, String.duplicate(" ", 262_144) <> "\n", [:append])
+    assert :ok = Shuttle.Voice.Transcript.append([recent])
+    assert :ok = Shuttle.Voice.Transcript.append([row, recent])
+
+    assert {:ok, %{rows: [^row, ^recent, ^row]}} =
+             Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
+  end
+
   test "a torn day-file tail is skipped by reads and never breaks relay appends", c do
     directory = Shuttle.Voice.Transcript.directory()
     File.mkdir_p!(directory)

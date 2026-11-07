@@ -26,7 +26,7 @@ defmodule Shuttle.Voice.Transcript do
 
       :global.trans({{__MODULE__, path}, self()}, fn ->
         :ok = Shuttle.FS.mkdir_p(directory())
-        bytes = read_bytes(path)
+        bytes = read_tail(path)
         existing = decode_rows(bytes)
         # Replaying a relay checkpoint must not duplicate the day's speech.
         known = MapSet.new(existing)
@@ -96,8 +96,35 @@ defmodule Shuttle.Voice.Transcript do
 
   defp decode_rows(bytes) do
     for line <- String.split(bytes, "\n", trim: true),
-        {:ok, row} <- [Jason.decode(line)],
+        {:ok, row} when is_map(row) <- [Jason.decode(line)],
         do: row
+  end
+
+  # A relay poll consumes at most 64 KB; four such chunks cover checkpoint replay.
+  defp read_tail(path) do
+    case Shuttle.FS.open(path, [:read, :binary]) do
+      {:ok, file} ->
+        try do
+          {:ok, size} = Shuttle.FS.position(file, :eof)
+          offset = max(size - 262_144, 0)
+
+          bytes =
+            case Shuttle.FS.pread(file, offset, 262_144) do
+              {:ok, bytes} -> bytes
+              :eof -> ""
+            end
+
+          if offset > 0, do: bytes |> String.split("\n", parts: 2) |> List.last(), else: bytes
+        after
+          Shuttle.FS.close(file)
+        end
+
+      {:error, :enoent} ->
+        ""
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "read transcript tail", path: path
+    end
   end
 
   defp read_bytes(path) do
