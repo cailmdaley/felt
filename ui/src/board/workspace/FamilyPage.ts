@@ -232,7 +232,7 @@ export class FamilyPage {
     if (!this.unfolds) return
     this.setFocus(thread.key)
     this.place.view = null
-    if (this.drawing.layout) this.zoom.fly(this.aimed())
+    this.zoom.fly(this.aimed())
     this.drawField()
     this.levelled()
   }

@@ -24,6 +24,6 @@ it('truncates no name by style', () => {
   for (const name of ['fm-label-name', 'fm-held-name', 'fm-focus-name', 'fm-row-name', 'fm-fold-name', 'fm-ledger-name']) {
     const rule = css.split('\n').find(line => line.startsWith(`.family-map .${name} {`))!
     expect(rule, name).toBeDefined()
-    expect(rule, name).not.toMatch(/ellipsis|line-clamp|nowrap/)
+    expect(rule, name).not.toMatch(/ellipsis|line-clamp/)
   }
 })

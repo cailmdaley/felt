@@ -14,7 +14,7 @@ const THIN = 6
 const STRIP = 14
 const TOP = 26
 /** The fold under a focused thread's rows, where what it holds lies. */
-const FOLD = 34
+const FOLD = 56
 const FOLD_FILES = 6
 
 interface Row { thread: MapThread; y: number; height: number; loud: boolean; level: number; open: boolean; shown: MapThread }

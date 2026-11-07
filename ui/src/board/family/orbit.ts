@@ -169,7 +169,7 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   const cx = plate.cx * k + dx, cy = plate.cy * k + dy
   const zoomed = {
     ...plate, k, cx, cy, R: plate.R * k, stars, labels: [], numerals: [],
-    arms: plate.arms?.map(arm => ({ ...arm, x: arm.x * k + dx, y: arm.y * k + dy })),
+    arms: [],
   }
   const deep = sight && k >= REVEAL ? sight : null
   const unfolded = deep ? gathered(zoomed, stars, model, deep) : null
