@@ -47,7 +47,6 @@ describe('workspace style contracts', () => {
       '.ws-dock .kbn-ctl-date.kbn-ctl-empty',
       '.ws-dock .kbn-detail-parent-empty',
     ]) expect(dock).toContain(selector)
-    expect(dock).not.toContain('.kbn-meeting-stamp')
   })
   it('parks documents under an opaque cover without removing their layout', () => {
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m => m[1].includes('.ws-parked')).map(m => m[2]).join('\n')

@@ -395,7 +395,29 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     send(new, :accept)
   end
 
-  test "a final JSON utterance arriving during exit observation is drained before the footer",
+  test "capture replacement drains every JSON chunk without consulting the text file", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a", true)
+    # Whitespace keeps word count low while forcing multiple 64 KB reads.
+    for i <- 1..5,
+        do:
+          record(c.path, "2026-11-06T10:00:0#{i}Z", "phrase#{i}" <> String.duplicate(" ", 40_000))
+
+    Agent.update(c.observation, fn _ ->
+      {:ok, %{capture: %{launch: "replacement", state: "live"}}}
+    end)
+
+    start_monitor(c, routes: routes)
+    pid = worker(c)
+    for _ <- 1..4, do: send(pid, :poll)
+    assert_receive {:delivery, %{text: text}}, 1_000
+    for i <- 1..5, do: assert(text =~ "phrase#{i}")
+    assert {:ok, %{rows: rows}} = Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
+    assert Enum.map(rows, &String.trim(&1["text"])) == ~w(phrase1 phrase2 phrase3 phrase4 phrase5)
+    refute File.exists?(c.path)
+  end
+
+  test "a final JSON utterance arriving during exit observation is drained before completion",
        c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
@@ -1091,9 +1113,9 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:attempt, first, %{text: text}}, 1_000
     assert String.starts_with?(text, "me: already sending\n— shuttle transcript --since ")
 
-    assert %{pending: %{text: "me a private thought"}, pending_words: 4} = poll(c)
+    assert %{pending: %{text: "me a private thought"}, pending_words: 3} = poll(c)
 
-    assert {:ok, 4} = TranscriptRelay.discard("launch", server: c.name)
+    assert {:ok, 3} = TranscriptRelay.discard("launch", server: c.name)
     assert %{pending: nil, pending_words: 0} = TranscriptRelay.status("launch", server: c.name)
 
     assert [%{"text" => text}] = :sys.get_state(worker(c)).config["outbox"]
@@ -1105,7 +1127,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     now = DateTime.utc_now()
     record(c.path, now |> DateTime.add(-1) |> DateTime.to_iso8601(), "the rest of it")
     record(c.path, now |> DateTime.add(1) |> DateTime.to_iso8601(), "something new")
-    assert %{pending: %{text: "me something new"}, pending_words: 3} = poll(c)
+    assert %{pending: %{text: "me something new"}, pending_words: 2} = poll(c)
 
     send(first, :accept)
     sync_tasks(c)

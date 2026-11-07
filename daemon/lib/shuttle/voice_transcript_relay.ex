@@ -150,7 +150,6 @@ defmodule Shuttle.Voice.TranscriptRelay.Coordinator do
       "created_at" => DateTime.to_iso8601(DateTime.utc_now()),
       "routes_path" => value(row, :routes_path),
       "started_at" => value(row, :started_at),
-      "offset" => 0,
       "json_offset" => 0,
       "route_offset" => 0,
       "routes" => [],
@@ -439,7 +438,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
         do: %{
           fiber_id: buffer["fiber_id"],
           words: buffer["words"],
-          text: Enum.join(buffer["lines"], "\n")
+          text: Enum.map_join(buffer["voice_rows"], "\n", &(&1["speaker"] <> " " <> &1["text"]))
         }
 
     {:reply,
@@ -534,7 +533,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     true = is_binary(config["launch"]) and config["launch"] != ""
     true = is_binary(config["transcript"])
 
-    for key <- ~w(offset json_offset route_offset) do
+    for key <- ~w(json_offset route_offset) do
       true = is_integer(config[key]) and config[key] >= 0
     end
 
@@ -543,7 +542,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
 
     Enum.each(config["buffers"], fn buffer ->
       true = is_binary(buffer["fiber_id"])
-      true = is_list(buffer["lines"]) and Enum.all?(buffer["lines"], &is_binary/1)
+      true = is_list(buffer["voice_rows"])
       true = is_integer(buffer["words"])
     end)
 
@@ -581,7 +580,19 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
         config
       )
 
-    Map.update!(config, "routes", &bound_routes(&1, config["started_at"]))
+    config
+    |> Map.drop(~w(offset end_seen))
+    |> Map.update!("routes", &bound_routes(&1, config["started_at"]))
+    |> Map.update!("buffers", fn buffers when is_list(buffers) ->
+      Enum.map(buffers, fn buffer ->
+        buffer
+        |> Map.delete("lines")
+        |> Map.put(
+          "words",
+          Enum.sum(Enum.map(buffer["voice_rows"], &length(String.split(&1["text"]))))
+        )
+      end)
+    end)
   end
 
   defp read_routes(%{"ended" => true} = config, _state), do: config
@@ -639,44 +650,13 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
   defp ingest(%{"ended" => true} = config, _state), do: config
 
   defp ingest(config, state) do
-    config = ingest_voice(config, state)
-    ingest_text(config, state)
+    config |> ingest_voice(state) |> maybe_end(state)
   end
 
   defp json_pending?(config) do
     case Shuttle.FS.stat(Path.rootname(config["transcript"]) <> ".jsonl") do
       {:ok, %{size: size}} -> size > config["json_offset"]
       _ -> false
-    end
-  end
-
-  defp ingest_text(config, state) do
-    case FileTail.advance(config["transcript"], config["offset"], max_bytes: 65_536) do
-      {:append, lines, offset} ->
-        config =
-          Enum.reduce(lines, config, fn line, acc ->
-            cond do
-              acc["ended"] ->
-                acc
-
-              String.starts_with?(line, "# ended") ->
-                Map.put(acc, "end_seen", line)
-
-              String.starts_with?(line, "#") ->
-                add_line(acc, List.last(acc["routes"]), line, state)
-
-              true ->
-                acc
-            end
-          end)
-
-        Map.put(config, "offset", offset)
-
-      {:reset, _} ->
-        end_capture(config, "transcript file was replaced", state)
-
-      :noop ->
-        maybe_end(config, state)
     end
   end
 
@@ -746,7 +726,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     if discarded?(config, at) do
       config
     else
-      add_line(config, target, "#{name} #{text}", state, %{
+      add_line(config, target, state, %{
         speaker: name,
         text: text,
         t: entry["t"],
@@ -760,42 +740,24 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     at
   end
 
-  defp add_line(config, target, line, state, voice \\ nil)
+  defp add_line(config, nil, _state, _voice), do: config
 
-  defp add_line(config, _target, "#" <> _ = line, state, nil) do
-    if String.starts_with?(line, "# ended"),
-      do: config |> Map.put("ended", true) |> flush_all(state),
-      else: config
-  end
-
-  defp add_line(config, nil, line, _state, _voice),
-    do: if(String.starts_with?(line, "# ended"), do: Map.put(config, "ended", true), else: config)
-
-  defp add_line(config, target, line, state, voice) do
+  defp add_line(config, target, state, voice) do
     target = target |> Map.take(~w(fiber_id origin pinned)) |> Map.put_new("pinned", false)
 
     buffer =
       Enum.find(config["buffers"], &same_target?(&1, target)) ||
-        Map.merge(target, %{"lines" => [], "words" => 0, "last_word_at" => nil})
+        Map.merge(target, %{"voice_rows" => [], "words" => 0, "last_word_at" => nil})
 
-    spoken = line
-    words = length(String.split(spoken))
-
-    buffer =
-      if voice do
-        rows = Map.get(buffer, "voice_rows") || voice_rows(buffer["lines"])
-
-        Map.put(
-          buffer,
-          "voice_rows",
-          rows ++ [%{"speaker" => voice.speaker, "text" => voice.text, "t" => voice.t}]
-        )
-      else
-        buffer
-      end
+    words = length(String.split(voice.text))
 
     buffer =
-      buffer |> Map.update!("lines", &(&1 ++ [line])) |> Map.update!("words", &(&1 + words))
+      buffer
+      |> Map.update!(
+        "voice_rows",
+        &(&1 ++ [%{"speaker" => voice.speaker, "text" => voice.text, "t" => voice.t}])
+      )
+      |> Map.update!("words", &(&1 + words))
 
     buffer =
       if words > 0,
@@ -812,10 +774,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     threshold = state.thresholds.()
 
     cond do
-      String.starts_with?(line, "# ended") ->
-        config |> Map.put("ended", true) |> flush_all(state)
-
-      Regex.match?(@closing, spoken) ->
+      Regex.match?(@closing, voice.text) ->
         make_batch(config, buffer)
 
       buffer["words"] >= threshold["words"] ->
@@ -880,8 +839,6 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
   end
 
   defp make_batch(config, buffer) do
-    lines = buffer["lines"]
-
     id =
       :crypto.hash(
         :sha256,
@@ -889,7 +846,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
       )
       |> Base.url_encode64(padding: false)
 
-    rendered = render_lines(lines, buffer["voice_rows"])
+    rendered = render_rows(buffer["voice_rows"])
     config = Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
 
     # A batch that was only "send" has nothing left to deliver.
@@ -914,8 +871,8 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     end
   end
 
-  defp render_lines(lines, rows) do
-    rows = unsend(rows || voice_rows(lines))
+  defp render_rows(rows) do
+    rows = unsend(rows)
 
     {paragraphs, _} =
       Enum.reduce(rows, {[], nil}, fn %{"speaker" => speaker, "text" => text},
@@ -943,13 +900,6 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     end
   end
 
-  defp voice_rows(lines) do
-    for line <- lines,
-        not String.starts_with?(line, "#"),
-        [speaker, text] <- [String.split(line, " ", parts: 2)],
-        do: %{"speaker" => speaker, "text" => text}
-  end
-
   # A worker on another host reads the transcript from this recorder, not its own.
   defp recorder_flag(origin) do
     own = Shuttle.RecorderRouter.own_host()
@@ -966,46 +916,35 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
 
   defp maybe_end(config, state) do
     case state.observe.() do
-      {:ok, %{capture: %{launch: launch, state: phase, error: error}}} ->
+      {:ok, %{capture: %{launch: launch, state: phase}}} ->
         cond do
           launch != config["launch"] ->
-            end_capture(config, "capture was replaced before completion", state)
+            end_capture(config, state)
 
           phase in ["failed", "ended"] ->
-            end_capture(config, "capture #{phase}: #{error}", state)
+            end_capture(config, state)
 
           true ->
             config
         end
 
       {:ok, %{capture: nil}} ->
-        end_capture(config, "capture ended", state)
+        end_capture(config, state)
 
       _ ->
         config
     end
   end
 
-  defp end_capture(config, reason, state) do
-    # After observing the recorder's exit, drain once more: its last JSON row
-    # may have landed between this tick's JSON read and the text footer.
+  defp end_capture(config, state) do
+    # Drain after exit observation, including a final row that arrived during it.
     drained = ingest_voice(config, state)
 
-    target = List.last(config["routes"])
-
-    cond do
-      json_pending?(drained) and drained["json_offset"] > config["json_offset"] ->
-        drained
-
-      json_pending?(drained) ->
-        # The recorder is gone and no complete row remains. Keep the broken
-        # suffix on disk, but don't wait for a newline that cannot arrive.
-        drained
-        |> add_line(target, "# incomplete final voice JSON row retained in transcript", state)
-        |> add_line(target, drained["end_seen"] || "# ended (#{reason})", state)
-
-      true ->
-        add_line(drained, target, drained["end_seen"] || "# ended (#{reason})", state)
+    if json_pending?(drained) and drained["json_offset"] > config["json_offset"] do
+      drained
+    else
+      # An incomplete suffix stays on disk; no recorder remains to finish it.
+      drained |> Map.put("ended", true) |> flush_all(state)
     end
   end
 

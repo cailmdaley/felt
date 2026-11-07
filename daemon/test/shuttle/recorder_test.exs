@@ -230,7 +230,7 @@ defmodule Shuttle.RecorderRexTest do
 end
 
 defmodule Shuttle.RecorderTest do
-  # group: Shuttle.Recorder.Control is one app-started claim every meeting route reconciles.
+  # Shuttle.Recorder.Control is the app-started recorder claim shared by these tests.
   use ExUnit.Case, async: true, group: :recorder
 
   alias Shuttle.Recorder

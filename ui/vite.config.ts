@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
  * The Shuttle UI build.
  *
  * `index.html` → `src/main.ts`: the kanban board and Stash/Capture, with
- * meeting audio owned by the board (vanilla TS DOM with React form islands).
+ * phone audio owned by the board (vanilla TS DOM with React form islands).
  * The vellum/parchment look is hand-rolled CSS.
  *
  * The board fetches the daemon with a *relative* base (`/api/v1/...`):

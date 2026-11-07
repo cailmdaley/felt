@@ -82,7 +82,7 @@ defmodule Shuttle.VoiceTest do
     assert config["quiet_seconds"] == 4
     refute Map.has_key?(config, "run_quiet_seconds")
 
-    assert :ok = Config.enable(false)
+    assert :ok = Config.update(%{"enabled" => false})
     refute path |> File.read!() |> Jason.decode!() |> Map.has_key?("run_quiet_seconds")
   end
 
@@ -834,7 +834,7 @@ defmodule Shuttle.VoiceTest do
     assert (api_conn() |> post("/api/v1/voice", ~s({"muted":3}))).status == 422
   end
 
-  # A meeting start writes hark's lifecycle file, which wakes idle voice.
+  # A recorder start writes hark's lifecycle file, which wakes idle voice.
   defp start_voice(c) do
     Agent.update(c.observed, fn _ -> %{available: true, capture: voice_row()} end)
     write_lifecycle(c, "loading")

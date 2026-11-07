@@ -70,8 +70,6 @@ defmodule Shuttle.Voice.Config do
 
   def validate(_), do: {:error, "voice settings must be a JSON object"}
 
-  def enable(enabled), do: update(%{"enabled" => enabled})
-
   def update(params) when map_size(params) == 0, do: :ok
 
   def update(params) do
