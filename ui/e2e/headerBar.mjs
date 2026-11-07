@@ -22,6 +22,15 @@ async function openRoot(page) {
   }
   await named(page, title)
 }
+// Find changes the channel whose lifecycle the band acts on; row entry does not.
+async function visitChannel(page, name) {
+  await page.evaluate(() => document.activeElement?.blur())
+  await page.keyboard.press('/')
+  const find = page.locator('.kbn-viewtabs-find input')
+  await find.fill(name)
+  await page.locator('.ws-switcher .ws-channel-row').filter({ has: page.getByText(name, { exact: true }) }).click()
+  await named(page, name)
+}
 const visibleHeaderVerbs = header => header.locator('.kbn-ctl-verdict button').evaluateAll(buttons =>
   buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
 /** A band control by its verb, or by its whole label for navigation. */
@@ -96,8 +105,7 @@ export function registerHeaderBarJourneys(test) {
         ['Discarded pilot', [], ['Start']],
       ]
       for (const [name, verbs, worker] of visits) {
-        const tree = await familyTree(page)
-        await openThread(page, threadRow(page, tree, name), name)
+        await visitChannel(page, name)
         assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
         assert.deepEqual(await workerVerbs(page), worker, `${name} offers its worker's verbs`)
         await assertLifecycleInk(header, scheme)
@@ -188,7 +196,13 @@ export function registerHeaderBarJourneys(test) {
       await header.evaluate(el => { el.scrollLeft = 0 })
     }
     await assertBand(['Temper', 'Discard'])
-    await openThread(page, threadRow(page, await familyTree(page), 'Response analysis'), 'Response analysis')
+    await page.locator('.ws-band-leave').click()
+    await page.locator('.kbn-folio-seg[data-folio="1"]').click()
+    const family = page.locator('[data-column="inFlight"] .kbn-card[data-fiber-id="research/workspace/calibration-report"]').filter({ has: page.locator('.kbn-thread-count[title*="working"]') })
+    const fold = family.locator('.kbn-thread-count')
+    if (await fold.getAttribute('aria-expanded') === 'false') await fold.click()
+    await family.locator('.kbn-thread-row[title="Response analysis"] .kbn-thread-name').click()
+    await named(page, 'Response analysis')
     await assertBand(['Close for review', 'Rest'])
     const reviewInk = await bandControl(header, 'Close for review').evaluate(el => {
       const neutral = document.createElement('span')
@@ -204,11 +218,9 @@ export function registerHeaderBarJourneys(test) {
     })
     assert.equal(reviewInk.pigment, '', `Close for review has no verdict pigment: ${JSON.stringify(reviewInk)}`)
     assert.equal(reviewInk.color, reviewInk.neutral, `Close for review uses neutral lifecycle ink: ${JSON.stringify(reviewInk)}`)
-    await openThread(page, threadRow(page, await familyTree(page), 'Next validation'), 'Next validation')
-    await assertBand([])
     if (process.env.WORKSPACE_SHOTS) {
       await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
-      await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'resting-seat-phone-light.png') })
+      await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'working-phone-light.png') })
     }
   }, { width: 390, height: 844 })
   test('Listen stays one control inside the band at every width', async page => {
@@ -310,7 +322,7 @@ export function registerHeaderBarJourneys(test) {
     await page.waitForFunction(() => document.querySelector('.ws-selected .ws-prose-scroll').scrollTop > 0)
   }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
-    for (const scheme of ['light', 'dark']) test(`The constitution's page keeps its root at its head and marks the open thread (${device}, ${scheme})`, async page => {
+    for (const scheme of ['light', 'dark']) test(`The constitution's page keeps its root at its head and highlights the entered thread (${device}, ${scheme})`, async page => {
       await page.addInitScript(scheme => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
@@ -324,14 +336,15 @@ export function registerHeaderBarJourneys(test) {
         assert.equal(await head().count(), 1)
         assert.equal(await head().locator('.fp-name').innerText(), title)
         assert.ok(await head().locator('.fp-mark').isVisible())
-        assert.equal(await threadRow(page, page.locator('.ws-page.ws-selected .fp-tree'), name).getAttribute('data-current'), '')
+        assert.equal(await head().getAttribute('data-current'), '')
+        assert.equal(await threadRow(page, page.locator('.ws-page.ws-selected .fp-tree'), name).getAttribute('aria-selected'), 'true')
         if (process.env.WORKSPACE_SHOTS && name === 'Choose the response cut') {
           await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
           await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `family-${device}-${scheme}.png`) })
         }
         await openThread(page, head(), title)
         await familyTree(page)
-        assert.equal(await head().getAttribute('data-current'), '')
+        assert.equal(await head().getAttribute('aria-selected'), 'true')
       }
     }, viewport)
     for (const scheme of ['light', 'dark']) test(`One band (${device}, ${scheme}): long name, icons and unified settings`, async page => {

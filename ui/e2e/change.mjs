@@ -93,7 +93,10 @@ export function registerChangeJourneys(test) {
     })
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
-    await page.locator('.ws-selected .fp-row[aria-selected="true"] [data-kind="lead"]').filter({ hasText: 'Report' }).click()
+    const family = page.locator('.ws-selected'), route = new URL(page.url()).hash
+    await family.locator('.fp-row[aria-selected="true"] .fp-lead').click()
+    assert.equal(new URL(page.url()).hash, route)
+    await family.locator('.fp-row[aria-selected="true"] .fp-doc iframe').waitFor()
     const link = page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' })
     await link.waitFor()
     await page.locator('.ws-selected .kbn-fileview-loading').waitFor({ state: 'detached' })
@@ -104,6 +107,7 @@ export function registerChangeJourneys(test) {
     await page.locator('.ws-selected .change-reader').waitFor()
     assert.equal(popups.length, 0, 'relative change links stay in the workspace after the report bridge is ready')
     await page.locator('.ws-selected .ws-document-back').click()
-    await page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' }).waitFor()
+    await page.frameLocator('.ws-selected .fp-doc iframe').getByRole('link', { name: 'Read the change →' }).waitFor()
+    assert.equal(new URL(page.url()).hash, route)
   })
 }
