@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { card } from '../testFixtures.js'
+import { card, conversations } from '../testFixtures.js'
 import { ThreadIndex } from '../threads.js'
 import { FamilyPage } from '../workspace/FamilyPage.js'
 import { WHOLE, held, zoomAbout, type View } from './zoom.js'
@@ -24,7 +24,7 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.use
 
 function mapped(drawing = 'radial'): { stage: HTMLElement; plate: HTMLElement } {
   stored.set('shuttle.family.drawing', drawing)
-  const page = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, vi.fn())
+  const page = new FamilyPage(vi.fn(), conversations(), feeds, { focus: null, view: null }, vi.fn())
   document.body.append(page.el)
   page.update(root, new ThreadIndex(cards), now)
   const stage = page.el.querySelector<HTMLElement>('[role="listbox"]')!, plate = stage.querySelector<HTMLElement>('.fm-sky-plate')!

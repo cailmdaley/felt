@@ -38,7 +38,9 @@ export type ConversationDestination = { id: ConversationOpening; label: string; 
   | { run: () => void; href?: never }
 )
 export type ConversationWorker = Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'terminalBackend' | 'shuttleHost' | 'launchError'>
-export type WorkerOpener = (session: string, host?: string, quiet?: boolean) => void
+export type WorkerOpener = (session: string, host?: string) => void
+/** A thread's conversation, two ways: `open` is the explicit act, true if it had a destination; `reach` is a click's quiet move, true once Rex moved. */
+export interface Conversations { open(card: KanbanCard): boolean; reach(card: KanbanCard): Promise<boolean> }
 
 /** Every usable destination, best first. An unavailable preference never changes this order. */
 export function conversationDestinations(card: ConversationWorker, device: ConversationDevice, openWorker?: WorkerOpener): ConversationDestination[] {

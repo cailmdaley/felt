@@ -791,6 +791,38 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
+  @doc """
+  Select a located worker's window in an app client already attached, launching
+  nothing; `{:ok, true}` when the app moved.
+  """
+  def select_binding(runner, b), do: select_existing(runner, b["session_id"], b["window_id"])
+
+  @doc "Select the live viewer of a tmux worker by its `name@host` label, creating none."
+  def select_viewer(runner, label) do
+    with {:ok, doc} <- Bindings.read(),
+         b when is_map(b) <- get_in(doc, ["viewers", label]),
+         {:ok, true} <- viewer_alive(runner, b) do
+      select_existing(runner, b["session_id"], b["window_id"])
+    else
+      nil -> {:ok, false}
+      {:ok, false} -> {:ok, false}
+      {:error, :server_absent} -> {:ok, false}
+      error -> open_error(error)
+    end
+  end
+
+  defp select_existing(runner, sid, wid) do
+    alias Shuttle.OpenTrace
+
+    with {:ok, client} <- OpenTrace.step(:app_client, fn -> Rex.app_client(runner) end),
+         {:ok, _} <- OpenTrace.step(:select, fn -> Rex.select(runner, client, sid, wid) end) do
+      {:ok, true}
+    else
+      {:error, reason} when reason in [:not_found, :server_absent] -> {:ok, false}
+      error -> open_error(error)
+    end
+  end
+
   @doc "Open or focus a display-only Rex viewer for a local or remote tmux worker."
   def reveal_tmux(name, host, destination, opts \\ []) do
     runner = Env.app(:rex_runner, Shuttle.Runner.Default)

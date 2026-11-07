@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import { card } from '../testFixtures.js'
+import { card, conversations } from '../testFixtures.js'
 import { ThreadIndex } from '../threads.js'
 import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -24,7 +24,7 @@ const draft = card({ id: 'hub/draft', name: 'Draft', orchestrator: 'hub', status
 const cards = [root, asked, idle, done, draft]
 
 function page(open = vi.fn(), feed = feeds, place: MapPlace = { focus: null, view: null }, known = cards): { page: FamilyPage; open: typeof open; converse: Mock; place: MapPlace } {
-  const converse = vi.fn(() => true), family = new FamilyPage(open, converse, feed, place, vi.fn())
+  const converse = vi.fn(() => true), family = new FamilyPage(open, conversations(converse), feed, place, vi.fn())
   document.body.append(family.el)
   family.update(root, new ThreadIndex(known), now)
   return { page: family, open, converse, place }
@@ -194,7 +194,7 @@ it('keeps the selection and each mark\'s element across a repaint, so a moved th
   expect(mark.getAttribute('aria-selected')).toBe('true')
 })
 it('lands on the open thread on a thread\'s map, and repaints only when something changed', () => {
-  const family = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, vi.fn()), index = new ThreadIndex(cards)
+  const family = new FamilyPage(vi.fn(), conversations(), feeds, { focus: null, view: null }, vi.fn()), index = new ThreadIndex(cards)
   family.update(idle, index, now)
   expect(peekName(family)).toBe('Idle')
   const stage = family.el.querySelector('[role="listbox"]')!, marks = stage.querySelector('.fm-stars')
@@ -297,7 +297,7 @@ it('leaves keys on its controls and modified keys alone', () => {
 it('disconnects its observer and tells its owner when its frame is evicted', () => {
   const disconnect = vi.fn(), disposed = vi.fn()
   vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect = disconnect })
-  const family = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, disposed)
+  const family = new FamilyPage(vi.fn(), conversations(), feeds, { focus: null, view: null }, disposed)
   disposeFileViewer(family.el)
   expect(disconnect).toHaveBeenCalledOnce()
   expect(disposed).toHaveBeenCalledOnce()
@@ -361,14 +361,14 @@ it('draws a drag with the newest model, not the one it began on', () => {
 
 it('offers a thread with a worker its conversation from the peek', () => {
   const root = card({ id: 'hub' }), thread = card({ id: 'hub/a', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting', terminalBackend: 'rex' })
-  const converse = vi.fn(() => true), page = new FamilyPage(vi.fn(), converse, { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, () => {})
+  const converse = vi.fn(() => true), page = new FamilyPage(vi.fn(), conversations(converse), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, () => {})
   document.body.append(page.el)
   page.update(root, new ThreadIndex([root, thread]))
   expect(page.selection?.id).toBe('hub/a')
   const worker = page.el.querySelector<HTMLButtonElement>('.ws-family-peek-worker')!
   expect(worker.textContent).toBe('Open in Rex')
   worker.click()
-  expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/a' }), undefined)
+  expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/a' }))
 })
 
 describe('coming to a thread', () => {
@@ -467,7 +467,7 @@ describe('coming to a thread', () => {
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }), 'doc:notes.md')
     expect(converse).not.toHaveBeenCalled()
     expect(place.focus).toContain('hub/mid')
-    const again = new FamilyPage(open, vi.fn(), holding, place, vi.fn())
+    const again = new FamilyPage(open, conversations(), holding, place, vi.fn())
     document.body.append(again.el)
     again.update(root, new ThreadIndex(tree), now)
     expect(again.el.querySelector('[role="listbox"]')!.classList.contains('family-map-zoomed')).toBe(true)
@@ -504,9 +504,10 @@ describe('coming to a thread', () => {
     expect(converse).not.toHaveBeenCalled()
     expect(family.flyTo(card({ id: 'elsewhere' }))).toBe(false)
   })
-  it('marks the worker Rex holds wherever the view goes, stepping out and panning leaving it be', () => {
+  it('marks the worker Rex holds wherever the view goes, stepping out and panning leaving it be', async () => {
     const { page: family, converse, place } = page(vi.fn(), holding, undefined, tree)
     click(option(family, 'Mid'))
+    await settled()
     expect(option(family, 'Mid').hasAttribute('data-worker')).toBe(true)
     converse.mockClear()
     family.stepOut()
@@ -519,7 +520,7 @@ describe('coming to a thread', () => {
     const lone = card({ id: 'lone', name: 'Lone', status: 'active', createdAt: when(30), sessionUuid: 'session-lone' })
     const feed: FamilyFeeds = { ...holding, files: () => sent, lead: async () => lead }
     const place: MapPlace = { focus: null, view: null }
-    const family = new FamilyPage(vi.fn(), vi.fn(), feed, place, vi.fn())
+    const family = new FamilyPage(vi.fn(), conversations(), feed, place, vi.fn())
     document.body.append(family.el)
     family.update(lone, new ThreadIndex([lone]), now)
     await settled()
@@ -623,14 +624,17 @@ describe('coming to a thread', () => {
     await settled()
     expect(open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'hub/mid' }), sent[0].key)
   })
-  it('rings only the thread whose conversation opened', () => {
+  it('rings only the thread Rex moved to, once it says so', async () => {
     const { page: family, converse, place } = page(vi.fn(), holding, undefined, tree)
     converse.mockReturnValueOnce(false)
     click(option(family, 'Mid'))
+    await settled()
     expect(converse).toHaveBeenCalledTimes(1)
     expect(place.worker).toBeUndefined()
     expect(option(family, 'Mid').hasAttribute('data-worker')).toBe(false)
     click(option(family, 'Mid'))
+    expect(option(family, 'Mid').hasAttribute('data-worker')).toBe(false)
+    await settled()
     expect(option(family, 'Mid').hasAttribute('data-worker')).toBe(true)
   })
   it('colours a thread by its state and leaves a new file to the mark on top', () => {
@@ -646,7 +650,7 @@ describe('coming to a thread', () => {
 
 describe('a page with no reader around it', () => {
   const scoped = () => {
-    const open = vi.fn(), converse = vi.fn(), family = new FamilyPage(open, converse, feeds, { focus: null, view: null }, vi.fn())
+    const open = vi.fn(), converse = vi.fn(), family = new FamilyPage(open, conversations(converse), feeds, { focus: null, view: null }, vi.fn())
     document.body.append(family.el)
     const index = new ThreadIndex(cards)
     family.map({ key: 'all', cards, model: at => familyModel(index, root, root, feeds, at) }, now)

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { buildSessionHistory, claudeAppRoute, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
+import { buildSessionHistory, claudeAppRoute, selectWorker, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
 import type { SessionRecord } from './views/TemporalData.js'
 
 const UID = '01KVTXJ3VQYNZ6TYK342ZHV5CK'
@@ -252,5 +252,22 @@ describe('sessionWhen', () => {
     expect(earlier).toMatch(/14:02$/)
     expect(earlier).not.toMatch(/2026/)
     expect(sessionWhen(new Date(2025, 11, 30, 8, 0).getTime(), now)).toMatch(/2025/)
+  })
+})
+
+describe('selectWorker', () => {
+  it('asks only to select, and resolves what the daemon says about Rex moving', async () => {
+    const fetcher = vi.fn(async () => Response.json({ moved: true, session: 'w' }))
+    vi.stubGlobal('fetch', fetcher)
+    expect(await selectWorker('', 'w', 'north')).toBe(true)
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/attach', expect.objectContaining({ method: 'POST' }))
+    expect(JSON.parse(String((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toEqual({ tmux_session: 'w', shuttle_host: 'north', select_only: true })
+    fetcher.mockImplementation(async () => Response.json({ moved: false, session: 'w' }))
+    expect(await selectWorker('', 'w')).toBe(false)
+    fetcher.mockImplementation(async () => Response.json({ error: 'Rex refused' }, { status: 502 }))
+    expect(await selectWorker('', 'w')).toBe(false)
+    fetcher.mockImplementation(async () => { throw new TypeError('offline') })
+    expect(await selectWorker('', 'w')).toBe(false)
+    vi.unstubAllGlobals()
   })
 })

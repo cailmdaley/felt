@@ -17,8 +17,10 @@ async function board(page) {
     await window.__harness.modal.fetchAndRender()
   })
 }
-const asked = page => page.evaluate(() => window.__harness.events.filter(event => event.type === 'open-worker').map(event => event.session))
+/** Every ask of Rex, as `select:` for a click's quiet move and `open:` for the explicit act. */
+const asked = page => page.evaluate(() => window.__harness.events.filter(event => event.type === 'open-worker' || event.type === 'select-worker').map(event => `${event.type === 'open-worker' ? 'open' : 'select'}:${event.session}`))
 const until = (page, fn, arg) => page.waitForFunction(fn, arg, { polling: 40 })
+const asks = (page, n) => until(page, n => window.__harness.events.filter(event => event.type === 'open-worker' || event.type === 'select-worker').length >= n, n)
 /** A hand's click at a name: names let the pointer through to the tile under them. */
 const clickOn = async (page, locator) => { const { x, y, width, height } = await locator.boundingBox(); await page.mouse.click(x + width / 2, y + height / 2) }
 const box = async locator => { const { x, y } = await locator.boundingBox(); return [Math.round(x), Math.round(y)] }
@@ -58,7 +60,8 @@ export function registerMapViewJourneys(test) {
     assert.equal(await page.locator('.family-map-moving').count(), 1, 'a click flies')
     await rested(page)
     await inScene(page, 'Response analysis')
-    assert.deepEqual(await asked(page), [...before, 'session-analysis'], 'a click opens the thread\'s chat at once')
+    await asks(page, before.length + 1)
+    assert.deepEqual(await asked(page), [...before, 'select:session-analysis'], 'a click moves Rex to the thread\'s window at once')
     assert.match(await page.locator('.ws-page.ws-selected .fm-star[data-worker]').getAttribute('aria-label'), /^Response analysis,/)
     assert.equal(await band(), root, 'the page does not change')
 
@@ -74,7 +77,7 @@ export function registerMapViewJourneys(test) {
     await inScene(page, root)
     await rested(page)
     assert.equal(await page.locator('.ws-reader.ws-dormant').count(), 0, 'stepping out stays on the page')
-    assert.deepEqual(await asked(page), [...before, 'session-analysis'], 'Back and stepping out never reach Rex')
+    assert.deepEqual(await asked(page), [...before, 'select:session-analysis'], 'Back and stepping out never reach Rex')
   }, { width: 1440, height: 900 }, 'no-preference')
 
   test("The radial on a phone: a first tap comes to a thread, a second leaves a terminal worker's ring alone", async page => {
@@ -162,8 +165,8 @@ export function registerMapViewJourneys(test) {
     assert.deepEqual(await asked(page), before, 'moving never reaches Rex')
     while (await chosen().locator('.tree-name').textContent() !== 'Response analysis') await page.keyboard.press('j')
     await page.keyboard.press('Enter')
-    await until(page, n => window.__harness.events.filter(event => event.type === 'open-worker').length === n, before.length + 1)
-    assert.deepEqual(await asked(page), [...before, 'session-analysis'], 'Enter opens a thread\'s chat')
+    await asks(page, before.length + 1)
+    assert.deepEqual(await asked(page), [...before, 'select:session-analysis'], 'Enter moves Rex to a thread\'s window')
     assert.equal(await page.locator('.kbn-reader-open').count(), 0, 'a thread stays on the Tree')
 
     const file = rows.and(page.locator('[data-kind="file"]')).last()
@@ -180,7 +183,7 @@ export function registerMapViewJourneys(test) {
     assert.equal(await page.locator('.tree-list').evaluate(list => list.scrollTop), scrolled, 'Back keeps the scroll')
   }, { width: 1440, height: 420 })
 
-  test('The Globe: hotkey 5, keys and a drag move without Rex, a thread opens its chat, a file opens and Back returns as it stood', async page => {
+  test('The Globe: hotkey 5, keys and a drag move without Rex, a click moves Rex to its thread, a file opens and Back returns as it stood', async page => {
     await board(page)
     await page.keyboard.press('5')
     const canvas = page.locator('.globe-canvas')
@@ -221,7 +224,8 @@ export function registerMapViewJourneys(test) {
 
     await clickOn(page, name('Deep follow-up'))
     await peek.filter({ hasText: 'Deep follow-up on the response cut' }).waitFor()
-    assert.deepEqual(await asked(page), [...before, 'session-analysis/checks/question/deep'], 'a click opens the thread\'s chat at once')
+    await asks(page, before.length + 1)
+    assert.deepEqual(await asked(page), [...before, 'select:session-analysis/checks/question/deep'], 'a click moves Rex to the thread\'s window at once')
     await page.keyboard.press('Escape')
     await until(page, () => !document.querySelector('.globe-crumbs').textContent.includes('Deep follow-up'))
     assert.equal((await asked(page)).length, before.length + 1, 'stepping out never reaches Rex')

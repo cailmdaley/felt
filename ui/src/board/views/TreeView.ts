@@ -424,7 +424,7 @@ class TreePage {
     const { item, open } = row
     if (item.kind === 'file') { this.context?.workspace?.openPage(item.card!, item.file!.key); return }
     if (item.thread) {
-      this.context?.workspace?.reach(item.thread.card)
+      void this.context?.workspace?.reach(item.thread.card)
       if (open === false) this.toggle(item, true)
       return
     }

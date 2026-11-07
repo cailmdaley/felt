@@ -354,13 +354,13 @@ export class KanbanModal {
     // address (`sessionLink`, stamped by the owning daemon), and to nothing
     // when it doesn't — never to a terminal on some other machine.
     this.openWorkerAfterGesture = this.onOpenWorker
-      ? (tmuxSessionName, shuttleHost, quiet) => {
+      ? (tmuxSessionName, shuttleHost) => {
           if (coarsePointer()) {
             const link = this.sessionLinkFor(tmuxSessionName)
             if (link) window.location.assign(link)
             return
           }
-          window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost, quiet), 0)
+          window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost), 0)
         }
       : undefined
     // Meeting Terminal is an explicit request for the daemon-local hark pane.

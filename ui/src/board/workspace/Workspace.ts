@@ -16,6 +16,8 @@ import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { channelLead, documentActivity, familyKey, fiberKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { meetingHostCard, type MeetingRecord } from '../meeting.js'
+import { conversationDevice } from '../conversationOpening.js'
+import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { frameBridge } from './DocumentBridge.js'
@@ -27,7 +29,7 @@ import { TranscriptResults } from './TranscriptResults.js'
 import { Overview } from './Overview.js'
 import { FamilyPage, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
-import { conversable, familyModel, isDrawn as onTheMap, type MapFile } from '../family/model.js'
+import { familyModel, isDrawn as onTheMap, type MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { unseenSince } from './DocumentSeen.js'
 import type { FiberSend } from '../fiberSends.js'
@@ -317,13 +319,13 @@ export class Workspace {
   }
   /** A thread's tapestry or report, for the Tree. */
   readLead(card: KanbanCard): Promise<MapFile | undefined> { return this.mapLead(card) }
-  /** A Desk or Chronicle click lands on the fiber's map, at its body, and moves Rex there. */
+  /** A Desk or Chronicle click lands on the fiber's map, at its body, and reaches its worker. */
   openFromDesk(card: KanbanCard): void {
     const map = this.landOnMap(card)
     if (map) this.open(card, undefined, map)
     else if (card.status === 'active' && isQuestion(card)) this.openQuestion(card)
     else this.open(card)
-    if (map && conversable(card)) this.dock.openConversation(card, true)
+    void this.reach(card)
   }
   /** Readies a fiber on a family's map to land there, at its thread, and names the page; undefined for one the map has no place for. */
   private landOnMap(card: KanbanCard): DocKey | undefined {
@@ -655,10 +657,16 @@ export class Workspace {
     }
     return page
   }
-  /** A click in a view that stays in place moves Rex behind it and takes voice along; true if Rex moved. */
-  reach(card: KanbanCard): boolean {
+  /**
+   * What every click on a thread does to Rex: voice follows the thread, and Rex
+   * moves quietly to the window its live worker already has. Nothing opens, is
+   * created or resumed, so a thread without one leaves Rex be; opening is `c`
+   * or Open in Rex (`Dock.openConversation`). Resolves true if Rex moved.
+   */
+  reach(card: KanbanCard): Promise<boolean> {
     this.opts.onSight?.(card)
-    return conversable(card) && this.dock.openConversation(card, true)
+    if (!card.tmuxSession || !conversationDevice().desktop) return Promise.resolve(false)
+    return selectWorker(this.opts.shuttleBase, card.tmuxSession, card.shuttleHost)
   }
   /** Voice follows the page: on the map, the thread it rests on; anywhere else, the page's fiber. */
   private sight(state: ChannelState): void {
@@ -670,7 +678,7 @@ export class Workspace {
   }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), (card, quiet) => this.dock.openConversation(card, quiet), this.mapFeeds, state.mapPlace,
+    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), { open: card => this.dock.openConversation(card), reach: card => this.reach(card) }, this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
       () => {
         if (this.current !== state) return

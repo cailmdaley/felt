@@ -131,6 +131,10 @@ beforeEach(() => {
   visibility.mockClear()
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
+/** What the board asked Rex to select: every select-only attach body. */
+const selections = (): Record<string, unknown>[] => vi.mocked(fetch).mock.calls
+  .filter(([url]) => String(url).endsWith('/api/v1/attach'))
+  .map(([, init]) => JSON.parse(String(init!.body)) as Record<string, unknown>)
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('routes a linked change to the fiber holding its file on its own host, not the report channel', async () => {
@@ -933,23 +937,22 @@ describe('workspace reader integration', () => {
     expect(selected()).toBe('family:host-a:lone')
     expect(conversation).not.toHaveBeenCalled()
   })
-  it('moves Rex at once on a click at any depth, and not at all on the way out', async () => {
+  it('moves Rex at once on a click at any depth, only selecting, and not at all on the way out', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
-      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, tmuxSession: `worker-${over.id}`, workerState: 'running', ...over })
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' }), thread({ id: 'hub/mid/leaf', orchestrator: 'hub-mid', status: 'active' })]
     bodyCards = feed
     workspace.dispose()
-    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true)
+    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation')
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
     workspace.openFromDesk(feed[0]); await flush()
-    expect(conversation.mock.calls.map(([opened]) => opened.id)).toEqual(['hub'])
-    conversation.mockClear()
+    expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: null, select_only: true }])
     const body = (name: string): Element => document.querySelector(`.ws-selected [role="option"][aria-label^="${name},"]`)!
     body('hub/mid/leaf').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(conversation.mock.calls.map(([opened]) => opened.id)).toEqual(['hub/mid/leaf'])
-    conversation.mockClear()
+    expect(selections().at(-1)?.tmux_session).toBe('worker-hub/mid/leaf')
     workspace.reader.back(); await flush()
     workspace.reader.back(); await flush()
+    expect(selections()).toHaveLength(2)
     expect(conversation).not.toHaveBeenCalled()
   })
   it('goes where Rex went from the Desk, another family or a lone body, and never writes back', async () => {
@@ -971,34 +974,42 @@ describe('workspace reader integration', () => {
     expect(sight.mock.lastCall?.[0].id).toBe('far')
     expect(conversation).not.toHaveBeenCalled()
   })
-  it('reaches a thread from a view that stays in place: Rex quietly, and voice with it', async () => {
-    const worker = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleKind: 'oneshot', status: 'active', sessionUuid: 'session-hub' })
-    const plain = card({ id: 'notes', originId: 'host-a', status: 'active' })
+  it('reaches a thread from a view that stays in place: Rex selects the window its worker has, voice goes with it, and nothing opens', async () => {
+    const worker = card({ id: 'hub', uid: 'hub', originId: 'host-a', shuttleHost: 'host-a', shuttleKind: 'oneshot', status: 'active', sessionUuid: 'session-hub', tmuxSession: 'worker-hub', workerState: 'running' })
+    const past = card({ id: 'done', originId: 'host-a', status: 'closed', sessionUuid: 'session-done' })
     workspace.dispose()
-    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true), sight = vi.fn()
-    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker, plain], origin: () => 'Tree', onVisibility: visibility, onSight: sight, dock })
-    workspace.reach(worker)
-    expect(conversation).toHaveBeenCalledExactlyOnceWith(worker, true)
+    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation'), sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [worker, past], origin: () => 'Globe', onVisibility: visibility, onSight: sight, dock })
+    const answer = (moved: boolean): void => {
+      const original = vi.mocked(fetch).getMockImplementation()!
+      vi.mocked(fetch).mockImplementation(async (input, init) => String(input).endsWith('/api/v1/attach') ? Response.json({ moved, session: 'worker-hub' }) : original(input, init))
+    }
+    answer(true)
+    expect(await workspace.reach(worker)).toBe(true)
+    expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: 'host-a', select_only: true }])
     expect(sight).toHaveBeenLastCalledWith(worker)
-    workspace.globeHost.converse(plain)
-    expect(conversation).toHaveBeenCalledTimes(1)
-    expect(sight).toHaveBeenLastCalledWith(plain)
+    answer(false)
+    expect(await workspace.globeHost.converse(worker)).toBe(false)
+    expect(await workspace.globeHost.converse(past)).toBe(false)
+    expect(selections()).toHaveLength(2)
+    expect(sight).toHaveBeenLastCalledWith(past)
+    expect(conversation).not.toHaveBeenCalled()
   })
-  it('tells voice what it shows: the thread the map rests on, the page elsewhere, and opens quietly from a click', async () => {
+  it('tells voice what it shows: the thread the map rests on, the page elsewhere, and moves Rex quietly on a click', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
-      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, tmuxSession: `worker-${over.id}`, workerState: 'running', ...over })
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' })]
     bodyCards = feed
     workspace.dispose()
-    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true), sight = vi.fn()
+    const dock = new Dock('', changed), sight = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
     const seen = (): string | undefined => (sight.mock.lastCall?.[0] as KanbanCard | undefined)?.id
     workspace.openFromDesk(feed[0]); await flush()
     expect(seen()).toBe('hub')
-    expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'hub' }), true)
+    expect(selections().at(-1)?.tmux_session).toBe('worker-hub')
     document.querySelector('.ws-selected [role="option"][aria-label^="hub/mid,"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(seen()).toBe('hub/mid')
-    expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'hub/mid' }), true)
+    expect(selections().at(-1)?.tmux_session).toBe('worker-hub/mid')
     workspace.reader.back(); await flush()
     expect(seen()).toBe('hub')
     workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await flush()

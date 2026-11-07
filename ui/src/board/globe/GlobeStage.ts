@@ -15,8 +15,8 @@ import './globe.css'
 export interface GlobeHost {
   feeds: MapFeeds & { refresh(): void; lead(card: KanbanCard): Promise<MapFile | undefined> }
   openDocument(card: KanbanCard, doc: string): void
-  /** Moves Rex to the thread; true if it had a conversation to open. */
-  converse(card: KanbanCard): boolean
+  /** A click's quiet move of Rex to the thread's existing window (`Workspace.reach`); true once Rex moved. */
+  converse(card: KanbanCard): Promise<boolean>
   constitutionKey(card: KanbanCard): string
   /** The thread a surface has come to rest on, which voice follows; null for none. */
   see?(card: KanbanCard | null): void
@@ -682,7 +682,7 @@ export class GlobeStage {
       if (touch && this.tapped !== body.key) { this.tapped = body.key; this.come(body); return }
       this.tapped = null
       this.come(body)
-      if (conversable(thread.card) && this.host.converse(thread.card)) { this.place.worker = body.key; this.request() }
+      if (conversable(thread.card)) void this.host.converse(thread.card).then(moved => { if (moved) { this.place.worker = body.key; this.request() } })
       return
     }
     if (owner && body.file) this.host.openDocument(owner.card, body.file.key)

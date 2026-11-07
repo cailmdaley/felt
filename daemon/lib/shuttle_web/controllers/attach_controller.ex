@@ -19,6 +19,13 @@ defmodule ShuttleWeb.AttachController do
   this host's display, uses SSH for remote tmux terminals, and asks a remote Rex
   owner to select its worker in the attached app client.
 
+  With `"select_only": true` the request is a click's: the display moves to a
+  window the conversation already has and nothing else happens to it
+  (`Shuttle.Opener.select/2`). No terminal is created, no app launched or
+  brought forward, and a past session is never resumed. It answers 200
+  `{ "moved": <bool>, "session": ... }`, where `moved` says whether the display
+  now shows the conversation.
+
   `shuttle_host` is optional; absent/own-host → local. Returns 200
   `{ "attached": true, "session": <tmux session> }` on success, 400 for a
   missing or malformed session or a non-string host, 409 when the session is
@@ -34,10 +41,13 @@ defmodule ShuttleWeb.AttachController do
   alias Shuttle.{OpenTrace, OriginRouter, Remote, SessionResume, Transcript}
   alias ShuttleWeb.SessionResumeController
 
-  def reveal(conn, %{"name" => name}) when is_binary(name) and name != "" do
-    case Shuttle.Opener.reveal_owned_rex(name) do
+  def reveal(conn, %{"name" => name} = params) when is_binary(name) and name != "" do
+    case Shuttle.Opener.reveal_owned_rex(name, select_only: params["select_only"] == true) do
       :ok ->
         json(conn, %{revealed: true})
+
+      {:ok, moved} ->
+        json(conn, %{revealed: moved})
 
       {:error, :no_app_client} ->
         conn
@@ -62,8 +72,20 @@ defmodule ShuttleWeb.AttachController do
     conn |> put_status(400) |> json(%{error: "shuttle_host must be a string"})
   end
 
+  defp create_traced(conn, %{"tmux_session" => session, "select_only" => true} = params)
+       when is_binary(session) do
+    case OpenTrace.step(:display, fn -> opener().select(session, params["shuttle_host"]) end) do
+      {:ok, moved} -> json(conn, %{moved: moved, session: session})
+      {:error, reason} -> conn |> put_status(502) |> json(%{error: format_error(reason)})
+    end
+  end
+
+  defp create_traced(conn, %{"session" => session, "select_only" => true})
+       when is_binary(session),
+       do: json(conn, %{moved: false, session: session})
+
   defp create_traced(conn, %{"tmux_session" => session} = params) when is_binary(session) do
-    attach(conn, session, Map.get(params, "shuttle_host"), quiet(params))
+    attach(conn, session, Map.get(params, "shuttle_host"))
   end
 
   defp create_traced(conn, %{"session" => session} = params) when is_binary(session) do
@@ -72,7 +94,7 @@ defmodule ShuttleWeb.AttachController do
     if Transcript.valid_session?(session) do
       case OpenTrace.step(:resume, fn -> prepare(session, host) end) do
         {:ok, tmux} ->
-          attach(conn, tmux, host, quiet(params))
+          attach(conn, tmux, host)
 
         {:error, status, reason} ->
           conn |> put_status(status) |> json(%{error: format_error(reason)})
@@ -86,12 +108,8 @@ defmodule ShuttleWeb.AttachController do
     conn |> put_status(400) |> json(%{error: "tmux_session or session is required"})
   end
 
-  # `quiet: true` moves the terminal to the conversation and leaves the keyboard
-  # where it is.
-  defp quiet(params), do: [quiet: params["quiet"] == true]
-
-  defp attach(conn, tmux, host, opts) do
-    case OpenTrace.step(:display, fn -> opener().open(tmux, host, opts) end) do
+  defp attach(conn, tmux, host) do
+    case OpenTrace.step(:display, fn -> opener().open(tmux, host) end) do
       :ok ->
         json(conn, %{attached: true, session: tmux})
 

@@ -1422,6 +1422,8 @@ const realFetch = (window as unknown as { __harnessNativeFetch?: typeof fetch })
 const mockRequests: Array<Record<string, unknown>> = []
 const mockHandlers: Array<Record<string, unknown>> = []
 const harnessEvents: Array<Record<string, unknown>> = []
+/** Workers Rex holds no window for: a click's select-only attach answers that Rex did not move. */
+const windowless = new Set<string>()
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const method = (init?.method ?? 'GET').toUpperCase()
@@ -1681,8 +1683,14 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     await new Promise((resolve) => setTimeout(resolve, 400))
     return json(mockSessionLinks(url))
   }
+  // A click only selects a window Rex already has, and says whether it did.
   // Kitty takes a moment; a row shows it pending meanwhile.
   if (url.endsWith('/api/v1/attach')) {
+    const { tmux_session: session, shuttle_host: host, select_only: selectOnly } = body()
+    if (selectOnly === true) {
+      harnessEvents.push({ type: 'select-worker', session, host })
+      return json({ moved: !windowless.has(String(session)), session })
+    }
     await new Promise((resolve) => setTimeout(resolve, 300))
     return json({ attached: true })
   }
@@ -1816,6 +1824,7 @@ try {
     requests: mockRequests,
     handlers: mockHandlers,
     events: harnessEvents,
+    windowless,
     nativeFiles: nativeWorkspaceFiles,
     feedSpanMs: FEED_SPAN_MS,
     feedFromMs: now - FEED_SPAN_MS,

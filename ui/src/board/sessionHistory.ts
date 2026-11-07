@@ -67,8 +67,8 @@ export function parseSessionLinks(body: unknown): Map<string, SessionLinkEntry> 
 
 /** What `POST /api/v1/attach` is sent: a live worker's tmux, or a session to resume. */
 export type AttachBody =
-  | { tmux_session: string; shuttle_host: string | null; quiet?: boolean }
-  | { session: string; shuttle_host: string | null; quiet?: boolean }
+  | { tmux_session: string; shuttle_host: string | null }
+  | { session: string; shuttle_host: string | null }
 
 export type SessionTarget =
   | { kind: 'terminal'; body: AttachBody; label: string; title: string }
@@ -199,6 +199,24 @@ export async function attachConversation(shuttleBase: string, attach: AttachBody
     }
   } catch {
     onError('Couldn’t reach the daemon to open the terminal')
+  }
+}
+
+/**
+ * `POST /api/v1/attach` with `select_only`: Rex moves to the window the live
+ * worker already has, behind whatever holds the keyboard, and nothing opens.
+ * Resolves whether Rex moved; a failure only means it did not.
+ */
+export async function selectWorker(shuttleBase: string, tmuxSession: string, shuttleHost?: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${shuttleBase}/api/v1/attach`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null, select_only: true }),
+    })
+    return res.ok && (await res.json() as { moved?: unknown }).moved === true
+  } catch {
+    return false
   }
 }
 

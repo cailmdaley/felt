@@ -69,31 +69,86 @@ defmodule Shuttle.OpenerTest do
     assert Enum.any?(FakeRex.calls(), &match?({"open", ["-b", "com.superlogical.rex"], _}, &1))
   end
 
-  test "a quiet open selects the worker and leaves the frontmost app in front" do
-    Env.put_app_env(:os_type, {:unix, :darwin})
-    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
-    assert :ok = Opener.open(@name, nil, quiet: true)
-    assert [_select] = requests("client.perform")
-    refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
-  end
+  describe "select, a click's move" do
+    test "a live Rex worker's window is selected, and the app stays where it stands" do
+      Env.put_app_env(:os_type, {:unix, :darwin})
+      assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+      creates = length(requests("session.create"))
+      assert {:ok, true} = Opener.select(@name)
+      assert [select] = requests("client.perform")
+      [window] = FakeRex.fixture("session_create")["initial_windows"]
+      assert select["args"]["window_id"] == window["window_id"]
+      assert length(requests("session.create")) == creates
+      refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
+    end
 
-  test "a quiet open launches a closed Rex behind the frontmost app" do
-    Env.put_app_env(:os_type, {:unix, :darwin})
-    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
-    FakeRex.clients([])
+    test "a closed Rex app is not launched" do
+      Env.put_app_env(:os_type, {:unix, :darwin})
+      assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+      FakeRex.clients([])
+      assert {:ok, false} = Opener.select(@name)
+      assert requests("client.perform") == []
+      refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
+    end
 
-    Env.put_app_env(:fake_rex_hook, fn
-      "open" ->
-        FakeRex.clients([%{"client_id" => "client:app", "info" => %{"kind" => "app"}}])
+    test "a worker with no terminal is left alone" do
+      assert {:ok, false} = Opener.select(@name)
+      assert requests("session.create") == []
+      assert requests("client.perform") == []
+    end
 
-      _ ->
-        :ok
-    end)
+    test "a tmux worker without a viewer gets none; one with a viewer is selected" do
+      FakeRex.reply("tmux", {"", 0})
+      assert {:ok, false} = Opener.select(@name)
+      assert requests("session.create") == []
+      assert requests("client.perform") == []
+      assert :ok = Opener.open(@name)
+      assert {:ok, true} = Opener.select(@name)
+      assert [_] = requests("session.create")
+      assert length(requests("client.perform")) == 2
+    end
 
-    assert :ok = Opener.open(@name, nil, quiet: true)
+    test "a remote tmux worker is selected only through a viewer this display already has" do
+      assert {:ok, false} = Opener.select(@name, "remote-a")
+      assert requests("session.create") == []
+      assert :ok = Opener.open(@name, "remote-a")
+      assert {:ok, true} = Opener.select(@name, "remote-a")
+      assert [_] = requests("session.create")
+    end
 
-    assert [{"open", ["-g", "-b", "com.superlogical.rex"], _}] =
-             Enum.filter(FakeRex.calls(), &match?({"open", _, _}, &1))
+    test "a remote Rex worker is selected on its owner, which says whether it moved" do
+      Env.put_app_env(:os_type, {:unix, :darwin})
+      Env.put_app_env(:opener_version, {:ok, ~s({"terminal":"rex"})})
+      Env.put_app_env(:remotes, [%{name: "remote-a", url: "http://worker.example.test:4000"}])
+      assert {:ok, true} = Opener.select(@name, "remote-a")
+
+      assert_received {:reveal, "http://worker.example.test:4000/api/v1/terminal/reveal",
+                       %{"name" => @name, "select_only" => true}}
+
+      Env.put_app_env(:reveal_response, {:ok, 200, ~s({"revealed":false})})
+      assert {:ok, false} = Opener.select(@name, "remote-a")
+      assert FakeRex.calls() == []
+    end
+
+    test "an owner asked only to select launches no app and answers false without a worker" do
+      Env.put_app_env(:os_type, {:unix, :darwin})
+      assert {:ok, false} = Opener.reveal_owned_rex(@name, select_only: true)
+      assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+      FakeRex.clients([])
+      assert {:ok, false} = Opener.reveal_owned_rex(@name, select_only: true)
+      FakeRex.clients([%{"client_id" => "client:app", "info" => %{"kind" => "app"}}])
+      assert {:ok, true} = Opener.reveal_owned_rex(@name, select_only: true)
+      assert [_] = requests("client.perform")
+      refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
+    end
+
+    test "a kitty display never moves for a click" do
+      Env.put_app_env(:terminal_backend, Tmux)
+      assert {:ok, false} = Opener.select(@name)
+      assert {:ok, false} = Opener.select(@name, "remote-a")
+      refute_received {:kitty, _, _}
+      assert FakeRex.calls() == []
+    end
   end
 
   test "an owner selects its worker for the display hub without activating its own app" do
@@ -365,18 +420,6 @@ defmodule Shuttle.OpenerTest do
                      %{"name" => @name}}
 
     assert [{"open", ["-b", "com.superlogical.rex"], _}] = FakeRex.calls()
-  end
-
-  test "a quiet remote open selects on the owner and leaves the local app alone" do
-    Env.put_app_env(:os_type, {:unix, :darwin})
-    Env.put_app_env(:opener_version, {:ok, ~s({"terminal":"rex"})})
-    Env.put_app_env(:remotes, [%{name: "remote-a", url: "http://worker.example.test:4000"}])
-    assert :ok = Opener.open(@name, "remote-a", quiet: true)
-
-    assert_received {:reveal, "http://worker.example.test:4000/api/v1/terminal/reveal",
-                     %{"name" => @name}}
-
-    assert FakeRex.calls() == []
   end
 
   test "remote Rex reports the owner address when no app client is attached" do

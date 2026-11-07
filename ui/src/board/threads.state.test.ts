@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { card } from './testFixtures.js'
+import { card, conversations } from './testFixtures.js'
 import { ThreadIndex, threadState } from './threads.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
 import { FamilyPage } from './workspace/FamilyPage.js'
@@ -52,7 +52,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
     vi.stubGlobal('matchMedia', () => ({ matches: false }))
     try {
       const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-      const page = new FamilyPage(vi.fn(), vi.fn(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, vi.fn()); page.update(hub, index)
+      const page = new FamilyPage(vi.fn(), conversations(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, vi.fn()); page.update(hub, index)
       const labels = Object.fromEntries([...page.el.querySelectorAll<HTMLElement>('.kbn-thread-row')]
         .filter(row => row.querySelector('.kbn-thread-name')!.textContent !== hub.name)
         .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('.ws-tree-state')!.textContent]))

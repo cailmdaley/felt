@@ -5,6 +5,7 @@ import { aim, arrival, sighted } from '../family/orbit.js'
 import { ROSTER, chooseDrawing, chosenDrawing } from '../family/roster.js'
 import { FieldZoom, WHOLE, type View } from '../family/zoom.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
+import type { Conversations } from '../conversationOpening.js'
 import { threadItem } from '../ThreadPeek.js'
 import { threadKey, type ThreadIndex } from '../threads.js'
 import { fiberKey } from './documents.js'
@@ -96,11 +97,11 @@ export class FamilyPage {
   private readonly place: MapPlace
   private readonly levelled: () => void
 
-  private readonly converse: (card: KanbanCard, quiet?: boolean) => boolean
+  private readonly conversations: Conversations
 
   /** `open` leaves for a document, or a thread the map has no place for; `converse` opens a conversation, `quiet` leaving the keyboard here, and says whether it had one to open; `levelled` hears the map change level or come to rest. */
-  constructor(open: (card: KanbanCard, doc?: string) => void, converse: (card: KanbanCard, quiet?: boolean) => boolean, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, levelled: () => void = () => {}) {
-    this.open = open; this.converse = converse; this.feeds = feeds; this.place = place; this.disposed = disposed; this.levelled = levelled
+  constructor(open: (card: KanbanCard, doc?: string) => void, conversations: Conversations, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, levelled: () => void = () => {}) {
+    this.open = open; this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.levelled = levelled
     this.stage.setAttribute('role', 'listbox')
     this.stage.setAttribute('aria-label', 'Threads, most urgent first')
     this.scroller.append(this.stage)
@@ -507,11 +508,13 @@ export class FamilyPage {
     }
     this.peeked = null
     this.come(thread)
-    if (conversable(thread.card)) this.chat(thread.card, true)
+    if (conversable(thread.card)) void this.conversations.reach(thread.card).then(moved => { if (moved) this.ring(thread.card) })
   }
   /** Opens a thread's conversation; the ring moves only if it opened. */
-  private chat(card: KanbanCard, quiet?: boolean): void {
-    if (!this.converse(card, quiet)) return
+  private chat(card: KanbanCard): void {
+    if (this.conversations.open(card)) this.ring(card)
+  }
+  private ring(card: KanbanCard): void {
     this.place.worker = threadKey(card)
     this.drawField()
   }

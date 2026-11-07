@@ -10,6 +10,7 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { surfaceTotals } from './KanbanReadModel.js'
 import { buildTimelineDays } from './KanbanSurfaces.js'
 import { civilDayAt, hostZone } from './civilDay.js'
+import type { Conversations } from './conversationOpening.js'
 import type { CommitRecord, SessionPairing } from './views/TemporalData.js'
 
 /**
@@ -177,3 +178,7 @@ export function dayAt(offset: number): string {
   if (!day) throw new Error(`offset ${offset} outside fixture window`)
   return day.iso
 }
+
+/** A surface's conversations as one mock: the explicit open calls it with the card, a click's reach with the card and true. */
+export const conversations = (converse: (card: KanbanCard, click?: true) => unknown = () => false): Conversations =>
+  ({ open: found => !!converse(found), reach: async found => !!converse(found, true) })

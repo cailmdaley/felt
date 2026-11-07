@@ -666,14 +666,13 @@ export class Dock {
    * opens, or, on a desktop with no worker up, the past session reopened in a
    * terminal on its host. A reopening sends nothing and starts no turn, and it
    * leaves the card's lifecycle alone, so it holds in every column. A card
-   * that never ran is launched by name, not by a key. A `quiet` opening moves
-   * Rex and leaves the keyboard where it is.
+   * that never ran is launched by name, not by a key. This is the explicit
+   * act (`c`, Open in Rex); a click calls `Workspace.reach` instead.
    */
-  openConversation(card: KanbanCard, quiet?: boolean): boolean {
-    const opener = this.onOpenWorker
-    const destination = resolveDestination(conversationDestinations(card, conversationDevice(), quiet && opener ? (session, host) => opener(session, host, true) : opener))
+  openConversation(card: KanbanCard): boolean {
+    const destination = resolveDestination(conversationDestinations(card, conversationDevice(), this.onOpenWorker))
     if (card.sessionUuid && this.reopens(card, destination)) {
-      void attachConversation(this.shuttleBase, { session: card.sessionUuid, shuttle_host: card.shuttleHost ?? null, quiet }, message => showToast(message, 'error'))
+      void attachConversation(this.shuttleBase, { session: card.sessionUuid, shuttle_host: card.shuttleHost ?? null }, message => showToast(message, 'error'))
       return true
     }
     if (!destination) return false

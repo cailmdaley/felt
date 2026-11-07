@@ -618,18 +618,6 @@ describe('opening the conversation by key', () => {
     expect(posts()).toEqual([['/api/v1/attach', { session: 'past', shuttle_host: 'owner' }]])
   })
 
-  it('keeps the keyboard on a quiet opening', async () => {
-    vi.mocked(fetch).mockClear()
-    vi.mocked(fetch).mockImplementation(async () => response({ attached: true }))
-    const opened = vi.fn(), keys = new Dock('', saved, undefined, opened)
-    keys.openConversation(task({ status: 'closed', sessionUuid: 'past' }), true)
-    await flush()
-    expect(posts()).toEqual([['/api/v1/attach', { session: 'past', shuttle_host: 'owner', quiet: true }]])
-    keys.openConversation(task({ status: 'active', tmuxSession: 'worker-1', workerState: 'running' }), true)
-    expect(opened.mock.lastCall?.[0]).toBe('worker-1')
-    expect(opened.mock.lastCall?.[2]).toBe(true)
-  })
-
   it('reopens over a dead session\'s link, but keeps a link the human chose', async () => {
     vi.mocked(fetch).mockClear()
     vi.mocked(fetch).mockImplementation(async () => response({ attached: true }))

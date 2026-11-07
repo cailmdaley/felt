@@ -21,7 +21,7 @@ function host(): GlobeHost & { conversed: string[]; opened: string[] } {
     conversed, opened,
     feeds: { marks: () => undefined, files: found => found.id === 'science/hub' ? [{ key: 'doc:report.html', name: 'report.html', at: Date.now(), unread: false }] : [], refresh: noop, lead: async () => undefined },
     openDocument: (_, doc) => opened.push(doc),
-    converse: found => { conversed.push(found.id); return true },
+    converse: async found => { conversed.push(found.id); return true },
     constitutionKey: found => `fiber:${found.id}`,
   }
 }
@@ -124,15 +124,20 @@ describe('moving on the globe', () => {
     settle()
     expect([...stage.el.querySelectorAll('.globe-name')].map(name => name.textContent)).toContain('life/ask')
   })
-  it('rings the thread Rex reached, and not one a click could not open', () => {
+  it('rings the thread once Rex answers that it moved there, and not before or otherwise', async () => {
     stage.follow('science/hub', ORIGIN)
     settle()
     place.worker = null
-    board.converse = () => false
+    board.converse = async () => false
+    clickAt(400, 500)
+    await Promise.resolve()
+    expect(place.worker).toBeNull()
+    let answer!: (moved: boolean) => void
+    board.converse = () => new Promise(resolve => { answer = resolve })
     clickAt(400, 500)
     expect(place.worker).toBeNull()
-    board.converse = () => true
-    clickAt(400, 500)
+    answer(true)
+    await Promise.resolve()
     expect(place.worker).toBe('science/hub')
   })
   it('keeps a fiber named alike on two hosts as two tiles, and comes to the host Rex names', () => {

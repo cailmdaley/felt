@@ -6,10 +6,14 @@ defmodule ShuttleWeb.AttachControllerTest do
   @endpoint ShuttleWeb.Endpoint
 
   defmodule Opener do
-    def open(name, host, opts) do
+    def open(name, host) do
       send(Shuttle.Env.app(:attach_test), {:opened, name, host})
-      send(Shuttle.Env.app(:attach_test), {:opts, opts})
       Shuttle.Env.app(:attach_result, :ok)
+    end
+
+    def select(name, host) do
+      send(Shuttle.Env.app(:attach_test), {:selected, name, host})
+      Shuttle.Env.app(:select_result, {:ok, true})
     end
   end
 
@@ -32,14 +36,38 @@ defmodule ShuttleWeb.AttachControllerTest do
              |> json_response(200)
 
     assert_received {:opened, "worker-shuttle", "remote-a"}
-    assert_received {:opts, [quiet: false]}
+    refute_received {:selected, _, _}
   end
 
-  test "a quiet attach reaches the opener" do
-    post(api_conn(), "/api/v1/attach", Jason.encode!(%{tmux_session: "worker", quiet: true}))
-    |> json_response(200)
+  test "a select-only attach only selects, and says whether the display moved" do
+    body = %{tmux_session: "worker", shuttle_host: "remote-a", select_only: true}
 
-    assert_received {:opts, [quiet: true]}
+    assert %{"moved" => true, "session" => "worker"} =
+             post(api_conn(), "/api/v1/attach", Jason.encode!(body)) |> json_response(200)
+
+    assert_received {:selected, "worker", "remote-a"}
+    Env.put_app_env(:select_result, {:ok, false})
+
+    assert %{"moved" => false} =
+             post(api_conn(), "/api/v1/attach", Jason.encode!(body)) |> json_response(200)
+
+    Env.put_app_env(:select_result, {:error, "Rex refused"})
+
+    assert %{"error" => "Rex refused"} =
+             post(api_conn(), "/api/v1/attach", Jason.encode!(body)) |> json_response(502)
+
+    refute_received {:opened, _, _}
+  end
+
+  test "a select-only attach to a past session never resumes it" do
+    Env.put_app_env(:remotes, [])
+    body = %{session: "00000000-0000-4000-8000-000000000001", select_only: true}
+
+    assert %{"moved" => false} =
+             post(api_conn(), "/api/v1/attach", Jason.encode!(body)) |> json_response(200)
+
+    refute_received {:opened, _, _}
+    refute_received {:selected, _, _}
   end
 
   test "unsupported remote Rex errors reach the board as a 502" do

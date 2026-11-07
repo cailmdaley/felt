@@ -1307,12 +1307,26 @@ test('Conversation c (and its dot alias) uses the pill destination in reader and
   const remote = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
   await remote.click()
   const opened = n => poll(p, n => window.__harness.events.filter(e => e.type === 'open-worker').length === n, n)
-  await opened(1)
-  await p.keyboard.press('c'); await opened(2)
-  await p.keyboard.press('.'); await opened(3)
+  await p.keyboard.press('c'); await opened(1)
+  await p.keyboard.press('.'); await opened(2)
   await leave(p)
-  await p.keyboard.press('c'); await opened(4)
-  await p.keyboard.press('.'); await opened(5)
+  await p.keyboard.press('c'); await opened(3)
+  await p.keyboard.press('.'); await opened(4)
+})
+
+test('A click on a thread only asks Rex to select its window, and opens nothing when it has none; c opens it', async p => {
+  const remote = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
+  const session = 'remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle'
+  await p.evaluate(session => window.__harness.windowless.add(session), session)
+  const attaches = () => p.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.endsWith('/api/v1/attach')).map(r => JSON.parse(r.body)))
+  await remote.click()
+  await poll(p, () => window.__harness.events.some(e => e.type === 'select-worker'))
+  assert.deepEqual(await attaches(), [{ tmux_session: session, shuttle_host: 'basalt-login-02', select_only: true }], 'a click posts the select-only mode')
+  await p.waitForTimeout(150)
+  assert.equal(await p.evaluate(() => window.__harness.events.filter(e => e.type === 'open-worker').length), 0, 'a click opens no terminal')
+  await p.keyboard.press('c')
+  await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker'))
+  assert.deepEqual(await p.evaluate(() => window.__harness.events.filter(e => e.type === 'open-worker').map(e => [e.session, e.host])), [[session, 'basalt-login-02']], 'c opens the conversation in full')
 })
 
 test('Band settings and history use mocked daemon', async p => {

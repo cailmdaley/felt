@@ -70,13 +70,12 @@ const board = new KanbanModal({
   // web app can't open a terminal itself (Portolan does it natively); the
   // daemon does, via POST /api/v1/attach (not owner-routed — the tab opens on
   // the host serving this UI, ssh-ing out for a remote worker). Success raises
-  // the terminal, or with `quiet` moves Rex behind the board; only failures
-  // surface a toast.
-  onOpenWorker: (tmuxSession, shuttleHost, quiet) => {
+  // the terminal; only failures surface a toast.
+  onOpenWorker: (tmuxSession, shuttleHost) => {
     void daemonFetch(`${shuttleBase}/api/v1/attach`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null, quiet }),
+      body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null }),
     })
       .then(async (res) => {
         if (!res.ok) {
