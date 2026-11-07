@@ -29,8 +29,8 @@
 .family-map .fm-line-fade stop { stop-color: var(--ws-ink-muted); stop-opacity: .45; }
 .family-map .fm-line-fade stop:last-child { stop-opacity: 0; }
 .family-map .fm-flow-rising, .family-map .fm-flow-receding { stroke-width: 1.5; stroke-dasharray: 1.5 22; }
-.family-map .fm-flow-rising { stroke: var(--ws-state-working); stroke-opacity: .7; animation: fm-rise 5s linear infinite; }
-.family-map .fm-flow-receding { stroke: var(--fm-fade); animation: fm-recede 7s linear infinite; }
+.family-map .fm-flow-rising { stroke: var(--ws-state-working); stroke-opacity: .7; }
+.family-map .fm-flow-receding { stroke: var(--fm-fade); }
 .family-map-radial .fm-star { touch-action: none; }
 .family-map-radial .fm-star:not([data-merged], [data-standing='question'], [data-standing='blocked']) .fm-star-halo { fill-opacity: calc(.3 * var(--fm-heat, 0)); }
 .family-map-radial .fm-star[role='option']:not([data-root]) { cursor: grab; }
@@ -187,8 +187,6 @@ button.fm-held { cursor: pointer; }
 .family-map-narrow .fm-row[data-loud] .fm-strip { height: 14px; }
 @keyframes fm-appear { from { opacity: 0; } }
 @keyframes fm-emerge { from { opacity: 0; translate: var(--fm-from-x, 0) var(--fm-from-y, 0); } }
-@keyframes fm-rise { to { stroke-dashoffset: 23.5; } }
-@keyframes fm-recede { to { stroke-dashoffset: -23.5; } }
 @keyframes fm-breathe { 50% { opacity: .45; } }
 .family-map-parked, .family-map-parked * { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
