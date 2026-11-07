@@ -532,9 +532,9 @@ defmodule Shuttle.Speaker do
       end
   end
 
-  # Route live voice to the card the inbox opened, bring the board to it, and
-  # move Rex to it behind the frontmost app, so all three agree. Rex stays put
-  # while a meeting holds the mic.
+  # Route live voice to the card the inbox opened, which brings every board to
+  # it wherever this daemon stands, and move Rex to it behind the frontmost
+  # app, so all three agree. Rex stays put while a meeting holds the mic.
   defp retarget(item) do
     params = %{"fiber_id" => item.fiber_id, "name" => item.name, "source" => "inbox"}
     params = if item[:origin], do: Map.put(params, "origin", item.origin), else: params
@@ -543,8 +543,6 @@ defmodule Shuttle.Speaker do
       {:ok, _} -> :ok
       {:error, reason} -> Logger.warning("speaker: inbox could not route voice: #{reason}")
     end
-
-    Shuttle.RexFocus.publish(Map.put_new(params, "origin", Shuttle.MeetingRouter.own_host()))
 
     case Shuttle.RexFocus.reveal(params) do
       :ok -> :ok

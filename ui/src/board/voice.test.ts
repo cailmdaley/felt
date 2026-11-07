@@ -114,6 +114,31 @@ describe('live voice', () => {
       voice.dispose()
       expect(live()).toHaveLength(0)
     })
+    const opened = (fiber: string): VoiceStatus['target'] => ({ fiber_id: fiber, origin: 'fir', name: fiber, source: 'inbox' })
+    it('moves to a card the inbox opens, once, and again if the board left it', async () => {
+      const target = (source: Source, value: unknown): void => source.listeners.get('target')!(new MessageEvent('target', { data: JSON.stringify(value) }))
+      const voice = await start(), moved: unknown[] = []
+      voice.onRex = event => moved.push(event.fiber_id)
+      target(live()[0], opened('card'))
+      target(live()[0], opened('card'))
+      target(live()[0], { fiber_id: 'board', origin: 'fir', name: 'board' })
+      target(live()[0], opened('card'))
+      expect(moved).toEqual(['card', 'card'])
+      voice.dispose()
+    })
+    it('hears the inbox of a remote recorder from its polled status, and not a card found on arrival', async () => {
+      const voice = await start(), moved: unknown[] = []
+      voice.onRex = event => moved.push(event.fiber_id)
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ ...status(), target: opened('remote') }) })))
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(moved).toEqual(['remote'])
+      voice.dispose()
+      const later = new Voice('')
+      later.onRex = event => moved.push(event.fiber_id)
+      later.mount(); await flush()
+      expect(moved).toEqual(['remote'])
+      later.dispose()
+    })
     it('closes while hidden, reopens on return, and moves nothing for it', async () => {
       let hidden = false
       vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden)

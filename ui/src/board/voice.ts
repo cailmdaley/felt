@@ -18,7 +18,8 @@ export interface VoiceStatus {
   enabled: boolean
   muted: boolean
   state: 'off' | 'starting' | 'listening' | 'yielded' | 'failed'
-  target: { fiber_id: string; origin: string; name: string } | null
+  /** Where live voice goes; `source` names what set it, when that was not a board or Rex. */
+  target: (RexMove & { source?: string }) | null
   last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string } | null
   error: string | null
   held?: VoiceHeld[]
@@ -60,6 +61,8 @@ const following = (status: VoiceStatus | null): boolean => !!status?.enabled && 
 export class Voice {
   status: VoiceStatus | null = null
   onRex: ((move: RexMove) => void) | null = null
+  /** The card the inbox last set the target to, null for none; undefined before the first status, which moves nothing. */
+  private inboxOpened: string | null | undefined
   /** The constitution the board shows, once it speaks to one. */
   private sighted: KanbanCard | null = null
   private sightTimer: number | null = null
@@ -77,7 +80,18 @@ export class Voice {
   private base: string
   constructor(base: string) { this.base = base }
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn) }
-  private notify(): void { this.listeners.forEach(fn => fn()) }
+  private notify(): void {
+    this.followInbox()
+    this.listeners.forEach(fn => fn())
+  }
+  /** A card the inbox opens moves the board as Rex does, from any status that shows it: the recorder's daemon may be another host's, whose stream this board does not hear. */
+  private followInbox(): void {
+    if (!this.status) return
+    const target = this.status.target, opened = target?.source === 'inbox' ? `${target.origin}\u0000${target.fiber_id}` : null
+    const fresh = opened !== this.inboxOpened && this.inboxOpened !== undefined
+    this.inboxOpened = opened
+    if (fresh && target && opened && !isMobileViewport()) this.onRex?.(target)
+  }
   mount(): void {
     this.mounted = true
     document.addEventListener('visibilitychange', this.visibility)

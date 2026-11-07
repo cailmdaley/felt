@@ -459,10 +459,10 @@ defmodule Shuttle.VoiceTest do
     assert %{enabled: true, error: ^warning} = Voice.show()
   end
 
-  test "a route records the source that moved it" do
+  test "a route and the target record the source that moved it" do
     assert {:ok, _} = Voice.update(%{"enabled" => true})
 
-    assert {:ok, %{target: %{"fiber_id" => "a/card"}}} =
+    assert {:ok, %{target: %{"fiber_id" => "a/card", "source" => "inbox"}}} =
              Voice.target(%{"fiber_id" => "a/card", "source" => "inbox"})
 
     assert [%{"fiber_id" => "a/card", "source" => "inbox"}] =
