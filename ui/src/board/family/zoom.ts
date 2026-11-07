@@ -8,7 +8,7 @@
 export interface View { k: number; x: number; y: number }
 export const WHOLE: View = { k: 1, x: 0, y: 0 }
 
-const MOST = 8
+const MOST = 64
 /** A wheel's quiet after which its gesture has ended. */
 const SETTLE_MS = 140
 const SLOP = 6
@@ -138,8 +138,8 @@ export class FieldZoom {
       this.startPinch()
       return
     }
-    const spiralBody = this.host.classList.contains('family-map-spiral') && (event.target as Element).closest('.fm-star')
-    if (this.view.k > 1 && !spiralBody && (event.pointerType === 'touch' || this.onField(event.target))) this.startPan(event.clientX, event.clientY)
+    const body = this.host.classList.contains('family-map-radial') && (event.target as Element).closest('.fm-star')
+    if (this.view.k > 1 && !body && (event.pointerType === 'touch' || this.onField(event.target))) this.startPan(event.clientX, event.clientY)
   }
   private startPan(x: number, y: number): void { this.pan = { view: this.view, from: { x, y }, moved: false } }
   private startPinch(): void {

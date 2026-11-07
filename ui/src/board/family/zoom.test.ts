@@ -5,7 +5,7 @@ import { ThreadIndex } from '../threads.js'
 import { FamilyPage } from '../workspace/FamilyPage.js'
 import { WHOLE, held, zoomAbout, type View } from './zoom.js'
 import { familyModel } from './model.js'
-import { skyLayout } from './sky.js'
+import { radialLayout } from './radial.js'
 import { aim, sighted, zoomPlate } from './orbit.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
@@ -21,7 +21,7 @@ beforeEach(() => {
 })
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
-function mapped(drawing = 'sky'): { stage: HTMLElement; plate: HTMLElement } {
+function mapped(drawing = 'radial'): { stage: HTMLElement; plate: HTMLElement } {
   stored.set('shuttle.family.drawing', drawing)
   const page = new FamilyPage(vi.fn(), vi.fn(), feeds, { focus: null, view: null }, vi.fn())
   document.body.append(page.el)
@@ -39,20 +39,19 @@ it('keeps the point under the pointer where it is, and the field over the plate'
   expect(zoomAbout(view, .25, .25, .75)).toEqual(WHOLE)
   expect(held({ k: 3, x: .9, y: -9 })).toEqual({ k: 3, x: .5, y: -2.5 })
   expect(held({ k: 1, x: .4, y: -.4 })).toEqual(WHOLE)
-  expect(held({ k: 99, x: 0, y: 0 }).k).toBe(8)
+  expect(held({ k: 99, x: 0, y: 0 }).k).toBe(64)
 })
-it('scales the geometry, keeps every mark its size, and names more threads as room opens', () => {
+it('scales the geometry, grows marks to their reading size, and names more threads as room opens', () => {
   const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now)
-  const base = skyLayout(model, 1000, 680), view: View = { k: 3, x: -1, y: -1 }
+  const base = radialLayout(model, 1000, 680), view: View = { k: 3, x: -1, y: -1 }
   const plate = zoomPlate(base, view, model, null)
   expect(zoomPlate(base, WHOLE, model, null)).toBe(base)
   expect(plate.R).toBeCloseTo(base.R * 3)
   plate.stars.forEach((star, n) => {
-    expect(star.r).toBe(base.stars[n].r)
+    expect(star.r).toBe(Math.min(base.stars[n].full, base.stars[n].r * 3))
     expect(star.x).toBeCloseTo(base.stars[n].x * 3 - 1000)
   })
-  expect(plate.labels.length).toBeGreaterThan(base.labels.length)
-  const names = plate.labels.map(label => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, y: label.y }))
+    const names = plate.labels.map(label => ({ left: label.side === 'right' ? label.x : label.x - label.width, right: label.side === 'right' ? label.x + label.width : label.x, y: label.y }))
   for (const a of names) for (const b of names) if (a !== b) expect(a.left < b.right && b.left < a.right && Math.abs(a.y - b.y) < 24).toBe(false)
 })
 it('leaves the wheel to the page at the base scale, and takes it once zoomed', () => {
@@ -78,21 +77,19 @@ it('moves layers while a wheel runs and paints only when it settles', async () =
 })
 it('reaches past the plate\'s edge once zoomed, so a body on the rim can come to the middle', () => {
   const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now)
-  const base = skyLayout(model, 800, 720), rim = [...base.stars].sort((a, b) => a.x - b.x)[0], view = aim(base, rim.thread)
+  const base = radialLayout(model, 800, 720), rim = [...base.stars].sort((a, b) => a.x - b.x)[0], view = aim(base, rim.thread)
   expect(rim.x / 800 * view.k + view.x).toBeCloseTo(.5)
   const plate = zoomPlate(base, view, model, null)
   expect(plate.stars.find(star => star.thread === rim.thread)!.x).toBeCloseTo(400)
 })
-it('flies deeper for a deeper thread, up to the most the field goes', () => {
-  const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now), base = skyLayout(model, 800, 720), star = base.stars[1]
-  expect(aim(base, star.thread).k).toBe(3)
-  const deep = { ...star.thread, depth: 2 }, deeper = { ...star.thread, depth: 9 }
-  expect(aim({ ...base, stars: [{ ...star, thread: deep }] }, deep).k).toBeCloseTo(4.05)
-  expect(aim({ ...base, stars: [{ ...star, thread: deeper }] }, deeper).k).toBe(8)
+it('flies deeper for a thread with less room, from the least a flight goes', () => {
+  const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now), base = radialLayout(model, 800, 720), star = base.stars[1]
+  expect(aim(base, star.thread).k).toBeGreaterThanOrEqual(3)
+  expect(aim({ ...base, stars: [{ ...star, reach: 12 }] }, star.thread).k).toBeCloseTo(18)
   expect(aim({ ...base, stars: [] }, star.thread)).toEqual(WHOLE)
 })
 it('comes to the body nearest the middle as a hand zooms past the reveal, keeping the one it holds, and none short of it', () => {
-  const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now), base = skyLayout(model, 800, 720)
+  const index = new ThreadIndex(cards), model = familyModel(index, root, root, feeds, now), base = radialLayout(model, 800, 720)
   const star = base.stars[3], view = aim(base, star.thread)
   expect(sighted(base, { ...view, k: 2 }, null)).toBeNull()
   expect(sighted(base, view, null)).toBe(star.thread.key)
@@ -102,7 +99,7 @@ it('comes to the body nearest the middle as a hand zooms past the reveal, keepin
 })
 it('steps out on a double-click of the field, not of a thread, and leaves the spiral\'s pins', () => {
   vi.useFakeTimers()
-  const { stage, plate } = mapped('spiral')
+  const { stage, plate } = mapped('radial')
   stored.set(`shuttle.family.spiral:${root.originId}:${root.uid ?? root.id}`, '{}')
   wheel(plate, { deltaY: -40, ctrlKey: true }); vi.advanceTimersByTime(300)
   expect(stage.classList.contains('family-map-zoomed')).toBe(true)

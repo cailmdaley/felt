@@ -1,12 +1,9 @@
 import { cloth } from './cloth.js'
-import { delta } from './delta.js'
 import type { Drawing } from './drawing.js'
-import { rings } from './rings.js'
-import { sky } from './sky.js'
-import { spiral } from './spiral.js'
+import { radial } from './radial.js'
 
-/** The drawings on trial, first the default. */
-export const ROSTER: readonly Drawing[] = [sky, rings, spiral, cloth, delta]
+/** The two drawings, first the default. */
+export const ROSTER: readonly Drawing[] = [radial, cloth]
 
 const KEY = 'shuttle.family.drawing'
 /** The drawing last chosen in this browser, if storage holds a current one. */

@@ -15,8 +15,8 @@ export interface Drawing {
   label: string
   /** What the drawing's marks mean, one channel to a phrase. */
   reading: readonly string[]
-  /** The order the arrow keys walk, when it is not the model's. */
-  sequence?(model: FamilyModel): MapThread[]
+  /** The threads it shows, in the order the arrow keys walk them, when that is not the model's. */
+  sequence?(model: FamilyModel, focus: string | null): MapThread[]
   /** A focused thread opens where the drawing lists it, on a drawing with no field. */
   folds?: boolean
   /** Where everything sits at the whole field, on a drawing with a field to zoom. */
@@ -138,22 +138,3 @@ export function lay(el: SVGElement, a: Point, b: Point): void {
 
 /** Square-root time: how far a moment sits from now, 0 to 1 across the map's window. */
 export const elapsed = (at: number, now: number): number => Math.sqrt(Math.max(0, Math.min(1, (now - at) / MAP_WINDOW_MS)))
-
-/**
- * Nudges sorted `wanted` positions apart by at least `gap` inside [lo, hi],
- * moving them as little as possible in the least-squares sense: isotonic
- * regression on the positions less their stacking offsets.
- */
-export function spread(wanted: readonly number[], gap: number, lo: number, hi: number): number[] {
-  const blocks: Array<{ sum: number; count: number }> = []
-  wanted.forEach((value, n) => {
-    let block = { sum: value - n * gap, count: 1 }
-    while (blocks.length && blocks.at(-1)!.sum / blocks.at(-1)!.count > block.sum / block.count) {
-      const last = blocks.pop()!
-      block = { sum: block.sum + last.sum, count: block.count + last.count }
-    }
-    blocks.push(block)
-  })
-  const top = hi - (wanted.length - 1) * gap, fitted = blocks.flatMap(block => Array<number>(block.count).fill(Math.max(lo, Math.min(top, block.sum / block.count))))
-  return fitted.map((value, n) => value + n * gap)
-}

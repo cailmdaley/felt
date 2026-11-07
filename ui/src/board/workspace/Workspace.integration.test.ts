@@ -817,7 +817,7 @@ describe('workspace reader integration', () => {
     expect(selected()).toBe('family:host-a:hub')
     expect(pages()[0]).toBe('family:host-a:hub')
     expect(document.querySelector('.ws-selected .ws-family [aria-current="page"] .kbn-thread-name')?.textContent).toBe('hub')
-    expect(document.querySelector('.ws-selected .family-map-sky')).not.toBeNull()
+    expect(document.querySelector('.ws-selected .family-map-radial')).not.toBeNull()
 
     workspace.open(feed[1], 'Desk'); await flush()
     expect(selected()).toBe('family:host-a:hub-leaf')

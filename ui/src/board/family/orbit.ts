@@ -1,56 +1,52 @@
 import { isDrawn, needsHuman, type FamilyModel, type MapThread } from './model.js'
 import { WHOLE, held, type View } from './zoom.js'
 import { REVEAL, miniature, unfold, type Locality, type Mini, type Satellite } from './locality.js'
-import { TIME_MARKS, htmlEl, lay, markPath, optionFor, part, reconcile, shortAgo, spread, svgEl, tagThread, type Point, type Sight } from './drawing.js'
+import { htmlEl, lay, markPath, optionFor, part, reconcile, shortAgo, svgEl, tagThread, type Point, type Sight } from './drawing.js'
 
-/** The drawings on a disc share this plate: bodies, fine arcs, names on the rim, a ledger on a phone, and a focused thread unfolded in place. */
+/** The radial drawing's plate: bodies, arcs, names, a ledger on a phone, and a focused thread unfolded in place. */
 export const TURN = 2 * Math.PI
 export const LABEL_ROW = 24
 const NUMERAL = 19
-/** The least distance between two rings' labels. */
-const RING_LABEL = 34
-const LABEL_MIN = 160
 export const LABEL_MAX = 310
-/** From the rim to where a label's text begins. */
-const RIM_MARGIN = 15
-const LABEL_GAP = 12
-const DISC_MIN = 120
 /** A satellite's row, as family-map.css sets it. */
 const HELD_ROW = 24
 const FOCUS_NAME = 190
 /** A miniature's button, as family-map.css sets it. */
 const MINI_MARK = 14
 const BODY_MAX = 15
-/** The field's fine grid. */
-const GRID_RINGS = 22
-/** The widest sweep a name may take along an orbit, and how many bodies carry one. */
-const ARC_SWEEP = 200 * Math.PI / 180
-const ARCS = 4
-/** Bodies smaller than this at R = 300 stay unnamed until peeked. */
-const ARC_BODY = 6
-const CHAR = 6.3
-const LABEL_CHAR = 6.6
+/** A serif name's width per character, kept generous so a whole name always fits, and what its number and age add. */
+const LABEL_CHAR = 7.4
+const LABEL_MARKS = 62
+const MARGIN = 8
 /** Sent files a body shows as dots, and their spacing around it. */
 const MOONS = 8
 const MOON_STEP = .42
 /** The scale a thread is flown to, a step deeper for each generation below the first. */
 const FOCUS_K = 3
-const FOCUS_STEP = 1.35
+const FOCUS_SHARE = .3
 /** Where a flight leaves its thread, as a share of the plate's height. */
 const FOCUS_Y = .46
 const FOCUS_Y_NARROW = .14
 /** How far from the plate's middle a body can be and still be the one a hand has zoomed to, as a share of the plate. */
 const SIGHT = .3
+/** How near a body's own scale the view must be for a hand to have reached it. */
+const SIGHT_DEPTH = .6
 const GATHERED_LEAST = 4
 /** How many bodies in view show what they hold. */
 const MINIS = 8
 
-export interface Star extends Point { thread: MapThread; angle: number; r: number }
+export interface Star extends Point {
+  thread: MapThread
+  angle: number
+  /** Its radius at the whole field. */
+  r: number
+  /** Its radius once there is room. */
+  full: number
+  /** The room around it for its own threads, on the whole field. */
+  reach: number
+}
 export interface SkyLabel extends Point { thread: MapThread; numeral: number; width: number; side: 'left' | 'right'; rim?: Point }
 export interface SkyNumeral extends Point { thread: MapThread; numeral: number; rim?: Point }
-export interface SkyRing { label: string; radius: number; marked: boolean }
-/** A name laid along an orbit, whole, or not at all. */
-export interface SkyArc { thread: MapThread; d: string; radius: number; from: number; to: number }
 export interface Plate {
   /** The field's scale; 1 for the whole field. */
   k: number
@@ -65,11 +61,6 @@ export interface Plate {
   links: boolean
   labels: SkyLabel[]
   numerals: SkyNumeral[]
-  arcs: SkyArc[]
-  rings: SkyRing[]
-  grid: number[]
-  /** The direction the rings' labels run along. */
-  scale: number
   /** The arms the bodies sit on, from the centre: what rises to the human and what recedes. */
   line?: { rising: string; receding: string }
   /** The arms' names, by the tips they end at. */
@@ -88,139 +79,26 @@ export const bodyRadius = (thread: MapThread, unit: number): number => {
   return unit * Math.max(thread.tone === 'question' || thread.tone === 'blocked' ? 7 : needsHuman(thread) ? 5.5 : thread.standing === 'working' ? 4 : 2.2, Math.min(BODY_MAX, bodySize(thread.weight)))
 }
 export const rootRadius = (model: FamilyModel, unit: number): number => unit * Math.min(28, 8 + bodySize(model.mass) * .8)
-export const fineGrid = (from: number, to: number): number[] => Array.from({ length: GRID_RINGS }, (_, n) => from + (to - from) * (n + 1) / GRID_RINGS)
-export const childrenOf = (model: FamilyModel, thread: MapThread): MapThread[] => thread.children.map(key => model.threads.get(key)!)
-export const drawnChildren = (model: FamilyModel, thread: MapThread): MapThread[] => childrenOf(model, thread).filter(isDrawn)
-
-/** Marks that land on each other step outward; a ring's width of time is the most this bends. */
-export function separate(stars: Star[], cx: number, cy: number, R: number): void {
-  const sorted = stars.filter(star => star.thread.parent !== null).sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy))
-  const clear = (star: Star, placed: readonly Star[]): boolean => placed.every(other => Math.hypot(star.x - other.x, star.y - other.y) >= star.r + other.r + 2)
-  const placed = stars.filter(star => star.thread.parent === null)
-  for (const star of sorted) {
-    for (let radius = Math.hypot(star.x - cx, star.y - cy); !clear(star, placed) && radius < R; radius += 1.5) {
-      star.x = cx + radius * Math.cos(star.angle); star.y = cy + radius * Math.sin(star.angle)
-    }
-    placed.push(star)
-  }
-}
-
-/** The rings of a time scale, each at `radius` of its span; only those with room for it carry their label. */
-export function timeRings(radius: (back: number) => number, marks: ReadonlyArray<readonly [number, string]> = TIME_MARKS): SkyRing[] {
-  const rings = marks.map(([back, label]): SkyRing => ({ label, radius: radius(back), marked: false }))
-  let room = Infinity
-  for (const ring of [...rings].reverse()) {
-    ring.marked = room - ring.radius >= RING_LABEL
-    if (ring.marked) room = ring.radius
-  }
-  return rings
-}
-
-/** How far above or below the centre a label of the least width first fits beside the rim. */
-function clearance(R: number, width: number): number {
-  const room = Math.max(0, width / 2 - LABEL_MIN - LABEL_GAP), rim = R + RIM_MARGIN
-  return room >= rim ? 0 : Math.sqrt(rim ** 2 - room ** 2)
-}
-const quadrant = (angle: number): number => (Math.cos(angle) >= 0 ? 1 : 0) + (Math.sin(angle) >= 0 ? 2 : 0)
-const quadrantRows = (R: number, width: number, height: number): number => Math.floor((height / 2 - clearance(R, width) - 2) / LABEL_ROW)
-
-/**
- * The largest disc that leaves its corners room for every thread needing the
- * human. A wide frame stacks them down the sides; a tall one lets the disc fill
- * the width and stacks them in the corners.
- */
-export function discRadius(model: FamilyModel, angles: ReadonlyMap<MapThread, number>, width: number, height: number): number {
-  const asking = model.attention.filter(needsHuman)
-  const most = Math.max(0, ...[0, 1, 2, 3].map(corner => asking.filter(thread => quadrant(angles.get(thread)!) === corner).length))
-  let R = Math.floor(Math.min(height / 2 - 12, width / 2 - 26))
-  while (R > DISC_MIN && quadrantRows(R, width, height) < most) R -= 4
-  return R
-}
-
-/**
- * Names beside the rim, each corner of the frame stacked in the order its stars
- * come round, so leaders do not cross and labels never touch.
- */
-export function rimLabels(stars: readonly Star[], model: FamilyModel, cx: number, cy: number, R: number, width: number, height: number): SkyLabel[] {
-  const star = new Map(stars.map(item => [item.thread, item]))
-  const wanted = model.attention.filter(needsHuman).map(thread => star.get(thread)!)
-  const clear = clearance(R, width), rows = quadrantRows(R, width, height)
-  return [0, 1, 2, 3].flatMap(corner => {
-    const right = corner % 2 === 1, below = corner >= 2
-    const rimY = (item: Star): number => cy + R * Math.sin(item.angle)
-    const chosen = wanted.filter(item => quadrant(item.angle) === corner).slice(0, rows).sort((a, b) => rimY(a) - rimY(b))
-    const [lo, hi] = below ? [cy + clear + LABEL_ROW / 2, height - LABEL_ROW / 2 - 2] : [LABEL_ROW / 2 + 2, cy - clear - LABEL_ROW / 2]
-    const ys = spread(chosen.map(rimY), LABEL_ROW, lo, hi)
-    return chosen.map((item, n): SkyLabel => {
-      const y = ys[n], reach = Math.sqrt(Math.max(0, (R + RIM_MARGIN) ** 2 - (y - cy) ** 2)) + LABEL_GAP
-      const x = right ? cx + reach : cx - reach, toward = Math.atan2(y - cy, x - cx)
-      return {
-        thread: item.thread, numeral: item.thread.rank + 1, side: right ? 'right' : 'left', x, y,
-        rim: { x: cx + R * Math.cos(toward), y: cy + R * Math.sin(toward) }, width: Math.min(right ? width - x - 6 : x - 6, LABEL_MAX),
-      }
-    })
-  })
-}
-
-/** On a phone the rim carries each asking thread's number, spread around so none touch; the list below names them. */
-export function rimNumerals(stars: readonly Star[], cx: number, cy: number, R: number): SkyNumeral[] {
-  const asking = stars.filter(star => needsHuman(star.thread)).sort((a, b) => a.angle - b.angle)
-  const ring = R + 13, gap = NUMERAL / ring
-  const angles = spread(asking.map(star => star.angle), gap, -TURN / 4, 3 * TURN / 4 - gap)
-  return asking.map((star, n) => ({
-    thread: star.thread, numeral: star.thread.rank + 1, x: cx + ring * Math.cos(angles[n]), y: cy + ring * Math.sin(angles[n]),
-    rim: { x: cx + (R - 1) * Math.cos(star.angle), y: cy + (R - 1) * Math.sin(star.angle) },
-  }))
-}
-
-/**
- * The names of the root and the largest bodies the rim does not already name,
- * each laid along its orbit, above the body. A name goes whole where its arc
- * runs clear of other bodies, or it waits for a peek: never cut short.
- */
-export function orbitNames(stars: readonly Star[], named: ReadonlySet<MapThread>, model: FamilyModel, cx: number, cy: number, R: number): SkyArc[] {
-  const unit = R / 300, arcs: SkyArc[] = []
-  const reach = (star: Star): number => Math.hypot(star.x - cx, star.y - cy)
-  const big = stars.filter(star => star.thread !== model.root && !named.has(star.thread) && star.r >= ARC_BODY * unit).sort((a, b) => b.r - a.r).slice(0, ARCS)
-  const root = stars.filter(star => star.thread === model.root && !named.has(star.thread))
-  const clash = (radius: number, from: number, to: number, own: Star): boolean => stars.some(star => {
-    if (star === own) return false
-    const off = Math.abs(((star.angle - (from + to) / 2 + TURN * 1.5) % TURN) - TURN / 2)
-    return Math.abs(reach(star) - radius) < star.r + 12 && off < (to - from) / 2 + (star.r + 6) / radius
-  }) || arcs.some(arc => Math.abs(arc.radius - radius) < 18 && from < arc.to && arc.from < to)
-  for (const star of [...root, ...big]) {
-    const radius = reach(star) + star.r + 8, sweep = star.thread.name.length * CHAR / radius
-    if (radius > R - 8 || sweep > ARC_SWEEP) continue
-    const at = star.thread === model.root ? -TURN / 4 : star.angle
-    const from = at - sweep / 2, to = at + sweep / 2
-    if (clash(radius, from, to, star)) continue
-    const below = Math.sin(at) > .15, r = below ? radius + 10 : radius
-    const a = below ? to : from, b = below ? from : to
-    const d = `M${(cx + r * Math.cos(a)).toFixed(1)} ${(cy + r * Math.sin(a)).toFixed(1)}A${r.toFixed(1)} ${r.toFixed(1)} 0 ${sweep > TURN / 2 ? 1 : 0} ${below ? 0 : 1} ${(cx + r * Math.cos(b)).toFixed(1)} ${(cy + r * Math.sin(b)).toFixed(1)}`
-    arcs.push({ thread: star.thread, d, radius, from, to })
-  }
-  return arcs
-}
 
 /** How far from its body a name may sit, in rows, nearest first. */
 export const NEAR_ROWS: readonly number[] = [0, -1, 1, -2, 2, -3, 3, -4, 4, -6, 6, -8, 8]
 export interface Box { left: number; right: number; top: number; bottom: number }
 
-/** Each name beside its body, on whichever side and row first keeps clear of every other name and body, whole where it can be. */
+/** Each name beside its body, on whichever side and row first keeps clear of every other name and body, whole or not at all. */
 export function nearLabels(stars: readonly Star[], named: readonly Star[], numeral: (thread: MapThread) => number, cx: number, width: number, height: number, reserved: readonly Box[] = [], rows: (star: Star) => readonly number[] = () => NEAR_ROWS): SkyLabel[] {
   const placed: Box[] = [...reserved], labels: SkyLabel[] = []
   const touches = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
   const clear = (box: Box, own: Star): boolean => !placed.some(other => touches(box, other))
     && stars.every(star => star === own || !touches(box, { left: star.x - star.r, right: star.x + star.r, top: star.y - star.r, bottom: star.y + star.r }))
   for (const star of named) {
-    const out = star.x >= cx, wanted = Math.min(LABEL_MAX, star.thread.name.length * LABEL_CHAR + 58)
+    const out = star.x >= cx, wanted = star.thread.name.length * LABEL_CHAR + LABEL_MARKS
     const options = [out, !out].flatMap(right => {
       const x = right ? star.x + star.r + 7 : star.x - star.r - 7
-      const room = Math.min(wanted, right ? width - x - 6 : x - 6)
+      const room = Math.min(wanted, right ? width - x - MARGIN : x - MARGIN)
       return rows(star).map(row => ({ right, x, room, y: star.y + row * LABEL_ROW }))
-    }).filter(option => option.room >= Math.min(wanted, 150) && option.y >= LABEL_ROW / 2 && option.y <= height - LABEL_ROW / 2)
+    }).filter(option => option.room >= wanted && option.y >= LABEL_ROW / 2 && option.y <= height - LABEL_ROW / 2)
     const box = (option: typeof options[number]): Box => ({ left: option.right ? option.x : option.x - option.room, right: option.right ? option.x + option.room : option.x, top: option.y - LABEL_ROW / 2, bottom: option.y + LABEL_ROW / 2 })
-    const chosen = options.find(option => option.room >= wanted && clear(box(option), star)) ?? options.find(option => clear(box(option), star))
+    const chosen = options.find(option => clear(box(option), star))
     if (!chosen) continue
     placed.push(box(chosen))
     labels.push({
@@ -231,18 +109,20 @@ export function nearLabels(stars: readonly Star[], named: readonly Star[], numer
   return labels
 }
 
+/** The scale at which a body's room for its own threads fills the middle of the plate. */
+const scaleFor = (plate: Plate, star: Star): number => Math.max(FOCUS_K, FOCUS_SHARE * Math.min(plate.width, plate.height) / star.reach)
 /** The view that brings a thread to the middle of the plate, deeper for a deeper thread; the whole field for one the plate has no body for. */
 export function aim(plate: Plate, thread: MapThread): View {
   const star = plate.stars.find(item => item.thread === thread)
   if (!star) return WHOLE
-  const k = Math.min(8, FOCUS_K * FOCUS_STEP ** Math.max(0, thread.depth - 1))
+  const k = scaleFor(plate, star)
   return held({ k, x: .5 - star.x / plate.width * k, y: (plate.narrow ? FOCUS_Y_NARROW : FOCUS_Y) - star.y / plate.height * k })
 }
 /** The thread a hand has zoomed to: `kept` while it stays near the middle, else the nearest body there, once the view is deep enough to unfold it. */
 export function sighted(plate: Plate, view: View, kept: string | null): string | null {
   if (view.k < REVEAL) return null
   const off = (star: Star): number => Math.max(Math.abs(star.x / plate.width * view.k + view.x - .5), Math.abs(star.y / plate.height * view.k + view.y - .5))
-  const near = plate.stars.filter(star => isDrawn(star.thread) && off(star) <= SIGHT).sort((a, b) => off(a) - off(b))
+  const near = plate.stars.filter(star => isDrawn(star.thread) && off(star) <= SIGHT && view.k >= scaleFor(plate, star) * SIGHT_DEPTH).sort((a, b) => off(a) - off(b))
   return (near.find(star => star.thread.key === kept) ?? near[0])?.thread.key ?? null
 }
 
@@ -285,11 +165,10 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   const { k } = view
   if (k === 1) return plate
   const { width, height } = plate, dx = view.x * width, dy = view.y * height
-  const stars = plate.stars.map(star => ({ ...star, x: star.x * k + dx, y: star.y * k + dy }))
+  const stars = plate.stars.map(star => ({ ...star, x: star.x * k + dx, y: star.y * k + dy, r: Math.min(star.full, star.r * k) }))
   const cx = plate.cx * k + dx, cy = plate.cy * k + dy
   const zoomed = {
-    ...plate, k, cx, cy, R: plate.R * k, stars, labels: [], numerals: [], arcs: [],
-    rings: plate.rings.map(ring => ({ ...ring, radius: ring.radius * k })), grid: plate.grid.map(radius => radius * k),
+    ...plate, k, cx, cy, R: plate.R * k, stars, labels: [], numerals: [],
     arms: plate.arms?.map(arm => ({ ...arm, x: arm.x * k + dx, y: arm.y * k + dy })),
   }
   const deep = sight && k >= REVEAL ? sight : null
@@ -360,8 +239,7 @@ function drawStars(layer: SVGGElement, plate: Plate, model: FamilyModel): void {
   }, (group, item) => {
     const { thread, r } = item
     tagThread(group, thread)
-    if (isDrawn(thread)) optionFor(group, thread, model)
-    else for (const name of ['role', 'aria-label', 'aria-posinset', 'aria-setsize', 'aria-selected', 'tabindex']) group.removeAttribute(name)
+    optionFor(group, thread, model)
     group.toggleAttribute('data-root', thread === model.root)
     group.toggleAttribute('data-merged', thread.merged)
     group.toggleAttribute('data-focus', thread === plate.locality?.thread)
@@ -382,21 +260,6 @@ function drawStars(layer: SVGGElement, plate: Plate, model: FamilyModel): void {
 }
 
 let arcIds = 0
-/** The names along the orbits, each on its own arc. */
-function drawArcs(layer: SVGGElement, plate: Plate): void {
-  reconcile(layer, plate.arcs, arc => arc.thread.key, () => {
-    const group = svgEl('g', 'fm-arc'), path = svgEl('path'), text = svgEl('text'), along = svgEl('textPath')
-    path.id = `fm-arc-${++arcIds}`
-    along.setAttribute('href', `#${path.id}`); along.setAttribute('startOffset', '50%')
-    text.append(along); group.append(path, text)
-    return group
-  }, (group, arc) => {
-    tagThread(group, arc.thread)
-    group.querySelector('path')!.setAttribute('d', arc.d)
-    group.querySelector('textPath')!.textContent = arc.thread.name
-  })
-}
-
 function drawLabels(layer: HTMLElement, numerals: HTMLElement, plate: Plate, model: FamilyModel): void {
   reconcile(layer, plate.labels, label => label.thread.key, () => {
     const el = htmlEl('div', 'fm-label')
@@ -531,17 +394,6 @@ export function paintPlate(host: HTMLElement, plate: Plate, model: FamilyModel):
   const svg = part(frame, 'fm-sky-svg', cls => svgEl('svg', cls))
   svg.setAttribute('viewBox', `0 0 ${plate.width} ${plate.height}`)
   const field = `translate(${plate.cx.toFixed(1)}px, ${plate.cy.toFixed(1)}px) scale(${plate.k})`
-  const circle = (el: SVGCircleElement, radius: number): void => { el.setAttribute('r', (radius / plate.k).toFixed(1)) }
-  const grid = part(svg, 'fm-grid', cls => svgEl('g', cls)), rings = part(svg, 'fm-rings', cls => svgEl('g', cls))
-  grid.style.transform = rings.style.transform = field
-  reconcile(grid, plate.grid.map((radius, n) => ({ radius, n })), ring => String(ring.n), () => svgEl('circle'), (el, ring) => circle(el, ring.radius))
-  reconcile(rings, plate.rings, ring => ring.label, () => svgEl('circle'), (el, ring) => circle(el, ring.radius))
-  reconcile(part(svg, 'fm-ring-names', cls => svgEl('g', cls)), plate.rings.filter(ring => ring.marked), ring => ring.label, ring => {
-    const text = svgEl('text'); text.textContent = ring.label
-    return text
-  }, (text, ring) => {
-    text.style.transform = `translate(${(plate.cx + ring.radius * Math.cos(plate.scale)).toFixed(1)}px, ${(plate.cy + ring.radius * Math.sin(plate.scale) + 4).toFixed(1)}px)`
-  })
   if (plate.line) {
     const line = part(svg, 'fm-line', cls => svgEl('g', cls))
     line.style.transform = field
@@ -558,7 +410,6 @@ export function paintPlate(host: HTMLElement, plate: Plate, model: FamilyModel):
   drawLeaders(part(svg, 'fm-leaders', cls => svgEl('g', cls)), plate)
   drawHeld(svg, part(frame, 'fm-helds', cls => htmlEl('div', cls)), plate, model)
   drawStars(part(svg, 'fm-stars', cls => svgEl('g', cls)), plate, model)
-  drawArcs(part(svg, 'fm-arcs', cls => svgEl('g', cls)), plate)
   drawLabels(part(frame, 'fm-labels', cls => htmlEl('div', cls)), part(frame, 'fm-numerals', cls => htmlEl('div', cls)), plate, model)
   drawArmNames(part(frame, 'fm-arm-names', cls => htmlEl('div', cls)), plate)
   drawLedger(part(host, 'fm-ledger', cls => htmlEl('div', cls)), model, plate.narrow)

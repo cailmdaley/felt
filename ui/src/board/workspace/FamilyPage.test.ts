@@ -6,7 +6,7 @@ import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { FamilyFeeds, MapPlace } from './FamilyPage.js'
 import { shouldForwardDocumentKey } from '../keymap.js'
-import { sky } from '../family/sky.js'
+import { radial } from '../family/radial.js'
 import { disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { FamilyPage } from './FamilyPage.js'
 
@@ -45,41 +45,38 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.res
 
 it('draws the sky first, counts what asks, and leads the peek with the most urgent thread', () => {
   const { page: family } = page()
-  expect(family.el.querySelector('.family-map-sky')).not.toBeNull()
+  expect(family.el.querySelector('.family-map-radial')).not.toBeNull()
   expect(family.el.querySelector('.ws-family-counts')?.textContent).toBe('1 question1 your turn')
   expect(peekName(family)).toBe('Asked')
   expect(family.el.querySelector('.ws-family-peek-note')?.textContent).toBe('Which one?')
   expect(family.el.querySelector('.ws-family-all-counts')?.textContent).toBe('1 draft')
 })
-it('cycles the roster with its key and its buttons, and remembers the choice', () => {
+it('toggles the two drawings with its key and its buttons, and remembers the choice', () => {
   const { page: family } = page()
   const pressed = (): string | undefined => family.el.querySelector<HTMLElement>('.ws-family-drawing[aria-pressed="true"]')?.dataset.drawing
-  expect(pressed()).toBe('sky')
+  expect(pressed()).toBe('radial')
   family.cycle()
-  expect(pressed()).toBe('rings')
-  expect(family.el.querySelector('.family-map-rings')).not.toBeNull()
-  expect(family.el.querySelector('.family-map-sky')).toBeNull()
-  expect(localStorage.getItem('shuttle.family.drawing')).toBe('rings')
-  family.el.querySelector<HTMLElement>('[data-drawing="delta"]')!.click()
-  expect(localStorage.getItem('shuttle.family.drawing')).toBe('delta')
-  expect(pressed()).toBe('delta')
-  family.cycle()
-  expect(pressed()).toBe('sky')
+  expect(pressed()).toBe('cloth')
+  expect(family.el.querySelector('.family-map-cloth')).not.toBeNull()
+  expect(family.el.querySelector('.family-map-radial')).toBeNull()
+  expect(localStorage.getItem('shuttle.family.drawing')).toBe('cloth')
+  family.el.querySelector<HTMLElement>('[data-drawing="radial"]')!.click()
+  expect(localStorage.getItem('shuttle.family.drawing')).toBe('radial')
   family.cycle()
   const { page: next } = page()
-  expect(next.el.querySelector('.family-map-rings')).not.toBeNull()
+  expect(next.el.querySelector('.family-map-cloth')).not.toBeNull()
 })
-it('falls back to the sky when storage refuses or holds a retired drawing', () => {
+it('falls back to the radial when storage refuses or holds a retired drawing', () => {
   localStorage.setItem('shuttle.family.drawing', 'retired')
-  expect(page().page.el.querySelector('.family-map-sky')).not.toBeNull()
+  expect(page().page.el.querySelector('.family-map-radial')).not.toBeNull()
   vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('denied') })
   vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('denied') })
   const { page: family } = page()
-  expect(family.el.querySelector('.family-map-sky')).not.toBeNull()
+  expect(family.el.querySelector('.family-map-radial')).not.toBeNull()
   family.cycle()
-  expect(family.el.querySelector('.family-map-rings')).not.toBeNull()
+  expect(family.el.querySelector('.family-map-cloth')).not.toBeNull()
 })
-it.each(['sky', 'rings', 'spiral', 'cloth', 'delta'])('walks the %s by arrow keys in attention order, stopping at the ends, and comes to a thread on Enter', drawing => {
+it.each(['radial', 'cloth'])('walks the %s by arrow keys in attention order, stopping at the ends, and comes to a thread on Enter', drawing => {
   localStorage.setItem('shuttle.family.drawing', drawing)
   const { page: family, open, place } = page()
   family.focus()
@@ -100,12 +97,11 @@ it.each(['sky', 'rings', 'spiral', 'cloth', 'delta'])('walks the %s by arrow key
   key_(document.activeElement!, 'Home')
   key_(document.activeElement!, 'Enter')
   expect(peekName(family)).toBe('Asked')
-  if (drawing === 'delta') expect(place.focus).toBeNull()
-  else expect(place.focus).toContain('hub/q')
+  expect(place.focus).toContain('hub/q')
   expect(open).not.toHaveBeenCalled()
 })
-it('arranges the spiral by dragging, per family, with order following and a way back', () => {
-  stored.set('shuttle.family.drawing', 'spiral')
+it('arranges the arms by dragging, per family, with a way back', () => {
+  stored.set('shuttle.family.drawing', 'radial')
   const { page: family, open } = page()
   const key = (): string => [...stored.keys()].find(name => name.startsWith('shuttle.family.spiral:'))!
   const sequence = (): string[] => [...family.el.querySelectorAll<SVGGElement>('.fm-star')].sort((a, b) => Number(a.getAttribute('aria-posinset')) - Number(b.getAttribute('aria-posinset'))).map(star => star.getAttribute('aria-label')!.split(',')[0])
@@ -123,10 +119,6 @@ it('arranges the spiral by dragging, per family, with order following and a way 
   expect(JSON.parse(stored.get(key())!)).toEqual({ [option(family, 'Idle').getAttribute('data-thread')!]: { arm: 'todo', slot: 0, standing: 'turn' } })
   expect(option(family, 'Idle').hasAttribute('data-pinned')).toBe(true)
   family.focus()
-  key_(document.activeElement!, 'Home')
-  expect(peekName(family)).toBe('Idle')
-  key_(document.activeElement!, 'ArrowDown')
-  expect(peekName(family)).toBe('Asked')
   const reset = family.el.querySelector<HTMLButtonElement>('.fm-unpin')!
   expect(reset.hidden).toBe(false)
   reset.click()
@@ -180,8 +172,8 @@ it('keeps the selection and each mark\'s element across a repaint, so a moved th
   const { page: family } = page()
   pointer(option(family, 'Idle'), 'pointerover', 'mouse')
   const mark = option(family, 'Idle'), before = mark.style.transform
-  const moved = { ...idle, lastActivityAt: now + hour - 60_000 }
-  family.update(root, new ThreadIndex([root, asked, moved, done, draft]), now + hour)
+  const newcomer = card({ id: 'hub/n', name: 'Newcomer', orchestrator: 'hub', status: 'active', createdAt: when(1), ask: { text: 'Now?', at: when(0) } })
+  family.update(root, new ThreadIndex([root, newcomer, asked, idle, done, draft]), now + hour)
   expect(option(family, 'Idle')).toBe(mark)
   expect(mark.style.transform).not.toBe(before)
   expect(peekName(family)).toBe('Idle')
@@ -220,13 +212,13 @@ it('keeps every thread reachable in the fold, with its folds, pin and links', ()
   expect(asks.mock.results[0].value).toEqual({ card: expect.objectContaining({ id: 'hub' }), pinned: true })
 })
 it('drops the old drawing when another page changed it, its gestures with it', () => {
-  stored.set('shuttle.family.drawing', 'spiral')
+  stored.set('shuttle.family.drawing', 'radial')
   const { page: family } = page()
   const stage = family.el.querySelector('[role="listbox"]')!
   stored.set('shuttle.family.drawing', 'cloth')
   family.update(root, new ThreadIndex(cards), now + hour)
   expect(stage.className.split(' ')).toContain('family-map-cloth')
-  expect(stage.className).not.toContain('family-map-spiral')
+  expect(stage.className).not.toContain('family-map-radial')
   expect(stage.querySelector('.fm-sky-plate')).toBeNull()
 })
 it('reads, repaints and animates nothing parked, and catches up when selected again', () => {
@@ -254,21 +246,6 @@ it('falls back to the first thread when the selected one goes aside, keeping a f
   key_(held, 'Enter')
   expect(place.focus).toContain('hub/q')
 })
-it('leaves a star the map does not draw unselectable, by pointer or first tap', () => {
-  stored.set('shuttle.family.drawing', 'rings')
-  const { page: family } = page()
-  const star = family.el.querySelector<SVGGElement>('.fm-star[data-standing="aside"]')!
-  expect(star.hasAttribute('role')).toBe(false)
-  pointer(star, 'pointerover', 'mouse')
-  expect(peekName(family)).toBe('Asked')
-  expect(family.el.querySelector('[role="option"][tabindex="0"]')).not.toBeNull()
-  const walked = option(family, 'Idle')
-  pointer(walked, 'pointerover', 'mouse')
-  const rested = card({ ...idle, status: 'open', effectiveHorizon: 'stashed', workerState: undefined, runtimePhase: undefined })
-  family.update(root, new ThreadIndex([root, asked, rested, done, draft]), now)
-  expect(walked.hasAttribute('role')).toBe(false)
-  expect(walked.hasAttribute('tabindex')).toBe(false)
-})
 it('paints once a resize settles, however many frames it crossed', () => {
   vi.useFakeTimers()
   let fire = (): void => {}
@@ -279,7 +256,7 @@ it('paints once a resize settles, however many frames it crossed', () => {
   let width = 900
   Object.defineProperty(stage, 'clientWidth', { get: () => width }); Object.defineProperty(stage, 'clientHeight', { get: () => 700 })
   fire()
-  const paints = vi.spyOn(sky, 'draw')
+  const paints = vi.spyOn(radial, 'draw')
   for (width = 800; width > 600; width -= 20) { fire(); vi.advanceTimersByTime(16) }
   expect(paints).not.toHaveBeenCalled()
   vi.advanceTimersByTime(200)
@@ -291,7 +268,7 @@ it('paints once a resize settles, however many frames it crossed', () => {
   vi.useRealTimers()
 })
 it('leaves keys on its controls and modified keys alone', () => {
-  stored.set('shuttle.family.drawing', 'spiral')
+  stored.set('shuttle.family.drawing', 'radial')
   const { page: family, open } = page()
   const pin = family.el.querySelector<HTMLButtonElement>('.fm-unpin')!
   expect(key_(pin, 'Enter').defaultPrevented).toBe(false)
@@ -334,7 +311,7 @@ const dragStar = (family: FamilyPage, from: string, to: string): void => {
   window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, ...end }))
 }
 it('clears the spiral\'s pins even after storage refused one', async () => {
-  stored.set('shuttle.family.drawing', 'spiral')
+  stored.set('shuttle.family.drawing', 'radial')
   const { page: family } = page()
   dragStar(family, 'Idle', 'Asked')
   const key = spiralPins()!
@@ -346,7 +323,7 @@ it('clears the spiral\'s pins even after storage refused one', async () => {
   expect(family.el.querySelector<HTMLButtonElement>('.fm-unpin')!.hidden).toBe(true)
 })
 it('takes a thread\'s pin away when it finishes', () => {
-  stored.set('shuttle.family.drawing', 'spiral')
+  stored.set('shuttle.family.drawing', 'radial')
   const { page: family } = page()
   dragStar(family, 'Idle', 'Asked')
   const finished = { ...idle, status: 'closed', tempered: true, closedAt: when(1), workerState: undefined, runtimePhase: undefined }
@@ -355,7 +332,7 @@ it('takes a thread\'s pin away when it finishes', () => {
   expect(family.el.querySelector('[data-pinned]')).toBeNull()
 })
 it('draws a drag with the newest model, not the one it began on', () => {
-  stored.set('shuttle.family.drawing', 'spiral')
+  stored.set('shuttle.family.drawing', 'radial')
   const { page: family } = page()
   const start = option(family, 'Idle'), box = { clientX: 0, clientY: 0 }
   start.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, ...box }))
@@ -390,7 +367,7 @@ describe('coming to a thread', () => {
   const settled = async (): Promise<void> => { await Promise.resolve(); await Promise.resolve() }
   const named = (family: FamilyPage): string[] => [...family.el.querySelectorAll('.fm-held-name')].map(el => el.textContent!)
 
-  it.each(['sky', 'rings', 'spiral'])('flies the %s to the thread and opens its conversation, staying on the page', async drawing => {
+  it.each(['radial'])('flies the %s to the thread and opens its conversation, staying on the page', async drawing => {
     stored.set('shuttle.family.drawing', drawing)
     const { page: family, open, converse, place } = page(vi.fn(), holding, undefined, tree)
     const stage = stageOf(family)

@@ -339,9 +339,12 @@ export class FamilyPage {
     const kept = this.selected ? model.threads.get(this.selected) : undefined
     const landing = model.current !== model.root.key ? model.threads.get(model.current ?? '') : undefined
     this.selected = null
-    this.select([kept, this.focused, landing].find(thread => thread && isDrawn(thread))?.key ?? model.order[0].key)
+    const walk = this.walk(model)
+    this.select([kept, this.focused, landing].find(thread => thread && walk.includes(thread))?.key ?? walk[0].key)
     if (this.refocus) { this.refocus = false; this.focus() }
   }
+  /** The threads the drawing shows, in the arrow keys' order. */
+  private walk(model: FamilyModel): MapThread[] { return this.drawing.sequence?.(model, this.place.focus) ?? model.order }
   /** The field alone, as the view or the focus moves. */
   private drawField(): void {
     const model = this.model
@@ -423,7 +426,6 @@ export class FamilyPage {
   }
   /** A click or Enter comes to a thread and moves Rex to it; a finger comes to it first and opens the conversation on its second tap. */
   private activate(thread: MapThread): void {
-    if (!isDrawn(thread)) { this.open(thread.card); return }
     if (this.touch && this.peeked !== thread.key) {
       this.peeked = thread.key
       this.come(thread)
@@ -440,7 +442,7 @@ export class FamilyPage {
   private key(event: KeyboardEvent): void {
     const model = this.model
     if (!model || !(event.target as Element).matches('[role="option"]') || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
-    const order = this.drawing.sequence?.(model) ?? model.order
+    const order = this.walk(model)
     const at = order.findIndex(thread => thread.key === this.selected)
     const step = STEPS[event.key]
     let next: MapThread | undefined
