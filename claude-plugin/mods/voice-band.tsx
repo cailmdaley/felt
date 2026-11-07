@@ -1,9 +1,9 @@
 // The Shuttle line, read from Shuttle's daemon: on the prompt's hint row
 // (placement `below`) or as a band above the prompt (`above`).
 //
-//   ☰  ⌗  ⧉²          🔊 12 words… ✕
-//   ☰  ⌗  ⧉²          🔈 → voice-modes · 8 words… ✕
-//   ☰  ⌗  ⧉²          🔇
+//   ☰ ⌗ ⧉² 🔊 12 words… ✕
+//   ☰ ⌗ ⧉² 🔈 → voice-modes · 8 words… ✕
+//   ☰ ⌗ ⧉² 🔇
 //
 // Pins at the left open this session's constitution, tapestry and sent files
 // on the board. The audio glyph says what the mic hears: 🔊 sound arriving,
@@ -93,7 +93,7 @@ async function post($: EngineInterface, path: string, body?: object): Promise<vo
 function line($: EngineInterface, ui: { Box: any; Button: any; Text: any }) {
   const { Box, Button, Text } = ui
   const pin = (page: Page, label: string) => (
-    <Box key={page} marginRight={2}>
+    <Box key={page} marginRight={1}>
       <Button key={page} plain dimColor label={label} onPress={() => post($, '/api/v1/board/open', { fiber_id: uid(), page })} />
     </Box>
   )
@@ -153,7 +153,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="row" width={e.props.bodyColumns}>
         {drawn.pinned}
-        <Box flexGrow={1} justifyContent="center">{drawn.audio}</Box>
+        {drawn.audio}
       </Box>
     )
   })

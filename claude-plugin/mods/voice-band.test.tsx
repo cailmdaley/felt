@@ -8,7 +8,7 @@ const BAND = {
   props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
 } as const
 
-function daemon(on: any, voice: object, { files = 0, tapestry = false } = {}) {
+function daemon(on: any, voice: object, { files = 0, tapestry = false, fiber = true } = {}) {
   const posts: { url: string; body: string }[] = []
   on('http.fetch', (_: any, e: any) => {
     if (e.init?.method === 'POST') {
@@ -21,7 +21,7 @@ function daemon(on: any, voice: object, { files = 0, tapestry = false } = {}) {
   on('fs.read', () => ({ value: `---\nid: ${SELF}\nname: Holistic hark\n---\n` }))
   on('fs.exists', (_: any, e: any) => ({ value: tapestry && e.path === `${DIR}/tapestry.html` }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
-  mock.env(on, { SHUTTLE_FIBER_PATH: `${DIR}/holistic-hark.md` })
+  mock.env(on, fiber ? { SHUTTLE_FIBER_PATH: `${DIR}/holistic-hark.md` } : {})
   const clock = mock.clock(on)
   return { posts, clock }
 }
@@ -130,6 +130,45 @@ const HINT = {
   props: { isDraft: false, isWorking: false, hint: '(shift+tab to cycle)' },
   viewport: { columns: 80, rows: 30 },
 } as const
+
+for (const [placement, options, request] of [
+  ['above', ABOVE, BAND],
+  ['below', BELOW, HINT],
+] as const) {
+  for (const [pins, expected] of [
+    [{ files: 2, tapestry: true }, ['constitution', 'tapestry', 'files']],
+    [{ files: 2 }, ['constitution', 'files']],
+    [{}, ['constitution']],
+  ] as const) {
+    test(`${placement}: ${expected.length} pin${expected.length === 1 ? '' : 's'} and audio form a left-hugged cluster`, options, async ($, on) => {
+      const { clock } = daemon(on, { ...HERE, pending_words: 12, level: { mic: -20 } }, pins)
+      await start($)
+      await clock.advance(0)
+      const ui = await $.ui.mount({ ...request, surface: 'terminal' } as any)
+      const row = await ui.find({ type: 'Box' })
+      expect(row?.props.flexDirection).toBe('row')
+      expect(row?.children.length).toBe(expected.length + 1)
+      for (const [i, key] of expected.entries()) {
+        expect(row?.children[i].props).toEqual({ key, marginRight: 1 })
+      }
+      const audio = row?.children[expected.length]
+      expect(audio?.props).toEqual({ flexDirection: 'row' })
+      expect(audio?.children.map((child: any) => child.props?.label ?? child.children?.[0])).toEqual(['🔊', ' 12 words…', ' ✕'])
+      await ui.unmount()
+    })
+  }
+
+  test(`${placement}: audio starts at the left without pins`, options, async ($, on) => {
+    daemon(on, HERE, { fiber: false })
+    await start($)
+    const ui = await $.ui.mount({ ...request, surface: 'terminal' } as any)
+    const row = await ui.find({ type: 'Box' })
+    expect(row?.children.length).toBe(1)
+    expect(row?.children[0].props).toEqual({ flexDirection: 'row' })
+    expect(row?.children[0].children[0].props.label).toBe('🔈')
+    await ui.unmount()
+  })
+}
 
 test('below, the line takes the hint text\'s place', BELOW, async ($, on) => {
   daemon(on, { ...HERE, level: { mic: -20 } })

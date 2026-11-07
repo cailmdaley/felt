@@ -10,9 +10,9 @@ One dim line in every Claude session, read from the Shuttle daemon: pins at
 the left, the mic's state beside them.
 
 ```
-☰  ⌗  ⧉²          🔊 12 words… ✕
-☰  ⌗  ⧉²          🔈 → voice-modes · 8 words… ✕
-☰  ⌗  ⧉²          🔇
+☰ ⌗ ⧉² 🔊 12 words… ✕
+☰ ⌗ ⧉² 🔈 → voice-modes · 8 words… ✕
+☰ ⌗ ⧉² 🔇
 ```
 
 **Pins**, in a Shuttle worker's session: `☰` its constitution, `⌗` its
@@ -43,8 +43,8 @@ With no pins and no audio the line is not drawn.
 **Placement** is the plugin option `placement` (`/config`, row "Voice line
 placement", or `pluginConfigs` in settings):
 
-- `above` (default): its own band above the prompt, the audio centred in the
-  room the pins leave. Claude Code draws its `[-]` collapse control beside it
+- `above` (default): its own band above the prompt, with the audio immediately
+  after the pins. Claude Code draws its `[-]` collapse control beside it
   (`ctrl+x ctrl+a`); no mod can remove it.
 - `below`: on the hint row under the prompt, in place of the engine's hint
   text (`(shift+tab to cycle)`, `esc to interrupt`), costing no line. The
