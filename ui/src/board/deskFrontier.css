@@ -7,16 +7,26 @@
 .kbn-count-working { color: var(--kbn-agent); }
 .kbn-count-needs { color: var(--kbn-owed); }
 .kbn-row-elapsed { flex: none; font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--kbn-ink-muted); white-space: nowrap; }
-/* The others asking the same thing: one indented line each, under the title. */
-.kbn-family-asks { grid-column: 2 / -1; flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; gap: 1px; margin-top: 3px; padding-left: 2px; border-left: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent); }
-.kbn-family-ask { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 6px; }
-.kbn-family-ask .constitution-state-dot { transform: scale(0.8); }
-.kbn-family-ask-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font: inherit; font-size: var(--type-meta); line-height: var(--leading-prose); color: var(--kbn-ink-soft); background: transparent; border: 0; padding: 0; cursor: pointer; }
-.kbn-family-ask-name:hover { color: var(--kbn-ink); }
-.kbn-family-more { align-self: flex-start; font: inherit; font-size: var(--type-meta); color: var(--kbn-ink-muted); background: transparent; border: 0; padding: 0 0 0 6px; cursor: pointer; }
-.kbn-family-more:hover { color: var(--kbn-ink); }
-.kbn-thread-count:focus-visible, .kbn-card-crumb button:focus-visible, .kbn-family-ask-name:focus-visible, .kbn-family-more:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+/* The quiet count of a family that asks nothing, and the caret every family's count carries. */
+.kbn-count-quiet { font-weight: 400; color: var(--kbn-ink-muted); }
+.kbn-thread-caret { display: inline-block; width: 0.9em; margin-left: 3px; color: var(--kbn-ink-muted); text-align: center; transition: transform 120ms; }
+.kbn-thread-caret::before { content: '›'; }
+.kbn-thread-count[aria-expanded='true'] .kbn-thread-caret { transform: rotate(90deg); }
+.kbn-thread-count:hover .kbn-thread-caret { color: var(--kbn-ink); }
+/* The family's threads, nested under the title. */
+.kbn-desk-threads { grid-column: 2 / -1; flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; margin: 3px 0 0; padding-left: 2px; border-left: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent); }
+.kbn-desk-threads[hidden] { display: none; }
+.kbn-desk-threads .ws-tree-state { display: none; }
+.kbn-desk-threads .kbn-thread-row { box-sizing: border-box; gap: 6px; padding: 2px 6px 2px calc(6px + var(--ws-thread-depth, 0) * var(--ws-thread-indent)); line-height: var(--leading-prose); border-radius: 3px; }
+.kbn-desk-threads .kbn-thread-row .constitution-state-dot { transform: scale(0.8); }
+.kbn-desk-threads .kbn-thread-name { color: var(--kbn-ink-soft); }
+.kbn-desk-threads .kbn-thread-row:hover .kbn-thread-name, .kbn-desk-threads .kbn-thread-row.kbn-key-selected .kbn-thread-name { color: var(--kbn-ink); }
+.kbn-desk-threads .kbn-thread-row.kbn-key-selected { background: var(--kbn-plate); outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
+.kbn-desk-threads .kbn-thread-row.ws-thread-current .kbn-thread-name { color: var(--kbn-ink); font-weight: 500; }
+.kbn-desk-threads .ws-tree-shelf > summary { padding: 2px 6px; }
+.kbn-desk-threads .ws-tree-shelf > summary::before { display: inline-block; width: 0.9em; text-align: center; transition: transform 120ms; }
+.kbn-thread-count:focus-visible, .kbn-card-crumb button:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-card-crumb-root { max-width: 5em; }
-  .kbn-family-ask-name, .kbn-family-more { min-height: 30px; font-size: var(--type-note); }
+  .kbn-desk-threads .kbn-thread-row { min-height: 32px; font-size: var(--type-note); }
 }

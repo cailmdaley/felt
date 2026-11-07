@@ -23,18 +23,36 @@ describe('a family row', () => {
     const count = end.querySelector<HTMLButtonElement>('.kbn-thread-count')!
     expect(count.querySelector('.kbn-count-working')?.textContent).toBe('1 working')
     expect(count.querySelector('.kbn-count-needs')).toBeNull()
-    count.click(); expect(open).toHaveBeenLastCalledWith(root, true)
-    expect(host.querySelector('.kbn-family-asks')).toBeNull()
+    const threads = host.querySelector<HTMLElement>('.kbn-desk-threads')!
+    expect(threads.hidden).toBe(true)
+    count.click()
+    expect(count.getAttribute('aria-expanded')).toBe('true')
+    expect([...threads.querySelectorAll('.kbn-thread-name')].map(n => n.textContent)).toEqual(['Analysis', 'Choose cut', quiet.name])
+    expect(threads.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('Choose cut')
+    threads.querySelector<HTMLElement>('.kbn-thread-row')!.click(); expect(open).toHaveBeenLastCalledWith(work)
+    count.click()
+    expect(threads.hidden).toBe(true)
   })
   it('a node that is not its family\'s row draws only its crumb', () => {
     const host = document.createElement('div'), open = vi.fn()
     installFrontierDetails(host, host, work, new ThreadIndex([root, work, ask, quiet]), open)
     expect(host.textContent).toBe('Quiet chair /\u00a0')
   })
-  it('never draws a tail for quiet kin', () => {
+  it('a family that asks nothing names its threads quietly and lists none until opened', () => {
     const lone = document.createElement('div')
     installFrontierDetails(lone, lone, work, new ThreadIndex([work, quiet]), vi.fn())
-    expect(lone.querySelector('.kbn-thread-count')).toBeNull()
+    expect(lone.querySelector('.kbn-count-quiet')?.textContent).toBe('1 thread')
+    expect(lone.querySelector<HTMLElement>('.kbn-desk-threads')!.hidden).toBe(true)
+  })
+  it('archived threads stay behind a folded shelf of their own', () => {
+    const done = card({ id: 'root/work/done', name: 'Done', orchestrator: 'root/work', status: 'closed', tempered: true })
+    const lone = document.createElement('div')
+    installFrontierDetails(lone, lone, work, new ThreadIndex([work, done]), vi.fn())
+    expect(lone.querySelector('.kbn-count-quiet')?.textContent).toBe('1 archived')
+    lone.querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
+    const shelf = lone.querySelector<HTMLDetailsElement>('.kbn-desk-threads details[data-thread-details="archived"]')!
+    expect(shelf.open).toBe(false)
+    expect(shelf.querySelector('summary')?.textContent).toBe('1 archived')
   })
   it('renders missing ancestors as plain path text, not an orphan label or guessed link', () => {
     const orphan = card({ id: 'missing/folder/work', orchestrator: 'missing-uid', status: 'active' })
@@ -43,14 +61,14 @@ describe('a family row', () => {
     expect(host.textContent).toBe('missing / … /\u00a0')
     expect(host.querySelector('button')).toBeNull()
   })
-  it('the others asking the same thing are indented sub-lines that open themselves', () => {
+  it('folded, the family shows every thread that needs the human, nested under its ancestors, each opening itself', () => {
     const second = card({ id: 'root/second', name: 'Second ask', orchestrator: 'root', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
+    const deep = card({ id: 'root/work/deep', name: 'Deep ask', orchestrator: 'root/work', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
     const host = document.createElement('div'), open = vi.fn()
-    installFrontierDetails(host, host, ask, new ThreadIndex([root, work, ask, second]), open)
-    const lines = [...host.querySelectorAll<HTMLButtonElement>('.kbn-family-ask-name')]
-    expect(lines.map(l => l.textContent)).toEqual(['Second ask'])
-    lines[0].click(); expect(open).toHaveBeenLastCalledWith(second)
-    expect(host.querySelector('.kbn-family-more')).toBeNull()
+    installFrontierDetails(host, host, ask, new ThreadIndex([root, work, ask, second, deep, quiet]), open)
+    const rows = [...host.querySelectorAll<HTMLElement>('.kbn-desk-threads .kbn-thread-row')]
+    expect(rows.map(r => [r.querySelector('.kbn-thread-name')!.textContent, r.parentElement === r.closest('.kbn-desk-threads') && r.dataset.depth])).toEqual([['Analysis', '0'], ['Deep ask', '1'], ['Second ask', '0']])
+    rows[2].click(); expect(open).toHaveBeenLastCalledWith(second)
   })
   for (const mobile of [false, true]) it(`draws the same row on ${mobile ? 'phone' : 'desktop'}`, () => {
     vi.stubGlobal('matchMedia', () => ({ matches: mobile }))
@@ -64,7 +82,9 @@ describe('a family row', () => {
       expect(section.querySelector('.kbn-card-name')?.textContent).toBe('Quiet chair / … /\u00a0Choose cut')
       expect(section.querySelector('.kbn-count-working')?.textContent).toBe('1 working')
       section.querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
-      expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'root' }), true)
+      expect([...section.querySelectorAll('.kbn-desk-threads .kbn-thread-name')].map(n => n.textContent)).toEqual(['Analysis', 'Choose cut', quiet.name])
+      expect(open).not.toHaveBeenCalled()
+      section.querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
     } finally { vi.unstubAllGlobals() }
   })
 })

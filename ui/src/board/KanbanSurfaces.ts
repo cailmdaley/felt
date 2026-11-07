@@ -1601,7 +1601,7 @@ export class KanbanSurfaceRenderer {
     el.addEventListener('keydown', event => {
       if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
       // A sub-line names another node; the row's menu is not its menu.
-      if ((event.target as HTMLElement).closest('.kbn-family-asks')) return
+      if ((event.target as HTMLElement).closest('.kbn-desk-threads')) return
       event.preventDefault(); event.stopPropagation()
       this.openRowMenu(el, card, stale)
     })

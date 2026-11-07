@@ -41,7 +41,7 @@ it('keeps a waiting descendant visible beneath its archived ancestor', () => {
 it('opens a disclosure when the current thread becomes archived without navigating', () => {
   const root = card({ id: 'root' }), current = card({ id: 'child', orchestrator: 'root', status: 'active' })
   const index = new ThreadIndex([root, { ...current, status: 'closed', tempered: true }]), container = document.createElement('div')
-  container.append(...renderThreadTree(index, root, current, c => threadRow(c, index, vi.fn()), new Map()))
+  container.append(...renderThreadTree(index, root, current, c => threadRow(c, index, vi.fn())))
   const fold = container.querySelector<HTMLDetailsElement>('details')!
   expect(fold.open).toBe(true)
   expect(fold.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('child')

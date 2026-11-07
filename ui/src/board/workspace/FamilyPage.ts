@@ -430,7 +430,7 @@ export class FamilyPage {
       pin.hidden = threadKey(thread) !== threadKey(current) && pin.getAttribute('aria-pressed') !== 'true'
       pin.tabIndex = pin.hidden ? -1 : 0
       return item
-    }, this.openFolds))
+    }, { open: this.openFolds }))
     if (focus) [...this.allBody.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(node => node.dataset.threadFocus === focus)?.focus({ preventScroll: true })
   }
   private select(key: string): void {

@@ -138,14 +138,14 @@ describe('Desk row menu', () => {
     expect(document.querySelector('[data-card-uid="live"] .ws-verdict-undo')?.textContent).toMatch(/undo/)
     press('z')
   })
-  it('a sub-line opens neither the row menu nor the browser menu', () => {
+  it('a thread under a row opens neither the row menu nor the browser menu', () => {
     const waiting = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const }
     const root = card({ id: 'family', uid: 'family', shuttleKind: 'oneshot', ...waiting })
     const kids = ['a', 'b'].map(k => card({ id: `family/${k}`, uid: `family-${k}`, orchestrator: 'family', ...waiting }))
     draw(response({ now: { drafts: [], inFlight: [root], awaitingReview: [] }, threads: kids }))
-    const line = document.querySelector<HTMLElement>('.kbn-family-ask')!
+    const line = document.querySelector<HTMLElement>('.kbn-desk-threads .kbn-thread-row')!
     expect(line).not.toBeNull()
-    const name = line.querySelector<HTMLButtonElement>('.kbn-family-ask-name')!
+    const name = line
     name.focus()
     expect(press('F10', { shiftKey: true }, name).defaultPrevented).toBe(false)
     expect(menu()).toBeNull()
