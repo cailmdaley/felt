@@ -2576,12 +2576,18 @@ defmodule Shuttle.MeetingTest do
   test "every meeting target preempts voice before launching and voice returns after it ends", %{
     hark_dir: dir
   } do
+    Env.put_env("SHUTTLE_VOICE_FILE", Path.join(dir, "voice.json"))
+
     for target <- [:record, :capture, {:fiber, "project/fiber"}] do
       set_voice_handler(dir)
+      :ok = Shuttle.Voice.Config.enable(true)
       assert {:ok, %{meeting: %{launch: voice}}} = Meeting.reconcile_voice(true)
 
       assert {:ok, %{meeting: %{kind: "meeting", launch: meeting}}} =
                Meeting.start(%{"mode" => "call"}, target, "meeting", nil)
+
+      # One mode at a time: following is switched off, not left waiting underneath.
+      assert {:ok, %{"enabled" => false}} = Shuttle.Voice.Config.read()
 
       refute meeting == voice
       calls = Shuttle.Test.MeetingRunner.calls()

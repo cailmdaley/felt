@@ -1140,6 +1140,98 @@ defmodule Shuttle.Meeting.TranscriptRelayTest do
     refute_receive {:delivery, _}, 20
   end
 
+  test "discard drops voice words not yet sent, and the utterance in progress, but not the outbox",
+       c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    record(c.path, "2026-11-06T10:00:01Z", "already sending send")
+    record(c.path, "2026-11-06T10:00:02Z", "a private thought")
+    parent = self()
+
+    deliver = fn message ->
+      send(parent, {:attempt, self(), message})
+
+      receive do
+        :accept -> {200, %{delivered: true}}
+      end
+    end
+
+    start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
+    assert_receive {:attempt, first, %{text: "me: already sending send\n"}}, 1_000
+
+    assert %{pending: %{text: "me a private thought"}, pending_words: 4} = poll(c)
+
+    assert {:ok, 4} = TranscriptRelay.discard("launch", server: c.name)
+    assert %{pending: nil, pending_words: 0} = TranscriptRelay.status("launch", server: c.name)
+
+    assert [%{"text" => "me: already sending send\n"}] =
+             :sys.get_state(worker(c)).config["outbox"]
+
+    assert File.read!(Path.rootname(c.path) <> ".jsonl") =~ "a private thought"
+
+    # Begun before the discard, finished after: dropped. Begun after: a fresh buffer.
+    now = DateTime.utc_now()
+    record(c.path, now |> DateTime.add(-1) |> DateTime.to_iso8601(), "the rest of it")
+    record(c.path, now |> DateTime.add(1) |> DateTime.to_iso8601(), "something new")
+    assert %{pending: %{text: "me something new"}, pending_words: 3} = poll(c)
+
+    send(first, :accept)
+    sync_tasks(c)
+    assert {:ok, 0} = TranscriptRelay.discard("other", server: c.name)
+  end
+
+  test "discard empties a meeting's buffer and later lines start a fresh one", c do
+    File.write!(c.path, "10:00:01 me some words\n10:00:02 S2 more words\n")
+    start_monitor(c)
+    assert %{pending_words: 6} = poll(c)
+    assert {:ok, 6} = TranscriptRelay.discard("launch", server: c.name)
+    assert %{pending: nil, pending_words: 0} = poll(c)
+    File.write!(c.path, "10:00:03 me after\n", [:append])
+    assert %{pending: %{text: "10:00:03 me after"}, pending_words: 2} = poll(c)
+    Agent.update(c.now, fn _ -> 10_000 end)
+    poll(c)
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text == "Meeting transcript update (Weekly sync):\n10:00:03 me after\n"
+  end
+
+  test "a batch naming speech held elsewhere is dropped on load, never reported delivered", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    batch = %{"fiber_id" => "fiber-a", "origin" => "owner"}
+
+    File.mkdir_p!(Path.join(c.root, "relays"))
+
+    File.write!(
+      relay_path(c, "launch"),
+      Jason.encode!(%{
+        "launch" => "launch",
+        "transcript" => c.path,
+        "kind" => "voice",
+        "routes_path" => routes,
+        "started_at" => "2026-11-06T10:00:00Z",
+        "offset" => 0,
+        "json_offset" => 0,
+        "route_offset" => 0,
+        "routes" => [],
+        "buffers" => [],
+        "outbox" => [
+          Map.merge(batch, %{
+            "text" => "",
+            "message_id" => "meeting-held",
+            "held" => %{"id" => "h"}
+          }),
+          Map.merge(batch, %{"text" => "me: kept\n", "message_id" => "meeting-kept"})
+        ]
+      })
+    )
+
+    start_supervised!({TranscriptRelay, c.opts})
+    assert_receive {:delivery, %{message_id: "meeting-kept", text: "me: kept\n"}}, 1_000
+    refute_receive {:delivery, %{message_id: "meeting-held"}}, 50
+  end
+
   defp relay_path(c, launch) do
     digest = :crypto.hash(:sha256, launch) |> Base.encode16(case: :lower)
     Path.join([c.root, "relays", digest <> ".json"])

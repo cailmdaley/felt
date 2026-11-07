@@ -28,7 +28,24 @@ defmodule Shuttle.Meeting.TranscriptRelay do
     end
   catch
     :exit, {:timeout, _} -> :timeout
-    :exit, _ -> %{pending: nil, last: nil, error: "relay unavailable"}
+    :exit, _ -> %{pending: nil, pending_words: 0, last: nil, error: "relay unavailable"}
+  end
+
+  @doc """
+  Drops the words `launch`'s relay holds but has not sent, returning how many.
+  Batches already in the outbox still go; the transcript on disk keeps every
+  word. In live voice the utterance in progress is dropped too: rows that began
+  before the discard never enter a buffer.
+  """
+  def discard(launch, opts \\ []) do
+    server = Keyword.get(opts, :server, __MODULE__)
+
+    case GenServer.call(Module.concat(server, Coordinator), {:status, launch}) do
+      {:worker, pid} -> GenServer.call(pid, :discard)
+      {:status, _} -> {:ok, 0}
+    end
+  catch
+    :exit, reason -> {:error, reason}
   end
 
   @impl true
@@ -158,8 +175,12 @@ defmodule Shuttle.Meeting.TranscriptRelay.Coordinator do
   def handle_call({:status, launch}, _from, state) do
     reply =
       case state.workers[launch] do
-        {pid, _ref} -> {:worker, pid}
-        nil -> {:status, %{pending: nil, last: nil, error: state.errors[digest(launch)]}}
+        {pid, _ref} ->
+          {:worker, pid}
+
+        nil ->
+          {:status,
+           %{pending: nil, pending_words: 0, last: nil, error: state.errors[digest(launch)]}}
       end
 
     {:reply, reply, state}
@@ -434,7 +455,24 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
           text: Enum.join(buffer["lines"], "\n")
         }
 
-    {:reply, %{pending: pending, last: state.config["last"], error: state.error}, state}
+    {:reply,
+     %{
+       pending: pending,
+       pending_words: pending_words(state.config),
+       last: state.config["last"],
+       error: state.error
+     }, state}
+  end
+
+  def handle_call(:discard, _from, state) do
+    words = pending_words(state.config)
+
+    config =
+      state.config
+      |> Map.put("buffers", [])
+      |> Map.put("discarded_at", DateTime.to_iso8601(DateTime.utc_now()))
+
+    {:reply, {:ok, words}, persist!(%{state | config: config})}
   end
 
   @impl true
@@ -462,6 +500,8 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   def terminate(_reason, state) do
     Enum.each(state.task_handles, fn {_, task} -> Task.shutdown(task, :brutal_kill) end)
   end
+
+  defp pending_words(config), do: config["buffers"] |> Enum.map(& &1["words"]) |> Enum.sum()
 
   defp poll(state) do
     if state.timer, do: Process.cancel_timer(state.timer)
@@ -555,6 +595,11 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
 
     config = Map.merge(defaults, config)
     config = Map.update!(config, "routes", &bound_routes(&1, config["started_at"]))
+
+    # A batch carrying a `held` checkpoint has no words of its own: it named
+    # speech a separate store held, which no longer exists. It is dropped unsent.
+    config =
+      Map.update!(config, "outbox", &Enum.reject(&1, fn batch -> is_map_key(batch, "held") end))
 
     # An in-flight meeting message keeps its original identity across recovery.
     case Map.pop(config, "pending") do
@@ -704,36 +749,26 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         next =
           Enum.reduce(lines, config, fn line, acc ->
             case Jason.decode(line) do
-                {:ok, %{"wall" => wall, "text" => text, "speaker" => speaker} = row}
-                when is_binary(wall) and is_binary(text) and is_binary(speaker) ->
-                  case DateTime.from_iso8601(row["wall_start"] || wall) do
-                    {:ok, at, _} ->
-                      target =
-                        Enum.find(
-                          Enum.reverse(acc["routes"]),
-                          &(DateTime.compare(at, parse_time!(&1["t"])) != :lt)
-                        )
+              {:ok, %{"wall" => wall, "text" => text, "speaker" => speaker} = row}
+              when is_binary(wall) and is_binary(text) and is_binary(speaker) ->
+                case DateTime.from_iso8601(row["wall_start"] || wall) do
+                  {:ok, at, _} ->
+                    if discarded?(acc, at),
+                      do: acc,
+                      else: add_voice_row(acc, at, row, text, speaker, state)
 
-                      name = row["name"] || speaker
+                  _ ->
+                    raise ArgumentError,
+                          "voice utterance needs an absolute wall_start timestamp"
+                end
 
-                      add_line(acc, target, "#{name} #{text}", state, %{
-                        speaker: name,
-                        text: text,
-                        silent_ms: voice_silence(at, row)
-                      })
+              {:ok, %{"wall" => wall} = row}
+              when is_binary(wall) and not is_map_key(row, "text") ->
+                acc
 
-                    _ ->
-                      raise ArgumentError,
-                            "voice utterance needs an absolute wall_start timestamp"
-                  end
-
-                {:ok, %{"wall" => wall} = row}
-                when is_binary(wall) and not is_map_key(row, "text") ->
-                  acc
-
-                _ ->
-                  raise ArgumentError, "malformed voice transcript row"
-              end
+              _ ->
+                raise ArgumentError, "malformed voice transcript row"
+            end
           end)
 
         Map.put(next, "json_offset", offset)
@@ -741,6 +776,27 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
       _ ->
         config
     end
+  end
+
+  defp discarded?(%{"discarded_at" => cut}, at) when is_binary(cut),
+    do: DateTime.compare(at, parse_time!(cut)) == :lt
+
+  defp discarded?(_config, _at), do: false
+
+  defp add_voice_row(config, at, row, text, speaker, state) do
+    target =
+      Enum.find(
+        Enum.reverse(config["routes"]),
+        &(DateTime.compare(at, parse_time!(&1["t"])) != :lt)
+      )
+
+    name = row["name"] || speaker
+
+    add_line(config, target, "#{name} #{text}", state, %{
+      speaker: name,
+      text: text,
+      silent_ms: voice_silence(at, row)
+    })
   end
 
   defp parse_time!(value) do
@@ -833,10 +889,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     speaking = speaking?(config)
 
     Enum.reduce(config["buffers"], config, fn buffer, acc ->
-      if not speaking and buffer["last_word_at"] &&
+      if (not speaking and buffer["last_word_at"]) &&
            state.clock.() - buffer["last_word_at"] >= quiet,
-        do: flush_buffer(acc, buffer, state),
-        else: acc
+         do: flush_buffer(acc, buffer, state),
+         else: acc
     end)
   end
 

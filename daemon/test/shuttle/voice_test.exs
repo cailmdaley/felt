@@ -238,11 +238,16 @@ defmodule Shuttle.VoiceTest do
              api_conn() |> get("/api/v1/voice") |> json_response(200)
 
     Agent.update(c.observed, fn _ -> %{available: true, meeting: %{meeting | state: "failed"}} end)
+
     assert {:ok, %{mode: "off", destination: nil, paused: false}} = Voice.update(%{})
   end
 
-  test "a meeting is the mode while Follow me is off, observed on every tick until it ends", c do
+  test "a meeting is the mode while Follow me is off, observed when its files change or every ten seconds",
+       c do
+    stop_supervised!(Voice)
     Env.put_app_env(:meeting_fibers, fn -> [] end)
+    {:ok, clock} = Agent.start_link(fn -> 0 end)
+    Env.start_scoped!({Voice, Keyword.put(c.opts, :clock, fn -> Agent.get(clock, & &1) end)})
 
     meeting = %{
       kind: "meeting",
@@ -253,9 +258,9 @@ defmodule Shuttle.VoiceTest do
       paused: false
     }
 
-    # Idle, disabled voice wakes on hark's lifecycle file, which a meeting start writes.
-    lifecycle = Path.join([c.root, "hark", "meeting.json"])
-    File.mkdir_p!(Path.dirname(lifecycle))
+    hark = Path.join(c.root, "hark")
+    lifecycle = Path.join(hark, "meeting.json")
+    File.mkdir_p!(hark)
     File.write!(lifecycle, ~s({"phase":"loading","launch":"meeting"}))
     Agent.update(c.observed, fn _ -> %{available: true, meeting: meeting} end)
     assert {:ok, %{enabled: false, mode: "meeting", paused: false} = first} = Voice.update(%{})
@@ -266,19 +271,122 @@ defmodule Shuttle.VoiceTest do
              "origin" => Shuttle.MeetingRouter.own_host()
            }
 
+    # Unchanged files and a recent observation: no terminal probe.
     Agent.update(c.observed, fn _ ->
       %{available: true, meeting: %{meeting | state: "live", paused: true}}
     end)
 
     flush_reconciled()
+    assert {:ok, %{mode: "meeting", paused: false}} = Voice.update(%{})
+    refute_received {:reconciled, _}
+
+    # A pause flag wakes observation.
+    File.write!(Path.join(hark, "paused"), "")
     assert {:ok, %{mode: "meeting", paused: true}} = Voice.update(%{})
     assert_received {:reconciled, false}
+
+    # A recorder that ends without a lifecycle write is seen within ten seconds.
     Agent.update(c.observed, fn _ -> %{available: true, meeting: nil} end)
-    File.write!(lifecycle, ~s({"phase":"ended","launch":"meeting"}))
+    assert {:ok, %{mode: "meeting"}} = Voice.update(%{})
+    Agent.update(clock, &(&1 + 10_000))
     assert {:ok, %{mode: "off", destination: nil}} = Voice.update(%{})
     flush_reconciled()
+    Agent.update(clock, &(&1 + 10_000))
     assert {:ok, %{mode: "off"}} = Voice.update(%{})
     refute_received {:reconciled, _}
+  end
+
+  test "failing observation clears the meeting mode", c do
+    stop_supervised!(Voice)
+    {:ok, result} = Agent.start_link(fn -> nil end)
+
+    reconcile = fn _, _ ->
+      Agent.get(result, & &1) || {:ok, %{available: true, meeting: meeting_row()}}
+    end
+
+    Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
+    write_lifecycle(c, "loading")
+    assert {:ok, %{mode: "meeting"}} = Voice.update(%{})
+    Agent.update(result, fn _ -> {:error, :terminal_unavailable} end)
+    write_lifecycle(c, "live")
+    assert {:ok, %{mode: "off", destination: nil, state: "failed"}} = Voice.update(%{})
+  end
+
+  test "toggle turns following on, flips its mute, and pauses a meeting", c do
+    parent = self()
+
+    Env.put_app_env(:voice_meeting_pause, fn paused, opts ->
+      send(parent, {:pause, paused, opts})
+      {:ok, %{}}
+    end)
+
+    toggle = fn -> api_conn() |> post("/api/v1/voice/toggle", "{}") |> json_response(200) end
+
+    assert %{"mode" => "following", "enabled" => true, "muted" => false} = toggle.()
+    assert %{"mode" => "following", "muted" => true, "paused" => true} = toggle.()
+    assert %{"mode" => "following", "muted" => false} = toggle.()
+    refute_received {:pause, _, _}
+
+    assert {:ok, _} = Voice.update(%{"enabled" => false})
+    start_meeting(c)
+    assert {:ok, %{mode: "meeting", paused: false}} = Voice.update(%{})
+
+    assert %{"mode" => "meeting"} = toggle.()
+    assert_received {:pause, true, [launch: "meeting"]}
+
+    Agent.update(c.observed, fn _ ->
+      %{available: true, meeting: %{meeting_row() | paused: true}}
+    end)
+
+    File.write!(Path.join([c.root, "hark", "paused"]), "")
+    assert {:ok, %{mode: "meeting", paused: true}} = Voice.update(%{})
+    assert %{"mode" => "meeting"} = toggle.()
+    assert_received {:pause, false, [launch: "meeting"]}
+
+    Env.put_app_env(:voice_meeting_pause, fn _, _ ->
+      {:error, {:validation, "pause requires a live desktop meeting"}}
+    end)
+
+    response = api_conn() |> post("/api/v1/voice/toggle", "{}")
+    assert %{"error" => "pause requires a live desktop meeting"} = json_response(response, 422)
+  end
+
+  test "following cannot be switched on under a meeting", c do
+    start_meeting(c)
+    assert {:ok, %{mode: "meeting"}} = Voice.update(%{})
+    assert {:error, "a meeting holds the microphone"} = Voice.update(%{"enabled" => true})
+    assert {:ok, %{"enabled" => false}} = Config.read()
+  end
+
+  test "discard drops the live recording's unsent words and reports how many", c do
+    stop_supervised!(Voice)
+    {:ok, words} = Agent.start_link(fn -> 7 end)
+    parent = self()
+
+    opts =
+      Keyword.merge(c.opts,
+        monitor: fn "meeting" ->
+          %{pending: nil, last: nil, pending_words: Agent.get(words, & &1)}
+        end,
+        discard: fn launch ->
+          send(parent, {:discard, launch})
+          {:ok, Agent.get_and_update(words, &{&1, 0})}
+        end
+      )
+
+    Env.start_scoped!({Voice, opts})
+    discard = fn -> api_conn() |> post("/api/v1/voice/discard", "{}") |> json_response(200) end
+
+    assert %{"discarded" => 0, "pending_words" => 0} = discard.()
+    refute_received {:discard, _}
+
+    start_meeting(c)
+    assert {:ok, %{mode: "meeting", pending_words: 7}} = Voice.update(%{})
+    assert %{pending_words: 7} = Voice.snapshot()
+
+    assert %{"discarded" => 7, "pending_words" => 0, "mode" => "meeting"} = discard.()
+    assert_received {:discard, "meeting"}
+    assert %{"discarded" => 0} = discard.()
   end
 
   test "a relay status timeout preserves the last listening snapshot", c do
@@ -741,6 +849,24 @@ defmodule Shuttle.VoiceTest do
 
     assert (api_conn() |> post("/api/v1/voice", ~s({"muted":3}))).status == 422
   end
+
+  # A meeting start writes hark's lifecycle file, which wakes idle voice.
+  defp start_meeting(c) do
+    Agent.update(c.observed, fn _ -> %{available: true, meeting: meeting_row()} end)
+    write_lifecycle(c, "loading")
+  end
+
+  defp write_lifecycle(c, phase) do
+    File.mkdir_p!(Path.join(c.root, "hark"))
+
+    File.write!(
+      Path.join([c.root, "hark", "meeting.json"]),
+      ~s({"phase":"#{phase}","launch":"meeting"})
+    )
+  end
+
+  defp meeting_row,
+    do: %{kind: "meeting", launch: "meeting", state: "live", fiber: "project/sync", paused: false}
 
   defp flush_reconciled do
     receive do

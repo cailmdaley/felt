@@ -198,8 +198,13 @@ defmodule Shuttle.Meeting do
   # File observation wakes an idle, disabled Voice without shelling out. Boot
   # always performs a full observation, including retained orphan captures.
   @doc false
-  def voice_observation_key(opts \\ []),
-    do: Shuttle.FS.read(Path.join(hark_dir(opts), "meeting.json"))
+  def voice_observation_key(opts \\ []) do
+    dir = hark_dir(opts)
+
+    {Shuttle.FS.read(Path.join(dir, "meeting.json")),
+     Shuttle.FS.exists?(Path.join(dir, "paused")),
+     Shuttle.FS.exists?(Path.join(dir, "system-paused"))}
+  end
 
   defp maybe_start_voice(opts, snapshot) do
     if Keyword.get(opts, :voice_start, true), do: start_voice(opts), else: {:ok, snapshot}
@@ -696,6 +701,7 @@ defmodule Shuttle.Meeting do
          executable when is_binary(executable) <- find_hark(opts),
          :ok <- validate_supported_mode(mode, opts),
          :ok <- yield_voice(opts),
+         :ok <- Shuttle.Voice.Config.enable(false),
          {:ok, snapshot, context} <- inspect_current(opts),
          :ok <- ensure_startable(snapshot),
          {name, title} <-
@@ -1550,8 +1556,8 @@ defmodule Shuttle.Meeting do
   defp find_scribe_fiber(meeting, _launch, _opts), do: meeting
 
   @doc false
-  @spec served_fibers() :: [map()]
-  def served_fibers do
+  @spec served_fibers((-> map())) :: [map()]
+  def served_fibers(feeds \\ &Shuttle.RemoteFiberRegistry.feeds/0) do
     local =
       try do
         case Shuttle.Poller.cached_fiber_documents(
@@ -1567,7 +1573,7 @@ defmodule Shuttle.Meeting do
     fiber = &(Map.get(&1, :fiber) || Map.get(&1, "fiber"))
 
     remote =
-      Enum.flat_map(Shuttle.RemoteFiberRegistry.feeds(), fn {host, feed} ->
+      Enum.flat_map(feeds.(), fn {host, feed} ->
         for entry <- feed.fibers, f = fiber.(entry), is_map(f), do: Map.put(f, "origin", host)
       end)
 

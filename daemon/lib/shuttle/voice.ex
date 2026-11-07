@@ -16,6 +16,36 @@ defmodule Shuttle.Voice do
   def cold?(target), do: Shuttle.Voice.Target.cold?(target)
   def update(params, opts \\ []), do: GenServer.call(server(opts), {:update, params}, 30_000)
 
+  @doc """
+  The one mic key: off turns following on unmuted, following flips its mute,
+  and a meeting flips its pause.
+  """
+  def toggle(opts \\ []) do
+    case GenServer.call(server(opts), :toggle) do
+      {:pause, paused, launch} ->
+        pause = Shuttle.Env.app(:voice_meeting_pause, &Meeting.pause/2)
+
+        case pause.(paused, launch: launch) do
+          {:ok, _} -> update(%{}, opts)
+          {:error, {:stale_launch, _}} -> {:error, "a different meeting is recording now"}
+          {:error, {_, message}} when is_binary(message) -> {:error, message}
+          {:error, reason} -> {:error, inspect(reason)}
+        end
+
+      params ->
+        update(params, opts)
+    end
+  end
+
+  @doc """
+  Drops the live recording's words said but not yet sent, returning the state
+  with `discarded`, the number of words dropped.
+  """
+  def discard(opts \\ []) do
+    with {:ok, words} <- GenServer.call(server(opts), :discard),
+         do: {:ok, Map.put(show(opts), :discarded, words)}
+  end
+
   @doc "Route to `params` while Follow me is on and no recording holds the mic; otherwise a no-op."
   def target(params, opts \\ []),
     do: GenServer.call(server(opts), {:target, params, DateTime.utc_now()})
@@ -54,7 +84,10 @@ defmodule Shuttle.Voice do
       relay: Keyword.get(opts, :relay, &start_relay/2),
       monitor: Keyword.get(opts, :monitor, &monitor/1),
       cold: Keyword.get(opts, :cold, &cold?/1),
+      discard: Keyword.get(opts, :discard, &Shuttle.Meeting.TranscriptRelay.discard/1),
       meeting: nil,
+      launch: nil,
+      observed_at: nil,
       snapshot: %{
         available: false,
         enabled: false,
@@ -74,12 +107,35 @@ defmodule Shuttle.Voice do
 
   @impl true
   def handle_call(:snapshot, _from, state),
-    do: {:reply, put_mode(state.snapshot, state.meeting), state}
+    do: {:reply, state.snapshot |> put_mode(state.meeting) |> put_pending_words(state), state}
 
   def handle_call(:show, _from, state) do
     state = name_target(state)
     snapshot = live_drafts(state.snapshot, state)
     {:reply, %{snapshot | error: snapshot.error || state.focus_error}, state}
+  end
+
+  def handle_call(:toggle, _from, state) do
+    plan =
+      case put_mode(state.snapshot, state.meeting) do
+        %{mode: "meeting", paused: paused} -> {:pause, not paused, state.launch}
+        %{mode: "following", muted: muted} -> %{"muted" => not muted}
+        %{mode: "off"} -> %{"enabled" => true, "muted" => false}
+      end
+
+    {:reply, plan, state}
+  end
+
+  def handle_call(:discard, _from, %{launch: nil} = state), do: {:reply, {:ok, 0}, state}
+
+  def handle_call(:discard, _from, state) do
+    case state.discard.(state.launch) do
+      {:ok, words} ->
+        {:reply, {:ok, words}, %{state | snapshot: %{state.snapshot | pending: nil}}}
+
+      {:error, reason} ->
+        {:reply, {:error, inspect(reason)}, state}
+    end
   end
 
   def handle_call({:target, %{"fiber_id" => id} = params, received_at}, _from, state)
@@ -140,10 +196,15 @@ defmodule Shuttle.Voice do
     invalid =
       Enum.any?(~w(enabled muted), &(Map.has_key?(params, &1) and not is_boolean(params[&1])))
 
-    if invalid do
-      {:reply, {:error, "enabled and muted must be booleans"}, state}
-    else
-      {:noreply, enqueue(state, {params, from})}
+    cond do
+      invalid ->
+        {:reply, {:error, "enabled and muted must be booleans"}, state}
+
+      params["enabled"] == true and not is_nil(state.meeting) ->
+        {:reply, {:error, "a meeting holds the microphone"}, state}
+
+      true ->
+        {:noreply, enqueue(state, {params, from})}
     end
   end
 
@@ -169,6 +230,20 @@ defmodule Shuttle.Voice do
     |> Map.put(:cold, not is_nil(snapshot.target) and state.cold.(snapshot.target))
     |> Map.put(:level, Meeting.mic_level(state.capture_opts))
     |> put_mode(state.meeting)
+    |> put_pending_words(state)
+  end
+
+  # Words the live recording's relay holds unsent, read from the relay each time.
+  defp put_pending_words(snapshot, %{launch: nil}), do: Map.put(snapshot, :pending_words, 0)
+
+  defp put_pending_words(snapshot, state) do
+    words =
+      case state.monitor.(state.launch) do
+        %{pending_words: words} -> words
+        _ -> 0
+      end
+
+    Map.put(snapshot, :pending_words, words)
   end
 
   # Where spoken words go right now: a meeting joined to a card holds the mic
@@ -185,7 +260,8 @@ defmodule Shuttle.Voice do
     do: Map.merge(snapshot, %{mode: "off", destination: nil, paused: false})
 
   # A recording other than voice that is not failed is a meeting in progress.
-  defp meeting_view(%{kind: kind, state: phase} = row) when kind != "voice" and phase != "failed" do
+  defp meeting_view(%{kind: kind, state: phase} = row)
+       when kind != "voice" and phase != "failed" do
     destination =
       if row[:fiber] do
         origin = row[:origin] || row[:mirror_host] || Shuttle.MeetingRouter.own_host()
@@ -242,7 +318,9 @@ defmodule Shuttle.Voice do
               :idle_key,
               :capture_error,
               :preview_pin,
-              :meeting
+              :meeting,
+              :launch,
+              :observed_at
             ])
           )
 
@@ -356,7 +434,7 @@ defmodule Shuttle.Voice do
         }
     }
 
-    if not enabled and state.idle and key == state.idle_key do
+    if not enabled and state.idle and key == state.idle_key and not meeting_due?(state) do
       %{
         state
         | snapshot: %{
@@ -370,6 +448,12 @@ defmodule Shuttle.Voice do
       observe_capture(state, enabled, key)
     end
   end
+
+  # During a meeting, idle voice still observes the recorder every
+  # @meeting_observe_ms, to see a recorder that died without a lifecycle write.
+  @meeting_observe_ms 10_000
+  defp meeting_due?(%{meeting: nil}), do: false
+  defp meeting_due?(state), do: state.clock.() - state.observed_at >= @meeting_observe_ms
 
   defp observe_capture(state, enabled, key) do
     now = state.clock.()
@@ -458,7 +542,9 @@ defmodule Shuttle.Voice do
             retry: retry,
             preview_pin: preview_pin,
             meeting: meeting,
-            idle: is_nil(row) or (not enabled and not voice and is_nil(meeting)),
+            launch: if(row && not match?({:error, _}, relay_result), do: row.launch),
+            observed_at: now,
+            idle: is_nil(row) or (not enabled and not voice),
             idle_key: key,
             capture_error: nil
         }
@@ -469,7 +555,10 @@ defmodule Shuttle.Voice do
         %{
           state
           | retry: retry,
-            idle: not enabled and key == {:error, :enoent},
+            meeting: nil,
+            launch: nil,
+            observed_at: now,
+            idle: not enabled and elem(key, 0) == {:error, :enoent},
             idle_key: key,
             capture_error: inspect(reason),
             snapshot: %{
@@ -606,7 +695,10 @@ defmodule Shuttle.Voice do
   defp known_name(_target, _id), do: nil
 
   defp target_name(id, origin) do
-    fibers = Shuttle.Env.app(:meeting_fibers, &Meeting.served_fibers/0)
+    fibers =
+      Shuttle.Env.app(:meeting_fibers, fn ->
+        Meeting.served_fibers(&Shuttle.RemoteFiberRegistry.cached_feeds/0)
+      end)
 
     Enum.find_value(fibers.(), fn fiber ->
       if id in [fiber["uid"], fiber["id"], fiber["slug"]] and

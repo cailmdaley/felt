@@ -419,15 +419,16 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 ### Live voice
 
-`GET /voice` returns `{available, enabled, muted, state, mode, destination, paused, target, cold, pending, preview, level, last, error, recorder}`.
+`GET /voice` returns `{available, enabled, muted, state, mode, destination, paused, target, cold, pending, pending_words, preview, level, last, error, recorder}`.
 An optional `recorder` selects the recording daemon, independently of the receiving worker's `origin`.
 Without it, the receiving daemon is the recorder.
 `state` is `off`, `starting`, `listening`, `yielded` (a meeting owns the microphone), or `failed`.
 `target` is `{fiber_id, origin, name}` or `null`.
 `cold` says whether the selected target has no live worker. A live worker is warm, however long it has been idle; a target whose owner cannot be read is cold.
-`mode` says where spoken words go: `meeting` while a meeting recording is starting or live, whether or not Follow me is on; `following` while Follow me is on and no meeting holds the microphone; otherwise `off`.
+`mode` says where spoken words go: `meeting` while a meeting recording is loading, starting, live or stopping (any state but failed); `following` while Follow me is on and no meeting holds the microphone; otherwise `off`.
 `destination` is `{fiber_id, name, origin}` of that place (the meeting's card, or the followed target) or `null`, and `paused` is the meeting's pause in `meeting` mode, `muted` in `following` mode, and `false` when `off`.
 `pending` is `{fiber_id, words, text}` or `null`, holding finalized warm speech before a delivery trigger.
+`pending_words` is the word count the live recording's relay holds unsent across all targets, voice or meeting (speaker labels count, as for the word limit), read from the relay on each request; `0` when none.
 `preview` is `{fiber_id, origin, text}` or `null`, displaying raw in-progress words from hark's atomically replaced `<stem>.partial` on the current target.
 Missing or empty partials, mute, disabled voice and recorder exit clear the preview.
 Preview words never enter the relay or delivery.
@@ -436,14 +437,16 @@ Preview words never enter the relay or delivery.
 `enabled` reports the persisted intent even if recording fails. Invalid or unreadable `voice.json` fails off: `enabled: false`, `state: "failed"`, and `error` describes the configuration failure while the daemon stops any live voice recorder.
 
 `POST /voice` accepts `{enabled?, muted?, recorder?}` and returns the same state.
-Both control fields must be booleans; invalid input returns **422**.
+Both control fields must be booleans; invalid input returns **422**, as does `enabled: true` while a meeting holds the microphone.
+`POST /voice/toggle` is the one mic key: in mode `off` it turns following on unmuted, in `following` it flips `muted`, and in `meeting` it flips the meeting's pause (as `POST /meeting/pause` does); it returns the same state, or **422** with the pause's error.
+`POST /voice/discard` drops every word the live recording's relay holds but has not sent, voice or meeting, and returns the same state with `discarded`, the number of words dropped; batches already being delivered still go, the transcript on disk keeps every word, and in live voice an utterance begun before the discard is dropped when it finishes.
 Enabling persists to `voice.json`; muting uses `hark pause` and survives recorder restarts.
 The daemon keeps one retained `hark --voice` running while enabled and adopts it after daemon restarts.
 Crash retries wait 1, 2, 4 and 8 seconds; five failures latch `failed` until enabled is toggled off and on. A recorder stable for 30 seconds resets the failure budget. This retry budget belongs to the running daemon; a daemon restart starts a fresh budget.
 There is no scheduled recorder restart.
-Every meeting start stops live voice and verifies the recorder has exited before opening another capture; voice returns after the meeting ends or fails, with the same PID-exit verification before replacement.
+Every meeting start stops live voice, verifies the recorder has exited and switches following off (`enabled: false`) before opening another capture, so one mode holds the microphone at a time; following does not resume when the meeting ends.
 Voice captures are hidden from `/meeting`, its stop, pause and system-audio controls, including stale-launch errors.
-Disabled, idle voice checks lifecycle-file changes without polling the terminal; startup always observes retained captures so an orphan voice recorder is stopped.
+Disabled voice with no recording, or with a meeting recording, checks hark's lifecycle file and pause flags each second without polling the terminal, and observes the recorder again when they change; during a meeting it also observes every ten seconds, so a recorder that died without writing its lifecycle file is seen. Startup always observes retained captures so an orphan voice recorder is stopped.
 
 While following is on, the destination is whichever of Rex and the board had focus last. `Shuttle.RexFocus` routes Rex's worker when Rex comes to the front or changes worker, and the board posts what it shows to `POST /voice/target` while it has the keyboard, on regaining it included. Each route durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
 `t` is the recorder's UTC receipt time, not the time reconciliation finishes.
