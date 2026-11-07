@@ -11,8 +11,8 @@ export function familyCounts(others: Readonly<Record<FamilyNeed, number>>): { wo
 }
 
 const FOLDS_KEY = 'shuttle.desk.threads'
-/** Each family's folds as this browser left them: the whole tree, and its resting and archived shelves. */
-type Fold = { all?: boolean; resting?: boolean; archived?: boolean }
+/** Each family's folds as this browser left them: the whole tree, and its resting shelf. */
+type Fold = { all?: boolean; resting?: boolean }
 /** The browser's folds, read afresh; this page's own where the browser keeps none. */
 let folds: Record<string, Fold> = {}
 function foldOf(family: string): Fold {
@@ -32,8 +32,8 @@ const NEEDS_YOU: ReadonlySet<string> = new Set(['waiting', 'to-review'])
  * set the family's column: a thread leads with a quiet crumb to its root. The
  * family's threads hang beneath that row as a tree. Folded, it shows the
  * threads that need the human (a turn or a verdict, as the count says), with
- * their ancestors for context; the count's caret opens the whole tree, its resting and archived
- * threads on shelves of their own. Folds are remembered per browser. A root
+ * their ancestors for context; the count's caret opens the whole tree, its resting threads on a
+ * shelf of their own. Archived threads are never drawn here. Folds are remembered per browser. A root
  * whose family a thread leads keeps its count, which takes you to that row.
  */
 export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard, family?: boolean) => void, now = Date.now()): void {
@@ -58,9 +58,8 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
   const carries = family.lead === self
   if (!carries && family.root !== self) return
   if (family.root !== self) host.setAttribute('aria-label', `${family.root.name} / ${host.getAttribute('aria-label') ?? card.name}`)
-  // Every thread of the family but this row; a thread's root has a row of its own.
-  const kin = index.size(family.root) - (self === family.root ? 0 : 1)
-  const live = index.summary(family.root).unfinished - (self === family.root || index.state(self) === 'archived' ? 0 : 1)
+  // Every unarchived thread of the family but this row; a thread's root has a row of its own.
+  const kin = index.summary(family.root).unfinished - (self === family.root || index.state(self) === 'archived' ? 0 : 1)
   const familyKey = threadKey(family.root)
   const others = index.others(card)
   const { working, needs } = familyCounts(others)
@@ -69,7 +68,7 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
     count.dataset.family = familyKey
     const label = document.createElement('span')
     label.className = needs ? 'kbn-count-needs' : working ? 'kbn-count-working' : 'kbn-count-quiet'
-    label.textContent = needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : working ? `${working} working` : live ? `${live} ${live === 1 ? 'thread' : 'threads'}` : `${kin} archived`
+    label.textContent = needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : working ? `${working} working` : `${kin} ${kin === 1 ? 'thread' : 'threads'}`
     count.append(label)
     count.title = [
       others.yours > 0 && `${others.yours} your turn`,
@@ -118,7 +117,7 @@ function installThreads(host: HTMLElement, count: HTMLButtonElement, self: Kanba
       if (elapsed) { const age = document.createElement('span'); age.className = 'kbn-row-elapsed'; age.textContent = elapsed; row.append(age) }
       return row
     }, {
-      open: new Map([['resting', !!fold.resting], ['archived', !!fold.archived]]),
+      restingOpen: !!fold.resting,
       only: all ? undefined : thread => asking.has(threadKey(thread)),
       withRoot: false,
     }))

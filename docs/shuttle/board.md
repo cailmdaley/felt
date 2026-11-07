@@ -100,8 +100,8 @@ every thread that needs you, a turn or a verdict, with the threads above it
 for context, so what waits on you is visible without opening anything. The
 count at the row's end says how many need you, else how many work, else how
 many threads there are; its caret opens the whole tree, with the resting
-threads and the archived ones on folds of their own beneath it, the archived
-always folded until you open them. A root's count, on a family a thread
+threads on a fold of their own beneath it. Archived threads are not on the
+Desk; they stay on their constitution's page. A root's count, on a family a thread
 leads, opens the tree on the leading row instead. Each fold is remembered in
 this browser.
 

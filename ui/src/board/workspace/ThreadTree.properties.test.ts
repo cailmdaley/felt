@@ -50,25 +50,23 @@ it('keeps every node once in creation-ordered ancestry, independent of state', (
   }), run)
 })
 
-it('keeps threads in play in the tree and shelves the other resting, then archived, threads below it', () => {
+it('keeps threads in play in the tree, shelves the other resting threads below it, and drops the other archived ones', () => {
   fc.assert(fc.property(spec, rows => {
     const cards = make(rows), index = new ThreadIndex(cards), root = cards[0]
     const container = document.createElement('div')
     container.append(...renderThreadTree(index, root, root, c => {
       const row = document.createElement('div'); row.className = 'kbn-thread-row'; row.dataset.id = c.id; return row
     }))
-    expect(container.querySelectorAll('.kbn-thread-row')).toHaveLength(cards.length)
     const quiet = (c: KanbanCard) => shelfOf(index, c) !== 'tree'
     const context = (c: KanbanCard) => index.subtree(c).some(child => !quiet(child))
     for (const c of cards) {
-      const row = container.querySelector<HTMLElement>(`[data-id="${c.id}"]`)!
-      const shelf = row.closest<HTMLDetailsElement>('details')?.dataset.threadDetails
-      if (c === root || !quiet(c) || context(c)) expect(shelf).toBeUndefined()
-      else expect(shelf).toBe(shelfOf(index, c))
+      const row = container.querySelector<HTMLElement>(`[data-id="${c.id}"]`)
+      const inTree = c === root || !quiet(c) || context(c)
+      if (inTree) expect(row?.closest('details')).toBeNull()
+      else if (shelfOf(index, c) === 'archived') expect(row).toBeNull()
+      else expect(row!.closest<HTMLDetailsElement>('details')?.dataset.threadDetails).toBe('resting')
     }
-    for (const shelf of container.querySelectorAll<HTMLDetailsElement>('details')) expect(shelf.open).toBe(shelf.dataset.threadDetails === 'resting')
-    const order = [...container.querySelectorAll('details')].map(el => el.dataset.threadDetails)
-    expect(order).toEqual(['resting', 'archived'].filter(s => order.includes(s)))
+    for (const shelf of container.querySelectorAll<HTMLDetailsElement>('details')) expect([shelf.dataset.threadDetails, shelf.open]).toEqual(['resting', true])
     expect(container.querySelector('.ws-tree-attention')).toBeNull()
   }), { ...run, numRuns: 100 })
 })

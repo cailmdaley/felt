@@ -211,7 +211,7 @@ it('keeps every thread reachable in the fold, with its folds, pin and links', ()
   const open = vi.fn(), { page: family } = page(open)
   const all = family.el.querySelector<HTMLDetailsElement>('.ws-family-all')!
   const names = [...all.querySelectorAll('.kbn-thread-name')].map(el => el.textContent)
-  expect(names).toEqual(expect.arrayContaining([root.name, 'Asked', 'Idle', 'Done', 'Draft']))
+  expect(names).toEqual(expect.arrayContaining([root.name, 'Asked', 'Idle', 'Draft']))
   const row = [...all.querySelectorAll<HTMLElement>('.kbn-thread-row')].find(el => el.textContent?.includes('Draft'))!
   row.click()
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/draft' }))

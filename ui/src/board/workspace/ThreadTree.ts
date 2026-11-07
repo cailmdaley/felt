@@ -5,8 +5,8 @@ import { turnOf } from '../turn.js'
 import './thread-tree.css'
 
 export interface ThreadTreeOptions {
-  /** Which shelves stand open; resting opens and archived folds unless told. */
-  open?: ReadonlyMap<string, boolean>
+  /** Whether the resting shelf stands open; it opens unless told. */
+  restingOpen?: boolean
   /** Draws only these threads, each with its ancestors for context, and no shelves. */
   only?: (card: KanbanCard) => boolean
   /** Draws the root's own row at depth 0; without it the root's threads start there. */
@@ -16,11 +16,11 @@ export interface ThreadTreeOptions {
 /**
  * The family as drawn: the root, then a tree of the threads in play (a resting
  * or archived thread stays in it only as the context of work beneath it), then
- * the other resting threads, then the other archived ones folded. Both shelves
- * list in tree order.
+ * the other resting threads on a shelf, in tree order. Archived threads are
+ * not drawn otherwise.
  */
-export function renderThreadTree(index: ThreadIndex, root: KanbanCard, current: KanbanCard, rowFactory: (card: KanbanCard, focus: string) => HTMLElement, { open = new Map(), only, withRoot = true }: ThreadTreeOptions = {}): HTMLElement[] {
-  const shelved: Record<'resting' | 'archived', KanbanCard[]> = { resting: [], archived: [] }
+export function renderThreadTree(index: ThreadIndex, root: KanbanCard, current: KanbanCard, rowFactory: (card: KanbanCard, focus: string) => HTMLElement, { restingOpen = true, only, withRoot = true }: ThreadTreeOptions = {}): HTMLElement[] {
+  const resting: KanbanCard[] = []
   const lift = withRoot ? 0 : 1
   const draw = (card: KanbanCard, depth: number): HTMLElement => {
     const key = threadKey(card), focus = JSON.stringify(['row', key])
@@ -57,21 +57,18 @@ export function renderThreadTree(index: ThreadIndex, root: KanbanCard, current: 
     return rows
   }
   const shelve = (node: TreeNode): void => {
-    const shelf = shelfOf(index, node.card)
-    shelved[shelf === 'tree' ? 'resting' : shelf].push(node.card)
+    if (shelfOf(index, node.card) !== 'archived') resting.push(node.card)
     for (const child of node.children) shelve(child)
   }
   const tree = threadTree(index, root)
   if (only) want(tree)
   const result = grow(tree)
   if (only) return result
-  for (const [shelf, cards] of [['resting', shelved.resting], ['archived', shelved.archived]] as const) {
-    if (!cards.length) continue
-    const details = document.createElement('details'); details.className = `ws-tree-shelf ws-tree-${shelf}`; details.dataset.threadDetails = shelf
-    details.open = cards.some(c => threadKey(c) === threadKey(current)) || (open.get(shelf) ?? shelf === 'resting')
-    const summary = document.createElement('summary'); summary.dataset.threadFocus = JSON.stringify(['shelf', shelf])
-    summary.append(shelf === 'resting' ? `${cards.length} resting` : `${cards.length} archived`)
-    details.append(summary, ...cards.map(card => draw(card, 0))); result.push(details)
-  }
+  if (!resting.length) return result
+  const details = document.createElement('details'); details.className = 'ws-tree-shelf ws-tree-resting'; details.dataset.threadDetails = 'resting'
+  details.open = restingOpen || resting.some(c => threadKey(c) === threadKey(current))
+  const summary = document.createElement('summary'); summary.dataset.threadFocus = JSON.stringify(['shelf', 'resting'])
+  summary.append(`${resting.length} resting`)
+  details.append(summary, ...resting.map(card => draw(card, 0))); result.push(details)
   return result
 }

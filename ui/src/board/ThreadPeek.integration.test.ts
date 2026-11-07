@@ -44,15 +44,16 @@ describe('a family row', () => {
     expect(lone.querySelector('.kbn-count-quiet')?.textContent).toBe('1 thread')
     expect(lone.querySelector<HTMLElement>('.kbn-desk-threads')!.hidden).toBe(true)
   })
-  it('archived threads stay behind a folded shelf of their own', () => {
+  it('never draws archived threads, and a family of only archived threads has no tail', () => {
     const done = card({ id: 'root/work/done', name: 'Done', orchestrator: 'root/work', status: 'closed', tempered: true })
     const lone = document.createElement('div')
     installFrontierDetails(lone, lone, work, new ThreadIndex([work, done]), vi.fn())
-    expect(lone.querySelector('.kbn-count-quiet')?.textContent).toBe('1 archived')
-    lone.querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
-    const shelf = lone.querySelector<HTMLDetailsElement>('.kbn-desk-threads details[data-thread-details="archived"]')!
-    expect(shelf.open).toBe(false)
-    expect(shelf.querySelector('summary')?.textContent).toBe('1 archived')
+    expect(lone.querySelector('.kbn-thread-count')).toBeNull()
+    const both = document.createElement('div')
+    installFrontierDetails(both, both, work, new ThreadIndex([work, quiet, done]), vi.fn())
+    both.querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
+    expect([...both.querySelectorAll('.kbn-thread-name')].map(n => n.textContent)).toEqual([quiet.name])
+    expect(both.textContent).not.toMatch(/archived/)
   })
   it('renders missing ancestors as plain path text, not an orphan label or guessed link', () => {
     const orphan = card({ id: 'missing/folder/work', orchestrator: 'missing-uid', status: 'active' })

@@ -34,7 +34,7 @@ export function registerDeskThreadJourneys(test) {
     const open = await shown(card)
     assert.ok(open.length >= folded.length)
     assert.deepEqual(open.filter(row => row.outside || row.clipped), [], 'no thread reaches past its row')
-    for (const archived of await card.locator('.kbn-desk-threads details[data-thread-details="archived"]').all()) assert.equal(await archived.evaluate(el => el.open), false, 'archived threads stay folded')
+    assert.equal(await card.locator('.kbn-desk-threads').textContent().then(text => /archived/.test(text)), false, 'archived threads stay off the Desk')
     const name = await card.getAttribute('data-card-uid')
     await page.reload()
     const again = page.locator(`.kbn-desk .kbn-card[data-card-uid="${name}"]`).first()
