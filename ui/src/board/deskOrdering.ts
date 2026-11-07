@@ -26,7 +26,12 @@ export function deskCardKey(card: KanbanCard): string {
   return JSON.stringify([card.originId, card.uid ?? card.id])
 }
 
-/** Put every visible Desk row in its reading order for the given response. */
+/**
+ * Put every visible Desk row in its reading order for the given response.
+ * The reader's j/k walks `rows`: each constitution once, at its own row; a
+ * root heading another section is a view of it, and threads are reached from
+ * their constitution's page.
+ */
 export function deskOrder(
   resp: KanbanResponse | null,
   zone: Zone = hostZone(),
@@ -42,7 +47,7 @@ export function deskOrder(
   const resting = restingOrder(restingCards(resp), zone)
   const placements = new Map<string, DeskPlacement>()
   const place = (cards: KanbanCard[], column: DeskColumn, group: string): void => {
-    for (const card of cards) placements.set(deskCardKey(card), { column, group })
+    for (const card of cards) if (!card.deskSection) placements.set(deskCardKey(card), { column, group })
   }
   place(now.drafts, 'drafts', 'Drafts')
   for (const [band, label] of IN_FLIGHT_BANDS) {
@@ -55,7 +60,7 @@ export function deskOrder(
     now,
     roles,
     resting,
-    rows: [...now.drafts, ...now.inFlight, ...now.awaitingReview, ...roles, ...resting.flat],
+    rows: [...now.drafts, ...now.inFlight, ...now.awaitingReview, ...roles, ...resting.flat].filter(card => !card.deskSection),
     placements,
   }
 }

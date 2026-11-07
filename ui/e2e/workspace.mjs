@@ -268,7 +268,7 @@ test('Fresh Desk leaves focus alone; the first j selects awaiting review and Ent
   assert.ok(await p.evaluate(() => document.activeElement !== document.querySelector('.kbn-col-head')), 'load must not focus a column head')
   assert.equal(await p.locator('.kbn-key-selected').count(), 0)
   await p.keyboard.press('j')
-  assert.match(await p.locator('.kbn-card.kbn-key-selected').innerText(), /Calibrate the shear response/)
+  assert.match(await p.locator('.kbn-card.kbn-key-selected > .kbn-card-name').getAttribute('title'), /Calibrate the shear response/)
   await p.keyboard.press('Enter')
   await reportReady(p)
   assert.equal(await isSelected(p, 'calibration-report'), true)
@@ -964,7 +964,8 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
 }, undefined, reducedMotion)
 
 test('j/k step constitutions in Desk order from a Board-opened reader, J/K step its columns, and each landing is named; the Board shelves what was read', async p => {
-  const column = id => p.locator(`[data-column="${id}"] .kbn-card > .kbn-card-name`).allTextContents()
+  // Desk order names each constitution once, at its own row: a root heading another section is not a stop.
+  const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
   const drafts = await column('drafts'), flight = await column('inFlight'), review = await column('awaitingReview')
   const names = [...drafts, ...flight, ...review], at = names.indexOf(name)
   const title = expected => poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, expected)
@@ -1008,7 +1009,7 @@ test('j/k step constitutions in Desk order from a Board-opened reader, J/K step 
 })
 
 test('Wide reader scans Desk cards and returns the last viewed card with one Escape or its origin tab', async p => {
-  const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
+  const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
   const deskDrafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
   const knownDrafts = ['Weekly shear summary', 'Transfer-function check', 'Validate the summary against simulations']
   assert.deepEqual([...knownDrafts].sort(), [...deskDrafts].sort())
@@ -1023,13 +1024,13 @@ test('Wide reader scans Desk cards and returns the last viewed card with one Esc
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
   await p.keyboard.press('Escape')
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
-  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), next, 'Escape selects the last card viewed')
+  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next, 'Escape selects the last card viewed')
   await land(p)
   await p.keyboard.press('j')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
   await barTab(p, 'desk').click()
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
-  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), next)
+  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').getAttribute('title'), next)
 })
 
 test('Verdicts live in the band, with the undo line on its head; keys reach them from a report', async p => {
@@ -2121,7 +2122,8 @@ test('Reader slash hangs the constitution list under the bar Find; Escape puts i
 })
 
 test('j/k and Alt scans land immediately; browser Back returns to Board', async p => {
-  const column = id => p.locator(`[data-column="${id}"] .kbn-card > .kbn-card-name`).allTextContents()
+  // Desk order names each constitution once, at its own row: a root heading another section is not a stop.
+  const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
   const names = [...await column('drafts'), ...await column('inFlight'), ...await column('awaitingReview')]
   assert.ok(names.length >= 3, 'navigation exercises several constitutions')
   await p.locator('[data-view="shelf"]').click()
