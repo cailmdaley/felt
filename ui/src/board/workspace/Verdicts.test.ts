@@ -60,6 +60,19 @@ describe('late verdicts', () => {
     expect(line.hasAttribute('data-fresh')).toBe(false)
   })
 
+  it('retargets a retained host between pending verdicts of the same kind', async () => {
+    const a = card({ id: 'a', name: 'First' }), b = card({ id: 'b', name: 'Second' }), pair = host(a)
+    const first = vi.fn(), second = vi.fn()
+    verdicts.queue(a, 'tempered', first)
+    verdicts.queue(b, 'tempered', second)
+    markVerdictHost(pair, b); await flush()
+    expect(pair.querySelector('button[aria-label="Undo verdict on Second"]')).not.toBeNull()
+    pair.querySelector<HTMLButtonElement>('.ws-verdict-undo button')!.click()
+    vi.advanceTimersByTime(6000)
+    expect(first).toHaveBeenCalledOnce()
+    expect(second).not.toHaveBeenCalled()
+  })
+
   it('moves focus from the control that gave the verdict to its undo, and back', () => {
     const fiber = card({ id: 'a' }), pair = host(fiber)
     pair.querySelector('button')!.focus()

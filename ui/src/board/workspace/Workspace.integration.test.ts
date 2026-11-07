@@ -840,6 +840,32 @@ describe('workspace reader integration', () => {
     press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }), 'composted')
     expect(document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-discard')!.title).toBe('Discard (x)')
   })
+  it('uses the page card at the head, and sends to a highlighted live worker', async () => {
+    workspace.dispose()
+    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', name: 'Hub', status: 'active', shuttleKind: 'oneshot' })
+    const leaf = card({ id: 'hub/leaf', uid: 'leaf', originId: 'host-a', name: 'Leaf', orchestrator: 'hub', status: 'active', shuttleKind: 'oneshot', sessionUuid: 'session', workerState: 'running' })
+    const sibling = card({ id: 'hub/other', uid: 'other', originId: 'host-a', name: 'Other', orchestrator: 'hub', status: 'active', shuttleKind: 'oneshot', sessionUuid: 'other-session', workerState: 'running' })
+    const feed = [hub, leaf, sibling], dock = new Dock('', changed)
+    bodyCards = feed
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
+    const queue = vi.spyOn(workspace, 'queueVerdict').mockReturnValue(true)
+    const conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true)
+    workspace.open(leaf, 'Desk'); await flush()
+    document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click()
+    const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+    press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'leaf' }), 'composted')
+    press('c'); expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'leaf' }))
+    const other = [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(row => row.querySelector<HTMLElement>('.fp-name')?.title === 'Other')!
+    other.click()
+    const input = document.querySelector<HTMLInputElement>('.ws-worker-message')!
+    input.value = 'Hello'; input.dispatchEvent(new Event('input'))
+    const send = document.querySelector<HTMLButtonElement>('.ws-worker-primary')!
+    expect(send.getAttribute('aria-label')).toBe('Send Other')
+    send.click(); await flush()
+    const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
+    expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/other', user_message: 'Hello', resume_mode: 'previous' })
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Leaf')
+  })
   it('row verbs select their thread without unfolding it and share the undo queue', async () => {
     workspace.dispose()
     const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', status: 'active', shuttleKind: 'oneshot' })
