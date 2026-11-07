@@ -47,15 +47,27 @@
 .ws-band-acts > .kbn-ctl-verdict { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 6px; margin: 0; padding-left: 12px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-band-acts > .kbn-ctl-verdict[hidden] { display: none; }
 .ws-band-acts > .ws-verdict-undo { justify-content: flex-end; }
-.ws-header-sessions { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
-.ws-header-sessions[hidden] { display: none; }
 /* Settings keeps the further ancestors reachable without a second header row. */
 .ws-settings-ancestry { margin-bottom: 12px; }
 .ws-band-drawer { padding: 4px 0 8px; }
 .ws-band-section + .ws-band-section:not([hidden]) { border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
-.ws-dock > .ws-dock-body > .kbn-detail-transcript { padding: 6px 16px; max-height: 30vh; overflow-y: auto; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-band-status { padding: 6px 16px; }
 .ws-dock .ws-band-status:not(:has(.kbn-detail-error:not([style*='display: none']), .kbn-detail-save-status:not(:empty))) { display: none; }
+
+/* The worker's line under the band's head: an opening message and the verbs that send it. */
+.ws-band-head:has(+ .ws-worker-acts:not([hidden])) { border-bottom: 0; }
+.ws-worker-acts { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 0 16px 6px; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-worker-acts[hidden] { display: none; }
+.ws-worker-message {
+  flex: 1 1 0; min-width: 6em; height: var(--ws-control-height); box-sizing: border-box; padding: 0 10px; margin-right: 4px;
+  border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: transparent;
+  color: var(--ws-ink); font: var(--type-label)/var(--leading-solid) var(--font-serif); text-overflow: ellipsis;
+}
+.ws-worker-message::placeholder { color: var(--ws-ink-faint, var(--ws-ink-muted)); opacity: 1; }
+.ws-worker-message:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 0; }
+.ws-reader .ws-worker-acts .ws-header-icon:disabled { opacity: .45; cursor: default; }
+.ws-worker-receipt { flex: none; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
+.ws-worker-receipt:empty { display: none; }
 
 /* Immediate actions use a shared stroke-icon grid and native keyboard focus. */
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon {
@@ -91,7 +103,6 @@
     .ws-band-head { flex-wrap: wrap; gap: 0 4px; }
     .ws-band-acts { order: 1; flex: 1 0 100%; gap: 2px 6px; }
     .ws-band-acts > .kbn-ctl-verdict { gap: 2px; padding-left: 6px; }
-    .ws-header-sessions { gap: 2px; }
   }
   @container band (max-width: 760px) {
     .ws-band-title { font-size: var(--type-prose); }
@@ -108,6 +119,7 @@
   .kbn-verb-menu [role='menuitem'] { min-height: 44px; height: 44px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
   .ws-band-head { gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
+  .ws-worker-acts { padding: 0 8px 6px; }
   .ws-band-identity { flex: none; }
   /* The verbs hold still when the state word changes. */
   .ws-band-state { min-width: 5.5em; }
@@ -239,11 +251,17 @@
 .ws-dock .kbn-ctl-toggle:has(input:checked) { background: var(--ws-fill); border-color: var(--ws-hairline); }
 .ws-dock .kbn-ctl-toggle:has(input:checked) span::before { background: var(--ws-ink); }
 .ws-dock .kbn-ctl-toggle:has(input:focus-visible) { outline: var(--ws-focus-width) solid var(--ws-ink); }
-.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; align-items: center; max-width: 240px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
+.ws-dock .kbn-ctl-meet { position: relative; display: inline-flex; flex: none; align-items: center; max-width: 340px; min-height: var(--ctl-h); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
 .ws-dock .kbn-ctl-meet .kbn-ctl-btn { border: 0; }
 .ws-dock .kbn-ctl-meet-arm { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; min-height: 0; padding: 2px 4px 2px 8px; border: 0; background: transparent; color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-meet-arm.kbn-ctl-meet-on { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-dock .kbn-ctl-meet-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-dock .kbn-ctl-meet-label { flex: none; white-space: nowrap; }
+/* Where the words go: the meeting's fiber or the voice target, after the mic's state. */
+.ws-dock .kbn-ctl-meet-dest { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-dock .kbn-ctl-meet-dest::before { content: '→ '; color: var(--ws-ink-muted); }
+.ws-dock .kbn-ctl-meet-dest[hidden] { display: none; }
+.ws-dock .kbn-ctl-meet[data-voice='recording'] .kbn-ctl-meet-label::before { content: '●'; margin-right: 5px; color: var(--ws-state-working); }
+.ws-dock .kbn-ctl-meet[data-voice='failed'] .kbn-ctl-meet-arm { color: var(--ws-red); }
 .ws-dock .kbn-ctl-meet-arm svg { display: block; flex: none; width: 16px; height: 16px; }
 .ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
 .ws-dock .kbn-ctl-meet-dropdown { flex: none; width: 25px; padding: 0; border: 0; background: transparent; color: var(--ws-ink); cursor: pointer; }
@@ -299,15 +317,6 @@
 .ws-dock .kbn-ctl-foot .kbn-detail-error { flex-basis: 100%; }
 .ws-dock .kbn-detail-save-status { flex: 1; color: var(--ws-ink-muted); font: var(--type-label) var(--font-serif); }
 .ws-dock .kbn-detail-save-status-saving { font-style: italic; }
-.ws-dock .kbn-detail-transcript { padding: 8px 0; border-block: var(--ws-line-width) solid var(--ws-hairline); }
-/* The meeting's line is one voice: its state and its name, set as labels. */
-.ws-dock .kbn-detail-transcript-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 5px; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
-.ws-dock .kbn-detail-transcript-dot { width: var(--ws-dot-size); height: var(--ws-dot-size); flex: none; border-radius: 50%; background: var(--ws-ink-muted); }
-.ws-dock .kbn-detail-transcript-live .kbn-detail-transcript-dot { background: var(--ws-ink); }
-.ws-dock .kbn-detail-transcript-failed .kbn-detail-transcript-dot { background: var(--ws-red); }
-.ws-dock .kbn-detail-transcript-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label)/var(--leading-tight) var(--font-serif); }
-.ws-dock .kbn-detail-transcript-lines { margin: 0; padding: 0; list-style: none; max-height: 9em; overflow-y: auto; overscroll-behavior: contain; font: var(--type-prose)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
-.ws-dock .kbn-meeting-speaker { margin-right: 5px; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-history-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: var(--ctl-h); padding: 4px 0; border: none; background: transparent; color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-history-reading { display: flex; align-items: center; gap: 8px; font: inherit; }
 .ws-dock .kbn-ctl-history-open .kbn-ctl-history-chevron { transform: rotate(180deg); }

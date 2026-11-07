@@ -209,8 +209,7 @@ describe('Rest controls', () => {
     const rest = document.querySelector<HTMLButtonElement>('.ws-reader .kbn-ctl-rest')!
     expect(rest).not.toBeNull()
     expect(rest.hidden).toBe(true)
-    expect(rest.closest('.kbn-ctl-verdict')!.hasAttribute('hidden')).toBe(false)
-    expect([...document.querySelectorAll<HTMLButtonElement>('.ws-reader .ws-header-session')].filter(button => !button.hidden).map(button => button.getAttribute('aria-label'))).toEqual(['Resume', 'New session'])
+    expect([...document.querySelectorAll<HTMLButtonElement>('.ws-reader .ws-worker-acts button')].filter(button => !button.hidden).map(button => button.dataset.verb)).toEqual(['Resume', 'New session'])
     expect(document.querySelector<HTMLElement>('.ws-reader .kbn-ctl-temper')!.hidden).toBe(true)
     const target = document.querySelector<HTMLElement>('.ws-reader .ws-return')!
     target.focus()

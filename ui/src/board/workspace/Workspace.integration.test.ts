@@ -1413,8 +1413,9 @@ describe('workspace reader integration', () => {
     expect(band.querySelector<HTMLElement>('.ws-band-open')?.hidden).toBe(false)
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^working/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const fresh = band.querySelector<HTMLButtonElement>('.ws-header-session[aria-label="New session"]')!
+    const fresh = band.querySelector<HTMLButtonElement>('.ws-worker-acts button[data-verb="New session"]')!
     fresh.click()
+    await flush()
     expect(confirm).toHaveBeenCalledOnce()
     vi.useFakeTimers()
     confirm.mockReturnValue(true)

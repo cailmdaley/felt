@@ -26,7 +26,12 @@ let band: Dock
 const saved = vi.fn()
 const writes = (): Array<Record<string, unknown>> => vi.mocked(fetch).mock.calls
   .filter(([, options]) => options?.method === 'POST').map(([, options]) => JSON.parse(String(options?.body)))
-const session = (label: string): HTMLButtonElement => band.head.querySelector(`.ws-header-session[aria-label="${label}"]`)!
+const session = (label: string): HTMLButtonElement => band.el.querySelector(`.ws-worker-acts button[data-verb="${label}"]`)!
+/** The worker line's verbs, then the band's lifecycle verbs, as drawn. */
+const shownVerbs = (view: Dock): string[] => [
+  ...(view.el.querySelector<HTMLElement>('.ws-worker-acts')?.hidden ? [] : [...view.el.querySelectorAll<HTMLButtonElement>('.ws-worker-acts button')].filter(button => !button.hidden).map(button => button.dataset.verb!)),
+  ...[...view.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')].filter(button => !button.hidden).map(button => button.getAttribute('aria-label')!),
+]
 const button = (text: string): HTMLButtonElement => [...band.el.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === text)!
 const select = (label: string): HTMLSelectElement => band.el.querySelector(`select[aria-label="${label}"]`)!
 const change = (label: string, value: string): void => { select(label).value = value; select(label).dispatchEvent(new Event('change')) }
@@ -94,8 +99,7 @@ describe('change review delivery', () => {
 })
 
 describe('band header', () => {
-  const visibleVerbs = (view: Dock): string[] => [...view.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')]
-    .filter(button => !button.hidden).map(button => button.getAttribute('aria-label')!)
+  const visibleVerbs = shownVerbs
 
   it('× returns directly to Desk and writes nothing', () => {
     const transition = vi.fn()
@@ -122,8 +126,8 @@ describe('band header', () => {
   it('draws each verb with its word, apart from navigation', () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 'words' }))
-    const words = [...band.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')].filter(button => !button.hidden).map(button => button.querySelector('.ws-header-word')?.textContent)
-    expect(words).toEqual(['Resume', 'New session', 'Close for review'])
+    const words = [...band.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button, .ws-worker-acts button')].filter(button => !button.hidden).map(button => button.querySelector('.ws-header-word')?.textContent)
+    expect(words).toEqual(['Close for review', 'Resume', 'New session'])
     expect(band.el.querySelector('.ws-band-constitution .ws-header-word, .ws-band-settings .ws-header-word')).toBeNull()
   })
 
@@ -158,9 +162,9 @@ describe('band header', () => {
   it('draws the verbs selected for each lifecycle state', () => {
     const controls = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
     const visible = (patch: Partial<KanbanCard>): string[] => { controls.reset(); controls.open(task(patch)); return visibleVerbs(controls) }
-    expect(visible({ status: 'open' })).toEqual(['Launch', 'Rest'])
+    expect(visible({ status: 'open' })).toEqual(['Start', 'Rest'])
     expect(visible({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
-      .toEqual(['New session', 'Close for review', 'Rest'])
+      .toEqual(['Send', 'New session', 'Close for review', 'Rest'])
     expect(visible({ status: 'active', sessionUuid: 'idle' })).toEqual(['Resume', 'New session', 'Close for review', 'Rest'])
     expect(visible({ status: 'closed', sessionUuid: 'review' })).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
     expect(visible({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resting' })).toEqual(['Resume', 'New session'])
@@ -172,15 +176,15 @@ describe('band header', () => {
   it('offers session verbs by whether a worker or a past session stands behind them', () => {
     const offered = (patch: Partial<KanbanCard>): string[] => {
       dock.reset(); dock.open(task(patch))
-      return [...band.head.querySelectorAll<HTMLButtonElement>('.ws-header-session')].filter(item => !item.hidden).map(item => item.getAttribute('aria-label')!)
+      return [...band.el.querySelectorAll<HTMLButtonElement>('.ws-worker-acts button')].filter(item => !item.hidden).map(item => item.dataset.verb!)
     }
-    expect(offered({ status: 'open' })).toEqual(['Launch'])
-    expect(offered({ status: 'closed' })).toEqual(['Launch'])
+    expect(offered({ status: 'open' })).toEqual(['Start'])
+    expect(offered({ status: 'closed' })).toEqual(['Start'])
     expect(offered({ status: 'open', sessionUuid: 's' })).toEqual(['Resume', 'New session'])
     expect(offered({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' })).toEqual(['Resume', 'New session'])
-    expect(offered({ status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' })).toEqual(['New session'])
+    expect(offered({ status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' })).toEqual(['Send', 'New session'])
     dock.reset(); dock.open(card({ id: 'notes/plain', uid: 'plain', status: 'open' }))
-    expect(band.head.querySelector<HTMLElement>('.ws-header-sessions')!.hidden).toBe(true)
+    expect(band.el.querySelector<HTMLElement>('.ws-worker-acts')!.hidden).toBe(true)
   })
 
   it('names the lifecycle beside the title in the rail\'s words, kept current', () => {
@@ -197,11 +201,11 @@ describe('band header', () => {
     expect([chip.textContent, chip.dataset.state]).toEqual(['Tempered', 'tempered'])
   })
 
-  it('lays the band out as a head, its settings, the hosted recording and its status', () => {
+  it('lays the band out as a head, its worker\'s line, its settings and its status', () => {
     dock.reset()
     dock.open(task({ status: 'closed', sessionUuid: 'resume-me', name: 'A long and particular name' }))
     const children = [...band.el.querySelector('.ws-dock-body')!.children].map(child => child.className)
-    expect(children).toEqual(['ws-band-head', 'ws-band-drawer', 'kbn-detail-transcript', 'kbn-ctl-foot ws-band-status'])
+    expect(children).toEqual(['ws-band-head', 'ws-worker-acts', 'ws-band-drawer', 'kbn-ctl-foot ws-band-status'])
     expect(band.el.querySelector('.ws-band-head')!.contains(band.head)).toBe(true)
     expect(band.head.querySelector(':scope > .kbn-ctl-verdict')).not.toBeNull()
     expect(band.head.dataset.verdictKey).toBeTruthy()
@@ -211,7 +215,7 @@ describe('band header', () => {
     expect(visibleVerbs(band)).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
     dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
     expect(band.head.dataset.column).toBe('inFlight')
-    expect(visibleVerbs(band)).toEqual(['New session', 'Close for review'])
+    expect(visibleVerbs(band)).toEqual(['Send', 'New session', 'Close for review'])
   })
 
   it('offers named, keyboard-focusable icons in order without sheets', () => {
@@ -220,7 +224,7 @@ describe('band header', () => {
     band.setNav({ constitution: vi.fn() })
     document.body.append(band.el)
     const buttons = [...band.el.querySelectorAll<HTMLButtonElement>('.ws-band-head .ws-header-icon')].filter(button => !button.hidden)
-    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Resume', 'New session', 'Close for review', 'Rest', 'Constitution', 'Settings'])
+    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Close for review', 'Rest', 'Constitution', 'Settings'])
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
       expect(button.tabIndex).toBe(0)
@@ -493,7 +497,8 @@ describe('Listen', () => {
     recording = { title: 'Standup', state: 'live' }
     canJoin = false
     listening.syncMeeting()
-    expect([toggle.disabled, toggle.title, toggle.textContent]).toEqual([false, 'Your voice is going to Standup.', 'Listening · Standup'])
+    expect([toggle.disabled, toggle.title, toggle.textContent]).toEqual([false, 'Your voice is going to Standup.', 'RecordingStandup'])
+    expect(toggle.getAttribute('aria-label')).toBe('Recording → Standup')
     listening.reset()
   })
 
@@ -543,7 +548,7 @@ describe('Listen', () => {
     listening.setMeetingHostOpen(openHost, () => 'vizier')
     listening.syncMeeting()
     const chip = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
-    expect(chip.textContent).toBe('Listening · vizier')
+    expect(chip.getAttribute('aria-label')).toBe('Recording → vizier')
     expect(q('.kbn-ctl-meet').hidden).toBe(false)
     expect(listening.el.querySelector('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop')).toBeNull()
     chip.click()
@@ -552,19 +557,25 @@ describe('Listen', () => {
     listening.reset()
   })
 
-  it('shows the hosted recording\'s words under the band, only while it hosts one', () => {
+  it('says in one line where the words go, here or elsewhere, and shows no transcript', () => {
     let recording: Record<string, unknown> | null = null
-    const { q, listening } = mountListen(task(), { current: () => recording })
-    const pane = q('.kbn-detail-transcript')
-    expect(pane.hidden).toBe(true)
-    recording = { launch: 'L1', title: 'Standup', state: 'live', fiber: 'a/task', tail: ['hello there'] }
+    const { q, item, listening } = mountListen(task(), { current: () => recording })
+    const openFile = vi.fn()
+    listening.openFile = openFile
+    listening.setMeetingHostOpen(vi.fn(), meeting => meeting.fiber?.split('/').at(-1))
+    const chip = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
+    expect(chip.getAttribute('aria-label')).toBe('Listen')
+    recording = { launch: 'L1', title: 'Standup', state: 'live', fiber: 'a/task', recorder: 'rec', transcript: '/m/standup.txt', tail: ['hello there'] }
     listening.syncMeeting()
-    expect(pane.hidden).toBe(false)
-    expect(pane.querySelector('.kbn-detail-transcript-title')?.textContent).toBe('Standup')
-    expect(pane.textContent).toContain('hello there')
-    recording = { ...recording, fiber: 'elsewhere' }
+    expect(chip.getAttribute('aria-label')).toBe('Recording → task')
+    expect(q('.kbn-ctl-meet').dataset.voice).toBe('recording')
+    expect(listening.el.textContent).not.toContain('hello there')
+    recording = { ...recording, fiber: 'b/elsewhere', paused: true }
     listening.syncMeeting()
-    expect(pane.hidden).toBe(true)
+    expect(chip.getAttribute('aria-label')).toBe('Paused → elsewhere')
+    chip.click()
+    item('Open transcript').click()
+    expect(openFile).toHaveBeenCalledWith('/m/standup.txt', 'Meeting transcript', 'rec')
     listening.reset()
   })
 
@@ -661,7 +672,7 @@ describe('session verbs', () => {
   beforeEach(() => { openWorker.mockClear(); dock.reset(); dock = band = opened() })
 
   it.each([
-    ['Launch', {}, 'fresh'],
+    ['Start', {}, 'fresh'],
     ['New session', { sessionUuid: 'prior' }, 'fresh'],
     ['Resume', { sessionUuid: 'prior' }, 'previous'],
   ] as const)('%s dispatches with its resume mode and an empty message, then opens the worker', async (label, patch, mode) => {
@@ -676,11 +687,61 @@ describe('session verbs', () => {
     expect(openWorker).toHaveBeenCalledWith('worker', 'owner')
   })
 
+  it.each([
+    ['Enter', { sessionUuid: 'prior' }, 'previous'],
+    ['New session', { sessionUuid: 'prior' }, 'fresh'],
+    ['Enter', {}, 'fresh'],
+  ] as const)('%s carries the line as the opening message, then says it was sent', async (how, patch, mode) => {
+    dock.open(task(patch))
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValue(response({ dispatched: true }))
+    const field = band.el.querySelector<HTMLInputElement>('.ws-worker-message')!
+    field.value = '  look at the cut first  '
+    field.dispatchEvent(new Event('input'))
+    if (how === 'Enter') field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    else session(how).click()
+    await flush()
+    expect(writes()).toEqual([expect.objectContaining({ fiber_id: 'a/task', resume_mode: mode, user_message: 'look at the cut first' })])
+    expect(field.value).toBe('')
+    expect(band.el.querySelector('.ws-worker-receipt')?.textContent).toBe('Sent')
+  })
+
+  it('types into a live worker only with something to say', async () => {
+    dock.open(task({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
+    const field = band.el.querySelector<HTMLInputElement>('.ws-worker-message')!
+    expect(session('Send').disabled).toBe(true)
+    expect(field.placeholder).toBe('Message a/task')
+    field.value = 'one more thing'
+    field.dispatchEvent(new Event('input'))
+    expect(session('Send').disabled).toBe(false)
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker' }))
+    session('Send').click()
+    await flush()
+    expect(writes()).toEqual([expect.objectContaining({ resume_mode: 'previous', user_message: 'one more thing' })])
+  })
+
+  it('serves a thread\'s worker from the same path, outside the band', async () => {
+    dock.open(task())
+    const thread = task({ id: 'a/task/thread', uid: 'thread-uid', name: 'Thread', sessionUuid: 'old' })
+    const actions = dock.workerActionsFor(thread)
+    document.body.append(actions.el)
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValue(response({}))
+    const field = actions.el.querySelector<HTMLInputElement>('.ws-worker-message')!
+    expect(field.placeholder).toBe('Resume Thread with…')
+    field.value = 'pick up the plots'
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flush()
+    expect(writes()).toEqual([expect.objectContaining({ fiber_id: 'a/task/thread', resume_mode: 'previous', user_message: 'pick up the plots' })])
+    actions.dispose()
+  })
+
   it('leaves a started worker closed under a finger', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('coarse'), addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     dock.open(task())
     vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker' }))
-    session('Launch').click()
+    session('Start').click()
     await flush()
     expect(saved).toHaveBeenCalledOnce()
     expect(openWorker).not.toHaveBeenCalled()
@@ -738,19 +799,19 @@ describe('session verbs', () => {
   it('says when Shuttle did not answer', async () => {
     dock.open(task())
     vi.mocked(fetch).mockRejectedValueOnce(new Error('connection reset'))
-    session('Launch').click()
+    session('Start').click()
     await flush()
     expect(band.el.querySelector('.kbn-detail-error')?.textContent).toContain('Shuttle did not answer (connection reset)')
-    expect(session('Launch').disabled).toBe(false)
+    expect(session('Start').disabled).toBe(false)
   })
 
   it('drops a reply that lands after the band moved to another card', async () => {
     dock.open(task())
     const pending = deferred<Response>()
     vi.mocked(fetch).mockImplementationOnce(async () => pending.promise)
-    session('Launch').click()
+    session('Start').click()
     dock.open(task({ id: 'b/task', uid: 'other-uid' }))
-    expect(session('Launch').disabled).toBe(false)
+    expect(session('Start').disabled).toBe(false)
     pending.resolve(response({ reason: 'closed' }, 422))
     await flush()
     expect(band.el.querySelector('.kbn-detail-error')?.textContent).toBe('')
@@ -774,7 +835,7 @@ describe('session verbs', () => {
     vi.mocked(fetch).mockClear()
     vi.mocked(fetch).mockResolvedValueOnce(response({ reason: 'arm_refused', needs: 'project_dir', host: 'owner', message: REASON }, 422))
       .mockResolvedValueOnce(response({ dispatched: true, tmux_session: 'worker' }))
-    session('Launch').click()
+    session('Start').click()
     await flush()
     expect(band.el.querySelector('.kbn-start-prompt-reason')?.textContent).toBe(`On owner: ${REASON}`)
     expect(band.el.querySelector<HTMLInputElement>('.kbn-start-prompt-input')?.value).toBe('/srv/checkout')
@@ -791,7 +852,7 @@ describe('session verbs', () => {
     const message = 'cannot arm: agent claude-retired is not in the registry (shuttle set-agent to pick a current one)'
     dock.open(task())
     vi.mocked(fetch).mockResolvedValueOnce(response({ reason: 'arm_refused', host: 'owner-host', message }, 422))
-    session('Launch').click()
+    session('Start').click()
     await flush()
     expect(band.el.querySelector('.kbn-start-prompt')).toBeNull()
     expect(band.el.querySelector('.kbn-detail-error')?.textContent).toBe(`On owner-host: ${message}`)
@@ -1126,7 +1187,7 @@ describe('session usage', () => {
     expect(part('cache').textContent).toBe('')
     expect(left()).toBe(0.5)
     expect(part('cache').title).toBe(`Cache ${said} (estimated from Claude cache usage)`)
-    expect(session('Resume').title).toBe(`Resume · cache ${said}`)
+    expect(session('Resume').title).toBe(`Resume a/task (Enter) · cache ${said}`)
     expect(band.el.querySelector('.ws-header-facts')!.textContent).toContain('94% cached')
     expect(usageReads()).toEqual([`/api/v1/transcript/usage?session=${id}&host=candide`])
   })
@@ -1145,7 +1206,7 @@ describe('session usage', () => {
     await flush()
     expect(usageReads()).toHaveLength(1)
     expect(part('context-meter').hidden).toBe(true)
-    expect(session('Resume').title).toBe('Resume')
+    expect(session('Resume').title).not.toContain('cache')
     expect(band.el.querySelector('.ws-header-facts')!.textContent).not.toContain('cached')
     dock.reset()
     dock.open(resting({ sessionUuid: undefined }))
@@ -1162,7 +1223,7 @@ describe('session usage', () => {
     expect(part('cache').dataset.cache).toBe('cold')
     expect(left()).toBe(0)
     expect(part('cache').getAttribute('aria-label')).toBe(`Cache cold since ${clockTime(until)}`)
-    expect(session('Resume').title).toBe('Resume')
+    expect(session('Resume').title).not.toContain('cache')
   })
 
   it('drains the dot to the cold ring without another answer', async () => {

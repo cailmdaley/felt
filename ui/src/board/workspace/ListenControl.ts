@@ -1,6 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { MeetingMode } from '../../forms/meetingApi.js'
-import { meetingActions, meetingHostCard, type MeetingRecord } from '../meeting.js'
+import { meetingActions, meetingHostCard, meetingStateWord, type MeetingRecord } from '../meeting.js'
 import { isMobileViewport } from '../mobile.js'
 import { openVoiceTranscript } from '../voiceTranscript.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
@@ -38,8 +38,6 @@ export interface ListenOptions {
   openFile(path: string, title?: string, owner?: string): void
   hostName(meeting: MeetingRecord): string | undefined
   openHost(meeting: MeetingRecord): void
-  /** Show the hosted meeting's transcript pane under the band. */
-  showPane(): void
   onError(message: string | null): void
 }
 
@@ -62,6 +60,7 @@ export class ListenControl {
   readonly el = document.createElement('span')
   private readonly button = document.createElement('button')
   private readonly word = document.createElement('span')
+  private readonly dest = document.createElement('span')
   private readonly dropdown = document.createElement('button')
   private readonly audio = document.createElement('select')
   private readonly opts: ListenOptions
@@ -93,7 +92,8 @@ export class ListenControl {
     icon.append(glyph)
     this.word.className = 'kbn-ctl-meet-label'
     this.word.textContent = 'Listen'
-    this.button.append(icon, this.word)
+    this.dest.className = 'kbn-ctl-meet-dest'
+    this.button.append(icon, this.word, this.dest)
     this.audio.className = 'kbn-ctl-select kbn-ctl-meet-audio'
     this.audio.setAttribute('aria-label', 'Listening audio')
     this.audio.append(new Option('Mic + system', 'system'), new Option('Mic only', 'mic'))
@@ -183,7 +183,7 @@ export class ListenControl {
   }
 
   private paint(): void {
-    const { card, meeting } = this.opts
+    const { meeting } = this.opts
     const current = meeting.current()
     const recording = current !== null && current.state !== 'failed'
     const voice = this.opts.voice?.status
@@ -192,25 +192,30 @@ export class ListenControl {
     if (this.voiceAvailable && !voice?.available) this.closeMenu()
     this.voiceAvailable = !!voice?.available
     if (this.menu && this.signature() !== this.menuState) this.closeMenu()
+    // One line says what the mic is doing and whose fiber the words reach.
     let label = 'Listen'
+    let destination: string | null = null
     let elsewhere: string | null = null
+    if (recording) {
+      destination = (meetingHostCard(current, [this.opts.card]) ? this.opts.card.name : this.opts.hostName(current)) ?? current.fiber?.split('/').at(-1) ?? current.title?.trim() ?? 'a meeting'
+      label = meetingStateWord(current.state, current.paused)
+      if (current.state !== 'stopping') elsewhere = current.paused ? `The mic is paused for ${destination}.` : `Your voice is going to ${destination}.`
+    } else if (voice?.available && voice.enabled) {
+      destination = voice.state === 'yielded' ? 'a recording' : voice.target?.name ?? 'Rex'
+      label = voice.muted ? 'Paused' : voice.state === 'starting' ? 'Starting' : 'Listening'
+      elsewhere = voice.muted ? `The mic is paused for ${destination}.` : `Your voice is going to ${destination}.`
+    }
     if (this.localError || current?.state === 'failed' || current?.handoff?.status === 'reported-failure' || voice?.state === 'failed' || voice?.last?.status === 'failed') {
       label = 'Failed'
-    } else if (recording) {
-      const hosted = meetingHostCard(current, [card]) !== null
-      const host = this.opts.hostName(current) ?? (hosted ? card.name : current.fiber?.split('/').at(-1)) ?? current.title?.trim() ?? 'card'
-      label = current.paused ? 'Paused' : 'Listening'
-      if (!hosted) label += ` · ${host}`
-      if (!hosted && current.state !== 'stopping') elsewhere = current.paused ? `The mic is paused for ${host}.` : `Your voice is going to ${host}.`
-    } else if (voice?.available && voice.enabled) {
-      label = voice.muted ? 'Paused' : 'Listening'
-      if (voice.target?.fiber_id !== (card.uid ?? card.id)) label += ` · ${voice.target?.name ?? 'Rex'}`
-      if (voice.state === 'yielded') elsewhere = 'Your voice is going to a recording.'
+      destination = null
     }
     if (this.word.textContent !== label) this.word.textContent = label
-    const whole = /^(Listening|Paused)$/.test(label) ? `${label} · ${card.name}` : label
+    this.dest.hidden = destination === null
+    if (this.dest.textContent !== (destination ?? '')) this.dest.textContent = destination ?? ''
+    const whole = destination ? `${label} → ${destination}` : label
     this.button.title = elsewhere ?? whole
     this.button.setAttribute('aria-label', whole)
+    this.el.dataset.voice = label === 'Failed' ? 'failed' : recording && current.state === 'live' && !current.paused ? 'recording' : destination ? (/Paused/.test(label) ? 'paused' : 'listening') : 'off'
     this.button.classList.toggle('kbn-ctl-meet-on', recording || !!voice?.enabled)
   }
 
@@ -269,7 +274,7 @@ export class ListenControl {
     }
     if (recording) {
       const hosted = meetingHostCard(current, [card]) !== null
-      this.item('Open transcript', () => { if (hosted) this.opts.showPane(); else this.opts.openHost(current) })
+      this.item('Open transcript', () => { if (current.transcript) this.opts.openFile(current.transcript, 'Meeting transcript', current.recorder ?? undefined); else this.opts.openHost(current) })
       if (!current.phone) this.item(current.paused ? 'Resume' : 'Pause', () => {
         void meeting.pause?.(current, !current.paused).then(() => { this.localError = null; this.paint() }).catch((error: unknown) => this.fail(error))
       }, !meeting.pause || current.state !== 'live')

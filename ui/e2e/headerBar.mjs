@@ -24,6 +24,9 @@ async function openRoot(page) {
 }
 const visibleHeaderVerbs = header => header.locator('.kbn-ctl-verdict button').evaluateAll(buttons =>
   buttons.filter(button => button.checkVisibility()).map(button => button.getAttribute('aria-label')))
+/** The worker line's verbs under the band's head. */
+const workerVerbs = page => page.locator('.ws-stage-band .ws-worker-acts button').evaluateAll(buttons =>
+  buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
 const assertLifecycleInk = async (header, scheme) => {
   const renderedTheme = await header.evaluate(el => ({
     appearance: document.documentElement.dataset.wsAppearance,
@@ -80,19 +83,21 @@ export function registerHeaderBarJourneys(test) {
       await page.goto(`${url}&e2e-appearance=${scheme}`)
       await openRoot(page)
       const header = page.locator('.ws-stage-band .ws-band-head')
-      assert.deepEqual(await visibleHeaderVerbs(header), ['Resume', 'New session', 'Temper', 'Discard'], 'Awaiting review offers its verdicts')
+      assert.deepEqual(await visibleHeaderVerbs(header), ['Temper', 'Discard'], 'Awaiting review offers its verdicts')
+      assert.deepEqual(await workerVerbs(page), ['Resume', 'New session'])
       await assertLifecycleInk(header, scheme)
       const visits = [
-        ['Response analysis', ['New session', 'Close for review', 'Rest']],
-        ['Draft the validation plan', ['Launch', 'Rest']],
-        ['Next validation', ['Launch']],
-        ['Accepted pilot', ['Launch']],
-        ['Discarded pilot', ['Launch']],
+        ['Response analysis', ['Close for review', 'Rest'], ['Send', 'New session']],
+        ['Draft the validation plan', ['Rest'], ['Start']],
+        ['Next validation', [], ['Start']],
+        ['Accepted pilot', [], ['Start']],
+        ['Discarded pilot', [], ['Start']],
       ]
-      for (const [name, verbs] of visits) {
+      for (const [name, verbs, worker] of visits) {
         const tree = await familyTree(page)
         await openThread(page, tree.locator('.kbn-thread-row').filter({ has: page.getByText(name, { exact: true }) }), name)
         assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
+        assert.deepEqual(await workerVerbs(page), worker, `${name} offers its worker's verbs`)
         await assertLifecycleInk(header, scheme)
       }
     }
@@ -121,7 +126,7 @@ export function registerHeaderBarJourneys(test) {
       assert.deepEqual([geometry.wrap, geometry.overflow], ['nowrap', 'ellipsis'])
       assert.ok(geometry.height <= geometry.line + 1, JSON.stringify(geometry))
       assert.equal(await header.locator('h1').getAttribute('title'), title)
-      assert.deepEqual(await visibleHeaderVerbs(header), ['Resume', 'New session', 'Temper', 'Discard'], `Awaiting review draws only its verbs at ${width}`)
+      assert.deepEqual(await visibleHeaderVerbs(header), ['Temper', 'Discard'], `Awaiting review draws only its verbs at ${width}`)
     }
   }, { width: 1440, height: 900 })
   test('The band keeps its title and every verb inside open desktop columns', async page => {
@@ -180,9 +185,9 @@ export function registerHeaderBarJourneys(test) {
       }
       await header.evaluate(el => { el.scrollLeft = 0 })
     }
-    await assertBand(['Resume', 'New session', 'Temper', 'Discard'])
+    await assertBand(['Temper', 'Discard'])
     await openThread(page, (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: 'Response analysis' }), 'Response analysis')
-    await assertBand(['New session', 'Close for review', 'Rest'])
+    await assertBand(['Close for review', 'Rest'])
     const reviewInk = await header.getByRole('button', { name: 'Close for review', exact: true }).evaluate(el => {
       const neutral = document.createElement('span')
       neutral.style.color = 'var(--ws-ink-muted, var(--kbn-ink-muted))'
@@ -199,7 +204,7 @@ export function registerHeaderBarJourneys(test) {
     assert.equal(reviewInk.color, reviewInk.neutral, `Close for review uses neutral lifecycle ink: ${JSON.stringify(reviewInk)}`)
     await (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: 'Next validation' }).click()
     await named(page, 'Next validation')
-    await assertBand(['Launch'])
+    await assertBand([])
     if (process.env.WORKSPACE_SHOTS) {
       await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
       await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'resting-seat-phone-light.png') })
@@ -228,12 +233,13 @@ export function registerHeaderBarJourneys(test) {
     const band = page.locator('.ws-stage-band')
     const chip = band.locator('.kbn-ctl-meet-arm')
     await chip.waitFor({ state: 'visible' })
-    assert.match(await chip.innerText(), /^Listening/)
+    assert.match(await chip.getAttribute('aria-label'), /^Recording → /)
     assert.equal(await band.locator('.kbn-ctl-meet-chip, .kbn-ctl-meet-arm, .kbn-ctl-meet-stop').evaluateAll(nodes => nodes.filter(el => el.checkVisibility()).length), 1)
     assert.equal(await band.locator('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop').count(), 0)
     await chip.click()
-    await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).click()
-    assert.ok(await page.locator('.ws-stage-band .kbn-detail-transcript').isVisible())
+    assert.ok(await page.getByRole('menuitem', { name: 'Open transcript', exact: true }).isEnabled())
+    await page.keyboard.press('Escape')
+    assert.equal(await page.locator('.ws-stage-band .kbn-detail-transcript').count(), 0)
     await page.locator('.ws-band-leave').click()
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     const foreign = page.locator('.ws-stage-band')
