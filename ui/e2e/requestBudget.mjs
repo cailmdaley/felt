@@ -54,7 +54,7 @@ try {
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Music"])`).first().click()
   const selected = () => p.locator('.ws-page.ws-selected')
   // A Desk click lands on the thread's row on its constitution's page, where its report opens.
-  await selected().locator('.fp-row[aria-selected="true"] [data-kind="lead"]').filter({ hasText: 'Report' }).click()
+  await selected().locator('.fp-row[aria-selected="true"] .fp-lead').click()
   await selected().frameLocator('iframe').getByRole('heading', { name: 'Listening notes', exact: true }).waitFor()
   // Let titles and durations settle.
   await p.clock.runFor(8_000)

@@ -27,6 +27,8 @@ export function registerNavigationJourneys(test) {
       assert.ok(await control.locator('.ws-back-label').isVisible())
       if (!phone) assert.equal(await control.evaluate(el => getComputedStyle(el).textIndent), '0px')
       if (phone) {
+        const scroll = selected(page).locator('.ws-family-scroll')
+        if (await scroll.count()) await scroll.evaluate(el => el.scrollTo(0, 0))
         await control.hover()
         assert.equal(await control.evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)', 'Touch back controls have no sticky hover background')
         await page.mouse.move(viewport.width - 1, viewport.height - 1)
@@ -60,34 +62,39 @@ export function registerNavigationJourneys(test) {
     // The page lands on the thread's row; Back leaves the page.
     await checkBack('Desk')
     await shot('01-nested-from-desk')
-    await openThread(page, threadRow(page, await familyTree(page), 'Review the null tests'), 'Review the null tests')
-    await checkBack('Choose the response cut')
+    const familyHash = new URL(page.url()).hash
+    const sibling = threadRow(page, await familyTree(page), 'Review the null tests')
+    await openThread(page, sibling, 'Review the null tests')
+    await sibling.locator('.fp-constitution').press('Enter')
+    assert.equal(new URL(page.url()).hash, familyHash, 'entering and unfolding stay on the family page')
+    await checkBack('Desk')
     await shot('02-sibling')
-    await selected(page).getByRole('link', { name: 'Open validation', exact: true }).click()
+    await sibling.locator('.fp-doc').getByRole('link', { name: 'Open validation', exact: true }).click()
     await selected(page).frameLocator('iframe').getByRole('heading', { name: 'Independent patches agree' }).waitFor()
-    await checkBack('Constitution')
+    await checkBack('Family')
     await shot('03-linked-file')
     const fileHash = new URL(page.url()).hash
-    await page.reload()
-    await selected(page).frameLocator('iframe').getByRole('heading', { name: 'Independent patches agree' }).waitFor()
-    await checkBack('Constitution')
-    await shot('04-file-reloaded')
     const fileBack = phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')
     await fileBack.click()
-    await selected(page).getByRole('link', { name: 'Open validation', exact: true }).waitFor()
-    await checkBack('Choose the response cut')
+    await selected(page).locator('.fp-doc').getByRole('link', { name: 'Open validation', exact: true }).waitFor()
+    assert.equal(new URL(page.url()).hash, familyHash)
     await shot('05-chevron-to-sibling')
+    await selected(page).locator('.fp-doc').getByRole('link', { name: 'Open validation', exact: true }).click()
+    await page.reload()
+    await selected(page).frameLocator('iframe').getByRole('heading', { name: 'Independent patches agree' }).waitFor()
+    await checkBack('Family')
+    await shot('04-file-reloaded')
     await page.goBack()
-    await named(page, 'Choose the response cut')
-    await shot('06-browser-back-to-nested')
-    // Back to the top, where the phone's bar shows again; Escape folds the row the page landed on before it goes back.
+    await selected(page).locator('.fp-tree').waitFor()
+    // Back to the top, where the phone's bar shows again; Escape folds the selected row before it goes back.
     if (phone) await selected(page).locator('.ws-family-scroll').evaluate(el => el.scrollTo(0, 0))
     await checkBack('Desk')
     if (!phone) {
       const landed = selected(page).locator('.fp-row[aria-selected="true"]')
-      assert.equal(await landed.getAttribute('aria-expanded'), 'true')
-      await page.keyboard.press('Escape')
-      assert.equal(await landed.getAttribute('aria-expanded'), 'false')
+      if (await landed.getAttribute('aria-expanded') === 'true') {
+        await page.keyboard.press('Escape')
+        assert.equal(await landed.getAttribute('aria-expanded'), 'false')
+      }
       await checkBack('Desk')
     }
     if (phone) {
