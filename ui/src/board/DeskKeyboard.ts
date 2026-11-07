@@ -35,7 +35,7 @@ export class DeskKeyboard {
 
   private regions(): HTMLElement[][] {
     return DESK_REGION_SELECTORS.map(selector => [...this.root.querySelectorAll<HTMLElement>(`${selector} [data-card-uid]`)]
-      .filter(el => !el.closest('[hidden]') || el.matches('.kbn-cluster-item[hidden]')))
+      .filter(el => !el.closest('[hidden]') || (el.matches('.kbn-cluster-item[hidden]') && !el.parentElement?.closest('[hidden]'))))
       .filter(region => region.length > 0)
   }
   private node(): HTMLElement | undefined {

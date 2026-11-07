@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer, restingOrder } from './KanbanSurfaces.js'
+import { DeskKeyboard } from './DeskKeyboard.js'
 import { card, response } from './testFixtures.js'
 
 it('folds each Desk section from its heading and remembers it across renders', () => {
@@ -31,4 +32,17 @@ it('folds each Desk section from its heading and remembers it across renders', (
     expect(head(selector).getAttribute('aria-expanded')).toBe('false')
   }
   vi.unstubAllGlobals()
+})
+
+it('skips paginated resting rows when the whole Resting section is folded', () => {
+  const root = document.createElement('div')
+  root.innerHTML = `<section data-column="awaitingReview"><div data-card-uid="review" data-card-origin="local"></div></section>
+    <section class="kbn-section-stash"><div hidden><div class="kbn-cluster-item" hidden data-card-uid="rest" data-card-origin="local"></div></div></section>
+    <section class="kbn-section-roles"><div data-card-uid="role" data-card-origin="local"></div></section>`
+  const keyboard = new DeskKeyboard(root, vi.fn())
+  keyboard.handle('down')
+  expect(keyboard.selection?.uid).toBe('review')
+  keyboard.handle('right')
+  expect(keyboard.selection?.uid).toBe('role')
+  keyboard.dispose()
 })

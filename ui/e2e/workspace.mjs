@@ -1270,6 +1270,7 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
 
 test('Temper remains available by key for drafts and work in flight through the undo queue', async p => {
   await chooseDeskColumn(p, 0)
+  await p.locator('[data-column="drafts"] .kbn-col-head').click()
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
   assert.equal(await band(p).locator('.ws-fiber-acts .kbn-ctl-temper').isVisible(), false, 'draft headers reserve their space for session actions')
   await p.keyboard.press('t')
@@ -2215,6 +2216,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       await window.__harness.modal.fetchAndRender()
     })
     await shot('waiting'); await leave(p); await chooseDeskColumn(p, 0)
+    await p.locator('[data-column="drafts"] .kbn-col-head').click()
     await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     await shot('no-worker')
@@ -2707,6 +2709,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await p.waitForTimeout(phone ? 600 : 0)
   for (const [index, column] of ['drafts', 'inFlight', 'awaitingReview'].entries()) {
     await chooseDeskColumn(p, index)
+    if (column === 'drafts') {
+      await p.locator('[data-column="drafts"] .kbn-col-head').click()
+      await settleTransitions(p, '[data-column="drafts"] .kbn-bandhead-fold')
+    }
     const card = p.locator(`[data-column="${column}"] .kbn-card`).first()
     if (phone) { await p.waitForTimeout(400); continue }
     // Under reduced motion a hovered card does not lift.
