@@ -389,7 +389,6 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
   use GenServer
   alias Shuttle.FileTail
 
-  @names ~r/\b(?:claude|cloud|clawed|claw|klaud|clot|clock|clod|claud)\b/iu
   @closing ~r/[\s,;:]*\bsend[.!?]*\s*$/iu
   @partial_stale_seconds 60
   @stamp ~r/^\d{2}:\d{2}:\d{2}(?:-\d{2}:\d{2}:\d{2})?\s+/
@@ -846,12 +845,6 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         do: Map.put(buffer, "last_word_at", state.clock.() - silence(line, voice)),
         else: buffer
 
-    # In live voice a name only wakes: the batch still waits for quiet.
-    buffer =
-      if config["kind"] == "voice" and Regex.match?(@names, spoken),
-        do: Map.put(buffer, "summoned", true),
-        else: buffer
-
     config =
       Map.put(
         config,
@@ -866,9 +859,6 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
         config |> Map.put("ended", true) |> flush_all(state)
 
       config["kind"] == "voice" and Regex.match?(@closing, spoken) ->
-        make_batch(config, buffer)
-
-      config["kind"] != "voice" and Regex.match?(@names, spoken) ->
         make_batch(config, buffer)
 
       buffer["words"] >= threshold["words"] ->
@@ -938,10 +928,10 @@ defmodule Shuttle.Meeting.TranscriptRelay.Worker do
     do: Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer)))
 
   # Waking a worker is deliberate: speech to a target with no live worker
-  # becomes a batch only when it named the worker or ended with "send", and is
-  # otherwise dropped here. The transcript on disk keeps the words.
+  # becomes a batch only when it ended with "send" (a batch made at once by
+  # `@closing`), and is otherwise dropped here. The transcript keeps the words.
   defp flush_buffer(%{"kind" => "voice"} = config, buffer, state) do
-    if state.cold.(buffer) and buffer["summoned"] != true,
+    if state.cold.(buffer),
       do: Map.put(config, "buffers", Enum.reject(config["buffers"], &same_target?(&1, buffer))),
       else: make_batch(config, buffer)
   end
