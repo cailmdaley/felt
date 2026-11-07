@@ -2,12 +2,12 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, ATTENTION_WORD, conversable, type MapFeeds, type MapFile } from '../family/model.js'
 import { htmlEl as el, markPath, shortAgo, svgEl } from '../family/drawing.js'
 import { flight, frameOf, invert, keeping, lonLat, project, wholeRadius, type Camera, type Flight, type Frame, type Projection, type Viewport } from './camera.js'
-import { forestOf } from './forest.js'
+import { forestOf, persistentId } from './forest.js'
 import { NORTH, cellSpan, centre, child, facePoint, inCell, ipixOf, type FacePoint, type Vec } from './healpix.js'
 import { blocks, placeNames, type Block, type Candidate, type Point } from './labels.js'
 import { BEACON_PX, paint, type Palette, type Pulse } from './paint.js'
 import { askKind, sceneOf, traceOf, type Body, type Scene, type Tone } from './scene.js'
-import type { ThreadIndex } from '../threads.js'
+import { cardNamed, type ThreadIndex } from '../threads.js'
 import { keystrokeIsSpokenFor } from '../views/ViewRegistry.js'
 import './globe.css'
 
@@ -15,7 +15,8 @@ import './globe.css'
 export interface GlobeHost {
   feeds: MapFeeds & { refresh(): void; lead(card: KanbanCard): Promise<MapFile | undefined> }
   openDocument(card: KanbanCard, doc: string): void
-  converse(card: KanbanCard): void
+  /** Moves Rex to the thread; true if it had a conversation to open. */
+  converse(card: KanbanCard): boolean
   constitutionKey(card: KanbanCard): string
   /** The thread a surface has come to rest on, which voice follows; null for none. */
   see?(card: KanbanCard | null): void
@@ -206,10 +207,10 @@ export class GlobeStage {
       if (was && (was.standing !== thread.standing || was.lastMove < thread.lastMove)) this.pulses.set(key, at)
     }
   }
-  /** Comes to a fiber Rex moved to, leaving Rex be; false for one the globe does not hold. */
-  follow(id: string): boolean {
+  /** Comes to a fiber Rex moved to on a host, leaving Rex be; false for one the globe does not hold. */
+  follow(id: string, origin: string): boolean {
     const { threads } = this.scene
-    const body = threads.get(id) ?? [...threads.values()].find(thread => thread.thread!.card.id === id)
+    const card = cardNamed([...threads.values()].map(body => body.thread!.card), id, origin), body = card && threads.get(persistentId(card))
     if (!body) return false
     this.place.worker = body.key
     if (body.key !== this.place.focus) this.come(body)
@@ -653,9 +654,7 @@ export class GlobeStage {
       if (touch && this.tapped !== body.key) { this.tapped = body.key; this.come(body); return }
       this.tapped = null
       this.come(body)
-      if (!conversable(thread.card)) return
-      this.place.worker = body.key
-      this.host.converse(thread.card)
+      if (conversable(thread.card) && this.host.converse(thread.card)) { this.place.worker = body.key; this.request() }
       return
     }
     if (owner && body.file) this.host.openDocument(owner.card, body.file.key)

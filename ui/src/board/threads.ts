@@ -49,6 +49,9 @@ export function threadState(card: KanbanCard): ThreadState {
 /** A thread's identity: a wire edge names a path, and the same path can live on several hosts. */
 export const threadKey = (card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id'>): string =>
   `${card.originId}\u0000${card.feltStore ?? ''}\u0000${card.id}`
+/** The card of a fiber a host names: that host's copy, else the fiber's one row, which a mirror's uid still reaches. */
+export const cardNamed = <T extends Pick<KanbanCard, 'originId' | 'id' | 'uid'>>(cards: readonly T[], id: string, origin: string): T | undefined =>
+  cards.find(card => (card.uid === id || card.id === id) && card.originId === origin) ?? cards.find(card => card.uid === id)
 const EMPTY: ThreadSummary = Object.freeze({ unfinished: 0, waiting: 0, working: 0, toReview: 0, drafts: 0, archived: 0 })
 let builds = 0
 /** How many indexes have been built in this page — the scale tests' witness that nothing rebuilds per card. */

@@ -1,4 +1,4 @@
-import { ThreadIndex, threadKey } from '../threads.js'
+import { ThreadIndex, cardNamed, threadKey } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
@@ -655,10 +655,10 @@ export class Workspace {
     }
     return page
   }
-  /** A click in a view that stays in place moves Rex behind it and takes voice along. */
-  reach(card: KanbanCard): void {
-    if (conversable(card)) this.dock.openConversation(card, true)
+  /** A click in a view that stays in place moves Rex behind it and takes voice along; true if Rex moved. */
+  reach(card: KanbanCard): boolean {
     this.opts.onSight?.(card)
+    return conversable(card) && this.dock.openConversation(card, true)
   }
   /** Voice follows the page: on the map, the thread it rests on; anywhere else, the page's fiber. */
   private sight(state: ChannelState): void {
@@ -670,7 +670,7 @@ export class Workspace {
   }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), (card, quiet) => { this.dock.openConversation(card, quiet) }, this.mapFeeds, state.mapPlace,
+    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), (card, quiet) => this.dock.openConversation(card, quiet), this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
       () => {
         if (this.current !== state) return
@@ -894,7 +894,7 @@ export class Workspace {
    * anything else opens. None of these speaks back to Rex.
    */
   follow(id: string, owner: string): void {
-    const state = this.current, known = this.opts.cards().find(card => (card.uid === id || card.id === id) && card.originId === owner)
+    const state = this.current, known = cardNamed(this.opts.cards(), id, owner)
     if (known && this.mapPage(state)?.flyTo(known)) return
     const shown = state?.card
     if (this.isActive && shown && shown.originId === owner && (shown.uid === id || shown.id === id)) return
@@ -904,8 +904,7 @@ export class Workspace {
   }
   async openFiber(id: string, owner: string): Promise<void> {
     const epoch = this.routeEpoch
-    const known = this.opts.cards().find(c => (c.id === id || c.uid === id) && c.originId === owner)
-      ?? this.opts.cards().find(c => c.uid === id)
+    const known = cardNamed(this.opts.cards(), id, owner)
     if (known) { this.open(known, this.origin); return }
     try {
       const entry = await readFiber(this.opts.shuttleBase, id, owner, undefined, 'discover')

@@ -77,7 +77,7 @@ export function registerMapViewJourneys(test) {
     assert.deepEqual(await asked(page), [...before, 'session-analysis'], 'Back and stepping out never reach Rex')
   }, { width: 1440, height: 900 }, 'no-preference')
 
-  test('The radial on a phone: a first tap comes to a thread, a second moves Rex to it', async page => {
+  test("The radial on a phone: a first tap comes to a thread, a second leaves a terminal worker's ring alone", async page => {
     await landed(page)
     const held = page.locator('.ws-page.ws-selected .fm-star[data-worker]')
     assert.match(await held.getAttribute('aria-label'), new RegExp(`^${root},`))
@@ -85,7 +85,7 @@ export function registerMapViewJourneys(test) {
     await inScene(page, 'Response analysis')
     assert.match(await held.getAttribute('aria-label'), new RegExp(`^${root},`), 'the first tap leaves Rex be')
     await star(page, 'Response analysis').tap()
-    await until(page, () => document.querySelector('.ws-page.ws-selected .fm-star[data-worker]')?.getAttribute('aria-label').startsWith('Response analysis,'))
+    assert.match(await held.getAttribute('aria-label'), new RegExp(`^${root},`), 'a terminal worker has nowhere to open on a phone, so the ring stays')
   }, { width: 390, height: 844 }, 'reduce', true)
 
   test('`l` before the tapestry has been read waits for it, rather than opening the newest file', async page => {
@@ -104,6 +104,34 @@ export function registerMapViewJourneys(test) {
     assert.equal(await page.evaluate(() => location.hash), map, 'nothing opens while the read is out')
     await page.evaluate(() => window.__landReads())
     await until(page, () => /tapestry\.html/.test(decodeURIComponent(location.hash)))
+  })
+
+  test('Rex naming a fiber on two hosts reveals that host\'s copy on the Tree and the Globe', async page => {
+    await board(page)
+    await page.evaluate(async () => {
+      const rows = window.__harness.MOCK_FEED.fibers, row = rows.find(({ fiber }) => fiber.name === 'Response analysis')
+      delete row.fiber.uid
+      rows.push({ ...row, origin: 'other-host', runtime: null, fiber: { ...row.fiber, name: 'Response analysis elsewhere', shuttle: { ...row.fiber.shuttle, host: 'other-host' } } })
+      await window.__harness.modal.fetchAndRender()
+    })
+    const id = await page.evaluate(() => window.__harness.MOCK_FEED.fibers.at(-1).fiber.id)
+    const rex = origin => page.evaluate(([origin, id]) => window.__harness.modal.voice.onRex({ fiber_id: id, origin }), [origin, id])
+    const here = await page.evaluate(() => window.__harness.MOCK_FEED.fibers.find(({ fiber }) => fiber.name === 'Response analysis').origin)
+    await page.keyboard.press('4')
+    await page.locator('.tree-page .tree-row').first().waitFor()
+    const chosen = page.locator('.tree-row[aria-selected="true"] .tree-name')
+    await rex('other-host')
+    await until(page, () => document.querySelector('.tree-row[aria-selected="true"] .tree-name')?.textContent === 'Response analysis elsewhere')
+    await rex(here)
+    await until(page, () => document.querySelector('.tree-row[aria-selected="true"] .tree-name')?.textContent === 'Response analysis')
+    assert.equal(await chosen.count(), 1)
+    await page.keyboard.press('5')
+    await page.locator('.globe canvas').waitFor()
+    await page.waitForTimeout(1300)
+    for (const [origin, name] of [['other-host', 'Response analysis elsewhere'], [here, 'Response analysis']]) {
+      await rex(origin)
+      await until(page, name => document.querySelector('.globe-peek-name')?.textContent === name, name)
+    }
   })
 
   test('The Tree: hotkey 4, keys move without Rex, a thread opens its chat, a file opens and Back returns to its row', async page => {

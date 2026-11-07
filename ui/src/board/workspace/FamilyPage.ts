@@ -96,10 +96,10 @@ export class FamilyPage {
   private readonly place: MapPlace
   private readonly levelled: () => void
 
-  private readonly converse: (card: KanbanCard, quiet?: boolean) => void
+  private readonly converse: (card: KanbanCard, quiet?: boolean) => boolean
 
-  /** `open` leaves for a document, or a thread the map has no place for; `converse` opens a conversation, `quiet` leaving the keyboard here; `levelled` hears the map change level or come to rest. */
-  constructor(open: (card: KanbanCard, doc?: string) => void, converse: (card: KanbanCard, quiet?: boolean) => void, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, levelled: () => void = () => {}) {
+  /** `open` leaves for a document, or a thread the map has no place for; `converse` opens a conversation, `quiet` leaving the keyboard here, and says whether it had one to open; `levelled` hears the map change level or come to rest. */
+  constructor(open: (card: KanbanCard, doc?: string) => void, converse: (card: KanbanCard, quiet?: boolean) => boolean, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, levelled: () => void = () => {}) {
     this.open = open; this.converse = converse; this.feeds = feeds; this.place = place; this.disposed = disposed; this.levelled = levelled
     this.stage.setAttribute('role', 'listbox')
     this.stage.setAttribute('aria-label', 'Threads, most urgent first')
@@ -163,7 +163,7 @@ export class FamilyPage {
     }
     if (event.key === 'c') {
       const card = this.selection
-      if (card && conversable(card)) this.converse(card)
+      if (card && conversable(card)) this.chat(card)
       return !!card
     }
     if (STEPS[event.key] && !this.stage.contains(document.activeElement)) { this.focus(); return true }
@@ -461,7 +461,7 @@ export class FamilyPage {
     if (conversable(thread.card)) {
       const worker = el('button', 'ws-family-peek-worker', thread.card.terminalBackend === 'rex' ? 'Open in Rex' : 'Open conversation'); worker.type = 'button'
       worker.title = `${worker.textContent} · c`
-      worker.addEventListener('click', () => this.converse(card()))
+      worker.addEventListener('click', () => this.chat(card()))
       title.append(worker)
     }
     const note = el('p', 'ws-family-peek-note', thread.note)
@@ -507,9 +507,12 @@ export class FamilyPage {
     }
     this.peeked = null
     this.come(thread)
-    if (!conversable(thread.card)) return
-    this.place.worker = thread.key
-    this.converse(thread.card, true)
+    if (conversable(thread.card)) this.chat(thread.card, true)
+  }
+  /** Opens a thread's conversation; the ring moves only if it opened. */
+  private chat(card: KanbanCard, quiet?: boolean): void {
+    if (!this.converse(card, quiet)) return
+    this.place.worker = threadKey(card)
     this.drawField()
   }
   /** The keys of the listbox: its options', unmodified, leaving any control beside them its own. */

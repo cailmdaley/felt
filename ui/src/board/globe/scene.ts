@@ -2,7 +2,7 @@
 import type { Attention, MapFile, MapThread, Standing } from '../family/model.js'
 import { ATTENTION } from '../family/model.js'
 import { assign, tilesOf, type Band, type Tile, type TileKind } from './assign.js'
-import type { Forest } from './forest.js'
+import { persistentId, type Forest } from './forest.js'
 import { centre, cellRadius, cellSpan, outline, type Cell, type Vec } from './healpix.js'
 import { mollweideAngle } from './camera.js'
 
@@ -108,7 +108,7 @@ export function sceneOf(forest: Forest, now: number): Scene {
     }
   }
   roots.forEach(gather)
-  return { roots, byKey, threads, deepest, asks: forest.asks.flatMap(ask => { const body = threads.get(ask.card.uid ?? ask.card.id); return body ? [body] : [] }) }
+  return { roots, byKey, threads, deepest, asks: forest.asks.flatMap(ask => { const body = threads.get(persistentId(ask.card)); return body ? [body] : [] }) }
 }
 
 export const askKind = (body: Body): Attention => body.thread!.standing as Attention

@@ -1,6 +1,6 @@
 import { inFlightModel } from '../family/inFlight.js'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { responseThreadIndex } from '../threads.js'
+import { cardNamed, responseThreadIndex } from '../threads.js'
 import { FamilyPage, type MapPlace } from '../workspace/FamilyPage.js'
 import { registerView, type TemporalView, type ViewContext } from './ViewRegistry.js'
 
@@ -29,7 +29,7 @@ class MapView implements TemporalView {
 
   mount(host: HTMLElement, context: ViewContext): void {
     const workspace = context.workspace!, feedsHost = workspace.globeHost
-    this.page = new FamilyPage((card, doc) => { if (doc) feedsHost.openDocument(card, doc); else workspace.openFromDesk(card) }, (card, quiet) => { workspace.dock.openConversation(card, quiet) }, feedsHost.feeds, this.place, () => {}, () => {
+    this.page = new FamilyPage((card, doc) => { if (doc) feedsHost.openDocument(card, doc); else workspace.openFromDesk(card) }, (card, quiet) => workspace.dock.openConversation(card, quiet), feedsHost.feeds, this.place, () => {}, () => {
       const settled = this.page?.settled
       feedsHost.see?.(settled?.path ? settled : null)
     })
@@ -58,7 +58,7 @@ class MapView implements TemporalView {
   }
   keydown(event: KeyboardEvent): boolean { return !!this.page?.keydown(event) }
   reveal(id: string, origin: string): boolean {
-    const card = this.context && everyCard(this.context).find(candidate => (candidate.uid === id || candidate.id === id) && candidate.originId === origin)
+    const card = this.context && cardNamed(everyCard(this.context), id, origin)
     return !!card && !!this.page?.flyTo(card)
   }
 }

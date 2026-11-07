@@ -1,7 +1,7 @@
 /** The board's cards as the forest `assign` places: projects, families and threads, by persistent id. */
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, familyModel, type MapFeeds, type MapThread } from '../family/model.js'
-import type { ThreadIndex } from '../threads.js'
+import { threadKey, type ThreadIndex } from '../threads.js'
 import type { Band, FamilySeed, ProjectSeed, ThreadSeed } from './assign.js'
 
 export interface Forest {
@@ -12,7 +12,7 @@ export interface Forest {
   asks: MapThread[]
 }
 
-export const persistentId = (card: KanbanCard): string => card.uid ?? card.id
+export const persistentId = (card: KanbanCard): string => card.uid ?? threadKey(card)
 export const projectOf = (card: KanbanCard): string => card.id.split('/')[0]
 /** The second segment of an id with a third: a family's place within its project, when its path names one. */
 const areaOf = (card: KanbanCard): string | undefined => { const parts = card.id.split('/'); return parts.length > 2 ? parts[1] : undefined }

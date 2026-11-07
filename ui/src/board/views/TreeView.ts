@@ -136,6 +136,7 @@ class TreePage {
   /** Rex moved to this fiber: select and show its row, leaving Rex be. */
   reveal(id: string, origin: string): boolean {
     const hit = this.search(node => !!node.thread && node.thread.card.originId === origin && (node.thread.card.uid === id || node.thread.card.id === id))
+      ?? this.search(node => node.thread?.card.uid === id)
     if (!hit) return false
     if (this.place.has(hit.key)) this.mark(hit.key, true)
     else if (!this.filter.value) this.show(hit)

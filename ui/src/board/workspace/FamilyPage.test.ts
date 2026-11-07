@@ -24,7 +24,7 @@ const draft = card({ id: 'hub/draft', name: 'Draft', orchestrator: 'hub', status
 const cards = [root, asked, idle, done, draft]
 
 function page(open = vi.fn(), feed = feeds, place: MapPlace = { focus: null, view: null }, known = cards): { page: FamilyPage; open: typeof open; converse: Mock; place: MapPlace } {
-  const converse = vi.fn(), family = new FamilyPage(open, converse, feed, place, vi.fn())
+  const converse = vi.fn(() => true), family = new FamilyPage(open, converse, feed, place, vi.fn())
   document.body.append(family.el)
   family.update(root, new ThreadIndex(known), now)
   return { page: family, open, converse, place }
@@ -361,15 +361,14 @@ it('draws a drag with the newest model, not the one it began on', () => {
 
 it('offers a thread with a worker its conversation from the peek', () => {
   const root = card({ id: 'hub' }), thread = card({ id: 'hub/a', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting', terminalBackend: 'rex' })
-  const converse = vi.fn(), page = new FamilyPage(vi.fn(), converse, { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, () => {})
+  const converse = vi.fn(() => true), page = new FamilyPage(vi.fn(), converse, { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, () => {})
   document.body.append(page.el)
   page.update(root, new ThreadIndex([root, thread]))
   expect(page.selection?.id).toBe('hub/a')
   const worker = page.el.querySelector<HTMLButtonElement>('.ws-family-peek-worker')!
   expect(worker.textContent).toBe('Open in Rex')
   worker.click()
-  expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/a' }))
-  expect(converse.mock.lastCall).toHaveLength(1)
+  expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/a' }), undefined)
 })
 
 describe('coming to a thread', () => {
@@ -623,6 +622,16 @@ describe('coming to a thread', () => {
     family.keydown(new KeyboardEvent('keydown', { key: 'l' }))
     await settled()
     expect(open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'hub/mid' }), sent[0].key)
+  })
+  it('rings only the thread whose conversation opened', () => {
+    const { page: family, converse, place } = page(vi.fn(), holding, undefined, tree)
+    converse.mockReturnValueOnce(false)
+    click(option(family, 'Mid'))
+    expect(converse).toHaveBeenCalledTimes(1)
+    expect(place.worker).toBeUndefined()
+    expect(option(family, 'Mid').hasAttribute('data-worker')).toBe(false)
+    click(option(family, 'Mid'))
+    expect(option(family, 'Mid').hasAttribute('data-worker')).toBe(true)
   })
   it('colours a thread by its state and leaves a new file to the mark on top', () => {
     const fresh: FamilyFeeds = { ...feeds, files: thread => thread.id === 'hub/w' ? [{ ...staged('fresh.png'), unread: true }] : [] }

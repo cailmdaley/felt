@@ -31,6 +31,6 @@ class GlobeView implements TemporalView {
     this.context = null
   }
   keydown(event: KeyboardEvent): boolean { return !!this.stage?.keydown(event) }
-  reveal(id: string): boolean { return !!this.stage?.follow(id) }
+  reveal(id: string, origin: string): boolean { return !!this.stage?.follow(id, origin) }
 }
 registerView(new GlobeView())
