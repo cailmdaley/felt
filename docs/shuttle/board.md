@@ -1,7 +1,7 @@
 # The board
 
 The daemon serves the board at `http://127.0.0.1:4000/`. It is one page with
-four full-page views behind a hotkey row, `1`–`4`, and a settings sheet on
+five full-page views behind a hotkey row, `1`–`5`, and a settings sheet on
 `⌘,`. Everything on it is a view over fibers the daemon already polls, plus
 the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 
@@ -11,9 +11,10 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 | `2` | **Chronicle** | What a stretch of weeks was about |
 | `3` | **Board** | What the work produced |
 | `4` | **Tree** | Where everything is |
+| `5` | **Globe** | Everything at once, as one place to move through |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
-`#/desk`, `#/chronicle`, `#/board`, and `#/tree` deep-link the views.
+`#/desk`, `#/chronicle`, `#/board`, `#/tree` and `#/globe` deep-link the views.
 A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
 ## Desk — the kanban
@@ -210,7 +211,7 @@ Document header lines show the title and arrival history, omit the agent, and na
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
 The ‹ button, browser Back and the phone's right swipe follow the pages you visited, across constitutions and linked files.
 The back control names the constitution across channels, or the page within the same channel: Constitution or the file's name.
-A direct address without a visited page behind it returns to its origin view (Desk, Chronicle or Board).
+A direct address without a visited page behind it returns to its origin view (Desk, Chronicle, Board or Globe).
 Reloads retain this path in browser history.
 Ancestry links and `b` go up the thread tree separately.
 Opening a different page adds a history stop, including a link to a page just visited.
@@ -291,6 +292,32 @@ By default, whatever holds live work is open far enough to show it. What a hand 
 
 A click does the same as `Enter`, and also opens a thread with its row collapsed; the caret only folds, and a row's **map** button opens its map. On a touch screen the first tap comes to a thread and the second opens its chat.
 The bar at the foot names the selected row's path, and each step of it selects that row. Going to a page and coming Back keeps the selection and the scroll position.
+
+## Globe — everything on one sphere
+
+The Globe holds the whole fleet on a HEALPix sphere: zoom out and it holds everything running, zoom in and you reach a project, a family, a thread, its files and its finished work. `ui/src/board/globe/` is the view; its boundary maths is checked against healpy.
+
+**Latitude is state.** The twelve base pixels are three bands of four. The north holds families with anything in flight, the equator families at rest, the south families wholly finished, so a family's latitude says where it stands and going south is going into the past. Within a band each project is one cell, its province, labelled with the project's name. An area the ids name, such as `ai-futures/felt/`, is a cell inside that when two or more families share it, and families lie inside those. A project appears once in each band it has work in.
+
+**Area is a share of the work.** The nested scheme is a quadtree, so each size is a power of four, and siblings are packed by a buddy allocator. A cell is as large as it must be to hold what it holds, heavier threads take more, and shares are compressed so that a hub of a hundred threads does not reduce a lone thread to a speck. Not every tile is filled: the rest is ocean, or the ground of its parent.
+
+**Every thread's cell splits the same way, at every level.** Its live threads are to the north and its finished ones to the south. Its tapestry or report is the west quadrant. Its sent files are the east quadrant, with its constitution at that quadrant's north corner. An absent item leaves its place empty, so a tapestry that arrives later moves nothing.
+
+**Places hold.** Each sibling follows a path of quadrants drawn from a hash of its persistent id, and takes the first free cell of its size along it, so a place depends on who is there and not on the order they came. A new thread takes empty cells; a family that changes band moves alone; a cell that grows or shrinks stays on its own path. A band that crosses a size limit rescales in place.
+
+The tile's colour is its state, in the Desk's pigments, and it fades with age. A tile too small to open shows the most urgent thing inside it. What asks keeps a marker of constant size from any distance, and what asks over the horizon waits at the rim at its bearing. The chips under the trail count what asks, and clicking one walks to the next of that kind. The peek at the foot names the tile under the pointer or in focus, with its order and nested index.
+
+**Moving.** Drag to turn, with the surface kept under the pointer exactly at any zoom, or scroll to turn. `⌘` and scroll, or a pinch, zooms about the pointer, down to the smallest thing there filling the stage; names grow in as their tiles can hold them whole, and the grid refines with the zoom. `m` or the switch at the top right changes to Mollweide's whole sky and back, with the same clicks and zoom.
+
+**Clicking.** A click on a thread flies to it and opens its Rex chat at once; on a phone the first tap comes to it and the second opens the chat. A click on a tapestry, report, file or constitution opens it on the stage, and Back returns to the Globe as it stood. A click on a province or area flies to it. Zooming, turning and stepping back never touch Rex. A click in Rex flies the Globe to that thread.
+
+| Key | On the Globe |
+|---|---|
+| `Esc`, `h` | One level out |
+| `←` `→` `↑` `↓` | The previous or next thing that asks, most urgent first |
+| `Enter` | What a click does, on the tile in focus |
+| `+`, `-` | Zoom |
+| `m` | Globe or Mollweide |
 
 ## The board is optional, and the bundle is its own artifact
 

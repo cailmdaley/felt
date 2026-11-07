@@ -14,7 +14,7 @@ import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { channelLead, documentActivity, familyKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, documentActivity, familyKey, fiberKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { meetingHostCard, type MeetingRecord } from '../meeting.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
@@ -26,6 +26,7 @@ import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
 import { Overview } from './Overview.js'
 import { FamilyPage, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
+import type { GlobeHost } from '../globe/GlobeStage.js'
 import { conversable, familyModel, isDrawn as onTheMap, type MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { unseenSince } from './DocumentSeen.js'
@@ -83,9 +84,9 @@ interface ChannelState {
   error?: string
 }
 export type WorkspaceView = WorkspaceOriginView
-const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/tree': 'tree' }
-const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', tree: 'Tree' }
-const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Tree' ? 'tree' : 'board'
+const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/tree': 'tree', '#/globe': 'globe' }
+const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', tree: 'Tree', globe: 'Globe' }
+const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Tree' ? 'tree' : origin === 'Globe' ? 'globe' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
@@ -133,16 +134,27 @@ export class Workspace {
   private lastUpdateRevision = ''
   private lastRenderedFamilyRevision = ''
   private readonly mapFeeds: FamilyFeeds
+  /** What the Globe reaches through the board: the map's feeds, and its pages and conversations. */
+  readonly globeHost: GlobeHost
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.root = root
-    this.activity = new FamilyActivity(opts.shuttleBase, () => { if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph()) })
+    this.activity = new FamilyActivity(opts.shuttleBase, () => {
+      if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
+      this.globeHost.onFeeds?.()
+    })
     this.mapFeeds = {
       marks: card => this.activity.of(card.uid ?? card.id),
       files: card => this.mapFiles(card),
       refresh: () => this.refreshFamilyFeeds(),
       lead: card => this.mapLead(card),
+    }
+    this.globeHost = {
+      feeds: this.mapFeeds,
+      openDocument: (card, doc) => this.openFromMap(card, doc),
+      converse: card => { this.dock.openConversation(card) },
+      constitutionKey: card => fiberKey(card.originId, card.uid ?? card.id),
     }
     this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {
       shuttleBase: opts.shuttleBase, frameActive: frame => frameBridge(frame)?.active ?? null,
@@ -378,6 +390,7 @@ export class Workspace {
   /** The sent-file feed moved: the open map redraws. */
   sendsChanged(): void {
     if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
+    this.globeHost.onFeeds?.()
   }
   private graph(): ThreadIndex { return this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()) }
   /** A fiber in a family of threads carries the map among its pages, and so does a constitution alone, past its draft. */
@@ -482,7 +495,7 @@ export class Workspace {
   handleOverviewEscapeLayer(): boolean { return this.overview.handleEscapeLayer() }
 
   /** View keys park the reader; Board restores its last unreturned channel. */
-  suspend(view: 'desk' | 'chronicle' | 'tree'): void {
+  suspend(view: 'desk' | 'chronicle' | 'tree' | 'globe'): void {
     this.history.view(`#/${view}`)
   }
   showBoard(): void {

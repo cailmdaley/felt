@@ -14,6 +14,7 @@ import './views.css'
 import './ChronicleView.js'
 import './BoardView.js'
 import './TreeView.js'
+import './GlobeView.js'
 
 export {
   blockingDialogOpen,

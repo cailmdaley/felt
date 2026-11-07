@@ -1,7 +1,7 @@
 /**
  * ViewRegistry — the contract between KanbanModal and the temporal views.
  *
- * The board is four full-page views behind one hotkey row:
+ * The board is five full-page views behind one hotkey row:
  *
  *   1  desk       the kanban page (Now board + Resting). Owned by
  *                 KanbanModal itself, NOT a TemporalView.
@@ -31,9 +31,10 @@ import type { MapFile } from '../family/model.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import type { DocKey } from '../workspace/documents.js'
 import type { TemporalFetchers } from './TemporalData.js'
+import type { GlobeHost } from '../globe/GlobeStage.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'shelf' | 'tree'
+  id: 'chronicle' | 'shelf' | 'tree' | 'globe'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void
@@ -71,6 +72,7 @@ export interface ViewContext extends TemporalFetchers {
     openFromDesk(card: KanbanCard): void
     openPage(card: KanbanCard, doc: DocKey): void
     readLead(card: KanbanCard): Promise<MapFile | undefined>
+    readonly globeHost: GlobeHost
   }
   /**
    * WORK — every card on the eight lifecycle/planning surfaces, deduped. This

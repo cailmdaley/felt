@@ -556,6 +556,7 @@ export class KanbanModal {
     else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
     else if (window.location.hash === '#/chronicle') this.setView('chronicle')
     else if (window.location.hash === '#/tree') this.setView('tree')
+    else if (window.location.hash === '#/globe') this.setView('globe')
     this.keymapHelp = new KeymapHelp(
       () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : this.activeViewId === 'tree' ? 'tree' : 'overview',
     )
@@ -567,7 +568,7 @@ export class KanbanModal {
       deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
-      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'tree' ? 'Tree' : 'Board',
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'tree' ? 'Tree' : this.activeViewId === 'globe' ? 'Globe' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
@@ -1132,7 +1133,7 @@ export class KanbanModal {
   private handleViewHotkey(e: KeyboardEvent): boolean {
     const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'shelf' ? 'overview' : 'desk'
     const intent = keyIntent(e, surface)
-    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'tree') return false
+    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'tree' && intent !== 'globe') return false
     if (keystrokeIsSpokenFor()) return false
     const id: BoardViewId = intent === 'board' ? 'shelf' : intent
     e.preventDefault()

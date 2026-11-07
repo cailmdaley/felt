@@ -91,6 +91,10 @@
      you type. On-pigment is text set on a solid pigment; shade is the colour
      of every cast shadow. */
   --kbn-paper-bright: #FFFBED;
+  /* The globe's sea: open water, the water at the limb, and the shadow over the sphere. */
+  --kbn-sea: color-mix(in srgb, var(--kbn-paper) 74%, #4A7486);
+  --kbn-sea-deep: color-mix(in srgb, var(--kbn-paper) 44%, #3B6072);
+  --kbn-sea-shade: color-mix(in srgb, #1D3442 34%, transparent);
   --kbn-rag: #FFFCF5;
   --kbn-blank: #FFFFFF;
   --kbn-on-pigment: #FFFFFF;
@@ -194,6 +198,9 @@
   --kbn-sheet: #0D141D;
   --kbn-paper: #16202B;
   --kbn-paper-bright: #1A2430;
+  --kbn-sea: color-mix(in srgb, var(--kbn-paper) 84%, #06121F);
+  --kbn-sea-deep: color-mix(in srgb, var(--kbn-paper) 58%, #06121F);
+  --kbn-sea-shade: color-mix(in srgb, #000 42%, transparent);
   --kbn-blank: #1E2935;
   --kbn-plate: #1D2733;
   --kbn-hairline: #363C43;
