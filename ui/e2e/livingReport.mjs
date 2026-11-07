@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
-import { familyTree, openThread, sentFiles } from './familyNav.mjs'
+import { familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
 
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
@@ -47,8 +47,8 @@ export function registerLivingReportJourneys(test) {
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
       await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"] .kbn-card-name').click()
-      // The family tree keeps the report's owning constitution at its root.
-      await (await familyTree(page)).locator('.kbn-thread-row').first().click()
+      // The family's page keeps the report's owning constitution at its head.
+      await openThread(page, (await familyTree(page)).locator('.fp-head'), 'Calibrate the shear response')
       await band(page).locator('.ws-band-head').waitFor()
       assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
@@ -123,11 +123,11 @@ export function registerLivingReportJourneys(test) {
         assert.equal(await band(page).getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
       }
       // A thread's back returns to the page from which it was opened.
-      await openThread(page, (await familyTree(page)).locator('.kbn-thread-row[data-thread-state="working"]').first(), 'Response analysis')
+      await openThread(page, threadRow(page, await familyTree(page), 'Response analysis'), 'Response analysis')
       await back(page, phone)
       await named(page, 'Calibrate the shear response')
       // Further ancestors stay reachable from settings without adding a header row.
-      await openThread(page, (await familyTree(page)).locator('.kbn-thread-row[data-thread-state="working"]').first(), 'Response analysis')
+      await openThread(page, threadRow(page, await familyTree(page), 'Response analysis'), 'Response analysis')
       await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
       await page.locator('.ws-settings-menu:not([hidden]) .ws-settings-ancestry .ws-ancestry-link').click()
       await named(page, 'Calibrate the shear response')

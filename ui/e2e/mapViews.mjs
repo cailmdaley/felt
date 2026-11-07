@@ -1,6 +1,6 @@
-// Three ways of moving over the whole of the work, and the one rule they share:
-// moving never touches Rex. Only a click on a thread does, and Back from a file
-// finds everything where it stood.
+// The ways of moving over the work, and the rule they share: moving never
+// opens a conversation. Only a click on a thread moves Rex, quietly, and Back
+// from a file finds everything where it stood.
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -26,81 +26,69 @@ const clickOn = async (page, locator) => { const { x, y, width, height } = await
 const box = async locator => { const { x, y } = await locator.boundingBox(); return [Math.round(x), Math.round(y)] }
 
 export function registerMapViewJourneys(test) {
-  const star = (page, name) => page.locator(`.ws-page.ws-selected .fm-star[aria-label^="${name},"]`)
-  const rested = page => until(page, () => !document.querySelector('.family-map-moving'))
+  const tree = page => page.locator('.ws-page.ws-selected .fp-tree')
+  const row = (page, name) => tree(page).locator('.fp-row').filter({ has: page.locator('.fp-name').getByText(name, { exact: true }) })
   const landed = async page => {
     await board(page)
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).last().locator('.kbn-card-name').click()
-    await inScene(page, root)
-    await rested(page)
+    await tree(page).waitFor()
   }
-  // The scene's title, or on a phone, which draws none, the peek.
-  const inScene = (page, name) => until(page, name => document.querySelector('.ws-page.ws-selected :is(.fm-focus-name, .ws-family-peek-name)')?.textContent === name, name)
 
-  test('The radial: a click flies and asks Rex; zoom, pan, Back and stepping out leave it be', async page => {
+  test('A constitution\'s page: a click unfolds a row and moves Rex quietly, a second folds it, and a file and Back leave it as it stood', async page => {
     await landed(page)
     const band = () => page.locator('.ws-stage-band .ws-band-title').textContent()
     const before = await asked(page)
-    const plate = await page.locator('.ws-page.ws-selected .fm-sky-plate').boundingBox()
-    const start = await box(star(page, 'Discarded pilot'))
-    await page.mouse.move(plate.x + plate.width / 2, plate.y + plate.height / 2)
-    await page.keyboard.down('Control')
-    await page.mouse.wheel(0, -40)
-    await page.keyboard.up('Control')
-    await page.locator('.family-map-moving').waitFor()
-    await rested(page)
-    const zoomed = await box(star(page, 'Discarded pilot'))
-    assert.notDeepEqual(zoomed, start, 'the zoom moved the field')
-    await page.mouse.wheel(30, 0)
-    await until(page, ([selector, x]) => Math.round(document.querySelector(selector).getBoundingClientRect().x) !== x, ['.ws-page.ws-selected .fm-star[aria-label^="Discarded pilot,"]', zoomed[0]])
-    await rested(page)
-    assert.deepEqual(await asked(page), before, 'zooming and panning never reach Rex')
-
-    await star(page, 'Response analysis').click()
-    assert.equal(await page.locator('.family-map-moving').count(), 1, 'a click flies')
-    await rested(page)
-    await inScene(page, 'Response analysis')
-    await asks(page, before.length + 1)
-    assert.deepEqual(await asked(page), [...before, 'select:session-analysis'], 'a click moves Rex to the thread\'s window at once')
-    assert.match(await page.locator('.ws-page.ws-selected .fm-star[data-worker]').getAttribute('aria-label'), /^Response analysis,/)
+    const analysis = row(page, 'Response analysis')
+    if (await analysis.getAttribute('aria-expanded') === 'true') await analysis.click()
+    const quiet = await asked(page)
+    await analysis.click()
+    assert.equal(await analysis.getAttribute('aria-expanded'), 'true')
+    await asks(page, quiet.length + 1)
+    assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'], 'an unfolding click moves Rex to the thread\'s window')
+    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-worker] .fp-name')?.textContent === 'Response analysis')
     assert.equal(await band(), root, 'the page does not change')
+    await analysis.locator('[data-kind="constitution"]').waitFor()
+    const order = await analysis.locator('.fp-held button').evaluateAll(buttons => buttons.map(button => button.dataset.kind ?? button.className))
+    assert.deepEqual(order.filter(kind => kind !== 'fp-earlier'), [...(order[0] === 'lead' ? ['lead'] : []), 'constitution', ...order.filter(kind => kind === 'file'), 'fp-converse'], 'tapestry, constitution, then sent files, then Rex')
 
-    const place = await box(star(page, 'Response analysis'))
-    await page.locator('.ws-page.ws-selected .fm-held').filter({ hasText: 'Constitution' }).click()
-    await until(page, () => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === 'Response analysis')
+    const scroll = await page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => el.scrollTop)
+    await analysis.locator('[data-kind="constitution"]').click()
+    await page.waitForFunction(() => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === 'Response analysis')
     await page.locator('.ws-page.ws-selected .ws-document-back').click()
-    await inScene(page, 'Response analysis')
-    await rested(page)
-    assert.deepEqual(await box(star(page, 'Response analysis')), place, 'Back returns to the same zoom')
+    await tree(page).waitFor()
+    assert.equal(await row(page, 'Response analysis').getAttribute('aria-expanded'), 'true', 'Back finds the row still open')
+    assert.equal(await page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => el.scrollTop), scroll, 'and the scroll where it was')
 
+    await row(page, 'Response analysis').click()
+    assert.equal(await row(page, 'Response analysis').getAttribute('aria-expanded'), 'false', 'a second click folds the row')
+    await row(page, 'Response analysis').focus()
+    await page.keyboard.press('ArrowRight')
+    assert.equal(await row(page, 'Response analysis').getAttribute('aria-expanded'), 'true', 'the right arrow unfolds')
     await page.keyboard.press('Escape')
-    await inScene(page, root)
-    await rested(page)
-    assert.equal(await page.locator('.ws-reader.ws-dormant').count(), 0, 'stepping out stays on the page')
-    assert.deepEqual(await asked(page), [...before, 'select:session-analysis'], 'Back and stepping out never reach Rex')
-  }, { width: 1440, height: 900 }, 'no-preference')
+    assert.equal(await row(page, 'Response analysis').getAttribute('aria-expanded'), 'false', 'Escape folds the open row')
+    assert.equal(await page.locator('.ws-reader.ws-dormant').count(), 0, 'and stays on the page')
+    assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'], 'files, Back, keys and folding never reach Rex')
+    assert.ok(before.length <= quiet.length)
+  }, { width: 800, height: 1000 }, 'no-preference')
 
-  test("The radial on a phone: a first tap comes to a thread, a second leaves a terminal worker's ring alone", async page => {
+  test('A constitution\'s page sets archived threads aside behind one fold, and opens it on demand', async page => {
     await landed(page)
-    const held = page.locator('.ws-page.ws-selected .fm-star[data-worker]')
-    assert.match(await held.getAttribute('aria-label'), new RegExp(`^${root},`))
-    await star(page, 'Response analysis').tap()
-    await inScene(page, 'Response analysis')
-    assert.match(await held.getAttribute('aria-label'), new RegExp(`^${root},`), 'the first tap leaves Rex be')
-    await star(page, 'Response analysis').tap()
-    assert.match(await held.getAttribute('aria-label'), new RegExp(`^${root},`), 'a terminal worker has nowhere to open on a phone, so the ring stays')
+    const fold = tree(page).locator('.fp-aside').last()
+    await fold.waitFor()
+    assert.equal(await row(page, 'Discarded pilot').count(), 0, 'nothing set aside shows')
+    await fold.click()
+    await row(page, 'Discarded pilot').waitFor()
   }, { width: 390, height: 844 }, 'reduce', true)
 
   test('`l` before the tapestry has been read waits for it, rather than opening the newest file', async page => {
     await page.goto(`${url.replace('example=threads', 'example=families')}#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub`)
-    await page.locator('.ws-page.ws-selected .fm-star').first().waitFor()
+    await tree(page).locator('.fp-row').first().waitFor()
     await page.evaluate(() => {
       const fetched = window.fetch, held = []
       window.__landReads = () => held.splice(0).forEach(land => land())
       window.fetch = (input, init) => /tapestry\.html/.test(String(input)) ? new Promise(land => held.push(() => land(fetched(input, init)))) : fetched(input, init)
     })
-    await star(page, 'Pipeline repository steward').click()
-    await rested(page)
+    await row(page, 'Pipeline repository steward').click()
     const map = await page.evaluate(() => location.hash)
     await page.keyboard.press('l')
     await page.waitForTimeout(200)

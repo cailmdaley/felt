@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
-import { familyTree, openThread, sentFiles } from './familyNav.mjs'
+import { familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
@@ -95,7 +95,7 @@ export function registerHeaderBarJourneys(test) {
       ]
       for (const [name, verbs, worker] of visits) {
         const tree = await familyTree(page)
-        await openThread(page, tree.locator('.kbn-thread-row').filter({ has: page.getByText(name, { exact: true }) }), name)
+        await openThread(page, threadRow(page, tree, name), name)
         assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
         assert.deepEqual(await workerVerbs(page), worker, `${name} offers its worker's verbs`)
         await assertLifecycleInk(header, scheme)
@@ -186,7 +186,7 @@ export function registerHeaderBarJourneys(test) {
       await header.evaluate(el => { el.scrollLeft = 0 })
     }
     await assertBand(['Temper', 'Discard'])
-    await openThread(page, (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: 'Response analysis' }), 'Response analysis')
+    await openThread(page, threadRow(page, await familyTree(page), 'Response analysis'), 'Response analysis')
     await assertBand(['Close for review', 'Rest'])
     const reviewInk = await header.getByRole('button', { name: 'Close for review', exact: true }).evaluate(el => {
       const neutral = document.createElement('span')
@@ -202,8 +202,7 @@ export function registerHeaderBarJourneys(test) {
     })
     assert.equal(reviewInk.pigment, '', `Close for review has no verdict pigment: ${JSON.stringify(reviewInk)}`)
     assert.equal(reviewInk.color, reviewInk.neutral, `Close for review uses neutral lifecycle ink: ${JSON.stringify(reviewInk)}`)
-    await (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: 'Next validation' }).click()
-    await named(page, 'Next validation')
+    await openThread(page, threadRow(page, await familyTree(page), 'Next validation'), 'Next validation')
     await assertBand([])
     if (process.env.WORKSPACE_SHOTS) {
       await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
@@ -283,7 +282,7 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
-    const row = async name => (await familyTree(page)).locator('.kbn-thread-row').filter({ hasText: name })
+    const row = async name => name === title ? (await familyTree(page)).locator('.fp-head') : threadRow(page, await familyTree(page), name)
     for (const key of ['Enter', 'Space']) {
       const press = async target => { await target.focus(); await page.keyboard.press(key) }
       await openThread(page, await row('Response analysis'), 'Response analysis', press)
@@ -307,32 +306,28 @@ export function registerHeaderBarJourneys(test) {
     await page.waitForFunction(() => document.querySelector('.ws-selected .ws-prose-scroll').scrollTop > 0)
   }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
-    for (const scheme of ['light', 'dark']) test(`The family tree keeps its root and marks the open thread (${device}, ${scheme})`, async page => {
+    for (const scheme of ['light', 'dark']) test(`The constitution's page keeps its root at its head and marks the open thread (${device}, ${scheme})`, async page => {
       await page.addInitScript(scheme => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
       }, scheme)
       await page.goto(url)
       await openRoot(page)
-      const header = page.locator('.ws-stage-band .ws-band-head')
-      const family = page.locator('.ws-page.ws-selected .ws-family-all .ws-family')
-      const show = () => familyTree(page)
-      const rootAnchor = () => family.locator('.kbn-thread-row').first()
+      const head = () => page.locator('.ws-page.ws-selected .fp-head')
       for (const name of ['Response analysis', 'Choose the response cut']) {
-        await show()
-        await openThread(page, family.locator('.kbn-thread-row').filter({ hasText: name }), name)
-        await show()
-        assert.equal(await rootAnchor().count(), 1)
-        assert.equal(await rootAnchor().locator('.kbn-thread-name').innerText(), title)
-        assert.ok(await rootAnchor().locator('.constitution-state-dot').isVisible())
+        await openThread(page, threadRow(page, await familyTree(page), name), name)
+        await familyTree(page)
+        assert.equal(await head().count(), 1)
+        assert.equal(await head().locator('.fp-name').innerText(), title)
+        assert.ok(await head().locator('.fp-mark').isVisible())
+        assert.equal(await threadRow(page, page.locator('.ws-page.ws-selected .fp-tree'), name).getAttribute('data-current'), '')
         if (process.env.WORKSPACE_SHOTS && name === 'Choose the response cut') {
           await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
           await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `family-${device}-${scheme}.png`) })
         }
-        await openThread(page, rootAnchor(), title)
-        await show()
-        assert.equal(await rootAnchor().count(), 1)
-        assert.equal(await rootAnchor().getAttribute('aria-current'), 'page')
+        await openThread(page, head(), title)
+        await familyTree(page)
+        assert.equal(await head().getAttribute('data-current'), '')
       }
     }, viewport)
     for (const scheme of ['light', 'dark']) test(`One band (${device}, ${scheme}): long name, icons and unified settings`, async page => {

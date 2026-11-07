@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { ThreadIndex, threadIndexBuilds } from './threads.js'
-import { conversations } from './testFixtures.js'
 import { describe, expect, it, vi } from 'vitest'
 import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { boardCards, KanbanSurfaceRenderer, threadIndexFor } from './KanbanSurfaces.js'
-import { FamilyPage } from './workspace/FamilyPage.js'
+import { FamilyPage, placeAt } from './workspace/FamilyPage.js'
+import { conversations } from './testFixtures.js'
 
 const N = 472
 type Shape = Array<[id: string, parent: string | null]>
@@ -120,12 +120,13 @@ describe('thread read model at fleet scale', () => {
       const reads = (size: number) => {
         const board = buildKanbanResponseFromComposite(feed(chain(size)))
         const root = board.now.inFlight.find(c => c.id === 'c0')!
-        const index = threadIndexFor(board), page = new FamilyPage(vi.fn(), conversations(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, { focus: null, view: null }, vi.fn())
+        const deepest = boardCards(board).find(c => c.id.endsWith(`/c${size - 1}`))!
+        const index = threadIndexFor(board), page = new FamilyPage(vi.fn(), conversations(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined }, placeAt(deepest), vi.fn())
         const before = threadIndexBuilds()
         // Map touches see the walks inside the index's methods, not only the calls.
         const count = counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => page.update(root, index))
         expect(threadIndexBuilds()).toBe(before)
-        expect(page.el.querySelectorAll('.kbn-thread-row')).toHaveLength(size)
+        expect(page.el.querySelectorAll('.fp-row')).toHaveLength(size)
         return count
       }
       expect(reads(N) / reads(N / 4)).toBeLessThan(LINEAR)

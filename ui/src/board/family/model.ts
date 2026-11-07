@@ -51,8 +51,6 @@ export interface MapThread {
   merged: boolean
   /** Its own mass of work and that of every thread merged into it. */
   weight: number
-  /** How many threads a body that stands for a whole family holds that need the human. */
-  asks?: number
 }
 
 export interface FamilyModel {
@@ -72,12 +70,8 @@ export interface FamilyModel {
   counts: Record<Attention, number>
   /** The open thread, when the map holds it. */
   current: string | null
-  /** Threads that lie on the just-finished arm whatever they still hold. */
-  finished?: ReadonlySet<string>
 }
 
-/** A thread's time open, to its close or to now. */
-export const timeOpen = (thread: MapThread, now: number): number => Math.max(0, (thread.ended ?? now) - thread.born)
 /** The card has a conversation to open: a live worker, or a past session. */
 export const conversable = (card: KanbanCard): boolean => hasLiveWorker(card) || !!card.sessionUuid
 export const needsHuman = (thread: MapThread): boolean => (ATTENTION as readonly string[]).includes(thread.standing) && thread.standing !== 'working'
@@ -115,7 +109,7 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     const standing = standingOf(card, index, fresh, lastMove, now), tone = standingOf(card, index, false, lastMove, now) as MapThread['tone']
     const thread: MapThread = {
       key: threadKey(card), card, name: card.name, depth, parent, children: [], standing, tone,
-      word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : THREAD_LABEL[index.state(card)].toLowerCase()),
+      word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : index.state(card) === 'roles' ? 'seat' : THREAD_LABEL[index.state(card)].toLowerCase()),
       note: ask?.text ?? card.outcome ?? '', rank: -1, lastMove, born, ended, launches, commits, files, fresh,
       merged: index.state(card) === 'archived', weight: launches.length + commits.length + files.length,
     }

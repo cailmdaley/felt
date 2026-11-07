@@ -2665,7 +2665,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   }
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-band-state', '.ws-family-counts', '.ws-family-peek-title'], settle: 100 })
+  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-band-state', '.ws-family-counts', '.fp-title'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   for (const control of ['.kbn-ctl-review', '.kbn-ctl-rest']) {
     assert.ok(await band(p).locator(control).isVisible())

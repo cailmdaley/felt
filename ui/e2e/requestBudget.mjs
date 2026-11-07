@@ -53,8 +53,8 @@ try {
   await p.goto(url)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Music' }).first().click()
   const selected = () => p.locator('.ws-page.ws-selected')
-  // A Desk click lands on the map, and the thread's report opens from its scene.
-  await selected().locator('.fm-held').filter({ hasText: 'Report' }).click()
+  // A Desk click lands on the thread's row on its constitution's page, where its report opens.
+  await selected().locator('.fp-row[aria-selected="true"] [data-kind="lead"]').filter({ hasText: 'Report' }).click()
   await selected().frameLocator('iframe').getByRole('heading', { name: 'Listening notes', exact: true }).waitFor()
   // Let titles and durations settle.
   await p.clock.runFor(8_000)

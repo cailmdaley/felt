@@ -33,7 +33,7 @@ import type { TemporalFetchers } from './TemporalData.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'shelf' | 'globe' | 'map'
+  id: 'chronicle' | 'shelf' | 'globe'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void
@@ -100,8 +100,6 @@ export interface ViewContext extends TemporalFetchers {
   openCard(cardId: string): void
   /** Re-fetch the board's own feed now, rather than on the next poll. */
   requestRefresh(): void
-  /** Back to the Desk's cards, for a view that stands in for them. */
-  showDesk?(): void
 }
 
 /** A view's id, or `desk` for the kanban page KanbanModal renders itself. */

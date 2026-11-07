@@ -1,28 +1,39 @@
-/** The way to a constitution's threads and sent files, from any of its pages. */
+/**
+ * The way to a constitution's threads and sent files, from any of its pages:
+ * its family's page, with every fold that holds a thread opened by the keys,
+ * which leave Rex alone.
+ */
 export async function familyTree(page) {
-  const fold = page.locator('.ws-page.ws-selected .ws-family-all')
-  if (!await fold.count()) {
+  const shown = page.locator('.ws-page.ws-selected'), tree = shown.locator('.fp-tree')
+  await shown.waitFor()
+  if (!(await shown.getAttribute('data-key')).startsWith('family:')) {
     await page.evaluate(() => { document.activeElement?.blur() })
     await page.keyboard.press('l')
-    await fold.waitFor()
   }
-  if (!await fold.evaluate(el => el.open)) await fold.locator('.ws-family-all-label').click()
-  await fold.evaluate(el => { for (const inner of el.querySelectorAll('details')) inner.open = true })
-  return fold.locator('.ws-family')
+  await tree.locator('.fp-row').first().waitFor()
+  for (let n = 0; n < 40; n++) {
+    const closed = tree.locator('.fp-aside[aria-expanded="false"], .fp-row[aria-expanded="false"]:has(.fp-count:not(:empty))').first()
+    if (!await closed.count()) break
+    await closed.focus()
+    await page.keyboard.press('ArrowRight')
+  }
+  return tree
 }
+/** A thread's row on its family's page, by its exact name. */
+export const threadRow = (page, tree, name) => tree.locator('.fp-row').filter({ has: page.locator('.fp-name').getByText(name, { exact: true }) })
 /**
- * Opens a thread's own page from its row in the family's tree. A row comes to a
- * thread the map draws, leaving the page standing, and that thread's scene holds
- * the way to its constitution; a thread the map has no place for opens at once.
+ * Opens a thread's own page from its row: the activation unfolds the row in
+ * place (a second one when the first folded it), and the constitution it
+ * holds opens the page. The head is always unfolded. Keys rather than clicks,
+ * so a phone's top bar sliding as the page scrolls never moves the target.
  */
-export async function openThread(page, row, name, activate = target => target.click()) {
-  await activate(row)
-  await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name
-    || document.querySelector('.ws-page.ws-selected .ws-family-peek-name')?.textContent === name, name)
-  if (await page.locator('.ws-stage-band .ws-band-title').textContent() !== name) {
-    await page.locator('.ws-page.ws-selected .fm-held:visible').filter({ hasText: 'Constitution' }).click()
-    await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
+export async function openThread(page, row, name, activate = target => target.press('Enter')) {
+  if (await row.getAttribute('aria-expanded') !== null) {
+    await activate(row)
+    if (await row.getAttribute('aria-expanded') === 'false') await activate(row)
   }
+  await row.locator('[data-kind="constitution"]').press('Enter')
+  await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
 }
 /** The sent files, in the sheet the bar's toggle opens. */
 export async function sentFiles(page) {

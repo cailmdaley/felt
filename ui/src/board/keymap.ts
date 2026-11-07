@@ -1,7 +1,7 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'globe' | 'map' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'drawing' | 'tapestry'
+export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'globe' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'tapestry'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
@@ -47,7 +47,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
     bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
     ...constitutionBindings('the selected card'),
-    bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['m'], 'map', 'Between the Desk\'s cards and its map'), bind(['?'], 'help', 'Keyboard help'),
+    bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
     bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'),
@@ -73,7 +73,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['ArrowLeft'], 'back', 'Back to the previous page', true),
     bind(['ArrowDown'], 'nextChannel', 'Next constitution', true), bind(['ArrowUp'], 'prevChannel', 'Previous constitution', true),
     bind(['b'], 'orchestrator', 'Back to the thread’s orchestrator'),
-    bind(['l'], 'tapestry', 'Between the family map and its tapestry'), bind(['v'], 'drawing', 'Next drawing of the family map'),
+    bind(['l'], 'tapestry', 'Between the constitution\'s page and its tapestry'),
     bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape'], 'back', 'Close a layer, then go back'),
     bind(['?'], 'help', 'Keyboard help'),
   ],
@@ -93,7 +93,7 @@ export function shouldForwardDocumentKey(event: Pick<KeyboardEvent, 'defaultPrev
   if (editable && editable.getAttribute('contenteditable') !== 'false') return false
   if (!event.altKey && !event.ctrlKey && !event.metaKey) {
     if (['Enter', ' '].includes(event.key ?? '') && el?.closest?.('button,a[href],summary,[role="link"],[role="button"],[role="option"],[role="treeitem"],[role="checkbox"],[role="radio"],[role="switch"],[role="tab"]')) return false
-    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key ?? '') && el?.closest?.('[role="menu"],[role="radiogroup"],[role="tablist"],[role="slider"],[role="listbox"]')) return false
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key ?? '') && el?.closest?.('[role="menu"],[role="radiogroup"],[role="tablist"],[role="slider"],[role="listbox"],[role="tree"]')) return false
   }
   return true
 }
@@ -106,7 +106,7 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface,
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
   const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null
-  if (event.repeat && ['open', 'back', 'help', 'find', 'temper', 'discard', 'toReview', 'undoVerdict', 'conversation', 'rest', 'pin', 'orchestrator', 'drawing', 'tapestry', 'map'].includes(binding.intent)) return null
+  if (event.repeat && ['open', 'back', 'help', 'find', 'temper', 'discard', 'toReview', 'undoVerdict', 'conversation', 'rest', 'pin', 'orchestrator', 'tapestry'].includes(binding.intent)) return null
   return binding.intent
 }
 
@@ -161,9 +161,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['↓', '↑', 'd', 'u', 'Space', '⇧Space'], 'Scroll: line, half page, page', on('reader', 'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp')),
     row(['p', '[', ']'], 'Audio: play or pause, back or forward 5 s', on('reader', 'audioPlay', 'audioBack', 'audioForward')),
   ] },
-  { title: 'Family map', note: 'With the map focused, the arrows walk its threads from the most urgent, and Enter opens one.', rows: [
-    row(['l'], 'To its tapestry, and back to the map', on('reader', 'tapestry')),
-    row(['v'], 'Next drawing', on('reader', 'drawing')),
-    row(['m'], 'Between the Desk\'s cards and its map', on('desk', 'map')),
+  { title: 'A constitution\'s page', note: 'With a row focused, the arrows walk the rows, → and ← unfold and fold, Escape folds the open row around it, and Enter unfolds a row and moves Rex to its worker.', rows: [
+    row(['l'], 'To the selected thread\'s tapestry, and back to the page', on('reader', 'tapestry')),
   ] },
 ]

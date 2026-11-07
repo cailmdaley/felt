@@ -1,4 +1,4 @@
-import { familyTree, openThread } from './familyNav.mjs'
+import { familyTree, openThread, threadRow } from './familyNav.mjs'
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -57,11 +57,10 @@ export function registerNavigationJourneys(test) {
     const nameBox = await name.boundingBox()
     await name.click({ position: { x: nameBox.width - 6, y: nameBox.height / 2 } })
     await named(page, 'Choose the response cut')
-    // Back steps out of the map's levels before it leaves the page.
-    await checkBack('Response analysis')
+    // The page lands on the thread's row; Back leaves the page.
+    await checkBack('Desk')
     await shot('01-nested-from-desk')
-    const rows = (await familyTree(page)).locator('.kbn-thread-row')
-    await openThread(page, rows.filter({ hasText: 'Review the null tests' }), 'Review the null tests')
+    await openThread(page, threadRow(page, await familyTree(page), 'Review the null tests'), 'Review the null tests')
     await checkBack('Choose the response cut')
     await shot('02-sibling')
     await selected(page).getByRole('link', { name: 'Open validation', exact: true }).click()
@@ -81,13 +80,16 @@ export function registerNavigationJourneys(test) {
     await page.goBack()
     await named(page, 'Choose the response cut')
     await shot('06-browser-back-to-nested')
-    // Stepping out climbs the map to the whole family, and only then leaves the page.
-    const stepOut = () => phone ? page.locator('.ws-return').click() : page.keyboard.press('Escape')
-    await checkBack('Response analysis')
-    await stepOut()
-    await checkBack('Whole family')
-    await stepOut()
+    // Back to the top, where the phone's bar shows again; Escape folds the row the page landed on before it goes back.
+    if (phone) await selected(page).locator('.ws-family-scroll').evaluate(el => el.scrollTo(0, 0))
     await checkBack('Desk')
+    if (!phone) {
+      const landed = selected(page).locator('.fp-row[aria-selected="true"]')
+      assert.equal(await landed.getAttribute('aria-expanded'), 'true')
+      await page.keyboard.press('Escape')
+      assert.equal(await landed.getAttribute('aria-expanded'), 'false')
+      await checkBack('Desk')
+    }
     if (phone) {
       const cdp = await page.context().newCDPSession(page)
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 60, y: 300 }] })
@@ -97,7 +99,10 @@ export function registerNavigationJourneys(test) {
       }
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
       await cdp.detach()
-    } else await page.keyboard.press('Escape')
+    } else {
+      // Escape folds each open row outward, and only then goes back.
+      for (let n = 0; n < 4 && !await page.locator('.ws-reader.ws-dormant').count(); n++) await page.keyboard.press('Escape')
+    }
     await page.locator('.ws-reader.ws-dormant').waitFor()
     assert.equal(new URL(page.url()).hash, '#/desk')
     await shot(phone ? '07-swipe-to-desk' : '07-escape-to-desk')
