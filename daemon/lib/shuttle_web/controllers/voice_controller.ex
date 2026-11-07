@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.VoiceController do
   @moduledoc "Recorder-addressed live voice state and controls."
   use Phoenix.Controller, formats: [:json]
-  alias Shuttle.{Meeting, MeetingRouter, OriginRouter, Remote, Voice}
+  alias Shuttle.{RecorderRouter, OriginRouter, Remote, Voice}
 
   def show(conn, params), do: route(conn, params, :show, "/api/v1/voice")
   def update(conn, params), do: route(conn, params, :update, "/api/v1/voice")
@@ -19,7 +19,7 @@ defmodule ShuttleWeb.VoiceController do
   """
   def events(conn, params) do
     recorder =
-      match?({:ok, :local}, MeetingRouter.select_start(Map.drop(params, ["prefer", "rex"])))
+      match?({:ok, :local}, RecorderRouter.select_start(Map.drop(params, ["prefer", "rex"])))
 
     if recorder, do: Voice.subscribe()
     if params["rex"] == "1", do: Shuttle.RexFocus.subscribe()
@@ -49,7 +49,7 @@ defmodule ShuttleWeb.VoiceController do
   """
   def open(conn, %{"fiber_id" => id, "page" => page} = params)
       when is_binary(id) and id != "" and page in ~w(constitution tapestry files) do
-    open = %{fiber_id: id, origin: params["origin"] || MeetingRouter.own_host(), page: page}
+    open = %{fiber_id: id, origin: params["origin"] || RecorderRouter.own_host(), page: page}
 
     Registry.dispatch(Shuttle.Voice.Streams, :board_open, fn entries ->
       for {pid, _} <- entries, do: send(pid, {:board_open, open})
@@ -99,13 +99,13 @@ defmodule ShuttleWeb.VoiceController do
   end
 
   defp route(conn, params, action, path) do
-    case MeetingRouter.select_start(Map.delete(params, "prefer")) do
+    case RecorderRouter.select_start(Map.delete(params, "prefer")) do
       {:ok, :local} ->
         result = local(action, params)
 
         case result do
           {:ok, body} ->
-            json(conn, Map.put(body, :recorder, MeetingRouter.own_host()))
+            json(conn, Map.put(body, :recorder, RecorderRouter.own_host()))
 
           {:error, :not_found} ->
             conn |> put_status(404) |> json(%{error: "No listening transcript is available yet"})
@@ -117,8 +117,8 @@ defmodule ShuttleWeb.VoiceController do
       {:ok, {:remote, remote}} ->
         {status, body} =
           if action in [:show, :transcript],
-            do: forward_read(remote, path),
-            else: MeetingRouter.forward_control(remote, path, params)
+            do: forward_read(remote, path, params),
+            else: RecorderRouter.forward_control(remote, path, params)
 
         conn |> put_status(status) |> json(body)
 
@@ -128,7 +128,7 @@ defmodule ShuttleWeb.VoiceController do
   end
 
   defp local(:show, _params), do: {:ok, Voice.show()}
-  defp local(:transcript, _params), do: Meeting.voice_transcript()
+  defp local(:transcript, params), do: Shuttle.Voice.Transcript.read(params)
 
   defp local(:target, params) do
     with {:ok, _} <- Voice.target(Map.put(params, "source", "board")), do: {:ok, Voice.show()}
@@ -138,8 +138,17 @@ defmodule ShuttleWeb.VoiceController do
   defp local(:toggle, _params), do: Voice.toggle()
   defp local(:discard, _params), do: Voice.discard()
 
-  defp forward_read(remote, path) do
-    case OriginRouter.forward_client().get_file(Remote.url_for(remote, path), 2_000) do
+  defp forward_read(remote, path, params) do
+    query =
+      params
+      |> Map.take(~w(date fiber since))
+      |> Map.put("recorder", remote.name)
+      |> URI.encode_query()
+
+    case OriginRouter.forward_client().get_file(
+           Remote.url_for(remote, path) <> "?" <> query,
+           2_000
+         ) do
       {:ok, status, _type, bytes} ->
         case Jason.decode(bytes) do
           {:ok, body} when is_map(body) -> {status, Map.put(body, "recorder", remote.name)}

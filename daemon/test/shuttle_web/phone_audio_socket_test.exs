@@ -1,4 +1,4 @@
-defmodule ShuttleWeb.MeetingAudioSocketTest do
+defmodule ShuttleWeb.PhoneAudioSocketTest do
   use ExUnit.Case, async: true
 
   # Socket connect/recv bounds are reached only when the peer never answers, so
@@ -7,7 +7,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
   # waits stay short and literal.
   @io_timeout 30_000
 
-  alias ShuttleWeb.MeetingAudioSocket, as: Relay
+  alias ShuttleWeb.PhoneAudioSocket, as: Relay
 
   # macOS caps a Unix socket path at 104 bytes, so the socket lives in a short
   # directory of its own rather than ExUnit's tmp_dir.
@@ -91,9 +91,9 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     assert reason =~ "starting"
   end
 
-  test "no phone meeting closes with a reason the page can show" do
+  test "no phone recording closes with a reason the page can show" do
     for {answer, code, kind, words} <- [
-          {{:error, :none}, 4404, "refused", "no meeting"},
+          {{:error, :none}, 4404, "refused", "no recording"},
           {{:error, :not_phone}, 4404, "refused", "not a phone"},
           {{:error, :ended}, 4410, "ended", "ended"},
           {{:error, {:failed, "no models"}}, 4410, "ended", "failed: no models"}
@@ -104,10 +104,10 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     end
   end
 
-  test "a socket bound to one meeting refuses another", %{path: path} do
+  test "a socket bound to one recording refuses another", %{path: path} do
     opts = resolve_to(live(path, "other")) |> Keyword.put(:launch, "L1")
     assert {:stop, :normal, {4404, reason}, [status], _state} = Relay.init(opts)
-    assert reason =~ "different meeting"
+    assert reason =~ "different recording"
     assert json(status)["state"] == "refused"
 
     listener = listen(path)
@@ -127,12 +127,12 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
 
     assert byte_size(reason) <= 123
     assert String.valid?(reason)
-    assert json(status)["reason"] == "the meeting failed: " <> error
+    assert json(status)["reason"] == "the recording failed: " <> error
     assert Relay.truncate_utf8("short") == "short"
     assert Relay.truncate_utf8("aé", 2) == "a"
   end
 
-  test "hark closing the socket at the meeting's end closes the WebSocket as ended", %{
+  test "hark closing the socket at the recording's end closes the WebSocket as ended", %{
     path: path
   } do
     listener = listen(path)
@@ -152,7 +152,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     assert state.socket == nil
   end
 
-  test "hark closing the socket while a new meeting is live ends this one, not replaced", %{
+  test "hark closing the socket while a new recording is live ends this one, not replaced", %{
     path: path
   } do
     listener = listen(path)
@@ -169,7 +169,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     assert json(status)["state"] == "ended"
   end
 
-  test "hark closing the socket while the meeting is still live means another sender took over",
+  test "hark closing the socket while the recording is still live means another sender took over",
        %{path: path} do
     listener = listen(path)
     {:push, _connected, state} = Relay.init(Keyword.put(resolve_to(live(path)), :launch, "L1"))
@@ -186,7 +186,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     setup %{path: path} do
       {:ok, phase} = Agent.start_link(fn -> {:ok, %{path: path, launch: "L1"}} end)
 
-      Shuttle.Test.Env.put_app_env(:meeting_audio_socket,
+      Shuttle.Test.Env.put_app_env(:phone_audio_socket,
         resolve: fn -> Agent.get(phase, & &1) end,
         retry_ms: 10
       )
@@ -204,7 +204,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
       %{port: port, phase: phase}
     end
 
-    test "a same-origin page streams into hark and hears when the meeting ends", %{
+    test "a same-origin page streams into hark and hears when the recording ends", %{
       path: path,
       port: port,
       phase: phase
@@ -229,7 +229,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
       assert reason =~ "ended"
     end
 
-    test "the launch query binds the socket: another meeting's id is refused", %{port: port} do
+    test "the launch query binds the socket: another recording's id is refused", %{port: port} do
       {status, ws} = handshake(port, "http://127.0.0.1:#{port}", "L9")
       assert status =~ "HTTP/1.1 101"
       assert {:text, refused} = read_frame(ws)
@@ -243,7 +243,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
       :ok =
         :gen_tcp.send(
           http,
-          "GET /api/v1/meeting/audio HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
+          "GET /api/v1/voice/audio HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nConnection: close\r\n\r\n"
         )
 
       assert read_head(http) =~ "HTTP/1.1 426"
@@ -260,7 +260,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     key = Base.encode64(:crypto.strong_rand_bytes(16))
 
     request =
-      "GET /api/v1/meeting/audio?launch=#{launch} HTTP/1.1\r\n" <>
+      "GET /api/v1/voice/audio?launch=#{launch} HTTP/1.1\r\n" <>
         "Host: 127.0.0.1:#{port}\r\n" <>
         "Origin: #{origin}\r\n" <>
         "Upgrade: websocket\r\nConnection: Upgrade\r\n" <>

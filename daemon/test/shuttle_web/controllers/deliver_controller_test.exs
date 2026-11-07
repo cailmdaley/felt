@@ -146,7 +146,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     put_constitution(fiber)
 
     assert {200, %{delivered: true, delivery: "dispatch"}} =
-             Shuttle.Meeting.TranscriptRelay.Worker.deliver(%{
+             Shuttle.Voice.TranscriptRelay.Worker.deliver(%{
                fiber_id: fiber,
                origin: nil,
                kind: "voice",
@@ -168,7 +168,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     Env.put_app_env(:voice_target_entries, fn -> [] end)
 
     assert {200, %{delivered: true, delivery: "resume"}} =
-             Shuttle.Meeting.TranscriptRelay.Worker.deliver(%{
+             Shuttle.Voice.TranscriptRelay.Worker.deliver(%{
                fiber_id: fiber,
                origin: nil,
                kind: "voice",
@@ -182,7 +182,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
   end
 
   test "finalized voice traverses the relay, cold drop, dormant resume and live messaging" do
-    alias Shuttle.Meeting.TranscriptRelay
+    alias Shuttle.Voice.TranscriptRelay
     dormant = "tests/voice-pipeline-dormant"
     live = "tests/voice-pipeline-live"
     session = "de11ae00-0000-4000-8000-000000000098"
@@ -218,6 +218,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     write_route.("2026-11-06T10:00:00Z", dormant)
     relay = Module.concat(__MODULE__, "VoiceProbe#{System.unique_integer([:positive])}")
+    {:ok, following} = Agent.start_link(fn -> true end)
     Env.put_server(TranscriptRelay, relay)
 
     start_supervised!(
@@ -227,8 +228,9 @@ defmodule ShuttleWeb.DeliverControllerTest do
          directory: Path.join(root, "relay"),
          poll_ms: 60_000,
          cold: fn target -> target["fiber_id"] == dormant end,
-         thresholds: fn _ -> %{"words" => 1, "quiet_seconds" => 1} end,
-         observe: fn -> {:ok, %{meeting: %{launch: "pipeline", state: "live", error: nil}}} end
+         thresholds: fn -> %{"words" => 1, "quiet_seconds" => 1} end,
+         follow: fn -> Agent.get(following, & &1) end,
+         observe: fn -> {:ok, %{capture: %{launch: "pipeline", state: "live", error: nil}}} end
        ]}
     )
 
@@ -241,8 +243,6 @@ defmodule ShuttleWeb.DeliverControllerTest do
                  routes_path: routes,
                  started_at: "2026-11-06T10:00:00Z"
                },
-               nil,
-               nil,
                server: relay
              )
 
@@ -272,13 +272,31 @@ defmodule ShuttleWeb.DeliverControllerTest do
     write_route.("2026-11-06T10:00:03Z", live)
     record.("2026-11-06T10:00:04Z", "ordinary live words")
     poll.()
-    assert_receive {:paste, "S1: ordinary live words\n"}, 30_000
+    assert_receive {:paste, text}, 30_000
+    assert String.starts_with?(text, "S1: ordinary live words\n— shuttle transcript --since ")
     refute_receive {:paste, _}, 20
     refute_receive {:message, _}, 20
 
     assert Enum.count(MockRunner.commands(), fn {command, args} ->
              command == "tmux" and match?(["new-session" | _], args)
            end) == 2
+
+    pinned = "tests/voice-pinned-cold"
+    put_constitution(pinned)
+    Agent.update(following, fn _ -> false end)
+    write_route.("2026-11-06T10:00:05Z", pinned)
+    record.("2026-11-06T10:00:06Z", "start this cold card without a trigger")
+    poll.()
+
+    for task <- Map.values(:sys.get_state(worker).task_handles) do
+      ref = Process.monitor(task.pid)
+      assert_receive {:DOWN, ^ref, :process, _, _}, 30_000
+    end
+
+    GenServer.call(worker, :status)
+    assert is_map(Poller.live_worker(pinned))
+    assert run_script() =~ "S1: start this cold card without a trigger"
+    assert run_script() =~ "shuttle transcript --since"
   end
 
   # A previous run of `fiber_id` under `session`, dispatched a minute ago

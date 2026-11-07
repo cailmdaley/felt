@@ -1,4 +1,4 @@
-defmodule ShuttleWeb.MeetingAudioRelaySocket do
+defmodule ShuttleWeb.PhoneAudioRelaySocket do
   @moduledoc """
   One-hop recorder WebSocket relay. Both legs belong to this process. Sends
   are synchronous and time-bounded; remote reads use active-once and frames
@@ -6,7 +6,7 @@ defmodule ShuttleWeb.MeetingAudioRelaySocket do
   Recorder status frames and close details pass through unchanged.
   """
   @behaviour WebSock
-  alias Shuttle.MeetingAudioRelay.Client
+  alias Shuttle.PhoneAudioRelay.Client
   @max_queue 32
 
   @impl true

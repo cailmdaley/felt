@@ -4,137 +4,119 @@ defmodule ShuttleWeb.VoiceTranscriptControllerTest do
   import Shuttle.Test.ForwardStub
   import Phoenix.ConnTest
   alias Shuttle.Test.{Env, StubGetFileClient}
-
+  alias Shuttle.Voice.Transcript
   @endpoint ShuttleWeb.Endpoint
   @moduletag :tmp_dir
 
   setup %{tmp_dir: root} do
-    hark = Path.join(root, "hark")
-    File.mkdir_p!(Path.join(hark, "voice"))
-    Env.put_app_env(:hark_dir, hark)
+    Env.put_env("SHUTTLE_DATA_DIR", root)
     Env.put_app_env(:remotes, [])
-    path = Path.join([hark, "voice", "voice-current_A.txt"])
-    text = "# Listening\n12:00:00 mic  The actual spoken words.\n"
-    File.write!(path, text)
-    manifest = %{"phase" => "live", "launch" => "voice-current_A", "transcript" => path}
-    write_manifest(hark, manifest)
-    {:ok, hark: hark, path: path, text: text, manifest: manifest}
+    Env.put_app_env(:voice_fibers, fn -> [%{"uid" => "uid-a", "slug" => "project/card-a"}] end)
+    :ok
   end
 
-  test "resolves the current transcript independently of the target origin and opens its bytes",
-       c do
-    conn =
-      get(api_conn(), "/api/v1/voice/transcript?origin=worker-on-another-host&path=/etc/passwd")
+  test "day transcript returns JSON rows, persists through recorder stops and filters date, fiber and local time" do
+    rows = [
+      row("2026-11-06T10:00:00Z", nil, "unrouted"),
+      row("2026-11-06T10:01:00Z", "uid-a", "first routed"),
+      row("2026-11-06T10:02:00Z", "project/card-b", "other card"),
+      row("2026-11-06T10:03:00Z", "uid-a", "later words")
+    ]
 
-    assert conn.status == 200
+    assert :ok = Transcript.append(rows)
+    # Relay checkpoint replay doesn't append duplicate utterances.
+    assert :ok = Transcript.append(rows)
+    path = Path.join(Transcript.directory(), "2026-11-06.jsonl")
+
+    assert rows ==
+             path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+    conn = api_conn() |> get("/api/v1/voice/transcript?date=2026-11-06&origin=unrelated-owner")
     assert Plug.Conn.get_resp_header(conn, "cache-control") == ["no-store"]
+    assert %{"date" => "2026-11-06", "rows" => ^rows, "recorder" => _} = json_response(conn, 200)
 
-    assert %{"path" => path, "launch" => "voice-current_A", "recorder" => recorder} =
-             Jason.decode!(conn.resp_body)
+    for fiber <- ["uid-a", "card-a", "project/card-a"] do
+      query =
+        URI.encode_query(%{
+          date: "2026-11-06",
+          fiber: fiber,
+          since: Transcript.local_time("2026-11-06T10:02:00Z")
+        })
 
-    assert path == c.path
-    assert recorder == Shuttle.MeetingRouter.own_host()
-
-    file = get(api_conn(), "/api/v1/file?" <> URI.encode_query(%{path: path, origin: recorder}))
-    assert file.status == 200
-    assert file.resp_body == c.text
-    assert Plug.Conn.get_resp_header(file, "x-content-type-options") == ["nosniff"]
-  end
-
-  test "has no transcript before the file appears, and resolves each new launch", c do
-    File.rm!(c.path)
-    assert get(api_conn(), "/api/v1/voice/transcript").status == 404
-    next = Path.join([c.hark, "voice", "voice-next.txt"])
-    File.write!(next, "next capture")
-    write_manifest(c.hark, %{c.manifest | "launch" => "voice-next", "transcript" => next})
-
-    assert %{"path" => ^next, "launch" => "voice-next"} =
-             get(api_conn(), "/api/v1/voice/transcript")
-             |> Map.fetch!(:resp_body)
-             |> Jason.decode!()
-  end
-
-  test "does not expose fixed meetings, ended captures, malformed state, or caller-selected files",
-       c do
-    outside = Path.join(c.hark, "secret.txt")
-    File.write!(outside, "not a transcript")
-
-    for invalid <- [
-          %{c.manifest | "launch" => "meeting-fixed"},
-          %{c.manifest | "phase" => "ended"},
-          %{c.manifest | "transcript" => outside},
-          %{c.manifest | "transcript" => "voice/voice-current.txt"},
-          %{c.manifest | "launch" => "voice-../secret"},
-          %{c.manifest | "launch" => nil},
-          %{}
-        ] do
-      write_manifest(c.hark, invalid)
-
-      assert get(api_conn(), "/api/v1/voice/transcript?path=" <> URI.encode_www_form(c.path)).status ==
-               404
+      assert %{"rows" => [%{"text" => "later words"}]} =
+               api_conn() |> get("/api/v1/voice/transcript?" <> query) |> json_response(200)
     end
 
-    File.write!(Path.join(c.hark, "meeting.json"), "invalid json")
-    assert get(api_conn(), "/api/v1/voice/transcript").status == 404
-    File.rm!(Path.join(c.hark, "meeting.json"))
-    assert get(api_conn(), "/api/v1/voice/transcript").status == 404
+    assert %{"rows" => [%{"text" => "other card"}]} =
+             api_conn()
+             |> get("/api/v1/voice/transcript?date=2026-11-06&fiber=card-b")
+             |> json_response(200)
+
+    assert {:ok, %{rows: [%{"text" => "other card"}, %{"text" => "later words"}]}} =
+             Transcript.read(%{
+               "date" => "2026-11-06",
+               "since" => String.slice(Transcript.local_time("2026-11-06T10:02:00Z"), 0, 5)
+             })
+
+    assert %{"rows" => [], "date" => "2026-11-05"} =
+             api_conn() |> get("/api/v1/voice/transcript?date=2026-11-05") |> json_response(200)
+
+    assert %{"rows" => [], "date" => today} =
+             api_conn() |> get("/api/v1/voice/transcript") |> json_response(200)
+
+    assert today == Transcript.today()
   end
 
-  test "refuses a symlink or non-regular transcript and a symlinked voice directory", c do
-    outside = Path.join(c.hark, "secret.txt")
-    File.write!(outside, "not a transcript")
-    File.rm!(c.path)
-    File.ln_s!(outside, c.path)
-    assert get(api_conn(), "/api/v1/voice/transcript").status == 404
-    File.rm!(c.path)
-    File.mkdir!(c.path)
-    assert get(api_conn(), "/api/v1/voice/transcript").status == 404
-    File.rmdir!(c.path)
-    File.rmdir!(Path.dirname(c.path))
-    elsewhere = Path.join(c.hark, "elsewhere")
-    File.mkdir!(elsewhere)
-    File.write!(Path.join(elsewhere, "voice-current_A.txt"), "outside voice directory")
-    File.ln_s!(elsewhere, Path.dirname(c.path))
-    assert get(api_conn(), "/api/v1/voice/transcript").status == 404
+  test "invalid filters return 422 rather than selecting a caller's file" do
+    for query <- ["date=../secret", "date=2026-13-40", "since=25:00", "since=noon"] do
+      assert %{"error" => _} =
+               api_conn() |> get("/api/v1/voice/transcript?" <> query) |> json_response(422)
+    end
   end
 
-  test "pins the recorder rather than the receiving worker and stamps the relay owner", c do
+  test "recorder routing forwards every transcript filter and ignores the worker origin" do
     stub_forward(
       "audio-host",
       "http://audio.invalid:4000",
       {:ok, 200, "application/json",
-       Jason.encode!(%{
-         path: "/remote/voice/voice-remote.txt",
-         launch: "voice-remote",
-         recorder: "wrong-owner"
-       })}
+       Jason.encode!(%{date: "2026-11-06", rows: [], recorder: "wrong-owner"})}
     )
 
-    conn = get(api_conn(), "/api/v1/voice/transcript?recorder=audio-host&origin=worker-host")
-    assert conn.status == 200
+    conn =
+      api_conn()
+      |> get(
+        "/api/v1/voice/transcript?recorder=audio-host&origin=worker-host&date=2026-11-06&fiber=card-a&since=10:03"
+      )
 
-    assert %{"path" => "/remote/voice/voice-remote.txt", "recorder" => "audio-host"} =
-             Jason.decode!(conn.resp_body)
+    assert %{"rows" => [], "recorder" => "audio-host"} = json_response(conn, 200)
+    %{url: url} = StubGetFileClient.last()
+    uri = URI.parse(url)
+    assert uri.path == "/api/v1/voice/transcript"
 
-    assert %{url: "http://audio.invalid:4000/api/v1/voice/transcript"} = StubGetFileClient.last()
-    refute conn.resp_body =~ c.path
+    assert URI.decode_query(uri.query) == %{
+             "recorder" => "audio-host",
+             "date" => "2026-11-06",
+             "fiber" => "card-a",
+             "since" => "10:03"
+           }
+
+    assert api_conn() |> get("/api/v1/voice/transcript?recorder=unknown-host") |> Map.get(:status) ==
+             400
+
+    StubGetFileClient.set_response({:error, :timeout})
+
+    assert api_conn() |> get("/api/v1/voice/transcript?recorder=audio-host") |> Map.get(:status) ==
+             502
   end
 
-  test "unknown or unreachable recorders never fall back to the local transcript" do
-    assert get(api_conn(), "/api/v1/voice/transcript?recorder=unknown-host").status == 400
-    stub_forward("audio-host", "http://audio.invalid:4000", {:error, :timeout})
-    assert get(api_conn(), "/api/v1/voice/transcript?recorder=audio-host").status == 502
-
-    for {status, body, expected} <- [
-          {404, ~s({"error":"not ready"}), 404},
-          {200, "[]", 502},
-          {200, "not json", 502}
-        ] do
-      StubGetFileClient.set_response({:ok, status, "application/json", body})
-      assert get(api_conn(), "/api/v1/voice/transcript?recorder=audio-host").status == expected
-    end
-  end
-
-  defp write_manifest(hark, manifest),
-    do: File.write!(Path.join(hark, "meeting.json"), Jason.encode!(manifest))
+  defp row(t, fiber, text),
+    do: %{
+      "t" => t,
+      "speaker" => "me",
+      "text" => text,
+      "fiber_id" => fiber,
+      "origin" => if(fiber, do: "owner"),
+      "name" => if(fiber, do: "Card"),
+      "launch" => "voice-test"
+    }
 end

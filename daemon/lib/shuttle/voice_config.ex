@@ -1,16 +1,13 @@
 defmodule Shuttle.Voice.Config do
-  @moduledoc """
-  The live voice switch and the shared transcript monitor's thresholds.
-
-  `quiet_seconds` is the one pause that means a speaker is done: hark reads it
-  from this file (`--settings`) to close a speech run, and the transcript relay
-  delivers once the same quiet has passed since the last spoken word.
-  """
+  @moduledoc "Persistent Listen settings, shared with hark through --settings."
 
   @defaults %{
     "enabled" => false,
+    "follow" => true,
+    "system_audio" => false,
     "words" => 200,
-    "quiet_seconds" => 15
+    "quiet_seconds" => 15,
+    "pinned_quiet_seconds" => 120
   }
 
   def path do
@@ -28,63 +25,67 @@ defmodule Shuttle.Voice.Config do
       {:ok, bytes} ->
         with {:ok, config} <- Jason.decode(bytes),
              :ok <- validate(config),
-             do: {:ok, normalize(config)}
+             do: {:ok, Map.merge(@defaults, Map.take(config, Map.keys(@defaults)))}
 
       {:error, reason} ->
         {:error, Shuttle.FS.format_error(reason)}
     end
   end
 
-  def thresholds(_kind) do
-    case read() do
-      {:ok, config} -> Map.take(config, ~w(words quiet_seconds))
-      {:error, _} -> Map.take(@defaults, ~w(words quiet_seconds))
-    end
-  end
+  def thresholds do
+    config =
+      case read() do
+        {:ok, config} -> config
+        {:error, _} -> @defaults
+      end
 
-  defp normalize(config) do
-    legacy = Map.merge(Map.get(config, "meeting", %{}), Map.get(config, "voice", %{}))
-
-    @defaults
-    |> Map.merge(Map.take(legacy, ~w(words quiet_seconds)))
-    |> Map.merge(Map.delete(config, "run_quiet_seconds"))
+    %{
+      "words" => config["words"],
+      "quiet_seconds" =>
+        config[if(config["follow"], do: "quiet_seconds", else: "pinned_quiet_seconds")]
+    }
   end
 
   def validate(config) when is_map(config) do
     cond do
-      not is_boolean(Map.get(config, "enabled", false)) ->
-        {:error, "enabled must be a boolean"}
+      Enum.any?(
+        ~w(enabled follow system_audio),
+        &(Map.has_key?(config, &1) and not is_boolean(config[&1]))
+      ) ->
+        {:error, "enabled, follow and system_audio must be booleans"}
 
-      not Enum.all?(~w(voice meeting), &is_map(Map.get(config, &1, %{}))) ->
-        {:error, "voice and meeting settings must be objects"}
+      not (is_integer(Map.get(config, "words", 200)) and Map.get(config, "words", 200) > 0) ->
+        {:error, "words must be a positive integer"}
+
+      Enum.any?(
+        ~w(quiet_seconds pinned_quiet_seconds),
+        &(Map.has_key?(config, &1) and not (is_number(config[&1]) and config[&1] > 0))
+      ) ->
+        {:error, "quiet_seconds and pinned_quiet_seconds must be positive"}
 
       true ->
-        case normalize(config) do
-          %{"words" => words, "quiet_seconds" => quiet}
-          when is_integer(words) and words > 0 and is_number(quiet) and quiet > 0 ->
-            :ok
-
-          _ ->
-            {:error, "words must be a positive integer and quiet_seconds must be positive"}
-        end
+        :ok
     end
   end
 
   def validate(_), do: {:error, "voice settings must be a JSON object"}
 
-  def enable(enabled) do
-    # Off is a safety control even when the operator file cannot be decoded.
+  def enable(enabled), do: update(%{"enabled" => enabled})
+
+  def update(params) when map_size(params) == 0, do: :ok
+
+  def update(params) do
+    # Off remains available when the settings file cannot be decoded.
     config =
       case read() do
         {:ok, config} -> {:ok, config}
-        {:error, _} when enabled == false -> {:ok, @defaults}
-        error -> error
+        {:error, _} = error -> if(params["enabled"] == false, do: {:ok, @defaults}, else: error)
       end
 
     with {:ok, config} <- config,
-         {:ok, _} <-
-           Shuttle.ConfigFiles.write(:voice, Jason.encode!(Map.put(config, "enabled", enabled))) do
-      :ok
-    end
+         config <- Map.merge(config, Map.take(params, Map.keys(@defaults))),
+         :ok <- validate(config),
+         {:ok, _} <- Shuttle.ConfigFiles.write(:voice, Jason.encode!(config)),
+         do: :ok
   end
 end

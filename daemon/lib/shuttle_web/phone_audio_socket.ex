@@ -1,32 +1,32 @@
-defmodule ShuttleWeb.MeetingAudioSocket do
+defmodule ShuttleWeb.PhoneAudioSocket do
   @moduledoc """
-  Relays a phone's microphone into the live `phone` meeting.
+  Relays a phone's microphone into the live `phone` recording.
 
   The browser sends binary frames of s16le 16 kHz mono PCM; this process
-  writes them unchanged into hark's Unix socket (`Shuttle.Meeting.phone_socket/1`).
+  writes them unchanged into hark's Unix socket (`Shuttle.Recorder.phone_socket/1`).
   Nothing is buffered. hark places phone audio on its own wall clock and pads
   any gap with silence, so audio replayed late would be counted twice and
   shift every later timestamp. Until hark's socket accepts a connection (it
   binds once its models load), frames are discarded and a connect is retried
   every `retry_ms`.
 
-  The socket is bound to one meeting: the page passes that meeting's launch id
-  (`launch`), and a different meeting is refused or, mid-stream, ends this
-  socket, so a reconnect never lands in another meeting. Without a `launch`,
-  any live phone meeting is fed.
+  The socket is bound to one recording: the page passes that recording's launch id
+  (`launch`), and a different recording is refused or, mid-stream, ends this
+  socket, so a reconnect never lands in another recording. Without a `launch`,
+  any live phone recording is fed.
 
   The page learns what is happening from small JSON text frames:
 
     * `{"state":"waiting","reason":…}` — no hark socket yet; audio is dropped;
     * `{"state":"connected"}` — audio reaches hark;
-    * `{"state":"refused","reason":…}` — there is no phone meeting to feed;
-    * `{"state":"ended","reason":…}` — the meeting stopped or failed;
+    * `{"state":"refused","reason":…}` — there is no phone recording to feed;
+    * `{"state":"ended","reason":…}` — the recording stopped or failed;
     * `{"state":"replaced","reason":…}` — hark took another sender.
 
   Each terminal state is followed by a close whose code names it (see
   `close_code/1`) and whose reason is the frame's, cut to the 123 bytes a close
   frame holds. hark keeps one sender: when it closes our socket while the same
-  meeting is still live, another sender replaced this one, and the relay
+  recording is still live, another sender replaced this one, and the relay
   closes rather than reconnecting, which would steal the socket back.
   """
 
@@ -63,7 +63,7 @@ defmodule ShuttleWeb.MeetingAudioSocket do
   @impl WebSock
   def init(opts) do
     state = %{
-      resolve: Keyword.get(opts, :resolve, &Shuttle.Meeting.phone_socket/0),
+      resolve: Keyword.get(opts, :resolve, &Shuttle.Recorder.phone_socket/0),
       retry_ms: Keyword.get(opts, :retry_ms, @retry_ms),
       launch: blank_to_nil(Keyword.get(opts, :launch)),
       socket: nil,
@@ -113,7 +113,7 @@ defmodule ShuttleWeb.MeetingAudioSocket do
   defp attempt(state) do
     case state.resolve.() do
       {:ok, %{launch: launch}} when not is_nil(state.launch) and launch != state.launch ->
-        finish(state, :refused, "a different meeting is recording now")
+        finish(state, :refused, "a different recording is recording now")
 
       {:ok, %{path: path}} ->
         case connect(path) do
@@ -129,19 +129,23 @@ defmodule ShuttleWeb.MeetingAudioSocket do
         wait(state, "hark is starting")
 
       {:error, :none} ->
-        finish(state, :refused, "no meeting is recording")
+        finish(state, :refused, "no recording is recording")
 
       {:error, :not_phone} ->
-        finish(state, :refused, "the live meeting records this machine's microphone, not a phone")
+        finish(
+          state,
+          :refused,
+          "the live recording records this machine's microphone, not a phone"
+        )
 
       {:error, :ended} ->
-        finish(state, :ended, "the meeting has ended")
+        finish(state, :ended, "the recording has ended")
 
       {:error, {:failed, error}} ->
         finish(state, :ended, failure(error))
 
       {:error, reason} ->
-        wait(state, "can't read the meeting yet: #{inspect(reason)}")
+        wait(state, "can't read the recording yet: #{inspect(reason)}")
     end
   end
 
@@ -169,21 +173,21 @@ defmodule ShuttleWeb.MeetingAudioSocket do
     end
   end
 
-  # hark closed our socket. The same meeting, still a live phone meeting, took
-  # another sender; anything else means this meeting ended.
+  # hark closed our socket. The same recording, still a live phone recording, took
+  # another sender; anything else means this recording ended.
   defp hark_closed(state) do
     :gen_tcp.close(state.socket)
     state = %{state | socket: nil}
 
     case state.resolve.() do
       {:ok, %{launch: launch}} when is_nil(state.launch) or launch == state.launch ->
-        finish(state, :replaced, "another device is now the meeting's microphone")
+        finish(state, :replaced, "another device is now the recording's microphone")
 
       {:error, {:failed, error}} ->
         finish(state, :ended, failure(error))
 
       _ended_other_or_unknown ->
-        finish(state, :ended, "the meeting has ended")
+        finish(state, :ended, "the recording has ended")
     end
   end
 
@@ -192,8 +196,8 @@ defmodule ShuttleWeb.MeetingAudioSocket do
      [frame(%{state: Atom.to_string(kind), reason: reason})], state}
   end
 
-  defp failure(error) when is_binary(error) and error != "", do: "the meeting failed: #{error}"
-  defp failure(_error), do: "the meeting failed"
+  defp failure(error) when is_binary(error) and error != "", do: "the recording failed: #{error}"
+  defp failure(_error), do: "the recording failed"
 
   defp blank_to_nil(value) when is_binary(value) and value != "", do: value
   defp blank_to_nil(_value), do: nil

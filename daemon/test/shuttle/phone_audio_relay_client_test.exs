@@ -1,6 +1,6 @@
-defmodule Shuttle.MeetingAudioRelay.ClientTest do
+defmodule Shuttle.PhoneAudioRelay.ClientTest do
   use ExUnit.Case, async: true
-  alias Shuttle.MeetingAudioRelay.Client
+  alias Shuttle.PhoneAudioRelay.Client
 
   defmodule Refusal do
     @behaviour Plug
@@ -32,12 +32,12 @@ defmodule Shuttle.MeetingAudioRelay.ClientTest do
     Shuttle.Test.Env.put_app_env(:https_proxy, "127.0.0.1:1")
 
     assert {:error, {:tailnet_dial, :no_bridge}} =
-             Client.connect("https://no-bridge.invalid:443/api/v1/meeting/audio")
+             Client.connect("https://no-bridge.invalid:443/api/v1/voice/audio")
 
     Shuttle.Test.Env.put_app_env(:tailscale_socket, "relative-invalid")
 
     assert {:error, {:tailnet_dial, :invalid_tailscale_socket}} =
-             Client.connect("https://no-bridge.invalid/api/v1/meeting/audio")
+             Client.connect("https://no-bridge.invalid/api/v1/voice/audio")
   end
 
   test "shared hosts refuse the unauthenticated HTTPS proxy" do
@@ -46,7 +46,7 @@ defmodule Shuttle.MeetingAudioRelay.ClientTest do
     Shuttle.Test.Env.put_app_env(:host_class, :shared_multi_user)
 
     assert {:error, :https_proxy_refused} =
-             Client.connect("https://recorder.invalid/api/v1/meeting/audio")
+             Client.connect("https://recorder.invalid/api/v1/voice/audio")
   end
 
   test "loopback HTTPS bypasses the configured proxy while still verifying TLS" do
@@ -86,11 +86,11 @@ defmodule Shuttle.MeetingAudioRelay.ClientTest do
   end
 end
 
-defmodule Shuttle.MeetingAudioRelay.PrivateTransportTest do
+defmodule Shuttle.PhoneAudioRelay.PrivateTransportTest do
   # TailnetDial's bridge table is global. Own it only in the synchronous tier,
   # as tailnet_dial_test does; the WebSocket listeners are throwaway endpoints.
   use ExUnit.Case, async: false
-  alias Shuttle.Test.MeetingAudioRelay.{Ingress, Recorder}
+  alias Shuttle.Test.PhoneAudioRelay.{Ingress, Recorder}
   alias Shuttle.Remote
 
   test "a hub forwards real WS audio via the private bridge, retaining receiving host and launch" do
@@ -144,14 +144,14 @@ defmodule Shuttle.MeetingAudioRelay.PrivateTransportTest do
     {:ok, {_, port}} = ThousandIsland.listener_info(hub)
 
     assert {:ok, browser} =
-             Shuttle.MeetingAudioRelay.Client.connect(
-               "http://127.0.0.1:#{port}/api/v1/meeting/audio?recorder=recorder&launch=private-L1"
+             Shuttle.PhoneAudioRelay.Client.connect(
+               "http://127.0.0.1:#{port}/api/v1/voice/audio?recorder=recorder&launch=private-L1"
              )
 
     assert_receive {:recorder, _, "private-L1"}, 10_000
-    :ok = Shuttle.MeetingAudioRelay.Client.send_frame(browser, :binary, <<255, 0, 127>>)
+    :ok = Shuttle.PhoneAudioRelay.Client.send_frame(browser, :binary, <<255, 0, 127>>)
     assert_receive {:audio, :binary, <<255, 0, 127>>}, 10_000
-    Shuttle.MeetingAudioRelay.Client.close(browser)
+    Shuttle.PhoneAudioRelay.Client.close(browser)
     assert_receive {:recorder_closed, _}, 10_000
   end
 end

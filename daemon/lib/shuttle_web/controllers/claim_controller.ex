@@ -18,9 +18,7 @@ defmodule ShuttleWeb.ClaimController do
   for a multi-block session), `agent` (optional
   registry name; defaults to the fiber's shuttle.agent), `session_uuid`
   (optional harness transcript UUID — written into the dispatch-shaped felt
-  history event so Resume previous works on claimed sessions too), `meeting`
-  (optional launch id of the meeting a capture scribes, stamped on the fiber as
-  `shuttle.runtime.meeting`).
+  history event so Resume previous works on claimed sessions too).
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -61,8 +59,7 @@ defmodule ShuttleWeb.ClaimController do
         case Shuttle.Poller.claim_session(fiber_id, tmux_session,
                agent: Map.get(params, "agent"),
                tmux_pane: Map.get(params, "tmux_pane"),
-               session_uuid: Map.get(params, "session_uuid"),
-               meeting: Map.get(params, "meeting")
+               session_uuid: Map.get(params, "session_uuid")
              ) do
           {:ok, %{session: session, agent_id: agent_id}} ->
             json(

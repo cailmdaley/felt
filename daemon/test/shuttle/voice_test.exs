@@ -8,7 +8,7 @@ defmodule Shuttle.Test.MissingVoiceRunner do
 end
 
 defmodule Shuttle.Test.NoCaptureVoiceRunner do
-  def cmd("tmux", _args, _opts), do: {"can't find session: hark-meeting", 1}
+  def cmd("tmux", _args, _opts), do: {"can't find session: hark-voice", 1}
   def cmd(_command, _args, _opts), do: {"", 0}
 end
 
@@ -26,7 +26,7 @@ defmodule Shuttle.VoiceTest do
     Env.put_env("SHUTTLE_DATA_DIR", root)
     Env.put_app_env(:hark_dir, Path.join(root, "hark"))
     Env.put_app_env(:remotes, [])
-    {:ok, observed} = Agent.start_link(fn -> %{available: true, meeting: nil} end)
+    {:ok, observed} = Agent.start_link(fn -> %{available: true, capture: nil} end)
     parent = self()
 
     reconcile = fn enabled, _opts ->
@@ -61,8 +61,8 @@ defmodule Shuttle.VoiceTest do
     for invalid <- [
           %{"enabled" => "yes"},
           %{"words" => 0},
-          %{"voice" => %{"words" => 0, "quiet_seconds" => 4}},
-          %{"meeting" => %{"words" => 5, "quiet_seconds" => -1}},
+          %{"pinned_quiet_seconds" => 0},
+          %{"follow" => "no"},
           []
         ] do
       assert {:error, _} = Config.validate(invalid)
@@ -72,22 +72,6 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{"enabled" => true, "words" => 200}} = Config.read()
     assert {:error, _} = Voice.update(%{"muted" => "true"})
     assert File.exists?(Path.join(c.root, "voice.json"))
-  end
-
-  test "both modes share thresholds, including old nested files", c do
-    path = Path.join(c.root, "voice.json")
-
-    File.write!(
-      path,
-      ~s({"voice":{"words":42,"quiet_seconds":3},"meeting":{"words":75,"quiet_seconds":8}})
-    )
-
-    assert Config.thresholds("voice") == %{"words" => 42, "quiet_seconds" => 3}
-    assert Config.thresholds("meeting") == Config.thresholds("voice")
-
-    File.write!(path, ~s({"meeting":{"words":75,"quiet_seconds":8},"words":99}))
-    assert Config.thresholds("voice") == %{"words" => 99, "quiet_seconds" => 8}
-    assert Config.thresholds("meeting") == Config.thresholds("voice")
   end
 
   test "one quiet setting: a separate run quiet is dropped on read and on save", c do
@@ -100,6 +84,55 @@ defmodule Shuttle.VoiceTest do
 
     assert :ok = Config.enable(false)
     refute path |> File.read!() |> Jason.decode!() |> Map.has_key?("run_quiet_seconds")
+  end
+
+  test "pin sets the target and follow together, ignores views, restores the view on follow, and survives restart",
+       c do
+    assert {:ok, %{enabled: true, follow: true, system_audio: false}} =
+             Voice.update(%{"enabled" => true})
+
+    assert {:ok, _} = Voice.target(%{"fiber_id" => "view/first"})
+
+    pin = %{
+      follow: false,
+      target: %{fiber_id: "pinned/card", name: "Pinned", origin: Shuttle.Poller.own_host_id()}
+    }
+
+    assert %{"follow" => false, "target" => %{"fiber_id" => "pinned/card"}} =
+             api_conn() |> post("/api/v1/voice", Jason.encode!(pin)) |> json_response(200)
+
+    assert {:ok, %{target: %{"fiber_id" => "pinned/card"}, mode: "pinned"}} =
+             Voice.target(%{"fiber_id" => "view/second"})
+
+    assert {:ok, %{"follow" => false}} = Config.read()
+    stop_supervised!(Voice)
+    Env.start_scoped!({Voice, c.opts})
+    assert {:ok, %{follow: false, target: %{"fiber_id" => "pinned/card"}}} = Voice.update(%{})
+    assert {:ok, _} = Voice.target(%{"fiber_id" => "view/third"})
+
+    assert {:ok, %{follow: true, target: %{"fiber_id" => "view/third"}}} =
+             Voice.update(%{"follow" => true})
+
+    assert {:ok, %{target: %{"fiber_id" => "view/fourth"}}} =
+             Voice.target(%{"fiber_id" => "view/fourth"})
+
+    assert {:error, _} = Voice.update(%{"target" => %{"fiber_id" => "unintended"}})
+    assert {:error, _} = Voice.update(%{"follow" => false, "target" => %{}})
+  end
+
+  test "follow chooses its own quiet threshold and discarded nested keys do not affect it", c do
+    File.write!(Config.path(), ~s({"voice":{"quiet_seconds":2},"meeting":{"words":8}}))
+    assert Config.thresholds() == %{"words" => 200, "quiet_seconds" => 15}
+    assert :ok = Config.update(%{"follow" => false, "pinned_quiet_seconds" => 44})
+    assert Config.thresholds() == %{"words" => 200, "quiet_seconds" => 44}
+    refute File.read!(Path.join(c.root, "voice.json")) =~ "meeting"
+  end
+
+  test "toggle starts Listen and flips mute in both follow and pin states" do
+    assert {:ok, %{enabled: true, muted: false}} = Voice.toggle()
+    assert {:ok, %{muted: true}} = Voice.toggle()
+    assert {:ok, _} = Voice.update(%{"follow" => false})
+    assert {:ok, %{mode: "pinned", muted: false}} = Voice.toggle()
   end
 
   test "subscribers receive each new route as it is appended" do
@@ -145,7 +178,7 @@ defmodule Shuttle.VoiceTest do
     Agent.update(c.observed, fn _ ->
       %{
         available: true,
-        meeting: %{kind: "voice", launch: "voice", state: "live", transcript: transcript}
+        capture: %{kind: "voice", launch: "voice", state: "live", transcript: transcript}
       }
     end)
 
@@ -176,186 +209,8 @@ defmodule Shuttle.VoiceTest do
     File.write!(partial, "S1: stale")
     assert {:ok, %{preview: nil}} = Voice.update(%{"enabled" => false})
     assert {:ok, %{preview: %{"text" => "S1: stale"}}} = Voice.update(%{"enabled" => true})
-    Agent.update(c.observed, fn _ -> %{available: true, meeting: nil} end)
+    Agent.update(c.observed, fn _ -> %{available: true, capture: nil} end)
     assert {:ok, %{preview: nil}} = Voice.update(%{})
-  end
-
-  test "meeting ownership yields voice and it returns once the meeting ends", c do
-    Agent.update(c.observed, fn _ ->
-      %{available: true, meeting: %{kind: "meeting", launch: "meeting", state: "live"}}
-    end)
-
-    assert {:ok, %{state: "yielded", enabled: true}} = Voice.update(%{"enabled" => true})
-
-    Agent.update(c.observed, fn _ ->
-      %{available: true, meeting: %{kind: "voice", launch: "voice", state: "live", error: nil}}
-    end)
-
-    assert {:ok, %{state: "listening"}} = Voice.update(%{})
-  end
-
-  test "mode names where words go: nowhere, the followed target, or the meeting's card", c do
-    host = Shuttle.MeetingRouter.own_host()
-    card = %{"uid" => "01CARD", "name" => "The card", "shuttle" => %{"host" => host}}
-    Env.put_app_env(:meeting_fibers, fn -> [card] end)
-
-    assert %{mode: "off", destination: nil, paused: false} = Voice.snapshot()
-
-    Agent.update(c.observed, fn _ ->
-      %{available: true, meeting: %{kind: "voice", launch: "voice", state: "live", error: nil}}
-    end)
-
-    assert {:ok, %{mode: "following", destination: nil}} = Voice.update(%{"enabled" => true})
-
-    assert {:ok, %{mode: "following", destination: %{"fiber_id" => "01CARD"} = following}} =
-             Voice.target(%{"fiber_id" => "01CARD", "origin" => host})
-
-    assert following == %{"fiber_id" => "01CARD", "name" => "The card", "origin" => host}
-    assert {:ok, %{mode: "following", paused: true}} = Voice.update(%{"muted" => true})
-    assert {:ok, _} = Voice.update(%{"muted" => false})
-
-    meeting = %{
-      kind: "meeting",
-      launch: "meeting",
-      state: "live",
-      title: "Weekly sync",
-      fiber: "01CARD",
-      mirror_host: host,
-      paused: true
-    }
-
-    Agent.update(c.observed, fn _ -> %{available: true, meeting: meeting} end)
-
-    assert {:ok,
-            %{
-              state: "yielded",
-              mode: "meeting",
-              paused: true,
-              destination: %{"fiber_id" => "01CARD", "name" => "The card", "origin" => ^host}
-            }} = Voice.update(%{})
-
-    assert %{"mode" => "meeting", "destination" => %{"fiber_id" => "01CARD"}, "paused" => true} =
-             api_conn() |> get("/api/v1/voice") |> json_response(200)
-
-    Agent.update(c.observed, fn _ -> %{available: true, meeting: %{meeting | state: "failed"}} end)
-
-    assert {:ok, %{mode: "off", destination: nil, paused: false}} = Voice.update(%{})
-  end
-
-  test "a meeting is the mode while Follow me is off, observed when its files change or every ten seconds",
-       c do
-    stop_supervised!(Voice)
-    Env.put_app_env(:meeting_fibers, fn -> [] end)
-    {:ok, clock} = Agent.start_link(fn -> 0 end)
-    Env.start_scoped!({Voice, Keyword.put(c.opts, :clock, fn -> Agent.get(clock, & &1) end)})
-
-    meeting = %{
-      kind: "meeting",
-      launch: "meeting",
-      state: "starting",
-      title: "Weekly sync",
-      fiber: "project/sync",
-      paused: false
-    }
-
-    hark = Path.join(c.root, "hark")
-    lifecycle = Path.join(hark, "meeting.json")
-    File.mkdir_p!(hark)
-    File.write!(lifecycle, ~s({"phase":"loading","launch":"meeting"}))
-    Agent.update(c.observed, fn _ -> %{available: true, meeting: meeting} end)
-    assert {:ok, %{enabled: false, mode: "meeting", paused: false} = first} = Voice.update(%{})
-
-    assert first.destination == %{
-             "fiber_id" => "project/sync",
-             "name" => "Weekly sync",
-             "origin" => Shuttle.MeetingRouter.own_host()
-           }
-
-    # Unchanged files and a recent observation: no terminal probe.
-    Agent.update(c.observed, fn _ ->
-      %{available: true, meeting: %{meeting | state: "live", paused: true}}
-    end)
-
-    flush_reconciled()
-    assert {:ok, %{mode: "meeting", paused: false}} = Voice.update(%{})
-    refute_received {:reconciled, _}
-
-    # A pause flag wakes observation.
-    File.write!(Path.join(hark, "paused"), "")
-    assert {:ok, %{mode: "meeting", paused: true}} = Voice.update(%{})
-    assert_received {:reconciled, false}
-
-    # A recorder that ends without a lifecycle write is seen within ten seconds.
-    Agent.update(c.observed, fn _ -> %{available: true, meeting: nil} end)
-    assert {:ok, %{mode: "meeting"}} = Voice.update(%{})
-    Agent.update(clock, &(&1 + 10_000))
-    assert {:ok, %{mode: "off", destination: nil}} = Voice.update(%{})
-    flush_reconciled()
-    Agent.update(clock, &(&1 + 10_000))
-    assert {:ok, %{mode: "off"}} = Voice.update(%{})
-    refute_received {:reconciled, _}
-  end
-
-  test "failing observation clears the meeting mode", c do
-    stop_supervised!(Voice)
-    {:ok, result} = Agent.start_link(fn -> nil end)
-
-    reconcile = fn _, _ ->
-      Agent.get(result, & &1) || {:ok, %{available: true, meeting: meeting_row()}}
-    end
-
-    Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
-    write_lifecycle(c, "loading")
-    assert {:ok, %{mode: "meeting"}} = Voice.update(%{})
-    Agent.update(result, fn _ -> {:error, :terminal_unavailable} end)
-    write_lifecycle(c, "live")
-    assert {:ok, %{mode: "off", destination: nil, state: "failed"}} = Voice.update(%{})
-  end
-
-  test "toggle turns following on, flips its mute, and pauses a meeting", c do
-    parent = self()
-
-    Env.put_app_env(:voice_meeting_pause, fn paused, opts ->
-      send(parent, {:pause, paused, opts})
-      {:ok, %{}}
-    end)
-
-    toggle = fn -> api_conn() |> post("/api/v1/voice/toggle", "{}") |> json_response(200) end
-
-    assert %{"mode" => "following", "enabled" => true, "muted" => false} = toggle.()
-    assert %{"mode" => "following", "muted" => true, "paused" => true} = toggle.()
-    assert %{"mode" => "following", "muted" => false} = toggle.()
-    refute_received {:pause, _, _}
-
-    assert {:ok, _} = Voice.update(%{"enabled" => false})
-    start_meeting(c)
-    assert {:ok, %{mode: "meeting", paused: false}} = Voice.update(%{})
-
-    assert %{"mode" => "meeting"} = toggle.()
-    assert_received {:pause, true, [launch: "meeting"]}
-
-    Agent.update(c.observed, fn _ ->
-      %{available: true, meeting: %{meeting_row() | paused: true}}
-    end)
-
-    File.write!(Path.join([c.root, "hark", "paused"]), "")
-    assert {:ok, %{mode: "meeting", paused: true}} = Voice.update(%{})
-    assert %{"mode" => "meeting"} = toggle.()
-    assert_received {:pause, false, [launch: "meeting"]}
-
-    Env.put_app_env(:voice_meeting_pause, fn _, _ ->
-      {:error, {:validation, "pause requires a live desktop meeting"}}
-    end)
-
-    response = api_conn() |> post("/api/v1/voice/toggle", "{}")
-    assert %{"error" => "pause requires a live desktop meeting"} = json_response(response, 422)
-  end
-
-  test "following cannot be switched on under a meeting", c do
-    start_meeting(c)
-    assert {:ok, %{mode: "meeting"}} = Voice.update(%{})
-    assert {:error, "a meeting holds the microphone"} = Voice.update(%{"enabled" => true})
-    assert {:ok, %{"enabled" => false}} = Config.read()
   end
 
   test "discard drops the live recording's unsent words and reports how many", c do
@@ -380,11 +235,11 @@ defmodule Shuttle.VoiceTest do
     assert %{"discarded" => 0, "pending_words" => 0} = discard.()
     refute_received {:discard, _}
 
-    start_meeting(c)
-    assert {:ok, %{mode: "meeting", pending_words: 7}} = Voice.update(%{})
+    start_voice(c)
+    assert {:ok, %{mode: "following", pending_words: 7}} = Voice.update(%{"enabled" => true})
     assert %{pending_words: 7} = Voice.snapshot()
 
-    assert %{"discarded" => 7, "pending_words" => 0, "mode" => "meeting"} = discard.()
+    assert %{"discarded" => 7, "pending_words" => 0, "mode" => "following"} = discard.()
     assert_received {:discard, "meeting"}
     assert %{"discarded" => 0} = discard.()
   end
@@ -400,7 +255,7 @@ defmodule Shuttle.VoiceTest do
     Agent.update(c.observed, fn _ ->
       %{
         available: true,
-        meeting: %{kind: "voice", launch: "voice", state: "live", error: nil, transcript: "file"}
+        capture: %{kind: "voice", launch: "voice", state: "live", error: nil, transcript: "file"}
       }
     end)
 
@@ -433,7 +288,7 @@ defmodule Shuttle.VoiceTest do
       {:ok,
        %{
          available: true,
-         meeting: %{kind: "voice", launch: "voice-recovered", state: "starting", error: nil}
+         capture: %{kind: "voice", launch: "voice-recovered", state: "starting", error: nil}
        }}
     end)
 
@@ -446,14 +301,14 @@ defmodule Shuttle.VoiceTest do
     Env.put_app_env(:hark_path, false)
     File.mkdir_p!(Path.join(c.root, "hark"))
     # Mute can't inspect the terminal, but enabling has already persisted.
-    Env.put_app_env(:meeting_runner, Shuttle.Test.MissingVoiceRunner)
+    Env.put_app_env(:recorder_runner, Shuttle.Test.MissingVoiceRunner)
     assert {:error, _} = Voice.update(%{"enabled" => true, "muted" => true})
     assert %{enabled: true, muted: true, state: "failed"} = Voice.show()
   end
 
   test "successful mute controls stay visible when subsequent reconciliation fails", c do
     stop_supervised!(Voice)
-    Env.put_app_env(:meeting_runner, Shuttle.Test.NoCaptureVoiceRunner)
+    Env.put_app_env(:recorder_runner, Shuttle.Test.NoCaptureVoiceRunner)
     Env.put_app_env(:hark_path, false)
     reconcile = fn _, _ -> {:error, :recorder_unavailable} end
     Env.start_scoped!({Voice, Keyword.put(c.opts, :reconcile, reconcile)})
@@ -468,7 +323,7 @@ defmodule Shuttle.VoiceTest do
 
     opts =
       Keyword.merge(c.opts,
-        reconcile: &Shuttle.Meeting.reconcile_voice/2,
+        reconcile: &Shuttle.Recorder.reconcile_voice/2,
         capture_opts: [runner: Shuttle.Test.MissingVoiceRunner, hark_path: false]
       )
 
@@ -486,7 +341,7 @@ defmodule Shuttle.VoiceTest do
   end
 
   test "idle off snapshots retain explicit mute changes" do
-    Env.put_app_env(:meeting_runner, Shuttle.Test.NoCaptureVoiceRunner)
+    Env.put_app_env(:recorder_runner, Shuttle.Test.NoCaptureVoiceRunner)
     Env.put_app_env(:hark_path, false)
     assert {:ok, %{state: "off", muted: true}} = Voice.update(%{"muted" => true})
     assert {:ok, %{state: "off", muted: true}} = Voice.update(%{})
@@ -565,17 +420,19 @@ defmodule Shuttle.VoiceTest do
     assert bytes == File.read!(Voice.routes_path())
 
     Agent.update(c.observed, fn _ ->
-      %{available: true, meeting: %{kind: "meeting", launch: "fixed", state: "live"}}
+      %{available: true, capture: %{kind: "voice", launch: "fixed", state: "live"}}
     end)
 
-    assert {:ok, %{enabled: true, state: "yielded"}} = Voice.update(%{"enabled" => true})
+    assert {:ok, %{enabled: true, state: "listening"}} =
+             Voice.update(%{"enabled" => true, "follow" => false})
+
     assert {:ok, _} = Voice.target(%{params | "fiber_id" => "project/fixed"})
     assert bytes == File.read!(Voice.routes_path())
   end
 
   test "a target is named from served fibers, even when the lookup missed at the switch" do
     {:ok, served} = Agent.start_link(fn -> [] end)
-    Env.put_app_env(:meeting_fibers, fn -> Agent.get(served, & &1) end)
+    Env.put_app_env(:voice_fibers, fn -> Agent.get(served, & &1) end)
     assert {:ok, _} = Voice.update(%{"enabled" => true})
 
     assert {:ok, %{target: %{"name" => "01CARD", "origin" => host}}} =
@@ -634,7 +491,7 @@ defmodule Shuttle.VoiceTest do
        c do
     assert {:ok, %{enabled: true}} = Voice.update(%{"enabled" => true})
 
-    for invalid <- ["{not-json", ~s({"enabled":true,"voice":{"words":0,"quiet_seconds":1}})] do
+    for invalid <- ["{not-json", ~s({"enabled":true,"words":0})] do
       File.write!(Config.path(), invalid)
       assert {:ok, %{enabled: false, state: "failed", error: error}} = Voice.update(%{})
       assert error =~ "invalid voice settings"
@@ -680,7 +537,7 @@ defmodule Shuttle.VoiceTest do
     Agent.update(c.observed, fn _ ->
       %{
         available: true,
-        meeting: %{
+        capture: %{
           kind: "voice",
           launch: "voice-live",
           state: "live",
@@ -736,7 +593,7 @@ defmodule Shuttle.VoiceTest do
               recorder
           end
 
-        {{:ok, %{available: true, meeting: recorder.row}}, recorder}
+        {{:ok, %{available: true, capture: recorder.row}}, recorder}
       end)
     end
 
@@ -782,7 +639,7 @@ defmodule Shuttle.VoiceTest do
         Agent.update(attempts, &(&1 + 1))
         {:error, :launch_failed}
       else
-        {:ok, %{available: true, meeting: nil}}
+        {:ok, %{available: true, capture: nil}}
       end
     end
 
@@ -810,12 +667,12 @@ defmodule Shuttle.VoiceTest do
     opts = Keyword.put(c.opts, :clock, fn -> Agent.get(clock, & &1) end)
     Env.start_scoped!({Voice, opts})
     row = %{kind: "voice", state: "failed", launch: "voice-first", error: "crashed"}
-    Agent.update(c.observed, &%{&1 | meeting: row})
+    Agent.update(c.observed, &%{&1 | capture: row})
     assert {:ok, %{state: "failed"}} = Voice.update(%{"enabled" => true})
 
     Agent.update(
       c.observed,
-      &%{&1 | meeting: %{row | launch: "voice-stable", state: "live", error: nil}}
+      &%{&1 | capture: %{row | launch: "voice-stable", state: "live", error: nil}}
     )
 
     assert {:ok, %{state: "listening"}} = Voice.update(%{})
@@ -851,8 +708,8 @@ defmodule Shuttle.VoiceTest do
   end
 
   # A meeting start writes hark's lifecycle file, which wakes idle voice.
-  defp start_meeting(c) do
-    Agent.update(c.observed, fn _ -> %{available: true, meeting: meeting_row()} end)
+  defp start_voice(c) do
+    Agent.update(c.observed, fn _ -> %{available: true, capture: voice_row()} end)
     write_lifecycle(c, "loading")
   end
 
@@ -865,14 +722,6 @@ defmodule Shuttle.VoiceTest do
     )
   end
 
-  defp meeting_row,
-    do: %{kind: "meeting", launch: "meeting", state: "live", fiber: "project/sync", paused: false}
-
-  defp flush_reconciled do
-    receive do
-      {:reconciled, _} -> flush_reconciled()
-    after
-      0 -> :ok
-    end
-  end
+  defp voice_row,
+    do: %{kind: "voice", launch: "meeting", state: "live", fiber: "project/sync", paused: false}
 end

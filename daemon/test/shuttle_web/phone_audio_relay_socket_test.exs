@@ -1,10 +1,10 @@
-defmodule ShuttleWeb.MeetingAudioRelaySocketTest do
+defmodule ShuttleWeb.PhoneAudioRelaySocketTest do
   use ExUnit.Case, async: true
-  alias Shuttle.MeetingAudioRelay
+  alias Shuttle.PhoneAudioRelay
   alias Shuttle.Remote
   @timeout 10_000
 
-  alias Shuttle.Test.MeetingAudioRelay.Ingress
+  alias Shuttle.Test.PhoneAudioRelay.Ingress
 
   defp server(opts) do
     pid =
@@ -69,7 +69,7 @@ defmodule ShuttleWeb.MeetingAudioRelaySocketTest do
     assert_receive {:recorder_closed, _}, @timeout
   end
 
-  test "a stale launch crossing the real relay cannot feed a replacement meeting" do
+  test "a stale launch crossing the real relay cannot feed a replacement recording" do
     dir = Path.join(System.tmp_dir!(), "relay-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
@@ -79,7 +79,7 @@ defmodule ShuttleWeb.MeetingAudioRelaySocketTest do
 
     {hub, _, _} =
       fleet(
-        socket: ShuttleWeb.MeetingAudioSocket,
+        socket: ShuttleWeb.PhoneAudioSocket,
         socket_opts: [resolve: fn -> {:ok, %{path: path, launch: "replacement"}} end]
       )
 
@@ -103,21 +103,21 @@ defmodule ShuttleWeb.MeetingAudioRelaySocketTest do
   test "explicit remote launch and addressed forwarded target are required" do
     remote = %Remote{name: "recorder", url: "http://localhost:1"}
     opts = [own_host_id: "hub", remotes: [remote]]
-    assert {:error, :launch_required} = MeetingAudioRelay.route(%{"recorder" => "recorder"}, opts)
+    assert {:error, :launch_required} = PhoneAudioRelay.route(%{"recorder" => "recorder"}, opts)
 
     for target <- [nil, "", "local", "recorder", "absent"] do
       params = %{"recorder" => target, "launch" => "L1", "relay" => "1"}
-      assert {:error, _} = MeetingAudioRelay.route(params, opts)
+      assert {:error, _} = PhoneAudioRelay.route(params, opts)
     end
 
     assert {:local, "L1"} =
-             MeetingAudioRelay.route(
+             PhoneAudioRelay.route(
                %{"recorder" => "hub", "launch" => "L1", "relay" => "1"},
                opts
              )
 
     assert {:error, {:unknown_origin, "absent"}} =
-             MeetingAudioRelay.route(%{"recorder" => "absent", "launch" => "L1"}, opts)
+             PhoneAudioRelay.route(%{"recorder" => "absent", "launch" => "L1"}, opts)
   end
 
   defp connect(port, query) do
@@ -129,7 +129,7 @@ defmodule ShuttleWeb.MeetingAudioRelaySocketTest do
 
   defp request(port, query),
     do:
-      "GET /api/v1/meeting/audio?#{query} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+      "GET /api/v1/voice/audio?#{query} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
 
   defp head(ws) do
     :inet.setopts(ws, packet: :line)

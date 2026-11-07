@@ -648,9 +648,7 @@ defmodule Shuttle.Poller do
 
   Options: `:agent` (optional execution agent asserted by the claimant; the
   fiber's shuttle.agent remains the display fallback),
-  `:session_uuid` (the harness transcript UUID, for the dispatch marker),
-  `:meeting` (the launch id of the meeting a capture scribes, stamped as
-  `shuttle.runtime.meeting` so the meeting's daemon can find the fiber).
+  `:session_uuid` (the harness transcript UUID, for the dispatch marker).
   """
   @spec claim_session(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def migrate(from, to, opts \\ []), do: migrate(Shuttle.Env.server(__MODULE__), from, to, opts)
@@ -705,8 +703,7 @@ defmodule Shuttle.Poller do
   pre-existing fiber) in `work_dir`. See `Shuttle.Dispatcher.capture/2`.
 
   Options: `:agent`, `:work_dir` (required), `:felt_store` (defaults to the
-  daemon's primary store), `:meeting` (the launch id of the meeting the
-  capture scribes).
+  daemon's primary store).
   """
   @spec capture(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def capture(yap, opts \\ []), do: capture(Shuttle.Env.server(__MODULE__), yap, opts)
@@ -2347,8 +2344,7 @@ defmodule Shuttle.Poller do
             agent: Keyword.get(opts, :agent),
             effort: Keyword.get(opts, :effort),
             chrome: Keyword.get(opts, :chrome) == true,
-            host: state.own_host_id,
-            meeting: Keyword.get(opts, :meeting)
+            host: state.own_host_id
           )
 
         {:reply, result, state}
@@ -5164,7 +5160,7 @@ defmodule Shuttle.Poller do
               # through `shuttle mark-runtime`, which needs an installed
               # block to nest under. Claiming an uninstalled fiber would
               # register a worker whose runtime never lands — no Resume
-              # previous, no meeting-to-card link — so install comes first.
+              # previous — so install comes first.
               not is_map(Map.get(fiber, "shuttle")) ->
                 {state, {:error, :not_installed}}
 
@@ -5441,14 +5437,12 @@ defmodule Shuttle.Poller do
   # path: `store_for_fiber` (the same owning-store the poll enumerated this fiber
   # from), falling back to the primary configured store. A claim with no captured
   # session_uuid still stamps `dispatched_at` (the run-window anchor) so a clean
-  # handoff can later be compared against it. A meeting capture's claim also
-  # stamps the meeting's launch id, which is how the meeting finds its fiber.
+  # handoff can later be compared against it.
   defp log_worker_claim(%State{} = state, fiber_id, opts) do
     felt_store = owning_store(fiber_id, state)
 
     Shuttle.Continuation.write_dispatch(state.runner, felt_store, fiber_id, %{
-      session_uuid: present_string(Keyword.get(opts, :session_uuid)),
-      meeting: present_string(Keyword.get(opts, :meeting))
+      session_uuid: present_string(Keyword.get(opts, :session_uuid))
     })
   end
 

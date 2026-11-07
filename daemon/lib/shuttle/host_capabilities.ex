@@ -17,14 +17,6 @@ defmodule Shuttle.HostCapabilities do
   @browser_cache_key {__MODULE__, :browser_capable}
   @browser_cache_ttl_ms 60_000
 
-  @spec meeting_modes(boolean(), keyword()) :: [String.t()]
-  def meeting_modes(hark_available?, opts \\ [])
-  def meeting_modes(false, _opts), do: []
-
-  def meeting_modes(true, opts) do
-    if os_type(opts) == {:unix, :darwin}, do: ~w(call phone), else: ~w(phone)
-  end
-
   @spec browser_capable?(keyword()) :: boolean()
   def browser_capable?(opts \\ []) do
     probe = fn -> os_type(opts) == {:unix, :darwin} and gui_session?(opts) end

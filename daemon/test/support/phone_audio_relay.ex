@@ -1,4 +1,4 @@
-defmodule Shuttle.Test.MeetingAudioRelay.Recorder do
+defmodule Shuttle.Test.PhoneAudioRelay.Recorder do
   @moduledoc false
   @behaviour WebSock
   def init(opts) do
@@ -18,7 +18,7 @@ defmodule Shuttle.Test.MeetingAudioRelay.Recorder do
   def terminate(reason, opts), do: send(opts[:observer], {:recorder_closed, reason})
 end
 
-defmodule Shuttle.Test.MeetingAudioRelay.Ingress do
+defmodule Shuttle.Test.PhoneAudioRelay.Ingress do
   @moduledoc false
   @behaviour Plug
   def init(opts), do: opts
@@ -26,12 +26,12 @@ defmodule Shuttle.Test.MeetingAudioRelay.Ingress do
   def call(conn, opts) do
     conn = Plug.Conn.fetch_query_params(conn)
 
-    case Shuttle.MeetingAudioRelay.route(conn.query_params, opts[:routing]) do
+    case Shuttle.PhoneAudioRelay.route(conn.query_params, opts[:routing]) do
       {:remote, _url} ->
-        ShuttleWeb.MeetingAudioController.upgrade(conn, conn.query_params, opts[:routing])
+        ShuttleWeb.PhoneAudioController.upgrade(conn, conn.query_params, opts[:routing])
 
       {:local, launch} ->
-        socket = opts[:socket] || Shuttle.Test.MeetingAudioRelay.Recorder
+        socket = opts[:socket] || Shuttle.Test.PhoneAudioRelay.Recorder
         args = Keyword.put(opts[:socket_opts] || [], :launch, launch)
         conn |> WebSockAdapter.upgrade(socket, args, timeout: 30_000) |> Plug.Conn.halt()
 

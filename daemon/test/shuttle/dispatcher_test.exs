@@ -2117,29 +2117,6 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ "references/capture.md"
   end
 
-  test "a meeting capture's Claim body carries the meeting's launch id" do
-    prompt =
-      Dispatcher.render_capture_prompt("Meeting mode (call).",
-        session: "capture-ab12cd34",
-        felt_store: "/Users/x/loom",
-        listen: "tcp://127.0.0.1:4123",
-        agent_id: "pi-luna",
-        project_dir: "/home/x/loom",
-        host: "candide",
-        meeting: "launch-xyz"
-      )
-
-    [claim_line] = Regex.run(~r/^Claim: (.*)$/m, prompt, capture: :all_but_first)
-
-    assert %{
-             "fiber_id" => "<fiber id>",
-             "tmux_session" => "capture-ab12cd34",
-             "meeting" => "launch-xyz"
-           } = claim = Jason.decode!(claim_line)
-
-    refute Map.has_key?(claim, "session_uuid")
-  end
-
   test "capture identity and install metadata name the worker terminal" do
     message = "preserve\nindent and quotes"
 

@@ -1,4 +1,4 @@
-defmodule Shuttle.MeetingAudioRelay.Client do
+defmodule Shuttle.PhoneAudioRelay.Client do
   @moduledoc """
   Single-use RFC 6455 client for recorder forwarding. The calling WebSock
   process owns the socket; its death closes the connection even on an abnormal

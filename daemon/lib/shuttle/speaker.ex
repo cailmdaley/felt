@@ -90,7 +90,7 @@ defmodule Shuttle.Speaker do
   def voice_for(fiber_id, opts \\ []), do: role_voice(find_fiber(fiber_id, opts), opts)
 
   defp find_fiber(fiber_id, opts) when is_binary(fiber_id) do
-    fibers = Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0)
+    fibers = Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0)
 
     Enum.find(fibers.(), fn fiber ->
       is_map(fiber) and fiber_id in [fiber["uid"], fiber["id"], fiber["slug"]]
@@ -187,7 +187,7 @@ defmodule Shuttle.Speaker do
        partial: Keyword.get(opts, :partial, &partial/0),
        target: Keyword.get(opts, :target, &target/0),
        retarget: Keyword.get(opts, :retarget, &retarget/1),
-       fibers: Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0),
+       fibers: Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0),
        render_fun: Keyword.get(opts, :render, &render/2),
        play: Keyword.get(opts, :play, &play/1),
        stop: Keyword.get(opts, :stop, &stop/1),
@@ -534,7 +534,7 @@ defmodule Shuttle.Speaker do
 
   # Route live voice to the card the inbox opened, which brings every board to
   # it wherever this daemon stands, and move Rex to it behind the frontmost
-  # app, so all three agree. Rex stays put while a meeting holds the mic.
+  # app, so all three agree. Rex stays put while Listen is pinned.
   defp retarget(item) do
     params = %{"fiber_id" => item.fiber_id, "name" => item.name, "source" => "inbox"}
     params = if item[:origin], do: Map.put(params, "origin", item.origin), else: params
@@ -680,7 +680,7 @@ defmodule Shuttle.Speaker do
 
   # The pending words of hark's live voice line, when one is under way.
   defp partial do
-    with {:ok, %{path: path}} <- Shuttle.Meeting.voice_transcript(),
+    with {:ok, %{path: path}} <- Shuttle.Recorder.current_transcript(),
          partial = Path.rootname(path) <> ".partial",
          {:ok, text} <- Shuttle.FS.read(partial) do
       text

@@ -1,4 +1,4 @@
-defmodule Shuttle.MeetingAudioRelay do
+defmodule Shuttle.PhoneAudioRelay do
   @moduledoc """
   Selects the recorder for an audio upgrade without silently falling back to
   another host. Forwarded upgrades carry a launch identity and admit one hop.
@@ -9,7 +9,7 @@ defmodule Shuttle.MeetingAudioRelay do
     recorder = params["recorder"]
 
     cond do
-      params["relay"] == "1" and (not is_binary(params["launch"]) or params["launch"] == "") ->
+      not is_binary(params["launch"]) or params["launch"] == "" ->
         {:error, :launch_required}
 
       params["relay"] == "1" and (not is_binary(recorder) or recorder == "") ->
@@ -42,7 +42,7 @@ defmodule Shuttle.MeetingAudioRelay do
                     "relay" => "1"
                   })
 
-                {:remote, Remote.url_for(remote, "/api/v1/meeting/audio") <> "?" <> query}
+                {:remote, Remote.url_for(remote, "/api/v1/voice/audio") <> "?" <> query}
             end
 
           {:error, reason} ->

@@ -23,17 +23,6 @@ defmodule ShuttleWeb.Router do
     # Spawn-without-constitution: launch a capture session from a free-text
     # prompt; the session files the fiber and claims itself.
     post("/capture", CaptureController, :create)
-    # A recording starts for a new capture (/capture with `meeting`), joins
-    # an existing constitution (/meeting/join), or only records
-    # (/meeting/start). Each records on the selected recorder's audio; only
-    # the agent's half is owner-routed. Stop acts on the addressed recorder;
-    # GET observes this daemon or the host named by its optional selector.
-    post("/meeting/start", MeetingController, :start)
-    post("/meeting/join", MeetingController, :join)
-    post("/meeting/stop", MeetingController, :stop)
-    post("/meeting/pause", MeetingController, :pause)
-    post("/meeting/system-audio", MeetingController, :system_audio)
-    get("/meeting", MeetingController, :show)
     get("/voice", VoiceController, :show)
     get("/voice/transcript", VoiceController, :transcript)
     post("/voice", VoiceController, :update)
@@ -199,10 +188,10 @@ defmodule ShuttleWeb.Router do
     get("/transcript/raw", TranscriptController, :raw)
     # SSE is not subject to JSON content negotiation.
     get("/voice/events", VoiceController, :events)
-    # The phone page's microphone, relayed into the live `phone` meeting's
+    # The phone page's microphone, relayed into the live voice recorder's
     # hark socket. A WebSocket upgrade negotiates no JSON, so it stays outside
     # `:api` like the byte routes above.
-    get("/meeting/audio", MeetingAudioController, :upgrade)
+    get("/voice/audio", PhoneAudioController, :upgrade)
   end
 
   # The served frontend's bare-root document. Static assets are served by

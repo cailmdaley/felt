@@ -41,17 +41,6 @@ defmodule Shuttle.HostCapabilitiesTest do
     refute HostCapabilities.cached_browser_capable?(fn -> false end, 99)
   end
 
-  # Mutation control: make meeting_modes/2 return all modes for every OS.
-  test "audio modes require hark and macOS device support" do
-    for os <- [{:unix, :darwin}, {:unix, :linux}, {:unix, :freebsd}, {:win32, :nt}] do
-      assert HostCapabilities.meeting_modes(false, os_type: os) == []
-    end
-
-    assert HostCapabilities.meeting_modes(true, os_type: {:unix, :darwin}) == ~w(call phone)
-    assert HostCapabilities.meeting_modes(true, os_type: {:unix, :linux}) == ~w(phone)
-    assert HostCapabilities.meeting_modes(true, os_type: {:unix, :freebsd}) == ~w(phone)
-  end
-
   test "an owned macOS console and a GUI login domain permit browser access without dialogs" do
     assert browser?(probe_responses())
 

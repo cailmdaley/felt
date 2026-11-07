@@ -1,14 +1,14 @@
-defmodule ShuttleWeb.MeetingAudioController do
+defmodule ShuttleWeb.PhoneAudioController do
   @moduledoc """
-  `GET /api/v1/meeting/audio?recorder=<host>&launch=<id>` upgrades to
-  the local meeting audio socket or a one-hop relay to the explicitly selected
-  recorder. Remote upgrades require a launch identity; forwarded upgrades
+  `GET /api/v1/voice/audio?recorder=<host>&launch=<id>` upgrades to
+  the local recording audio socket or a one-hop relay to the explicitly selected
+  recorder. Every upgrade requires a launch identity; forwarded upgrades
   must name the receiving daemon and cannot route again.
 
   Browsers open WebSockets cross-site without CORS, so the upgrade is held to
   the same origin rule as a write (`ShuttleWeb.CORSPlug.write_permitted?/1`):
-  another site's page must not speak into a meeting its scribe acts on. Every
-  meeting state, including none, upgrades; the socket's first frames say what
+  another site's page must not speak into a worker's listening source. Every
+  recording state, including none, upgrades; the socket's first frames say what
   it found, which a browser could not read from a refused upgrade.
   """
 
@@ -33,16 +33,16 @@ defmodule ShuttleWeb.MeetingAudioController do
         |> halt()
 
       true ->
-        case Shuttle.MeetingAudioRelay.route(params, routing_opts) do
+        case Shuttle.PhoneAudioRelay.route(params, routing_opts) do
           {:local, launch} ->
             upgrade_socket(
               conn,
-              ShuttleWeb.MeetingAudioSocket,
-              Keyword.put(Shuttle.Env.app(:meeting_audio_socket, []), :launch, launch)
+              ShuttleWeb.PhoneAudioSocket,
+              Keyword.put(Shuttle.Env.app(:phone_audio_socket, []), :launch, launch)
             )
 
           {:remote, url} ->
-            upgrade_socket(conn, ShuttleWeb.MeetingAudioRelaySocket, url: url)
+            upgrade_socket(conn, ShuttleWeb.PhoneAudioRelaySocket, url: url)
 
           {:error, reason} ->
             conn |> put_status(409) |> json(%{error: routing_error(reason)}) |> halt()
@@ -59,7 +59,7 @@ defmodule ShuttleWeb.MeetingAudioController do
     |> halt()
   end
 
-  defp routing_error(:launch_required), do: "remote audio requires an explicit launch"
+  defp routing_error(:launch_required), do: "phone audio requires an explicit voice launch"
   defp routing_error(:wrong_recorder), do: "forwarded audio targets a different recorder"
   defp routing_error({:unknown_origin, host}), do: "unknown recorder: #{host}"
 

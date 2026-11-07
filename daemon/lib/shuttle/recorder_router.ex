@@ -1,4 +1,4 @@
-defmodule Shuttle.MeetingRouter do
+defmodule Shuttle.RecorderRouter do
   @moduledoc """
   Selects the recording host independently of the agent's owner. Phone requests
   prefer a reachable device-capable recorder; explicit recorder addresses pin
@@ -22,7 +22,7 @@ defmodule Shuttle.MeetingRouter do
       recorder not in [nil, ""] ->
         addressed(recorder, opts)
 
-      params["prefer"] == "phone" or match?(%{"mode" => "phone"}, params["meeting"]) ->
+      params["source"] == "phone" ->
         prefer_phone(opts)
 
       true ->
@@ -69,9 +69,12 @@ defmodule Shuttle.MeetingRouter do
   end
 
   defp prefer_phone(opts) do
-    case probe(opts, "/api/v1/meeting", fn
-           %{"available" => true, "modes" => modes} when is_list(modes) -> "call" in modes
-           _ -> false
+    case probe(opts, &("/api/v1/voice?recorder=" <> URI.encode_www_form(&1.name)), fn
+           %{"available" => true, "sources" => sources} when is_list(sources) ->
+             "desktop" in sources
+
+           _ ->
+             false
          end) do
       nil -> {:ok, :local}
       remote -> {:ok, {:remote, remote}}
@@ -131,53 +134,9 @@ defmodule Shuttle.MeetingRouter do
   defp url_path(path, remote) when is_function(path, 1), do: path.(remote)
   defp url_path(path, _remote), do: path
 
-  def normalize_origin(origin) when origin in [nil, "", "local"], do: own_host()
-  def normalize_origin(origin), do: origin
+  def stamp(body, recorder \\ own_host()), do: Map.put(body, "recorder", recorder)
 
-  def stamp(body, recorder \\ own_host()) when is_map(body) do
-    body = Map.put(body, "recorder", recorder)
-    key = if Map.has_key?(body, :meeting), do: :meeting, else: "meeting"
-
-    case Map.get(body, key) do
-      row when is_map(row) -> Map.put(body, key, Map.put(row, "recorder", recorder))
-      _ -> body
-    end
-  end
-
-  def forward_start(remote, path, params) do
-    payload =
-      params
-      |> Map.put("origin", normalize_origin(params["origin"]))
-      |> Map.put("recorder", remote.name)
-      |> Map.put("recorder_forwarded", true)
-
-    # A POST transport failure is ambiguous: the recorder may have started.
-    # Never retry it and never select another recorder after this call.
-    client = OriginRouter.forward_client()
-    Code.ensure_loaded?(client)
-    post = if function_exported?(client, :post_once, 4), do: :post_once, else: :post
-
-    case apply(client, post, [
-           Remote.url_for(remote, path),
-           Jason.encode!(payload),
-           "application/json",
-           OriginRouter.default_forward_timeout_ms()
-         ]) do
-      {:ok, status, body} ->
-        {status, stamp(decode(body), remote.name)}
-
-      {:error, reason} ->
-        {502,
-         %{
-           recorder: remote.name,
-           recording_unknown: true,
-           error:
-             "Recorder #{remote.name} did not confirm the start (#{inspect(reason)}). Inspect that recorder before retrying; it may already be recording."
-         }}
-    end
-  end
-
-  def forward_read(remote, path \\ "/api/v1/meeting") do
+  def forward_read(remote, path) do
     case OriginRouter.forward_client().get_file(Remote.url_for(remote, path), 2_000) do
       {:ok, status, _type, body} ->
         {status, stamp(decode(body), remote.name)}
@@ -186,8 +145,6 @@ defmodule Shuttle.MeetingRouter do
         {502, %{recorder: remote.name, error: "cannot inspect recorder: #{inspect(reason)}"}}
     end
   end
-
-  def forward_stop(remote, params), do: forward_control(remote, "/api/v1/meeting/stop", params)
 
   def forward_control(remote, path, params) do
     payload = params |> Map.put("recorder", remote.name) |> Map.put("recorder_forwarded", true)
@@ -209,7 +166,7 @@ defmodule Shuttle.MeetingRouter do
         {502,
          %{
            recorder: remote.name,
-           error: "meeting control was not confirmed; inspect this recorder: #{inspect(reason)}"
+           error: "recorder control was not confirmed; inspect this recorder: #{inspect(reason)}"
          }}
     end
   end

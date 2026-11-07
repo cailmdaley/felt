@@ -65,12 +65,12 @@ defmodule Shuttle.RexFocus do
         end),
       warn: Keyword.get(opts, :warn, &Shuttle.Voice.focus_error/1),
       poll_ms: Keyword.get(opts, :poll_ms, 250),
-      active?: Keyword.get(opts, :active?, &following?/0),
+      active?: Keyword.get(opts, :active?, &listening?/0),
       watched?: Keyword.get(opts, :watched?, &watched?/0),
       publish: Keyword.get(opts, :publish, &publish/1),
       command: Keyword.get(opts, :command, &command/0),
       bindings: Keyword.get(opts, :bindings, &Shuttle.Terminal.RexBindings.read/0),
-      fibers: Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0),
+      fibers: Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0),
       target: Keyword.get(opts, :target, &Shuttle.Voice.target/1)
     }
 
@@ -177,13 +177,12 @@ defmodule Shuttle.RexFocus do
   A local worker is found by its binding; a worker on another host by its
   window and session labels on that host's Rex server, which the app shows
   under the host's name. Returns `:ok` when Rex was asked to show it,
-  otherwise `{:skip, reason}`: `:off` when voice is off or a meeting holds the
-  mic, `:unbound` when no worker window is found, `:shown` when Rex's front
+  otherwise `{:skip, reason}`: `:off` when Listen is off or pinned, `:unbound` when no worker window is found, `:shown` when Rex's front
   window already shows it.
   """
   def reveal(params, opts \\ []) do
     following? = Keyword.get(opts, :active?, &following?/0)
-    own = Keyword.get_lazy(opts, :own_host, &Shuttle.MeetingRouter.own_host/0)
+    own = Keyword.get_lazy(opts, :own_host, &Shuttle.RecorderRouter.own_host/0)
 
     cond do
       not following?.() -> {:skip, :off}
@@ -194,7 +193,7 @@ defmodule Shuttle.RexFocus do
 
   defp reveal_local(params, opts) do
     bindings = Keyword.get(opts, :bindings, &Shuttle.Terminal.RexBindings.read/0)
-    fibers = Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0)
+    fibers = Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0)
     title = Keyword.get(opts, :title, &read_title/0)
     select = Keyword.get(opts, :select, &select/3)
 
@@ -212,7 +211,7 @@ defmodule Shuttle.RexFocus do
   end
 
   defp reveal_remote(%{"fiber_id" => id, "origin" => host}, opts) do
-    fibers = Keyword.get(opts, :fibers, &Shuttle.Meeting.served_fibers/0).()
+    fibers = Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0).()
     title = Keyword.get(opts, :title, &read_title/0)
     locate = Keyword.get(opts, :locate, &locate/3)
     select = Keyword.get(opts, :select, &select/3)
@@ -255,7 +254,7 @@ defmodule Shuttle.RexFocus do
   end
 
   defp binding_for(%{"fiber_id" => id} = params, %{"bindings" => bindings}, fibers) do
-    origin = params["origin"] || Shuttle.MeetingRouter.own_host()
+    origin = params["origin"] || Shuttle.RecorderRouter.own_host()
 
     with %{} = fiber <-
            Enum.find(fibers, fn f ->
@@ -293,7 +292,7 @@ defmodule Shuttle.RexFocus do
   the labels its own daemon projects from the fiber tree, which the served
   fibers carry with their `shuttle.host`.
   """
-  def title_target(title, bindings, fibers, own_host \\ Shuttle.MeetingRouter.own_host()) do
+  def title_target(title, bindings, fibers, own_host \\ Shuttle.RecorderRouter.own_host()) do
     case title_binding(title, bindings) do
       %{fiber: id} -> fiber_target(id, fibers)
       nil -> remote_title_target(title, fibers, own_host)
@@ -501,10 +500,14 @@ defmodule Shuttle.RexFocus do
 
   defp title_helper, do: Path.join(Shuttle.Env.home(), ".local/bin/shuttle-rex-title")
 
+  defp listening? do
+    Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and Shuttle.Voice.snapshot().enabled
+  end
+
   defp following? do
     Shuttle.Terminal.primary() == Shuttle.Terminal.Rex and
       case Shuttle.Voice.snapshot() do
-        %{enabled: true, state: state} when state != "yielded" -> true
+        %{enabled: true, follow: true} -> true
         _ -> false
       end
   end

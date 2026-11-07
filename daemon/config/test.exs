@@ -25,7 +25,7 @@ config :shuttle,
   # Shuttle.TailnetPeers with injected status and probes instead.
   start_tailnet_peers: false,
   start_tailnet_dial: false,
-  start_meeting_transcript_relay: false,
+  start_voice_transcript_relay: false,
   start_voice: false,
   start_remote_registry: false,
   start_remote_fiber_registry: false,

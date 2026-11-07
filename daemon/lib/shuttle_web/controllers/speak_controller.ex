@@ -6,26 +6,26 @@ defmodule ShuttleWeb.SpeakController do
   `GET /voices` the voices and the roles holding them.
   """
   use Phoenix.Controller, formats: [:json]
-  alias Shuttle.{MeetingRouter, Speaker}
+  alias Shuttle.{RecorderRouter, Speaker}
 
   def show(conn, params), do: route(conn, params, :show)
   def create(conn, params), do: route(conn, params, :create)
   def voices(conn, params), do: route(conn, params, :voices)
 
   defp route(conn, params, action) do
-    case MeetingRouter.select_speaker(params) do
+    case RecorderRouter.select_speaker(params) do
       {:ok, :local} ->
         case local(action, params) do
-          {:ok, body} -> json(conn, Map.put(body, :recorder, MeetingRouter.own_host()))
+          {:ok, body} -> json(conn, Map.put(body, :recorder, RecorderRouter.own_host()))
           {:error, reason} -> conn |> put_status(422) |> json(%{error: reason})
         end
 
       {:ok, {:remote, remote}} ->
         {status, body} =
           case action do
-            :show -> MeetingRouter.forward_read(remote, "/api/v1/speak")
-            :voices -> MeetingRouter.forward_read(remote, "/api/v1/speak/voices")
-            :create -> MeetingRouter.forward_control(remote, "/api/v1/speak", params)
+            :show -> RecorderRouter.forward_read(remote, "/api/v1/speak")
+            :voices -> RecorderRouter.forward_read(remote, "/api/v1/speak/voices")
+            :create -> RecorderRouter.forward_control(remote, "/api/v1/speak", params)
           end
 
         conn |> put_status(status) |> json(body)

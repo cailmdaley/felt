@@ -189,7 +189,7 @@ defmodule Shuttle.Application do
       # Owns the ETS tables of fiber addresses, polled and learned, so a read
       # by UID goes through a known `{store, id}` instead of a store walk.
       Shuttle.FiberAddresses,
-      Shuttle.Meeting.Control,
+      Shuttle.Recorder.Control,
       # Resolves bridge links off request paths and publishes ready entries in
       # ETS; a restart rebuilds them from native transcripts.
       Shuttle.SessionLink,
@@ -219,8 +219,8 @@ defmodule Shuttle.Application do
     fleet = for {Shuttle.Fleet, child} <- optional, do: child
 
     core =
-      if Shuttle.Env.app(:start_meeting_transcript_relay, true),
-        do: core ++ [Shuttle.Meeting.TranscriptRelay],
+      if Shuttle.Env.app(:start_voice_transcript_relay, true),
+        do: core ++ [Shuttle.Voice.TranscriptRelay],
         else: core
 
     core =
