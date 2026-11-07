@@ -36,7 +36,7 @@ export function forestOf(index: ThreadIndex, cards: readonly KanbanCard[], feeds
     const seed = (thread: MapThread): ThreadSeed => {
       threads.set(persistentId(thread.card), thread)
       const kids = thread.children.map(key => seed(model.threads.get(key)!))
-      return { key: persistentId(thread.card), weight: thread.weight, live: !isSettled(thread, index) || kids.some(kid => kid.live), kids, files: thread.files.map(file => file.key) }
+      return { key: persistentId(thread.card), weight: thread.weight, born: thread.born, live: !isSettled(thread, index) || kids.some(kid => kid.live), kids, files: thread.files.map(file => file.key) }
     }
     const name = projectOf(root)
     const project = byProject.get(name) ?? { name, families: [] }

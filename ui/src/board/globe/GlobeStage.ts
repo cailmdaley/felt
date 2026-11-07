@@ -29,9 +29,10 @@ export interface GlobePlace {
 }
 export const freshPlace = (): GlobePlace => ({ camera: null, projection: 'globe', focus: null, worker: null, fed: false })
 
-const OPENING_LAT = 62 * Math.PI / 180
-/** The share of the stage a tile's width takes when flown to. */
-const FRAME_SHARE = .58
+/** The opening looks straight down on the north, where everything in flight is, with its four base pixels square to the stage. */
+const OPENING_LAT = Math.PI / 2 - 1e-6, OPENING_LON = Math.PI / 4
+/** The pixels left around a tile flown to, and the least the foot of the stage is kept for the peek. */
+const FRAME_MARGIN = 10, MIN_FOOT = 70
 const WHEEL_RATE = .01, WHEEL_MOST = 60, KEY_ZOOM = 1.6
 const SLOP = 5
 /** A callout's distance from the centre of its marker. */
@@ -53,6 +54,8 @@ const TRAIL_MS = 90
 const TARGET_PX = 14
 /** A tile narrower than this has no name to read and no tapestry worth asking for. */
 const NAME_PX = 40, LEAD_PX = 70
+/** A constitution is named when its thread is in focus, or it is this wide: he seldom wants it. */
+const CONSTITUTION_PX = 170
 const MOST_NAMES = 90
 /** The type roles a name may take and their sizes, as styles/type.css sets them, at --leading-tight. */
 const ROLE_SIZE = { display: 34, title: 21, row: 16, note: 14 } as const
@@ -63,6 +66,21 @@ const ROLES: Record<Body['kind'], readonly Role[]> = {
   province: ['display', 'title', 'row'], area: ['title', 'row', 'note'], thread: ['display', 'title', 'row', 'note'], lead: ['title', 'row', 'note'], constitution: ['row', 'note'], file: ['title', 'row', 'note'],
 }
 const TONES: readonly Tone[] = ['question', 'blocked', 'new', 'turn', 'review', 'working', 'still', 'quiet', 'aside', 'land', 'page']
+/**
+ * The shape a thread's name may fill: as wide as its diamond and half as tall,
+ * centred on it. Diamonds of a size tile as bricks at their centres, so names
+ * in these shapes clear each other where a name inside the diamond could not fit.
+ */
+function brickOf(polygon: readonly number[], { x, y }: Point): number[] {
+  let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity
+  for (let n = 0; n < polygon.length; n += 2) {
+    left = Math.min(left, polygon[n]); right = Math.max(right, polygon[n])
+    top = Math.min(top, polygon[n + 1]); bottom = Math.max(bottom, polygon[n + 1])
+  }
+  const halfWidth = Math.min(x - left, right - x), halfHeight = Math.min(y - top, bottom - y) / 2
+  return [x - halfWidth, y - halfHeight, x + halfWidth, y - halfHeight, x + halfWidth, y + halfHeight, x - halfWidth, y + halfHeight]
+}
+
 /** The sphere with nothing placed yet. */
 const BARE: Scene = { roots: [], byKey: new Map(), threads: new Map(), asks: [], deepest: 8 }
 const firstSentence = (text: string): string => text.replace(/\s+/g, ' ').match(/^.*?[.?!](?=\s|$)/)?.[0] ?? text
@@ -202,12 +220,8 @@ export class GlobeStage {
   private get closest(): number {
     return Math.max(this.whole * 4, Math.min(this.viewport.width, this.viewport.height) * 1.2 / cellSpan(this.scene.deepest + 1))
   }
-  /** The whole sphere, turned to face what is in flight. */
-  private opening(): Camera {
-    const flying = this.scene.roots.filter(root => root.band === 'flying')
-    const sum = flying.reduce<[number, number]>(([x, y], root) => [x + root.span ** 2 * root.centre[0], y + root.span ** 2 * root.centre[1]], [0, 0])
-    return { lon: flying.length ? Math.atan2(sum[1], sum[0]) : 0, lat: this.place.projection === 'globe' ? OPENING_LAT : 0, radius: this.whole }
-  }
+  /** The whole sphere from over the north, or the whole sky on the map. */
+  private opening(): Camera { return { lon: OPENING_LON, lat: this.place.projection === 'globe' ? OPENING_LAT : 0, radius: this.whole } }
   private frameNow(): Frame { return frameOf(this.camera, this.place.projection, this.viewport) }
   private held(camera: Camera): Camera { return { ...camera, radius: Math.max(this.whole, Math.min(this.closest, camera.radius)) } }
   private request(): void { if (!this.frame) this.frame = requestAnimationFrame(now => this.draw(now)) }
@@ -220,10 +234,20 @@ export class GlobeStage {
     this.flying = { path: flight(this.camera, this.held(to), this.viewport, this.whole), started: performance.now() }
     this.request()
   }
-  /** The camera that holds a tile in the middle of the stage. */
+  /** The camera that holds a tile's whole outline in the stage clear of the head and foot, as large as that allows. */
   private framing(body: Body): Camera {
-    const wide = Math.min(this.viewport.width, this.viewport.height)
-    return { ...lonLat(body.centre), radius: wide * FRAME_SHARE / body.span }
+    const { width, height } = this.viewport, top = this.headHeight, bottom = height - Math.max(this.footHeight, MIN_FOOT)
+    const centred: Camera = { ...lonLat(body.centre), radius: 1 }
+    const unit = frameOf(centred, this.place.projection, this.viewport), points = traceOf(body, 8).points
+    let left = Infinity, right = -Infinity, up = Infinity, down = -Infinity
+    for (let n = 0; n < points.length; n += 3) {
+      const at = project(unit, [points[n], points[n + 1], points[n + 2]])
+      left = Math.min(left, at.x); right = Math.max(right, at.x); up = Math.min(up, at.y); down = Math.max(down, at.y)
+    }
+    const radius = Math.min((width - 2 * FRAME_MARGIN) / (right - left), (bottom - top - 2 * FRAME_MARGIN) / (down - up))
+    const sized: Camera = { ...centred, radius }
+    const shiftX = width / 2 - radius * ((left + right) / 2 - unit.cx), shiftY = (top + bottom) / 2 - radius * ((up + down) / 2 - unit.cy)
+    return keeping(sized, this.place.projection, this.viewport, body.centre, shiftX, shiftY)
   }
   private come(body: Body): void {
     this.place.focus = body.key
@@ -332,11 +356,13 @@ export class GlobeStage {
       const reach = body.radius * r
       if (at.depth < 0 || at.x < -reach || at.x > width + reach || at.y < -reach || at.y > height + reach) return
       if (body.kind === 'thread' && px >= LEAD_PX) this.readLead(body)
-      if (body.kind !== 'lead' || body.file) candidates.push(body)
+      const page = body.kind === 'constitution' && body.parent!.key !== this.place.focus && px < CONSTITUTION_PX
+      if ((body.kind !== 'lead' || body.file) && !page) candidates.push(body)
       body.kids.forEach(visit)
     }
     scene.roots.forEach(visit)
-    candidates.sort((a, b) => a.urgency - b.urgency || b.cell.order - a.cell.order)
+    const opens = (body: Body): number => body.kind === 'province' || body.kind === 'area' || body.kids.some(kid => kid.kind === 'thread') ? 1 : 0
+    candidates.sort((a, b) => opens(a) - opens(b) || a.urgency - b.urgency || b.cell.order - a.cell.order)
     const placed = placeNames(this.candidates(candidates, frame, scene), { left: 8, top: this.headHeight + 4, right: width - 8, bottom: height - this.footHeight - 4 }, MOST_NAMES)
     const live = new Set<string>()
     for (const { owner, block, at } of placed) {
@@ -390,8 +416,9 @@ export class GlobeStage {
       }
       if (hidden) continue
       const middle = project(frame, body.centre)
-      const anchors = body.kind === 'thread' ? [project(frame, centre(child(body.cell, NORTH))), middle] : [middle]
-      yield { owner: body, polygon, anchors, blocks: this.blocksOf(body) }
+      const childless = body.kind === 'thread' && !body.kids.some(kid => kid.kind === 'thread')
+      const anchors = childless ? [project(frame, centre(child(body.cell, NORTH))), middle] : [middle]
+      yield { owner: body, polygon: body.kind === 'province' || body.kind === 'area' ? polygon : brickOf(polygon, middle), anchors, blocks: this.blocksOf(body) }
     }
   }
   private blocksOf(body: Body): Block[] {

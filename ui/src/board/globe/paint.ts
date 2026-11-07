@@ -22,7 +22,7 @@ const LEAST_PX = 2, FADE_PX = 8
 /** Grid cells narrower than this are not drawn. */
 const GRID_PX = 20
 /** A tile with a beacon stops needing it once it is this wide. */
-export const BEACON_PX = 96
+export const BEACON_PX = 170
 const smooth = (lo: number, hi: number, value: number): number => {
   const t = Math.max(0, Math.min(1, (value - lo) / (hi - lo)))
   return t * t * (3 - 2 * t)
@@ -146,7 +146,7 @@ function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene:
     const trace = traceOf(body, stepFor(px))
     c.beginPath()
     if (traceAny(c, f, trace)) {
-      const strength = STRENGTH[body.tone] * body.heat, ground = body.kind === 'province' || body.kind === 'area' ? 1 : 1 - .78 * smooth(40, 220, px)
+      const strength = STRENGTH[body.tone] * body.heat, ground = !body.thread ? 1 : body.kids.some(kid => kid.kind === 'thread') ? 1 - .55 * smooth(40, 220, px) : 1 - .25 * smooth(40, 220, px)
       if (opened < 1 && body.hottest !== body.tone) {
         c.fillStyle = palette.tones[body.hottest]
         c.globalAlpha = appear * STRENGTH[body.hottest] * body.heat * (1 - opened)
