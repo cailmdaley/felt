@@ -39,6 +39,7 @@ const FOCUS_Y = .46
 const FOCUS_Y_NARROW = .14
 /** How far from the plate's middle a body can be and still be the one a hand has zoomed to, as a share of the plate. */
 const SIGHT = .3
+const GATHERED_LEAST = 4
 
 export interface Star extends Point { thread: MapThread; angle: number; r: number }
 export interface SkyLabel extends Point { thread: MapThread; numeral: number; width: number; side: 'left' | 'right'; rim?: Point }
@@ -239,6 +240,8 @@ export function sighted(plate: Plate, view: View, kept: string | null): string |
   return (near.find(star => star.thread.key === kept) ?? near[0])?.thread.key ?? null
 }
 
+/** A gathered thread's body: its own, within its slot, and never too small to see. */
+const gatheredBody = (r: number, slot: number): number => Math.max(GATHERED_LEAST, Math.min(r, slot))
 /** Unfolds the focused thread where it now sits, its threads gathered from the field onto its orbit. */
 function gathered(plate: Plate, stars: Star[], model: FamilyModel, focus: Focus): Pick<Plate, 'stars' | 'locality' | 'labels'> | null {
   const thread = model.threads.get(focus.key), centre = stars.find(star => star.thread === thread)
@@ -250,10 +253,10 @@ function gathered(plate: Plate, stars: Star[], model: FamilyModel, focus: Focus)
     stars: stars.map(star => {
       const slot = slots.get(star.thread)
       if (star === centre) return { ...star, r: locality.r }
-      return slot ? { ...star, x: slot.x, y: slot.y, r: Math.min(star.r, slot.r) } : star
+      return slot ? { ...star, x: slot.x, y: slot.y, r: gatheredBody(star.r, slot.r) } : star
     }),
     labels: locality.kids.map(slot => {
-      const r = Math.min(stars.find(star => star.thread === slot.thread)!.r, slot.r), right = slot.side === 'right'
+      const r = gatheredBody(stars.find(star => star.thread === slot.thread)!.r, slot.r), right = slot.side === 'right'
       return { thread: slot.thread, numeral: slot.thread.rank + 1, side: slot.side, x: slot.x + (right ? r + 7 : -r - 7), y: slot.y, width: slot.room - r - 7 }
     }),
   }

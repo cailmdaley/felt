@@ -13,8 +13,8 @@ const MARGIN = 14
 /** A focused body's least radius. */
 export const FOCUS_BODY = 17
 const KID_MOST = 12
-/** A phone stacks what a thread holds below it, this far down and this far in. */
-const NARROW_DROP = 62
+/** A phone stacks what a thread holds below its name, this far under the body and this far in. */
+const NARROW_DROP = 80
 const NARROW_INSET = 30
 /** A side's heading sits this far above its first row, this far around the orbit. */
 const KICKER_RISE = 26
@@ -69,16 +69,17 @@ export function unfold(model: FamilyModel, thread: MapThread, lead: MapFile | un
   const holdings: Array<{ file: MapFile; lead: boolean }> = [...(lead ? [{ file: lead, lead: true }] : []), ...files.map(file => ({ file, lead: false }))]
   const r = Math.max(body, FOCUS_BODY), kids = kidsOf(model, thread, drawn)
   const reach = narrow ? 0 : Math.round(Math.min(REACH_MOST, Math.max(REACH_LEAST, Math.min(width, height) * .24)))
-  const rows = narrow ? Math.floor((height - at.y - NARROW_DROP) / ROW) : Math.floor((2 * reach - ROW) / ROW) + 1
+  const drop = r + NARROW_DROP
+  const rows = narrow ? Math.floor((height - at.y - drop) / ROW) : Math.floor((2 * reach - ROW) / ROW) + 1
   const satellite = (place: Point, side: 'left' | 'right', room: number, item?: typeof holdings[number], more = 0): Satellite => ({ ...place, file: item?.file, lead: item?.lead ?? false, more, side, room })
   const clip = (items: typeof holdings, count: number): { shown: typeof holdings; more: number } => items.length <= count ? { shown: items, more: 0 } : { shown: items.slice(0, count - 1), more: items.length - count + 1 }
   if (narrow) {
     const room = width - NARROW_INSET - MARGIN
-    const down = (n: number): Point => ({ x: NARROW_INSET, y: at.y + NARROW_DROP + n * ROW })
+    const down = (n: number): Point => ({ x: NARROW_INSET, y: at.y + drop + n * ROW })
     const { shown, more } = clip(holdings, Math.max(1, rows - Math.min(kids.length, Math.floor(rows / 2))))
     const held = shown.map((item, n) => satellite(down(n), 'right', room, item))
     if (more) held.push(satellite(down(shown.length), 'right', room, undefined, more))
-    return { thread, at, r, reach, held, kids: kids.slice(0, Math.max(0, rows - held.length)).map((kid, n) => ({ ...down(held.length + n), thread: kid, r: 7, room, side: 'right' })), kickers: [{ label: held.length ? 'Holds' : 'Nothing sent yet', side: 'right', x: NARROW_INSET - 8, y: at.y + NARROW_DROP - ROW }] }
+    return { thread, at, r, reach, held, kids: kids.slice(0, Math.max(0, rows - held.length)).map((kid, n) => ({ ...down(held.length + n), thread: kid, r: 7, room, side: 'right' })), kickers: [{ label: held.length ? 'Holds' : 'Nothing sent yet', side: 'right', x: NARROW_INSET - 8, y: at.y + drop - ROW }] }
   }
   /** Without threads of its own, a long list takes both sides of the orbit. */
   const spill = kids.length === 0 && holdings.length > rows
