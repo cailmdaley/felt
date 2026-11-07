@@ -448,12 +448,9 @@ kanban with Stash/Capture, Chronicle, Board and Globe on hotkeys 1–4. Board is
 document overview and reader; fiber controls sit inline on the fiber page and
 the worker pill opens its conversation. The UI is served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).
-Phone meetings start from Capture on the board.
-Capture reads meeting availability and supported modes from the daemon serving the board.
-On a mobile viewport, it selects Meeting with phone audio and no mode selector; the live meeting card holds the microphone controls.
-On desktop, the selector appears only when the recording host supports several modes.
-The host picker chooses where the scribe runs; open the desired recording host's board to record there.
-When recorder and scribe differ, Capture names both beside the Meeting toggle.
+Listen can use the desktop or a phone as its audio source.
+Capture creates a card; pin Listen to that card to keep a call's speech there while navigating elsewhere.
+The recording host and the worker's host can differ.
 The `--chrome` flag appears only for a browser-capable agent on a macOS host with an active GUI session.
 `/phone` redirects to `/`.
 To pull it up locally: `make start`, then open the root URL in a browser. A fresh

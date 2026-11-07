@@ -36,19 +36,6 @@ The realistic case uses 3,000 managed fibers and real tmux on a private socket, 
 Codex is an external executable stub. These gates require tmux, preserve production quarantine and read the dirty-I/O scheduler count from release VM arguments.
 A new production child belongs in the independent manifest in `test/support/production_boot.exs`.
 
-## Real Hark pause probe
-
-`daemon/test/shuttle/meeting_pause_real_test.exs` runs the installed Hark CLI against a private `HARK_DIR` and a live Hark `PauseMonitor` with synthetic PCM, without opening audio devices or loading recognition models.
-It checks both track gates, transcript pause/resume markers, repeated requests, and restoration of mic-only versus mic + system capture.
-With Hark installed in a Python environment, run from `daemon/`:
-
-```bash
-SHUTTLE_TEST_HARK_PYTHON=/path/to/hark/venv/bin/python mix test test/shuttle/meeting_pause_real_test.exs --include integration
-```
-
-The environment's `bin/hark` must be beside that Python executable.
-The normal suite excludes this integration probe.
-
 ## Native filesystem I/O
 
 `daemon/test/shuttle/fs_test.exs` exercises caller-owned raw operations with `file_server_2` suspended in an isolated VM.
@@ -172,7 +159,7 @@ and add your test to its file.
 - **Temporal read APIs:** the `activity`, `commits`, `sent_files` and `sessions` controllers, and `temporal_composite`.
 - **Session and commit history:** `session_ledger`, `session_link`, `session_resume`, `commit_ledger`, `transcript`.
 - **Messaging:** the `messaging`, `deliver`, `attachments` and `claim` controllers.
-- **Meetings:** `meeting_test.exs`, `meeting_transcript_relay_test.exs`, `capture_controller`, `meeting_audio_socket`.
+- **Listen:** `recorder_test.exs`, `voice_test.exs`, `voice_transcript_relay_test.exs`, `voice_transcript_controller_test.exs`, `phone_audio_socket`.
 - **Startup and readiness:** `application_boot`, `readiness`, `build_stamp`, `log_level`, `log_rotator`.
 - **Test-support guards:** `env_guard_test.exs`, `env_isolation_test.exs`, `operator_files_guard_test.exs`.
 
@@ -199,7 +186,7 @@ and add your test to its file.
 - **Desk input:** `keymap.test.ts`, `deskKeyboard.integration.test.ts`, `longPress`, `dismissGesture`, `mobile`.
 - **Dispatch actions:** `boardWire.test.ts`, `daemonApi`, `startPrompt`, `KanbanModal.verdict`.
 - **Chronicle:** `src/board/views/chronicle*.test.ts`, `temporalData.test.ts`, `vocabulary.test.ts`.
-- **Meetings and the phone:** `meeting.test.ts`, `src/phone/*.test.ts`, `src/forms/meeting*.test.tsx`.
+- **Listen and the phone:** workspace Listen tests and `src/phone/*.test.ts`.
 - **Settings:** `src/forms/settings/`.
 - **Styles and accessibility:** `ui/test/*.test.ts`.
 - **The document workspace:** `src/board/workspace/`, owned by the document-workspace effort; it follows these conventions as it is rewritten.

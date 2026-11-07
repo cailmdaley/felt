@@ -82,7 +82,7 @@ people.
 | `felt hook pretool` | PreToolUse gate: deny non-felt tool calls until the felt skill activates |
 | `felt hook posttool` | PostToolUse: stamp `updated-at` when an agent edits a fiber file directly |
 
-## Transcript search
+## Session transcript search
 
 `shuttle transcript <session-id>` resolves a transcript's native path, materializing a remote transcript into the local cache when needed.
 The same command family searches local Claude Code, Codex, and Pi JSONL transcripts:
@@ -259,6 +259,7 @@ constitution open; activating it could launch another worker.
 | `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon. `--message <text>` or `--message-file <path>` adds a launch directive |
 | `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
 | `shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which resolves to its recorded worker session (`--attach`, `--file`, `--context-only`, `--notify-when-idle`, `--notify-wake`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
+| `shuttle transcript [--date YYYY-MM-DD] [--fiber <id\|slug>] [--since HH:MM[:SS]] [--recorder HOST]` | Read the day's spoken transcript, including the card each line went to (`--json` for the daemon response) |
 | `shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `shuttle agents [resolve <agent>]` | List the effective agent registry (`--source builtin\|user`), or resolve one agent with its axes (`--effort`, `--chrome`) |
 | `shuttle agents init` | Seed `~/.config/shuttle/agents.json` from the built-ins (`--path`, `--force`) |
@@ -566,7 +567,7 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
 | `shuttle tunnels install [name ...]` | Write (and optionally bootstrap) autossh tunnels for the named remotes, or all enabled remotes if none are given (`--unit-dir`, `--log-dir`, `--autossh-path`, `--write-only`, `--dry-run`). launchd on macOS, systemd user units on Linux |
 | `shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds (`--daemon-url`, repeatable, to check other hosts) |
 | `shuttle contract` | Print the daemon-facing CLI contract version, used at daemon boot to detect an incompatible CLI |
-| `shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`, `--meeting`, `--thread-exit-verb`; at least one required); daemon-facing, not for manual use |
+| `shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`, `--thread-exit-verb`; at least one required); daemon-facing, not for manual use |
 
 !!! note
     `shuttle remotes`, `tunnels`, `validate-identity`, `contract`, and
@@ -619,45 +620,14 @@ Run the command on that host or use the gallery's **Clear** control, which route
 Unowned notes can be cleared locally.
 The daemon uses the internal form `shuttle sent-files clear <UID> --uid --local` after routing to the stream host; it bypasses fiber lookup, requires a canonical UID, and never routes again.
 
-### `shuttle follow <transcript>`
+### `shuttle transcript [--date YYYY-MM-DD] [--fiber <id|slug>] [--since HH:MM[:SS]] [--recorder HOST] [--json]`
 
-Stream a live meeting transcript to an agent in batches, each followed by one
-blank line. Run it under a harness monitor that reads stdout as it arrives.
-The file may not exist yet; follow waits for it. Everything already in the file
-at the first read is printed at once. After that, new complete lines are held
-until a line addresses the agent (a whole word from `--names`, case-insensitive,
-default `claude,cloud,clawed,claw,klaud,clot,clock,clod,claud`, matched after any leading `HH:MM:SS`
-timestamp or `HH:MM:SS-HH:MM:SS` range), the pending utterance text reaches `--words` (default 150), or
-`--seconds` (default 30) pass since the last utterance arrived. A line
-starting `# ended` flushes and ends the follow with exit 0. Lines starting `#`
-ride along without counting words or addressing the agent. A partial trailing
-line waits for its newline, a file that shrinks is read again from the start,
-and the file is polled once per second.
+Read a recorder's day transcript through the local daemon.
+Each line shows the spoken time, speaker, card and text; `—` marks an unrouted line.
+It includes speech that wasn't delivered to a worker.
+Date defaults to today on the recorder, and `--since` is inclusive in the recorder's local time.
+`--fiber` filters by UID, path or slug; `--recorder` selects the recording host, defaulting to the local daemon's host.
+`--json` returns the complete response, including the recorder, date, routes and launch IDs.
+Every delivered voice batch points to its first line with `shuttle transcript --since HH:MM:SS`.
 
-### `shuttle meeting start [--recorder <host>] [--mode call|phone] [--note <text>]`
-
-Start a hark recording without launching or telling any agent, for a session
-the daemon did not launch (a Claude Code Remote Control session, say) that
-follows the transcript itself. The local daemon's `POST /meeting/start` records
-on `--recorder` (default: this host; `--mode phone` without a recorder lets the
-daemon select one) and mirrors the transcript to this host. `--mode` defaults
-to `call`. The recording is named after the note's first line, else `Meeting`.
-
-Stdout is the transcript's path on this host, so the verbs compose:
-
-```bash
-shuttle follow "$(shuttle meeting start --recorder mac --note 'Weekly standup')"
-```
-
-The recorder and launch id go to stderr; `--json` prints the daemon's whole
-answer. An existing meeting on the recorder (409), a recorder without hark
-(503) or a mode it cannot record (422) fails with the daemon's error. A start
-the recorder did not confirm fails with `recording_unknown`: inspect that
-recorder before starting another.
-
-### `shuttle meeting stop [--recorder <host> --launch <id>]`
-
-Stop the recording on `--recorder` (default: this host), or dismiss its failed
-tmux pane, through the local daemon's `POST /meeting/stop`. An addressed stop
-needs the launch id `meeting start` printed, so a stale stop never ends a newer
-recording.
+With a session UUID instead, the command resolves a [session transcript](#session-transcript-search), not the spoken transcript.
