@@ -4,7 +4,7 @@ import { registerView, type TemporalView, type ViewContext } from './ViewRegistr
 class BoardView implements TemporalView {
   readonly id = 'shelf' as const
   readonly title = 'Board'
-  readonly hotkey = '4'
+  readonly hotkey = '3'
   private context: ViewContext | null = null
   private host: HTMLElement | null = null
 

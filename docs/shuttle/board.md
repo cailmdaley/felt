@@ -8,12 +8,12 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 | Key | View | What it answers |
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now |
-| `2` | **Globe** | Everything at once, as one place to move through |
-| `3` | **Chronicle** | What a stretch of weeks was about |
-| `4` | **Board** | What the work produced |
+| `2` | **Chronicle** | What a stretch of weeks was about |
+| `3` | **Board** | What the work produced |
+| `4` | **Globe** | Everything at once, as one place to move through |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
-`#/desk`, `#/globe`, `#/chronicle` and `#/board` deep-link the views.
+`#/desk`, `#/chronicle`, `#/board` and `#/globe` deep-link the views.
 A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
 ## Desk — the kanban
@@ -191,7 +191,7 @@ data while Chronicle is closed.
 
 ## Board — what the work produced
 
-Hotkey `4` opens a contact sheet of constitutions with documents sent in the last 30 days.
+Hotkey `3` opens a contact sheet of constitutions with documents sent in the last 30 days.
 A ribbon shows the twelve latest documents across the fleet.
 Beneath it, **Read lately** names the constitutions opened in the reader this session, most recent first; each opens in the reader.
 Below it, each fiber has a folio with a live thumbnail, name, outcome, document count and host marks.

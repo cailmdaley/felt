@@ -41,7 +41,7 @@ export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="i
  * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */
 export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   desk: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'globe', 'Switch to Globe'), bind(['3'], 'chronicle', 'Switch to Chronicle'), bind(['4'], 'board', 'Switch to Board'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'),
     bind(['/'], 'find', 'Find a card or constitution'),
     bind(['h', 'ArrowLeft'], 'left', 'Previous column / region'), bind(['l', 'ArrowRight'], 'right', 'Next column / region'),
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
@@ -50,7 +50,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['m'], 'map', 'Between the Desk\'s cards and its map'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'globe', 'Switch to Globe'), bind(['3'], 'chronicle', 'Switch to Chronicle'), bind(['4'], 'board', 'Switch to Board'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'),
     bind(['/'], 'find', 'Find work or files'), bind(['Escape'], 'back', 'Return to Desk when nothing is open'),
     bind(['h', 'ArrowLeft'], 'left', 'Move left'), bind(['l', 'ArrowRight'], 'right', 'Move right'),
     bind(['j', 'ArrowDown'], 'down', 'Move down'), bind(['k', 'ArrowUp'], 'up', 'Move up'),
@@ -58,7 +58,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['c', '.'], 'conversation', 'Open conversation'), bind(['Enter', 'o'], 'open', 'Open file'), bind(['?'], 'help', 'Keyboard help'),
   ],
   reader: [
-    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'globe', 'Switch to Globe'), bind(['3'], 'chronicle', 'Switch to Chronicle'), bind(['4'], 'board', 'Switch to Board'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'), bind(['4'], 'globe', 'Switch to Globe'),
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
@@ -134,7 +134,7 @@ const row = (keys: string[], label: string, covers: Array<readonly [KeySurface, 
  * covers its surface and intent and shows each of its keys. */
 export const helpSections: readonly HelpSection[] = [
   { title: 'Everywhere', rows: [
-    row(['1', '2', '3', '4'], 'Desk, Globe, Chronicle, Board', everywhere('desk', 'globe', 'chronicle', 'board')),
+    row(['1', '2', '3', '4'], 'Desk, Chronicle, Board, Globe', everywhere('desk', 'chronicle', 'board', 'globe')),
     row(['/'], 'Find', everywhere('find')),
     row(['Esc'], 'Close a layer, then step back', everywhere('back')),
     row(['?'], 'This guide', everywhere('help')),

@@ -120,7 +120,7 @@ export function registerMapViewJourneys(test) {
     const id = await page.evaluate(() => window.__harness.MOCK_FEED.fibers.at(-1).fiber.id)
     const rex = origin => page.evaluate(([origin, id]) => window.__harness.modal.voice.onRex({ fiber_id: id, origin }), [origin, id])
     const here = await page.evaluate(() => window.__harness.MOCK_FEED.fibers.find(({ fiber }) => fiber.name === 'Response analysis').origin)
-    await page.keyboard.press('2')
+    await page.keyboard.press('4')
     await page.locator('.globe canvas').waitFor()
     await page.waitForTimeout(1300)
     for (const [origin, name] of [['other-host', 'Response analysis elsewhere'], [here, 'Response analysis']]) {
@@ -132,7 +132,7 @@ export function registerMapViewJourneys(test) {
   test('The Globe names every live thread of a crowded family, whole and clear of each other, at half a screen, and leaves the archived quiet', async page => {
     await page.goto(url.replace('example=threads', 'example=families'))
     await page.locator('.kbn-desk .kbn-card').first().waitFor()
-    await page.keyboard.press('2')
+    await page.keyboard.press('4')
     await page.locator('.globe canvas').waitFor()
     await page.waitForTimeout(1400)
     await page.evaluate(() => window.__harness.modal.voice.onRex({ fiber_id: 'hub', origin: 'umber-workstation' }))
@@ -148,7 +148,7 @@ export function registerMapViewJourneys(test) {
 
   test('On the Globe, / opens Find and a pick flies the Globe to that thread, leaving Rex and the stage be', async page => {
     await board(page)
-    await page.keyboard.press('2')
+    await page.keyboard.press('4')
     await page.locator('.globe-canvas').waitFor()
     await page.waitForTimeout(1300)
     const before = await asked(page)
@@ -162,9 +162,9 @@ export function registerMapViewJourneys(test) {
     assert.deepEqual(await asked(page), before, 'a pick never reaches Rex')
   })
 
-  test('The Globe: hotkey 2, keys and a drag move without Rex, a click moves Rex to its thread, a file opens and Back returns as it stood', async page => {
+  test('The Globe: hotkey 4, keys and a drag move without Rex, a click moves Rex to its thread, a file opens and Back returns as it stood', async page => {
     await board(page)
-    await page.keyboard.press('2')
+    await page.keyboard.press('4')
     const canvas = page.locator('.globe-canvas')
     await canvas.waitFor()
     assert.equal(new URL(page.url()).hash, '#/globe')

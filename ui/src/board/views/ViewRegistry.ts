@@ -5,13 +5,13 @@
  *
  *   1  desk       the kanban page (Now board + Resting). Owned by
  *                 KanbanModal itself, NOT a TemporalView.
- *   2  globe      ┐
- *   3  chronicle  │ registered views — each mounts into a full-width host
- *   4  board      ┘ where the Desk surfaces would otherwise be.
+ *   2  chronicle  ┐
+ *   3  board      │ registered views — each mounts into a full-width host
+ *   4  globe      ┘ where the Desk surfaces would otherwise be.
  *
- * The Globe is all the work on a sphere. Chronicle holds the record in time.
- * Board is the document workspace's contact sheet, grouped by recent work,
- * project or host.
+ * Chronicle holds the record in time. Board is the document workspace's
+ * contact sheet, grouped by recent work, project or host. The Globe is all
+ * the work on a sphere.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.

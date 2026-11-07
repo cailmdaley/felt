@@ -281,7 +281,7 @@ describe('Desk keyboard selection', () => {
       press('Enter')
       expect(inside.workspace.isActive).toBe(true)
     }
-    const key = to === 'desk' ? '1' : to === 'chronicle' ? '3' : '4'
+    const key = to === 'desk' ? '1' : to === 'chronicle' ? '2' : '3'
     expect(press(key).defaultPrevented).toBe(true)
     expect(inside.activeViewId).toBe(to)
     if (to === 'desk') expect(selected()).toBe('review')

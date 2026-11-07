@@ -1,5 +1,5 @@
 /**
- * ChronicleView (hotkey 3) — the long record: what was worked on, and for how
+ * ChronicleView (hotkey 2) — the long record: what was worked on, and for how
  * long.
  *
  * THE SHAPE. Days run left to right as calendar columns (28 back, 14 ahead);
@@ -1102,7 +1102,7 @@ function colLeft(idx: number): string {
 class ChronicleView implements TemporalView {
   readonly id = 'chronicle' as const
   readonly title = 'Chronicle'
-  readonly hotkey = '3'
+  readonly hotkey = '2'
 
   private root: HTMLElement | null = null
   private body: HTMLElement | null = null

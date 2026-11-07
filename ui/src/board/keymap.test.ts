@@ -36,7 +36,7 @@ describe('shared keyboard table', () => {
     expect(phantom).toEqual([])
   })
   it('routes 1·2·3·4 to the same view intents on every surface, without forwarding them into documents', () => {
-    const intents = ['desk', 'globe', 'chronicle', 'board'] as const
+    const intents = ['desk', 'chronicle', 'board', 'globe'] as const
     for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
       for (const [index, intent] of intents.entries()) expect(keyIntent(event(String(index + 1)), surface)).toBe(intent)
     }
