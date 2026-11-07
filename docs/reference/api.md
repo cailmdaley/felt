@@ -457,7 +457,7 @@ Names have no routing or delivery meaning.
 The owner decides resume versus first launch from its current document.
 Speaker-labelled paragraphs merge adjacent utterances by the same speaker, without a header, and omit a final `send`.
 A bare `send` delivers nothing.
-Each delivered batch ends with `— shuttle transcript --since HH:MM:SS`, using its first spoken time on the recorder.
+Each delivered batch ends with `— shuttle transcript --since HH:MM:SS`, using its first spoken time on the recorder, followed by ` --recorder HOST` when the target's origin is another host.
 The `/voice/transcript` endpoint reads the corresponding day rows.
 Live workers take terminal input through `/deliver` with `live_input: true`; cold workers receive the same text as their launch directive, with `message_after_launch: false`.
 Batches stay ordered per destination; different destinations proceed independently.

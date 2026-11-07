@@ -904,7 +904,8 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
           "text" =>
             rendered <>
               "\n— shuttle transcript --since " <>
-              Shuttle.Voice.Transcript.local_time(hd(buffer["voice_rows"])["t"]) <> "\n",
+              Shuttle.Voice.Transcript.local_time(hd(buffer["voice_rows"])["t"]) <>
+              recorder_flag(buffer["origin"]) <> "\n",
           "message_id" => "voice-" <> id
         })
 
@@ -948,6 +949,12 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
         not String.starts_with?(line, "#"),
         [speaker, text] <- [String.split(line, " ", parts: 2)],
         do: %{"speaker" => speaker, "text" => text}
+  end
+
+  # A worker on another host reads the transcript from this recorder, not its own.
+  defp recorder_flag(origin) do
+    own = Shuttle.RecorderRouter.own_host()
+    if origin in [nil, own], do: "", else: " --recorder " <> own
   end
 
   defp same_target?(nil, _), do: false

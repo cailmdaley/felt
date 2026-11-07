@@ -96,7 +96,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
 
     assert text ==
-             "me: one phrase two phrases\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")}\n"
+             "me: one phrase two phrases\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
   end
 
   test "a relay ignores the port exits its trapped shell calls leave behind" do
@@ -150,7 +150,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert new =~ "new words"
 
     assert new ==
-             "me: new words\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:11Z")}\n"
+             "me: new words\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:11Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
 
     refute new =~ "room speech"
     refute new =~ "Cail's spoken words"
@@ -371,7 +371,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{text: text}}, 1_000
 
     assert text ==
-             "S2: Claude make this plot\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")}\n"
+             "S2: Claude make this plot\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
   end
 
   test "voice groups consecutive speakers without headers or timestamps", c do
@@ -397,7 +397,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{text: first}}, 1_000
 
     assert first ==
-             "me: one two\nS2: three four\nme: five\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")}\n"
+             "me: one two\nS2: three four\nme: five\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
 
     sync_tasks(c)
     record(c.path, "2026-11-06T10:10:05Z", "no timestamp send")

@@ -628,6 +628,6 @@ It includes speech that wasn't delivered to a worker.
 Date defaults to today on the recorder, and `--since` is inclusive in the recorder's local time.
 `--fiber` filters by UID, path or slug; `--recorder` selects the recording host, defaulting to the local daemon's host.
 `--json` returns the complete response, including the recorder, date, routes and launch IDs.
-Every delivered voice batch points to its first line with `shuttle transcript --since HH:MM:SS`.
+Every delivered voice batch points to its first line with `shuttle transcript --since HH:MM:SS`, plus `--recorder HOST` when the worker is on another host.
 
 With a session UUID instead, the command resolves a [session transcript](#session-transcript-search), not the spoken transcript.
