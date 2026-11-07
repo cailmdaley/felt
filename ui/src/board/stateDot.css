@@ -11,7 +11,9 @@
 .constitution-state-dot[data-turn='working']::before { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
 [inert] .constitution-state-dot::before { animation: none; }
 @media (prefers-reduced-motion: reduce) { .constitution-state-dot::before { animation: none !important; } }
-.constitution-state-dot:is([data-turn='idle'], [data-turn='question']) { --state-dot: var(--kbn-owed-bright); }
+/* A question is red, as on the worker pill; a block is quiet ink. */
+.constitution-state-dot[data-turn='question'] { --state-dot: var(--kbn-you); }
+.constitution-state-dot[data-turn='idle'] { --state-dot: var(--kbn-owed-bright); }
 .constitution-state-dot:is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked']) { --state-dot: var(--kbn-ink-muted); }
 .constitution-state-dot:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: -1px; }
 

@@ -1,6 +1,7 @@
 import type { KanbanCard } from './KanbanTypes.js'
 import { threadKey, type FamilyNeed, type ThreadIndex } from './threads.js'
 import { threadRow } from './ThreadPeek.js'
+import { turnOf } from './turn.js'
 import { renderThreadTree } from './workspace/ThreadTree.js'
 import { workerPlateFacts } from './workspace/workerPlate.js'
 import './deskFrontier.css'
@@ -69,6 +70,7 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
     const label = document.createElement('span')
     label.className = needs ? 'kbn-count-needs' : working ? 'kbn-count-working' : 'kbn-count-quiet'
     label.textContent = needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : working ? `${working} working` : `${kin} ${kin === 1 ? 'thread' : 'threads'}`
+    if (needs && index.subtree(family.root).some(thread => thread !== self && turnOf(thread).turn === 'question')) label.dataset.asks = ''
     count.append(label)
     count.title = [
       others.yours > 0 && `${others.yours} your turn`,
@@ -108,12 +110,7 @@ function installThreads(host: HTMLElement, count: HTMLButtonElement, self: Kanba
     count.setAttribute('aria-label', `${count.title}; ${all ? 'fold' : 'show all'} the family's threads`)
     list.replaceChildren(...renderThreadTree(index, family.root, self, (thread, focus) => {
       const row = threadRow(thread, index, open); row.dataset.threadFocus = focus
-      const { turn, elapsed } = workerPlateFacts(thread, now)
-      if (turn === 'question' || turn === 'blocked') {
-        const mark = document.createElement('span'); mark.className = 'kbn-thread-asks'; mark.dataset.turn = turn
-        mark.textContent = turn === 'question' ? '?' : '!'; mark.title = turn === 'question' ? 'Your question' : 'Blocked'
-        row.append(mark)
-      }
+      const { elapsed } = workerPlateFacts(thread, now)
       if (elapsed) { const age = document.createElement('span'); age.className = 'kbn-row-elapsed'; age.textContent = elapsed; row.append(age) }
       return row
     }, {

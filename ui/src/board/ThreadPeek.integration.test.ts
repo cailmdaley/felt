@@ -71,6 +71,14 @@ describe('a family row', () => {
     expect(rows.map(r => [r.querySelector('.kbn-thread-name')!.textContent, r.parentElement === r.closest('.kbn-desk-threads') && r.dataset.depth])).toEqual([['Analysis', '0'], ['Deep ask', '1'], ['Second ask', '0']])
     rows[2].click(); expect(open).toHaveBeenLastCalledWith(second)
   })
+  it('a question among the family reddens its count, and only a question', () => {
+    const hub = card({ id: 'hub', name: 'Hub', status: 'active', workerState: 'running', runtimePhase: 'working' })
+    const idle = card({ id: 'hub/idle', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
+    const asking = card({ id: 'hub/ask', orchestrator: 'hub', status: 'active', ask: { text: 'Which?', at: '2026-10-01T00:00:00Z' } })
+    const count = (cards: ReturnType<typeof card>[]) => { const host = document.createElement('div'); installFrontierDetails(host, host, hub, new ThreadIndex(cards), vi.fn()); return host.querySelector<HTMLElement>('.kbn-count-needs')! }
+    expect(count([hub, idle]).hasAttribute('data-asks')).toBe(false)
+    expect(count([hub, idle, asking]).hasAttribute('data-asks')).toBe(true)
+  })
   for (const mobile of [false, true]) it(`draws the same row on ${mobile ? 'phone' : 'desktop'}`, () => {
     vi.stubGlobal('matchMedia', () => ({ matches: mobile }))
     try {

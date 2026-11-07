@@ -68,7 +68,7 @@ that says otherwise. The pill's word names why it is (or isn't) your move:
 
 | Pill | Band | Meaning | Age counts from |
 |---|---|---|---|
-| **question** | Your turn | The worker needs an answer: an outstanding `shuttle ask` (the worker may still be working, and its dot breathes), or the harness stopped on a prompt. | the ask, or the prompt's event |
+| **question** | Your turn | The worker needs an answer: an outstanding `shuttle ask` (the worker may still be working, and its dot breathes), or the harness stopped on a prompt. Its dot is red, the Desk's only red. | the ask, or the prompt's event |
 | **idle** | Your turn | The worker ended its turn with nothing running under it. | the last event |
 | **blocked** | Your turn | Rare: the turn could not start (launch error), or the session could not be attributed. Drawn quietly, as a hollow dot. | the last event |
 | **working** | Working | Mid-turn, or idle over background work it started. | the last event, once it has been silent ten minutes |
@@ -98,8 +98,8 @@ The family's threads hang beneath its row as a tree, each thread under its
 orchestrator, drawn with the same dot and age as a row. Folded, the tree shows
 every thread that needs you, a turn or a verdict, with the threads above it
 for context, so what waits on you is visible without opening anything. The
-count at the row's end says how many need you, else how many work, else how
-many threads there are; its caret opens the whole tree, with the resting
+count at the row's end says how many need you, in red when one of them is a
+question, else how many work, else how many threads there are; its caret opens the whole tree, with the resting
 threads on a fold of their own beneath it. Archived threads are not on the
 Desk; they stay on their constitution's page. A root's count, on a family a thread
 leads, opens the tree on the leading row instead. Each fold is remembered in
