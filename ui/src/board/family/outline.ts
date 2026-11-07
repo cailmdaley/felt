@@ -1,15 +1,19 @@
 import { needsHuman, type FamilyModel, type MapThread } from './model.js'
+import { threadState } from '../threads.js'
 
 /** The kinds of attention a thread can ask for, most urgent first: the order of the rows and the words of the counts. */
 export const SECTIONS = ['question', 'blocked', 'turn', 'review', 'working', 'still'] as const
 export type Section = typeof SECTIONS[number]
-export const SECTION_WORD: Readonly<Record<Section, string>> = {
+const ASIDE_SECTIONS = ['resting', 'drafts', 'roles', 'archived'] as const
+type AsideSection = typeof ASIDE_SECTIONS[number]
+export const SECTION_WORD: Readonly<Record<Section | AsideSection, string>> = {
   question: 'Questions', blocked: 'Blocked', turn: 'Your turn', review: 'To review', working: 'Working', still: 'No worker',
+  resting: 'Resting', drafts: 'Drafts', roles: 'Seats', archived: 'Archived',
 }
 
 /** One line of the page under its head: the family's section of a kind of attention, a thread's row, or the fold that holds a level's threads set aside. */
 export type Line =
-  | { kind: 'section'; key: string; section: Section }
+  | { kind: 'section'; key: string; section: Section | AsideSection; level: number }
   | { kind: 'thread'; key: string; thread: MapThread; level: number; section: Section | undefined; open: boolean }
   | { kind: 'aside'; key: string; owner: string; level: number; threads: MapThread[]; open: boolean }
 
@@ -64,14 +68,19 @@ export function outline(model: FamilyModel, open: ReadonlySet<string>, under: Re
     let last: Section | undefined
     for (const kid of live) {
       const section = under.get(kid.key)!.section!
-      if (depth === 0 && section !== last) lines.push({ kind: 'section', key: `section:${section}`, section })
+      if (depth === 0 && section !== last) lines.push({ kind: 'section', key: `section:${section}`, section, level: depth })
       last = section
       row(kid, depth, section)
     }
     if (!aside.length) return
     const key = `aside:${owner.key}`, unfolded = open.has(key)
     lines.push({ kind: 'aside', key, owner: owner.key, level: depth, threads: aside, open: unfolded })
-    if (unfolded) for (const kid of aside) row(kid, depth, undefined)
+    if (unfolded) for (const section of ASIDE_SECTIONS) {
+      const group = aside.filter(kid => threadState(kid.card) === section)
+      if (!group.length) continue
+      lines.push({ kind: 'section', key: `aside-section:${owner.key}:${section}`, section, level: depth })
+      for (const kid of group) row(kid, depth, undefined)
+    }
   }
   const row = (thread: MapThread, depth: number, section: Section | undefined): void => {
     const unfolded = open.has(thread.key)

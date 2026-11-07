@@ -150,7 +150,7 @@ describe('a row', () => {
     const { family } = made()
     expect(said(family)).not.toContain('Done')
     click(family.el.querySelector('.fp-aside')!)
-    expect(said(family).slice(-2).sort()).toEqual(['Done', 'Draft'])
+    expect(said(family).slice(-4)).toEqual(['[Drafts]', 'Draft', '[Archived]', 'Done'])
     expect(row(family, 'Done').dataset.standing).toBe('aside')
   })
 })

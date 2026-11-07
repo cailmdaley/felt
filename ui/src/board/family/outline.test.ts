@@ -40,6 +40,21 @@ it('unfolds an open row to its own threads beneath it without dividers, its set-
   expect(said(outline(m, new Set([lead.key])))).toEqual(['[question]', 'lead', '  asks', '  (1 aside)', '[turn]', 'turn-new', 'turn-old', '[review]', 'review', '[working]', 'working', '(2 aside)'])
   expect(said(outline(m, new Set([lead.key, `aside:${lead.key}`])))).toContain('  done')
 })
+it('groups set-aside threads at each level: resting, drafts, seats, then archived', () => {
+  const cards = [root,
+    thread('hub/archive', { status: 'closed', tempered: true, closedAt: at(1) }),
+    thread('hub/rest', { status: 'open', effectiveHorizon: 'stashed', shuttleKind: 'oneshot' }),
+    thread('hub/draft', { status: 'open' }),
+    thread('hub/seat', { status: 'open', shuttleKind: 'oneshot', shuttleSeat: true, shuttleRole: 'keeper' }),
+    thread('hub/rest/deep', { status: 'closed', tempered: true }, 'hub/rest'),
+  ]
+  const m = model(cards), rest = [...m.threads.values()].find(t => t.card.id === 'hub/rest')!
+  const open = new Set([`aside:${m.root.key}`, rest.key, `aside:${rest.key}`])
+  expect(said(outline(m, open))).toEqual(['(4 aside)', '[resting]', 'rest', '  (1 aside)', '[archived]', '  deep', '[drafts]', 'draft', '[roles]', 'seat', '[archived]', 'archive'])
+  const sections = outline(m, open).filter(line => line.kind === 'section')
+  expect(sections.map(line => line.level)).toEqual([0, 1, 0, 0, 0])
+  expect(new Set(sections.map(line => line.key)).size).toBe(sections.length)
+})
 it('opens every fold above a thread to show it, the set-aside fold that hides it included', () => {
   const m = model(family), done = [...m.threads.values()].find(t => t.card.id === 'hub/lead/done')!
   const open = new Set(opening(m, done.key))

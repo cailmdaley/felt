@@ -218,6 +218,7 @@ export class FamilyPage {
     if (line.kind === 'section') {
       const head = this.made(line.key, () => { const head = el('div', 'fp-section', SECTION_WORD[line.section]); head.setAttribute('role', 'presentation'); return head })
       head.dataset.standing = line.section
+      head.style.setProperty('--fp-level', String(line.level))
       return head
     }
     const row = line.kind === 'aside' ? this.made(line.key, () => {
