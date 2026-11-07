@@ -20,6 +20,7 @@ import { meetingHostCard, type MeetingRecord } from '../meeting.js'
 import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
+import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { frameBridge } from './DocumentBridge.js'
 import './mentions.css'
@@ -28,7 +29,7 @@ import { WorkspaceDepth } from './Depth.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
 import { Overview } from './Overview.js'
-import { FamilyPage, placeAt, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
+import { FamilyPage, placeAt, type EmbeddedDocument, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
@@ -157,6 +158,7 @@ export class Workspace {
       files: card => this.mapFiles(card),
       refresh: () => this.refreshFamilyFeeds(),
       lead: card => this.mapLead(card),
+      embed: (card, doc) => this.embed(card, doc),
     }
     this.globeHost = {
       feeds: this.mapFeeds,
@@ -419,12 +421,7 @@ export class Workspace {
     const map = state && this.isActive ? this.familyDocument(state.card) : undefined
     if (!state || !map) return false
     if (this.shown(state) !== map) { this.visit(map); return true }
-    const page = state.familyPage, lead = channelLead(state.channel)
-    const leave = (leading?: { card: KanbanCard; doc: DocKey }): void => {
-      if (leading) this.openFromMap(leading.card, leading.doc)
-      else if (lead && !page?.elsewhere) this.visit(lead.key)
-    }
-    if (page) page.leading(leave); else leave()
+    state.familyPage?.toggleLead()
     return true
   }
 
@@ -619,17 +616,41 @@ export class Workspace {
   private proseRevision(state: ChannelState): string {
     return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.shuttleRole, state.card.shuttleSeat, holdsRevision(this.holds(state)), state.error, state.loaded, state.metadataKnown])
   }
-  private prose(key: DocKey): HTMLElement {
-    const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
-    if (!state) return document.createElement('div')
-    this.proseRevisions.set(key, this.proseRevision(state))
-    const page = buildFiberProse(state.card, state.channel, {
+  private drawProse(state: ChannelState): HTMLElement {
+    return buildFiberProse(state.card, state.channel, {
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title, owner?: string) => this.openFile(path, title, owner),
       holds: this.holds(state),
       onCard: card => { void this.openFiber(card.uid ?? card.id, card.originId) },
     })
+  }
+  /**
+   * One of a thread's documents for its constitution's page to unfold under the
+   * thread's row: the constitution as its drawn prose, a file at its full height.
+   */
+  private embed(card: KanbanCard, doc: DocKey): EmbeddedDocument {
+    const box = document.createElement('div')
+    box.className = 'ws-embedded'
+    const file = parseDocKey(doc)
+    if (!file) {
+      const state = this.ensure(card)
+      const draw = (): void => { box.replaceChildren(this.drawProse(state)) }
+      draw()
+      if (!state.loaded) void this.load(state).then(draw)
+      return { el: box, dispose: () => {} }
+    }
+    const viewer = buildFileViewer(this.opts.shuttleBase, file.path, file.owner, undefined, undefined, {
+      active: true, fit: true, onNavigate: href => this.openRelative(file, href),
+    })
+    box.append(viewer)
+    return { el: box, dispose: () => disposeFileViewer(viewer) }
+  }
+  private prose(key: DocKey): HTMLElement {
+    const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
+    if (!state) return document.createElement('div')
+    this.proseRevisions.set(key, this.proseRevision(state))
+    const page = this.drawProse(state)
     if (!state.loaded || state.error) {
       const note = document.createElement('p')
       note.className = 'ws-body-status'
@@ -665,10 +686,10 @@ export class Workspace {
   }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), { open: card => this.dock.openConversation(card), reach: card => this.reach(card) }, this.mapFeeds, state.mapPlace,
+    state.familyPage ??= new FamilyPage({ reach: card => this.reach(card) }, this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
       () => { if (this.current === state) this.sight(state) })
-    state.familyPage.workerActions ??= card => this.dock.workerActionsFor(card)
+    state.familyPage.leave ??= () => this.returnToOrigin()
     state.familyPage.update(state.card, this.graph())
     return state.familyPage.el
   }
@@ -844,7 +865,7 @@ export class Workspace {
       [link.dataset.filePath, link.dataset.filePathAlt].some(path => path && docKey(state.card.originId, path, state.card.originId, state.card.fiberDir) === key))
   }
 
-  private openRelative(source: WorkspaceDocument, href: string): void {
+  private openRelative(source: Pick<WorkspaceDocument, 'owner' | 'path'>, href: string): void {
     if (!href) return
     const route = parseRoute(href)
     if (route?.kind === 'channel') { this.history.enter(route.uid, route.owner, route.doc); return }

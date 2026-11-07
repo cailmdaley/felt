@@ -46,6 +46,8 @@ export function documentMessage(data: unknown): data is DocumentMessage {
       if (fields(p, ['intent', 'instant']) && typeof p.intent === 'string') return SCROLL_INTENTS.includes(p.intent) && (p.instant === undefined || typeof p.instant === 'boolean')
       return fields(p, ['x', 'y']) && coordinate(p.x) && coordinate(p.y)
     case 'restore': return fields(p, ['x', 'y']) && coordinate(p.x) && coordinate(p.y)
+    case 'fit': return fields(p, [])
+    case 'height': return fields(p, ['height']) && coordinate(p.height) && p.height > 0
     case 'swipe':
       if (fields(p, ['phase']) && p.phase === 'cancel') return true
       if (fields(p, ['phase', 'dx']) && p.phase === 'move') return travel(p.dx)
@@ -241,6 +243,21 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
         if (state && typeof state.candidate === 'string' && typeof state.playing === 'boolean' && Number.isFinite(state.progress)) links?.playback(state)
       }
     } else if (data.type === 'pause') pause()
+    else if (data.type === 'fit') {
+      // The host draws the page at its full height: report it whenever layout moves it.
+      let sent = 0, frame = 0
+      const measure = (): void => {
+        frame = 0
+        const height = Math.ceil(Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0))
+        if (height !== sent) { sent = height; send('height', { height }) }
+      }
+      const schedule = (): void => { if (!frame) frame = requestAnimationFrame(measure) }
+      const observer = new ResizeObserver(schedule)
+      observer.observe(document.documentElement)
+      if (document.body) observer.observe(document.body)
+      new MutationObserver(schedule).observe(document, { childList: true, subtree: true })
+      measure()
+    }
     else if (data.type === 'restore' && Number.isFinite(payload.x) && Number.isFinite(payload.y)) {
       cancelRestore()
       pendingRestore = { x: Math.max(0, payload.x), y: Math.max(0, payload.y) }

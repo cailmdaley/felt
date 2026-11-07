@@ -51,6 +51,11 @@ export interface FileViewerOptions {
   thumbnailLabel?: boolean
   /** Inactive viewers read once for a preview, without periodic subscriptions. */
   active?: boolean
+  /**
+   * Draw an HTML page at its full height, its viewport units pinned to the
+   * board's, so it scrolls with its host instead of in a frame of its own.
+   */
+  fit?: boolean
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
   transformHtml?: (html: string) => string
   onDocumentKey?: (key: DocumentKey) => void
@@ -607,6 +612,8 @@ function buildHtmlViewer(
           const top = frameBox.top - layerBox.top + entry.y * scaleY + pdfLayer.scrollTop
           Object.assign(pdf.element.style, { left: `${left}px`, top: `${top}px`, width: `${entry.width * scaleX}px`, height: `${entry.height * scaleY}px` })
         }
+      } else if (message.type === 'height' && options.fit && frame === iframe) {
+        fit(message.payload.height as number)
       } else if (message.type === 'ready') {
         if (announced) return
         announced = true
@@ -636,10 +643,21 @@ function buildHtmlViewer(
     })
     return frame
   }
+  // A page whose height follows its frame's (a script sizing itself by the window)
+  // grows by the same step on every report; it keeps the height it had.
+  let fitted = 0, step = 0, coupled = false
+  const fit = (height: number): void => {
+    if (coupled) return
+    if (height > fitted && fitted && height - fitted === step) { coupled = true; return }
+    step = height - fitted
+    fitted = height
+    wrap.style.height = `${height}px`
+  }
   let iframe = createFrame((frame, bridge) => {
     if (!hasContent || initialLoadHandled || iframe !== frame) return
     initialLoadHandled = true
     embedded.bridge = bridge
+    if (options.fit) bridge.command('fit')
     bridge.command('active', { active: embedded.active })
     bridge.command('pdf:scan')
     failed = false
@@ -657,7 +675,7 @@ function buildHtmlViewer(
       options.onThumbnailSource?.(html, recallText(src)?.etag)
       veil.classList.remove('kbn-fileview-loading-error')
       const withBase = htmlWithBase(html, src)
-      const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(withBase)
+      const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(options.fit ? pinViewportUnits(withBase, window.innerHeight) : withBase)
       const weight = new Blob([html]).size > 2 * 1024 * 1024 || /<(?:audio|video)\b/i.test(html) ? 2 : 1
       if (!hasContent) {
         hasContent = true
@@ -682,6 +700,7 @@ function buildHtmlViewer(
         currentBridge = bridge
         embedded.bridge = bridge
         bridge.command('active', { active: embedded.active })
+        if (options.fit) bridge.command('fit')
         if (position) bridge.command('restore', position)
         iframe.replaceWith(frame)
         iframe = frame
@@ -903,4 +922,16 @@ function showLoadError(veil: HTMLElement, wrap: HTMLElement, fullPath: string, e
 export function isScrollableFile(path: string): boolean {
   const ext = fileExt(path)
   return !IMAGE_EXTS.has(ext) && !AUDIO_EXTS.has(ext) && !VIDEO_EXTS.has(ext)
+}
+
+/**
+ * Rewrites a page's viewport-height units, in its style sheets and style
+ * attributes, as pixels of a viewport `height` tall, so a page drawn at its
+ * full height keeps the proportions it has on a screen.
+ */
+export function pinViewportUnits(html: string, height: number): string {
+  const pin = (css: string): string => css.replace(/(-?(?:\d+\.?\d*|\.\d+))[sdl]?vh\b/g, (_, n: string) => `${+(Number(n) * height / 100).toFixed(2)}px`)
+  return html
+    .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_, open: string, css: string, close: string) => open + pin(css) + close)
+    .replace(/(\sstyle\s*=\s*)(["'])([\s\S]*?)\2/gi, (_, attr: string, quote: string, css: string) => attr + quote + pin(css) + quote)
 }

@@ -1,17 +1,14 @@
 import type { KanbanCard } from '../KanbanTypes.js'
-import { conversable, familyModel, type FamilyModel, type MapFeeds, type MapFile, type MapThread, type Standing } from '../family/model.js'
+import { familyModel, type FamilyModel, type MapFeeds, type MapFile, type MapThread, type Standing } from '../family/model.js'
 import { htmlEl as el, markPath, markSvg, shortAgo, standingLine } from '../family/drawing.js'
-import { SECTIONS, SECTION_WORD, opening, outline, underAll, type Line, type Under } from '../family/outline.js'
+import { SECTION_WORD, opening, outline, underAll, type Line, type Under } from '../family/outline.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import type { Conversations } from '../conversationOpening.js'
 import { threadKey, type ThreadIndex } from '../threads.js'
-import { fiberKey } from './documents.js'
+import { fiberKey, type DocKey } from './documents.js'
 import { slug } from '../threadOutline.js'
-import type { WorkerActions } from './workerActions.js'
 import './family-page.css'
 
-/** Sent files a thread shows before the earlier ones fold behind a count. */
-const FILES = 8
 /** A sent file that is a thread's tapestry or report when its fiber's directory holds none. */
 const LEAD_NAME = /^(tapestry|report)\.html$/i
 /** How the fold of threads set aside names each kind, one and many. */
@@ -22,7 +19,12 @@ export interface FamilyFeeds extends MapFeeds {
   refresh(): void
   /** The thread's tapestry or report, read when the page shows what the thread holds. */
   lead(card: KanbanCard): Promise<MapFile | undefined>
+  /** One of a thread's documents drawn at its full height, for the page to hold in its own scroll. */
+  embed(card: KanbanCard, doc: DocKey): EmbeddedDocument
 }
+
+/** A document unfolded under its row, and how to let it go. */
+export interface EmbeddedDocument { el: HTMLElement; dispose(): void }
 
 /**
  * Where a page stands, kept by its channel so it outlives the page's frame:
@@ -35,6 +37,10 @@ export interface MapPlace {
   /** The fiber it lands on, by host and identity, which holds before the family's cards have loaded. */
   landing?: string
   worker?: string
+  /** The thread last entered (a click, Enter or `l`), which voice follows; the highlight alone commits nothing. */
+  entered?: string | null
+  /** The document each thread has unfolded under its row, by thread. */
+  docs?: Map<string, DocKey>
 }
 const fiberOf = (card: KanbanCard): string => `${card.originId}:${card.uid ?? card.id}`
 /** A page that lands on a fiber's row. */
@@ -48,13 +54,14 @@ export const placeAt = (card: KanbanCard): MapPlace => ({ open: new Set(), selec
  * A row leads with its name and what it came to (or what it asks); a click
  * unfolds it to what it holds (tapestry or report, constitution, sent files
  * oldest to newest) and its own threads, laid out the same way, and a second
- * click folds it. A click moves Rex quietly to the thread's worker; only
- * "Open in Rex" or `c` opens a conversation. It reads feeds and repaints only
- * while its frame is selected in an open reader; its frame's eviction ends it.
+ * click folds it. A document's chip unfolds that document under the row, full
+ * width and at its full height, in the page's one scroll; a second click folds
+ * it. A click moves Rex quietly to the thread's worker; only `c` opens a
+ * conversation. It reads feeds and repaints only while its frame is selected in
+ * an open reader; its frame's eviction ends it.
  */
 export class FamilyPage {
   readonly el = el('div', 'ws-family-page family-map')
-  private readonly counts = el('div', 'ws-family-counts')
   private readonly scroller = el('div', 'ws-family-scroll')
   private readonly tree = el('div', 'fp-tree')
   private readonly announcement = el('p', 'ws-family-announce')
@@ -69,30 +76,29 @@ export class FamilyPage {
   /** The landing this page has come to, and in which family: a family that grows an orchestrator lands again. */
   private landed = ''
   private awake = true
-  private readonly open: (card: KanbanCard, doc?: string) => void
-  private readonly conversations: Conversations
+  private readonly conversations: Pick<Conversations, 'reach'>
   private readonly feeds: FamilyFeeds
   private readonly place: MapPlace
   private readonly disposed: () => void
   private readonly sighted: () => void
-  /** Builds a thread's own worker line: its opening message, Resume and New session. */
-  workerActions?: (card: KanbanCard) => WorkerActions
-  /** Each unfolded thread's worker line, kept across repaints so a draft survives a poll. */
-  private readonly actions = new Map<string, WorkerActions>()
+  /** `h` from a row: off the page, back where it was opened from. */
+  leave?: () => void
+  /** Each unfolded document, by thread, kept across repaints so a page holds its place. */
+  private readonly embedded = new Map<string, EmbeddedDocument & { doc: DocKey }>()
 
   /**
-   * `open` shows a page of a thread on the stage; `conversations` moves Rex
-   * quietly to a thread's existing window or opens its conversation outright;
+   * `conversations` moves Rex quietly to a thread's existing window;
    * `sighted` hears the selection move.
    */
-  constructor(open: (card: KanbanCard, doc?: string) => void, conversations: Conversations, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, sighted: () => void = () => {}) {
-    this.open = open; this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.sighted = sighted
+  constructor(conversations: Pick<Conversations, 'reach'>, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, sighted: () => void = () => {}) {
+    this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.sighted = sighted
+    this.place.docs ??= new Map()
     this.tree.setAttribute('role', 'tree')
     this.tree.setAttribute('aria-label', 'The constitution and its threads, most urgent first')
     this.announcement.setAttribute('aria-live', 'polite')
     this.scroller.append(this.tree)
     const grid = el('div', 'ws-family-grid')
-    grid.append(this.counts, this.scroller, this.announcement)
+    grid.append(this.scroller, this.announcement)
     this.el.append(grid)
     this.tree.addEventListener('click', event => this.clicked(event))
     this.tree.addEventListener('keydown', event => this.key(event))
@@ -126,25 +132,24 @@ export class FamilyPage {
     return true
   }
   /**
-   * Hands `then` what `l` opens from the selected thread, its tapestry else its
-   * newest file, once the tapestry's read has landed. A page whose selection
-   * has moved by then hears nothing.
+   * Unfolds the selected thread's tapestry, else its newest file, under its
+   * row, or folds it, once the tapestry's read has landed. A page whose
+   * selection has moved by then does nothing.
    */
-  leading(then: (lead?: { card: KanbanCard; doc: string }) => void): void {
+  toggleLead(): void {
     const at = this.leadThread
-    if (at) this.readLead(at)
-    void Promise.resolve(at && this.leads.get(at.key)?.read).then(() => {
+    if (!at) return
+    this.readLead(at)
+    void this.leads.get(at.key)!.read.then(() => {
       const thread = this.leadThread
-      if (!this.awake || thread?.key !== at?.key) return
-      const file = (thread && this.leadOf(thread)) ?? thread?.files[0]
-      then(thread && file ? { card: thread.card, doc: file.key } : undefined)
+      if (!this.awake || thread?.key !== at.key) return
+      const file = this.leadOf(thread) ?? thread.files[0]
+      if (file) this.toggleDoc(thread, file.key)
     })
   }
-  /** The page has selected a thread other than its own. */
-  get elsewhere(): boolean { return !!this.selectedThread && this.selectedThread.key !== this.model?.current }
-  /** The thread the page rests on, which voice follows: the selected thread, else the constitution heading it. */
-  get settled(): KanbanCard | undefined { return this.leadThread?.card }
-  /** The thread the page has selected, which `c` opens the worker of. */
+  /** The thread the page rests on, which voice follows: the thread last entered, else the constitution heading it. */
+  get settled(): KanbanCard | undefined { return (this.model?.threads.get(this.place.entered ?? '') ?? this.model?.root)?.card }
+  /** The thread the page has highlighted, which `c` opens the worker of. */
   get selection(): KanbanCard | undefined { return this.selectedThread?.card }
 
   private get selectedKey(): string | null { return this.place.selected ?? this.model?.root.key ?? null }
@@ -171,6 +176,7 @@ export class FamilyPage {
     this.landed = `${thread.key}@${fiberOf(this.model!.root.card)}`
     for (const key of opening(this.model!, thread.key, this.under)) this.place.open.add(key)
     this.place.selected = thread === this.model!.root ? null : thread.key
+    this.place.entered = thread.key
     this.paint()
     const row = this.row(thread.key)
     if (row && thread !== this.model!.root) this.reveal(row, true)
@@ -180,20 +186,12 @@ export class FamilyPage {
   private paint(): void {
     const model = this.model
     if (!model) return
-    // What asks across the family, by state; a lone constitution's head already says it.
-    this.counts.replaceChildren(...SECTIONS.flatMap(section => {
-      const n = [...model.threads.values()].filter(thread => thread.tone === section).length
-      if (!n || section === 'still' || model.threads.size === 1) return []
-      const count = el('span', 'ws-family-count'), word = SECTION_WORD[section].toLowerCase()
-      count.dataset.standing = section
-      count.append(markSvg('', section), `${n} ${n === 1 ? word.replace(/s$/, '') : word}`)
-      return [count]
-    }))
     this.lines = outline(model, this.place.open, this.under)
     const keys = new Set([model.root.key, ...this.lines.map(line => line.key)])
     if (!keys.has(this.place.selected ?? '')) this.place.selected = null
     const order = [this.fillHead(model.root), ...this.lines.map(line => this.fill(line))]
     for (const [key, row] of this.rows) if (!keys.has(key)) { row.remove(); this.rows.delete(key) }
+    for (const key of this.embedded.keys()) if (!keys.has(key)) this.dropDoc(key)
     order.forEach((row, n) => { if (this.tree.children[n] !== row) this.tree.insertBefore(row, this.tree.children[n] ?? null) })
     this.markSelected()
     for (const thread of [model.root, ...this.lines.flatMap(line => line.kind === 'thread' ? [line.thread] : [])]) this.readLead(thread)
@@ -240,12 +238,11 @@ export class FamilyPage {
   private makeRow(cls: string): HTMLElement {
     const row = el('div', cls); row.setAttribute('role', 'treeitem'); row.tabIndex = -1
     const title = el('div', 'fp-title')
-    const lead = el('button', 'fp-lead'); lead.type = 'button'
-    title.append(markSvg('fp-mark', 'working'), el('span', 'fp-name'), lead, el('span', 'fp-meta'), el('span', 'fp-count'))
-    row.append(title, el('p', 'fp-note'), el('div', 'fp-held'))
+    title.append(markSvg('fp-mark', 'working'), el('span', 'fp-name'), el('span', 'fp-docs'), el('span', 'fp-meta'), el('span', 'fp-count'))
+    row.append(title, el('p', 'fp-note'), el('div', 'fp-files'), el('div', 'fp-doc'))
     return row
   }
-  /** A thread's row: one mark, the state its section says; its slug, the name in its tooltip as on the Desk, and its tapestry or report while folded; its own state and last move; what it came to or asks. */
+  /** A thread's row: one mark, the state its section says; its slug, the name in its tooltip as on the Desk; what it holds; its last move; what it came to or asks. */
   private fillThread(row: HTMLElement, thread: MapThread, standing: Standing, open: boolean): void {
     const model = this.model!
     row.dataset.thread = thread.key
@@ -263,59 +260,79 @@ export class FamilyPage {
     note.textContent = thread.note
     note.hidden = !thread.note
     row.setAttribute('aria-label', [thread.name, thread.word].filter(Boolean).join(', '))
-    const lead = this.leadOf(thread), way = row.querySelector<HTMLButtonElement>('.fp-lead')!
-    way.hidden = open || !lead
-    if (lead) Object.assign(way.dataset, { held: lead.key, owner: thread.key })
-    way.textContent = lead?.name ?? ''
-    way.toggleAttribute('data-unread', !!lead?.unread)
-    const held = row.querySelector<HTMLElement>('.fp-held')!
-    held.hidden = !open
-    if (open) this.fillHeld(held, thread)
-    this.seatActions(held, thread, open)
+    this.fillDocs(row, thread)
+    this.seatDoc(row.querySelector<HTMLElement>('.fp-doc')!, thread)
   }
-  /** An unfolded thread's own worker line ends what it holds; the page's own constitution has its line in the band. */
-  private seatActions(held: HTMLElement, thread: MapThread, open: boolean): void {
-    let line = this.actions.get(thread.key)
-    if (!open || !this.workerActions || thread.key === this.model!.current) {
-      line?.el.remove()
-      return
-    }
-    if (!line) { line = this.workerActions(thread.card); this.actions.set(thread.key, line) }
-    line.update(thread.card)
-    if (line.el.parentElement !== held || held.lastElementChild !== line.el) held.append(line.el)
-  }
-  /** What a thread holds, in the one order every surface keeps: its tapestry or report, its constitution, its sent files oldest to newest. */
-  private fillHeld(held: HTMLElement, thread: MapThread): void {
-    const lead = this.leadOf(thread)
-    const files = thread.files.filter(file => file.key !== lead?.key).reverse()
-    const earlier = this.place.open.has(`earlier:${thread.key}`) ? 0 : Math.max(0, files.length - FILES)
-    const shape = JSON.stringify([lead?.key, lead?.unread, files.map(file => [file.key, file.unread]), earlier, conversable(thread.card), Math.floor(this.model!.now / 60_000)])
-    if (held.dataset.shape === shape) return
-    held.dataset.shape = shape
-    const way = (file: MapFile, kind: string): HTMLButtonElement => {
-      const button = el('button', 'fp-file'); button.type = 'button'
-      button.dataset.held = file.key; button.dataset.owner = thread.key; button.dataset.kind = kind; button.dataset.level = thread.key
-      button.toggleAttribute('data-unread', file.unread)
-      button.append(el('span', 'fp-file-name', file.name))
-      if (file.at && kind === 'file') button.append(el('span', 'fp-file-age', shortAgo(file.at, this.model!.now)))
+  /**
+   * What a thread holds, on its row in the one order every surface keeps, in
+   * the mod's glyphs: ⌗ its tapestry or report, ☰ its constitution, ⧉ n its
+   * sent files, which unfold as a list, newest first.
+   */
+  private fillDocs(row: HTMLElement, thread: MapThread): void {
+    const lead = this.leadOf(thread), shown = this.place.docs!.get(thread.key)
+    const files = thread.files.filter(file => file.key !== lead?.key)
+    const listed = this.place.open.has(`files:${thread.key}`) && files.length > 0
+    const shape = JSON.stringify([lead?.key, lead?.unread, files.map(file => [file.key, file.unread]), listed, shown, Math.floor(this.model!.now / 60_000)])
+    const docs = row.querySelector<HTMLElement>('.fp-docs')!, list = row.querySelector<HTMLElement>('.fp-files')!
+    list.hidden = !listed
+    if (docs.dataset.shape === shape) return
+    docs.dataset.shape = shape
+    const chip = (cls: string, glyph: string, label: string, held?: string): HTMLButtonElement => {
+      const button = el('button', `fp-chip ${cls}`, glyph); button.type = 'button'
+      button.title = label; button.setAttribute('aria-label', label)
+      button.dataset.owner = button.dataset.level = thread.key
+      if (held) { button.dataset.held = held; button.setAttribute('aria-pressed', String(held === shown)) }
       return button
     }
-    const items: HTMLElement[] = []
-    if (lead) items.push(way(lead, 'lead'))
-    if (thread.card.path) items.push(way({ key: fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id), name: 'Constitution', at: 0, unread: false }, 'constitution'))
-    if (earlier) {
-      const more = el('button', 'fp-earlier', `${earlier} earlier`); more.type = 'button'
-      more.dataset.earlier = more.dataset.level = thread.key
-      items.push(more)
+    const chips: HTMLElement[] = []
+    if (lead) chips.push(chip('fp-lead', '⌗', lead.name, lead.key))
+    if (thread.card.path) chips.push(chip('fp-constitution', '☰', 'Constitution', fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id)))
+    if (files.length) {
+      const all = chip('fp-sent', `⧉ ${files.length}`, `${files.length} sent ${files.length === 1 ? 'file' : 'files'}`)
+      all.dataset.files = thread.key
+      all.setAttribute('aria-expanded', String(listed))
+      chips.push(all)
     }
-    items.push(...files.slice(earlier).map(file => way(file, 'file')))
-    if (conversable(thread.card)) {
-      const rex = el('button', 'fp-converse', thread.card.terminalBackend === 'rex' ? 'Open in Rex' : 'Open conversation'); rex.type = 'button'
-      rex.title = `${rex.textContent} · c`
-      rex.dataset.converse = rex.dataset.level = thread.key
-      items.push(rex)
+    for (const [n, file] of [lead, ...files].entries()) if (file?.unread) chips[n === 0 ? 0 : chips.length - 1]?.toggleAttribute('data-unread', true)
+    docs.replaceChildren(...chips)
+    list.replaceChildren(...(listed ? files : []).map(file => {
+      const item = el('button', 'fp-file'); item.type = 'button'
+      item.dataset.held = file.key; item.dataset.owner = item.dataset.level = thread.key
+      item.setAttribute('aria-pressed', String(file.key === shown))
+      item.toggleAttribute('data-unread', file.unread)
+      item.append(el('span', 'fp-file-name', file.name))
+      if (file.at) item.append(el('span', 'fp-file-age', shortAgo(file.at, this.model!.now)))
+      return item
+    }))
+  }
+  /** The document the thread has unfolded, drawn under its row. */
+  private seatDoc(slot: HTMLElement, thread: MapThread): void {
+    const want = this.place.docs!.get(thread.key)
+    let shown = this.embedded.get(thread.key)
+    if (shown && shown.doc !== want) { this.dropDoc(thread.key); shown = undefined }
+    if (want && !shown) {
+      shown = { ...this.feeds.embed(thread.card, want), doc: want }
+      this.embedded.set(thread.key, shown)
+      slot.replaceChildren(shown.el)
     }
-    held.replaceChildren(...items)
+    slot.hidden = !shown
+  }
+  private dropDoc(key: string): void {
+    const shown = this.embedded.get(key)
+    if (!shown) return
+    shown.dispose()
+    shown.el.remove()
+    this.embedded.delete(key)
+  }
+  /** A chip's document unfolds under its row, or folds; either enters the thread. */
+  private toggleDoc(thread: MapThread, doc: DocKey): void {
+    const docs = this.place.docs!
+    if (docs.get(thread.key) === doc) docs.delete(thread.key)
+    else docs.set(thread.key, doc)
+    this.enter(thread.key)
+    this.paint()
+    const row = this.row(thread.key)
+    if (row && docs.has(thread.key)) this.reveal(row, true)
   }
   private markSelected(): void {
     const selected = this.selectedKey
@@ -342,44 +359,43 @@ export class FamilyPage {
 
   private clicked(event: MouseEvent): void {
     const target = event.target as Element, model = this.model
-    if (!model || event.detail > 1 || target.closest('.ws-worker-acts')) return
-    const held = target.closest<HTMLElement>('[data-held]'), earlier = target.closest<HTMLElement>('[data-earlier]'), rex = target.closest<HTMLElement>('[data-converse]')
-    if (held) { this.open(model.threads.get(held.dataset.owner!)!.card, held.dataset.held); return }
-    if (earlier) { this.toggle(`earlier:${earlier.dataset.earlier}`); return }
-    if (rex) { this.chat(model.threads.get(rex.dataset.converse!)!); return }
+    if (!model || event.detail > 1 || target.closest('.fp-doc')) return
+    const held = target.closest<HTMLElement>('[data-held]'), files = target.closest<HTMLElement>('[data-files]')
+    if (held) { this.toggleDoc(model.threads.get(held.dataset.owner!)!, held.dataset.held!); return }
+    if (files) { this.select(files.dataset.files!); this.toggle(`files:${files.dataset.files}`); return }
     const key = target.closest<HTMLElement>('[role="treeitem"]')?.dataset.row
     if (key) this.activate(key)
   }
-  /** A click or Enter: a thread's row unfolds and moves Rex quietly to its worker, or folds; the fold of threads set aside opens or closes; the head moves Rex. */
+  /** A click or Enter: a thread's row unfolds or folds and is entered; the fold of threads set aside opens or closes; the head is entered. */
   private activate(key: string): void {
     const model = this.model!, thread = model.threads.get(key)
     this.select(key)
-    if (thread === model.root) { this.quietly(thread); return }
-    const unfolding = !this.place.open.has(key)
-    this.toggle(key)
-    if (thread && unfolding) this.quietly(thread)
+    if (thread && thread !== model.root) this.toggle(key)
+    else if (!thread) { this.toggle(key); return }
+    this.enter(key)
   }
   private toggle(key: string): void {
     if (!this.place.open.delete(key)) this.place.open.add(key)
     this.paint()
     this.focus()
   }
-  /** Moves Rex to the thread's worker without a new tab; the ring moves only if Rex moved. */
-  private quietly(thread: MapThread): void {
-    void this.conversations.reach(thread.card).then(moved => { if (moved) this.ring(thread) })
+  /** Entering a thread commits to it: voice follows it, and Rex moves quietly to its worker's window. */
+  private enter(key: string): void {
+    const thread = this.model!.threads.get(key)
+    if (!thread || this.place.entered === key) return
+    this.place.entered = key
+    this.sighted()
+    void this.conversations.reach(thread.card).then(moved => {
+      if (!moved) return
+      this.place.worker = thread.key
+      if (this.awake) this.paint()
+    })
   }
-  private chat(thread: MapThread): void {
-    if (this.conversations.open(thread.card)) this.ring(thread)
-  }
-  private ring(thread: MapThread): void {
-    this.place.worker = thread.key
-    if (this.awake) this.paint()
-  }
+  /** The highlight: what `c` opens and the keys move from; it commits to nothing. */
   private select(key: string): void {
     if (key === this.selectedKey) return
     this.place.selected = key === this.model?.root.key ? null : key
     this.markSelected()
-    this.sighted()
   }
   /** Escape: folds the open row the selection sits in, selecting it; false when nothing is open around it. */
   foldOut(): boolean {
@@ -393,47 +409,41 @@ export class FamilyPage {
     return false
   }
   /**
-   * The tree's keys, unmodified, a level at a time. A level is the head's
-   * holdings and the family's threads, or, inside an unfolded thread, its
-   * holdings and its own threads. j and k (or down and up) step between the
-   * pieces of the level; l (or right) unfolds a row and steps into it; h (or
-   * left) steps out to the thread above and folds it, and from the family's
-   * threads to the head. Enter does what a click does, the only key to reach Rex.
+   * One vim grammar, depth along h and l. j and k (or down and up) move the
+   * highlight among the rows, never committing; on a row's documents they
+   * step among them. l (or right) goes in: from a row to its documents, entering
+   * the thread, and from a document to its page unfolded under the row (⧉ n
+   * lists the sent files). h (or left) goes out: from a document to its row,
+   * folding what it had unfolded, and from a row back off the page. Enter does
+   * what a click does.
    */
   private key(event: KeyboardEvent): void {
     const model = this.model, target = event.target as HTMLElement
     if (!model || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
-    const head = this.row(model.root.key)!
-    const item = target === head ? head : target.closest<HTMLElement>('[data-level]')
-    if (!item || item.closest('.ws-worker-acts')) return
-    const owner = item === head ? undefined : item.dataset.level!, row = item.dataset.row
-    if (row) this.select(row)
-    else if (owner) this.select(owner)
-    const level = (key: string): HTMLElement[] => [...this.tree.querySelectorAll<HTMLElement>('[data-level]')].filter(el => el.dataset.level === key && !el.hidden && !el.closest('[hidden]'))
-    const down = (): HTMLElement | undefined => {
-      if (item === head) return level(model.root.key)[0]
-      if (!row) return undefined
-      if (!this.place.open.has(row)) this.toggle(row)
-      if (!row.startsWith('aside:')) return level(row)[0]
-      const peers = level(owner!)
-      return peers[peers.indexOf(item) + 1]
-    }
+    const item = target.closest<HTMLElement>('[data-row], [data-level]')
+    if (!item || item.closest('.fp-doc')) return
+    const onRow = item.getAttribute('role') === 'treeitem', owner = onRow ? item.dataset.row! : item.dataset.level!
+    const thread = model.threads.get(owner)
+    const docs = (): HTMLElement[] => [...(this.row(owner)?.querySelectorAll<HTMLElement>('.fp-docs button, .fp-files:not([hidden]) button') ?? [])]
     let next: HTMLElement | undefined
     const step = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 }[event.key]
     if (step) {
-      if (owner === undefined) next = step > 0 ? level(model.root.key)[0] : undefined
-      else { const peers = level(owner); next = peers[peers.indexOf(item) + step] }
+      const peers = onRow ? [...this.tree.querySelectorAll<HTMLElement>('[role="treeitem"]')] : docs()
+      next = peers[peers.indexOf(item) + step]
     } else if (event.key === 'l' || event.key === 'ArrowRight') {
-      if (!row && item !== head) { event.preventDefault(); item.click(); return }
-      next = down()
+      if (onRow && thread) { this.enter(owner); next = docs()[0]; if (!next && !this.place.open.has(owner) && thread !== model.root) this.toggle(owner) }
+      else if (onRow) { this.toggle(owner); return void event.preventDefault() }
+      else if (item.dataset.files && !this.place.open.has(`files:${owner}`)) { this.toggle(`files:${owner}`); next = docs().find(doc => doc.closest('.fp-files')) }
+      else if (item.dataset.held && thread && this.place.docs!.get(owner) !== item.dataset.held) { this.toggleDoc(thread, item.dataset.held); next = this.findDoc(owner, item.dataset.held) }
+      else return void event.preventDefault()
     } else if (event.key === 'h' || event.key === 'ArrowLeft') {
-      if (owner === undefined) return
-      if (owner === model.root.key) next = head
-      else { next = this.row(owner); if (this.place.open.has(owner)) this.toggle(owner) }
-      if (next) this.select(next.dataset.row ?? model.root.key)
-    } else if ((event.key === 'Enter' || event.key === ' ') && (row || item === head)) {
+      if (onRow) { event.preventDefault(); this.leave?.(); return }
+      if (this.place.docs!.delete(owner)) this.paint()
+      if (item.closest('.fp-files')) this.place.open.delete(`files:${owner}`), this.paint()
+      next = this.row(owner)
+    } else if ((event.key === 'Enter' || event.key === ' ') && onRow) {
       event.preventDefault()
-      this.activate(row ?? model.root.key)
+      this.activate(owner)
       return
     } else return
     event.preventDefault()
@@ -441,8 +451,11 @@ export class FamilyPage {
     if (next.dataset.row) this.select(next.dataset.row)
     next.focus({ preventScroll: true })
     this.reveal(next, false)
-    const thread = next.dataset.row ? model.threads.get(next.dataset.row) : undefined
-    this.announcement.textContent = thread ? [thread.name, thread.note].filter(Boolean).join('. ') : next.textContent ?? ''
+    const at = next.dataset.row ? model.threads.get(next.dataset.row) : undefined
+    this.announcement.textContent = at ? [at.name, at.note].filter(Boolean).join('. ') : next.title || next.textContent || ''
+  }
+  private findDoc(owner: string, held: string): HTMLElement | undefined {
+    return [...(this.row(owner)?.querySelectorAll<HTMLElement>('[data-held]') ?? [])].find(doc => doc.dataset.held === held)
   }
 
   /** The page stops where it is, reading and drawing nothing, until its frame is selected again. */
@@ -453,8 +466,7 @@ export class FamilyPage {
   }
   dispose(): void {
     this.suspend()
-    for (const line of this.actions.values()) line.dispose()
-    this.actions.clear()
+    for (const key of [...this.embedded.keys()]) this.dropDoc(key)
     this.disposed()
   }
 }
