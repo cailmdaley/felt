@@ -690,7 +690,11 @@ export class Workspace {
     state.familyPage ??= new FamilyPage({ reach: card => this.reach(card) }, this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
       () => { if (this.current === state) this.sight(state) },
-      () => { if (this.current === state && this.isActive) this.dock.setActionCard(this.actionCard(state.card)) })
+      () => { if (this.current === state && this.isActive) this.dock.setActionCard(this.actionCard(state.card)) },
+      (card, verb, anchor) => {
+        if (verb === 'rest') this.opts.onRest?.(card, anchor)
+        else this.queueVerdict(card, ({ review: 'awaitingReview', temper: 'tempered', discard: 'composted' } as const)[verb])
+      }, !!this.opts.onRest)
     state.familyPage.leave ??= () => this.returnToOrigin()
     state.familyPage.update(state.card, this.graph())
     return state.familyPage.el

@@ -35,6 +35,19 @@ export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lif
   return reachable
 }
 
+/** The console and thread rows share the same stroke icon and keyboard label. */
+export function iconVerb(verb: LifecycleVerb, target = ''): HTMLButtonElement {
+  const spec = verbSpec(verb), key = { review: 'a', rest: 's', temper: 't', discard: 'x' }[verb]
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = `ws-header-icon ${spec.cls}`
+  button.dataset.verb = spec.label
+  button.title = `${spec.label}${target ? ` ${target}` : ''} (${key})`
+  button.setAttribute('aria-label', button.title)
+  button.innerHTML = headerIcon(spec.icon)
+  return button
+}
+
 /** Draw a button as the header draws a lifecycle verb: its stroke icon, then its word, in its pigment. */
 export function dressVerb(button: HTMLButtonElement, verb: LifecycleVerb): HTMLButtonElement {
   const spec = verbSpec(verb)

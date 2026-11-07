@@ -131,6 +131,21 @@ describe('a row', () => {
     expect(chips(family, 'Mid')).toEqual(['⌗', '☰', '⧉ 3'])
     expect(row(family, 'Mid').querySelector('.fp-lead')!.getAttribute('aria-label')).toBe('Tapestry')
   })
+  it('offers the console verbs for each thread state, and a click does not unfold or enter it', () => {
+    const work = { ...mid, shuttleKind: 'oneshot' as const }, review = { ...done, tempered: undefined, shuttleKind: 'oneshot' as const }
+    const act = vi.fn(), reach = vi.fn(async () => true)
+    const family = new FamilyPage({ reach }, feeds, { open: new Set(), selected: null }, vi.fn(), vi.fn(), vi.fn(), act, true)
+    family.update(root, new ThreadIndex([root, work, review]), now)
+    expect(row(family, 'Mid').querySelectorAll('.fp-verbs button')).toHaveLength(2)
+    expect(row(family, 'Done').querySelectorAll('.fp-verbs button')).toHaveLength(2)
+    expect(row(family, 'hub').querySelectorAll('.fp-verbs button')).toHaveLength(0)
+    const close = row(family, 'Mid').querySelector<HTMLButtonElement>('.kbn-ctl-review')!
+    click(close)
+    expect(act).toHaveBeenCalledExactlyOnceWith(work, 'review', close)
+    expect(family.selection).toEqual(work)
+    expect(row(family, 'Mid').getAttribute('aria-expanded')).toBe('false')
+    expect(reach).not.toHaveBeenCalled()
+  })
   it('keeps the set-aside behind its fold until asked', () => {
     const { family } = made()
     expect(said(family)).not.toContain('Done')

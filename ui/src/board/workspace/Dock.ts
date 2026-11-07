@@ -15,7 +15,7 @@ import { coarsePointer } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
-import { headerLifecycleVerbsFor, verbSpec, type LifecycleVerb } from './lifecycleVerbs.js'
+import { headerLifecycleVerbsFor, iconVerb, verbSpec, type LifecycleVerb } from './lifecycleVerbs.js'
 import { WorkerActions } from './workerActions.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
@@ -796,24 +796,18 @@ export class Dock {
     verdict.setAttribute('role', 'group')
     verdict.setAttribute('aria-label', 'Verdict')
     markVerdictHost(this.head, card)
-    const verb = (name: LifecycleVerb, key: string, run: (button: HTMLButtonElement) => void): HTMLButtonElement => {
-      const spec = verbSpec(name)
-      const button = document.createElement('button')
-      button.type = 'button'
-      button.className = `ws-header-icon ${spec.cls}`
-      button.dataset.verb = spec.label
-      button.title = `${spec.label} (${key})`; button.setAttribute('aria-label', `${spec.label} (${key})`)
-      button.innerHTML = headerIcon(spec.icon)
+    const verb = (name: LifecycleVerb, run: (button: HTMLButtonElement) => void): HTMLButtonElement => {
+      const button = iconVerb(name)
       button.addEventListener('click', () => run(button))
       verdict.append(button)
       return button
     }
     const target = (): KanbanCard => this.actionCard ?? card
-    const review = verb('review', 'a', () => this.verdict(target(), 'awaitingReview'))
+    const review = verb('review', () => this.verdict(target(), 'awaitingReview'))
     const onRest = this.onRest
-    const rest = onRest ? verb('rest', 's', button => onRest(target(), button)) : null
-    const temper = verb('temper', 't', () => this.verdict(target(), 'tempered'))
-    const discard = verb('discard', 'x', () => this.verdict(target(), 'composted'))
+    const rest = onRest ? verb('rest', button => onRest(target(), button)) : null
+    const temper = verb('temper', () => this.verdict(target(), 'tempered'))
+    const discard = verb('discard', () => this.verdict(target(), 'composted'))
     const worker = this.workerActionsFor(card)
     this.disposers.push(() => worker.dispose())
 

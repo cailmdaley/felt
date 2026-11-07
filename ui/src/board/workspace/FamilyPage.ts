@@ -7,6 +7,7 @@ import type { Conversations } from '../conversationOpening.js'
 import { threadKey, type ThreadIndex } from '../threads.js'
 import { fiberKey, type DocKey } from './documents.js'
 import { slug } from '../threadOutline.js'
+import { headerLifecycleVerbsFor, iconVerb, type LifecycleVerb } from './lifecycleVerbs.js'
 import './family-page.css'
 
 /** A sent file that is a thread's tapestry or report when its fiber's directory holds none. */
@@ -82,6 +83,8 @@ export class FamilyPage {
   private readonly disposed: () => void
   private readonly sighted: () => void
   private readonly selectionChanged: () => void
+  private readonly act?: (card: KanbanCard, verb: LifecycleVerb, anchor: HTMLElement) => void
+  private readonly canRest: boolean
   /** `h` from a row: off the page, back where it was opened from. */
   leave?: () => void
   /** Each unfolded document, by thread, kept across repaints so a page holds its place. */
@@ -91,8 +94,8 @@ export class FamilyPage {
    * `conversations` moves Rex quietly to a thread's existing window;
    * `sighted` hears the selection move.
    */
-  constructor(conversations: Pick<Conversations, 'reach'>, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, sighted: () => void = () => {}, selectionChanged: () => void = () => {}) {
-    this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.sighted = sighted; this.selectionChanged = selectionChanged
+  constructor(conversations: Pick<Conversations, 'reach'>, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, sighted: () => void = () => {}, selectionChanged: () => void = () => {}, act?: (card: KanbanCard, verb: LifecycleVerb, anchor: HTMLElement) => void, canRest = false) {
+    this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.sighted = sighted; this.selectionChanged = selectionChanged; this.act = act; this.canRest = canRest
     this.place.docs ??= new Map()
     this.tree.setAttribute('role', 'tree')
     this.tree.setAttribute('aria-label', 'The constitution and its threads, most urgent first')
@@ -242,7 +245,7 @@ export class FamilyPage {
   private makeRow(cls: string): HTMLElement {
     const row = el('div', cls); row.setAttribute('role', 'treeitem'); row.tabIndex = -1
     const title = el('div', 'fp-title')
-    title.append(markSvg('fp-mark', 'working'), el('span', 'fp-name'), el('span', 'fp-docs'), el('span', 'fp-meta'), el('span', 'fp-count'))
+    title.append(markSvg('fp-mark', 'working'), el('span', 'fp-name'), el('span', 'fp-docs'), el('span', 'fp-meta'), el('span', 'fp-count'), el('span', 'fp-verbs'))
     row.append(title, el('p', 'fp-note'), el('div', 'fp-files'), el('div', 'fp-doc'))
     return row
   }
@@ -265,6 +268,17 @@ export class FamilyPage {
     note.hidden = !thread.note
     row.setAttribute('aria-label', [thread.name, thread.word].filter(Boolean).join(', '))
     this.fillDocs(row, thread)
+    const verbs = row.querySelector<HTMLElement>('.fp-verbs')!
+    const offered = thread !== model.root && this.act ? headerLifecycleVerbsFor(thread.card, this.canRest) : []
+    const shape = JSON.stringify([offered, slug(thread.card)])
+    if (verbs.dataset.shape !== shape) {
+      verbs.dataset.shape = shape
+      verbs.replaceChildren(...offered.map(verb => {
+        const button = iconVerb(verb, slug(thread.card))
+        button.addEventListener('click', event => { event.stopPropagation(); this.select(thread.key); this.act!(this.model!.threads.get(thread.key)!.card, verb, button) })
+        return button
+      }))
+    }
     this.seatDoc(row.querySelector<HTMLElement>('.fp-doc')!, thread)
   }
   /**
@@ -424,7 +438,7 @@ export class FamilyPage {
    */
   private key(event: KeyboardEvent): void {
     const model = this.model, target = event.target as HTMLElement
-    if (!model || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+    if (!model || target.closest('.fp-verbs') || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
     const item = target.closest<HTMLElement>('[data-row], [data-level]')
     if (!item || item.closest('.fp-doc')) return
     const onRow = item.getAttribute('role') === 'treeitem', owner = onRow ? item.dataset.row! : item.dataset.level!

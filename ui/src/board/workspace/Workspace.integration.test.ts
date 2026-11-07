@@ -840,6 +840,28 @@ describe('workspace reader integration', () => {
     press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }), 'composted')
     expect(document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-discard')!.title).toBe('Discard (x)')
   })
+  it('row verbs select their thread without unfolding it and share the undo queue', async () => {
+    workspace.dispose()
+    const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', status: 'active', shuttleKind: 'oneshot' })
+    const leaf = card({ id: 'hub/notch', uid: 'notch', originId: 'host-a', orchestrator: 'hub', status: 'closed', shuttleKind: 'oneshot' })
+    const feed = [hub, leaf], commit = vi.fn(), onRest = vi.fn()
+    bodyCards = feed
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed, commit, undefined, { onRest }), onRest })
+    workspace.open(hub, 'Desk'); await flush()
+    const row = document.querySelector<HTMLElement>('.ws-selected .fp-row:not(.fp-head)')!
+    const discard = row.querySelector<HTMLButtonElement>('.fp-verbs .kbn-ctl-discard')!
+    expect(discard.title).toBe('Discard notch (x)')
+    vi.useFakeTimers()
+    discard.click()
+    expect(row.getAttribute('aria-selected')).toBe('true')
+    expect(row.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('.ws-fiber-acts .ws-verdict-undo')).not.toBeNull()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true, cancelable: true }))
+    vi.advanceTimersByTime(6000)
+    expect(commit).not.toHaveBeenCalled()
+    discard.click(); vi.advanceTimersByTime(4000)
+    expect(commit).toHaveBeenCalledExactlyOnceWith(leaf, 'composted')
+  })
   it('lands a family\'s constitution on its page, first in its run, a leaf thread there too at its unfolded row, and one outside a family on its own page', async () => {
     workspace.dispose()
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
