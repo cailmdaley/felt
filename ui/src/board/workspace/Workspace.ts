@@ -159,6 +159,7 @@ export class Workspace {
       openDocument: (card, doc) => this.openFromMap(card, doc),
       converse: card => this.reach(card),
       constitutionKey: card => fiberKey(card.originId, card.uid ?? card.id),
+      shuttleBase: opts.shuttleBase,
       see: card => this.opts.onSight?.(card),
     }
     this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {

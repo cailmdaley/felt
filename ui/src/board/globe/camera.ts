@@ -7,7 +7,7 @@
  * HEALPix's own (Calabretta & Roukema 2007), where every cell is a straight
  * square diamond, scaled to the sphere's area so a tile is as wide in both.
  */
-import { faceAt, facePoint, planeOf, vecOf, type Vec } from './healpix.js'
+import { faceAt, facePoint, nside, planeOf, vecOf, type Cell, type Vec } from './healpix.js'
 
 export type Projection = 'globe' | 'plane'
 export interface Viewport { width: number; height: number }
@@ -120,6 +120,21 @@ export function frameOf({ turn, at, radius }: Camera, projection: Projection, { 
 }
 /** How far east of the frame's centre a place on the plane lies, by the copy nearest the centre. */
 export const planeOffset = (frame: Frame, px: number): number => wrapped(px - frame.atX, PERIOD)
+
+/** A cell's diamond on the screen's plane, north, west, south and east, at the copy nearest the centre; `shift` moves it by whole turns. */
+export function planeOutline(frame: Frame, { order, face, x, y }: Cell, shift = 0): number[] {
+  const side = nside(order), out: number[] = []
+  for (const [a, b] of [[x + 1, y + 1], [x, y + 1], [x, y], [x + 1, y]]) {
+    const [xs, ys] = planeOf({ face, fx: a / side, fy: b / side })
+    out.push(xs * PLANE_SCALE, ys * PLANE_SCALE)
+  }
+  const middle = (out[2] + out[6]) / 2, offset = planeOffset(frame, middle) + shift
+  for (let n = 0; n < 8; n += 2) {
+    out[n] = frame.cx + frame.r * (out[n] - middle + offset)
+    out[n + 1] = frame.cy - frame.r * (out[n + 1] - frame.atY)
+  }
+  return out
+}
 
 /** A vector's place on screen, and how far it faces the viewer: below zero it is over the horizon. */
 export function project(frame: Frame, v: Vec): { x: number; y: number; depth: number } {

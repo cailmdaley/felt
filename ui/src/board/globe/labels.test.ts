@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blocks, boxClear, boxFits, overlaps, placeNames, within, wrap } from './labels.js'
+import { blocks, boxClear, boxFits, inscribed, overlaps, placeNames, within, wrap } from './labels.js'
 
 const measure = (text: string): number => text.length * 7
 const diamond = (x: number, y: number, r: number): number[] => [x, y - r, x - r, y, x, y + r, x + r, y]
@@ -65,5 +65,19 @@ describe('laying a name into a tile', () => {
     ], frame, 9)
     expect(placed.map(item => item.owner)).toEqual(['first', 'third'])
     expect(overlaps(placed[0].box, placed[1].box)).toBe(false)
+  })
+})
+
+describe('a box inside a tile', () => {
+  const tile = [100, 0, 0, 100, 100, 200, 200, 100]
+  it('fills a diamond as far as its ratio allows, centred', () => {
+    const box = inscribed(tile, { x: 100, y: 100 }, 2)!
+    // A box of ratio a in a diamond of half-diagonals D: half-width D·a/(a+1).
+    expect(box.right - 100).toBeCloseTo(100 * 2 / 3, 1)
+    expect(box.bottom - 100).toBeCloseTo(100 / 3, 1)
+    expect(100 - box.left).toBeCloseTo(box.right - 100, 6)
+  })
+  it('finds none from a point outside', () => {
+    expect(inscribed(tile, { x: 5, y: 5 }, 1)).toBeNull()
   })
 })

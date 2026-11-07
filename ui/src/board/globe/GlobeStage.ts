@@ -1,11 +1,12 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, ATTENTION_WORD, conversable, type MapFeeds, type MapFile } from '../family/model.js'
 import { htmlEl as el, markPath, shortAgo, svgEl } from '../family/drawing.js'
-import { PERIOD, UPRIGHT, bounded, carried, facing, flight, frameOf, grip, invert, keeping, northUp, project, wholeRadius, type Camera, type Flight, type Frame, type Grip, type Projection, type Viewport } from './camera.js'
+import { PERIOD, UPRIGHT, bounded, carried, planeOutline, facing, flight, frameOf, grip, invert, keeping, northUp, project, wholeRadius, type Camera, type Flight, type Frame, type Grip, type Projection, type Viewport } from './camera.js'
 import { forestOf, persistentId } from './forest.js'
 import { NORTH, cellSpan, centre, child, facePoint, inCell, ipixOf, type FacePoint, type Vec } from './healpix.js'
-import { blocks, placeNames, within, type Block, type Candidate, type Point } from './labels.js'
-import { BEACON_PX, paint, paintLeaders, type Leader, type Palette, type Pulse } from './paint.js'
+import { blocks, inscribed, placeNames, within, type Block, type Box, type Candidate, type Point } from './labels.js'
+import { BEACON_PX, PREVIEW_PX, paint, paintLeaders, type Leader, type Palette, type Pulse } from './paint.js'
+import { Previews, type Shown } from './previews.js'
 import { askKind, sceneOf, traceOf, type Body, type Scene, type Tone } from './scene.js'
 import { cardNamed, type ThreadIndex } from '../threads.js'
 import { keystrokeIsSpokenFor } from '../views/ViewRegistry.js'
@@ -18,6 +19,8 @@ export interface GlobeHost {
   /** A click's quiet move of Rex to the thread's existing window (`Workspace.reach`); true once Rex moved. */
   converse(card: KanbanCard): Promise<boolean>
   constitutionKey(card: KanbanCard): string
+  /** The daemon's base, which previews read files from. */
+  shuttleBase: string
   /** The thread a surface has come to rest on, which voice follows; null for none. */
   see?(card: KanbanCard | null): void
   /** Heard when a feed lands. */
@@ -62,7 +65,15 @@ const TARGET_PX = 14
 const NAME_PX = 40, LEAD_PX = 70
 /** A constitution is named when its thread is in focus, or it is this wide: he seldom wants it. */
 const CONSTITUTION_PX = 170
+/** An archived thread is named once its tile is this wide, and not as one of the focus's own. */
+const SETTLED_PX = 220
 const MOST_NAMES = 90
+/** The share of its box a preview leaves around itself, and a caption's distance from it. */
+const PREVIEW_INSET = .05, CAPTION_GAP = 4
+const inset = (box: Box, share: number): Box => {
+  const dx = (box.right - box.left) * share / 2, dy = (box.bottom - box.top) * share / 2
+  return { left: box.left + dx, top: box.top + dy, right: box.right - dx, bottom: box.bottom - dy }
+}
 /** The type roles a name may take and their sizes, as styles/type.css sets them, at --leading-tight. */
 const ROLE_SIZE = { display: 34, title: 21, row: 16, note: 14 } as const
 type Role = keyof typeof ROLE_SIZE
@@ -110,6 +121,7 @@ export class GlobeStage {
   private readonly canvas = el('canvas', 'globe-canvas')
   private readonly context: CanvasRenderingContext2D
   private readonly names = el('div', 'globe-names')
+  private readonly previews: Previews
   private readonly crumbs = el('nav', 'globe-crumbs')
   private readonly counts = el('div', 'ws-family-counts globe-counts')
   private readonly toggle = el('div', 'globe-toggle')
@@ -144,6 +156,10 @@ export class GlobeStage {
   /** The thread a first tap came to, which a second tap converses with. */
   private tapped: string | null = null
   private readonly leads = new Map<string, MapFile | null>()
+  /** What the names and previews were last laid for, and the lines that left; a ring or a hover repaints without laying them again. */
+  private laid: { key: string; leaders: Leader[] } = { key: '', leaders: [] }
+  /** Counts what changes the layout besides the camera and the scene: a tapestry found, a preview's true shape. */
+  private revision = 0
   private readonly nameEls = new Map<string, HTMLButtonElement>()
   private readonly blockCache = new Map<string, Block[]>()
   private crumbShape = ''
@@ -160,6 +176,7 @@ export class GlobeStage {
     host.onFeeds = fed
     this.holding = setTimeout(fed, place.fed ? 0 : FEED_WAIT_MS)
     this.context = this.canvas.getContext('2d')!
+    this.previews = new Previews(host.shuttleBase, () => { this.revision++; this.request() })
     this.canvas.setAttribute('aria-hidden', 'true')
     this.names.setAttribute('role', 'listbox')
     this.names.setAttribute('aria-label', 'What the view holds')
@@ -175,7 +192,7 @@ export class GlobeStage {
     }
     this.toggle.setAttribute('role', 'group')
     this.toggle.setAttribute('aria-label', 'Projection')
-    this.el.append(this.canvas, this.names, head, this.toggle, this.peek, this.probe, this.ruler)
+    this.el.append(this.canvas, this.previews.el, this.names, head, this.toggle, this.peek, this.probe, this.ruler)
     const signal = this.listening.signal
     this.el.addEventListener('wheel', event => this.wheel(event), { passive: false, signal })
     this.canvas.addEventListener('pointerdown', event => this.down(event), { signal })
@@ -193,6 +210,7 @@ export class GlobeStage {
     this.host.onFeeds = undefined
     this.listening.abort()
     this.observer.disconnect()
+    this.previews.dispose()
     cancelAnimationFrame(this.frame)
     this.place.camera = this.camera
   }
@@ -263,9 +281,13 @@ export class GlobeStage {
     const centred = facing(body.centre, 1)
     const unit = frameOf(centred, this.place.projection, this.viewport), points = traceOf(body, 8).points
     let left = Infinity, right = -Infinity, up = Infinity, down = -Infinity
-    for (let n = 0; n < points.length; n += 3) {
+    const extend = (x: number, y: number): void => { left = Math.min(left, x); right = Math.max(right, x); up = Math.min(up, y); down = Math.max(down, y) }
+    if (unit.projection === 'plane') {
+      const corners = planeOutline(unit, body.cell)
+      for (let n = 0; n < 8; n += 2) extend(corners[n], corners[n + 1])
+    } else for (let n = 0; n < points.length; n += 3) {
       const at = project(unit, [points[n], points[n + 1], points[n + 2]])
-      left = Math.min(left, at.x); right = Math.max(right, at.x); up = Math.min(up, at.y); down = Math.max(down, at.y)
+      extend(at.x, at.y)
     }
     const radius = Math.min((width - 2 * FRAME_MARGIN) / (right - left), (bottom - top - 2 * FRAME_MARGIN) / (down - up))
     const sized: Camera = { ...centred, radius }
@@ -353,11 +375,17 @@ export class GlobeStage {
     if (this.bloom && now - this.bloom < BLOOM_MS) this.request()
     this.paintCrumbs()
     this.paintPeek()
-    paintLeaders(c, this.placeNames(frame, scene), this.palette!)
+    const key = this.layoutKey()
+    if (key !== this.laid.key) this.laid = { key, leaders: this.placeNames(frame, scene) }
+    paintLeaders(c, this.laid.leaders, this.palette!)
     for (const button of this.toggle.children) button.setAttribute('aria-pressed', String((button as HTMLElement).dataset.projection === this.place.projection))
     this.el.dataset.projection = this.place.projection
   }
 
+  private layoutKey(): string {
+    const { turn, at, radius } = this.camera
+    return [this.place.projection, ...turn, ...at, radius, this.viewport.width, this.viewport.height, this.place.focus, !!this.flying, this.headHeight, this.footHeight, this.revision, this.signature].join('|')
+  }
   private readPalette(): void {
     const paper = getComputedStyle(this.el).backgroundColor
     if (this.palette && paper === this.paper) return
@@ -366,12 +394,13 @@ export class GlobeStage {
     this.palette = {
       ocean: colour('ocean'), deep: colour('deep'), glow: colour('glow'), grid: colour('grid'), ink: colour('ink'), paper: colour('paper'), land: colour('land'), shade: colour('shade'),
       tones: Object.fromEntries(TONES.map(tone => [tone, colour(`tone-${tone}`)])) as Record<Tone, string>,
+      serif: getComputedStyle(this.el).fontFamily,
     }
   }
 
-  /** Lays the names that fit over the frame, reusing their elements, and gives back the lines from those standing off their tiles. */
+  /** Lays the previews and the names that fit over the frame, reusing their elements, and gives back the lines from names standing off their tiles. */
   private placeNames(frame: Frame, scene: Scene): Leader[] {
-    const { width, height } = this.viewport, r = frame.r, candidates: Body[] = []
+    const { width, height } = this.viewport, r = frame.r, candidates: Body[] = [], pages: Shown[] = []
     const visit = (body: Body): void => {
       const px = body.span * r
       if (px < NAME_PX) return
@@ -379,8 +408,13 @@ export class GlobeStage {
       const reach = body.radius * r
       if (at.depth < 0 || at.x < -reach || at.x > width + reach || at.y < -reach || at.y > height + reach) return
       if (body.kind === 'thread' && px >= LEAD_PX) this.readLead(body)
+      if (body.file && px >= PREVIEW_PX && this.previews.readable(body.file)) {
+        const outline = this.outlineOn(frame, body), box = outline && inscribed(outline, at, this.previews.aspect(body.key, body.file))
+        if (box) pages.push({ key: body.key, file: body.file, box: inset(box, PREVIEW_INSET), title: body.kind === 'lead' ? body.parent!.name : body.file.name })
+      }
       const page = body.kind === 'constitution' && body.parent!.key !== this.place.focus && px < CONSTITUTION_PX
-      if ((body.kind !== 'lead' || body.file) && !page) candidates.push(body)
+      const quiet = body.settled && px < SETTLED_PX && !this.within(body)
+      if ((body.kind !== 'lead' || body.file) && !page && !quiet) candidates.push(body)
       body.kids.forEach(visit)
     }
     scene.roots.forEach(visit)
@@ -390,8 +424,10 @@ export class GlobeStage {
     const box = { left: 8, top: this.headHeight + 4, right: width - 8, bottom: height - this.footHeight - 4 }
     const owed = candidates.filter(body => this.underFocus(body))
     // Thread names in the largest type their tiles allow may crowd out their neighbours; then all of them take the smallest.
-    let placed = placeNames(this.candidates(candidates, frame, scene, false), box, MOST_NAMES)
-    if (owed.some(body => !placed.some(name => name.owner === body))) placed = placeNames(this.candidates(candidates, frame, scene, true), box, MOST_NAMES)
+    const shown = new Map(pages.map(page => [page.key, page.box])), kept = [...shown.values()]
+    let placed = placeNames(this.candidates(candidates, frame, scene, false, shown), box, MOST_NAMES, kept)
+    if (owed.some(body => !placed.some(name => name.owner === body))) placed = placeNames(this.candidates(candidates, frame, scene, true, shown), box, MOST_NAMES, kept)
+    this.previews.show(pages, { x: width / 2, y: height / 2 }, !this.flying)
     const live = new Set<string>(), leaders: Leader[] = []
     for (const { owner, block, at, box } of placed) {
       live.add(owner.key)
@@ -435,10 +471,16 @@ export class GlobeStage {
       yield { owner: body, polygon: null, blocks: options, anchors: options.flatMap(block => [{ x: x + CALLOUT_GAP + block.width / 2, y }, { x: x - CALLOUT_GAP - block.width / 2, y }]) }
     }
   }
+  /** The view has come to this archived tile, or to the archived thread it lies in. */
+  private within(body: Body): boolean {
+    for (let at: Body | null = body; at?.settled; at = at.parent) if (at.key === this.place.focus) return true
+    return false
+  }
   /** The thread is one of those the view has come to: its name is to be read, whatever the size of its tile. */
-  private underFocus(body: Body): boolean { return body.kind === 'thread' && body.parent?.key === this.place.focus }
+  private underFocus(body: Body): boolean { return body.kind === 'thread' && !body.settled && body.parent?.key === this.place.focus }
   /** A tile's outline on the screen; null while any of it is over the horizon. */
   private outlineOn(frame: Frame, body: Body): number[] | null {
+    if (frame.projection === 'plane') return planeOutline(frame, body.cell)
     const trace = traceOf(body, 4).points, polygon: number[] = []
     for (let n = 0; n < trace.length; n += 3) {
       const point = project(frame, [trace[n], trace[n + 1], trace[n + 2]])
@@ -447,12 +489,21 @@ export class GlobeStage {
     }
     return polygon
   }
-  private *candidates(bodies: readonly Body[], frame: Frame, scene: Scene, small: boolean): Generator<Candidate<Body>> {
+  private *candidates(bodies: readonly Body[], frame: Frame, scene: Scene, small: boolean, previewed: ReadonlyMap<string, Box>): Generator<Candidate<Body>> {
     yield* this.callouts(frame, scene)
     const focus = this.place.focus ? scene.byKey.get(this.place.focus) : undefined, room = focus ? this.outlineOn(frame, focus) : null
     for (const body of bodies) {
       const polygon = this.outlineOn(frame, body)
       if (!polygon) continue
+      const page = previewed.get(body.key)
+      if (page) {
+        // A page showing what it holds is named just under it, or over it, or not at all.
+        const x = (page.left + page.right) / 2
+        for (const block of this.blocksOf(body).filter(block => block.role === 'note')) {
+          yield { owner: body, polygon, anchors: [{ x, y: page.bottom + CAPTION_GAP + block.height / 2 }, { x, y: page.top - CAPTION_GAP - block.height / 2 }], blocks: [block] }
+        }
+        continue
+      }
       const middle = project(frame, body.centre)
       if (this.underFocus(body)) {
         const notes = this.blocksOf(body).filter(block => block.role === 'note').reverse()
@@ -490,6 +541,7 @@ export class GlobeStage {
       if (!lead) return
       this.leads.set(body.key, lead)
       this.withLead(body.key, lead)
+      this.revision++
       this.request()
     })
   }

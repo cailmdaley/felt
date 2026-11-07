@@ -10,6 +10,8 @@ export interface Forest {
   threads: Map<string, MapThread>
   /** Asking threads, most urgent first. */
   asks: MapThread[]
+  /** Archived threads, by persistent id. */
+  settled: Set<string>
 }
 
 export const persistentId = (card: KanbanCard): string => card.uid ?? threadKey(card)
@@ -27,7 +29,7 @@ function bandOf(all: readonly MapThread[], index: ThreadIndex): Band {
 
 export function forestOf(index: ThreadIndex, cards: readonly KanbanCard[], feeds: MapFeeds, now: number): Forest {
   const threads = new Map<string, MapThread>(), byProject = new Map<string, { name: string; families: FamilySeed[] }>()
-  const seen = new Set<string>(), asks: MapThread[] = []
+  const seen = new Set<string>(), asks: MapThread[] = [], settled = new Set<string>()
   for (const card of cards) {
     const root = index.card(card)
     if (card.isCycle || index.parentOf(root) || seen.has(persistentId(root))) continue
@@ -35,6 +37,7 @@ export function forestOf(index: ThreadIndex, cards: readonly KanbanCard[], feeds
     const model = familyModel(index, root, root, feeds, now)
     const seed = (thread: MapThread): ThreadSeed => {
       threads.set(persistentId(thread.card), thread)
+      if (isSettled(thread, index)) settled.add(persistentId(thread.card))
       const kids = thread.children.map(key => seed(model.threads.get(key)!))
       return { key: persistentId(thread.card), weight: thread.weight, born: thread.born, live: !isSettled(thread, index) || kids.some(kid => kid.live), kids, files: thread.files.map(file => file.key) }
     }
@@ -46,6 +49,6 @@ export function forestOf(index: ThreadIndex, cards: readonly KanbanCard[], feeds
   }
   const urgency = (thread: MapThread): number => (ATTENTION as readonly string[]).indexOf(thread.standing)
   asks.sort((a, b) => urgency(a) - urgency(b) || b.lastMove - a.lastMove)
-  return { projects: [...byProject.values()], threads, asks }
+  return { projects: [...byProject.values()], threads, asks, settled }
 }
 

@@ -24,6 +24,8 @@ export interface Body {
   parent: Body | null
   kids: Body[]
   thread?: MapThread
+  /** An archived thread, or anything of one: drawn quietly and named only up close. */
+  settled: boolean
   /** The file behind a lead or file tile; a lead's arrives when read. */
   file?: MapFile
   name: string
@@ -79,7 +81,7 @@ export function sceneOf(forest: Forest, now: number): Scene {
     const tone: Tone = thread ? thread.tone : isGround(tile) ? 'land' : tile.kind === 'file' && file?.unread ? 'new' : 'page'
     const body: Body = {
       tile, key: tile.key, kind: tile.kind, cell: tile.cell, band: tile.band, centre: centre(tile.cell), span: cellSpan(tile.cell.order), radius: cellRadius(tile.cell.order),
-      parent: up, kids: [], thread, file, name,
+      parent: up, kids: [], thread, file, name, settled: thread ? forest.settled.has(tile.key) : !!up?.settled,
       tone, hottest: thread ? (thread.standing === 'new' ? 'new' : thread.tone) : tone, urgency: thread ? urgencyOf(thread.standing) : CALM, heat: thread ? heatOf(now - thread.lastMove) : 1, traces: new Map(),
     }
     byKey.set(tile.key, body)

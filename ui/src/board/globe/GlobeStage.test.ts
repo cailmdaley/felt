@@ -4,6 +4,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { card } from '../testFixtures.js'
 import { ThreadIndex } from '../threads.js'
 import { GlobeStage, freshPlace, type GlobeHost, type GlobePlace } from './GlobeStage.js'
+import { frameOf, invert, northUp, project, type Frame } from './camera.js'
 
 const WIDTH = 800, HEIGHT = 1000, ORIGIN = 'local'
 const thread = (id: string, extra: Partial<KanbanCard> = {}): KanbanCard => card({ id, uid: id, name: id, status: 'active', createdAt: '2026-11-01T00:00:00Z', sessionUuid: `session-${id}`, ...extra })
@@ -19,10 +20,15 @@ function host(): GlobeHost & { conversed: string[]; opened: string[] } {
   const conversed: string[] = [], opened: string[] = []
   return {
     conversed, opened,
-    feeds: { marks: () => undefined, files: found => found.id === 'science/hub' ? [{ key: 'doc:report.html', name: 'report.html', at: Date.now(), unread: false }] : [], refresh: noop, lead: async () => undefined },
+    feeds: {
+      marks: () => undefined, refresh: noop, lead: async () => undefined,
+      files: found => found.id === 'science/hub' ? [{ key: 'doc:report.html', name: 'report.html', at: Date.now(), unread: false }]
+        : found.id === 'life/errand' ? [{ key: 'local:/runs/plot.png', name: 'plot.png', at: Date.now(), unread: false }] : [],
+    },
     openDocument: (_, doc) => opened.push(doc),
     converse: async found => { conversed.push(found.id); return true },
     constitutionKey: found => `fiber:${found.id}`,
+    shuttleBase: '',
   }
 }
 
@@ -42,7 +48,7 @@ describe('moving on the globe', () => {
     frames = []
     vi.stubGlobal('requestAnimationFrame', (frame: FrameRequestCallback) => frames.push(frame))
     vi.stubGlobal('cancelAnimationFrame', noop)
-    vi.stubGlobal('ResizeObserver', class { observe = noop; disconnect = noop })
+    vi.stubGlobal('ResizeObserver', class { observe = noop; unobserve = noop; disconnect = noop })
     vi.stubGlobal('Path2D', class {})
     vi.stubGlobal('PointerEvent', class extends MouseEvent {
       pointerId: number; pointerType: string
@@ -90,13 +96,64 @@ describe('moving on the globe', () => {
     clickAt(400, 500, 'touch')
     expect(board.conversed).toEqual(['science/hub'])
   })
-  it('never reaches Rex from a zoom or a turn', () => {
+  const wheel = (deltaY: number, init: WheelEventInit = {}): void => {
+    stage.el.dispatchEvent(new WheelEvent('wheel', { deltaY, clientX: 400, clientY: 500, bubbles: true, cancelable: true, ...init }))
+  }
+  const drag = (from: [number, number], to: [number, number]): void => {
+    const canvas = stage.el.querySelector('canvas')!
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: from[0], clientY: from[1], pointerId: 2, button: 0, bubbles: true }))
+    for (let n = 1; n <= 10; n++) window.dispatchEvent(new PointerEvent('pointermove', { clientX: from[0] + (to[0] - from[0]) * n / 10, clientY: from[1] + (to[1] - from[1]) * n / 10, pointerId: 2 }))
+  }
+  it('zooms on a plain scroll, out as it scrolls back, and on a pinch, never reaching Rex', () => {
     stage.follow('science/hub', ORIGIN)
     settle()
-    stage.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, metaKey: true, clientX: 400, clientY: 500, bubbles: true, cancelable: true }))
-    stage.el.dispatchEvent(new WheelEvent('wheel', { deltaX: 30, clientX: 400, clientY: 500, bubbles: true, cancelable: true }))
+    const start = place.camera!.radius
+    wheel(-40)
+    const closer = place.camera!.radius
+    expect(closer).toBeGreaterThan(start)
+    wheel(40)
+    expect(place.camera!.radius).toBeCloseTo(start, 6)
+    wheel(-8, { ctrlKey: true })
+    expect(place.camera!.radius / start).toBeCloseTo(closer / start, 6)
     settle()
     expect(board.conversed).toEqual([])
+  })
+  it('turns from straight over the pole and on past it, the grabbed point under the pointer', () => {
+    const frame = (): Frame => frameOf(place.camera ?? { turn: northUp(Math.PI / 4, Math.PI / 2), at: [0, 0], radius: 386 }, 'globe', { width: WIDTH, height: HEIGHT })
+    const grabbed = invert(frame(), 400, 380)!
+    drag([400, 380], [400, 760])
+    const seen = project(frame(), grabbed)
+    expect(seen.x).toBeCloseTo(400, 4)
+    expect(seen.y).toBeCloseTo(760, 4)
+    expect(project(frame(), [0, 0, 1]).y).toBeGreaterThan(HEIGHT / 2)
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 400, clientY: 760, pointerId: 2 }))
+    expect(board.conversed).toEqual([])
+  })
+  it('names an archived thread only once the view comes to it', () => {
+    const settled = [...cards, thread('science/hub/old', { orchestrator: 'science/hub', status: 'closed', tempered: true })]
+    stage.update(new ThreadIndex(settled), settled)
+    stage.follow('science/hub', ORIGIN)
+    settle()
+    const named = (): string[] => [...stage.el.querySelectorAll('.globe-name')].map(name => name.textContent ?? '')
+    expect(named()).toContain('science/hub/thread')
+    expect(named()).not.toContain('science/hub/old')
+    stage.follow('science/hub/old', ORIGIN)
+    settle()
+    expect(named()).toContain('science/hub/old')
+  })
+  it('shows a sent plot on its tile once the tile is wide enough to read it, and names it beneath', () => {
+    const shown = (): HTMLElement[] => [...stage.el.querySelectorAll<HTMLElement>('.globe-preview:not([hidden])')]
+    expect(shown()).toHaveLength(0)
+    stage.follow('life/errand', ORIGIN)
+    settle()
+    const name = stage.el.querySelector<HTMLElement>('.globe-name[data-kind="file"]')!
+    const [, x, y] = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(name.style.transform)!.map(Number)
+    for (let n = 0; n < 12 && !shown().length; n++) stage.el.dispatchEvent(new WheelEvent('wheel', { deltaY: -60, clientX: x, clientY: y, bubbles: true, cancelable: true }))
+    settle()
+    expect(shown()).toHaveLength(1)
+    expect(shown()[0].querySelector('img')?.getAttribute('src')).toContain('plot.png')
+    const caption = stage.el.querySelector<HTMLElement>('.globe-name[data-kind="file"]')!
+    expect(caption.textContent).toBe('plot.png')
   })
   it('opens a sent file on the stage from its tile', () => {
     stage.follow('science/hub', ORIGIN)

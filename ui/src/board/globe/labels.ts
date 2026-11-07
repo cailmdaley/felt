@@ -99,3 +99,17 @@ export function placeNames<T>(candidates: Iterable<Candidate<T>>, frame: Box, mo
   }
   return placed
 }
+
+/** The largest box of a width-to-height ratio centred at a point that sits inside a polygon, by halving on its size; null when none does. */
+export function inscribed(polygon: Polygon, { x, y }: Point, aspect: number): Box | null {
+  let left = 0, right = 0
+  for (let n = 0; n < polygon.length; n += 2) right = Math.max(right, Math.abs(polygon[n] - x), Math.abs(polygon[n + 1] - y) * aspect)
+  const fits = (half: number): boolean => {
+    const h = half / aspect
+    for (const t of [-1, -.5, 0, .5, 1]) if (!within(polygon, x + t * half, y - h) || !within(polygon, x + t * half, y + h) || !within(polygon, x - half, y + t * h) || !within(polygon, x + half, y + t * h)) return false
+    return true
+  }
+  if (!within(polygon, x, y)) return null
+  for (let n = 0; n < 14; n++) { const mid = (left + right) / 2; if (fits(mid)) left = mid; else right = mid }
+  return left > 0 ? { left: x - left, top: y - left / aspect, right: x + left, bottom: y + left / aspect } : null
+}

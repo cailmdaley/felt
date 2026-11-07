@@ -4,8 +4,9 @@
  * in as it grows and its parent gives way to it, so zooming is continuous.
  */
 import { markPath } from '../family/drawing.js'
-import { PERIOD, PLANE_SCALE, planeOffset, project, type Frame, type Viewport } from './camera.js'
-import { baseCell, cellRadius, cellSpan, centre as cellCentre, child, nside, outline, planeOf, type Cell, type Digit, type Vec } from './healpix.js'
+import { PERIOD, planeOutline, project, type Frame, type Viewport } from './camera.js'
+import { NORTH, baseCell, cellRadius, cellSpan, centre as cellCentre, child, outline, uniq, type Cell, type Digit, type Vec } from './healpix.js'
+import { KIND_GLYPH, documentKind, parseDocKey } from '../workspace/documents.js'
 import type { Box, Point } from './labels.js'
 import { askKind, traceOf, type Body, type Scene, type Tone } from './scene.js'
 
@@ -15,6 +16,8 @@ const LEADER_ALPHA = .45, LEADER_DOT = 2
 export interface Palette {
   ocean: string; deep: string; glow: string; grid: string; ink: string; paper: string; land: string; shade: string
   tones: Record<Tone, string>
+  /** The board's serif, for the marks drawn on pages. */
+  serif: string
 }
 /** A tile ringing because it just changed, `age` from nought to one. */
 export interface Pulse { body: Body; age: number }
@@ -24,6 +27,9 @@ export interface Marks { hover: Body | null; focus: Body | null; worker: Body | 
 const LEAST_PX = 2, FADE_PX = 8
 /** Grid cells narrower than this are not drawn. */
 const GRID_PX = 20
+/** A page's tile shows the mark of its kind from this wide, and what it holds from the next. */
+const GLYPH_PX = 26
+export const PREVIEW_PX = 130
 /** A tile with a beacon stops needing it once it is this wide. */
 export const BEACON_PX = 170
 const smooth = (lo: number, hi: number, value: number): number => {
@@ -31,6 +37,8 @@ const smooth = (lo: number, hi: number, value: number): number => {
   return t * t * (3 - 2 * t)
 }
 
+/** How much of its colour an archived thread keeps. */
+const SETTLED = .3
 /** How strongly each tone colours its tile. */
 const STRENGTH: Record<Tone, number> = { question: .95, blocked: .95, new: .85, turn: .72, review: .72, working: .62, still: .4, quiet: .34, aside: .24, land: .7, page: .5 }
 
@@ -75,27 +83,16 @@ function traceGlobe(c: CanvasRenderingContext2D, f: Frame, points: Float64Array)
   return true
 }
 
-/** A cell's place on the plane: its four corners, north, west, south and east, and its centre, in the plane's units. */
-function onPlane({ order, face, x, y }: Cell): { corners: number[]; mx: number; my: number } {
-  const side = nside(order), corners: number[] = []
-  for (const [a, b] of [[x + 1, y + 1], [x, y + 1], [x, y], [x + 1, y]]) {
-    const [xs, ys] = planeOf({ face, fx: a / side, fy: b / side })
-    corners.push(xs * PLANE_SCALE, ys * PLANE_SCALE)
-  }
-  return { corners, mx: (corners[2] + corners[6]) / 2, my: (corners[1] + corners[5]) / 2 }
-}
 /** Traces a cell's diamond on the plane at the copy nearest the centre, and at the next copy too where it reaches the edge of one turn. */
 function tracePlane(c: CanvasRenderingContext2D, f: Frame, cell: Cell): boolean {
-  const { corners, mx } = onPlane(cell), offset = planeOffset(f, mx), half = (corners[6] - corners[2]) / 2
-  const draw = (shift: number): void => {
-    for (let n = 0; n < 8; n += 2) {
-      const x = f.cx + f.r * (corners[n] - mx + shift), y = f.cy - f.r * (corners[n + 1] - f.atY)
-      if (n) c.lineTo(x, y); else c.moveTo(x, y)
-    }
+  const draw = (corners: number[]): void => {
+    c.moveTo(corners[0], corners[1])
+    for (let n = 2; n < 8; n += 2) c.lineTo(corners[n], corners[n + 1])
     c.closePath()
   }
-  draw(offset)
-  if (Math.abs(offset) + half > PERIOD / 2) draw(offset - Math.sign(offset) * PERIOD)
+  const corners = planeOutline(f, cell), half = (corners[6] - corners[2]) / 2, offset = (corners[2] + corners[6]) / 2 - f.cx
+  draw(corners)
+  if (Math.abs(offset) + half > f.r * PERIOD / 2) draw(planeOutline(f, cell, -Math.sign(offset) * PERIOD))
   return true
 }
 const traceAny = (c: CanvasRenderingContext2D, f: Frame, cell: Cell, points: () => Float64Array): boolean => f.projection === 'globe' ? traceGlobe(c, f, points()) : tracePlane(c, f, cell)
@@ -104,8 +101,8 @@ const traceAny = (c: CanvasRenderingContext2D, f: Frame, cell: Cell, points: () 
 function seen(f: Frame, viewport: Viewport, cell: Cell, centre: Vec, radius: number): boolean {
   let sx: number, sy: number
   if (f.projection === 'plane') {
-    const { mx, my } = onPlane(cell)
-    sx = f.cx + f.r * planeOffset(f, mx); sy = f.cy - f.r * (my - f.atY)
+    const corners = planeOutline(f, cell)
+    sx = (corners[2] + corners[6]) / 2; sy = (corners[1] + corners[5]) / 2
   } else {
     const [x, y, z] = centre
     if (x * f.fwdX + y * f.fwdY + z * f.fwdZ < -Math.sin(Math.min(1.5, radius))) return false
@@ -115,6 +112,19 @@ function seen(f: Frame, viewport: Viewport, cell: Cell, centre: Vec, radius: num
   return sx > -reach && sx < viewport.width + reach && sy > -reach && sy < viewport.height + reach
 }
 
+/** Grid outlines, kept between frames; let go when there are more than a few screens' worth. */
+const gridTraces = new Map<string, Float64Array>()
+const GRID_KEPT = 6000
+function gridTrace(cell: Cell, step: number): Float64Array {
+  const key = `${uniq(cell)}:${step}`
+  let points = gridTraces.get(key)
+  if (!points) {
+    if (gridTraces.size >= GRID_KEPT) gridTraces.clear()
+    points = outline(cell, step)
+    gridTraces.set(key, points)
+  }
+  return points
+}
 /** Draws the grid of the finest order that still reads at this zoom and the two above it, finer ones fainter. */
 function grid(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, palette: Palette): void {
   const finest = Math.floor(Math.log2(.9 * f.r * cellSpan(0) / GRID_PX))
@@ -127,7 +137,7 @@ function grid(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, palette
       c.globalAlpha = cell.order === 0 ? .34 : .04 + .1 * fade
       c.lineWidth = cell.order === 0 ? 1 : .5
       c.beginPath()
-      if (traceAny(c, f, cell, () => outline(cell, stepFor(span)))) c.stroke()
+      if (traceAny(c, f, cell, () => gridTrace(cell, stepFor(span)))) c.stroke()
     }
     if (cell.order < finest) for (const digit of [0, 1, 2, 3] as Digit[]) walk(child(cell, digit))
   }
@@ -136,8 +146,35 @@ function grid(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, palette
   c.globalAlpha = 1
 }
 
-function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene: Scene, palette: Palette, shown: number, leads: (body: Body) => boolean): void {
-  const visit = (body: Body, fade: number): void => {
+const glyphs = new Map<string, string>()
+/** The board's mark for what a page tile holds: a constitution's, or its file's kind. */
+function glyphOf(body: Body): string | null {
+  if (body.kind === 'constitution') return KIND_GLYPH.fiber
+  if (!body.file) return null
+  let mark = glyphs.get(body.file.key)
+  if (!mark) {
+    const path = parseDocKey(body.file.key)?.path
+    mark = KIND_GLYPH[path ? documentKind(path) : 'other']
+    glyphs.set(body.file.key, mark)
+  }
+  return mark
+}
+/** A page's mark in its tile's north quarter, clear of its name at the centre, until what it holds shows instead. */
+function glyph(c: CanvasRenderingContext2D, f: Frame, body: Body, px: number, palette: Palette, appear: number): void {
+  if (px < GLYPH_PX || (px >= PREVIEW_PX && body.kind !== 'constitution')) return
+  const mark = glyphOf(body)
+  if (!mark) return
+  const at = project(f, cellCentre(child(body.cell, NORTH)))
+  if (at.depth <= 0) return
+  c.font = `${Math.min(40, Math.round(px * .26))}px ${palette.serif}`
+  c.globalAlpha = appear * .6 * smooth(GLYPH_PX, GLYPH_PX * 1.6, px)
+  c.fillText(mark, at.x, at.y)
+}
+
+/** Paints every tile big enough to see; an archived one quietly, unless the view has come to it or to the archived thread it lies in. */
+function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene: Scene, palette: Palette, shown: number, leads: (body: Body) => boolean, focus: Body | null): void {
+  const visit = (body: Body, fade: number, awake: boolean): void => {
+    awake ||= body === focus
     if (!seen(f, viewport, body.cell, body.centre, body.radius)) return
     const px = body.span * f.r
     if (px < LEAST_PX) return
@@ -146,7 +183,7 @@ function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene:
     const opened = body.kids.length ? smooth(8, 56, px) : 1
     c.beginPath()
     if (traceAny(c, f, body.cell, () => traceOf(body, stepFor(px)).points)) {
-      const strength = STRENGTH[body.tone] * body.heat, ground = !body.thread ? 1 : body.kids.some(kid => kid.kind === 'thread') ? 1 - .55 * smooth(40, 220, px) : 1 - .25 * smooth(40, 220, px)
+      const strength = STRENGTH[body.tone] * body.heat * (body.settled && !awake ? SETTLED : 1), ground = !body.thread ? 1 : body.kids.some(kid => kid.kind === 'thread') ? 1 - .55 * smooth(40, 220, px) : 1 - .25 * smooth(40, 220, px)
       if (opened < 1 && body.hottest !== body.tone) {
         c.fillStyle = palette.tones[body.hottest]
         c.globalAlpha = appear * STRENGTH[body.hottest] * body.heat * (1 - opened)
@@ -156,16 +193,18 @@ function tiles(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport, scene:
       c.globalAlpha = appear * strength * ground * (opened < 1 && body.hottest !== body.tone ? opened : 1)
       c.fill()
       if (px > 7) {
-        const bright = body.thread && px > 90
+        const bright = body.thread && (!body.settled || awake) && px > 90
         c.globalAlpha = appear * (bright ? .9 * strength : .28)
         c.strokeStyle = bright ? palette.tones[body.tone] : palette.paper
         c.lineWidth = bright ? 1.25 : Math.min(1.2, .4 + px / 200)
         c.stroke()
       }
     }
-    if (px > LEAST_PX * 2) for (const kid of body.kids) visit(kid, appear)
+    if (body.kind === 'file' || body.kind === 'lead' || body.kind === 'constitution') { c.fillStyle = palette.ink; glyph(c, f, body, px, palette, appear) }
+    if (px > LEAST_PX * 2) for (const kid of body.kids) visit(kid, appear, awake && body.settled)
   }
-  for (const root of scene.roots) visit(root, shown)
+  c.textAlign = 'center'; c.textBaseline = 'middle'
+  for (const root of scene.roots) visit(root, shown, false)
   c.globalAlpha = 1
 }
 
@@ -237,17 +276,15 @@ export function paint(c: CanvasRenderingContext2D, f: Frame, viewport: Viewport,
     c.clip()
     c.beginPath()
     for (let face = 0; face < 12; face++) for (const turn of [-PERIOD, 0, PERIOD]) {
-      const { corners, mx } = onPlane(baseCell(face)), shift = planeOffset(f, mx) + turn
-      for (let n = 0; n < 8; n += 2) {
-        const x = f.cx + f.r * (corners[n] - mx + shift), y = f.cy - f.r * (corners[n + 1] - f.atY)
-        if (n) c.lineTo(x, y); else c.moveTo(x, y)
-      }
+      const corners = planeOutline(f, baseCell(face), turn)
+      c.moveTo(corners[0], corners[1])
+      for (let n = 2; n < 8; n += 2) c.lineTo(corners[n], corners[n + 1])
       c.closePath()
     }
     c.fillStyle = palette.deep; c.fill(); c.clip()
   }
-  tiles(c, f, viewport, scene, palette, shown, leads)
   grid(c, f, viewport, palette)
+  tiles(c, f, viewport, scene, palette, shown, leads, marked.focus)
   if (globe && f.r < 2 * Math.max(viewport.width, viewport.height)) {
     const shade = c.createRadialGradient(f.cx - f.r * .3, f.cy - f.r * .36, f.r * .55, f.cx, f.cy, f.r * 1.02)
     shade.addColorStop(0, 'transparent'); shade.addColorStop(1, palette.shade)
