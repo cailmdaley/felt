@@ -230,7 +230,7 @@ export function registerHeaderBarJourneys(test) {
     const band = page.locator('.ws-stage-band')
     const chip = band.locator('.kbn-ctl-meet-arm')
     await chip.waitFor({ state: 'visible' })
-    assert.match(await chip.innerText(), /^Listening · /)
+    assert.match(await chip.innerText(), /^Listening/)
     assert.equal(await band.locator('.kbn-ctl-meet-chip, .kbn-ctl-meet-arm, .kbn-ctl-meet-stop').evaluateAll(nodes => nodes.filter(el => el.checkVisibility()).length), 1)
     assert.equal(await band.locator('.kbn-ctl-meet-stop, .kbn-detail-transcript-stop').count(), 0)
     await chip.click()

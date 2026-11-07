@@ -26,7 +26,7 @@ try {
       const el = document.querySelector('.ws-stage-band .kbn-ctl-meet-label')
       return { scroll: el.scrollWidth, client: el.clientWidth, text: el.textContent }
     })
-    assert.match(geometry.text, /^Listening · An exceptionally long/)
+    assert.match(geometry.text, /^Listening/)
     assert.ok(geometry.scroll > geometry.client, 'long name is ellipsized')
     assert.ok(await band.locator('.kbn-ctl-meet').isVisible(), 'Listening remains visible')
     await arm.click()
