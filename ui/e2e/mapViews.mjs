@@ -1,0 +1,169 @@
+// Three ways of moving over the whole of the work, and the one rule they share:
+// moving never touches Rex. Only a click on a thread does, and Back from a file
+// finds everything where it stood.
+import assert from 'node:assert/strict'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
+const root = 'Calibrate the shear response'
+
+/** The family's board, with a terminal behind every worker, so asking Rex leaves an event. */
+async function board(page) {
+  await page.goto(url)
+  await page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).first().waitFor()
+  await page.evaluate(async () => {
+    for (const { runtime } of window.__harness.MOCK_FEED.fibers) if (runtime) runtime.tmux_session = runtime.session_uuid
+    await window.__harness.modal.fetchAndRender()
+  })
+}
+const asked = page => page.evaluate(() => window.__harness.events.filter(event => event.type === 'open-worker').map(event => event.session))
+const until = (page, fn, arg) => page.waitForFunction(fn, arg, { polling: 40 })
+/** A hand's click at a name: names let the pointer through to the tile under them. */
+const clickOn = async (page, locator) => { const { x, y, width, height } = await locator.boundingBox(); await page.mouse.click(x + width / 2, y + height / 2) }
+const box = async locator => { const { x, y } = await locator.boundingBox(); return [Math.round(x), Math.round(y)] }
+
+export function registerMapViewJourneys(test) {
+  const star = (page, name) => page.locator(`.ws-page.ws-selected .fm-star[aria-label^="${name},"]`)
+  const rested = page => until(page, () => !document.querySelector('.family-map-moving'))
+  const landed = async page => {
+    await board(page)
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: root }).last().locator('.kbn-card-name').click()
+    await inScene(page, root)
+    await rested(page)
+  }
+  // The scene's title, or on a phone, which draws none, the peek.
+  const inScene = (page, name) => until(page, name => document.querySelector('.ws-page.ws-selected :is(.fm-focus-name, .ws-family-peek-name)')?.textContent === name, name)
+
+  test('The radial: a click flies and asks Rex; zoom, pan, Back and stepping out leave it be', async page => {
+    await landed(page)
+    const band = () => page.locator('.ws-stage-band .ws-band-title').textContent()
+    const before = await asked(page)
+    const plate = await page.locator('.ws-page.ws-selected .fm-sky-plate').boundingBox()
+    const start = await box(star(page, 'Discarded pilot'))
+    await page.mouse.move(plate.x + plate.width / 2, plate.y + plate.height / 2)
+    await page.keyboard.down('Control')
+    await page.mouse.wheel(0, -40)
+    await page.keyboard.up('Control')
+    await page.locator('.family-map-moving').waitFor()
+    await rested(page)
+    const zoomed = await box(star(page, 'Discarded pilot'))
+    assert.notDeepEqual(zoomed, start, 'the zoom moved the field')
+    await page.mouse.wheel(30, 0)
+    await until(page, ([selector, x]) => Math.round(document.querySelector(selector).getBoundingClientRect().x) !== x, ['.ws-page.ws-selected .fm-star[aria-label^="Discarded pilot,"]', zoomed[0]])
+    await rested(page)
+    assert.deepEqual(await asked(page), before, 'zooming and panning never reach Rex')
+
+    await star(page, 'Response analysis').click()
+    assert.equal(await page.locator('.family-map-moving').count(), 1, 'a click flies')
+    await rested(page)
+    await inScene(page, 'Response analysis')
+    assert.deepEqual(await asked(page), [...before, 'session-analysis'], 'a click opens the thread\'s chat at once')
+    assert.match(await page.locator('.ws-page.ws-selected .fm-star[data-worker]').getAttribute('aria-label'), /^Response analysis,/)
+    assert.equal(await band(), root, 'the page does not change')
+
+    const place = await box(star(page, 'Response analysis'))
+    await page.locator('.ws-page.ws-selected .fm-held').filter({ hasText: 'Constitution' }).click()
+    await until(page, () => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === 'Response analysis')
+    await page.locator('.ws-page.ws-selected .ws-document-back').click()
+    await inScene(page, 'Response analysis')
+    await rested(page)
+    assert.deepEqual(await box(star(page, 'Response analysis')), place, 'Back returns to the same zoom')
+
+    await page.keyboard.press('Escape')
+    await inScene(page, root)
+    await rested(page)
+    assert.equal(await page.locator('.ws-reader.ws-dormant').count(), 0, 'stepping out stays on the page')
+    assert.deepEqual(await asked(page), [...before, 'session-analysis'], 'Back and stepping out never reach Rex')
+  }, { width: 1440, height: 900 }, 'no-preference')
+
+  test('The radial on a phone: a first tap comes to a thread, a second moves Rex to it', async page => {
+    await landed(page)
+    const held = page.locator('.ws-page.ws-selected .fm-star[data-worker]')
+    assert.match(await held.getAttribute('aria-label'), new RegExp(`^${root},`))
+    await star(page, 'Response analysis').tap()
+    await inScene(page, 'Response analysis')
+    assert.match(await held.getAttribute('aria-label'), new RegExp(`^${root},`), 'the first tap leaves Rex be')
+    await star(page, 'Response analysis').tap()
+    await until(page, () => document.querySelector('.ws-page.ws-selected .fm-star[data-worker]')?.getAttribute('aria-label').startsWith('Response analysis,'))
+  }, { width: 390, height: 844 }, 'reduce', true)
+
+  test('The Tree: hotkey 4, keys move without Rex, a thread opens its chat, a file opens and Back returns to its row', async page => {
+    await board(page)
+    await page.keyboard.press('4')
+    const rows = page.locator('.tree-page .tree-row')
+    await rows.first().waitFor()
+    assert.equal(new URL(page.url()).hash, '#/tree')
+    const chosen = () => page.locator('.tree-row[aria-selected="true"]')
+    const before = await asked(page)
+    await page.keyboard.press('j')
+    await page.keyboard.press('j')
+    assert.equal(await chosen().getAttribute('id'), await rows.nth(2).getAttribute('id'), 'j walks the rows')
+    assert.deepEqual(await asked(page), before, 'moving never reaches Rex')
+    while (await chosen().locator('.tree-name').textContent() !== 'Response analysis') await page.keyboard.press('j')
+    await page.keyboard.press('Enter')
+    await until(page, n => window.__harness.events.filter(event => event.type === 'open-worker').length === n, before.length + 1)
+    assert.deepEqual(await asked(page), [...before, 'session-analysis'], 'Enter opens a thread\'s chat')
+    assert.equal(await page.locator('.kbn-reader-open').count(), 0, 'a thread stays on the Tree')
+
+    const file = rows.and(page.locator('[data-kind="file"]')).last()
+    const key = await file.getAttribute('data-key')
+    await file.click()
+    await page.locator('.ws-page.ws-selected .ws-document-back').waitFor()
+    assert.equal(await page.locator('.ws-stage-band .ws-band-title').textContent(), 'Response analysis')
+    const scrolled = await page.locator('.tree-list').evaluate(list => list.scrollTop)
+    assert.ok(scrolled > 0, 'the file was far enough down to scroll to it')
+    await page.locator('.ws-page.ws-selected .ws-document-back').click()
+    await until(page, () => !document.querySelector('.kbn-reader-open'))
+    assert.equal(new URL(page.url()).hash, '#/tree')
+    assert.equal(await chosen().getAttribute('data-key'), key, 'Back keeps the selection')
+    assert.equal(await page.locator('.tree-list').evaluate(list => list.scrollTop), scrolled, 'Back keeps the scroll')
+  }, { width: 1440, height: 420 })
+
+  test('The Globe: hotkey 5, keys and a drag move without Rex, a thread opens its chat, a file opens and Back returns as it stood', async page => {
+    await board(page)
+    await page.keyboard.press('5')
+    const canvas = page.locator('.globe-canvas')
+    await canvas.waitFor()
+    assert.equal(new URL(page.url()).hash, '#/globe')
+    const name = label => page.locator('.globe-names .globe-name').filter({ hasText: label })
+    const peek = page.locator('.globe-peek-name')
+    const before = await asked(page)
+    await page.keyboard.press('ArrowRight')
+    await peek.filter({ hasText: 'Choose the response cut' }).waitFor()
+    const report = name('Report')
+    await report.waitFor()
+    const flown = await box(report)
+    const stage = await canvas.boundingBox()
+    await page.mouse.move(stage.x + 200, stage.y + stage.height - 200)
+    await page.mouse.down()
+    await page.mouse.move(stage.x + 230, stage.y + stage.height - 215, { steps: 4 })
+    await page.mouse.up()
+    await until(page, ([x, y]) => {
+      const box = [...document.querySelectorAll('.globe-names .globe-name')].find(el => el.textContent === 'Report')?.getBoundingClientRect()
+      return box && (Math.round(box.x) !== x || Math.round(box.y) !== y)
+    }, flown)
+    assert.deepEqual(await asked(page), before, 'moving never reaches Rex')
+
+    const crumbs = await page.locator('.globe-crumbs').textContent()
+    await page.waitForTimeout(300)
+    const place = await box(report)
+    await clickOn(page, report)
+    await page.locator('.ws-page.ws-selected .ws-document-back').waitFor()
+    assert.equal(await page.locator('.kbn-viewtabs .kbn-viewtab-active').getAttribute('data-view'), 'globe', 'the file stands over the Globe')
+    await page.locator('.ws-page.ws-selected .ws-document-back').click()
+    await until(page, () => !document.querySelector('.kbn-reader-open'))
+    assert.equal(new URL(page.url()).hash, '#/globe')
+    await report.waitFor()
+    assert.equal(await page.locator('.globe-crumbs').textContent(), crumbs, 'Back keeps the level')
+    assert.deepEqual(await box(report), place, 'Back keeps the camera')
+    assert.deepEqual(await asked(page), before, 'a file never reaches Rex')
+
+    await clickOn(page, name('Deep follow-up'))
+    await peek.filter({ hasText: 'Deep follow-up on the response cut' }).waitFor()
+    assert.deepEqual(await asked(page), [...before, 'session-analysis/checks/question/deep'], 'a click opens the thread\'s chat at once')
+    await page.keyboard.press('Escape')
+    await until(page, () => !document.querySelector('.globe-crumbs').textContent.includes('Deep follow-up'))
+    assert.equal((await asked(page)).length, before.length + 1, 'stepping out never reaches Rex')
+  })
+}

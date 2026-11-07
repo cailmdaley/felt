@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 
-// Header and living-report journeys register with the workspace suite.
+// Header, living-report and map-view journeys register with the workspace suite.
 // The *-live probes require a running daemon and stay opt-in.
 for (const suite of ['workspace', 'changeSmoke', 'consolePicker', 'requestBudget', 'performance', 'voice']) {
   console.log(`\n=== ${suite} ===`)

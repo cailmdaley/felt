@@ -258,7 +258,8 @@ export function registerHeaderBarJourneys(test) {
     await page.locator('.ws-band-leave').click()
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     await page.locator('.ws-stage-band .kbn-ctl-meet-arm').click()
-    page.once('dialog', dialog => dialog.accept())
+    // Another client of the shared browser may dismiss a native dialog first.
+    await page.evaluate(() => { window.confirm = () => true })
     await page.getByRole('menuitem', { name: 'Listen here', exact: true }).click()
     await page.waitForFunction(() => window.__harness.requests.some(r => r.url?.includes('/meeting/join')))
     const calls = await page.evaluate(() => window.__harness.requests.filter(r => /meeting\/(stop|join)$/.test(r.url)))

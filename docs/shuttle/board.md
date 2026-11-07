@@ -233,7 +233,7 @@ HTML documents get first refusal on their own keys; native PDF and media viewers
 
 ### The family map
 
-The map is one page the board draws for every family, for seeing what is happening and what to look at next. Rex holds the conversation; the map is the stage. The counts above it say what asks. The peek below it shows the selected thread's ask or outcome and its sent files. **All threads** at the foot folds out the whole tree, drafts, resting and archived included.
+The map is one page the board draws for every family, for seeing what is happening and what to look at next. Rex holds the conversation; the map is the stage. The counts above it say what asks. The peek below it shows the selected thread's ask or outcome and its sent files. **All threads** at the foot folds out the whole tree, drafts, resting and archived included; a row does what a click on its body does and folds the tree away.
 
 What asks comes in one order everywhere: questions, blocked, new since you last opened a file, your turn, to review, then working, newest first within a kind. A thread in flight with no worker reads as armed, stopped or held and follows them, ahead of finished work. Drafts and resting threads stay counts rather than competing.
 

@@ -214,9 +214,11 @@ it('keeps every thread reachable in the fold, with its folds, pin and links', ()
   row.click()
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/draft' }))
   open.mockClear()
+  all.open = true
   ;[...all.querySelectorAll<HTMLElement>('.kbn-thread-row')].find(el => el.textContent?.includes('Idle'))!.click()
   expect(open).not.toHaveBeenCalled()
   expect(peekName(family)).toBe('Idle')
+  expect(all.open).toBe(false)
   const asks = vi.fn((event: Event) => (event as CustomEvent<ThreadPinRequest>).detail)
   family.el.addEventListener(THREAD_PIN, asks)
   const rootItem = [...all.querySelectorAll<HTMLElement>('.kbn-thread-item')].find(item => item.textContent?.includes(root.name))!

@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 import { frames, layoutShift, settleTransitions, unexpected } from './layoutShift.mjs'
+import { registerMapViewJourneys } from './mapViews.mjs'
 import { registerNavigationJourneys } from './navBack.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
@@ -1182,7 +1183,8 @@ test('A key discard waits on the constitution in place of the pair; undo, then T
 
 test('a moves in-flight work to review through the Desk drag\'s transition, after an undo window z can cancel', async p => {
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  p.on('dialog', dialog => dialog.accept())
+  // Another client of the shared browser may dismiss a native dialog first.
+  await p.evaluate(() => { window.confirm = () => true })
   const posts = async () => (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
   await chooseDeskColumn(p, 1)
   const card = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
@@ -2720,6 +2722,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 }, viewport)
 
 registerNavigationJourneys(test)
+registerMapViewJourneys(test)
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)
 registerCapGeometryJourneys(test, { open, choose, headerAction })
