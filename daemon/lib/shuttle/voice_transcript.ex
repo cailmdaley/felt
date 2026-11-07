@@ -26,14 +26,20 @@ defmodule Shuttle.Voice.Transcript do
 
       :global.trans({{__MODULE__, path}, self()}, fn ->
         :ok = Shuttle.FS.mkdir_p(directory())
-        existing = read_rows(path)
+        bytes = read_bytes(path)
+        existing = decode_rows(bytes)
         # Replaying a relay checkpoint must not duplicate the day's speech.
         known = MapSet.new(existing)
         fresh = Enum.reject(rows, &MapSet.member?(known, &1))
 
-        if fresh != [],
-          do:
-            :ok = Shuttle.FS.write(path, Enum.map(fresh, &(Jason.encode!(&1) <> "\n")), [:append])
+        if fresh != [] do
+          separator = if bytes != "" and not String.ends_with?(bytes, "\n"), do: "\n", else: ""
+
+          :ok =
+            Shuttle.FS.write(path, [separator, Enum.map(fresh, &(Jason.encode!(&1) <> "\n"))], [
+              :append
+            ])
+        end
       end)
     end
 
@@ -86,10 +92,18 @@ defmodule Shuttle.Voice.Transcript do
     with {:ok, time} <- Time.from_iso8601(value), do: {:ok, Time.to_iso8601(time)}
   end
 
-  defp read_rows(path) do
+  defp read_rows(path), do: path |> read_bytes() |> decode_rows()
+
+  defp decode_rows(bytes) do
+    for line <- String.split(bytes, "\n", trim: true),
+        {:ok, row} <- [Jason.decode(line)],
+        do: row
+  end
+
+  defp read_bytes(path) do
     case Shuttle.FS.read(path) do
-      {:ok, bytes} -> bytes |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
-      {:error, :enoent} -> []
+      {:ok, bytes} -> bytes
+      {:error, :enoent} -> ""
       {:error, reason} -> raise File.Error, reason: reason, action: "read transcript", path: path
     end
   end

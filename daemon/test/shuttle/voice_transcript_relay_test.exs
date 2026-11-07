@@ -109,6 +109,21 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     refute_receive {:delivery, _}, 20
   end
 
+  test "a torn day-file tail is skipped by reads and never breaks relay appends", c do
+    directory = Shuttle.Voice.Transcript.directory()
+    File.mkdir_p!(directory)
+    day = Path.join(directory, "2026-11-06.jsonl")
+    File.write!(day, "{\"t\":")
+    assert {:ok, %{rows: []}} = Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
+    record(c.path, "2026-11-06T10:00:01Z", "words after torn row send")
+    start_monitor(c)
+    assert %{error: nil} = poll(c)
+    assert_receive {:delivery, _}, 1_000
+
+    assert {:ok, %{rows: [%{"text" => "words after torn row send"}]}} =
+             Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
+  end
+
   test "pinned batches deliver to cold workers without send, and point at their first spoken time",
        c do
     routes = Path.join(c.root, "routes.jsonl")
