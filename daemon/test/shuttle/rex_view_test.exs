@@ -76,15 +76,56 @@ defmodule Shuttle.RexViewTest do
     assert Enum.sort(placed(sid)) == Enum.sort([@kid, "shell"])
   end
 
-  test "a hidden worker opens back into a window of its own, and a click leaves it hidden" do
+  test "a click on a hidden worker puts its own window back, and the next sweep hides the one left" do
     sid = family()
     show(sid, @hub)
     {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0)
     refute @kid in placed(sid)
-    assert {:ok, false} = Opener.select(@kid)
-    assert :ok = Opener.open(@kid)
+    assert {:ok, true} = Opener.select(@kid)
+    assert Enum.sort(placed(sid)) == Enum.sort([@hub, @kid, "shell"])
+    show(sid, @kid)
+    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0)
+    assert Enum.sort(placed(sid)) == Enum.sort([@kid, "shell"])
+  end
+
+  test "a worker with a raised ask stays in view, and one that raises an ask while hidden comes back" do
+    sid = family()
+    show(sid, @hub)
+    asking = MapSet.new([@kid])
+    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0, asking: asking)
     assert @kid in placed(sid)
-    assert Enum.count(placed(sid)) == 3
+    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0)
+    refute @kid in placed(sid)
+    {:ok, _} = RexView.sweep(FakeRex, %{}, now: 0, grace_ms: 0, asking: asking)
+    assert @kid in placed(sid)
+  end
+
+  test "a raised ask is a question in an active fiber, a harness prompt, or a block; waiting is not" do
+    ask = %{"status" => "active", "shuttle" => %{"ask" => %{"text" => "Which?", "at" => "now"}}}
+    plain = %{"status" => "active", "shuttle" => %{}}
+    assert RexView.raised?(ask, %{phase: "waiting"})
+    refute RexView.raised?(%{ask | "status" => "closed"}, %{phase: "waiting"})
+
+    for phase <- ["attention", "blocked", "identity_failed"],
+        do: assert(RexView.raised?(plain, %{phase: phase}))
+
+    assert RexView.raised?(plain, %{state: "blocked"})
+    assert RexView.raised?(plain, %{launch_error: "no such agent"})
+    refute RexView.raised?(plain, %{phase: "waiting", state: "running", launch_error: nil})
+    refute RexView.raised?(plain, %{phase: "working"})
+  end
+
+  test "a resumed conversation's pane names its fiber, while a worker's keeps its recovery index" do
+    resume = "resume-2bea56c2-31a7-4537-a2ac-db77c58cde24"
+    assert Rex.block_label(resume, "work/positions/career-futures") == "career-futures"
+    assert Rex.block_label(resume, nil) == resume
+    assert Rex.block_label(@hub, "hub") == @hub
+
+    spec = Rex.create_spec(resume, "/tmp", "resume.sh", fiber: "work/positions/career-futures")
+    assert spec["label"] == "career-futures"
+
+    assert get_in(spec, ["initial_windows", Access.at(0), "layout", "block", "label"]) ==
+             "career-futures"
   end
 
   defp requests(method) do

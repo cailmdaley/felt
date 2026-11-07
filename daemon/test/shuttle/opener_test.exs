@@ -142,21 +142,23 @@ defmodule Shuttle.OpenerTest do
       refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
     end
 
-    test "a hidden worker has no window to select, and an open puts it back in one" do
+    test "a hidden worker comes back into a window of its own, for a click or an open" do
       assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
       sid = FakeRex.fixture("session_create")["session_id"]
       [%{"block_id" => bid}] = FakeRex.state().sessions[sid].blocks
       assert {:ok, _} = Rex.hide(FakeRex, sid, bid)
-      assert {:ok, false} = Opener.select(@name)
-      assert requests("client.perform") == []
+      assert {:ok, true} = Opener.select(@name)
+      [placed] = FakeRex.state().sessions[sid].blocks
+      assert is_binary(placed["window_id"])
+      assert {:ok, _} = Rex.hide(FakeRex, sid, bid)
 
       assert :ok = Opener.open(@name)
       [placed] = FakeRex.state().sessions[sid].blocks
       assert placed["block_id"] == bid and is_binary(placed["window_id"])
-      assert [select] = requests("client.perform")
+      assert [_, select] = requests("client.perform")
       assert select["args"]["window_id"] == placed["window_id"]
-      assert [_] = requests("block.close")
-      assert {:ok, true} = Opener.select(@name)
+      assert [_, _] = requests("block.close")
+      assert requests("session.create") |> length() == 1
     end
 
     test "a kitty display never moves for a click" do

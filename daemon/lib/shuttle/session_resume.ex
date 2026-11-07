@@ -84,13 +84,7 @@ defmodule Shuttle.SessionResume do
        %{
          session: session,
          tmux: tmux_name(session),
-         fiber:
-           case SessionLedger.latest_for_session(session,
-                  path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
-                ) do
-             %{"fiber" => fiber} -> fiber
-             _ -> nil
-           end,
+         fiber: fiber_of(session, opts),
          harness: harness,
          agent: agent.id,
          cwd: cwd,
@@ -170,6 +164,31 @@ defmodule Shuttle.SessionResume do
     end)
   catch
     :exit, _ -> []
+  end
+
+  # The fiber that ran the session names its Rex session, tab and pane: the
+  # ledger's record, else the fiber whose runtime last held this session.
+  defp fiber_of(session, opts) do
+    case SessionLedger.latest_for_session(session,
+           path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
+         ) do
+      %{"fiber" => fiber} when is_binary(fiber) and fiber != "" ->
+        fiber
+
+      _ ->
+        case Shuttle.Poller.cached_fiber_documents(
+               felt_stores: Shuttle.FeltStores.configured_stores()
+             ) do
+          {:ok, %{fibers: entries}} ->
+            Enum.find_value(entries, fn %{fiber: row} ->
+              if get_in(row, ["shuttle", "runtime", "session_uuid"]) == session,
+                do: row["slug"] || row["id"]
+            end)
+
+          _ ->
+            nil
+        end
+    end
   end
 
   @doc "Whether a terminal or an uncertain observation holds this resume on the host."

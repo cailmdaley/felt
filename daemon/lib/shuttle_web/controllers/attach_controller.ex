@@ -19,8 +19,8 @@ defmodule ShuttleWeb.AttachController do
   this host's display, uses SSH for remote tmux terminals, and asks a remote Rex
   owner to select its worker in the attached app client.
 
-  With `"select_only": true` the request is a click's: the display moves to a
-  window the conversation already has and nothing else happens to it
+  With `"select_only": true` the request is a click's: the display moves to the
+  conversation's window, a hidden worker's put back, and nothing else happens
   (`Shuttle.Opener.select/2`). No terminal is created, no app launched or
   brought forward, and a past session is never resumed. It answers 200
   `{ "moved": <bool>, "session": ... }`, where `moved` says whether the display

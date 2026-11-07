@@ -21,10 +21,11 @@ defmodule Shuttle.Opener do
   def open(_, _), do: {:error, "tmux_session is required"}
 
   @doc """
-  Move a Rex display to a conversation's existing window and leave the app where
-  it stands. It creates no window, viewer or session and launches no app, so a
-  conversation without a window, or a kitty display, stays as it is.
-  `{:ok, true}` when the display moved.
+  Move a Rex display to a conversation's window and leave the app where it
+  stands. A worker hidden from the view (`Shuttle.RexView`) gets its own window
+  back; nothing else is created: no viewer, session or program, and no app
+  launch, so a conversation without a terminal, or a kitty display, stays as it
+  is. `{:ok, true}` when the display moved.
   """
   @spec select(String.t(), String.t() | nil) :: {:ok, boolean()} | {:error, String.t()}
   def select(name, host \\ nil)

@@ -107,7 +107,7 @@ defmodule Shuttle.Terminal.RexTree do
       for {name, b} <- doc["bindings"],
           fiber = b["fiber"] || resolve_fiber(name, b),
           is_binary(fiber) and fiber != "",
-          do: Map.merge(b, %{"fiber" => fiber, "suffix" => ""})
+          do: Map.merge(b, %{"fiber" => fiber, "suffix" => "", "name" => name})
 
     viewers = Map.values(doc["viewers"] || %{})
 
@@ -141,6 +141,9 @@ defmodule Shuttle.Terminal.RexTree do
                 fiber: b["fiber"],
                 session_id: b["session_id"],
                 window_id: block["window_id"],
+                block_id: b["block_id"],
+                block_label: block["label"],
+                name: b["name"],
                 family: root,
                 depth: depth,
                 suffix: b["suffix"] || ""
@@ -187,7 +190,8 @@ defmodule Shuttle.Terminal.RexTree do
                  do: {:ok, %{}},
                  else: Rex.call(runner, "session.set_label", %{"label" => label}, session: sid)
                ),
-             :ok <- relabel_windows(runner, sid, windows, view) do
+             :ok <- relabel_windows(runner, sid, windows, view),
+             :ok <- relabel_blocks(runner, sid, windows) do
           desired = windows |> Enum.map(& &1.window_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
           current = Enum.map(view, & &1["window_id"])
 
@@ -204,6 +208,23 @@ defmodule Shuttle.Terminal.RexTree do
         :ok -> {:cont, :ok}
         error -> {:halt, error}
       end
+    end)
+  end
+
+  # A resumed conversation's pane names its fiber; a worker's keeps its recovery index.
+  defp relabel_blocks(runner, sid, entries) do
+    each(Enum.filter(entries, &is_binary(&1.name)), fn e ->
+      label = Shuttle.Terminal.Rex.block_label(e.name, e.fiber)
+
+      if e.block_label == label,
+        do: {:ok, %{}},
+        else:
+          Rex.call(
+            runner,
+            "session.set_block_label",
+            %{"block_id" => e.block_id, "label" => label},
+            session: sid
+          )
     end)
   end
 

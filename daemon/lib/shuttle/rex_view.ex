@@ -38,17 +38,18 @@ defmodule Shuttle.RexView do
   @impl true
   def handle_info(:sweep, state) do
     behind =
-      if Shuttle.Terminal.primary() == Shuttle.Terminal.Rex do
-        case sweep(runner(), state.behind, grace_ms: state.grace_ms) do
-          {:ok, behind} ->
-            behind
-
-          {:error, reason} ->
-            Logger.debug("Rex view sweep skipped: #{inspect(reason)}")
-            state.behind
-        end
+      with true <- Shuttle.Terminal.primary() == Shuttle.Terminal.Rex,
+           {:ok, asking} <- asking(),
+           {:ok, behind} <-
+             sweep(runner(), state.behind, grace_ms: state.grace_ms, asking: asking) do
+        behind
       else
-        %{}
+        false ->
+          %{}
+
+        reason ->
+          Logger.debug("Rex view sweep skipped: #{inspect(reason)}")
+          state.behind
       end
 
     Process.send_after(self(), :sweep, state.every_ms)
@@ -56,23 +57,55 @@ defmodule Shuttle.RexView do
   end
 
   @doc """
-  One pass: hide every window of ours that has stood behind its session's
-  active window since `behind[block]` for at least `:grace_ms` (0 hides it at
-  once). Returns when each remaining one was first seen behind.
+  The terminals whose worker has raised an ask: a question in its fiber, a
+  harness prompt, or a block. Unknown while this host's feed is cold.
+  """
+  def asking do
+    case Shuttle.Poller.cached_fiber_documents(
+           felt_stores: Shuttle.FeltStores.configured_stores()
+         ) do
+      {:ok, %{fibers: entries}} ->
+        {:ok,
+         for(
+           %{fiber: fiber, runtime: runtime} <- entries,
+           is_binary(runtime[:tmux_session]) and raised?(fiber, runtime),
+           into: MapSet.new(),
+           do: runtime.tmux_session
+         )}
+
+      error ->
+        error
+    end
+  end
+
+  @doc "Whether a worker has raised an ask: the red ones on the Desk."
+  def raised?(fiber, runtime) do
+    (fiber["status"] == "active" and is_map(get_in(fiber, ["shuttle", "ask"]))) or
+      runtime[:phase] in ["attention", "blocked", "identity_failed"] or
+      runtime[:state] == "blocked" or is_binary(runtime[:launch_error])
+  end
+
+  @doc """
+  One pass. A window of ours that has stood behind its session's active window
+  since `behind[block]` for at least `:grace_ms` (0: at once) leaves the view,
+  unless its terminal is in `:asking`; a hidden one in `:asking` comes back.
+  Returns when each remaining one was first seen behind.
   """
   def sweep(runner, behind \\ %{}, opts \\ []) do
     now = Keyword.get(opts, :now, System.monotonic_time(:millisecond))
     grace = Keyword.get(opts, :grace_ms, 0)
+    asking = Keyword.get(opts, :asking, MapSet.new())
 
     with {:ok, doc} <- RexBindings.read() do
-      ours = Map.values(doc["bindings"]) ++ Map.values(doc["viewers"] || %{})
-      blocks = MapSet.new(ours, & &1["block_id"])
+      ours = Enum.to_list(doc["bindings"]) ++ Enum.to_list(doc["viewers"] || %{})
+      names = Map.new(ours, fn {name, b} -> {b["block_id"], name} end)
+      keep = fn bid -> MapSet.member?(asking, names[bid]) end
 
       ours
-      |> Enum.map(& &1["session_id"])
+      |> Enum.map(fn {_, b} -> b["session_id"] end)
       |> Enum.uniq()
       |> Enum.reduce_while({:ok, %{}}, fn sid, {:ok, seen} ->
-        case session(runner, sid, blocks, behind, now, grace) do
+        case session(runner, sid, names, keep, behind, now, grace) do
           {:ok, more} -> {:cont, {:ok, Map.merge(seen, more)}}
           {:error, :not_found} -> {:cont, {:ok, seen}}
           error -> {:halt, error}
@@ -81,15 +114,17 @@ defmodule Shuttle.RexView do
     end
   end
 
-  defp session(runner, sid, ours, behind, now, grace) do
-    with {:ok, view} <- Shuttle.Rex.call(runner, "session.view", %{}, session: sid) do
+  defp session(runner, sid, names, keep, behind, now, grace) do
+    with {:ok, view} <- Shuttle.Rex.call(runner, "session.view", %{}, session: sid),
+         {:ok, blocks} <- Shuttle.Rex.blocks(runner, sid),
+         :ok <- bring_back(runner, sid, blocks, names, keep) do
       active = view["active_window_id"]
 
       view
       |> Map.get("windows", [])
       |> Enum.reject(&(&1["window_id"] == active))
       |> Enum.flat_map(&window_blocks/1)
-      |> Enum.filter(&MapSet.member?(ours, &1))
+      |> Enum.filter(&(Map.has_key?(names, &1) and not keep.(&1)))
       |> Enum.reduce_while({:ok, %{}}, fn bid, {:ok, seen} ->
         since = Map.get(behind, bid, now)
 
@@ -104,6 +139,19 @@ defmodule Shuttle.RexView do
         end
       end)
     end
+  end
+
+  # A worker that raises an ask while hidden comes back into view.
+  defp bring_back(runner, sid, blocks, names, keep) do
+    blocks
+    |> Enum.filter(&(&1["placement"] == "detached" and Map.has_key?(names, &1["block_id"])))
+    |> Enum.filter(&keep.(&1["block_id"]))
+    |> Enum.reduce_while(:ok, fn block, :ok ->
+      case Shuttle.Terminal.Rex.place(runner, sid, block) do
+        {:ok, _} -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
   end
 
   defp window_blocks(window),

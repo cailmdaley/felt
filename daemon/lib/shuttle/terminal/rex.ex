@@ -170,7 +170,8 @@ defmodule Shuttle.Terminal.Rex do
          {:ok, %{"host_id" => server} = identity} <- Rex.whoami(runner),
          :ok <- reconcile(runner, identity),
          {:ok, family} <- Tree.resolve(opts[:fiber] || Tree.fiber_for(name), opts) do
-      spec = create_spec(name, cwd, script_path, opts)
+      spec =
+        create_spec(name, cwd, script_path, Keyword.put(opts, :fiber, family && family.fiber))
 
       case in_family(
              runner,
@@ -195,7 +196,7 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   def create_spec(name, cwd, script_path, opts \\ []) do
-    label = worker_label(name)
+    label = block_label(name, opts[:fiber])
 
     %{
       "label" => label,
@@ -789,10 +790,13 @@ defmodule Shuttle.Terminal.Rex do
   def hide(runner, sid, bid),
     do: Rex.call(runner, "session.detach_block", %{"block_id" => bid}, session: sid)
 
-  # Rex places a detached block only beside a placed one, so a placeholder
-  # window holds the spot until the block is beside it, then closes. The tree
-  # refresh gives the window its label and place among the family's tabs.
-  defp place(runner, sid, block) do
+  @doc """
+  Put a hidden block back in a window of its own. Rex places a detached block
+  only beside a placed one, so a placeholder window holds the spot until the
+  block is beside it, then closes. The tree refresh gives the window its label
+  and place among the family's tabs.
+  """
+  def place(runner, sid, block) do
     holder = %{
       "window_label" => block["label"],
       "layout" => %{
@@ -833,13 +837,24 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   @doc """
-  Select a located worker's window in an app client already attached, launching
-  nothing; `{:ok, true}` when the app moved.
+  Select a located worker's window in an app client already attached,
+  launching nothing; a worker hidden from the view gets its own window back
+  first. `{:ok, true}` when the app moved.
   """
   def select_binding(runner, %{"window_id" => wid} = b) when is_binary(wid),
     do: select_existing(runner, b["session_id"], wid)
 
-  def select_binding(_runner, _hidden), do: {:ok, false}
+  # A hidden worker's own window comes back for a click: no program starts.
+  def select_binding(runner, b) do
+    with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]),
+         {:ok, wid} <-
+           window_for(runner, b, Enum.find(blocks, &(&1["block_id"] == b["block_id"]))) do
+      select_existing(runner, b["session_id"], wid)
+    else
+      {:error, reason} when reason in [:not_found, :server_absent] -> {:ok, false}
+      error -> open_error(error)
+    end
+  end
 
   @doc "Select the live viewer of a tmux worker by its `name@host` label, creating none."
   def select_viewer(runner, label) do
@@ -1317,6 +1332,16 @@ defmodule Shuttle.Terminal.Rex do
     }
 
   defp quote_sh(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
+
+  @doc """
+  The label a terminal's block carries: a worker's bounded recovery index, or
+  for a resumed conversation its fiber's leaf, so Rex shows what it is. A
+  resumed conversation is recovered through its binding alone.
+  """
+  def block_label("resume-" <> _, fiber) when is_binary(fiber) and fiber != "",
+    do: fiber |> String.split("/") |> List.last() |> worker_label()
+
+  def block_label(name, _fiber), do: worker_label(name)
 
   @doc "A bounded block recovery index, distinct from the full durable worker name."
   def worker_label(name) do
