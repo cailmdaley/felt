@@ -76,7 +76,7 @@ describe.each(SIZES)('the radial drawing at %i by %i', (width, height) => {
   it('names every first-generation thread with a row, and what asks first', () => {
     if (layout.narrow) return
     const named = new Set(sky.labels.map(label => label.thread))
-    for (const star of on([...arms.todo, ...arms.done])) if (star.side === (star.arm === 'todo' ? 'left' : 'right') && star.r > 2) expect(named.has(star.thread)).toBe(true)
+    for (const star of on([...arms.todo, ...arms.done])) if (star.side === (star.arm === 'todo' ? 'left' : 'right') && star.r > 2) expect(named.has(star.thread) || star.thread.name.length > 24, star.thread.name).toBe(true)
   })
 })
 it('holds a family of one to a single body', () => {

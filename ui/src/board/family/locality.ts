@@ -7,7 +7,7 @@ const SLOTS = 5
 const ARC = .68
 const ARC_TOP = -.9
 const ROW = 26
-const TITLE_RISE = 56
+const TITLE_RISE = 70
 const NAME_MOST = 300
 const MARGIN = 14
 /** A file's name per character, and what its sheet and age add. */

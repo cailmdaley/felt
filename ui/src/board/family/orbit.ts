@@ -14,8 +14,8 @@ const LABEL_AGE = 34
 const LABEL_FILES = 28
 const LABEL_GAP = 7
 /** How far a name may lift off its body's line to clear the arm, and how much of its row's height is air a line may pass through. */
-const NUDGES: readonly number[] = [0, 5, 10, 15]
-const LINE_INSET = 4
+const NUDGES: readonly number[] = [0, 5, -5, 10, -10, 15, -15]
+const LINE_INSET = 2
 const MARGIN = 8
 const NUMERAL = 19
 /** A body's step along the rim past its arm's end, and along a phone's arm. */
@@ -42,6 +42,9 @@ const NAMED_FILL = .7
 const MINIS = 8
 const ARM_NAME_RISE = 9
 const TITLE_MOST = 340
+const TITLE_HEIGHT = 56
+/** A title runs to two lines; this share of them holds whatever words it breaks at. */
+const TITLE_FILL = .85
 /** How far out from a focused body its life begins. */
 const LIFE_GAP = 9
 const ARM_NAME_WIDTH = 110
@@ -125,27 +128,33 @@ const JOIN = /\s(?:and|with|on|for|in|to|through|from|by|at|into|via|under|after
 /** Words a stopped name must not end on. */
 const DANGLING = /\s(?:the|a|an|its|their|our|and|or|of|to|in|on|for|with)$/
 const SHORTEST = 12
+/** The share of a name a stop at a bare word must keep. */
+const NEARLY = .7
 const stops = (name: string, pattern: RegExp, most: number): number[] => [...name.matchAll(pattern)].map(match => match.index).filter(at => at >= SHORTEST && at <= most)
 
 /**
  * A name told in at most `most` characters: whole when it fits, else up to the
- * last clause that does, else up to a joining word, else up to a word. Thread
- * names are often sentences; the first clause says what the thread is, and the
- * peek and the page carry the rest.
+ * last clause that does, else up to a joining word, else at a word if nearly
+ * all of it is said, else not at all: a stop anywhere else would say less than
+ * it seems to. Thread names are often
+ * sentences; the first clause says what the thread is, and the peek and the page
+ * carry the rest.
  */
 export function spokenName(name: string, most: number): string {
   if (name.length <= most) return name
-  const at = stops(name, CLAUSE, most).at(-1) ?? stops(name, JOIN, most).at(-1) ?? name.lastIndexOf(' ', most)
-  return at < SHORTEST ? '' : name.slice(0, at).replace(DANGLING, '')
+  const near = name.lastIndexOf(' ', most)
+  const at = stops(name, CLAUSE, most).at(-1) ?? stops(name, JOIN, most).at(-1) ?? (near >= name.length * NEARLY ? near : undefined)
+  return at === undefined ? '' : name.slice(0, at).replace(DANGLING, '')
 }
 
 /** A name's line in a label of this width: what it says, and the marks beside it there is room for. */
-export interface Fit { text: string; width: number; files: boolean }
+export interface Fit { text: string; width: number; age: boolean; files: boolean }
 export function labelFit(thread: MapThread, room: number): Fit | undefined {
-  const text = spokenName(thread.name, Math.floor((room - LABEL_RANK - LABEL_AGE) / LABEL_CHAR))
+  const dated = spokenName(thread.name, Math.floor((room - LABEL_RANK - LABEL_AGE) / LABEL_CHAR))
+  const text = dated || spokenName(thread.name, Math.floor((room - LABEL_RANK) / LABEL_CHAR))
   if (!text) return undefined
-  const used = LABEL_RANK + LABEL_AGE + text.length * LABEL_CHAR, files = !!thread.files.length && used + LABEL_FILES <= room
-  return { text, files, width: used + (files ? LABEL_FILES : 0) }
+  const used = LABEL_RANK + (dated ? LABEL_AGE : 0) + text.length * LABEL_CHAR, files = !!thread.files.length && used + LABEL_FILES <= room
+  return { text, age: !!dated, files, width: used + (files ? LABEL_FILES : 0) }
 }
 
 interface Box { left: number; right: number; top: number; bottom: number }
@@ -186,12 +195,18 @@ export function aim(plate: Plate, thread: MapThread): View {
   const k = 1 / star.scale
   return held({ k, x: (plate.cx - star.x * k) / plate.width, y: (plate.cy - star.y * k) / plate.height })
 }
+const offMiddle = (plate: Plate, view: View) => (star: Star): number => Math.max(Math.abs(star.x / plate.width * view.k + view.x - .5), Math.abs(star.y / plate.height * view.k + view.y - .5))
 /** The thread a hand has zoomed to, the deepest whose scene fills the plate around its middle, `kept` while it does; null for the whole family. */
 export function sighted(plate: Plate, view: View, kept: string | null): string | null {
-  const off = (star: Star): number => Math.max(Math.abs(star.x / plate.width * view.k + view.x - .5), Math.abs(star.y / plate.height * view.k + view.y - .5))
+  const off = offMiddle(plate, view)
   const near = plate.stars.filter(star => star.owner && off(star) <= SIGHT && star.scale * view.k >= SIGHT_FILL)
   const deepest = near.reduce<Star | null>((best, star) => !best || star.scale < best.scale ? star : best, null)
   return near.find(star => star.thread.key === kept && star.scale * view.k <= 2)?.thread.key ?? deepest?.thread.key ?? null
+}
+/** The thread a zoom inward comes to rest on: the one in sight, else the nearest whose scene the view has reached, so a zoom into empty field still arrives. */
+export function arrival(plate: Plate, view: View, kept: string | null): string | null {
+  const off = offMiddle(plate, view), reached = plate.stars.filter(star => star.owner && star.scale * view.k >= SIGHT_FILL)
+  return sighted(plate, view, kept) ?? reached.reduce<Star | null>((best, star) => !best || off(star) < off(best) ? star : best, null)?.thread.key ?? null
 }
 
 /**
@@ -223,7 +238,7 @@ export function zoomPlate(plate: Plate, view: View, model: FamilyModel, sight: S
   const titled = named && title && title.y >= 0 ? title : null
   const taken: Box[] = narrow ? [] : [
     ...held.map(item => ({ left: item.side === 'right' ? item.x - 8 : item.x - item.room, right: item.side === 'right' ? item.x + item.room : item.x + 8, top: item.y - 12, bottom: item.y + 12 })),
-    ...(titled ? [{ left: titled.x, right: titled.x + titled.width, top: titled.y - 4, bottom: titled.y + 40 }] : []),
+    ...(titled ? [{ left: titled.x, right: titled.x + titled.width, top: titled.y - 4, bottom: titled.y + TITLE_HEIGHT }] : []),
   ]
   const arms = stars.filter(star => star.segments.length && !star.hidden && star.room >= ARMS_FROM && star.room < ARMS_GONE * reach).map((star): SkyArm => {
     const small = star.room < BODIES_FROM ? (star.r + LABEL_GAP) / reach : k * star.scale
@@ -363,7 +378,7 @@ function drawLabels(layer: HTMLElement, numerals: HTMLElement, sky: Sky, model: 
     const [rank, text] = el.children, [name, age, files] = text.children
     setText(rank, label.numeral ? String(label.numeral) : '')
     setText(name, label.text)
-    setText(age, shortAgo(label.thread.lastMove, model.now))
+    setText(age, label.age ? shortAgo(label.thread.lastMove, model.now) : '')
     ;(files as HTMLElement).hidden = !label.files
     setText(files.lastElementChild!, String(label.thread.files.length))
   })
@@ -424,7 +439,7 @@ function drawHeld(layer: HTMLElement, sky: Sky, model: FamilyModel): void {
     el.style.width = `${Math.round(item.title.width)}px`
     el.style.transform = `translate(${item.title.x.toFixed(1)}px, ${item.title.y.toFixed(1)}px)`
     const [name, state] = el.children
-    setText(name, spokenName(item.thread.name, Math.floor(item.title.width / LABEL_CHAR)) || item.thread.name)
+    setText(name, spokenName(item.thread.name, Math.floor(2 * item.title.width / LABEL_CHAR * TITLE_FILL)))
     setText(state, `${item.thread.word} · ${shortAgo(item.thread.lastMove, model.now)}`)
   })
 }

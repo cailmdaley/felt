@@ -119,7 +119,7 @@ it('tells a long name up to its last clause that fits, and never ends it on a da
   expect(spokenName('Data ↔ pipeline: the blinded vector on current develop', 30)).toBe('Data ↔ pipeline')
   expect(spokenName('Establish what causes the smooth droop of measured over model', 44)).toBe('Establish what causes the smooth droop')
   expect(spokenName('Explain the BB rise near the wall and the low-ell residual structure', 40)).toBe('Explain the BB rise near the wall')
-  expect(spokenName('Run the very long pipeline again tomorrow morning please', 30)).toBe('Run the very long pipeline')
+  expect(spokenName('Rerun everything tomorrow morning please without fail', 30)).toBe('')
   expect(spokenName('x'.repeat(80), 40)).toBe('')
 })
 it('fits a name to one line, its marks after it while there is room', () => {

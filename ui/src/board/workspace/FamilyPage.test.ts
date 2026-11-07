@@ -514,7 +514,7 @@ describe('coming to a thread', () => {
     expect(family.outward).toBeUndefined()
     expect(family.stepOut()).toBe(false)
   })
-  it('shows every body in view what it holds as a hand zooms, moving none of them and leaving Rex alone', async () => {
+  it('comes to rest on a thread as a hand zooms in, however far, showing what it holds and leaving Rex alone', async () => {
     const reads = vi.fn(async () => lead)
     const { page: family, converse, place } = page(vi.fn(), { ...holding, files: () => sent, lead: reads }, undefined, tree)
     const stage = stageOf(family), plate = stage.querySelector<HTMLElement>('.fm-sky-plate')!
@@ -525,7 +525,7 @@ describe('coming to a thread', () => {
     vi.advanceTimersByTime(300)
     vi.useRealTimers()
     await settled()
-    expect(place.view).not.toBeNull()
+    expect(place.focus).not.toBeNull()
     expect(stage.querySelectorAll('.fm-mini').length + stage.querySelectorAll('.fm-held').length).toBeGreaterThan(0)
     expect(before).not.toBe('')
     expect(converse).not.toHaveBeenCalled()

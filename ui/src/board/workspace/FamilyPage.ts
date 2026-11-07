@@ -1,7 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ATTENTION, ATTENTION_WORD, conversable, familyModel, isDrawn, needsHuman, type FamilyModel, type MapFeeds, type MapFile, type MapThread } from '../family/model.js'
 import { htmlEl as el, markPath, markSelection, shortAgo, svgEl, type Drawing, type Holds, type Sight } from '../family/drawing.js'
-import { aim, sighted } from '../family/orbit.js'
+import { aim, arrival, sighted } from '../family/orbit.js'
 import { ROSTER, chooseDrawing, chosenDrawing } from '../family/roster.js'
 import { FieldZoom, WHOLE, type View } from '../family/zoom.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
@@ -252,8 +252,13 @@ export class FamilyPage {
   private gestured(inward: boolean): void {
     if (this.lone) { this.zoom.jump(this.aimed()); this.repaintStill(); return }
     this.sightFocus()
+    const model = this.model, layout = this.drawing.layout
+    if (inward && model && layout) {
+      const { width, height } = this.stageSize()
+      this.setFocus(arrival(layout(model, width, height), this.zoom.drawn, this.place.focus))
+    }
     const thread = this.focused
-    if (inward && thread && thread !== this.model?.root) {
+    if (inward && thread && thread !== model?.root) {
       this.place.view = null
       this.select(thread.key)
       this.zoom.fly(this.aimed())
