@@ -83,7 +83,8 @@ import { joinDeliveryPhrase, meetingStatusUrl, supportedMeetingModes, meetingJoi
 import { joinMeeting as requestMeetingJoin, setMeetingPaused as requestMeetingPaused, setMeetingSystemAudio as requestMeetingSystemAudio, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
 import { recordingStartHold } from '../forms/recordingStart'
 import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
-import { Voice } from './voice.js'
+import { Voice, constitutionFor } from './voice.js'
+import type { WorkerOpener } from './conversationOpening.js'
 import {
   collectCards,
   createTemporalFetchers,
@@ -122,7 +123,7 @@ interface KanbanModalOptions {
    * POSTs the tmux session name to the daemon's `/api/v1/attach`, which
    * raises the matching kitty tab. No-op when there's no running worker.
    */
-  onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
+  onOpenWorker?: WorkerOpener
   /**
    * Called when the user clicks the Drafts lane's `+` stash button. The host
    * (main.ts) opens the StashForm modal. Omit to hide the button (e.g.
@@ -172,8 +173,8 @@ interface KanbanScrollSnapshot {
 }
 
 export class KanbanModal {
-  private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
-  private readonly openWorkerAfterGesture?: (tmuxSessionName: string, shuttleHost?: string) => void
+  private readonly onOpenWorker?: WorkerOpener
+  private readonly openWorkerAfterGesture?: WorkerOpener
   private readonly openMeetingTerminalAfterGesture?: (tmuxSessionName: string) => void
   private readonly onStashClick?: () => void
   private readonly onNewIdeaClick?: () => void
@@ -352,13 +353,13 @@ export class KanbanModal {
     // address (`sessionLink`, stamped by the owning daemon), and to nothing
     // when it doesn't — never to a terminal on some other machine.
     this.openWorkerAfterGesture = this.onOpenWorker
-      ? (tmuxSessionName, shuttleHost) => {
+      ? (tmuxSessionName, shuttleHost, quiet) => {
           if (coarsePointer()) {
             const link = this.sessionLinkFor(tmuxSessionName)
             if (link) window.location.assign(link)
             return
           }
-          window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost), 0)
+          window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost, quiet), 0)
         }
       : undefined
     // Meeting Terminal is an explicit request for the daemon-local hark pane.
@@ -569,7 +570,8 @@ export class KanbanModal {
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : this.activeViewId === 'tree' ? 'Tree' : this.activeViewId === 'globe' ? 'Globe' : 'Board',
-      onVisibility: (active) => this.showWorkspace(active),
+      onVisibility: (active) => { this.showWorkspace(active); if (!active) this.voice.see(null) },
+      onSight: card => this.voice.see(constitutionFor(card, boardCards(this.lastResponse))),
       onReturnCard: card => {
         this.workspaceReturnCard = { id: card.id, origin: card.originId }
         this.workspaceReturnFocus = null

@@ -16,7 +16,7 @@ defmodule Shuttle.Voice do
   def cold?(target), do: Shuttle.Voice.Target.cold?(target)
   def update(params, opts \\ []), do: GenServer.call(server(opts), {:update, params}, 30_000)
 
-  @doc "Follow the focused Rex session while Follow me is on and no recording holds the mic."
+  @doc "Route to `params` while Follow me is on and no recording holds the mic; otherwise a no-op."
   def target(params, opts \\ []),
     do: GenServer.call(server(opts), {:target, params, DateTime.utc_now()})
 

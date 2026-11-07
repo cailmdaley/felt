@@ -952,6 +952,26 @@ describe('workspace reader integration', () => {
     workspace.reader.back(); await flush()
     expect(conversation).not.toHaveBeenCalled()
   })
+  it('tells voice what it shows: the thread the map rests on, the page elsewhere, and opens quietly from a click', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, sessionUuid: `session-${over.id}`, ...over })
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' })]
+    bodyCards = feed
+    workspace.dispose()
+    const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true), sight = vi.fn()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
+    const seen = (): string | undefined => (sight.mock.lastCall?.[0] as KanbanCard | undefined)?.id
+    workspace.openFromDesk(feed[0]); await flush()
+    expect(seen()).toBe('hub')
+    expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'hub' }), true)
+    document.querySelector('.ws-selected [role="option"][aria-label^="hub/mid,"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(seen()).toBe('hub/mid')
+    expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'hub/mid' }), true)
+    workspace.reader.back(); await flush()
+    expect(seen()).toBe('hub')
+    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await flush()
+    expect(seen()).toBe('hub/mid')
+  })
   it('draws a lone constitution as one body with what it holds, and a draft on its own page', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })

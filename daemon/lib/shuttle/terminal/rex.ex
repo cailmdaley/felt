@@ -763,24 +763,27 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   @doc "Reveal the exact address returned by locate/2 without another inventory scan."
-  def reveal_binding(runner, %{"window_id" => wid} = b) when is_binary(wid),
-    do: reveal_session(runner, b["session_id"], wid)
+  def reveal_binding(runner, binding, opts \\ [])
 
-  def reveal_binding(runner, b) do
+  def reveal_binding(runner, %{"window_id" => wid} = b, opts) when is_binary(wid),
+    do: reveal_session(runner, b["session_id"], wid, opts)
+
+  def reveal_binding(runner, b, opts) do
     with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
       block = Enum.find(blocks, &(&1["block_id"] == b["block_id"]))
-      reveal_session(runner, b["session_id"], block && block["window_id"])
+      reveal_session(runner, b["session_id"], block && block["window_id"], opts)
     else
       error -> open_error(error)
     end
   end
 
-  defp reveal_session(runner, sid, wid) do
+  # `quiet: true` selects without activating the app.
+  defp reveal_session(runner, sid, wid, opts) do
     alias Shuttle.OpenTrace
 
     with {:ok, client} <- OpenTrace.step(:app_client, fn -> ensure_app_client(runner) end),
          {:ok, _} <- OpenTrace.step(:select, fn -> Rex.select(runner, client, sid, wid) end),
-         :ok <- activate_app(runner) do
+         :ok <- if(opts[:quiet], do: :ok, else: activate_app(runner)) do
       :ok
     else
       {:error, :no_app_client} = error -> error
@@ -797,7 +800,7 @@ defmodule Shuttle.Terminal.Rex do
          {:ok, argv} <- viewer_command(name, destination),
          {:ok, sid} <- viewer(runner, label, argv, opts) do
       with {:ok, doc} <- Bindings.read(),
-           do: reveal_session(runner, sid, get_in(doc, ["viewers", label, "window_id"]))
+           do: reveal_session(runner, sid, get_in(doc, ["viewers", label, "window_id"]), opts)
     else
       {:error, message} when is_binary(message) -> {:error, message}
       error -> open_error(error)

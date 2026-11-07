@@ -10,8 +10,8 @@ defmodule Shuttle.RexFocus do
   Other hosts, and macOS without that grant, use Rex's per-session
   active-window events.
 
-  `reveal/2` is the board's way in: opening a constitution selects its worker
-  in Rex, which brings Rex forward, and the front edge then routes the mic.
+  `reveal/2` moves Rex's selection behind whatever has the keyboard, for a
+  caller that sets the voice target itself. Selecting never activates the app.
   """
   use GenServer
 
@@ -138,7 +138,8 @@ defmodule Shuttle.RexFocus do
   def target(_, _, _), do: nil
 
   @doc """
-  Selects the Rex worker for `fiber_id` and `origin`, bringing Rex forward.
+  Selects the Rex worker for `fiber_id` and `origin`, leaving the frontmost app
+  in front.
   A local worker is found by its binding; a worker on another host by its
   window and session labels on that host's Rex server, which the app shows
   under the host's name. Returns `:ok` when Rex was asked to show it,
@@ -245,12 +246,11 @@ defmodule Shuttle.RexFocus do
 
   # `host` nil is this host's Rex server; another host's is addressed by name.
   defp select(host, sid, wid) do
-    runner = Shuttle.Runner.Default
+    runner = Shuttle.Env.app(:rex_runner, Shuttle.Runner.Default)
     server = if host, do: [server: host], else: []
 
     with {:ok, client} <- Shuttle.Rex.app_client(runner, server),
-         {:ok, _} <- Shuttle.Rex.select(runner, client, sid, wid, server),
-         do: Shuttle.Terminal.Rex.activate_app(runner)
+         do: Shuttle.Rex.select(runner, client, sid, wid, server)
   end
 
   @doc """

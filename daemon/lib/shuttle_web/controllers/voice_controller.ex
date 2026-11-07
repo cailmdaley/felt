@@ -5,7 +5,7 @@ defmodule ShuttleWeb.VoiceController do
 
   def show(conn, params), do: route(conn, params, :show, "/api/v1/voice")
   def update(conn, params), do: route(conn, params, :update, "/api/v1/voice")
-  def reveal(conn, params), do: route(conn, params, :reveal, "/api/v1/voice/reveal")
+  def target(conn, params), do: route(conn, params, :target, "/api/v1/voice/target")
 
   @doc """
   Streams the target as server-sent `target` events: the current one on
@@ -88,11 +88,8 @@ defmodule ShuttleWeb.VoiceController do
   defp local(:show, _params), do: {:ok, Voice.show()}
   defp local(:transcript, _params), do: Meeting.voice_transcript()
 
-  defp local(:reveal, params) do
-    case Shuttle.RexFocus.reveal(params) do
-      :ok -> {:ok, %{revealed: true}}
-      {:skip, reason} -> {:ok, %{revealed: false, skipped: reason}}
-    end
+  defp local(:target, params) do
+    with {:ok, _} <- Voice.target(Map.put(params, "source", "board")), do: {:ok, Voice.show()}
   end
 
   defp local(:update, params), do: Voice.update(params)

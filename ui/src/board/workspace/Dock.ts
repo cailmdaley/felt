@@ -4,7 +4,7 @@ import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { atDesktop, workerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
-import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, resolveDestination, openDestination, type ConversationDestination } from '../conversationOpening.js'
+import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
 import { attachConversationPicker } from '../conversationMenu.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
@@ -448,7 +448,7 @@ export class Dock {
   private readonly onSaved: () => void
   private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
   private queueVerdict?: (card: KanbanCard, target: Verdict) => void
-  private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
+  private readonly onOpenWorker?: WorkerOpener
   private readonly meeting: MeetingJoinControl | null
   private readonly voice: DockOptions['voice']
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
@@ -666,12 +666,14 @@ export class Dock {
    * opens, or, on a desktop with no worker up, the past session reopened in a
    * terminal on its host. A reopening sends nothing and starts no turn, and it
    * leaves the card's lifecycle alone, so it holds in every column. A card
-   * that never ran is launched by name, not by a key.
+   * that never ran is launched by name, not by a key. A `quiet` opening moves
+   * Rex and leaves the keyboard where it is.
    */
-  openConversation(card: KanbanCard): boolean {
-    const destination = resolveDestination(conversationDestinations(card, conversationDevice(), this.onOpenWorker))
+  openConversation(card: KanbanCard, quiet?: boolean): boolean {
+    const opener = this.onOpenWorker
+    const destination = resolveDestination(conversationDestinations(card, conversationDevice(), quiet && opener ? (session, host) => opener(session, host, true) : opener))
     if (card.sessionUuid && this.reopens(card, destination)) {
-      void attachConversation(this.shuttleBase, { session: card.sessionUuid, shuttle_host: card.shuttleHost ?? null }, message => showToast(message, 'error'))
+      void attachConversation(this.shuttleBase, { session: card.sessionUuid, shuttle_host: card.shuttleHost ?? null, quiet }, message => showToast(message, 'error'))
       return true
     }
     if (!destination) return false

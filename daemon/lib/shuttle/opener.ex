@@ -4,41 +4,50 @@ defmodule Shuttle.Opener do
   alias Shuttle.{Env, Kitty, OpenTrace, OriginRouter, Remote, Terminal}
   alias Shuttle.Terminal.Rex
 
-  @spec open(String.t(), String.t() | nil) :: :ok | {:error, String.t()}
-  def open(name, host \\ nil)
+  @doc """
+  With `quiet: true`, a Rex display moves its selection to the conversation and
+  leaves the frontmost app in front. A kitty tab always opens in front.
+  """
+  @spec open(String.t(), String.t() | nil, keyword()) :: :ok | {:error, String.t()}
+  def open(name, host \\ nil, opts \\ [])
 
-  def open(name, host) when is_binary(name) and name != "" do
-    OpenTrace.run(name, host, fn -> open_routed(name, host) end)
+  def open(name, host, opts) when is_binary(name) and name != "" do
+    OpenTrace.run(name, host, fn -> open_routed(name, host, opts) end)
   end
 
-  def open(_, _), do: {:error, "tmux_session is required"}
+  def open(_, _, _), do: {:error, "tmux_session is required"}
 
-  defp open_routed(name, host) do
+  defp open_routed(name, host, opts) do
     case OpenTrace.step(:route, fn -> OriginRouter.route_host(host) end) do
       :local ->
-        open_local(name)
+        open_local(name, opts)
 
       {:remote, remote} ->
-        open_remote(name, host, remote)
+        open_remote(name, host, remote, opts)
 
       {:error, {:unknown_origin, origin}} ->
         {:error, OriginRouter.unknown_origin_message(origin)}
     end
   end
 
-  defp open_local(name) do
+  defp open_local(name, opts) do
     if Terminal.primary() == Rex do
       runner = Env.app(:rex_runner, Shuttle.Runner.Default)
 
       case OpenTrace.step(:locate, fn -> Terminal.locate_target(runner, name) end) do
         {Rex, binding} ->
-          case Rex.reveal_binding(runner, binding) do
+          case Rex.reveal_binding(runner, binding, opts) do
             {:error, :no_app_client} -> {:error, "No Rex app client is attached to this server"}
             result -> result
           end
 
         {Terminal.Tmux, _} ->
-          Rex.reveal_tmux(name, nil, nil, fiber: Shuttle.Terminal.RexTree.fiber_for(name))
+          Rex.reveal_tmux(
+            name,
+            nil,
+            nil,
+            Keyword.put(opts, :fiber, Shuttle.Terminal.RexTree.fiber_for(name))
+          )
 
         nil ->
           {:error, "Cannot locate terminal #{name}; it is absent or unobservable"}
@@ -48,11 +57,11 @@ defmodule Shuttle.Opener do
     end
   end
 
-  defp open_remote(name, host, remote) do
+  defp open_remote(name, host, remote, opts) do
     if Terminal.primary() == Rex do
       case OpenTrace.step(:remote_backend, fn -> remote_backend(remote) end) do
         {:ok, "rex"} ->
-          reveal_remote_rex(name, remote)
+          reveal_remote_rex(name, remote, opts)
 
         {:ok, "tmux"} ->
           with {:ok, destination} <-
@@ -60,7 +69,7 @@ defmodule Shuttle.Opener do
             fiber = OpenTrace.step(:remote_fiber, fn -> remote_fiber(name, remote) end)
 
             OpenTrace.step(:viewer, fn ->
-              Rex.reveal_tmux(name, host, destination, fiber: fiber)
+              Rex.reveal_tmux(name, host, destination, Keyword.put(opts, :fiber, fiber))
             end)
           end
 
@@ -91,22 +100,29 @@ defmodule Shuttle.Opener do
     end
   end
 
-  @doc "Reveal a Rex worker on its owner, without routing through the display hub."
+  @doc """
+  Select a Rex worker on its owner, without routing through the display hub.
+  The hub, which holds the display, decides whether to activate its app.
+  """
   def reveal_owned_rex(name) do
     runner = Env.app(:rex_runner, Shuttle.Runner.Default)
 
     case Rex.locate(runner, name) do
-      {:ok, binding} -> Rex.reveal_binding(runner, binding)
+      {:ok, binding} -> Rex.reveal_binding(runner, binding, quiet: true)
       _ -> {:error, "Cannot locate terminal #{name}; it is absent or unobservable"}
     end
   end
 
-  defp reveal_remote_rex(name, remote) do
+  defp reveal_remote_rex(name, remote, opts) do
     case OriginRouter.forward(remote, "/api/v1/terminal/reveal", %{"name" => name}) do
       {:forwarded, 200, _} ->
-        case Rex.activate_app(Env.app(:rex_runner, Shuttle.Runner.Default)) do
-          :ok -> :ok
-          {:error, reason} -> {:error, "Cannot activate Rex app: #{inspect(reason)}"}
+        if opts[:quiet] do
+          :ok
+        else
+          case Rex.activate_app(Env.app(:rex_runner, Shuttle.Runner.Default)) do
+            :ok -> :ok
+            {:error, reason} -> {:error, "Cannot activate Rex app: #{inspect(reason)}"}
+          end
         end
 
       {:forwarded, _, body} ->

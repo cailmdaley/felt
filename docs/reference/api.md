@@ -63,6 +63,7 @@ time.
 | `GET /voice` | recorder-routed | Live microphone state, selected target, pending speech and last delivery |
 | `GET /voice/transcript` | recorder-addressed | Resolve the current following transcript as `{path, launch, recorder}` for the file reader; no capture control |
 | `POST /voice` | recorder-routed | Persist `{enabled?}` and control `{muted?}`; returns voice state |
+| `POST /voice/target` | recorder-routed | Route following to `{fiber_id, origin?, name?}`, the board's view; returns voice state, unchanged unless following |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
@@ -76,7 +77,7 @@ time.
 | `POST /fleet/remotes` | host-addressed | Add, replace or remove one remote — shells `shuttle remotes add\|rm` |
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
-| `POST /attach` | **not** owner-routed | Open a worker or past-session viewer on the local display using Kitty or Rex; remote tmux uses SSH, and remote Rex opening is unsupported |
+| `POST /attach` | **not** owner-routed | Open a worker or past-session viewer on the local display using Kitty or Rex; remote tmux uses SSH; `{quiet: true}` moves Rex's selection and leaves the frontmost app in front |
 | `POST /sessions/resume` | local | Start (or find) a past session's terminal viewer; an active terminal Codex worker reuses its owned thread |
 | `POST /sessions/prepare-terminal` | host-addressed | Prepare the terminal viewer of an owned Codex thread by fiber UID or recorded tmux name, without starting a turn |
 | `POST /sessions/receiver` | host-addressed | Resolve the live native Codex process for `{session_uuid}` and return `{session_uuid, pid, process_start}` from a kernel lifetime probe; 404 means absent or stale, 503 means process state is unknown |
@@ -442,7 +443,7 @@ Every meeting start stops live voice and verifies the recorder has exited before
 Voice captures are hidden from `/meeting`, its stop, pause and system-audio controls, including stale-launch errors.
 Disabled, idle voice checks lifecycle-file changes without polling the terminal; startup always observes retained captures so an orphan voice recorder is stopped.
 
-While following is on, the focused Rex session is the destination: `Shuttle.RexFocus` durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory. No HTTP route sets a target.
+While following is on, the destination is whichever of Rex and the board had focus last. `Shuttle.RexFocus` routes Rex's worker when Rex comes to the front or changes worker, and the board posts what it shows to `POST /voice/target` while it has the keyboard, on regaining it included. Each route durably appends `{t, fiber_id, origin, name}` to `voice-routes.jsonl` under the daemon's data directory.
 `t` is the recorder's UTC receipt time, not the time reconciliation finishes.
 Each utterance uses the route in force at its spoken-start timestamp (`wall` in hark's JSONL), even if recognition completes after a target switch.
 A target switch flushes warm pending words to the old target immediately; cold speech stays with its card.

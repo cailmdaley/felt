@@ -44,4 +44,28 @@ try {
     await context.close()
   }
   console.log('voice layout and elsewhere state: ok (light + dark)')
+
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage()
+  await page.goto(`${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=music`)
+  await page.locator('.kbn-desk').waitFor()
+  await page.evaluate(() => {
+    const voice = window.__harness.modal.voice, fetched = window.fetch
+    voice.dispose()
+    voice.status = { available: true, enabled: true, muted: false, state: 'listening', target: { fiber_id: 'other', origin: 'other', name: 'Other' }, last: null, error: null }
+    window.__routes = []
+    window.fetch = (url, init) => {
+      if (!String(url).endsWith('/api/v1/voice/target')) return fetched(url, init)
+      const target = JSON.parse(init.body)
+      window.__routes.push(target)
+      return Promise.resolve(new Response(JSON.stringify({ ...voice.status, target })))
+    }
+  })
+  await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Music' }).first().click()
+  await page.waitForFunction(() => window.__routes.length > 0)
+  const [route] = await page.evaluate(() => window.__routes)
+  assert.match(route.name, /Music/)
+  assert.equal(await page.evaluate(() => window.__harness.modal.voice.status.target.fiber_id), route.fiber_id)
+  await context.close()
+  console.log('voice follows the page the board shows: ok')
 } finally { await browser.close() }

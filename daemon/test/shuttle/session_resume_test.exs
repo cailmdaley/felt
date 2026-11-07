@@ -123,7 +123,7 @@ defmodule Shuttle.SessionResumeTest do
     def start_link(_ \\ []), do: Agent.start_link(fn -> [] end, name: __MODULE__)
     def opened, do: Agent.get(__MODULE__, & &1)
 
-    def open(session, host) do
+    def open(session, host, _opts \\ []) do
       Agent.update(__MODULE__, &(&1 ++ [{session, host}]))
       :ok
     end

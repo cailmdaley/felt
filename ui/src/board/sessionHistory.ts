@@ -67,8 +67,8 @@ export function parseSessionLinks(body: unknown): Map<string, SessionLinkEntry> 
 
 /** What `POST /api/v1/attach` is sent: a live worker's tmux, or a session to resume. */
 export type AttachBody =
-  | { tmux_session: string; shuttle_host: string | null }
-  | { session: string; shuttle_host: string | null }
+  | { tmux_session: string; shuttle_host: string | null; quiet?: boolean }
+  | { session: string; shuttle_host: string | null; quiet?: boolean }
 
 export type SessionTarget =
   | { kind: 'terminal'; body: AttachBody; label: string; title: string }

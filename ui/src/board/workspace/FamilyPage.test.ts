@@ -137,6 +137,17 @@ it('leaves its arrows and Enter to itself under the reader, and j, k and h to th
   expect(key_(target, 'j').defaultPrevented).toBe(false)
   expect(peekName(family)).toBe('Asked')
 })
+it('settles on what it comes to, not on a hover, and on the root when whole', () => {
+  const { page: family } = page()
+  expect(family.settled?.id).toBe('hub')
+  pointer(option(family, 'Idle'), 'pointerover', 'mouse')
+  expect(family.selection?.id).toBe('hub/w')
+  expect(family.settled?.id).toBe('hub')
+  click(option(family, 'Idle'))
+  expect(family.settled?.id).toBe('hub/w')
+  family.stepOut()
+  expect(family.settled?.id).toBe('hub')
+})
 it('peeks as the pointer rests on a thread, and keeps it after the pointer leaves', () => {
   const { page: family, open, place } = page()
   pointer(option(family, 'Idle').querySelector('path')!, 'pointerover', 'mouse')
@@ -156,7 +167,7 @@ it('comes to a thread on a first tap and opens its conversation on the second', 
   expect(peekName(family)).toBe('Idle')
   pointer(mark, 'pointerdown', 'touch')
   click(mark)
-  expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/w' }))
+  expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/w' }), true)
 })
 it('shows the selected thread\'s sent files in the peek, marks the unread, and opens one', () => {
   const files = Array.from({ length: 6 }, (_, n) => ({ key: `doc-${n}`, name: `f${n}.html`, at: now - n * hour, unread: n === 0 }))
@@ -354,6 +365,7 @@ it('offers a thread with a worker its conversation from the peek', () => {
   expect(worker.textContent).toBe('Open in Rex')
   worker.click()
   expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/a' }))
+  expect(converse.mock.lastCall).toHaveLength(1)
 })
 
 describe('coming to a thread', () => {
@@ -376,7 +388,7 @@ describe('coming to a thread', () => {
     click(option(family, 'Mid'))
     expect(stage.classList.contains('family-map-zoomed')).toBe(true)
     expect(converse).toHaveBeenCalledTimes(1)
-    expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }))
+    expect(converse).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub/mid' }), true)
     expect(open).not.toHaveBeenCalled()
     expect(place.focus).toContain('hub/mid')
     expect(option(family, 'Mid').hasAttribute('data-focus')).toBe(true)

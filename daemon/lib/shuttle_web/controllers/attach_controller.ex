@@ -63,9 +63,7 @@ defmodule ShuttleWeb.AttachController do
   end
 
   defp create_traced(conn, %{"tmux_session" => session} = params) when is_binary(session) do
-    host = Map.get(params, "shuttle_host")
-
-    attach(conn, session, host)
+    attach(conn, session, Map.get(params, "shuttle_host"), quiet(params))
   end
 
   defp create_traced(conn, %{"session" => session} = params) when is_binary(session) do
@@ -74,7 +72,7 @@ defmodule ShuttleWeb.AttachController do
     if Transcript.valid_session?(session) do
       case OpenTrace.step(:resume, fn -> prepare(session, host) end) do
         {:ok, tmux} ->
-          attach(conn, tmux, host)
+          attach(conn, tmux, host, quiet(params))
 
         {:error, status, reason} ->
           conn |> put_status(status) |> json(%{error: format_error(reason)})
@@ -88,8 +86,12 @@ defmodule ShuttleWeb.AttachController do
     conn |> put_status(400) |> json(%{error: "tmux_session or session is required"})
   end
 
-  defp attach(conn, tmux, host) do
-    case OpenTrace.step(:display, fn -> opener().open(tmux, host) end) do
+  # `quiet: true` moves the terminal to the conversation and leaves the keyboard
+  # where it is.
+  defp quiet(params), do: [quiet: params["quiet"] == true]
+
+  defp attach(conn, tmux, host, opts) do
+    case OpenTrace.step(:display, fn -> opener().open(tmux, host, opts) end) do
       :ok ->
         json(conn, %{attached: true, session: tmux})
 

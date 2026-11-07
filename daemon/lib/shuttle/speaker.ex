@@ -532,9 +532,9 @@ defmodule Shuttle.Speaker do
       end
   end
 
-  # Route live voice to the card the inbox opened and reveal it in Rex, so the
-  # target, the board and Rex agree on it. Rex reveals nothing while a meeting
-  # holds the mic.
+  # Route live voice to the card the inbox opened and move Rex to it behind the
+  # frontmost app, so the target, the board and Rex agree on it. Rex stays put
+  # while a meeting holds the mic.
   defp retarget(item) do
     params = %{"fiber_id" => item.fiber_id, "name" => item.name, "source" => "inbox"}
     params = if item[:origin], do: Map.put(params, "origin", item.origin), else: params

@@ -37,7 +37,7 @@ defmodule ShuttleWeb.Router do
     get("/voice", VoiceController, :show)
     get("/voice/transcript", VoiceController, :transcript)
     post("/voice", VoiceController, :update)
-    post("/voice/reveal", VoiceController, :reveal)
+    post("/voice/target", VoiceController, :target)
     # The spoken outbox plays on the host with a speaker: an addressed
     # recorder, else this host, else the first remote that can speak.
     get("/speak", SpeakController, :show)

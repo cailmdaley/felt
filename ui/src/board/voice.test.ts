@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Voice, voicePollDelay, type VoiceStatus } from './voice'
+import { card } from './testFixtures.js'
+import { Voice, constitutionFor, voicePollDelay, type VoiceStatus } from './voice'
 
 const status = (changes: Partial<VoiceStatus> = {}): VoiceStatus => ({ available: true, enabled: true, muted: false, state: 'listening', target: null, last: null, error: null, ...changes })
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
@@ -186,5 +187,108 @@ describe('live voice', () => {
     expect(voicePollDelay(true, false, status())).toBe(15_000)
     expect(voicePollDelay(true, true, status({ enabled: false }))).toBe(15_000)
     expect(voicePollDelay(true, true, status())).toBe(2_000)
+  })
+  describe('following what the board shows', () => {
+    const worker = card({ id: 'project/a', uid: 'uid-a', name: 'A', originId: 'owner', shuttleKind: 'oneshot' })
+    const other = card({ id: 'project/b', uid: 'uid-b', name: 'B', originId: 'owner', shuttleKind: 'oneshot' })
+    const held = { fiber_id: 'uid-b', origin: 'owner', name: 'B' }
+    let current: VoiceStatus, posts: unknown[], focused: boolean
+    const mounted = async (start: VoiceStatus): Promise<Voice> => {
+      vi.useFakeTimers()
+      current = start
+      posts = []
+      focused = true
+      vi.spyOn(document, 'hasFocus').mockImplementation(() => focused)
+      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          posts.push(JSON.parse(String(init.body)))
+          current = { ...current, target: JSON.parse(String(init.body)) as VoiceStatus['target'] }
+        }
+        return { ok: true, json: async () => current }
+      }))
+      const voice = new Voice('')
+      voice.mount(); await flush()
+      return voice
+    }
+
+    it('sets the target from what the board shows, once the view holds, without following its own write back', async () => {
+      const voice = await mounted(status({ target: held }))
+      const followed: string[] = []
+      voice.onFollow = target => followed.push(target.fiber_id)
+      voice.see(other)
+      voice.see(worker)
+      await vi.advanceTimersByTimeAsync(300)
+      voice.see(other)
+      await vi.advanceTimersByTimeAsync(300)
+      voice.see(worker)
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
+      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      expect(followed).toEqual([])
+      voice.dispose()
+    })
+    it('lets the last focused of Rex and the board decide', async () => {
+      const voice = await mounted(status({ target: held }))
+      const followed: string[] = []
+      voice.onFollow = target => followed.push(target.fiber_id)
+      focused = false
+      voice.see(worker)
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      expect(posts).toEqual([])
+      focused = true
+      window.dispatchEvent(new Event('focus')); await flush()
+      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
+      focused = false
+      current = status({ target: held })
+      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      expect(followed).toEqual(['uid-b'])
+      expect(posts).toHaveLength(1)
+      voice.dispose()
+    })
+    it('takes back the seen route when the write fails, and leaves a target that already agrees alone', async () => {
+      const voice = await mounted(status({ target: held }))
+      const followed: string[] = []
+      voice.onFollow = target => followed.push(target.fiber_id)
+      voice.see(other)
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      expect(posts).toEqual([])
+      vi.mocked(fetch).mockImplementation(async (_url, init) => init?.method === 'POST' ? { ok: false, status: 503 } as Response : { ok: true, json: async () => current } as Response)
+      voice.see(worker)
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      expect(followed).toEqual([])
+      voice.dispose()
+    })
+    it.each([
+      ['voice is off', status({ enabled: false, target: held })],
+      ['a meeting holds the mic', status({ state: 'yielded', target: held })],
+    ])('changes nothing while %s, and claims the view when following returns', async (_, start) => {
+      const voice = await mounted(start)
+      voice.see(worker)
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      expect(posts).toEqual([])
+      current = status({ target: held })
+      await vi.advanceTimersByTimeAsync(15_000); await flush()
+      expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
+      voice.dispose()
+    })
+    it('leaves the target where it is on a fiber with no constitution, or off any fiber', async () => {
+      const voice = await mounted(status({ target: held }))
+      voice.see(card({ id: 'notes', originId: 'owner' }))
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      voice.see(null)
+      await vi.advanceTimersByTimeAsync(400); await flush()
+      window.dispatchEvent(new Event('focus')); await flush()
+      expect(posts).toEqual([])
+      voice.dispose()
+    })
+    it('reads a plain fiber as the nearest constitution above it on the same host', () => {
+      const hub = card({ id: 'project', originId: 'owner', shuttleKind: 'standing' })
+      const elsewhere = card({ id: 'project/sub', originId: 'other', shuttleKind: 'oneshot' })
+      const page = card({ id: 'project/sub/tapestry', originId: 'owner' })
+      expect(constitutionFor(page, [hub, elsewhere, page])).toBe(hub)
+      expect(constitutionFor(hub, [hub, page])).toBe(hub)
+      expect(constitutionFor(page, [elsewhere, page])).toBe(page)
+    })
   })
 })

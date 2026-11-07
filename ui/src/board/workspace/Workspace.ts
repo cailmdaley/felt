@@ -46,6 +46,8 @@ export interface WorkspaceOptions {
   deskPlacement?(card: KanbanCard): DeskPlacement | undefined
   origin(): string
   onVisibility(active: boolean): void
+  /** The fiber the page shows, which voice follows. */
+  onSight?(card: KanbanCard): void
   onReturnCard?(card: KanbanCard): void
   onEscapeHome?(): void
   /** A history entry addressed a board view or channel origin; switch to it without pushing. */
@@ -320,7 +322,7 @@ export class Workspace {
     if (map) this.open(card, undefined, map)
     else if (card.status === 'active' && isQuestion(card)) this.openQuestion(card)
     else this.open(card)
-    if (map && conversable(card)) this.dock.openConversation(card)
+    if (map && conversable(card)) this.dock.openConversation(card, true)
   }
   /** Readies a fiber on a family's map to land there, at its thread, and names the page; undefined for one the map has no place for. */
   private landOnMap(card: KanbanCard): DocKey | undefined {
@@ -649,15 +651,23 @@ export class Workspace {
     }
     return page
   }
+  /** Voice follows the page: on the map, the thread it rests on; anywhere else, the page's fiber. */
+  private sight(state: ChannelState): void {
+    this.opts.onSight?.(this.mapPage(state)?.settled ?? state.card)
+  }
   /** On the family's map, the thread it has selected. */
   private mapSelection(): KanbanCard | undefined {
     return this.mapPage(this.current)?.selection
   }
   private family(): HTMLElement {
     const state = this.current!
-    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), card => { this.dock.openConversation(card) }, this.mapFeeds, state.mapPlace,
+    state.familyPage ??= new FamilyPage((card, doc) => this.openFromMap(card, doc), (card, quiet) => { this.dock.openConversation(card, quiet) }, this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
-      () => { if (this.current === state) this.reader.setBackDestination(this.backDestination(state)) })
+      () => {
+        if (this.current !== state) return
+        this.reader.setBackDestination(this.backDestination(state))
+        this.sight(state)
+      })
     state.familyPage.update(state.card, this.graph())
     return state.familyPage.el
   }
@@ -797,6 +807,7 @@ export class Workspace {
     if (selected === this.familyDocument(state.card)) this.focusMap(state)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.seatBand(state)
+    this.sight(state)
   }
   /** The map takes the keys as it lands, unless a control in the reader already holds them. */
   private focusMap(state: ChannelState): void {

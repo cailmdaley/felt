@@ -88,10 +88,10 @@ export class FamilyPage {
   private readonly place: MapPlace
   private readonly levelled: () => void
 
-  private readonly converse: (card: KanbanCard) => void
+  private readonly converse: (card: KanbanCard, quiet?: boolean) => void
 
-  /** `open` leaves for a document, or a thread the map has no place for; `levelled` hears the map change level. */
-  constructor(open: (card: KanbanCard, doc?: string) => void, converse: (card: KanbanCard) => void, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, levelled: () => void = () => {}) {
+  /** `open` leaves for a document, or a thread the map has no place for; `converse` opens a conversation, `quiet` leaving the keyboard here; `levelled` hears the map change level or come to rest. */
+  constructor(open: (card: KanbanCard, doc?: string) => void, converse: (card: KanbanCard, quiet?: boolean) => void, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, levelled: () => void = () => {}) {
     this.open = open; this.converse = converse; this.feeds = feeds; this.place = place; this.disposed = disposed; this.levelled = levelled
     this.stage.setAttribute('role', 'listbox')
     this.stage.setAttribute('aria-label', 'Threads, most urgent first')
@@ -229,7 +229,7 @@ export class FamilyPage {
   /** Comes to a thread: the map flies to it, and whatever it holds unfolds. */
   private come(thread: MapThread): void {
     this.select(thread.key)
-    if (!this.unfolds) return
+    if (!this.unfolds) { this.levelled(); return }
     this.setFocus(thread.key)
     this.place.view = null
     this.zoom.fly(this.aimed())
@@ -431,6 +431,11 @@ export class FamilyPage {
     if (thread.files.length > PEEK_FILES) files.append(el('span', 'ws-family-peek-more', `+${thread.files.length - PEEK_FILES}`))
     this.peek.replaceChildren(title, note, files)
   }
+  /** The thread the map has come to rest on, which voice follows: never a hover, and the family's root while it stands whole. */
+  get settled(): KanbanCard | undefined {
+    const key = this.unfolds ? this.place.focus : this.selected
+    return (key ? this.model?.threads.get(key) : this.model?.root)?.card
+  }
   /** The thread the map has selected, which `c` opens the worker of. */
   get selection(): KanbanCard | undefined {
     return this.selected ? this.model?.threads.get(this.selected)?.card : undefined
@@ -458,7 +463,7 @@ export class FamilyPage {
     this.come(thread)
     if (!conversable(thread.card)) return
     this.place.worker = thread.key
-    this.converse(thread.card)
+    this.converse(thread.card, true)
     this.drawField()
   }
   /** The keys of the listbox: its options', unmodified, leaving any control beside them its own. */

@@ -360,6 +360,37 @@ defmodule Shuttle.RexFocusTest do
     refute_receive {:select, _, _, _}
   end
 
+  test "reveal moves Rex's selection and never activates the app", %{tmp_dir: dir} do
+    alias Shuttle.Test.{Env, FakeRex}
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
+    Env.put_app_env(:rex_runner, FakeRex)
+    Env.put_app_env(:os_type, {:unix, :darwin})
+    FakeRex.clients([%{"client_id" => "client:app", "info" => %{"kind" => "app"}}])
+
+    assert :ok =
+             RexFocus.reveal(%{"fiber_id" => "01TASK", "origin" => "test-host"},
+               own_host: "test-host",
+               active?: fn -> true end,
+               bindings: fn -> {:ok, bindings()} end,
+               title: fn -> {:error, :unavailable} end,
+               fibers: fn ->
+                 [
+                   %{
+                     "id" => "project/task",
+                     "uid" => "01TASK",
+                     "shuttle" => %{"host" => "test-host"}
+                   }
+                 ]
+               end
+             )
+
+    calls = FakeRex.calls()
+    assert Enum.any?(calls, fn {_, argv, _} -> "client.perform" in argv end)
+    refute Enum.any?(calls, &match?({"open", _, _}, &1))
+  end
+
   test "reveal finds a remote worker's window on its host's Rex server by its labels" do
     parent = self()
 

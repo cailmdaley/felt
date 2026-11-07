@@ -6,8 +6,9 @@ defmodule ShuttleWeb.AttachControllerTest do
   @endpoint ShuttleWeb.Endpoint
 
   defmodule Opener do
-    def open(name, host) do
+    def open(name, host, opts) do
       send(Shuttle.Env.app(:attach_test), {:opened, name, host})
+      send(Shuttle.Env.app(:attach_test), {:opts, opts})
       Shuttle.Env.app(:attach_result, :ok)
     end
   end
@@ -31,6 +32,14 @@ defmodule ShuttleWeb.AttachControllerTest do
              |> json_response(200)
 
     assert_received {:opened, "worker-shuttle", "remote-a"}
+    assert_received {:opts, [quiet: false]}
+  end
+
+  test "a quiet attach reaches the opener" do
+    post(api_conn(), "/api/v1/attach", Jason.encode!(%{tmux_session: "worker", quiet: true}))
+    |> json_response(200)
+
+    assert_received {:opts, [quiet: true]}
   end
 
   test "unsupported remote Rex errors reach the board as a 502" do

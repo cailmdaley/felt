@@ -38,7 +38,7 @@ export type ConversationDestination = { id: ConversationOpening; label: string; 
   | { run: () => void; href?: never }
 )
 export type ConversationWorker = Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'terminalBackend' | 'shuttleHost' | 'launchError'>
-export type WorkerOpener = (session: string, host?: string) => void
+export type WorkerOpener = (session: string, host?: string, quiet?: boolean) => void
 
 /** Every usable destination, best first. An unavailable preference never changes this order. */
 export function conversationDestinations(card: ConversationWorker, device: ConversationDevice, openWorker?: WorkerOpener): ConversationDestination[] {

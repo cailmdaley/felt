@@ -746,6 +746,21 @@ defmodule Shuttle.VoiceTest do
     assert :sys.get_state(Env.server!(Voice)).retry.failures == 0
   end
 
+  test "the board sets the target over HTTP only while following" do
+    target = Jason.encode!(%{fiber_id: "project/seen", origin: "test-host", name: "Seen"})
+    response = api_conn() |> post("/api/v1/voice/target", target)
+    assert %{"target" => nil} = json_response(response, 200)
+
+    assert {:ok, _} = Voice.update(%{"enabled" => true})
+    response = api_conn() |> post("/api/v1/voice/target", target)
+    assert %{"target" => %{"fiber_id" => "project/seen"}} = json_response(response, 200)
+
+    assert %{"source" => "board", "fiber_id" => "project/seen"} =
+             Voice.routes_path() |> File.read!() |> String.trim() |> Jason.decode!()
+
+    assert (api_conn() |> post("/api/v1/voice/target", "{}")).status == 422
+  end
+
   test "voice API answers from the local recorder" do
     response = api_conn() |> post("/api/v1/voice", Jason.encode!(%{enabled: true}))
     assert response.status == 200
