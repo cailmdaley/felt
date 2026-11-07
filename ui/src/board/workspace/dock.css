@@ -65,7 +65,6 @@
   color: var(--ws-ink); font: var(--type-label)/var(--leading-solid) var(--font-serif); text-overflow: ellipsis;
 }
 .ws-worker-message::placeholder { color: var(--ws-ink-faint, var(--ws-ink-muted)); opacity: 1; }
-.ws-worker-message:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 0; }
 .ws-reader .ws-worker-acts .ws-header-icon:disabled { opacity: .45; cursor: default; }
 .ws-worker-receipt { flex: none; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
 .ws-worker-receipt:empty { display: none; }
