@@ -44,9 +44,9 @@ const press = (el: Element, key: string): KeyboardEvent => { const event = new K
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('the page', () => {
-  it('heads with the constitution and its outcome, then its threads most urgent first, the set-aside behind one fold', () => {
+  it('heads with the constitution and its outcome, then its threads under one divider per kind, the set-aside behind one fold', () => {
     const { family } = made()
-    expect(said(family)).toEqual(['hub', 'Asked', 'Mid', 'Idle', '(1 archived · 1 draft)'])
+    expect(said(family)).toEqual(['hub', '[Questions]', 'Asked', '[Your turn]', 'Mid', 'Idle', '(1 archived · 1 draft)'])
     expect(family.el.querySelector('.fp-head .fp-note')!.textContent).toBe('The hub came to this.')
     expect(row(family, 'Asked').querySelector('.fp-note')!.textContent).toBe('Which one?')
     expect(row(family, 'Idle').querySelector('.fp-note')!.textContent).toBe('Needs a look')
@@ -56,7 +56,7 @@ describe('the page', () => {
     for (const el of family.el.querySelectorAll('.fp-row')) expect(el.querySelectorAll('svg')).toHaveLength(1)
     expect(row(family, 'Asked').dataset.standing).toBe('question')
     expect(row(family, 'Mid').dataset.standing).toBe('turn')
-    expect(row(family, 'Mid').querySelector('.fp-meta')!.textContent).toMatch(/^new file/)
+    expect(row(family, 'Mid').querySelector('.fp-meta')!.textContent).toMatch(/^(now|\d+\w+)$/)
     expect(row(family, 'Mid').querySelector('.fp-count')!.textContent).toBe('1 of 1 ask')
   })
   it('counts what asks across the family', () => {
