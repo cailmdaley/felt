@@ -20,7 +20,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildRows, type ChronicleRow } from './ChronicleView.js'
+import { buildRows, type ChronicleRow } from './chronicleModel.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import { collectCards } from './ViewRegistry.js'
 import type { ActivityBucket } from './TemporalData.js'

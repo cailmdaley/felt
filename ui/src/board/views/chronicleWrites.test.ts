@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import './ChronicleView'
 import { getView, type ViewContext } from './ViewRegistry'
-import type { CycleBand } from './ChronicleView'
+import type { CycleBand } from './chronicleModel'
 
 const makeView = () => {
   const Constructor = getView('chronicle')!.constructor as new () => object

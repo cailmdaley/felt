@@ -7,7 +7,7 @@
     "src/board/views/TemporalData.ts",
     "src/board/views/vocabulary.ts",
     "src/board/views/join.ts",
-    "src/board/views/ChronicleView.ts"
+    "src/board/views/chronicleModel.ts"
   ],
   "coverageAnalysis": "perTest",
   "disableBail": true,

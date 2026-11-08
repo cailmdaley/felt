@@ -42,7 +42,7 @@ import {
   rowWaitingOn,
   type CycleCard,
   saysNothingHere,
-} from './ChronicleView.js'
+} from './chronicleModel.js'
 import { fiberDocUrl } from '../utils.js'
 import { buildLedgerNarration } from './join.js'
 import type { LedgerNarration } from './join.js'

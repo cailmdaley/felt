@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
-import { columnIndexAtX, overlayDueEdits } from './ChronicleView.js'
+import { columnIndexAtX, overlayDueEdits } from './chronicleModel.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { card as baseCard } from '../testFixtures.js'
 

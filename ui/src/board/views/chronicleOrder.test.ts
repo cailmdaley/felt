@@ -4,12 +4,12 @@
  * Two honest signals compete for a row's rank, and `modifiedAt` is
  * deliberately absent from both: a metadata-only touch (a due-date tweak, a
  * frontmatter edit) must not float an unworked fiber above one that was
- * actually worked. See `buildFiberRow` in ChronicleView.ts for the mechanism
+ * actually worked. See `buildFiberRow` in chronicleModel.ts for the mechanism
  * these tests pin down.
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildRows, type ChronicleRow } from './ChronicleView.js'
+import { buildRows, type ChronicleRow } from './chronicleModel.js'
 import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import {
