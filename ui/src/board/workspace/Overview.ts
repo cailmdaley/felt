@@ -219,6 +219,8 @@ export class Overview {
   private visible = true
   /** Model changes reached while the sheet was off screen, waiting to be drawn. */
   private stale = false
+  /** Folios whose receipts arrived off screen, lifted when the Board is next seen. */
+  private readonly arrivals = new Set<Folio>()
   private disposed = false
   private scroll = 0
   /** The prior visit is fixed for this sheet, so reloads inside thirty seconds keep the news. */
@@ -380,7 +382,7 @@ export class Overview {
     if (this.disposed) return
     if (visible === this.visible) {
       if (visible && this.stale) this.render()
-      if (visible) this.startVisit()
+      if (visible) { this.startVisit(); this.liftArrivals() }
       return
     }
     if (!visible) { this.navigation++; this.scroll = this.el.scrollTop; this.leaveVisit() }
@@ -397,7 +399,7 @@ export class Overview {
       if (visible) this.opts.themes?.bind(row.el, row.change.card)
       else this.opts.themes?.unbind(row.el)
     }
-    if (visible) { this.el.scrollTop = this.scroll; this.startVisit(); this.schedule() }
+    if (visible) { this.el.scrollTop = this.scroll; this.startVisit(); this.schedule(); this.liftArrivals() }
     else {
       if (this.raf !== undefined) { cancelAnimationFrame(this.raf); this.raf = undefined }
       for (const thumb of this.thumbnails.values()) thumb.schedule()
@@ -543,9 +545,8 @@ export class Overview {
     }
     this.marks = overviewHostMarks([...this.sends.hosts, ...known.values()].flatMap(h => typeof h === 'string' ? [h] : [h.originId, ...(h.mirroredOrigins ?? [])]).concat([...this.folios.values()].flatMap(f => f.receipts.map(r => r.owner))))
     this.render()
-    if (this.visible && this.el.isConnected) {
-      for (const folio of arrived) if (!folio.el.hidden) this.receiptMotion.folio(folio.el)
-    }
+    for (const folio of arrived) this.arrivals.add(folio)
+    this.liftArrivals()
     this.resolveFolios()
   }
 
@@ -701,6 +702,12 @@ export class Overview {
     if (this.find.value === query) return
     this.find.value = query
     this.render()
+  }
+  /** Lift the folios whose receipts arrived, once the sheet is on screen to show it. */
+  private liftArrivals(): void {
+    if (!this.shown) return
+    for (const folio of this.arrivals) if (folio.el.isConnected && !folio.el.hidden) this.receiptMotion.folio(folio.el)
+    this.arrivals.clear()
   }
   /** The sheet draws only while it is on screen; channel order stays current regardless. */
   private get shown(): boolean { return this.visible && this.el.isConnected }
