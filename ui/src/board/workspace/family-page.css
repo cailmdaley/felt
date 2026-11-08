@@ -22,10 +22,9 @@
 .fp-count:empty { display: none; }
 .fp-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 1px 0 0 20px; overflow: hidden; color: var(--ws-ink-soft); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .fp-note[hidden], .fp-files[hidden] { display: none; }
-/* A thread row's outcome stays folded until the row is highlighted, at once, or hovered a moment. */
+/* A thread row's outcome stays folded until the row is highlighted, by keys or a click. */
 .fp-row:not(.fp-head) > .fp-line > .fp-note { max-height: 0; margin-top: 0; transition: max-height .12s ease-out; }
 .fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line > .fp-note { max-height: calc(2em * var(--leading-ui)); margin-top: 1px; }
-.fp-row:not(.fp-head):hover > .fp-line > .fp-note { max-height: calc(2em * var(--leading-ui)); margin-top: 1px; transition-delay: .3s; }
 
 .fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; visibility: hidden; }
 .fp-row:not(.fp-head):is(:hover, :focus-within, [data-selected]) .fp-verbs { visibility: visible; }
