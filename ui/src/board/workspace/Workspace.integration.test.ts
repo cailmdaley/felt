@@ -1225,7 +1225,7 @@ describe('workspace reader integration', () => {
     workspace.openFromDesk(feed[0]); await flush()
     await press('j'); await press('l')
     expect(doc().hidden).toBe(false)
-    workspace.returnToOrigin(); await new Promise(resolve => setTimeout(resolve, 50)); await flush()
+    await pop(() => workspace.returnToOrigin())
     expect(workspace.isActive).toBe(false)
     workspace.openFromDesk(feed[0]); await flush()
     expect(workspace.isActive).toBe(true)
