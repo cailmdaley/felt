@@ -47,10 +47,9 @@ defmodule Shuttle.Actions do
   # Deriving the set *from* the resolver is the load-bearing invariant: for
   # every valid target t, `action_for_target(fiber, t, running?) ∈
   # action_ids(fiber, running?)` holds by construction, so a drag can never
-  # 409 `action_not_available` from a resolve/availability disagreement. The
-  # two cond-chains that used to be hand-maintained independently drifted
-  # apart for 110 of the 270 (state × target) combinations; this collapses the
-  # second chain into a projection of the first. Order is preserved
+  # 409 `action_not_available` from a resolve/availability disagreement: the
+  # available set is a projection of the resolver, never a second cond-chain
+  # that can drift from it. Order is preserved
   # (`@kanban_targets` then `:pause`) so the rendered list is stable.
   #
   # See `gotcha-shuttle-resolve-invoke-daemon-split`.

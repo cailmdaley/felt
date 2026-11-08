@@ -5,12 +5,10 @@ defmodule Shuttle.CommitLedger do
 
   ## Why it exists
 
-  Sibling to `Shuttle.SessionLedger`, and for the same reason. Commit↔session
-  attribution used to be *inferred*: read the commit subject, match a prefix
-  against a fiber's leaf, hope the worker wrote the subject the board expects.
-  That inference is a string game — it fails on any subject a human phrased
-  freely, and it says nothing about *who* committed. The ledger makes the
-  attribution **structural**: the hook fires at the one moment the pairing is
+  Sibling to `Shuttle.SessionLedger`, and for the same reason. A commit subject
+  cannot attribute a commit: matching it against a fiber's leaf fails on any
+  subject a human phrased freely, and says nothing about *who* committed. The
+  ledger makes the attribution **structural**: the hook fires at the one moment the pairing is
   certain (a `git commit` just returned inside a session) and appends one line
   naming it.
 

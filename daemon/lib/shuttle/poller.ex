@@ -2005,7 +2005,7 @@ defmodule Shuttle.Poller do
     {:noreply, state}
   end
 
-  # A slow read no longer owns the poller's clock forever. Reap its supervised,
+  # A slow read never owns the poller's clock. Reap its supervised,
   # unlinked task first, then advance with a fresh cycle token. The phase
   # reference keeps an already-queued timeout from an earlier phase inert.
   defp transition_info(

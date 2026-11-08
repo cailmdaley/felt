@@ -7,9 +7,9 @@ defmodule Shuttle.Contract do
   touches the daemon-shelled CLI surface (see `internal/shuttlecli/contract.go`'s
   moduledoc for exactly what counts — a flag added/removed/renamed on
   mark-runtime/reopen/any verb the daemon shells at dispatch/conclude time, or
-  a change to what a shelled verb's stdout/exit code means). This is the exact
-  skew that shipped 80ce7b3: a post-fix daemon shelling a pre-fix CLI that
-  silently failed every dispatch write because it didn't know `--host`.
+  a change to what a shelled verb's stdout/exit code means). Without the bump, a
+  newer daemon shelling an older CLI fails every write that uses a flag the CLI
+  does not know.
 
   During the Poller's contract-check stage the daemon shells `shuttle contract` and
   compares its bare-integer stdout against `expected_level/0` — catching a

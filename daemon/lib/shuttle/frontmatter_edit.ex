@@ -4,11 +4,11 @@ defmodule Shuttle.FrontmatterEdit do
 
   The lifecycle store flips one or two frontmatter fields on each transition
   (`status`, `tempered`, `closed-at`, plus a handful of daemon-owned runtime
-  keys nested under `shuttle:`). Round-tripping the whole document through a
-  hand-rolled emitter used to corrupt it: keys got alphabetically reordered on
-  every write (churn across machines), and multi-line block scalars like
-  `outcome: |-` were collapsed into Elixir-`inspect`-escaped one-liners that the
-  felt CLI could no longer parse — the fiber vanished from the kanban.
+  keys nested under `shuttle:`). Round-tripping the whole document through an
+  emitter would corrupt it: keys reorder on every write (churn across
+  machines), and multi-line block scalars like `outcome: |-` collapse into
+  escaped one-liners that the felt CLI cannot parse — and the fiber vanishes
+  from the kanban.
 
   This module instead operates on the raw frontmatter text directly. It parses
   the text into top-level entries (each a `key:` line plus its deeper-indented

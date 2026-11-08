@@ -1,7 +1,7 @@
 defmodule Shuttle.Transition do
   @moduledoc """
   The unified write-plane for kanban transitions — one call that hides the
-  resolve / invoke / owner-routing dance the kanban used to orchestrate itself.
+  resolve / invoke / owner-routing sequence from the kanban.
 
   A kanban drag is `{fiber_id, target, origin}`: move this fiber to that column,
   and the fiber is owned by that host. `transition/3` turns it into a lifecycle

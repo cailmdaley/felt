@@ -18,13 +18,12 @@ defmodule Shuttle.FolderPicker do
     * `:zenity` — Linux/GTK, `--file-selection --directory`.
     * `:kdialog` — Linux/KDE, `--getexistingdirectory`.
 
-  On Linux the binary being on PATH is **not** the test, and it used to be. A
-  cluster login node ships `zenity` in its base image and has no display server
-  at all, so `find_executable` said yes and the dialog it promised exited
-  non-zero into a code path that reads a non-zero exit as the human pressing
-  Cancel — the caller waited, and then nothing happened and nothing was said. So
-  a GTK/KDE mechanism additionally requires `$DISPLAY` or `$WAYLAND_DISPLAY`,
-  which is the actual question ("is there a screen to put this on?").
+  On Linux the binary being on PATH is **not** the test. A cluster login node
+  ships `zenity` in its base image and has no display server at all; the dialog
+  would exit non-zero, which reads as the human pressing Cancel, and nothing
+  would be said. So a GTK/KDE mechanism additionally requires `$DISPLAY` or
+  `$WAYLAND_DISPLAY`, which is the actual question ("is there a screen to put
+  this on?").
 
   `mechanism/0` answers `nil` when none of them is usable (or the platform has
   no dialog at all), which is what lets the UI decide between the dialog and the

@@ -5,12 +5,11 @@ defmodule Shuttle.SessionLedger do
 
   ## Why it exists
 
-  Fiber↔session association used to be *inferred*: read the tmux session name,
-  pull the ULID out of it, hope the worker is still alive. That inference
-  disappears the moment the session ends, so nothing downstream can answer
-  "which sessions has this card had?" after the fact. The ledger makes the
-  association **structural**: at each moment the daemon certainly knows the
-  pairing, it appends one line naming it, and that line outlives the session.
+  A live worker's tmux session name carries its fiber's ULID, but that name
+  disappears the moment the session ends, so it cannot answer "which sessions
+  has this card had?" after the fact. The ledger makes the association
+  **structural**: at each moment the daemon certainly knows the pairing, it
+  appends one line naming it, and that line outlives the session.
 
   One line per session, not per event:
 
@@ -19,8 +18,7 @@ defmodule Shuttle.SessionLedger do
        "at":1786203000000,"kind":"dispatch"}
 
   Pure machine exhaust — a pairing and its provenance, no editorial content, no
-  narrative. That distinction is deliberate: this is not felt-history reborn,
-  and nothing here is written for a human to read as prose.
+  narrative. Nothing here is written for a human to read as prose.
 
   ## The three moments
 

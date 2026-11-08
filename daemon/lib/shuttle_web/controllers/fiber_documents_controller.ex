@@ -4,7 +4,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
   `GET /api/v1/fibers` returns the fibers visible to this daemon's configured
   felt stores. `GET /api/v1/fibers/:id` resolves a SINGLE fiber by canonical id
-  — the per-fiber lookup used to open a card without fetching every fiber — and
+  — the per-fiber lookup that opens a card without fetching every fiber — and
   is OWNER-ROUTED: a remote-owned fiber's body is fetched from the owning daemon
   over the SSH tunnel (see `show/2`), never assumed present in a local git
   mirror. The `fiber` payload is felt JSON, intentionally leaving document

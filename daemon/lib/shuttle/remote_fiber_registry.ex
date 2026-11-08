@@ -528,8 +528,8 @@ defmodule Shuttle.RemoteFiberRegistry do
   end
 
   # A COLD empty 200 (owner just restarted; its first Lustre poll hasn't warmed
-  # the cache) must NOT erase the viewer's last-good feed — that is the exact
-  # regression the deleted live fallback used to avoid. Keep last-good fibers,
+  # the cache) must NOT erase the viewer's last-good feed, or every owner
+  # restart would blank its rows on the board. Keep last-good fibers,
   # refresh etag/cache, clear the error, but do NOT advance `last_polled_at`:
   # staleness stays honest (time-since-last-WARM-success) until a warm feed
   # arrives. `restored?` is left alone for the same reason: a cold feed has not
