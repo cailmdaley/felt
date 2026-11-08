@@ -1,6 +1,6 @@
 import { isDrawn, type WorkspaceDocument, type DocKey } from './documents.js'
-import { DOCUMENT_KEY_INTENTS, keyIntent } from '../keymap.js'
-import { frameBridge, type DocumentKey } from './DocumentBridge.js'
+import { keyIntent } from '../keymap.js'
+import { forwardDocumentKey, frameBridge, type DocumentKey } from './DocumentBridge.js'
 import type { SwipeSignal } from './PhoneGestures.js'
 export { withWorkspaceKeyBridge } from './DocumentBridge.js'
 import {
@@ -762,15 +762,8 @@ export class DocumentHost {
 
   private forwardKey(state: FrameState, data: DocumentKey): void {
     if (this.disposed || state.frame.doc.key !== this.selected || !state.active || state.frame.doc.kind !== 'html') return
-    const forwarded = new KeyboardEvent('keydown', {
-      key: data.key, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true,
-      metaKey: data.metaKey === true, shiftKey: data.shiftKey === true, repeat: data.repeat === true,
-      bubbles: true, cancelable: true,
-    })
-    const intent = keyIntent(forwarded, 'reader')
-    if (!intent || !DOCUMENT_KEY_INTENTS.includes(intent)) return
     // Bubble through the same app handler; keys never focus a document.
-    this.track.dispatchEvent(forwarded)
+    forwardDocumentKey(this.track, data, state.frame.viewer?.querySelector('iframe'))
   }
 }
 

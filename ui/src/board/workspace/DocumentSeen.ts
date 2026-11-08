@@ -39,6 +39,11 @@ export class DocumentSeen {
   }
 }
 
+/** Records that the human has seen each document as it stood at `at`, as the reader does when it shows one. */
+export function markSeen(files: Iterable<{ key: DocKey; at: number }>): void {
+  for (const { key, at } of files) write(PREFIX + key, Math.max(Date.now(), at))
+}
+
 /**
  * True when `key` changed at `activity` after the reader last showed it, read
  * from what `DocumentSeen` stored in any session. A document the reader never

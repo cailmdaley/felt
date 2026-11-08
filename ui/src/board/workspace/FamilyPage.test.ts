@@ -22,7 +22,7 @@ const file = (name: string, back: number, unread = false): MapFile => ({ key: `d
 /** Mid's sent files, newest first as the feed gives them. */
 const sent = [file('new.png', 1, true), file('mid.md', 2), file('old.md', 3)]
 const tapestry = file('Tapestry', 4)
-const feeds: FamilyFeeds = { marks: () => undefined, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(), lead: async c => c.id === 'hub/mid' ? tapestry : undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }) }
+const feeds: FamilyFeeds = { marks: () => undefined, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(), lead: async c => c.id === 'hub/mid' ? tapestry : undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {} }
 const settled = async (): Promise<void> => { for (let n = 0; n < 4; n++) await Promise.resolve() }
 
 interface Made { family: FamilyPage; reach: Mock; place: MapPlace; sighted: Mock }
@@ -52,11 +52,15 @@ describe('the page', () => {
     expect(row(family, 'Asked').querySelector('.fp-note')!.textContent).toBe('Which one?')
     expect(row(family, 'Idle').querySelector('.fp-note')!.textContent).toBe('Needs a look')
   })
-  it('gives each row one mark, coloured by the most urgent thing it holds, and counts what asks under it', () => {
+  it('gives each row one mark for its own state, files it under the most urgent thing it holds, and draws what is under it', () => {
     const { family } = made()
     for (const el of family.el.querySelectorAll('.fp-row')) expect(el.querySelectorAll('.fp-title svg')).toHaveLength(1)
     expect(row(family, 'Asked').dataset.standing).toBe('question')
-    expect(row(family, 'Mid').dataset.standing).toBe('turn')
+    expect(row(family, 'Asked').querySelector('.fp-mark title')!.textContent).toBe('question')
+    expect(row(family, 'Asked').querySelector('.fp-word')!.textContent, 'the mark says it; no word repeats it').toBe('')
+    expect(row(family, 'Mid').dataset.standing).toBe('working')
+    const lines = said(family)
+    expect(lines.slice(0, lines.indexOf('Mid')).filter(line => line.startsWith('[')).at(-1), 'Mid sits with Your turn, for the leaf under it').toBe('[Your turn]')
     expect(row(family, 'Mid').querySelector('.fp-meta')!.textContent).toMatch(/^(now|\d+\w+)$/)
     const tally = row(family, 'Mid').querySelector<HTMLElement>('.fp-count')!
     expect(tally.getAttribute('aria-label')).toBe('1 of 1 ask')
@@ -84,6 +88,28 @@ describe('the page', () => {
     await settled()
     expect(said(family)).toEqual(['solo'])
     expect(chips(family, 'solo')).toEqual(['☰'])
+  })
+  it('opens a lone constitution on its tapestry, unfolded under its head, and a fold then holds', async () => {
+    const lone = card({ id: 'solo', status: 'active', shuttleKind: 'oneshot', sessionUuid: 's', outcome: 'Solo came to this.' })
+    const embed = vi.fn(() => ({ el: document.createElement('div'), dispose: () => {} }))
+    const place = placeAt(lone), index = new ThreadIndex([lone])
+    const family = new FamilyPage(conversations(), { ...feeds, lead: async () => tapestry, embed }, place, vi.fn())
+    family.update(lone, index, now)
+    await settled()
+    const head = row(family, 'solo')
+    expect(head.querySelector('.fp-note')!.textContent).toBe('Solo came to this.')
+    expect(embed).toHaveBeenCalledExactlyOnceWith(lone, 'doc:Tapestry')
+    expect(head.querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(false)
+    click(head.querySelector('.fp-lead')!)
+    family.update(lone, index, now + 120_000)
+    expect(head.querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(true)
+    expect(embed).toHaveBeenCalledOnce()
+  })
+  it('leaves a constitution with threads folded until asked', async () => {
+    const embed = vi.fn(() => ({ el: document.createElement('div'), dispose: () => {} }))
+    made({ feeds: { ...feeds, lead: async () => tapestry, embed } })
+    await settled()
+    expect(embed).not.toHaveBeenCalled()
   })
 })
 
@@ -149,6 +175,7 @@ describe('a row', () => {
     expect(row(family, 'Mid').querySelector('.fp-lead')!.getAttribute('aria-pressed')).toBe('true')
     expect(reach).toHaveBeenCalledExactlyOnceWith(mid)
     expect(sighted).toHaveBeenCalledOnce()
+    expect(family.selection, 'what `c` opens is the thread whose document is open').toBe(mid)
     place.entered = null
     click(row(family, 'Mid').querySelector('.fp-lead')!)
     expect(reach, 'folding a document never touches Rex').toHaveBeenCalledOnce()
@@ -157,6 +184,25 @@ describe('a row', () => {
     expect(place.docs!.size).toBe(0)
     expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(true)
     expect(row(family, 'Mid').querySelector('.fp-lead')!.getAttribute('aria-pressed')).toBe('false')
+  })
+  it('counts a thread\'s sent files seen once their list has been open, without a click on each', async () => {
+    let mine = [file('new.png', 1, true), file('also.png', 2, true), file('old.md', 3)]
+    const seen = vi.fn((files: readonly MapFile[]) => { mine = mine.map(f => files.some(s => s.key === f.key) ? { ...f, unread: false } : f) })
+    const { family } = made({ feeds: { ...feeds, files: c => c.id === 'hub/mid' ? mine : [], lead: async () => undefined, seen } })
+    await settled()
+    expect(row(family, 'Mid').querySelector('.fp-sent')!.hasAttribute('data-unread')).toBe(true)
+    click(row(family, 'Mid').querySelector('.fp-sent')!)
+    expect(seen).toHaveBeenCalledExactlyOnceWith([mine[0], mine[1]].map(f => ({ ...f, unread: true })))
+    expect(row(family, 'Mid').querySelector('.fp-sent')!.hasAttribute('data-unread')).toBe(false)
+    expect(row(family, 'Mid').hasAttribute('data-fresh'), 'a new file is the chip\'s mark, never the row\'s').toBe(false)
+  })
+  it('counts a document seen when it unfolds', async () => {
+    const seen = vi.fn()
+    const { family } = made({ feeds: { ...feeds, lead: async c => c.id === 'hub/mid' ? { ...tapestry, unread: true } : undefined, seen } })
+    await settled()
+    click(row(family, 'Mid').querySelector('.fp-lead')!)
+    expect(seen).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ key: tapestry.key })])
+    expect(row(family, 'Mid').querySelector('.fp-lead')!.hasAttribute('data-unread')).toBe(false)
   })
   it('names a sent tapestry as the lead when the fiber\'s directory holds none', async () => {
     const { family } = made({ feeds: { ...feeds, files: c => c.id === 'hub/mid' ? [file('tapestry.html', 1), ...sent] : [], lead: async () => undefined } })
@@ -185,7 +231,7 @@ describe('a row', () => {
     expect(said(family)).not.toContain('Done')
     click(family.el.querySelector('.fp-aside')!)
     expect(said(family).slice(-4)).toEqual(['[Drafts]', 'Draft', '[Archived]', 'Done'])
-    expect(row(family, 'Done').dataset.standing).toBe('aside')
+    expect(row(family, 'Done').dataset.standing).toBe('quiet')
   })
 })
 
@@ -283,6 +329,16 @@ describe('keys', () => {
     expect(said(family)).not.toContain('Leaf')
     expect(at()).toBe('Mid')
     expect(family.foldOut()).toBe(false)
+  })
+})
+
+describe('choose', () => {
+  it('highlights a thread of the family, and ignores one of another', () => {
+    const { family } = made()
+    family.choose(idle)
+    expect(family.selection).toBe(idle)
+    family.choose(card({ id: 'elsewhere' }))
+    expect(family.selection).toBe(idle)
   })
 })
 

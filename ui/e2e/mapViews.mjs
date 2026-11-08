@@ -167,6 +167,25 @@ export function registerMapViewJourneys(test) {
     assert.equal(await steward.locator('.fp-doc').isVisible(), false, 'a second l folds it')
   })
 
+  test('A lone constitution opens on its tapestry, and `c` from inside it opens that worker\'s conversation', async page => {
+    await page.goto(url.replace('example=threads', 'example=families'))
+    const card = page.locator('.kbn-desk .kbn-card:has(.kbn-card-name[title="Morning post"])').first()
+    await card.waitFor({ state: 'attached' })
+    await page.evaluate(async () => {
+      for (const { runtime } of window.__harness.MOCK_FEED.fibers) if (runtime) runtime.tmux_session = runtime.session_uuid
+      await window.__harness.modal.fetchAndRender()
+    })
+    await card.locator('.kbn-card-name').click({ force: true })
+    const head = tree(page).locator('.fp-head')
+    const map = head.frameLocator('.fp-doc iframe')
+    await map.getByRole('heading', { name: 'Morning post' }).click()
+    assert.ok(await head.locator('.fp-doc iframe').evaluate(el => el === document.activeElement), 'the tapestry holds the focus')
+    const before = await asked(page)
+    await page.keyboard.press('c')
+    await asks(page, before.length + 1)
+    assert.deepEqual(await asked(page), [...before, 'open:session-morning-post'])
+  })
+
   test('Rex naming a fiber on two hosts reveals that host\'s copy on the Globe', async page => {
     await board(page)
     await page.evaluate(async () => {
