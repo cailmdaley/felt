@@ -380,4 +380,4 @@ state.
     local forwarded port, and how to reach it. The CLI and the daemon both read
     it at runtime. Manage it with `shuttle remotes list|add|rm|path`. A
     single-machine setup needs no such file — see [Configuring
-    remotes](installation.md#configuring-remotes).
+    remotes](configuration.md#configuring-remotes).

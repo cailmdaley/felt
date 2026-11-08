@@ -1,8 +1,8 @@
 # The event stream and the ledgers — internals
 
 Operator-facing coverage lives in
-[Installing the shuttle daemon](../shuttle/installation.md#the-event-stream-and-the-ledgers)
-and [Telemetry](../shuttle/telemetry.md); this page is the writer/reader contract.
+[Telemetry and the ledgers](../shuttle/telemetry.md); this page is the
+writer/reader contract.
 
 ## Owning the event stream — `shuttle hook event`
 

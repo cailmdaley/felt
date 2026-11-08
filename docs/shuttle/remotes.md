@@ -168,7 +168,7 @@ When that authenticated connection expires, log in again.
 The tunnel waits for a live connection instead of trying to answer two-factor prompts unattended.
 
 Userspace Tailscale is an advanced alternative only where policy permits it.
-Read the [host boundaries](installation.md#host-classes-and-trust-boundaries) and [userspace recipe](installation.md#the-unprivileged-recipe) first: serving a shared host is not the same as forwarding a personal machine's port 4000.
+Read the [host boundaries](configuration.md#host-classes-and-trust-boundaries) and [userspace recipe](configuration.md#the-unprivileged-recipe) first: serving a shared host is not the same as forwarding a personal machine's port 4000.
 
 ## Verify work across the connection
 
@@ -196,4 +196,4 @@ Run Git and `felt sync` explicitly to synchronize those at your own pace; each t
 Distinct stores on different hosts can also appear together on the board without being merged.
 
 If the remote disappears, check the layers in order: host awake, daemon healthy, Serve or tunnel reachable, then stores and task ownership.
-[The installation reference](installation.md#configuring-remotes) covers timeouts, discovery overrides, recovery, and private userspace dialing.
+[The configuration reference](configuration.md#configuring-remotes) covers timeouts, discovery overrides, recovery, and private userspace dialing.

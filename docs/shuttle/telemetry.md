@@ -8,7 +8,7 @@ that record is three append-only JSONL files in the daemon's state directory.
 |---|---|---|
 | `~/.shuttle/events.jsonl` | `shuttle hook event`, from your agent harness (the coding-agent CLI you're running — Claude Code, Codex, …) | one line per harness hook event |
 | `~/.shuttle/sessions.jsonl` | the daemon, at dispatch / claim / resume | one line per session: which fiber it belonged to |
-| `~/.shuttle/commits.jsonl` | the plugin's `PostToolUse` hook on `Bash` (`shuttle hook commit`) | one line per commit: sha, subject, repo, `--shortstat` counts, and the session that made it |
+| `~/.shuttle/commits.jsonl` | the Pi extension, after a `bash` call that committed (`shuttle hook commit`) | one line per commit: sha, subject, repo, `--shortstat` counts, and the session that made it |
 
 All three resolve against `$SHUTTLE_DATA_DIR` (default `~/.shuttle`; the value
 is trimmed and a leading `~` expands to your home), and each has its own
@@ -50,9 +50,32 @@ The eight hook types collapse into three kinds, plus one facet laid over them:
 The same stream feeds the in-flight idle ranking on the Desk and the
 [Board's document receipts](../concepts/companions.md#sent-files-shuttle-only).
 
-See [The event stream and the
-ledgers](installation.md#the-event-stream-and-the-ledgers) for how it is
-installed, and for the rotation and truncation rules.
+### Recording and rotation
+
+The plugin registers `shuttle hook event` for SessionStart, UserPromptSubmit,
+PreToolUse, PostToolUse, Stop, StopFailure, SubagentStop, Notification and
+SessionEnd in Claude Code and Codex, and the Pi extension calls it for Pi's
+equivalents; `felt setup claude|codex|pi` installs the wiring. The hook writes
+only when the stream's parent directory already exists, so an install without
+daemon state grows no stream. `SHUTTLE_EVENTS_FILE` overrides the path and
+creates its parent; `SHUTTLE_EVENTS=off` disables recording. Probe the writer
+by hand:
+
+```bash
+echo '{"hook_event_name":"SessionStart"}' | SHUTTLE_EVENTS_FILE=/tmp/e.jsonl shuttle hook event
+```
+
+The live file rotates once it passes `SHUTTLE_EVENTS_MAX_BYTES` (64 MiB): it is
+renamed to `events.jsonl.1` and a fresh stream starts. The daemon reads both
+files once at boot, the rotated one first, keeps what it derives from them in
+memory — activity, the sent-files trail, each session's last event — and
+carries that across a rotation rather than re-reading. Only `events.jsonl.1` is
+kept; an older rotation is overwritten, so a sent file leaves the trail with
+the second rotation after it. Writers that find the stream full at the same
+moment serialize the rename on a flock of `events.jsonl.lock`, so it rotates
+once. A `toolInput` over 8 KiB is trimmed to its file paths plus
+`truncated: true`, so a `Write` of a large file does not park the whole body in
+the stream.
 
 ## The session ledger
 
@@ -86,10 +109,11 @@ attributes commits without parsing a fiber name out of a subject line, and it
 lets the Chronicle narrate a stretch of days in prose and count lines changed.
 
 The pairing is only knowable inside the session's own process tree, where the
-daemon is not — so the plugin writes it from a `PostToolUse` hook on `Bash`,
-whenever the command ran a `git commit`. `shuttle hook commit` reads the commit
-back, dedupes against the tail of the ledger, and appends one line. Installing
-the plugin (`felt setup claude`, `felt setup codex`) is all it takes.
+daemon is not — so the Pi extension writes it after a `bash` call that ran a
+`git commit`: `shuttle hook commit` reads the commit back, dedupes against the
+tail of the ledger, and appends one line. `felt setup pi` installs it. The
+Claude Code and Codex plugin registers no commit recorder, so their commits
+appear only when something else appends them (below).
 
 The file stays absent on a host with no `~/.shuttle` — a felt user who does not
 run shuttle acquires nothing. There it is written, the commit strip fills, the

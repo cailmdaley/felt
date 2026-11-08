@@ -228,7 +228,7 @@ shuttle set-model <fiber> codex-luna    # agent-only shorthand
     ids, aliases, or replacements for built-in ones. To change only an
     agent's default effort, `shuttle agents effort <id> <level>` writes an
     override instead of a copied record. See
-    [Configuring agents](installation.md#configuring-agents).
+    [Configuring agents](configuration.md#configuring-agents).
 
 ## Required gates
 

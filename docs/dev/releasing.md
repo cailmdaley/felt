@@ -251,5 +251,5 @@ didn't ask for it, and all three key off the `-` in the tag: goreleaser marks
 the GitHub release `prerelease: auto`; `install.sh` and `felt update` resolve
 through the `releases/latest` API, which skips prereleases; and the Homebrew
 tap's `skip_upload` is true for any prerelease, so `brew upgrade felt` never
-sees it. The only way in is pinning `FELT_VERSION` (see [Release candidates](../shuttle/installation.md#release-candidates)). The daemon tarballs
+sees it. The only way in is pinning `FELT_VERSION` (see [Pin a release](../shuttle/installation.md#pin-a-release)). The daemon tarballs
 attach to the RC release the same way, stamped with the RC version.

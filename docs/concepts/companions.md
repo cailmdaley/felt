@@ -139,4 +139,4 @@ does not surface it on the board.
     `shuttle hook event` refuses to create its own directory, so an install
     without daemon state grows no event stream and every trail stays empty. See [The event
     stream and the
-    ledgers](../shuttle/installation.md#the-event-stream-and-the-ledgers).
+    ledgers](../shuttle/telemetry.md#recording-and-rotation).

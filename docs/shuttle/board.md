@@ -138,7 +138,7 @@ re-arms, on a oneshot it writes the terminus. The outcome stays: the last run's 
 the next run writes its own.
 
 Opening a Desk card enters its constitution's documents.
-The constitution's band (see [the reader](#board--what-the-work-produced)) carries its worker's line and Listen; the folded settings hold the next launch's agent, effort, surface and kind, plus the card's due day and parent.
+The constitution's band (see [the reader](#board-what-the-work-produced)) carries its worker's line and Listen; the folded settings hold the next launch's agent, effort, surface and kind, plus the card's due day and parent.
 The Desk also offers Stash and Capture dialogs and Attach.
 
 <a id="attach"></a>
@@ -320,7 +320,7 @@ make ui        # npm ci when the lockfile changed, then npm run build
 ```
 
 A fresh clone builds it fine — no private checkout needed (see [Sharp
-edges](installation.md#sharp-edges)). `make build`, `make restart` and `make
+edges](troubleshooting.md)). `make build`, `make restart` and `make
 all` all include this step; `SKIP_UI=1` leaves the bundle alone, which is how a
 host that takes its bundle from elsewhere is built.
 

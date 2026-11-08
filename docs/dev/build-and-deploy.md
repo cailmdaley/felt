@@ -137,7 +137,7 @@ the daemon reaches their API over that tunnel.
 HTTPS `url` entries use the configured dial transport. When
 `defaults.tailscale_socket` is set, the private LocalAPI bridge is mandatory
 and requests fail closed if it is unavailable (see
-[Configuring remotes](../shuttle/installation.md#configuring-remotes)).
+[Configuring remotes](../shuttle/configuration.md#configuring-remotes)).
 How an SSH entry authenticates is your ssh config's business — but an alias
 needing a live credential (a short-lived certificate, a 2FA-backed
 ControlMaster) fails *instantly* with `Permission denied` once that credential

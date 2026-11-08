@@ -172,8 +172,8 @@ healthy daemon serving an empty board — no error, because nothing is wrong.
 A cross-project store is the tidy answer: felt re-discovers a store's symlinked
 substores, so naming the store reaches every project linked into it, and a new
 project joins by symlink rather than by reconfiguring the daemon. See
-[Configuring stores](../shuttle/installation.md#configuring-stores) for where
-the store list is set, and its [Sharp edges](../shuttle/installation.md#sharp-edges)
+[Configuring stores](../shuttle/configuration.md#configuring-stores) for where
+the store list is set, and its [Sharp edges](../shuttle/troubleshooting.md)
 for the macOS constraint that decides the direction: launchd cannot read
 `~/Documents`, `~/Desktop` or `~/Downloads` at all, so a project in one of those
 can only be daemon-visible if its bytes are canonical elsewhere.

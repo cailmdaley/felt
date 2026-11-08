@@ -93,7 +93,7 @@ When there is no store configuration, the service installer reuses a felt store 
 Existing store configuration takes precedence, including an intentionally empty registry.
 `shuttle daemon install --print` previews the service without creating this folder or installing anything.
 Read the effective registered paths and use one for the setup task.
-If an existing registry is empty, add the selected collection through **Settings → Notes & tasks** or the [store registry](installation.md#configuring-stores), preserving the rest of the configuration.
+If an existing registry is empty, add the selected collection through **Settings → Notes & tasks** or the [store registry](configuration.md#configuring-stores), preserving the rest of the configuration.
 If a fixed environment list controls the service, update that list deliberately rather than writing an ignored registry.
 Keep the default for a first setup unless the user already has a store or wants a different location.
 A working project and the folder holding its notes can be different directories.

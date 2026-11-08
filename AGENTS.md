@@ -49,7 +49,9 @@ lives in the docs site (`docs/`, published to
 | Plugin integration, `scripts/release.sh`, release candidates | [`docs/dev/releasing.md`](docs/dev/releasing.md) |
 | Codebase layout, test suites | [`docs/dev/layout.md`](docs/dev/layout.md) |
 | Writing a test: where it goes, tiers, fixtures, properties | [`docs/dev/testing.md`](docs/dev/testing.md) |
-| Installing a daemon, keep-alive, macOS TCC, sharp edges | [`docs/shuttle/installation.md`](docs/shuttle/installation.md) |
+| Installing a daemon, keep-alive, Rex, Remote Control | [`docs/shuttle/installation.md`](docs/shuttle/installation.md) |
+| Stores, agents, host classes, remotes, Tailscale | [`docs/shuttle/configuration.md`](docs/shuttle/configuration.md) |
+| macOS TCC and other sharp edges | [`docs/shuttle/troubleshooting.md`](docs/shuttle/troubleshooting.md) |
 | Fiber model, frontmatter, cross-project stores | [`docs/concepts/`](docs/concepts/) |
 | CLI verbs, daemon HTTP API | [`docs/reference/cli.md`](docs/reference/cli.md), [`docs/reference/api.md`](docs/reference/api.md) |
 

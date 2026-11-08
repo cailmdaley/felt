@@ -60,4 +60,6 @@ The setup card records which of these checks actually passed.
 - [Agent setup guide](agent-setup.md): the readable checklist and commands behind onboarding.
 - [Opening conversations](conversations.md): terminal and browser choices.
 - [Connect your machines](remotes.md): Tailscale, SSH, and shared servers.
-- [Installation reference](installation.md): configuration files, service management, and recovery.
+- [Installation reference](installation.md): installing, upgrading and supervising the daemon.
+- [Configuration reference](configuration.md): stores, agents, host trust and remotes.
+- [Sharp edges](troubleshooting.md): what tends to go wrong, and the fix.

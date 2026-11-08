@@ -94,7 +94,9 @@ Connecting machines lets one board show their combined tasks and activity; this 
 - [Set up Shuttle](setup.md): install the service and run your first task.
 - [Constitutions](constitutions.md): write goals and constraints an agent can act on.
 - [Lifecycle](lifecycle.md): pause, resume, review, and continue work.
-- [Opening conversations](conversations.md): return to workers in a terminal, desktop app, or browser.
-- [Installation reference](installation.md): configuration files, service management, and recovery.
+- [Opening conversations](conversations.md): return to workers in a terminal or browser.
+- [Installation reference](installation.md): installing, upgrading and supervising the daemon.
+- [Configuration reference](configuration.md): stores, agents, host trust and remotes.
+- [Sharp edges](troubleshooting.md): what tends to go wrong, and the fix.
 
 For notes without agent execution, start with [felt's getting-started guide](../getting-started.md).

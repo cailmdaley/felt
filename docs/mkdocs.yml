@@ -58,6 +58,8 @@ nav:
       - Connect your machines: shuttle/remotes.md
       - Opening conversations: shuttle/conversations.md
       - Installation reference: shuttle/installation.md
+      - Configuration reference: shuttle/configuration.md
+      - Sharp edges: shuttle/troubleshooting.md
       - Constitutions: shuttle/constitutions.md
       - Lifecycle: shuttle/lifecycle.md
       - The board: shuttle/board.md
@@ -79,6 +81,7 @@ nav:
       - Dispatch internals: dev/dispatch.md
       - Operating the daemon: dev/operating.md
       - Event stream and ledgers: dev/event-stream.md
+      - Family board: dev/family-board.md
       - Releasing: dev/releasing.md
       - Codebase layout and tests: dev/layout.md
       - Writing tests: dev/testing.md
