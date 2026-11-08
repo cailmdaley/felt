@@ -35,8 +35,12 @@ over every Claude, Codex and Pi session on this host, and prints the fibers
 first and the sessions after.
 
 The fiber half takes felt find's flags and ranking. The transcript half
-searches the same words, grouped by session, leaving out the calling session;
-it is skipped for a regex (-r) or a query-less filter (-t, --has-field).
+searches the same words, grouped by session, leaving out the calling session.
+It covers what was said and what was done: user and assistant messages rank
+first, and tool calls (first 2 KB: commands, paths, written content) and tool
+results (first 4 KB) are searched too. Each session prints the address
+shuttle show opens it at. The transcript half is skipped for a regex (-r) or
+a query-less filter (-t, --has-field).
 --limit caps both the enclosing store's fiber block and the session count.
 A half that fails is reported and the other still prints.
 
