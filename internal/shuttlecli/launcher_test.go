@@ -54,7 +54,7 @@ case "$*" in
     [ -f "$SHUTTLE_TEST_DEAD" ] && exit 1
     printf '%s\n' '{"ready":false}'
     ;;
-  "daemon start --force")
+  "daemon start")
     printf 'start:%s\n' "$SHUTTLE_RELEASE" >> "$SHUTTLE_TEST_CALLS"
     exit 1
     ;;

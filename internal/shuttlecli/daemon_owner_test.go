@@ -67,7 +67,7 @@ func TestDaemonStartCannotBypassPrelistenClaim(t *testing.T) {
 	defer unlock()
 	launched := false
 	a.execDaemonRelease = func(string, ...string) error { launched = true; return nil }
-	_, _, err = executeApp(t, a, t.TempDir(), "daemon", "start", "--force")
+	_, _, err = executeApp(t, a, t.TempDir(), "daemon", "start")
 	if err == nil || launched || !strings.Contains(err.Error(), "already claimed") {
 		t.Fatalf("claimed pre-listen endpoint was bypassed: launched=%t err=%v", launched, err)
 	}

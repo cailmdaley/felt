@@ -132,7 +132,7 @@ func TestRespawnLoopReadsPointerBetweenStarts(t *testing.T) {
 	sysenvtest.FakeCommand(t, env, "shuttle", `#!/bin/sh
 case "$*" in
  "daemon status") exit 1;;
- "daemon start --force")
+ "daemon start")
  printf '%s\n' "$SHUTTLE_RELEASE" >> "$POINTER_TEST_CALLS"
  if [ "$(wc -l < "$POINTER_TEST_CALLS")" -ge 2 ]; then kill -TERM "$PPID"; exit 1; fi
  printf '%s\n' "$POINTER_TEST_NEXT" > "$HOME/.shuttle/next"

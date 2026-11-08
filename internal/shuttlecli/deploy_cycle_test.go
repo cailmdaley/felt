@@ -70,7 +70,7 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 	write(filepath.Join(bin, "systemctl"), "#!/bin/sh\ncase \"$*\" in *show-environment*) exit 0;; *is-active*|*is-enabled*) [ \"${SHUTTLE_TEST_ACTIVE:-0}\" = 1 ] && exit 0 || exit 3;; *) exit 0;; esac\n")
 	write(filepath.Join(bin, "launchctl"), "#!/bin/sh\nexit 1\n")
 	write(filepath.Join(bin, "felt"), "#!/bin/sh\nexit 0\n")
-	write(filepath.Join(bin, "shuttle"), "#!/bin/sh\ncase \"$*\" in 'daemon loop-present') exit 1;; 'daemon status') curl -fsS --max-time 1 http://127.0.0.1:"+port+"/health >/dev/null || exit 1; echo '{\"ready\":true}';; 'daemon start --force') '"+os.Args[0]+"' -test.run=^TestDeployCycleListenerChild$ >/dev/null 2>&1 & exit 0;; 'host --json') printf '{\"data_dir\":\"%s\",\"listen\":\"tcp://127.0.0.1:%s\"}\\n' '"+data+"' '"+port+"';; *) exit 2;; esac\n")
+	write(filepath.Join(bin, "shuttle"), "#!/bin/sh\ncase \"$*\" in 'daemon loop-present') exit 1;; 'daemon status') curl -fsS --max-time 1 http://127.0.0.1:"+port+"/health >/dev/null || exit 1; echo '{\"ready\":true}';; 'daemon start') '"+os.Args[0]+"' -test.run=^TestDeployCycleListenerChild$ >/dev/null 2>&1 & exit 0;; 'host --json') printf '{\"data_dir\":\"%s\",\"listen\":\"tcp://127.0.0.1:%s\"}\\n' '"+data+"' '"+port+"';; *) exit 2;; esac\n")
 	launcher, err := os.ReadFile("../../bin/shuttle-launch")
 	if err != nil {
 		t.Fatal(err)

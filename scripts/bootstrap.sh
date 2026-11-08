@@ -115,7 +115,7 @@ have_systemd_user() { have systemctl && systemctl --user show-environment >/dev/
 keepalive_desc() {
   if [ "$OS" = Darwin ]; then echo "launchd LaunchAgent (make install-agent: build + render plist + load)"
   elif have_systemd_user; then echo "systemd user unit (make install-agent: render + enable --now shuttle-daemon.service)"
-  else echo "shuttle-daemon respawn loop (tmux: while true; shuttle daemon start --force) — no systemd user session here"; fi
+  else echo "shuttle-daemon respawn loop (tmux: while true; shuttle daemon start) — no systemd user session here"; fi
 }
 cli_desc() {
   if [ "$SKIP_CLI" = 1 ]; then echo "SKIP (--skip-cli; felt and shuttle already on PATH)"

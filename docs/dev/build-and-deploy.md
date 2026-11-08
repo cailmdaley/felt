@@ -303,7 +303,7 @@ The listener binds before store resolution, orphan adoption, event-stream
 seeding, and Tailnet bridge reconciliation finish. While that synchronous boot
 work runs, `/api/v1/version` answers with `ready: false`; state-dependent routes
 return a fast 503. The respawn loop treats the bound listener as alive, polls
-booting daemons every five seconds, and falls through to `start --force` if the
+booting daemons every five seconds, and falls through to `shuttle daemon start` if the
 listener stops answering.
 
 For a manual remote build:

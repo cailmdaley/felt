@@ -743,8 +743,8 @@ environment you start it in. Give it stores through `SHUTTLE_STORES`, or persist
 them once in `~/.config/shuttle/stores.json` (see [Configuring
 stores](#configuring-stores)).
 
-The loop runs `shuttle daemon start --force` and backs off exponentially.
-The start command probes the live daemon endpoint even with `--force`; the loop's status probe stands down while the daemon answers.
+The loop runs `shuttle daemon start` and backs off exponentially.
+The start command probes the live daemon endpoint and refuses a live daemon; the loop's status probe stands down while the daemon answers.
 Start and install also share an atomic endpoint claim, so a second cooperating start or installer is refused before the first daemon has bound its listener.
 The claim survives the CLI's `exec` into the foreground release and becomes reclaimable when that process dies.
 Direct release launches bypass this guard, and creating external supervisor definitions is not serialized; see [deployment ownership](../dev/build-and-deploy.md).

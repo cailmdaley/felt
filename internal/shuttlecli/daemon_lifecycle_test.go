@@ -299,24 +299,28 @@ func TestShuttleVersionPrefersLiveDaemonAndFallsBackToRelease(t *testing.T) {
 	})
 }
 
-func TestDaemonStartForceExecutesReleaseLauncher(t *testing.T) {
+// A respawn loop running an earlier shuttle-launch passes --force; start
+// accepts it and behaves identically.
+func TestDaemonStartExecutesReleaseLauncher(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	env.Set("SHUTTLE_RELEASE", release.Dir)
 	env.Set("SHUTTLE_LISTEN", "tcp://127.0.0.1:1")
-	a := newApp(env)
-	var gotPath string
-	var gotArgs []string
-	a.execDaemonRelease = func(path string, args ...string) error {
-		gotPath, gotArgs = path, args
-		return nil
-	}
-	if _, _, err := executeApp(t, a, t.TempDir(), "daemon", "start", "--force"); err != nil {
-		t.Fatalf("forced start: %v", err)
-	}
-	if gotPath != release.Launcher || strings.Join(gotArgs, " ") != "start" {
-		t.Fatalf("exec = %q %v, want %q start", gotPath, gotArgs, release.Launcher)
+	for _, args := range [][]string{{"daemon", "start"}, {"daemon", "start", "--force"}} {
+		a := newApp(env)
+		var gotPath string
+		var gotArgs []string
+		a.execDaemonRelease = func(path string, args ...string) error {
+			gotPath, gotArgs = path, args
+			return nil
+		}
+		if _, _, err := executeApp(t, a, t.TempDir(), args...); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if gotPath != release.Launcher || strings.Join(gotArgs, " ") != "start" {
+			t.Fatalf("%v: exec = %q %v, want %q start", args, gotPath, gotArgs, release.Launcher)
+		}
 	}
 }
 
@@ -336,7 +340,7 @@ func TestDaemonStartGuardRefusesWhenTCPOwnerCheckFails(t *testing.T) {
 	}
 }
 
-func TestDaemonStartForceCannotBypassLiveDaemonInAnotherProcess(t *testing.T) {
+func TestDaemonStartCannotBypassLiveDaemonInAnotherProcess(t *testing.T) {
 	if os.Getenv("SHUTTLE_LIVE_DAEMON_HELPER") == "1" {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -351,7 +355,7 @@ func TestDaemonStartForceCannotBypassLiveDaemonInAnotherProcess(t *testing.T) {
 	}
 	dir := t.TempDir()
 	addressFile := filepath.Join(dir, "address")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestDaemonStartForceCannotBypassLiveDaemonInAnotherProcess$")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestDaemonStartCannotBypassLiveDaemonInAnotherProcess$")
 	cmd.Env = append(os.Environ(), "SHUTTLE_LIVE_DAEMON_HELPER=1", "SHUTTLE_LIVE_DAEMON_ADDRESS="+addressFile)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -377,9 +381,9 @@ func TestDaemonStartForceCannotBypassLiveDaemonInAnotherProcess(t *testing.T) {
 	launched := false
 	a := newApp(env)
 	a.execDaemonRelease = func(string, ...string) error { launched = true; return nil }
-	_, _, err := executeApp(t, a, t.TempDir(), "daemon", "start", "--force")
+	_, _, err := executeApp(t, a, t.TempDir(), "daemon", "start")
 	if err == nil || launched || !strings.Contains(err.Error(), "daemon is already running") {
-		t.Fatalf("--force result err=%v launched=%t", err, launched)
+		t.Fatalf("start result err=%v launched=%t", err, launched)
 	}
 }
 

@@ -76,7 +76,10 @@ func (a *app) shuttleDaemonStartCmd() *cobra.Command {
 			return a.execDaemonRelease(release.Launcher, "start")
 		},
 	}
-	shuttleDaemonStartCmd.Flags().Bool("force", false, "Deprecated; live daemons are never bypassed")
+	// Respawn loops started from an earlier shuttle-launch keep running its
+	// text across deploys and pass --force; it changes nothing.
+	shuttleDaemonStartCmd.Flags().Bool("force", false, "")
+	_ = shuttleDaemonStartCmd.Flags().MarkHidden("force")
 	return shuttleDaemonStartCmd
 }
 

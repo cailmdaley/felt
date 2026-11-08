@@ -196,7 +196,7 @@ make_fiber probe-dirty dirty
 info "starting daemon on :$PORT (store=$STORE host=$HOST)"
 SHUTTLE_RELEASE="$REPO/bin/rel" SHUTTLE_PORT="$PORT" SHUTTLE_STORES="$STORE" \
   SHUTTLE_AGENTS_FILE="$AGENTS_FILE" SHUTTLE_HOST="$HOST" SHUTTLE_DATA_DIR="$DATA" \
-  nohup "$DAEMON" daemon start --force >"$DAEMON_LOG" 2>&1 &
+  nohup "$DAEMON" daemon start >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 
 # Wait for the HTTP surface to bind.

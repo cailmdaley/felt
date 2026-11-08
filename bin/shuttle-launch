@@ -20,14 +20,14 @@
 # if it looks like <repo>/bin. Source checkouts contain bin/rel/bin/shuttled;
 # fetched releases contain bin/shuttled. If none resolves, this exits loudly.
 #
-# The loop calls `shuttle daemon start --force` with exponential backoff:
+# The loop calls `shuttle daemon start` with exponential backoff:
 # a daemon that exits in < 60s doubles the sleep (2s .. 300s cap); one that
 # lived >= 60s resets it to 2s, so repeated crashes back off without slowing
 # recovery after a healthy run.
 #
-# `--force` is a compatibility spelling: start always checks live listeners
-# and atomically claims the endpoint before exec. The loop waits while another
-# daemon answers instead of repeatedly attempting to bind its endpoint.
+# start checks live listeners and atomically claims the endpoint before exec.
+# The loop waits while another daemon answers instead of repeatedly attempting
+# to bind its endpoint.
 
 set -u
 
@@ -164,7 +164,7 @@ if [ "${1:-}" = "--loop" ]; then
     SHUTTLE_RELEASE=$(release_dir "$REPO")
     started=$(date +%s)
     echo "=== shuttle start $(date '+%Y-%m-%dT%H:%M:%S%z') ===" >> "$LOG"
-    SHUTTLE_RELEASE="$SHUTTLE_RELEASE" shuttle daemon start --force >> "$LOG" 2>&1
+    SHUTTLE_RELEASE="$SHUTTLE_RELEASE" shuttle daemon start >> "$LOG" 2>&1
     status=$?
     lived=$(( $(date +%s) - started ))
     [ "$lived" -ge 60 ] && backoff=2

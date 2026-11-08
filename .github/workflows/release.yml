@@ -254,7 +254,7 @@ jobs:
           mkdir -p /tmp/boot-store/.felt
           export SHUTTLE_PORT=4390 SHUTTLE_HOST=ci-boot-test SHUTTLE_STORES=/tmp/boot-store
           export SHUTTLE_RELEASE="$PWD/out/shuttled"
-          shuttle daemon start --force >/tmp/daemon.log 2>&1 &
+          shuttle daemon start >/tmp/daemon.log 2>&1 &
           DAEMON_PID=$!
           trap 'kill "$DAEMON_PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do

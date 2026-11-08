@@ -323,7 +323,7 @@ See [Changes](../concepts/changes.md) for the full bundle schema and story-autho
 | Command | Purpose |
 |---|---|
 | `shuttle doctor` | Diagnose the shuttle binary, host identity/configuration, listener, daemon contract, and tmux integration; warn about local fiber context pending for at least ten minutes |
-| `shuttle daemon start [--force]` | Start the local Mix release in the foreground; atomically claims its endpoint and refuses an answering daemon or live start/install claim even with `--force` |
+| `shuttle daemon start` | Start the local Mix release in the foreground; atomically claims its endpoint and refuses an answering daemon or live start/install claim |
 | `shuttle daemon stop [--within <directory>]` | Stop the local daemon using its reported boot path and mark the shutdown intentional; `--within` refuses a missing or out-of-directory release receipt |
 | `shuttle daemon status` | Print daemon state including its booted `release_path`; exits 2 when the daemon is down |
 | `shuttle daemon select-release <path>` | Validate a built release and atomically select it in `~/.shuttle/repo` for the next launch; does not cycle a running daemon |
