@@ -702,85 +702,95 @@ export class Dock {
       errorEl.style.display = message ? '' : 'none'
     }
 
-    const settings = document.createElement('div')
-    settings.className = 'kbn-detail-controls'
-    const toggle = document.createElement('button')
-    toggle.type = 'button'
-    toggle.className = 'kbn-detail-controls-toggle'
-    if (card.shuttlePulse) toggle.classList.add('kbn-detail-controls-toggle-pulse')
-    toggle.setAttribute('aria-expanded', 'false')
-    const name = document.createElement('span')
-    name.className = 'kbn-ctl-sr'
-    name.textContent = 'Settings'
-    const chevron = document.createElement('span')
-    chevron.className = 'kbn-detail-controls-chevron'
-    chevron.setAttribute('aria-hidden', 'true')
-    let strip = buildStrip(card)
-    toggle.append(chevron, name, strip)
-    const ledger = document.createElement('div')
-    ledger.className = 'kbn-detail-controls-body kbn-ctl-ledger'
-    ledger.hidden = true
-    const watchers: Array<(view: KanbanCard) => void> = []
-    const reflect = (patch: Partial<KanbanCard>): void => {
-      Object.assign(card, patch)
-      if (this.card !== card) return
-      const next = buildStrip(card)
-      strip.replaceWith(next)
-      strip = next
-      for (const watch of watchers) watch(card)
-    }
-    const reseeders: Array<() => void> = []
-    const reseed = (fn: () => void): void => { reseeders.push(fn) }
-    this.settingsSync = (view) => {
-      if (ledger.contains(document.activeElement) || this.savesPending || this.settingStep) return
-      for (const key of ['name', 'due', 'storedHorizon', 'isCycle', 'shuttleAgent', 'shuttleEffort', 'shuttleChrome', 'shuttleKind', 'shuttleSchedule', 'shuttleTz', 'inheritedProjectDir'] as const) {
-        Object.assign(card, { [key]: view[key] })
+    /**
+     * The settings sheet for one card: its agent and card fields, then its
+     * sessions. The band's own card keeps its sheet in step with runtime polls;
+     * a thread's sheet is drawn fresh each time the gear opens it.
+     */
+    const sheetFor = (card: KanbanCard, shuttleManaged: boolean, own: boolean) => {
+      const settings = document.createElement('div')
+      settings.className = 'kbn-detail-controls'
+      const toggle = document.createElement('button')
+      toggle.type = 'button'
+      toggle.className = 'kbn-detail-controls-toggle'
+      if (card.shuttlePulse) toggle.classList.add('kbn-detail-controls-toggle-pulse')
+      toggle.setAttribute('aria-expanded', 'false')
+      const name = document.createElement('span')
+      name.className = 'kbn-ctl-sr'
+      name.textContent = 'Settings'
+      const chevron = document.createElement('span')
+      chevron.className = 'kbn-detail-controls-chevron'
+      chevron.setAttribute('aria-hidden', 'true')
+      let strip = buildStrip(card)
+      toggle.append(chevron, name, strip)
+      const ledger = document.createElement('div')
+      ledger.className = 'kbn-detail-controls-body kbn-ctl-ledger'
+      ledger.hidden = true
+      const watchers: Array<(view: KanbanCard) => void> = []
+      const reflect = (patch: Partial<KanbanCard>): void => {
+        Object.assign(card, patch)
+        if (this.card !== card) return
+        const next = buildStrip(card)
+        strip.replaceWith(next)
+        strip = next
+        for (const watch of watchers) watch(card)
       }
-      for (const sync of reseeders) sync()
-      reflect({})
-    }
-    ledger.append(
-      this.buildWorkerFields(card, shuttleManaged, statusEl, errorEl, reflect, reseed),
-      this.buildCardFields(card, statusEl, errorEl, reflect, fn => watchers.push(fn), reseed),
-    )
-    toggle.addEventListener('click', () => {
-      ledger.hidden = !ledger.hidden
-      toggle.setAttribute('aria-expanded', String(!ledger.hidden))
-      settings.classList.toggle('kbn-detail-controls-open', !ledger.hidden)
-      if (ledger.hidden) this.dismissParent?.()
-    })
-    settings.append(toggle, ledger)
-    let history: HTMLElement | null = null
-    const historyKey = (): string => JSON.stringify([card.uid, card.shuttleHost, hasLiveWorker(card), card.sessionUuid, card.tmuxSession, card.terminalBackend])
-    let historyRevision = historyKey()
-    const refreshHistory = (open: boolean): void => {
-      if (!card.uid) return
-      const focusToggle = document.activeElement === history?.querySelector('.kbn-ctl-history-toggle')
-      const next = buildSessionHistory({
-        shuttleBase: this.shuttleBase, uid: card.uid, fiberHost: card.shuttleHost,
-        liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession, terminalBackend: card.terminalBackend,
-        desktop: atDesktop(navigator.userAgent, coarsePointer()),
-        onError: showError,
+      const reseeders: Array<() => void> = []
+      const reseed = (fn: () => void): void => { reseeders.push(fn) }
+      if (own) this.settingsSync = (view) => {
+        if (ledger.contains(document.activeElement) || this.savesPending || this.settingStep) return
+        for (const key of ['name', 'due', 'storedHorizon', 'isCycle', 'shuttleAgent', 'shuttleEffort', 'shuttleChrome', 'shuttleKind', 'shuttleSchedule', 'shuttleTz', 'inheritedProjectDir'] as const) {
+          Object.assign(card, { [key]: view[key] })
+        }
+        for (const sync of reseeders) sync()
+        reflect({})
+      }
+      ledger.append(
+        this.buildWorkerFields(card, shuttleManaged, statusEl, errorEl, reflect, reseed),
+        this.buildCardFields(card, statusEl, errorEl, reflect, fn => watchers.push(fn), reseed),
+      )
+      toggle.addEventListener('click', () => {
+        ledger.hidden = !ledger.hidden
+        toggle.setAttribute('aria-expanded', String(!ledger.hidden))
+        settings.classList.toggle('kbn-detail-controls-open', !ledger.hidden)
+        if (ledger.hidden) this.dismissParent?.()
       })
-      history?.replaceWith(next)
-      history = next
-      const unfold = next.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')!
-      if (open) unfold.click()
-      if (focusToggle) unfold.focus({ preventScroll: true })
-      // Every unfold gets a fresh ledger and current attach/resume targets.
-      unfold.addEventListener('click', event => {
-        if (unfold.getAttribute('aria-expanded') === 'true') return
-        event.stopImmediatePropagation()
-        refreshHistory(true)
-      }, true)
+      settings.append(toggle, ledger)
+      let history: HTMLElement | null = null
+      const historyKey = (): string => JSON.stringify([card.uid, card.shuttleHost, hasLiveWorker(card), card.sessionUuid, card.tmuxSession, card.terminalBackend])
+      let historyRevision = historyKey()
+      const refreshHistory = (open: boolean): void => {
+        if (!card.uid) return
+        const focusToggle = document.activeElement === history?.querySelector('.kbn-ctl-history-toggle')
+        const next = buildSessionHistory({
+          shuttleBase: this.shuttleBase, uid: card.uid, fiberHost: card.shuttleHost,
+          liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession, terminalBackend: card.terminalBackend,
+          desktop: atDesktop(navigator.userAgent, coarsePointer()),
+          onError: showError,
+        })
+        history?.replaceWith(next)
+        history = next
+        const unfold = next.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')!
+        if (open) unfold.click()
+        if (focusToggle) unfold.focus({ preventScroll: true })
+        // Every unfold gets a fresh ledger and current attach/resume targets.
+        unfold.addEventListener('click', event => {
+          if (unfold.getAttribute('aria-expanded') === 'true') return
+          event.stopImmediatePropagation()
+          refreshHistory(true)
+        }, true)
+      }
+      refreshHistory(false)
+      if (own) this.historySync = () => {
+        const revision = historyKey()
+        if (revision === historyRevision) return
+        historyRevision = revision
+        refreshHistory(history?.classList.contains('kbn-ctl-history-open') ?? false)
+      }
+      return { settings, toggle, ledger, history: () => history }
     }
-    refreshHistory(false)
-    this.historySync = () => {
-      const revision = historyKey()
-      if (revision === historyRevision) return
-      historyRevision = revision
-      refreshHistory(history?.classList.contains('kbn-ctl-history-open') ?? false)
-    }
+    let sheetCard = card
+    let sheet = sheetFor(card, shuttleManaged, true)
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot ws-band-status'
     foot.append(errorEl, statusEl)
@@ -813,11 +823,15 @@ export class Dock {
     const settingsSection = document.createElement('section')
     settingsSection.className = 'ws-band-section'
     settingsSection.setAttribute('aria-label', 'Settings')
-    settingsSection.append(settings)
+    const sheetName = document.createElement('p')
+    sheetName.className = 'ws-band-sheet-name'
+    sheetName.hidden = true
+    settingsSection.append(sheetName, sheet.settings)
     const sessionsSection = document.createElement('section')
     sessionsSection.className = 'ws-band-section'
     sessionsSection.setAttribute('aria-label', 'Sessions')
-    if (history) sessionsSection.append(history)
+    const firstHistory = sheet.history()
+    if (firstHistory) sessionsSection.append(firstHistory)
     drawer.append(settingsSection, sessionsSection)
 
     const item = (label: string, name: HeaderIcon, cls: string, run: () => void): HTMLButtonElement => {
@@ -830,7 +844,22 @@ export class Dock {
       return button
     }
     const settingsItem = item('Settings', 'settings', 'ws-band-settings', () => {
-      if (ledger.hidden) toggle.click()
+      // The gear follows the highlighted thread, as the verbs beside it do.
+      const act = target()
+      if ((act.uid ?? act.id) !== (sheetCard.uid ?? sheetCard.id) || act.originId !== sheetCard.originId) {
+        const own = (act.uid ?? act.id) === (card.uid ?? card.id) && act.originId === card.originId
+        sheetCard = act
+        sheet = sheetFor(own ? card : { ...act }, own ? shuttleManaged : isAgentCard(act), own)
+        sheetName.textContent = own ? '' : act.name
+        sheetName.hidden = own
+        // The band's own ancestry and facts stay with the band's card.
+        drawer.toggleAttribute('data-thread', !own)
+        settingsSection.replaceChildren(sheetName, sheet.settings)
+        const history = sheet.history()
+        sessionsSection.replaceChildren(...(history ? [history] : []))
+        sessionsSection.hidden = !act.uid
+      }
+      if (sheet.ledger.hidden) sheet.toggle.click()
       const unfold = sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')
       if (unfold?.getAttribute('aria-expanded') !== 'true') unfold?.click()
       if (this.openSettings) this.openSettings(drawer, settingsItem)
@@ -918,7 +947,9 @@ export class Dock {
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')
       review.hidden = !offered.includes('review')
-      sessionsSection.hidden = !card.uid
+      sessionsSection.hidden = !sheetCard.uid
+      const settingsLabel = `Settings${same ? '' : ` ${slug(act)}`}`
+      settingsItem.title = settingsLabel; settingsItem.setAttribute('aria-label', settingsLabel)
     }
     this.actPaint()
     return body

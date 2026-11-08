@@ -27,4 +27,4 @@ Name `areas` by concept, explaining where the change sits, its parts and what it
 
 The reader opens version 2 bundles; rebake an older companion with `shuttle change`.
 
-For a repo that lands directly on `main`, such as felt, the same pass works on commits already landed, or on a branch just before landing. A change never needs a PR; on felt, a lane's tested branch reaches `main` by a land request to the felt materializer seat (`roles/felt-materializer`), and only that seat pushes `main` or deploys.
+For a repo that lands directly on `main`, such as felt, the same pass works on commits already landed, or on a branch just before landing. A change never needs a PR; on felt, a lane's tested branch reaches `main` by a land request to the felt lander seat (`roles/felt-lander`), and only that seat pushes `main` or deploys.

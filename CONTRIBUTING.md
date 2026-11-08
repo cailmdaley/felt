@@ -68,7 +68,7 @@ Before opening a PR, verify:
 ## Landing
 
 Maintainer lanes do not push `main` or deploy: a tested branch goes to the felt
-materializer seat, which lands and deploys it. The rules are under *Landing
+lander seat, which lands and deploys it. The rules are under *Landing
 changes* in `AGENTS.md`.
 
 ## Scope

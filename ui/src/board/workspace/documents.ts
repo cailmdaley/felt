@@ -320,7 +320,7 @@ export function buildChannel(input: ChannelInput): Channel {
 /** The frame owns document naming and arrival metadata; renderers own content only. */
 export function documentLabelMetadata(doc: WorkspaceDocument, label: string, channelOwner: string, now = Date.now()): { title: string; summary: string } {
   const age = (time: number): string => ago(time, now)
-  if (doc.kind === 'family') return { title: '', summary: 'Threads' }
+  if (doc.kind === 'family') return { title: '', summary: '' }
   if (doc.kind === 'fiber') {
     const time = doc.modifiedAt ? Date.parse(doc.modifiedAt) : NaN
     return { title: '', summary: Number.isFinite(time) ? `Last changed ${age(time)}` : 'Last changed unknown' }

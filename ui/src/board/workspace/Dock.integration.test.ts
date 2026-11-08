@@ -285,6 +285,28 @@ describe('band settings', () => {
     expect(band.el.querySelector('.ws-band-drawer .kbn-ctl-history')).not.toBeNull()
   })
 
+  it('follows the highlighted thread: its gear opens that thread\'s settings and writes to it', async () => {
+    const page = task(), thread = task({ id: 'a/task/thread', uid: 'thread', name: 'The thread', shuttleAgent: 'codex-luna', shuttleEffort: 'low' })
+    dock.reset(); dock.open(page); dock.setActionCard(thread)
+    const gear = band.el.querySelector<HTMLButtonElement>('.ws-band-settings')!
+    expect(gear.getAttribute('aria-label')).toBe('Settings thread')
+    gear.click(); await flush()
+    const name = band.el.querySelector<HTMLElement>('.ws-band-sheet-name')!
+    expect(name.hidden).toBe(false)
+    expect(name.textContent).toBe('The thread')
+    expect(band.el.querySelector('.ws-band-drawer')!.hasAttribute('data-thread')).toBe(true)
+    expect(select('Agent').value).toBe('codex-luna')
+    vi.mocked(fetch).mockClear()
+    change('Effort', 'high'); await flush()
+    expect(writes()).toEqual([{ action: 'set-agent', origin: 'owner', fiber: 'a/task/thread', effort: 'high' }])
+    dock.setActionCard(page)
+    expect(gear.getAttribute('aria-label')).toBe('Settings')
+    gear.click(); await flush()
+    expect(name.hidden).toBe(true)
+    expect(band.el.querySelector('.ws-band-drawer')!.hasAttribute('data-thread')).toBe(false)
+    expect(select('Agent').value).toBe('codex-sol')
+  })
+
   it('keeps the thread\'s ancestry in settings', () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 's' }))

@@ -30,6 +30,10 @@
 .ws-band-acts > .ws-verdict-undo { justify-content: flex-end; }
 /* Settings keeps the further ancestors reachable without a second header row. */
 .ws-settings-ancestry { margin-bottom: 12px; }
+/* A highlighted thread's settings name the thread they write to. */
+.ws-band-sheet-name { margin: 0 0 8px; color: var(--ws-ink); font: 500 var(--type-label)/var(--leading-tight) var(--font-serif); }
+.ws-band-sheet-name[hidden] { display: none; }
+.ws-band-drawer[data-thread] > .ws-settings-ancestry, .ws-band-drawer[data-thread] > .ws-header-facts { display: none; }
 .ws-band-drawer { padding: 4px 0 8px; }
 .ws-band-section + .ws-band-section:not([hidden]) { border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-band-status { padding: 6px 16px; }

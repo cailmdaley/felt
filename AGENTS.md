@@ -251,7 +251,7 @@ CI runs `npm test`, then type-checks and builds the bundle with
 ### Deploying
 
 Restarting the daemon preserves terminal workers: the terminal backend owns their processes, while Shuttle owns their watchers.
-Workers do not deploy for themselves: a verified change goes to the materializer seat (see [Landing changes](#landing-changes)), the one driver of `bin/shuttle-deploy`.
+Workers do not deploy for themselves: a verified change goes to the lander seat (see [Landing changes](#landing-changes)), the one driver of `bin/shuttle-deploy`.
 
 ```
 resolve one commit → push → preflight origin availability and default-branch freshness
@@ -311,8 +311,8 @@ Run the targeted local tests before pushing; use the full suite for broad change
 CI is feedback, not a landing or deployment gate: do not wait for CI after pushing.
 The repo's SessionStart hook prints the cached latest completed main CI result when red and refreshes it in the background for the next session.
 
-Work reaches `main` and the fleet through one seat, the felt materializer
-(role `felt-materializer` in the store; `shuttle roles` finds it). Lanes share
+Work reaches `main` and the fleet through one seat, the felt lander
+(role `felt-lander` in the store; `shuttle roles` finds it). Lanes share
 one deploy lock per host and one quarantine, so landing is one worker's job.
 A lane commits on a branch or worktree, runs the suites its change touches,
 pushes the branch, and sends the seat a land request in the format its charter
