@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { chromium } from 'playwright-core'
 import { findBrowser } from './sharedBrowser.mjs'
@@ -39,13 +39,20 @@ export async function launchBrowser({ args = [] } = {}) {
 
 async function cachedFont(route) {
   const file = join(fontCache, createHash('sha256').update(route.request().url()).digest('hex'))
-  const cached = await readFile(`${file}.type`, 'utf8').then(async contentType => ({ contentType, body: await readFile(file) }), () => null)
-  if (cached) return route.fulfill({ ...cached, headers: { 'access-control-allow-origin': '*' } })
-  const response = await route.fetch()
-  if (response.ok()) {
-    await mkdir(fontCache, { recursive: true })
-    await writeFile(file, await response.body())
-    await writeFile(`${file}.type`, response.headers()['content-type'] ?? 'application/octet-stream')
+  try {
+    const cached = await readFile(`${file}.type`, 'utf8').then(async contentType => ({ contentType, body: await readFile(file) }), () => null)
+    if (cached) return await route.fulfill({ ...cached, headers: { 'access-control-allow-origin': '*' } })
+    const response = await route.fetch()
+    if (response.ok()) {
+      // The body lands before its type, each by rename, so a reader never sees a partial font.
+      await mkdir(fontCache, { recursive: true })
+      const partial = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}`
+      await writeFile(partial, await response.body()); await rename(partial, file)
+      await writeFile(partial, response.headers()['content-type'] ?? 'application/octet-stream'); await rename(partial, `${file}.type`)
+    }
+    await route.fulfill({ response })
+  } catch {
+    // Offline, or the journey's context closed mid-fetch: the page keeps its fallback face.
+    await route.abort().catch(() => {})
   }
-  await route.fulfill({ response })
 }

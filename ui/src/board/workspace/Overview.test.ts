@@ -211,6 +211,27 @@ describe('Overview receipt membership and identity', () => {
     expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
   })
 
+  it('lifts a folio whose receipt arrived off screen when the sheet is next shown, once', async () => {
+    const lifted: Element[] = []
+    Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: function (this: Element) {
+      lifted.push(this); return { addEventListener: () => {}, cancel: () => {} }
+    } })
+    try {
+      document.body.append(overview.el)
+      feed.files = [receipt('alpha', '/old.html', now() - 60000)]
+      await refresh()
+      overview.hide()
+      feed.files.push(receipt('alpha', '/new.html', now() + 1000)); await refresh()
+      expect(lifted).toEqual([])
+      overview.show()
+      expect(lifted).toEqual([folio('alpha')])
+      overview.hide(); overview.show()
+      expect(lifted).toHaveLength(1)
+    } finally {
+      delete (HTMLElement.prototype as { animate?: unknown }).animate
+    }
+  })
+
   it('replaces receipts with each authoritative rolling snapshot while failures retain the last sheet', async () => {
     const started = now()
     const first = receipt('alpha', '/report.html', started - 1000, 'host-b', { sessionId: 'session-a' })
