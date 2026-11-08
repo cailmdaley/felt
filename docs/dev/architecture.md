@@ -47,7 +47,7 @@ Signals stamped at or before that baseline stay in fiber history and are never b
 The baseline survives restarts; invalid or unreadable state refuses startup rather than replaying historical results.
 
 The sender captures each new publication's immutable intended parent UID (felt's intrinsic frontmatter identity), text and message ID before attempting delivery.
-Every retry resolves that UID from a fresh document read and uses its current host, including for formerly local parents.
+Every retry resolves that UID from a fresh document read and uses its current host, wherever the parent lived at capture.
 Cross-host delivery carries the UID, never a slug.
 Moving the child does not change a pending publication's recipient; a missing parent leaves it pending.
 Snapshot migration keeps the original baseline and publications, extracting the parent's UID from saved snapshots.
@@ -142,8 +142,8 @@ session when the terminal backend supports attachment.
 
 Codex conversations run through the Codex CLI in the terminal, like Claude
 Code and Pi. Dispatch, capture, messaging and resume use the terminal worker's
-native identity. Stored `shuttle.surface` values from older fibers remain
-opaque data and do not affect execution; config writes preserve them.
+native identity. A `shuttle.surface` value is opaque data that does not
+affect execution; config writes preserve it.
 
 ## Trust boundaries
 

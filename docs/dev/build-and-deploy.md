@@ -286,7 +286,7 @@ The helper builds both CLIs, the daemon, and — on every host that is not marke
 An autonomous worker should deploy a built, tested, independently reviewed change.
 Restarting briefly interrupts the API and board; existing tmux workers keep running.
 Every daemon cycle quarantines fresh launches until `shuttle daemon release`:
-previously-running workers restore without that gate.
+workers that were running restore without that gate.
 the cycle touches `$SHUTTLE_DATA_DIR/heartbeat.stopped` on the target host and
 then stops the daemon with SIGTERM (whose shutdown touches the marker again), so
 the rebuilt daemon sees a graceful stop and holds. Only on a host that opts in

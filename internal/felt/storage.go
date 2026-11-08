@@ -26,10 +26,9 @@ const (
 	DirName = ".felt"
 	// FileExt is the extension for felt files.
 	FileExt = ".md"
-	// LegacyMystConfigName is a MyST project file some store roots carry from
-	// earlier felt releases. felt does not create one; the readers skip it so
-	// a store that still carries one is read cleanly.
-	LegacyMystConfigName = "myst.yml"
+	// MystConfigName is a MyST project file a store root may hold. felt never
+	// creates one, and its readers skip it rather than parse it as a fiber.
+	MystConfigName = "myst.yml"
 	// GitignoreName is the felt store ignore file generated at init time.
 	GitignoreName = ".gitignore"
 )
@@ -205,7 +204,7 @@ func looksLikeStore(dir string) bool {
 	for _, entry := range entries {
 		name := entry.Name()
 		if !entry.IsDir() {
-			if name != LegacyMystConfigName && strings.HasSuffix(name, FileExt) {
+			if name != MystConfigName && strings.HasSuffix(name, FileExt) {
 				return true
 			}
 			continue
@@ -940,6 +939,10 @@ type pendingWrite struct {
 	context   *moveRewriteContext
 }
 
+func (w pendingWrite) write(s *Storage) error {
+	return w.writeJournaled(s, nil, nil)
+}
+
 func (w pendingWrite) writeJournaled(s *Storage, task *moveRewrite, journal *moveJournal) error {
 	path := w.path
 	if path == "" {
@@ -1117,6 +1120,23 @@ func rewriteMovedRef(before, after *scopedIDResolver, sourceOld, sourceNew, targ
 	return destination, true
 }
 
+// rewriteFileBody applies rewrite to the body references of the fiber file at
+// path, returning the file's new bytes with its frontmatter untouched.
+func rewriteFileBody(path string, rewrite func(string) (string, bool)) ([]byte, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	_, _, bodyStart, err := frontmatterBounds(content)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := RewriteBodyRefs(string(content[bodyStart:]), rewrite)
+	out := make([]byte, 0, bodyStart+len(body))
+	out = append(out, content[:bodyStart]...)
+	return append(out, body...), nil
+}
+
 // Migrate performs the storage-model normalization pass:
 // flat-file fibers become directory fibers, stray fiber files fold into the
 // directory layout, legacy frontmatter `title` fields become `name`, and
@@ -1176,7 +1196,7 @@ func (s *Storage) MigrateFlatFiles(dryRun bool) (*MigrationResult, error) {
 			continue
 		}
 		name := entry.Name()
-		if name == LegacyMystConfigName || filepath.Ext(name) != FileExt {
+		if name == MystConfigName || filepath.Ext(name) != FileExt {
 			continue
 		}
 		oldID := strings.TrimSuffix(name, FileExt)

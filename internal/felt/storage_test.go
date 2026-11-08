@@ -54,8 +54,8 @@ func TestStorageInit(t *testing.T) {
 	if !s.Exists() {
 		t.Error("Exists() should be true after Init()")
 	}
-	if _, err := os.Stat(filepath.Join(s.root, LegacyMystConfigName)); !os.IsNotExist(err) {
-		t.Fatalf("Init() must not create %s; felt is not a MyST project", LegacyMystConfigName)
+	if _, err := os.Stat(filepath.Join(s.root, MystConfigName)); !os.IsNotExist(err) {
+		t.Fatalf("Init() must not create %s; felt is not a MyST project", MystConfigName)
 	}
 	gitignoreData, err := os.ReadFile(filepath.Join(s.root, GitignoreName))
 	if err != nil {

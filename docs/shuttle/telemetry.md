@@ -81,8 +81,8 @@ outside shuttle is invisible there.
 
 ## The commit ledger
 
-`~/.shuttle/commits.jsonl` pairs a commit with the session that made it. It is
-what retired parsing a fiber name out of a commit subject line, and it is what
+`~/.shuttle/commits.jsonl` pairs a commit with the session that made it. It
+attributes commits without parsing a fiber name out of a subject line, and it
 lets the Chronicle narrate a stretch of days in prose and count lines changed.
 
 The pairing is only knowable inside the session's own process tree, where the
