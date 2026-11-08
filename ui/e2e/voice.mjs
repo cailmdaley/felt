@@ -3,16 +3,14 @@ import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
-import { getBrowser } from './browser.mjs'
+import { launchBrowser } from './browser.mjs'
 
 const out = process.env.LISTEN_SCREENSHOT_DIR
 if (out) await mkdir(out, { recursive: true })
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
 // A private headless Chrome supplies fake audio; no operator microphone is opened.
-const browser = await getBrowser({
-  sharedBrowser: { status: async () => ({ running: false }) },
-  executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  args: ['--allow-file-access-from-files', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+const browser = await launchBrowser({
+  args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
 })
 async function open(page, state) {
   await page.goto(`${url}&voice=${state}`)

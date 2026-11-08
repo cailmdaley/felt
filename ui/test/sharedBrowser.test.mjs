@@ -1,11 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { findBrowser, sharedBrowser, system as browserSystem } from '../e2e/sharedBrowser.mjs'
-import { getBrowser } from '../e2e/browser.mjs'
 
 const fast = { readyMs: 300, pollMs: 5, probeMs: 50, graceMs: 60, killMs: 60, lockMs: 10_000 }
 const temporary = () => mkdtempSync(join(tmpdir(), 'shared-browser-test-'))
@@ -323,80 +321,3 @@ describe('browser discovery', () => {
   })
 })
 
-// A real browser on a temporary port and profile; skipped where no Chrome is installed.
-const executablePath = await findBrowser().catch(() => null)
-describe.skipIf(!executablePath)('media preferences hold from the first script, locally and shared', () => {
-  const stateDir = temporary()
-  let real, idle
-  beforeAll(async () => {
-    const free = () => new Promise(done => { const server = createServer().listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => done(port)) }) })
-    real = sharedBrowser({ port: await free(), stateDir })
-    idle = sharedBrowser({ port: await free(), stateDir })
-    await real.endpoint()
-  }, 60_000)
-  afterAll(async () => {
-    await real?.stop()
-    rmSync(stateDir, { recursive: true, force: true })
-  }, 30_000)
-
-  const page = `<script>window.first = [matchMedia('(prefers-color-scheme: dark)').matches, matchMedia('(prefers-reduced-motion: reduce)').matches,
-    matchMedia('(forced-colors: active)').matches, matchMedia('(prefers-contrast: more)').matches]</script>
-    <a id="same" href="/next">same tab</a><a id="popup" href="/popup" target="_blank">popup</a>`
-  const preferences = {
-    dark: { colorScheme: 'dark', reducedMotion: 'reduce', forcedColors: 'active', contrast: 'more' },
-    light: { colorScheme: 'light', reducedMotion: 'no-preference', forcedColors: 'none', contrast: 'no-preference' },
-  }
-
-  async function observe(session, options) {
-    const context = await session.newContext(options)
-    await context.route('http://probe.test/**', route => route.fulfill({ contentType: 'text/html', body: page }))
-    const tab = await context.newPage()
-    const first = () => tab.evaluate(() => window.first)
-    const seen = {}
-    await tab.setContent(page); seen.setContent = await first()
-    await tab.goto('http://probe.test/'); seen.goto = await first()
-    await tab.reload(); seen.reload = await first()
-    await Promise.all([tab.waitForURL('**/next'), tab.click('#same')]); seen.link = await first()
-    const [popup] = await Promise.all([tab.waitForEvent('popup'), tab.click('#popup')])
-    await popup.waitForLoadState(); seen.popup = await popup.evaluate(() => window.first)
-    return seen
-  }
-
-  for (const mode of ['local', 'shared']) {
-    it(`${mode}: simultaneous contexts keep opposite preferences on every navigation path`, async () => {
-      vi.stubEnv('SHARED_BROWSER', '')
-      const session = await getBrowser({ executablePath, sharedBrowser: mode === 'shared' ? real : idle })
-      try {
-        expect(session.shared).toBe(mode === 'shared')
-        const [dark, light] = await Promise.all([observe(session, preferences.dark), observe(session, preferences.light)])
-        for (const path of ['setContent', 'goto', 'reload', 'link', 'popup']) {
-          expect([path, dark[path]]).toEqual([path, [true, true, true, true]])
-          expect([path, light[path]]).toEqual([path, [false, false, false, false]])
-        }
-      } finally {
-        await session.close()
-        vi.unstubAllEnvs()
-      }
-    }, 60_000)
-  }
-
-  it('another attached client leaves a conversation dialog to its owner', async () => {
-    vi.stubEnv('SHARED_BROWSER', '')
-    const owner = await getBrowser({ sharedBrowser: real })
-    const tab = await owner.newPage()
-    const observer = await getBrowser({ sharedBrowser: real })
-    try {
-      const dialog = tab.waitForEvent('dialog')
-      const answer = tab.evaluate(() => confirm('Keep the owner in charge?'))
-      const prompt = await dialog
-      // A foreign client must neither dismiss nor race this owner's answer.
-      await new Promise(resolve => setImmediate(resolve))
-      await prompt.accept()
-      expect(await answer).toBe(true)
-    } finally {
-      await observer.close()
-      await owner.close()
-      vi.unstubAllEnvs()
-    }
-  }, 30_000)
-})

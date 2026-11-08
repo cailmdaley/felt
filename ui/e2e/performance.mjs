@@ -5,10 +5,9 @@ import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { resolve, join, extname, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { getBrowser } from './browser.mjs'
+import { launchBrowser } from './browser.mjs'
 
-const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
+const browser = await launchBrowser()
 const base = pathToFileURL(resolve('harness-board-dist/index.html')).href
 const screenshotDir = '/private/tmp/felt-board-perf-screenshots'
 await mkdir(screenshotDir, { recursive: true })
@@ -214,7 +213,7 @@ async function measureColdApp() {
       const fiber = { id: 'work/math-note', uid: 'math-note', name: 'Math note', status: 'closed',
         created_at: '2026-10-01T00:00:00Z', outcome: 'The checked result is $x^2$.',
         shuttle: { kind: 'oneshot', agent: 'codex-sol', host: 'perf', project_dir: '/perf' } }
-      const entry = { origin: 'perf', felt_store: '/perf/.felt', path: 'work/math-note/math-note.md', dir: 'work/math-note', fiber }
+      const entry = { origin: 'perf', felt_store: '/perf/.felt', path: 'work/math-note/math-note.md', dir: 'work/math-note', column: 'awaiting_review', fiber }
       const body = path.endsWith('/fibers/composite')
         ? { host: 'perf', fibers: [entry], origins: {} }
         : path.endsWith('/fibers') ? { fibers: [{ fiber: { id: 'work/math-note', name: 'Math note' } }] }

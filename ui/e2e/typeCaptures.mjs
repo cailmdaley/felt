@@ -6,7 +6,7 @@
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { getBrowser } from './browser.mjs'
+import { launchBrowser } from './browser.mjs'
 
 const out = resolve(process.argv[2] ?? 'type-captures')
 const base = pathToFileURL(resolve('harness-board-dist/index.html')).href
@@ -55,7 +55,7 @@ const surfaces = {
 const only = process.env.SURFACES?.split(',')
 await mkdir(out, { recursive: true })
 // A local headless browser: the shared one may carry extension targets CDP attaches to.
-const browser = await getBrowser({ sharedBrowser: { status: async () => ({ running: false }) } })
+const browser = await launchBrowser()
 try {
   for (const [device, viewport] of Object.entries(viewports)) for (const scheme of ['light', 'dark']) {
     for (const [name, open] of Object.entries(surfaces)) {

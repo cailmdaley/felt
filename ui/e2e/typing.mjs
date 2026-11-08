@@ -80,9 +80,7 @@ try {
     const stats = await page.evaluate(() => window.__typing)
     result.samples[name] = { ...stats, p50Paint: percentile(stats.keys.map(k => k.paint), .5), p95Paint: percentile(stats.keys.map(k => k.paint), .95), p95Task: percentile(stats.keys.map(k => k.task), .95) }
   }
-  const search = page.locator('.kbn-find')
-  // The bar find input belongs to the real board, not a synthetic probe field.
-  const find = await search.count() ? search : page.locator('input[type="search"]').first()
+  const find = page.locator('.kbn-viewtabs-find input')
   await type('find', find, 'calibration')
   await page.keyboard.press('Escape')
   await page.screenshot({ path: '/tmp/shuttle-typing.png' })

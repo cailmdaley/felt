@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { getBrowser } from './browser.mjs'
+import { launchBrowser } from './browser.mjs'
 
-const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args: ['--allow-file-access-from-files'] })
+const browser = await launchBrowser()
 const base = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
 const shots = process.env.CONSOLE_PICKER_SHOTS
 if (shots) await mkdir(shots, { recursive: true })

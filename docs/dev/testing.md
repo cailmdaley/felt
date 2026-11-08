@@ -8,14 +8,15 @@ running each suite are in [layout.md](layout.md#tests).
 Run `cd ui && npm test` for the board's unit and integration tests.
 Run `cd ui && npm run e2e` for every headless harness browser journey: workspace (including header, living-report, constitution page and Globe journeys), document request budgets, and performance budgets.
 The command builds both bundles, runs every suite even when one fails, and exits nonzero on any failure.
-It reuses the shared headless browser when available; `SHARED_BROWSER=1` starts or reuses it explicitly.
+Each suite launches its own headless Chrome, and the board's Google Fonts are served from a cache under `ui/node_modules/.cache/e2e-fonts` after their first fetch.
+The workspace suite runs its journeys four at a time, each in its own context (`E2E_JOBS` changes the count), prints each journey's time, and takes `E2E_ONLY=<regex>` to run the journeys it names; the whole command takes about two minutes on a busy laptop.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.
 
 `cd ui && npm run e2e:change` builds the change-reader ES-module harness and checks every virtual diff window, including open shadow DOM, against an independent parse of real `git diff` output.
 The fixtures cover story excerpts, tests, remaining hunks, folded generated files, hostile filenames and a blocked lazy Go grammar chunk, on desktop and phone.
 The source of truth is Git's changed side, line number and text, not the CLI bundle's hunks or the highlighting library's parser.
 The full `npm run e2e` recipe and CI include this gate.
-Set `CHROME_PATH` to a headless Chrome executable, or install Chromium with `npx playwright-core install chromium`; the browser helper also supports the shared headless browser.
+The browser is found as `bin/shared-browser` finds its own (see [layout.md](layout.md#browser-checks)); `CHROME_PATH` names one, or install Chromium with `npx playwright-core install chromium`.
 `CHANGE_DOM_INJECT_LOSS=1 npm run e2e:change` removes rendered changed rows before comparison and must exit nonzero.
 The unit contract test and browser gate create their own disposable Git histories; neither needs an origin remote or old commits in the source checkout.
 
@@ -203,7 +204,7 @@ and add your test to its file.
 |---|---|---|
 | the suites | `go test ./...`, `mix test`, `npm test` — all concurrent; each aims to finish in under a minute on a laptop, a target rather than a guarantee | every change, every lane |
 | full | `make test` plus `make test-linux` (CI's Ubuntu: dash as `/bin/sh`, `/proc`, systemd) | before pushing; CI |
-| browser | `npm run e2e`, which reuses the shared browser (`bin/shared-browser`) when one is running | changes to anything the board draws |
+| browser | `npm run e2e`, on a headless Chrome of its own | changes to anything the board draws |
 | opt-in | real harness smoke, the stranger-bootstrap container, `integration`-tagged tests | when touching what they cover |
 
 A test belongs in a browser only if a browser is the only place it can be

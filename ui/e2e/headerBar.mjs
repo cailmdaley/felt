@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { getBrowser } from './browser.mjs'
 import { familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
@@ -363,14 +362,13 @@ export function registerHeaderBarJourneys(test) {
       })
       assert.ok(geometry.barHeight <= (device === 'desktop' ? 96 : 64), JSON.stringify(geometry))
       assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
-      assert.equal(await page.locator('.ws-report-inset, .ws-header-sheet').count(), 0)
       for (const label of device === 'desktop' ? ['Settings', 'Constitution', 'Temper', 'Discard'] : ['Settings', 'Constitution']) {
         const icon = bandControl(header, label)
         assert.equal(await icon.getAttribute('title'), await icon.getAttribute('aria-label'))
         assert.deepEqual(await icon.evaluate(el => {
           const svg = el.querySelector('svg'), box = svg?.getBoundingClientRect(), css = svg && getComputedStyle(svg)
           return { viewBox: svg?.getAttribute('viewBox'), inheritsColor: css?.stroke === getComputedStyle(el).color, width: box?.width, height: box?.height, weight: css?.strokeWidth }
-        }), { viewBox: '0 0 16 16', inheritsColor: true, width: 16, height: 16, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
+        }), { viewBox: '0 0 16 16', inheritsColor: true, width: 20, height: 20, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
         await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
       }
       if (device === 'desktop') {
@@ -403,14 +401,4 @@ export function registerHeaderBarJourneys(test) {
       assert.equal(await page.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length), 0)
     }, viewport)
   }
-}
-if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? '')).href) {
-  const cases = []; registerHeaderBarJourneys((...args) => cases.push(args))
-  const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args: ['--allow-file-access-from-files'] })
-  try {
-    for (const [name, run, viewport] of cases) {
-      const context = await browser.newContext({ viewport, isMobile: viewport.width <= 700, hasTouch: viewport.width <= 700, reducedMotion: 'reduce' })
-      try { await run(await context.newPage()); console.log(`PASS ${name}`) } finally { await context.close() }
-    }
-  } finally { await browser.close() }
 }

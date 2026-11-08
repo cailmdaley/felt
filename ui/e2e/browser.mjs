@@ -1,88 +1,51 @@
-import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { chromium } from 'playwright-core'
-import { sharedBrowser as defaultSharedBrowser } from './sharedBrowser.mjs'
+import { findBrowser } from './sharedBrowser.mjs'
 
-export async function sharedBrowserAvailable(sharedBrowser = defaultSharedBrowser()) {
-  return process.env.SHARED_BROWSER === '1' || (await sharedBrowser.status()).running
-}
+const FONTS = /^https:\/\/fonts\.(googleapis|gstatic)\.com\//
+const fontCache = join(import.meta.dirname, '..', 'node_modules', '.cache', 'e2e-fonts')
 
-// Ignore contextless root targets by detaching this connection's session only.
-// https://github.com/microsoft/playwright/commit/0726df3130b0972faa267c0fb38df904a39150ef
-export function sharedCDPTransport(endpoint, Socket = globalThis.WebSocket) {
-  const socket = new Socket(endpoint), pending = []
-  let detachId = 0, failure, closed = false, closeReason, onclose
-  const transport = {
-    set onclose(listener) {
-      onclose = listener
-      if (closed) queueMicrotask(() => onclose?.(closeReason))
-    },
-    send(message) {
-      if (closed) return
-      const text = JSON.stringify(message)
-      if (socket.readyState === 0) pending.push(text)
-      else socket.send(text)
-    },
-    close() { socket.close() },
-  }
-  socket.addEventListener('open', () => { for (const text of pending.splice(0)) socket.send(text) })
-  socket.addEventListener('error', event => { failure = event.message || 'CDP WebSocket failed' })
-  socket.addEventListener('close', event => {
-    closed = true; closeReason = failure || event.reason
-    onclose?.(closeReason)
+/**
+ * A headless Chrome of the check's own. A browser shared with other lanes
+ * serialises their work behind ours and skews every timing we measure.
+ *
+ * Sandboxed report frames stay in the page's process: an out-of-process frame
+ * receives input by the compositor's last hit-test map, so a click on a sheet
+ * that opened over a frame in the same moment can land in the frame instead.
+ *
+ * Every context serves the board's Google Fonts from a disk cache filled on
+ * first use, so a page's load never waits on the network and every journey
+ * lays out in the same faces.
+ */
+export async function launchBrowser({ args = [] } = {}) {
+  const browser = await chromium.launch({
+    executablePath: await findBrowser(),
+    headless: true,
+    args: [...new Set([
+      '--mute-audio', '--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required',
+      '--disable-features=IsolateSandboxedIframes', ...args,
+    ])],
   })
-  socket.addEventListener('message', ({ data }) => {
-    const message = JSON.parse(data)
-    // Playwright uses positive request ids; negative ids belong to our detach requests.
-    if (message.id < 0) return
-    const attached = message.method === 'Target.attachedToTarget' && !message.sessionId ? message.params : null
-    if (attached && attached.targetInfo.type !== 'browser' && !attached.targetInfo.browserContextId
-      && typeof attached.sessionId === 'string') {
-      transport.send({ id: --detachId, method: 'Target.detachFromTarget', params: { sessionId: attached.sessionId } })
-      return
-    }
-    transport.onmessage?.(message)
-  })
-  return transport
-}
-
-// Connects to the shared browser when SHARED_BROWSER=1 or it is already running; otherwise launches a local one.
-export async function getBrowser({ args = [], executablePath, sharedBrowser = defaultSharedBrowser() } = {}) {
-  const shared = await sharedBrowserAvailable(sharedBrowser)
-  const browser = shared
-    ? await chromium.connectOverCDP(sharedCDPTransport(await sharedBrowser.endpoint()), { noDefaults: true })
-    : await launchLocalBrowser(args, executablePath)
-  // CDP also attaches other clients' pages. Their owner handles dialogs;
-  // Playwright's automatic dismissal would race that owner's response.
-  if (shared) for (const context of browser.contexts()) context.on('dialog', () => {})
-  const contexts = new Set()
-  let closed = false
-
-  async function newContext(options) {
-    if (closed) throw new Error('This browser session is already closed')
-    const context = await browser.newContext(options)
-    contexts.add(context)
-    context.once('close', () => contexts.delete(context))
+  const newContext = browser.newContext.bind(browser)
+  browser.newContext = async options => {
+    const context = await newContext(options)
+    await context.route(FONTS, cachedFont)
     return context
   }
-
-  return {
-    shared,
-    isConnected: () => browser.isConnected(),
-    newContext,
-    async newPage(options) {
-      return (await newContext(options)).newPage()
-    },
-    async close() {
-      if (closed) return
-      closed = true
-      await Promise.all([...contexts].map(context => context.close().catch(() => {})))
-      // Closing a CDP-attached Playwright browser disconnects this client; Chrome stays running.
-      await browser.close()
-    },
-  }
+  return browser
 }
 
-async function launchLocalBrowser(args, executablePath) {
-  if (executablePath && !existsSync(executablePath)) throw new Error(`Chrome not found at ${executablePath}; set CHROME_PATH`)
-  return chromium.launch({ ...(executablePath ? { executablePath } : {}), headless: true, args: [...new Set(['--mute-audio', ...args])] })
+async function cachedFont(route) {
+  const file = join(fontCache, createHash('sha256').update(route.request().url()).digest('hex'))
+  const cached = await readFile(`${file}.type`, 'utf8').then(async contentType => ({ contentType, body: await readFile(file) }), () => null)
+  if (cached) return route.fulfill({ ...cached, headers: { 'access-control-allow-origin': '*' } })
+  const response = await route.fetch()
+  if (response.ok()) {
+    await mkdir(fontCache, { recursive: true })
+    await writeFile(file, await response.body())
+    await writeFile(`${file}.type`, response.headers()['content-type'] ?? 'application/octet-stream')
+  }
+  await route.fulfill({ response })
 }

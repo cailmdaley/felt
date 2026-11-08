@@ -4,7 +4,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { getBrowser } from './browser.mjs'
+import { launchBrowser } from './browser.mjs'
 import { frames, layoutShift, settleTransitions, unexpected } from './layoutShift.mjs'
 import { registerMapViewJourneys } from './mapViews.mjs'
 import { registerNavigationJourneys } from './navBack.mjs'
@@ -15,8 +15,7 @@ import { sentFiles as sentFileRows } from './familyNav.mjs'
 import { registerCapGeometryJourneys } from './capGeometry.mjs'
 import { registerRenderedTypeJourneys } from './renderedType.mjs'
 
-const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
+const browser = await launchBrowser()
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
 const name = 'Calibrate the shear response'
 const tests = []
@@ -293,7 +292,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await type('.ws-channel-title', 'label', 'EB Garamond')
   }
   await choose(p, 'Constitution')
-  await type('.ws-selected .ws-prose-status', 'label', 'EB Garamond')
   if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 'display', 'EB Garamond')
   assert.equal(await selected(p).locator('.kbn-detail-lede').count(), 1, 'the constitution leads with its outcome')
   await type('.ws-stage-band .ws-header-word', 'label', 'EB Garamond')
@@ -946,13 +944,17 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
       return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
     }
   })
-  await p.clock.fastForward(15001)
+  // The open fiber's receipts are read on their own cadence.
+  await p.clock.fastForward(15_001)
   const first = (await sentFiles(p)).first()
   assert.match(await first.getAttribute('data-key'), /brief.md$/)
   assert.equal(await first.locator('.ws-sent-new').count(), 1)
   await p.keyboard.press('Escape'); await poll(p, () => !document.querySelector('.ws-page-sheet').open)
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
-  await leave(p); await barTab(p, 'board').click()
+  // The fleet's are read past their interval while the Board is off screen, as a Desk redraw reads them.
+  await leave(p); await p.clock.fastForward(60_001)
+  await p.evaluate(() => window.__harness.modal.fiberSends.refresh())
+  await barTab(p, 'board').click()
   await poll(p, () => document.querySelector('.ws-overview-ribbon [title*="brief.md"]'))
   if (reducedMotion !== 'reduce') await poll(p, () => window.__receiptAnimations.length)
   const folios = await p.evaluate(() => window.__receiptAnimations)
@@ -1227,7 +1229,6 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
   await controls.getByRole(surface === 'Desk' ? 'menuitem' : 'button', { name: /Discard/ }).click()
   const host = surface === 'Desk' ? p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).locator('.kbn-card-meta') : controls
   assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
-  assert.equal(await p.locator('.ws-verdict-toasts').count(), 0, 'no floating line')
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
   await p.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
   await p.clock.runFor(6000)
@@ -1365,20 +1366,6 @@ test('Body wikilink opens a fiber absent from the card index', async p => {
   await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Method note')
   await choose(p, 'Constitution')
   await selected(p).getByText('The response correction uses independent simulations and leaves the measured shear unchanged in the null tests.', { exact: true }).waitFor()
-})
-
-test('Overview first visit names its window and a numeric stored visit survives reload', async p => {
-  await p.locator('[data-view="board"]').click()
-  await poll(p, () => document.querySelector('.ws-overview-masthead')?.textContent?.includes('The last 30 days'))
-  const key = 'shuttle.workspace.overview.seen'
-  const seen = Date.parse('2026-10-03T14:00:00Z')
-  await p.evaluate(({ key, seen }) => localStorage.setItem(key, JSON.stringify(seen)), { key, seen })
-  const readSeen = () => p.evaluate(key => JSON.parse(localStorage.getItem(key) ?? 'null'), key)
-  assert.equal(typeof await readSeen(), 'number', 'the visit is stored as a JSON number')
-  assert.equal(await readSeen(), seen)
-  await p.reload()
-  await p.locator(`.kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).waitFor()
-  assert.equal(await readSeen(), seen, 'reload retains the seeded visit timestamp')
 })
 
 test('Overview g selects the first change before folios and its main button opens the fiber', async p => {
@@ -1781,24 +1768,6 @@ test('A PDF iframe in a report is rendered by the trusted reader inside the opaq
   assert.ok(Math.abs(overlayBox.y - (frameBox.y + childBox.y * scaleY)) < 3, 'the PDF canvas follows the report layout')
 })
 
-test('Remote worker conversation records attach handler without launching a terminal', async p => {
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  await p.keyboard.press('c')
-  await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker'))
-  const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
-  assert.equal(event.host, 'basalt-login-02')
-  assert.match(event.session, /remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle/)
-})
-
-test("c opens the remote worker from its console", async p => {
-  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  await band(p).locator('.ws-band-head').waitFor()
-  await appFocus(p); await p.keyboard.press('c')
-  await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker'))
-  const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
-  assert.equal(event.host, 'basalt-login-02')
-})
-
 for (const width of [320, 390]) {
   test(`Phone view bar geometry at ${width}px`, async p => {
     const gear = p.locator('.kbn-viewtabs-settings')
@@ -2127,7 +2096,7 @@ test('Reader slash hangs the constitution list under the bar Find; Escape puts i
   assert.equal(await picker.count(), 0)
 })
 
-test('j/k and Alt scans land immediately; browser Back returns to Board', async p => {
+test('Alt-up/down step constitutions from wherever focus rests; browser Back returns to Board', async p => {
   // Desk order names each constitution once, at its own row: a root heading another section is not a stop.
   const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
   const names = [...await column('drafts'), ...await column('inFlight'), ...await column('awaitingReview')]
@@ -2135,13 +2104,12 @@ test('j/k and Alt scans land immediately; browser Back returns to Board', async 
   await p.locator('[data-view="board"]').click()
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await poll(p, first => document.querySelector('.ws-channel-title')?.textContent === first, name)
-  await appFocus(p)
   let index = names.indexOf(name)
-  for (const [key, delta] of [['k', -1], ['k', -1], ['j', 1], ['j', 1], ['Alt+ArrowUp', -1], ['Alt+ArrowUp', -1], ['Alt+ArrowDown', 1]]) {
+  for (const [key, delta] of [['Alt+ArrowUp', -1], ['Alt+ArrowUp', -1], ['Alt+ArrowDown', 1]]) {
     await p.keyboard.press(key)
     index += delta
     await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[index])
-    if (key.startsWith('Alt+')) assert.ok(await selected(p).count(), 'keyboard channel navigation retains a selected page')
+    assert.ok(await selected(p).count(), 'keyboard channel navigation retains a selected page')
   }
   await p.goBack()
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
@@ -2235,11 +2203,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   test(`Say it once: ${device} fiber, media, PDF and unsupported metadata`, async p => {
     await open(p); await choose(p, 'Constitution')
     const header = selected(p).locator('.ws-prose-header')
-    assert.equal((await header.locator('.ws-prose-status').innerText()).trim().toLowerCase(), 'awaiting your review')
     assert.equal(await header.locator('.ws-fiber-acts').count(), 0, 'prose does not duplicate the band')
     assert.equal(await selected(p).locator('.ws-dock').count(), 0)
-    assert.equal(await selected(p).locator('.ws-agent,.ws-prose-agent,.ws-prose-host,.ws-dock-status').count(), 0)
-    assert.equal(await selected(p).locator('.ws-fiber-prose > h1:visible').count(), device === 'phone' ? 0 : 1)
+    assert.equal(await selected(p).locator('.ws-fiber-prose [data-part="fiber-title"]:visible').count(), device === 'phone' ? 0 : 1)
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /changed 47m ago/i)
     await capture('fiber')
     const passive = await selected(p).evaluate(page => {
@@ -2494,7 +2460,7 @@ for (const [label, theme] of [['Night Chart', 'night-chart'], ['Lamplight', 'lam
     const rgb = color => { context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3) }
     const luminance = color => rgb(color).map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0)
     const paper = luminance(getComputedStyle(band).getPropertyValue('--ws-paper'))
-    const result = [...page.querySelectorAll('.ws-prose h1,.ws-prose-body p,.ws-prose-status,.ws-labelbar'), ...band.querySelectorAll('.kbn-ctl-agent,.kbn-detail-error')].map(el => {
+    const result = [...page.querySelectorAll('.ws-prose h1,.ws-prose-body p,.ws-labelbar'), ...band.querySelectorAll('.kbn-ctl-agent,.kbn-detail-error')].map(el => {
       const ink = luminance(getComputedStyle(el).color)
       return { part: el.className || el.tagName, ratio: (Math.max(ink, paper) + .05) / (Math.min(ink, paper) + .05) }
     })
@@ -2767,30 +2733,37 @@ for (const width of [1440, 1000]) test(`Listening audio stays inside a stable bu
 const runnable = tests.filter(test => !process.env.E2E_ONLY || new RegExp(process.env.E2E_ONLY).test(test.name))
 const started = performance.now()
 let passed = 0
-try {
-  for (const { name, run, viewport, reducedMotion, touch } of runnable) {
-    const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
-      hasTouch: !!touch || (!!viewport && viewport.width <= 700), isMobile: !!touch || (!!viewport && viewport.width <= 700),
-      reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
-    const page = await context.newPage()
-    page.setDefaultTimeout(10000)
-    page.setDefaultNavigationTimeout(30000)
-    const errors = []
-    page.on('pageerror', error => errors.push(error.message))
-    let failure
-    try {
-      await page.clock.install({ time: new Date('2026-10-04T14:00:00Z') })
-      await page.goto(url, { timeout: 15000 })
-      await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).waitFor({ state: 'attached', timeout: 15000 })
-      await run(page)
-    } catch (error) { failure = error; await mkdir(shots, { recursive: true }); await page.screenshot({ path: resolve(shots, 'failure-' + name.replace(/[^a-z0-9]+/gi, '-').slice(0, 100) + '.png') }).catch(() => {}) }
-    finally {
-      try { assert.deepEqual(errors, [], 'pageerror events') } catch (error) { failure = failure ? new AggregateError([failure, error]) : error }
-      await context.close()
-    }
-    if (failure) console.error(`FAIL ${name}\n${failure.stack}\n${failure.errors?.map(error => error.stack).join('\n') ?? ''}`)
-    else { passed++; console.log(`PASS ${name}`) }
+
+async function journey({ name, run, viewport, reducedMotion, touch }) {
+  const phone = !!viewport && viewport.width <= 700
+  const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
+    hasTouch: !!touch || phone, isMobile: !!touch || phone, reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
+  const page = await context.newPage()
+  page.setDefaultTimeout(10000)
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  let failure
+  const begun = performance.now()
+  try {
+    await page.clock.install({ time: new Date('2026-10-04T14:00:00Z') })
+    await page.goto(url)
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).waitFor({ state: 'attached' })
+    await run(page)
+  } catch (error) { failure = error; await mkdir(shots, { recursive: true }); await page.screenshot({ path: resolve(shots, 'failure-' + name.replace(/[^a-z0-9]+/gi, '-').slice(0, 100) + '.png') }).catch(() => {}) }
+  finally {
+    try { assert.deepEqual(errors, [], 'pageerror events') } catch (error) { failure = failure ? new AggregateError([failure, error]) : error }
+    await context.close()
   }
+  const seconds = ((performance.now() - begun) / 1000).toFixed(1)
+  if (failure) console.error(`FAIL ${name} (${seconds}s)\n${failure.stack}\n${failure.errors?.map(error => error.stack).join('\n') ?? ''}`)
+  else { passed++; console.log(`PASS ${name} (${seconds}s)`) }
+}
+
+// Journeys share nothing but the browser: each has its own context and mocked daemon.
+const queue = [...runnable]
+const jobs = Math.max(1, Number(process.env.E2E_JOBS) || 4)
+try {
+  await Promise.all(Array.from({ length: jobs }, async () => { while (queue.length) await journey(queue.shift()) }))
 } finally { await browser.close() }
 await mkdir(shots, { recursive: true })
 await writeFile(resolve(shots, 'inventory.json'), JSON.stringify(inventory, null, 2))

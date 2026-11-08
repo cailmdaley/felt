@@ -1,22 +1,22 @@
 // @vitest-environment jsdom
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { ChannelThemes } from '../src/board/workspace/ChannelThemes.js'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
 import { type Page } from 'playwright-core'
-import { getBrowser, sharedBrowserAvailable } from '../e2e/browser.mjs'
+import { launchBrowser } from '../e2e/browser.mjs'
+import { findBrowser } from '../e2e/sharedBrowser.mjs'
 
 // Native @scope, layers, nesting and computed custom properties require CSSOM.
-const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-const canUseBrowser = existsSync(chrome) || await sharedBrowserAvailable()
-let browser: Awaited<ReturnType<typeof getBrowser>> | undefined
+const canUseBrowser = await findBrowser().then(() => true, () => false)
+let browser: Awaited<ReturnType<typeof launchBrowser>> | undefined
 let page: Page
 let sharedDefaults: string
 const native = it.skipIf(!canUseBrowser)
 beforeAll(async () => {
   if (!canUseBrowser) return
-  browser = await getBrowser({ executablePath: chrome })
+  browser = await launchBrowser()
   page = await browser.newPage()
   const defaults = { '--ws-paper': 'white', '--ws-ink': 'black', '--known': '12px', '--ws-stage-inset': '28px', '--ws-strip-h': '32px',
     '--font-serif': 'Georgia, serif', '--ws-focus': '#BC4538', '--kbn-agent': '#3D5BA0', '--kbn-you': '#BC4538', '--kbn-owed': '#9A7B35', '--kbn-tempered-ink': '#2E6862' }

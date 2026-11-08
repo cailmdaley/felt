@@ -8,11 +8,10 @@ import { sentFiles } from './familyNav.mjs'
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { getBrowser } from './browser.mjs'
+import { launchBrowser } from './browser.mjs'
 
 const reportOnly = process.argv.includes('--report')
-const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
+const browser = await launchBrowser()
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=music`
 
 /** Requests for document routes, grouped by the document they read. */
@@ -53,8 +52,7 @@ try {
   await p.goto(url)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Music"])`).first().click()
   const selected = () => p.locator('.ws-page.ws-selected')
-  // A Desk click lands on the thread's row on its constitution's page, where its report opens.
-  await selected().locator('.fp-row[aria-selected="true"] .fp-lead').click()
+  // A Desk click lands on the constitution's page, its report already unfolded under its lone row.
   await selected().frameLocator('iframe').getByRole('heading', { name: 'Listening notes', exact: true }).waitFor()
   // Let titles and durations settle.
   await p.clock.runFor(8_000)

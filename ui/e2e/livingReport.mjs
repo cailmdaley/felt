@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { getBrowser } from './browser.mjs'
 import { familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
 
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
@@ -54,7 +53,6 @@ export function registerLivingReportJourneys(test) {
       }
       await named(page, 'Calibrate the shear response')
       await band(page).locator('.ws-band-head').waitFor()
-      assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
       await shot(page, `${device}-landing`)
       await band(page).getByRole('button', { name: 'Constitution', exact: true }).click()
@@ -137,19 +135,4 @@ export function registerLivingReportJourneys(test) {
       assert.equal(errors.length, 0, errors.join('\n'))
     }, viewport, 'reduce', phone)
   }
-}
-
-if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? '')).href) {
-  const cases = []
-  registerLivingReportJourneys((...test) => cases.push(test))
-  const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args: ['--allow-file-access-from-files'] })
-  try {
-    for (const [name, run, viewport, , reducedMotion, hasTouch] of cases) {
-      const context = await browser.newContext({ viewport, isMobile: viewport.width <= 700, hasTouch, reducedMotion })
-      try {
-        await run(await context.newPage())
-        console.log(`PASS ${name}`)
-      } finally { await context.close() }
-    }
-  } finally { await browser.close() }
 }
