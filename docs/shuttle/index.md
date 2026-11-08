@@ -40,8 +40,8 @@ The agent chooses its implementation steps.
 
 The tour pairs screenshots of the board over a fictional workshop with control guides, diagrams of dialogs and menus the screenshots don't show.
 
-A terminal worker runs in **tmux**, which keeps its terminal session alive when you close a window or disconnect from SSH.
-Codex can also run through its native desktop backend; see [Opening conversations](conversations.md) for the available choices.
+Every worker runs in its host's terminal backend (**tmux** by default, or **Rex**), which keeps its session alive when you close a window or disconnect from SSH.
+[Opening conversations](conversations.md) covers how to open one.
 The machine doing the work must stay awake.
 
 ## A task carries its own context

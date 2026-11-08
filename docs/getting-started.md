@@ -9,10 +9,10 @@ You can follow it yourself or ask your agent to work through it with you.
 
 ## Install
 
-On macOS or Linux, install **2.0.0-rc.1** for prerelease testing:
+On macOS or Linux, install **2.0.0-rc.2** for prerelease testing:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.1 sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.2 sh
 ```
 
 The installer downloads the `felt` and `shuttle` commands and prints where it puts them.

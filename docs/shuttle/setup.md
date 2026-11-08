@@ -1,6 +1,6 @@
 # Set up Shuttle
 
-This guide targets **2.0.0-rc.1**, a release candidate for testing before the stable 2.0 release.
+This guide targets **2.0.0-rc.2**, a release candidate for testing before the stable 2.0 release.
 The agent setup guide pins that version explicitly; ordinary stable updates do not select it.
 
 **We recommend setting up Shuttle with the agent you already use.**
@@ -58,6 +58,6 @@ The setup card records which of these checks actually passed.
 ## Reference
 
 - [Agent setup guide](agent-setup.md): the readable checklist and commands behind onboarding.
-- [Opening conversations](conversations.md): terminal, desktop, and browser choices.
+- [Opening conversations](conversations.md): terminal and browser choices.
 - [Connect your machines](remotes.md): Tailscale, SSH, and shared servers.
 - [Installation reference](installation.md): configuration files, service management, and recovery.

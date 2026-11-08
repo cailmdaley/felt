@@ -574,7 +574,7 @@ ledgers](../shuttle/telemetry.md) for what writes the files underneath.
 | Route | Reads | Serves |
 |---|---|---|
 | `GET /activity` | `events.jsonl` | Per-minute activity buckets (`agent` and `reply` overlap — see Telemetry) |
-| `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to; Codex App rows may carry a separate `thread_id`; `uid=` narrows to one fiber |
+| `GET /sessions` | `sessions.jsonl` | Which fiber each harness session belonged to; a Codex row may carry a separate `thread_id`; `uid=` narrows to one fiber |
 | `GET /commits` | `commits.jsonl` | Which session made each commit, with `--shortstat` counts |
 | `GET /sent-files/all` | `events.jsonl` | Every `SendUserFile` push on this host |
 | `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |

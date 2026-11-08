@@ -14,6 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 - Sender proofs, cross-host attestations, sender claims and the board's sender marks. The `message-proof` command, the `POST /messages/attestations` route and the `context-mailbox put` proof, claim and daemon-sender flags are gone; contract level 35.
+- The Codex desktop (App Server) worker backend. Codex workers run the Codex CLI in the host's terminal backend like Claude Code and Pi; dispatch, capture, resume and messaging use the terminal session's native identity.
 
 ### Changed
 
@@ -22,6 +23,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - The board draws delivered messages and thread notices as messages again, from transcripts in every header format.
+
+## [2.0.0-rc.2] — 2026-10-23
+
+### Added
+
+- Constitutions nested under a constitution are its threads: a child's lifecycle results reach its nearest orchestrator.
+
+### Fixed
+
 - Remote recovery respects a responding daemon regardless of whether it runs under
   tmux or a service supervisor. Booting daemons are allowed to finish, and queued
   restarts check liveness again before invoking the launcher.
@@ -458,3 +468,5 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 [1.0.8]: https://github.com/cailmdaley/felt/releases/tag/v1.0.8
 [1.0.9]: https://github.com/cailmdaley/felt/releases/tag/v1.0.9
 [1.1.0]: https://github.com/cailmdaley/felt/releases/tag/v1.1.0
+[2.0.0-rc.1]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0-rc.1
+[2.0.0-rc.2]: https://github.com/cailmdaley/felt/releases/tag/v2.0.0-rc.2
