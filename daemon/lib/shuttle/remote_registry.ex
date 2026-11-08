@@ -20,6 +20,11 @@ defmodule Shuttle.RemoteRegistry do
   seconds; otherwise polling uses a 60-second floor. Recovery actions retain
   their own deadlines. Failures mark the origin as stale or recovering.
 
+  Probes and recovery steps run inline, one remote after another, so readers
+  never call the registry: it publishes its entries to an ETS table after
+  every change, and `snapshots/1` and `snapshot/2` build their views from that
+  table while a slow remote holds the registry's process.
+
   ## Configuration
 
   The fleet comes from `Shuttle.Remotes` — `~/.config/shuttle/remotes.json`, or
@@ -105,6 +110,7 @@ defmodule Shuttle.RemoteRegistry do
       :trip_cooldown_schedule_ms,
       :user_uid,
       :remotes_token,
+      :published,
       clock: &DateTime.utc_now/0,
       last_read_at: nil,
       reload_from_file?: false,
@@ -188,12 +194,10 @@ defmodule Shuttle.RemoteRegistry do
   """
   @spec snapshots(GenServer.server()) :: %{String.t() => map()}
   def snapshots(server) do
-    snapshots(server, RegistryCommon.read_timeout_ms())
-  end
-
-  @spec snapshots(GenServer.server(), non_neg_integer()) :: %{String.t() => map()}
-  def snapshots(server, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
-    RegistryCommon.read(server, :snapshots, %{}, timeout_ms)
+    case published(server) do
+      nil -> %{}
+      state -> build_snapshots_view(state)
+    end
   end
 
   @doc """
@@ -202,7 +206,26 @@ defmodule Shuttle.RemoteRegistry do
   """
   @spec snapshot(GenServer.server(), String.t()) :: map() | nil
   def snapshot(server, name) do
-    RegistryCommon.read(server, {:snapshot, name}, nil)
+    case published(server) do
+      nil -> nil
+      state -> build_one_view(state, name)
+    end
+  end
+
+  # The registry's published entries, with the read registered as demand for
+  # the polling cadence. nil when no registry runs.
+  defp published(server) do
+    with pid when is_pid(pid) <- GenServer.whereis(server),
+         table when not is_nil(table) <- :persistent_term.get({__MODULE__, pid}, nil),
+         [{:snapshots, snapshots, clock}] <- :ets.lookup(table, :snapshots),
+         [{:last_read_at, last_read_at}] <- :ets.lookup(table, :last_read_at) do
+      GenServer.cast(pid, :read)
+      %State{snapshots: snapshots, last_read_at: last_read_at, clock: clock}
+    else
+      _ -> nil
+    end
+  rescue
+    ArgumentError -> nil
   end
 
   @doc """
@@ -297,8 +320,13 @@ defmodule Shuttle.RemoteRegistry do
       snapshots: snapshots,
       reload_from_file?: reload_from_file?,
       remotes_token: Shuttle.Remotes.config_token(),
-      clock: Keyword.get(opts, :clock, &DateTime.utc_now/0)
+      clock: Keyword.get(opts, :clock, &DateTime.utc_now/0),
+      published: :ets.new(__MODULE__, [:set, :protected, read_concurrency: true])
     }
+
+    :persistent_term.put({__MODULE__, self()}, state.published)
+    :ets.insert(state.published, {:last_read_at, nil})
+    publish(state)
 
     state =
       if not auto_poll do
@@ -311,14 +339,13 @@ defmodule Shuttle.RemoteRegistry do
   end
 
   @impl true
-  def handle_call(:snapshots, _from, state) do
-    {:reply, build_snapshots_view(state), RegistryCommon.mark_read(state)}
+  def handle_cast(:read, state) do
+    state = RegistryCommon.mark_read(state)
+    :ets.insert(state.published, {:last_read_at, state.last_read_at})
+    {:noreply, state}
   end
 
-  def handle_call({:snapshot, name}, _from, state) do
-    {:reply, build_one_view(state, name), RegistryCommon.mark_read(state)}
-  end
-
+  @impl true
   def handle_call({:reset_breaker, name}, _from, state) do
     case Map.get(state.snapshots, name) do
       nil ->
@@ -338,7 +365,7 @@ defmodule Shuttle.RemoteRegistry do
               last_action: "recovery manually reset; re-running cascade"
           })
 
-        {:reply, :ok, %{state | snapshots: Map.put(state.snapshots, name, entry)}}
+        {:reply, :ok, publish(%{state | snapshots: Map.put(state.snapshots, name, entry)})}
 
       _entry ->
         {:reply, {:error, :not_tripped}, state}
@@ -347,6 +374,7 @@ defmodule Shuttle.RemoteRegistry do
 
   def handle_call(:poll_now, _from, state) do
     state = state |> RegistryCommon.mark_read() |> poll_all()
+    :ets.insert(state.published, {:last_read_at, state.last_read_at})
     {:reply, :ok, state}
   end
 
@@ -388,7 +416,19 @@ defmodule Shuttle.RemoteRegistry do
   # Every poll cycle — tick or the synchronous `poll_now/1` — starts by picking
   # up a fleet edit, so the two paths can never disagree about the fleet.
   defp poll_all(%State{} = state) do
-    state |> reload_remotes() |> poll_configured() |> report_fleet()
+    state |> reload_remotes() |> publish() |> poll_configured() |> report_fleet()
+  end
+
+  # Readers see each remote's entry as soon as its probe lands, not after the
+  # whole sweep. Unchanged entries are the same terms, so the comparison is
+  # cheap and an idle tick writes nothing.
+  defp publish(%State{} = state) do
+    case :ets.lookup(state.published, :snapshots) do
+      [{:snapshots, snapshots, _clock}] when snapshots == state.snapshots -> :ok
+      _ -> :ets.insert(state.published, {:snapshots, state.snapshots, state.clock})
+    end
+
+    state
   end
 
   # The Poller files threads by whether a worker runs anywhere in the fleet.
@@ -430,14 +470,11 @@ defmodule Shuttle.RemoteRegistry do
     now = state.clock.()
     now_ms = DateTime.to_unix(now, :millisecond)
 
-    new_snapshots =
-      Enum.reduce(remotes, state.snapshots, fn remote, acc ->
-        prev = Map.get(acc, remote.name, initial_entry(remote))
-        next = poll_remote(prev, state, now, now_ms)
-        Map.put(acc, remote.name, next)
-      end)
-
-    %{state | snapshots: new_snapshots}
+    Enum.reduce(remotes, state, fn remote, acc ->
+      prev = Map.get(acc.snapshots, remote.name, initial_entry(remote))
+      next = poll_remote(prev, state, now, now_ms)
+      publish(%{acc | snapshots: Map.put(acc.snapshots, remote.name, next)})
+    end)
   end
 
   defp poll_remote(%{recovery: %Recovery{} = recovery} = entry, state, now, now_ms) do

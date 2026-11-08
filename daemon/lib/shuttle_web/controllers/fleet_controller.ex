@@ -60,7 +60,6 @@ defmodule ShuttleWeb.FleetController do
 
   alias Shuttle.{CLI, ConfigFiles, OriginRouter, Poller, Remotes}
 
-  @registry_timeout_ms 1_500
   @cli_timeout_ms 60_000
   # The forward must outlast the work it forwards. `OriginRouter`'s default is
   # 30s and the CLI on the far side is given 60s, so at the default a tunnel
@@ -175,14 +174,8 @@ defmodule ShuttleWeb.FleetController do
   # The registry's rows as it holds them — raw, because two different things are
   # read off one entry: its reachability and the build stamp buried in the last
   # good snapshot. Rendering here would throw the second away.
-  defp registry_health do
-    Shuttle.RemoteRegistry.snapshots(
-      Shuttle.Env.server(Shuttle.RemoteRegistry),
-      @registry_timeout_ms
-    )
-  catch
-    :exit, _ -> %{}
-  end
+  defp registry_health,
+    do: Shuttle.RemoteRegistry.snapshots(Shuttle.Env.server(Shuttle.RemoteRegistry))
 
   defp render_health(%{} = entry) do
     %{

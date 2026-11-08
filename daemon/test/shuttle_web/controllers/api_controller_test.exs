@@ -82,12 +82,6 @@ defmodule ShuttleWeb.APIControllerTest do
     refute forwarded =~ "origin"
   end
 
-  # A suspended Poller or RemoteRegistry never answers, so a degraded state
-  # read costs the controller's whole state timeout. Shrink it for this test.
-  defp shrink_state_timeout do
-    Shuttle.Test.Env.put_app_env(:state_call_timeout_ms, 50)
-  end
-
   # ── POST /api/v1/dispatch ──
 
   test "existing-only review delivery cannot arm or launch a missing worker" do
@@ -1064,8 +1058,13 @@ defmodule ShuttleWeb.APIControllerTest do
     assert candide["recovery"]["attempt"] == 0
   end
 
-  test "composite degrades remote snapshots when the remote registry is unavailable" do
-    shrink_state_timeout()
+  test "composite serves published remote snapshots while the registry is busy" do
+    defmodule BusyRegistryStubClient do
+      @behaviour Shuttle.RemoteRegistry.Client
+
+      @impl true
+      def get(_url, _timeout), do: {:ok, Jason.encode!(%{"host" => "candide", "eligible" => []})}
+    end
 
     Env.start_scoped!({
       Shuttle.RemoteRegistry,
@@ -1073,18 +1072,20 @@ defmodule ShuttleWeb.APIControllerTest do
       remotes: [
         %Shuttle.Remote{name: "candide", url: "http://localhost:4001"}
       ],
+      client: BusyRegistryStubClient,
       tick_interval_ms: 60_000
     })
 
+    :ok = Shuttle.RemoteRegistry.poll_now()
     :sys.suspend(Shuttle.Env.server(Shuttle.RemoteRegistry))
 
     try do
-      conn = get(api_conn(), "/api/v1/state/composite")
+      {micros, conn} = :timer.tc(fn -> get(api_conn(), "/api/v1/state/composite") end)
       assert conn.status == 200
-      body = Jason.decode!(conn.resp_body)
-      assert body["remotes"]["_registry"]["stale"] == true
-      assert body["remotes"]["_registry"]["last_error"] != nil
-      assert body["remotes"]["_registry"]["recovery"]["state"] == "unavailable"
+      assert micros < 1_000_000
+      candide = Jason.decode!(conn.resp_body)["remotes"]["candide"]
+      assert candide["snapshot"]["host"] == "candide"
+      assert candide["stale"] == false
     after
       :sys.resume(Shuttle.Env.server(Shuttle.RemoteRegistry))
     end

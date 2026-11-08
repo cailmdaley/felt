@@ -98,22 +98,8 @@ defmodule ShuttleWeb.StateController do
       }
   end
 
-  defp remote_snapshots do
-    Shuttle.RemoteRegistry.snapshots(
-      Shuttle.Env.server(Shuttle.RemoteRegistry),
-      state_timeout_ms()
-    )
-  catch
-    :exit, reason ->
-      %{
-        "_registry" => %{
-          snapshot: nil,
-          stale: true,
-          last_error: reason,
-          recovery: %{state: :unavailable, attempt: 0, last_error: reason}
-        }
-      }
-  end
+  defp remote_snapshots,
+    do: Shuttle.RemoteRegistry.snapshots(Shuttle.Env.server(Shuttle.RemoteRegistry))
 
   defp render_entry(%{} = entry) do
     %{

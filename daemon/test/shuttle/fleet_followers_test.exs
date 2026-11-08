@@ -35,7 +35,9 @@ defmodule Shuttle.FleetFollowersTest do
            ) == [true, true]
   end
 
-  defp await_remote(pid, read, attempts \\ 200)
+  # Registry reads return at once rather than queueing behind a tick, so the
+  # wait is bounded in attempts that each sleep: five seconds in all.
+  defp await_remote(pid, read, attempts \\ 1_000)
   defp await_remote(pid, read, 0), do: Map.has_key?(read.(pid), "peer-a")
 
   defp await_remote(pid, read, attempts) do
