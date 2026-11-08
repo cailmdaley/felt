@@ -273,7 +273,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     record.("2026-11-06T10:00:04Z", "ordinary live words")
     poll.()
     assert_receive {:paste, text}, 30_000
-    assert String.starts_with?(text, "S1: ordinary live words\n— shuttle transcript --since ")
+    assert text == "S1: ordinary live words\n"
     refute_receive {:paste, _}, 20
     refute_receive {:message, _}, 20
 
@@ -296,7 +296,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     GenServer.call(worker, :status)
     assert is_map(Poller.live_worker(pinned))
     assert run_script() =~ "S1: start this cold card without a trigger"
-    assert run_script() =~ "shuttle transcript --since"
+    refute run_script() =~ "shuttle transcript --since"
   end
 
   # A previous run of `fiber_id` under `session`, dispatched a minute ago
