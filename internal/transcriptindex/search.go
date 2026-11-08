@@ -100,12 +100,16 @@ func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, 
 	if opts.PerMessage {
 		sql = "SELECT session,harness,project,path,line,timestamp,role,score,snippet,1 AS matches FROM (" + sql + ") ORDER BY score DESC,message_id LIMIT ?"
 	} else {
+		// A session ranks by its best message anywhere, but is represented by
+		// its best main-thread message when it has one: that is the
+		// conversation, where a subagent's match is often only its brief.
 		sql = `WITH matched AS MATERIALIZED (` + sql + `), ranked AS (
  SELECT *, count(*) OVER (PARTITION BY session) AS matches,
- row_number() OVER (PARTITION BY session ORDER BY score DESC,message_id) AS position
+ max(score) OVER (PARTITION BY session) AS session_score,
+ row_number() OVER (PARTITION BY session ORDER BY instr(path,'/subagents/')=0 DESC,score DESC,message_id) AS position
  FROM matched)
  SELECT session,harness,project,path,line,timestamp,role,score,snippet,matches
- FROM ranked WHERE position=1 ORDER BY score DESC,message_id LIMIT ?`
+ FROM ranked WHERE position=1 ORDER BY session_score DESC,message_id LIMIT ?`
 	}
 	args = append(args, opts.Limit)
 	rows, err := i.db.QueryContext(ctx, sql, args...)

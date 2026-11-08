@@ -79,7 +79,7 @@ func TestTranscriptSearchJSONContractAndFiberThreadAliases(t *testing.T) {
 	if err = json.Unmarshal(result["hits"], &hits); err != nil || len(hits) != 1 {
 		t.Fatalf("fiber alias filter: %v %s", err, out)
 	}
-	exactJSONKeys(t, hits[0], "session", "harness", "project", "path", "line", "timestamp", "role", "score", "snippet", "matches", "fibers")
+	exactJSONKeys(t, hits[0], "session", "harness", "project", "path", "line", "timestamp", "role", "score", "snippet", "matches", "address", "fibers")
 	if string(hits[0]["session"]) != `"22222222-2222-4222-8222-222222222222"` || !strings.Contains(string(hits[0]["snippet"]), "«VMPZ»") {
 		t.Fatal(out)
 	}
@@ -152,14 +152,14 @@ func TestTranscriptSearchPerMessageFlag(t *testing.T) {
 	}
 }
 
-func TestTranscriptSearchNonTTYOutputCarriesNativeLocation(t *testing.T) {
+func TestTranscriptSearchNonTTYOutputNamesTheSessionAndHowToOpenIt(t *testing.T) {
 	env := indexedTranscriptEnv(t)
 	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	out, _, err := executeIn(t, env, t.TempDir(), "transcript", "search", "VMPZ convention", "--no-index", "--harness", "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, part := range []string{"«VMPZ»", "«convention»", "fleet", "33333333", "(1 matches)", "session.jsonl:3", "shuttle transcript 33333333-3333-4333-8333-333333333333"} {
+	for _, part := range []string{"2026-10-03", "· fleet", "«VMPZ» «convention»", "→ shuttle show 33333333:3"} {
 		if !strings.Contains(out, part) {
 			t.Errorf("missing %q: %s", part, out)
 		}

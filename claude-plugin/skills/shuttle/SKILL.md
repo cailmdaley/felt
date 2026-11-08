@@ -94,7 +94,7 @@ More in [references/operating.md](references/operating.md#threads-on-the-board).
 
 ## Finding anything
 
-Does this exist, was it discussed, where did we put it: `shuttle find "<words>"` answers in one call. It prints the store's matching fibers first (felt find's ranking and flags: `-s`, `-t`, `--no-body`, `-r`), then this host's Claude, Codex and Pi sessions whose messages match (`--since 30d`, `--harness`), each with its file and line. Something made in a session and never filed — a page in a cleared scratchpad, a recipe, a decision said aloud — is only in its transcript. `felt find` searches fibers alone; `shuttle transcript search` searches sessions alone, with `--fiber` and `--per-message`.
+Does this exist, was it discussed, where did we put it: `shuttle find "<words>"` answers in one call. It prints the store's matching fibers first, closed ones included (felt find's ranking and flags: `-s`, `-t`, `--no-body`, `-r`), then this host's Claude, Codex and Pi sessions whose messages match (`--since 30d`, `--harness`): each session's date and title, its best passage, and the address that opens it. `shuttle show <address>` reads the conversation around that passage, with line numbers to recenter on and earlier/later addresses to page; `shuttle show <session>` outlines every turn the human took. Something made in a session and never filed — a page in a cleared scratchpad, a recipe, a decision said aloud — is only in its transcript; once found, file it. `felt find` searches fibers alone; `shuttle transcript search` searches sessions alone, with `--fiber` and `--per-message`.
 
 ## Talking to others
 

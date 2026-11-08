@@ -282,7 +282,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.tunnelsCmd(),
 		a.validateIdentityCmd(),
 		feltcli.NewLsCmd(a.env, a.shuttleViewOptions()),
-		feltcli.NewShowCmd(a.env, a.shuttleViewOptions()),
+		a.wrapShowForTranscripts(feltcli.NewShowCmd(a.env, a.shuttleViewOptions())),
 	} {
 		addShuttleCommand(root, command)
 	}

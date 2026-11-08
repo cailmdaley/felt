@@ -196,9 +196,9 @@ func TestFindNeedsSomethingToSearchFor(t *testing.T) {
 	}
 }
 
-// TestFindClosedHintCountsBothStores: closed matches are suppressed and
-// counted, and the count covers the outer block too.
-func TestFindClosedHintCountsBothStores(t *testing.T) {
+// TestFindShowsClosedMatches: closed fibers hold what was found and decided,
+// so find prints them by default; -s narrows.
+func TestFindShowsClosedMatches(t *testing.T) {
 	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
@@ -214,19 +214,16 @@ func TestFindClosedHintCountsBothStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find debug: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "(+1 closed — add -s closed)") {
-		t.Fatalf("missing closed hint:\n%s", out)
-	}
-	if strings.Contains(out, "retired-debug") {
-		t.Fatalf("closed match should be counted, not printed:\n%s", out)
+	if !strings.Contains(out, "● retired-debug") || strings.Contains(out, "add -s closed") {
+		t.Fatalf("closed match should print with its glyph:\n%s", out)
 	}
 
-	closed, err := runCommand(t, subProj, "find", "debug", "-s", "closed")
+	open, err := runCommand(t, subProj, "find", "debug", "-s", "open")
 	if err != nil {
-		t.Fatalf("find -s closed: %v\n%s", err, closed)
+		t.Fatalf("find -s open: %v\n%s", err, open)
 	}
-	if !strings.Contains(closed, "retired-debug") {
-		t.Fatalf("-s closed did not surface it:\n%s", closed)
+	if strings.Contains(open, "retired-debug") {
+		t.Fatalf("-s open still printed the closed fiber:\n%s", open)
 	}
 }
 

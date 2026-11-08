@@ -21,9 +21,15 @@ type transcriptSearchResult struct {
 	Hits   []transcriptSearchHit `json:"hits"`
 	Errors []string              `json:"errors"`
 }
+
+// transcriptSearchHit is one session's best message, with what a reader needs
+// to tell the session apart and the address `shuttle show` opens it at.
 type transcriptSearchHit struct {
 	transcriptindex.Hit
-	Fibers []transcriptFiber `json:"fibers"`
+	Address  string            `json:"address"`
+	Title    string            `json:"title,omitempty"`
+	Subagent string            `json:"subagent,omitempty"`
+	Fibers   []transcriptFiber `json:"fibers"`
 }
 type transcriptFiber struct {
 	ID   string `json:"id"`
@@ -209,7 +215,8 @@ func (a *app) searchTranscripts(ctx context.Context, q transcriptQuery) (transcr
 		}
 	}
 	var selected []string
-	ledger, ledgerErr := a.fetchSessionLedger()
+	labels, ledgerErr := a.newSessionLabels(idx)
+	ledger := labels.ledger
 	if ledgerErr != nil {
 		errorsList = append(errorsList, "session ledger unavailable: "+ledgerErr.Error())
 	}
@@ -249,46 +256,38 @@ func (a *app) searchTranscripts(ctx context.Context, q transcriptQuery) (transcr
 		return none, err
 	}
 	result := transcriptSearchResult{Query: q.Query, Index: stats, Hits: []transcriptSearchHit{}, Errors: errorsList}
-	fiberNamesByID := map[string]string{}
 	for _, hit := range hits {
-		fibers := []transcriptFiber{}
-		seenFibers := map[string]bool{}
-		if ledger != nil {
-			for _, row := range ledger.Records {
-				if row.Session != hit.Session && row.ThreadID != hit.Session {
-					continue
-				}
-				id := row.fiber()
-				if id == "" || seenFibers[id] {
-					continue
-				}
-				seenFibers[id] = true
-				name, ok := fiberNamesByID[id]
-				if !ok {
-					name = filepath.Base(id)
-					if f, e := a.shuttleAddressFiber(id); e == nil {
-						name = f.Name
-					}
-					fiberNamesByID[id] = name
-				}
-				fibers = append(fibers, transcriptFiber{ID: id, Name: name})
-			}
-		}
-		result.Hits = append(result.Hits, transcriptSearchHit{Hit: hit, Fibers: fibers})
+		labelled := transcriptSearchHit{Hit: hit, Address: addressOf(hit.Path, hit.Session, hit.Line), Subagent: subagentDescription(hit.Path), Fibers: labels.fibers(hit.Session)}
+		labelled.Title = labels.title(ctx, hit.Session, len(labelled.Fibers) > 0)
+		result.Hits = append(result.Hits, labelled)
 	}
 	return result, nil
 }
 
+// writeTranscriptHits prints each session as its date and name, the matching
+// passage, and the command that opens it there.
 func writeTranscriptHits(w io.Writer, hits []transcriptSearchHit) {
-	for _, hit := range hits {
-		projectName, fiberLabel := "", ""
+	for n, hit := range hits {
+		if n > 0 {
+			fmt.Fprintln(w)
+		}
+		head := []string{}
+		if t := formatTranscriptTime(hit.Timestamp); t != "" {
+			head = append(head, t[:10])
+		}
+		if label := sessionLabel(hit.Fibers, hit.Title); label != "" {
+			head = append(head, label)
+		}
 		if hit.Project != "" {
-			projectName = filepath.Base(hit.Project)
+			head = append(head, "· "+filepath.Base(hit.Project))
 		}
-		if len(hit.Fibers) > 0 {
-			fiberLabel = "[" + strings.Join(fiberNames(hit.Fibers), ", ") + "]"
+		fmt.Fprintln(w, strings.Join(head, "  "))
+		fmt.Fprintf(w, "  %s\n", displaySnippet(w, strings.Join(strings.Fields(hit.Snippet), " ")))
+		open := "  → shuttle show " + hit.Address
+		if hit.Subagent != "" {
+			open += "   (in subagent: " + hit.Subagent + ")"
 		}
-		fmt.Fprintf(w, "%.4g  %s  %-8s  %s  %s  %s  (%d matches)\n  %s\n  open: %s:%d  (shuttle transcript %s)\n", hit.Score, hit.Timestamp, hit.Harness, projectName, shortSession(hit.Session), fiberLabel, hit.Matches, displaySnippet(w, hit.Snippet), hit.Path, hit.Line, hit.Session)
+		fmt.Fprintln(w, open)
 	}
 }
 

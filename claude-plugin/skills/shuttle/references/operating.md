@@ -172,7 +172,7 @@ Native wake respects Claude's approval policy. Other sessions use their existing
 
 ## Past conversations
 
-`shuttle find "<phrase>"` searches fibers and sessions together. `shuttle transcript search "<phrase>"` searches sessions alone: it ranks this host's Claude, Codex and Pi sessions by their best-matching message (`--fiber`, `--since 30d`, `--harness`, `--json`; `--per-message` for individual messages); `shuttle transcript <session-id>` gives the file. Your own session is excluded unless you pass `--include-self`; other hosts' transcripts are searched on those hosts.
+`shuttle find "<phrase>"` searches fibers and sessions together. `shuttle transcript search "<phrase>"` searches sessions alone: it ranks this host's Claude, Codex and Pi sessions by their best-matching message (`--fiber`, `--since 30d`, `--harness`, `--json`; `--per-message` for individual messages); `shuttle show <session>[/<agent>][:<line>]` reads a session from the index (the passage around a line, or an outline of the human's turns); `shuttle transcript <session-id>` gives the file. Your own session is excluded unless you pass `--include-self`; other hosts' transcripts are searched on those hosts.
 
 ## Remote hosts
 

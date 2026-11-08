@@ -27,8 +27,9 @@ rest of the store under a separator, each by its full id there; those ids work
 as arguments to show, edit, nest, rm, and tree. In a top-level store find is a
 plain search.
 
-A query, -t, or --has-field is required. Every status is searched; closed
-matches are counted rather than printed unless -s asks for them. Matches under
+A query, -t, or --has-field is required. Every status is searched and shown,
+closed included, since closed fibers hold what was found and decided; -s
+narrows to one. Matches under
 a matching ancestor fold into it (-v lists them flat), and --limit caps the
 enclosing store's block.
 
@@ -105,13 +106,12 @@ func (q *FindQuery) Changed(command *cobra.Command) {
 // FindResult is a completed fiber search: the local view's matches, then the
 // enclosing store's.
 type FindResult struct {
-	query            string
-	jsonMode         bool
-	limit            int
-	limitExplicit    bool
-	local            findBlock
-	outer            findBlock
-	closedSuppressed int
+	query         string
+	jsonMode      bool
+	limit         int
+	limitExplicit bool
+	local         findBlock
+	outer         findBlock
 }
 
 type findBlock struct {
@@ -122,7 +122,7 @@ type findBlock struct {
 }
 
 // Find runs q against the store that dir resolves to. jsonMode keeps every
-// status and match, the wire form; otherwise closed matches are counted.
+// match, the wire form.
 func Find(env *sysenv.Env, dir string, q FindQuery, jsonMode bool) (*FindResult, error) {
 	storage, _, err := felt.RequireStore(env, dir)
 	if err != nil {
@@ -140,17 +140,12 @@ func Find(env *sysenv.Env, dir string, q FindQuery, jsonMode bool) (*FindResult,
 	if err != nil {
 		return nil, err
 	}
-	// --json is a wire: it carries every status the filter asked for and
-	// every match found, so machine consumers never have to guess what a
-	// human-facing trim removed.
-	suppressClosed := !q.StatusExplicit && !jsonMode
-
 	bodiesLoaded := search.readsBodies()
 	felts, err := listForSearch(storage, nil, jsonMode, search)
 	if err != nil {
 		return nil, err
 	}
-	shown, collapsed, bodyOnly, closedSuppressed, err := search.run(storage, felts, suppressClosed, bodiesLoaded)
+	shown, collapsed, bodyOnly, _, err := search.run(storage, felts, false, bodiesLoaded)
 	if err != nil {
 		return nil, err
 	}
@@ -159,18 +154,17 @@ func Find(env *sysenv.Env, dir string, q FindQuery, jsonMode bool) (*FindResult,
 			return nil, err
 		}
 	}
-	outerShown, outerCollapsed, outerBodyOnly, outerRoot, outerClosed, err := findOuterHits(storage, search, suppressClosed, jsonMode, q.Body)
+	outerShown, outerCollapsed, outerBodyOnly, outerRoot, err := findOuterHits(storage, search, jsonMode, q.Body)
 	if err != nil {
 		return nil, err
 	}
 	result := &FindResult{
-		query:            query,
-		jsonMode:         jsonMode,
-		limit:            q.Limit,
-		limitExplicit:    q.LimitExplicit,
-		local:            findBlock{shown, collapsed, bodyOnly, storage.Root()},
-		outer:            findBlock{outerShown, outerCollapsed, outerBodyOnly, outerRoot},
-		closedSuppressed: closedSuppressed + outerClosed,
+		query:         query,
+		jsonMode:      jsonMode,
+		limit:         q.Limit,
+		limitExplicit: q.LimitExplicit,
+		local:         findBlock{shown, collapsed, bodyOnly, storage.Root()},
+		outer:         findBlock{outerShown, outerCollapsed, outerBodyOnly, outerRoot},
 	}
 	// Bodies participate in matching by default, but are an output opt-in.
 	if jsonMode && !q.Body {
@@ -227,9 +221,6 @@ func (r *FindResult) Write(w io.Writer) {
 			fmt.Fprintf(w, "… %d more — refine the query or pass --limit 0\n", remainder)
 		}
 	}
-	if r.closedSuppressed > 0 {
-		fmt.Fprintf(w, "\n(+%d closed — add -s closed)\n", r.closedSuppressed)
-	}
 }
 
 // FindHit is one fiber in --json, carrying the store that holds it alongside
@@ -275,16 +266,16 @@ func limitOuter(outer []*felt.Felt, limit int, apply bool) []*felt.Felt {
 // this store's own subtree — those fibers are already in the local block, and
 // printing them twice under two different ids is worse than not printing them
 // at all. A top-level store has no enclosing one and returns nothing.
-func findOuterHits(storage *felt.Storage, search lsSearch, suppressClosed, jsonMode, includeBody bool) ([]*felt.Felt, map[string]int, map[string]bool, string, int, error) {
+func findOuterHits(storage *felt.Storage, search lsSearch, jsonMode, includeBody bool) ([]*felt.Felt, map[string]int, map[string]bool, string, error) {
 	external := storage.ExternalRefs()
 	if external == nil {
-		return nil, nil, nil, "", 0, nil
+		return nil, nil, nil, "", nil
 	}
 	outerStorage := felt.NewStorage(external.ProjectDir())
 	bodiesLoaded := search.readsBodies()
 	felts, err := listForSearch(outerStorage, nil, jsonMode, search)
 	if err != nil {
-		return nil, nil, nil, "", 0, err
+		return nil, nil, nil, "", err
 	}
 
 	prefix := external.Prefix()
@@ -296,15 +287,15 @@ func findOuterHits(storage *felt.Storage, search lsSearch, suppressClosed, jsonM
 		outside = append(outside, f)
 	}
 
-	shown, collapsed, bodyOnly, closed, err := search.run(outerStorage, outside, suppressClosed, bodiesLoaded)
+	shown, collapsed, bodyOnly, _, err := search.run(outerStorage, outside, false, bodiesLoaded)
 	if err != nil {
-		return nil, nil, nil, "", 0, err
+		return nil, nil, nil, "", err
 	}
 	if jsonMode && includeBody && !bodiesLoaded {
 		shown, err = hydrateBodies(outerStorage, shown)
 		if err != nil {
-			return nil, nil, nil, "", 0, err
+			return nil, nil, nil, "", err
 		}
 	}
-	return shown, collapsed, bodyOnly, external.Root(), closed, nil
+	return shown, collapsed, bodyOnly, external.Root(), nil
 }
