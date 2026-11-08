@@ -17,7 +17,7 @@ export interface FiberSend {
 }
 
 /** How far back a sent file still counts. */
-export const SEND_WINDOW_MS = 30 * DAY_MS
+const SEND_WINDOW_MS = 30 * DAY_MS
 /** The least time between two fleet reads. */
 export const SEND_REFRESH_MS = 60_000
 

@@ -25,17 +25,11 @@ export {
   listViews,
   viewFallbackKind,
   type BoardViewId,
-  type SettingsHotkey,
   type TemporalView,
   type ViewContext,
 } from './ViewRegistry.js'
 export {
   createTemporalFetchers,
-  type ActivityBucket,
-  type ActivityResult,
-  type CommitRecord,
-  type SessionRecord,
   type TemporalFetchers,
-  type TemporalOrigins,
 } from './TemporalData.js'
 export { createViewFallbackPage } from './ViewPage.js'

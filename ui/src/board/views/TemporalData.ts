@@ -79,7 +79,7 @@ export interface ActivityResult {
  * narrower than the span asked for is not an error either — that origin's data
  * simply thins out where it has nothing cached.
  */
-export interface TemporalOrigin {
+interface TemporalOrigin {
   kind: 'local' | 'remote'
   stale: boolean
   lastPolledAt?: string
@@ -639,7 +639,7 @@ export function buildSessionIndex(records: readonly SessionRecord[]): SessionInd
 }
 
 /** The host-scoped key a cross-host tmux join reads. */
-export function tmuxJoinKey(host: string, tmux: string): string {
+function tmuxJoinKey(host: string, tmux: string): string {
   return `${host}\u0000${tmux}`
 }
 

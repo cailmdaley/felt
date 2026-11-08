@@ -2,7 +2,7 @@
 export interface GroupStop<T> { key: string; caption: string; cards: T[] }
 
 /** Stable across the appearance or disappearance of runs with other captions. */
-export function groupRunKey(caption: string, occurrence: number): string {
+function groupRunKey(caption: string, occurrence: number): string {
   return JSON.stringify([caption, occurrence])
 }
 
@@ -23,7 +23,7 @@ export function groupStops<T>(cards: readonly T[], stopOf: (card: T) => string):
 }
 
 /** A stop is entered on the card remembered for its key while that card is still in it, else on its first card. */
-export function stopLanding<T>(stop: GroupStop<T>, identity: (card: T) => string, memory: ReadonlyMap<string, string>): T {
+function stopLanding<T>(stop: GroupStop<T>, identity: (card: T) => string, memory: ReadonlyMap<string, string>): T {
   const remembered = memory.get(stop.key)
   return stop.cards.find(card => identity(card) === remembered) ?? stop.cards[0]
 }

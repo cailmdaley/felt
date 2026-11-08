@@ -25,7 +25,7 @@
  */
 import { EAST, NORTH, SOUTH, WEST, baseCell, child, uniq, type Cell, type Digit } from './healpix.js'
 
-export const BANDS = ['flying', 'resting', 'settled'] as const
+const BANDS = ['flying', 'resting', 'settled'] as const
 export type Band = typeof BANDS[number]
 
 export interface ThreadSeed {

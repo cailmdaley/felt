@@ -48,7 +48,7 @@ import type {
   SessionRecord,
   TemporalFetchers,
   TemporalOrigins,
-} from '../src/board/views/index.js'
+} from '../src/board/views/TemporalData.js'
 
 // ── Mock composite feed ──────────────────────────────────────────────────────
 // Shaped exactly like the daemon's `GET /api/v1/fibers/composite` body, so

@@ -8,7 +8,7 @@ export type LifecycleVerb = 'review' | 'rest' | 'temper' | 'discard'
 export interface LifecycleVerbSpec { verb: LifecycleVerb; label: string; icon: HeaderIcon; cls: string }
 
 /** The one definition: header order, word, stroke icon and pigment class of each verb. */
-export const LIFECYCLE_VERBS: readonly LifecycleVerbSpec[] = [
+const LIFECYCLE_VERBS: readonly LifecycleVerbSpec[] = [
   { verb: 'review', label: 'Close for review', icon: 'close', cls: 'kbn-ctl-review' },
   { verb: 'rest', label: 'Rest', icon: 'rest', cls: 'kbn-ctl-rest' },
   { verb: 'temper', label: 'Temper', icon: 'temper', cls: 'kbn-ctl-temper' },

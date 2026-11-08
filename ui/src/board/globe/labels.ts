@@ -65,7 +65,7 @@ export function boxClear(polygon: Polygon, { x, y }: Point, width: number, heigh
 }
 
 export const overlaps = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
-export const boxAt = ({ x, y }: Point, width: number, height: number): Box => ({ left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 })
+const boxAt = ({ x, y }: Point, width: number, height: number): Box => ({ left: x - width / 2, top: y - height / 2, right: x + width / 2, bottom: y + height / 2 })
 
 export interface Candidate<T> {
   owner: T

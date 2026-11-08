@@ -73,7 +73,7 @@ interface CompositeRuntime {
 }
 
 /** Owner-served operational pulse clock, separate from worker liveness. */
-export interface PulseRuntime {
+interface PulseRuntime {
   next_tick?: string | null;
   last_tick?: string | null;
   state: 'scheduled' | 'held' | 'paused' | 'unsupported' | 'sending';

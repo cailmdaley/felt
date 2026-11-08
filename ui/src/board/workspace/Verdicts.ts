@@ -19,7 +19,7 @@ export function confirmWorkerStop(card: KanbanCard, verdict: Verdict): boolean {
 }
 
 /** A fiber's identity across hosts and renames: the undo queue's key. */
-export const verdictKey = (card: Pick<KanbanCard, 'originId' | 'uid' | 'id'>): string =>
+const verdictKey = (card: Pick<KanbanCard, 'originId' | 'uid' | 'id'>): string =>
   JSON.stringify([card.originId, card.uid ?? card.id])
 
 /**

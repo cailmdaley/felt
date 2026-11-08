@@ -53,7 +53,7 @@ export interface GestureTimers {
  * click gets through (the bug); too long and a *deliberate* second tap, made
  * after the overlay is gone, is eaten instead (the bug, wearing a hat).
  */
-export const CLICK_SWALLOW_MS = 700
+const CLICK_SWALLOW_MS = 700
 
 function cancel(e: GestureEvent): void {
   e.preventDefault?.()

@@ -1,4 +1,4 @@
-export interface TranscriptHitFiber { id: string; name: string }
+interface TranscriptHitFiber { id: string; name: string }
 
 /** A session's best message, as grouped `shuttle transcript search --json` reports it. */
 export interface TranscriptHit {

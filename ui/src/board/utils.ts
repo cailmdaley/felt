@@ -385,7 +385,7 @@ function withOrigin(url: string, originId: string | undefined): string {
   return url
 }
 
-export function fileUrl(rawPath: string, opts?: RenderMarkdownOptions): string | null {
+function fileUrl(rawPath: string, opts?: RenderMarkdownOptions): string | null {
   if (/^https?:\/\//.test(rawPath) || /^data:/.test(rawPath)) return rawPath
   const abs = resolveAbs(rawPath, opts)
   if (abs === null) return null
@@ -397,7 +397,7 @@ export function fileUrl(rawPath: string, opts?: RenderMarkdownOptions): string |
  * routes require. Absolute (`/…`) passes through; relative needs `opts.basePath`
  * (the fiber's dir); otherwise `null`.
  */
-export function resolveAbs(rawPath: string, opts?: RenderMarkdownOptions): string | null {
+function resolveAbs(rawPath: string, opts?: RenderMarkdownOptions): string | null {
   if (rawPath.startsWith('/')) return rawPath
   if (opts?.basePath) return `${opts.basePath}/${rawPath}`
   return null

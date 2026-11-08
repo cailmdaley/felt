@@ -15,7 +15,7 @@ export interface Forest {
 }
 
 export const persistentId = (card: KanbanCard): string => card.uid ?? threadKey(card)
-export const projectOf = (card: KanbanCard): string => card.id.split('/')[0]
+const projectOf = (card: KanbanCard): string => card.id.split('/')[0]
 /** The second segment of an id with a third: a family's place within its project, when its path names one. */
 const areaOf = (card: KanbanCard): string | undefined => { const parts = card.id.split('/'); return parts.length > 2 ? parts[1] : undefined }
 

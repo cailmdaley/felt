@@ -10,7 +10,7 @@ import { parseRoute } from './route.js'
 export const DOCUMENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms'
 const PROTOCOL = 'shuttle-document'
 const VERSION = 1
-export type ScrollPosition = { x: number; y: number }
+type ScrollPosition = { x: number; y: number }
 export type DocumentKey = { key: string; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; repeat?: boolean }
 
 /**
@@ -32,8 +32,8 @@ export type DocumentMessage = { protocol: typeof PROTOCOL; version: typeof VERSI
 export function envelope(type: string, payload: Record<string, unknown> = {}): DocumentMessage {
   return { protocol: PROTOCOL, version: VERSION, type, payload }
 }
-export const REFERENCE_LIMIT = 500
-export const REFERENCE_LENGTH = 256
+const REFERENCE_LIMIT = 500
+const REFERENCE_LENGTH = 256
 const REFERENCE_RATE = 4
 const KEY_FIELDS = ['key', 'altKey', 'ctrlKey', 'metaKey', 'shiftKey', 'repeat']
 const SCROLL_INTENTS = ['scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp']

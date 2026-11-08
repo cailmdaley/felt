@@ -8,7 +8,7 @@ export function sentDocuments(channel: Channel): WorkspaceDocument[] {
 }
 
 /** One sent file: its title, last send time, a `new` mark until read, and the current page marked. */
-export function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void, className: string): HTMLButtonElement {
+function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void, className: string): HTMLButtonElement {
   const row = document.createElement('button')
   row.type = 'button'; row.className = className; row.dataset.key = doc.key
   const label = document.createElement('span')
@@ -30,13 +30,13 @@ export function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: 
 }
 
 /** Sent files shown before the rest fold behind a "Show N more" toggle. */
-export const SENT_FILES_SHOWN = 4
+const SENT_FILES_SHOWN = 4
 
 /**
  * Fold every row past the newest four behind a toggle that expands in place.
  * `expanded` is the caller's memory of the toggle, `toggle` repaints on a flip.
  */
-export function foldSentFiles(rows: HTMLElement[], expanded: boolean, toggle: (expanded: boolean) => void, className: string): HTMLElement[] {
+function foldSentFiles(rows: HTMLElement[], expanded: boolean, toggle: (expanded: boolean) => void, className: string): HTMLElement[] {
   if (rows.length <= SENT_FILES_SHOWN) return rows
   const more = rows.length - SENT_FILES_SHOWN
   const button = document.createElement('button')

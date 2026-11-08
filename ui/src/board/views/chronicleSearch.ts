@@ -43,7 +43,7 @@ export interface SearchHit {
 }
 
 /** One row of `GET /api/v1/search`. */
-export interface SearchWireHit {
+interface SearchWireHit {
   id?: unknown
   name?: unknown
   status?: unknown

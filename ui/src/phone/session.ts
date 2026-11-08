@@ -47,9 +47,9 @@ export interface SessionDeps {
 }
 
 /** Silence from the worklet longer than this is an interruption worth saying. */
-export const AUDIO_GAP_MS = 3_000
+const AUDIO_GAP_MS = 3_000
 
-export function micError(err: unknown): string {
+function micError(err: unknown): string {
   const name = (err as { name?: string })?.name
   if (name === 'NotAllowedError') {
     return 'Microphone permission was denied. Allow it for this site in Safari (aA → Website Settings → Microphone), then tap again.'

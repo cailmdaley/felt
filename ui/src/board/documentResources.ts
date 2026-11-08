@@ -26,7 +26,7 @@ import { normalizeAbsolutePath } from './workspace/documents.js'
  * - **Derived facts once per validator:** `fact` memoises a computation over
  *   a document's bytes under the validator it was computed from.
  */
-export const PEEK_BYTES = 65536
+const PEEK_BYTES = 65536
 /** What a read serves, most urgent first. */
 export const RESOURCE_PRIORITY = { selected: 0, neighbour: 1, title: 2, thumbnail: 3, duration: 4 } as const
 export type ResourcePriority = typeof RESOURCE_PRIORITY[keyof typeof RESOURCE_PRIORITY]

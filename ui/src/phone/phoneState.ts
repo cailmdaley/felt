@@ -21,7 +21,7 @@ export type LinkState =
 export const TERMINAL_LINKS: ReadonlySet<LinkState> = new Set(['refused', 'ended', 'replaced'])
 
 /** The relay's close codes (`ShuttleWeb.PhoneAudioSocket.close_code/1`). */
-export const RELAY_CLOSE_CODES: Readonly<Record<number, LinkState>> = {
+const RELAY_CLOSE_CODES: Readonly<Record<number, LinkState>> = {
   4404: 'refused',
   4409: 'replaced',
   4410: 'ended',

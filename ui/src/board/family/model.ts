@@ -75,9 +75,9 @@ export interface FamilyModel {
 /** The card has a conversation to open: a live worker, or a past session. */
 export const conversable = (card: KanbanCard): boolean => hasLiveWorker(card) || !!card.sessionUuid
 export const needsHuman = (thread: MapThread): boolean => (ATTENTION as readonly string[]).includes(thread.standing) && thread.standing !== 'working'
-export const isDrawn = (thread: MapThread): boolean => thread.rank >= 0
+const isDrawn = (thread: MapThread): boolean => thread.rank >= 0
 /** A thread's mass of work: its launches, commits and files. */
-export const mass = (thread: MapThread): number => thread.launches.length + thread.commits.length + thread.files.length
+const mass = (thread: MapThread): number => thread.launches.length + thread.commits.length + thread.files.length
 
 function standingOf(card: KanbanCard, index: ThreadIndex, fresh: boolean, lastMove: number, now: number): Standing {
   const state = index.state(card), { turn, yours } = turnOf(card, now)

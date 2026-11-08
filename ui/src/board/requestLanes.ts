@@ -28,7 +28,7 @@ const lanes: Record<Lane, LaneState> = {
 let order = 0
 
 /** True when the page reached the daemon over a multiplexed protocol. */
-export function multiplexed(): boolean {
+function multiplexed(): boolean {
   try {
     const entry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
     return /^(h2|h3)/.test(entry?.nextHopProtocol ?? '')

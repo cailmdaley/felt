@@ -1,4 +1,4 @@
-import type { ActivityBucket, CommitRecord, SessionRecord, TemporalFetchers } from '../src/board/views/index.js'
+import type { ActivityBucket, CommitRecord, SessionRecord, TemporalFetchers } from '../src/board/views/TemporalData.js'
 
 /** Fictional workshop data for documentation screenshots, rendered by the real board. */
 export function workshopExample(now: number) {

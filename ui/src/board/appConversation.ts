@@ -5,7 +5,7 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 
 /** The pill's hover title: the turn in full, and how long it has held. */
-export function turnTitle(card: TurnInput, nowMs = Date.now()): string {
+function turnTitle(card: TurnInput, nowMs = Date.now()): string {
   const { detail, since } = turnOf(card, nowMs)
   return since !== undefined && Number.isFinite(since) ? `${detail} (${age(nowMs - since)})` : detail
 }

@@ -9,7 +9,7 @@
 import workletUrl from './pcmWorklet.ts?worker&url'
 import { audioHealth, type AudioHealth } from './phoneState'
 
-export const MIC_CONSTRAINTS: MediaStreamConstraints = {
+const MIC_CONSTRAINTS: MediaStreamConstraints = {
   audio: {
     channelCount: 1,
     echoCancellation: false,

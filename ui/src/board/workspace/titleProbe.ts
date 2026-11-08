@@ -18,7 +18,7 @@ const probed = new Map<string, { version: string }>()
 const PROBED_LIMIT = 2000
 
 /** What the channel knows of a document's version: its modification time and its latest receipt. */
-export function documentVersion(doc: WorkspaceDocument): string {
+function documentVersion(doc: WorkspaceDocument): string {
   const sent = doc.provenance.reduce((latest, p) => p.kind === 'sent' && Number.isFinite(p.time) ? Math.max(latest, p.time) : latest, 0)
   return `${doc.modifiedAt ?? ''}|${sent || ''}`
 }

@@ -281,8 +281,8 @@ export class ThreadIndex {
 
 export interface TreeNode { card: KanbanCard; depth: number; hasActiveDescendant: boolean; children: TreeNode[] }
 /** Where a thread is drawn: in the tree while it is in play, else below it with the resting or the archived. */
-export type Shelf = 'tree' | 'resting' | 'archived'
-export function shelfOf(index: ThreadIndex, card: KanbanCard): Shelf {
+type Shelf = 'tree' | 'resting' | 'archived'
+function shelfOf(index: ThreadIndex, card: KanbanCard): Shelf {
   const state = index.state(card)
   return state === 'archived' ? 'archived' : state === 'resting' || state === 'roles' ? 'resting' : 'tree'
 }

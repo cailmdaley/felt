@@ -32,6 +32,6 @@ export function waitingNote(card: Pick<KanbanCard, 'pendingResults'>): HTMLEleme
 }
 
 export const PINNED_TAG = 'pinned'
-export const isPinned = (card: Pick<KanbanCard, 'tags'>): boolean => card.tags?.includes(PINNED_TAG) ?? false
+const isPinned = (card: Pick<KanbanCard, 'tags'>): boolean => card.tags?.includes(PINNED_TAG) ?? false
 export const THREAD_PIN = 'shuttle-thread-pin'
 export interface ThreadPinRequest { card: KanbanCard; pinned: boolean }

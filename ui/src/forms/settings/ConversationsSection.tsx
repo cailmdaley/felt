@@ -8,7 +8,7 @@ const APP: Choice = { id: 'app', label: 'Claude app', note: 'Open the installed 
 
 /** The preference is per browser, so it offers only what this device can open,
  *  in the order opening falls back through them. */
-export function deviceChoices(desktop: boolean): Choice[] {
+function deviceChoices(desktop: boolean): Choice[] {
   return desktop ? [TERMINAL, BROWSER, APP] : [BROWSER]
 }
 

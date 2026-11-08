@@ -69,7 +69,7 @@ export interface BuildKanbanResponseOptions {
  * which of them it draws. A due-only row arriving on the wire is expected and
  * simply not admitted here.
  */
-export function shouldIncludeInKanban(fiber: Fiber): boolean {
+function shouldIncludeInKanban(fiber: Fiber): boolean {
   if (fiber.hasShuttleBlock === true) return true;
   return isCycleFiber(fiber);
 }

@@ -398,7 +398,7 @@ export function eraName(prose: string): string {
 const DOUBLE_CLICK_MS = 250
 
 /** Cycles stack this deep before overflow starts sharing a lane. */
-export const MAX_CYCLE_LANES = 3
+const MAX_CYCLE_LANES = 3
 
 /**
  * Place one cycle card on the day grid, or null when it misses the window.

@@ -4,7 +4,7 @@ import { declaredTitle } from './DocumentTitles.js'
 
 export type DocKey = string
 
-export type Provenance =
+type Provenance =
   | { kind: 'fiber' }
   | { kind: 'family' }
   | { kind: 'embed'; title?: string }
@@ -171,7 +171,7 @@ export function lastSent(document: WorkspaceDocument): number | undefined {
 }
 
 /** True when the body declares the document, as an embed or a link. */
-export function isDeclared(document: WorkspaceDocument): boolean {
+function isDeclared(document: WorkspaceDocument): boolean {
   return document.provenance.some(p => p.kind === 'embed' || p.kind === 'link')
 }
 
@@ -180,7 +180,7 @@ function isReport(document: WorkspaceDocument): boolean {
 }
 
 /** True when the document runs left of the fiber page: the body declares it. */
-export function runsLeft(document: WorkspaceDocument): boolean {
+function runsLeft(document: WorkspaceDocument): boolean {
   return isDeclared(document)
 }
 
@@ -210,7 +210,7 @@ export function compareDocuments(declared: ReadonlyMap<DocKey, number> = new Map
  * documents to its left, sent and routed ones to its right, each
  * side ordered outward from it by `compareDocuments`.
  */
-export function arrangeDocuments(prose: WorkspaceDocument, others: Iterable<WorkspaceDocument>, declared: ReadonlyMap<DocKey, number> = new Map()): WorkspaceDocument[] {
+function arrangeDocuments(prose: WorkspaceDocument, others: Iterable<WorkspaceDocument>, declared: ReadonlyMap<DocKey, number> = new Map()): WorkspaceDocument[] {
   const outward = [...others].sort(compareDocuments(declared))
   return [...outward.filter(runsLeft).reverse(), prose, ...outward.filter(d => !runsLeft(d))]
 }

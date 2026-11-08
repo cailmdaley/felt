@@ -36,7 +36,7 @@ export function untilOf(card: Pick<KanbanCard, 'shuttleBlockedOn'>, index?: Thre
 }
 
 /** The current name of a fiber the board does not hold, from the daemon's fiber index. */
-export async function nameRef(ref: string, shuttleBase = BASE): Promise<string | null> {
+async function nameRef(ref: string, shuttleBase = BASE): Promise<string | null> {
   try {
     const rows = await fiberIndex(shuttleBase)
     const upper = ref.toUpperCase()
@@ -45,9 +45,6 @@ export async function nameRef(ref: string, shuttleBase = BASE): Promise<string |
     return null
   }
 }
-
-/** The state-line words: "⏸ until <name>". */
-export const untilWords = (until: Until): string => `⏸ until ${until.text}`
 
 /**
  * The muted one-line "⏸ until <name>". A constitution on the board is a chip

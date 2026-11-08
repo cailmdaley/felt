@@ -152,7 +152,7 @@ interface ChangeRow {
   change: Change
 }
 /** Sent attachments a change row draws before folding the rest behind its +N button. */
-export const CHANGE_ATTACHMENT_CAP = 3
+const CHANGE_ATTACHMENT_CAP = 3
 const needsYou = (card: KanbanCard): number => deskColumn(card) === 'awaitingReview' ? 0
   : deskColumn(card) === 'inFlight' && inFlightBand(card) !== 'working' ? 1 : 2
 function changeSummary(change: Change): string {

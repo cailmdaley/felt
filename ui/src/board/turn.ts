@@ -64,7 +64,7 @@ export interface TurnState {
 }
 
 /** A worker that has been working this long without a hook event says so. */
-export const SILENCE_FLOOR_MS = 10 * 60_000
+const SILENCE_FLOOR_MS = 10 * 60_000
 /** A worker with no signal this soon after launch is still starting. */
 const STARTING_MS = 5 * 60_000
 

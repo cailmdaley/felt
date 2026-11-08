@@ -10,7 +10,7 @@
  * The panel follows its trigger through scrolling and resizing until released;
  * a panel whose content changes size asks to be placed again with `reposition`.
  */
-export type Placement = 'below-start' | 'below-end' | 'above-start' | 'above-end'
+type Placement = 'below-start' | 'below-end' | 'above-start' | 'above-end'
 
 export interface AnchorOptions {
   /** Preferred side and edge alignment; the side flips when the other has more room. */

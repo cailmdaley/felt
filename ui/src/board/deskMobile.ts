@@ -9,7 +9,7 @@
  * Section folds live in localStorage; a storage failure uses the defaults.
  */
 
-export const FOLIO_STORAGE_KEY = 'shuttle.desk.sections'
+const FOLIO_STORAGE_KEY = 'shuttle.desk.sections'
 
 /** Which leaf of an n-page pager sits under the viewport, from scroll offset.
  *

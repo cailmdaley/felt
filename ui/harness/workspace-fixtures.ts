@@ -4,7 +4,7 @@ import mp4Data from './fixtures/test.mp4?inline'
 import webmData from './fixtures/test.webm?inline'
 import imageData from './fixtures/figure.png?inline'
 import pdfData from './fixtures/native.pdf?inline'
-import type { ActivityBucket, CommitRecord, SessionRecord, TemporalFetchers } from '../src/board/views/index.js'
+import type { ActivityBucket, CommitRecord, SessionRecord, TemporalFetchers } from '../src/board/views/TemporalData.js'
 import { LONG_OUTCOME, WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION } from './transcript-fixtures.js'
 
 export const WORKSPACE_HOST = 'umber-workstation'

@@ -21,7 +21,7 @@ export const DESKTOP: Device = { width: 1440, height: 900, coarse: false }
 export const DESKTOP_NARROW: Device = { width: 600, height: 900, coarse: false }
 export const DESKTOP_SHORT: Device = { width: 1440, height: 420, coarse: false }
 
-export function mediaMatches(d: Device, query: string): boolean {
+function mediaMatches(d: Device, query: string): boolean {
   const feature = (f: string): boolean => {
     const m = /^\(\s*([a-z-]+)\s*:\s*([^)]+?)\s*\)$/.exec(f.trim())
     if (!m) throw new Error(`unsupported media feature: ${f}`)
@@ -32,42 +32,6 @@ export function mediaMatches(d: Device, query: string): boolean {
     throw new Error(`unsupported media feature: ${name}`)
   }
   return query.split(',').some((clause) => clause.split(/\band\b/).every(feature))
-}
-
-/**
- * A `matchMedia` whose device can change under it: `become(next)` moves to a
- * new device and fires `change` on every list whose answer flipped, the way a
- * resized window or a switched pointer does.
- */
-export function liveMedia(initial: Device): {
-  matchMedia: (query: string) => MediaQueryList
-  become: (next: Device) => void
-} {
-  let device = initial
-  const lists: Array<{ query: string; matches: boolean; listeners: Set<() => void> }> = []
-  return {
-    matchMedia: (query: string) => {
-      const rec = { query, matches: mediaMatches(device, query), listeners: new Set<() => void>() }
-      lists.push(rec)
-      return {
-        get matches() {
-          return mediaMatches(device, query)
-        },
-        media: query,
-        addEventListener: (_type: string, fn: () => void) => rec.listeners.add(fn),
-        removeEventListener: (_type: string, fn: () => void) => rec.listeners.delete(fn),
-      } as unknown as MediaQueryList
-    },
-    become: (next: Device) => {
-      device = next
-      for (const rec of lists) {
-        const now = mediaMatches(device, rec.query)
-        if (now === rec.matches) continue
-        rec.matches = now
-        for (const fn of [...rec.listeners]) fn()
-      }
-    },
-  }
 }
 
 /** A `matchMedia` for `d`, with inert change listeners. */

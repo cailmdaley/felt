@@ -26,7 +26,7 @@ export type Grip = readonly number[]
 export interface Camera { turn: Quat; sky: readonly [lon: number, lat: number]; at: readonly [number, number]; radius: number }
 
 /** The plane's scale to equal area: twelve diamonds of π²/8 against 4π. */
-export const PLANE_SCALE = Math.sqrt(8 / (3 * Math.PI))
+const PLANE_SCALE = Math.sqrt(8 / (3 * Math.PI))
 /** The plane's width, after which it repeats, and its half height, in its units. */
 export const PERIOD = 2 * Math.PI * PLANE_SCALE
 const HALF_HEIGHT = Math.PI / 2 * PLANE_SCALE
@@ -66,7 +66,7 @@ const about = (axis: Vec, angle: number): Quat => {
 }
 const mix = (a: Quat, b: Quat, s0: number, s1: number): Quat => normal([s0 * a[0] + s1 * b[0], s0 * a[1] + s1 * b[1], s0 * a[2] + s1 * b[2], s0 * a[3] + s1 * b[3]])
 /** The rotation part way from one to another, the short way round. */
-export function slerp(a: Quat, b: Quat, u: number): Quat {
+function slerp(a: Quat, b: Quat, u: number): Quat {
   let cos = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
   const sign = cos < 0 ? -1 : 1
   cos *= sign
@@ -104,7 +104,7 @@ export function mollweideAngle(z: number): number {
 
 const wrapped = (value: number, period: number): number => value - period * Math.round(value / period)
 const toVec = (lon: number, lat: number): Vec => [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)]
-export const lonLat = ([x, y, z]: Vec): { lon: number; lat: number } => ({ lon: Math.atan2(y, x), lat: Math.atan2(z, Math.hypot(x, y)) })
+const lonLat = ([x, y, z]: Vec): { lon: number; lat: number } => ({ lon: Math.atan2(y, x), lat: Math.atan2(z, Math.hypot(x, y)) })
 
 /** A direction's place on the plane, in its units. */
 export function planeAt([x, y, z]: Vec): [number, number] {
@@ -144,7 +144,7 @@ export function frameOf({ turn, sky, at, radius }: Camera, projection: Projectio
 /** The longitude from Mollweide's centre to a point, between -π and π. */
 export const fromCentre = (frame: Frame, phi: number): number => wrapped(phi - frame.lon, 2 * Math.PI)
 /** How far east of the frame's centre a place on the plane lies, by the copy nearest the centre. */
-export const planeOffset = (frame: Frame, px: number): number => wrapped(px - frame.atX, PERIOD)
+const planeOffset = (frame: Frame, px: number): number => wrapped(px - frame.atX, PERIOD)
 
 /** A cell's diamond on the screen's plane, north, west, south and east, at the copy nearest the centre; `shift` moves it by whole turns. */
 export function planeOutline(frame: Frame, { order, face, x, y }: Cell, shift = 0): number[] {

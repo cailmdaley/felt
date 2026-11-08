@@ -69,7 +69,7 @@ export type AttachBody =
   | { tmux_session: string; shuttle_host: string | null }
   | { session: string; shuttle_host: string | null }
 
-export type SessionTarget =
+type SessionTarget =
   | { kind: 'terminal'; body: AttachBody; label: string; title: string }
   | { kind: 'web'; href: string; label: string; title: string }
   | { kind: 'app'; href: string; label: string; title: string }

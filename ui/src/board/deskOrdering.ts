@@ -12,7 +12,7 @@ export interface DeskOrder {
   placements: ReadonlyMap<string, DeskPlacement>
 }
 
-export type DeskColumn = 'drafts' | 'inFlight' | 'awaitingReview' | 'roles' | 'resting'
+type DeskColumn = 'drafts' | 'inFlight' | 'awaitingReview' | 'roles' | 'resting'
 
 /** The caption and Desk column a row occupies in the rendered projection. */
 export interface DeskPlacement {

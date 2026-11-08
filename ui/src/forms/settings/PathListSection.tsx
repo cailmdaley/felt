@@ -53,7 +53,7 @@ import {
   type SettingsHost,
 } from './settingsApi'
 
-export type PathListKind = 'stores' | 'projects'
+type PathListKind = 'stores' | 'projects'
 
 export interface PathListSectionProps {
   shuttleBase: string

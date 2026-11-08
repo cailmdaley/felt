@@ -90,7 +90,7 @@ interface ChannelState {
   metadataKnown: boolean
   error?: string
 }
-export type WorkspaceView = WorkspaceOriginView
+type WorkspaceView = WorkspaceOriginView
 const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board', '#/globe': 'globe' }
 const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board', globe: 'Globe' }
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : origin === 'Globe' ? 'globe' : 'board'

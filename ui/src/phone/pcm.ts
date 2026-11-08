@@ -4,7 +4,7 @@
  * runs it and the suite tests it.
  */
 
-export const TARGET_RATE = 16_000
+const TARGET_RATE = 16_000
 /** 100 ms of 16 kHz audio: one WebSocket frame. */
 export const CHUNK_SAMPLES = 1_600
 

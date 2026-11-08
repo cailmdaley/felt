@@ -2,7 +2,7 @@ import { needsHuman, type FamilyModel, type MapThread } from './model.js'
 import { threadState } from '../threads.js'
 
 /** The kinds of attention a thread can ask for, most urgent first: the order of the rows and the words of the counts. */
-export const SECTIONS = ['question', 'blocked', 'turn', 'review', 'working', 'still'] as const
+const SECTIONS = ['question', 'blocked', 'turn', 'review', 'working', 'still'] as const
 export type Section = typeof SECTIONS[number]
 /** The kinds of thread set aside, in the order their fold names and unfolds them: resting first, archived last. */
 export const ASIDE_SECTIONS = ['resting', 'drafts', 'roles', 'archived'] as const
