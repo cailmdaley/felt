@@ -3,7 +3,7 @@ import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
 import { markVerdictHost, type Verdict } from './workspace/Verdicts.js'
 import { openActionMenu, type ConversationAction } from './conversationMenu.js'
-import { dressVerb, lifecycleVerbsFor, verbSpec } from './workspace/lifecycleVerbs.js'
+import { dressAction, dressVerb, lifecycleVerbsFor, verbSpec } from './workspace/lifecycleVerbs.js'
 import {
   ascByKey,
   civilWeekday,
@@ -124,7 +124,7 @@ interface AxisScrollSpec {
   stop: () => void
 }
 
-interface KanbanSurfaceRendererOptions {
+export interface KanbanSurfaceRendererOptions {
   getDragSourceId: () => string | null
   setDragSourceId: (id: string | null) => void
   getLastResponse: () => KanbanResponse | null
@@ -148,7 +148,8 @@ interface KanbanSurfaceRendererOptions {
    *  renderer only reports the gesture and the element to hang a menu off; what
    *  it raises is the board's business. Omit to leave cards press-inert. */
   onCardLongPress?: (card: KanbanCard, anchor: HTMLElement) => void
-  openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
+  /** The card's conversation, as `c` and the band's console open it; `can` says whether there is one to open. */
+  conversation?: { can(card: KanbanCard): boolean; open(card: KanbanCard): void }
   /** Release the boot quarantine on a card's owning host — the `⏹︎ held` →
    *  `▶ release` click. Release is global per daemon (one restart parks the
    *  whole board, one click frees it), so the card only names which host. */
@@ -1367,8 +1368,9 @@ export class KanbanSurfaceRenderer {
     if (card.held && this.o.releaseQuarantine) {
       actions.push({ label: 'Release boot quarantine', run: () => { void this.o.releaseQuarantine!(card.shuttleHost) } })
     }
-    if (card.tmuxSession && this.o.openWorker) {
-      actions.push({ label: 'Open terminal', run: () => this.o.openWorker!(card.tmuxSession!, card.shuttleHost) })
+    const conversation = this.o.conversation
+    if (conversation?.can(card)) {
+      actions.push({ label: 'Open conversation', dress: item => { dressAction(item, 'console', 'Open conversation') }, run: () => conversation.open(card) })
     }
     const move = this.o.onCardLongPress
     if (!stale && move) actions.push({ label: 'Move…', run: () => move(card, anchor) })

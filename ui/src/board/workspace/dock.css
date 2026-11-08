@@ -73,7 +73,7 @@
 .ws-header-word { font: var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
 /* A Desk row's menu lists the same verbs, drawn as the header draws them. */
 .kbn-verb-menu .ws-header-icon.ws-header-verb { display: grid; justify-content: start; width: 100%; padding: 0 10px 0 8px; }
-/* Its plain items (Open terminal, Move…) keep the verbs' height, type and word column. */
+/* Its plain items (Move…, Release boot quarantine) keep the verbs' height, type and word column. */
 .kbn-verb-menu .kbn-verb-menu-plain {
   display: block; width: 100%; height: 36px; box-sizing: border-box; padding: 0 10px 0 31px; margin: 0;
   border: 0; border-radius: var(--ws-control-radius); background: transparent; text-align: left;
@@ -124,7 +124,7 @@
   outline: var(--ws-focus-width) solid var(--ws-ink);
   outline-offset: 2px;
 }
-.ws-dock :is(button, input, select, textarea):not(.kbn-card-worker) { color: inherit; }
+.ws-dock :is(button, input, select, textarea) { color: inherit; }
 .ws-dock button { cursor: pointer; }
 .ws-dock :disabled { opacity: .55; cursor: default; }
 .ws-dock-body { display: flex; flex-direction: column; min-width: 0; }

@@ -7,8 +7,7 @@ import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
 import { card, servedFeed } from './testFixtures.js'
 import { TURN_WORD, turnOf, type Turn } from './turn.js'
-import { Dock } from './workspace/Dock.js'
-import { workerPlate } from './workspace/workerPlate.js'
+import { workerPlateFacts } from './workspace/workerPlate.js'
 
 const NOW = Date.parse('2026-10-18T12:00:00Z')
 const live = (over: Partial<KanbanCard>): KanbanCard =>
@@ -120,11 +119,10 @@ const YOURS = new Set(['question', 'blocked', 'idle'])
 
 afterEach(() => { vi.unstubAllGlobals(); document.body.replaceChildren() })
 
-describe('band, pill, dock and order cannot disagree', () => {
+describe('band, worker facts and order cannot disagree', () => {
   it('draws every in-flight card in the band its pill names', () => {
     vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    const dock = new Dock('https://daemon.example', vi.fn(), undefined, vi.fn())
     fc.assert(fc.property(fc.array(runtimeArb, { minLength: 1, maxLength: 8 }), (rows) => {
       const data = feed(rows)
       const root = desk(data)
@@ -147,9 +145,8 @@ describe('band, pill, dock and order cannot disagree', () => {
           expect(pill.querySelector('.ws-worker-state')?.textContent).toBe(turn.word)
           expect(turn.word).toBe(TURN_WORD[turn.turn])
         }
-        // The dock's control for the same card says the same.
-        const control = dock.workerPillFor(c)
-        if (control) expect(workerPlate(c, control).dataset.turn).toBe(turn.turn)
+        // The worker facts every surface reads say the same.
+        expect(workerPlateFacts(c, NOW).turn).toBe(turn.turn)
         // Questions lead Your turn: no question follows an idle turn.
         if (band === 'yourTurn') {
           if (isQuestion(c)) expect(seenIdle).toBe(false)

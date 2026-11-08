@@ -181,7 +181,7 @@ Check that **Set up Shuttle** appears in the board's task feed, that the selecte
 Open the board visually when a browser tool is available; distinguish an API check from visual verification.
 Don't call setup complete solely because a process is listening.
 
-Help the user choose where the worker pill opens, in Settings.
+Help the user choose where the console (›_) opens conversations, in Settings.
 [Opening conversations](conversations.md) describes which harnesses support terminal and browser opening.
 Claude Remote Control, Kitty's control socket, and Codex remote access are separate features; don't tell users to enable all of them indiscriminately.
 A choice in browser settings changes how a conversation opens, not where the worker runs.
@@ -196,7 +196,7 @@ Install the test as a draft before activating it.
 Inspect all eligible tasks before running `shuttle daemon release`: release applies to the whole host after a deliberate restart.
 Verify that the task starts in the correct directory, receives a message, and reaches **Awaiting review** with a useful result.
 For a terminal worker, test `shuttle attach <fiber>` and detach with `Ctrl-b`, then `d`.
-Test the worker pill separately; a successful worker launch doesn't establish that the preferred opener works.
+Test the console separately; a successful worker launch doesn't establish that the preferred opener works.
 If the user only wants the board, don't launch a worker as an unnecessary test.
 
 ## Finish with a useful record

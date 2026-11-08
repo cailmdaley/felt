@@ -172,7 +172,7 @@ describe('band header', () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 's', workerState: 'running', tmuxSession: 't', runtimePhase: 'working' }))
     expect([...band.el.querySelector('.ws-band-identity')!.children].map(child => child.className)).toEqual(['ws-band-title', 'ws-band-meter'])
-    expect(band.el.querySelector('.ws-band-head .kbn-card-worker, [data-part="lifecycle"]')).toBeNull()
+    expect(band.el.querySelector('.ws-band-head [data-part="lifecycle"]')).toBeNull()
     expect(band.el.dataset.column).toBe('inFlight')
     dock.open(task({ status: 'closed', sessionUuid: 's' }))
     expect(band.el.dataset.column).toBe('awaitingReview')
@@ -201,8 +201,7 @@ describe('band header', () => {
     band.setNav({ constitution: vi.fn() })
     document.body.append(band.el)
     const buttons = [...band.el.querySelectorAll<HTMLButtonElement>('.ws-band-head .ws-header-icon')].filter(button => !button.hidden)
-    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Close for review (a)', 'Rest (s)', 'Constitution', 'Settings'])
-    expect(band.el.querySelector('.ws-band-open')).toBeNull()
+    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Close for review (a)', 'Rest (s)', "Reopen task's last session on owner (c)", 'Constitution', 'Settings'])
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
       expect(button.tabIndex).toBe(0)
@@ -232,7 +231,8 @@ describe('band header', () => {
     const worker = task({ tmuxSession: 'terminal-worker', workerState: 'running', sessionLink })
     dock.open(worker)
     document.body.append(band.el)
-    expect(dock.workerPillFor(worker)?.matches('a[href],button')).toBe(visible)
+    expect(dock.canOpenConversation(worker)).toBe(visible)
+    expect(band.el.querySelector<HTMLElement>('.ws-band-console')!.hidden).toBe(!visible)
     if (!phone) {
       expect(dock.openConversation(worker)).toBe(true)
       expect(openWorker).toHaveBeenCalledWith('terminal-worker', 'owner')

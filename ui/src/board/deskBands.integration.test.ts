@@ -3,13 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, byInFlightBand, deriveCycleLens } from './KanbanReadModel.js'
-import { KanbanSurfaceRenderer, restingOrder } from './KanbanSurfaces.js'
+import { KanbanSurfaceRenderer, restingOrder, type KanbanSurfaceRendererOptions } from './KanbanSurfaces.js'
 import { deskCardKey, deskOrder } from './deskOrdering.js'
 import { zone } from './civilDay.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { card, response, servedFeed } from './testFixtures.js'
 
-function renderer(data: KanbanResponse, openDetail = vi.fn(), openWorker = vi.fn()): KanbanSurfaceRenderer {
+function renderer(data: KanbanResponse, openDetail = vi.fn(), conversation?: KanbanSurfaceRendererOptions['conversation']): KanbanSurfaceRenderer {
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null,
     setDragSourceId: () => {},
@@ -18,7 +18,7 @@ function renderer(data: KanbanResponse, openDetail = vi.fn(), openWorker = vi.fn
     transition: () => {},
     setSurface: () => {},
     openDetail,
-    openWorker,
+    conversation,
   })
 }
 
@@ -98,16 +98,16 @@ describe('cycle members at rest', () => {
 })
 
 describe('In flight bands', () => {
-  it('keeps the terminal in the action menu with the owning host, never on the row', () => {
-    const data = workerFeed(['working']), openWorker = vi.fn()
+  it('keeps the conversation in the action menu, never on the row', () => {
+    const data = workerFeed(['working']), open = vi.fn()
     const worker = data.now.inFlight[0]
-    const root = renderer(data, vi.fn(), openWorker).renderNowSection(data.now, {})
+    const root = renderer(data, vi.fn(), { can: () => true, open }).renderNowSection(data.now, {})
     document.body.append(root)
     root.querySelector<HTMLElement>('.kbn-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-    const terminal = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'Open terminal')!
-    expect(terminal).toBeDefined()
-    terminal.click()
-    expect(openWorker).toHaveBeenCalledExactlyOnceWith(worker.tmuxSession, worker.shuttleHost)
+    const conversation = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'Open conversation')!
+    expect(conversation).toBeDefined()
+    conversation.click()
+    expect(open).toHaveBeenCalledExactlyOnceWith(worker)
     expect(root.querySelector('.kbn-card-worker')).toBeNull()
     root.remove()
   })

@@ -1,3 +1,4 @@
+import { headerIcon } from './headerIcon.js'
 import { ago, clockTime, daysBetween, hostZone, isoDayLocal, type Zone } from '../civilDay.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { readFiber } from './fiberSource.js'
@@ -616,9 +617,9 @@ export class Overview {
     const count = node('span', '')
     const when = node('span', 'ws-overview-when')
     const conversation = button('ws-overview-folio-conversation')
-    conversation.textContent = 'Open'
-    conversation.setAttribute('aria-label', 'Open conversation')
-    conversation.title = 'Open conversation'
+    conversation.innerHTML = headerIcon('console')
+    conversation.setAttribute('aria-label', 'Open conversation (c)')
+    conversation.title = 'Open conversation (c)'
     footer.append(marks, count, conversation, when); tx.append(title, outcome); open.append(stack, tx); el.append(open, footer)
     const folio: Folio = { uid, card, receipts: [], latest: 0, recent: 'Earlier', project: projectOf(card), host: card.originId, provisional: true,
       el, open, conversation, stack, name, fresh, outcome, marks, count, when }

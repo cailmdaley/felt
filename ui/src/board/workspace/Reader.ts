@@ -20,7 +20,6 @@ import type { ChannelThemes } from './ChannelThemes.js'
 import { deskCardKey } from '../deskOrdering.js'
 import { groupJump, groupStops } from './groupJump.js'
 import { invalidateWorkspaceMeasures, workspaceMeasure } from './measures.js'
-import { workerPlate } from './workerPlate.js'
 import { type Verdict } from './Verdicts.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
@@ -43,8 +42,6 @@ export interface ReaderOptions {
   onRevisitDocument(key: DocKey): void
   /** Between the family's map and its tapestry; false outside a family. */
   onTapestry?(): boolean
-  /** The next drawing of the map; false off the map. */
-  workerPill?(card: KanbanCard): HTMLElement | null
   actionCard?(card: KanbanCard): KanbanCard
   onVerdict?(verdict: Verdict): void
   onConversation?(card: KanbanCard): void
@@ -119,8 +116,6 @@ export class Reader {
   /** The band over the stage, seated by the workspace for a fiber on the Desk's lifecycle. */
   private readonly band = element('div', 'ws-stage-band')
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
-  private readonly headWorker = element('span', 'ws-head-worker')
-  private workerClock = 0
   private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
   private readonly stopSwipe: () => void
   private swipeSettle: ReturnType<typeof setTimeout> | null = null
@@ -167,14 +162,12 @@ export class Reader {
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.title)
-    this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
-    this.headWorker.hidden = true
     const documentMenu = button('ws-icon-button ws-phone-document-menu', '⋯', () => {
       const doc = this.document
       if (doc) this.openMenu(doc, documentMenu)
     }, 'Document menu')
-    this.trail.append(this.headWorker, this.filesToggle, documentMenu)
-    // The phone's top bar owns return, the fiber's name, its worker and document actions.
+    this.trail.append(this.filesToggle, documentMenu)
+    // The phone's top bar owns return, the fiber's name and document actions.
     // The desktop draws no head of its own.
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
@@ -257,7 +250,6 @@ export class Reader {
     this.setBackDestination(this.backDestination)
     this.title.textContent = channel.name
     this.title.title = channel.name
-    if (!this.workerClock) this.workerClock = window.setInterval(() => this.paintWorker(), 30000)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)
     if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
@@ -280,7 +272,6 @@ export class Reader {
    * sheet wears the same veil, it goes at once.
    */
   hide(animate = false): void {
-    window.clearInterval(this.workerClock); this.workerClock = 0
     this.cancelSwipe()
     if (this.expanded) this.setExpanded(false)
     this.active = false
@@ -410,17 +401,7 @@ export class Reader {
     if (this.swipeWatchdog !== null) clearTimeout(this.swipeWatchdog)
     this.swipeWatchdog = null
   }
-  /** Repaint the head's worker control from the current card, keeping its focus. */
-  private paintWorker(): void {
-    const card = this.currentCard
-    const pill = card ? this.opts.workerPill?.(card) ?? null : null
-    const focused = this.headWorker.contains(document.activeElement)
-    this.headWorker.replaceChildren(...(card && pill ? [workerPlate(card, pill)] : []))
-    this.headWorker.hidden = !pill
-    if (focused) this.headWorker.querySelector<HTMLElement>('.kbn-card-worker')?.focus({ preventScroll: true })
-  }
   private paint(animate: boolean): void {
-    this.paintWorker()
     const ch = this.channel
     if (!ch) return
     const index = ch.documents.findIndex(d => d.key === this.selected)
@@ -748,7 +729,6 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
-    window.clearInterval(this.workerClock)
     this.opts.themes?.unbind(this.el)
     this.closeMenu()
     this.stopSwipe()

@@ -129,7 +129,7 @@ views behind a hotkey row.
 | `4` | **Globe** | Everything at once, as one place to move through |
 
 The Board opens on a document overview and a reader for one fiber's channel.
-The fiber page carries its controls inline, and its worker pill opens the conversation.
+The band above the fiber page carries its controls, and its console (›_) opens the conversation.
 The board holds no state of its own. It views the same fibers the daemon polls,
 plus tmux liveness and the host-local [ledgers](telemetry.md).
 

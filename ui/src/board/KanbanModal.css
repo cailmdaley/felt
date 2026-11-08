@@ -1482,71 +1482,7 @@
   background: var(--kbn-recess);
   border-style: dashed;
 }
-/* THE WORKER PILL — the conversation backend control in the reader's head.
-   A dot carries the state's
-   turn's pigment (cobalt working, gold idle, cinnabar blocked, prompt or
-   question, muted when the turn is unknown); the turn word and its compact age ("11m", "3h", "2d") are mono capitals,
-   set tight, with no plate. Only the pointer or the keyboard draws a plate.
-   Each word's box is trimmed to its capitals (cap height to baseline), so
-   centring the words centres the capitals in the plate, and the pill's
-   baseline is theirs. The dot sits in the plate's left padding, centred on
-   the plate, outside the flow that sets that baseline. One fixed height, so a
-   worker landing never makes the row twitch. */
-.kbn-card-worker {
-  --worker-figures: oldstyle-nums tabular-nums;
-  --worker-gap: 0.32em;
-  --worker-dot-size: 7px;
-  position: relative;
-  box-sizing: border-box;
-  height: 19px;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--worker-gap);
-  margin: 0 -4px;
-  padding: 0 4px 0 calc(4px + var(--worker-dot-size) + var(--worker-gap));
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--kbn-ink-soft);
-  font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono);
-  text-decoration: none;
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  transition: color 120ms ease, background 120ms ease;
-}
-.kbn-card-worker:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-plate) 70%, transparent); }
-.kbn-card-worker:focus { outline: none; }
-.kbn-card-worker:focus-visible { outline: 1px dashed var(--kbn-you); outline-offset: 2px; }
-.kbn-card-worker .ws-worker-dot {
-  --worker-dot: var(--kbn-agent);
-  position: absolute; left: 4px; top: 50%; translate: 0 -50%;
-  width: var(--worker-dot-size); height: var(--worker-dot-size); border-radius: 50%;
-  background: var(--worker-dot);
-  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--worker-dot) 18%, transparent);
-}
-.kbn-card-worker[data-turn='idle'] .ws-worker-dot { --worker-dot: var(--kbn-owed-bright); }
-.kbn-card-worker[data-turn='question'] .ws-worker-dot { --worker-dot: var(--kbn-you); }
-.kbn-card-worker:is([data-turn='none'], [data-turn='starting'], [data-turn='no-signal']) .ws-worker-dot { --worker-dot: var(--kbn-ink-muted); }
-/* Blocked is rare and needs a repair, not an alarm: a hollow ring in muted
-   ink, distinct in shape from every filled dot, quiet in colour. */
-.kbn-card-worker[data-turn='blocked'] .ws-worker-dot {
-  --worker-dot: var(--kbn-ink-muted);
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--worker-dot);
-}
-.kbn-card-worker .ws-worker-state { font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); }
-.kbn-card-worker > :is(.ws-worker-state, .ws-worker-elapsed) { text-box: trim-both cap alphabetic; }
-.kbn-card-worker .ws-worker-elapsed { font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
-.kbn-card-worker .ws-worker-elapsed:empty { display: none; }
-.kbn-card-worker:hover .ws-worker-elapsed { color: inherit; }
-/* A working turn breathes in its dot alone. */
-.kbn-card-worker.ws-turn-active .ws-worker-dot { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
 @keyframes kbn-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-@media (prefers-reduced-motion: reduce) { .kbn-card-worker .ws-worker-dot { animation: none !important; } }
-/* Behind the reader or the Board's veil the Desk is inert and unread; its dots rest. */
-[inert] .kbn-card-worker .ws-worker-dot { animation: none; }
 
 /* Stale-origin card: the originating agent is disconnected. The
    snapshot is preserved (last-known-good) so the card still reads
@@ -1566,7 +1502,7 @@
 }
 .kbn-card--stale:active { cursor: default; }
 .kbn-card--stale .kbn-card-name { color: color-mix(in srgb, var(--kbn-ink) 34%, var(--kbn-ink-muted)); }
-/* The waiting badge sits in the same band as kbn-card-worker — runtime-state
+/* The waiting badge is runtime-state
    info that depends on connection, not on fiber content. Cool grey-blue
    distinguishes "stale" from the teal of "worker running." */
 .kbn-card-waiting {
@@ -1966,15 +1902,6 @@
 /* ── Touch, wherever it happens ────────────────────────────────────────────
    Asked about the input, not the viewport. */
 @media (pointer: coarse) {
-  /* A worker pill is a link to its session in the Claude app when the daemon
-     knows where the session lives, on the card and in the open card alike.
-     Anything else is a mark of the worker's state, since there is no
-     terminal to open here. The rule keys on the element, so no class can
-     make a link inert. */
-  .kbn-card-worker:not(a[href]) {
-    pointer-events: none;
-    cursor: default;
-  }
   /* Drag is off on touch (`coarsePointer()` clears `draggable`); the grab
      cursor and the lift-on-press would be promising a gesture that isn't
      there. */

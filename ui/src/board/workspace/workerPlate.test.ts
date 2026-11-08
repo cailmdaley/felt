@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { card } from '../testFixtures.js'
-import { workerPlate, workerPlateFacts } from './workerPlate.js'
+import { workerPlateFacts } from './workerPlate.js'
 
 const now = Date.parse('2026-10-04T14:00:00Z')
-describe('owner-observed worker plate', () => {
+describe('owner-observed worker facts', () => {
   it('ages a working worker only once it has gone quiet', () => {
     const busy = card({ id: 'task', workerState: 'running', runtimePhase: 'working', lastActivityAt: now - 30_000, workerStartedAt: now - 12 * 60000 })
     expect(workerPlateFacts(busy, now)).toEqual({ turn: 'working', word: 'working', elapsed: undefined, busy: true })
@@ -26,16 +26,5 @@ describe('owner-observed worker plate', () => {
   })
   it('ignores a durable old session on a workerless fiber', () => {
     expect(workerPlateFacts(card({ id: 'task', dispatchedAt: '2025-01-01T00:00:00Z', sessionUuid: 'old-session' }), now)).toEqual({ turn: 'none', word: 'no worker', elapsed: undefined, busy: false })
-  })
-  it('keeps the conversation target and its click handler', () => {
-    const target = document.createElement('button')
-    let opened = false
-    target.addEventListener('click', () => { opened = true })
-    const plate = workerPlate(card({ id: 'task', workerState: 'running', runtimePhase: 'working' }), target)
-    expect(plate).toBe(target)
-    plate.click()
-    expect(opened).toBe(true)
-    expect(plate.querySelector('.ws-worker-dot')?.getAttribute('aria-hidden')).toBe('true')
-    expect(plate.classList.contains('ws-turn-active')).toBe(true)
   })
 })

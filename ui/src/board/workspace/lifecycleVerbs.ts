@@ -50,11 +50,17 @@ export function iconVerb(verb: LifecycleVerb, target = ''): HTMLButtonElement {
 /** Draw a button as the header draws a lifecycle verb: its stroke icon, then its word, in its pigment. */
 export function dressVerb(button: HTMLButtonElement, verb: LifecycleVerb): HTMLButtonElement {
   const spec = verbSpec(verb)
+  button.classList.add(spec.cls)
+  return dressAction(button, spec.icon, spec.label)
+}
+
+/** Draw a menu item as a header action: its stroke icon, then its word. */
+export function dressAction(button: HTMLButtonElement, icon: HeaderIcon, label: string): HTMLButtonElement {
   button.classList.remove('kbn-ctl-btn')
-  button.classList.add(spec.cls, 'ws-header-icon', 'ws-header-verb')
-  button.title = spec.label; button.setAttribute('aria-label', spec.label)
-  button.innerHTML = headerIcon(spec.icon)
-  const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = spec.label
+  button.classList.add('ws-header-icon', 'ws-header-verb')
+  button.title = label; button.setAttribute('aria-label', label)
+  button.innerHTML = headerIcon(icon)
+  const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = label
   button.append(word)
   return button
 }

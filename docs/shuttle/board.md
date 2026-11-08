@@ -68,7 +68,7 @@ turn when idle. Cards keep creation order within each tier, so a card moves
 only when it crosses the seam or a question is raised or answered.
 
 One reading, the card's *turn*, decides the band, the order, and the
-worker pill on every surface, so a card can never sit in Your turn with a pill
+row's mark on every surface, so a card can never sit in Your turn with a mark
 that says otherwise. The owning daemon serves the turn from its worker's
 runtime; the board lays over it only what it alone knows — the conversation
 you are following, and an owner it cannot reach. The thread roster
@@ -150,9 +150,9 @@ The Desk also offers Stash and Capture dialogs and Attach.
 <a id="attach"></a>
 ### Open a worker
 
-Worker pills on Desk cards and the fiber page open the worker's conversation.
-The constitution header also offers Console on every layout, including phones, whenever a destination is available.
-Tap to open; long-press or right-click Console or a pill to choose a destination.
+The band's console (›_) opens the conversation of the constitution it holds, or of the thread highlighted on its page, on every layout, including phones, whenever a destination is available.
+`c` does the same from any view, and a Desk row's menu and a Board folio offer it too.
+Tap to open; long-press or right-click the console to choose a destination.
 A choice between alternatives is remembered; opening a sole destination leaves the preference unchanged.
 Fiber controls remain inline.
 For terminal workers, the board can open Kitty; `shuttle attach <fiber>` works from other terminals too.
@@ -346,9 +346,9 @@ same with a pointer, pinned to the right edge on a phone so it never scrolls
 out of reach. `Esc` closes it. It is an overlay rather than a fourth tab — the
 three tabs are windows onto the work, and configuration is not work.
 
-Settings opens to **Conversations**, where you choose the preferred destination for Console, worker pills, keyboard opening and History.
+Settings opens to **Conversations**, where you choose the preferred destination for the console, keyboard opening and History.
 The conversation-opening preference belongs to this browser and saves immediately.
-Long-press or right-click Console or a worker pill to choose another supported destination.
+Long-press or right-click the console to choose another supported destination.
 Choosing among alternatives remembers the destination; opening a sole destination leaves your preference unchanged.
 When the preference is unavailable for a worker or device, opening uses the best available destination without changing it.
 

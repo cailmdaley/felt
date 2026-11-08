@@ -31,9 +31,9 @@ let listedCards: KanbanCard[]
 const onChannel = vi.fn<(card: KanbanCard) => void>()
 const channels = [alpha, beta, gamma]
 
-function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerPill?: (card: KanbanCard) => HTMLElement | null, extra: Partial<ReaderOptions> = {}): Reader {
+function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, extra: Partial<ReaderOptions> = {}): Reader {
   const reader = new Reader({
-    shuttleBase: '', themes, workerPill,
+    shuttleBase: '', themes,
     buildProse: () => document.createElement('div'),
     onRefreshProse: vi.fn(),
     onSelect: key => reader.select(key),
@@ -101,36 +101,14 @@ afterEach(() => {
 })
 
 describe('Reader', () => {
-  it("draws the card's own worker pill bare at the head's right end; the map rides the centre column", () => {
-    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', turn: 'working' as const, column: 'inFlight' as const, tmuxSession: 'beta-worker', lastActivityAt: Date.now() - 34 * 60000 }
-    listedCards = [working]
-    const open = vi.fn()
-    const reader = makeReader(working, undefined, () => {
-      const pill = document.createElement('button')
-      pill.className = 'kbn-card-worker'
-      pill.addEventListener('click', open)
-      return pill
-    })
-    const head = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail .ws-head-worker')!
-    expect(head.hidden).toBe(false)
-    expect(head.dataset.part).toBe('act')
-    // Document actions stay reachable from the phone's top bar, without a map or count.
-    expect(head.parentElement?.lastElementChild?.getAttribute('aria-label')).toBe('Document menu')
+  it("keeps the phone's top bar to return, name and document actions; the map rides the centre column", () => {
+    const reader = makeReader(beta)
+    const trail = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail')!
+    expect(trail.lastElementChild?.getAttribute('aria-label')).toBe('Document menu')
     expect(reader.el.querySelector('.ws-head-position')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar [data-part="page-band"]')).toBeNull()
     expect(reader.el.querySelector('.ws-stage-column > [data-part="page-band"]')).toBeNull()
-    const control = head.querySelector<HTMLElement>('.ws-worker-control')!
-    expect(control.dataset.turn).toBe('working')
-    expect(control.querySelector('.ws-worker-dot')).not.toBeNull()
-    expect(control.querySelector('.ws-worker-state')?.textContent).toBe('working')
-    expect(control.querySelector('.ws-worker-elapsed')?.textContent).toBe('34m')
-    control.click()
-    expect(open).toHaveBeenCalledOnce()
-    // Where the phone shows the dot alone, the dot is the target's own child: a click on it is a click on the target.
-    const dot = control.querySelector<HTMLElement>('.ws-worker-dot')!
-    expect(dot.parentElement).toBe(control)
-    dot.click()
-    expect(open).toHaveBeenCalledTimes(2)
+    disposeReader(reader)
   })
 
   it('binds the reader alone and leaves the phone bar free of chrome plates and verbs', () => {
@@ -146,7 +124,6 @@ describe('Reader', () => {
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
     expect(reader.el.querySelector('.ws-thumbbar')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar .kbn-ctl-temper, .ws-navbar .kbn-ctl-discard')).toBeNull()
-    expect(reader.el.querySelector<HTMLElement>('.ws-navbar .ws-head-worker')?.hidden).toBe(true)
     reader.hide()
     expect(bound.size).toBe(0)
     disposeReader(reader)
@@ -201,21 +178,21 @@ describe('Reader', () => {
 
   it('sends the title and / to the board bar Find on the desktop, and to the switcher on the phone', () => {
     const onFind = vi.fn(() => true)
-    const desk = makeReader(alpha, undefined, undefined, { onFind })
+    const desk = makeReader(alpha, undefined, { onFind })
     desk.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
     press('/')
     expect(onFind).toHaveBeenCalledTimes(2)
     expect(desk.el.querySelector('.ws-switcher')).toBeNull()
     disposeReader(desk)
     viewport.phone = true
-    const phone = makeReader(alpha, undefined, undefined, { onFind })
+    const phone = makeReader(alpha, undefined, { onFind })
     phone.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
     expect(onFind).toHaveBeenCalledTimes(2)
     expect(phone.el.querySelector('.ws-switcher')).not.toBeNull()
   })
 
   it('lists channels in Desk order, marks the current channel, filters, and opens the chosen card', () => {
-    const reader = makeReader(beta, undefined, undefined, { pickerCards: () => listedCards })
+    const reader = makeReader(beta, undefined, { pickerCards: () => listedCards })
     reader.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
     const rows = [...reader.el.querySelectorAll<HTMLButtonElement>('.ws-channel-row')]
     expect(rowNames(reader)).toEqual(['Beta', 'Alpha', 'Gamma'])
@@ -232,7 +209,7 @@ describe('Reader', () => {
 
   it('marks owner identity even for equal UIDs and a channel absent from the list', () => {
     const other = { ...alpha, originId: 'host-other', name: 'Other Alpha' }
-    const reader = makeReader(alpha, undefined, undefined, { pickerCards: () => [alpha, alpha] })
+    const reader = makeReader(alpha, undefined, { pickerCards: () => [alpha, alpha] })
     reader.show(channel(other), fiberKey(other), 'Board', other)
     reader.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
     const selected = [...reader.el.querySelectorAll<HTMLElement>('.ws-switcher [aria-current="true"]')]
@@ -261,7 +238,7 @@ describe('Reader', () => {
 
   it('says briefly where a step landed: its Desk column and name', () => {
     const stops = new Map([[beta, 'Drafts'], [alpha, 'Drafts'], [gamma, 'In flight']])
-    makeReader(alpha, undefined, undefined, { deskStop: row => stops.get(row)! })
+    makeReader(alpha, undefined, { deskStop: row => stops.get(row)! })
     press('j')
     expect(document.querySelector('.shuttle-toast .toast-message')?.textContent).toBe('In flight · Gamma')
     press('k')
@@ -273,7 +250,7 @@ describe('Reader', () => {
     const delta = card({ id: 'work/delta', uid: 'delta', name: 'Delta', originId: 'host-d' })
     listedCards = [alpha, beta, gamma, delta]
     const stops = new Map([[alpha, 'review'], [beta, 'review'], [gamma, 'flight'], [delta, 'flight']])
-    const reader = makeReader(alpha, undefined, undefined, { deskStop: row => stops.get(row)! })
+    const reader = makeReader(alpha, undefined, { deskStop: row => stops.get(row)! })
     const jump = (key: string): void => press(key, { shiftKey: true })
     jump('J')
     expect(onChannel).toHaveBeenLastCalledWith(gamma)
@@ -325,7 +302,7 @@ describe('Reader', () => {
     Object.defineProperty(scroller, 'clientHeight', { value: 400 })
     const family: Channel = { ...channel(alpha), documents: [{ key: 'family:host-a:alpha', owner: 'host-a', path: alpha.path, name: 'Family', kind: 'family', provenance: [{ kind: 'family' }] }, ...channel(alpha).documents], labels: ['Family', 'Note'] }
     const page = document.createElement('div'); page.append(scroller)
-    const reader = makeReader(alpha, undefined, undefined, { buildProse: doc => doc.kind === 'family' ? page : document.createElement('div') })
+    const reader = makeReader(alpha, undefined, { buildProse: doc => doc.kind === 'family' ? page : document.createElement('div') })
     reader.show(family, 'family:host-a:alpha', 'Board', alpha)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', bubbles: true, cancelable: true }))
     expect(scroller.scrollBy).toHaveBeenCalledOnce()
@@ -396,7 +373,7 @@ describe('Reader', () => {
       sent: Array.from({ length: 6 }, (_, i) => ({ path: `/sent-${i}.html`, time: 100 + i })),
     })
     const onReturn = vi.fn()
-    const reader = makeReader(alpha, undefined, undefined, { onReturn })
+    const reader = makeReader(alpha, undefined, { onReturn })
     reader.show(big, big.documents[0].key, 'Board', alpha)
     expect(reader.el.querySelector('.ws-tabs,.ws-thumbbar')).toBeNull()
     const file = big.documents.at(-1)!

@@ -445,8 +445,8 @@ human is only one of them:
 
 **The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the Desk
 kanban with Stash/Capture, Chronicle, Board and Globe on hotkeys 1–4. Board is a
-document overview and reader; fiber controls sit inline on the fiber page and
-the worker pill opens its conversation. The UI is served as the static `ui/dist`
+document overview and reader; a constitution's controls sit in the band above
+its page, whose console (›_) opens its conversation. The UI is served as the static `ui/dist`
 bundle by the same process as the `:4000` API (`Plug.Static` + `SpaController`).
 Listen can use the desktop or a phone as its audio source.
 Capture creates a card; pin Listen to that card to keep a call's speech there while navigating elsewhere.

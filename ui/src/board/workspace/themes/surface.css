@@ -1,14 +1,5 @@
 /* Inherited CSS stops here too; the ordinary control rules rebuild this zone. */
 :where([data-ws-theme] [data-part='act']) { all: initial; display: revert; }
-/* The shared worker control keeps its pigments on the channel's paper. */
-@scope ([data-ws-theme]) to (:scope [data-ws-theme-boundary], :scope [data-ws-theme]) {
-  :scope .kbn-card-worker { color: var(--ws-ink-soft); }
-  :scope .kbn-card-worker:hover { color: var(--ws-ink); background: var(--ws-hover); }
-  :scope .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-agent); }
-  :scope .kbn-card-worker[data-turn='idle'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
-  :scope .kbn-card-worker[data-turn='question'] .ws-worker-dot { --worker-dot: var(--ws-you); }
-  :scope .kbn-card-worker[data-turn='blocked'] .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
-}
 /* Only the room's tint crosses; its pages and chrome change immediately. */
 .ws-reader [data-part='veil'] {
   transition: background-color var(--ws-crossing) var(--ws-ease), opacity var(--ws-veil-time) var(--ws-ease);

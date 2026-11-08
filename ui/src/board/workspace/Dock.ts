@@ -1,9 +1,9 @@
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
-import { workerPill } from '../appConversation.js'
+import { attachConversationPicker } from '../conversationMenu.js'
 import { canOpenDesktopApp } from '../conversationLinks.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
-import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
+import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, linkDestination, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
@@ -416,7 +416,6 @@ export class Dock {
   private listen: ListenControl | null = null
   private voiceStrip: VoiceStrip | null = null
   private disposers: (() => void)[] = []
-  private workerPillCard: KanbanCard | null = null
   private dismissParent: (() => boolean) | null = null
   private dismissConversation: (() => boolean) | null = null
   private errorEl: HTMLElement | null = null
@@ -554,7 +553,7 @@ export class Dock {
     this.searchDebounce = null
     this.searchRenderToken++
     this.fiberIndex = null
-    this.card = this.actionCard = this.workerPillCard = null
+    this.card = this.actionCard = null
     this.constitutionButton = this.openConstitution = null
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
@@ -587,35 +586,72 @@ export class Dock {
   }
 
   /**
-   * The worker control is the Desk card's own pill: same turn, same word,
-   * same destination under a mouse or a finger (see `workerPill`).
+   * Where the conversation is for this card: the remembered destination or the
+   * best usable one, or, on a desktop with no worker up, the past session
+   * reopened in a terminal on its host. A link the human chose still wins over
+   * reopening. Null when there is nowhere to go.
    */
-  workerPillFor(card: KanbanCard): HTMLElement | null {
-    return card.tmuxSession || card.sessionLink ? workerPill(card, { openWorker: this.onOpenWorker }) : null
+  private conversationRoute(card: KanbanCard): { reopen: false; destination: ConversationDestination } | { reopen: true } | null {
+    const destination = resolveDestination(conversationDestinations(card, conversationDevice(), this.onOpenWorker))
+    if (conversationDevice().desktop && card.sessionUuid && !hasLiveWorker(card) && destination?.id !== conversationOpening()) return { reopen: true }
+    return destination ? { reopen: false, destination } : null
   }
 
+  /** Whether `c` and the band's console have somewhere to take the human. */
+  canOpenConversation(card: KanbanCard): boolean { return this.conversationRoute(card) !== null }
+
   /**
-   * Take the human to the conversation: the exact destination the worker pill
-   * opens, or, on a desktop with no worker up, the past session reopened in a
-   * terminal on its host. A reopening sends nothing and starts no turn, and it
-   * leaves the card's lifecycle alone, so it holds in every column. A card
-   * that never ran is launched by name, not by a key. This is the explicit
-   * act (`c`); a click calls `Workspace.reach` instead.
+   * Take the human to the conversation ({@link conversationRoute}). A reopening
+   * sends nothing and starts no turn, and it leaves the card's lifecycle alone,
+   * so it holds in every column. This is the explicit act (`c`, the band's
+   * console, a Desk row's menu); a click on a row calls `Workspace.reach` instead.
    */
   openConversation(card: KanbanCard): boolean {
-    const destination = resolveDestination(conversationDestinations(card, conversationDevice(), this.onOpenWorker))
-    if (card.sessionUuid && this.reopens(card, destination)) {
-      void attachConversation(this.shuttleBase, { session: card.sessionUuid, shuttle_host: card.shuttleHost ?? null }, message => showToast(message, 'error'))
-      return true
-    }
-    if (!destination) return false
-    openDestination(destination)
+    const route = this.conversationRoute(card)
+    if (!route) return false
+    if (route.reopen) void attachConversation(this.shuttleBase, { session: card.sessionUuid!, shuttle_host: card.shuttleHost ?? null }, message => showToast(message, 'error'))
+    else openDestination(route.destination)
     return true
   }
 
-  /** Whether opening means reopening the past session: a link the human chose still wins. */
-  private reopens(card: KanbanCard, destination: ConversationDestination | undefined): boolean {
-    return conversationDevice().desktop && !!card.sessionUuid && !hasLiveWorker(card) && destination?.id !== conversationOpening()
+  /**
+   * The band's console: opens the highlighted card's conversation as `c` does.
+   * A destination with an address is a native link, so app schemes and web
+   * links keep their gesture semantics; long-press or right-click picks
+   * another destination.
+   */
+  private buildConsole(target: () => KanbanCard): { el: HTMLAnchorElement; paint: () => void } {
+    const el = document.createElement('a')
+    el.className = 'ws-header-icon ws-band-console'
+    el.dataset.part = 'console'
+    el.tabIndex = 0
+    el.innerHTML = headerIcon('console')
+    el.addEventListener('click', event => {
+      event.stopPropagation()
+      if (el.hasAttribute('href')) return
+      event.preventDefault()
+      this.openConversation(target())
+    })
+    el.addEventListener('keydown', event => {
+      if (el.hasAttribute('href') || (event.key !== 'Enter' && event.key !== ' ')) return
+      event.preventDefault(); el.click()
+    })
+    this.disposers.push(attachConversationPicker(el, () => conversationDestinations(target(), conversationDevice(), this.onOpenWorker)))
+    const paint = (): void => {
+      const card = target(), route = this.conversationRoute(card)
+      el.hidden = !route
+      const href = route && !route.reopen ? route.destination.href : undefined
+      if (href) { linkDestination(el, href); el.removeAttribute('role') }
+      else { el.removeAttribute('href'); el.removeAttribute('target'); el.removeAttribute('rel'); el.setAttribute('role', 'button') }
+      if (!route) return
+      const who = slug(card)
+      const label = route.reopen
+        ? `Reopen ${who}'s last session${card.shuttleHost ? ` on ${card.shuttleHost}` : ''}`
+        : `Open ${who}'s conversation in ${route.destination.label}`
+      el.setAttribute('aria-label', `${label} (c)`)
+      el.title = route.reopen ? `${label} (c)` : `${label} (c)\nLong-press or right-click to choose where to open.`
+    }
+    return { el, paint }
   }
 
   /** A worker's own line for an opening message, Resume and New session, for a page to seat beside that worker. */
@@ -666,7 +702,6 @@ export class Dock {
       void this.readUsage(card)
     }
     this.actPaint?.()
-    this.workerPillCard = card
   }
 
   /** Read the card's session usage and repaint; a failed read keeps the last figures, and one that outlives its session or band is dropped. */
@@ -681,7 +716,7 @@ export class Dock {
   }
 
   refreshConversationOpening(): void {
-    this.syncRuntime(this.workerPillCard)
+    this.actPaint?.()
     this.root?.querySelectorAll('.kbn-ctl-history').forEach((history) => {
       history.dispatchEvent(new Event(CONVERSATION_OPENING_CHANGED))
     })
@@ -867,6 +902,7 @@ export class Dock {
     })
     settingsItem.setAttribute('aria-haspopup', 'true')
     settingsItem.setAttribute('aria-expanded', 'false')
+    const consoleItem = this.buildConsole(target)
     const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-band-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
     this.drawerClose = () => {
@@ -915,7 +951,7 @@ export class Dock {
     if (unsubscribe) this.disposers.push(unsubscribe)
     this.paintVoice()
     this.head.replaceChildren(...(this.listen ? [this.listen.el] : []), voiceStrip.el, verdict)
-    header.append(identity, this.head, constitutionItem, settingsItem, leave)
+    header.append(identity, this.head, consoleItem.el, constitutionItem, settingsItem, leave)
     body.append(header, worker.el, drawer, foot)
     this.actPaint = () => {
       const column = card.column
@@ -943,6 +979,7 @@ export class Dock {
       const offered = headerLifecycleVerbsFor(act, !!this.onRest)
       verdict.hidden = !offered.length
       worker.update(act, same && warm !== undefined ? `cache warm until ${clockTime(warm)}` : '')
+      consoleItem.paint()
       if (rest) rest.hidden = !offered.includes('rest')
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')

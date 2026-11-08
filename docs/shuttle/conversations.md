@@ -14,9 +14,9 @@ A live worker's pill names its turn (**question**, **idle**, **blocked**, **work
 
 ## Choose where conversations open
 
-The constitution header shows **Console** whenever the worker has a destination on your device, including phones.
-Tap Console or a worker pill to open the remembered destination.
-Long-press or right-click either control to pick from all available destinations, even when there is only one.
+The band over an open constitution shows a console (›_) whenever its conversation has somewhere to open on your device, including phones; on a desktop with no worker up, it reopens the last session on its host.
+Tap the console, press `c`, or choose **Open conversation** from a Desk row's menu to open the remembered destination.
+Long-press or right-click the console to pick from all available destinations, even when there is only one.
 The check mark identifies the destination a tap uses.
 
 The board remembers terminal, Claude browser, and Claude app preferences in this browser.

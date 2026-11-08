@@ -1606,8 +1606,7 @@ describe('workspace reader integration', () => {
       workerState: 'running', tmuxSession: 'new-worker', sessionUuid: 'new-session', runtimePhase: 'working', turn: 'working', column: 'inFlight' }]
     workspace.update()
     expect(document.querySelector('.ws-stage-band .ws-dock')).toBe(band)
-    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-navbar *)')).toHaveLength(0)
-    expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^working/)
+    expect(band.querySelector<HTMLElement>('.ws-band-console')!.hidden).toBe(false)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const fresh = band.querySelector<HTMLButtonElement>('.ws-worker-acts button[data-verb="New session"]')!
     fresh.click()
@@ -1694,7 +1693,7 @@ describe('workspace reader integration', () => {
     expect(visibility).toHaveBeenLastCalledWith(false)
   })
 
-  it('opens the real worker conversation with c, without a panel or a pill on the fiber page', async () => {
+  it('opens the real worker conversation from the band and with c, without a panel on the fiber page', async () => {
     const live = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', tmuxSession: 'terminal-alpha', shuttleHost: 'daemon-a', terminalBackend: 'rex' as const }
     const openWorker = vi.fn()
     bodyCards = [{ ...live, terminalBackend: undefined }]
@@ -1705,10 +1704,11 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await settle()
-    // The band draws no opening of its own; the navbar pill and c reach the conversation.
-    expect(document.querySelectorAll('.ws-dock .kbn-card-worker, .ws-band-open')).toHaveLength(0)
-    const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!
-    head.click()
+    // The band's console and c reach the conversation; the top bar draws no second opener.
+    expect(document.querySelector('.ws-navbar .ws-band-console')).toBeNull()
+    const opener = document.querySelectorAll<HTMLElement>('.ws-band-console')
+    expect(opener).toHaveLength(1)
+    opener[0].click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
     openWorker.mockClear()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()

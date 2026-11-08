@@ -373,7 +373,7 @@ test('Desk action menus open on a phone long press without hover', async p => {
   await chooseDeskColumn(p, 1)
   const inFlight = p.locator('[data-column="inFlight"] .kbn-card').first()
   await hold(inFlight)
-  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Close for review', 'Rest', 'Temper', 'Discard', 'Open terminal', 'Move…'])
+  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Close for review', 'Rest', 'Temper', 'Discard', 'Move…'], 'a phone has no conversation to open for a terminal worker without a Claude link')
 }, { width: 390, height: 844 }, undefined, 'reduce', true)
 
 test('Desk family action menus preserve native activation and Resting row stacking', async p => {
@@ -386,7 +386,7 @@ test('Desk family action menus preserve native activation and Resting row stacki
   assert.ok(await family.evaluate(el => el === document.activeElement && el.classList.contains('kbn-key-selected')))
   for (const key of ['Enter', 'Space']) {
     await family.focus(); await family.press('Shift+F10'); await p.getByRole('menu').waitFor()
-    assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
+    assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Open conversation', 'Move…'])
     await p.keyboard.press('Escape'); assert.ok(await family.evaluate(el => el === document.activeElement))
     await family.press('Shift+F10')
     await p.getByRole('menu').getByRole('menuitem', { name: 'Temper', exact: true }).press(key)
@@ -408,7 +408,7 @@ test('Desk family action menus preserve native activation and Resting row stacki
   })
   assert.deepEqual(geometry, { titleInside: true, rowHasMenuTarget: true })
   await resting.click({ button: 'right' })
-  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
+  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Open conversation', 'Move…'])
 })
 
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
@@ -2150,13 +2150,12 @@ for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Ch
 })
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
-  test(`Worker plate and undo line states: ${device}`, async p => {
+  test(`Undo line states: ${device}`, async p => {
     const shot = async state => {
       if (!process.env.WORKSPACE_SHOTS) return
       await mkdir(shots, { recursive: true }); await p.screenshot({ path: resolve(shots, `verdict-${device}-${state}.png`) })
     }
     await open(p)
-    assert.equal(await band(p).locator('.ws-band-acts .kbn-card-worker').count(), 0)
     assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
     if (device === 'phone') await headerAction(p, 'Settings')
     for (const verb of ['Temper (t)', 'Discard (x)']) {
@@ -2177,7 +2176,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
     await poll(p, () => document.querySelector('.ws-stage-band .ws-dock')?.dataset.column === 'inFlight')
     assert.equal(await band(p).locator('[data-part="lifecycle"]').count(), 0, 'colour carries the state; no word says it')
-    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 0, 'no second worker pill')
     await shot('working')
     await p.evaluate(async () => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
@@ -2187,7 +2185,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await shot('waiting'); await leave(p); await chooseDeskColumn(p, 0)
     await p.locator('[data-column="drafts"] .kbn-col-head').click()
     await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
-    assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     await shot('no-worker')
   }, viewport)
 }
@@ -2248,7 +2245,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await leave(p); await chooseDeskColumn(p, 1)
     await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 0)
     await bandMenu(p, 'Settings')
     const cadence = band(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
     assert.equal(await cadence.count(), 1); assert.ok((await cadence.innerText()).trim())
@@ -2632,7 +2628,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   }
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
-  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.fp-title'], settle: 100 })
+  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.fp-title'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   for (const control of ['.kbn-ctl-review', '.kbn-ctl-rest']) {
     assert.ok(await band(p).locator(control).isVisible())
@@ -2668,7 +2664,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
       row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
     })
     await repaint(p)
-  }, { allow: ['.kbn-card-worker'], settle: 100 })
+  }, { settle: 100 })
 }, viewport)
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the Desk and the Board (${device})`, async p => {

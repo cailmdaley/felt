@@ -375,7 +375,7 @@ export class KanbanModal {
       onRest: card => this.openRestPopover(card),
       getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
-      openWorker: this.openWorkerAfterGesture,
+      conversation: { can: card => this.dock.canOpenConversation(card), open: card => { this.dock.openConversation(card) } },
       releaseQuarantine: (host) => this.releaseQuarantine(host),
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,

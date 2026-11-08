@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
-import { workerPill } from './appConversation'
-import { conversationOpening, CLAUDE_OPENING_KEY, saveConversationOpening, conversationDestinations, resolveDestination, REX_PHONE_SHORTCUT, type ConversationOpening } from './conversationOpening'
+import type { KanbanCard } from './KanbanTypes'
+import { Dock } from './workspace/Dock'
+import { conversationOpening, CLAUDE_OPENING_KEY, saveConversationOpening, conversationDestinations, resolveDestination, REX_PHONE_SHORTCUT, type ConversationOpening, type WorkerOpener } from './conversationOpening'
 import { sessionTargets } from './sessionHistory'
 import { card } from './testFixtures'
 
@@ -19,34 +20,40 @@ beforeEach(() => {
     setItem: (key: string, value: string) => saved.set(key, value),
   })
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')))
 })
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.replaceChildren() })
+const bandConsole = (current: KanbanCard, openWorker?: WorkerOpener): HTMLAnchorElement => {
+  const dock = new Dock('', vi.fn(), undefined, openWorker)
+  dock.open(current)
+  document.body.append(dock.el)
+  return dock.el.querySelector<HTMLAnchorElement>('.ws-band-console')!
+}
+const opensInPlace = (opener: HTMLAnchorElement): boolean => !opener.hidden && !opener.hasAttribute('href')
 
 describe('conversation opening', () => {
   it('defaults to terminal and preserves its owner-routed attach action', () => {
     const attach = vi.fn()
-    const pill = workerPill(worker, { openWorker: attach })
-    expect(pill.tagName).toBe('BUTTON')
-    pill.click()
+    const opener = bandConsole(worker, attach)
+    expect(opensInPlace(opener)).toBe(true)
+    opener.click()
     expect(attach).toHaveBeenCalledWith('test-shuttle', undefined)
   })
 
   it.each([
     ['browser', bridge], ['app', 'claude://claude.ai/code/session_test'],
-  ] as const)('makes the worker pill and History open the same %s destination', (choice, href) => {
+  ] as const)('makes the band console and History open the same %s destination', (choice, href) => {
     expect(saveConversationOpening(choice)).toBe(true)
-    const pill = workerPill(worker, { openWorker: vi.fn() }) as HTMLAnchorElement
-    expect(pill.href).toBe(href)
+    expect(bandConsole(worker, vi.fn()).href).toBe(href)
     expect(sessionTargets(record, link, { desktop: true }).primary).toMatchObject({ href })
   })
 
-  it('falls back to the best destination without changing the remembered choice or turn word', () => {
+  it('falls back to the best destination without changing the remembered choice', () => {
     saveConversationOpening('app')
     const attach = vi.fn()
-    const pill = workerPill({ ...worker, sessionLink: undefined }, { openWorker: attach })
-    expect(pill.textContent).toBe('working')
-    expect(pill.getAttribute('aria-label')).toBe('working. Open in Terminal')
-    pill.click()
+    const opener = bandConsole({ ...worker, sessionLink: undefined }, attach)
+    expect(opener.getAttribute('aria-label')).toBe("Open test's conversation in Terminal (c)")
+    opener.click()
     expect(attach).toHaveBeenCalledOnce()
     expect(conversationOpening()).toBe('app')
     expect(sessionTargets(record, { ...link, url: null }, { desktop: true }).primary.kind).toBe('terminal')
@@ -55,26 +62,24 @@ describe('conversation opening', () => {
   it('uses terminal before browser when a desktop app route is unavailable', () => {
     saveConversationOpening('app')
     const url = `${bridge}?source=remote`
-    expect(workerPill({ ...worker, sessionLink: url }, { openWorker: vi.fn() }).tagName).toBe('BUTTON')
+    expect(opensInPlace(bandConsole({ ...worker, sessionLink: url }, vi.fn()))).toBe(true)
     expect(sessionTargets(record, { ...link, url }, { desktop: true }).primary.kind).toBe('terminal')
-    expect((workerPill({ ...worker, sessionLink: url }) as HTMLAnchorElement).href).toBe(url)
+    expect(bandConsole({ ...worker, sessionLink: url }).href).toBe(url)
   })
 
   it.each(['terminal', 'browser', 'app'] as const)('uses phone HTTPS opening with %s remembered', (choice) => {
     saveConversationOpening(choice)
     vi.stubGlobal('matchMedia', () => ({ matches: true }))
-    expect((workerPill(worker) as HTMLAnchorElement).href).toBe(bridge)
+    expect(bandConsole(worker).href).toBe(bridge)
     expect(sessionTargets(record, link, { desktop: false }).primary).toMatchObject({ kind: 'web', href: bridge })
-    const mark = workerPill({ ...worker, sessionLink: undefined })
-    expect(mark.tagName).toBe('SPAN')
-    expect(mark.title).toContain('Remote Control')
+    expect(bandConsole({ ...worker, sessionLink: undefined }).hidden).toBe(true)
   })
 
   it('labels Rex and opens Codex workers in their terminal', () => {
-    const rex = workerPill({ ...worker, terminalBackend: 'rex' }, { openWorker: vi.fn() })
-    expect(rex.getAttribute('aria-label')).toBe('working. Open in Rex')
+    const rex = bandConsole({ ...worker, terminalBackend: 'rex' }, vi.fn())
+    expect(rex.getAttribute('aria-label')).toBe("Open test's conversation in Rex (c)")
     const open = vi.fn()
-    const codex = workerPill(card({ id: 'codex', tmuxSession: 'codex-shuttle' }), { openWorker: open })
+    const codex = bandConsole(card({ id: 'codex', status: 'active', workerState: 'running', tmuxSession: 'codex-shuttle' }), open)
     codex.click()
     expect(open).toHaveBeenCalledWith('codex-shuttle', undefined)
   })
@@ -94,7 +99,7 @@ describe('conversation opening', () => {
 
   it.each(['javascript:alert(1)', 'https://claude.ai.evil.example/code/session_test', `${bridge}\n`])('never opens an unsafe session link: %s', (sessionLink) => {
     saveConversationOpening('app')
-    expect(workerPill({ ...worker, sessionLink }, { openWorker: vi.fn() }).tagName).toBe('BUTTON')
+    expect(opensInPlace(bandConsole({ ...worker, sessionLink }, vi.fn()))).toBe(true)
     expect(sessionTargets(record, { ...link, url: sessionLink }, { desktop: true }).primary.kind).toBe('terminal')
   })
 

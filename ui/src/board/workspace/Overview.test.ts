@@ -164,7 +164,7 @@ describe('Overview receipt membership and identity', () => {
 
     const conversation = folio('alpha').querySelector<HTMLButtonElement>('.ws-overview-folio-conversation')!
     expect(conversation.hidden).toBe(false)
-    expect(conversation.getAttribute('aria-label')).toBe('Open conversation')
+    expect(conversation.getAttribute('aria-label')).toBe('Open conversation (c)')
     conversation.click()
     expect(onConversation).toHaveBeenLastCalledWith(agent)
 

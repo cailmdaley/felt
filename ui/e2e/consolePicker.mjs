@@ -10,7 +10,7 @@ const shots = process.env.CONSOLE_PICKER_SHOTS
 if (shots) await mkdir(shots, { recursive: true })
 const selected = p => p.locator('.ws-page.ws-selected')
 const band = p => p.locator('.ws-stage-band')
-const pill = p => p.locator('.ws-navbar .ws-head-worker .kbn-card-worker')
+const opener = p => band(p).locator('.ws-band-console')
 const items = p => p.getByRole('menuitemradio')
 async function shot(p, name) {
   if (await items(p).count()) await pickerReadable(p, false)
@@ -32,11 +32,11 @@ async function open(p, backend) {
 async function headerFits(p) {
   const geometry = await band(p).locator('.ws-band-head').evaluate(header => {
     const bounds = header.getBoundingClientRect()
-    const controls = [...header.querySelectorAll('.listen-control,.kbn-ctl-verdict,.ws-band-settings,.ws-band-leave,.ws-band-identity')]
+    const controls = [...header.querySelectorAll('.listen-control,.kbn-ctl-verdict,.ws-band-console,.ws-band-settings,.ws-band-leave,.ws-band-identity')]
       .filter(el => el.checkVisibility()).map(el => ({ name: el.className, rect: el.getBoundingClientRect().toJSON() }))
-    return { bounds: bounds.toJSON(), controls, opening: header.querySelectorAll('.ws-band-open').length }
+    return { bounds: bounds.toJSON(), controls, opening: header.querySelectorAll('.ws-band-console').length }
   })
-  assert.equal(geometry.opening, 0, 'the console draws no opening; following and c reach the conversation')
+  assert.equal(geometry.opening, 1, 'the band carries one console opener')
   const controls = geometry.controls
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
     const a = controls[i].rect, b = controls[j].rect
@@ -88,18 +88,16 @@ try {
     // c opens the conversation where the remembered opening says.
     await p.keyboard.press('c')
     assert.equal(await p.evaluate(() => window.__conversationLinks.at(-1)), 'https://claude.ai/code/session_fixture')
+    // The band's console opens the same place, on both surfaces.
+    assert.match(await opener(p).getAttribute('aria-label'), /^Open [\w-]+'s conversation in Claude browser \(c\)$/, 'the console names its destination and key')
+    assert.equal(await opener(p).getAttribute('href'), 'https://claude.ai/code/session_fixture', 'a web destination is a native link')
     if (phone) {
-      await band(p).getByRole('button', { name: 'Constitution', exact: true }).click()
-      await selected(p).locator('.ws-fiber-prose').waitFor()
-      assert.match(await pill(p).getAttribute('aria-label'), /^\w+\. Open in Claude browser$/, 'the pill names its turn')
-      assert.equal(await pill(p).getAttribute('target'), null, 'a phone opens Claude in place so iOS can hand it to the app')
-      assert.equal(await pill(p).evaluate(el => getComputedStyle(el).userSelect), 'none', 'the held pill is a picker anchor, not text')
-      await shot(p, 'phone-reader-pill')
-      assert.equal(await pill(p).locator('.ws-worker-console').textContent(), '›_', 'the plate shows it opens a console')
-      await longPress(p, context, pill(p))
+      assert.equal(await opener(p).getAttribute('target'), null, 'a phone opens Claude in place so iOS can hand it to the app')
+      assert.equal(await opener(p).evaluate(el => getComputedStyle(el).userSelect), 'none', 'the held console is a picker anchor, not text')
+      await longPress(p, context, opener(p))
       assert.deepEqual(await items(p).locator('.kbn-conversation-label').allTextContents(), ['Open in Claude browser', 'Open in Rex'])
       assert.equal(await items(p).nth(1).getAttribute('href'), 'shortcuts://run-shortcut?name=Rex', 'Rex for iOS opens through its Shortcut')
-      await shot(p, 'phone-reader-pill-picker')
+      await shot(p, 'phone-console-picker')
       await p.keyboard.press('Escape')
       await p.goto(base)
       await p.locator('.kbn-viewtabs-settings').click()

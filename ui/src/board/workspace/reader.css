@@ -49,18 +49,6 @@
 .ws-return, .ws-channel-title { font: var(--type-label)/var(--ws-control-height) var(--font-serif); letter-spacing: 0; white-space: nowrap; }
 .ws-channel-title { color: var(--ws-ink); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ws-nav-trail { display: flex; min-width: 0; }
-.ws-head-worker { flex: none; display: flex; }
-.ws-head-worker[hidden] { display: none; }
-/* The console prompt marks a plate that opens the worker's conversation. */
-.ws-head-worker .ws-worker-console { margin-left: 6px; font: 600 var(--type-meta)/var(--leading-solid) var(--font-mono); color: var(--ws-ink-muted); }
-.ws-head-worker .kbn-card-worker:hover .ws-worker-console { color: inherit; }
-/* The top bar's worker dot is the card's own pill, bare. */
-.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { border: 0; background: transparent; }
-/* In the reader the worker state is mono capitals and the dot takes the room's own pigments. */
-.ws-reader .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-machine); }
-.ws-reader .kbn-card-worker[data-turn='idle'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
-.ws-reader .kbn-card-worker[data-turn='question'] .ws-worker-dot { --worker-dot: var(--ws-you); }
-.ws-reader .kbn-card-worker:is([data-turn='none'], [data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked']) .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
 .ws-stage-column { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .ws-stage {
   /* Pages clip at the stage's sides; their shadows still fall below it. */
@@ -172,14 +160,8 @@
   .ws-page.ws-receded { transform: none; opacity: 1; }
   .ws-labelbar { display: none; }
   .ws-media-poster { inset: 0; }
-  /* The top bar's right end: the worker's dot and console prompt, in a full target. */
+  /* The top bar's right end: the document actions. */
   .ws-nav-trail { gap: 0; align-self: center; }
-  .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { min-width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0 8px; justify-content: center; align-items: center; }
-  .ws-head-worker .ws-worker-console { font-size: var(--type-row); color: var(--ws-ink); }
-  /* The state word stays for assistive technology, unseen. */
-  .ws-head-worker .ws-worker-state { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .ws-head-worker .ws-worker-elapsed { display: none; }
-  .ws-head-worker .ws-worker-dot { position: static; translate: none; width: 9px; height: 9px; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); align-items: center; gap: 0; }
   /* The back destination truncates inside a full-height touch target, leaving room for the title. */
   .ws-return { display: inline-flex; align-items: center; gap: 5px; min-width: var(--ws-phone-target); max-width: calc(100vw / 3); height: var(--ws-phone-target); flex: 0 1 auto; padding: 0 6px; color: var(--ws-ink) !important; }
@@ -194,10 +176,6 @@
   /* A wide table scrolls inside itself, so the page keeps its width and its swipe. */
   .ws-content .kbn-detail-prose table { display: block; width: max-content; max-width: 100%; overflow-x: auto; }
   .ws-menu-item { min-height: var(--ws-phone-target); }
-}
-/* Under a finger the head's worker control is a full target, as the pill was. */
-@media (pointer: coarse) {
-  .ws-navbar .ws-head-worker .kbn-card-worker { min-height: var(--ws-phone-target); }
 }
 @media (prefers-reduced-motion: reduce) {
   .ws-track, .ws-page { transition: none !important; }
