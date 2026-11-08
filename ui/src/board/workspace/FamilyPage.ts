@@ -247,7 +247,10 @@ export class FamilyPage {
     const row = el('div', cls); row.setAttribute('role', 'treeitem'); row.tabIndex = -1
     const title = el('div', 'fp-title')
     title.append(markSvg('fp-mark', 'working'), el('span', 'fp-name'), el('span', 'fp-word'), el('span', 'fp-docs'), el('span', 'fp-verbs'), el('span', 'fp-meta'))
-    row.append(title, el('p', 'fp-note'), el('span', 'fp-count'), el('div', 'fp-files'), el('div', 'fp-doc'))
+    // The row's own lines, which the worker's rail runs beside; what it holds unfolds below.
+    const line = el('div', 'fp-line')
+    line.append(title, el('p', 'fp-note'), el('span', 'fp-count'))
+    row.append(line, el('div', 'fp-files'), el('div', 'fp-doc'))
     return row
   }
   /** A thread's row: one mark, the state its section says; its slug, the name in its tooltip as on the Desk; what it holds; its verbs; its last move at the very right; below, what it came to or asks and how many threads it holds. */

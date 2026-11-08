@@ -610,8 +610,9 @@ export class Workspace {
   private proseRevision(state: ChannelState): string {
     return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.shuttleRole, state.card.shuttleSeat, holdsRevision(this.holds(state)), state.error, state.loaded, state.metadataKnown])
   }
-  private drawProse(state: ChannelState): HTMLElement {
+  private drawProse(state: ChannelState, embedded = false): HTMLElement {
     return buildFiberProse(state.card, state.channel, {
+      embedded,
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title, owner?: string) => this.openFile(path, title, owner),
@@ -629,7 +630,7 @@ export class Workspace {
     const file = parseDocKey(doc)
     if (!file) {
       const state = this.ensure(card)
-      const draw = (): void => { box.replaceChildren(this.drawProse(state)) }
+      const draw = (): void => { box.replaceChildren(this.drawProse(state, true)) }
       draw()
       if (!state.loaded) void this.load(state).then(draw)
       return { el: box, dispose: () => {} }

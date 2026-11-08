@@ -32,18 +32,11 @@
 @media (prefers-reduced-motion: reduce) { .ws-verdict-undo, .ws-verdict-undo[data-fresh] { animation: none; } }
 
 .ws-verdict-word { color: var(--verdict-ink); }
-/* The fiber page's status line: the kicker, then the roles, which give way
-   when the line runs out. The kicker's box is trimmed to its small capitals,
-   so the line centres on its glyphs. */
-.ws-fiber-prose .ws-prose-header { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
-.ws-fiber-prose .ws-prose-status { flex: none; text-box: trim-both ex alphabetic; }
-/* The constitution's office, left of the pill and in its register: mono capitals,
-   muted, a middot between two, cut with an ellipsis when the line runs out:
-   they give way, so a worker arriving never pushes the verdicts off the line.
-   Each opens its role's page; the link firms under the pointer the way the
+/* The constitution's office: muted small capitals, a middot between two, cut
+   with an ellipsis when the line runs out. Each opens its role's page; the link firms under the pointer the way the
    pill does, with no underline at rest. */
 .ws-fiber-prose .ws-fiber-roles {
-  flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-box: trim-both cap alphabetic;
+  flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
 }
 .ws-fiber-roles .ws-fiber-role + .ws-fiber-role::before { content: '·'; margin-inline: var(--ws-small-gap); }
@@ -55,7 +48,5 @@
 .ws-fiber-acts .kbn-ctl-verdict[hidden] { display: none; }
 .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-verdict { gap: 6px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  /* When the kicker and the roles outgrow the line, the roles take a line of their own. */
-  .ws-fiber-prose .ws-prose-header { flex-wrap: wrap; }
   .ws-fiber-acts .kbn-ctl-verdict { gap: var(--ws-small-gap); }
 }

@@ -9,7 +9,8 @@
 .fp-row { --fp-indent: calc(var(--fp-level, 0) * 16px); position: relative; padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + var(--fp-indent)); cursor: pointer; outline: none; }
 .fp-row[data-selected]:not(.fp-head) { background: var(--ws-hover); }
 .fp-row:focus-visible, .fp-aside:focus-visible { outline: 1px solid var(--ws-hairline); outline-offset: -1px; }
-.fp-row[data-worker]::before { content: ''; position: absolute; top: 5px; bottom: 5px; left: calc(var(--fp-gutter) + var(--fp-indent) - 8px); width: 2px; border-radius: 1px; background: var(--fm-tone); }
+.fp-line { position: relative; }
+.fp-row[data-worker] > .fp-line::before { content: ''; position: absolute; top: 1px; bottom: 1px; left: -8px; width: 2px; border-radius: 1px; background: var(--fm-tone); }
 .fp-title { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto 84px 4ch; grid-template-areas: 'mark name word docs verbs meta'; align-items: baseline; column-gap: 8px; font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
 .fp-mark { grid-area: mark; align-self: center; width: 10px; height: 10px; overflow: visible; }
 .fp-name { grid-area: name; min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); font: 500 var(--type-row)/var(--leading-tight) var(--font-mono); }
@@ -22,9 +23,9 @@
 .fp-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 1px 0 0 20px; overflow: hidden; color: var(--ws-ink-soft); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .fp-note[hidden], .fp-files[hidden] { display: none; }
 /* A thread row's outcome stays folded until the row is highlighted, at once, or hovered a moment. */
-.fp-row:not(.fp-head) > .fp-note { max-height: 0; margin-top: 0; transition: max-height .12s ease-out; }
-.fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-note { max-height: calc(2em * var(--leading-ui)); margin-top: 1px; }
-.fp-row:not(.fp-head):hover > .fp-note { max-height: calc(2em * var(--leading-ui)); margin-top: 1px; transition-delay: .3s; }
+.fp-row:not(.fp-head) > .fp-line > .fp-note { max-height: 0; margin-top: 0; transition: max-height .12s ease-out; }
+.fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line > .fp-note { max-height: calc(2em * var(--leading-ui)); margin-top: 1px; }
+.fp-row:not(.fp-head):hover > .fp-line > .fp-note { max-height: calc(2em * var(--leading-ui)); margin-top: 1px; transition-delay: .3s; }
 
 .fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; visibility: hidden; }
 .fp-row:not(.fp-head):is(:hover, :focus-within, [data-selected]) .fp-verbs { visibility: visible; }
@@ -71,4 +72,4 @@
   .fp-docs, .fp-word { justify-self: start; }
   .fp-chip, .fp-file { min-height: var(--ws-phone-target); }
 }
-@media (prefers-reduced-motion: reduce) { .fp-aside::before { transition: none; } .fp-row:not(.fp-head) > .fp-note { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .fp-aside::before { transition: none; } .fp-row:not(.fp-head) > .fp-line > .fp-note { transition: none; } }

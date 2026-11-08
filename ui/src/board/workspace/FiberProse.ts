@@ -6,7 +6,6 @@ import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import '../prose.css'
 import './fiber-prose.css'
 import type { Channel } from './documents.js'
-import { fiberPageKicker } from './fiberPageState.js'
 import { buildRoleLedger, roleSlug } from './RolePage.js'
 
 /** The outcome as the reading surface's lede, including math and references. */
@@ -98,6 +97,8 @@ export function buildFiberProse(
     /** On a role charter, the constitutions assigned to the office in Desk order. */
     holds?: KanbanCard[]
     onCard?: (card: KanbanCard) => void
+    /** Drawn under its own row on a constitution's page, which already shows its name and outcome. */
+    embedded?: boolean
   },
 ): HTMLElement {
   const scroller = document.createElement('div')
@@ -105,25 +106,24 @@ export function buildFiberProse(
   const article = document.createElement('article')
   article.className = 'ws-prose ws-fiber-prose kbn-detail-prose'
   article.dataset.part = 'prose'
+  // The title line: the name, then its office beside it. Unfolded under its
+  // own row, the row already names the fiber and says what it came to, so
+  // only the office stays.
   const header = document.createElement('header')
   header.className = 'ws-prose-header'
   header.dataset.part = 'fiber-header'
-  const kicker = card.status ? fiberPageKicker(card) : ''
-  if (kicker) {
-    const status = document.createElement('span')
-    status.className = 'ws-prose-status'
-    status.textContent = kicker
-    header.append(status)
+  if (!opts.embedded) {
+    const title = document.createElement('h1')
+    title.textContent = channel.name
+    title.dataset.part = 'fiber-title'
+    header.append(title)
   }
   // An office named like the fiber itself would only say the name twice.
   const kebab = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
   const roles = card.shuttleRole && kebab(card.shuttleRole) !== kebab(channel.name) ? roleChip(card.shuttleRole, opts) : null
   if (roles) header.append(roles)
-  const title = document.createElement('h1')
-  title.textContent = channel.name
-  title.dataset.part = 'fiber-title'
   const outcome = document.createElement('div')
-  const outcomeText = channel.outcome ?? card.outcome ?? ''
+  const outcomeText = opts.embedded ? '' : channel.outcome ?? card.outcome ?? ''
   outcome.innerHTML = ledeHtml(outcomeText)
   const body = document.createElement('div')
   body.className = 'ws-prose-body'
@@ -146,7 +146,7 @@ export function buildFiberProse(
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
   const slug = roleSlug(card)
   const ledger = slug ? buildRoleLedger(opts.holds ?? [], { onCard: opts.onCard ?? (() => {}) }) : null
-  article.append(header, title, ...(outcomeText.trim() ? [outcome] : []), ...(ledger ? [ledger] : []), body)
+  article.append(...(header.childElementCount ? [header] : []), ...(outcomeText.trim() ? [outcome] : []), ...(ledger ? [ledger] : []), body)
   scroller.append(article)
   return scroller
 }

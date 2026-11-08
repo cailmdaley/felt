@@ -1,10 +1,14 @@
-.ws-fiber-prose .ws-prose-header { border: 0; margin: 0 0 8px; padding: 0; font: var(--type-label)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-.ws-fiber-prose > h1 { font-size: var(--type-display); margin-bottom: 20px; }
+/* The title line: the name, then its office beside it on the name's baseline,
+   or below it when the line runs out. */
+.ws-fiber-prose .ws-prose-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--ws-small-gap) var(--ws-gap); border: 0; margin: 0 0 20px; padding: 0; }
+.ws-fiber-prose .ws-prose-header > h1 { flex: 0 1 auto; min-width: 0; margin: 0; font-size: var(--type-display); }
 .ws-fiber-prose .kbn-detail-lede { background: transparent; padding-block: 0; font-size: var(--type-title); line-height: var(--leading-tight); margin: 0 0 20px; }
 .ws-fiber-prose > .ws-prose-body { border-top: 1px solid var(--ws-hairline); padding-top: 20px; }
+/* Under its own row with no office to name, the body opens the document. */
+.ws-fiber-prose > .ws-prose-body:first-child { border-top: 0; padding-top: 0; }
 .ws-fiber-prose > .ws-dock { border: 0; margin: 0; padding-bottom: 20px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-fiber-prose > h1 { display: none; }
+  .ws-fiber-prose .ws-prose-header > h1 { display: none; }
 }
 /* A role charter's assigned constitutions, between the lede and the body.
    Captions share the status line's register (mono capitals, muted); each hold is a compact

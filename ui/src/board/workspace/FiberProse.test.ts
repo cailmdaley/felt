@@ -54,20 +54,19 @@ describe('fiber prose', () => {
     expect(pane.querySelector('button')).toBeNull()
   })
 
-  it('names no Desk column for a fiber without a shuttle block', () => {
-    for (const status of ['open', 'closed']) {
-      const note = { ...card, status, shuttleAgent: undefined, shuttleKind: undefined }
-      const pane = buildFiberProse(note, channel, { shuttleBase: '', onFiber: vi.fn(), onFile: vi.fn() })
-      expect(pane.querySelector('.ws-prose-status')).toBeNull()
-    }
+  it('drops the name and outcome under its own row, keeping the office', () => {
+    const pane = buildFiberProse({ ...card, shuttleRole: 'surveyor' }, channel, { shuttleBase: '', onFiber: vi.fn(), onFile: vi.fn(), embedded: true })
+    expect(pane.querySelector('h1')).toBeNull()
+    expect(pane.querySelector('.kbn-detail-lede')).toBeNull()
+    expect(pane.querySelector('header')?.textContent).toBe('surveyor')
+    expect(pane.querySelector('.ws-prose-body')?.textContent).toContain('See')
   })
 
-  it('shows status alone in the header and leaves documents to the tab strip', async () => {
+  it('heads the page with its name and no status, and leaves documents to the tab strip', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
     const onFiber = vi.fn(), onFile = vi.fn()
     const pane = buildFiberProse(card, channel, { shuttleBase: '', onFiber, onFile })
-    expect(pane.querySelector('header')?.textContent).toBe('In flight')
-    expect(pane.querySelector('.ws-prose-status')?.textContent).toBe('In flight')
+    expect(pane.querySelector('header')?.textContent).toBe('Task')
     expect(pane.querySelector('.ws-prose-agent, .ws-prose-host')).toBeNull()
     expect(pane.querySelector('h1')?.textContent).toBe('Task')
     expect(pane.querySelector('iframe')).toBeNull()
