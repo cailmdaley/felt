@@ -80,7 +80,7 @@ defmodule ShuttleWeb.BoardController do
     since_ms = div(System.system_time(:millisecond), minute) * minute - reach
     sessions = Composite.remote_entries(:sessions)
     commits = Composite.remote_entries(:commits)
-    own = Composite.own_host()
+    own = Shuttle.Poller.own_host_id()
 
     validator =
       {since_ms,
