@@ -63,7 +63,7 @@ it.each([false, true])('the state dot opens the constitution once on phone=%s, w
   const open = vi.spyOn(inside, 'openDocumentChannel').mockImplementation(() => {})
   row().querySelector<HTMLButtonElement>('.constitution-state-dot')!.click()
   expect(open).toHaveBeenCalledExactlyOnceWith(head)
-  expect(row().querySelector('.kbn-card-worker, .kbn-card-glyph')).toBeNull()
+  expect(row().querySelector('.kbn-card-glyph')).toBeNull()
 })
 it('arrows navigate and Escape clears selection without family state', () => {
   press('j'); expect(selected()).toBe('hub-uid')

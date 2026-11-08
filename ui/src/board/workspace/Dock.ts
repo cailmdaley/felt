@@ -641,8 +641,10 @@ export class Dock {
       const card = target(), route = this.conversationRoute(card)
       el.hidden = !route
       const href = route && !route.reopen ? route.destination.href : undefined
+      // One anchor serves every destination, so each paint starts from a bare link.
+      el.removeAttribute('href'); el.removeAttribute('target'); el.removeAttribute('rel')
       if (href) { linkDestination(el, href); el.removeAttribute('role') }
-      else { el.removeAttribute('href'); el.removeAttribute('target'); el.removeAttribute('rel'); el.setAttribute('role', 'button') }
+      else el.setAttribute('role', 'button')
       if (!route) return
       const who = slug(card)
       const label = route.reopen

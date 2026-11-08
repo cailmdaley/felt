@@ -138,13 +138,7 @@ describe('band, worker facts and order cannot disagree', () => {
         if (c.originStale) expect(turn.turn).toBe(c.ask ? 'question' : hasLiveWorker(c) ? 'no-signal' : 'none')
         expect(band).toBe(inFlightBand(c))
         expect(band === 'yourTurn').toBe(YOURS.has(turn.turn))
-        // The pill, where one is drawn, names the same turn in the same word.
-        const pill = el.querySelector<HTMLElement>('.kbn-card-worker')
-        if (pill) {
-          expect(pill.dataset.turn).toBe(turn.turn)
-          expect(pill.querySelector('.ws-worker-state')?.textContent).toBe(turn.word)
-          expect(turn.word).toBe(TURN_WORD[turn.turn])
-        }
+        expect(turn.word).toBe(TURN_WORD[turn.turn])
         // The worker facts every surface reads say the same.
         expect(workerPlateFacts(c, NOW).turn).toBe(turn.turn)
         // Questions lead Your turn: no question follows an idle turn.

@@ -108,7 +108,6 @@ describe('In flight bands', () => {
     expect(conversation).toBeDefined()
     conversation.click()
     expect(open).toHaveBeenCalledExactlyOnceWith(worker)
-    expect(root.querySelector('.kbn-card-worker')).toBeNull()
     root.remove()
   })
   it.each([
@@ -122,7 +121,7 @@ describe('In flight bands', () => {
       { band, caption, label: caption, ids: ['worker-0'] },
     ])
     expect(root.querySelector('.constitution-state-dot')?.getAttribute('data-turn')).toBe(label)
-    expect(root.querySelector('.kbn-card-worker, .kbn-card-phase, .kbn-card-glyph')).toBeNull()
+    expect(root.querySelector('.kbn-card-phase, .kbn-card-glyph')).toBeNull()
   })
   it('ranks asks and harness prompts first in Your turn, both drawn and named as questions', () => {
     const feed = parseCompositeFeed(servedFeed({

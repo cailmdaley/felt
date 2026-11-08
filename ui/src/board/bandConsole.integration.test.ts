@@ -48,6 +48,16 @@ describe("the band's console opens the conversation, as c does", () => {
     expect(opener.href).toBe('claude://claude.ai/code/session_test')
     expect(opener.getAttribute('role')).toBeNull()
   })
+  it('drops the new tab when the destination moves from the web to the app', () => {
+    const live = worker({ workerAgent: 'claude-opus', sessionLink: 'https://claude.ai/code/session_test' })
+    saveConversationOpening('browser')
+    const opener = consoleFor(live)
+    expect(opener.target).toBe('_blank')
+    saveConversationOpening('app'); dock.refreshConversationOpening()
+    expect(opener.href).toBe('claude://claude.ai/code/session_test')
+    expect(opener.hasAttribute('target')).toBe(false)
+    expect(opener.hasAttribute('rel')).toBe(false)
+  })
   it('opens the remembered destination through the keyboard entry point', () => {
     const live = worker({ workerAgent: 'claude-opus', sessionLink: 'https://claude.ai/code/session_test' })
     const opened: string[] = []
