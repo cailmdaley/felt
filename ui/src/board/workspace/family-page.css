@@ -21,7 +21,7 @@
 .fp-count { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 3px 0 0 20px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
 .fp-tally-mark { display: inline-flex; }
 .fp-tally-svg { width: 11px; height: 11px; overflow: visible; }
-.fp-tally-aside { margin-left: 3px; opacity: .7; }
+.fp-tally-more { margin-left: 3px; opacity: .7; }
 .fp-count:empty { display: none; }
 .fp-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 1px 0 0 20px; overflow: hidden; color: var(--ws-ink-soft); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .fp-note[hidden], .fp-files[hidden] { display: none; }

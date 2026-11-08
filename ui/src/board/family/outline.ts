@@ -18,29 +18,26 @@ export type Line =
   | { kind: 'aside'; key: string; owner: string; level: number; threads: MapThread[]; open: boolean }
 
 /** What a row says of the threads under it. */
-export interface Under { section: Section | undefined; from: MapThread | undefined; threads: number; asks: number; lastMove: number }
+export interface Under { section: Section | undefined; from: MapThread | undefined; lastMove: number }
 
 const rankOf = (section: Section | undefined): number => section === undefined ? SECTIONS.length : SECTIONS.indexOf(section)
 const own = (thread: MapThread): Section | undefined => (SECTIONS as readonly string[]).includes(thread.tone) ? thread.tone as Section : undefined
 
 /**
  * Each thread's standing with everything under it: the most urgent section at
- * or below it and the thread that puts it there, how many threads it holds and
- * how many of those ask something of the human, and its newest move. A thread
+ * or below it and the thread that puts it there, and its newest move. A thread
  * whose whole subtree is set aside has no section.
  */
 export function underAll(model: FamilyModel): ReadonlyMap<string, Under> {
   const all = new Map<string, Under>()
   const walk = (thread: MapThread): Under => {
-    let section = own(thread), from = section ? thread : undefined, threads = 0, asks = 0, lastMove = thread.lastMove
+    let section = own(thread), from = section ? thread : undefined, lastMove = thread.lastMove
     for (const key of thread.children) {
-      const kid = model.threads.get(key)!, below = walk(kid)
-      threads += 1 + below.threads
-      asks += (needsHuman(kid) ? 1 : 0) + below.asks
+      const below = walk(model.threads.get(key)!)
       lastMove = Math.max(lastMove, below.lastMove)
       if (rankOf(below.section) < rankOf(section)) { section = below.section; from = below.from }
     }
-    const under = { section, from, threads, asks, lastMove }
+    const under = { section, from, lastMove }
     all.set(thread.key, under)
     return under
   }
@@ -57,21 +54,22 @@ export function underAll(model: FamilyModel): ReadonlyMap<string, Under> {
  * row lists its own threads beneath it the same way, without dividers.
  */
 /**
- * Everything under a thread at a glance: one section per live descendant, most
- * urgent first, and how many are set aside.
+ * The live threads under a thread at a glance: one section per live
+ * descendant, most urgent first, and how many of them ask something of the
+ * human. Threads set aside (resting, drafts, seats, archived) are not counted.
  */
-export function tally(model: FamilyModel, key: string): { live: Section[]; aside: number } {
+export function tally(model: FamilyModel, key: string): { live: Section[]; asks: number } {
   const live: Section[] = []
-  let aside = 0
+  let asks = 0
   const walk = (thread: MapThread): void => {
     for (const kid of thread.children.map(child => model.threads.get(child)!)) {
       const section = own(kid)
-      if (section) live.push(section); else aside += 1
+      if (section) { live.push(section); if (needsHuman(kid)) asks += 1 }
       walk(kid)
     }
   }
   walk(model.threads.get(key)!)
-  return { live: live.sort((a, b) => rankOf(a) - rankOf(b)), aside }
+  return { live: live.sort((a, b) => rankOf(a) - rankOf(b)), asks }
 }
 
 export function outline(model: FamilyModel, open: ReadonlySet<string>, under: ReadonlyMap<string, Under> = underAll(model)): Line[] {

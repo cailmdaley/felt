@@ -3,7 +3,7 @@ import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ThreadIndex } from '../threads.js'
 import { familyModel, type MapFeeds } from './model.js'
-import { opening, outline, underAll, type Line } from './outline.js'
+import { opening, outline, tally, underAll, type Line } from './outline.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
 const noFeeds: MapFeeds = { marks: () => undefined, files: () => [] }
@@ -29,9 +29,10 @@ const family = [root,
 it('lists the root\'s threads under one divider per kind of attention, each once, newest first within one, and the set-aside behind one fold at the end', () => {
   expect(said(outline(model(family), new Set()))).toEqual(['[question]', 'lead', '[turn]', 'turn-new', 'turn-old', '[review]', 'review', '[working]', 'working', '(2 aside)'])
 })
-it('puts a row in the section of the most urgent thing it holds, and counts what asks under it', () => {
+it('puts a row in the section of the most urgent thing it holds, and counts the live threads under it and what asks among them', () => {
   const m = model(family), under = underAll(m), lead = [...m.threads.values()].find(t => t.card.id === 'hub/lead')!
-  expect(under.get(lead.key)).toMatchObject({ section: 'question', threads: 2, asks: 1 })
+  expect(under.get(lead.key)).toMatchObject({ section: 'question' })
+  expect(tally(m, lead.key)).toEqual({ live: ['question'], asks: 1 })
   expect(under.get(lead.key)!.from!.card.id).toBe('hub/lead/asks')
   expect(under.get(m.root.key)!.section).toBe('question')
 })

@@ -12,9 +12,9 @@ import './family-page.css'
 
 /** A sent file that is a thread's tapestry or report when its fiber's directory holds none. */
 const LEAD_NAME = /^(tapestry|report)\.html$/i
-/** How the fold of threads set aside names each kind, one and many. */
 /** The most marks a row's tally draws before the rest join the count. */
 const TALLY_MARKS = 16
+/** How the fold of threads set aside names each kind, one and many. */
 const ASIDE_WORDS: Readonly<Record<string, readonly [string, string]>> = { drafts: ['draft', 'drafts'], seat: ['seat', 'seats'] }
 
 /** What the page reads, and how to ask for it again. */
@@ -245,23 +245,23 @@ export class FamilyPage {
     return row
   }
   /**
-   * What a row holds below it, drawn: a mark for each live thread in its
-   * section's shape and pigment, most urgent first, then a quiet count of the
-   * threads set aside. The words stay for screen readers and the tooltip.
+   * The live threads a row holds below it, drawn: a mark for each in its
+   * section's shape and pigment, most urgent first, the rest joining a quiet
+   * count. Threads set aside are not counted. The words stay for screen
+   * readers and the tooltip.
    */
   private fillTally(count: HTMLElement, key: string): void {
-    const { threads, asks } = this.under.get(key)!
-    const words = !threads ? '' : asks ? `${asks} of ${threads} ask` : `${threads} ${threads === 1 ? 'thread' : 'threads'}`
-    const { live, aside } = tally(this.model!, key)
-    const shape = JSON.stringify([live, aside])
+    const { live, asks } = tally(this.model!, key)
+    const words = !live.length ? '' : asks ? `${asks} of ${live.length} ask` : `${live.length} ${live.length === 1 ? 'thread' : 'threads'}`
+    const shape = JSON.stringify(live)
     count.title = words
     count.setAttribute('aria-label', words)
     if (count.dataset.shape === shape) return
     count.dataset.shape = shape
     const shown = live.slice(0, TALLY_MARKS)
     const marks = shown.map(section => { const mark = el('span', 'fp-tally-mark'); mark.dataset.standing = section; mark.append(markSvg('fp-tally-svg', section, 3.6)); return mark })
-    const more = live.length - shown.length + aside
-    count.replaceChildren(...marks, ...(more ? [el('span', 'fp-tally-aside', `+${more}`)] : []))
+    const more = live.length - shown.length
+    count.replaceChildren(...marks, ...(more ? [el('span', 'fp-tally-more', `+${more}`)] : []))
   }
   private makeRow(cls: string): HTMLElement {
     const row = el('div', cls); row.setAttribute('role', 'treeitem'); row.tabIndex = -1

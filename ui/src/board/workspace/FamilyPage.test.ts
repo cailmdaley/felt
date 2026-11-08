@@ -62,6 +62,14 @@ describe('the page', () => {
     expect(tally.getAttribute('aria-label')).toBe('1 of 1 ask')
     expect([...tally.querySelectorAll<HTMLElement>('.fp-tally-mark')].map(mark => mark.dataset.standing)).toEqual(['turn'])
   })
+  it('counts only the live threads under a row, never those set aside', () => {
+    const archived = card({ id: 'hub/mid/old', name: 'Old', orchestrator: 'hub/mid', status: 'closed', tempered: true, createdAt: when(60), closedAt: when(30) })
+    const { family } = made({ known: [...cards, archived] })
+    const tally = row(family, 'Mid').querySelector<HTMLElement>('.fp-count')!
+    expect(tally.getAttribute('aria-label')).toBe('1 of 1 ask')
+    expect(tally.textContent).toBe('')
+    expect(tally.querySelectorAll('.fp-tally-mark')).toHaveLength(1)
+  })
   it('holds a lone constitution as its head alone, unfolded', async () => {
     const lone = card({ id: 'solo', status: 'active', shuttleKind: 'oneshot', sessionUuid: 's' })
     const family = new FamilyPage(conversations(), feeds, placeAt(lone), vi.fn())
