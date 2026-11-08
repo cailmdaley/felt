@@ -242,3 +242,28 @@ func TestHookIdleFollowsRotation(t *testing.T) {
 		t.Fatal("rotation not followed")
 	}
 }
+
+// Lines written to the old file between the watcher's last read and the
+// rename are read before the new file is.
+func TestEventTailDrainsTheRotatedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	writeEvents(t, path, hookEvent{Timestamp: 1, Type: "pre_tool_use", SessionID: "s"})
+	var seen []int64
+	observe := func(e hookEvent) { seen = append(seen, e.Timestamp) }
+	tail := eventTail{path: path}
+	defer tail.close()
+	if err := tail.read(observe); err != nil {
+		t.Fatal(err)
+	}
+	writeEvents(t, path, hookEvent{Timestamp: 2, Type: "stop", SessionID: "s"})
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	writeEvents(t, path, hookEvent{Timestamp: 3, Type: "session_end", SessionID: "s"})
+	if err := tail.read(observe); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 3 || seen[0] != 1 || seen[1] != 2 || seen[2] != 3 {
+		t.Fatalf("seen %v, want [1 2 3]", seen)
+	}
+}

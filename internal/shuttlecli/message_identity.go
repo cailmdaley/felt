@@ -10,13 +10,15 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
-// localMessageLedger reads owner-local provenance without calling back into the
-// daemon that shells this CLI for delivery. Remote rejection hints come from
-// the receiving owner, not a sender's potentially stale synchronized store.
+// localMessageLedger is the CLI's one reader of this host's session ledger. It
+// reads owner-local provenance without calling back into the daemon that
+// shells this CLI for delivery. Remote rejection hints come from the receiving
+// owner, not a sender's potentially stale synchronized store.
 func (a *app) localMessageLedger() []SessionProvenance {
-	path, _ := a.shuttleStatePath("SHUTTLE_SESSIONS_FILE", "sessions.jsonl")
+	path, _ := shuttle.SessionsFile(a.env)
 	if path == "" {
 		return nil
 	}

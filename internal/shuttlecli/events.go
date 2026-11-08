@@ -10,12 +10,12 @@ import (
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
-// This file is the Go half of the host-local state contract: where the hook
-// stream and the commit ledger live, when they may be written, and how the
-// stream is bounded. It sits beside shuttle_stores.go as a "mirror the Elixir
-// resolver in Go" module — the daemon reads these files
-// (daemon/lib/shuttle/event_stream.ex, daemon/lib/shuttle/commit_ledger.ex), `shuttle hook event` and
-// `shuttle hook commit` write them, and the two sides must never disagree about the paths.
+// This file is the writer's half of the host-local state contract: when the
+// hook stream and the commit ledger may be written, and how the stream is
+// bounded. shuttle.EventsFile and shuttle.CommitsFile name the files; the
+// daemon reads them (daemon/lib/shuttle/event_stream.ex,
+// daemon/lib/shuttle/commit_ledger.ex), and `shuttle hook event` and
+// `shuttle hook commit` write them.
 
 const (
 	// eventsDefaultMaxBytes bounds the live stream. On rollover the file is
@@ -29,37 +29,8 @@ const (
 	eventsLockSuffix = ".lock"
 )
 
-// shuttleStatePath resolves one host-local state file the way the Elixir side
-// resolves it — an explicit env var, else the data directory, else ~/.shuttle:
-//
-//	$<envVar> → <shuttle.DataDir(a.env)>/<leaf>
-//
-// explicit reports whether the env var named the path — an explicit path is
-// explicit intent, so it also overrides the write gate below. The path is ""
-// when the data directory cannot be resolved (no home to expand against).
-func (a *app) shuttleStatePath(envVar, leaf string) (path string, explicit bool) {
-	if v := strings.TrimSpace(a.env.Getenv(envVar)); v != "" {
-		return v, true
-	}
-	dir, err := shuttle.DataDir(a.env)
-	if err != nil {
-		return "", false
-	}
-	return filepath.Join(dir, leaf), false
-}
-
-// eventsFilePath mirrors Shuttle.EventStream.default_events_file/0 exactly.
-func (a *app) eventsFilePath() (path string, explicit bool) {
-	return a.shuttleStatePath("SHUTTLE_EVENTS_FILE", "events.jsonl")
-}
-
-// commitsFilePath mirrors Shuttle.CommitLedger.default_path/0 exactly — the
-// same resolver as the event stream, one leaf over.
-func (a *app) commitsFilePath() (path string, explicit bool) {
-	return a.shuttleStatePath("SHUTTLE_COMMITS_FILE", "commits.jsonl")
-}
-
-// shuttleSink applies the write gate to a resolved state path.
+// shuttleSink applies the write gate to a resolved state path. An explicit
+// path (the env var named it) also overrides the gate.
 //
 // The gate is the daemon's own state directory: write only when the file's
 // parent already exists, and never create it. That directory is created by
@@ -94,14 +65,14 @@ func (a *app) eventsSink() (string, bool) {
 	if strings.EqualFold(strings.TrimSpace(a.env.Getenv("SHUTTLE_EVENTS")), "off") {
 		return "", false
 	}
-	return shuttleSink(a.eventsFilePath())
+	return shuttleSink(shuttle.EventsFile(a.env))
 }
 
 // commitsSink resolves the commit ledger path under the same gate. The state
 // directory is the only switch here: the ledger has no stream to silence, and
 // a host without ~/.shuttle acquires no file.
 func (a *app) commitsSink() (string, bool) {
-	return shuttleSink(a.commitsFilePath())
+	return shuttleSink(shuttle.CommitsFile(a.env))
 }
 
 // eventsMaxBytes is the rollover threshold, overridable by

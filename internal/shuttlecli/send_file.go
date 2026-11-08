@@ -1,8 +1,6 @@
 package shuttlecli
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -122,23 +120,15 @@ func (a *app) sendFiles(paths []string, session string) ([]string, error) {
 	return files, nil
 }
 
-// Use only this host's actual tmux association; cwd is not session identity.
+// The newest session the ledger binds to this host's tmux session; cwd is not
+// session identity.
 func (a *app) sendFileLedgerSession(tmux string) string {
-	if tmux == "" {
-		return ""
-	}
-	path, _ := a.shuttleStatePath("SHUTTLE_SESSIONS_FILE", "sessions.jsonl")
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	session := ""
-	for scanner.Scan() {
-		var row SessionProvenance
-		if json.Unmarshal(scanner.Bytes(), &row) == nil && row.Tmux == tmux && row.Session != "" {
+	if tmux == "" {
+		return session
+	}
+	for _, row := range a.localMessageLedger() {
+		if row.Tmux == tmux && row.Session != "" {
 			session = row.Session
 		}
 	}

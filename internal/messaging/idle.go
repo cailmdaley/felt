@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -89,11 +90,11 @@ func idleRecordPath(env *sysenv.Env, req Request) string {
 	return filepath.Join(idleDir(env), hex.EncodeToString(h[:16])+".json")
 }
 
+// eventsFile is the host's hook-event stream, the one this package's watchers
+// tail. The writer and the daemon resolve the same path.
 func eventsFile(env *sysenv.Env) string {
-	if path := env.Getenv("SHUTTLE_EVENTS_FILE"); path != "" {
-		return env.Resolve(path)
-	}
-	return filepath.Join(dataDir(env), "events.jsonl")
+	path, _ := shuttle.EventsFile(env)
+	return path
 }
 
 // subscribeIdle records the subscription and starts its watcher. It never
@@ -319,85 +320,48 @@ type hookEvent struct {
 // background task becomes idle once the grace window passes with no further
 // activity for the session; any activity in the window cancels it.
 func watchHookIdle(ctx context.Context, path, sessionID string, offset int64) (IdleNotice, error) {
-	var f *os.File
-	defer func() {
-		if f != nil {
-			f.Close()
-		}
-	}()
-	var reader *bufio.Reader
-	var pending []byte
 	var candidate *hookEvent
 	var candidateSeen time.Time
 	// Codex stops do not count spawned agents; the stream does, as
 	// spawn_agent/followup_task tool calls less subagent_stop events.
 	children := 0
+	var exited *IdleNotice
+	observe := func(e hookEvent) {
+		if e.SessionID != sessionID || exited != nil {
+			return
+		}
+		switch e.Type {
+		case "session_end":
+			exited = &IdleNotice{State: NoticeExited, FinishedAt: time.UnixMilli(e.Timestamp)}
+		case "stop":
+			if e.BackgroundTasks == 0 {
+				ev := e
+				candidate, candidateSeen = &ev, time.Now()
+			} else {
+				candidate = nil
+			}
+		case "subagent_stop":
+			children--
+		case "notification":
+		case "post_tool_use":
+			if e.Tool == "spawn_agent" || e.Tool == "followup_task" {
+				children++
+			}
+			candidate = nil
+		default:
+			candidate = nil
+		}
+	}
+	tail := eventTail{path: path, offset: offset}
+	defer tail.close()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if f == nil {
-			opened, err := os.Open(path)
-			if err == nil {
-				if info, statErr := opened.Stat(); statErr == nil && info.Size() < offset {
-					offset = 0
-				}
-				if _, err := opened.Seek(offset, io.SeekStart); err != nil {
-					opened.Close()
-					return IdleNotice{}, err
-				}
-				f, reader = opened, bufio.NewReaderSize(opened, 64<<10)
-			}
+		if err := tail.read(observe); err != nil {
+			return IdleNotice{}, err
 		}
-		for reader != nil {
-			chunk, err := reader.ReadSlice('\n')
-			pending = append(pending, chunk...)
-			if len(pending) > 1<<20 {
-				pending = nil
-			}
-			if err != nil {
-				if errors.Is(err, bufio.ErrBufferFull) {
-					continue
-				}
-				break
-			}
-			var e hookEvent
-			line := pending
-			pending = nil
-			if json.Unmarshal(line, &e) != nil || e.SessionID != sessionID {
-				continue
-			}
-			switch e.Type {
-			case "session_end":
-				return IdleNotice{State: NoticeExited, FinishedAt: time.UnixMilli(e.Timestamp)}, nil
-			case "stop":
-				if e.BackgroundTasks == 0 {
-					ev := e
-					candidate, candidateSeen = &ev, time.Now()
-				} else {
-					candidate = nil
-				}
-			case "subagent_stop":
-				children--
-			case "notification":
-			case "post_tool_use":
-				if e.Tool == "spawn_agent" || e.Tool == "followup_task" {
-					children++
-				}
-				candidate = nil
-			default:
-				candidate = nil
-			}
-		}
-		if f != nil && reader != nil {
-			// The stream rotates by rename; a new file at the path restarts
-			// the read from its beginning.
-			if cur, err := os.Stat(path); err == nil {
-				if held, err := f.Stat(); err == nil && !os.SameFile(cur, held) {
-					f.Close()
-					f, reader, offset, pending = nil, nil, 0, nil
-					continue
-				}
-			}
+		if exited != nil {
+			return *exited, nil
 		}
 		if candidate != nil && children <= 0 && time.Since(candidateSeen) >= idleHookGrace {
 			return IdleNotice{State: NoticeIdle, FinishedAt: time.UnixMilli(candidate.Timestamp)}, nil
@@ -407,6 +371,76 @@ func watchHookIdle(ctx context.Context, path, sessionID string, offset int64) (I
 			return IdleNotice{}, ctx.Err()
 		case <-ticker.C:
 		}
+	}
+}
+
+// eventTail follows the hook-event stream across rotations. Writers rotate by
+// renaming the live file under the stream's lock, so once the path names a new
+// file the held one is complete: it is drained, then the new file is read from
+// its start.
+type eventTail struct {
+	path    string
+	offset  int64
+	f       *os.File
+	reader  *bufio.Reader
+	pending []byte
+}
+
+func (t *eventTail) close() {
+	if t.f != nil {
+		t.f.Close()
+		t.f, t.reader, t.pending = nil, nil, nil
+	}
+}
+
+// read hands every complete line appended since the last read to fn.
+func (t *eventTail) read(fn func(hookEvent)) error {
+	if t.f == nil {
+		f, err := os.Open(t.path)
+		if err != nil {
+			return nil
+		}
+		if info, err := f.Stat(); err == nil && info.Size() < t.offset {
+			t.offset = 0
+		}
+		if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
+			f.Close()
+			return err
+		}
+		t.f, t.reader = f, bufio.NewReaderSize(f, 64<<10)
+	}
+	t.drain(fn)
+	cur, err := os.Stat(t.path)
+	if err != nil {
+		return nil
+	}
+	if held, err := t.f.Stat(); err == nil && !os.SameFile(cur, held) {
+		t.drain(fn)
+		t.close()
+		t.offset = 0
+		return t.read(fn)
+	}
+	return nil
+}
+
+func (t *eventTail) drain(fn func(hookEvent)) {
+	for {
+		chunk, err := t.reader.ReadSlice('\n')
+		t.pending = append(t.pending, chunk...)
+		if len(t.pending) > 1<<20 {
+			t.pending = nil
+		}
+		if err != nil {
+			if errors.Is(err, bufio.ErrBufferFull) {
+				continue
+			}
+			return
+		}
+		var e hookEvent
+		if json.Unmarshal(t.pending, &e) == nil {
+			fn(e)
+		}
+		t.pending = nil
 	}
 }
 

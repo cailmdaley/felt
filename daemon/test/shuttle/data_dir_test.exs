@@ -26,7 +26,7 @@ defmodule Shuttle.DataDirTest do
     end
   end
 
-  # The per-file overrides the Go CLI's `shuttleStatePath` is also held to, so
+  # The per-file overrides Go's `shuttle.StatePath` is also held to, so
   # the hook that writes events.jsonl (or a ledger) and the daemon that reads
   # it name the same file.
   test "Shuttle.state_path/2 resolves every shared override case" do

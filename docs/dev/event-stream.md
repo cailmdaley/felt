@@ -10,9 +10,11 @@ shuttle derives per-minute activity, per-session waiting state and the
 sent-files trail from its OWN agent hook-event stream. `shuttle hook event`
 (`internal/shuttlecli/hook_event.go`) appends one JSON line per hook event to
 `$SHUTTLE_EVENTS_FILE`, else `events.jsonl` under the data directory.
-`Shuttle.EventStream` is its one reader, and `internal/shuttlecli/events.go` mirrors
-`Shuttle.EventStream.default_events_file/0` so the writer and the reader cannot
-drift.
+`Shuttle.EventStream` is the daemon's one reader; outside the daemon, only an
+idle subscription's watcher (`internal/messaging/idle.go`) tails it.
+`shuttle.EventsFile` (`internal/shuttle/datadir.go`) is the Go resolver every
+writer and that watcher use, held to `Shuttle.EventStream.default_events_file/0`
+by the shared fixture below.
 
 **The data directory** is `$SHUTTLE_DATA_DIR`, else `~/.shuttle`; the variable
 is trimmed and a leading `~` or `~/` expands to the home directory, for every

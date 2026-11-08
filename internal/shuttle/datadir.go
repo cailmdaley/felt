@@ -33,3 +33,35 @@ func DataDir(env *sysenv.Env) (string, error) {
 	}
 	return home + v[1:], nil
 }
+
+// StatePath resolves one host-local state file the way the daemon's
+// Shuttle.state_path/2 does: $<envVar>, trimmed and otherwise taken as
+// written, else <DataDir>/<leaf>. explicit reports whether the env var named
+// the path. The path is "" when the data directory cannot be resolved.
+// daemon/test/fixtures/data_dir/cases.json holds both readers to it.
+func StatePath(env *sysenv.Env, envVar, leaf string) (path string, explicit bool) {
+	if v := strings.TrimSpace(env.Getenv(envVar)); v != "" {
+		return v, true
+	}
+	dir, err := DataDir(env)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(dir, leaf), false
+}
+
+// EventsFile is the hook-event stream, events.jsonl. Its rotated sibling is
+// the path plus ".1".
+func EventsFile(env *sysenv.Env) (string, bool) {
+	return StatePath(env, "SHUTTLE_EVENTS_FILE", "events.jsonl")
+}
+
+// SessionsFile is the daemon's session ledger, sessions.jsonl.
+func SessionsFile(env *sysenv.Env) (string, bool) {
+	return StatePath(env, "SHUTTLE_SESSIONS_FILE", "sessions.jsonl")
+}
+
+// CommitsFile is the commit ledger, commits.jsonl.
+func CommitsFile(env *sysenv.Env) (string, bool) {
+	return StatePath(env, "SHUTTLE_COMMITS_FILE", "commits.jsonl")
+}
