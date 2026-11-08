@@ -1,15 +1,15 @@
 // The Shuttle line, read from Shuttle's daemon: on the prompt's hint row
 // (placement `below`) or as a band above the prompt (`above`).
 //
-//   ⧉ ⌗ ☰ ⚉ 12 words… ✕
-//   ⧉ ⌗ ☰ ⚇ → voice-modes · 8 words… ✕
-//   ⧉ ⌗ ☰ ⚇ 📌 → voice-modes
+//   ⧉ ⌗ ☰ ⚇ 12 words… ✕
+//   ⧉ ⌗ ☰ ⚆ → voice-modes · 8 words… ✕
+//   ⧉ ⌗ ☰ ⚆ 📌 → voice-modes
 //   ⧉ ⌗ ☰ ⊘
 //   ⧉ ⌗ ☰ ○
 //
 // Pins at the left open this session's family page, tapestry and constitution
 // on the board. The audio glyph, drawn in the pins' register, says what the
-// mic hears: ⚉ sound arriving, ⚇ open and quiet, ⊘ muted, and a click toggles
+// mic hears: ⚇ sound arriving, ⚆ open and quiet, ⊘ muted, and a click toggles
 // the mute; ○ Listening off, and a click starts it as the board's Listen does.
 // `n words…` counts what was said but not yet sent, and `✕` drops it;
 // `→ <slug>` names the card words go to when it is not this one. A pinned
@@ -31,8 +31,8 @@ type Page = 'constitution' | 'tapestry' | 'files'
 const LIVE = 150 // words come here: the glyph and count move with speech
 const FAST = 500
 const SLOW = 5000
-// dBFS, with hysteresis: speech lights ⚉ above ON, and it holds until the
-// level falls below OFF, so room noise stays ⚇ and a phrase doesn't flicker.
+// dBFS, with hysteresis: speech lights ⚇ above ON, and it holds until the
+// level falls below OFF, so room noise stays ⚆ and a phrase doesn't flicker.
 const ON = -36
 const OFF = -44
 let sounding = false
@@ -126,7 +126,7 @@ function line($: EngineInterface, ui: { Box: any; Button: any; Text: any }) {
     const v = voice
     const db = v.level?.mic ?? -Infinity
     sounding = db > (sounding ? OFF : ON)
-    const glyph = v.paused ? '⊘' : sounding ? '⚉' : '⚇'
+    const glyph = v.paused ? '⊘' : sounding ? '⚇' : '⚆'
     const n = v.paused ? 0 : v.pending_words ?? 0
     const where = !v.follow && v.destination ? ` 📌 → ${slug(v.destination)}`
       : v.paused || mine(v.destination?.fiber_id) ? '' : ` → ${slug(v.destination)}`
