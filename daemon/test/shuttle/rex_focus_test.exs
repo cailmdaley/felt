@@ -658,6 +658,69 @@ defmodule Shuttle.RexFocusTest do
     refute_receive {:select, _, _, _}
   end
 
+  test "the frontmost listener replaces per-tick reads and closes with the watch", c do
+    parent = self()
+    listener = Path.join(c.tmp_dir, "listener.sh")
+    listener_pids = Path.join(c.tmp_dir, "listener-pids")
+    File.write!(listener, "#!/bin/sh\necho $$ >> \"$1\"\nexec sleep 300\n")
+    File.chmod!(listener, 0o700)
+    title = start_supervised!({Agent, fn -> {:ok, "task - project/task"} end}, id: :title)
+    other = %{"fiber" => "other/work", "family" => "other/work", "depth" => 0}
+
+    {watcher, active, _} =
+      watcher(c.tmp_dir, true,
+        poll_ms: 60_000,
+        front?: fn ->
+          send(parent, :front_read)
+          true
+        end,
+        front_events: fn -> {listener, [listener_pids]} end,
+        title: fn -> Agent.get(title, & &1) end,
+        bindings: fn -> {:ok, put_in(bindings(), ["bindings", "other"], other)} end,
+        fibers: fn ->
+          fibers() ++
+            [%{"id" => "other/work", "name" => "Work", "shuttle" => %{"host" => "test-host"}}]
+        end
+      )
+
+    tick = fn ->
+      send(watcher, :tick)
+      :sys.get_state(watcher)
+    end
+
+    became = fn bundle ->
+      port = :sys.get_state(watcher).front_port
+
+      line =
+        ~s(Notification: kLSNotifyBecameFrontmost time=+0.0s  dataRef={ "ApplicationType"="Foreground", "CFBundleIdentifier"="#{bundle}", "LSASN"=ASN:0x0-0x1: })
+
+      send(watcher, {port, {:data, {:eol, line}}})
+      tick.()
+    end
+
+    assert_receive {:selected, %{"fiber_id" => "project/task"}}
+    assert_receive :front_read
+    tick.()
+    tick.()
+    refute_receive :front_read, 30
+
+    became.("com.apple.Safari")
+    Agent.update(title, fn _ -> {:ok, "work - other/work"} end)
+    tick.()
+    refute_receive {:selected, _}, 30
+
+    became.("com.superlogical.rex")
+    assert_receive {:selected, %{"fiber_id" => "other/work"}}
+    refute_receive :front_read, 30
+
+    eventually(fn -> File.exists?(listener_pids) end)
+    [pid] = read_pids(listener_pids)
+    Agent.update(active, fn _ -> false end)
+    tick.()
+    assert :sys.get_state(watcher).front_port == nil
+    eventually(fn -> not alive?(pid) end)
+  end
+
   test "the frontmost read recognises Rex by bundle and counts a failed read as Rex" do
     Shuttle.Test.Env.put_app_env(:rex_title_observer, self())
 
@@ -811,6 +874,7 @@ defmodule Shuttle.RexFocusTest do
              name: nil,
              title: nil,
              front?: fn -> true end,
+             front_events: fn -> nil end,
              poll_ms: 25,
              active?: fn -> Agent.get(active, & &1) end,
              watched?: fn -> false end,

@@ -8,7 +8,8 @@ defmodule Shuttle.RexFocus do
   sessions, read through `~/.local/bin/shuttle-rex-title`, which holds the
   Accessibility grant so deploys can't invalidate it. Titles route only while
   Rex is the frontmost app, and Rex coming to the front re-asserts the worker
-  its title names; `lsappinfo` reports the frontmost app without a grant.
+  its title names. `lsappinfo` reports the frontmost app without a grant: one
+  read when the watch begins, then its `listen` stream of frontmost changes.
   Other hosts, and macOS without that grant, use Rex's per-session
   active-window events, for voice alone.
 
@@ -23,9 +24,10 @@ defmodule Shuttle.RexFocus do
   """
   use GenServer
 
-  # The stdin reader owns the CLI's lifetime even if the BEAM exits without
-  # running terminate/2. Rex events exits on server disconnect; wait then reaps
-  # the reader too. This wrapper never starts or stops the Rex server.
+  # The stdin reader owns a streaming CLI's lifetime (Rex events, the frontmost
+  # listener) even if the BEAM exits without running terminate/2. Rex events
+  # exits on server disconnect; wait then reaps the reader too. This wrapper
+  # never starts or stops the Rex server.
   @stream """
   exec 2>/dev/null 3<&0
   "$@" 3<&- &
@@ -49,6 +51,9 @@ defmodule Shuttle.RexFocus do
       discard: false,
       title: Keyword.get(opts, :title, if(Shuttle.Rex.macos?(), do: &read_title/0)),
       front?: Keyword.get(opts, :front?, &rex_front?/0),
+      front_events: Keyword.get(opts, :front_events, &front_events/0),
+      front: nil,
+      front_port: nil,
       following: false,
       ticks: 0,
       slow_every: Keyword.get(opts, :slow_every, 8),
@@ -96,6 +101,7 @@ defmodule Shuttle.RexFocus do
       else
         state
         |> stop_stream()
+        |> stop_front()
         |> warning(nil)
         |> Map.merge(%{
           last_front: nil,
@@ -110,6 +116,18 @@ defmodule Shuttle.RexFocus do
     Process.send_after(self(), :tick, state.poll_ms)
     {:noreply, state}
   end
+
+  def handle_info({port, {:data, {:eol, line}}}, %{front_port: port} = state) do
+    if String.contains?(line, "kLSNotifyBecameFrontmost"),
+      do: {:noreply, %{state | front: line =~ ~s("CFBundleIdentifier"="com.superlogical.rex)}},
+      else: {:noreply, state}
+  end
+
+  def handle_info({port, {:exit_status, _}}, %{front_port: port} = state),
+    do: {:noreply, %{state | front_port: nil, front: nil}}
+
+  def handle_info({:EXIT, port, _}, %{front_port: port} = state),
+    do: {:noreply, %{state | front_port: nil, front: nil}}
 
   def handle_info({port, {:data, {:noeol, _}}}, %{port: port} = state),
     do: {:noreply, %{state | discard: true}}
@@ -139,7 +157,7 @@ defmodule Shuttle.RexFocus do
   def handle_info({:EXIT, port, _}, state) when is_port(port), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, state), do: state |> stop_stream() |> warning(nil)
+  def terminate(_reason, state), do: state |> stop_stream() |> stop_front() |> warning(nil)
 
   @doc "Delivers `{:rex_focus, target}` to the calling process each time Rex's worker is chosen."
   def subscribe, do: Registry.register(Shuttle.Voice.Streams, :rex_focus, nil)
@@ -397,7 +415,8 @@ defmodule Shuttle.RexFocus do
   defp poll_title(%{title: nil} = state), do: state
 
   defp poll_title(state) do
-    front = state.front?.()
+    state = track_front(state)
+    front = state.front
 
     if state.title_ready and not front and rem(state.ticks, state.slow_every) != 0,
       do: %{state | last_front: false},
@@ -533,28 +552,48 @@ defmodule Shuttle.RexFocus do
 
   defp start_stream(state) do
     case state.command.() do
-      nil ->
-        state
-
-      {bin, args} ->
-        port =
-          Port.open({:spawn_executable, Shuttle.Env.find_executable("sh")}, [
-            :binary,
-            :exit_status,
-            :use_stdio,
-            :hide,
-            {:line, 65_536},
-            {:args, ["-c", @stream, "sh", bin | args]}
-          ])
-
-        %{state | port: port, discard: false}
+      nil -> state
+      {bin, args} -> %{state | port: open_stream(bin, args), discard: false}
     end
   end
 
   defp stop_stream(%{port: nil} = state), do: state
 
   defp stop_stream(state) do
-    if Port.info(state.port), do: Port.close(state.port)
+    close(state.port)
     %{state | port: nil, discard: false}
   end
+
+  # The frontmost app is read once as its listener starts, then follows the
+  # listener's lines. Without a listener it is read on every tick.
+  defp track_front(%{front_port: port} = state) when is_port(port), do: state
+
+  defp track_front(state) do
+    case state.front_events.() do
+      nil -> %{state | front: state.front?.()}
+      {bin, args} -> %{state | front_port: open_stream(bin, args), front: state.front?.()}
+    end
+  end
+
+  defp stop_front(%{front_port: nil} = state), do: %{state | front: nil}
+
+  defp stop_front(state) do
+    close(state.front_port)
+    %{state | front_port: nil, front: nil}
+  end
+
+  defp front_events, do: {"/usr/bin/lsappinfo", ["listen", "+becameFrontmost", "forever"]}
+
+  defp open_stream(bin, args) do
+    Port.open({:spawn_executable, Shuttle.Env.find_executable("sh")}, [
+      :binary,
+      :exit_status,
+      :use_stdio,
+      :hide,
+      {:line, 65_536},
+      {:args, ["-c", @stream, "sh", bin | args]}
+    ])
+  end
+
+  defp close(port), do: if(Port.info(port), do: Port.close(port))
 end
