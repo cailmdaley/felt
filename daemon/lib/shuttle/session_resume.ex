@@ -39,6 +39,13 @@ defmodule Shuttle.SessionResume do
   every "is this a worker?" predicate (`Shuttle.Dispatcher.shuttle_session?/1`,
   the poller's session listing) ignores it and it cannot collide with the
   fiber's worker session.
+
+  ## The fiber's conversation
+
+  Reopening a card's own last session (`c` on a card with no worker) is still
+  that fiber's conversation, so it is addressed as one: the terminal exports
+  `SHUTTLE_FIBER_PATH` as a worker's does, and `reopened/1` hands delivery
+  (`Shuttle.Delivery`, voice) the open conversation while no worker runs.
   """
 
   require Logger
@@ -80,11 +87,14 @@ defmodule Shuttle.SessionResume do
          {:ok, cwd} <- work_dir(harness, path) do
       agent = agent_for(session, harness, runner, opts)
 
+      fiber = fiber_of(session, opts)
+
       {:ok,
        %{
          session: session,
          tmux: tmux_name(session),
-         fiber: fiber_of(session, opts),
+         fiber: fiber && fiber.slug,
+         fiber_path: fiber && fiber.path,
          harness: harness,
          agent: agent.id,
          cwd: cwd,
@@ -166,29 +176,73 @@ defmodule Shuttle.SessionResume do
     :exit, _ -> []
   end
 
-  # The fiber that ran the session names its Rex session, tab and pane: the
-  # ledger's record, else the fiber whose runtime last held this session.
-  defp fiber_of(session, opts) do
-    case SessionLedger.latest_for_session(session,
-           path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
-         ) do
-      %{"fiber" => fiber} when is_binary(fiber) and fiber != "" ->
-        fiber
+  @doc """
+  The fiber's conversation a human reopened: its last session
+  (`shuttle.runtime.session_uuid`) running in `resume-<uuid>` on this host.
+  The shape of `Shuttle.Poller.live_worker/1`, so delivery addresses it as it
+  would a worker; `nil` when that terminal is not running.
 
-      _ ->
-        case Shuttle.Poller.cached_fiber_documents(
-               felt_stores: Shuttle.FeltStores.configured_stores()
-             ) do
-          {:ok, %{fibers: entries}} ->
-            Enum.find_value(entries, fn %{fiber: row} ->
-              if get_in(row, ["shuttle", "runtime", "session_uuid"]) == session,
-                do: row["slug"] || row["id"]
-            end)
+  Opts: `:runner` (default: the app's `:session_resume_runner`), and the
+  transcript roots `Shuttle.Transcript.path/2` takes.
+  """
+  @spec reopened(String.t(), keyword()) :: map() | nil
+  def reopened(fiber_id, opts \\ []) when is_binary(fiber_id) do
+    runner = Keyword.get_lazy(opts, :runner, &runner/0)
 
-          _ ->
-            nil
-        end
+    with %{fiber: fiber} <- Enum.find(fiber_entries(), &(fiber_id in identities(&1.fiber))),
+         session when is_binary(session) <- get_in(fiber, ["shuttle", "runtime", "session_uuid"]),
+         tmux = tmux_name(session),
+         :alive <- Terminal.status(runner, tmux),
+         path when is_binary(path) <- Transcript.path(session, opts),
+         harness when is_binary(harness) <- Transcript.harness_for(path, opts) do
+      %{session: tmux, session_uuid: session, cli: cli_for(harness)}
+    else
+      _ -> nil
     end
+  end
+
+  # The fiber that ran the session names its Rex session, tab and pane, and its
+  # document is the terminal's `SHUTTLE_FIBER_PATH`: the ledger's record, else
+  # the fiber whose runtime last held this session.
+  defp fiber_of(session, opts) do
+    ledger =
+      case SessionLedger.latest_for_session(session,
+             path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
+           ) do
+        %{"fiber" => fiber} when is_binary(fiber) and fiber != "" -> fiber
+        _ -> nil
+      end
+
+    entry =
+      Enum.find(fiber_entries(), fn %{fiber: row} ->
+        if ledger,
+          do: ledger in identities(row),
+          else: get_in(row, ["shuttle", "runtime", "session_uuid"]) == session
+      end)
+
+    cond do
+      entry -> %{slug: entry.fiber["slug"] || entry.fiber["id"], path: entry[:path]}
+      ledger -> %{slug: ledger, path: nil}
+      true -> nil
+    end
+  end
+
+  @doc "The runner a resume terminal is driven with."
+  def runner, do: Shuttle.Env.app(:session_resume_runner, Shuttle.Runner.Default)
+
+  defp identities(row), do: Enum.filter([row["uid"], row["id"], row["slug"]], &is_binary/1)
+
+  defp fiber_entries, do: Shuttle.Env.app(:session_resume_fibers, &cached_fibers/0).()
+
+  defp cached_fibers do
+    case Shuttle.Poller.cached_fiber_documents(
+           felt_stores: Shuttle.FeltStores.configured_stores()
+         ) do
+      {:ok, %{fibers: entries}} -> entries
+      _ -> []
+    end
+  catch
+    :exit, _ -> []
   end
 
   @doc "Whether a terminal or an uncertain observation holds this resume on the host."
@@ -248,7 +302,7 @@ defmodule Shuttle.SessionResume do
     #!/bin/bash
     trap 'rm -f "$0"' EXIT
 
-    #{snippets.env}#{Dispatcher.erts_scrub_block()}#{snippets.passthrough}#{snippets.wait_for_viewer}
+    #{snippets.env}#{Dispatcher.erts_scrub_block()}#{snippets.passthrough}#{fiber_path_export(plan)}#{snippets.wait_for_viewer}
     #{plan.command} || {
       status=$?
       echo ""
@@ -257,6 +311,11 @@ defmodule Shuttle.SessionResume do
     }
     """
   end
+
+  defp fiber_path_export(%{fiber_path: path}) when is_binary(path),
+    do: "export SHUTTLE_FIBER_PATH=#{Dispatcher.shell_single_quote(path)}\n"
+
+  defp fiber_path_export(_plan), do: ""
 
   # ── the agent ──────────────────────────────────────────────────────────────
 

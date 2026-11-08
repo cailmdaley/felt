@@ -321,6 +321,69 @@ defmodule Shuttle.SessionResumeTest do
     end
   end
 
+  describe "the fiber's own conversation" do
+    setup %{project: project} do
+      path = Path.join(project, "f.md")
+
+      Env.put_app_env(:session_resume_fibers, fn ->
+        [
+          %{
+            path: path,
+            fiber: %{
+              "uid" => "U",
+              "id" => "U",
+              "slug" => "f",
+              "shuttle" => %{"runtime" => %{"session_uuid" => @claude}}
+            }
+          }
+        ]
+      end)
+
+      {:ok, path: path}
+    end
+
+    test "a reopened session knows its fiber, as a worker does", %{path: path} do
+      assert {:ok, %{created: true}} = SessionResume.prepare(@claude, runner: Runner)
+
+      [{"tmux", args}] = Enum.filter(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
+      script = List.last(args)
+      assert File.read!(script) =~ "export SHUTTLE_FIBER_PATH='#{path}'"
+      File.rm(script)
+    end
+
+    test "is the fiber's live conversation while its terminal runs" do
+      assert SessionResume.reopened("f", runner: Runner) == nil
+
+      Runner.set_running(true)
+      tmux = "resume-" <> @claude
+
+      for id <- ["U", "f"] do
+        assert %{session: ^tmux, session_uuid: @claude, cli: "claude"} =
+                 SessionResume.reopened(id, runner: Runner)
+      end
+
+      assert SessionResume.reopened("other", runner: Runner) == nil
+    end
+
+    test "voice to it is warm: words are not dropped for want of a worker" do
+      Env.put_app_env(:voice_target_entries, fn -> [] end)
+      assert Shuttle.Voice.Target.cold?(%{"fiber_id" => "U", "origin" => nil})
+      Runner.set_running(true)
+      refute Shuttle.Voice.Target.cold?(%{"fiber_id" => "U", "origin" => nil})
+      assert Shuttle.Voice.Target.cold?(%{"fiber_id" => "U", "origin" => "elsewhere"})
+    end
+
+    test "live input is typed into its terminal instead of launching a worker" do
+      Runner.set_running(true)
+
+      assert {:input, {:ok, "resume-" <> @claude}} =
+               Shuttle.Delivery.deliver("U", "me: hello", live_input: true)
+
+      refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
+      assert Enum.any?(Runner.calls(), &match?({"tmux", ["paste-buffer" | _]}, &1))
+    end
+  end
+
   describe "Rex primary" do
     @describetag :tmp_dir
 

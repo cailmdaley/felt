@@ -1986,7 +1986,8 @@ defmodule Shuttle.Dispatcher do
   # POSIX single-quote a value for safe interpolation into the run script's
   # `export` line. Single-quoting suppresses every shell special char; an
   # embedded `'` is closed, escaped (`'\''`), and reopened.
-  defp shell_single_quote(value) do
+  @doc false
+  def shell_single_quote(value) do
     "'" <> String.replace(value, "'", "'\\''") <> "'"
   end
 

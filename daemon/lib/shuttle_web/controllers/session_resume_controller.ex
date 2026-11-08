@@ -43,7 +43,7 @@ defmodule ShuttleWeb.SessionResumeController do
   # The runner and the live-session source, injectable for tests.
   def prepare_opts do
     [
-      runner: Shuttle.Env.app(:session_resume_runner, Shuttle.Runner.Default),
+      runner: SessionResume.runner(),
       live_sessions: Shuttle.Env.app(:session_resume_live, &SessionResume.live_sessions/0)
     ]
   end
