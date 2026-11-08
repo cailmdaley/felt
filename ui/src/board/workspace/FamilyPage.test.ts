@@ -47,7 +47,7 @@ afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 describe('the page', () => {
   it('heads with the constitution and its outcome, then its threads under one divider per kind, the set-aside behind one fold', () => {
     const { family } = made()
-    expect(said(family)).toEqual(['hub', '[Questions]', 'Asked', '[Your turn]', 'Mid', 'Idle', '(1 archived · 1 draft)'])
+    expect(said(family)).toEqual(['hub', '[Questions]', 'Asked', '[Your turn]', 'Mid', 'Idle', '(1 draft · 1 archived)'])
     expect(family.el.querySelector('.fp-head .fp-note')!.textContent).toBe('The hub came to this.')
     expect(row(family, 'Asked').querySelector('.fp-note')!.textContent).toBe('Which one?')
     expect(row(family, 'Idle').querySelector('.fp-note')!.textContent).toBe('Needs a look')
@@ -61,6 +61,13 @@ describe('the page', () => {
     const tally = row(family, 'Mid').querySelector<HTMLElement>('.fp-count')!
     expect(tally.getAttribute('aria-label')).toBe('1 of 1 ask')
     expect([...tally.querySelectorAll<HTMLElement>('.fp-tally-mark')].map(mark => mark.dataset.standing)).toEqual(['turn'])
+  })
+  it('names the threads set aside on one fold at the end, resting first, then drafts and seats, archived last', () => {
+    const resting = card({ id: 'hub/r', name: 'Resting', orchestrator: 'hub', status: 'open', effectiveHorizon: 'stashed', createdAt: when(60) })
+    const discarded = card({ id: 'hub/x', name: 'Discarded', orchestrator: 'hub', status: 'closed', tempered: false, createdAt: when(70), closedAt: when(1) })
+    const { family } = made({ known: [...cards, resting, discarded] })
+    expect(said(family).at(-1)).toBe('(1 resting · 1 draft · 2 archived)')
+    expect(family.el.querySelector('.fp-aside')!.getAttribute('aria-expanded')).toBe('false')
   })
   it('counts only the live threads under a row, never those set aside', () => {
     const archived = card({ id: 'hub/mid/old', name: 'Old', orchestrator: 'hub/mid', status: 'closed', tempered: true, createdAt: when(60), closedAt: when(30) })

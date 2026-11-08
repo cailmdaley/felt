@@ -4,8 +4,9 @@ import { threadState } from '../threads.js'
 /** The kinds of attention a thread can ask for, most urgent first: the order of the rows and the words of the counts. */
 export const SECTIONS = ['question', 'blocked', 'turn', 'review', 'working', 'still'] as const
 export type Section = typeof SECTIONS[number]
-const ASIDE_SECTIONS = ['resting', 'drafts', 'roles', 'archived'] as const
-type AsideSection = typeof ASIDE_SECTIONS[number]
+/** The kinds of thread set aside, in the order their fold names and unfolds them: resting first, archived last. */
+export const ASIDE_SECTIONS = ['resting', 'drafts', 'roles', 'archived'] as const
+export type AsideSection = typeof ASIDE_SECTIONS[number]
 export const SECTION_WORD: Readonly<Record<Section | AsideSection, string>> = {
   question: 'Questions', blocked: 'Blocked', turn: 'Your turn', review: 'To review', working: 'Working', still: 'No worker',
   resting: 'Resting', drafts: 'Drafts', roles: 'Seats', archived: 'Archived',

@@ -1,10 +1,10 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { familyModel, type FamilyModel, type MapFeeds, type MapFile, type MapThread, type Standing } from '../family/model.js'
 import { htmlEl as el, markPath, markSvg, shortAgo } from '../family/drawing.js'
-import { SECTION_WORD, opening, outline, tally, underAll, type Line, type Under } from '../family/outline.js'
+import { ASIDE_SECTIONS, SECTION_WORD, opening, outline, tally, underAll, type AsideSection, type Line, type Under } from '../family/outline.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import type { Conversations } from '../conversationOpening.js'
-import { threadKey, type ThreadIndex } from '../threads.js'
+import { threadKey, threadState, type ThreadIndex } from '../threads.js'
 import { fiberKey, type DocKey } from './documents.js'
 import { slug } from '../threadOutline.js'
 import { headerLifecycleVerbsFor, iconVerb, type LifecycleVerb } from './lifecycleVerbs.js'
@@ -15,7 +15,9 @@ const LEAD_NAME = /^(tapestry|report)\.html$/i
 /** The most marks a row's tally draws before the rest join the count. */
 const TALLY_MARKS = 16
 /** How the fold of threads set aside names each kind, one and many. */
-const ASIDE_WORDS: Readonly<Record<string, readonly [string, string]>> = { drafts: ['draft', 'drafts'], seat: ['seat', 'seats'] }
+const ASIDE_WORDS: Readonly<Record<AsideSection, readonly [string, string]>> = {
+  resting: ['resting', 'resting'], drafts: ['draft', 'drafts'], roles: ['seat', 'seats'], archived: ['archived', 'archived'],
+}
 
 /** What the page reads, and how to ask for it again. */
 export interface FamilyFeeds extends MapFeeds {
@@ -233,9 +235,8 @@ export class FamilyPage {
     row.setAttribute('aria-level', String(line.level + 2))
     row.style.setProperty('--fp-level', String(line.level))
     if (line.kind === 'aside') {
-      const words = new Map<string, number>()
-      for (const thread of line.threads) words.set(thread.word, (words.get(thread.word) ?? 0) + 1)
-      row.querySelector('.fp-aside-words')!.textContent = [...words].map(([word, n]) => `${n} ${ASIDE_WORDS[word]?.[n === 1 ? 0 : 1] ?? word}`).join(' · ')
+      const counts = ASIDE_SECTIONS.map(section => [section, line.threads.filter(thread => threadState(thread.card) === section).length] as const)
+      row.querySelector('.fp-aside-words')!.textContent = counts.filter(([, n]) => n).map(([section, n]) => `${n} ${ASIDE_WORDS[section][n === 1 ? 0 : 1]}`).join(' · ')
       return row
     }
     this.fillThread(row, line.thread, line.section ?? 'aside', line.open)
