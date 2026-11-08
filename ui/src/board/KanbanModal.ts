@@ -98,6 +98,7 @@ import {
 } from './views/index.js'
 import { isTypingTarget } from './views/ViewRegistry.js'
 import { FiberSends } from './fiberSends.js'
+import { viewOfHash } from './workspace/route.js'
 import type { DocKey } from './workspace/documents.js'
 
 /** The message a thrown/rejected value carries, for a banner or an announce. */
@@ -404,11 +405,8 @@ export class KanbanModal {
     this.assembleChrome()
     this.phoneAudio.mount()
     host.append(this.container!)
-    const wanted = new URLSearchParams(window.location.search).get('view')
+    const wanted = new URLSearchParams(window.location.search).get('view') ?? viewOfHash(window.location.hash)
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
-    else if (window.location.hash.startsWith('#/board')) this.setView('board')
-    else if (window.location.hash === '#/chronicle') this.setView('chronicle')
-    else if (window.location.hash === '#/globe') this.setView('globe')
     this.keymapHelp = new KeymapHelp(
       () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'overview',
     )
@@ -752,12 +750,11 @@ export class KanbanModal {
    * Switch the page. Idempotent — re-selecting the active view is a no-op, so
    * a stray click or repeated hotkey never tears a view down and back up.
    */
-  private setView(wanted: BoardViewId, navigate = true, forceHome = false): void {
-    if (forceHome && wanted === 'desk' && this.workspace?.isActive) {
+  private setView(id: BoardViewId, navigate = true, forceHome = false): void {
+    if (forceHome && id === 'desk' && this.workspace?.isActive) {
       this.workspace.escapeHome()
       return
     }
-    const id = wanted
     // With the reader open the bar marks the view it came from: that tab, or
     // its key, closes the reader back to it; any other switches and closes.
     if (navigate && this.workspace?.isActive && id === this.activeViewId) {

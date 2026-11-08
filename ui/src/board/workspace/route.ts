@@ -27,7 +27,8 @@ function encode(value: string): string {
 function isOriginView(value: unknown): value is WorkspaceOriginView {
   return value === 'desk' || value === 'chronicle' || value === 'board' || value === 'globe'
 }
-function originFromHash(hash: string): WorkspaceOriginView | null {
+/** The board view a location hash addresses, or null for any other hash. */
+export function viewOfHash(hash: string): WorkspaceOriginView | null {
   if (hash === '#/desk') return 'desk'
   if (hash === '#/chronicle') return 'chronicle'
   if (hash === '#/globe') return 'globe'
@@ -38,6 +39,7 @@ function hashFromOrigin(view: WorkspaceOriginView): string {
   return view === 'board' ? OVERVIEW_HASH : `#/${view}`
 }
 
+/** Self-contained: the document bridge serializes it into each document's runtime. */
 export function parseRoute(hash: string): WorkspaceRoute | null {
   const OVERVIEW_HASH = '#/board'
   const decode = (value: string): string | null => { try { return decodeURIComponent(value) } catch { return null } }
@@ -165,7 +167,7 @@ export class WorkspaceHistory {
       this.depth = 0
       this.base = true
       this.baseHash = this.currentHash
-      this.routeOrigin = readRouteState(window.history.state)?.originView ?? originFromHash(this.currentHash) ?? this.routeOrigin
+      this.routeOrigin = readRouteState(window.history.state)?.originView ?? viewOfHash(this.currentHash) ?? this.routeOrigin
       return
     }
     this.current = route
@@ -211,7 +213,7 @@ export class WorkspaceHistory {
     this.depth = 0
     this.base = true
     this.baseHash = hash
-    this.routeOrigin = originFromHash(hash) ?? 'board'
+    this.routeOrigin = viewOfHash(hash) ?? 'board'
     this.currentHash = hash
     this.current = { kind: 'overview', hash }
     window.history.pushState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, pageLabel: undefined, back: undefined }), '', hash)
@@ -275,8 +277,8 @@ export class WorkspaceHistory {
       this.baseHash = route.kind === 'overview' ? hash : ''
     }
     this.routeOrigin = saved?.originView
-      ?? originFromHash(saved?.baseHash ?? '')
-      ?? originFromHash(hash)
+      ?? viewOfHash(saved?.baseHash ?? '')
+      ?? viewOfHash(hash)
       ?? (route.kind === 'channel' ? 'board' : this.routeOrigin)
   }
 
