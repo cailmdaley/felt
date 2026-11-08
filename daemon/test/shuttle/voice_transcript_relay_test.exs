@@ -153,7 +153,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
 
     assert text ==
-             "me: one phrase two phrases\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
+             "me: one phrase two phrases\n"
   end
 
   test "following to pin drops A's cold buffer even after global settings change", c do
@@ -235,7 +235,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert new =~ "new words"
 
     assert new ==
-             "me: new words\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:11Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
+             "me: new words\n"
 
     refute new =~ "room speech"
     refute new =~ "Cail's spoken words"
@@ -478,7 +478,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{text: text}}, 1_000
 
     assert text ==
-             "S2: Claude make this plot\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
+             "S2: Claude make this plot\n"
   end
 
   test "voice groups consecutive speakers without headers or timestamps", c do
@@ -504,18 +504,18 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert_receive {:delivery, %{text: first}}, 1_000
 
     assert first ==
-             "me: one two\nS2: three four\nme: five\n— shuttle transcript --since #{Shuttle.Voice.Transcript.local_time("2026-11-06T10:00:01Z")} --recorder #{Shuttle.RecorderRouter.own_host()}\n"
+             "me: one two\nS2: three four\nme: five\n"
 
     sync_tasks(c)
     record(c.path, "2026-11-06T10:10:05Z", "no timestamp, send")
     poll(c)
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert String.starts_with?(text, "me: no timestamp\n— shuttle transcript --since ")
+    assert text == "me: no timestamp\n"
     sync_tasks(c)
     record(c.path, "2026-11-06T10:20:06Z", "after silence, send")
     poll(c)
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert String.starts_with?(text, "me: after silence\n— shuttle transcript --since ")
+    assert text == "me: after silence\n"
   end
 
   test "a slow or failed voice destination does not hold a later target or retry forever", c do
@@ -1017,7 +1017,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     poll(c)
 
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
-    assert String.starts_with?(text, "me: check the plot\n— shuttle transcript --since ")
+    assert text == "me: check the plot\n"
 
     sync_tasks(c)
     refute_receive {:delivery, _}, 20
@@ -1055,7 +1055,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:01Z", "open the notebook, send.")
     poll(c)
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
-    assert String.starts_with?(text, "me: open the notebook\n— shuttle transcript --since ")
+    assert text == "me: open the notebook\n"
   end
 
   test "the closing send leaves the message, and a send inside it stays", c do
@@ -1067,7 +1067,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:02Z", "Send.")
     poll(c)
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
-    assert String.starts_with?(text, "me: send Ana the plot\n— shuttle transcript --since ")
+    assert text == "me: send Ana the plot\n"
   end
 
   test "a batch that was only the closing send delivers nothing", c do
@@ -1081,7 +1081,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:02Z", "then this, send")
     poll(c)
     assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
-    assert String.starts_with?(text, "me: then this\n— shuttle transcript --since ")
+    assert text == "me: then this\n"
   end
 
   test "a worker warming by another path resumes ordinary quiet triggers with its buffered speech",
@@ -1100,7 +1100,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     Agent.update(c.now, fn _ -> 5_000 end)
     poll(c)
     assert_receive {:delivery, %{text: text}}, 1_000
-    assert String.starts_with?(text, "me: early words warm words\n— shuttle transcript --since ")
+    assert text == "me: early words warm words\n"
   end
 
   test "voice speaker comments never strand a buffer before finalized speech", c do
@@ -1135,7 +1135,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
     assert_receive {:attempt, first, %{text: text}}, 1_000
-    assert String.starts_with?(text, "me: already sending\n— shuttle transcript --since ")
+    assert text == "me: already sending\n"
 
     assert %{pending: %{text: "me a private thought"}, pending_words: 3} = poll(c)
 
@@ -1143,7 +1143,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert %{pending: nil, pending_words: 0} = TranscriptRelay.status("launch", server: c.name)
 
     assert [%{"text" => text}] = :sys.get_state(worker(c)).config["outbox"]
-    assert String.starts_with?(text, "me: already sending\n— shuttle transcript --since ")
+    assert text == "me: already sending\n"
 
     assert File.read!(Path.rootname(c.path) <> ".jsonl") =~ "a private thought"
 
