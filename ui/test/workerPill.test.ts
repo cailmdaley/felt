@@ -9,6 +9,7 @@ import { dirname, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { workerPill } from '../src/board/appConversation.js'
+import type { Turn } from '../src/board/turn.js'
 import { DESKTOP, IPAD_PORTRAIT, PHONE_PORTRAIT, matchMediaFor, type Device } from '../src/board/testDevices.js'
 
 type FakeElement = HTMLElement & { href: string }
@@ -87,10 +88,12 @@ const TOKENS_CSS = readBoardCss('workspace/tokens.css')
 const TOUCH_CSS = [readBoardCss('KanbanModal.css'), DOCK_CSS, READER_CSS].join('\n')
 const LINK = 'https://claude.ai/code/session_bridged'
 const now = Date.now()
+const TURN_OF_PHASE: Record<string, Turn> = { working: 'working', waiting: 'idle', attention: 'question' }
 const worker = (phase: string, sessionLink?: string) => ({
   tmuxSession: 'felt-abc',
   workerState: 'running' as const,
   runtimePhase: phase,
+  turn: TURN_OF_PHASE[phase],
   lastActivityAt: now - 3 * 3_600_000,
   shuttleHost: 'workstation',
   sessionLink,

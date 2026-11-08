@@ -13,14 +13,12 @@ import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from 
 import { attachConversation, buildSessionHistory } from '../sessionHistory.js'
 import { showToast } from '../utils.js'
 import { coarsePointer } from '../mobile.js'
-import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
 import { headerLifecycleVerbsFor, iconVerb, verbSpec, type LifecycleVerb } from './lifecycleVerbs.js'
 import { WorkerActions } from './workerActions.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
-import { deskColumn } from '../deskColumn.js'
 import { slug } from '../threadOutline.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
@@ -167,7 +165,7 @@ export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripF
         : `Seat pulse${pulse?.state ? `; ${pulse.state}` : ''}`,
     }
   } else if (card.shuttleKind === 'standing' && card.shuttleSchedule) {
-    const spoken = humanizeCron(card.shuttleSchedule)
+    const spoken = card.scheduleText
     cadence = spoken
       ? { text: spoken, title: `cron: ${card.shuttleSchedule}${card.shuttleTz ? ` (${card.shuttleTz})` : ''}` }
       : { text: card.shuttleSchedule }
@@ -656,7 +654,7 @@ export class Dock {
     if (!card || !this.card ||
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
-    for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
+    for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'column', 'turn', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
       Object.assign(this.card, { [key]: card[key] })
     }
     card = this.card
@@ -741,7 +739,7 @@ export class Dock {
       const reseed = (fn: () => void): void => { reseeders.push(fn) }
       if (own) this.settingsSync = (view) => {
         if (ledger.contains(document.activeElement) || this.savesPending || this.settingStep) return
-        for (const key of ['name', 'due', 'storedHorizon', 'isCycle', 'shuttleAgent', 'shuttleEffort', 'shuttleChrome', 'shuttleKind', 'shuttleSchedule', 'shuttleTz', 'inheritedProjectDir'] as const) {
+        for (const key of ['name', 'due', 'storedHorizon', 'isCycle', 'shuttleAgent', 'shuttleEffort', 'shuttleChrome', 'shuttleKind', 'shuttleSchedule', 'shuttleTz', 'scheduleText', 'nextLaunchAt', 'inheritedProjectDir'] as const) {
           Object.assign(card, { [key]: view[key] })
         }
         for (const sync of reseeders) sync()
@@ -920,7 +918,7 @@ export class Dock {
     header.append(identity, this.head, constitutionItem, settingsItem, leave)
     body.append(header, worker.el, drawer, foot)
     this.actPaint = () => {
-      const column = deskColumn(card)
+      const column = card.column
       this.el.dataset.column = column
       this.head.dataset.column = column
       if (title.textContent !== card.name) title.textContent = card.name
@@ -1090,11 +1088,12 @@ export class Dock {
     tzInput.spellcheck = false
     tzInput.setAttribute('aria-label', 'Timezone')
 
-    // The cron said the way a person would, beside the expression.
+    // The saved cron as Shuttle says it, beside the expression; an edit in
+    // progress says nothing until Shuttle has read it.
     const spoken = document.createElement('span')
     spoken.className = 'kbn-ctl-spoken'
     const paintSpoken = (): void => {
-      spoken.textContent = humanizeCron(cronInput.value.trim()) ?? ''
+      spoken.textContent = cronInput.value.trim() === card.shuttleSchedule ? card.scheduleText ?? '' : ''
     }
     paintSpoken()
     cronInput.addEventListener('input', paintSpoken)

@@ -7,7 +7,7 @@ import { buildFiberProse } from './FiberProse.js'
 
 const card: KanbanCard = {
   id: 'notes/task', uid: 'task', name: 'Task', path: '/fibers/task/task.md',
-  originId: 'host-a', status: 'active', createdAt: '', fiberDir: '/fibers/task',
+  originId: 'host-a', status: 'active', column: 'inFlight', turn: 'none', createdAt: '', fiberDir: '/fibers/task',
   shuttleKind: 'oneshot', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: '',
 }
 const channel: Channel = { uid: 'task', owner: 'host-a', name: 'Task', body: '', labels: ['Task'], documents: [] }

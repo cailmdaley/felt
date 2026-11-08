@@ -10,22 +10,19 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import {
-  classifyFiber,
   cycleMembership,
   cycleSpan,
   dueBouncesFromResting,
   effectiveHorizon,
-  humanizeCron,
   isCycleFiber,
   lensCycles,
   restingUntil,
 } from './KanbanRules.js'
 import type { CycleDropCandidate } from './KanbanRules.js'
 import type { Fiber } from './KanbanFiber.js'
-import type { CompositeEntry, CompositeFeed } from './KanbanComposite.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { card as baseCard, response } from './testFixtures.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
+import { boardFrom, card as baseCard, response, type FeedOf, type FeedRow } from './testFixtures.js'
+import { deriveCycleLens, isSleepingOnSchedule, restingCards } from './KanbanReadModel.js'
 import {
   clusterStashCards,
   findCardById,
@@ -145,7 +142,7 @@ describe('dueBouncesFromResting', () => {
 describe('a mirrored fiber renders as ONE card', () => {
   // Shape taken from the real board: 245 rows for 240 fibers, five of them
   // served by both the laptop and `kelvin` out of the same git-synced store.
-  const mirrored = (origin: string, over: Partial<Fiber> = {}): CompositeEntry => ({
+  const mirrored = (origin: string, over: Partial<Fiber> = {}): FeedRow => ({
     origin,
     feltStore: `/store/${origin}`,
     path: '.felt/science/unions/final-push.md',
@@ -161,9 +158,9 @@ describe('a mirrored fiber renders as ONE card', () => {
     },
   })
   const feedWith = (
-    entries: CompositeEntry[],
+    entries: FeedRow[],
     origins: Record<string, { kind: 'local' | 'remote'; stale: boolean }>,
-  ): CompositeFeed => ({
+  ): FeedOf => ({
     host: 'laptop',
     entries,
     origins: Object.fromEntries(
@@ -171,8 +168,8 @@ describe('a mirrored fiber renders as ONE card', () => {
     ),
   })
 
-  const drafts = (feed: CompositeFeed): KanbanCard[] =>
-    buildKanbanResponseFromComposite(feed, { nowMs: NOW }).now.drafts
+  const drafts = (feed: FeedOf): KanbanCard[] =>
+    boardFrom(feed, { nowMs: NOW }).now.drafts
 
   it('lands a future-dated draft in Drafts, not off the board', () => {
     // The Desk regression: a fresh draft with `due: <future>` routed to a
@@ -181,7 +178,7 @@ describe('a mirrored fiber renders as ONE card', () => {
       [mirrored('laptop', { due: dayFromNow(21) })],
       { laptop: { kind: 'local', stale: false } },
     )
-    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    const resp = boardFrom(feed, { nowMs: NOW })
     expect(resp.now.drafts.map((c) => c.id)).toEqual(['science/unions/final-push'])
     expect(resp.now.drafts[0].due).toBeDefined()
     expect(resp.stash).toHaveLength(0)
@@ -193,7 +190,7 @@ describe('a mirrored fiber renders as ONE card', () => {
       [mirrored('laptop', { horizon: 'stashed', due: dayFromNow(21) })],
       { laptop: { kind: 'local', stale: false } },
     )
-    const resp = buildKanbanResponseFromComposite(feed, { nowMs: NOW })
+    const resp = boardFrom(feed, { nowMs: NOW })
     expect(resp.now.drafts).toHaveLength(0)
     expect(resp.stash.map((c) => c.id)).toEqual(['science/unions/final-push'])
   })
@@ -280,9 +277,9 @@ describe('a mirrored fiber renders as ONE card', () => {
     // written to (`originId` addressed the mirror, so transitions went there).
     // The daemon stopped serving these rows in 5669fc7; this is the board-side
     // half of the same rule, and what protects it during a mixed-version fleet.
-    const inFlight = (feed: CompositeFeed): KanbanCard[] =>
-      buildKanbanResponseFromComposite(feed, { nowMs: NOW }).now.inFlight
-    const owned = (origin: string, over: Partial<CompositeEntry> = {}): CompositeEntry => ({
+    const inFlight = (feed: FeedOf): KanbanCard[] =>
+      boardFrom(feed, { nowMs: NOW }).now.inFlight
+    const owned = (origin: string, over: Partial<FeedRow> = {}): FeedRow => ({
       ...mirrored(origin, { status: 'active', shuttleHost: 'kelvin' }),
       ...over,
     })
@@ -380,7 +377,7 @@ describe('what the board admits — a shuttle block, or a cycle', () => {
   // is a date, not a commitment the Desk can act on, so it is promoted rather
   // than shown. The daemon's feed is deliberately wider (it runs a
   // `--has-field due` walk); this is where the board narrows it.
-  const row = (over: Partial<Fiber>): CompositeEntry => ({
+  const row = (over: Partial<Fiber>): FeedRow => ({
     origin: 'laptop',
     feltStore: '/store/laptop',
     path: '.felt/x.md',
@@ -393,8 +390,8 @@ describe('what the board admits — a shuttle block, or a cycle', () => {
       ...over,
     },
   })
-  const boardOf = (entries: CompositeEntry[]) =>
-    buildKanbanResponseFromComposite(
+  const boardOf = (entries: FeedRow[]) =>
+    boardFrom(
       { host: 'laptop', entries, origins: { laptop: { kind: 'local', stale: false, fiberCount: entries.length } } },
       { nowMs: NOW },
     )
@@ -443,6 +440,8 @@ describe('Resting clusters split when they overflow', () => {
     path: `.felt/${id}.md`,
     originId: 'local',
     status: 'open',
+    column: 'resting',
+    turn: 'none',
     createdAt: at(),
     effectiveHorizon: 'stashed',
     drifted: false,
@@ -629,11 +628,19 @@ describe('cycles — a named span of time, not work', () => {
     })
   })
 
-  describe('classifyFiber keeps cycles off every lifecycle column', () => {
+  describe('the read model keeps cycles off every lifecycle column', () => {
     // The load-bearing claim: no combination of status, verdict, liveness or a
-    // stray shuttle block can put a cycle on the desk. One "Autumn 2026" in
-    // Drafts teaches the human to distrust the column.
-    it('routes every lifecycle shape to cycles, a live worker included', () => {
+    // stray shuttle block — and so no column its owner serves — can put a
+    // cycle on the desk. One "Autumn 2026" in Drafts teaches the human to
+    // distrust the column.
+    const boardOfOne = (fiber: Fiber, live: boolean) => boardFrom({
+      host: 'here',
+      entries: [{ origin: 'here', feltStore: '/store', path: `.felt/${fiber.id}.md`, fiber,
+        runtime: live ? { state: 'running', tmuxSession: 't' } : undefined }],
+      origins: { here: { kind: 'local', stale: false, fiberCount: 1 } },
+    }, { nowMs: NOW })
+
+    it('files every lifecycle shape among the cycles, a live worker included', () => {
       fc.assert(fc.property(
         fc.record({
           status: fc.constantFrom('open', 'active', 'closed'),
@@ -643,15 +650,17 @@ describe('cycles — a named span of time, not work', () => {
           due: fc.constantFrom(undefined, -30, 0, 30).map(days => days === undefined ? undefined : asFeltWrites(dayFromNow(days))),
         }, { requiredKeys: ['status'] }),
         fc.boolean(),
-        (shape, liveWorker) => {
-          expect(classifyFiber(cycle(shape as Partial<Fiber>), { liveWorker })).toBe('cycles')
+        (shape, live) => {
+          const resp = boardOfOne(cycle(shape as Partial<Fiber>), live)
+          expect(resp.cycles.map(c => c.id)).toEqual(['cycles/autumn'])
+          expect(Object.values(resp.totals).every(n => n === 0)).toBe(true)
         },
       ), { numRuns: 200, seed: 0x5eed })
     })
 
     it('leaves ordinary work exactly where it was', () => {
       const work = { ...cycle({ tags: ['planning'] }), hasShuttleBlock: true, status: 'active' }
-      expect(classifyFiber(work)).toBe('inFlight')
+      expect(boardOfOne(work, false).now.inFlight.map(c => c.id)).toEqual(['cycles/autumn'])
     })
   })
 
@@ -788,7 +797,7 @@ describe('cycles — a named span of time, not work', () => {
   })
 
   describe('the assembled response', () => {
-    const feedOf = (...fibers: Fiber[]): CompositeFeed => ({
+    const feedOf = (...fibers: Fiber[]): FeedOf => ({
       host: 'here',
       entries: fibers.map((fiber) => ({
         origin: 'here',
@@ -812,7 +821,7 @@ describe('cycles — a named span of time, not work', () => {
     it('admits a cycle that has no shuttle block and no due — the open-ended case', () => {
       // The `due`-or-shuttle admission test would drop this row, and an
       // open-ended cycle is a band the views must still draw.
-      const resp = buildKanbanResponseFromComposite(
+      const resp = boardFrom(
         feedOf(cycle({ start: asFeltWrites('2026-08-01'), due: undefined })),
         { nowMs: NOW },
       )
@@ -820,7 +829,7 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('puts cycles on their own surface and NOWHERE else', () => {
-      const resp = buildKanbanResponseFromComposite(
+      const resp = boardFrom(
         feedOf(cycle({ start: asFeltWrites('2026-08-01'), due: asFeltWrites('2026-08-31') }), work()),
         { nowMs: NOW },
       )
@@ -835,8 +844,8 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('never counts a cycle in a column total', () => {
-      const withoutCycles = buildKanbanResponseFromComposite(feedOf(work()), { nowMs: NOW })
-      const withCycles = buildKanbanResponseFromComposite(
+      const withoutCycles = boardFrom(feedOf(work()), { nowMs: NOW })
+      const withCycles = boardFrom(
         feedOf(
           work(),
           cycle({ id: 'cycles/a', start: asFeltWrites('2026-08-01') }),
@@ -849,7 +858,7 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('carries the contract fields the views read', () => {
-      const resp = buildKanbanResponseFromComposite(
+      const resp = boardFrom(
         feedOf(cycle({ start: asFeltWrites('2026-09-01'), due: asFeltWrites('2026-09-30') })),
         { nowMs: NOW },
       )
@@ -860,7 +869,7 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('leaves cycleStart null on a cycle with no start, and on ordinary work', () => {
-      const resp = buildKanbanResponseFromComposite(
+      const resp = boardFrom(
         feedOf(cycle({ due: asFeltWrites('2026-09-30') }), work({ due: asFeltWrites('2026-09-30') })),
         { nowMs: NOW },
       )
@@ -871,7 +880,7 @@ describe('cycles — a named span of time, not work', () => {
     })
 
     it('orders the bands earliest first', () => {
-      const resp = buildKanbanResponseFromComposite(
+      const resp = boardFrom(
         feedOf(
           cycle({ id: 'cycles/late', start: asFeltWrites('2026-11-01') }),
           cycle({ id: 'cycles/early', start: asFeltWrites('2026-09-01') }),
@@ -956,7 +965,7 @@ describe('sessionWindow', () => {
 describe('stripFacts — the drawer strip as a reading of the card', () => {
   const card = (patch: Partial<KanbanCard>): KanbanCard => ({
     id: 'work/spectra/null-tests', uid: 'U', name: 'Null tests', path: '', fiberDir: '', feltStore: '',
-    originId: 'h', status: 'active', outcome: '', tags: [], createdAt: at0,
+    originId: 'h', status: 'active', column: 'inFlight', turn: 'none', outcome: '', tags: [], createdAt: at0,
     effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null,
     ...patch,
   })
@@ -984,7 +993,7 @@ describe('stripFacts — the drawer strip as a reading of the card', () => {
   it('speaks a standing cron and keeps the expression on the hover', () => {
     const f = stripFacts(card({
       shuttleKind: 'standing', shuttleAgent: 'claude-opus',
-      shuttleSchedule: '0 9 * * 1-5', shuttleTz: 'Europe/Paris', due: dayFromNow(2),
+      shuttleSchedule: '0 9 * * 1-5', shuttleTz: 'Europe/Paris', scheduleText: 'weekdays 9:00', due: dayFromNow(2),
     }), NOW)
     expect(f.cadence).toEqual({ text: 'weekdays 9:00', title: 'cron: 0 9 * * 1-5 (Europe/Paris)' })
     // A standing constitution is placed by its cron — its due is never read.
@@ -1000,25 +1009,6 @@ describe('stripFacts — the drawer strip as a reading of the card', () => {
   it('carries the chrome flag only when it is on', () => {
     expect(stripFacts(card({ shuttleAgent: 'claude-opus', shuttleChrome: true }), NOW).chrome).toBe(true)
     expect(stripFacts(card({ shuttleAgent: 'claude-opus' }), NOW).chrome).toBe(false)
-  })
-})
-
-describe('humanizeCron', () => {
-  it('says the cadences a person says', () => {
-    expect(humanizeCron('0 9 * * 1-5')).toBe('weekdays 9:00')
-    expect(humanizeCron('30 6 * * *')).toBe('daily 6:30')
-    expect(humanizeCron('0 8 * * 1')).toBe('Mon 8:00')
-    expect(humanizeCron('15 20 * * 0,6')).toBe('weekends 20:15')
-    expect(humanizeCron('0 7 * * 1,3,5')).toBe('Mon, Wed, Fri 7:00')
-  })
-
-  it('stays silent rather than lie about a schedule it cannot say', () => {
-    expect(humanizeCron('*/15 * * * *')).toBeUndefined()   // many hours
-    expect(humanizeCron('0 9 1 * *')).toBeUndefined()      // day-of-month
-    expect(humanizeCron('0 9 * 3 *')).toBeUndefined()      // one month only
-    expect(humanizeCron('not a cron')).toBeUndefined()
-    expect(humanizeCron('')).toBeUndefined()
-    expect(humanizeCron(undefined)).toBeUndefined()
   })
 })
 
@@ -1186,11 +1176,11 @@ describe('the cycle lens — membership is derived, never assigned', () => {
 })
 
 describe('Resting holds standing constitutions asleep between runs', () => {
-  // `classifyFiber` calls an armed standing constitution `scheduled` and the read model
+  // An armed standing constitution between firings rests, and the read model
   // files it on the timeline surface, which the Desk does not draw; without the
   // Resting join `ops/monthly-report` — armed, monthly, perfectly healthy —
   // would be on no surface a human could see.
-  const role = (over: Partial<Fiber> = {}): CompositeEntry => ({
+  const role = (over: Partial<Fiber> = {}): FeedRow => ({
     origin: 'laptop',
     feltStore: '/store/laptop',
     path: '.felt/ops/monthly-report.md',
@@ -1202,11 +1192,12 @@ describe('Resting holds standing constitutions asleep between runs', () => {
       hasShuttleBlock: true,
       shuttleKind: 'standing',
       shuttleSchedule: { expr: '0 9 12 * *', tz: 'UTC' },
+      shuttleNextDue: '2026-08-12T09:00:00Z',
       ...over,
     },
   })
-  const boardOf = (entries: CompositeEntry[]): KanbanResponse =>
-    buildKanbanResponseFromComposite(
+  const boardOf = (entries: FeedRow[]): KanbanResponse =>
+    boardFrom(
       { host: 'laptop', entries, origins: { laptop: { kind: 'local', stale: false, fiberCount: entries.length } } },
       { nowMs: NOW },
     )
@@ -1226,7 +1217,7 @@ describe('Resting holds standing constitutions asleep between runs', () => {
   })
 
   it('keeps snoozed work and sleeping roles in the same region, told apart', () => {
-    const snoozed: CompositeEntry = {
+    const snoozed: FeedRow = {
       origin: 'laptop',
       feltStore: '/store/laptop',
       path: '.felt/work/later.md',
@@ -1243,9 +1234,9 @@ describe('Resting holds standing constitutions asleep between runs', () => {
   })
 
   it('sends a RUNNING standing constitution to In flight, not to Resting', () => {
-    // Live work is activity worth showing on the desk; the liveness branch of
-    // classifyFiber already owns this and Resting must not double-claim it.
-    const resp = buildKanbanResponseFromComposite(
+    // Live work is activity worth showing on the desk; its owner serves it In
+    // flight, and Resting must not double-claim it.
+    const resp = boardFrom(
       {
         host: 'laptop',
         entries: [{ ...role(), runtime: { state: 'running', tmuxSession: 'shuttle-cc', phase: 'running' } }],

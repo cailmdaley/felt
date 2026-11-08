@@ -5,7 +5,7 @@ import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { boardCards, KanbanSurfaceRenderer, threadIndexFor } from './KanbanSurfaces.js'
 import { FamilyPage, placeAt } from './workspace/FamilyPage.js'
-import { conversations } from './testFixtures.js'
+import { conversations, servedFeed } from './testFixtures.js'
 
 const N = 472
 type Shape = Array<[id: string, parent: string | null]>
@@ -25,12 +25,12 @@ function groups(): Shape {
   return rows
 }
 function feed(shape: Shape) {
-  return parseCompositeFeed({ host: 'owner', fibers: shape.map(([id, parent], n) => ({
+  return parseCompositeFeed(servedFeed({ host: 'owner', fibers: shape.map(([id, parent], n) => ({
     origin: 'owner', felt_store: '/store', path: `${id}.md`, orchestrator: parent,
     fiber: { id, name: id, status: 'active', created_at: '2026-10-01T09:00:00Z',
       shuttle: { kind: 'oneshot', ask: n % 4 === 0 ? { text: 'Which cut?', at: '2026-10-02T09:00:00Z' } : undefined } },
     runtime: n % 4 === 1 ? { state: 'running', phase: 'working', session_uuid: `s-${id}` } : null,
-  })) })
+  })) }))
 }
 /**
  * Work done by `run`, counted rather than timed: calls to the named methods
@@ -51,10 +51,10 @@ const LINEAR = 6
 
 describe('a family splits across the sections its threads stand in', () => {
   // A root in Your turn over ten working threads; a working root over twelve threads in Your turn; a waiting hub over twelve waiting threads.
-  const family = (rootPhase: string, threadPhase: string, n: number) => parseCompositeFeed({ host: 'owner', fibers: [['cmbx', null, rootPhase], ...Array.from({ length: n }, (_, k) => [`cmbx/t${k}`, 'cmbx', threadPhase])]
+  const family = (rootPhase: string, threadPhase: string, n: number) => parseCompositeFeed(servedFeed({ host: 'owner', fibers: [['cmbx', null, rootPhase], ...Array.from({ length: n }, (_, k) => [`cmbx/t${k}`, 'cmbx', threadPhase])]
     .map(([id, parent, phase]) => ({ origin: 'owner', felt_store: '/store', path: `${id}.md`, orchestrator: parent,
       fiber: { id, name: id, status: 'active', created_at: '2026-10-01T09:00:00Z', shuttle: { kind: 'oneshot' } },
-      runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) })
+      runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) }))
   const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} }).renderNowSection(board.now, {})
   it('threads in another state group beneath their root heading that section, named by slug', () => {

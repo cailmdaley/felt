@@ -1,7 +1,6 @@
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { onDesk, restReachable, reviewReachable, verdictsFor } from './fiberPageState.js'
-import { deskColumn } from '../deskColumn.js'
 
 /** A lifecycle verb a constitution offers wherever it is acted on: the opened card's header and the Desk row's menu. */
 export type LifecycleVerb = 'review' | 'rest' | 'temper' | 'discard'
@@ -27,11 +26,11 @@ export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lifecycle
 /** The header keeps only the actions called for by the card's current state. */
 export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): LifecycleVerb[] {
   const reachable = lifecycleVerbsFor(card, canRest)
-  if (deskColumn(card) === 'roles') return []
-  if (deskColumn(card) === 'awaitingReview') return reachable.filter(verb => verb === 'temper' || verb === 'discard')
-  if (deskColumn(card) === 'inFlight' || hasLiveWorker(card)) return reachable.filter(verb => verb === 'review' || verb === 'rest')
-  if (deskColumn(card) === 'drafts') return reachable.filter(verb => verb === 'rest')
-  if (['resting', 'scheduled', 'tempered', 'composted'].includes(deskColumn(card))) return []
+  if (card.column === 'roles') return []
+  if (card.column === 'awaitingReview') return reachable.filter(verb => verb === 'temper' || verb === 'discard')
+  if (card.column === 'inFlight' || hasLiveWorker(card)) return reachable.filter(verb => verb === 'review' || verb === 'rest')
+  if (card.column === 'drafts') return reachable.filter(verb => verb === 'rest')
+  if (['resting', 'tempered', 'composted'].includes(card.column)) return []
   return reachable
 }
 

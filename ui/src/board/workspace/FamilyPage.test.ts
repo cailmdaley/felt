@@ -212,7 +212,7 @@ describe('a row', () => {
     expect(row(family, 'Mid').querySelector('.fp-lead')!.getAttribute('aria-label')).toBe('Tapestry')
   })
   it('offers the console verbs for each thread state, and a click does not unfold or enter it', () => {
-    const work = { ...mid, shuttleKind: 'oneshot' as const }, review = { ...done, tempered: undefined, shuttleKind: 'oneshot' as const }
+    const work = { ...mid, shuttleKind: 'oneshot' as const }, review = { ...done, tempered: undefined, column: 'awaitingReview' as const, shuttleKind: 'oneshot' as const }
     const act = vi.fn(), reach = vi.fn(async () => true)
     const family = new FamilyPage({ reach }, feeds, { open: new Set(), selected: null }, vi.fn(), vi.fn(), vi.fn(), act, true)
     family.update(root, new ThreadIndex([root, work, review]), now)

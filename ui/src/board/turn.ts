@@ -1,11 +1,13 @@
 import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
 
 /**
- * Whose move a card is, and why: the one derivation every surface reads.
+ * Whose move a card is, and why: the one reading every surface draws.
  *
- * The In flight band, the order within it, the worker pill's word, pigment and
- * age, the Desk's groups and the dock's control all come from
- * `turnOf`, so no two of them can tell a different story about one card.
+ * The owning daemon decides the turn from its worker's runtime
+ * (`Shuttle.Lifecycle.turn/5`) and serves it on the card's row. The In flight
+ * band, the order within it, the worker pill's word, pigment and age, the
+ * Desk's groups and the dock's control all read it through `turnOf`, so no two
+ * of them can tell a different story about one card.
  *
  * Two questions are kept apart. The TURN says whose move it is; `busy` says
  * whether the worker is doing something right now. They are independent: a
@@ -64,21 +66,25 @@ export interface TurnState {
 }
 
 /** A worker that has been working this long without a hook event says so. */
-const SILENCE_FLOOR_MS = 10 * 60_000
-/** A worker with no signal this soon after launch is still starting. */
-const STARTING_MS = 5 * 60_000
+export const SILENCE_FLOOR_MS = 10 * 60_000
 
 function instant(value: string | undefined): number | undefined {
   const ms = value ? Date.parse(value) : NaN
   return Number.isFinite(ms) ? ms : undefined
 }
 
+/** What a card must carry for its turn to be read. */
+export type TurnInput = Pick<KanbanCard, 'turn' | 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale' | 'followed'>
+
 /**
- * The card's turn. An `ask` counts only on an active card, the one place the
- * card draws it; a closed card's leftover ask is nobody's move.
+ * The card's turn: the owner-served `turn`, with what only this board knows
+ * laid over it, and the words and age every surface draws. A conversation
+ * the human follows is working; an unreachable owner's runtime is frozen at
+ * its last poll, so a live worker's turn is unknown and only the synced ask
+ * is still owed. An `ask` counts only on an active card.
  */
 export function turnOf(
-  card: Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale' | 'followed'>,
+  card: TurnInput,
   nowMs: number = Date.now(),
 ): TurnState {
   const phase = card.runtimePhase
@@ -87,51 +93,43 @@ export function turnOf(
   const ask = card.status === 'active' ? card.ask : undefined
   const state = (turn: Turn, detail: string, since?: number): TurnState =>
     ({ turn, yours: YOURS.includes(turn), busy, word: TURN_WORD[turn], detail, since })
+  const asked = (): TurnState => state('question', `The worker asked: ${ask?.text}`, instant(ask?.at))
 
   if (card.followed && live) return state('working', 'You are following this conversation.', card.lastActivityAt)
-
-  // An unreachable owner's runtime is frozen at its last poll: no evidence of
-  // a turn. The ask lives in the synced fiber, so it is still owed.
   if (card.originStale) {
-    if (ask) return state('question', `The worker asked: ${ask.text}`, instant(ask.at))
+    if (ask) return asked()
     if (live) {
       return state('no-signal', 'The worker\'s host is unreachable; its last reported state is frozen, so the turn is unknown.', instant(card.originStale.since))
     }
   }
-  if (card.launchError || phase === 'blocked' || card.workerState === 'blocked') {
-    return state('blocked', card.launchError ?? 'The worker could not start its turn.', card.lastActivityAt)
-  }
-  // Without a live worker a phase is stale; only an ask is still owed.
-  if (!live) {
-    return ask ? state('question', `The worker asked: ${ask.text}`, instant(ask.at)) : state('none', 'No live worker.')
-  }
-  if (phase === 'identity_failed') {
-    return state('blocked', 'Session attribution failed, so the turn is unknown. Shuttle keeps retrying; an explicit session claim repairs it.', card.lastActivityAt)
-  }
-  if (phase === 'attention') {
-    return state('question', ask
-      ? `The worker is stopped on a harness prompt and needs an answer to continue. It also asked: ${ask.text}`
-      : 'The worker is stopped on a harness prompt and needs an answer to continue.', card.lastActivityAt)
-  }
-  if (ask) {
-    return state('question', busy
-      ? `The worker asked: ${ask.text} — and is still working.`
-      : `The worker asked: ${ask.text}`, instant(ask.at))
-  }
-  if (phase === 'waiting') {
-    return state('idle', 'The worker ended its turn with nothing running under it.', card.lastActivityAt)
-  }
-  if (phase === 'working') {
-    const silent = card.lastActivityAt !== undefined && nowMs - card.lastActivityAt >= SILENCE_FLOOR_MS
-    return state('working', silent
-      ? 'The worker is mid-turn or over background work, with no hook event since.'
-      : 'The worker is mid-turn or over background work it started.', silent ? card.lastActivityAt : undefined)
-  }
   const started = card.workerStartedAt ?? instant(card.dispatchedAt)
-  if (phase === 'identity_pending') {
-    return state('starting', 'The worker is live; Shuttle is acquiring its session before it can report the turn.', started)
+  switch (card.turn) {
+    case 'question':
+      if (live && phase === 'attention') {
+        return state('question', ask
+          ? `The worker is stopped on a harness prompt and needs an answer to continue. It also asked: ${ask.text}`
+          : 'The worker is stopped on a harness prompt and needs an answer to continue.', card.lastActivityAt)
+      }
+      return busy && ask ? state('question', `The worker asked: ${ask.text} — and is still working.`, instant(ask.at)) : asked()
+    case 'blocked':
+      return phase === 'identity_failed' && !card.launchError
+        ? state('blocked', 'Session attribution failed, so the turn is unknown. Shuttle keeps retrying; an explicit session claim repairs it.', card.lastActivityAt)
+        : state('blocked', card.launchError ?? 'The worker could not start its turn.', card.lastActivityAt)
+    case 'idle':
+      return state('idle', 'The worker ended its turn with nothing running under it.', card.lastActivityAt)
+    case 'working': {
+      const silent = card.lastActivityAt !== undefined && nowMs - card.lastActivityAt >= SILENCE_FLOOR_MS
+      return state('working', silent
+        ? 'The worker is mid-turn or over background work, with no hook event since.'
+        : 'The worker is mid-turn or over background work it started.', silent ? card.lastActivityAt : undefined)
+    }
+    case 'starting':
+      return phase === 'identity_pending'
+        ? state('starting', 'The worker is live; Shuttle is acquiring its session before it can report the turn.', started)
+        : state('starting', 'The worker is starting; no hook event yet.', started)
+    case 'no-signal':
+      return state('no-signal', 'The worker is live, but the daemon holds no hook event for its session, so its turn is unknown.', started)
+    case 'none':
+      return state('none', 'No live worker.')
   }
-  return started !== undefined && nowMs - started < STARTING_MS
-    ? state('starting', 'The worker is starting; no hook event yet.', started)
-    : state('no-signal', 'The worker is live, but the daemon holds no hook event for its session, so its turn is unknown.', started)
 }

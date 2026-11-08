@@ -19,15 +19,13 @@ import type {
 } from './KanbanComposite.js';
 import type { Fiber } from './KanbanFiber.js';
 import {
-  classifyFiber,
   cycleMembership,
   cycleSpan,
   effectiveHorizon,
   isCycleFiber,
-  nextStandingLaunch,
-  type KanbanColumn,
 } from './KanbanRules.js';
 import type {
+  DeskColumn,
   InheritedProjectDir,
   KanbanCard,
   KanbanOriginStaleness,
@@ -37,13 +35,11 @@ import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 import { turnOf } from './turn.js';
 import { adoptThreadIndex, ThreadIndex, threadKey, threadState } from './threads.js';
-import { deskColumn } from './deskColumn.js';
 import type { RexMove } from './voice.js';
 
 export interface BuildKanbanResponseOptions {
-  /** Reference instant for due-drift, standing-role placement, and the response
-   * `generatedAt`. Defaults to `Date.now()`. Thread it in tests for
-   * determinism. */
+  /** Reference instant for due-drift and the response `generatedAt`. Defaults
+   * to `Date.now()`. Thread it in tests for determinism. */
   nowMs?: number;
 }
 
@@ -60,8 +56,8 @@ export interface BuildKanbanResponseOptions {
  * A CYCLE is the exception, and it is not work: admitted on its tag alone —
  * no shuttle block, no `due:`, no lifecycle status required, because an
  * open-ended cycle (a `start:` and nothing else) is a legitimate band the
- * Chronicle must draw. `classifyFiber` sends it straight to the `cycles`
- * surface, so it never reaches a Desk column.
+ * Chronicle must draw. The read model files it among the `cycles` before it
+ * reads any column, so it never reaches a Desk column.
  *
  * The daemon's feed is WIDER than this on purpose (`--has-field due` is one of
  * its three admission walks, see daemon/lib/shuttle/fiber_documents.ex): it serves
@@ -76,6 +72,17 @@ function shouldIncludeInKanban(fiber: Fiber): boolean {
 
 /** The Desk column a family section stands in. */
 const sectionColumn = (card: KanbanCard): 'inFlight' | 'awaitingReview' => (card.deskSection ?? threadState(card)) === 'to-review' ? 'awaitingReview' : 'inFlight';
+
+/**
+ * Where a card is drawn: its served column, except that a cycle is drawn
+ * among the cycles and a standing constitution asleep on its cron on the
+ * timeline, placed by its next launch.
+ */
+type Surface = DeskColumn | 'scheduled' | 'cycles';
+function surfaceOf(card: KanbanCard): Surface {
+  if (card.isCycle) return 'cycles';
+  return card.column === 'resting' && isSleepingOnSchedule(card) ? 'scheduled' : card.column;
+}
 
 /** The followed live conversation is working in the Desk's projection, not waiting on the human. */
 export function projectDeskFollowing(response: KanbanResponse, target: RexMove | null | undefined): KanbanResponse {
@@ -99,7 +106,7 @@ export function projectDeskFrontier(response: KanbanResponse): KanbanResponse {
   const visible = new Set(index.frontier());
   const rows = cards.filter(card => visible.has(card)).map(card => ({ ...card, threadSummary: index.summary(card) }));
   const headers = index.headers();
-  const at = (column: string) => [...rows.filter(card => deskColumn(card) === column), ...headers.filter(card => sectionColumn(card) === column)];
+  const at = (surface: Surface) => [...rows.filter(card => surfaceOf(card) === surface), ...headers.filter(card => sectionColumn(card) === surface)];
   const now = { drafts: at('drafts').sort(byCreatedAtDesc), inFlight: at('inFlight').sort(byInFlightBand), awaitingReview: at('awaitingReview').sort(byClosedAtDesc) };
   const stash = at('resting'), roles = at('roles');
   const timeline = { ...response.timeline, futureDated: at('scheduled').sort(byDueAtAsc), past: [...at('tempered'), ...at('composted')].sort(byClosedAtDesc) };
@@ -264,10 +271,9 @@ type AssembledSurfaces = {
 };
 
 /**
- * The classify-and-route pass: run `classifyFiber` (the SINGLE source of truth)
- * over each eligible entry, sort each column, and route the open/scheduled
- * buckets onto the three response surfaces (now / timeline / stash), with
- * `toCard` reading owner-served liveness off the feed row.
+ * The route-and-order pass: build each entry's card, file it on the surface
+ * its served column names (`surfaceOf`), and sort each surface. Only a
+ * family's root is a Desk row; its threads stay reachable on `threads`.
  */
 function assembleSurfaces(
   entries: CompositeEntry[],
@@ -275,73 +281,44 @@ function assembleSurfaces(
   nowMs: number,
   staleOrigin: (origin: string) => KanbanCard['originStale'] = () => undefined,
 ): AssembledSurfaces {
-  const drafts: KanbanCard[] = [];
-  const scheduled: KanbanCard[] = [];
-  const inFlight: KanbanCard[] = [];
-  const awaitingReview: KanbanCard[] = [];
-  const tempered: KanbanCard[] = [];
-  const composted: KanbanCard[] = [];
-  const cycles: KanbanCard[] = [];
-  const roles: KanbanCard[] = [];
-
-  const buckets: Record<KanbanColumn, KanbanCard[]> = {
-    drafts, scheduled, inFlight, awaitingReview, tempered, composted, cycles, roles,
+  const buckets: Record<Surface, KanbanCard[]> = {
+    drafts: [], inFlight: [], awaitingReview: [], tempered: [], composted: [],
+    resting: [], roles: [], scheduled: [], cycles: [],
   };
-  const classified = entries.map((entry) => {
+  const allCards = entries.map((entry) => {
     const card = toCard(entry, dirs, nowMs);
     const originStale = staleOrigin(entry.origin);
     if (originStale) card.originStale = originStale;
-    return {
-      card,
-      column: classifyFiber(entry.fiber, { liveWorker: hasLiveWorker(card) }),
-    };
+    return card;
   });
-  const allCards = classified.map(row => row.card);
   const threadIndex = new ThreadIndex(allCards);
   const frontier = new Set(threadIndex.frontier());
   for (const card of allCards) card.threadSummary = threadIndex.summary(card);
   // Keep every non-row available to the constitution view and its family page.
   const threads = allCards.filter(card => !frontier.has(card));
-  for (const { card, column } of classified) {
-    if (frontier.has(card)) buckets[column].push(card);
+  for (const card of allCards) {
+    if (frontier.has(card)) buckets[surfaceOf(card)].push(card);
   }
   for (const header of threadIndex.headers()) buckets[sectionColumn(header)].push(header);
 
-  scheduled.sort(byCreatedAtDesc);
-  // Desk has no persisted human arrangement; drafts use creation order.
-  // Neither activity nor a renamed path moves them.
-  drafts.sort(byCreatedAtDesc);
+  // Desk has no persisted human arrangement; drafts and the work put down use
+  // creation order. Neither activity nor a renamed path moves them.
+  buckets.drafts.sort(byCreatedAtDesc);
+  buckets.resting.sort(byCreatedAtDesc);
   // Seats read like a shelf of offices: alphabetical, so a launcher stays
   // where the hand expects it whatever was used last.
-  roles.sort(byNameAsc);
+  buckets.roles.sort(byNameAsc);
   // A card moves only when it crosses the Your turn / Working seam, or when a
   // question is raised or answered inside Your turn. Activity age does not
   // move it.
-  inFlight.sort(byInFlightBand);
-  awaitingReview.sort(byClosedAtDesc);
-  tempered.sort(byClosedAtDesc);
-  composted.sort(byClosedAtDesc);
-
-  const stash: KanbanCard[] = [];
-  const nowDrafts: KanbanCard[] = [];
-  for (const card of drafts) routeOpenCardByPlanningSurface(card, nowDrafts, stash);
-
-
-  // Awaiting-review cards are closed and pending a human verdict — actionable,
-  // so they stay in the Now awaitingReview column. They must NOT be
-  // routed through the open-card planning router: a stale `horizon` left over from
-  // when the card was an active stashed draft (planning horizon is an open-card
-  // concept) would otherwise re-route a just-closed card onto the stash surface,
-  // hiding it from the desk. That's exactly how a closed-with-horizon:stashed card
-  // "disappeared from everywhere." See gotcha-awaiting-review-stale-horizon.
-  const nowAwaitingReview = awaitingReview;
-
-  const past = mergeByClosedAtDesc(tempered, composted);
-  const futureDated = scheduled.sort(byDueAtAsc);
+  buckets.inFlight.sort(byInFlightBand);
+  buckets.awaitingReview.sort(byClosedAtDesc);
+  buckets.tempered.sort(byClosedAtDesc);
+  buckets.composted.sort(byClosedAtDesc);
 
   // Cycles are the calendar's backdrop, so they read left to right: earliest
   // band first, with identity ties and absent dates last.
-  cycles.sort((a, b) => {
+  buckets.cycles.sort((a, b) => {
     const aStart = dueSortMs(a.cycleStart ?? a.due);
     const bStart = dueSortMs(b.cycleStart ?? b.due);
     return ascByKey(aStart, bStart) || byCardIdentity(a, b);
@@ -350,11 +327,14 @@ function assembleSurfaces(
   return {
     threads,
     threadIndex,
-    now: { drafts: nowDrafts, inFlight, awaitingReview: nowAwaitingReview },
-    timeline: { past, futureDated },
-    stash,
-    roles,
-    cycles,
+    now: { drafts: buckets.drafts, inFlight: buckets.inFlight, awaitingReview: buckets.awaitingReview },
+    timeline: {
+      past: mergeByClosedAtDesc(buckets.tempered, buckets.composted),
+      futureDated: buckets.scheduled.sort(byDueAtAsc),
+    },
+    stash: buckets.resting,
+    roles: buckets.roles,
+    cycles: buckets.cycles,
   };
 }
 
@@ -369,9 +349,9 @@ function byNameAsc(a: KanbanCard, b: KanbanCard): number {
  *
  *   • SNOOZED work — `horizon:stashed`, on `resp.stash`. Put down on purpose,
  *     returning on its `due:` day.
- *   • A STANDING ROLE BETWEEN RUNS — `status:active` + a cron. `classifyFiber`
- *     calls it `scheduled` and the read model files it on the timeline surface
- *     at its next launch. The Desk draws no timeline cards (the timeline is
+ *   • A STANDING ROLE BETWEEN RUNS — `status:active` + a cron. Its column is
+ *     `resting`, and the read model files it on the timeline surface at its
+ *     next launch (`surfaceOf`). The Desk draws no timeline cards (the timeline is
  *     only the drag horizon), so without this join an armed monthly role
  *     would be in the board's data and on no surface the human could see.
  *
@@ -385,9 +365,9 @@ function byNameAsc(a: KanbanCard, b: KanbanCard): number {
  * JOIN, done at render time, not a second home for the card.
  *
  * The three statuses that are NOT here, and why they need nothing:
- *   status:open standing   → paused/draft, classifies to `drafts` — on the desk.
- *   status:closed standing → an awaiting run needing a verdict; it classifies to
- *                            `awaitingReview` and belongs in that column, not
+ *   status:open standing   → paused/draft, its column `drafts` — on the desk.
+ *   status:closed standing → an awaiting run needing a verdict; its column is
+ *                            `awaitingReview` and it belongs there, not
  *                            asleep in Resting. Accept re-arms it (`shuttle
  *                            accept` → `status:active`) and it lands back here.
  *   a running standing constitution → the liveness branch sends it to `inFlight`.
@@ -473,16 +453,12 @@ export function deriveCycleLens(
 }
 
 /**
- * The column a resting card would surface in. Today every card on the Resting
- * surface is an open draft (`routeOpenCardByPlanningSurface` only ever routes
- * the drafts bucket there), so this is `drafts` in practice; the closed and
- * running branches are here so a future Resting inhabitant lands somewhere
- * truthful rather than silently in Drafts.
+ * The column a card at rest would surface in: an armed standing constitution
+ * between firings in In flight, a draft put down or a seat in Drafts. Nothing
+ * closed or live is ever at rest.
  */
 function ghostColumn(card: KanbanCard): LensColumn {
-  if (card.status === 'closed' && card.tempered === undefined) return 'awaitingReview';
-  if (hasLiveWorker(card) || card.status === 'active') return 'inFlight';
-  return 'drafts';
+  return card.status === 'active' ? 'inFlight' : 'drafts';
 }
 
 /**
@@ -539,6 +515,8 @@ function toCard(
       entry.dir ??
       (entry.reportPath ? entry.reportPath.replace(/\/[^/]*$/, '') : undefined),
     status: f.status,
+    column: entry.column,
+    turn: entry.turn,
     outcome: f.outcome,
     theme: f.theme,
     due: f.due,
@@ -581,7 +559,9 @@ function toCard(
     } : undefined,
     shuttleProjectDir: f.shuttleProjectDir,
     inheritedProjectDir: inheritedProjectDir(entry, dirs),
-    nextLaunchAt: nextStandingLaunch(f, nowMs),
+    // An armed standing constitution's next firing; nothing else launches on a clock.
+    nextLaunchAt: f.shuttleKind === 'standing' && f.status === 'active' ? f.shuttleNextDue : undefined,
+    scheduleText: f.shuttleScheduleText,
     storedHorizon: horizon.storedHorizon,
     effectiveHorizon: horizon.effectiveHorizon,
     drifted: horizon.drifted,
@@ -637,24 +617,6 @@ export function inheritedProjectDir(
     if (path) return { path, from: id };
   }
   return undefined;
-}
-
-/**
- * Route one open card onto its planning surface from `effectiveHorizon`:
- * `now` → the desk, `stashed` → Resting. A `due:` never routes: a future-dated
- * draft stays in Drafts and wears its date as a chip.
- *
- * A SNOOZED card — `horizon:stashed` plus a future `due:` — resolves to
- * `stashed` and lands here in Resting, keeping its `due:`. `effectiveHorizon`'s
- * drift branch returns it to the desk when the day arrives.
- */
-function routeOpenCardByPlanningSurface(
-  card: KanbanCard,
-  now: KanbanCard[],
-  stash: KanbanCard[],
-): void {
-  if (card.effectiveHorizon === 'now') now.push(card);
-  else stash.push(card);
 }
 
 /** Per-bucket counts for a response, derived from the assembled surfaces. */

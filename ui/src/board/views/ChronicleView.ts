@@ -1814,8 +1814,8 @@ class ChronicleView implements TemporalView {
   /**
    * Drag a row's due mark to reschedule it — the plain-fiber twin of
    * {@link installEdgeDrag}, over a single point instead of two. `nextLaunchAt`
-   * gets no such handler: it is the daemon's own computation of a standing
-   * role's next run (`nextStandingLaunch` in KanbanReadModel), not a value a
+   * gets no such handler: it is Shuttle's own computation of a standing
+   * role's next run (`shuttle.resolved.next_due`), not a value a
    * fiber's frontmatter carries, so there is nothing for a drag to write.
    *
    * A drag threshold is unnecessary rather than missing: a plain click drags

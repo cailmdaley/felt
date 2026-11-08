@@ -1,27 +1,14 @@
-import { CronExpressionParser } from 'cron-parser';
 import type { Fiber } from './KanbanFiber.js';
 import { dueCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js';
 
-// The kanban's single classifier, in the view. Shuttle (the engine) speaks
-// engine vocabulary — eligible/blocked/running — and never names a kanban
-// column; translating that into columns is view logic, so it lives here, in
-// the frontend, as the SOLE implementation.
+// The board's rules over time: cycles and the planning horizon. Where a card
+// stands on its lifecycle is its owning daemon's to say (`column` on its feed
+// row); these rules decide what a card wears and where a gesture lands.
 
 // Two surfaces. `now` is desk presence and `stashed` is Resting; there is no
 // scheduled surface, because a `due:` is a date a card wears, never a place it
 // goes.
 export type KanbanHorizon = 'now' | 'stashed';
-
-/** The set of columns the kanban renders. */
-export type KanbanColumn =
-  | 'drafts'
-  | 'scheduled'
-  | 'inFlight'
-  | 'awaitingReview'
-  | 'tempered'
-  | 'composted'
-  | 'cycles'
-  | 'roles';
 
 /** The tag that makes a fiber a cycle. Matched case-insensitively on a trimmed
  *  tag so `Cycle` and ` cycle ` are the same declaration. */
@@ -32,8 +19,8 @@ const CYCLE_TAG = 'cycle';
  *
  * A cycle is an annotation on the calendar: `start:` opens it, `due:` closes
  * it, and the temporal views draw it as a band behind the work. It is not
- * something you do, so it never belongs in a lifecycle column — see the first
- * branch of `classifyFiber`, which is where that is enforced.
+ * something you do, so it never belongs in a lifecycle column: the read model
+ * files it among the cycles before it asks any card's column.
  */
 export function isCycleFiber(f: Pick<Fiber, 'tags'>): boolean {
   return (f.tags ?? []).some((t) => typeof t === 'string' && t.trim().toLowerCase() === CYCLE_TAG);
@@ -199,102 +186,6 @@ export function lensCycles(
   return chips;
 }
 
-/**
- * Classify a fiber into the kanban column it belongs in. The single source
- * of truth for "what column is this?". Reads ONLY the document-lifecycle
- * signals the frozen Shuttle contract names — `status`, `tempered`, `kind`,
- * and whether the owning daemon holds a worker (`liveWorker`, from the
- * card's `hasLiveWorker`). There is no `enabled` and no
- * `review.state`: lifecycle is `status + tempered`, uniform across kinds.
- *
- *   1. A closed fiber takes its column from the verdict regardless of liveness:
- *      `tempered:true` → tempered, `tempered:false` → composted,
- *      tempered absent → awaitingReview. A standing run stays here until
- *      accepted or the owner conditionally re-arms the next occurrence after
- *      its last service and close. Existing verdicts are never auto-cleared.
- *
- *   2. A live worker overrides the open/active branch — the user dragging a
- *      card and seeing it stay in drafts is the dissonance we're avoiding.
- *      Liveness is the owning daemon's observation (never stored), for a
- *      worker alike; only shuttle fibers have workers. A
- *      running standing constitution is caught here too, so it shows as live
- *      work in Now rather than waiting on the timeline.
- *
- *   2b. A seat at rest (`shuttle.seat`; open, statusless, or an armed
- *      standing constitution between runs) → `roles`, the Roles band.
- *
- *   3. The open/active branch, on the document alone:
- *        - no shuttle block      → drafts   (human due-date card; visible,
- *                                            not dispatchable)
- *        - status:open           → drafts   (draft / paused — NOT dispatched;
- *                                            launch is open → active)
- *        - status:active oneshot → inFlight (armed: the daemon dispatches it)
- *        - status:active standing→ scheduled(armed but action-needed-nothing:
- *                                            it fires on its own cron, so it
- *                                            belongs on the timeline at its
- *                                            next launch, not in the Now nav. A
- *                                            *running* standing constitution returned
- *                                            inFlight at the liveness branch
- *                                            above — live work shows in Now.)
- *
- * The kanban response splits classifyFiber's output across the
- * surfaces: now, timeline, stash and roles. The classifier
- * itself doesn't care which surface — it produces a flat label that the
- * handler routes.
- */
-export function classifyFiber(
-  f: Fiber,
-  opts: { liveWorker?: boolean } = {},
-): KanbanColumn {
-  // A CYCLE is an annotation on time, not work, so it leaves before any
-  // lifecycle question is asked. This branch is FIRST on purpose and it is
-  // unconditional: a cycle's `status`, its `due:`, even a `shuttle:` block
-  // someone pasted onto it, must not put it on the desk. Every other branch
-  // below would happily claim it — an open cycle reads as a draft, a cycle
-  // whose end date has passed reads as a drifted card on the desk — and one
-  // stray "Autumn 2026" sitting in Drafts teaches the human to distrust the
-  // column.
-  if (isCycleFiber(f)) return 'cycles';
-
-  if (f.status === 'closed') {
-    if (f.tempered === true) return 'tempered';
-    if (f.tempered === false) return 'composted';
-    return 'awaitingReview';
-  }
-
-  if (opts.liveWorker && f.hasShuttleBlock === true) {
-    return 'inFlight';
-  }
-
-  // A SEAT AT REST belongs to its role, not to a project's drafts or to
-  // Resting: open (whatever its horizon), or a standing seat asleep on its
-  // cron. An armed oneshot seat falls through to In flight, where the daemon
-  // is about to start it.
-  if (
-    f.hasShuttleBlock === true &&
-    f.shuttleSeat === true && !!f.shuttleRole &&
-    (f.status !== 'active' || f.shuttleKind === 'standing')
-  ) {
-    return 'roles';
-  }
-
-  // Everything still here carries a shuttle block: `shouldIncludeInKanban`
-  // admits nothing else onto a Desk column, and the one block-less kind it does
-  // admit — a cycle — left at the top of this function. A block-less row that
-  // somehow reached this far falls through to `drafts` at the bottom, which is
-  // where it would have been sent anyway.
-  if (f.status === 'active') {
-    // An armed standing constitution between firings needs no action now — it fires on
-    // its own cron. Route it to `scheduled` (→ timeline, placed by the card's
-    // `nextLaunchAt`) so the Now / in-flight surface stays action-needed only.
-    // A *running* standing constitution already returned 'inFlight' above: a live worker
-    // is activity worth showing in Now, not a waiting-on-the-clock card.
-    if (f.shuttleKind === 'standing') return 'scheduled';
-    return 'inFlight';
-  }
-  return 'drafts';
-}
-
 export function effectiveHorizon(
   f: Pick<Fiber, 'due' | 'horizon'>,
   nowMs: number = Date.now(),
@@ -371,82 +262,6 @@ export function dueBouncesFromResting(
 ): boolean {
   if (due === undefined) return false;
   return effectiveHorizon({ due, horizon: 'stashed' }, nowMs).effectiveHorizon === 'now';
-}
-
-const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-/**
- * A cron expression as a human would say it — "weekdays 9:00", "daily 6:30",
- * "Mon 8:00". Undefined for anything this vocabulary can't say faithfully
- * (multiple hours, minute steps, day-of-month or month constraints), so the
- * caller falls back to the raw expression rather than printing a lie.
- *
- * Faithful-or-silent is the whole contract here: a schedule the human reads
- * wrong is worse than one they have to parse themselves, and the raw string
- * always stays available on the `title`.
- */
-export function humanizeCron(expr: string | undefined): string | undefined {
-  if (!expr?.trim()) return undefined;
-  let fields;
-  try {
-    fields = CronExpressionParser.parse(expr.trim()).fields;
-  } catch {
-    return undefined;
-  }
-  const minutes = fields.minute.values;
-  const hours = fields.hour.values;
-  if (minutes.length !== 1 || hours.length !== 1) return undefined;
-  // Only an unconstrained day-of-month + month can be said as a weekly cadence.
-  if (fields.dayOfMonth.values.length !== 31) return undefined;
-  if (fields.month.values.length !== 12) return undefined;
-
-  const time = `${hours[0]}:${String(minutes[0]).padStart(2, '0')}`;
-  // cron-parser lists Sunday as both 0 and 7 for `*`; collapse to 0..6 so the
-  // set comparisons below have one representation to reason about. The field
-  // values are typed loosely enough to admit the non-numeric cron tokens
-  // (`L`, `W`), so coerce and drop anything that isn't a weekday number.
-  const dow = [
-    ...new Set(
-      fields.dayOfWeek.values
-        .map((d) => Number(d))
-        .filter((d) => Number.isInteger(d) && d >= 0 && d <= 7)
-        .map((d) => (d === 7 ? 0 : d)),
-    ),
-  ].sort((a, b) => a - b);
-  const key = dow.join(',');
-  if (key === '0,1,2,3,4,5,6') return `daily ${time}`;
-  if (key === '1,2,3,4,5') return `weekdays ${time}`;
-  if (key === '0,6') return `weekends ${time}`;
-  if (dow.length <= 3) return `${dow.map((d) => DOW_NAMES[d]).join(', ')} ${time}`;
-  return undefined;
-}
-
-/**
- * The next cron occurrence for an *armed* standing constitution, for timeline
- * placement. A standing constitution is armed iff `status:active` — the sole
- * dispatch gate under the frozen contract. A paused role (`status:open`) or
- * a role awaiting/finished review (`status:closed`) has no next launch: an
- * open role isn't dispatched, and a closed one waits on a human verdict
- * before it re-arms. Returns undefined for non-standing fibers and for any
- * schedule that won't parse.
- */
-export function nextStandingLaunch(
-  f: Pick<Fiber, 'shuttleKind' | 'shuttleSchedule' | 'status'>,
-  nowMs: number = Date.now(),
-): string | undefined {
-  if (f.shuttleKind !== 'standing') return undefined;
-  if (f.status !== 'active') return undefined;
-  const sched = f.shuttleSchedule;
-  if (!sched?.expr.trim()) return undefined;
-  try {
-    const it = CronExpressionParser.parse(sched.expr, {
-      tz: sched.tz.trim() ? sched.tz : 'UTC',
-      currentDate: new Date(nowMs),
-    });
-    return it.next().toISOString() ?? undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function normalizeHorizon(value: unknown): KanbanHorizon | undefined {

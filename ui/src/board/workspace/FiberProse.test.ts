@@ -18,7 +18,7 @@ vi.mock('../wikilinks.js', async (original) => {
 
 const card: KanbanCard = {
   id: 'notes/task', uid: 'task', name: 'Task', path: '/fibers/task/task.md',
-  originId: 'host-a', status: 'active', createdAt: '', fiberDir: '/fibers/task',
+  originId: 'host-a', status: 'active', column: 'inFlight', turn: 'none', createdAt: '', fiberDir: '/fibers/task',
   shuttleProjectDir: '/project', shuttleAgent: 'sol', outcome: 'Outcome $x^2$',
   effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: '',
 }

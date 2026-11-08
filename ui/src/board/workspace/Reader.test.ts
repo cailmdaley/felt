@@ -102,7 +102,7 @@ afterEach(() => {
 
 describe('Reader', () => {
   it("draws the card's own worker pill bare at the head's right end; the map rides the centre column", () => {
-    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', lastActivityAt: Date.now() - 34 * 60000 }
+    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', turn: 'working' as const, column: 'inFlight' as const, tmuxSession: 'beta-worker', lastActivityAt: Date.now() - 34 * 60000 }
     listedCards = [working]
     const open = vi.fn()
     const reader = makeReader(working, undefined, () => {

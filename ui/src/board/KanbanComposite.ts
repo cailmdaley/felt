@@ -20,9 +20,11 @@
 //         felt_store: string,       // owning store path
 //         path: string,             // fiber path relative to .felt/
 //         fiber: {...felt JSON...}, // → mapFeltJsonToFiber
+//         column: string,           // owner-served Desk column (drafts, in_flight, …)
+//         turn: string,             // owner-served turn (question, idle, working, …)
 //         runtime?: { state, tmux_session?, session_uuid?, phase?, ... } | null,  // owner-served liveness
 //         dir?: string,             // fiber's own dir (embed/image base), owner-resolved
-//         report_path?: string,     // sibling report.html, owner-resolved
+//         report_path?: string,     // companion page, owner-resolved
 //         origin: string,           // owning host/remote name
 //       }, ...
 //     ],
@@ -39,6 +41,15 @@
 //   }
 
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
+import type { DeskColumn } from './KanbanTypes.js';
+import { TURN_WORD, type Turn } from './turn.js';
+
+/** The owner's `column`, in the board's names. */
+export const WIRE_COLUMN: Record<string, DeskColumn> = {
+  drafts: 'drafts', in_flight: 'inFlight', awaiting_review: 'awaitingReview', tempered: 'tempered',
+  discarded: 'composted', resting: 'resting', roles: 'roles',
+};
+const TURNS = Object.keys(TURN_WORD) as Turn[];
 
 /**
  * The owning daemon's worker for one fiber. The daemon emits a `runtime` only
@@ -94,6 +105,10 @@ export interface CompositeEntry {
   /** Fiber path relative to the owning `.felt/` root. */
   path: string;
   fiber: Fiber;
+  /** Owner-served Desk column (`Shuttle.Lifecycle.column/3`). */
+  column: DeskColumn;
+  /** Owner-served turn (`Shuttle.Lifecycle.turn/5`). */
+  turn: Turn;
   /** Owner-served liveness — present iff the owning daemon holds a worker for
    * this fiber. The single reconciled liveness observation per fiber. */
   runtime?: CompositeRuntime;
@@ -114,7 +129,7 @@ export interface CompositeEntry {
    * image in the body resolves against before the `/file` route reads it.
    * Present for every fiber a current-build daemon serves. */
   dir?: string;
-  /** Absolute path to the sibling `tapestry.html` or legacy `report.html`,
+  /** Absolute path to the companion page (`tapestry.html`, `artifact.html` or `report.html`),
    * when the owning daemon resolved one. */
   reportPath?: string;
   /**
@@ -174,7 +189,9 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     const orchestrator = typeof item.orchestrator === 'string' && item.orchestrator ? item.orchestrator : null;
     const pendingResults = typeof item.pending_results === 'number' && item.pending_results > 0 ? item.pending_results : undefined;
     const dispatchError = typeof item.dispatch_error === 'string' && item.dispatch_error ? item.dispatch_error : undefined;
-    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
+    const column = WIRE_COLUMN[String(item.column)] ?? 'drafts';
+    const turn = TURNS.includes(item.turn as Turn) ? item.turn as Turn : 'none';
+    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, column, turn, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};
@@ -217,8 +234,7 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const state = value.state === 'blocked' ? 'blocked' : 'running';
   const phase = typeof value.phase === 'string' && value.phase.length > 0 ? value.phase : undefined;
   const lastActivityAt = typeof value.last_activity_at === 'number' ? value.last_activity_at : undefined;
-  const launchError = [value.launch_error, value.terminal_error]
-    .find((error): error is string => typeof error === 'string' && error.length > 0);
+  const launchError = typeof value.launch_error === 'string' && value.launch_error ? value.launch_error : undefined;
   const sessionLink =
     typeof value.session_link === 'string' && value.session_link.startsWith('https://')
       ? value.session_link

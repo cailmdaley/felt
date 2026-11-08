@@ -566,7 +566,7 @@ describe('Overview news, visits and graduated density', () => {
     document.body.append(overview.el)
   }
   it('leads a first visit with thirty-day news without writing a visit on load', async () => {
-    cards[0] = { ...cards[0], status: 'closed', closedAt: new Date(now() - 60000).toISOString() }
+    cards[0] = { ...cards[0], status: 'closed', column: 'awaitingReview', closedAt: new Date(now() - 60000).toISOString() }
     feed.files = [receipt('alpha', '/one.html', now() - 5000), receipt('alpha', '/two.mp3', now() - 4000)]
     await refresh()
     expect(overview.el.querySelector('.ws-overview-summary')?.textContent).toBe('The last 30 days: 2 documents in 1 constitution; 1 await your review.')
@@ -626,7 +626,7 @@ describe('Overview news, visits and graduated density', () => {
     overview.cardsChanged()
     expect(overview.el.querySelectorAll('.ws-overview-change')).toHaveLength(0)
     cards[0] = { ...cards[0], outcome: 'A different checked measurement.' }
-    cards[1] = { ...cards[1], status: 'closed' }
+    cards[1] = { ...cards[1], status: 'closed', column: 'awaitingReview' }
     overview.cardsChanged()
     const rows = [...overview.el.querySelectorAll<HTMLElement>('.ws-overview-change')]
     expect(rows.map(r => r.dataset.uid)).toEqual(['beta', 'alpha'])
@@ -643,8 +643,8 @@ describe('Overview news, visits and graduated density', () => {
   it('puts awaiting review ahead of Needs-you ahead of newest work, and bounds new-document previews', async () => {
     reset(now() - 3600000)
     cards.push(card({ id: 'gamma', uid: 'gamma', originId: 'host-a', status: 'active', shuttleKind: 'oneshot' }))
-    cards[0] = { ...cards[0], status: 'closed' }
-    cards[1] = { ...cards[1], status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'waiting' }
+    cards[0] = { ...cards[0], status: 'closed', column: 'awaitingReview' }
+    cards[1] = { ...cards[1], status: 'active', column: 'inFlight', turn: 'idle', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'waiting' }
     feed.files = [receipt('gamma', '/working.html', now()), receipt('beta', '/needs.html', now() - 1000),
       ...Array.from({ length: 6 }, (_, i) => receipt('alpha', `/report-${i}.html`, now() - 2000 - i, 'host-a', { sessionId: 'one-batch' }))]
     await refresh()

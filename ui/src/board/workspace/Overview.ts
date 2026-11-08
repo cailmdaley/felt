@@ -5,7 +5,6 @@ import { inLane } from '../requestLanes.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
-import { deskColumn } from '../deskColumn.js'
 import type { SentFile } from '../sentFiles.js'
 import { FiberSends, SEND_WINDOW_MS } from '../fiberSends.js'
 import { LOAD_POLICY, Thumbnail, pumpThumbnails } from './Thumbnail.js'
@@ -155,8 +154,8 @@ interface ChangeRow {
 }
 /** Sent attachments a change row draws before folding the rest behind its +N button. */
 const CHANGE_ATTACHMENT_CAP = 3
-const needsYou = (card: KanbanCard): number => deskColumn(card) === 'awaitingReview' ? 0
-  : deskColumn(card) === 'inFlight' && inFlightBand(card) !== 'working' ? 1 : 2
+const needsYou = (card: KanbanCard): number => card.column === 'awaitingReview' ? 0
+  : card.column === 'inFlight' && inFlightBand(card) !== 'working' ? 1 : 2
 function changeSummary(change: Change): string {
   const parts = [change.review ? '→ awaiting review' : '', change.outcome ? 'outcome changed' : ''].filter(Boolean)
   const kinds = new Map<string, number>()
@@ -486,7 +485,7 @@ export class Overview {
     const key = `${uid}\n${owner}`
     let card = this.fallbacks.get(key)
     if (!card) {
-      card = { id: uid, uid, name: uid.startsWith('other:') ? `Unfiled · ${owner}` : `Resolving fiber · ${owner}`, path: '', originId: owner, status: '', createdAt: '',
+      card = { id: uid, uid, name: uid.startsWith('other:') ? `Unfiled · ${owner}` : `Resolving fiber · ${owner}`, path: '', originId: owner, status: '', column: 'drafts', turn: 'none', createdAt: '',
         effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
       this.fallbacks.set(key, card)
     }
@@ -659,7 +658,7 @@ export class Overview {
     let changed = false
     for (const [uid, card] of known) {
       const outcome = card.outcome ?? ''
-      const review = deskColumn(card) === 'awaitingReview'
+      const review = card.column === 'awaitingReview'
       const old = this.stamps.get(uid)
       if (old && old.outcome === outcome && old.review === review) continue
       this.stamps.set(uid, {
@@ -763,7 +762,7 @@ export class Overview {
     const newDocuments = [...this.folios.values()].flatMap(f => f.receipts.filter(r => r.timestamp > this.seen))
     const documentCount = new Set(newDocuments.map(r => r.key)).size
     const constitutionCount = new Set([...newDocuments.map(r => r.uid), ...changes.map(c => c.uid)]).size
-    const reviewCount = this.opts.cards().filter(c => deskColumn(c) === 'awaitingReview').length
+    const reviewCount = this.opts.cards().filter(c => c.column === 'awaitingReview').length
     const prefix = this.previousVisit ? `Since you were here at ${clockTime(this.previousVisit)}` : 'The last 30 days'
     text(this.summary, `${prefix}: ${documentCount} ${documentCount === 1 ? 'document' : 'documents'} in ${constitutionCount} ${constitutionCount === 1 ? 'constitution' : 'constitutions'}; ${reviewCount} await your review.`)
     this.startVisit()

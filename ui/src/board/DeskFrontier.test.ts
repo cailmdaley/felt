@@ -38,7 +38,7 @@ it('uses agreement in the count', () => {
   const count = end.querySelector<HTMLButtonElement>('.kbn-thread-count')!
   expect(count.querySelector('.kbn-count-needs')?.textContent).toBe('2 need you')
   const header = { ...parent, deskSection: 'working' as const }
-  const workingChild = { ...child, runtimePhase: 'working' }
+  const workingChild = { ...child, runtimePhase: 'working', turn: 'working' as const }
   const other = document.createElement('div'), otherEnd = document.createElement('div')
   installFrontierDetails(other, otherEnd, header, new ThreadIndex([parent, workingChild]), vi.fn(), now)
   expect(other.classList.contains('kbn-card-header')).toBe(true)

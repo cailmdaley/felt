@@ -7,7 +7,7 @@ import { KanbanSurfaceRenderer, restingOrder } from './KanbanSurfaces.js'
 import { deskCardKey, deskOrder } from './deskOrdering.js'
 import { zone } from './civilDay.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { card, response } from './testFixtures.js'
+import { card, response, servedFeed } from './testFixtures.js'
 
 function renderer(data: KanbanResponse, openDetail = vi.fn(), openWorker = vi.fn()): KanbanSurfaceRenderer {
   return new KanbanSurfaceRenderer({
@@ -23,7 +23,7 @@ function renderer(data: KanbanResponse, openDetail = vi.fn(), openWorker = vi.fn
 }
 
 function workerFeed(phases: string[], activityBase = 0): KanbanResponse {
-  return buildKanbanResponseFromComposite(parseCompositeFeed({
+  return buildKanbanResponseFromComposite(parseCompositeFeed(servedFeed({
     host: 'desk',
     fibers: phases.map((phase, i) => ({
       origin: i % 2 ? 'beta' : 'alpha', felt_store: '/store', path: `${i}.md`,
@@ -39,7 +39,7 @@ function workerFeed(phases: string[], activityBase = 0): KanbanResponse {
         launch_error: phase === 'blocked' ? 'Needs a project directory' : undefined,
       },
     })).reverse(),
-  }), { nowMs: Date.parse('2026-10-05T12:00:00Z') })
+  })), { nowMs: Date.parse('2026-10-05T12:00:00Z') })
 }
 
 function flightOrder(root: HTMLElement): unknown {
@@ -125,7 +125,7 @@ describe('In flight bands', () => {
     expect(root.querySelector('.kbn-card-worker, .kbn-card-phase, .kbn-card-glyph')).toBeNull()
   })
   it('ranks asks and harness prompts first in Your turn, both drawn and named as questions', () => {
-    const feed = parseCompositeFeed({
+    const feed = parseCompositeFeed(servedFeed({
       host: 'desk',
       fibers: [{
         origin: 'desk', felt_store: '/store', path: 'question.md',
@@ -135,7 +135,7 @@ describe('In flight bands', () => {
         },
         runtime: { state: 'running', phase: 'working', tmux_session: 'tmux-question' },
       }],
-    })
+    }))
     const data = buildKanbanResponseFromComposite(feed)
     const question = data.now.inFlight[0]
     expect(question.ask).toEqual({ text: 'Your view on the cut would help — report §2', at: '2026-10-05T12:00:00Z' })

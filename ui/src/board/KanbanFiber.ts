@@ -77,6 +77,10 @@ export interface Fiber {
   shuttleChrome?: boolean;
   /** `shuttle.schedule` — cron expression + IANA timezone for standing constitutions. */
   shuttleSchedule?: { expr: string; tz: string };
+  /** `shuttle.resolved.next_due` — Shuttle's next occurrence of the schedule, an instant. */
+  shuttleNextDue?: string;
+  /** `shuttle.resolved.schedule_text` — the schedule as a person says it, when it can be said. */
+  shuttleScheduleText?: string;
   /** `shuttle.pulse` cadence and optional local-time window for a oneshot seat. */
   shuttlePulse?: { every: string; window?: { start: string; end: string; tz: string } };
   /** `shuttle.project_dir` — the worker's cwd on the owning host. Echoed back
@@ -158,6 +162,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttleAgent: string | undefined;
   let shuttleEffort: string | undefined;
   let shuttleSchedule: { expr: string; tz: string } | undefined;
+  let shuttleNextDue: string | undefined;
+  let shuttleScheduleText: string | undefined;
   let shuttlePulse: Fiber['shuttlePulse'];
   let shuttleProjectDir: string | undefined;
   let shuttleChrome: boolean | undefined;
@@ -171,8 +177,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
         shuttleAsk = { text: ask.text, at: ask.at };
       }
     }
-    // Every other value, the retired `pinned` included, reads as a oneshot —
-    // the CLI's `shuttle.NormalizeKind` and the daemon's `Poller.block_kind`.
     shuttleKind = s.kind === 'standing' ? 'standing' : 'oneshot';
     if (typeof s.host === 'string' && s.host.trim()) shuttleHost = s.host.trim();
     if (typeof s.role === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s.role)) shuttleRole = s.role;
@@ -203,8 +207,16 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     // undefined so consumers can do a single existence check.
     if (s.chrome === true) shuttleChrome = true;
 
-    // shuttle.schedule = { expr, tz } for standing constitutions. Pre-CLI fibers may
-    // carry the legacy `timezone` key; read either. Absent tz falls back to UTC.
+    // Shuttle resolves the schedule; the board never parses cron.
+    const resolved = s.resolved;
+    if (resolved && typeof resolved === 'object' && !Array.isArray(resolved)) {
+      const r = resolved as Record<string, unknown>;
+      shuttleNextDue = pickIsoString(r, 'next_due');
+      if (typeof r.schedule_text === 'string' && r.schedule_text) shuttleScheduleText = r.schedule_text;
+    }
+
+    // shuttle.schedule = { expr, tz } for standing constitutions, its zone
+    // under `tz` or `timezone`. Absent tz reads as UTC.
     const sched = s.schedule;
     if (sched && typeof sched === 'object' && !Array.isArray(sched)) {
       const m = sched as Record<string, unknown>;
@@ -272,6 +284,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleAgent,
     shuttleEffort,
     shuttleSchedule,
+    shuttleNextDue,
+    shuttleScheduleText,
     shuttlePulse,
     shuttleProjectDir,
     shuttleChrome,

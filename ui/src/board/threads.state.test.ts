@@ -4,7 +4,6 @@ import { card, conversations } from './testFixtures.js'
 import { ThreadIndex, threadState } from './threads.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
 import { FamilyPage, placeAt } from './workspace/FamilyPage.js'
-import { deskColumn } from './deskColumn.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
 const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard => card({ shuttleKind: 'oneshot', ...over })
@@ -40,11 +39,11 @@ describe('every thread surface names a thread the way the Desk files it', () => 
   const asking = thread({ id: 'hub/asking', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
   const hub = thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' })
   const expected: Array<[KanbanCard, string, string]> = [
-    [spawned, 'inFlight', 'Working'], [standing, 'scheduled', 'Resting'], [seat, 'roles', 'Roles'], [asking, 'inFlight', 'Waiting'],
+    [spawned, 'inFlight', 'Working'], [standing, 'resting', 'Resting'], [seat, 'roles', 'Roles'], [asking, 'inFlight', 'Waiting'],
   ]
   it('an armed thread with no worker yet is Working, a standing one Resting, a seat Roles', () => {
     for (const [c, column, label] of expected) {
-      expect(deskColumn(c)).toBe(column)
+      expect(c.column).toBe(column)
       expect(constitutionMentions([c])[0].state).toBe(label)
     }
   })

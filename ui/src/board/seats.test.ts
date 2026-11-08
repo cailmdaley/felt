@@ -1,58 +1,20 @@
 // @vitest-environment jsdom
 // Seats: a constitution carrying `shuttle.seat` is drawn among the Roles when
-// it is at rest, and is ordinary work everywhere else. The classifier, the read
-// model, the Move menu and the Roles band must agree on "at rest".
+// it is at rest, and is ordinary work everywhere else. The served column (held
+// to daemon/test/fixtures/columns), the read model, the Move menu and the Roles
+// band must agree on "at rest".
 
 import { describe, expect, it, vi } from 'vitest'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
-import { classifyFiber } from './KanbanRules.js'
-import type { Fiber } from './KanbanFiber.js'
 import { mapFeltJsonToFiber } from './KanbanFiber.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { moveDestinations, seatAtRest } from './MoveDestinations.js'
-import { card as baseCard } from './testFixtures.js'
+import { moveDestinations } from './MoveDestinations.js'
+import { card as baseCard, servedFeed } from './testFixtures.js'
 import { stripFacts } from './workspace/Dock.js'
 
 const at0 = '2026-01-01T00:00:00Z'
-
-const fiber = (over: Partial<Fiber>): Fiber => ({
-  id: 'science/cmbx',
-  name: 'cmbx chair',
-  status: 'open',
-  createdAt: at0,
-  hasShuttleBlock: true,
-  shuttleKind: 'oneshot',
-  shuttleRole: 'cmbx-chair',
-  shuttleSeat: true,
-  ...over,
-})
-
-describe('classifyFiber — a seat at rest is among the Roles', () => {
-  it('draws an open seat in Roles whatever its horizon', () => {
-    expect(classifyFiber(fiber({}))).toBe('roles')
-    expect(classifyFiber(fiber({ horizon: 'stashed' }))).toBe('roles')
-  })
-
-  it('draws a standing seat asleep on its cron in Roles', () => {
-    expect(classifyFiber(fiber({ status: 'active', shuttleKind: 'standing' }))).toBe('roles')
-  })
-
-  it('leaves running, armed and closed seats to the lifecycle columns', () => {
-    expect(classifyFiber(fiber({ status: 'open' }), { liveWorker: true })).toBe('inFlight')
-    expect(classifyFiber(fiber({ status: 'active' }))).toBe('inFlight')
-    expect(classifyFiber(fiber({ status: 'closed' }))).toBe('awaitingReview')
-    expect(classifyFiber(fiber({ status: 'closed', tempered: true }))).toBe('tempered')
-  })
-
-  it('requires both an office and a boolean seat', () => {
-    expect(classifyFiber(fiber({ shuttleSeat: false }))).toBe('drafts')
-    expect(classifyFiber(fiber({ shuttleSeat: undefined }))).toBe('drafts')
-    expect(classifyFiber(fiber({ shuttleRole: undefined }))).toBe('drafts')
-    expect(classifyFiber(fiber({ shuttleSeat: 'cmbx-chair' as unknown as boolean }))).toBe('drafts')
-  })
-})
 
 describe('mapFeltJsonToFiber reads shuttle.seat', () => {
   it('carries the role slug and boolean seat', () => {
@@ -75,11 +37,11 @@ describe('mapFeltJsonToFiber reads shuttle.seat', () => {
 })
 
 function board(fibers: Record<string, unknown>[]): KanbanResponse {
-  return buildKanbanResponseFromComposite(parseCompositeFeed({
+  return buildKanbanResponseFromComposite(parseCompositeFeed(servedFeed({
     host: 'desk',
     fibers: fibers.map((f, i) => ({ origin: 'desk', felt_store: '/store', path: `${i}.md`, fiber: f })),
     origins: { desk: { kind: 'local', stale: false, fiber_count: fibers.length } },
-  }), { nowMs: Date.parse('2026-10-08T12:00:00Z') })
+  })), { nowMs: Date.parse('2026-10-08T12:00:00Z') })
 }
 
 describe('the read model files seats on the roles surface', () => {
@@ -118,7 +80,7 @@ describe('the read model files seats on the roles surface', () => {
   })
 
   it('carries the owner pulse clock onto the card unchanged', () => {
-    const feed = parseCompositeFeed({
+    const feed = parseCompositeFeed(servedFeed({
       host: 'desk',
       fibers: [{
         origin: 'desk', felt_store: '/store', path: 'life/vizier.md',
@@ -128,7 +90,7 @@ describe('the read model files seats on the roles surface', () => {
         pulse: { next_tick: '2026-10-08T13:00:00Z', last_tick: '2026-10-08T12:01:00Z', state: 'scheduled' },
       }],
       origins: { desk: { kind: 'local', stale: false, fiber_count: 1 } },
-    })
+    }))
     const card = buildKanbanResponseFromComposite(feed, { nowMs: Date.parse('2026-10-08T12:00:00Z') }).now.inFlight[0]
     expect(card.shuttlePulse).toEqual({ every: '59m' })
     expect(card.shuttlePulseRuntime).toEqual({
@@ -143,13 +105,13 @@ describe('moveDestinations for a seat', () => {
 
   it('offers a seat at rest only what changes it: start it, or review it', () => {
     const c = seatCard()
-    expect(seatAtRest(c)).toBe(true)
+    expect(c.column).toBe('roles')
     expect(moveDestinations(c, null).map((d) => d.id)).toEqual(['inFlight', 'awaitingReview'])
   })
 
   it('names the way back for a seat in flight "Roles"', () => {
     const c = seatCard({ status: 'active' })
-    expect(seatAtRest(c)).toBe(false)
+    expect(c.column).toBe('inFlight')
     const back = moveDestinations(c, 'inFlight').find((d) => d.id === 'stashed')
     expect(back?.label).toBe('Roles')
   })

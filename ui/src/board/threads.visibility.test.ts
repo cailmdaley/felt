@@ -3,16 +3,17 @@ import { buildKanbanResponseFromComposite, inFlightBand } from './KanbanReadMode
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { boardCards, threadIndexFor } from './KanbanSurfaces.js'
 import type { KanbanResponse } from './KanbanTypes.js'
+import { servedFeed } from './testFixtures.js'
 
 export type Row = { id: string; parent?: string; status: string; tempered?: boolean; horizon?: string; ask?: boolean; phase?: string; seat?: boolean; kind?: string }
 export function board(rows: Row[]): KanbanResponse {
-  return buildKanbanResponseFromComposite(parseCompositeFeed({ host: 'owner', fibers: rows.map(row => ({
+  return buildKanbanResponseFromComposite(parseCompositeFeed(servedFeed({ host: 'owner', fibers: rows.map(row => ({
     origin: 'owner', felt_store: '/store', path: `${row.id}.md`, orchestrator: row.parent,
     fiber: { id: row.id, name: row.id, status: row.status, tempered: row.tempered, horizon: row.horizon,
       created_at: '2026-10-01T09:00:00Z', closed_at: row.status === 'closed' ? '2026-10-02T09:00:00Z' : undefined,
       shuttle: { kind: row.kind ?? 'oneshot', seat: row.seat, role: row.seat ? 'chair' : undefined, ask: row.ask ? { text: 'Which cut?', at: '2026-10-02T09:00:00Z' } : undefined } },
     runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `s-${row.id}` } : null,
-  })) }))
+  })) })))
 }
 export const ids = (cards: readonly { id: string }[]) => cards.map(c => c.id)
 const desk = (b: KanbanResponse) => [...b.now.drafts, ...b.now.inFlight, ...b.now.awaitingReview, ...b.stash, ...b.roles, ...b.timeline.past, ...b.timeline.futureDated]

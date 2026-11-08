@@ -1,6 +1,5 @@
 import type { KanbanCard } from '../KanbanTypes.js'
-import { deskColumn } from '../deskColumn.js'
-import { COLUMN_TITLES } from '../KanbanSurfaces.js'
+import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
 import { isAgentCard } from '../KanbanModalShared.js'
 import type { KeyIntent } from '../keymap.js'
 import type { Verdict } from './Verdicts.js'
@@ -11,6 +10,10 @@ import type { Verdict } from './Verdicts.js'
 export function onDesk(card: KanbanCard): boolean {
   return isAgentCard(card) || card.isCycle
 }
+/** A constitution its column speaks for: Shuttle-managed, and not a cycle, which marks time. */
+function constitution(card: KanbanCard): boolean {
+  return isAgentCard(card) && !card.isCycle
+}
 /** Rest reaches every Shuttle-managed constitution, including one with a verdict. */
 export function restReachable(card: KanbanCard): boolean {
   return isAgentCard(card)
@@ -20,13 +23,13 @@ export function restReachable(card: KanbanCard): boolean {
  *  cards take Discard alone: Temper accepts a standing run, not a paused or
  *  idle responsibility. A seat at rest takes none. */
 export function verdictsFor(card: KanbanCard): Array<'temper' | 'discard'> {
-  if (!onDesk(card)) return []
-  const column = deskColumn(card)
+  if (!constitution(card)) return []
+  const column = card.column
   if (column === 'roles') return []
   if (card.shuttleKind === 'standing' && card.status === 'open')
     return card.shuttleSeat === true || card.tempered != null ? [] : ['discard']
   if (column === 'drafts' || column === 'inFlight' || column === 'awaitingReview') return ['temper', 'discard']
-  if ((column !== 'resting' && column !== 'scheduled') || !isAgentCard(card) || card.shuttleSeat === true) return []
+  if (column !== 'resting' || card.shuttleSeat === true) return []
   return card.shuttleKind === 'standing' ? ['discard'] : ['temper', 'discard']
 }
 /** Whether a card takes any verdict. */
@@ -35,19 +38,13 @@ export function verdictReachable(card: KanbanCard): boolean {
 }
 /** Work still on its way, a draft or in flight, can be moved to Awaiting review. */
 export function reviewReachable(card: KanbanCard): boolean {
-  if (!onDesk(card)) return false
-  const column = deskColumn(card)
-  return column === 'drafts' || column === 'inFlight'
+  return constitution(card) && (card.column === 'drafts' || card.column === 'inFlight')
 }
 /** The column's name for the page's status line; empty for a fiber with no column. */
 export function fiberPageKicker(card: KanbanCard): string {
-  if (!onDesk(card)) return ''
-  const column = deskColumn(card)
-  if (column === 'awaitingReview') return 'Awaiting your review'
-  if (column === 'resting' || column === 'scheduled') return 'Resting'
-  if (column === 'cycles') return 'Cycle'
-  if (column === 'roles') return 'Roles'
-  return COLUMN_TITLES[column]
+  if (card.isCycle) return 'Cycle'
+  if (!isAgentCard(card)) return ''
+  return card.column === 'awaitingReview' ? 'Awaiting your review' : DESK_COLUMN_TITLE[card.column]
 }
 
 /** What a surface does once a constitution key has reached a card. */

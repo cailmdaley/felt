@@ -6,12 +6,13 @@ import { parseCompositeFeed } from '../KanbanComposite.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { scopeTheme } from './themeScope.js'
 import { workspaceToken } from './measures.js'
+import { servedFeed } from '../testFixtures.js'
 
 vi.mock('./themeScope.js', () => ({ scopeTheme: vi.fn((css: string, scope: string) => {
   if (css === 'broken') throw new Error('Invalid CSS')
   return `${scope} { /* ${css} */ }`
 }) }))
-const card: KanbanCard = { id: 'work/report', uid: 'theme-fixture', name: 'A report', originId: 'remote-fixture', path: 'work/report/report.md', fiberDir: '/store/work/report', status: 'closed', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
+const card: KanbanCard = { id: 'work/report', uid: 'theme-fixture', name: 'A report', originId: 'remote-fixture', path: 'work/report/report.md', fiberDir: '/store/work/report', status: 'closed', column: 'awaitingReview', turn: 'none', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
 let themes: ChannelThemes
 beforeEach(() => {
   const storage = new Map<string, string>()
@@ -233,7 +234,7 @@ describe('channel theme lifetime and owner reads', () => {
     expect(warnings).toHaveBeenCalledTimes(1)
   })
   it('preserves the declared theme from frontmatter through the owner card model', () => {
-    const entry = parseCompositeFeed({ host: 'fixture-owner', fibers: [{ origin: 'fixture-owner', felt_store: '/store', path: 'work/report.md', fiber: { id: 'report', theme: '  Laboratory Paper  ' } }] }).entries[0]
+    const entry = parseCompositeFeed(servedFeed({ host: 'fixture-owner', fibers: [{ origin: 'fixture-owner', felt_store: '/store', path: 'work/report.md', fiber: { id: 'report', theme: '  Laboratory Paper  ' } }] })).entries[0]
     expect(cardFromCompositeEntry(entry).theme).toBe('Laboratory Paper')
   })
   it('keeps identities deterministic and distinguishes mirrored owners', () => {

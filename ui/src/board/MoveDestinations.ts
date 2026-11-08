@@ -32,7 +32,6 @@
  */
 
 import type { KanbanCard, ColumnKind } from './KanbanTypes.js'
-import { hasLiveWorker } from './KanbanTypes.js'
 import { COLUMN_TITLES, SURFACE_TITLE } from './KanbanSurfaces.js'
 
 /** What a chosen destination asks the board to do. One-to-one with the
@@ -55,7 +54,7 @@ export interface MoveDestination {
 }
 
 /** A card is UNPLANNABLE when a horizon write on it would be ignored by the
- *  classifier and the card would snap back: a standing constitution, placed by
+ *  read model and the card would snap back: a standing constitution, placed by
  *  its schedule — exactly `setSurface`'s banner guard. */
 function planningIgnored(card: KanbanCard): boolean {
   return card.shuttleKind === 'standing'
@@ -72,12 +71,7 @@ function planningIgnored(card: KanbanCard): boolean {
  * clause the menu would withhold a destination the drop performs.
  */
 function restingNow(card: KanbanCard): boolean {
-  return (
-    !hasLiveWorker(card) &&
-    card.status === 'open' &&
-    card.effectiveHorizon === 'stashed' &&
-    (card.cold ?? false) === false
-  )
+  return card.column === 'resting' && card.status === 'open' && (card.cold ?? false) === false
 }
 
 /**
@@ -95,7 +89,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   // A seat at rest is already where every parking gesture would put it: a
   // draft, the desk or Resting all land it back among the Roles. What it can
   // do is start, or be sent for review.
-  const restingSeat = seatAtRest(card)
+  const restingSeat = card.column === 'roles'
 
   // ── The Now columns ────────────────────────────────────────────────────
   // Offered in the board's own left-to-right order, each omitted only when the
@@ -143,16 +137,6 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   return out
 }
 
-/** A seat at rest — the cards the Roles band draws: `classifyFiber`'s `roles`
- *  branch, read off the card. */
-export function seatAtRest(card: KanbanCard): boolean {
-  return (
-    card.shuttleSeat === true && !!card.shuttleRole &&
-    card.status !== 'closed' &&
-    !hasLiveWorker(card) &&
-    (card.status !== 'active' || card.shuttleKind === 'standing')
-  )
-}
 
 /**
  * What the move menu needs from the board in order to offer its places.

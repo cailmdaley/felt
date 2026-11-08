@@ -5,7 +5,7 @@ import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, inFlightBand, isQuestion } from './KanbanReadModel.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
-import { card } from './testFixtures.js'
+import { card, servedFeed } from './testFixtures.js'
 import { TURN_WORD, turnOf, type Turn } from './turn.js'
 import { Dock } from './workspace/Dock.js'
 import { workerPlate } from './workspace/workerPlate.js'
@@ -16,44 +16,49 @@ const live = (over: Partial<KanbanCard>): KanbanCard =>
 const ASK = { text: 'OK to adopt the estimator?', at: '2026-10-18T10:00:00Z' }
 
 describe('turnOf', () => {
-  it.each<[string, Partial<KanbanCard>, Turn, string, boolean]>([
-    ['a question asked while working', { runtimePhase: 'working', ask: ASK, lastActivityAt: NOW - 1000 }, 'question', 'question', true],
-    ['a question asked, then idle', { runtimePhase: 'waiting', ask: ASK }, 'question', 'question', true],
-    ['a harness prompt', { runtimePhase: 'attention' }, 'question', 'question', true],
-    ['a harness prompt, over an ask', { runtimePhase: 'attention', ask: ASK }, 'question', 'question', true],
-    ['a blocked turn', { runtimePhase: 'blocked', workerState: 'blocked' }, 'blocked', 'blocked', true],
-    ['a launch error over cached activity', { runtimePhase: 'waiting', launchError: 'failed' }, 'blocked', 'blocked', true],
-    ['failed attribution', { runtimePhase: 'identity_failed' }, 'blocked', 'blocked', true],
-    ['an ended turn', { runtimePhase: 'waiting' }, 'idle', 'idle', true],
-    ['work in progress', { runtimePhase: 'working', lastActivityAt: NOW - 1000 }, 'working', 'working', false],
-    ['an identity being acquired', { runtimePhase: 'identity_pending' }, 'starting', 'starting', false],
-    ['a fresh launch with no hook yet', { workerStartedAt: NOW - 60_000 }, 'starting', 'starting', false],
-    ['an old launch with no hook', { workerStartedAt: NOW - 20 * 3_600_000 }, 'no-signal', 'no signal', false],
-  ])('reads %s', (_, over, turn, word, yours) => {
-    expect(turnOf(live(over), NOW)).toMatchObject({ turn, word, yours })
+  it.each<[string, Partial<KanbanCard>, Turn, string, boolean, RegExp]>([
+    ['a question asked while working', { turn: 'question', runtimePhase: 'working', ask: ASK, lastActivityAt: NOW - 1000 }, 'question', 'question', true, /asked: .* still working/],
+    ['a harness prompt', { turn: 'question', runtimePhase: 'attention' }, 'question', 'question', true, /stopped on a harness prompt/],
+    ['a harness prompt, over an ask', { turn: 'question', runtimePhase: 'attention', ask: ASK }, 'question', 'question', true, /It also asked/],
+    ['a launch error', { turn: 'blocked', runtimePhase: 'waiting', launchError: 'failed' }, 'blocked', 'blocked', true, /^failed$/],
+    ['failed attribution', { turn: 'blocked', runtimePhase: 'identity_failed' }, 'blocked', 'blocked', true, /attribution failed/],
+    ['an ended turn', { turn: 'idle', runtimePhase: 'waiting' }, 'idle', 'idle', true, /ended its turn/],
+    ['work in progress', { turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 1000 }, 'working', 'working', false, /mid-turn/],
+    ['an identity being acquired', { turn: 'starting', runtimePhase: 'identity_pending' }, 'starting', 'starting', false, /acquiring its session/],
+    ['a fresh launch with no hook yet', { turn: 'starting', workerStartedAt: NOW - 60_000 }, 'starting', 'starting', false, /no hook event yet/],
+    ['an old launch with no hook', { turn: 'no-signal', workerStartedAt: NOW - 20 * 3_600_000 }, 'no-signal', 'no signal', false, /holds no hook event/],
+  ])('says %s', (_, over, turn, word, yours, detail) => {
+    const state = turnOf(live(over), NOW)
+    expect(state).toMatchObject({ turn, word, yours })
+    expect(state.detail).toMatch(detail)
   })
 
   it('keeps whose move apart from whether the worker is busy', () => {
-    expect(turnOf(live({ runtimePhase: 'working', ask: ASK }), NOW)).toMatchObject({ turn: 'question', yours: true, busy: true })
-    expect(turnOf(live({ runtimePhase: 'waiting' }), NOW)).toMatchObject({ yours: true, busy: false })
+    expect(turnOf(live({ turn: 'question', runtimePhase: 'working', ask: ASK }), NOW)).toMatchObject({ turn: 'question', yours: true, busy: true })
+    expect(turnOf(live({ turn: 'idle', runtimePhase: 'waiting' }), NOW)).toMatchObject({ yours: true, busy: false })
   })
 
   it('ages a question from when it was asked, and an idle turn from the last event', () => {
-    expect(turnOf(live({ runtimePhase: 'working', ask: ASK, lastActivityAt: NOW - 1000 }), NOW).since).toBe(Date.parse(ASK.at))
-    expect(turnOf(live({ runtimePhase: 'waiting', lastActivityAt: NOW - 5000 }), NOW).since).toBe(NOW - 5000)
+    expect(turnOf(live({ turn: 'question', runtimePhase: 'working', ask: ASK, lastActivityAt: NOW - 1000 }), NOW).since).toBe(Date.parse(ASK.at))
+    expect(turnOf(live({ turn: 'idle', runtimePhase: 'waiting', lastActivityAt: NOW - 5000 }), NOW).since).toBe(NOW - 5000)
   })
 
   it('names a working worker\'s silence only past ten minutes', () => {
-    expect(turnOf(live({ runtimePhase: 'working', lastActivityAt: NOW - 60_000 }), NOW).since).toBeUndefined()
-    expect(turnOf(live({ runtimePhase: 'working', lastActivityAt: NOW - 18 * 3_600_000 }), NOW).since).toBe(NOW - 18 * 3_600_000)
+    expect(turnOf(live({ turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 60_000 }), NOW).since).toBeUndefined()
+    expect(turnOf(live({ turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 18 * 3_600_000 }), NOW).since).toBe(NOW - 18 * 3_600_000)
   })
 
   it('reads an unreachable owner\'s frozen runtime as no turn at all, keeping only the synced ask', () => {
     const since = '2026-10-16T14:17:00Z'
-    const frozen = live({ runtimePhase: 'working', lastActivityAt: NOW - 98 * 3_600_000, originStale: { since } })
+    const frozen = live({ turn: 'working', runtimePhase: 'working', lastActivityAt: NOW - 98 * 3_600_000, originStale: { since } })
     expect(turnOf(frozen, NOW)).toMatchObject({ turn: 'no-signal', word: 'no signal', yours: false, busy: false, since: Date.parse(since) })
-    expect(turnOf({ ...frozen, runtimePhase: 'attention' }, NOW).turn).toBe('no-signal')
+    expect(turnOf({ ...frozen, turn: 'question', runtimePhase: 'attention' }, NOW).turn).toBe('no-signal')
     expect(turnOf({ ...frozen, ask: ASK }, NOW)).toMatchObject({ turn: 'question', yours: true, busy: false })
+  })
+
+  it('reads the conversation the human follows as working', () => {
+    expect(turnOf(live({ turn: 'idle', runtimePhase: 'waiting', followed: true }), NOW)).toMatchObject({ turn: 'working', yours: false })
+    expect(turnOf(card({ id: 'x', status: 'active', turn: 'question', ask: ASK, followed: true }), NOW).turn).toBe('question')
   })
 
   it('counts an ask only on an active card', () => {
@@ -78,7 +83,7 @@ const runtimeArb = fc.record({
 type Row = typeof runtimeArb extends fc.Arbitrary<infer T> ? T : never
 
 function feed(rows: Row[]): KanbanResponse {
-  return buildKanbanResponseFromComposite(parseCompositeFeed({
+  return buildKanbanResponseFromComposite(parseCompositeFeed(servedFeed({
     host: 'desk',
     fibers: rows.map((r, i) => ({
       origin: r.unreachable ? 'far' : 'desk', felt_store: '/store', path: `${i}.md`,
@@ -100,7 +105,7 @@ function feed(rows: Row[]): KanbanResponse {
       desk: { kind: 'local', stale: false, fiber_count: rows.length },
       far: { kind: 'remote', stale: true, last_polled_at: '2026-10-16T14:17:00Z', fiber_count: 0 },
     },
-  }), { nowMs: NOW })
+  }, NOW)), { nowMs: NOW })
 }
 
 function desk(data: KanbanResponse): HTMLElement {

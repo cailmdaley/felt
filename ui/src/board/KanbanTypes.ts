@@ -1,5 +1,13 @@
+import type { Turn } from './turn.js'
+
 /** Column identifier within the Now surface — also doubles as the API target. */
 export type ColumnKind = 'drafts' | 'inFlight' | 'awaitingReview' | 'tempered' | 'composted'
+/**
+ * Where a card stands, as its owning daemon serves it (`Shuttle.Lifecycle`):
+ * a lifecycle column, or at rest — put down, or a standing constitution
+ * between firings (`resting`), or a seat (`roles`).
+ */
+export type DeskColumn = ColumnKind | 'resting' | 'roles'
 export type HorizonKind = 'now' | 'stashed'
 
 /** The two shapes a shuttle block can take — the values `shuttle
@@ -51,6 +59,10 @@ export interface KanbanCard {
    */
   fiberDir?: string
   status: string
+  /** Its owner-served Desk column. */
+  column: DeskColumn
+  /** Whose move it is, as its owner serves it; `turnOf` adds what only this board knows. */
+  turn: Turn
   outcome?: string
   /** Bundled theme for this channel; Desk surfaces do not consume it. */
   theme?: string
@@ -214,17 +226,14 @@ export interface KanbanCard {
    */
   inheritedProjectDir?: InheritedProjectDir
   /**
-   * ISO timestamp of the next cron occurrence, server-computed from
-   * `shuttleSchedule` + `shuttleTz`. Present only for armed standing constitutions
-   * (kind=standing, `status: active`, not awaiting); absent in every other
-   * case.
-   *
-   * The backend routing layer uses this to lift dormant standing constitutions
-   * onto the timeline surface. The strip placement reads
-   * `card.nextLaunchAt ?? card.due` for day-column lookup. A standing
-   * role is a commitment with a date, not a draft.
+   * ISO timestamp of the next cron occurrence, as Shuttle resolves it
+   * (`shuttle.resolved.next_due`). Present only for an armed standing
+   * constitution (`status: active`); absent in every other case. The
+   * timeline sorts and places a sleeping standing constitution by it.
    */
   nextLaunchAt?: string
+  /** The schedule as a person says it (`shuttle.resolved.schedule_text`), when it can be said. */
+  scheduleText?: string
   /** Raw legacy top-level `horizon:` value from fiber frontmatter, if present. */
   storedHorizon?: HorizonKind
   /** Planning surface derived from due date plus legacy stash storage. */
@@ -250,7 +259,7 @@ export interface KanbanCard {
   /**
    * True when the fiber carries the `cycle` tag — a named span of time drawn as
    * a band by the temporal views, not a piece of work. A cycle card appears
-   * ONLY in `KanbanResponse.cycles`; `classifyFiber` keeps it out of every
+   * ONLY in `KanbanResponse.cycles`; the read model keeps it out of every
    * lifecycle column, so no desk surface and no column count ever sees one.
    */
   isCycle: boolean

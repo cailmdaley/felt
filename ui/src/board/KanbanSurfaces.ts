@@ -19,6 +19,7 @@ import {
 } from './civilDay.js'
 import type {
   ColumnKind,
+  DeskColumn,
   HorizonKind,
   KanbanCard,
   KanbanOriginStaleness,
@@ -26,10 +27,7 @@ import type {
 } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 import { isAgentCard } from './KanbanModalShared.js'
-import {
-  humanizeCron,
-  lensCycles,
-} from './KanbanRules.js'
+import { lensCycles } from './KanbanRules.js'
 import type {
   CycleLensChip,
 } from './KanbanRules.js'
@@ -61,6 +59,9 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
   tempered: 'Tempered',
   composted: 'Discarded',
 }
+
+/** Every column's name, the two at rest included. */
+export const DESK_COLUMN_TITLE: Record<DeskColumn, string> = { ...COLUMN_TITLES, resting: 'Resting', roles: 'Roles' }
 
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
 const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview']
@@ -694,7 +695,7 @@ export class KanbanSurfaceRenderer {
     if (isSleepingOnSchedule(card)) {
       const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null
       hint.textContent = returns ? `↻ ${returns}` : '↻'
-      const schedule = humanizeCron(card.shuttleSchedule) ?? card.shuttleSchedule
+      const schedule = card.scheduleText ?? card.shuttleSchedule
       detail = [schedule, returns && `next ${returns}`].filter(Boolean).join(' · ')
     }
     hint.hidden = hint.textContent === ''

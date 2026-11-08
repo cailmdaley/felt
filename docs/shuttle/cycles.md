@@ -39,8 +39,8 @@ Both dates are optional, and each omission means something:
 
 ## A cycle is never on the desk
 
-`classifyFiber` checks the `cycle` tag first and unconditionally, before any
-lifecycle question. Its `status`, its `due:`, even a `shuttle:` block someone
+The board's read model checks the `cycle` tag first and unconditionally, before
+it reads any column. Its `status`, its `due:`, even a `shuttle:` block someone
 pasted onto it, cannot put it in a Desk column — a cycle routes straight to the
 `cycles` surface. Otherwise an open cycle would read as a draft and a finished
 one as a card that had drifted past its date, and one stray "Autumn 2026" in

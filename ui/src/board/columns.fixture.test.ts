@@ -1,47 +1,49 @@
 import { describe, expect, it } from 'vitest'
 import source from '../../../daemon/test/fixtures/columns/cases.json?raw'
 import { card } from './testFixtures.js'
-import { deskColumn } from './deskColumn.js'
+import { WIRE_COLUMN } from './KanbanComposite.js'
 import { threadState, type ThreadState } from './threads.js'
-import { effectiveHorizon } from './KanbanRules.js'
-import type { ShuttleKind } from './KanbanTypes.js'
+import type { Turn } from './turn.js'
+import { ownerColumn, ownerTurn } from '../../harness/ownerLifecycle.js'
 
-/** The cases the daemon's roster and `shuttle status --json` are held to (daemon/test/fixtures/columns). */
+/** The cases the daemon's `Shuttle.Lifecycle` and `shuttle status --json` are held to (daemon/test/fixtures/columns). */
 interface Case {
   name: string
   live: boolean
+  runtime?: Record<string, unknown>
+  error?: string
   column: string
+  turn: Turn
   state: string
-  fiber: { status?: string; tempered?: boolean; horizon?: string; due?: string; shuttle: { kind: ShuttleKind; seat?: boolean; role?: string; ask?: { text: string; at: string } } }
+  fiber: Record<string, unknown>
 }
 const cases: Case[] = JSON.parse(source)
 
-// The wire's column names and the roster's state words, from the board's own.
-const COLUMN: Record<string, string> = {
-  drafts: 'drafts', inFlight: 'in_flight', awaitingReview: 'awaiting_review', tempered: 'tempered',
-  composted: 'discarded', resting: 'resting', scheduled: 'resting', roles: 'roles',
-}
+// The rails' state words, from the board's own.
 const STATE: Record<ThreadState, string> = {
   waiting: 'Waiting', working: 'Working', 'to-review': 'To review', drafts: 'Draft', archived: 'Archived', resting: 'Resting', roles: 'Resting',
 }
 
-describe('the board files every shared column case as the daemon and the CLI do', () => {
+describe('the mock owner serves every shared case as the daemon does', () => {
   for (const c of cases) {
     it(c.name, () => {
-      const { fiber } = c
-      const kanban = card({
+      const runtime = c.runtime ?? (c.live ? { state: 'running' } : undefined)
+      expect(ownerColumn(c.fiber, c.live)).toBe(c.column)
+      expect(ownerTurn(c.fiber, runtime, c.error)).toBe(c.turn)
+    })
+  }
+})
+
+describe('the board files every served column and turn as the daemon does', () => {
+  for (const c of cases) {
+    it(c.name, () => {
+      const served = card({
         id: 'hub/thread',
-        status: fiber.status ?? '',
-        tempered: fiber.tempered,
-        shuttleKind: fiber.shuttle.kind,
-        shuttleSeat: fiber.shuttle.seat,
-        shuttleRole: fiber.shuttle.role,
-        ask: fiber.shuttle.ask,
-        effectiveHorizon: effectiveHorizon({ due: fiber.due, horizon: fiber.horizon }).effectiveHorizon,
-        ...(c.live ? { workerState: 'running', runtimePhase: 'working', lastActivityAt: Date.now() } : {}),
+        column: WIRE_COLUMN[c.column],
+        turn: c.turn,
+        ...(c.live ? { workerState: 'running' } : {}),
       })
-      expect(COLUMN[deskColumn(kanban)]).toBe(c.column)
-      expect(STATE[threadState(kanban)]).toBe(c.state)
+      expect(STATE[threadState(served)]).toBe(c.state)
     })
   }
 })

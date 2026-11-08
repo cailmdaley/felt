@@ -27,10 +27,11 @@ it('launching a quiet ancestor brings its own row in beside the header of its as
   expect(named(data.now.inFlight)).toStrictEqual(['hub/ask'])
   const armed = applyOptimisticTransition(data, 'hub', 'inFlight')!
   expect(named(armed.now.inFlight)).toStrictEqual(['hub/ask', 'hub'])
-  const live = projectDeskFrontier({ ...armed, now: { ...armed.now, inFlight: armed.now.inFlight.map(c => c.id === 'hub' ? { ...c, workerState: 'running', runtimePhase: 'working' } : c) } })
+  const live = projectDeskFrontier({ ...armed, now: { ...armed.now, inFlight: armed.now.inFlight.map(c => c.id === 'hub' ? { ...c, workerState: 'running', runtimePhase: 'working', turn: 'working' as const } : c) } })
   expect(live.now.inFlight.map(c => inFlightBand(c))).toStrictEqual(['yourTurn', 'working'])
   // Once the question is answered, the working root is the family's only row.
-  const answered = projectDeskFrontier({ ...live, now: { ...live.now, inFlight: live.now.inFlight.map(c => ({ ...c, ask: undefined })) }, threads: live.threads?.map(c => ({ ...c, ask: undefined })) })
+  const answer = (c: ReturnType<typeof card>) => ({ ...c, ask: undefined, turn: c.turn === 'question' ? 'none' as const : c.turn })
+  const answered = projectDeskFrontier({ ...live, now: { ...live.now, inFlight: live.now.inFlight.map(answer) }, threads: live.threads?.map(answer) })
   expect(named(answered.now.inFlight)).toStrictEqual(['hub'])
   expect(inFlightBand(answered.now.inFlight[0])).toBe('working')
 })

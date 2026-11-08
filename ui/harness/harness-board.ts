@@ -32,6 +32,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { addChangeFixtures } from './change-fixtures.js'
+import { stampLifecycle } from './ownerLifecycle.js'
 import { addNavigationFixtures } from './nav-back-fixtures.js'
 import { addFamilyFixtures, addFrontierFixtures, addThreadFixtures } from './thread-fixtures.js'
 import { KanbanModal } from '../src/board/KanbanModal.js'
@@ -465,7 +466,7 @@ const SEATS: MockFiber[] = [
 /**
  * CYCLES — `cycle`-tagged fibers, each a named span of time. Chronicle draws
  * them as bands above the work, the Desk offers them as lenses, and they
- * appear in NO desk column: `classifyFiber` routes a cycle to `response.cycles`
+ * appear in NO desk column: the read model files a cycle in `response.cycles`
  * and nowhere else, so the column counts never see one.
  *
  * Without a band on screen there is nothing to click offline, so one live
@@ -1390,7 +1391,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   mockRequests.push(request)
   mockHandlers.push({ method, path: new URL(url, 'http://harness.invalid').pathname })
   const json = (body: unknown, status = 200) => {
-    const serialized = JSON.stringify(body)
+    // Like its owner, the mock serves every fiber row its column and turn.
+    const fibers = (body as { fibers?: unknown })?.fibers
+    const served = Array.isArray(fibers) ? { ...(body as object), fibers: fibers.map(row => stampLifecycle(row)) } : body
+    const serialized = JSON.stringify(served)
     request.responseBytes = new TextEncoder().encode(serialized).byteLength
     return new Response(serialized, { status, headers: { 'Content-Type': 'application/json' } })
   }

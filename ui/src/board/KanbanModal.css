@@ -82,9 +82,8 @@
    The F1 vine (.kbn-cap::before) is the same across all three — iron gall on
    paper, gilt on dark stock — so the row reads as one hand.
 
-   There is no Tempered or Discarded column styling: those buckets exist in
-   classifyFiber (ui/src/board/KanbanRules.ts) and feed the timeline, but
-   renderColumn/renderCard only ever take the three Now kinds. */
+   There is no Tempered or Discarded column styling: those columns feed the
+   timeline, and renderColumn/renderCard only ever take the three Now kinds. */
 .kbn-col-drafts .kbn-cap { color: var(--kbn-owed-bright); }       /* ochre */
 .kbn-col-inFlight .kbn-cap { color: var(--kbn-agent); }                 /* cobalt */
 .kbn-col-awaitingReview .kbn-cap { color: var(--kbn-tempered); }  /* verdigris — the verdict axis */

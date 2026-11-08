@@ -33,20 +33,23 @@ and which horizon it sits on.
 
 ### Column
 
-The browser computes column membership with `classifyFiber`
-(`ui/src/board/KanbanRules.ts`). That function decides membership alone, and it
-evaluates in this order:
+The daemon that owns a constitution decides its column, because only it sees
+the worker: it serves `column` and `turn` on every board row
+(`Shuttle.Lifecycle`), by the rule `shuttle status --json` also reports
+(`internal/shuttle/column.go`). The board files each row by what it is served,
+after setting cycles apart. The rule evaluates in this order:
 
 | Column | Condition |
 |---|---|
-| Cycles | tagged `cycle` — checked first, unconditionally |
+| Cycles | tagged `cycle` — the board checks this first, unconditionally |
 | Tempered | `closed` + `tempered: true` |
 | Discarded | `closed` + `tempered: false` |
 | Awaiting review | `closed`, `tempered` absent |
-| In flight | live tmux worker with a shuttle block — liveness wins over everything below |
+| In flight | live worker — liveness wins over everything below |
 | Roles | `shuttle.seat: true` with a role, and at rest: not `active`, or `active` + `kind: standing` between runs |
-| Scheduled | `active` + `kind: standing` — drawn in Resting, wearing its next launch |
+| Resting | `active` + `kind: standing` between runs — drawn wearing its next launch |
 | In flight | `active` oneshot |
+| Resting | `horizon: stashed`, unless a `due:` day that has come pulls it back |
 | Drafts | anything left, including `open` |
 
 In flight draws two bands, decided by whose move it is. **Your turn** holds
@@ -64,9 +67,13 @@ the worker as `parentThreadId`. A harness that reports none reads as your
 turn when idle. Cards keep creation order within each tier, so a card moves
 only when it crosses the seam or a question is raised or answered.
 
-One derivation, the card's *turn*, decides the band, the order, and the
+One reading, the card's *turn*, decides the band, the order, and the
 worker pill on every surface, so a card can never sit in Your turn with a pill
-that says otherwise. The pill's word names why it is (or isn't) your move:
+that says otherwise. The owning daemon serves the turn from its worker's
+runtime; the board lays over it only what it alone knows — the conversation
+you are following, and an owner it cannot reach. The thread roster
+(`shuttle threads`) reads the same turn. The pill's word names why it is (or
+isn't) your move:
 
 | Pill | Band | Meaning | Age counts from |
 |---|---|---|---|
@@ -81,13 +88,12 @@ The dot's breathing says whether the worker is busy, independently of whose
 move it is. The pill is also the control that opens the conversation.
 
 The cycle branch comes first on purpose. A [cycle](cycles.md) is an annotation
-on the calendar rather than work, so it leaves classification before any
-lifecycle question is asked — otherwise a stray "Autumn 2026" would sit in
-Drafts forever.
+on the calendar rather than work, so the board sets it apart before it reads
+any column — otherwise a stray "Autumn 2026" would sit in Drafts forever.
 
-Apart from that one tag, the classifier reads only `status`, `tempered`,
-`kind`, and tmux liveness. Neither the daemon nor the board reads tags for
-anything else.
+Apart from that one tag, the column reads only `status`, `tempered`, `kind`,
+the seat, the horizon and its `due:`, and worker liveness. Neither the daemon
+nor the board reads tags for anything else.
 
 ### A family's threads
 

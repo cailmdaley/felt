@@ -4,6 +4,7 @@ import { dispatchFailureMessage, needsProjectDir, type DispatchFailureBody } fro
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, inheritedProjectDir, projectDirIndex } from './KanbanReadModel.js'
 import { buildProjectDirPrompt } from './projectDirPrompt.js'
+import { servedFeed } from './testFixtures.js'
 
 // ── A DOM just big enough for the prompt ─────────────────────────────────────
 // No jsdom in this suite: elements hold children, text, a value, a disabled
@@ -140,14 +141,14 @@ describe('inheritedProjectDir', () => {
     },
   })
   const feed = (...rows: ReturnType<typeof row>[]) =>
-    parseCompositeFeed({
+    parseCompositeFeed(servedFeed({
       host: 'here',
       fibers: rows,
       origins: {
         here: { kind: 'local', stale: false, fiber_count: rows.length },
         far: { kind: 'remote', stale: false, fiber_count: rows.length },
       },
-    })
+    }))
   const suggested = (...rows: ReturnType<typeof row>[]) =>
     buildKanbanResponseFromComposite(feed(...rows)).now.awaitingReview.find((c) => c.id === 'a/b/c')
       ?.inheritedProjectDir

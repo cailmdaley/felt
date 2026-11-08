@@ -1,6 +1,5 @@
 import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
 import { ascByKey, instantMs } from './civilDay.js'
-import { deskColumn } from './deskColumn.js'
 import { turnOf } from './turn.js'
 
 export type ThreadState = 'waiting' | 'to-review' | 'working' | 'drafts' | 'roles' | 'resting' | 'archived'
@@ -32,20 +31,21 @@ export interface Family {
 const SPLIT = ['waiting', 'working', 'to-review'] as const
 const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'roles', 'resting', 'archived']
 /**
- * A thread's state: the Desk column it would sit in (`deskColumn`), with
- * In flight split by `turnOf` into Waiting (the human's move) and Working
- * (the worker's, including an armed thread whose worker has not started).
- * A verdict archives; a standing thread asleep on its cron rests; a seat at
- * rest is among the Roles. The family page and mention chips read this.
+ * A thread's state: its served Desk column, with In flight split by `turnOf`
+ * into Waiting (the human's move) and Working (the worker's, including an
+ * armed thread whose worker has not started). A verdict archives; a standing
+ * thread asleep on its cron rests; a seat at rest is among the Roles. The
+ * family page and mention chips read this; the daemon's roster
+ * (`Shuttle.Threads.thread_state/4`) reads the same column and turn.
  */
 export function threadState(card: KanbanCard): ThreadState {
-  switch (deskColumn(card)) {
+  switch (card.column) {
     case 'tempered': case 'composted': return 'archived'
     case 'awaitingReview': return 'to-review'
     case 'inFlight': return turnOf(card).yours ? 'waiting' : 'working'
     case 'drafts': return 'drafts'
     case 'roles': return 'roles'
-    default: return 'resting'
+    case 'resting': return 'resting'
   }
 }
 /** A thread's identity: a wire edge names a path, and the same path can live on several hosts. */

@@ -7,6 +7,8 @@
  * view's CSS.
  */
 
+import type { DeskColumn } from '../KanbanTypes.js'
+
 // ── Obligations ──────────────────────────────────────────────────────────────
 
 /**
@@ -27,12 +29,10 @@ export const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐' 
 /**
  * Where a fiber stands in its life, as the temporal views need to say it.
  *
- * This is the Desk's column vocabulary seen from the side: the same six
- * answers `classifyFiber` gives, minus the surface question of which strip a
- * card lands on. `resting` folds two ways of being off the desk — snoozed
- * (`horizon:stashed`) and an armed standing constitution between firings —
- * because from a row on the chronicle they are one claim: nothing is owed here
- * now.
+ * This is the card's served Desk column seen from the side. `resting` folds
+ * the two columns off the desk — Resting (put down, or an armed standing
+ * constitution between firings) and the Roles — because from a row on the
+ * chronicle they are one claim: nothing is owed here now.
  *
  *   ◇ draft            written, not armed
  *   ▶ in flight        a worker is running, or the fiber is armed to run
@@ -82,40 +82,19 @@ export const STATE_KEY_ITEMS: LifecycleState[] = [
   'discarded',
 ]
 
-/** The fields a card must carry for its state to be readable. `KanbanCard`
- *  satisfies this; the shape is structural so the shared vocabulary keeps
- *  owning no view or wire types. */
-export interface StateBearing {
-  status: string
-  tempered?: boolean
-  workerState?: 'running' | 'blocked'
-  shuttleKind?: 'oneshot' | 'standing'
-  effectiveHorizon?: 'now' | 'stashed'
+const COLUMN_STATE: Record<DeskColumn, LifecycleState> = {
+  drafts: 'draft',
+  inFlight: 'inFlight',
+  awaitingReview: 'awaitingReview',
+  resting: 'resting',
+  roles: 'resting',
+  tempered: 'tempered',
+  composted: 'discarded',
 }
 
-/**
- * A card's lifecycle state, in `classifyFiber`'s branch order.
- *
- * Closed is asked FIRST and unconditionally: a fiber that ended still carries
- * whatever `shuttle:` block ran it, and reading the block first would show a
- * finished fiber as in flight forever. After that a live worker outranks
- * everything — a running resting or standing fiber is running, whatever it does
- * between workers.
- */
-export function cardState(card: StateBearing): LifecycleState {
-  if (card.status === 'closed') {
-    if (card.tempered === true) return 'tempered'
-    if (card.tempered === false) return 'discarded'
-    return 'awaitingReview'
-  }
-  if (card.workerState !== undefined) return 'inFlight'
-  if (card.effectiveHorizon === 'stashed') return 'resting'
-  if (card.status === 'active') {
-    // An armed standing constitution fires on its own cron; nothing is owed until it
-    // does. Only a one-shot that is `active` is genuinely underway.
-    return card.shuttleKind === 'standing' ? 'resting' : 'inFlight'
-  }
-  return 'draft'
+/** A card's lifecycle state, from its served column. */
+export function cardState(card: { column: DeskColumn }): LifecycleState {
+  return COLUMN_STATE[card.column]
 }
 
 // ── Message tallies ──────────────────────────────────────────────────────────

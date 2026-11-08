@@ -7,7 +7,10 @@
  */
 import { expect, vi } from 'vitest'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { surfaceTotals } from './KanbanReadModel.js'
+import { WIRE_COLUMN, type CompositeEntry, type CompositeFeed } from './KanbanComposite.js'
+import type { Turn } from './turn.js'
+import { ownerColumn, ownerTurn, stampLifecycle } from '../../harness/ownerLifecycle.js'
+import { buildKanbanResponseFromComposite, surfaceTotals, type BuildKanbanResponseOptions } from './KanbanReadModel.js'
 import { buildTimelineDays } from './KanbanSurfaces.js'
 import { civilDayAt, hostZone } from './civilDay.js'
 import type { VoiceStatus } from './voice.js'
@@ -21,14 +24,31 @@ export function voiceStatus(over: Partial<VoiceStatus> = {}): VoiceStatus {
 /**
  * A minimally-real KanbanCard: every field the type requires, with an
  * id-derived name and path. Per-suite defaults ride in via `over`, which is
- * spread LAST so a caller's override always wins.
+ * spread LAST so a caller's override always wins. Its `column` and `turn` are
+ * the ones its owner would serve for the fields given (`ownerLifecycle`), a
+ * stashed horizon read as a rest; a caller that changes those fields on a
+ * built card changes the served pair with them.
  */
 export function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard {
+  const fiber = {
+    status: over.status ?? 'open',
+    tempered: over.tempered,
+    horizon: over.effectiveHorizon === 'stashed' ? 'stashed' : undefined,
+    shuttle: {
+      kind: over.shuttleKind ?? 'oneshot', seat: over.shuttleSeat, role: over.shuttleRole, ask: over.ask,
+      runtime: { dispatched_at: over.dispatchedAt },
+    },
+  }
+  const runtime = over.workerState === undefined ? undefined
+    : { state: over.workerState, phase: over.runtimePhase, launch_error: over.launchError, started_at: over.workerStartedAt }
   return {
     name: over.name ?? over.id,
     path: `.felt/${over.id}.md`,
     originId: 'local',
     status: 'open',
+    // A cycle carries no constitution its owner would stamp.
+    column: over.isCycle ? 'drafts' : WIRE_COLUMN[ownerColumn(fiber, runtime !== undefined)],
+    turn: over.isCycle ? 'none' : ownerTurn(fiber, runtime, over.launchError) as Turn,
     createdAt: '2026-01-01T09:00:00Z',
     effectiveHorizon: 'now',
     drifted: false,
@@ -37,6 +57,41 @@ export function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): Kanban
     isCycle: false,
     cycleStart: null,
     ...over,
+  }
+}
+
+/** A feed body as its owners serve it: each constitution row carries its column and turn. */
+export function servedFeed<T extends object>(body: T, nowMs = Date.now()): T {
+  const fibers = (body as { fibers?: unknown }).fibers
+  return Array.isArray(fibers) ? { ...body, fibers: fibers.map(row => stampLifecycle(row, nowMs)) } : body
+}
+
+/** A composite row before its owner stamps it. */
+export type FeedRow = Omit<CompositeEntry, 'column' | 'turn'> & Partial<Pick<CompositeEntry, 'column' | 'turn'>>
+/** A composite feed of rows before their owners stamp them. */
+export type FeedOf = Omit<CompositeFeed, 'entries'> & { entries: FeedRow[] }
+
+/** The board one feed builds, each row as its owner serves it. */
+export function boardFrom(feed: FeedOf, opts: BuildKanbanResponseOptions = {}): KanbanResponse {
+  return buildKanbanResponseFromComposite({ ...feed, entries: feed.entries.map(e => served(e, opts.nowMs)) }, opts)
+}
+
+/** A parsed composite entry as its owner serves it, unless it states its own column and turn. */
+export function served(entry: FeedRow, nowMs = Date.now()): CompositeEntry {
+  const f = entry.fiber
+  const fiber = {
+    status: f.status, tempered: f.tempered, horizon: f.horizon, due: f.due,
+    shuttle: f.hasShuttleBlock ? {
+      kind: f.shuttleKind, seat: f.shuttleSeat, role: f.shuttleRole, ask: f.shuttleAsk,
+      runtime: { dispatched_at: f.shuttleDispatchedAt },
+    } : undefined,
+  }
+  const r = entry.runtime
+  const runtime = r && { state: r.state, phase: r.phase, launch_error: r.launchError, started_at: r.startedAt }
+  return {
+    column: WIRE_COLUMN[ownerColumn(fiber, runtime !== undefined, nowMs)],
+    turn: ownerTurn(fiber, runtime, entry.dispatchError, nowMs) as Turn,
+    ...entry,
   }
 }
 

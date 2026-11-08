@@ -6,8 +6,8 @@ import { card, response } from './testFixtures.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { projectDeskFrontier } from './KanbanReadModel.js'
 
-const waiting = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const }
-const working = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'working' as const }
+const waiting = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const, turn: 'idle' as const }
+const working = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'working' as const, turn: 'working' as const }
 const root = card({ id: 'proj/hub', name: 'Hub', ...waiting })
 const busy = card({ id: 'proj/hub/busy', name: 'Busy', orchestrator: 'proj/hub', createdAt: '2026-10-01T00:00:00Z', ...working })
 const asks = card({ id: 'proj/hub/busy/asks', name: 'Choose a cut', orchestrator: 'proj/hub/busy', createdAt: '2026-10-02T00:00:00Z', status: 'active', ask: { text: 'Which?', at: '2026-10-01T00:00:00Z' } })

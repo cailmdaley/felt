@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { card } from '../testFixtures.js'
+import { card, servedFeed } from '../testFixtures.js'
 import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
+import type { Turn } from '../turn.js'
 import { Workspace, type WorkspaceOptions } from './Workspace.js'
 import { ThreadIndex } from '../threads.js'
 import { projectDeskFrontier } from '../KanbanReadModel.js'
@@ -38,6 +39,8 @@ type WorkspaceTestOptions = Omit<WorkspaceOptions, 'deskRows'> & { deskRows?: Wo
 function makeWorkspace(root: HTMLElement, opts: WorkspaceTestOptions): Workspace {
   return new Workspace(root, { sends: new FiberSends(opts.shuttleBase, { intervalMs: 0 }), ...opts, deskRows: opts.deskRows ?? opts.cards })
 }
+/** The turn an owner serves for a live worker's phase. */
+const TURN_OF_PHASE: Record<string, Turn> = { working: 'working', waiting: 'idle', attention: 'question', blocked: 'blocked' }
 const cards = [
   card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a', fiberDir: '/notes/alpha', path: 'work/alpha/alpha.md' }),
   card({ id: 'work/beta', uid: 'beta', name: 'Beta', originId: 'host-b', fiberDir: '/notes/beta', path: 'work/beta/beta.md' }),
@@ -57,7 +60,7 @@ const fiberReadResponse = (card: KanbanCard, contents = body): Response => {
       project_dir: card.shuttleProjectDir,
     }
   }
-  return new Response(JSON.stringify({
+  return new Response(JSON.stringify(servedFeed({
     host: card.originId,
     fibers: [{
       origin: card.originId, felt_store: card.feltStore ?? '/notes/.felt', path: card.path,
@@ -69,7 +72,7 @@ const fiberReadResponse = (card: KanbanCard, contents = body): Response => {
         outcome: card.outcome ?? 'A checked result.', body: contents,
       },
     }],
-  }))
+  })))
 }
 // Microtask depth varies with the Node runtime (undici fetch/Response hops), so drain generously.
 const flush = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
@@ -693,7 +696,7 @@ describe('workspace reader integration', () => {
   it('steps the Desk with j/k wherever it opens', async () => {
     workspace.dispose()
     const returned = vi.fn()
-    const grouped = [{ ...cards[0], status: 'closed' }, { ...cards[1], status: 'active' }]
+    const grouped = [{ ...cards[0], status: 'closed', column: 'awaitingReview' as const }, { ...cards[1], status: 'active', column: 'inFlight' as const }]
     workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => grouped, origin: () => 'Board', onVisibility: visibility,
       deskRows: () => [grouped[1], grouped[0]], onReturnCard: returned, dock: new Dock('', changed),
@@ -709,8 +712,8 @@ describe('workspace reader integration', () => {
   it('walks In flight\'s bands as one flow with j/k, and stops J/K at each column', async () => {
     workspace.dispose()
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
-      ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', workerState: 'running', runtimePhase })
-    const feed = [{ ...cards[0], status: 'closed' }, flight('w1', 'working'), flight('n1', 'waiting'), flight('w2', 'working'), flight('n2', 'blocked'), { ...cards[1], uid: 'draft', id: 'work/draft', name: 'draft' }]
+      ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', column: 'inFlight', turn: TURN_OF_PHASE[runtimePhase ?? ''] ?? 'no-signal', workerState: 'running', runtimePhase })
+    const feed = [{ ...cards[0], status: 'closed', column: 'awaitingReview' as const }, flight('w1', 'working'), flight('n1', 'waiting'), flight('w2', 'working'), flight('n2', 'blocked'), { ...cards[1], uid: 'draft', id: 'work/draft', name: 'draft' }]
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[5], feed[2], feed[4], feed[1], feed[3], feed[0]], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[0], 'Desk'); await flush()
     expect(walked()).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
@@ -1600,7 +1603,7 @@ describe('workspace reader integration', () => {
     const band = document.querySelector<HTMLElement>('.ws-stage-band .ws-dock')!
     liveCards = [{ ...liveCards[0], id: 'b/task', path: 'b/task/task.md', fiberDir: '/notes/b/task',
       feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b',
-      workerState: 'running', tmuxSession: 'new-worker', sessionUuid: 'new-session', runtimePhase: 'working' }]
+      workerState: 'running', tmuxSession: 'new-worker', sessionUuid: 'new-session', runtimePhase: 'working', turn: 'working', column: 'inFlight' }]
     workspace.update()
     expect(document.querySelector('.ws-stage-band .ws-dock')).toBe(band)
     expect(document.querySelectorAll('.kbn-card-worker:not(.ws-navbar *)')).toHaveLength(0)

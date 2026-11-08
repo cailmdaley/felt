@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { CompositeEntry, CompositeFeed } from './KanbanComposite.js'
+
 import type { Fiber } from './KanbanFiber.js'
 import {
-  buildKanbanResponseFromComposite,
   byCardIdentity,
   byClosedAtDesc,
   byCreatedAtDesc,
@@ -15,7 +14,7 @@ import {
 import { clusterStashCards, sortDatedByReturn, splitStashByReturn } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { dueCivilDay, instantMs, zone } from './civilDay.js'
-import { card } from './testFixtures.js'
+import { boardFrom, card, served, type FeedOf, type FeedRow } from './testFixtures.js'
 
 const NOW = Date.parse('2026-10-05T12:00:00Z')
 const NEW = '2026-10-04T09:00:00-07:00'
@@ -37,7 +36,7 @@ const identity = (c: KanbanCard): string => `${c.uid ?? ''}@${c.originId}:${c.id
 const ids = (cards: KanbanCard[]): string[] => cards.map((c) => c.id)
 const identities = (cards: KanbanCard[]): string[] => cards.map(identity)
 
-function entry(id: string, over: Partial<Fiber> = {}, origin = 'alpha'): CompositeEntry {
+function entry(id: string, over: Partial<Fiber> = {}, origin = 'alpha'): FeedRow {
   return {
     origin, feltStore: '/store', path: `${id}.md`,
     fiber: {
@@ -47,7 +46,7 @@ function entry(id: string, over: Partial<Fiber> = {}, origin = 'alpha'): Composi
   }
 }
 
-function feed(entries: CompositeEntry[], seed = 0): CompositeFeed {
+function feed(entries: FeedRow[], seed = 0): FeedOf {
   return {
     host: 'desk', entries: shuffled(entries, seed),
     origins: Object.fromEntries(shuffled(['desk', 'alpha', 'beta', 'gamma'], seed + 17).map((origin) => [
@@ -153,16 +152,16 @@ describe('Desk comparators', () => {
     expect(workers.map(inFlightBand)).toEqual(['yourTurn', 'yourTurn', 'yourTurn', 'working', 'working'])
     expect(workers.map(isQuestion)).toEqual([false, true, true, false, false])
     // An idle turn joins Your turn below the questions; a question raised on it lifts it to the top.
-    workers[3].runtimePhase = 'waiting'
+    Object.assign(workers[3], { runtimePhase: 'waiting', turn: 'idle' })
     expect(ids([...workers].sort(byInFlightBand)))
       .toEqual(['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old'])
-    workers[3].ask = { text: 'Choose the next slice?', at: NEW }
+    Object.assign(workers[3], { ask: { text: 'Choose the next slice?', at: NEW }, turn: 'question' })
     expect(ids([...workers].sort(byInFlightBand))[0]).toBe('working-new')
-    workers[3].ask = undefined
+    Object.assign(workers[3], { ask: undefined, turn: 'idle' })
     expect(ids([...workers].sort(byInFlightBand)))
       .toEqual(['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old'])
     // A blocked turn is the human's move but not a question: it stays below them.
-    workers[3].runtimePhase = 'blocked'
+    Object.assign(workers[3], { runtimePhase: 'blocked', turn: 'blocked' })
     expect(inFlightBand(workers[3])).toBe('yourTurn')
     expect(ids([...workers].sort(byInFlightBand)).slice(0, 2)).toEqual(['attention-old', 'asked-old'])
   })
@@ -190,31 +189,31 @@ describe('the composite Desk is independent of entry and origin order', () => {
     entry('shared/local-id', { uid: 'distinct-b' }, 'beta'),
     entry('old/local-id', { uid: undefined }, 'alpha'),
     entry('old/local-id', { uid: undefined }, 'beta'),
-    entry('future/early', { status: 'active', shuttleKind: 'standing', shuttleSchedule: { expr: '0 9 * * *', tz: 'UTC' } }),
-    entry('future/late', { status: 'active', shuttleKind: 'standing', shuttleSchedule: { expr: '0 19 * * *', tz: 'UTC' } }),
+    entry('future/early', { status: 'active', shuttleKind: 'standing', shuttleSchedule: { expr: '0 9 * * *', tz: 'UTC' }, shuttleNextDue: '2026-10-06T09:00:00Z' }),
+    entry('future/late', { status: 'active', shuttleKind: 'standing', shuttleSchedule: { expr: '0 19 * * *', tz: 'UTC' }, shuttleNextDue: '2026-10-05T19:00:00Z' }),
   )
 
   it('keeps every lane stable, duplicates visible, independent of recency', () => {
-    const baseline = buildKanbanResponseFromComposite(feed(entries), { nowMs: NOW })
+    const baseline = boardFrom(feed(entries), { nowMs: NOW })
     expect(baseline.now.drafts.filter((c) => c.id === 'shared/local-id')).toHaveLength(2)
     expect(baseline.now.drafts.filter((c) => c.id === 'old/local-id')).toHaveLength(2)
     expect(ids(baseline.timeline.futureDated)).toEqual(['future/late', 'future/early'])
     for (let seed = 1; seed <= 40; seed++) {
-      const result = buildKanbanResponseFromComposite(feed(entries, seed), { nowMs: NOW })
+      const result = boardFrom(feed(entries, seed), { nowMs: NOW })
       expect(surfaceOrder(result)).toEqual(surfaceOrder(baseline))
     }
   })
 
   it('ignores edits, file timestamps and runtime age; a genuinely newer draft inserts once at the top', () => {
-    const before = buildKanbanResponseFromComposite(feed(entries), { nowMs: NOW })
+    const before = boardFrom(feed(entries), { nowMs: NOW })
     const edited = entries.map((e) => ({
       ...e,
       fiber: { ...e.fiber, modifiedAt: '2026-10-05T23:59:59Z', body: 'Edited body', name: 'Renamed' },
       runtime: e.runtime ? { ...e.runtime, lastActivityAt: NOW + 10_000 } : undefined,
     }))
-    const after = buildKanbanResponseFromComposite(feed(edited, 39), { nowMs: NOW + 10_000 })
+    const after = boardFrom(feed(edited, 39), { nowMs: NOW + 10_000 })
     expect(surfaceOrder(after)).toEqual(surfaceOrder(before))
-    const added = buildKanbanResponseFromComposite(feed([
+    const added = boardFrom(feed([
       ...edited, entry('brand-new', { createdAt: '2026-10-05T13:00:00Z' }),
     ], 40), { nowMs: NOW + 10_000 })
     expect(ids(added.now.drafts)).toEqual(['brand-new', ...ids(before.now.drafts)])
@@ -233,7 +232,7 @@ describe('mirrored row survivor determinism', () => {
     ]
     for (let seed = 1; seed <= 40; seed++) {
       const shuffledFeed = feed(entries, seed)
-      const rows = dedupeMirroredRows(shuffledFeed.entries, shuffledFeed)
+      const rows = dedupeMirroredRows(shuffledFeed.entries.map(e => served(e)), { ...shuffledFeed, entries: [] })
       expect(rows).toHaveLength(1)
       expect(rows[0].origin).toBe('alpha')
       expect(rows[0].mirroredOrigins).toEqual(['beta', 'gamma'])
@@ -245,7 +244,7 @@ describe('mirrored row survivor determinism', () => {
       entry('mirror', { uid: 'same', shuttleHost: undefined, modifiedAt: 'bad' }, 'alpha'),
       entry('mirror', { uid: 'same', shuttleHost: undefined, modifiedAt: '1969-01-01T00:00:00Z' }, 'beta'),
     ]
-    expect(dedupeMirroredRows(entries, feed(entries))[0].origin).toBe('beta')
+    expect(dedupeMirroredRows(entries.map(e => served(e)), { ...feed(entries), entries: [] })[0].origin).toBe('beta')
   })
 })
 

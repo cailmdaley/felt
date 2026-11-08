@@ -8,61 +8,20 @@ import {
   diffClause,
   sumDiff,
   type LifecycleState,
-  type StateBearing,
 } from './vocabulary.js'
-
-const card = (over: Partial<StateBearing> = {}): StateBearing => ({
-  status: 'open',
-  ...over,
-})
+import type { DeskColumn } from '../KanbanTypes.js'
 
 describe('cardState', () => {
-  it('reads a closed fiber by its verdict', () => {
-    expect(cardState(card({ status: 'closed', tempered: true }))).toBe('tempered')
-    expect(cardState(card({ status: 'closed', tempered: false }))).toBe('discarded')
-    expect(cardState(card({ status: 'closed' }))).toBe('awaitingReview')
-  })
-
-  it('asks closed FIRST — a finished fiber keeps the block that ran it', () => {
-    // Every field below would otherwise claim the card: a live worker, a
-    // standing kind, a stash. None of them outranks a verdict.
-    expect(
-      cardState({
-        status: 'closed',
-        tempered: true,
-        workerState: 'running',
-        shuttleKind: 'standing',
-        effectiveHorizon: 'stashed',
-      }),
-    ).toBe('tempered')
-  })
-
-  it('calls a live worker in flight, whatever the fiber does at rest', () => {
-    expect(cardState(card({ workerState: 'running' }))).toBe('inFlight')
-    expect(cardState(card({ workerState: 'running', shuttleKind: 'standing' }))).toBe('inFlight')
-    expect(cardState(card({ workerState: 'running', effectiveHorizon: 'stashed' }))).toBe(
-      'inFlight',
-    )
-  })
-
-  it('folds the two ways of being off the desk into resting', () => {
-    expect(cardState(card({ effectiveHorizon: 'stashed' }))).toBe('resting')
-    // An armed standing constitution fires on its own cron — nothing owed until it does.
-    expect(cardState(card({ status: 'active', shuttleKind: 'standing' }))).toBe('resting')
-  })
-
-  it('calls an armed one-shot in flight before any worker exists', () => {
-    expect(cardState(card({ status: 'active' }))).toBe('inFlight')
-    expect(cardState(card({ status: 'active', shuttleKind: 'oneshot' }))).toBe('inFlight')
-  })
-
-  it('falls through to draft', () => {
-    expect(cardState(card())).toBe('draft')
-    expect(cardState(card({ shuttleKind: 'oneshot' }))).toBe('draft')
-    expect(cardState(card({ status: 'something-new' }))).toBe('draft')
+  it('reads every served column as the state a row names', () => {
+    const states: Record<DeskColumn, LifecycleState> = {
+      drafts: 'draft', inFlight: 'inFlight', awaitingReview: 'awaitingReview',
+      tempered: 'tempered', composted: 'discarded',
+      // The two ways of being off the desk are one claim on a row: nothing owed now.
+      resting: 'resting', roles: 'resting',
+    }
+    for (const [column, state] of Object.entries(states)) expect(cardState({ column: column as DeskColumn })).toBe(state)
   })
 })
-
 describe('the state vocabulary', () => {
   const states = Object.keys(STATE_GLYPH) as LifecycleState[]
 

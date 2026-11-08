@@ -30,9 +30,9 @@
  *     /api/v1/transition lifecycle path.
  *   • Click a card body to open its channel in the document workspace.
  *
- * Classification happens once, frontend-side: `classifyFiber` in
- * `KanbanRules.ts` buckets the composite feed into surfaces. The drag handler's
- * only knob is which surface and day to send.
+ * Each card's owning daemon serves its column; the read model
+ * (`KanbanReadModel.ts`) files the composite feed onto surfaces by it. The drag
+ * handler's only knob is which surface and day to send.
  */
 
 import '../styles/type.css'
@@ -62,7 +62,7 @@ import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch
 import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { deskCardKey, deskOrder, type DeskOrder } from './deskOrdering.js'
-import { moveDestinations, seatAtRest } from './MoveDestinations.js'
+import { moveDestinations } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
@@ -70,11 +70,7 @@ import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, surfaceTotals, projectDeskFrontier, projectDeskFollowing } from './KanbanReadModel.js'
 import { threadKey } from './threads.js'
-import {
-  dueBouncesFromResting,
-  nextStandingLaunch,
-  restingUntil,
-} from './KanbanRules.js'
+import { dueBouncesFromResting, restingUntil } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
@@ -1036,10 +1032,10 @@ export class KanbanModal {
    * reopens a closed lifecycle itself, so no separate transition write runs.
    *
    * Drag-from-timeline-or-stash composes the park-on-desk write with the
-   * lifecycle verb rather than writing the surface alone and trusting
-   * classifyFiber to redirect: standing constitutions always re-classify back to the
-   * timeline (their lifecycle column is `scheduled`, horizon-independent),
-   * and tempered/closed past cards never leave timeline.past. Composing both
+   * lifecycle verb rather than writing the surface alone and trusting the
+   * served column to redirect: an armed standing constitution always returns
+   * to the timeline (its column is `resting`, horizon-independent), and
+   * tempered/closed past cards never leave timeline.past. Composing both
    * writes makes the drag take precedence: the gesture lands the card where
    * the user dropped it AND fires the action that column means.
    */
@@ -1107,9 +1103,9 @@ export class KanbanModal {
 
     // Optimism: reflect the gesture's named destination *now*, before the
     // server write returns. This is honoring the drop, not reclassifying —
-    // the user dropped the card on `target`, so it goes there. classifyFiber
-    // stays authoritative: commitTransition refetches and reconciles, so a
-    // surprising server classification (or server-enriched card fields like
+    // the user dropped the card on `target`, so it goes there. The served
+    // column stays authoritative: commitTransition refetches and reconciles, so a
+    // surprising server column (or server-enriched card fields like
     // closedAt) self-corrects within one refetch. The slow part — a daemon
     // round-trip, a worker spawn for inFlight — no longer blocks the card
     // from moving.
@@ -1302,7 +1298,7 @@ export class KanbanModal {
   ): void {
 
     // A standing constitution is placed on the timeline by its schedule
-    // (`nextStandingLaunch`), not by hand — a horizon/due write here is
+    // (`nextLaunchAt`), not by hand — a horizon/due write here is
     // silently ignored by the read model and just leaves dead frontmatter.
     // Reject the planning gesture with an explanation rather than no-op. The
     // lifecycle gestures still work: drag to In flight runs it now (that's
@@ -2374,11 +2370,11 @@ export function resolveOpenTarget(
  * the card isn't anywhere in `resp` — the caller then skips optimism and
  * leans on the post-commit refetch alone.
  *
- * This honors the gesture's *named* destination; it does NOT re-derive
- * placement from fiber fields (that stays the server's `classifyFiber`). It
- * only patches the minimal fields the destination's own rendering reads — the
- * past lane keys off `status`/`tempered` and a `closedAt` day-column, and
- * closing the fiber drops the running-worker pill.
+ * This honors the gesture's *named* destination: the card takes the column
+ * its owner will serve once the write lands, and the minimal fields the
+ * destination's own rendering reads — the past lane keys off
+ * `status`/`tempered` and a `closedAt` day-column, and closing the fiber drops
+ * the running-worker pill.
  */
 export function applyOptimisticTransition(
   resp: KanbanResponse | null,
@@ -2410,25 +2406,23 @@ export function applyOptimisticTransition(
     moved.workerState = undefined
     moved.tmuxSession = undefined
     moved.runtimePhase = undefined
-    const nowMs = Date.parse(nowIso)
-    moved.nextLaunchAt = nextStandingLaunch(
-      {
-        shuttleKind: 'standing',
-        status: 'active',
-        shuttleSchedule: card.shuttleSchedule ? { expr: card.shuttleSchedule, tz: card.shuttleTz ?? 'UTC' } : undefined,
-      },
-      nowMs,
-    )
+    moved.turn = 'none'
     // A standing seat re-armed between runs rests among the Roles.
-    if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
+    if (moved.shuttleSeat === true && moved.shuttleRole) {
+      moved.column = 'roles'
+      return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
+    }
+    moved.column = 'resting'
     timeline.futureDated = [...timeline.futureDated, moved]
     return withSurfaces(resp, { now, timeline, stash, roles })
   }
+  moved.column = target
   if (target === 'tempered' || target === 'composted') {
     moved.status = 'closed'
     moved.tempered = target === 'tempered'
     moved.workerState = undefined           // closing the fiber stops its worker
     moved.tmuxSession = undefined
+    moved.turn = 'none'
     moved.closedAt = card.closedAt ?? nowIso  // past lane skips cards with no closedAt day-column
     timeline.past = [moved, ...timeline.past]
   } else {
@@ -2447,6 +2441,7 @@ export function applyOptimisticTransition(
       moved.effectiveHorizon = 'now'
       moved.drifted = false
       moved.due = undefined
+      moved.turn = 'none'
     } else if (target === 'awaitingReview') {
       moved.status = 'closed'
       moved.tempered = undefined
@@ -2454,6 +2449,7 @@ export function applyOptimisticTransition(
       moved.workerState = undefined
       moved.tmuxSession = undefined
       moved.runtimePhase = undefined
+      moved.turn = 'none'
     } else if (target === 'inFlight') {
       moved.status = 'active'
       moved.tempered = undefined
@@ -2461,6 +2457,7 @@ export function applyOptimisticTransition(
     }
     // A seat parked as a draft is a seat at rest: it goes back to its role.
     if (target === 'drafts' && moved.shuttleSeat === true && moved.shuttleRole) {
+      moved.column = 'roles'
       return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
     }
     now[target] = [...now[target], moved]
@@ -2479,7 +2476,9 @@ export function applyOptimisticSeat(resp: KanbanResponse | null, seat: KanbanCar
     timeline: { ...resp.timeline, past: patch(resp.timeline.past), futureDated: patch(resp.timeline.futureDated) },
     stash: patch(resp.stash), roles: patch(resp.roles),
   })
-  return seatAtRest(seat)
+  // Whatever was at rest — a draft, a card put down, a standing constitution
+  // between firings — rests among the Roles once it is a seat.
+  return seat.shuttleRole && (seat.column === 'drafts' || seat.column === 'resting' || seat.column === 'roles')
     ? placeOptimistically(updated, seat.id, () => ({}))
     : updated
 }
@@ -2512,6 +2511,7 @@ export function applyOptimisticSurface(
     workerState: undefined,
     tmuxSession: undefined,
     runtimePhase: undefined,
+    turn: 'none',
     storedHorizon: 'stashed',
     effectiveHorizon: 'stashed',
     drifted: false,
@@ -2541,6 +2541,10 @@ function placeOptimistically(
   if (!card) return null
   const moved: KanbanCard = { ...card, ...patch(card) }
   // Resting a seat keeps it a seat: it comes to rest among the Roles.
-  if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
+  if (moved.shuttleSeat === true && moved.shuttleRole) {
+    moved.column = 'roles'
+    return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
+  }
+  moved.column = 'resting'
   return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], roles })
 }

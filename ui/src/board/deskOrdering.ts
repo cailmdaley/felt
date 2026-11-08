@@ -1,7 +1,7 @@
 import { IN_FLIGHT_BANDS, inFlightBand, restingCards } from './KanbanReadModel.js'
 import { restingOrder, type RestingOrder } from './KanbanSurfaces.js'
 import { hostZone, type Zone } from './civilDay.js'
-import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import type { DeskColumn, KanbanCard, KanbanResponse } from './KanbanTypes.js'
 
 /** The Desk's visible order, including the Resting grouping used to draw it. */
 export interface DeskOrder {
@@ -12,11 +12,12 @@ export interface DeskOrder {
   placements: ReadonlyMap<string, DeskPlacement>
 }
 
-type DeskColumn = 'drafts' | 'inFlight' | 'awaitingReview' | 'roles' | 'resting'
+/** The columns the Desk draws rows in: every column but the closed verdicts. */
+type RowColumn = Exclude<DeskColumn, 'tempered' | 'composted'>
 
 /** The caption and Desk column a row occupies in the rendered projection. */
 export interface DeskPlacement {
-  column: DeskColumn
+  column: RowColumn
   group: string
 }
 
@@ -43,7 +44,7 @@ export function deskOrder(
   const roles = resp?.roles ?? []
   const resting = restingOrder(restingCards(resp), zone)
   const placements = new Map<string, DeskPlacement>()
-  const place = (cards: KanbanCard[], column: DeskColumn, group: string): void => {
+  const place = (cards: KanbanCard[], column: RowColumn, group: string): void => {
     for (const card of cards) if (!card.deskSection) placements.set(deskCardKey(card), { column, group })
   }
   place(now.drafts, 'drafts', 'Drafts')

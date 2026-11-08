@@ -9,7 +9,8 @@ import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry, isQuestion } from '../KanbanReadModel.js'
-import { deskColumn, ownColumn } from '../deskColumn.js'
+import { ownColumn } from '../deskColumn.js'
+import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
 import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
@@ -447,12 +448,8 @@ export class Workspace {
     const root = this.deskAnchor(card)
     const placement = this.opts.deskPlacement?.(root)
     if (!placement && this.isOpenPage(card)) return 'Open'
-    const column = placement?.column ?? deskColumn(root)
-    if (column === 'inFlight') return 'In flight'
-    if (column === 'drafts') return 'Drafts'
-    if (column === 'awaitingReview') return 'Awaiting review'
-    if (column === 'roles') return 'Roles'
-    if (column === 'resting' || column === 'scheduled') return 'Resting'
+    const column = placement?.column ?? root.column
+    if (column !== 'tempered' && column !== 'composted' && !root.isCycle) return DESK_COLUMN_TITLE[column]
     return fiberPageKicker(card) || 'Reading'
   }
   /** The current Reader page is outside the drawn Desk projection. */
@@ -552,7 +549,7 @@ export class Workspace {
     if (!indexed && !state?.metadataKnown) return false
     const card = indexed ?? requested
     if (verdict === 'awaitingReview' && !reviewReachable(card)) return false
-    const review = deskColumn(card) === 'awaitingReview'
+    const review = card.column === 'awaitingReview'
     // Ask while the gesture is fresh; the undo window carries the answer to the write.
     if (!confirmWorkerStop(card, verdict)) return false
     const workerStopConfirmed = hasWorkerToStop(card)
@@ -569,7 +566,7 @@ export class Workspace {
         return
       }
       // A worker may start during the undo window; never stop it from a stale review.
-      if (review && deskColumn(live) !== 'awaitingReview') {
+      if (review && live.column !== 'awaitingReview') {
         showToast(`${live.name} no longer awaits review; verdict not written`, 'error')
         return
       }
@@ -751,7 +748,7 @@ export class Workspace {
       if (card) state = this.ensure(card)
       else state = this.ensure({
         id: route.uid, uid: route.uid, name: route.uid, path: '', originId: route.owner,
-        status: '', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null,
+        status: '', column: 'drafts', turn: 'none', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null,
       }, false)
     }
     const sameChannel = this.current === state && this.isActive
@@ -995,11 +992,12 @@ export class Workspace {
       try {
         const entry = await (refresh ? inLane('slow', read) : read())
         if (entry) {
-          // Body reads carry document metadata; the composite feed owns live workers.
+          // Body reads carry document metadata; the composite feed owns live
+          // workers, and with them where the card stands and whose turn it is.
           const feed = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner)
           const live = feed ?? state.card
           const metadata = cardFromCompositeEntry({ ...entry, origin: state.channel.owner })
-          for (const key of ['workerState', 'workerAgent', 'tmuxSession', 'terminalBackend', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'launchError'] as const) {
+          for (const key of ['workerState', 'workerAgent', 'tmuxSession', 'terminalBackend', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'launchError', 'column', 'turn', 'nextLaunchAt', 'scheduleText'] as const) {
             metadata[key] = live[key] as never
           }
           // The feed owns office metadata between body reads.

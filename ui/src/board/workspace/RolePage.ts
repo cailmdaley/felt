@@ -1,6 +1,6 @@
-import type { KanbanCard } from '../KanbanTypes.js'
+import type { DeskColumn, KanbanCard } from '../KanbanTypes.js'
+import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
 import { renderMarkdown } from '../utils.js'
-import { deskColumn } from '../deskColumn.js'
 
 const ROLE_ID = /^roles\/([a-z0-9]+(?:-[a-z0-9]+)*)$/
 
@@ -9,20 +9,15 @@ export function roleSlug(card: KanbanCard): string | null {
   return ROLE_ID.exec(card.id)?.[1] ?? null
 }
 
-type HoldColumn = ReturnType<typeof deskColumn>
 /** The Desk's reading order: work awaiting review, in flight, drafts, then the rest. */
-const HOLD_ORDER: HoldColumn[] = ['awaitingReview', 'inFlight', 'roles', 'drafts', 'scheduled', 'resting', 'cycles', 'tempered', 'composted']
-const LIVE: ReadonlySet<HoldColumn> = new Set(['awaitingReview', 'inFlight', 'drafts'])
-const HOLD_LABELS: Record<HoldColumn, string> = {
-  awaitingReview: 'Awaiting review', inFlight: 'In flight', roles: 'Roles', drafts: 'Drafts', scheduled: 'Resting',
-  resting: 'Resting', cycles: 'Cycle', tempered: 'Tempered', composted: 'Discarded',
-}
+const HOLD_ORDER: DeskColumn[] = ['awaitingReview', 'inFlight', 'roles', 'drafts', 'resting', 'tempered', 'composted']
+const LIVE: ReadonlySet<DeskColumn> = new Set(['awaitingReview', 'inFlight', 'drafts'])
 /** Rows shown before the rest fold behind "more"; live work is always shown whole. */
 const HOLDS_SHOWN = 5
 
 /** The feed's constitutions assigned to this office, in Desk order. */
 export function roleHolds(cards: KanbanCard[], slug: string): KanbanCard[] {
-  const rank = (card: KanbanCard) => HOLD_ORDER.indexOf(deskColumn(card))
+  const rank = (card: KanbanCard) => HOLD_ORDER.indexOf(card.column)
   return cards
     .filter(card => card.shuttleRole === slug)
     .sort((a, b) => rank(a) - rank(b))
@@ -30,7 +25,7 @@ export function roleHolds(cards: KanbanCard[], slug: string): KanbanCard[] {
 
 /** What the page shows of each hold, so a feed poll that changes none of it leaves the page alone. */
 export function holdsRevision(holds: KanbanCard[]): unknown[] {
-  return holds.map(card => [card.originId, card.uid ?? card.id, card.name, card.outcome, deskColumn(card)])
+  return holds.map(card => [card.originId, card.uid ?? card.id, card.name, card.outcome, card.column])
 }
 
 function caption(text: string): HTMLElement {
@@ -50,7 +45,7 @@ function plainOutcome(outcome: string): string {
 }
 
 function holdRow(card: KanbanCard, onCard: (card: KanbanCard) => void): HTMLElement {
-  const column = deskColumn(card)
+  const column = card.column
   const item = document.createElement('li')
   const row = document.createElement('button')
   row.type = 'button'
@@ -65,7 +60,7 @@ function holdRow(card: KanbanCard, onCard: (card: KanbanCard) => void): HTMLElem
   name.textContent = card.name
   const state = document.createElement('span')
   state.className = 'ws-role-hold-column'
-  state.textContent = HOLD_LABELS[column]
+  state.textContent = DESK_COLUMN_TITLE[column]
   row.append(dot, name, state)
   const outcome = card.outcome ? plainOutcome(card.outcome) : ''
   if (outcome) {
@@ -85,7 +80,7 @@ function holdsSection(holds: KanbanCard[], onCard: (card: KanbanCard) => void): 
   section.dataset.part = 'role-holds'
   const list = document.createElement('ol')
   list.className = 'ws-role-hold-list'
-  const live = holds.filter(card => LIVE.has(deskColumn(card))).length
+  const live = holds.filter(card => LIVE.has(card.column)).length
   const shown = Math.max(live, HOLDS_SHOWN)
   list.append(...holds.slice(0, shown).map(card => holdRow(card, onCard)))
   section.append(caption('Holds'), list)
