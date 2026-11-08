@@ -1275,6 +1275,73 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert unchanged.status == 304
   end
 
+  test "GET /api/v1/fibers/composite files an older owner's rows that carry no column",
+       %{store: store} do
+    write_fiber!(store, "tests/managed", """
+    ---
+    name: Managed
+    status: active
+    shuttle:
+      kind: oneshot
+      host: test-host
+    ---
+    """)
+
+    remote = %Remote{name: "candide", url: "http://localhost:4001"}
+
+    row = fn id, status, extra ->
+      Map.merge(
+        %{
+          "felt_store" => "/loom",
+          "path" => "tests/#{id}/#{id}.md",
+          "fiber" => %{
+            "id" => "tests/#{id}",
+            "name" => id,
+            "status" => status,
+            "shuttle" => %{"kind" => "oneshot", "host" => "candide"}
+          }
+        },
+        extra
+      )
+    end
+
+    remote_body =
+      Jason.encode!(%{
+        "host" => "candide",
+        "fibers" => [
+          row.("running", "active", %{"runtime" => %{"tmux_session" => "s", "phase" => "working"}}),
+          row.("review", "closed", %{}),
+          row.("served", "active", %{"column" => "drafts", "turn" => "none"})
+        ]
+      })
+
+    start_supervised!(StubFiberClient)
+    StubFiberClient.set(Remote.fibers_url(remote), {:ok, remote_body})
+
+    Shuttle.Test.Env.start_scoped!(
+      {RemoteFiberRegistry,
+       name: nil, remotes: [remote], client: StubFiberClient, auto_poll: false, store_dir: nil},
+      RemoteFiberRegistry
+    )
+
+    :ok = RemoteFiberRegistry.refresh_now()
+
+    warm_poller!(store)
+    body = get(api_conn(), "/api/v1/fibers/composite").resp_body |> Jason.decode!()
+
+    by_id =
+      body["fibers"]
+      |> Enum.filter(&(&1["origin"] == "candide"))
+      |> Map.new(&{&1["fiber"]["id"], {&1["column"], &1["turn"]}})
+
+    assert by_id == %{
+             "tests/running" => {"in_flight", "working"},
+             "tests/review" => {"awaiting_review", "none"},
+             # What the owner served stands.
+             "tests/served" => {"drafts", "none"}
+           }
+  end
+
   test "GET /api/v1/fibers/composite stamps a remote thread with its hub on this host",
        %{store: store} do
     write_fiber!(store, "tests/hub", """

@@ -17,6 +17,25 @@ defmodule Shuttle.Poller.DocumentCacheTest do
              cache["hub"]
   end
 
+  test "a standing constitution's next due moving rebuilds an unchanged fiber mtime" do
+    due = fn day ->
+      candidate("claude")
+      |> put_in(["shuttle", "resolved", "next_due"], day)
+    end
+
+    {cache, _} =
+      DocumentCache.refresh(%{document_cache: %{}}, [due.("2026-01-02T09:00:00Z")], %{
+        "hub" => "/store"
+      })
+
+    {cache, %{hits: 0, misses: 1}} =
+      DocumentCache.refresh(%{document_cache: cache}, [due.("2026-01-03T09:00:00Z")], %{
+        "hub" => "/store"
+      })
+
+    assert cache["hub"].entry.fiber["shuttle"]["resolved"]["next_due"] == "2026-01-03T09:00:00Z"
+  end
+
   test "a rename with stable identity and unchanged mtime rebuilds its address" do
     original = candidate("claude") |> Map.put("uid", "01JZ0000000000000000000000")
 

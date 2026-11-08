@@ -494,7 +494,7 @@ defmodule Shuttle.Threads do
                 Enum.map(shown, fn row ->
                   detail =
                     case state do
-                      "Blocked" -> single_line(row["dispatch_error"])
+                      "Blocked" -> single_line(row["dispatch_error"] || "worker blocked")
                       "Waiting" -> single_line(row["ask"] || "(no question)")
                       _ -> first_sentence(row["outcome"])
                     end
@@ -611,7 +611,10 @@ defmodule Shuttle.Threads do
       live? = live?(fiber, live)
       host = get_in(fiber, ["shuttle", "host"])
       runtime = Map.get(entry, :runtime)
-      error = Map.get(entry, :dispatch_error) || (runtime && field(runtime, :launch_error))
+
+      error =
+        Map.get(entry, :dispatch_error) ||
+          (runtime && (field(runtime, :launch_error) || field(runtime, :identity_error)))
 
       {column, state} =
         if Map.get(entry, :unknown_owner_state) do

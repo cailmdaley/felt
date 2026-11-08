@@ -302,6 +302,9 @@ defmodule ShuttleWeb.FiberDocumentsController do
   containment crosses hosts: a thread and its hub may be owned by different
   daemons but share a store (`Shuttle.Threads.put_board_orchestrators/2`).
 
+  An owner serves each row's `column` and `turn`; a remote row without them
+  (an owner on an older build) is stamped here from its own runtime.
+
   Each fiber row carries an `origin` field (the owning host/remote name) so the
   view can route worker-badge focus and transitions without re-deriving owner
   from the `shuttle.host` block. `origins` reports per-origin staleness so the
@@ -322,7 +325,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
     fibers =
       (Enum.map(local_owner_entries, &Map.put(&1, :origin, local_origin)) ++
          Enum.flat_map(remote_feeds, fn {name, feed} ->
-           Enum.map(feed.fibers, &stamp_origin(&1, name))
+           feed.fibers |> Enum.map(&stamp_origin(&1, name)) |> Shuttle.Lifecycle.stamp()
          end))
       |> Shuttle.Threads.put_board_orchestrators(Shuttle.Poller.fiber_stores())
 

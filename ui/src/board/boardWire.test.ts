@@ -308,6 +308,17 @@ describe('setSurface → commitSurface — a Resting drop is one rest', () => {
     expect(wire.writes()).toEqual(restOf('fiber-1', { until: due }))
   })
 
+  it('redates a resting card that waits on a blocker without replacing it', async () => {
+    const due = dayFromNow(7)
+    const c = card({ status: 'open', storedHorizon: 'stashed', shuttleBlockedOn: 'u-blocker' })
+    asPrivate(makeBoard()).setSurface(c, 'stashed', { due })
+    await wire.settled()
+    expect(wire.writes()).toEqual([{
+      url: `${BASE}/api/v1/felt-edit`, method: 'POST',
+      body: { fiber_id: 'fiber-1', origin: 'local', due },
+    }])
+  })
+
   it('banners a refused rest', async () => {
     const board = asPrivate(makeBoard())
     const banner = vi.spyOn(board, 'showBanner')

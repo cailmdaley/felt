@@ -2411,4 +2411,31 @@ defmodule Shuttle.ThreadsTest do
     assert roster =~ "1 blocked"
     assert roster =~ reason
   end
+
+  test "a live thread whose session could not be attributed is blocked with its reason",
+       %{store: store} do
+    entry = fn id, runtime ->
+      %{
+        felt_store: store,
+        fiber: %{
+          "id" => id,
+          "uid" => "u-" <> id,
+          "status" => "active",
+          "shuttle" => %{"kind" => "oneshot", "host" => "test-host"}
+        },
+        runtime: runtime
+      }
+    end
+
+    for {runtime, detail} <- [
+          {%{phase: "identity_failed", identity_error: "boom"}, "boom"},
+          {%{state: "blocked"}, "worker blocked"}
+        ] do
+      entries = [entry.("hub", nil), entry.("hub/kid", runtime)]
+      live = MapSet.new(["u-hub/kid"])
+
+      assert [%{"state" => "Blocked"}] = Threads.tree("hub", store, entries, live)
+      assert Threads.roster("hub", store, entries, live) =~ "- kid — #{detail}"
+    end
+  end
 end

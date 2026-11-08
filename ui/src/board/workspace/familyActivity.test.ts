@@ -4,14 +4,15 @@ import { FamilyActivity } from './familyActivity.js'
 describe('reading the daemon’s thread marks', () => {
   const answer = (body: unknown, ok = true): Response => ({ ok, json: async () => body }) as Response
   const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve))
-  const reach = 14 * 86_400_000
+  const reach = 7 * 86_400_000
   afterEach(() => { vi.unstubAllGlobals() })
 
   it('serves the marks and reach it read, and throttles the next read', async () => {
     const fetcher = vi.fn(async (_url: string) => answer({ reach_ms: reach, marks: { a: { launches: [5], commits: [6] } } }))
     vi.stubGlobal('fetch', fetcher)
     const onChange = vi.fn(), activity = new FamilyActivity('http://d', onChange)
-    expect(activity.reach()).toBe(0)
+    // Before any answer, the daemon's default retention, not zero.
+    expect(activity.reach()).toBe(14 * 86_400_000)
     activity.refresh(1000)
     await settle()
     expect(fetcher.mock.calls[0][0]).toBe('http://d/api/v1/board/marks')

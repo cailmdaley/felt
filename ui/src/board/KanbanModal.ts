@@ -1366,7 +1366,8 @@ export class KanbanModal {
    * in one locked write, clears any verdict, applies the wake day (`until`) or
    * keeps a future due and clears an arrived one, and stops a live worker
    * through its backend. On work already at rest, `until` changes only the
-   * wake day.
+   * wake day, and replaces a blocker, so a resting card that waits on one is
+   * re-dated with a `due` edit instead.
    *
    * Back to Now holds DRAFTS. Parking a running card there stops its worker —
    * alive only while in flight — and a card that isn't a draft yet is parked as
@@ -1385,7 +1386,12 @@ export class KanbanModal {
   ): Promise<void> {
     this.gestureDepth += 1
     try {
-      if (horizon === 'stashed') {
+      const restingOnBlocker = !hasWorkerToStop(card) && card.status === 'open'
+        && card.storedHorizon === 'stashed' && card.shuttleBlockedOn !== undefined
+      if (horizon === 'stashed' && restingOnBlocker && typeof opts.due === 'string') {
+        // `rest --until <day>` replaces a blocker; re-dating keeps it.
+        await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, due: opts.due }, 'Rest failed')
+      } else if (horizon === 'stashed') {
         await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
           action: 'rest', fiber: card.id, origin: card.originId,
           ...(typeof opts.due === 'string' ? { until: opts.due } : {}),

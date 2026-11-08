@@ -113,6 +113,10 @@ defmodule Shuttle.Lifecycle do
   `column` and `turn`, read against the row's own `runtime` (its presence is
   the worker's liveness) and `dispatch_error`, and against this host's civil
   day at `now`.
+
+  A decoded wire row (string keys) is stamped only when its owner served no
+  `column`: an owner on an older build, whose rows the hub files rather than
+  showing every one as a draft.
   """
   def stamp(entries, now \\ DateTime.utc_now()) do
     today = local_day(now)
@@ -126,6 +130,15 @@ defmodule Shuttle.Lifecycle do
         entry
         |> Map.put(:column, column(fiber, live?, today))
         |> Map.put(:turn, turn(fiber, live?, runtime, Map.get(entry, :dispatch_error), now_ms))
+
+      %{"fiber" => %{"shuttle" => shuttle} = fiber} = row
+      when is_map(shuttle) and not is_map_key(row, "column") ->
+        runtime = row["runtime"]
+        live? = runtime != nil
+
+        row
+        |> Map.put("column", column(fiber, live?, today))
+        |> Map.put("turn", turn(fiber, live?, runtime, row["dispatch_error"], now_ms))
 
       entry ->
         entry

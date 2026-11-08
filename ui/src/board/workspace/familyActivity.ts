@@ -3,15 +3,18 @@ import { getDaemonJson } from '../daemonApi.js'
 import { ThrottledRead } from '../throttledRead.js'
 
 const REFRESH_MS = 120_000
+const DEFAULT_REACH_MS = 14 * 86_400_000
 
 /**
  * Each thread's launches and commits over the board's reach, as the daemon
  * joins them (`GET /api/v1/board/marks`), read only while a family's view asks.
- * Until the first answer the reach is zero: nothing is known to lie within it.
+ * Until the first answer the reach is the daemon's default retention
+ * (`Shuttle.Board.retention_ms/0`), so recent archived work is drawn from the
+ * first paint and through a failing read.
  */
 export class FamilyActivity {
   private marks = new Map<string, ThreadMarks>()
-  private reachMs = 0
+  private reachMs = DEFAULT_REACH_MS
   private readonly base: string
   private readonly onChange: () => void
   private readonly reader = new ThrottledRead(REFRESH_MS, () => this.read())
