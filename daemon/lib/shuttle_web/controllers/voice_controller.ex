@@ -69,7 +69,12 @@ defmodule ShuttleWeb.VoiceController do
 
     for remote <- Shuttle.RegistryCommon.configured_remotes(), remote.name != own do
       Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-        client.post(Shuttle.Remote.url_for(remote, "/api/v1/board/open"), body, "application/json", 2_000)
+        client.post(
+          Shuttle.Remote.url_for(remote, "/api/v1/board/open"),
+          body,
+          "application/json",
+          2_000
+        )
       end)
     end
   end

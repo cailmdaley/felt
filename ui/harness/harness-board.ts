@@ -551,7 +551,7 @@ const TURN_FIXTURES: ReadonlyArray<readonly [string, string, Record<string, unkn
   ['working', 'Working right now', { phase: 'working', last_activity_at: now - 4_000 }],
   ['silent-working', 'Working, no sign of life for 18h', { phase: 'working', last_activity_at: now - 18 * 3_600_000 }],
   ['no-signal', 'Live, no hook event yet', { last_activity_at: now - 20 * 3_600_000 }],
-  ['blocked', 'Terminal worker could not start', { state: 'blocked', terminal_error: 'terminal launch failed', last_activity_at: now - 12 * 60_000 }],
+  ['blocked', 'Terminal worker could not start', { state: 'blocked', last_activity_at: now - 12 * 60_000 }],
 ]
 
 /**

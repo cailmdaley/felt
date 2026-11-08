@@ -923,7 +923,8 @@ defmodule Shuttle.Host do
               "refusing to listen on unix://#{path}: a #{type} is already there, not a stale socket"
 
       {:error, reason} ->
-        raise ArgumentError, "refusing to listen on unix://#{path}: #{Shuttle.FS.format_error(reason)}"
+        raise ArgumentError,
+              "refusing to listen on unix://#{path}: #{Shuttle.FS.format_error(reason)}"
     end
   end
 

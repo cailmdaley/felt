@@ -1806,7 +1806,7 @@ defmodule Shuttle.ThreadsTest do
     assert %{
              runtime: %{
                session_uuid: ^native,
-               state: "running",
+               state: "running"
              }
            } = Enum.find(feed, &(Threads.address(&1.fiber) == "hub"))
 

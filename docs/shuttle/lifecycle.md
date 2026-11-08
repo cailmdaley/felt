@@ -288,7 +288,7 @@ shuttle status [<fiber>]              # offline eligibility and dispatch state
 shuttle snapshot                      # local daemon snapshot
 shuttle dispatch <fiber> [--ad-hoc]   # ask the daemon to dispatch
 
-shuttle daemon start [--force]        # start the local Mix release
+shuttle daemon start                  # start the local Mix release
 shuttle daemon stop                   # stop it and record an intentional stop
 shuttle daemon status                 # state JSON; exit 2 when the daemon is down
 shuttle daemon release                # clear the boot quarantine

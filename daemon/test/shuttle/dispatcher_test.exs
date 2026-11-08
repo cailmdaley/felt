@@ -1050,8 +1050,8 @@ defmodule Shuttle.DispatcherTest do
   test "dispatch with force: true on a closed fiber shells out to shuttle reopen" do
     # The kanban Resume button on an awaitingReview / closed card flows here
     # with force=true. Without the reopen step, the worker spawns but the
-    # YAML stays closed and `classifyFiber` keeps the card pinned
-    # in its prior column — see KanbanModal.runRequeue's comment about why
+    # YAML stays closed and its owning daemon keeps serving the card's
+    # prior column — see KanbanModal.runRequeue's comment about why
     # this side-effect is daemon-owned. The contract: force-dispatch on a
     # not-already-clean fiber issues `shuttle reopen <fiber>` before
     # tmux new-session fires.

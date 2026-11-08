@@ -4,7 +4,7 @@
 
 ```bash
 # shuttle — local daemon lifecycle
-shuttle daemon start [--force]                   # run the Mix release in the foreground
+shuttle daemon start                             # run the Mix release in the foreground
 shuttle daemon stop                              # stop it and mark the shutdown intentional
 shuttle daemon status                            # state JSON; exit 2 when down
 shuttle daemon release                           # release the boot quarantine
