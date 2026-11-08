@@ -326,7 +326,7 @@ func CheckParseability(s *Storage) ([]CheckIssue, error) {
 
 	var issues []CheckIssue
 	for _, file := range files {
-		if _, err := s.readPathWithMode(file.path, file.id, ParseFull); err != nil {
+		if _, err := s.readFile(file, ParseFull); err != nil {
 			// An iCloud-dataless file is not malformed — the bytes simply
 			// aren't here yet. Same symptom (invisible fiber), different fix,
 			// and it isn't the store's fault, so it lands as a warning.

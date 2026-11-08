@@ -228,7 +228,9 @@ func serialReferenceWalk(s *Storage) ([]fiberFile, []looseFile, error) {
 			if reportName != "" {
 				reportPath = filepath.Join(dir, reportName)
 			}
-			files = append(files, fiberFile{id: id, path: fullPath, entryPoint: entryPoint, reportPath: reportPath})
+			resolved, err := filepath.EvalSymlinks(fullPath)
+			canonical := err == nil && resolved == fullPath
+			files = append(files, fiberFile{id: id, path: fullPath, canonical: canonical, entryPoint: entryPoint, reportPath: reportPath})
 		}
 		return nil
 	}

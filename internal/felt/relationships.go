@@ -177,10 +177,13 @@ type resolvedRef struct {
 //
 // The resolver is passed in, not built here, so a caller that walks many fibers
 // against the same id set builds it once for the whole walk — newScopedIDResolverIn
-// rebuilds maps + sorts over every id.
+// rebuilds maps + sorts over every id. Extraction, the costly half over a
+// whole store, runs across workers first; resolution and yield stay in order.
 func iterRefsResolved(felts []*Felt, resolver *scopedIDResolver, yield func(resolvedRef) error) error {
-	for _, f := range felts {
-		for _, ref := range ExtractBodyRefs(f.Body) {
+	bodyRefs := make([][]BodyRef, len(felts))
+	parallelFileWork(len(felts), func(i int) { bodyRefs[i] = ExtractBodyRefs(felts[i].Body) })
+	for i, f := range felts {
+		for _, ref := range bodyRefs[i] {
 			resolved, via, err := resolver.resolve(f.ID, ref.Target)
 			if err := yield(resolvedRef{
 				Source:     f,

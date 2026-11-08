@@ -938,6 +938,9 @@ const codeMask = '\x00'
 // is never extracted, and never rewritten, while a link whose text merely
 // contains code — [`felt nest`](target) — still is.
 func maskCode(body string) string {
+	if !strings.ContainsAny(body, "`~") {
+		return body
+	}
 	masked := []byte(body)
 	blank := func(text string, re *regexp.Regexp) {
 		for _, m := range re.FindAllStringIndex(text, -1) {
@@ -962,6 +965,9 @@ type bodyRefSite struct {
 // bodyRefSites finds every fiber reference in body: markdown links first,
 // then wikilinks, each in document order, skipping code.
 func bodyRefSites(body string) []bodyRefSite {
+	if !strings.Contains(body, "[[") && !strings.Contains(body, "](") {
+		return nil
+	}
 	var sites []bodyRefSite
 	masked := maskCode(body)
 	for _, re := range []*regexp.Regexp{bodyLinkRe, wikiLinkRe} {

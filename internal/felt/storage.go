@@ -399,6 +399,7 @@ func (x *ExternalRefs) err(query, id string, inferred, guessed bool) error {
 type fiberFile struct {
 	id         string
 	path       string
+	canonical  bool   // path is already absolute and symlink-resolved
 	entryPoint bool   // bare `.felt/<slug>.md` at the .felt/ root
 	reportPath string // sibling report.html, if any (absolute, symlink-resolved dir)
 }
@@ -781,7 +782,21 @@ func (s *Storage) readPathWithMode(path, id string, mode ParseMode) (*Felt, erro
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		carriedPath = resolved
 	}
+	return readFiberAt(path, carriedPath, id, mode)
+}
 
+// readFile reads a fiber the walk found. The walk descends only real
+// directories below a resolved tier root, so a file that is not itself a
+// symlink already carries its canonical path and needs no resolution.
+func (s *Storage) readFile(file fiberFile, mode ParseMode) (*Felt, error) {
+	if !file.canonical {
+		return s.readPathWithMode(file.path, file.id, mode)
+	}
+	return readFiberAt(file.path, file.path, file.id, mode)
+}
+
+// readFiberAt parses the fiber at path, carrying carriedPath as its location.
+func readFiberAt(path, carriedPath, id string, mode ParseMode) (*Felt, error) {
 	var f *Felt
 	if mode == ParseMetadataOnly {
 		var err error
@@ -1669,7 +1684,7 @@ func (s *Storage) listFilesWithMode(mode ParseMode, includeModTime bool, fields 
 				return
 			}
 		}
-		f, err := s.readPathWithMode(file.path, file.id, mode)
+		f, err := s.readFile(file, mode)
 		if err != nil {
 			issues[i] = err
 			return
@@ -1793,7 +1808,7 @@ func (s *Storage) findByUIDWithMode(files []fiberFile, query string, mode ParseM
 	file, f := matches[0].file, matches[0].meta
 	if mode != ParseMetadataOnly {
 		var err error
-		if f, err = s.readPathWithMode(file.path, file.id, mode); err != nil {
+		if f, err = s.readFile(file, mode); err != nil {
 			return nil, true, err
 		}
 	}
@@ -1880,7 +1895,7 @@ func (s *Storage) readUIDCandidate(file fiberFile, uid string) (*Felt, error) {
 	if !frontmatterMayHoldUID(frontmatter, uid) {
 		return nil, nil
 	}
-	meta, err := s.readPathWithMode(file.path, file.id, ParseMetadataOnly)
+	meta, err := s.readFile(file, ParseMetadataOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -2164,7 +2179,7 @@ func (s *Storage) walkStoreOnce() ([]fiberFile, []looseFile, error) {
 			if reportName != "" {
 				reportPath = filepath.Join(dir, reportName)
 			}
-			files = append(files, fiberFile{id: id, path: fullPath, entryPoint: entryPoint, reportPath: reportPath})
+			files = append(files, fiberFile{id: id, path: fullPath, canonical: d.Type()&os.ModeSymlink == 0, entryPoint: entryPoint, reportPath: reportPath})
 		}
 		return nil
 	}
