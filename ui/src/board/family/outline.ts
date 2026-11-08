@@ -65,7 +65,7 @@ export function tally(model: FamilyModel, key: string): { live: Section[]; asks:
   const walk = (thread: MapThread): void => {
     for (const kid of thread.children.map(child => model.threads.get(child)!)) {
       const section = own(kid)
-      if (section) { live.push(section); if (needsHuman(kid)) asks += 1 }
+      if (section && section !== 'still') { live.push(section); if (needsHuman(kid)) asks += 1 }
       walk(kid)
     }
   }
