@@ -46,7 +46,7 @@ test('sound arriving here: a loud glyph, the words counted, and a discard', ABOV
   await ui.press({ key: 'mic' })
   expect(posts).toEqual([
     { url: 'http://127.0.0.1:4000/api/v1/voice/discard', body: undefined },
-    { url: 'http://127.0.0.1:4000/api/v1/voice/toggle', body: undefined },
+    { url: 'http://127.0.0.1:4000/api/v1/voice', body: '{"enabled":false}' },
   ])
   await ui.unmount()
 })

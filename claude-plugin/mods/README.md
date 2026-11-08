@@ -39,7 +39,7 @@ Each opens its page on the board through `POST /api/v1/board/open`.
 | voice unavailable | nothing |
 
 The slug is the last segment of the destination's path id, else its name.
-Clicking the glyph toggles mute through `POST /api/v1/voice/toggle`, as does the global hotkey.
+Clicking the glyph turns Listening off (`POST /api/v1/voice {enabled: false}`), releasing the mic; starting again takes about 4 s for the recorder to come back. The global hotkey toggles mute (`POST /api/v1/voice/toggle`), which is instant.
 Clicking `○` starts Listen on this machine's recorder, as the board's Listen does (`POST /api/v1/voice {enabled: true, muted: false, source: "desktop"}`).
 The board sets mute through `POST /api/v1/voice {muted}`.
 `✕` drops the words not yet sent (`POST /api/v1/voice/discard`).
