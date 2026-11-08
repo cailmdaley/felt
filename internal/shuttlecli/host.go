@@ -172,7 +172,7 @@ func (a *app) seedOwnHost() (id string, source hostSource, seeded bool, err erro
 // rather than reading it, so this is its only reader.
 func (a *app) hostConfigFilePath() string {
 	if v := strings.TrimSpace(a.env.Getenv("SHUTTLE_HOST_FILE")); v != "" {
-		if expanded, err := a.expandUserPath(v); err == nil {
+		if expanded, err := shuttle.ExpandUserPath(a.env, v); err == nil {
 			return expanded
 		}
 		return v

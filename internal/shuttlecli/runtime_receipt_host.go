@@ -29,6 +29,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // ReceiptHost reports the declared class against the observed host.
@@ -185,8 +187,8 @@ func (a *app) gatherHostEvidence() hostEvidence {
 
 	// 4000 always: a daemon started from another shell, or by the
 	// supervisor, need not share this shell's SHUTTLE_PORT.
-	ev.daemonPorts = []int{defaultDaemonPort}
-	if p, err := parsePort(strings.TrimSpace(a.env.Getenv("SHUTTLE_PORT"))); err == nil && p != defaultDaemonPort {
+	ev.daemonPorts = []int{shuttle.DefaultDaemonPort}
+	if p, err := shuttle.ParsePort(strings.TrimSpace(a.env.Getenv("SHUTTLE_PORT"))); err == nil && p != shuttle.DefaultDaemonPort {
 		ev.daemonPorts = append(ev.daemonPorts, p)
 	}
 	if ev.settingsErr == nil && ev.settings.listen.Network == "tcp" {
@@ -319,7 +321,7 @@ func observedDaemonPortOwner(ev hostEvidence, callerUID int) (*ReceiptDaemonPort
 }
 
 func observedDaemonPortOwnerFromProc(ev hostEvidence, callerUID int, procRoot string) (*ReceiptDaemonPortOwner, string) {
-	if !(hostClass(ev.settings.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()) {
+	if !(shuttle.HostClass(ev.settings.Class).UsesSocket() || shuttle.HostClass(ev.daemonClass).UsesSocket()) {
 		return nil, ""
 	}
 	candidates := []string{}
@@ -389,7 +391,7 @@ func (a *app) evaluateHost(ev hostEvidence) ReceiptHost {
 		}
 	}
 
-	socketClass := hostClass(h.Class).usesSocket() || hostClass(ev.daemonClass).usesSocket()
+	socketClass := shuttle.HostClass(h.Class).UsesSocket() || shuttle.HostClass(ev.daemonClass).UsesSocket()
 	portOwnerMismatch := ev.daemonPortOwner != nil && !ev.daemonPortOwner.IsCaller
 	if ev.daemonPortOwner != nil {
 		h.DaemonPortOwner = ev.daemonPortOwner
@@ -418,7 +420,7 @@ func (a *app) evaluateHost(ev hostEvidence) ReceiptHost {
 				"run the CLI and daemon as the same uid, then restart the daemon")
 		}
 	}
-	gatedDaemonTCP := hostClass(h.Class) == hostClassShared && hostClass(ev.daemonClass) == hostClassShared &&
+	gatedDaemonTCP := shuttle.HostClass(h.Class) == shuttle.HostClassShared && shuttle.HostClass(ev.daemonClass) == shuttle.HostClassShared &&
 		strings.HasPrefix(ev.daemonListen, "tcp://") && ev.daemonPeerGate == "uid" &&
 		ev.daemonPeerGateUIDSource != "" && ev.daemonPeerGateUID != nil && !portOwnerMismatch
 	if gatedDaemonTCP {
@@ -492,7 +494,7 @@ func (a *app) evaluateHost(ev hostEvidence) ReceiptHost {
 		case socket.Symlink || !socket.Socket:
 			mismatch(fmt.Sprintf("configured Tailscale LocalAPI path %s is not a Unix socket", socket.Path),
 				"set defaults.tailscale_socket to the actual tailscaled Unix socket path")
-		case hostClass(h.Class).usesSocket() && (!socket.OwnerOK || !socket.Private || socket.BadAncestor != ""):
+		case shuttle.HostClass(h.Class).UsesSocket() && (!socket.OwnerOK || !socket.Private || socket.BadAncestor != ""):
 			problem := fmt.Sprintf("Tailscale LocalAPI socket %s is not confined to a private directory owned by uid %d", socket.Path, os.Geteuid())
 			if socket.BadAncestor != "" {
 				problem += "; " + socket.BadAncestor
@@ -516,7 +518,7 @@ func (a *app) evaluateHost(ev hostEvidence) ReceiptHost {
 		mismatch(fmt.Sprintf("the running daemon reports a TCP listener %s on a %s host", ev.daemonListen, h.Class), listenerRepair("daemon"))
 	}
 
-	if hostClass(h.Class).usesSocket() {
+	if shuttle.HostClass(h.Class).UsesSocket() {
 		if ev.settings.listen.Network == "tcp" && !gatedDaemonTCP {
 			mismatch(fmt.Sprintf("class %s declares a TCP listener %s", h.Class, h.Listen),
 				fmt.Sprintf("drop the tcp:// listen from %s so the daemon takes the class's unix socket, then restart it; retarget `tailscale serve` and tunnels at the socket",
@@ -825,7 +827,7 @@ func daemonListenerAddress(address string) bool {
 // checkResolvedDaemonPortOwner checks the socket-class TCP exception used by
 // the shuttle CLI. A refused connection means there is no listener to inspect yet.
 func checkResolvedDaemonPortOwner(settings hostSettings) error {
-	if runtime.GOOS != "linux" || !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
+	if runtime.GOOS != "linux" || !shuttle.HostClass(settings.Class).UsesSocket() || settings.listen.Network != "tcp" {
 		return nil
 	}
 	conn, err := net.DialTimeout("tcp", settings.listen.Address, 2*time.Second)

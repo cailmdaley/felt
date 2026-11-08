@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // The daemon HTTP client — the shuttle CLI's window onto the running daemon
@@ -44,10 +46,7 @@ func (a *app) daemonURL() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving the daemon listener: %w", err)
 	}
-	if s.listen.Network == "tcp" {
-		return "http://" + s.listen.Address, nil
-	}
-	return "http://" + daemonSocketHost, nil
+	return s.listen.BaseURL(), nil
 }
 
 // daemonEndpoint is daemonURL() plus a path.
@@ -68,20 +67,20 @@ func (a *app) daemonHTTPClient(timeout time.Duration) *http.Client {
 	// The socket is local; an $HTTP_PROXY must never capture it.
 	proxy := a.httpProxy
 	transport.Proxy = func(req *http.Request) (*url.URL, error) {
-		if req.URL.Host == daemonSocketHost || proxy == nil {
+		if req.URL.Host == shuttle.DaemonSocketHost || proxy == nil {
 			return nil, nil
 		}
 		return proxy(req)
 	}
 	base := transport.DialContext
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if addr == daemonSocketHost+":80" {
+		if addr == shuttle.DaemonSocketHost+":80" {
 			s, err := a.resolveHostSettings()
 			if err != nil {
 				return nil, err
 			}
 			if s.listen.Network != "unix" {
-				return nil, fmt.Errorf("%s names no unix socket (listen is %s)", daemonSocketHost, s.Listen)
+				return nil, fmt.Errorf("%s names no unix socket (listen is %s)", shuttle.DaemonSocketHost, s.Listen)
 			}
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", s.listen.Address)
@@ -124,7 +123,7 @@ func (a *app) isSocketClassDaemonTCP(network, address string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !hostClass(settings.Class).usesSocket() || settings.listen.Network != "tcp" {
+	if !shuttle.HostClass(settings.Class).UsesSocket() || settings.listen.Network != "tcp" {
 		return false, nil
 	}
 	gotPort, err := strconv.Atoi(portText)
@@ -140,7 +139,7 @@ func (a *app) isSocketClassDaemonTCP(network, address string) (bool, error) {
 type socketHostTransport struct{ next http.RoundTripper }
 
 func (t socketHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Host == daemonSocketHost {
+	if req.URL.Host == shuttle.DaemonSocketHost {
 		req = req.Clone(req.Context())
 		req.Host = "localhost"
 	}

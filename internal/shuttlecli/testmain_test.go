@@ -224,8 +224,8 @@ func assertFenced(t *testing.T, env *sysenv.Env, root string) {
 	for name, resolve := range map[string]func() (string, error){
 		"remotes":       a.shuttleRemotesPath,
 		"stores":        a.feltStoresRegistryPath,
-		"agents":        func() (string, error) { return a.shuttleConfigPath("SHUTTLE_AGENTS_FILE", "agents.json") },
-		"projects":      func() (string, error) { return a.shuttleConfigPath("SHUTTLE_PROJECTS_FILE", "projects.json") },
+		"agents":        func() (string, error) { return shuttle.ConfigPath(a.env, "SHUTTLE_AGENTS_FILE", "agents.json") },
+		"projects":      func() (string, error) { return shuttle.ConfigPath(a.env, "SHUTTLE_PROJECTS_FILE", "projects.json") },
 		"home":          env.UserHomeDir,
 		"host config":   a.hostClassFilePath,
 		"host identity": func() (string, error) { return a.hostConfigFilePath(), nil },

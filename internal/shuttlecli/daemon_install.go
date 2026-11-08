@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -340,7 +341,7 @@ func validateSupervisorOptions(options supervisorOptions) error {
 		return errors.New("--label may not contain path separators")
 	}
 	if options.Port != "" {
-		if _, err := parsePort(options.Port); err != nil {
+		if _, err := shuttle.ParsePort(options.Port); err != nil {
 			return fmt.Errorf("--port: %w", err)
 		}
 	}
@@ -839,7 +840,7 @@ func parseLoginEnv(output string) (loginEnv, bool) {
 
 func (a *app) supervisorStoresFilePath() (string, error) {
 	if path := strings.TrimSpace(a.env.Getenv("SHUTTLE_STORES_FILE")); path != "" {
-		return a.expandUserPath(path)
+		return shuttle.ExpandUserPath(a.env, path)
 	}
 	home, err := a.env.UserHomeDir()
 	if err != nil {
@@ -858,7 +859,7 @@ func (a *app) warnProtectedSupervisorPaths(options supervisorOptions, releaseDir
 		if store == "" {
 			continue
 		}
-		if expanded, err := a.expandUserPath(store); err == nil {
+		if expanded, err := shuttle.ExpandUserPath(a.env, store); err == nil {
 			paths = append(paths, struct{ path, impact string }{expanded, "the daemon will start but walk no fibers — an empty board, no error."})
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -346,7 +347,7 @@ func parseProxyEndpoint(raw string) (proxyEndpoint, error) {
 	if host == "" {
 		return proxyEndpoint{}, fmt.Errorf("no host")
 	}
-	port, err := parsePort(portText)
+	port, err := shuttle.ParsePort(portText)
 	if err != nil {
 		return proxyEndpoint{}, err
 	}
@@ -459,7 +460,7 @@ func managedTunnel(manager string) bool {
 // shuttleRemotesPath is the canonical fleet file location for reads AND writes:
 // $SHUTTLE_REMOTES_FILE, else ~/.config/shuttle/remotes.json.
 func (a *app) shuttleRemotesPath() (string, error) {
-	return a.shuttleConfigPath("SHUTTLE_REMOTES_FILE", "remotes.json")
+	return shuttle.ConfigPath(a.env, "SHUTTLE_REMOTES_FILE", "remotes.json")
 }
 
 // loadRemotesFileRaw parses the fleet file WITHOUT filling defaults. Edit verbs

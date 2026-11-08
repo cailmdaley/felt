@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
@@ -58,7 +59,7 @@ func TestHostTerminalFixtureParity(t *testing.T) {
 			}
 			setHostEnvIn(t, env, path, nil, nil)
 			a := newApp(env)
-			got, err := a.hostTerminal()
+			got, err := shuttle.HostTerminal(a.env)
 			if tc.Error != "" {
 				if !isHostConfigError(err, tc.Error) {
 					t.Fatalf("want %s, got %v", tc.Error, err)
@@ -153,13 +154,13 @@ func TestWriteHostClass_PreservesKeysAndMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cfg", "host.json")
 	setHostEnvIn(t, env, path, map[string]string{"SHUTTLE_DATA_DIR": "/srv/shuttle-fixture"}, nil)
 
-	if _, err := newApp(env).writeHostClass(hostClassShared); err != nil {
+	if _, err := newApp(env).writeHostClass(shuttle.HostClassShared); err != nil {
 		t.Fatalf("write to absent file: %v", err)
 	}
 	if err := os.WriteFile(path, []byte(`{"class":"single-user","listen":"unix:///srv/x.sock","note":{"kept":true}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newApp(env).writeHostClass(hostClassExposed); err != nil {
+	if _, err := newApp(env).writeHostClass(shuttle.HostClassExposed); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	info, err := os.Stat(path)
@@ -191,13 +192,13 @@ func TestWriteHostClass_Refusals(t *testing.T) {
 	env := testEnv(t)
 	path := filepath.Join(t.TempDir(), "host.json")
 	setHostEnvIn(t, env, path, nil, nil)
-	if _, err := newApp(env).writeHostClass("shared"); !isHostConfigError(err, hostErrBadClass) {
+	if _, err := newApp(env).writeHostClass("shared"); !isHostConfigError(err, shuttle.HostErrBadClass) {
 		t.Errorf("bad class: err = %v", err)
 	}
 	if err := os.WriteFile(path, []byte("{nope"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newApp(env).writeHostClass(hostClassShared); !isHostConfigError(err, hostErrMalformed) {
+	if _, err := newApp(env).writeHostClass(shuttle.HostClassShared); !isHostConfigError(err, shuttle.HostErrMalformed) {
 		t.Errorf("malformed file must be refused, not overwritten: err = %v", err)
 	}
 	if raw, _ := os.ReadFile(path); string(raw) != "{nope" {
@@ -211,7 +212,7 @@ func TestResolveHostSettings_NonStringKeyIsMalformed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "host.json")
 	setHostEnvIn(t, env, path, nil, nil)
 	_ = os.WriteFile(path, []byte(`{"class": 3}`), 0o600)
-	if _, err := newApp(env).resolveHostSettings(); !isHostConfigError(err, hostErrMalformed) {
+	if _, err := newApp(env).resolveHostSettings(); !isHostConfigError(err, shuttle.HostErrMalformed) {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -294,8 +295,8 @@ func TestShuttleDeployChecksOwnerBeforeDaemonCall(t *testing.T) {
 func TestCheckResolvedDaemonPortOwnerSkipsOtherListeners(t *testing.T) {
 	t.Parallel()
 	for _, settings := range []hostSettings{
-		{Class: "single-user", listen: listenAddr{Network: "tcp", Address: "127.0.0.1:4000"}},
-		{Class: "shared-multi-user", listen: listenAddr{Network: "unix", Address: "/tmp/daemon.sock"}},
+		{Class: "single-user", listen: shuttle.Listener{Network: "tcp", Address: "127.0.0.1:4000"}},
+		{Class: "shared-multi-user", listen: shuttle.Listener{Network: "unix", Address: "/tmp/daemon.sock"}},
 	} {
 		if err := checkResolvedDaemonPortOwner(settings); err != nil {
 			t.Fatalf("check for %+v: %v", settings, err)
@@ -523,6 +524,6 @@ func TestPostLifecycle_BrokenHostFileDoesNotFallBack(t *testing.T) {
 // isHostConfigError reports whether err is a host-file refusal of the given
 // kind, through any wrapping.
 func isHostConfigError(err error, kind string) bool {
-	var hc hostConfigError
+	var hc shuttle.HostConfigError
 	return errors.As(err, &hc) && hc.Kind == kind
 }

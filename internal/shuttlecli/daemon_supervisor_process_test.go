@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -33,7 +34,7 @@ func TestDaemonOwnerHelper(t *testing.T) {
 	if address == "" {
 		address = "127.0.0.1:49999"
 	}
-	settings := hostSettings{listen: listenAddr{Network: "tcp", Address: address}}
+	settings := hostSettings{listen: shuttle.Listener{Network: "tcp", Address: address}}
 	var installing *supervisorOptions
 	if mode == "install" {
 		installing = &supervisorOptions{OS: "Linux", Label: defaultDaemonLabel}

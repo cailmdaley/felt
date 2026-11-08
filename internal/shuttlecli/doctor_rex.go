@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -25,7 +26,7 @@ const (
 )
 
 func (a *app) collectRexReceipt() *ReceiptRex {
-	terminal, err := a.hostTerminal()
+	terminal, err := shuttle.HostTerminal(a.env)
 	if err != nil || terminal != "rex" {
 		// Host configuration errors belong to the host receipt.
 		return nil

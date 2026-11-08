@@ -199,10 +199,7 @@ func (a *app) shuttleVersionCmd() *cobra.Command {
 }
 
 func daemonLifecycleURL(settings hostSettings, path string) string {
-	if settings.listen.Network == "unix" {
-		return "http://" + daemonSocketHost + path
-	}
-	return "http://" + settings.listen.Address + path
+	return settings.listen.BaseURL() + path
 }
 
 func (a *app) daemonLifecycleGet(settings hostSettings, path string, timeout time.Duration) ([]byte, error) {
@@ -245,7 +242,7 @@ func (a *app) findDaemonRelease() (daemonRelease, error) {
 
 func (a *app) findDaemonReleaseAt(configured, executable, home string) (daemonRelease, error) {
 	if configured = strings.TrimSpace(configured); configured != "" {
-		dir, err := a.expandUserPath(configured)
+		dir, err := shuttle.ExpandUserPath(a.env, configured)
 		if err != nil {
 			return daemonRelease{}, fmt.Errorf("resolving SHUTTLE_RELEASE: %w", err)
 		}
@@ -254,7 +251,7 @@ func (a *app) findDaemonReleaseAt(configured, executable, home string) (daemonRe
 	if home != "" {
 		data, err := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
 		if err == nil && strings.TrimSpace(string(data)) != "" {
-			dir, err := a.expandUserPath(strings.TrimSpace(string(data)))
+			dir, err := shuttle.ExpandUserPath(a.env, strings.TrimSpace(string(data)))
 			if err != nil {
 				return daemonRelease{}, err
 			}

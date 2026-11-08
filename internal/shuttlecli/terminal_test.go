@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 	"os"
 	"path/filepath"
@@ -11,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -213,7 +213,7 @@ func TestTerminalObservationHostConfigFallback(t *testing.T) {
 				if strings.Count(stderr.String(), "warning:") != 1 || !strings.Contains(stderr.String(), configPath) || !strings.Contains(stderr.String(), "tmux") {
 					t.Fatalf("fallback warning=%q", stderr.String())
 				}
-				if _, err := a.hostTerminal(); err == nil {
+				if _, err := shuttle.HostTerminal(a.env); err == nil {
 					t.Fatal("strict host configuration reader accepted malformed input")
 				}
 			} else if stderr.Len() != 0 {

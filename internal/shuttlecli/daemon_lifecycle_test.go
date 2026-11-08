@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
@@ -84,7 +85,7 @@ func TestDaemonLifecycleChecksTCPListenerOwnershipBeforeRequest(t *testing.T) {
 	defer server.Close()
 	a := newApp(testEnv(t))
 	a.daemonLifecycleOwnerCheck = func(hostSettings) error { return errors.New("foreign listener") }
-	settings := hostSettings{Listen: "tcp://127.0.0.1:4000", listen: listenAddr{Network: "tcp", Address: "127.0.0.1:4000"}}
+	settings := hostSettings{Listen: "tcp://127.0.0.1:4000", listen: shuttle.Listener{Network: "tcp", Address: "127.0.0.1:4000"}}
 	if _, err := a.daemonLifecycleGet(settings, "/api/v1/version", daemonReadTimeout); err == nil || !strings.Contains(err.Error(), "foreign listener") {
 		t.Fatalf("owner-refused request error = %v", err)
 	}

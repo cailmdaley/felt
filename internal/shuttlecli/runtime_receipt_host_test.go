@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 func TestParseSSListeners(t *testing.T) {
@@ -400,10 +402,10 @@ func TestEvaluateHost(t *testing.T) {
 	env := testEnv(t)
 	one, three := 1, 3
 	tcpSettings := func(class string) hostSettings {
-		return hostSettings{Class: class, ClassSource: "file", Listen: "tcp://127.0.0.1:4000", listen: listenAddr{"tcp", "127.0.0.1:4000"}}
+		return hostSettings{Class: class, ClassSource: "file", Listen: "tcp://127.0.0.1:4000", listen: shuttle.Listener{Network: "tcp", Address: "127.0.0.1:4000"}}
 	}
 	unixSettings := func(class string) hostSettings {
-		return hostSettings{Class: class, ClassSource: "file", Listen: "unix:///srv/s/sock/daemon.sock", listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"}}
+		return hostSettings{Class: class, ClassSource: "file", Listen: "unix:///srv/s/sock/daemon.sock", listen: shuttle.Listener{Network: "unix", Address: "/srv/s/sock/daemon.sock"}}
 	}
 	goodDir := &ReceiptSocketDir{Path: "/srv/s/sock", Exists: true, Mode: "0700", OwnerOK: true}
 	daemonTCP := []rawListener{{Process: "beam.smp", PID: 1, Address: "127.0.0.1", Port: 4000}}
@@ -522,7 +524,7 @@ func TestEvaluateHostReportsPrivateTailnetSocket(t *testing.T) {
 	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
-			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+			listen: shuttle.Listener{Network: "unix", Address: "/srv/s/sock/daemon.sock"},
 		},
 		users:           &one,
 		socketDir:       &ReceiptSocketDir{Path: "/srv/s/sock", Exists: true, Mode: "0700", OwnerOK: true},
@@ -580,7 +582,7 @@ func TestGatherHostEvidencePreservesMalformedRemotesFileError(t *testing.T) {
 	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "single-user", ClassSource: "file", Listen: listen,
-			listen: listenAddr{"unix", "/tmp/shuttle.sock"},
+			listen: shuttle.Listener{Network: "unix", Address: "/tmp/shuttle.sock"},
 		},
 		remotesConfigError: ev.remotesConfigError,
 	})
@@ -596,7 +598,7 @@ func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
 	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
-			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+			listen: shuttle.Listener{Network: "unix", Address: "/srv/s/sock/daemon.sock"},
 		},
 		tailscaleSocket: "/run/from-file/tailscaled.sock",
 		tailnetSocketEvidence: &ReceiptTailnetSocket{
@@ -611,7 +613,7 @@ func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
 	got = newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
-			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+			listen: shuttle.Listener{Network: "unix", Address: "/srv/s/sock/daemon.sock"},
 		},
 		tailscaleSocket:       "/run/from-file/tailscaled.sock",
 		daemonVersionReported: true,
@@ -628,7 +630,7 @@ func TestEvaluateHostReportsUnreadyTailnetBridge(t *testing.T) {
 	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
-			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+			listen: shuttle.Listener{Network: "unix", Address: "/srv/s/sock/daemon.sock"},
 		},
 		tailscaleSocket:    "/run/tailscaled.sock",
 		tailnetRemoteNames: []string{"hub-a"},
@@ -651,7 +653,7 @@ func TestEvaluateHostRejectsUnconfinedTailnetSocketAndConflictingDefaults(t *tes
 	base := hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
-			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
+			listen: shuttle.Listener{Network: "unix", Address: "/srv/s/sock/daemon.sock"},
 		},
 		socketDir:  &ReceiptSocketDir{Path: "/srv/s/sock", Exists: true, Mode: "0700", OwnerOK: true},
 		listenFrom: "ss",
@@ -791,7 +793,7 @@ func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
 	foreignUID := callerUID + 1
 	listen := "tcp://127.0.0.1:4000"
 	settings := hostSettings{
-		Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
+		Class: "shared-multi-user", Listen: listen, listen: shuttle.Listener{Network: "tcp", Address: "127.0.0.1:4000"},
 	}
 	cases := []struct {
 		name, source, problem string
@@ -822,7 +824,7 @@ func TestEvaluateHost_UidGateWithoutUidMismatches(t *testing.T) {
 	listen := "tcp://127.0.0.1:4000"
 	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
-			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
+			Class: "shared-multi-user", Listen: listen, listen: shuttle.Listener{Network: "tcp", Address: "127.0.0.1:4000"},
 		},
 		daemonClass: "shared-multi-user", daemonListen: listen, daemonPeerGate: "uid",
 		daemonPeerGateUIDSource: "euid",
@@ -840,7 +842,7 @@ func TestEvaluateHost_ForeignDaemonPortOwnerOverridesVersionGate(t *testing.T) {
 	callerUID := os.Geteuid()
 	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
-			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
+			Class: "shared-multi-user", Listen: listen, listen: shuttle.Listener{Network: "tcp", Address: "127.0.0.1:4000"},
 		},
 		daemonClass:             "shared-multi-user",
 		daemonListen:            listen,
@@ -873,7 +875,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 		Class:       "shared-multi-user",
 		ClassSource: "file",
 		Listen:      "tcp://127.0.0.1:4000",
-		listen:      listenAddr{"tcp", "127.0.0.1:4000"},
+		listen:      shuttle.Listener{Network: "tcp", Address: "127.0.0.1:4000"},
 	}
 	daemonTCP := []rawListener{{Process: "beam.smp", PID: 1, Address: "127.0.0.1", Port: 4000}}
 
@@ -904,7 +906,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	exposedListen := "tcp://127.0.0.1:4000"
 	exposed := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
-			Class: "exposed", Listen: exposedListen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
+			Class: "exposed", Listen: exposedListen, listen: shuttle.Listener{Network: "tcp", Address: "127.0.0.1:4000"},
 		},
 		daemonClass:    "exposed",
 		daemonListen:   exposedListen,
@@ -939,7 +941,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 func TestEvaluateHostTailscaledPeerAPIAndProxies(t *testing.T) {
 	t.Parallel()
 	one := 1
-	base := hostEvidence{settings: hostSettings{Class: "shared-multi-user", Listen: "unix:///srv/s.sock", listen: listenAddr{"unix", "/srv/s.sock"}}, users: &one, listenFrom: "ss"}
+	base := hostEvidence{settings: hostSettings{Class: "shared-multi-user", Listen: "unix:///srv/s.sock", listen: shuttle.Listener{Network: "unix", Address: "/srv/s.sock"}}, users: &one, listenFrom: "ss"}
 	for _, tc := range []struct {
 		name, command string
 		port          int
@@ -971,7 +973,7 @@ func TestEvaluateHost_OneRepairPerRemedy(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	got := newApp(env).evaluateHost(hostEvidence{
-		settings:    hostSettings{Class: "exposed", Listen: "unix:///srv/s.sock", listen: listenAddr{"unix", "/srv/s.sock"}},
+		settings:    hostSettings{Class: "exposed", Listen: "unix:///srv/s.sock", listen: shuttle.Listener{Network: "unix", Address: "/srv/s.sock"}},
 		listenFrom:  "ss",
 		daemonPorts: []int{4000},
 		listeners: []rawListener{

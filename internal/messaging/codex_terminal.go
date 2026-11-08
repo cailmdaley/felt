@@ -9,9 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -145,8 +142,9 @@ func submitCodexTerminalInputWithClient(ctx context.Context, env *sysenv.Env, ad
 	return receipt, nil
 }
 
-// codexDaemonEndpoint follows Shuttle's host listener setting, but keeps this
-// package independent of the CLI command tree.
+// codexDaemonEndpoint is the local daemon's base URL, and the socket to dial
+// for it when it listens on one: SHUTTLE_DAEMON_URL when set, else the host's
+// listener (shuttle.ResolveHostConfig).
 func codexDaemonEndpoint(env *sysenv.Env) (string, string, error) {
 	if override := strings.TrimRight(env.Getenv("SHUTTLE_DAEMON_URL"), "/"); override != "" {
 		u, err := url.Parse(override)
@@ -155,82 +153,14 @@ func codexDaemonEndpoint(env *sysenv.Env) (string, string, error) {
 		}
 		return override, "", nil
 	}
-	listen := strings.TrimSpace(env.Getenv("SHUTTLE_LISTEN"))
-	class := "single-user"
-	if listen == "" {
-		home, err := env.UserHomeDir()
-		if err != nil {
-			return "", "", err
-		}
-		path := env.Getenv("SHUTTLE_HOST_CONFIG_FILE")
-		if path == "" {
-			path = filepath.Join(home, ".config", "shuttle", "host.json")
-		} else {
-			path = env.Resolve(path)
-		}
-		if data, err := readBounded(path, 1<<20); err == nil {
-			var config struct {
-				Class  string `json:"class"`
-				Listen string `json:"listen"`
-			}
-			if err := json.Unmarshal(data, &config); err != nil {
-				return "", "", fmt.Errorf("reading Shuttle host config %s: %w", path, err)
-			}
-			if config.Class != "" {
-				class = config.Class
-			}
-			listen = strings.TrimSpace(config.Listen)
-		} else if !os.IsNotExist(err) {
-			return "", "", err
-		}
+	config, err := shuttle.ResolveHostConfig(env)
+	if err != nil {
+		return "", "", fmt.Errorf("resolving the Shuttle daemon listener: %w", err)
 	}
-	if listen == "" {
-		switch class {
-		case "single-user":
-			port := strings.TrimSpace(env.Getenv("SHUTTLE_PORT"))
-			if port == "" {
-				port = "4000"
-			}
-			n, err := strconv.Atoi(port)
-			if err != nil || n < 1 || n > 65535 {
-				return "", "", fmt.Errorf("SHUTTLE_PORT must be between 1 and 65535")
-			}
-			listen = "tcp://127.0.0.1:" + port
-		case "shared-multi-user", "exposed":
-			dir, err := shuttle.DataDir(env)
-			if err != nil {
-				return "", "", err
-			}
-			listen = "unix://" + dir + "/sock/daemon.sock"
-		default:
-			return "", "", fmt.Errorf("invalid Shuttle host class %q", class)
-		}
+	if config.Listen.Network == "unix" {
+		return config.Listen.BaseURL(), config.Listen.Address, nil
 	}
-	u, err := url.Parse(listen)
-	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", "", fmt.Errorf("invalid Shuttle listener URL")
-	}
-	if u.Scheme == "unix" {
-		if u.Host != "" {
-			return "", "", fmt.Errorf("Shuttle unix listener path must not include a host")
-		}
-		socket := u.Path
-		if !filepath.IsAbs(socket) {
-			return "", "", fmt.Errorf("Shuttle unix listener path must be absolute")
-		}
-		if len(socket) > 100 {
-			return "", "", fmt.Errorf("Shuttle unix listener path exceeds 100 bytes")
-		}
-		return "http://shuttle.invalid", filepath.Clean(socket), nil
-	}
-	if u.Scheme != "tcp" || u.Host == "" || u.Path != "" || !loopbackHost(u.Hostname()) {
-		return "", "", fmt.Errorf("Shuttle listener must be a loopback TCP or unix socket")
-	}
-	port, err := strconv.Atoi(u.Port())
-	if err != nil || port < 1 || port > 65535 {
-		return "", "", fmt.Errorf("Shuttle listener must include a valid TCP port")
-	}
-	return "http://" + u.Host, "", nil
+	return config.Listen.BaseURL(), "", nil
 }
 
 func loopbackHost(host string) bool {

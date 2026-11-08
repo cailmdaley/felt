@@ -3,6 +3,8 @@ package shuttlecli
 import (
 	"errors"
 	"fmt"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // terminalBackend observes and closes terminals; only the daemon launches them.
@@ -21,10 +23,10 @@ func (a *app) terminalBackends() ([]terminalBackend, error) {
 	if a.terminals != nil {
 		return a.terminals, nil
 	}
-	primary, err := a.hostTerminal()
+	primary, err := shuttle.HostTerminal(a.env)
 	if err != nil {
-		var configErr hostConfigError
-		if errors.As(err, &configErr) && configErr.Kind == "bad_terminal" {
+		var configErr shuttle.HostConfigError
+		if errors.As(err, &configErr) && configErr.Kind == shuttle.HostErrBadTerminal {
 			return nil, err
 		}
 		fmt.Fprintf(a.env.Stderr, "warning: cannot read terminal backend: %v; observing tmux only\n", err)

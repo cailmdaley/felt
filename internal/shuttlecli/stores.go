@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // Store resolution for the shuttle aggregate-read verbs (status, ps) and the
@@ -102,20 +103,7 @@ func (a *app) registeredFeltStores() ([]string, error) {
 // feltStoresRegistryPath is the canonical registry location for WRITES:
 // $SHUTTLE_STORES_FILE, else ~/.config/shuttle/stores.json.
 func (a *app) feltStoresRegistryPath() (string, error) {
-	return a.shuttleConfigPath("SHUTTLE_STORES_FILE", "stores.json")
-}
-
-// shuttleConfigPath resolves a ~/.config/shuttle/<leaf> file, letting envVar override
-// it outright.
-func (a *app) shuttleConfigPath(envVar, leaf string) (string, error) {
-	if env := a.env.Getenv(envVar); env != "" {
-		return a.expandUserPath(env)
-	}
-	home, err := a.env.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
-	}
-	return filepath.Join(home, ".config", "shuttle", leaf), nil
+	return shuttle.ConfigPath(a.env, "SHUTTLE_STORES_FILE", "stores.json")
 }
 
 // normalizeFeltStores trims, drops empty, expands `~`, and deduplicates while
@@ -128,7 +116,7 @@ func (a *app) normalizeFeltStores(stores []string) []string {
 		if s == "" {
 			continue
 		}
-		expanded, err := a.expandUserPath(s)
+		expanded, err := shuttle.ExpandUserPath(a.env, s)
 		if err != nil {
 			continue
 		}
@@ -226,30 +214,4 @@ func fiberIDFromStorePath(rel string) (string, error) {
 		return "", fmt.Errorf("unexpected fiber layout under .felt: %q", rel)
 	}
 	return strings.Join(parts[:len(parts)-1], "/"), nil
-}
-
-// expandUserPath expands a leading ~ and returns a cleaned absolute path.
-func (a *app) expandUserPath(path string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("empty path")
-	}
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := a.env.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolving home directory: %w", err)
-		}
-		if path == "~" {
-			path = home
-		} else {
-			path = filepath.Join(home, path[2:])
-		}
-	}
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path), nil
-	}
-	abs, err := a.env.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Clean(abs), nil
 }
