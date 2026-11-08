@@ -2,7 +2,7 @@ import { registerView, type TemporalView, type ViewContext } from './ViewRegistr
 
 /** The Board's contact sheet shares the workspace's session lifetime. */
 class BoardView implements TemporalView {
-  readonly id = 'shelf' as const
+  readonly id = 'board' as const
   readonly title = 'Board'
   readonly hotkey = '3'
   private context: ViewContext | null = null

@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 
 export function registerCapGeometryJourneys(test, { open, choose, headerAction }) {
   for (const width of [1440, 390, 320]) test(`Initial decoration and session history remain visible at ${width}px`, async p => {
-    if (width < 700) await p.locator('[data-view="shelf"]').click()
+    if (width < 700) await p.locator('[data-view="board"]').click()
     await p.locator('.kbn-cap:visible').first().waitFor()
     await p.evaluate(() => document.fonts.ready)
     const cap = p.locator('.kbn-cap:visible').first()

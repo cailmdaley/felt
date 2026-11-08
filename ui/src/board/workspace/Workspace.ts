@@ -10,8 +10,7 @@ import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry, isQuestion } from '../KanbanReadModel.js'
 import { deskColumn, ownColumn } from '../deskColumn.js'
-import { normalizeShelfFiles } from '../views/shelfData.js'
-import type { ShelfFile } from '../views/shelfData.js'
+import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
@@ -126,7 +125,7 @@ export class Workspace {
   /** Constitutions opened in this session, most recent first. */
   private readLately: string[] = []
   private origin = 'Board'
-  private readonly receipts = new Map<string, { files: ShelfFile[]; etag?: string }>()
+  private readonly receipts = new Map<string, { files: SentFile[]; etag?: string }>()
   private readonly receiptsRead = new Map<string, Promise<void>>()
   private readonly loads = new Map<string, Promise<void>>()
   private readonly mentions: ReturnType<typeof bindConstitutionMentions>
@@ -955,7 +954,7 @@ export class Workspace {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray((raw as { files?: unknown }).files)) {
           throw new Error('Invalid receipt feed')
         }
-        const files = normalizeShelfFiles(raw).map(file => ({
+        const files = normalizeSentFiles(raw).map(file => ({
           ...file,
           uid: file.uid ?? state.channel.uid,
           host: file.host ?? state.channel.owner,

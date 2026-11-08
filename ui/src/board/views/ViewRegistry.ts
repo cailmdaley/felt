@@ -33,7 +33,7 @@ import type { TemporalFetchers } from './TemporalData.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 
 export interface TemporalView {
-  id: 'chronicle' | 'shelf' | 'globe'
+  id: 'chronicle' | 'board' | 'globe'
   title: string
   hotkey: string
   mount(host: HTMLElement, ctx: ViewContext): void

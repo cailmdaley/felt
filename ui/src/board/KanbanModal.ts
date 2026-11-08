@@ -412,7 +412,7 @@ export class KanbanModal {
     host.append(this.container!)
     const wanted = new URLSearchParams(window.location.search).get('view')
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
-    else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
+    else if (window.location.hash.startsWith('#/board')) this.setView('board')
     else if (window.location.hash === '#/chronicle') this.setView('chronicle')
     else if (window.location.hash === '#/globe') this.setView('globe')
     this.keymapHelp = new KeymapHelp(
@@ -435,7 +435,7 @@ export class KanbanModal {
         this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
       },
       onEscapeHome: () => this.workspace?.escapeHome(),
-      onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
+      onView: (view) => this.setView(view, false),
       dock: this.dock,
       find: this.findEl ?? undefined,
       focusFind: () => this.focusFind(),
@@ -709,8 +709,8 @@ export class KanbanModal {
     this.findEl.type = 'search'
     this.findEl.placeholder = 'Find'
     this.findEl.setAttribute('aria-label', 'Find a constitution or transcript')
-    this.findEl.addEventListener('focus', () => this.workspace?.find(this.activeViewId === 'shelf'))
-    this.findEl.addEventListener('input', () => this.workspace?.find(this.activeViewId === 'shelf'))
+    this.findEl.addEventListener('focus', () => this.workspace?.find(this.activeViewId === 'board'))
+    this.findEl.addEventListener('input', () => this.workspace?.find(this.activeViewId === 'board'))
     // Escape puts Find away whole: its list, its filter and the focus.
     this.findEl.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || e.isComposing) return
@@ -771,7 +771,7 @@ export class KanbanModal {
       return
     }
     if (navigate && this.workspace) {
-      if (id === 'shelf') this.workspace.showBoard()
+      if (id === 'board') this.workspace.showBoard()
       else this.workspace.suspend(id)
     }
     if (id === this.activeViewId) return
@@ -832,7 +832,7 @@ export class KanbanModal {
     const onDesk = this.activeViewId === 'desk'
     // The Board's sheet is a vellum veil over the Desk, which stays drawn
     // beneath it, untouchable and out of the accessibility tree.
-    const veiled = this.activeViewId === 'shelf'
+    const veiled = this.activeViewId === 'board'
     // Leaving the Desk mid-drag takes the horizon with it.
     if (!onDesk) this.syncDragHorizon(false)
     if (this.deskEl) {
@@ -863,7 +863,7 @@ export class KanbanModal {
 
   /** The veiled view host starts under the tab strip and covers the rest of the page. */
   private placeVeil(): void {
-    if (!this.container || !this.tabsEl || this.activeViewId !== 'shelf') return
+    if (!this.container || !this.tabsEl || this.activeViewId !== 'board') return
     const top = this.tabsEl.getBoundingClientRect().bottom - this.container.getBoundingClientRect().top
     this.container.style.setProperty('--kbn-veil-top', `${Math.max(0, Math.round(top))}px`)
   }
@@ -992,14 +992,13 @@ export class KanbanModal {
    * key was consumed.
    */
   private handleViewHotkey(e: KeyboardEvent): boolean {
-    const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'shelf' ? 'overview' : 'desk'
+    const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'board' ? 'overview' : 'desk'
     const intent = keyIntent(e, surface)
     if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board' && intent !== 'globe') return false
     if (keystrokeIsSpokenFor()) return false
-    const id: BoardViewId = intent === 'board' ? 'shelf' : intent
     e.preventDefault()
     e.stopPropagation()
-    this.setView(id, true, intent === 'desk')
+    this.setView(intent, true, intent === 'desk')
     return true
   }
 
@@ -1732,7 +1731,7 @@ export class KanbanModal {
     // it can see what it is doing.
     // The Board veils a Desk that must exist: its first paint happens beneath
     // the veil, and later data waits for the Desk to be in front again.
-    const veiledFirstPaint = this.activeViewId === 'shelf' && !this.deskEl.hasChildNodes()
+    const veiledFirstPaint = this.activeViewId === 'board' && !this.deskEl.hasChildNodes()
     if (this.activeViewId !== 'desk') {
       this.lastResponse = data
       this.mountOrRefreshActiveView()
@@ -2072,7 +2071,7 @@ export class KanbanModal {
     }
     if (this.handleSettingsHotkey(e)) return
     if (this.handleViewHotkey(e)) return
-    if (e.key === 'Escape' && this.activeViewId === 'shelf' && !keystrokeIsSpokenFor()) {
+    if (e.key === 'Escape' && this.activeViewId === 'board' && !keystrokeIsSpokenFor()) {
       if (this.workspace?.handleOverviewEscapeLayer()) { e.preventDefault(); e.stopPropagation(); return }
       e.preventDefault(); e.stopPropagation(); this.setView('desk'); return
     }

@@ -2,7 +2,8 @@
  * The newest report each Desk row marks, from one throttled fleet read.
  * The Desk never reads a sent-file feed per card.
  */
-import { normalizeShelfFiles, shelfKind, type ShelfFile } from './views/shelfData.js'
+import { normalizeSentFiles, type SentFile } from './sentFiles.js'
+import { fileKind } from './attachments.js'
 import { docKey, parseDocKey, type DocKey } from './workspace/documents.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
@@ -21,15 +22,15 @@ export const SEND_WINDOW_MS = 30 * 86_400_000
 export const SEND_REFRESH_MS = 60_000
 
 /** Each fiber's files, newest first, a re-send at its latest time. */
-export function sendsByFiber(files: readonly ShelfFile[]): Map<string, ShelfFile[]> {
-  const latest = new Map<string, ShelfFile>()
+export function sendsByFiber(files: readonly SentFile[]): Map<string, SentFile[]> {
+  const latest = new Map<string, SentFile>()
   for (const file of files) {
     if (!file.uid || file.uid === file.sessionId) continue
     const identity = `${file.uid}\u0000${file.host ?? ''}\u0000${file.fullPath}`
     const prior = latest.get(identity)
     if (!prior || file.timestamp > prior.timestamp) latest.set(identity, file)
   }
-  const out = new Map<string, ShelfFile[]>()
+  const out = new Map<string, SentFile[]>()
   for (const file of latest.values()) {
     const list = out.get(file.uid!)
     if (list) list.push(file)
@@ -40,12 +41,12 @@ export function sendsByFiber(files: readonly ShelfFile[]): Map<string, ShelfFile
 }
 
 /** A report mark stands for a drawable file, never an opaque receipt. */
-export function newestReport(files: readonly ShelfFile[]): ShelfFile | undefined {
-  return files.find(file => shelfKind(file.fullPath) !== 'opaque')
+export function newestReport(files: readonly SentFile[]): SentFile | undefined {
+  return files.find(file => fileKind(file.fullPath) !== 'other')
 }
 
 export class FiberSends {
-  private byFiber = new Map<string, ShelfFile[]>()
+  private byFiber = new Map<string, SentFile[]>()
   private readAt = -Infinity
   private inflight: Promise<void> | null = null
 
@@ -55,7 +56,7 @@ export class FiberSends {
   /** `window` is how far back a read reaches. */
   constructor(base: string, onChange: () => void, window = SEND_WINDOW_MS) { this.base = base; this.onChange = onChange; this.window = window }
 
-  private of(card: KanbanCard): ShelfFile[] {
+  private of(card: KanbanCard): SentFile[] {
     return (card.uid ? this.byFiber.get(card.uid) : undefined) ?? this.byFiber.get(card.id) ?? []
   }
   /** This fiber's sent files, newest first. */
@@ -79,7 +80,7 @@ export class FiberSends {
         if (!res.ok) throw new Error('Sent-files feed unavailable')
         const raw = await res.json()
         if (!raw || !Array.isArray(raw.files)) throw new Error('Invalid sent-files feed')
-        const next = sendsByFiber(normalizeShelfFiles(raw))
+        const next = sendsByFiber(normalizeSentFiles(raw))
         if (!sameSends(this.byFiber, next)) {
           this.byFiber = next
           this.onChange()
@@ -94,14 +95,14 @@ export class FiberSends {
   }
 }
 
-function resolve(card: KanbanCard, file: ShelfFile): FiberSend | undefined {
+function resolve(card: KanbanCard, file: SentFile): FiberSend | undefined {
   const key = docKey(file.host ?? '', file.fullPath, card.originId, card.fiberDir)
   const parsed = parseDocKey(key)
   if (!parsed) return undefined
   return { key, fullPath: file.fullPath, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner }
 }
 
-function sameSends(a: Map<string, ShelfFile[]>, b: Map<string, ShelfFile[]>): boolean {
+function sameSends(a: Map<string, SentFile[]>, b: Map<string, SentFile[]>): boolean {
   if (a.size !== b.size) return false
   for (const [uid, files] of a) {
     const other = b.get(uid)

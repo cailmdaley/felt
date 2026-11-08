@@ -847,7 +847,7 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'over the reader')
   await leave(p)
-  await barTab(p, 'shelf').click()
+  await barTab(p, 'board').click()
   await p.locator('.ws-overview-folio').first().waitFor()
   await p.waitForTimeout(350)
   assert.deepEqual(await bar(), desk, 'on the Board')
@@ -865,8 +865,8 @@ test('The board bar holds its tabs, Find and Settings to the pixel on every view
 // its key) closes the reader back to it; another tab switches and closes.
 const origins = {
   desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click() } },
-  shelf: { other: 'desk', open: async p => { await barTab(p, 'shelf').click(); await p.locator('.ws-overview-folio').filter({ hasText: name }).click() } },
-  chronicle: { other: 'shelf', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
+  board: { other: 'desk', open: async p => { await barTab(p, 'board').click(); await p.locator('.ws-overview-folio').filter({ hasText: name }).click() } },
+  chronicle: { other: 'board', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
 }
 for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the reader opened from ${origin}`, async p => {
   await origins[origin].open(p)
@@ -952,7 +952,7 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
   assert.equal(await first.locator('.ws-sent-new').count(), 1)
   await p.keyboard.press('Escape'); await poll(p, () => !document.querySelector('.ws-page-sheet').open)
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
-  await leave(p); await barTab(p, 'shelf').click()
+  await leave(p); await barTab(p, 'board').click()
   await poll(p, () => document.querySelector('.ws-overview-ribbon [title*="brief.md"]'))
   if (reducedMotion !== 'reduce') await poll(p, () => window.__receiptAnimations.length)
   const folios = await p.evaluate(() => window.__receiptAnimations)
@@ -971,13 +971,13 @@ test('j/k step constitutions in Desk order from a Board-opened reader, J/K step 
   const names = [...drafts, ...flight, ...review], at = names.indexOf(name)
   const title = expected => poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, expected)
   const landing = expected => poll(p, text => document.querySelector('.toast-message')?.textContent === text, expected)
-  await barTab(p, 'shelf').click()
+  await barTab(p, 'board').click()
   assert.ok(await p.locator('.ws-overview-read').isHidden(), 'nothing read yet, no shelf')
   await p.locator('.ws-overview-folio').filter({ hasText: 'Weekly shear summary' }).click()
   await selected(p).waitFor()
-  assert.equal(await activeBarView(p), 'shelf', 'the bar marks the Board as the origin')
+  assert.equal(await activeBarView(p), 'board', 'the bar marks the Board as the origin')
   await leave(p)
-  assert.equal(await activeBarView(p), 'shelf', 'the origin tab closes the reader back to the Board')
+  assert.equal(await activeBarView(p), 'board', 'the origin tab closes the reader back to the Board')
   assert.deepEqual(await p.locator('.ws-overview-read-name').allTextContents(), ['Weekly shear summary'])
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await reportReady(p)
@@ -1368,7 +1368,7 @@ test('Body wikilink opens a fiber absent from the card index', async p => {
 })
 
 test('Overview first visit names its window and a numeric stored visit survives reload', async p => {
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   await poll(p, () => document.querySelector('.ws-overview-masthead')?.textContent?.includes('The last 30 days'))
   const key = 'shuttle.workspace.overview.seen'
   const seen = Date.parse('2026-10-03T14:00:00Z')
@@ -1382,7 +1382,7 @@ test('Overview first visit names its window and a numeric stored visit survives 
 })
 
 test('Overview g selects the first change before folios and its main button opens the fiber', async p => {
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   const changes = p.locator('.ws-overview-change[data-uid]')
   await changes.first().waitFor()
   const first = changes.first()
@@ -1402,7 +1402,7 @@ test('Overview g selects the first change before folios and its main button open
 })
 
 test('Overview document thumbnails open the exact receipt, and seen constitutions recede', async p => {
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   const row = p.locator('.ws-overview-change[data-uid="01KVBR1F9BWBVKF97473PV67K8"]')
   const thumbnail = row.locator('.ws-overview-change-doc').nth(1)
   await thumbnail.waitFor()
@@ -1416,7 +1416,7 @@ test('Overview document thumbnails open the exact receipt, and seen constitution
 })
 
 test('Overview lenses, declared-title Find, exact receipt ribbon route and scroll restoration', async p => {
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   for (const lens of ['Recent', 'Projects', 'Hosts']) {
     const radio = p.getByRole('radio', { name: lens, exact: true }); await radio.click()
     assert.equal(await radio.getAttribute('aria-checked'), 'true')
@@ -1426,7 +1426,7 @@ test('Overview lenses, declared-title Find, exact receipt ribbon route and scrol
     await find.fill('Calibrate')
     assert.equal(await p.locator('.ws-overview-folio:visible').count(), 1)
     // The field and the sheet's filter stay in step across views: leaving the Board empties both.
-    await barTab(p, 'desk').click(); await barTab(p, 'shelf').click()
+    await barTab(p, 'desk').click(); await barTab(p, 'board').click()
     await p.locator('.ws-overview-folio').first().waitFor()
     assert.equal(await find.inputValue(), '', 'switching views empties Find')
     assert.ok(await p.locator('.ws-overview-folio:visible').count() > 1, 'and lifts the sheet\'s filter')
@@ -1460,7 +1460,7 @@ test('Overview lenses, declared-title Find, exact receipt ribbon route and scrol
 }, { width: 1440, height: 600 })
 
 test('Overview media thumbnails show duration and a paused first video frame', async p => {
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   const ribbon = await revealLatestFiles(p)
   const audioCard = ribbon.locator('button').filter({ has: p.locator('.ws-overview-rib-label').getByText('tone.mp3', { exact: true }) })
   await audioCard.scrollIntoViewIfNeeded()
@@ -1698,7 +1698,7 @@ test('PDF.js paints fixture; owner route; Overview draws PDFs as faces', async p
   await assertRenderedPdf(p)
   assert.ok((await records(p)).some(r => r.url.includes('origin=basalt-login-02') && r.url.includes('remote-summary.pdf')))
   await leave(p)
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   await revealLatestFiles(p)
   await poll(p, () => document.querySelectorAll('.ws-overview .kbn-thumbnail-pdf').length > 0)
   assert.equal(await p.locator('.ws-overview .kbn-thumbnail-pdf iframe').count(), 0, 'PDF thumbnails draw a face, not the native viewer')
@@ -1830,7 +1830,7 @@ for (const width of [320, 390]) {
 test('Phone overview single column, report reader and Back', async p => {
   const switcher = await p.locator('.kbn-viewtabs').boundingBox()
   assert.equal(Math.round(switcher.y + switcher.height), 844, 'view switcher sits at the bottom')
-  for (const view of ['desk', 'chronicle', 'shelf']) assert.ok((await p.locator(`[data-view="${view}"]`).boundingBox()).height >= 44)
+  for (const view of ['desk', 'chronicle', 'board']) assert.ok((await p.locator(`[data-view="${view}"]`).boundingBox()).height >= 44)
   const seasons = p.locator('.kbn-viewtabs-lens')
   if (await seasons.locator('.kbn-lens-chip').count()) {
     const gear = await p.locator('.kbn-viewtabs-settings').boundingBox(), lane = await seasons.boundingBox()
@@ -1838,7 +1838,7 @@ test('Phone overview single column, report reader and Back', async p => {
     await seasons.evaluate(el => { el.scrollLeft = el.scrollWidth })
     assert.ok(await seasons.evaluate(el => el.scrollLeft > 0))
   }
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   await poll(p, () => document.querySelector('.ws-overview-change[data-uid]')?.getClientRects().length > 0)
   const firstChange = p.locator('.ws-overview-change[data-uid]').first()
   const firstBounds = await firstChange.evaluate(row => {
@@ -2132,7 +2132,7 @@ test('j/k and Alt scans land immediately; browser Back returns to Board', async 
   const column = id => p.locator(`[data-column="${id}"] .kbn-card:not(.kbn-card-header) > .kbn-card-name`).evaluateAll(names => names.map(name => name.title))
   const names = [...await column('drafts'), ...await column('inFlight'), ...await column('awaitingReview')]
   assert.ok(names.length >= 3, 'navigation exercises several constitutions')
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await poll(p, first => document.querySelector('.ws-channel-title')?.textContent === first, name)
   await appFocus(p)
@@ -2288,7 +2288,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.equal(await cadence.count(), 1); assert.ok((await cadence.innerText()).trim())
     const outside = await p.locator('.ws-stage-column').evaluate(column => { const copy = column.cloneNode(true); copy.querySelector('.ws-settings-menu')?.remove(); copy.querySelector('.ws-band-drawer')?.remove(); return copy.textContent })
     assert.ok(!outside.includes(await cadence.innerText()), 'cadence has one editable home')
-    await leave(p); await p.locator('[data-view="shelf"]').click(); await p.locator('.ws-overview-folio').first().waitFor()
+    await leave(p); await p.locator('[data-view="board"]').click(); await p.locator('.ws-overview-folio').first().waitFor()
     await p.screenshot({ path: resolve(shots, `${device}-overview.png`) })
     async function capture(state) {
       await mkdir(shots, { recursive: true })
@@ -2379,7 +2379,7 @@ test('Escaped theme imports cannot load unscoped CSS or target the act zone', as
 
 test('Custom theme is scoped with private keyframes, hoisted fonts and conditional rules', async p => {
   const desk = await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity)
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').click()
   await choose(p, 'Constitution')
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
@@ -2413,7 +2413,7 @@ test('Custom theme is scoped with private keyframes, hoisted fonts and condition
 })
 
 test('Plain removes custom and bundled styling, persists, and can restore custom CSS', async p => {
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').click()
   await choose(p, 'Constitution')
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
@@ -2522,7 +2522,7 @@ test('Appearance gives declared themes way, and embedded reports read their fram
   assert.deepEqual(await reportLook(), { scheme: 'dark', dark: true, paper: 'rgb(22, 24, 29)' })
   const thumbLook = async () => {
     if (await selected(p).count()) await leave(p)
-    await barTab(p, 'shelf').click()
+    await barTab(p, 'board').click()
     const thumb = p.locator('.ws-overview-folio').filter({ hasText: name }).locator('iframe[sandbox=""]').first()
     await thumb.waitFor({ state: 'attached' })
     const inside = await (await thumb.elementHandle()).contentFrame()
@@ -2541,7 +2541,7 @@ test('Appearance gives declared themes way, and embedded reports read their fram
 
 test('Overview never fans out theme.css probes; folios reuse the reader ETag cache', async p => {
   const themeReads = async () => (await records(p)).filter(r => r.url.includes('/api/v1/file?') && decodeURIComponent(r.url).includes('/theme.css'))
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   await p.locator('.ws-overview-folio').first().waitFor()
   await p.waitForTimeout(100)
   assert.equal((await themeReads()).length, 0, 'cold overview uses bundled themes only')
@@ -2676,7 +2676,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the bar and label bar (${device})`, async p => {
   await open(p); await reportReady(p)
-  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="shelf"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-selected .ws-expand-button']) {
+  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="board"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-selected .ws-expand-button']) {
     await still(p, `hovering ${control}`, () => p.locator(control).hover(), { allow: [control] })
   }
   await p.mouse.move(viewport.width / 2, viewport.height - 4)
@@ -2727,7 +2727,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   // title's start and every other row stay put.
   await still(p, 'a Desk worker-state change', () => flipWorker(p), { allow: ['.kbn-card-meta', '.kbn-card-name'], settle: 100 })
   if (phone) return
-  await p.locator('[data-view="shelf"]').click()
+  await p.locator('[data-view="board"]').click()
   await p.locator('.ws-overview-folio').first().waitFor()
   await p.waitForTimeout(400)
   const folio = p.locator('.ws-overview-folio').first()

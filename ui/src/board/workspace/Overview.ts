@@ -6,9 +6,8 @@ import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
 import { deskColumn } from '../deskColumn.js'
-import { normalizeShelfFiles, type ShelfFile } from '../views/shelfData.js'
-import { LOAD_POLICY } from '../views/shelfLoad.js'
-import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
+import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
+import { LOAD_POLICY, Thumbnail, pumpThumbnails } from './Thumbnail.js'
 import { leadReceipt, docKey, parseDocKey, documentKind, documentLabels, type DocKey } from './documents.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import type { ChannelThemes } from './ChannelThemes.js'
@@ -100,7 +99,7 @@ function place(parent: HTMLElement, children: HTMLElement[]): void {
 function age(timestamp: number): string {
   return timestamp ? ago(timestamp) : 'Opened this session'
 }
-interface Receipt extends ShelfFile { key: DocKey; uid: string; owner: string }
+interface Receipt extends SentFile { key: DocKey; uid: string; owner: string }
 interface Folio {
   uid: string
   card: KanbanCard
@@ -216,7 +215,7 @@ export class Overview {
   private readonly observer?: IntersectionObserver
   private readonly resizeObserver?: ResizeObserver
   private marks = new Map<string, string>()
-  private files: ShelfFile[] = []
+  private files: SentFile[] = []
   private fleetHosts: string[] = []
   private lens: OverviewLens = 'recent'
   private order: KanbanCard[] = []
@@ -348,7 +347,7 @@ export class Overview {
         const raw: unknown = await response.json()
         if (this.disposed || this.request !== controller) return
         if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { files?: unknown }).files)) throw new Error('Invalid receipt feed')
-        const incoming = normalizeShelfFiles(raw)
+        const incoming = normalizeSentFiles(raw)
         this.files = incoming.filter(file => Number.isFinite(file.timestamp) && file.timestamp > 0 && file.timestamp >= Date.now() - WINDOW_MS)
         const origins = (raw as { origins?: unknown }).origins
         if (origins && typeof origins === 'object' && !Array.isArray(origins)) {
@@ -467,7 +466,7 @@ export class Overview {
   fileNames(card: KanbanCard): string[] {
     return this.folios.get(uidOf(card))?.receipts.flatMap(r => [r.basename, r.fullPath]) ?? []
   }
-  unfiledReceipts(uid: string): ShelfFile[] { return this.folios.get(uid)?.receipts ?? [] }
+  unfiledReceipts(uid: string): SentFile[] { return this.folios.get(uid)?.receipts ?? [] }
   hasMetadata(card: KanbanCard): boolean {
     const uid = uidOf(card)
     return uid.startsWith('other:') || this.knownCards().get(uid)?.originId === card.originId

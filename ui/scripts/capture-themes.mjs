@@ -56,7 +56,7 @@ try {
       const page = await context.newPage()
       const url = new URL(base); url.hash = '/board'
       await page.goto(url.href)
-      await page.locator('[data-view="shelf"]').click()
+      await page.locator('[data-view="board"]').click()
       const finder = page.locator('.ws-overview-find')
       if (isLive) await finder.fill('ai-futures/felt')
       await page.locator('.ws-overview-folio:not([hidden])').nth(3).waitFor()
@@ -64,7 +64,7 @@ try {
       if (uids.length !== 4 || uids.some(uid => !uid)) throw new Error('Four real channel folios are required for a mixed-paper capture')
       uids.forEach((uid, index) => url.searchParams.append('theme-preview', `${uid}:${themes[index]}`))
       await page.goto(url.href)
-      await page.locator('[data-view="shelf"]').click()
+      await page.locator('[data-view="board"]').click()
       if (isLive) await finder.fill('ai-futures/felt')
       await page.getByRole('radio', { name: 'Projects', exact: true }).click()
       await page.locator(`.ws-overview-folio[data-uid="${uids[3]}"][data-ws-theme-name="night-chart"]`).waitFor()

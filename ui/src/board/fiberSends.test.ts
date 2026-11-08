@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FiberSends, SEND_REFRESH_MS, newestReport, sendsByFiber } from './fiberSends.js'
-import type { ShelfFile } from './views/shelfData.js'
+import type { SentFile } from './sentFiles.js'
 import { card } from './testFixtures.js'
 
-const file = (fullPath: string, uid: string | undefined, timestamp: number, extra: Partial<ShelfFile> = {}): ShelfFile =>
+const file = (fullPath: string, uid: string | undefined, timestamp: number, extra: Partial<SentFile> = {}): SentFile =>
   ({ fullPath, basename: fullPath.split('/').pop()!, timestamp, uid, ...extra })
 
 describe('sendsByFiber', () => {

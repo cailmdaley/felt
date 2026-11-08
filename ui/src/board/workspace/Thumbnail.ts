@@ -1,5 +1,4 @@
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
-import { LOAD_POLICY } from '../views/shelfLoad.js'
 import { RESOURCE_FRESH_MS } from '../documentResources.js'
 import { docKey, documentKind, KIND_GLYPH } from './documents.js'
 import { cacheDocumentTitle, declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
@@ -21,6 +20,23 @@ export interface ThumbnailOptions {
   distance(): number
   onAspect?(aspect: number): void
 }
+
+/**
+ * How many document bodies may be alive at once. A thumbnail's face is
+ * metadata and costs nothing; its body is a live document, so bodies are
+ * finite: nearest the reader's eye loads first, and past the cap the least
+ * recently seen lower-priority body makes room.
+ */
+export const LOAD_POLICY = {
+  /** Live or loading bodies allowed at once. */
+  maxLive: 16,
+  /** Bodies loading at once; four keeps the connection pool and main thread usable. */
+  maxConcurrent: 4,
+  /** The ring around the viewport inside which a thumbnail is worth loading. */
+  ring: '300px',
+  /** How long before a load is called stalled, generous for a remote origin. */
+  softTimeoutMs: 20_000,
+} as const
 
 /** One shared budget for the overview and every strip, with stable nearest-first loading. */
 class ThumbnailBudget {
@@ -195,7 +211,7 @@ export class Thumbnail {
       }
       budget.schedule()
     }
-    this.timer = setTimeout(() => finish(false), LOAD_POLICY.softTimeoutRemoteMs)
+    this.timer = setTimeout(() => finish(false), LOAD_POLICY.softTimeoutMs)
     const kind = documentKind(file.fullPath)
     this.body = buildFileViewer(this.opts.shuttleBase, file.fullPath, file.owner, undefined, undefined, {
       kind: kind === 'fiber' ? undefined : kind, thumbnail: true, thumbnailLabel: !this.opts.captioned, active: false,

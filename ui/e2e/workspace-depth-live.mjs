@@ -71,7 +71,7 @@ try {
     await page.keyboard.press('j'); await page.waitForTimeout(350)
     await shot(page, `${size}-after-j-twice.png`)
     await page.locator('.ws-return').click(); await page.waitForTimeout(400)
-    await page.locator('[data-view="shelf"]').click()
+    await page.locator('[data-view="board"]').click()
     const folio = page.locator('.ws-overview-folio').filter({ hasText: name })
     await folio.waitFor(); await folio.click(); await page.waitForTimeout(500)
     await shot(page, `${size}-from-board.png`)
