@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { card, voiceStatus } from './testFixtures.js'
+import { card, voiceStatus, settle } from './testFixtures.js'
 import { Voice, constitutionFor, voicePollDelay, type VoiceStatus } from './voice'
 
 const status = (changes: Partial<VoiceStatus> = {}): VoiceStatus => voiceStatus({ enabled: true, state: 'listening', ...changes })
-const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
@@ -21,7 +20,7 @@ describe('live voice', () => {
     const voice = new Voice('')
     const first = voice.set({ muted: true })
     const second = voice.set({ muted: false })
-    await flush()
+    await settle()
     expect(calls).toEqual([{ muted: true }])
     finishFirst()
     await first; await second
@@ -41,9 +40,9 @@ describe('live voice', () => {
     const urls: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (url: string) => { urls.push(url); return { ok: true, json: async () => status() } }))
     const voice = new Voice('')
-    voice.mount(); await flush()
+    voice.mount(); await settle()
     window.dispatchEvent(new Event('focus'))
-    document.dispatchEvent(new Event('visibilitychange')); await flush()
+    document.dispatchEvent(new Event('visibilitychange')); await settle()
     expect(new Set(urls)).toEqual(new Set(['/api/v1/voice']))
     voice.dispose()
   })
@@ -65,7 +64,7 @@ describe('live voice', () => {
       return { ok: true, json: async () => status() }
     }))
     const voice = new Voice('')
-    voice.mount(); await flush()
+    voice.mount(); await settle()
     expect(sources.map(s => s.url)).toEqual(['/api/v1/voice/events?rex=1'])
     sources[0].emit(null)
 
@@ -73,7 +72,7 @@ describe('live voice', () => {
     await vi.advanceTimersByTimeAsync(2_000)
     sources[0].emit({ fiber_id: 'rex/worker', origin: 'local', name: 'Worker' })
     expect(voice.status?.target?.fiber_id).toBe('rex/worker')
-    release(); await flush()
+    release(); await settle()
     expect(voice.status?.target?.fiber_id).toBe('rex/worker')
     sources[0].emit({ fiber_id: 'rex/worker', origin: 'local', name: 'Worker' })
     voice.dispose()
@@ -97,7 +96,7 @@ describe('live voice', () => {
       vi.stubGlobal('EventSource', Source)
       vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => status() })))
       const voice = new Voice('')
-      voice.mount(); await flush()
+      voice.mount(); await settle()
       return voice
     }
     const move = { fiber_id: 'uid', origin: 'fir', name: 'Worker' }
@@ -135,7 +134,7 @@ describe('live voice', () => {
       voice.dispose()
       const later = new Voice('')
       later.onRex = event => moved.push(event.fiber_id)
-      later.mount(); await flush()
+      later.mount(); await settle()
       expect(moved).toEqual(['remote'])
       later.dispose()
     })
@@ -145,10 +144,10 @@ describe('live voice', () => {
       const voice = await start(), moved: unknown[] = []
       voice.onRex = event => moved.push(event)
       hidden = true
-      document.dispatchEvent(new Event('visibilitychange')); await flush()
+      document.dispatchEvent(new Event('visibilitychange')); await settle()
       expect(live()).toHaveLength(0)
       hidden = false
-      document.dispatchEvent(new Event('visibilitychange')); await flush()
+      document.dispatchEvent(new Event('visibilitychange')); await settle()
       expect(live()).toHaveLength(1)
       expect(moved).toEqual([])
       voice.dispose()
@@ -159,7 +158,7 @@ describe('live voice', () => {
       const voice = await start()
       expect(Source.all).toHaveLength(0)
       hidden = false
-      document.dispatchEvent(new Event('visibilitychange')); await flush()
+      document.dispatchEvent(new Event('visibilitychange')); await settle()
       expect(live()).toHaveLength(1)
       voice.dispose()
     })
@@ -204,7 +203,7 @@ describe('live voice', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => status() })))
     const voice = new Voice('')
-    voice.mount(); await flush()
+    voice.mount(); await settle()
     sources[0].fail()
     await vi.advanceTimersByTimeAsync(4_999)
     expect(sources).toHaveLength(1)
@@ -220,10 +219,10 @@ describe('live voice', () => {
     let ok = true
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok, json: async () => status({ error: 'stale' }) })))
     const voice = new Voice('')
-    voice.mount(); await flush()
+    voice.mount(); await settle()
     expect(voice.status?.error).toBe('stale')
     ok = false
-    await vi.advanceTimersByTimeAsync(2_000); await flush()
+    await vi.advanceTimersByTimeAsync(2_000); await settle()
     expect(voice.status).toBeNull()
     voice.dispose()
   })
@@ -232,9 +231,9 @@ describe('live voice', () => {
     let enabled = true
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => status({ enabled }) })))
     const voice = new Voice('')
-    voice.mount(); await flush()
+    voice.mount(); await settle()
     enabled = false
-    window.dispatchEvent(new CustomEvent('shuttle-voice-settings-saved', { detail: false })); await flush()
+    window.dispatchEvent(new CustomEvent('shuttle-voice-settings-saved', { detail: false })); await settle()
     expect(voice.status?.enabled).toBe(false)
     voice.dispose()
   })
@@ -243,10 +242,10 @@ describe('live voice', () => {
     let enabled = false
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => status({ enabled }) })))
     const voice = new Voice('')
-    voice.mount(); await flush()
-    window.dispatchEvent(new CustomEvent('shuttle-voice-settings-saved', { detail: true })); await flush()
+    voice.mount(); await settle()
+    window.dispatchEvent(new CustomEvent('shuttle-voice-settings-saved', { detail: true })); await settle()
     enabled = true
-    await vi.advanceTimersByTimeAsync(2_000); await flush()
+    await vi.advanceTimersByTimeAsync(2_000); await settle()
     expect(voice.status?.enabled).toBe(true)
     voice.dispose()
   })
@@ -257,14 +256,14 @@ describe('live voice', () => {
     const fetcher = vi.fn(async () => ({ ok: true, json: async () => status() }))
     vi.stubGlobal('fetch', fetcher)
     const voice = new Voice('')
-    voice.mount(); await flush()
+    voice.mount(); await settle()
     expect(fetcher).toHaveBeenCalledTimes(1)
     hidden = true
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.advanceTimersByTimeAsync(60_000)
     expect(fetcher).toHaveBeenCalledTimes(1)
     hidden = false
-    document.dispatchEvent(new Event('visibilitychange')); await flush()
+    document.dispatchEvent(new Event('visibilitychange')); await settle()
     expect(fetcher).toHaveBeenCalledTimes(2)
     voice.dispose()
   })
@@ -293,7 +292,7 @@ describe('live voice', () => {
         return { ok: true, json: async () => current }
       }))
       const voice = new Voice('')
-      voice.mount(); await flush()
+      voice.mount(); await settle()
       return voice
     }
 
@@ -305,18 +304,18 @@ describe('live voice', () => {
       voice.see(other)
       await vi.advanceTimersByTimeAsync(300)
       voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
-      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      await vi.advanceTimersByTimeAsync(2_000); await settle()
       voice.dispose()
     })
     it('remembers a board view while pinned without moving the target or repeating the write', async () => {
       const voice = await mounted(status({ follow: false, target: held, recorder: 'audio-host' }))
       voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A', recorder: 'audio-host' }])
       expect(voice.status?.target).toEqual(held)
-      window.dispatchEvent(new Event('focus')); await flush()
+      window.dispatchEvent(new Event('focus')); await settle()
       expect(posts).toHaveLength(1)
       voice.dispose()
     })
@@ -324,7 +323,7 @@ describe('live voice', () => {
       vi.stubGlobal('matchMedia', () => ({ matches: true }) as MediaQueryList)
       const voice = await mounted(status({ source: 'phone', target: held, recorder: 'audio-host' }))
       voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A', recorder: 'audio-host' }])
       voice.dispose()
     })
@@ -332,26 +331,26 @@ describe('live voice', () => {
       const voice = await mounted(status({ target: held }))
       focused = false
       voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
       expect(posts).toEqual([])
       focused = true
-      window.dispatchEvent(new Event('focus')); await flush()
+      window.dispatchEvent(new Event('focus')); await settle()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
       focused = false
       current = status({ target: held })
-      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      await vi.advanceTimersByTimeAsync(2_000); await settle()
       expect(posts).toHaveLength(1)
       voice.dispose()
     })
     it('leaves a target that already agrees alone, and survives a refused write', async () => {
       const voice = await mounted(status({ target: held }))
       voice.see(other)
-      await vi.advanceTimersByTimeAsync(400); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
       expect(posts).toEqual([])
       vi.mocked(fetch).mockImplementation(async (_url, init) => init?.method === 'POST' ? { ok: false, status: 503 } as Response : { ok: true, json: async () => current } as Response)
       voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await flush()
-      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
+      await vi.advanceTimersByTimeAsync(2_000); await settle()
       voice.dispose()
     })
     it.each([
@@ -359,10 +358,10 @@ describe('live voice', () => {
     ])('changes nothing while %s, and claims the view when following returns', async (_, start) => {
       const voice = await mounted(start)
       voice.see(worker)
-      await vi.advanceTimersByTimeAsync(400); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
       expect(posts).toEqual([])
       current = status({ target: held })
-      await vi.advanceTimersByTimeAsync(15_000); await flush()
+      await vi.advanceTimersByTimeAsync(15_000); await settle()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
       voice.dispose()
     })
@@ -370,20 +369,20 @@ describe('live voice', () => {
       const voice = await mounted(status({ target: held }))
       focused = false
       voice.see(worker)
-      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      await vi.advanceTimersByTimeAsync(2_000); await settle()
       expect(posts).toEqual([])
       focused = true
-      await vi.advanceTimersByTimeAsync(2_000); await flush()
+      await vi.advanceTimersByTimeAsync(2_000); await settle()
       expect(posts).toEqual([{ fiber_id: 'uid-a', origin: 'owner', name: 'A' }])
       voice.dispose()
     })
     it('leaves the target where it is on a fiber with no constitution, or off any fiber', async () => {
       const voice = await mounted(status({ target: held }))
       voice.see(card({ id: 'notes', originId: 'owner' }))
-      await vi.advanceTimersByTimeAsync(400); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
       voice.see(null)
-      await vi.advanceTimersByTimeAsync(400); await flush()
-      window.dispatchEvent(new Event('focus')); await flush()
+      await vi.advanceTimersByTimeAsync(400); await settle()
+      window.dispatchEvent(new Event('focus')); await settle()
       expect(posts).toEqual([])
       voice.dispose()
     })

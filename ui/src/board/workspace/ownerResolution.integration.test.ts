@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { card } from '../testFixtures.js'
+import { card, settle } from '../testFixtures.js'
 import { resetLanes } from '../requestLanes.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { Dock } from './Dock.js'
@@ -8,7 +8,6 @@ import { Overview } from './Overview.js'
 import { Workspace } from './Workspace.js'
 import { readFiber } from './fiberSource.js'
 
-const settle = async (): Promise<void> => { for (let i = 0; i < 50; i++) await Promise.resolve() }
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(done => { resolve = done })

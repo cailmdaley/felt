@@ -4,7 +4,7 @@ import { KanbanModal } from './KanbanModal.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { deskOrder } from './deskOrdering.js'
-import { card, response } from './testFixtures.js'
+import { card, response, settle } from './testFixtures.js'
 
 interface WorkspaceBoard {
   launchFromDrag(card: KanbanCard): Promise<boolean>
@@ -22,7 +22,6 @@ interface WorkspaceBoard {
 }
 beforeEach(() => { vi.stubGlobal('innerWidth', 1440) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
-const flushTasks = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
 
 describe('Desk runtime handoff to the workspace', () => {
   it('updates the workspace without querying the band manager as an open Dock', () => {
@@ -129,7 +128,7 @@ describe('Desk rows in the document workspace', () => {
       board.render(data)
       for (const page of [card({ id: 'notes/x' }), card({ id: 'roles/editor' })]) {
         board.workspace.open(page, 'Desk')
-        await flushTasks()
+        await settle()
         const stops = board.workspace as unknown as { deskStop(card: KanbanCard): string }
         expect(readerRows(board)).toEqual(['draft', 'working', 'review', 'resting/item', 'roles/seat', page.id])
         expect(stops.deskStop(page)).toBe('Open')

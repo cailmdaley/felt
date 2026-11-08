@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { card, expectPinnedZone, ownerFiberResponse } from '../testFixtures.js'
+import { card, expectPinnedZone, ownerFiberResponse, settle } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { docKey } from './documents.js'
 import { resetDocumentResources } from '../documentResources.js'
@@ -47,7 +47,6 @@ const receiptOrigins = (remoteAt = now(), stale = false): Record<string, unknown
   'host-a': { kind: 'local', stale: false, last_polled_at: null },
   'host-b': { kind: 'remote', stale, last_polled_at: new Date(remoteAt).toISOString() },
 })
-const settle = async (): Promise<void> => { for (let i = 0; i < 15; i++) await Promise.resolve() }
 const draw = (): void => {
   const current = [...frames.values()]; frames.clear()
   for (const frame of current) frame(performance.now())

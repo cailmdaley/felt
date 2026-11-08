@@ -17,6 +17,18 @@ import type { VoiceStatus } from './voice.js'
 import type { Conversations } from './conversationOpening.js'
 import type { CommitRecord, SessionPairing } from './views/TemporalData.js'
 
+const realSetTimeout = globalThis.setTimeout
+
+/**
+ * Resolves after one real task turn, captured at import so fake timers never
+ * intercept it: every pending microtask chain (fetch mocks, Response bodies,
+ * queued writes) has run to completion, and so have tasks already due, such as
+ * jsdom's history traversals. Counting `await Promise.resolve()` ticks is not a
+ * portable wait: reading a Response body takes twice as many microtasks on
+ * Node 22 as on Node 26.
+ */
+export const settle = (): Promise<void> => new Promise(resolve => { realSetTimeout(resolve, 0) })
+
 export function voiceStatus(over: Partial<VoiceStatus> = {}): VoiceStatus {
   return { available: true, enabled: false, muted: false, follow: true, system_audio: false, sources: ['desktop', 'phone'], source: 'desktop', launch: null, state: 'off', target: null, last: null, error: null, ...over }
 }

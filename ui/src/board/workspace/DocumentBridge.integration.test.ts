@@ -15,6 +15,7 @@ let host: HostModule.DocumentHost
 let track: HTMLElement
 let reportHtml: string
 let errors: unknown[]
+const frameObservers: MutationObserver[] = []
 let browser: { window: Window & typeof globalThis; close: () => void }
 const messages = vi.fn()
 const app = vi.fn()
@@ -73,6 +74,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // A browser discards a removed frame's observers; JSDOM delivers the frame's
+  // teardown records to them after its document is gone.
+  for (const observer of frameObservers.splice(0)) observer.disconnect()
   host.dispose()
   document.removeEventListener('keydown', onAppKey)
   browser.close()
@@ -99,6 +103,11 @@ async function report(doc = documents[0]): Promise<HTMLIFrameElement> {
   const win = frame.contentWindow!
   win.addEventListener('error', event => { errors.push(event.error ?? event.message); event.preventDefault() })
   win.scrollTo = vi.fn()
+  const frameGlobal = win as Window & typeof globalThis
+  const FrameObserver = frameGlobal.MutationObserver
+  frameGlobal.MutationObserver = class extends FrameObserver {
+    constructor(callback: MutationCallback) { super(callback); frameObservers.push(this) }
+  }
   // JSDOM doesn't navigate srcdoc and doesn't populate MessageEvent.source.
   // Execute the renderer's actual srcdoc in its iframe; adapt only transport,
   // preserving the real frame Window identity for DocumentHost's source gate.

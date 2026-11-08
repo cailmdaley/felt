@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
 import { type KanbanResponse } from './KanbanTypes.js'
-import { card, response, voiceStatus } from './testFixtures.js'
+import { card, response, voiceStatus, settle } from './testFixtures.js'
 import type { Workspace } from './workspace/Workspace.js'
 import { MOBILE_MEDIA } from './mobile.js'
 import type { VoiceStatus } from './voice.js'
@@ -197,7 +197,7 @@ describe('Reader Rest lifecycle', () => {
     // The same entry point receives Desk and Chronicle's original card, even
     // when it isn't present in any drawn Desk region.
     inside.openDocumentChannel(finished)
-    for (let i = 0; i < 200; i++) await Promise.resolve()
+    await settle()
     const target = document.querySelector<HTMLElement>('.ws-reader .ws-return')!
     expect(target).not.toBeNull()
     target.focus()
@@ -219,7 +219,7 @@ describe('Rest controls', () => {
     draw(response({ timeline: { past: [finished], futureDated: [] } }))
     inside.setView('chronicle')
     inside.openDocumentChannel(finished)
-    for (let i = 0; i < 200; i++) await Promise.resolve()
+    await settle()
     const rest = document.querySelector<HTMLButtonElement>('.ws-reader .kbn-ctl-rest')!
     expect(rest).not.toBeNull()
     expect(rest.hidden).toBe(true)
@@ -327,7 +327,7 @@ describe('Desk keyboard selection', () => {
     press('j'); expect(selected()).toBe('review')
     inside.setView('board')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
-    for (let i = 0; i < 100; i++) await Promise.resolve()
+    await settle()
     expect(inside.workspace.isActive).toBe(true)
     expect(press('1').defaultPrevented).toBe(true)
     expect(inside.activeViewId).toBe('desk')
@@ -336,7 +336,7 @@ describe('Desk keyboard selection', () => {
 
     inside.setView('board')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
-    for (let i = 0; i < 100; i++) await Promise.resolve()
+    await settle()
     expect(inside.workspace.isActive).toBe(true)
     await pop(() => { expect(press('Escape').defaultPrevented).toBe(true) })
     expect(inside.activeViewId).toBe('board')
@@ -348,14 +348,14 @@ describe('Desk keyboard selection', () => {
   ] as const)('%s and Escape both return to the non-Desk origin', async (key, init) => {
     inside.setView('board')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
-    for (let i = 0; i < 100; i++) await Promise.resolve()
+    await settle()
     expect(inside.workspace.isActive).toBe(true)
     await pop(() => { expect(press(key, init).defaultPrevented).toBe(true) })
     expect(inside.workspace.isActive).toBe(false)
     expect(inside.activeViewId).toBe('board')
 
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
-    for (let i = 0; i < 100; i++) await Promise.resolve()
+    await settle()
     await pop(() => { expect(press('Escape').defaultPrevented).toBe(true) })
     expect(inside.workspace.isActive).toBe(false)
     expect(inside.activeViewId).toBe('board')
@@ -470,10 +470,10 @@ describe('Desk keyboard selection', () => {
   })
   it.each([['j', 'head-uid'], ['J', 'review']])('%s scans two stops and one Escape selects the last viewed Desk card', async (key, expected) => {
     press('j'); press('k'); press('k'); press('k'); press('k'); press('Enter')
-    for (let i = 0; i < 200; i++) await Promise.resolve()
+    await settle()
     for (let step = 0; step < 2; step++) {
       press(key)
-      for (let i = 0; i < 200; i++) await Promise.resolve()
+      await settle()
     }
     expect(window.location.hash).toContain(expected)
     await pop(() => press('Escape'))
