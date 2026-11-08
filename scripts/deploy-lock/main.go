@@ -17,6 +17,10 @@ import (
 	"time"
 )
 
+// activationMargin is the deadline activation keeps beyond the readiness
+// timeout for the work that finishes it. The tests link a shorter one with -X.
+var activationMargin = "1m"
+
 func deadline() (time.Time, error) {
 	key, value := "SHUTTLE_DEPLOY_DEADLINE", os.Getenv("SHUTTLE_DEPLOY_DEADLINE")
 	if value != "" {
@@ -203,7 +207,8 @@ func owned(ctx context.Context, until time.Time, cmd *exec.Cmd, control *os.File
 				if n, e := strconv.Atoi(os.Getenv("SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS")); e == nil && n >= 0 {
 					ready = n
 				}
-				reserve := time.Duration(ready)*time.Second + time.Minute
+				margin, _ := time.ParseDuration(activationMargin)
+				reserve := time.Duration(ready)*time.Second + margin
 				if reason == nil && time.Until(until) <= reserve {
 					reason = fmt.Errorf("insufficient activation deadline budget: need more than %s, have %s", reserve, time.Until(until).Round(time.Second))
 				}

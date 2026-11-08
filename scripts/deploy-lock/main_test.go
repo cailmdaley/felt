@@ -23,13 +23,23 @@ func await(t *testing.T, description string, condition func() bool) {
 }
 func contents(path string) string { b, _ := os.ReadFile(path); return string(b) }
 func present(path string) bool    { _, e := os.Stat(path); return e == nil }
-func build(t *testing.T) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "lock")
-	if out, e := exec.Command("go", "build", "-o", p, ".").CombinedOutput(); e != nil {
-		t.Fatalf("build: %v %s", e, out)
+
+// binary is deploy-lock built once for every test, with a one-second
+// activation margin so a deadline test need not outlast the production minute.
+var binary string
+
+func TestMain(m *testing.M) {
+	dir, e := os.MkdirTemp("", "deploy-lock-test-*")
+	if e != nil {
+		panic(e)
 	}
-	return p
+	binary = filepath.Join(dir, "lock")
+	if out, e := exec.Command("go", "build", "-ldflags", "-X main.activationMargin=1s", "-o", binary, ".").CombinedOutput(); e != nil {
+		panic(fmt.Sprintf("build: %v %s", e, out))
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 func start(t *testing.T, binary, root, label, script string, env ...string) (*exec.Cmd, *os.File, string) {
 	t.Helper()
@@ -104,9 +114,10 @@ func free(t *testing.T, path string) {
 	}
 }
 func TestObserverEOFAndSignalsCancelGroup(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	for _, how := range []string{"eof", "TERM", "INT", "HUP", "deadline"} {
 		t.Run(how, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			env := []string{}
 			if how == "deadline" {
@@ -138,7 +149,7 @@ func TestObserverEOFAndSignalsCancelGroup(t *testing.T) {
 	}
 }
 func TestForgottenWaiterNeverRuns(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	root := t.TempDir()
 	holder, life, log := start(t, binary, root, "holder", `touch "$1/entered"; sleep 300`)
 	await(t, log, func() bool { return present(filepath.Join(root, "entered")) })
@@ -166,7 +177,7 @@ func TestForgottenWaiterNeverRuns(t *testing.T) {
 	}
 }
 func TestLateEOFFinishesOnlyActivation(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	root := t.TempDir()
 	cmd, pipe, log := start(t, binary, root, "activation", `printf B >&5; read -r ack <&5; trap '' TERM INT HUP; touch "$1/critical"; while [ ! -f "$1/release" ]; do sleep .02; done; touch "$1/activated"; printf E >&5; trap 'exit 143' TERM; sleep 300`)
 	await(t, log, func() bool { return present(filepath.Join(root, "critical")) })
@@ -184,7 +195,7 @@ func TestLateEOFFinishesOnlyActivation(t *testing.T) {
 	free(t, filepath.Join(root, "host.lock"))
 }
 func TestLostOutputObserverClosesTransport(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	root := t.TempDir()
 	script := filepath.Join(root, "script")
 	if e := os.WriteFile(script, []byte("bootstrap"), 0600); e != nil {
@@ -228,7 +239,7 @@ func TestLostOutputObserverClosesTransport(t *testing.T) {
 }
 
 func TestActivationControlGetsEOFWhenOwnerDies(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	root := t.TempDir()
 	cmd, life, log := start(t, binary, root, "control-eof", `touch "$1/entered"; read -r ack <&5; echo $? > "$1/control-eof"`)
 	defer life.Close()
@@ -249,7 +260,7 @@ func TestActivationControlGetsEOFWhenOwnerDies(t *testing.T) {
 }
 
 func TestTransactionDoesNotInheritIgnoredSIGPIPE(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	root := t.TempDir()
 	cmd, life, log := start(t, binary, root, "pipe-signal", `trap -p PIPE > "$1/pipe-signal"; exit 7`)
 	defer life.Close()
@@ -262,9 +273,9 @@ func TestTransactionDoesNotInheritIgnoredSIGPIPE(t *testing.T) {
 }
 
 func TestActivationRefusesInsufficientDeadlineBudget(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	root := t.TempDir()
-	cmd, life, log := start(t, binary, root, "budget", `printf B >&5; read -r ack <&5 || exit 43; touch "$1/pointer"`, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(4*time.Second).Unix()), "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
+	cmd, life, log := start(t, binary, root, "budget", `printf B >&5; read -r ack <&5 || exit 43; touch "$1/pointer"`, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(4*time.Second).Unix()), "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=10")
 	defer life.Close()
 	if e := result(t, cmd); e == nil || present(filepath.Join(root, "pointer")) {
 		t.Fatalf("activation began without readiness reserve: %v %s", e, contents(log))
@@ -275,9 +286,9 @@ func TestActivationRefusesInsufficientDeadlineBudget(t *testing.T) {
 }
 
 func TestHardDeadlineStillStopsStalledActivation(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	root := t.TempDir()
-	cmd, life, log := start(t, binary, root, "stalled", `printf B >&5; read -r ack <&5; trap '' TERM; touch "$1/critical"; sleep 300`, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(70*time.Second).Unix()), "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
+	cmd, life, log := start(t, binary, root, "stalled", `printf B >&5; read -r ack <&5; trap '' TERM; touch "$1/critical"; sleep 300`, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(5*time.Second).Unix()), "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
 	defer life.Close()
 	await(t, log, func() bool { return present(filepath.Join(root, "critical")) })
 	done := make(chan error, 1)
@@ -287,7 +298,7 @@ func TestHardDeadlineStillStopsStalledActivation(t *testing.T) {
 		if e == nil {
 			t.Fatal("stalled activation succeeded")
 		}
-	case <-time.After(85 * time.Second):
+	case <-time.After(20 * time.Second):
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-done
 		t.Fatal("hard activation deadline did not stop the group")
@@ -299,7 +310,7 @@ func TestHardDeadlineStillStopsStalledActivation(t *testing.T) {
 }
 
 func TestDeadlineKillsTermIgnoringGroup(t *testing.T) {
-	binary := build(t)
+	t.Parallel()
 	root := t.TempDir()
 	cmd, life, log := start(t, binary, root, "stubborn", `trap '' TERM INT HUP; touch "$1/entered"; sleep 300`, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(2*time.Second).Unix()))
 	defer life.Close()
