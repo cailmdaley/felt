@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -160,7 +161,12 @@ func provideClaudeNative(t *testing.T, env *sysenv.Env, id string) {
 			if err != nil {
 				return
 			}
-			conn.Close()
+			// Held open until the client hangs up: the client reads its peer's
+			// credentials after connecting, which fail once this side closes.
+			go func() {
+				_, _ = io.Copy(io.Discard, conn)
+				conn.Close()
+			}()
 		}
 	}()
 	if err := messaging.RegisterClaudeNative(env, id, "host", dir, socket, transcript, true); err != nil {
