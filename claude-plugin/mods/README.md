@@ -10,9 +10,9 @@ One dim line in every Claude session, read from the Shuttle daemon: pins at
 the left, the mic's state beside them.
 
 ```
-⧉ ⌗ ☰ ◉ 12 words… ✕
-⧉ ⌗ ☰ ◎ → voice-modes · 8 words… ✕
-⧉ ⌗ ☰ ◎ 📌 → voice-modes
+⧉ ⌗ ☰ ⚉ 12 words… ✕
+⧉ ⌗ ☰ ⚇ → voice-modes · 8 words… ✕
+⧉ ⌗ ☰ ⚇ 📌 → voice-modes
 ⧉ ⌗ ☰ ⊘
 ⧉ ⌗ ☰ ○
 ```
@@ -29,8 +29,8 @@ Each opens its page on the board through `POST /api/v1/board/open`.
 
 | State | Text |
 | --- | --- |
-| speech (above -36 dBFS; holds until below -44 dBFS) | `◉` |
-| mic open and quiet | `◎` |
+| speech (above -36 dBFS; holds until below -44 dBFS) | `⚉` |
+| mic open and quiet | `⚇` |
 | muted | `⊘` |
 | words said and not yet sent | ` n words…` after the glyph, then `✕` |
 | following another card | ` → <slug>`, then ` · n words…` when there are some |
