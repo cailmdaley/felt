@@ -21,7 +21,7 @@ import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
-import { frameBridge } from './DocumentBridge.js'
+import { forwardDocumentKey, frameBridge } from './DocumentBridge.js'
 import './mentions.css'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
@@ -32,7 +32,7 @@ import { FamilyPage, placeAt, type EmbeddedDocument, type FamilyFeeds, type MapP
 import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
-import { unseenSince } from './DocumentSeen.js'
+import { markSeen, unseenSince } from './DocumentSeen.js'
 import type { FiberSend } from '../fiberSends.js'
 import type { BoardOpen } from '../voice.js'
 import { parseRoute, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
@@ -155,6 +155,7 @@ export class Workspace {
       refresh: () => this.refreshFamilyFeeds(),
       lead: card => this.mapLead(card),
       embed: (card, doc) => this.embed(card, doc),
+      seen: files => markSeen(files),
     }
     this.globeHost = {
       feeds: this.mapFeeds,
@@ -623,6 +624,7 @@ export class Workspace {
   /**
    * One of a thread's documents for its constitution's page to unfold under the
    * thread's row: the constitution as its drawn prose, a file at its full height.
+   * A key the file passes up acts for its thread, as on the thread's row.
    */
   private embed(card: KanbanCard, doc: DocKey): EmbeddedDocument {
     const box = document.createElement('div')
@@ -637,6 +639,7 @@ export class Workspace {
     }
     const viewer = buildFileViewer(this.opts.shuttleBase, file.path, file.owner, undefined, undefined, {
       active: true, fit: true, onNavigate: href => this.openRelative(file, href),
+      onDocumentKey: key => { this.mapPage(this.current)?.choose(card); forwardDocumentKey(box, key, box.querySelector('iframe')) },
     })
     box.append(viewer)
     return { el: box, dispose: () => disposeFileViewer(viewer) }

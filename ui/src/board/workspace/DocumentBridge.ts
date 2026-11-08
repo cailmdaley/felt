@@ -1,4 +1,4 @@
-import { DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
+import { DOCUMENT_KEY_INTENTS, FOCUSED_DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
 import { referenceRuntime, type ReferenceTarget, type ReferencePlayback } from './ChannelReferences.js'
 import referenceStyles from './references.css?inline'
 import { installPageSwipe, SWIPE } from './PhoneGestures.js'
@@ -12,6 +12,22 @@ const PROTOCOL = 'shuttle-document'
 const VERSION = 1
 export type ScrollPosition = { x: number; y: number }
 export type DocumentKey = { key: string; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; repeat?: boolean }
+
+/**
+ * Replays a key a document passed up through the board's own handlers, from
+ * `target`, when it is one documents may pass; `frame`, the document's, must
+ * hold the human's focus for the intents only a focused document may pass.
+ */
+export function forwardDocumentKey(target: EventTarget, data: DocumentKey, frame?: Element | null): void {
+  const forwarded = new KeyboardEvent('keydown', {
+    key: data.key, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true,
+    metaKey: data.metaKey === true, shiftKey: data.shiftKey === true, repeat: data.repeat === true,
+    bubbles: true, cancelable: true,
+  })
+  const intent = keyIntent(forwarded, 'reader')
+  const focused = !!frame && document.hasFocus() && document.activeElement === frame
+  if (intent && (DOCUMENT_KEY_INTENTS.includes(intent) || (focused && FOCUSED_DOCUMENT_KEY_INTENTS.includes(intent)))) target.dispatchEvent(forwarded)
+}
 export type DocumentMessage = { protocol: typeof PROTOCOL; version: typeof VERSION; type: string; payload: Record<string, unknown> }
 export function envelope(type: string, payload: Record<string, unknown> = {}): DocumentMessage {
   return { protocol: PROTOCOL, version: VERSION, type, payload }
@@ -390,7 +406,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()},${JSON.stringify(window.location.origin)},${parseRoute.toString()});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify([...DOCUMENT_KEY_INTENTS, ...FOCUSED_DOCUMENT_KEY_INTENTS])},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()},${JSON.stringify(window.location.origin)},${parseRoute.toString()});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length

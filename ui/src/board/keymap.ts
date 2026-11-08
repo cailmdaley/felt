@@ -8,6 +8,12 @@ export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
   'back', 'find', 'help', 'desk', 'chronicle', 'board', 'globe', 'tapestry',
 ]
+/**
+ * Intents a document may pass up only while it holds the human's focus, so a
+ * report's script cannot ask for them on its own: opening its thread's
+ * conversation, as `c` does on the thread's row.
+ */
+export const FOCUSED_DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = ['conversation']
 export interface KeyBinding {
   keys: readonly string[]
   intent: KeyIntent

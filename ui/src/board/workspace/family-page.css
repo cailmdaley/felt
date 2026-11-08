@@ -14,7 +14,6 @@
 .fp-title { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto 84px 4ch; grid-template-areas: 'mark name word docs verbs meta'; align-items: baseline; column-gap: 8px; font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
 .fp-mark { grid-area: mark; align-self: center; width: 10px; height: 10px; overflow: visible; }
 .fp-name { grid-area: name; min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); font: 500 var(--type-row)/var(--leading-tight) var(--font-mono); }
-.fp-row[data-fresh] .fp-name::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 2px; background: var(--ws-fresh); transform: rotate(45deg); }
 .fp-word { grid-area: word; color: var(--fm-text); white-space: nowrap; }
 .fp-word:empty { display: none; }
 .fp-meta { grid-area: meta; color: var(--ws-ink-muted); white-space: nowrap; text-align: right; }
@@ -63,8 +62,7 @@
 .fp-head { padding-top: 12px; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--ws-hairline-soft); }
 
 .fp-head .fp-name { font: var(--type-title)/var(--leading-tight) var(--font-serif); }
-.fp-head .fp-note { -webkit-line-clamp: 5; color: var(--ws-ink); font-size: var(--type-row); }
-.fp-row[data-open].fp-head .fp-note { -webkit-line-clamp: 5; }
+.fp-head .fp-note { -webkit-line-clamp: 5; margin-left: 0; color: var(--ws-ink); font-size: var(--type-row); }
 .fp-section { margin-bottom: 2px; padding: 12px var(--fp-gutter) 3px calc(var(--fp-gutter) + var(--fp-level, 0) * 16px); border-bottom: 1px solid var(--ws-hairline-soft); color: var(--fm-text); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .fp-aside { padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + 20px + var(--fp-level, 0) * 16px); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); cursor: pointer; outline: none; }
 .fp-aside::before { content: '▸'; display: inline-block; width: 1.2em; margin-left: -1.2em; transition: transform .15s; }

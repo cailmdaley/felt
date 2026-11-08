@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { connectDocumentFrame, documentMessage, envelope } from './DocumentBridge.js'
+import { connectDocumentFrame, documentMessage, envelope, forwardDocumentKey } from './DocumentBridge.js'
 
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
@@ -93,5 +93,29 @@ describe('bounded document messages', () => {
       expect(receive.mock.lastCall![0].payload.candidates).toEqual(['late'])
       bridge.dispose()
     } finally { vi.useRealTimers() }
+  })
+})
+
+describe('forwardDocumentKey', () => {
+  const heard = (frame?: Element | null, key = 'c'): string[] => {
+    const target = document.createElement('div'), keys: string[] = []
+    target.addEventListener('keydown', event => keys.push(event.key))
+    document.body.append(target)
+    forwardDocumentKey(target, { key }, frame)
+    target.remove()
+    return keys
+  }
+  it('passes navigation from any document, and the conversation only from the one holding the focus', () => {
+    const frame = document.createElement('iframe')
+    document.body.append(frame)
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    expect(heard(frame, 'j')).toEqual(['j'])
+    expect(heard(frame), 'a report cannot ask for the conversation unfocused').toEqual([])
+    expect(heard(undefined)).toEqual([])
+    frame.focus()
+    expect(document.activeElement).toBe(frame)
+    expect(heard(frame)).toEqual(['c'])
+    expect(heard(frame, 't'), 'verdicts never pass').toEqual([])
+    frame.remove()
   })
 })

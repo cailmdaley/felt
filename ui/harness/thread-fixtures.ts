@@ -110,7 +110,22 @@ export function addFamilyFixtures(example: WorkspaceExample, now: number): void 
     })
     example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\nFamily fixture.`
   }
+  addLoneFixture(example, now)
   addHubFixture(example, now)
+}
+
+/** A constitution without threads, whose page opens on its tapestry. */
+function addLoneFixture(example: WorkspaceExample, now: number): void {
+  const id = 'morning-post', dir = `/fixture-store/workspace/${id}`, at = now - 20 * 60000
+  example.feed.fibers.push({
+    origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${id}/${id}.md`, dir,
+    fiber: { id, uid: id, name: 'Morning post', status: 'active', outcome: 'Three letters need you today; the rest is filed.', created_at: new Date(now - 3600000).toISOString(),
+      shuttle: { kind: 'standing', host: WORKSPACE_HOST, agent: 'claude-opus', project_dir: '/fixture-project' } },
+    runtime: { state: 'running', phase: 'waiting', session_uuid: `session-${id}`, last_activity_at: at },
+  })
+  example.bodies[id] = '## Desired State\n\nThe morning read.\n\n## Status\n\nLone fixture.'
+  const page = '<!doctype html><html><head><meta charset="utf-8"><title>Morning post</title><style>body{font:16px Georgia;margin:24px}.map{height:60vh;display:grid;place-items:center;background:#e4dcc8}</style></head><body><div class="map">today</div><h1>Morning post</h1><p>Three letters need you today.</p></body></html>'
+  example.files.push({ owner: WORKSPACE_HOST, path: `${dir}/tapestry.html`, mime: 'text/html', body: new Blob([page], { type: 'text/html' }) })
 }
 
 /** The hub threads that carry a tapestry in their fiber directory. */

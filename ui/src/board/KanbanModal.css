@@ -2339,6 +2339,9 @@
 .kbn-col > [hidden], .kbn-section-roles > [hidden], .kbn-section-stash > [hidden] { display: none !important; }
 .kbn-col-head, .kbn-bandhead { cursor: pointer; }
 .kbn-bandhead-fold { display: inline-block; margin-left: auto; color: var(--kbn-ink-muted); transition: transform 160ms ease; }
+/* A lane's round action stands at the head's far right, beside its fold. */
+.kbn-col-head > .kbn-col-action { margin-left: auto; }
+.kbn-col-head > .kbn-col-action + .kbn-bandhead-fold { margin-left: 10px; }
 .kbn-bandhead-fold::before { content: '▾'; }
 .kbn-band-folded .kbn-bandhead-fold { transform: rotate(-90deg); }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
