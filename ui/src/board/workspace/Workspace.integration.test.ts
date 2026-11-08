@@ -1212,6 +1212,31 @@ describe('workspace reader integration', () => {
     expect(selected()).toBe('family:host-a:hub')
     expect(document.querySelector<HTMLElement>('.ws-selected .fp-row[aria-selected="true"] .fp-doc')!.hidden).toBe(true)
   })
+  it('returns from the Desk with a thread\'s document still unfolded, and h folds it before leaving', async () => {
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
+    const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/mid', orchestrator: 'hub', status: 'active' })]
+    bodyCards = feed
+    workspace.dispose()
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const doc = (): HTMLElement => document.querySelector<HTMLElement>('.ws-selected .fp-row[data-row$="hub/mid"] .fp-doc')!
+    const selected = (): HTMLElement => document.querySelector<HTMLElement>('.ws-selected .fp-row[aria-selected="true"]')!
+    const press = async (key: string): Promise<void> => { selected().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); await flush() }
+    workspace.openFromDesk(feed[0]); await flush()
+    await press('j'); await press('l')
+    expect(doc().hidden).toBe(false)
+    workspace.returnToOrigin(); await new Promise(resolve => setTimeout(resolve, 50)); await flush()
+    expect(workspace.isActive).toBe(false)
+    workspace.openFromDesk(feed[0]); await flush()
+    expect(workspace.isActive).toBe(true)
+    expect(selected().classList.contains('fp-head')).toBe(true)
+    expect(doc().hidden).toBe(false)
+    await press('h')
+    expect(workspace.isActive).toBe(true)
+    expect(doc().hidden).toBe(true)
+    await press('h')
+    expect(workspace.isActive).toBe(false)
+  })
   it('leaves Download and Refresh off the map\'s document menu', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })

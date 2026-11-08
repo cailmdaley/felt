@@ -474,14 +474,15 @@ export class FamilyPage {
     return false
   }
   /**
-   * One vim grammar, depth along h and l. j and k (or down and up) move the
-   * highlight among the rows, never committing; on a row's documents they
-   * step among them. l (or right) goes in: from a row it unfolds the first
-   * document under the row, entering the thread, and from a document it unfolds
-   * the next in its place (⧉ n lists the sent files and unfolds the newest).
-   * h (or left) goes out: from a document to its row,
-   * folding what it had unfolded, and from a row back off the page. Enter does
-   * what a click does.
+   * One vim grammar: rows along j and k, depth along h and l. j and k (or down
+   * and up) move the highlight among the rows, never committing; from one of a
+   * row's documents they move on from its row, leaving the document unfolded
+   * there. l (or right) goes in: from a row it unfolds the first document under
+   * the row, entering the thread, and from a document it unfolds the next in its
+   * place (⧉ n lists the sent files and unfolds the newest). h (or left) goes
+   * out: from a document to its row, folding what it had unfolded; from a row,
+   * it folds every document the page has unfolded, and only a page with none
+   * unfolded is left. Enter does what a click does.
    */
   private key(event: KeyboardEvent): void {
     const model = this.model, target = event.target as HTMLElement
@@ -494,8 +495,8 @@ export class FamilyPage {
     let next: HTMLElement | undefined
     const step = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 }[event.key]
     if (step) {
-      const peers = onRow ? [...this.tree.querySelectorAll<HTMLElement>('[role="treeitem"]')] : docs()
-      next = peers[peers.indexOf(item) + step]
+      const rows = [...this.tree.querySelectorAll<HTMLElement>('[role="treeitem"]')]
+      next = rows[rows.indexOf(this.row(owner)!) + step]
     } else if (event.key === 'l' || event.key === 'ArrowRight') {
       if (onRow && !thread) { this.toggle(owner); return void event.preventDefault() }
       const chip = onRow ? docs()[0] : docs()[docs().indexOf(item) + 1]
@@ -503,10 +504,12 @@ export class FamilyPage {
       else if (onRow) { this.enter(owner); if (!this.place.open.has(owner) && thread !== model.root) this.toggle(owner) }
       if (!next) return void event.preventDefault()
     } else if (event.key === 'h' || event.key === 'ArrowLeft') {
-      if (onRow) { event.preventDefault(); this.leave?.(); return }
-      const listed = !!item.closest('.fp-files')
-      this.place.docs!.delete(owner)
-      if (listed) this.place.open.delete(`files:${owner}`)
+      if (onRow && !this.place.docs!.size) { event.preventDefault(); this.leave?.(); return }
+      if (onRow) this.place.docs!.clear()
+      else {
+        this.place.docs!.delete(owner)
+        if (item.closest('.fp-files')) this.place.open.delete(`files:${owner}`)
+      }
       this.paint()
       next = this.row(owner)
     } else if ((event.key === 'Enter' || event.key === ' ') && onRow) {
