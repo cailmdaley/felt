@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cailmdaley/felt/internal/harnesspaths"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -18,10 +19,11 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	t.Parallel()
 	env := messageHookEnv(t, "host")
 	provideClaudeNative(t, env, "s")
-	home, _ := env.UserHomeDir()
+	claudeProjects, _ := harnesspaths.ClaudeProjects(env)
+	transcript := filepath.Join(claudeProjects, "p", "s.jsonl")
 	hook := func(name string) string {
 		t.Helper()
-		b, _ := json.Marshal(eventHookInput{HookEventName: name, SessionID: "s", TranscriptPath: filepath.Join(home, ".claude", "projects", "p", "s.jsonl")})
+		b, _ := json.Marshal(eventHookInput{HookEventName: name, SessionID: "s", TranscriptPath: transcript})
 		var out bytes.Buffer
 		if err := newApp(env).runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
 			t.Fatal(err)
@@ -50,7 +52,7 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	if out := hook("SessionStart"); out != "" {
 		t.Fatalf("SessionStart cannot safely offer queued context: %s", out)
 	}
-	child, _ := json.Marshal(eventHookInput{HookEventName: "PostToolUse", SessionID: "s", AgentID: "subagent", TranscriptPath: filepath.Join(home, ".claude", "projects", "p", "s.jsonl")})
+	child, _ := json.Marshal(eventHookInput{HookEventName: "PostToolUse", SessionID: "s", AgentID: "subagent", TranscriptPath: transcript})
 	var childOut bytes.Buffer
 	if err := newApp(env).runEventAndMessageHook(bytes.NewReader(child), &childOut); err != nil || childOut.Len() != 0 {
 		t.Fatalf("a subagent consumed its parent's mail: %s %v", childOut.String(), err)
@@ -344,6 +346,7 @@ func TestClaudeHookHonorsCustomConfigDirectory(t *testing.T) {
 	t.Parallel()
 	config := t.TempDir()
 	env := messageHookEnv(t, "host")
+	env.Unset("SHUTTLE_CLAUDE_PROJECTS_DIR")
 	env.Set("CLAUDE_CONFIG_DIR", config)
 	input := eventHookInput{HookEventName: "SessionStart", SessionID: "custom-session", TranscriptPath: filepath.Join(config, "projects", "workspace", "custom-session.jsonl")}
 	b, _ := json.Marshal(input)

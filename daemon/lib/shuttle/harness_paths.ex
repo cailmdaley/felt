@@ -6,24 +6,26 @@ defmodule Shuttle.HarnessPaths do
   one module matters because a session can be captured successfully by the
   dispatcher and still be invisible to the temporal views if the two paths
   drift.
+
+  Each root takes an option, then Shuttle's explicit override, then the
+  harness's own home variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), then the
+  harness default under the home directory; a blank value counts as unset.
+  `internal/harnesspaths` is the Go copy, and
+  `test/fixtures/harness_paths/cases.json` holds both to the same roots.
   """
 
   @doc "The Claude Code projects root, with test and operator overrides."
   @spec claude_projects_root(keyword()) :: String.t()
   def claude_projects_root(opts \\ []) do
     configured_path(opts, [:claude_root, :root], "SHUTTLE_CLAUDE_PROJECTS_DIR", fn ->
-      Path.join([Shuttle.Env.home(), ".claude", "projects"])
+      Path.join(claude_config_dir(), "projects")
     end)
   end
 
   @doc "The Claude Code task root, with test and operator overrides."
   def claude_tasks_root(opts \\ []) do
     configured_path(opts, [:tasks_root], "SHUTTLE_CLAUDE_TASKS_DIR", fn ->
-      config =
-        non_empty(Shuttle.Env.get("CLAUDE_CONFIG_DIR")) ||
-          Path.join(Shuttle.Env.home(), ".claude")
-
-      Path.join(config, "tasks")
+      Path.join(claude_config_dir(), "tasks")
     end)
   end
 
@@ -39,10 +41,10 @@ defmodule Shuttle.HarnessPaths do
   @spec codex_sessions_root(keyword()) :: String.t()
   def codex_sessions_root(opts \\ []) do
     configured_path(opts, [:codex_root], "SHUTTLE_CODEX_SESSIONS_DIR", fn ->
-      case Shuttle.Env.get("CODEX_HOME") do
-        home when is_binary(home) and home != "" -> Path.join(home, "sessions")
-        _ -> Path.join([Shuttle.Env.home(), ".codex", "sessions"])
-      end
+      Path.join(
+        non_empty(Shuttle.Env.get("CODEX_HOME")) || Path.join(Shuttle.Env.home(), ".codex"),
+        "sessions"
+      )
     end)
   end
 
@@ -144,7 +146,17 @@ defmodule Shuttle.HarnessPaths do
       non_empty(Shuttle.Env.get(env_key)) || fallback.()
   end
 
-  defp non_empty(value) when is_binary(value) and value != "", do: value
+  defp claude_config_dir,
+    do:
+      non_empty(Shuttle.Env.get("CLAUDE_CONFIG_DIR")) || Path.join(Shuttle.Env.home(), ".claude")
+
+  defp non_empty(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
   defp non_empty(_), do: nil
 
   defp pad2(n) when n < 10, do: "0#{n}"

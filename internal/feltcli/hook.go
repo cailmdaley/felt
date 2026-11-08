@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/harnesspaths"
 	"github.com/spf13/cobra"
 )
 
@@ -129,18 +130,9 @@ do. Silent for any other tool, file, or error.`,
 // ----------------------------------------------------------------------------
 
 // isClaudeTranscriptPath recognizes the only harness-specific distinction the
-// Felt PreToolUse gate needs: Claude Code stores transcripts under projects/.
+// Felt PreToolUse gate needs: whether Claude Code's tree holds the transcript.
 func (a *app) isClaudeTranscriptPath(transcriptPath string) bool {
-	if transcriptPath == "" {
-		return false
-	}
-	home, _ := a.env.UserHomeDir()
-	claudeDir := a.env.Getenv("CLAUDE_CONFIG_DIR")
-	if claudeDir == "" {
-		claudeDir = filepath.Join(home, ".claude")
-	}
-	prefix := filepath.Join(claudeDir, "projects") + string(filepath.Separator)
-	return strings.HasPrefix(transcriptPath, prefix)
+	return harnesspaths.Harness(a.env, transcriptPath) == "claude"
 }
 
 // ----------------------------------------------------------------------------

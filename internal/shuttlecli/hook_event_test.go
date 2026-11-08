@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/harnesspaths"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
@@ -436,18 +437,22 @@ func TestEventToolInputPresence(t *testing.T) {
 // harnesses give us, and the PreToolUse gate reads it the same way.
 func TestEventHarnessDetection(t *testing.T) {
 	t.Parallel()
-	env, home := isolateEvents(t)
+	env, _ := isolateEvents(t)
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	env.Set("SHUTTLE_EVENTS_FILE", path)
+	claude, _ := harnesspaths.ClaudeProjects(env)
+	codex, _ := harnesspaths.CodexSessions(env)
+	pi, _ := harnesspaths.PiSessions(env)
 
 	for _, tc := range []struct {
 		transcript string
 		want       string
 	}{
-		{filepath.Join(home, ".claude", "projects", "x", "t.jsonl"), "claude-code"},
+		{filepath.Join(claude, "x", "t.jsonl"), "claude-code"},
 		{"", "codex"},
 		{"/tmp/elsewhere/t.jsonl", "codex"},
-		{filepath.Join(home, ".codex", "sessions", "t.jsonl"), "codex"},
+		{filepath.Join(codex, "t.jsonl"), "codex"},
+		{filepath.Join(pi, "x", "t.jsonl"), "pi"},
 	} {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("reset: %v", err)
@@ -707,11 +712,11 @@ type goldenEvent struct {
 //
 // The Elixir side asserts the phases and the sent-files trail these produce
 // (daemon/test/shuttle/events_parity_test.exs). Keep the two in step.
-func goldenEvents(home string) []goldenEvent {
+func goldenEvents(claudeProjects string) []goldenEvent {
 	const workerA = "depersonalize-01KVC1N5XMAAMYXDAGR4V6QA9G-shuttle"
 	const workerB = "codex-01KVC1N5XMAAMYXDAGR4V6QAAA-shuttle"
 	const workerC = "background-01KVC1N5XMAAMYXDAGR4V6QABB-shuttle"
-	claudeTranscript := filepath.Join(home, ".claude", "projects", "felt", "t.jsonl")
+	claudeTranscript := filepath.Join(claudeProjects, "felt", "t.jsonl")
 
 	return []goldenEvent{
 		{workerA, map[string]any{
@@ -871,7 +876,7 @@ func TestNotificationKindRecorded(t *testing.T) {
 // board.
 func TestEventGoldenParity(t *testing.T) {
 	t.Parallel()
-	env, home := isolateEvents(t)
+	env, _ := isolateEvents(t)
 
 	// Freeze everything the line would otherwise pick up from the machine.
 	base := time.UnixMilli(1753900000000).UTC()
@@ -884,7 +889,11 @@ func TestEventGoldenParity(t *testing.T) {
 
 	receivers := map[string]int{"sess-a": 4242, "sess-b": 4243, "sess-d": 4244, "sess-c": 4245}
 	var got bytes.Buffer
-	for _, ev := range goldenEvents(home) {
+	claudeProjects, err := harnesspaths.ClaudeProjects(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range goldenEvents(claudeProjects) {
 		env.Set("SHUTTLE_TMUX_SESSION", ev.tmux)
 		raw, err := json.Marshal(ev.payload)
 		if err != nil {

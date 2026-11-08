@@ -7,13 +7,38 @@ defmodule Shuttle.HarnessPathsTest do
     SHUTTLE_CLAUDE_PROJECTS_DIR
     SHUTTLE_PI_SESSIONS_DIR
     SHUTTLE_CODEX_SESSIONS_DIR
+    CLAUDE_CONFIG_DIR
     CODEX_HOME
   )
+
+  @fixture Path.expand("../fixtures/harness_paths/cases.json", __DIR__)
 
   setup do
     Enum.each(@env_keys, &Shuttle.Test.Env.delete_env/1)
 
     :ok
+  end
+
+  @tag :tmp_dir
+  test "the roots match the cases the Go reader is held to", %{tmp_dir: home} do
+    Shuttle.Test.Env.put_env("HOME", home)
+
+    roots = %{
+      "claude" => :claude_projects_root,
+      "codex" => :codex_sessions_root,
+      "pi" => :pi_sessions_root
+    }
+
+    for %{"name" => name, "env" => env, "expect" => expect} <-
+          @fixture |> File.read!() |> Jason.decode!() |> Map.fetch!("cases") do
+      Enum.each(@env_keys, &Shuttle.Test.Env.delete_env/1)
+      Enum.each(env, fn {key, value} -> Shuttle.Test.Env.put_env(key, value) end)
+
+      for {harness, want} <- expect do
+        want = String.replace_prefix(want, "~/", home <> "/")
+        assert apply(HarnessPaths, roots[harness], []) == want, "#{name}: #{harness}"
+      end
+    end
   end
 
   @tag :tmp_dir

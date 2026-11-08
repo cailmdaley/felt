@@ -1,9 +1,7 @@
 package shuttlecli
 
 import (
-	"path/filepath"
-	"strings"
-
+	"github.com/cailmdaley/felt/internal/harnesspaths"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 )
@@ -28,21 +26,12 @@ func (a *app) hookCmd() *cobra.Command {
 	return hookCmd
 }
 
-// harnessFor uses the transcript location shared by Claude Code and pi; an
-// empty or unrelated path identifies the Codex hook format.
+// harnessFor names the harness by the tree its transcript lives in; an empty
+// or unrelated path identifies the Codex hook format.
 func (a *app) harnessFor(transcriptPath string) string {
-	home, _ := a.env.UserHomeDir()
-	claudeDir := a.env.Getenv("CLAUDE_CONFIG_DIR")
-	if claudeDir == "" {
-		claudeDir = filepath.Join(home, ".claude")
-	}
-	for prefix, harness := range map[string]string{
-		filepath.Join(claudeDir, "projects") + string(filepath.Separator): messaging.LedgerHarnessName("claude"),
-		filepath.Join(home, ".pi") + string(filepath.Separator):           messaging.LedgerHarnessName("pi"),
-	} {
-		if transcriptPath != "" && strings.HasPrefix(transcriptPath, prefix) {
-			return harness
-		}
+	switch harness := harnesspaths.Harness(a.env, transcriptPath); harness {
+	case "claude", "pi":
+		return messaging.LedgerHarnessName(harness)
 	}
 	return messaging.LedgerHarnessName("codex")
 }
