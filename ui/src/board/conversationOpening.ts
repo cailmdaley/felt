@@ -3,14 +3,14 @@ import { canOpenDesktopApp, claudeAppRoute, claudeWebLink } from './conversation
 import { coarsePointer } from './mobile.js'
 
 /** Opening belongs to this browser; execution belongs to the worker's host. */
-export type ConversationOpening = 'terminal' | 'browser' | 'app'
+export type ConversationOpening = 'terminal' | 'browser' | 'app' | 'rex'
 export const CLAUDE_OPENING_KEY = 'shuttle.claude-opening'
 export const CONVERSATION_OPENING_CHANGED = 'shuttle-conversation-opening-changed'
 
 export function conversationOpening(): ConversationOpening {
   try {
     const value = globalThis.localStorage?.getItem(CLAUDE_OPENING_KEY)
-    if (value === 'browser' || value === 'app') return value
+    if (value === 'browser' || value === 'app' || value === 'rex') return value
   } catch { /* Site storage may be disabled. */ }
   return 'terminal'
 }
@@ -55,8 +55,15 @@ export function conversationDestinations(card: ConversationWorker, device: Conve
     const app = device.desktop ? claudeAppRoute(web) : undefined
     if (app) destinations.push({ id: 'app', label: 'Claude app', href: app })
   }
+  if (!device.desktop && card.terminalBackend === 'rex') destinations.push(REX_PHONE)
   return destinations
 }
+
+/** Rex for iOS registers no URL scheme, so the phone opens it through a one-action
+ *  Shortcut named "Rex" (Open App → Rex). The app lists every session; this one is
+ *  named after its constitution family. */
+export const REX_PHONE_SHORTCUT = 'shortcuts://run-shortcut?name=Rex'
+const REX_PHONE: ConversationDestination = { id: 'rex', label: 'Rex', title: 'Open the Rex app (through the Shortcut named “Rex”)', href: REX_PHONE_SHORTCUT }
 
 export function resolveDestination<T extends { id: ConversationOpening }>(destinations: readonly T[], remembered = conversationOpening()): T | undefined {
   return destinations.find(destination => destination.id === remembered) ?? destinations[0]

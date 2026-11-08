@@ -51,6 +51,9 @@
 .ws-nav-trail { display: flex; min-width: 0; }
 .ws-head-worker { flex: none; display: flex; }
 .ws-head-worker[hidden] { display: none; }
+/* The console prompt marks a plate that opens the worker's conversation. */
+.ws-head-worker .ws-worker-console { margin-left: 6px; font: 600 var(--type-meta)/var(--leading-solid) var(--font-mono); color: var(--ws-ink-muted); }
+.ws-head-worker .kbn-card-worker:hover .ws-worker-console { color: inherit; }
 /* The top bar's worker dot is the card's own pill, bare. */
 .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { border: 0; background: transparent; }
 /* In the reader the worker state is mono capitals and the dot takes the room's own pigments. */
@@ -169,9 +172,10 @@
   .ws-page.ws-receded { transform: none; opacity: 1; }
   .ws-labelbar { display: none; }
   .ws-media-poster { inset: 0; }
-  /* The top bar's right end: the worker's dot alone, in a full target. */
+  /* The top bar's right end: the worker's dot and console prompt, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
-  .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
+  .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { min-width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0 8px; justify-content: center; align-items: center; }
+  .ws-head-worker .ws-worker-console { font-size: var(--type-row); color: var(--ws-ink); }
   /* The state word stays for assistive technology, unseen. */
   .ws-head-worker .ws-worker-state { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .ws-head-worker .ws-worker-elapsed { display: none; }

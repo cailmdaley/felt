@@ -5,11 +5,12 @@ type Choice = { id: ConversationOpening; label: string; note: string }
 const TERMINAL: Choice = { id: 'terminal', label: 'Terminal', note: 'Rex on Rex hosts; the daemon terminal opener elsewhere' }
 const BROWSER: Choice = { id: 'browser', label: 'Claude browser', note: 'Continue through Remote Control' }
 const APP: Choice = { id: 'app', label: 'Claude app', note: 'Open the installed desktop app' }
+const REX: Choice = { id: 'rex', label: 'Rex', note: 'Open Rex for iOS through a Shortcut named “Rex” (one action: Open App → Rex)' }
 
 /** The preference is per browser, so it offers only what this device can open,
  *  in the order opening falls back through them. */
 function deviceChoices(desktop: boolean): Choice[] {
-  return desktop ? [TERMINAL, BROWSER, APP] : [BROWSER]
+  return desktop ? [TERMINAL, BROWSER, APP] : [BROWSER, REX]
 }
 
 export function ConversationsSection(): JSX.Element {
@@ -45,12 +46,12 @@ export function ConversationsSection(): JSX.Element {
       </fieldset>
       {error && <div className="set-error" role="alert">This browser cannot save preferences. Allow site storage, then try again.</div>}
       <p className="set-opening-guidance">If your preferred destination is unavailable for a worker or device, opening uses the best available one: terminal on desktop or Claude browser.</p>
-      <div className="set-opening-tip"><strong>Tap to open. Hold to choose.</strong> Long-press or right-click Console or a worker pill to see its destinations. Choosing opens it and, when there are alternatives, remembers it. A sole destination leaves your preference unchanged.</div>
+      <div className="set-opening-tip"><strong>Tap to open. Hold to choose.</strong> Long-press or right-click the worker's ›_ plate to see its destinations. Choosing opens it and, when there are alternatives, remembers it. A sole destination leaves your preference unchanged.</div>
       <p className="set-row-note">Saved in this browser across your fleet. Workers keep running on their assigned hosts.</p>
       <details className="set-opening-details">
         <summary>Conversation setup</summary>
         <p>Enable Remote Control in Claude Code to get a browser or app link. The installed Claude desktop app can open supported session links.</p>
-        <p>Phones can use Claude web links for CLI workers. A worker without a phone destination has no Console button.</p>
+        <p>Phones open Claude workers by their Remote Control link, which hands off to the Claude app. Workers on a Rex host can also open Rex for iOS: it registers no link of its own, so make a Shortcut named “Rex” whose one action opens the Rex app. The board runs it; pick the session there, named after its constitution family.</p>
         <a href="https://cailmdaley.github.io/felt/shuttle/conversations/" target="_blank" rel="noopener noreferrer">Conversation setup guide ↗</a>
       </details>
     </>

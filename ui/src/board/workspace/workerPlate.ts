@@ -35,5 +35,11 @@ export function workerPlate(card: KanbanCard, target: HTMLElement | null): HTMLE
   const dot = part('ws-worker-dot')
   dot.setAttribute('aria-hidden', 'true')
   plate.replaceChildren(dot, part('ws-worker-state', facts.word), part('ws-worker-elapsed', facts.elapsed ?? ''))
+  // A plate that opens the conversation says so with a console prompt.
+  if (plate.matches('a[href], button')) {
+    const prompt = part('ws-worker-console', '›_')
+    prompt.setAttribute('aria-hidden', 'true')
+    plate.append(prompt)
+  }
   return plate
 }

@@ -37,7 +37,7 @@ it('saves a browser preference without writing host configuration and notifies t
   expect(values.get(CLAUDE_OPENING_KEY)).toBe('app')
   expect(changed).toHaveBeenCalledOnce()
   expect(fetch).not.toHaveBeenCalled()
-  expect(document.body.textContent).toContain('Long-press or right-click Console or a worker pill')
+  expect(document.body.textContent).toContain('›_ plate to see its destinations')
   expect(document.body.textContent).toContain('terminal on desktop or Claude browser')
   window.removeEventListener(CONVERSATION_OPENING_CHANGED, changed)
 })
@@ -51,7 +51,7 @@ it('reports blocked site storage without pretending the choice was saved', () =>
 
 it.each([
   [false, ['terminal', 'browser', 'app'], 'terminal'],
-  [true, ['browser'], 'browser'],
+  [true, ['browser', 'rex'], 'browser'],
 ])('offers only what this device opens and marks what opening falls back to (phone: %s)', (phone, offered, selected) => {
   vi.stubGlobal('matchMedia', () => ({ matches: phone }))
   act(() => root.render(<></>))

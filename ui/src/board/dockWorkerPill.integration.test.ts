@@ -43,7 +43,8 @@ describe('the worker control lives in the reader head, once', () => {
   it('opens the owner terminal without repeating agent or worker state on the fiber', () => {
     const pill = show(worker())!
     expect(pill.tagName).toBe('BUTTON')
-    expect(pill.textContent).toBe('no signal')
+    expect(pill.querySelector('.ws-worker-state')?.textContent).toBe('no signal')
+    expect(pill.querySelector('.ws-worker-console')?.textContent).toBe('›_')
     pill.click()
     expect(openWorker.mock.calls).toEqual([['shuttle-debug', 'host-a']])
   })
@@ -73,6 +74,6 @@ describe('the worker control lives in the reader head, once', () => {
   it('follows owner-observed runtime, ignoring stale phase without a worker', () => {
     expect(show(worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.querySelector('.ws-worker-state')?.textContent).toBe('idle')
     expect(show(worker({ runtimePhase: 'working', lastActivityAt: Date.now() }))?.querySelector('.ws-worker-state')?.textContent).toBe('working')
-    expect(show(worker({ workerState: undefined, status: 'closed', runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.textContent).toBe('no worker')
+    expect(show(worker({ workerState: undefined, status: 'closed', runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.querySelector('.ws-worker-state')?.textContent).toBe('no worker')
   })
 })

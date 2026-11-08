@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { workerPill } from './appConversation'
-import { conversationOpening, CLAUDE_OPENING_KEY, saveConversationOpening, conversationDestinations, resolveDestination, type ConversationOpening } from './conversationOpening'
+import { conversationOpening, CLAUDE_OPENING_KEY, saveConversationOpening, conversationDestinations, resolveDestination, REX_PHONE_SHORTCUT, type ConversationOpening } from './conversationOpening'
 import { sessionTargets } from './sessionHistory'
 import { card } from './testFixtures'
 
@@ -79,9 +79,17 @@ describe('conversation opening', () => {
     expect(open).toHaveBeenCalledWith('codex-shuttle', undefined)
   })
 
-  it('treats a stored Rex preference as no preference', () => {
+  it('keeps a stored Rex preference', () => {
     localStorage.setItem(CLAUDE_OPENING_KEY, 'rex')
-    expect(conversationOpening()).toBe('terminal')
+    expect(conversationOpening()).toBe('rex')
+  })
+
+  it('offers a phone Rex for iOS through its Shortcut, after the exact Claude session', () => {
+    const phone = { desktop: false, userAgent: 'iPhone', coarse: true }
+    const rexWorker = { ...worker, terminalBackend: 'rex' as const, sessionLink: bridge }
+    expect(conversationDestinations(rexWorker, phone, vi.fn()).map(d => [d.id, d.href])).toEqual([['browser', bridge], ['rex', REX_PHONE_SHORTCUT]])
+    expect(conversationDestinations({ ...rexWorker, terminalBackend: 'tmux' }, phone, vi.fn()).map(d => d.id)).toEqual(['browser'])
+    expect(resolveDestination(conversationDestinations(rexWorker, phone, vi.fn()), 'terminal')?.id).toBe('browser')
   })
 
   it.each(['javascript:alert(1)', 'https://claude.ai.evil.example/code/session_test', `${bridge}\n`])('never opens an unsafe session link: %s', (sessionLink) => {
