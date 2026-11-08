@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { inLane, laneSlots, resetLanes } from './requestLanes.js'
+import { settle } from './testFixtures.js'
 
 const deferred = () => {
   let resolve!: () => void
   const promise = new Promise<void>(r => { resolve = r })
   return { promise, resolve }
 }
-const settle = async (): Promise<void> => { for (let i = 0; i < 5; i++) await Promise.resolve() }
 
 afterEach(() => resetLanes())
 

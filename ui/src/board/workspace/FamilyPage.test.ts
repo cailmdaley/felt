@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
-import { card, conversations } from '../testFixtures.js'
+import { card, conversations, settle } from '../testFixtures.js'
 import { ThreadIndex } from '../threads.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { MapFile } from '../family/model.js'
@@ -23,7 +23,6 @@ const file = (name: string, back: number, unread = false): MapFile => ({ key: `d
 const sent = [file('new.png', 1, true), file('mid.md', 2), file('old.md', 3)]
 const tapestry = file('Tapestry', 4)
 const feeds: FamilyFeeds = { marks: () => undefined, reach: () => 14 * 86_400_000, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(), lead: async c => c.id === 'hub/mid' ? tapestry : undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {} }
-const settled = async (): Promise<void> => { for (let n = 0; n < 4; n++) await Promise.resolve() }
 
 interface Made { family: FamilyPage; reach: Mock; place: MapPlace; sighted: Mock }
 function made(over: { feeds?: FamilyFeeds; place?: MapPlace; known?: KanbanCard[] } = {}): Made {
@@ -85,7 +84,7 @@ describe('the page', () => {
     const lone = card({ id: 'solo', status: 'active', shuttleKind: 'oneshot', sessionUuid: 's' })
     const family = new FamilyPage(conversations(), feeds, placeAt(lone), vi.fn())
     family.update(lone, new ThreadIndex([lone]), now)
-    await settled()
+    await settle()
     expect(said(family)).toEqual(['solo'])
     expect(chips(family, 'solo')).toEqual(['☰'])
   })
@@ -95,7 +94,7 @@ describe('the page', () => {
     const place = placeAt(lone), index = new ThreadIndex([lone])
     const family = new FamilyPage(conversations(), { ...feeds, lead: async () => tapestry, embed }, place, vi.fn())
     family.update(lone, index, now)
-    await settled()
+    await settle()
     const head = row(family, 'solo')
     expect(head.querySelector('.fp-note')!.textContent).toBe('Solo came to this.')
     expect(embed).toHaveBeenCalledExactlyOnceWith(lone, 'doc:Tapestry')
@@ -108,7 +107,7 @@ describe('the page', () => {
   it('leaves a constitution with threads folded until asked', async () => {
     const embed = vi.fn(() => ({ el: document.createElement('div'), dispose: () => {} }))
     made({ feeds: { ...feeds, lead: async () => tapestry, embed } })
-    await settled()
+    await settle()
     expect(embed).not.toHaveBeenCalled()
   })
 })
@@ -120,7 +119,7 @@ describe('a row', () => {
     expect(reach).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'hub/mid' }))
     expect(said(family)).toContain('Leaf')
     expect(row(family, 'Mid').getAttribute('aria-expanded')).toBe('true')
-    await settled()
+    await settle()
     expect(row(family, 'Mid').hasAttribute('data-worker')).toBe(true)
     expect(place.worker).toContain('hub/mid')
     click(row(family, 'Mid'))
@@ -131,13 +130,13 @@ describe('a row', () => {
     const { family, reach, place } = made()
     reach.mockResolvedValueOnce(false)
     click(row(family, 'Mid'))
-    await settled()
+    await settle()
     expect(place.worker).toBeUndefined()
     expect(row(family, 'Mid').hasAttribute('data-worker')).toBe(false)
   })
   it('shows glyph chips and lists sent files newest first', async () => {
     const { family, place } = made()
-    await settled()
+    await settle()
     expect(chips(family, 'Mid')).toEqual(['⌗', '☰', '⧉ 3'])
     expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-files')!.hidden).toBe(true)
     click(row(family, 'Mid').querySelector('.fp-sent')!)
@@ -151,7 +150,7 @@ describe('a row', () => {
   it('folds a sent file open from the list when the list folds, and returns the cursor to ⧉ n', async () => {
     const dispose = vi.fn()
     const { family, place } = made({ feeds: { ...feeds, embed: () => ({ el: document.createElement('div'), dispose }) } })
-    await settled()
+    await settle()
     click(row(family, 'Mid').querySelector('.fp-sent')!)
     click(row(family, 'Mid').querySelector<HTMLElement>('.fp-file')!)
     row(family, 'Mid').querySelector<HTMLElement>('.fp-file')!.focus()
@@ -166,7 +165,7 @@ describe('a row', () => {
     const dispose = vi.fn(), embedded = document.createElement('div')
     const embed = vi.fn(() => ({ el: embedded, dispose }))
     const { family, reach, sighted, place } = made({ feeds: { ...feeds, embed } })
-    await settled()
+    await settle()
     click(row(family, 'Mid').querySelector('.fp-lead')!)
     expect(embed).toHaveBeenCalledExactlyOnceWith(mid, 'doc:Tapestry')
     expect(place.docs!.get(row(family, 'Mid').dataset.thread!)).toBe('doc:Tapestry')
@@ -189,7 +188,7 @@ describe('a row', () => {
     let mine = [file('new.png', 1, true), file('also.png', 2, true), file('old.md', 3)]
     const seen = vi.fn((files: readonly MapFile[]) => { mine = mine.map(f => files.some(s => s.key === f.key) ? { ...f, unread: false } : f) })
     const { family } = made({ feeds: { ...feeds, files: c => c.id === 'hub/mid' ? mine : [], lead: async () => undefined, seen } })
-    await settled()
+    await settle()
     expect(row(family, 'Mid').querySelector('.fp-sent')!.hasAttribute('data-unread')).toBe(true)
     click(row(family, 'Mid').querySelector('.fp-sent')!)
     expect(seen).toHaveBeenCalledExactlyOnceWith([mine[0], mine[1]].map(f => ({ ...f, unread: true })))
@@ -199,7 +198,7 @@ describe('a row', () => {
   it('counts a document seen when it unfolds', async () => {
     const seen = vi.fn()
     const { family } = made({ feeds: { ...feeds, lead: async c => c.id === 'hub/mid' ? { ...tapestry, unread: true } : undefined, seen } })
-    await settled()
+    await settle()
     click(row(family, 'Mid').querySelector('.fp-lead')!)
     expect(seen).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ key: tapestry.key })])
     expect(row(family, 'Mid').querySelector('.fp-lead')!.hasAttribute('data-unread')).toBe(false)
@@ -207,7 +206,7 @@ describe('a row', () => {
   it('names a sent tapestry as the lead when the fiber\'s directory holds none', async () => {
     const { family } = made({ feeds: { ...feeds, files: c => c.id === 'hub/mid' ? [file('tapestry.html', 1), ...sent] : [], lead: async () => undefined } })
     click(row(family, 'Mid'))
-    await settled()
+    await settle()
     expect(chips(family, 'Mid')).toEqual(['⌗', '☰', '⧉ 3'])
     expect(row(family, 'Mid').querySelector('.fp-lead')!.getAttribute('aria-label')).toBe('Tapestry')
   })
@@ -240,7 +239,7 @@ describe('keys', () => {
   const keys = (...names: string[]): void => { for (const name of names) press(document.activeElement!, name) }
   it('moves the highlight without entering; l enters the thread and focuses its first chip', async () => {
     const { family, reach, sighted } = made()
-    await settled()
+    await settle()
     family.focus()
     keys('j', 'j', 'j', 'k')
     expect(at()).toBe('Mid')
@@ -257,7 +256,7 @@ describe('keys', () => {
   it('unfolds a row\'s first document with l, the next in its place with l again, and goes back out with h', async () => {
     const { family, reach } = made()
     const leave = vi.fn(); family.leave = leave
-    await settled()
+    await settle()
     family.focus()
     const doc = (): HTMLElement => row(family, 'Mid').querySelector<HTMLElement>('.fp-doc')!
     keys('j', 'j', 'l')
@@ -281,7 +280,7 @@ describe('keys', () => {
   })
   it('moves among the rows with a document unfolded, which stays under its own row', async () => {
     const { family, place } = made()
-    await settled()
+    await settle()
     family.focus()
     const doc = (): HTMLElement => row(family, 'Mid').querySelector<HTMLElement>('.fp-doc')!
     keys('j', 'j', 'l')
@@ -296,7 +295,7 @@ describe('keys', () => {
   })
   it('folds what the page has unfolded with h from any row before h leaves, as on a return that lands elsewhere', async () => {
     const leave = vi.fn(), { family, place } = made()
-    await settled()
+    await settle()
     family.focus()
     keys('j', 'j', 'l')
     family.dispose()
@@ -304,7 +303,7 @@ describe('keys', () => {
     back.leave = leave
     document.body.replaceChildren(back.el)
     back.update(root, new ThreadIndex(cards), now)
-    await settled()
+    await settle()
     back.focus()
     expect(at()).toBe('hub')
     expect(row(back, 'Mid').querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(false)
@@ -376,14 +375,14 @@ describe('`l` outside the tree', () => {
   it('toggles the selected thread\'s tapestry, else its newest file, reading each thread once', async () => {
     const reads = vi.fn(feeds.lead), { family, place } = made({ feeds: { ...feeds, lead: reads } })
     click(row(family, 'Mid'))
-    family.toggleLead(); await settled()
+    family.toggleLead(); await settle()
     expect(place.docs!.get(row(family, 'Mid').dataset.thread!)).toBe('doc:Tapestry')
-    family.toggleLead(); await settled()
+    family.toggleLead(); await settle()
     expect(place.docs!.size).toBe(0)
     expect(reads.mock.calls.filter(([thread]) => thread.id === 'hub/mid')).toHaveLength(1)
     const { family: other, place: otherPlace } = made({ feeds: { ...feeds, lead: async () => undefined } })
     click(row(other, 'Mid'))
-    other.toggleLead(); await settled()
+    other.toggleLead(); await settle()
     expect(otherPlace.docs!.get(row(other, 'Mid').dataset.thread!)).toBe('doc:new.png')
   })
   it('waits for the lead read and ignores it if the selection moves', async () => {
@@ -392,10 +391,10 @@ describe('`l` outside the tree', () => {
     const { family, place } = made({ feeds: { ...feeds, lead: slow } })
     click(row(family, 'Mid'))
     family.toggleLead()
-    await settled()
+    await settle()
     expect(place.docs!.size).toBe(0)
     landing.splice(0).forEach(land => land())
-    await settled()
+    await settle()
     expect(place.docs!.get(row(family, 'Mid').dataset.thread!)).toBe('doc:Tapestry')
 
     const pending: Array<() => void> = []
@@ -404,7 +403,7 @@ describe('`l` outside the tree', () => {
     other.toggleLead()
     click(row(other, 'Idle'))
     pending.splice(0).forEach(land => land())
-    await settled()
+    await settle()
     expect(otherPlace.docs!.size).toBe(0)
   })
 })

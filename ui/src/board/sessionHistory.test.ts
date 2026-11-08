@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { claudeAppRoute } from './conversationLinks.js'
 import { buildSessionHistory, selectWorker, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
 import type { SessionRecord } from './views/TemporalData.js'
+import { settle } from './testFixtures.js'
 
 const UID = '01KVTXJ3VQYNZ6TYK342ZHV5CK'
 const CLAUDE = 'b8586ace-8ce7-4152-a16c-cffa73822756'
@@ -86,11 +87,11 @@ describe('session history pending links', () => {
     const history = buildSessionHistory({ shuttleBase: 'http://shuttle', uid: UID, desktop: false })
     document.body.append(history)
     history.querySelector('button')!.click()
-    for (let i = 0; i < 10; i++) await Promise.resolve()
+    await settle()
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/sessions/links'))).toHaveLength(1)
 
     await vi.advanceTimersByTimeAsync(750)
-    for (let i = 0; i < 10; i++) await Promise.resolve()
+    await settle()
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/sessions/links'))).toHaveLength(2)
     expect(history.querySelector('a[href^="https://claude.ai/"]')).not.toBeNull()
     history.remove()
@@ -117,7 +118,7 @@ describe('session history pending links', () => {
     document.body.append(history)
     const toggle = history.querySelector('button')!
     toggle.click()
-    for (let i = 0; i < 10; i++) await Promise.resolve()
+    await settle()
     expect(linkRequests).toBe(1)
     toggle.click()
     await vi.advanceTimersByTimeAsync(5_000)

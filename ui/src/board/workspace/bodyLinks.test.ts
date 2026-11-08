@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { card } from '../testFixtures.js'
+import { card, settle } from '../testFixtures.js'
 import { installWikilinks } from '../wikilinks.js'
 import { constitutionMentions, mentionRuntime, bindConstitutionMentions, resolveConstitutionCandidates } from './bodyLinks.js'
 
@@ -18,7 +18,6 @@ describe('constitution mentions', () => {
     root.innerHTML = '<div class="ws-transcript"><p>Transcript prose without mentions.</p></div><div class="controls"><button>Send</button></div>'
     const cards = vi.fn(() => Array.from({ length: 500 }, (_, i) => work({ id: `work/task-${i}` })))
     const binding = bindConstitutionMentions(root, cards, vi.fn())
-    const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve() }
     await settle()
     const walks = vi.spyOn(document, 'createTreeWalker')
     cards.mockClear()
@@ -42,7 +41,7 @@ describe('constitution mentions', () => {
     const runtime = mentionRuntime(root, vi.fn())
     const walks = vi.spyOn(document, 'createTreeWalker')
     update(runtime)
-    for (let i = 0; i < 5; i++) await Promise.resolve()
+    await settle()
     expect(walks).toHaveBeenCalledTimes(1)
     runtime.dispose()
   })

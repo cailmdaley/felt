@@ -137,6 +137,11 @@ does not rescue a short inner one: if a task's call carries a two-second
 deadline, a thirty-second `Task.await` around it still fails when the call
 does. Make incidental deadlines failure-only all the way down, and tag the
 tests whose subject is a deadline `:timing`.
+In the board, wait for promised work with `settle()` from
+`ui/src/board/testFixtures.ts`, one real task turn that fake timers don't
+intercept, never a counted run of `await Promise.resolve()`: a `Response`
+body takes twice as many microtasks to read on Node 22 as on Node 26. Wait for
+a history traversal on its `popstate`.
 
 ## 1. Where does it go?
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { card, servedFeed } from '../testFixtures.js'
+import { card, servedFeed, settle } from '../testFixtures.js'
 import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import type { Turn } from '../turn.js'
 import { Workspace, type WorkspaceOptions } from './Workspace.js'
@@ -75,22 +75,22 @@ const fiberReadResponse = (card: KanbanCard, contents = body): Response => {
   })))
 }
 // Microtask depth varies with the Node runtime (undici fetch/Response hops), so drain generously.
-const flush = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
 const pop = async (action: () => void): Promise<void> => {
   await new Promise<void>(resolve => {
     window.addEventListener('popstate', () => resolve(), { once: true })
     action()
   })
-  await flush()
+  await settle()
 }
-/** The Board's receipt feed has named alpha's report before the channel opens. */
+/** The Board's receipt feed has named alpha's report before the channel opens: the construction read lands, then a fresh read returns the new feed. */
 const feedNamesReport = async (): Promise<void> => {
+  await settle()
   const original = vi.mocked(fetch).getMockImplementation()!
   vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/sent-files/all/')
     ? new Response(JSON.stringify({ files: [{ fullPath: '/notes/alpha/report.html', uid: 'alpha', host: 'host-a', timestamp: Date.now(), sessionId: 'session-two' }] }))
     : original(input, init))
   workspace.overview.refresh()
-  await flush()
+  await settle()
 }
 const changed = vi.fn()
 const visibility = vi.fn<(active: boolean) => void>()
@@ -145,10 +145,10 @@ afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); docume
 it('routes a linked change to the fiber holding its file on its own host, not the report channel', async () => {
   boardCards = bodyCards = cards.map(c => ({ ...c, workerState: 'running' as const }))
   const send = vi.spyOn(Dock.prototype, 'sendReview').mockResolvedValue(undefined)
-  workspace.open(boardCards[0], 'Desk', docKey('host-a', '/notes/alpha/report.html', 'host-a')); await flush()
+  workspace.open(boardCards[0], 'Desk', docKey('host-a', '/notes/alpha/report.html', 'host-a')); await settle()
   const report = vi.mocked(buildFileViewer).mock.calls.filter(call => call[1] === '/notes/alpha/report.html').at(-1)![5]!
   report.onNavigate!('/api/v1/file?path=%2Fnotes%2Fbeta%2Freview.change.json&origin=host-b')
-  await flush()
+  await settle()
   const review = vi.mocked(buildFileViewer).mock.calls.filter(call => call[1] === '/notes/beta/review.change.json').at(-1)![5]!
   expect(review.reviewTarget!()).toBe('work/beta on host-b')
   expect(review.canReview!()).toBe(true)
@@ -164,7 +164,7 @@ it('routes a linked change to the fiber holding its file on its own host, not th
 
 it('does not redraw an unchanged active channel and follows changed cards across navigation', async () => {
   workspace.open(cards[0], 'Desk')
-  await flush()
+  await settle()
   workspace.update() // The first poll seats the current card revision.
   const show = vi.spyOn(workspace.reader, 'show')
 
@@ -179,7 +179,7 @@ it('does not redraw an unchanged active channel and follows changed cards across
   expect(show).toHaveBeenCalledOnce()
 
   workspace.open(boardCards[1], 'Desk')
-  await flush()
+  await settle()
   show.mockClear()
   workspace.update()
   expect(show).not.toHaveBeenCalled()
@@ -201,22 +201,22 @@ it('discovers a report only after it exists, including creation on a later refre
   const original = vi.mocked(fetch).getMockImplementation()!
   vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/file-info?')
     ? new Response(JSON.stringify({ exists: String(input).includes('report.html') && exists })) : original(input, init))
-  workspace.open(cards[1], 'Desk'); await flush()
+  workspace.open(cards[1], 'Desk'); await settle()
   const key = docKey('host-b', '/notes/beta/report.html', 'host-b')
   expect(workspace.reader.host.get(key)).toBeUndefined()
   expect(document.querySelector('.ws-report-inset')).toBeNull()
   exists = true
-  await vi.advanceTimersByTimeAsync(15000); await flush()
+  await vi.advanceTimersByTimeAsync(15000); await settle()
   expect(workspace.reader.host.get(key)).toBeDefined()
 })
 
 it('brings the constitution forward from the band and retraces to the page it left', async () => {
   bodyCards = cards.map(card => ({ ...card, shuttleKind: 'oneshot' }))
-  workspace.open(bodyCards[0], 'Desk'); await flush()
-  workspace.open(bodyCards[1], 'Desk'); await flush()
-  workspace.reader.openDocument(docKey('host-b', '/notes/beta/report.html', 'host-b')); await flush()
+  workspace.open(bodyCards[0], 'Desk'); await settle()
+  workspace.open(bodyCards[1], 'Desk'); await settle()
+  workspace.reader.openDocument(docKey('host-b', '/notes/beta/report.html', 'host-b')); await settle()
   document.querySelector<HTMLButtonElement>('.ws-stage-band .ws-band-constitution')!.click()
-  await flush()
+  await settle()
   expect(workspace.reader.document?.kind).toBe('fiber')
   expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
   await pop(() => workspace.reader.back())
@@ -225,9 +225,9 @@ it('brings the constitution forward from the band and retraces to the page it le
 
 it('takes a verdict key on a report without moving the page, its undo in the band', async () => {
   bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', status: 'closed' }]
-  workspace.open(bodyCards[0], 'Desk'); await flush()
+  workspace.open(bodyCards[0], 'Desk'); await settle()
   const report = docKey('host-a', '/notes/alpha/report.html', 'host-a')
-  workspace.reader.openDocument(report); await flush()
+  workspace.reader.openDocument(report); await settle()
   const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
   press('t')
   expect(workspace.reader.document?.key).toBe(report)
@@ -239,7 +239,7 @@ it('takes a verdict key on a report without moving the page, its undo in the ban
 
 it('gives r no work on a constitution', async () => {
   bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', status: 'closed' }]
-  workspace.open(bodyCards[0], 'Desk'); await flush()
+  workspace.open(bodyCards[0], 'Desk'); await settle()
   const event = new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true })
   document.dispatchEvent(event)
   expect(event.defaultPrevented).toBe(false)
@@ -252,10 +252,10 @@ it('steps constitutions in one history entry and returns the last viewed card to
   const returned = vi.fn()
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => bodyCards, deskRows: () => bodyCards,
     origin: () => 'Desk', onVisibility: visibility, onReturnCard: returned, dock: new Dock('', changed) })
-  workspace.open(bodyCards[0], 'Desk'); await flush()
+  workspace.open(bodyCards[0], 'Desk'); await settle()
   const length = window.history.length
   for (let i = 1; i < bodyCards.length; i++) {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await settle()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(`Scan ${i}`)
   }
   expect(window.history.length).toBe(length)
@@ -266,21 +266,21 @@ it('steps constitutions in one history entry and returns the last viewed card to
 
 it('does not rewrite unchanged names on show and writes a page selection once', async () => {
   bodyCards = [{ ...cards[0], shuttleKind: 'oneshot' }]
-  workspace.open(bodyCards[0], 'Desk'); await flush()
+  workspace.open(bodyCards[0], 'Desk'); await settle()
   const replace = vi.spyOn(window.history, 'replaceState')
   const push = vi.spyOn(window.history, 'pushState')
   for (const runtimePhase of ['waiting', 'working'] as const) {
     bodyCards = [{ ...bodyCards[0], runtimePhase }]
-    workspace.update(); await flush()
+    workspace.update(); await settle()
   }
   expect(replace).not.toHaveBeenCalled()
-  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a')); await flush()
+  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a')); await settle()
   expect(push).toHaveBeenCalledOnce()
   expect(replace).not.toHaveBeenCalled()
 })
 
 it('follows visited files after reload and returns a fresh deep link to its origin', async () => {
-  workspace.open(cards[0], 'Desk'); await flush()
+  workspace.open(cards[0], 'Desk'); await settle()
   const report = docKey('host-a', '/notes/alpha/report.html', 'host-a')
   const table = docKey('host-a', '/notes/alpha/table.html', 'host-a')
   workspace.reader.openDocument(report)
@@ -288,7 +288,7 @@ it('follows visited files after reload and returns a fresh deep link to its orig
   const hash = window.location.hash
   workspace.dispose()
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-  await flush()
+  await settle()
   await pop(() => workspace.reader.back())
   expect(workspace.reader.document?.key).toBe(report)
   await pop(() => workspace.reader.back())
@@ -296,7 +296,7 @@ it('follows visited files after reload and returns a fresh deep link to its orig
   workspace.dispose()
   window.history.replaceState(null, '', hash)
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-  await flush()
+  await settle()
   workspace.reader.back()
   expect(workspace.isActive).toBe(false)
   expect(window.location.hash).toBe('#/board')
@@ -304,26 +304,26 @@ it('follows visited files after reload and returns a fresh deep link to its orig
 
 it('names the fiber page behind a file, and the constitution behind another channel', async () => {
   workspace.open(cards[0], 'Desk')
-  await flush()
+  await settle()
   expect(workspace.reader.document?.kind).toBe('fiber')
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
-  await flush()
+  await settle()
   expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Constitution')
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
-  await flush()
+  await settle()
   expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
-  workspace.open(cards[1]); await flush()
+  workspace.open(cards[1]); await settle()
   expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Alpha')
 })
 
 it('visits documents and retraces them without re-reading the channel or its receipt feed', async () => {
-  workspace.open(cards[0], 'Desk'); await flush()
+  workspace.open(cards[0], 'Desk'); await settle()
   const reads = () => vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/v1\/(fibers\/|sent-files\?)/.test(String(url))).length
   const before = reads()
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
-  await flush()
+  await settle()
   workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
-  await flush()
+  await settle()
   await pop(() => workspace.reader.back())
   expect(workspace.reader.document?.name).toBe('report.html')
   expect(reads()).toBe(before)
@@ -363,7 +363,7 @@ describe('bar Find transcripts', () => {
     type(find, 'Alpha')
     await vi.advanceTimersByTimeAsync(299)
     expect(document.querySelector('.ws-search-result')).toBeNull()
-    await vi.advanceTimersByTimeAsync(1); await flush()
+    await vi.advanceTimersByTimeAsync(1); await settle()
     const rows = [...document.querySelectorAll<HTMLElement>('.ws-switcher .ws-channel-row, .ws-switcher .ws-search-result button')]
     expect(rows).toHaveLength(2)
     expect(rows[0].classList.contains('ws-channel-row')).toBe(true)
@@ -388,12 +388,12 @@ describe('bar Find transcripts', () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
       ? new Response(JSON.stringify({ hits: [{ ...hit, matches: 1 }], errors: [] }))
       : original(input, init))
-    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await flush()
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await settle()
     expect(document.querySelector('.ws-search-meta')?.textContent).toContain('1 match ·')
-    document.querySelector<HTMLElement>('.ws-search-result')!.click(); await flush()
+    document.querySelector<HTMLElement>('.ws-search-result')!.click(); await settle()
     expect(workspace.isActive).toBe(false)
     const copy = document.querySelector<HTMLButtonElement>('.ws-search-result button')!
-    copy.click(); await flush()
+    copy.click(); await settle()
     expect(copied).toHaveBeenCalledWith('/transcripts/alpha.jsonl:2')
     expect(copy.textContent).toBe('copied')
     expect(workspace.isActive).toBe(false)
@@ -407,9 +407,9 @@ describe('bar Find transcripts', () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
       ? new Response(JSON.stringify({ hits: [hit], errors: [] }))
       : original(input, init))
-    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await flush()
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await settle()
     const copy = document.querySelector<HTMLButtonElement>('.ws-search-result button')!
-    press(find, 'Enter'); await flush()
+    press(find, 'Enter'); await settle()
     expect(copy.textContent).toBe('copy path')
     expect(workspace.isActive).toBe(false)
   })
@@ -425,10 +425,10 @@ describe('bar Find transcripts', () => {
     type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300)
     type(find, 'Beta'); expect(requests[0].signal.aborted).toBe(true)
     await vi.advanceTimersByTimeAsync(300)
-    requests[0].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await flush()
+    requests[0].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await settle()
     expect(document.querySelector('.ws-search-result')).toBeNull()
     workspace.closeFind(); expect(requests[1].signal.aborted).toBe(true)
-    requests[1].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await flush()
+    requests[1].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await settle()
     expect(document.querySelector('.ws-switcher')).toBeNull()
   })
 
@@ -440,10 +440,10 @@ describe('bar Find transcripts', () => {
     vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
       ? new Response(JSON.stringify(fail ? { error: 'offline' } : { hits: [{ ...hit, fibers: [] }], errors: [] }), { status: fail ? 502 : 200 })
       : original(input, init))
-    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await flush()
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await settle()
     expect(document.querySelector('.ws-search-note')?.textContent).toBe('Transcript search unavailable.')
     fail = false
-    type(find, 'Alph'); await vi.advanceTimersByTimeAsync(300); await flush()
+    type(find, 'Alph'); await vi.advanceTimersByTimeAsync(300); await settle()
     expect(document.querySelector('.ws-search-note')).toBeNull()
     expect(document.querySelector('.ws-search-result button')?.textContent).toBe('copy path')
   })
@@ -456,7 +456,7 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), onRest })
     const constitution = { ...cards[0], shuttleKind: 'oneshot' as const }
     bodyCards = [constitution]
-    workspace.open(constitution); await flush(); await flush()
+    workspace.open(constitution); await settle(); await settle()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
     expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
   })
@@ -466,9 +466,9 @@ describe('workspace reader integration', () => {
       ? Response.json({ exists: true }) : request(input, init))
     const original = cards[0]; cards[0] = { ...original, shuttleKind: 'oneshot' }
     onTestFinished(() => { cards[0] = original })
-    workspace.open(cards[0]); await flush(); await flush()
+    workspace.open(cards[0]); await settle(); await settle()
     workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
-    workspace.openQuestion(cards[0]); await flush(); await flush()
+    workspace.openQuestion(cards[0]); await settle(); await settle()
     expect(workspace.reader.document?.name).toBe('tapestry.html')
     expect(document.querySelector('.ws-report-inset')).toBeNull()
   })
@@ -483,13 +483,13 @@ describe('workspace reader integration', () => {
     workspace.openQuestion(feed[0])
     await Promise.resolve()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).not.toBe('family:host-a:hub')
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).not.toBe('family:host-a:hub')
   })
 
   it('a Question without a report opens its constitution', async () => {
     bodyOverrides.set('host-b:beta', 'A question without a report.')
-    workspace.openQuestion(cards[1]); await flush(); await flush()
+    workspace.openQuestion(cards[1]); await settle(); await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-b:beta')
   })
 
@@ -499,13 +499,13 @@ describe('workspace reader integration', () => {
     try {
       // The body read carries no office; the feed's card does.
       cards[0] = { ...original, shuttleRole: 'surveyor' }
-      workspace.open(cards[0]); await flush(); await flush()
+      workspace.open(cards[0]); await settle(); await settle()
       expect(roles()).toEqual(['surveyor'])
       cards[0] = { ...original, shuttleRole: 'scribe' }
-      workspace.update(); await flush()
+      workspace.update(); await settle()
       expect(roles()).toEqual(['scribe'])
       cards[0] = original
-      workspace.update(); await flush()
+      workspace.update(); await settle()
       expect(roles()).toEqual([])
     } finally { cards[0] = original }
   })
@@ -517,7 +517,7 @@ describe('workspace reader integration', () => {
     bodyCards = [...cards, role]
     onTestFinished(() => { cards[0] = original })
     const holds = (): string[] => [...document.querySelectorAll('.ws-role-hold-name')].map(name => name.textContent ?? '')
-    workspace.open(role); await flush(); await flush()
+    workspace.open(role); await settle(); await settle()
     expect(holds()).toEqual(['Alpha'])
     expect(document.querySelector<HTMLElement>('.ws-stage-band')?.hidden).toBe(true)
     expect(document.querySelector('[data-part="role-holders"]')).toBeNull()
@@ -527,13 +527,13 @@ describe('workspace reader integration', () => {
     }
     // A role is outside the feed; its holds still follow office assignments.
     cards[0] = { ...original, shuttleKind: 'oneshot' }
-    workspace.update(); await flush()
+    workspace.update(); await settle()
     expect(holds()).toEqual([])
     expect(document.querySelector('[data-part="role-holds"]')).toBeNull()
     cards[0] = { ...original, shuttleKind: 'oneshot', shuttleRole: 'surveyor' }
-    workspace.update(); await flush()
+    workspace.update(); await settle()
     document.querySelector<HTMLButtonElement>('.ws-role-hold')!.click()
-    await flush(); await flush()
+    await settle(); await settle()
     expect(document.querySelector('.ws-selected [data-part="fiber-title"]')?.textContent).toBe('Alpha')
     // The band stands over a constitution's pages; its fiber page holds no controls.
     expect(document.querySelector('.ws-stage-band .ws-dock')).not.toBeNull()
@@ -549,7 +549,7 @@ describe('workspace reader integration', () => {
     const commit = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [live], origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed, commit) })
-    workspace.open(reviewing); await flush()
+    workspace.open(reviewing); await settle()
     vi.useFakeTimers()
     const pair = document.querySelector<HTMLElement>('.ws-fiber-acts')!
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
@@ -578,14 +578,14 @@ describe('workspace reader integration', () => {
     const commit = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed, commit) })
-    workspace.open(reviewing); await flush()
+    workspace.open(reviewing); await settle()
     vi.useFakeTimers()
     workspace.queueVerdict(reviewing, 'composted')
     expect(document.querySelectorAll('.ws-fiber-acts .ws-verdict-undo')).toHaveLength(1)
     live = change === 'removed' ? [] : [{ ...reviewing,
       ...(change === 'replacement' ? { uid: 'UID-B' } : { originId: 'host-b' }) }]
     bodyCards = live
-    vi.advanceTimersByTime(6000); await flush()
+    vi.advanceTimersByTime(6000); await settle()
     expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
     expect(commit).not.toHaveBeenCalled()
   })
@@ -596,7 +596,7 @@ describe('workspace reader integration', () => {
       bodyCards = [fiber]
       workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [fiber], origin: () => 'Desk',
         onVisibility: visibility, dock: new Dock('', changed, commit) })
-      workspace.open(fiber); await flush()
+      workspace.open(fiber); await settle()
       return document.querySelector<HTMLElement>('.ws-fiber-acts')!
     }
     const flying = card({ id: 'work/fly', uid: 'fly-uid', name: 'Fly', originId: 'host-a', status: 'active',
@@ -611,12 +611,12 @@ describe('workspace reader integration', () => {
     expect(pair.querySelector(':scope > .ws-verdict-undo')?.textContent).toBe('To review·undo z')
     press('z')
     expect(pair.hasAttribute('data-verdict-pending')).toBe(false)
-    vi.advanceTimersByTime(6000); await flush()
+    vi.advanceTimersByTime(6000); await settle()
     expect(commit).not.toHaveBeenCalled()
     press('a')
     vi.advanceTimersByTime(3999)
     expect(commit).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(1); await flush()
+    vi.advanceTimersByTime(1); await settle()
     expect(commit).toHaveBeenCalledExactlyOnceWith(flying, 'awaitingReview')
     // A declined worker stop queues nothing.
     vi.useRealTimers(); workspace.dispose(); document.body.replaceChildren()
@@ -631,7 +631,7 @@ describe('workspace reader integration', () => {
       workspace.dispose(); document.body.replaceChildren(); vi.useFakeTimers()
       await open(fiber, commit); press('a')
       expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
-      vi.advanceTimersByTime(6000); await flush()
+      vi.advanceTimersByTime(6000); await settle()
       expect(commit).not.toHaveBeenCalled()
       vi.useRealTimers()
     }
@@ -646,7 +646,7 @@ describe('workspace reader integration', () => {
     const commit = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed, commit) })
-    workspace.open(app); await flush()
+    workspace.open(app); await settle()
     vi.useFakeTimers()
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     workspace.queueVerdict(app, 'composted')
@@ -655,7 +655,7 @@ describe('workspace reader integration', () => {
     confirm.mockReturnValue(true)
     workspace.queueVerdict(app, 'composted')
     expect(confirm).toHaveBeenCalledTimes(2)
-    vi.advanceTimersByTime(6000); await flush()
+    vi.advanceTimersByTime(6000); await settle()
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(commit).toHaveBeenCalledExactlyOnceWith(app, 'composted')
     // A worker that starts during the undo window was never confirmed.
@@ -664,7 +664,7 @@ describe('workspace reader integration', () => {
     workspace.queueVerdict(finished, 'tempered')
     expect(confirm).not.toHaveBeenCalled()
     live = [{ ...finished, status: 'active', workerState: 'running' }]
-    vi.advanceTimersByTime(6000); await flush()
+    vi.advanceTimersByTime(6000); await settle()
     expect(commit).not.toHaveBeenCalled()
     expect(confirm).not.toHaveBeenCalled()
     expect(document.body.textContent).toContain('has a worker now; verdict not written')
@@ -677,13 +677,13 @@ describe('workspace reader integration', () => {
     const commit = vi.fn()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [], origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed, commit) })
-    workspace.open(linked); await flush()
+    workspace.open(linked); await settle()
     vi.useFakeTimers()
     workspace.queueVerdict(linked, 'tempered')
     const renamed = { ...linked, id: 'work/moved', path: 'work/moved/moved.md' }
     bodyCards = result === 'missing' ? [] : [result === 'replacement' ? { ...linked, uid: 'replacement-uid' } : renamed]
     vi.mocked(fetch).mockClear()
-    vi.advanceTimersByTime(6000); await flush()
+    vi.advanceTimersByTime(6000); await settle()
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/v1/fibers/linked-uid?body=true&origin=host-a&routed=1'))).toBe(true)
     if (result === 'same identity') expect(commit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: linked.uid, id: renamed.id, originId: linked.originId }), 'tempered')
     else expect(commit).not.toHaveBeenCalled()
@@ -692,7 +692,7 @@ describe('workspace reader integration', () => {
   const walked = (): string[] => (reader() as unknown as { deskCards(): KanbanCard[] }).deskCards().map(row => row.uid ?? row.id)
   const landed = (): string | null | undefined => document.querySelector('.shuttle-toast .toast-message')?.textContent
   const titled = (): string | null | undefined => document.querySelector('.ws-channel-title')?.textContent
-  const step = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key !== key.toLowerCase(), bubbles: true, cancelable: true })); await flush() }
+  const step = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key !== key.toLowerCase(), bubbles: true, cancelable: true })); await settle() }
   it('steps the Desk with j/k wherever it opens', async () => {
     workspace.dispose()
     const returned = vi.fn()
@@ -701,7 +701,7 @@ describe('workspace reader integration', () => {
       shuttleBase: '', cards: () => grouped, origin: () => 'Board', onVisibility: visibility,
       deskRows: () => [grouped[1], grouped[0]], onReturnCard: returned, dock: new Dock('', changed),
     })
-    workspace.open(grouped[0], 'Board'); await flush()
+    workspace.open(grouped[0], 'Board'); await settle()
     expect(walked()).toEqual(['beta', 'alpha'])
     await step('k')
     expect(titled()).toBe('Beta')
@@ -715,7 +715,7 @@ describe('workspace reader integration', () => {
       ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', column: 'inFlight', turn: TURN_OF_PHASE[runtimePhase ?? ''] ?? 'no-signal', workerState: 'running', runtimePhase })
     const feed = [{ ...cards[0], status: 'closed', column: 'awaitingReview' as const }, flight('w1', 'working'), flight('n1', 'waiting'), flight('w2', 'working'), flight('n2', 'blocked'), { ...cards[1], uid: 'draft', id: 'work/draft', name: 'draft' }]
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[5], feed[2], feed[4], feed[1], feed[3], feed[0]], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(feed[0], 'Desk'); await flush()
+    workspace.open(feed[0], 'Desk'); await settle()
     expect(walked()).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
     await step('K'); expect(titled()).toBe('n1')
     await step('j'); expect(titled()).toBe('n2')
@@ -743,11 +743,11 @@ describe('workspace reader integration', () => {
     const index = new ThreadIndex(raw)
     const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c) }))
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[4], feed[1], feed[5]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(feed[2], 'Desk'); await flush()
+    workspace.open(feed[2], 'Desk'); await settle()
     expect(walked()).toEqual(['draft', 'settled-ask', 'hub', 'hub-sub', 'review'])
     await step('k')
     expect(landed()).toBe('In flight · hub')
-    workspace.open(feed[3], 'Desk'); await flush()
+    workspace.open(feed[3], 'Desk'); await settle()
     expect(walked()).toEqual(['draft', 'settled-ask', 'settled', 'hub', 'review'])
     await step('j')
     expect(landed()).toBe('In flight · hub')
@@ -766,31 +766,31 @@ describe('workspace reader integration', () => {
     bodyCards = feed
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const title = (): string | null | undefined => document.querySelector('.ws-stage-band .ws-band-title')?.textContent
-    workspace.open(feed[0], 'Desk'); await flush()
+    workspace.open(feed[0], 'Desk'); await settle()
     expect(title()).toBe('hub')
     expect(document.querySelector('.ws-band-head button[aria-label="Settings"]')).not.toBeNull()
     // A root has no orchestrator: no way back on its line, and b does nothing.
     expect(document.querySelector<HTMLElement>('.ws-stage-band .ws-settings-ancestry')?.hidden).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
-    await flush()
+    await settle()
     expect(title()).toBe('hub')
-    workspace.open(feed[1], 'Desk'); await flush()
+    workspace.open(feed[1], 'Desk'); await settle()
     expect(title()).toBe('hub/sub')
     const links = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-stage-band .ws-settings-ancestry .ws-ancestry-link')]
     expect(links().map(b => b.textContent)).toEqual(['hub'])
-    links()[0].click(); await flush()
+    links()[0].click(); await settle()
     expect(title()).toBe('hub')
-    workspace.open(feed[2], 'Desk'); await flush()
+    workspace.open(feed[2], 'Desk'); await settle()
     expect(links().map(b => b.textContent)).toEqual(['hub', 'hub/sub'])
-    links()[0].click(); await flush()
+    links()[0].click(); await settle()
     expect(title()).toBe('hub')
-    workspace.open(feed[1], 'Desk'); await flush()
+    workspace.open(feed[1], 'Desk'); await settle()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
-    await flush()
+    await settle()
     expect(title()).toBe('hub')
   })
   it('opens the sheet of sent files from the toggle, newest first', async () => {
-    workspace.open(cards[0], 'Desk'); await flush()
+    workspace.open(cards[0], 'Desk'); await settle()
     const toggle = document.querySelector<HTMLButtonElement>('.ws-files-toggle')!
     expect(toggle.hidden).toBe(false)
     const showModal = vi.fn()
@@ -803,7 +803,7 @@ describe('workspace reader integration', () => {
     } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal') }
   })
   it('hides the toggle for a constitution with no sent files, and answers the menu with the empty sheet', async () => {
-    workspace.open(cards[1], 'Desk'); await flush()
+    workspace.open(cards[1], 'Desk'); await settle()
     expect(document.querySelector<HTMLElement>('.ws-files-toggle')!.hidden).toBe(true)
     const showModal = vi.fn()
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
@@ -820,7 +820,7 @@ describe('workspace reader integration', () => {
     bodyCards = feed
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock, onRest })
     const queue = vi.spyOn(workspace, 'queueVerdict').mockReturnValue(true)
-    workspace.open(hub, 'Desk'); await flush()
+    workspace.open(hub, 'Desk'); await settle()
     const row = document.querySelector<HTMLElement>('.ws-selected .fp-row:not(.fp-head)')!
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.focus()
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
@@ -838,7 +838,7 @@ describe('workspace reader integration', () => {
     expect(queue).toHaveBeenLastCalledWith(leaf, 'awaitingReview')
     const primary = document.querySelector<HTMLButtonElement>('.ws-worker-primary')!
     expect(primary.getAttribute('aria-label')).toBe('Resume Notch')
-    primary.click(); await flush()
+    primary.click(); await settle()
     const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
     expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/notch', resume_mode: 'previous' })
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click()
@@ -855,7 +855,7 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
     const queue = vi.spyOn(workspace, 'queueVerdict').mockReturnValue(true)
     const conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true)
-    workspace.open(leaf, 'Desk'); await flush()
+    workspace.open(leaf, 'Desk'); await settle()
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click()
     const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
     press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'leaf' }), 'composted')
@@ -866,7 +866,7 @@ describe('workspace reader integration', () => {
     input.value = 'Hello'; input.dispatchEvent(new Event('input'))
     const send = document.querySelector<HTMLButtonElement>('.ws-worker-primary')!
     expect(send.getAttribute('aria-label')).toBe('Send Other')
-    send.click(); await flush()
+    send.click(); await settle()
     const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
     expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/other', user_message: 'Hello', resume_mode: 'previous' })
     expect(document.querySelector('.ws-band-title')?.textContent).toBe('Leaf')
@@ -878,7 +878,7 @@ describe('workspace reader integration', () => {
     const feed = [hub, leaf], commit = vi.fn(), onRest = vi.fn()
     bodyCards = feed
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed, commit, undefined, { onRest }), onRest })
-    workspace.open(hub, 'Desk'); await flush()
+    workspace.open(hub, 'Desk'); await settle()
     const row = document.querySelector<HTMLElement>('.ws-selected .fp-row:not(.fp-head)')!
     const discard = row.querySelector<HTMLButtonElement>('.fp-verbs .kbn-ctl-discard')!
     expect(discard.title).toBe('Discard notch (x)')
@@ -905,19 +905,19 @@ describe('workspace reader integration', () => {
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
 
-    workspace.open(feed[0], 'Desk'); await flush()
+    workspace.open(feed[0], 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:hub')
     expect(pages()[0]).toBe('family:host-a:hub')
     expect(document.querySelector('.ws-selected .fp-head[data-current] .fp-name')?.textContent).toBe('hub')
 
-    workspace.open(feed[1], 'Desk'); await flush()
+    workspace.open(feed[1], 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:hub-leaf')
     expect(pages().indexOf('family:host-a:hub-leaf')).toBeLessThan(pages().indexOf('fiber:host-a:hub-leaf'))
     expect(chosen()).toBe('hub/leaf')
     expect(row('hub/leaf').getAttribute('aria-expanded')).toBe('true')
     expect(row('hub/leaf').hasAttribute('data-current')).toBe(true)
 
-    workspace.open(feed[2], 'Desk'); await flush()
+    workspace.open(feed[2], 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:lone')
     expect(workspace.familyDocument(card({ id: 'note', originId: 'host-a' }))).toBeUndefined()
   })
@@ -931,19 +931,19 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
-    workspace.open(feed[0], 'Desk'); await flush()
+    workspace.open(feed[0], 'Desk'); await settle()
     const scroller = (): HTMLElement => document.querySelector<HTMLElement>('.ws-selected .ws-family-scroll')!
     const key = (name: string): void => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })) }
     for (let n = 0; n < 8 && chosen() !== 'hub/b'; n++) key('j')
     expect(chosen()).toBe('hub/b')
-    key('Enter'); await flush()
+    key('Enter'); await settle()
     expect(row('hub/b').getAttribute('aria-expanded')).toBe('true')
     scroller().scrollTop = 333
     scroller().dispatchEvent(new Event('scroll'))
     expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub')
-    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-a'); await flush()
+    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-a'); await settle()
     expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub/a')
-    workspace.open(feed[0], 'Desk'); await flush()
+    workspace.open(feed[0], 'Desk'); await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:hub')
     expect(chosen()).toBe('hub/b')
     expect(row('hub/b').getAttribute('aria-expanded')).toBe('true')
@@ -960,22 +960,22 @@ describe('workspace reader integration', () => {
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
-    workspace.open(feed[0], 'Desk'); await flush()
+    workspace.open(feed[0], 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:hub')
-    row('hub/mid').click(); await flush()
+    row('hub/mid').click(); await settle()
     expect(selected()).toBe('family:host-a:hub')
     expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub')
     expect(chosen()).toBe('hub/mid')
     expect(row('hub/mid/leaf')).toBeDefined()
-    row('hub/mid').click(); await flush()
+    row('hub/mid').click(); await settle()
     expect(row('hub/mid/leaf')).toBeUndefined()
-    workspace.follow('hub-mid-leaf', 'host-a'); await flush()
+    workspace.follow('hub-mid-leaf', 'host-a'); await settle()
     expect(chosen()).toBe('hub/mid/leaf')
     expect(row('hub/mid').getAttribute('aria-expanded')).toBe('true')
     const leave = vi.spyOn(window.history, 'back')
     workspace.reader.back()
     expect(leave).toHaveBeenCalledOnce()
-    await flush()
+    await settle()
   })
   it('lands a Desk click on the page at its thread, even after reading a file there, and a draft on its own page', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -986,15 +986,15 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
-    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await flush()
+    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await settle()
     expect(selected()).toBe('fiber:host-a:hub-mid')
-    workspace.openFromDesk(feed[1]); await flush()
+    workspace.openFromDesk(feed[1]); await settle()
     expect(selected()).toBe('family:host-a:hub-mid')
     expect(chosen()).toBe('hub/mid')
-    workspace.openFromDesk(feed[0]); await flush()
+    workspace.openFromDesk(feed[0]); await settle()
     expect(selected()).toBe('family:host-a:hub')
     expect(chosen()).toBe('hub')
-    workspace.openFromDesk(feed[2]); await flush()
+    workspace.openFromDesk(feed[2]); await settle()
     expect(selected()).toBe('fiber:host-a:hub-draft')
   })
   it('follows Rex into a family without revealing back: comes to its row, lands on another family\'s page, and stands on a page of the same channel', async () => {
@@ -1008,18 +1008,18 @@ describe('workspace reader integration', () => {
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
-    workspace.open(feed[0], 'Desk'); await flush()
-    workspace.follow('hub-mid', 'host-a'); await flush()
+    workspace.open(feed[0], 'Desk'); await settle()
+    workspace.follow('hub-mid', 'host-a'); await settle()
     expect(selected()).toBe('family:host-a:hub')
     expect(chosen()).toBe('hub/mid')
     expect(row('hub/mid').hasAttribute('data-worker')).toBe(true)
-    workspace.follow('other-kid', 'host-a'); await flush()
+    workspace.follow('other-kid', 'host-a'); await settle()
     expect(selected()).toBe('family:host-a:other-kid')
     expect(chosen()).toBe('other/kid')
-    workspace.open(feed[3], 'Desk', 'fiber:host-a:other-kid'); await flush()
-    workspace.follow('other-kid', 'host-a'); await flush()
+    workspace.open(feed[3], 'Desk', 'fiber:host-a:other-kid'); await settle()
+    workspace.follow('other-kid', 'host-a'); await settle()
     expect(selected()).toBe('fiber:host-a:other-kid')
-    workspace.follow('lone', 'host-a'); await flush()
+    workspace.follow('lone', 'host-a'); await settle()
     expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('lone')
     expect(selected()).toBe('family:host-a:lone')
     expect(conversation).not.toHaveBeenCalled()
@@ -1036,11 +1036,11 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
-    await workspace.openFiber('hub-mid', 'host-a', 'constitution'); await flush()
+    await workspace.openFiber('hub-mid', 'host-a', 'constitution'); await settle()
     expect(selected()).toBe('fiber:host-a:hub-mid')
-    await workspace.openFiber('hub-mid', 'host-a', 'tapestry'); await flush()
+    await workspace.openFiber('hub-mid', 'host-a', 'tapestry'); await settle()
     expect(selected()).toBe(docKey('host-a', '/notes/hub/mid/tapestry.html', 'host-a', '/notes/hub/mid'))
-    await workspace.openFiber('hub-mid', 'host-a', 'files'); await flush()
+    await workspace.openFiber('hub-mid', 'host-a', 'files'); await settle()
     expect(selected()).toBe('family:host-a:hub-mid')
     expect(document.querySelector('.ws-selected .fp-row[aria-selected="true"]')?.hasAttribute('data-open')).toBe(true)
   })
@@ -1063,7 +1063,7 @@ describe('workspace reader integration', () => {
     })
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [thread], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    await workspace.openFiber('report-only', 'host-a', 'tapestry'); await flush()
+    await workspace.openFiber('report-only', 'host-a', 'tapestry'); await settle()
     expect(workspace.reader.document?.key).toBe(docKey('host-a', `/notes/report-only/${expected}`, 'host-a'))
     expect(workspace.reader.document?.name).toBe(expected)
   })
@@ -1083,13 +1083,13 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [thread, ...cards], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const pending = workspace.openFiber('slow-pin', 'host-a', 'tapestry')
-    await flush()
+    await settle()
     expect(answer).toBeDefined()
-    workspace.open(cards[0], 'Desk'); await flush()
+    workspace.open(cards[0], 'Desk'); await settle()
     const route = window.location.hash
     expect(route).toContain('alpha@host-a')
     answer(Response.json({ exists: true }))
-    await pending; await flush()
+    await pending; await settle()
     expect(window.location.hash).toBe(route)
   })
 
@@ -1102,7 +1102,7 @@ describe('workspace reader integration', () => {
     const dock = new Dock('', changed), conversation = vi.spyOn(dock, 'openConversation')
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
-    workspace.openFromDesk(feed[0]); await flush()
+    workspace.openFromDesk(feed[0]); await settle()
     expect(selections()).toEqual([{ tmux_session: 'worker-hub', shuttle_host: null, select_only: true }])
     row('hub/mid').click()
     row('hub/mid/leaf').click()
@@ -1112,7 +1112,7 @@ describe('workspace reader integration', () => {
     row('hub/mid').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(row('hub/mid/leaf')).toBeUndefined()
     vi.spyOn(window.history, 'back').mockImplementation(() => {})
-    workspace.reader.back(); await flush()
+    workspace.reader.back(); await settle()
     expect(selections()).toHaveLength(3)
     expect(conversation).not.toHaveBeenCalled()
   })
@@ -1127,10 +1127,10 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     expect(workspace.isActive).toBe(false)
-    workspace.follow('hub-mid', 'host-a'); await flush()
+    workspace.follow('hub-mid', 'host-a'); await settle()
     expect(workspace.isActive).toBe(true)
     expect(selected()).toBe('family:host-a:hub-mid')
-    workspace.follow('far', 'host-b'); await flush()
+    workspace.follow('far', 'host-b'); await settle()
     expect(selected()).toBe('family:host-b:far')
     expect(sight.mock.lastCall?.[0].id).toBe('far')
     expect(conversation).not.toHaveBeenCalled()
@@ -1166,7 +1166,7 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, onSight: sight, dock })
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     const seen = (): string | undefined => (sight.mock.lastCall?.[0] as KanbanCard | undefined)?.id
-    workspace.openFromDesk(feed[0]); await flush()
+    workspace.openFromDesk(feed[0]); await settle()
     expect(seen()).toBe('hub')
     expect(selections().at(-1)?.tmux_session).toBe('worker-hub')
     row('hub/mid').click()
@@ -1174,7 +1174,7 @@ describe('workspace reader integration', () => {
     expect(selections().at(-1)?.tmux_session).toBe('worker-hub/mid')
     row('hub').click()
     expect(seen()).toBe('hub')
-    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await flush()
+    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await settle()
     expect(seen()).toBe('hub/mid')
   })
   it('draws a lone constitution as its head with what it holds, and a draft on its own page', async () => {
@@ -1184,11 +1184,11 @@ describe('workspace reader integration', () => {
     bodyCards = feed
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.openFromDesk(feed[0]); await flush()
+    workspace.openFromDesk(feed[0]); await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:lone')
     expect(document.querySelectorAll('.ws-selected .fp-row')).toHaveLength(1)
     expect(document.querySelector('.ws-selected .fp-head .fp-constitution')).not.toBeNull()
-    workspace.openFromDesk(feed[1]); await flush()
+    workspace.openFromDesk(feed[1]); await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:draft')
   })
   it('toggles the selected thread\'s lead inline on the family page', async () => {
@@ -1203,8 +1203,8 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
-    const press = async (): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true })); await flush() }
-    workspace.open(feed[0], 'Desk'); await flush()
+    const press = async (): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', bubbles: true, cancelable: true })); await settle() }
+    workspace.open(feed[0], 'Desk'); await settle()
     await press()
     expect(selected()).toBe('family:host-a:hub')
     expect(document.querySelector<HTMLElement>('.ws-selected .fp-head .fp-doc')!.hidden).toBe(false)
@@ -1212,7 +1212,7 @@ describe('workspace reader integration', () => {
     await press()
     expect(selected()).toBe('family:host-a:hub')
     expect(document.querySelector<HTMLElement>('.ws-selected .fp-head .fp-doc')!.hidden).toBe(true)
-    workspace.follow('hub-mid', 'host-a'); await flush()
+    workspace.follow('hub-mid', 'host-a'); await settle()
     await press()
     expect(selected()).toBe('family:host-a:hub')
     expect(document.querySelector<HTMLElement>('.ws-selected .fp-row[aria-selected="true"] .fp-doc')!.hidden).toBe(true)
@@ -1226,13 +1226,13 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const doc = (): HTMLElement => document.querySelector<HTMLElement>('.ws-selected .fp-row[data-row$="hub/mid"] .fp-doc')!
     const selected = (): HTMLElement => document.querySelector<HTMLElement>('.ws-selected .fp-row[aria-selected="true"]')!
-    const press = async (key: string): Promise<void> => { selected().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); await flush() }
-    workspace.openFromDesk(feed[0]); await flush()
+    const press = async (key: string): Promise<void> => { selected().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); await settle() }
+    workspace.openFromDesk(feed[0]); await settle()
     await press('j'); await press('l')
     expect(doc().hidden).toBe(false)
     await pop(() => workspace.returnToOrigin())
     expect(workspace.isActive).toBe(false)
-    workspace.openFromDesk(feed[0]); await flush()
+    workspace.openFromDesk(feed[0]); await settle()
     expect(workspace.isActive).toBe(true)
     expect(selected().classList.contains('fp-head')).toBe(true)
     expect(doc().hidden).toBe(false)
@@ -1249,7 +1249,7 @@ describe('workspace reader integration', () => {
     bodyCards = feed
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(feed[0], 'Desk'); await flush()
+    workspace.open(feed[0], 'Desk'); await settle()
     document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!.click()
     const items = [...document.querySelectorAll('.ws-menu .ws-menu-item')].map(item => item.textContent)
     expect(items).toContain('Copy path')
@@ -1267,12 +1267,12 @@ describe('workspace reader integration', () => {
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     const row = (name: string): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')?.title === name)!
     const chosen = (): string | undefined => document.querySelector('.ws-selected .fp-row[aria-selected="true"] .fp-name')?.getAttribute('title') ?? undefined
-    workspace.open(hub, 'Desk'); await flush()
+    workspace.open(hub, 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:hub')
     feed = [hub, leaf]
-    workspace.update(); await flush()
+    workspace.update(); await settle()
     expect(selected()).toBe('family:host-a:hub')
-    row('hub/leaf').click(); await flush()
+    row('hub/leaf').click(); await settle()
     expect(selected()).toBe('family:host-a:hub')
     expect(chosen()).toBe('hub/leaf')
     expect(row('hub/leaf').getAttribute('aria-expanded')).toBe('true')
@@ -1296,7 +1296,7 @@ describe('workspace reader integration', () => {
       threadIndex: () => new ThreadIndex(rows), origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed),
     })
-    workspace.open(rows[0], 'Desk'); await flush()
+    workspace.open(rows[0], 'Desk'); await settle()
     expect(walked()).toEqual(rows.map(row => row.uid ?? row.id))
     const columns: string[] = []
     for (let n = 0; n < 4; n++) { await step('J'); columns.push(landed()!.split(' · ')[0]) }
@@ -1318,7 +1318,7 @@ describe('workspace reader integration', () => {
     expect(document.activeElement).toBe(find)
     find.value = 'table.html'; find.dispatchEvent(new Event('input'))
     expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(0)
-    await flush()
+    await settle()
     expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(1)
     expect(document.activeElement).toBe(find)
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/sent-files/all/'))).toHaveLength(1)
@@ -1333,7 +1333,7 @@ describe('workspace reader integration', () => {
     expect(vi.mocked(fetch).mock.calls.length).toBe(reads)
     expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(1)
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    await flush()
+    await settle()
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
@@ -1348,15 +1348,15 @@ describe('workspace reader integration', () => {
         return original(input, init)
       })
       const key = docKey('host-a', `/notes/alpha/${landing}`, 'host-a')
-      workspace.open(cards[0], 'Desk', landing === 'report.html' ? undefined : key); await flush()
+      workspace.open(cards[0], 'Desk', landing === 'report.html' ? undefined : key); await settle()
       const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
       // Before the body, the selected page shows; the strip and ticks wait unseen, and stepping does nothing.
       expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
       expect(workspace.reader.el.querySelector('.ws-tabs,.ws-page-ticks')).toBeNull()
       for (const press of ['G', 'l']) document.dispatchEvent(new KeyboardEvent('keydown', { key: press, bubbles: true, cancelable: true }))
-      await flush()
+      await settle()
       expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
-      release(); await flush(); await flush()
+      release(); await settle(); await settle()
       expect(selected()).toBe(key)
       expect(workspace.reader.el.querySelector('.ws-tabs,.ws-page-ticks')).toBeNull()
       await pop(() => workspace.reader.back())
@@ -1372,14 +1372,14 @@ describe('workspace reader integration', () => {
       if (String(input).includes('/api/v1/sent-files?')) await gate
       return original(input, init)
     })
-    workspace.open(cards[0]); await flush(); await flush()
+    workspace.open(cards[0]); await settle(); await settle()
     const prose = (): string => document.querySelector('.ws-prose')?.textContent ?? ''
     // The body is in hand: its prose shows and the loading note is gone, while the run waits.
     expect(prose()).toContain('The result is ready.')
     expect(document.querySelector('.ws-body-status')).toBeNull()
     expect(workspace.reader.el.querySelector('.ws-tabs,.ws-page-choice')).toBeNull()
-    workspace.update(); await flush()
-    release(); await flush(); await flush()
+    workspace.update(); await settle()
+    release(); await settle(); await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:alpha')
     expect(workspace.reader.host.get(docKey('host-a', '/notes/alpha/table.html', 'host-a'))).toBeDefined()
   })
@@ -1391,12 +1391,12 @@ describe('workspace reader integration', () => {
       if (String(input).includes('/api/v1/sent-files?')) await gate
       return original(input, init)
     })
-    workspace.open(cards[0]); await flush(); await flush()
+    workspace.open(cards[0]); await settle(); await settle()
     const table = docKey('host-a', '/notes/alpha/table.html', 'host-a')
-    workspace.open(cards[0], 'Desk', table); await flush()
+    workspace.open(cards[0], 'Desk', table); await settle()
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     expect(selected()).toBe(table)
-    release(); await flush(); await flush()
+    release(); await settle(); await settle()
     expect(selected()).toBe(table)
   })
   it('owner-routes file mtimes in Unix seconds for embeds and body links without reordering the strip', async () => {
@@ -1407,7 +1407,7 @@ describe('workspace reader integration', () => {
       return original(input, init)
     })
     await feedNamesReport()
-    workspace.open(cards[0]); await flush()
+    workspace.open(cards[0]); await settle()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
@@ -1418,7 +1418,7 @@ describe('workspace reader integration', () => {
     expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
     workspace.reader.openDocument('fiber:host-a:alpha')
     document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!.click()
-    await flush()
+    await settle()
     const selectedKey = document.querySelector('.ws-selected')?.getAttribute('data-key')
     expect(workspace.reader.host.get(selectedKey!)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
   })
@@ -1426,7 +1426,7 @@ describe('workspace reader integration', () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/file-info?') ? new Promise<Response>(() => {}) : original(input, init))
     await feedNamesReport()
-    workspace.open(cards[0]); await flush()
+    workspace.open(cards[0]); await settle()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
     expect(workspace.reader.host.get(docKey('host-a', '/notes/alpha/table.html', 'host-a'))).toBeDefined()
@@ -1471,22 +1471,22 @@ describe('workspace reader integration', () => {
 
     const reportA = docKey('host-a', '/notes/shared/report.html', 'host-a')
     const reportB = docKey('host-b', '/notes/shared/report.html', 'host-b')
-    workspace.open(shared[0]); await flush()
+    workspace.open(shared[0]); await settle()
     expect(workspace.reader.host.get(reportA)?.doc.provenance).toContainEqual({ kind: 'sent', time: 10, session: 'session-a' })
     const receiptCache = (workspace as unknown as { receipts: Map<string, { files: Array<{ uid?: string; host?: string }> }> }).receipts
     expect(receiptCache.get(JSON.stringify(['host-a', 'shared-uid']))?.files[0]).toMatchObject({ uid: 'shared-uid', host: 'host-a' })
     const byteOwned = workspace.reader.host.get(docKey('archive-host', '/remote/atlas.html', 'host-a'))
     expect(byteOwned?.doc.owner).toBe('archive-host')
     expect(byteOwned?.doc.provenance).toContainEqual({ kind: 'sent', time: 11, session: 'session-byte-owner' })
-    workspace.open(shared[1]); await flush()
+    workspace.open(shared[1]); await settle()
     expect(workspace.reader.host.get(reportB)?.doc.provenance).toContainEqual({ kind: 'sent', time: 20, session: 'session-b' })
     expect(workspace.reader.host.get(reportB)?.doc.provenance).not.toContainEqual(expect.objectContaining({ session: 'session-a' }))
 
-    workspace.open(shared[0]); await flush()
+    workspace.open(shared[0]); await settle()
     expect(workspace.reader.host.get(reportA)?.doc.provenance).toContainEqual({ kind: 'sent', time: 10, session: 'session-a' })
-    workspace.open(shared[1]); await flush()
+    workspace.open(shared[1]); await settle()
     failA = true
-    workspace.open(shared[0]); await flush()
+    workspace.open(shared[0]); await settle()
     expect(workspace.reader.host.get(reportA)?.doc.provenance).toContainEqual({ kind: 'sent', time: 10, session: 'session-a' })
 
     const receiptCalls = calls.filter(call => call.url.includes('/api/v1/sent-files?'))
@@ -1503,7 +1503,7 @@ describe('workspace reader integration', () => {
   it('opens on the report the receipt feed already names, and retains the same iframe through pages, expand and return', async () => {
     await feedNamesReport()
     workspace.open(cards[0])
-    await flush()
+    await settle()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const frame = workspace.reader.host.get(reportKey)!
     const iframe = frame.content.querySelector('iframe')!
@@ -1519,7 +1519,7 @@ describe('workspace reader integration', () => {
     workspace.reader.hide()
     expect(frame.el.classList.contains('ws-parked')).toBe(true)
     workspace.open(cards[0])
-    await flush()
+    await settle()
     expect(workspace.reader.host.get(reportKey)?.content.querySelector('iframe')).toBe(iframe)
     expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(1)
   })
@@ -1530,7 +1530,7 @@ describe('workspace reader integration', () => {
     onTestFinished(() => { cards[0] = original })
     await feedNamesReport()
     workspace.open(cards[0])
-    await flush()
+    await settle()
     expect(workspace.reader.document?.name).toBe('report.html')
     const band = document.querySelector<HTMLElement>('.ws-stage-band')!
     expect(band.hidden).toBe(false)
@@ -1549,7 +1549,7 @@ describe('workspace reader integration', () => {
     expect(band.hidden).toBe(false)
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
-    await flush()
+    await settle()
     expect(workspace.reader.host.get(docKey('host-a', '/notes/alpha/report.html', 'host-a'))).toBeDefined()
     const dataFrame = workspace.reader.host.get(docKey('host-a', '/notes/alpha/data.csv', 'host-a'))!
     expect(dataFrame.doc.provenance.some(p => p.kind === 'link')).toBe(true)
@@ -1571,18 +1571,18 @@ describe('workspace reader integration', () => {
     })
     const band = (): HTMLElement => document.querySelector<HTMLElement>('.ws-stage-band')!
     const name = (): string | null | undefined => band().querySelector('.ws-band-title')?.textContent
-    workspace.open(ownerCards[0]); await flush()
+    workspace.open(ownerCards[0]); await settle()
     expect(band().hidden).toBe(false)
     expect(name()).toBe('Alpha copy')
     const dock = band().querySelector('.ws-dock')
-    workspace.open(ownerCards[1]); await flush()
+    workspace.open(ownerCards[1]); await settle()
     expect(name()).toBe('Beta copy')
     expect(band().querySelector('.ws-dock')).toBe(dock)
     expect(band().querySelectorAll('.ws-dock')).toHaveLength(1)
-    workspace.open(ownerCards[2]); await flush()
+    workspace.open(ownerCards[2]); await settle()
     expect(band().hidden).toBe(true)
     expect(band().children).toHaveLength(0)
-    workspace.open(ownerCards[0]); await flush()
+    workspace.open(ownerCards[0]); await settle()
     expect(band().hidden).toBe(false)
     expect(name()).toBe('Alpha copy')
   })
@@ -1599,7 +1599,7 @@ describe('workspace reader integration', () => {
       dock: new Dock('', changed, transition, vi.fn()),
     })
     workspace.open(liveCards[0])
-    await flush()
+    await settle()
     const band = document.querySelector<HTMLElement>('.ws-stage-band .ws-dock')!
     liveCards = [{ ...liveCards[0], id: 'b/task', path: 'b/task/task.md', fiberDir: '/notes/b/task',
       feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b',
@@ -1611,7 +1611,7 @@ describe('workspace reader integration', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const fresh = band.querySelector<HTMLButtonElement>('.ws-worker-acts button[data-verb="New session"]')!
     fresh.click()
-    await flush()
+    await settle()
     expect(confirm).toHaveBeenCalledOnce()
     vi.useFakeTimers()
     confirm.mockReturnValue(true)
@@ -1627,7 +1627,7 @@ describe('workspace reader integration', () => {
     }), 'tempered')
     vi.mocked(fetch).mockClear()
     fresh.click()
-    await flush()
+    await settle()
     const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/dispatch'))!
     expect(JSON.parse(String(request[1]?.body))).toMatchObject({ fiber_id: 'b/task', origin: 'host-a', user_message: '', resume_mode: 'fresh' })
   })
@@ -1637,7 +1637,7 @@ describe('workspace reader integration', () => {
     cards[0] = { ...original, shuttleKind: 'oneshot' }
     onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0])
-    await flush()
+    await settle()
     const escape = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) }
     const expand = document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!
     expand.click()
@@ -1665,7 +1665,7 @@ describe('workspace reader integration', () => {
     workspace.openStartPrompt(managed, { reason: 'arm_refused', needs: 'project_dir', host: 'host-a', message: 'Choose a project directory.' })
     const band = workspace.dock.el
     expect(document.activeElement).toBe(band.querySelector('.kbn-start-prompt input'))
-    await flush()
+    await settle()
     expect(workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('alpha@host-a')
     expect(workspace.reader.document?.kind).toBe('fiber')
@@ -1681,13 +1681,13 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const historyLength = window.history.length
     workspace.open(cards[0])
-    await flush()
+    await settle()
     const key = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const iframe = workspace.reader.host.get(key)!.content.querySelector('iframe')
     expect(window.history.length).toBe(historyLength + 1)
     const nextBack = (): Promise<void> => new Promise(resolve => { window.addEventListener('popstate', () => resolve(), { once: true }); window.history.back() })
     await nextBack()
-    await flush()
+    await settle()
     expect(workspace.isActive).toBe(false)
     expect(window.location.hash).toBe('')
     expect(workspace.reader.host.get(key)?.content.querySelector('iframe')).toBe(iframe)
@@ -1704,7 +1704,7 @@ describe('workspace reader integration', () => {
       dock: new Dock('', changed, undefined, openWorker),
     })
     workspace.open(live)
-    await flush()
+    await settle()
     // The band draws no opening of its own; the navbar pill and c reach the conversation.
     expect(document.querySelectorAll('.ws-dock .kbn-card-worker, .ws-band-open')).toHaveLength(0)
     const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!
@@ -1720,10 +1720,10 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-fiber-prose .ws-dock')).toBeNull()
 
     workspace.returnToOrigin()
-    await flush()
+    await settle()
     workspace.mountOverview(document.body)
     workspace.showBoard()
-    await flush()
+    await settle()
     const chat = document.querySelector<HTMLButtonElement>('.ws-overview-folio-conversation')!
     expect(chat.hidden).toBe(false)
     openWorker.mockClear()
@@ -1749,9 +1749,9 @@ describe('workspace reader integration', () => {
       dock: new Dock('', changed),
     })
     workspace.open(orderedCards[0])
-    await flush()
+    await settle()
     expect(workspace.reader.document?.key).toBe('fiber:host-a:first')
-    workspace.open(orderedCards[1]); await flush()
+    workspace.open(orderedCards[1]); await settle()
     expect(workspace.reader.document?.key).toBe('fiber:host-b:second')
     const prose = workspace.reader.host.get('fiber:host-b:second')!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
@@ -1759,7 +1759,7 @@ describe('workspace reader integration', () => {
   })
 
   it('uses the Reader back key to pop an opened file to its parent', async () => {
-    workspace.open(cards[0]); await flush()
+    workspace.open(cards[0]); await settle()
     const key = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     workspace.reader.openDocument(key)
     expect(workspace.reader.document?.key).toBe(key)
@@ -1770,7 +1770,7 @@ describe('workspace reader integration', () => {
 
   it('leaves Enter and Space activation on native expand controls alone', async () => {
     workspace.open(cards[0])
-    await flush()
+    await settle()
     const expand = document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!
     for (const key of ['Enter', ' ']) {
       const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
@@ -1785,15 +1785,15 @@ describe('workspace reader integration', () => {
 
   it('uses j/k for constitution order and held arrows for document scrolling', async () => {
     workspace.open(cards[1])
-    await flush()
+    await settle()
     const ordered = [cards[0], cards[1]]
     workspace.open(ordered[0])
-    await flush()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
-    await flush()
+    await settle()
+    // Stepping onto Beta returns to its history entry: the step lands with the traversal.
+    await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })))
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[1].name)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true }))
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[0].name)
 
     workspace.reader.openDocument('fiber:host-a:alpha')
@@ -1828,7 +1828,7 @@ describe('workspace reader integration', () => {
 
   it('switches Reader focus modality from keyboard to pointer input', async () => {
     workspace.open(cards[0])
-    await flush()
+    await settle()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }))
     expect(workspace.reader.el.classList.contains('ws-keyboard')).toBe(true)
     document.dispatchEvent(new Event('pointerdown', { bubbles: true }))
@@ -1837,7 +1837,7 @@ describe('workspace reader integration', () => {
 
   it('keeps label controls and their keyboard focus through metadata polls', async () => {
     workspace.open(cards[0])
-    await flush()
+    await settle()
     const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
     control.focus()
     workspace.update()
@@ -1858,9 +1858,9 @@ describe('workspace reader integration', () => {
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
     // Nothing names a page at open: the fiber's own page paints and stays.
-    workspace.open(cards[0]); await flush()
+    workspace.open(cards[0]); await settle()
     expect(selected()).toBe('fiber:host-a:alpha')
-    deliver(); await flush()
+    deliver(); await settle()
     expect(workspace.reader.host.get(reportKey)).toBeTruthy()
     expect(selected()).toBe('fiber:host-a:alpha')
     expect(window.location.hash).not.toContain(encodeURIComponent(reportKey))
@@ -1871,10 +1871,10 @@ describe('workspace reader integration', () => {
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(tableKey)}`)
     window.dispatchEvent(new HashChangeEvent('hashchange'))
-    await flush()
+    await settle()
     expect(selected()).toBe(tableKey)
     const frame = workspace.reader.host.get(tableKey)!.el
-    deliver(); await flush()
+    deliver(); await settle()
     expect(selected()).toBe(tableKey)
     expect(workspace.reader.host.get(tableKey)!.el).toBe(frame)
   })
@@ -1885,7 +1885,7 @@ describe('workspace reader integration', () => {
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(reportKey)}`)
     window.dispatchEvent(new HashChangeEvent('hashchange'))
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
   })
 
@@ -1893,7 +1893,7 @@ describe('workspace reader integration', () => {
     const gone = docKey('host-a', '/notes/alpha/gone.html', 'host-a')
     window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(gone)}`)
     window.dispatchEvent(new HashChangeEvent('hashchange'))
-    await flush()
+    await settle()
     expect(workspace.reader.document?.key).toBe(gone)
     workspace.reader.back()
     expect(workspace.isActive).toBe(false)
@@ -1908,7 +1908,7 @@ describe('workspace reader integration', () => {
     workspace.open(cards[0])
     workspace.reader.openDocument('fiber:host-a:alpha')
     deliver(fiberReadResponse(cards[0]))
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:alpha')
   })
 
@@ -1926,19 +1926,19 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(open).not.toHaveBeenCalled()
     deliver(fiberReadResponse(managed))
-    await flush()
+    await settle()
     workspace.open(managed)
-    await flush()
+    await settle()
     const band = document.querySelector<HTMLElement>('.ws-stage-band .ws-dock')!
     expect(band.querySelector('.kbn-detail-controls-toggle')?.textContent).toContain('codex-sol')
   })
 
   it('gives an unknown routed fiber its own retryable failure page', async () => {
     workspace.open(cards[0])
-    await flush()
+    await settle()
     window.history.replaceState(null, '', '#/board/no-card@host-b')
     window.dispatchEvent(new HashChangeEvent('hashchange'))
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('no-card')
     expect(document.querySelector('.ws-selected')?.textContent).toContain('Fiber not found on host-b')
     expect(document.querySelector('.ws-selected')?.textContent).toContain('Retry')
@@ -1947,30 +1947,30 @@ describe('workspace reader integration', () => {
 
   it('mouse entry does not focus chrome, but keyboard entry does', async () => {
     workspace.open(cards[1])
-    await flush()
+    await settle()
     workspace.open(cards[0])
-    await flush()
+    await settle()
     expect(document.activeElement).not.toBe(document.querySelector('.ws-return'))
     const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
     const press = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
     control.dispatchEvent(press)
     expect(press.defaultPrevented).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
-    await flush()
+    await settle()
     expect(document.activeElement).toBe(document.querySelector('.ws-return'))
   })
 
   it('keeps Alt-arrow stepping in Desk order and ignores messages from unrelated frames', async () => {
     workspace.open(cards[1])
-    await flush()
+    await settle()
     const ordered = [cards[0], cards[1]]
     const hash = window.location.hash
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'shuttle-workspace-key', key: 'ArrowRight' }, source: window }))
     expect(window.location.hash).toBe(hash)
     workspace.open(ordered[0])
-    await flush()
+    await settle()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[1].name)
     expect(window.location.hash).toContain(`${ordered[1].uid ?? ordered[1].id}@${ordered[1].originId}`)
     expect(visibility).toHaveBeenCalledWith(true)
@@ -1978,7 +1978,7 @@ describe('workspace reader integration', () => {
 
   it('restores a Desk-opened channel over Desk after reload', async () => {
     workspace.open(cards[0])
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
     expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'desk' } })
 
@@ -1989,7 +1989,7 @@ describe('workspace reader integration', () => {
       shuttleBase: '', cards: () => cards, origin: () => 'Board', onVisibility: visibility, onView,
       dock: new Dock('', changed),
     })
-    await flush()
+    await settle()
 
     expect(onView).toHaveBeenCalledWith('desk')
     expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
@@ -1998,11 +1998,11 @@ describe('workspace reader integration', () => {
   it('restores the Board return for a file route after reload', async () => {
     workspace.mountOverview(document.body)
     workspace.showBoard()
-    await flush()
+    await settle()
     await feedNamesReport()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
     expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'board', base: true } })
 
@@ -2014,14 +2014,14 @@ describe('workspace reader integration', () => {
       dock: new Dock('', changed),
     })
     workspace.mountOverview(document.body)
-    await flush()
+    await settle()
     expect(onView).toHaveBeenCalledWith('board')
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
 
     const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     await returned
-    await flush()
+    await settle()
     expect(window.location.hash).toBe('#/board')
     expect(workspace.overview.el.hidden).toBe(false)
   })
@@ -2029,15 +2029,15 @@ describe('workspace reader integration', () => {
   it('restores the Board return after reloading a nested file route', async () => {
     workspace.mountOverview(document.body)
     workspace.showBoard()
-    await flush()
+    await settle()
     await feedNamesReport()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
-    await flush()
+    await settle()
     expect(workspace.reader.host.get(tableKey)).toBeTruthy()
     workspace.reader.openDocument(tableKey)
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
     expect(window.history.state).toMatchObject({ shuttleWorkspace: { back: { pageLabel: 'report.html' }, depth: 2 } })
 
@@ -2048,7 +2048,7 @@ describe('workspace reader integration', () => {
       dock: new Dock('', changed),
     })
     workspace.mountOverview(document.body)
-    await flush()
+    await settle()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
 
     await pop(() => workspace.reader.back())
@@ -2056,7 +2056,7 @@ describe('workspace reader integration', () => {
     const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
     workspace.reader.back()
     await returned
-    await flush()
+    await settle()
     expect(window.location.hash).toBe('#/board')
     expect(workspace.overview.el.hidden).toBe(false)
   })
@@ -2064,13 +2064,13 @@ describe('workspace reader integration', () => {
   it('restores overview scroll after returning from a channel opened on the Board', async () => {
     workspace.mountOverview(document.body)
     workspace.showBoard()
-    await flush()
+    await settle()
     await feedNamesReport()
     workspace.overview.opened(cards[0])
     const overview = workspace.overview.el
     overview.scrollTop = 432
     overview.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
-    await flush()
+    await settle()
     expect(workspace.reader.isActive).toBe(true)
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
     expect(overview.hidden).toBe(true)
@@ -2079,7 +2079,7 @@ describe('workspace reader integration', () => {
     const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     await returned
-    await flush()
+    await settle()
     expect(window.location.hash).toBe('#/board')
     expect.soft(overview.hidden).toBe(false)
     expect(overview.scrollTop).toBe(432)
@@ -2088,10 +2088,10 @@ describe('workspace reader integration', () => {
   it('resumes the last Board channel after Desk suspension, but not after an explicit return', async () => {
     workspace.mountOverview(document.body)
     workspace.showBoard()
-    await flush()
+    await settle()
     workspace.overview.opened(cards[0])
     workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
-    await flush()
+    await settle()
     expect(workspace.reader.isActive).toBe(true)
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
 
@@ -2099,13 +2099,13 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.isActive).toBe(false)
     expect(window.location.hash).toBe('#/desk')
     workspace.showBoard()
-    await flush()
+    await settle()
     expect(workspace.reader.isActive).toBe(true)
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
 
     await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
     workspace.showBoard()
-    await flush()
+    await settle()
     expect(workspace.reader.isActive).toBe(false)
     expect(workspace.overview.el.hidden).toBe(false)
     expect(window.location.hash).toBe('#/board')
