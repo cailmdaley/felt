@@ -158,14 +158,19 @@ defmodule Shuttle.FiberDocuments do
   cache-state: `%{state, refreshed_at, entries, last_refresh_ms}`) is stamped
   under `:cache` when given, so a viewer can render "stale as of T" instead of
   "down". The direct (uncached) `list/1` path passes no cache metadata.
+
+  Every served row carries its `column` and `turn` (`Shuttle.Lifecycle.stamp/2`),
+  read against whatever runtime the caller stamped on it.
   """
   @spec envelope([String.t()], [entry()], map() | nil) :: map()
   def envelope(stores, entries, cache \\ nil) do
+    now = DateTime.utc_now()
+
     base = %{
       host: Shuttle.Poller.own_host_id(),
       felt_stores: stores,
-      generated_at: DateTime.to_iso8601(DateTime.utc_now()),
-      fibers: entries
+      generated_at: DateTime.to_iso8601(now),
+      fibers: Shuttle.Lifecycle.stamp(entries, now)
     }
 
     if cache, do: Map.put(base, :cache, cache), else: base

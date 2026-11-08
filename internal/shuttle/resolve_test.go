@@ -112,6 +112,9 @@ func TestResolveBlock_StandingNextDue(t *testing.T) {
 	if nd.Weekday() == time.Saturday || nd.Weekday() == time.Sunday {
 		t.Fatalf("next_due %v lands on a weekend; cron is Mon-Fri", nd)
 	}
+	if res.ScheduleText != "weekdays 9:00" {
+		t.Fatalf("schedule_text = %q, want the cadence said aloud", res.ScheduleText)
+	}
 }
 
 // TestResolveBlock_StandingPrevDue locks the field the daemon's catch-up

@@ -40,13 +40,13 @@ func Verdict(f *felt.Felt) string {
 	}
 }
 
-// Column is the Desk column the board files a constitution in
-// (ui/src/board/deskColumn.ts): drafts, in_flight, awaiting_review, tempered,
-// discarded, resting (a draft put down, or a standing constitution between
-// firings) or roles (a seat at rest). live is whether its worker runs; today
-// is the civil day a due date is read against. The daemon's thread roster
-// files by the same rules (Shuttle.Threads.column/2), and
-// daemon/test/fixtures/columns holds the three classifiers equal.
+// Column is the Desk column a constitution sits in: drafts, in_flight,
+// awaiting_review, tempered, discarded, resting (a draft put down, or a
+// standing constitution between firings) or roles (a seat at rest). live is
+// whether its worker runs; today is the civil day a due date is read against.
+// The daemon, which holds the live runtime, serves the same column on every
+// board row (Shuttle.Lifecycle.column/3); daemon/test/fixtures/columns holds
+// the two equal.
 func Column(f *felt.Felt, block *Block, live bool, today time.Time) string {
 	if f.Status == felt.StatusClosed {
 		if verdict := Verdict(f); verdict != "" {

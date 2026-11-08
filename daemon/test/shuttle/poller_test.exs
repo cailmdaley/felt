@@ -457,8 +457,11 @@ defmodule Shuttle.PollerTest do
              "other-uid" => nil
            }
 
+    # Every constitution is served where it stands; the rest of the row is the cache's.
     for row <- feed do
-      assert Map.delete(row, :orchestrator) ==
+      assert %{column: "drafts", turn: "none"} = row
+
+      assert Map.drop(row, [:orchestrator, :column, :turn]) ==
                Enum.find(entries, &(&1.fiber["id"] == row.fiber["id"]))
     end
   end

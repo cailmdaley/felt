@@ -1,7 +1,7 @@
 defmodule Shuttle.Threads do
   @moduledoc "Constitution containment and owner-local result delivery."
 
-  alias Shuttle.{Delivery, FiberDocuments, OriginRouter, Remote, ThreadOutbox}
+  alias Shuttle.{Delivery, FiberDocuments, Lifecycle, OriginRouter, Remote, ThreadOutbox}
 
   @doc """
   Nearest strict ancestor that orchestrates, in the same felt store: one
@@ -602,25 +602,25 @@ defmodule Shuttle.Threads do
   end
 
   defp grow(children, key, {live, reachable, by_uid} = seen) do
+    now_ms = System.system_time(:millisecond)
+
     children
     |> Map.get(key, [])
     |> Enum.sort_by(&address(&1.fiber))
     |> Enum.map(fn %{fiber: fiber} = entry ->
       live? = live?(fiber, live)
       host = get_in(fiber, ["shuttle", "host"])
+      runtime = Map.get(entry, :runtime)
+      error = Map.get(entry, :dispatch_error) || (runtime && field(runtime, :launch_error))
 
-      state =
-        if Map.get(entry, :unknown_owner_state), do: "Unknown", else: thread_state(fiber, live?)
-
-      column = if Map.get(entry, :unknown_owner_state), do: "unknown", else: column(fiber, live?)
-
-      error =
-        Map.get(entry, :dispatch_error) || field(Map.get(entry, :runtime) || %{}, :launch_error)
-
-      state =
-        if error && fiber["status"] == "active" && !Map.get(entry, :unknown_owner_state),
-          do: "Blocked",
-          else: state
+      {column, state} =
+        if Map.get(entry, :unknown_owner_state) do
+          {"unknown", "Unknown"}
+        else
+          column = Lifecycle.column(fiber, live?)
+          turn = Lifecycle.turn(fiber, live?, runtime, error, now_ms)
+          {column, thread_state(fiber, column, turn, live?)}
+        end
 
       blocked = blocked_on(fiber)
 
@@ -920,84 +920,26 @@ defmodule Shuttle.Threads do
   end
 
   @doc """
-  The Desk column a constitution sits in, as the board files it
-  (`ui/src/board/deskColumn.ts`): `drafts`, `in_flight`, `awaiting_review`,
-  `tempered`, `discarded`, `resting` (a draft put down, or a standing
-  constitution between firings) or `roles` (a seat at rest). `live?` is whether
-  its worker is running. `shuttle status --json` reports the same column
-  (`internal/shuttle/column.go`); `test/fixtures/columns/cases.json` holds them equal.
+  A thread's roster state, from its column (`Shuttle.Lifecycle.column/3`) and
+  turn (`Shuttle.Lifecycle.turn/5`): a verdict Archived, a closed run To
+  review, a draft Draft, an active constitution whose turn is blocked Blocked,
+  In flight split into Waiting (the human's move), Working (a live worker) and
+  Armed (no worker running), and a rest or a seat Resting. The board's rails
+  (`ui/src/board/threads.ts` `threadState`) read the same column and turn, and
+  file Armed as Working and Blocked as Waiting.
   """
-  def column(fiber, live?) do
-    shuttle = fiber["shuttle"] || %{}
-    status = fiber["status"]
-
+  def thread_state(fiber, column, turn, live?) do
     cond do
-      status == "closed" and fiber["tempered"] == true -> "tempered"
-      status == "closed" and fiber["tempered"] == false -> "discarded"
-      status == "closed" -> "awaiting_review"
-      live? -> "in_flight"
-      seat_at_rest?(shuttle, status) -> "roles"
-      status == "active" and shuttle["kind"] == "standing" -> "resting"
-      status == "active" -> "in_flight"
-      stashed?(fiber) -> "resting"
-      true -> "drafts"
+      column in ["tempered", "discarded"] -> "Archived"
+      column == "awaiting_review" -> "To review"
+      column == "drafts" -> "Draft"
+      turn == "blocked" and fiber["status"] == "active" -> "Blocked"
+      column != "in_flight" -> "Resting"
+      Lifecycle.yours?(turn) -> "Waiting"
+      live? -> "Working"
+      true -> "Armed"
     end
   end
-
-  defp seat_at_rest?(shuttle, status) do
-    shuttle["seat"] == true and is_binary(shuttle["role"]) and shuttle["role"] != "" and
-      (status != "active" or shuttle["kind"] == "standing")
-  end
-
-  # Put down (`horizon: stashed`) unless a `due:` day that has come pulls it back.
-  defp stashed?(fiber) do
-    fiber["horizon"] == "stashed" and
-      case fiber["due"] do
-        due when is_binary(due) and byte_size(due) >= 10 ->
-          case Date.from_iso8601(binary_part(due, 0, 10)) do
-            {:ok, day} -> Date.compare(day, Date.utc_today()) == :gt
-            _ -> true
-          end
-
-        _ ->
-          true
-      end
-  end
-
-  @doc """
-  A thread's roster state: its column, with In flight split into Waiting (an
-  outstanding ask), Working (a live worker) and Armed (active with no worker
-  running), a verdict archived, and a rest or a seat Resting. The board's rails
-  (`ui/src/board/threads.ts` `threadState`) file Armed as Working, and also
-  read a harness stopped on a prompt as Waiting; the daemon's runtime record
-  does not carry that turn.
-  """
-  def thread_state(fiber, live?) do
-    case column(fiber, live?) do
-      verdict when verdict in ["tempered", "discarded"] ->
-        "Archived"
-
-      "awaiting_review" ->
-        "To review"
-
-      "drafts" ->
-        "Draft"
-
-      "in_flight" ->
-        cond do
-          asking?(fiber) -> "Waiting"
-          live? -> "Working"
-          true -> "Armed"
-        end
-
-      _ ->
-        "Resting"
-    end
-  end
-
-  # An ask counts only on an active card, as the board's `turnOf` reads it.
-  defp asking?(fiber),
-    do: fiber["status"] == "active" and is_map(get_in(fiber, ["shuttle", "ask"]))
 
   defp first_sentence(text) when is_binary(text) and text != "" do
     sentence = text |> String.split(~r/(?<=[.!?])\s|\n/, parts: 2) |> hd() |> String.trim()

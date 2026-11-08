@@ -288,6 +288,18 @@ Each constitution entry in the owner's Desk feed has `orchestrator`: the wire id
 The relation skips intervening ordinary fibers and retains ancestors owned by another host, even though those ancestors do not appear in this owner's rows.
 Containment uses canonical slugs within each felt store; existing fiber, path, report and runtime fields remain unchanged.
 
+Every constitution entry a daemon serves (its owner feed, `/fibers/:id`, and
+the listings) carries `column` and `turn`, read against the worker runtime
+that daemon serves on the row (`Shuttle.Lifecycle`); a document read serves
+none, so its pair is the constitution's at rest. `column` is the Desk column:
+`drafts`, `in_flight`, `awaiting_review`, `tempered`, `discarded`, `resting` or
+`roles`, by the rule `shuttle status --json` reports. `turn` is whose move it
+is: `question`, `blocked` or `idle` (the human's), `working`, `starting` or
+`no-signal` (the worker's), or `none`. The composite carries each remote
+owner's pair unchanged. Shuttle's resolved view under `fiber.shuttle.resolved`
+carries a standing schedule's `next_due` and, when it can be said plainly, its
+`schedule_text` (`weekdays 9:00`).
+
 An owned constitution entry with no live worker carries `pending_results` while something waits for its next worker: the number of thread results and messages in its context mailbox, plus results addressed to it still in the owner's outbox. The field is absent when nothing waits or a worker is live.
 The owner counts after each poll's delivery pass, so a count trails a new arrival by up to one poll; the composite carries each remote owner's count unchanged.
 `GET /threads/*id` carries the same count on the orchestrator (`pending_results`) and on each thread this host owns.

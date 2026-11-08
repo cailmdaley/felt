@@ -43,12 +43,16 @@ type Resolved struct {
 	// blocks and when the schedule won't parse.
 	NextDue *time.Time `json:"next_due,omitempty"`
 	PrevDue *time.Time `json:"prev_due,omitempty"`
+	// ScheduleText is a standing schedule as a person says it (ScheduleText),
+	// absent when that vocabulary cannot say it faithfully. The board draws it
+	// beside the cron expression.
+	ScheduleText string `json:"schedule_text,omitempty"`
 }
 
 // IsEmpty reports whether nothing resolved (no agent, no schedule) — callers
 // skip attaching an empty resolved object.
 func (r *Resolved) IsEmpty() bool {
-	return r == nil || (r.Agent == nil && r.NextDue == nil && r.PrevDue == nil && r.PulseIntervalMS == 0)
+	return r == nil || (r.Agent == nil && r.NextDue == nil && r.PrevDue == nil && r.PulseIntervalMS == 0 && r.ScheduleText == "")
 }
 
 // NewResolvedAgent folds a resolved harness record and the effective axes into the
@@ -79,7 +83,8 @@ func (r *AgentRegistry) NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAg
 
 // ResolveBlock computes the resolved view of a block: the agent name (or the
 // registry default when unnamed) → base record + effective axes, and — for a
-// standing constitution — the next scheduled occurrence strictly after `now`. Returns an
+// standing constitution — the occurrences either side of `now` and the schedule
+// as a person says it. Returns an
 // error on a structurally invalid block (unknown agent, dangling alias, axis
 // violation, unparseable cron); a read-path caller that has not pre-validated
 // can treat that as "emit the flat block without a resolved sub-key".
@@ -121,6 +126,7 @@ func ResolveBlock(b *Block, reg *AgentRegistry, now time.Time) (*Resolved, error
 				res.PrevDue = &prev
 			}
 		}
+		res.ScheduleText = ScheduleText(b.Schedule.Expr)
 	}
 	pulseAgentAllowed := res.Agent == nil || res.Agent.CLI == "claude" || res.Agent.CLI == "codex"
 	if b.Pulse != nil && len(validatePulse(b.Pulse)) == 0 && b.Kind == "oneshot" && pulseAgentAllowed {

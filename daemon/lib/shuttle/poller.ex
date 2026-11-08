@@ -435,12 +435,8 @@ defmodule Shuttle.Poller do
           |> stamp_pending_results(%State{pending_results: pending, running: running})
 
         log_cold_feed_once(server, cache)
-        envelope = Shuttle.FiberDocuments.envelope(default_stores, entries, cache)
-
-        case Keyword.get(opts, :felt_stores) do
-          nil -> {:ok, envelope}
-          stores -> {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache)}
-        end
+        stores = Keyword.get(opts, :felt_stores) || default_stores
+        {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache)}
     end
   end
 

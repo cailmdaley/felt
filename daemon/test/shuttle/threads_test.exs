@@ -2205,16 +2205,21 @@ defmodule Shuttle.ThreadsTest do
         fiber: Map.merge(%{"id" => id, "uid" => "u-" <> id, "shuttle" => %{}}, fiber)
       }
 
-    test "the classifier files every fixture case where the board does" do
+    test "the roster files every fixture case by its served column and turn" do
+      now = System.system_time(:millisecond)
+
       for c <-
             "../fixtures/columns/cases.json"
             |> Path.expand(__DIR__)
             |> File.read!()
             |> Jason.decode!() do
-        assert {c["name"], Shuttle.Threads.column(c["fiber"], c["live"])} ==
-                 {c["name"], c["column"]}
+        runtime = c["runtime"] || if(c["live"], do: %{"state" => "running"})
+        column = Shuttle.Lifecycle.column(c["fiber"], c["live"])
+        turn = Shuttle.Lifecycle.turn(c["fiber"], c["live"], runtime, c["error"], now)
 
-        assert {c["name"], Shuttle.Threads.thread_state(c["fiber"], c["live"])} ==
+        assert {c["name"], column, turn} == {c["name"], c["column"], c["turn"]}
+
+        assert {c["name"], Threads.thread_state(c["fiber"], column, turn, c["live"])} ==
                  {c["name"], c["roster"] || c["state"]}
       end
     end
