@@ -366,10 +366,8 @@ func validateHookManifest(path, pluginDir string) error {
 			return fmt.Errorf("hook executable %q is missing or not executable", basename)
 		}
 	}
-	for _, module := range []string{"handoff.mjs", filepath.Join("lib", "handoff.mjs")} {
-		if !isRegularFile(filepath.Join(pluginDir, "hooks", module)) {
-			return fmt.Errorf("hook module %q is missing", module)
-		}
+	if module := filepath.Join("lib", "handoff.mjs"); !isRegularFile(filepath.Join(pluginDir, "hooks", module)) {
+		return fmt.Errorf("hook module %q is missing", module)
 	}
 	return validateHookCommands(document)
 }

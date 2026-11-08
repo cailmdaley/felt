@@ -5,7 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { transcriptUsage, TAIL_BYTES } from "../claude-plugin/hooks/handoff.mjs";
+
+const TAIL_BYTES = 256 * 1024;
 
 const hook = fileURLToPath(new URL("../claude-plugin/hooks/handoff.sh", import.meta.url));
 const buildRoot = fs.mkdtempSync(path.join(os.tmpdir(), "felt-handoff-binary-"));
@@ -32,16 +33,6 @@ test("Claude sessions are never nudged, at any size or override", () => {
       assert.equal(f.run(), "");
       assert.equal(f.run(f.input, { SHUTTLE_HANDOFF_TOKENS: "1000" }), "");
     }
-  } finally { f.cleanup(); }
-});
-
-test("Claude usage sums cached/output tokens and reads the [1m] window", () => {
-  const f = fixture();
-  try {
-    f.write(150_000);
-    assert.equal(transcriptUsage(f.transcript).tokens, 150_000);
-    f.write(150_000, { model: "claude-test[1m]" });
-    assert.equal(transcriptUsage(f.transcript).contextWindow, 1_000_000);
   } finally { f.cleanup(); }
 });
 

@@ -56,12 +56,9 @@ Invalid configuration disables nudges without failing tools.
 Pi uses `getContextUsage()` and records `shuttle-handoff` entries in the session; it also honors existing `confer-handoff` entries.
 
 The Claude/Codex shim calls `shuttle hook handoff`; a missing or old binary fails open.
-It does not start Node.
-It reads at most the last 256 KiB of the transcript and skips malformed, partial, or oversized records.
+It does not start Node, and it never reads a transcript in Claude Code's tree.
+For Codex it reads at most the last 256 KiB of the rollout and skips malformed, partial, or oversized records.
 If that suffix contains no usage record, it emits nothing and tries again at the next hook.
-Claude context is the latest assistant's input, cache-read, cache-creation, and output tokens combined.
-An explicit `context_window` field, `SHUTTLE_HANDOFF_CONTEXT_WINDOW` override, or `[1m]` model selector supplies the window; otherwise only the absolute limit applies.
-No window is guessed from a Claude alias.
 The hook stores private atomic per-level claims under `~/.shuttle/handoff/`, keyed by a hash of harness and session ID; `SHUTTLE_HANDOFF_STATE_DIR` overrides this location.
 Resumes retain these files; delete a session's claims only to deliberately re-enable its warnings.
 

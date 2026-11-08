@@ -1,4 +1,5 @@
-// Shared by felt's Pi adapter and the Claude Code/Codex transcript hook.
+// Pi's handoff policy. `shuttle hook handoff` applies the same thresholds and
+// wording to Codex; TestHandoffHookMatchesTheSharedLibrary holds it to this file.
 export const HANDOFF_ENTRY = "shuttle-handoff";
 
 export function handoffThresholds(env = process.env) {

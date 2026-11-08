@@ -17,7 +17,7 @@ func codexPluginFileClass(path string) string {
 		return "hook-bundle"
 	case "claude-plugin/hooks/hooks.json", "claude-plugin/hooks/event.sh", "claude-plugin/hooks/felt-bin.sh", "claude-plugin/hooks/handoff.sh", "claude-plugin/hooks/remind.sh", "claude-plugin/hooks/session.sh", "claude-plugin/hooks/shuttle-bin.sh", "claude-plugin/hooks/touch.sh":
 		return "hook-bundle"
-	case "claude-plugin/hooks/handoff.mjs", "claude-plugin/hooks/lib/handoff.mjs":
+	case "claude-plugin/hooks/lib/handoff.mjs":
 		return "pi-only"
 	}
 	if strings.HasPrefix(path, "claude-plugin/skills/") {
@@ -253,17 +253,15 @@ func TestCodexProjectionIgnoresPiOnlyHookSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"handoff.mjs", "lib/handoff.mjs"} {
-		path := filepath.Join(candidate, "claude-plugin", "hooks", name)
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = f.WriteString("\n// Pi-only change\n")
-		f.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
+	path := filepath.Join(candidate, "claude-plugin", "hooks", "lib", "handoff.mjs")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString("\n// Pi-only change\n")
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := materializeCodexBundles(candidate); err != nil {
 		t.Fatal(err)

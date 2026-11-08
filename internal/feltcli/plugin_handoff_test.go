@@ -9,7 +9,7 @@ import (
 
 func TestPluginRequiresCompleteHandoffPayload(t *testing.T) {
 	t.Parallel()
-	for _, missing := range []string{"handoff.sh", "handoff.mjs", filepath.Join("lib", "handoff.mjs")} {
+	for _, missing := range []string{"handoff.sh", filepath.Join("lib", "handoff.mjs")} {
 		t.Run(missing, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()

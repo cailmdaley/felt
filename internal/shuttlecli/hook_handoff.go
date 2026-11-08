@@ -12,11 +12,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cailmdaley/felt/internal/harnesspaths"
 	"github.com/spf13/cobra"
 )
 
 const handoffTailBytes = 256 * 1024
 
+// handoffUsage is the latest Codex request's context, and the claim file's
+// contents.
 type handoffUsage struct {
 	Tokens        float64 `json:"tokens"`
 	ContextWindow float64 `json:"contextWindow"`
@@ -32,12 +35,14 @@ func (a *app) hookHandoffCmd() *cobra.Command {
 	}}
 }
 
+// runHandoffHook nudges a Codex session once per level as its context crosses
+// the thresholds claude-plugin/hooks/lib/handoff.mjs also gives Pi. Claude
+// sessions decide their own handoff, so their transcripts are never read.
 func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	var input struct {
 		Event      string `json:"hook_event_name"`
 		Session    string `json:"session_id"`
 		Transcript string `json:"transcript_path"`
-		Window     any    `json:"context_window"`
 	}
 	if err := json.NewDecoder(in).Decode(&input); err != nil {
 		return err
@@ -45,13 +50,12 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	if (input.Event != "PostToolUse" && input.Event != "UserPromptSubmit") || input.Session == "" || input.Transcript == "" {
 		return nil
 	}
-	usage, err := readHandoffUsage(input.Transcript, input.Window, a.env.Getenv("SHUTTLE_HANDOFF_CONTEXT_WINDOW"))
+	if harnesspaths.Harness(a.env, input.Transcript) == "claude" {
+		return nil
+	}
+	usage, err := readCodexUsage(input.Transcript)
 	if err != nil || usage == nil {
 		return err
-	}
-	// Claude sessions decide their own handoff; only Codex transcripts are nudged.
-	if usage.Harness == "claude" {
-		return nil
 	}
 	values := []float64{75, 500000, 88, 750000}
 	for i, key := range []string{"SHUTTLE_HANDOFF_PCT", "SHUTTLE_HANDOFF_TOKENS", "SHUTTLE_HANDOFF_HARD_PCT", "SHUTTLE_HANDOFF_HARD_TOKENS"} {
@@ -84,6 +88,8 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 		if usage.Tokens < threshold {
 			continue
 		}
+		// An exclusive create is the claim: concurrent hooks cannot both emit
+		// a level, and a resumed session keeps the levels it already got.
 		claim, err := os.OpenFile(filepath.Join(dir, level), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if os.IsExist(err) {
 			continue
@@ -109,18 +115,11 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	return nil
 }
 
-func handoffNumber(v any) float64 {
-	switch n := v.(type) {
-	case float64:
-		return n
-	case string:
-		f, _ := strconv.ParseFloat(strings.TrimSpace(n), 64)
-		return f
-	}
-	return 0
-}
-
-func readHandoffUsage(file string, window any, override string) (*handoffUsage, error) {
+// readCodexUsage is the newest `token_count` event in the last 256 KiB of a
+// Codex rollout: the latest request's own tokens, not the cumulative total. A
+// tail without one (another harness's transcript, or a long run of other
+// records) is nil, never a whole-history scan.
+func readCodexUsage(file string) (*handoffUsage, error) {
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, err
@@ -146,12 +145,6 @@ func readHandoffUsage(file string, window any, override string) (*handoffUsage, 
 	for i := len(lines) - 1; i >= 0; i-- {
 		var row struct {
 			Type    string `json:"type"`
-			Message struct {
-				Role   string         `json:"role"`
-				Model  string         `json:"model"`
-				Window any            `json:"context_window"`
-				Usage  map[string]any `json:"usage"`
-			} `json:"message"`
 			Payload struct {
 				Type string `json:"type"`
 				Info struct {
@@ -160,57 +153,12 @@ func readHandoffUsage(file string, window any, override string) (*handoffUsage, 
 				} `json:"info"`
 			} `json:"payload"`
 		}
-		if json.Unmarshal(lines[i], &row) != nil {
+		if json.Unmarshal(lines[i], &row) != nil || row.Type != "event_msg" || row.Payload.Type != "token_count" {
 			continue
 		}
-		if row.Type == "event_msg" && row.Payload.Type == "token_count" {
-			if tokens, ok := row.Payload.Info.Last["total_tokens"].(float64); ok {
-				return &handoffUsage{tokens, row.Payload.Info.Window, "codex"}, nil
-			}
+		if tokens, ok := row.Payload.Info.Last["total_tokens"].(float64); ok {
+			return &handoffUsage{tokens, row.Payload.Info.Window, "codex"}, nil
 		}
-		u := row.Message.Usage
-		if row.Type != "assistant" || row.Message.Role != "assistant" {
-			continue
-		}
-		if _, ok := u["input_tokens"].(float64); !ok {
-			continue
-		}
-		total := 0.0
-		valid := true
-		for _, key := range []string{"input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"} {
-			if v := u[key]; v != nil {
-				n, ok := v.(float64)
-				if !ok || n < 0 {
-					valid = false
-					break
-				}
-				total += n
-			}
-		}
-		if !valid {
-			continue
-		}
-		w := window
-		if w == nil {
-			w = u["context_window"]
-		}
-		if w == nil {
-			w = row.Message.Window
-		}
-		if w == nil {
-			w = override
-		}
-		size := handoffNumber(w)
-		// Match Number.isFinite(window) && window > 0 in the Node adapter.
-		// ParseFloat accepts NaN/Infinity and returns infinity on overflow; none
-		// can enter claim JSON or percentage calculations. Preserve [1m] fallback.
-		if math.IsNaN(size) || math.IsInf(size, 0) || size <= 0 {
-			size = 0
-			if strings.Contains(strings.ToLower(row.Message.Model), "[1m]") {
-				size = 1000000
-			}
-		}
-		return &handoffUsage{total, size, "claude"}, nil
 	}
 	return nil, nil
 }
