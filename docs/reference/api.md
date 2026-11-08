@@ -52,10 +52,13 @@ time.
 | `POST /dispatch` | owner-routed | Launch a worker for a fiber now, bypassing the poll |
 | `POST /transition` | owner-routed | The unified kanban write: move a fiber to a column, one call per drag |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
-| `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
-| `POST /claim` | owner-routed | Associate a terminal worker or a verified native app conversation with a fiber |
+| `POST /kill` | owner-routed | Hard-kill a fiber's live worker session; writes no lifecycle verdict |
+| `POST /claim` | owner-routed | Register an already-live terminal session as a fiber's running worker |
 | `POST /migrate` | local owner | Move a live worker from one installed fiber to another on the same host, without ending its conversation |
 | `POST /capture` | owner-routed | Launch an agent from a free-text prompt to file and claim a constitution |
+| `GET /speak` | speaker-routed | The spoken outbox: `{available, speaking, queued, held, inbox, paused, muted, error, recorder}` — see [Spoken output](#spoken-output) |
+| `POST /speak` | speaker-routed | Queue `{fiber_id, text, voice?}`, set `{muted}`, or drive the inbox with `{inbox: "play"\|"next"\|"stop"}` |
+| `GET /speak/voices` | speaker-routed | `{voices: [{name, kind, role}]}`: the voice bank and pocket-tts built-ins, each with the role claiming it |
 | `GET /voice` | recorder-routed | Listen settings, source, launch, selected target, pending speech and last delivery |
 | `GET /voice/audio` | recorder-addressed | Launch-bound phone PCM WebSocket, optionally relayed through a hub |
 | `POST /voice/toggle` | recorder-routed | Start Listen unmuted when off; otherwise flip mic mute |
@@ -68,6 +71,7 @@ time.
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
 | `POST /fiber/create` | owner-routed | Create a fiber |
+| `POST /document-changed` | local | `{fiber_id}`: a local Shuttle CLI write tells the Poller to re-read that document promptly; answers `{ok: true}` |
 | `POST /project-dir/resolve` | host-addressed | Validate `{path, origin?}` on the named host with `shuttle resolve-dir`; return `{path}` with the expanded absolute directory, or 422 for an invalid directory. Does not create or arm a fiber |
 | `POST /felt-stores` | host-addressed | Persist a daemon's registered felt stores (whole list; takes `expected_digest`) |
 | `POST /projects` | host-addressed | Register a picker project and initialize its `.felt/` when needed, or set the whole list with `projects: [...]` (which takes `expected_digest`) |
@@ -77,8 +81,10 @@ time.
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
 | `POST /attach` | **not** owner-routed | Open a worker or past-session viewer on the local display using Kitty or Rex; remote tmux uses SSH; brings the terminal forward. `{select_only: true}` is a click's: Rex moves to a window the conversation already has, creating none, launching or raising no app and resuming no session, and answers `{moved, session}` |
+| `POST /terminal/reveal` | host-addressed | `{name, select_only?}`: select this host's Rex-held worker in an attached Rex app client; another host's opener forwards here. 422 `no_app_client` when no client is attached |
 | `POST /sessions/resume` | local | Start (or find) a past session's terminal viewer; an active terminal Codex worker reuses its owned thread |
 | `POST /sessions/prepare-terminal` | host-addressed | Prepare the terminal viewer of an owned Codex thread by fiber UID or recorded tmux name, without starting a turn |
+| `POST /sessions/input` | host-addressed | Paste `{session_uuid, text}` into the live terminal of a Codex session this host owns, from the session ledger; answers `{status: "submitted"}`, 404 when the session is not running or not owned, 503 when terminal state is unknown |
 | `POST /sessions/receiver` | host-addressed | Resolve the live native Codex process for `{session_uuid}` and return `{session_uuid, pid, process_start}` from a kernel lifetime probe; 404 means absent or stale, 503 means process state is unknown |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
@@ -206,8 +212,8 @@ To listen to a new topic, capture its card, then pin Listen to that card with `P
 
 Codex workers use the Codex CLI through the owning host's selected terminal
 backend. Capture, dispatch and claim responses include the worker's native
-session identity and terminal coordinates. The stored `shuttle.surface` field
-is ignored by execution and may remain in older fiber documents.
+session identity and terminal coordinates. A `shuttle.surface` field is opaque
+and ignored by execution.
 
 `/attach` prepares an existing terminal worker session on its owning host.
 It does not start a model turn. A missing or uncertain terminal session is
@@ -466,6 +472,18 @@ Live workers take terminal input through `/deliver` with `live_input: true`; col
 Batches stay ordered per destination; different destinations proceed independently.
 The relay checkpoints attempts before delivery and never automatically replays them, including definite failures.
 A 202 with `delivered: null` or an interrupted delivery is unconfirmed; `last` explains that the words remain in the transcript.
+
+### Spoken output
+
+`shuttle say`, `voices` and `inbox` drive the spoken outbox (`Shuttle.Speaker`).
+A request goes to the host that can speak: `recorder=<host>` addresses one, else the receiving daemon answers when it has `afplay`, else the first remote that reports `available`; 400 when none can.
+Every response names that host as `recorder`.
+Lines render with pocket-tts in the voice of their fiber's role (the charter's `voice:`, default `dylan_thomas`) and play one at a time in arrival order.
+While Listen has a target, only that constitution's lines play; the rest are `held` per card until it is in view.
+Playback pauses while the human is talking or the speaker is `muted`, and resumes from just before where it stopped.
+`POST /speak` with a line answers `{voice, ahead, held, recorder}`; `ahead` counts lines before it.
+`held` in `GET /speak` lists `{fiber_id, name, n, first}` per card, oldest first; `inbox` is `{playing, card}`.
+The queue and current line are journaled, so a daemon restart resumes rather than drops them.
 
 ### Worker delivery
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -158,6 +159,39 @@ func forbidUnder(t *testing.T, root, ext string, phrases ...string) {
 func TestPluginSkillsAvoidRetiredCommands(t *testing.T) {
 	t.Parallel()
 	forbidUnder(t, pluginSkillsRoot(t), "", retiredCommandPhrases...)
+}
+
+func TestDocsAvoidRetiredCommands(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	forbidUnder(t, filepath.Join(root, "docs"), ".md", retiredCommandPhrases...)
+	forbidUnder(t, filepath.Join(root, "AGENTS.md"), "", retiredCommandPhrases...)
+	forbidUnder(t, filepath.Join(root, "README.md"), "", retiredCommandPhrases...)
+}
+
+// TestCLIReferenceNamesEveryCommand keeps docs/reference/cli.md complete: every
+// visible felt command path appears there, in a table cell or a code block.
+func TestCLIReferenceNamesEveryCommand(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "docs", "reference", "cli.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(data)
+	var walk func(*cobra.Command, string)
+	walk = func(parent *cobra.Command, prefix string) {
+		for _, cmd := range parent.Commands() {
+			if cmd.Hidden || cmd.Name() == "help" || cmd.Name() == "completion" {
+				continue
+			}
+			path := prefix + " " + cmd.Name()
+			if !strings.Contains(doc, "`"+path) && !strings.Contains(doc, "\n"+path) {
+				t.Errorf("docs/reference/cli.md does not name %q", path)
+			}
+			walk(cmd, path)
+		}
+	}
+	walk(NewRootCmd(sysenv.New(t.TempDir(), nil)), "felt")
 }
 
 func TestPluginSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
