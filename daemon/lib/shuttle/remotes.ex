@@ -601,7 +601,7 @@ defmodule Shuttle.Remotes do
          {:ok, rest} <- strip_scheme(trimmed),
          false <- String.contains?(rest, ["/", "?", "#"]),
          {:ok, host, port_text} <- split_host_port(strip_userinfo(rest)),
-         {:ok, port} <- parse_port(port_text) do
+         {:ok, port} <- Shuttle.Host.port_number(port_text) do
       {host, port}
     else
       _ -> nil
@@ -639,17 +639,6 @@ defmodule Shuttle.Remotes do
     case String.split(authority, ":") do
       [host, port] when host != "" -> {:ok, host, port}
       _ -> :error
-    end
-  end
-
-  defp parse_port(text) do
-    if Regex.match?(~r/\A[0-9]+\z/, text) do
-      case String.to_integer(text) do
-        port when port in 1..65_535 -> {:ok, port}
-        _ -> :error
-      end
-    else
-      :error
     end
   end
 

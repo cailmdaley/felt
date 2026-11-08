@@ -305,8 +305,7 @@ func printThreadRow(a *app, row threadRow, depth int) {
 	}
 }
 
-// stateLabel is the row's state as the launch roster writes it
-// (Shuttle.Threads.state_label/1).
+// stateLabel is the row's state as the launch roster writes it.
 func (row threadRow) stateLabel() string {
 	switch {
 	case row.OwnerCacheState != "":

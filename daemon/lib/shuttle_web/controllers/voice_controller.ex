@@ -49,7 +49,7 @@ defmodule ShuttleWeb.VoiceController do
   """
   def open(conn, %{"fiber_id" => id, "page" => page} = params)
       when is_binary(id) and id != "" and page in ~w(constitution tapestry files) do
-    open = %{fiber_id: id, origin: params["origin"] || RecorderRouter.own_host(), page: page}
+    open = %{fiber_id: id, origin: params["origin"] || Shuttle.Poller.own_host_id(), page: page}
 
     Registry.dispatch(Shuttle.Voice.Streams, :board_open, fn entries ->
       for {pid, _} <- entries, do: send(pid, {:board_open, open})
@@ -63,7 +63,7 @@ defmodule ShuttleWeb.VoiceController do
     do: conn |> put_status(400) |> json(%{error: "fiber_id and page are required"})
 
   defp forward_open(open) do
-    own = RecorderRouter.own_host()
+    own = Shuttle.Poller.own_host_id()
     body = open |> Map.put(:forwarded, true) |> Jason.encode!()
     client = Shuttle.OriginRouter.forward_client()
 
@@ -105,7 +105,7 @@ defmodule ShuttleWeb.VoiceController do
 
         case result do
           {:ok, body} ->
-            json(conn, Map.put(body, :recorder, RecorderRouter.own_host()))
+            json(conn, Map.put(body, :recorder, Shuttle.Poller.own_host_id()))
 
           {:error, :not_found} ->
             conn |> put_status(404) |> json(%{error: "No listening transcript is available yet"})

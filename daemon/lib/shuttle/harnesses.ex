@@ -17,24 +17,14 @@ defmodule Shuttle.Harnesses do
   @spec normalize(String.t()) :: String.t()
   def normalize(name) when is_binary(name), do: Map.get(@names, name, name)
 
-  @doc "Return the ledger spelling for a canonical harness, or nil if unknown."
+  # The session ledger spells Claude Code's harness in full.
+  @ledger_names %{"claude" => "claude-code"}
+
+  @doc "Return the ledger spelling for a known harness, or nil if unknown."
   @spec ledger_name(String.t() | nil) :: String.t() | nil
-  def ledger_name(name) when is_binary(name) do
-    canonical = normalize(name)
-
-    if canonical in Map.values(@names) do
-      case @names
-           |> Enum.filter(fn {spelling, target} -> spelling != target and target == canonical end)
-           |> Enum.map(&elem(&1, 0))
-           |> Enum.sort()
-           |> List.first() do
-        nil -> canonical
-        ledger_name -> ledger_name
-      end
-    end
+  def ledger_name(name) do
+    if supported?(name), do: Map.get(@ledger_names, normalize(name), normalize(name))
   end
-
-  def ledger_name(_), do: nil
 
   @doc "True when name resolves to one of Shuttle's addressable harnesses."
   @spec supported?(String.t()) :: boolean()

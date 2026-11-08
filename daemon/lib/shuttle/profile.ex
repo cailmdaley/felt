@@ -305,10 +305,9 @@ defmodule Shuttle.Profile do
         |> Path.split()
         |> Enum.take(6)
         |> Enum.map(fn part ->
-          if Regex.match?(
-               ~r/^(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
-               part
-             ), do: "<id>", else: part
+          if Shuttle.ULID.valid?(part) or Shuttle.Transcript.valid_session?(part),
+            do: "<id>",
+            else: part
         end)
         |> Path.join()
       end

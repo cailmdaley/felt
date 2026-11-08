@@ -751,10 +751,9 @@ defmodule Shuttle.Poller do
        "Check the fiber after the poller settles or restarts before retrying."}
   end
 
-  @spec orchestrator_state(GenServer.server(), non_neg_integer()) :: map()
-  def orchestrator_state(server, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
-    published_lookup(server, :state_map, %{})
-  end
+  @doc false
+  @spec published_state(GenServer.server()) :: map()
+  def published_state(server), do: published_lookup(server, :state_map, %{})
 
   @doc false
   def published_state_response(server \\ Shuttle.Env.server(__MODULE__), if_none_match \\ nil) do

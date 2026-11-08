@@ -3,9 +3,8 @@ defmodule ShuttleWeb.CORSPlug do
   Hand-rolled CORS plug for the Shuttle API endpoints.
 
   The browser UI is served same-origin from :4000, so CORS only matters for
-  the Vite dev server (and a legacy :3000 fallback) calling the daemon
-  directly during development. Origin matching is allowlist-based on those
-  localhost variants.
+  the Vite dev server calling the daemon directly during development. Origin
+  matching is allowlist-based on its localhost variants.
 
   Requests from non-allowed origins pass through without CORS headers for safe
   reads. Unsafe browser requests are rejected before they reach a controller:
@@ -25,10 +24,9 @@ defmodule ShuttleWeb.CORSPlug do
 
   import Plug.Conn
 
-  # Vite dev-server ports: 5173 is the default, but Vite falls back to the
-  # next free port (5174, 5175, ...) whenever 5173 is already taken by
-  # another local project, so a couple of fallbacks are allowlisted too.
-  @dev_ports [3000, 5173, 5174, 5175]
+  # Vite dev-server ports: the board's config asks for 5174, Vite's default is
+  # 5173, and Vite falls back to the next free port when one is taken.
+  @dev_ports [5173, 5174, 5175]
 
   @allowed_origins for host <- ["localhost", "127.0.0.1"],
                        port <- @dev_ports,

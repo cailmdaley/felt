@@ -80,7 +80,7 @@ defmodule Shuttle.PollerPublicationTest do
         end
 
         assert [%{fiber_id: ^id, uid: ^uid}] = Poller.snapshot(poller).eligible
-        assert Poller.orchestrator_state(poller, 0).running_detail != []
+        assert Poller.published_state(poller).running_detail != []
         assert Poller.fiber_stores(poller)[uid] == root
 
         assert {:ok, %{fibers: [%{fiber: %{"uid" => ^uid}}]}} =
@@ -148,7 +148,7 @@ defmodule Shuttle.PollerPublicationTest do
           assert Poller.context_receiver(poller, identity) == {:error, :no_worker}
         end
 
-        assert Poller.orchestrator_state(poller, 0).running_detail == []
+        assert Poller.published_state(poller).running_detail == []
         {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
         assert entry.fiber["status"] == "open"
       end)

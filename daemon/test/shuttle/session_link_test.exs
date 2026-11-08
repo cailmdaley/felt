@@ -475,9 +475,7 @@ defmodule Shuttle.SessionLinkTest do
     assert SessionLink.stats(next).bytes_read == byte_size(body)
   end
 
-  test "desktop routes and the URL allowlist stay narrow" do
-    assert SessionLink.desktop_url(@session) == "codex://threads/" <> @session
-    assert SessionLink.desktop_url("bad") == nil
+  test "the URL allowlist stays narrow" do
     refute SessionLink.claude_url?("https://claude.ai.evil.example/x")
     assert SessionLink.claude_url?(@first)
   end

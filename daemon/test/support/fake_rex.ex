@@ -265,9 +265,6 @@ defmodule Shuttle.Test.FakeRex do
   defp run("block.event", _, _, state), do: {fixture("block_event_paste"), state}
   defp run("send-key", _, _, state), do: {{"", 0}, state}
 
-  defp run("server.apple.privacy_status", _, _, state),
-    do: {%{"full_disk_access" => "granted"}, state}
-
   defp update_block(state, sid, bid, fun) do
     blocks =
       Enum.map(state.sessions[sid].blocks, &if(&1["block_id"] == bid, do: fun.(&1), else: &1))

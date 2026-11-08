@@ -17,10 +17,12 @@ defmodule Shuttle.HarnessesTest do
     end
   end
 
-  test "ledger writes retain the legacy spelling through the shared mapping" do
+  test "ledger writes spell each harness as the session ledger does" do
     assert Harnesses.ledger_name("claude") == "claude-code"
     assert Harnesses.ledger_name("codex") == "codex"
     assert Harnesses.ledger_name("pi") == "pi"
+    assert Harnesses.ledger_name("claude-code") == "claude-code"
     assert Harnesses.ledger_name("unknown") == nil
+    assert Harnesses.ledger_name(nil) == nil
   end
 end

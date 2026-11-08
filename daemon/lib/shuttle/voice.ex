@@ -227,7 +227,7 @@ defmodule Shuttle.Voice do
       target = %{
         "fiber_id" => id,
         "slug" => fiber["slug"] || fiber["id"] || params["slug"] || id,
-        "origin" => origin || Shuttle.RecorderRouter.own_host(),
+        "origin" => origin || Shuttle.Poller.own_host_id(),
         "pinned" => not state.snapshot.follow,
         "name" =>
           fiber["name"] || params["name"] || known_name(state.target, id) ||

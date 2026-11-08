@@ -439,7 +439,7 @@ defmodule Shuttle.SpeakerTest do
     assert %{role: "scout"} = Enum.find(voices, &(&1.name == "jean"))
   end
 
-  test "resolves the voice from the fiber's role charter", %{tmp_dir: root} do
+  test "resolves the voice from the fiber's role charter", %{tmp_dir: root, server: server} do
     charter = Path.join([root, ".felt", "roles", "tutor", "tutor.md"])
     File.mkdir_p!(Path.dirname(charter))
     File.write!(charter, "---\nname: Tutor\nvoice: borges\n---\nbody\n")
@@ -452,11 +452,17 @@ defmodule Shuttle.SpeakerTest do
       ]
     end
 
-    opts = [fibers: fibers, stores: fn -> [root] end]
-    assert Speaker.voice_for("a/tutored", opts) == "borges"
-    assert Speaker.voice_for("U1", opts) == "borges"
-    assert Speaker.voice_for("a/plain", opts) == "dylan_thomas"
-    assert Speaker.voice_for("a/unvoiced", opts) == "dylan_thomas"
-    assert Speaker.voice_for(nil, opts) == "dylan_thomas"
+    opts = [fibers: fibers, stores: fn -> [root] end] ++ server
+
+    voice = fn fiber_id ->
+      {:ok, %{voice: voice}} = Speaker.speak(%{"text" => "hi", "fiber_id" => fiber_id}, opts)
+      voice
+    end
+
+    assert voice.("a/tutored") == "borges"
+    assert voice.("U1") == "borges"
+    assert voice.("a/plain") == "dylan_thomas"
+    assert voice.("a/unvoiced") == "dylan_thomas"
+    assert voice.(nil) == "dylan_thomas"
   end
 end

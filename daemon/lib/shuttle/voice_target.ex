@@ -17,7 +17,7 @@ defmodule Shuttle.Voice.Target do
   end
 
   defp reopened?(%{"fiber_id" => fiber_id} = target) when is_binary(fiber_id) do
-    target["origin"] in [nil, Shuttle.Poller.own_host_id()] and
+    Shuttle.OriginRouter.local?(target["origin"]) and
       Shuttle.SessionResume.reopened(fiber_id) != nil
   end
 

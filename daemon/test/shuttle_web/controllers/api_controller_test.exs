@@ -981,7 +981,7 @@ defmodule ShuttleWeb.APIControllerTest do
       assert {:ok, {_, _, _}} = Poller.thread_inputs(poller)
       assert is_map(Poller.fiber_stores(poller))
       assert is_map(Poller.parked_index(poller))
-      assert is_map(Poller.orchestrator_state(poller, 0))
+      assert is_map(Poller.published_state(poller))
 
       assert {:command_error, 1, _} =
                Shuttle.Delivery.flush_context(%{

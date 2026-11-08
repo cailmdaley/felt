@@ -178,17 +178,14 @@ defmodule Shuttle.Remote do
   defp normalize_port(port) when is_integer(port) and port in 1..65_535, do: {:ok, port}
   defp normalize_port(_), do: :error
 
-  defp normalize_remote_port(port, socket) when is_binary(socket) and port in [nil, 0],
-    do: {:ok, 0}
-
-  defp normalize_remote_port(_port, socket) when is_binary(socket), do: :error
-  defp normalize_remote_port(nil, nil), do: {:ok, @default_remote_port}
-  defp normalize_remote_port(0, nil), do: {:ok, @default_remote_port}
+  # A remote socket replaces the remote port, which then reads as 0.
+  defp normalize_remote_port(port, socket) when port in [nil, 0],
+    do: {:ok, if(socket, do: 0, else: @default_remote_port)}
 
   defp normalize_remote_port(port, nil) when is_integer(port) and port in 1..65_535,
     do: {:ok, port}
 
-  defp normalize_remote_port(_, nil), do: :error
+  defp normalize_remote_port(_, _), do: :error
 
   defp normalize_remote_socket(value), do: normalize_socket_path(value)
 

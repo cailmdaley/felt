@@ -231,12 +231,12 @@ defmodule ShuttleWeb.BoardControllerTest do
 
     Shuttle.Test.Env.put_app_env(:remotes, [
       %{name: "fir", url: "http://127.0.0.1:4101"},
-      %{name: Shuttle.RecorderRouter.own_host(), url: "http://127.0.0.1:4102"}
+      %{name: Shuttle.Poller.own_host_id(), url: "http://127.0.0.1:4102"}
     ])
 
     body = %{fiber_id: "01FIBER", page: "files"}
     assert %{"ok" => true} = api_conn() |> post("/api/v1/board/open", body) |> json_response(200)
-    own = Shuttle.RecorderRouter.own_host()
+    own = Shuttle.Poller.own_host_id()
 
     assert_receive {:forwarded, "http://127.0.0.1:4101/api/v1/board/open",
                     %{

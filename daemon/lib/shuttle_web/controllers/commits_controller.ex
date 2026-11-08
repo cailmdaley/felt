@@ -65,7 +65,7 @@ defmodule ShuttleWeb.CommitsController do
       validator = Composite.validator({since_ms, until_ms, ledger_tokens()}, entries)
 
       json_with_validator(conn, validator, fn ->
-        own = Composite.own_host()
+        own = Shuttle.Poller.own_host_id()
 
         records =
           Enum.map(CommitLedger.read_between(since_ms, until_ms), &Composite.stamp(&1, own)) ++

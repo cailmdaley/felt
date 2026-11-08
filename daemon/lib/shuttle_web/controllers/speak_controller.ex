@@ -16,7 +16,7 @@ defmodule ShuttleWeb.SpeakController do
     case RecorderRouter.select_speaker(params) do
       {:ok, :local} ->
         case local(action, params) do
-          {:ok, body} -> json(conn, Map.put(body, :recorder, RecorderRouter.own_host()))
+          {:ok, body} -> json(conn, Map.put(body, :recorder, Shuttle.Poller.own_host_id()))
           {:error, reason} -> conn |> put_status(422) |> json(%{error: reason})
         end
 

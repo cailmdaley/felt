@@ -182,12 +182,16 @@ defmodule Shuttle.RexFocus do
   """
   def reveal(params, opts \\ []) do
     following? = Keyword.get(opts, :active?, &following?/0)
-    own = Keyword.get_lazy(opts, :own_host, &Shuttle.RecorderRouter.own_host/0)
 
     cond do
-      not following?.() -> {:skip, :off}
-      params["origin"] in [nil, "", own] -> reveal_local(params, opts)
-      true -> reveal_remote(params, opts)
+      not following?.() ->
+        {:skip, :off}
+
+      Shuttle.OriginRouter.local?(params["origin"], own_host_id: opts[:own_host]) ->
+        reveal_local(params, opts)
+
+      true ->
+        reveal_remote(params, opts)
     end
   end
 
@@ -254,7 +258,7 @@ defmodule Shuttle.RexFocus do
   end
 
   defp binding_for(%{"fiber_id" => id} = params, %{"bindings" => bindings}, fibers) do
-    origin = params["origin"] || Shuttle.RecorderRouter.own_host()
+    origin = params["origin"] || Shuttle.Poller.own_host_id()
 
     with %{} = fiber <-
            Enum.find(fibers, fn f ->
@@ -292,7 +296,7 @@ defmodule Shuttle.RexFocus do
   the labels its own daemon projects from the fiber tree, which the served
   fibers carry with their `shuttle.host`.
   """
-  def title_target(title, bindings, fibers, own_host \\ Shuttle.RecorderRouter.own_host()) do
+  def title_target(title, bindings, fibers, own_host \\ Shuttle.Poller.own_host_id()) do
     case title_binding(title, bindings) do
       %{fiber: id} -> fiber_target(id, fibers)
       nil -> remote_title_target(title, fibers, own_host)

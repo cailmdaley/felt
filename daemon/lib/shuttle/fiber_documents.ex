@@ -162,7 +162,7 @@ defmodule Shuttle.FiberDocuments do
   @spec envelope([String.t()], [entry()], map() | nil) :: map()
   def envelope(stores, entries, cache \\ nil) do
     base = %{
-      host: own_host_id(),
+      host: Shuttle.Poller.own_host_id(),
       felt_stores: stores,
       generated_at: DateTime.to_iso8601(DateTime.utc_now()),
       fibers: entries
@@ -447,7 +447,7 @@ defmodule Shuttle.FiberDocuments do
   defp list_args(false), do: ["ls", "-s", "all", "-j"]
 
   defp filter_rows(rows, :owned) do
-    own_host_id = own_host_id()
+    own_host_id = Shuttle.Poller.own_host_id()
     Enum.filter(rows, &owned_kanban_fiber?(&1, own_host_id))
   end
 
@@ -498,26 +498,8 @@ defmodule Shuttle.FiberDocuments do
   # a due-dated fiber pinned to another host cannot ride the aux clause into
   # this feed.
   defp owned_kanban_fiber?(fiber, own_host_id) do
-    (shuttle_fiber?(fiber) and host_owned?(fiber, own_host_id)) or kanban_aux_admissible?(fiber)
+    Shuttle.Poller.host_owned?(fiber["shuttle"], own_host_id) or kanban_aux_admissible?(fiber)
   end
-
-  # A fiber is owner-feed-relevant iff it carries a non-empty `shuttle:` block.
-  defp shuttle_fiber?(%{"shuttle" => shuttle}) when is_map(shuttle) and map_size(shuttle) > 0,
-    do: true
-
-  defp shuttle_fiber?(_), do: false
-
-  # Host-ownership: a fiber is owned by this daemon iff its `shuttle.host`
-  # equals `own_host_id`. Strict equality — an absent or empty `host:` is
-  # unowned everywhere (no wildcard), so it never appears in any daemon's feed.
-  # Mirrors `Shuttle.Poller`'s dispatch-side predicate; the feed and the
-  # dispatch plane agree on exactly one owner per fiber.
-  defp host_owned?(%{"shuttle" => %{"host" => host}}, own_host_id)
-       when is_binary(host) and host != "" do
-    host == own_host_id
-  end
-
-  defp host_owned?(_fiber, _own_host_id), do: false
 
   defp entry_for(store, %{"id" => id} = fiber, report_mode) when is_binary(id) and id != "" do
     # Three values, all read from felt, none reverse-derived or guessed by Shuttle:
@@ -695,9 +677,4 @@ defmodule Shuttle.FiberDocuments do
 
   defp store_errors({:ok, _rows}), do: []
   defp store_errors({:error, error}), do: [error]
-
-  # The owned-feed predicate and the envelope `host:` must match exactly what
-  # the dispatcher owns by, so both resolve through the single canonical
-  # resolver rather than re-deriving the hostname here.
-  defp own_host_id, do: Shuttle.Poller.own_host_id()
 end

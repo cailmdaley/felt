@@ -137,7 +137,6 @@ defmodule Shuttle.Rex do
     do: call(runner, "session.close_window", %{"window_id" => wid}, session: sid)
 
   def destroy(runner, sid), do: call(runner, "session.destroy", %{}, session: sid)
-  def privacy_status(runner), do: call(runner, "server.apple.privacy_status", %{})
 
   def set_labels(runner, sid, bid, label) do
     with {:ok, _} <- call(runner, "session.set_label", %{"label" => label}, session: sid),

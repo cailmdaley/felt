@@ -86,9 +86,6 @@ defmodule Shuttle.Speaker do
 
   def available?, do: not is_nil(Shuttle.Env.find_executable("afplay"))
 
-  @doc "The voice of the fiber's role: the charter's `voice:`, else #{@default_voice}."
-  def voice_for(fiber_id, opts \\ []), do: role_voice(find_fiber(fiber_id, opts), opts)
-
   defp find_fiber(fiber_id, opts) when is_binary(fiber_id) do
     fibers = Keyword.get(opts, :fibers, &Shuttle.ServedFibers.all/0)
 

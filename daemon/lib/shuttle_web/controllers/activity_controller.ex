@@ -77,7 +77,7 @@ defmodule ShuttleWeb.ActivityController do
       validator = Composite.validator({from_ms, to_ms, events_tokens()}, entries)
 
       json_with_validator(conn, validator, fn ->
-        own = Composite.own_host()
+        own = Shuttle.Poller.own_host_id()
 
         %{
           host: own,

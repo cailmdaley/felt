@@ -9,10 +9,8 @@ defmodule Shuttle.RecorderRouter do
   @probe_ms 800
   @max_probes 16
 
-  def own_host, do: Poller.own_host_id()
-
   def select(params, opts \\ []) do
-    own = Keyword.get(opts, :own_host_id, own_host())
+    own = Keyword.get(opts, :own_host_id, Poller.own_host_id())
     recorder = params["recorder"]
 
     cond do
@@ -85,7 +83,7 @@ defmodule Shuttle.RecorderRouter do
   defp probe(opts, path, accept) do
     client = Keyword.get(opts, :client, OriginRouter.forward_client())
     timeout = Keyword.get(opts, :probe_ms, @probe_ms)
-    own = Keyword.get(opts, :own_host_id, own_host())
+    own = Keyword.get(opts, :own_host_id, Poller.own_host_id())
 
     remotes =
       opts
@@ -134,7 +132,7 @@ defmodule Shuttle.RecorderRouter do
   defp url_path(path, remote) when is_function(path, 1), do: path.(remote)
   defp url_path(path, _remote), do: path
 
-  def stamp(body, recorder \\ own_host()), do: Map.put(body, "recorder", recorder)
+  def stamp(body, recorder \\ Poller.own_host_id()), do: Map.put(body, "recorder", recorder)
 
   def forward_read(remote, path, query \\ %{}) do
     url = Remote.url_for(remote, path)

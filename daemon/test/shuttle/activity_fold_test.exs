@@ -34,6 +34,9 @@ defmodule Shuttle.ActivityFoldTest do
 
   defp sid(id), do: %{"sessionId" => id}
 
+  defp fold_lines(acc, lines),
+    do: Enum.reduce(lines, acc, &Activity.fold_event(&2, Jason.decode!(&1)))
+
   defp fixture_lines do
     [
       # A: a spell with two repeats, answered by a person.
@@ -207,7 +210,7 @@ defmodule Shuttle.ActivityFoldTest do
 
     # The old call no longer fills when it returns; the newer one does.
     acc =
-      Activity.fold_lines(acc, [
+      fold_lines(acc, [
         ev(@a, "post_tool_use", 9 * @m, sid("old")),
         ev(@a, "post_tool_use", 9 * @m, sid("new"))
       ])
@@ -217,7 +220,7 @@ defmodule Shuttle.ActivityFoldTest do
     assert Activity.drop_before(acc, nil) == acc
 
     # Identities that only the dropped minutes referred to are forgotten.
-    b_only = path |> Activity.fold_stream() |> Activity.fold_lines([ev(@b, "stop", 0)])
+    b_only = path |> Activity.fold_stream() |> fold_lines([ev(@b, "stop", 0)])
     assert map_size(b_only.names) == 2
     assert map_size(Activity.drop_before(b_only, @t0 + 5 * @m).names) == 1
   end

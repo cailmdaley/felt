@@ -203,7 +203,7 @@ defmodule ShuttleWeb.SentFilesController do
       validator = Composite.validator({since_ms, sent_files_tokens()}, entries)
 
       json_with_validator(conn, validator, fn ->
-        own = Composite.own_host()
+        own = Shuttle.Poller.own_host_id()
 
         files =
           Enum.map(SentFiles.all_since(since_ms), &Composite.stamp(&1, own)) ++

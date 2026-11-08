@@ -99,17 +99,6 @@ defmodule Shuttle.SessionLink do
   @spec claude_url?(term()) :: boolean()
   def claude_url?(url), do: is_binary(url) and String.starts_with?(url, "https://claude.ai/")
 
-  @doc "The installed desktop app's native thread route; not a phone universal link."
-  def desktop_url(thread_id) when is_binary(thread_id) do
-    if Regex.match?(
-         ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i,
-         thread_id
-       ),
-       do: "codex://threads/" <> thread_id
-  end
-
-  def desktop_url(_), do: nil
-
   @doc false
   def forget(session, opts \\ []) do
     {key, _roots} = identity(session, opts)

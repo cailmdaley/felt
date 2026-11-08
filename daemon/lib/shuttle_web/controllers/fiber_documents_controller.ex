@@ -362,7 +362,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
         {host, entries, cold?(body), Map.get(body, :cache)}
 
       :unavailable ->
-        {own_host_id(), [], true, nil}
+        {Shuttle.Poller.own_host_id(), [], true, nil}
     end
   end
 
@@ -375,8 +375,6 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # string key so the wire shape matches the atom-keyed local rows after JSON
   # encoding.
   defp stamp_origin(entry, origin) when is_map(entry), do: Map.put(entry, "origin", origin)
-
-  defp own_host_id, do: Shuttle.Poller.own_host_id()
 
   # The owner-only kanban feed (`GET /api/v1/fibers?shuttle=true`) — the path
   # remote viewers poll every 5s over the SSH tunnel. Served ALWAYS from the

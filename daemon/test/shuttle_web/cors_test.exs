@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.CORSTest do
   @moduledoc """
   Tests that the Shuttle HTTP API serves CORS headers so the board UI dev
-  server (Vite on localhost:5173, or the legacy localhost:3000 fallback) can
+  server (Vite on localhost:5173–5175) can
   POST to the daemon (127.0.0.1:4000) directly from the browser.
 
   Covers:
@@ -27,13 +27,13 @@ defmodule ShuttleWeb.CORSTest do
   test "OPTIONS /api/v1/dispatch from allowed origin returns 204 + CORS headers" do
     conn =
       local_conn()
-      |> put_req_header("origin", "http://localhost:3000")
+      |> put_req_header("origin", "http://localhost:5174")
       |> put_req_header("access-control-request-method", "POST")
       |> put_req_header("access-control-request-headers", "content-type")
       |> options("/api/v1/dispatch")
 
     assert conn.status == 204
-    assert get_resp_header(conn, "access-control-allow-origin") == ["http://localhost:3000"]
+    assert get_resp_header(conn, "access-control-allow-origin") == ["http://localhost:5174"]
     assert get_resp_header(conn, "access-control-allow-methods") != []
     assert get_resp_header(conn, "access-control-allow-headers") != []
   end
@@ -67,15 +67,15 @@ defmodule ShuttleWeb.CORSTest do
     assert get_resp_header(conn, "access-control-allow-origin") == ["http://localhost:5173"]
   end
 
-  test "OPTIONS preflight from 127.0.0.1:3000 is also accepted" do
+  test "OPTIONS preflight from 127.0.0.1:5174 is also accepted" do
     conn =
       local_conn()
-      |> put_req_header("origin", "http://127.0.0.1:3000")
+      |> put_req_header("origin", "http://127.0.0.1:5174")
       |> put_req_header("access-control-request-method", "POST")
       |> options("/api/v1/dispatch")
 
     assert conn.status == 204
-    assert get_resp_header(conn, "access-control-allow-origin") == ["http://127.0.0.1:3000"]
+    assert get_resp_header(conn, "access-control-allow-origin") == ["http://127.0.0.1:5174"]
   end
 
   test "OPTIONS preflight from disallowed origin returns no CORS headers" do
@@ -94,12 +94,12 @@ defmodule ShuttleWeb.CORSTest do
   test "GET /api/v1/agents from allowed origin carries CORS response header" do
     conn =
       local_conn()
-      |> put_req_header("origin", "http://localhost:3000")
+      |> put_req_header("origin", "http://localhost:5174")
       |> put_req_header("accept", "application/json")
       |> get("/api/v1/agents")
 
     assert conn.status == 200
-    assert get_resp_header(conn, "access-control-allow-origin") == ["http://localhost:3000"]
+    assert get_resp_header(conn, "access-control-allow-origin") == ["http://localhost:5174"]
   end
 
   test "file validators are readable to an approved dev origin" do
@@ -120,7 +120,7 @@ defmodule ShuttleWeb.CORSTest do
   test "Vary: Origin header is set on responses with CORS headers" do
     conn =
       local_conn()
-      |> put_req_header("origin", "http://localhost:3000")
+      |> put_req_header("origin", "http://localhost:5174")
       |> put_req_header("accept", "application/json")
       |> get("/api/v1/agents")
 

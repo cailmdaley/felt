@@ -2399,10 +2399,9 @@ defmodule Shuttle.ThreadsTest do
         }
       end
 
-    assert [%{"state" => "Blocked", "dispatch_error" => reason} = row] =
+    assert [%{"state" => "Blocked", "dispatch_error" => reason}] =
              Threads.tree("hub", store, entries, MapSet.new())
 
-    assert Threads.state_label(row) == "Blocked · " <> reason
     roster = Threads.roster("hub", store, entries, MapSet.new())
     assert roster =~ "1 blocked"
     assert roster =~ reason

@@ -558,20 +558,6 @@ defmodule Shuttle.Threads do
 
   defp single_line(text), do: text |> String.replace(~r/\s+/, " ") |> String.trim()
 
-  @doc """
-  A thread's roster state as written: Armed says when its host is out of
-  sight, and a rest says what it waits for.
-  """
-  def state_label(%{"state" => state, "dispatch_error" => error}) when is_binary(error),
-    do: "#{state} · #{error}"
-
-  def state_label(%{"host_unreachable" => true}), do: "Armed · host unreachable"
-
-  def state_label(%{"state" => state, "until" => until}) when is_binary(until) and until != "",
-    do: "#{state} · ⏸ until #{until}"
-
-  def state_label(%{"state" => state}), do: state
-
   # The thread badge's count: unfinished threads anywhere below.
   defp unfinished(threads),
     do:
@@ -768,12 +754,14 @@ defmodule Shuttle.Threads do
                  do: resolve_orchestrator(parent, entries, stores, seen)
 
           _ ->
-            resolve_legacy_ancestor(entry, entries, stores, seen)
+            resolve_path_ancestor(entry, entries, stores, seen)
         end
     end
   end
 
-  defp resolve_legacy_ancestor(entry, entries, stores, seen) do
+  # A thread without `thread_parent` answers to the nearest Shuttle-managed
+  # fiber above it on its path.
+  defp resolve_path_ancestor(entry, entries, stores, seen) do
     entry.fiber
     |> address()
     |> Path.dirname()
@@ -1258,9 +1246,9 @@ defmodule Shuttle.Threads do
   @doc "Validate a queued lifecycle notice against its owner's fresh document, never the poll cache."
   def signal_current(params, opts \\ []) do
     signal = params["signal"]
-    modern? = is_map(signal) and is_binary(signal["owner"])
-    reference = if is_map(signal), do: signal["uid"], else: legacy_reference(params["text"])
-    lookup_opts = if modern?, do: opts, else: Keyword.put(opts, :all_matches, true)
+    structured? = is_map(signal) and is_binary(signal["owner"])
+    reference = if is_map(signal), do: signal["uid"], else: text_reference(params["text"])
+    lookup_opts = if structured?, do: opts, else: Keyword.put(opts, :all_matches, true)
 
     with ref when is_binary(ref) and ref != "" <- reference,
          {:ok, %{fibers: entries}} <-
@@ -1268,9 +1256,9 @@ defmodule Shuttle.Threads do
       case entries do
         [] -> missing_signal(params)
         [entry] -> validate_on_owner(entry, params, opts)
-        # A legacy slug can name different fibers in different stores. With no
+        # A text-only notice's slug can name different fibers in different stores. With no
         # unique owner document, deliver the queued notice without validation.
-        _ when not modern? -> {:ok, true}
+        _ when not structured? -> {:ok, true}
         _ -> {:error, :ambiguous_thread}
       end
     else
@@ -1283,9 +1271,9 @@ defmodule Shuttle.Threads do
   defp missing_signal(params) do
     # A newly created remote thread need not have reached this mirror yet.
     owner = get_in(params, ["signal", "owner"])
-    modern? = is_map(params["signal"]) and is_binary(owner)
+    structured? = is_map(params["signal"]) and is_binary(owner)
 
-    case {modern?, owner, params["forwarded"], OriginRouter.route_host(owner)} do
+    case {structured?, owner, params["forwarded"], OriginRouter.route_host(owner)} do
       {_, host, forwarded, {:remote, remote}} when is_binary(host) and forwarded != true ->
         forward_validation(remote, params)
 
@@ -1296,7 +1284,7 @@ defmodule Shuttle.Threads do
         {:ok, false}
 
       # A structured signal with a pinned local owner is stale when that
-      # owner's authoritative document is missing. Legacy notices without an
+      # owner's authoritative document is missing. Text-only notices without an
       # owner are delivered unvalidated above.
       {true, _, _, :local} ->
         {:ok, false}
@@ -1309,14 +1297,14 @@ defmodule Shuttle.Threads do
     end
   end
 
-  defp legacy_reference(text) when is_binary(text) do
+  defp text_reference(text) when is_binary(text) do
     case Regex.run(~r/^thread (\S+) (?:asked|closed|handed off|rested): /, text) do
       [_, ref] -> ref
       _ -> nil
     end
   end
 
-  defp legacy_reference(_), do: nil
+  defp text_reference(_), do: nil
 
   defp validate_on_owner(entry, params, _opts) do
     owner = get_in(entry.fiber, ["shuttle", "host"])

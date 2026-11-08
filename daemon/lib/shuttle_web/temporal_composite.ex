@@ -38,9 +38,6 @@ defmodule ShuttleWeb.TemporalComposite do
 
   alias Shuttle.RemoteTemporalRegistry
 
-  @doc "This daemon's own host id — the local origin's name."
-  def own_host, do: Shuttle.Poller.own_host_id()
-
   @doc """
   Every remote's view of `feed` (refreshing the ones past the freshness gate),
   or `%{}` when the registry is not running.
@@ -67,7 +64,7 @@ defmodule ShuttleWeb.TemporalComposite do
       end)
       |> Enum.sort()
 
-    {own_host(), local, remotes}
+    {Shuttle.Poller.own_host_id(), local, remotes}
   end
 
   @doc """
@@ -91,7 +88,7 @@ defmodule ShuttleWeb.TemporalComposite do
        )}
     end)
     |> Map.put(
-      own_host(),
+      Shuttle.Poller.own_host_id(),
       Map.merge(%{kind: "local", stale: false, last_polled_at: nil, last_error: nil}, local_extra)
     )
   end

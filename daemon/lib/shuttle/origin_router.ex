@@ -74,9 +74,7 @@ defmodule Shuttle.OriginRouter do
   """
   @spec route_host(String.t() | nil, keyword()) :: host_route_decision()
   def route_host(origin, opts \\ []) do
-    own = Keyword.get(opts, :own_host_id) || Poller.own_host_id()
-
-    if origin in [nil, "", "local", own] do
+    if local?(origin, opts) do
       :local
     else
       case Enum.find(RegistryCommon.configured_remotes(opts), &(&1.name == origin)) do
@@ -85,6 +83,14 @@ defmodule Shuttle.OriginRouter do
       end
     end
   end
+
+  @doc """
+  True when `origin` means this daemon: unaddressed (`nil`, `""`, `"local"`) or
+  its own host id (`:own_host_id` in `opts`, else `Shuttle.Poller.own_host_id/0`).
+  """
+  @spec local?(String.t() | nil, keyword()) :: boolean()
+  def local?(origin, opts \\ []),
+    do: origin in [nil, "", "local", Keyword.get(opts, :own_host_id) || Poller.own_host_id()]
 
   @doc """
   The sentence a refused host origin gets. One phrasing, so every endpoint says

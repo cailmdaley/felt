@@ -315,17 +315,6 @@ defmodule Shuttle.Activity do
   @spec fold_stream(Path.t()) :: acc()
   def fold_stream(live), do: EventStream.fold_files(live, new_acc(), &fold_event(&2, &1))
 
-  @doc "`lines`, in file order, decoded and folded onto `acc`."
-  @spec fold_lines(acc(), Enumerable.t()) :: acc()
-  def fold_lines(acc, lines) do
-    Enum.reduce(lines, acc, fn line, acc ->
-      case EventStream.decode(line) do
-        nil -> acc
-        event -> fold_event(acc, event)
-      end
-    end)
-  end
-
   @doc """
   One decoded event folded onto `acc`: the spell machine, the tool-call
   pairing and the tally advance together. An event missing a

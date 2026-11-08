@@ -531,12 +531,22 @@ defmodule Shuttle.Host do
     end
   end
 
-  # Decimal digits only, in 1..65535 — "+4000" and "4_000" are refused.
   defp parse_port(text) do
-    if Regex.match?(~r/\A[0-9]+\z/, text) and String.to_integer(text) in 1..65_535 do
-      {:ok, String.to_integer(text)}
+    with :error <- port_number(text),
+         do: {:error, :bad_port, ~s(port "#{text}" must be an integer between 1 and 65535)}
+  end
+
+  @doc """
+  A TCP port written as decimal digits only, in 1..65535 — "+4000" and
+  "4_000" are refused.
+  """
+  @spec port_number(String.t()) :: {:ok, 1..65_535} | :error
+  def port_number(text) do
+    with true <- Regex.match?(~r/\A[0-9]+\z/, text),
+         port when port in 1..65_535 <- String.to_integer(text) do
+      {:ok, port}
     else
-      {:error, :bad_port, ~s(port "#{text}" must be an integer between 1 and 65535)}
+      _ -> :error
     end
   end
 

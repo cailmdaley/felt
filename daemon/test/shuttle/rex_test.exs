@@ -160,7 +160,6 @@ defmodule Shuttle.RexTest do
 
     assert {:ok, "client:app"} = Rex.app_client(FakeRex)
     assert {:ok, %{"performed_by" => "client:app"}} = Rex.select(FakeRex, "client:app", sid)
-    assert {:ok, %{"full_disk_access" => "granted"}} = Rex.privacy_status(FakeRex)
   end
 
   test "EOF stdin reaches a real CLI reader without placing the request in argv", %{tmp_dir: dir} do
