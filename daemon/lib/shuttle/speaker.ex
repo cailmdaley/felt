@@ -11,8 +11,10 @@ defmodule Shuttle.Speaker do
   words beyond an echo of the line being spoken) or while the speaker is muted,
   and resumes from just before where it stopped. afplay keeps its clock running
   under SIGSTOP, so a hold stops the player and a resume plays the rest of the
-  file from the held offset. The human is quiet once their pending words have
-  not changed for 1.5 s.
+  file from the held offset. The pending words are read every 100 ms, so a
+  hold follows the human's second word within a poll. The hold lasts until 4 s
+  after the human last added a word, whether hark still shows their line or
+  has already closed it, so a pause mid-thought does not restart the line.
 
   Saying "skip" (or "skip it", "skip that") while a line is current drops the
   rest of it.
@@ -33,9 +35,10 @@ defmodule Shuttle.Speaker do
   @default_voice "dylan_thomas"
   @tts "http://127.0.0.1:8321"
   @bank "http://127.0.0.1:8322"
-  @poll_ms 250
+  @poll_ms 100
   @rewind_ms 500
   @quiet_ms 1_500
+  @hold_ms 4_000
 
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -177,10 +180,12 @@ defmodule Shuttle.Speaker do
        journal: journal,
        saved: saved,
        heard: {nil, nil},
+       talked: nil,
        error: nil,
        timer: nil,
        clock: Keyword.get(opts, :clock, fn -> System.monotonic_time(:millisecond) end),
        poll_ms: Keyword.get(opts, :poll_ms, @poll_ms),
+       hold_ms: Keyword.get(opts, :hold_ms, @hold_ms),
        partial: Keyword.get(opts, :partial, &partial/0),
        target: Keyword.get(opts, :target, &target/0),
        retarget: Keyword.get(opts, :retarget, &retarget/1),
@@ -385,10 +390,15 @@ defmodule Shuttle.Speaker do
     state = hear(state, partial, now)
     heard = state.heard
 
-    held =
-      state.muted or
-        (talking?(heard_over(partial, current), Map.get(current.item, :said, current.item.text)) and
-           now - elem(heard, 1) < @quiet_ms)
+    # When the human last added a word over the line: the latest change of
+    # the pending words, if they are the human's.
+    state =
+      if elem(heard, 1) != state.talked and
+           talking?(heard_over(partial, current), Map.get(current.item, :said, current.item.text)),
+         do: %{state | talked: elem(heard, 1)},
+         else: state
+
+    held = state.muted or (not is_nil(state.talked) and now - state.talked < state.hold_ms)
 
     skip = skip(partial, Map.get(current, :before))
 

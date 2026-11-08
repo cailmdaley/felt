@@ -10,6 +10,7 @@ defmodule Shuttle.SpeakerTest do
     opts = [
       name: Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}"),
       poll_ms: 10,
+      hold_ms: 1_500,
       clock: fn -> Agent.get(world, & &1.now) end,
       partial: fn -> Agent.get(world, & &1.partial) end,
       target: fn -> Agent.get(world, & &1.target) end,
@@ -116,6 +117,23 @@ defmodule Shuttle.SpeakerTest do
     set(world, %{now: 7_600})
     assert_receive {:play, "jean:a deliberately long line@3500", _}
     assert %{paused: false} = Speaker.show(server)
+  end
+
+  test "a hold outlasts hark closing the human's line, until the hold runs out",
+       %{server: server, world: world} do
+    {:ok, _} = Speaker.speak(%{"text" => "a deliberately long line", "voice" => "jean"}, server)
+    assert_receive {:play, "jean:a deliberately long line", handle}
+
+    set(world, %{now: 4_000, partial: "wait wait"})
+    assert_receive {:stop, ^handle}
+
+    # hark closes the run and clears its pending words.
+    set(world, %{now: 4_500, partial: ""})
+    refute_receive {:play, _, _}, 50
+    set(world, %{now: 5_400})
+    refute_receive {:play, _, _}, 50
+    set(world, %{now: 5_600})
+    assert_receive {:play, "jean:a deliberately long line@3500", _}
   end
 
   test "a restart resumes the held line and keeps the queue",
