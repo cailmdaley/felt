@@ -37,7 +37,7 @@ export type ConversationDestination = { id: ConversationOpening; label: string; 
   | { href: string; run?: never }
   | { run: () => void; href?: never }
 )
-export type ConversationWorker = Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'terminalBackend' | 'shuttleHost' | 'launchError'>
+export type ConversationWorker = Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'terminalBackend' | 'rexSession' | 'shuttleHost' | 'launchError'>
 export type WorkerOpener = (session: string, host?: string) => void
 /** A thread's conversation, two ways: `open` is the explicit act, true if it had a destination; `reach` is a click's quiet move, true once Rex moved. */
 export interface Conversations { open(card: KanbanCard): boolean; reach(card: KanbanCard): Promise<boolean> }
@@ -55,15 +55,17 @@ export function conversationDestinations(card: ConversationWorker, device: Conve
     const app = device.desktop ? claudeAppRoute(web) : undefined
     if (app) destinations.push({ id: 'app', label: 'Claude app', href: app })
   }
-  if (!device.desktop && card.terminalBackend === 'rex') destinations.push(REX_PHONE)
+  if (!device.desktop && (card.terminalBackend === 'rex' || card.rexSession)) destinations.push(rexPhone(card.rexSession))
   return destinations
 }
 
-/** Rex for iOS registers no URL scheme, so the phone opens it through a one-action
- *  Shortcut named "Rex" (Open App → Rex). The app lists every session; this one is
- *  named after its constitution family. */
+/** Rex for iOS registers no URL scheme, so the phone opens it through a Shortcut named
+ *  "Rex": it opens the app, then the Rex session whose name it is given, if any. */
 export const REX_PHONE_SHORTCUT = 'shortcuts://run-shortcut?name=Rex'
-const REX_PHONE: ConversationDestination = { id: 'rex', label: 'Rex', title: 'Open the Rex app (through the Shortcut named “Rex”)', href: REX_PHONE_SHORTCUT }
+function rexPhone(session?: string): ConversationDestination {
+  const href = session ? `${REX_PHONE_SHORTCUT}&input=text&text=${encodeURIComponent(session)}` : REX_PHONE_SHORTCUT
+  return { id: 'rex', label: 'Rex', title: session ? `Open ${session} in Rex (through the Shortcut named “Rex”)` : 'Open the Rex app (through the Shortcut named “Rex”)', href }
+}
 
 export function resolveDestination<T extends { id: ConversationOpening }>(destinations: readonly T[], remembered = conversationOpening()): T | undefined {
   return destinations.find(destination => destination.id === remembered) ?? destinations[0]

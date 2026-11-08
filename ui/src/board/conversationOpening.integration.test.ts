@@ -97,6 +97,12 @@ describe('conversation opening', () => {
     expect(resolveDestination(conversationDestinations(rexWorker, phone, vi.fn()), 'terminal')?.id).toBe('browser')
   })
 
+  it('hands the phone Rex Shortcut the worker family session to open', () => {
+    const phone = { desktop: false, userAgent: 'iPhone', coarse: true }
+    const rex = conversationDestinations({ ...worker, rexSession: 'ai-futures/felt' }, phone, vi.fn()).find(d => d.id === 'rex')
+    expect(rex?.href).toBe(`${REX_PHONE_SHORTCUT}&input=text&text=ai-futures%2Ffelt`)
+  })
+
   it.each(['javascript:alert(1)', 'https://claude.ai.evil.example/code/session_test', `${bridge}\n`])('never opens an unsafe session link: %s', (sessionLink) => {
     saveConversationOpening('app')
     expect(opensInPlace(bandConsole({ ...worker, sessionLink }, vi.fn()))).toBe(true)

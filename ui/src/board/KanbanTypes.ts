@@ -88,6 +88,8 @@ export interface KanbanCard {
    */
   tmuxSession?: string
   terminalBackend?: 'tmux' | 'rex'
+  /** The Rex session holding this worker's family, by its label. */
+  rexSession?: string
   /**
    * The daemon's report of the live worker: `working` (busy, or idle over
    * work it started), `waiting` (its turn ended with nothing running under

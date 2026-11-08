@@ -40,6 +40,17 @@ defmodule Shuttle.Terminal.RexTree do
 
   def session_label(root), do: root |> String.split("/") |> Enum.take(-2) |> Enum.join("/")
 
+  @doc "The Rex session label a worker's family session carries, or nil when it has no family binding."
+  def worker_session_label(name) do
+    case Bindings.read() do
+      {:ok, %{"bindings" => %{^name => %{"family" => family}}}} when is_binary(family) ->
+        session_label(family)
+
+      _ ->
+        nil
+    end
+  end
+
   @doc "Order tabs by fiber path, with deterministic ties; label by constitution depth."
   def layout(entries) do
     entries

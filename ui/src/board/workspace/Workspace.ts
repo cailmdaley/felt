@@ -996,7 +996,7 @@ export class Workspace {
           const feed = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner)
           const live = feed ?? state.card
           const metadata = cardFromCompositeEntry({ ...entry, origin: state.channel.owner })
-          for (const key of ['workerState', 'workerAgent', 'tmuxSession', 'terminalBackend', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'launchError', 'column', 'turn', 'nextLaunchAt', 'scheduleText'] as const) {
+          for (const key of ['workerState', 'workerAgent', 'tmuxSession', 'terminalBackend', 'rexSession', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'launchError', 'column', 'turn', 'nextLaunchAt', 'scheduleText'] as const) {
             metadata[key] = live[key] as never
           }
           // The feed owns office metadata between body reads.

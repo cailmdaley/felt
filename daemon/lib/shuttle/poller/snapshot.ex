@@ -329,6 +329,7 @@ defmodule Shuttle.Poller.Snapshot do
       tmux_session: backend.tmux_session,
       surface: backend.surface,
       terminal: backend.terminal,
+      rex_session: Shuttle.Terminal.RexTree.worker_session_label(meta.session),
       session_uuid: Map.get(meta, :session_uuid),
       agent: Map.get(meta, :agent_id),
       state: if(error, do: "blocked", else: Map.get(meta, :state, "running")),

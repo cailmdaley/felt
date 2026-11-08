@@ -529,6 +529,7 @@ function toCard(
     workerState: runtime?.state,
     tmuxSession,
     terminalBackend: runtime?.terminalBackend,
+    rexSession: runtime?.rexSession,
     runtimePhase,
     launchError: entry.dispatchError ?? entry.runtime?.launchError,
     sessionLink: entry.runtime?.sessionLink,

@@ -63,6 +63,8 @@ interface CompositeRuntime {
    * App workers have none. */
   tmuxSession?: string;
   terminalBackend?: 'tmux' | 'rex';
+  /** The Rex session holding this worker's family, by its label. */
+  rexSession?: string;
   agent?: string;
   sessionUuid?: string;
   /** Owner-served activity category: `"attention"` (stopped on a harness
@@ -242,7 +244,8 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const agent = typeof value.agent === 'string' ? value.agent : undefined;
   const startedAt = typeof value.started_at === 'number' && Number.isFinite(value.started_at) ? value.started_at : undefined;
   const terminalBackend = value.terminal === 'rex' || value.terminal === 'tmux' ? value.terminal : undefined;
-  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, launchError };
+  const rexSession = typeof value.rex_session === 'string' && value.rex_session ? value.rex_session : undefined;
+  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, rexSession, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, launchError };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
