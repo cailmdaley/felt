@@ -94,7 +94,10 @@ export function registerChangeJourneys(test) {
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
     const family = page.locator('.ws-selected'), route = new URL(page.url()).hash
-    await family.locator('.fp-row[aria-selected="true"] .fp-lead').click()
+    // A constitution without threads opens on its tapestry already unfolded.
+    const lead = family.locator('.fp-row[aria-selected="true"] .fp-lead')
+    await lead.waitFor()
+    if (await lead.getAttribute('aria-pressed') !== 'true') await lead.click()
     assert.equal(new URL(page.url()).hash, route)
     await family.locator('.fp-row[aria-selected="true"] .fp-doc iframe').waitFor()
     const link = page.frameLocator('.ws-selected iframe').getByRole('link', { name: 'Read the change →' })
