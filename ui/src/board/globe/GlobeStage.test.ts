@@ -21,7 +21,7 @@ function host(): GlobeHost & { conversed: string[]; opened: string[] } {
   return {
     conversed, opened,
     feeds: {
-      marks: () => undefined, refresh: noop, lead: async () => undefined,
+      marks: () => undefined, reach: () => 14 * 86_400_000, refresh: noop, lead: async () => undefined,
       files: found => found.id === 'science/hub' ? [{ key: 'doc:report.html', name: 'report.html', at: Date.now(), unread: false }]
         : found.id === 'life/errand' ? [{ key: 'local:/runs/plot.png', name: 'plot.png', at: Date.now(), unread: false }] : [],
     },

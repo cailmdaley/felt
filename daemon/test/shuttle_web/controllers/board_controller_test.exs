@@ -71,6 +71,32 @@ defmodule ShuttleWeb.BoardControllerTest do
     end
   end
 
+  test "marks endpoint joins this host's ledgers into per-thread marks over the board's reach" do
+    import Shuttle.Test.Ledgers
+    sessions = ledger_setup!("SHUTTLE_SESSIONS_FILE", "board_marks_sessions")
+    commits = ledger_setup!("SHUTTLE_COMMITS_FILE", "board_marks_commits")
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "host")
+    host = Shuttle.Poller.own_host_id()
+    now = System.system_time(:millisecond)
+    old = now - Shuttle.Board.retention_ms() - 120_000
+
+    write_jsonl!(sessions, [
+      %{"uid" => "U1", "session" => "s1", "host" => host, "at" => old, "kind" => "dispatch"},
+      %{"uid" => "U1", "session" => "s2", "host" => host, "at" => now - 1000, "kind" => "resume"}
+    ])
+
+    write_jsonl!(commits, [
+      commit_record(%{"at" => old, "session" => "s1", "sha" => "a"}),
+      commit_record(%{"at" => now - 500, "session" => "s2", "sha" => "b"}),
+      commit_record(%{"at" => now - 400, "session" => "elsewhere", "sha" => "c"})
+    ])
+
+    body = api_conn() |> get("/api/v1/board/marks") |> json_response(200)
+    assert body["reach_ms"] == Shuttle.Board.retention_ms()
+    assert body["marks"] == %{"U1" => %{"launches" => [now - 1000], "commits" => [now - 500]}}
+    assert Map.has_key?(body["origins"], host)
+  end
+
   test "family endpoint composes and deduplicates a remote feed" do
     path = Path.join(System.tmp_dir!(), "board-family-api-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm(path) end)
@@ -125,6 +151,7 @@ defmodule ShuttleWeb.BoardControllerTest do
     assert %{items: [_ | _]} = Shuttle.RemoteTemporalRegistry.entries(registry, :board)["remote"]
     result = api_conn() |> get("/api/v1/board/family?fiber=root&since_ms=0") |> json_response(200)
     assert result["family"]["root_uid"] == "root"
+    assert result["reach_ms"] == Shuttle.Board.retention_ms()
 
     assert [%{"id" => "duplicate", "text" => "local"}, %{"id" => "remote", "delivered" => true}] =
              result["records"]

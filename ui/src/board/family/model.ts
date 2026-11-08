@@ -2,9 +2,6 @@ import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { THREAD_LABEL, threadKey, threadTree, type ThreadIndex, type TreeNode } from '../threads.js'
 import { turnOf } from '../turn.js'
 
-/** How far back a family's map reaches. */
-export const MAP_WINDOW_MS = 14 * 86_400_000
-
 /** What a thread asks of the human, most urgent first. */
 export const ATTENTION = ['question', 'blocked', 'new', 'turn', 'review', 'working'] as const
 export type Attention = typeof ATTENTION[number]
@@ -19,6 +16,8 @@ export interface MapFile { key: string; name: string; at: number; unread: boolea
 /** The facts about a thread that do not live on its card. */
 export interface MapFeeds {
   marks(card: KanbanCard): ThreadMarks | undefined
+  /** How far back the marks reach, in ms: archived work moved within it stays on the map. */
+  reach(): number
   /** The thread's sent files, newest first. */
   files(card: KanbanCard): MapFile[]
 }
@@ -79,9 +78,9 @@ const isDrawn = (thread: MapThread): boolean => thread.rank >= 0
 /** A thread's mass of work: its launches, commits and files. */
 const mass = (thread: MapThread): number => thread.launches.length + thread.commits.length + thread.files.length
 
-function standingOf(card: KanbanCard, index: ThreadIndex, fresh: boolean, lastMove: number, now: number): Standing {
+function standingOf(card: KanbanCard, index: ThreadIndex, fresh: boolean, lastMove: number, now: number, reach: number): Standing {
   const state = index.state(card), { turn, yours } = turnOf(card, now)
-  if (state === 'archived') return now - lastMove < MAP_WINDOW_MS ? 'quiet' : 'aside'
+  if (state === 'archived') return now - lastMove < reach ? 'quiet' : 'aside'
   if (turn === 'question') return turn
   if (state === 'drafts' || state === 'roles' || state === 'resting') return 'aside'
   if (turn === 'blocked') return turn
@@ -97,7 +96,7 @@ const stillWord = (card: KanbanCard): string => card.held ? 'held' : card.dispat
 
 /** The family under `root`, ready to draw: one model every drawing reads. */
 export function familyModel(index: ThreadIndex, root: KanbanCard, current: KanbanCard, feeds: MapFeeds, now: number): FamilyModel {
-  const threads = new Map<string, MapThread>()
+  const threads = new Map<string, MapThread>(), reach = feeds.reach()
   const walk = (node: TreeNode, parent: string | null): MapThread => {
     const { card, depth } = node
     const marks = feeds.marks(card), files = feeds.files(card)
@@ -106,7 +105,7 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     const ask = turnOf(card, now).turn === 'question' ? card.ask : undefined
     const lastMove = Math.min(now, Math.max(card.lastActivityAt ?? 0, ...launches, ...commits, ...files.map(file => file.at), ended ?? 0, born, Date.parse(ask?.at ?? '') || 0))
     const fresh = files.some(file => file.unread)
-    const standing = standingOf(card, index, fresh, lastMove, now), tone = standingOf(card, index, false, lastMove, now) as MapThread['tone']
+    const standing = standingOf(card, index, fresh, lastMove, now, reach), tone = standingOf(card, index, false, lastMove, now, reach) as MapThread['tone']
     const thread: MapThread = {
       key: threadKey(card), card, name: card.name, depth, parent, children: [], standing, tone,
       word: WORD[standing] ?? (standing === 'working' ? turnOf(card, now).word : standing === 'still' ? stillWord(card) : index.state(card) === 'roles' ? 'seat' : THREAD_LABEL[index.state(card)].toLowerCase()),

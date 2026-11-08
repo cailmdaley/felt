@@ -6,7 +6,7 @@ import { familyModel, type MapFeeds } from './model.js'
 import { opening, outline, tally, underAll, type Line } from './outline.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
-const noFeeds: MapFeeds = { marks: () => undefined, files: () => [] }
+const noFeeds: MapFeeds = { marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [] }
 const at = (back: number): string => new Date(now - back * hour).toISOString()
 const running = (phase: string, age: number): Partial<KanbanCard> => ({ status: 'active', workerState: 'running', runtimePhase: phase as KanbanCard['runtimePhase'], lastActivityAt: now - age * hour, workerStartedAt: now - 100 * hour })
 const thread = (id: string, over: Partial<KanbanCard>, orchestrator = 'hub'): KanbanCard => card({ id, orchestrator, createdAt: at(200), ...over })

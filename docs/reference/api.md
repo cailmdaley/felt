@@ -613,10 +613,10 @@ memory, folded once from both files and then only over appended bytes, and a
 request reads its window out of that.
 
 `/board/family` accepts `fiber=<id|slug|uid>` or `session=<harness>:<id>` (required unless `all=true`), `since_ms`, and optional `viewer=<uid>` for delivery marking.
-It returns `{family, viewer, records}`; records are deduplicated by id and carry `member`, `to_member`, `actor`, and `delivered`.
+It returns `{family, viewer, records, reach_ms}`, `reach_ms` being the board's reach (its retention, 14 days), which `shuttle`'s board hook also uses to prune its per-session cursors; records are deduplicated by id and carry `member`, `to_member`, `actor`, and `delivered`.
 A record is delivered when the viewer is its subject, actor or recipient, or is the orchestrator of a thread's ask, close, handoff, rest or unblock.
 An externally cleared ask about the viewer is not delivered.
-The default window is 24 hours, or six hours for `all=true`, limited to up to 14 days and bounded by the two retained event files.
+The default window is 24 hours, or six hours for `all=true`, limited to the board's 14-day reach and bounded by the two retained event files.
 Remote records carry `received_at`, the viewer daemon's first receipt time, preserved across refreshes and restarts.
 The family view filters and orders remote records by that time, so a delayed host or a skewed writer clock cannot hide an arrival behind the viewer's cursor.
 Remote records are served from the last cached feed while a due refresh runs asynchronously.
@@ -660,6 +660,15 @@ The composite siblings are:
 | `GET /sessions/composite` | local ledger + remote caches | Cross-host fiber/session pairings; `uid=` narrows to one fiber |
 | `GET /commits/composite` | local ledger + remote caches | Cross-host commit narration and shortstat counts |
 | `GET /sent-files/all/composite` | local feed + remote caches | Cross-host `SendUserFile` pushes |
+| `GET /board/marks` | session and commit composites | Each thread's launches and commits over the board's reach |
+
+`/board/marks` answers `{reach_ms, marks, origins}`: `marks` maps a fiber uid
+to `{launches, commits}`, epoch-ms lists oldest first, over the last `reach_ms`
+(the board's 14-day retention). A launch is a session-ledger pairing; a burst
+of three or more resumes on one host within one two-minute bucket is a daemon
+restart and marks nothing. A commit joins its thread by `{host, session}`
+against the session ledger, and on the serving host also through that
+session's current successor.
 
 The board reads only these composites; the single-host routes are what a hub
 asks each peer for. A composite asks each remote for that feed when it is

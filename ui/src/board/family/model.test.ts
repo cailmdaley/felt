@@ -5,7 +5,7 @@ import { ThreadIndex } from '../threads.js'
 import { familyModel, type MapFeeds } from './model.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
-const noFeeds: MapFeeds = { marks: () => undefined, files: () => [] }
+const noFeeds: MapFeeds = { marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [] }
 const running = (phase: string, age: number): Partial<KanbanCard> => ({ status: 'active', workerState: 'running', runtimePhase: phase as KanbanCard['runtimePhase'], lastActivityAt: now - age * hour, workerStartedAt: now - 100 * hour })
 const thread = (id: string, over: Partial<KanbanCard>): KanbanCard => card({ id, orchestrator: 'hub', createdAt: new Date(now - 200 * hour).toISOString(), ...over })
 const model = (cards: KanbanCard[], feeds = noFeeds) => {
@@ -58,7 +58,7 @@ it('keeps an aside ancestor drawn while work hangs beneath it', () => {
 })
 it('takes the last move from every source it knows, never past now', () => {
   const m = model([root, thread('hub/t', running('working', 50))], {
-    marks: () => ({ launches: [now - 40 * hour], commits: [now - 3 * hour] }),
+    ...noFeeds, marks: () => ({ launches: [now - 40 * hour], commits: [now - 3 * hour] }),
     files: () => [{ key: 'k', name: 'a', at: now - 7 * hour, unread: false }],
   })
   expect(m.attention[0].lastMove).toBe(now - 3 * hour)
@@ -101,4 +101,11 @@ it('shows a closed thread\'s outcome, not the ask it left behind', () => {
   const closed = [...m.threads.values()].find(t => t.card.id === 'hub/closed')!
   expect(closed.note).toBe('Landed')
   expect(closed.lastMove).toBe(now - 9 * hour)
+})
+it('keeps archived work on the map only within the reach the daemon serves', () => {
+  const archived = thread('hub/tempered', { status: 'closed', tempered: true, closedAt: new Date(now - 30 * hour).toISOString() })
+  const standing = (reach: number) => [...model([root, archived], { ...noFeeds, reach: () => reach }).threads.values()].find(t => t.card.id === 'hub/tempered')!.standing
+  expect(standing(48 * hour)).toBe('quiet')
+  expect(standing(24 * hour)).toBe('aside')
+  expect(standing(0)).toBe('aside')
 })

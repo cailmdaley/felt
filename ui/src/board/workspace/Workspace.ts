@@ -153,6 +153,7 @@ export class Workspace {
     })
     this.mapFeeds = {
       marks: card => this.activity.of(card.uid ?? card.id),
+      reach: () => this.activity.reach(),
       files: card => this.mapFiles(card),
       refresh: () => this.refreshFamilyFeeds(),
       lead: card => this.mapLead(card),

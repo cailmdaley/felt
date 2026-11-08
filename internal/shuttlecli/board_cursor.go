@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-const boardRetention = 14 * 24 * time.Hour
-
-// pruneBoardCursors removes inactive session cursors after the board's retention.
-func pruneBoardCursors(dir string, now time.Time) {
+// pruneBoardCursors removes session cursors untouched for longer than the
+// board's reach, which the daemon serves with every family read: past it the
+// board holds nothing a cursor could still mark as seen.
+func pruneBoardCursors(dir string, now time.Time, reach time.Duration) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	cutoff := now.Add(-boardRetention)
+	cutoff := now.Add(-reach)
 	for _, entry := range entries {
 		if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue

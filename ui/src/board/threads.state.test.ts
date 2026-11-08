@@ -50,7 +50,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
   })
   it('the constitution\'s page names each state, the set-aside behind its fold', () => {
     const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
-    const page = new FamilyPage(conversations(), { marks: () => undefined, files: () => [], refresh: () => {}, lead: async () => undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {} }, placeAt(hub), () => {}); page.update(hub, index)
+    const page = new FamilyPage(conversations(), { marks: () => undefined, reach: () => 14 * 86_400_000, files: () => [], refresh: () => {}, lead: async () => undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {} }, placeAt(hub), () => {}); page.update(hub, index)
     expect(page.el.querySelector('.fp-aside')!.textContent).toBe('1 resting · 1 seat')
     page.el.querySelector('.fp-aside')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
     // Every thread is named by the divider it sits under, in flight or set aside.

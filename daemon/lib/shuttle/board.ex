@@ -5,6 +5,9 @@ defmodule Shuttle.Board do
 
   @retention_ms 14 * 24 * 60 * 60 * 1_000
 
+  @doc "How far back the board reaches: its records, and the thread marks it serves."
+  def retention_ms, do: @retention_ms
+
   @doc "Fold a valid board record by its fleet-wide identity."
   def fold(records, %{"type" => "board", "id" => id, "timestamp" => ts} = record)
       when is_binary(id) and id != "" and is_integer(ts),

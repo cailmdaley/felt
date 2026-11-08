@@ -156,7 +156,6 @@ func (a *app) boardDigest(harness, session string) (text string, acknowledge fun
 		return "", nil
 	}
 	path := filepath.Join(dir, "board-cursors", harness+"-"+session+".json")
-	pruneBoardCursors(filepath.Dir(path), a.eventNow())
 	var cursor boardCursor
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &cursor)
@@ -173,7 +172,13 @@ func (a *app) boardDigest(harness, session string) (text string, acknowledge fun
 		return "", nil
 	}
 	var response boardResponse
-	if json.Unmarshal(body, &response) != nil || response.Family == nil {
+	if json.Unmarshal(body, &response) != nil {
+		return "", nil
+	}
+	if response.ReachMs > 0 {
+		pruneBoardCursors(filepath.Dir(path), a.eventNow(), time.Duration(response.ReachMs)*time.Millisecond)
+	}
+	if response.Family == nil {
 		return "", nil
 	}
 	seen := make(map[string]bool, len(cursor.Seen))

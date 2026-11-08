@@ -128,6 +128,8 @@ defmodule ShuttleWeb.Router do
     # events.jsonl hook stream. JSON-native, so it lives in the :api pipeline
     # (unlike /file, which serves raw bytes).
     get("/board/family", BoardController, :family)
+    # Each thread's launches and commits over the board's reach, fleet-wide.
+    get("/board/marks", BoardController, :marks)
     get("/board", BoardController, :show)
     post("/board/open", VoiceController, :open)
     get("/sent-files", SentFilesController, :show)

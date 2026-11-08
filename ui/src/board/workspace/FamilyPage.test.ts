@@ -22,7 +22,7 @@ const file = (name: string, back: number, unread = false): MapFile => ({ key: `d
 /** Mid's sent files, newest first as the feed gives them. */
 const sent = [file('new.png', 1, true), file('mid.md', 2), file('old.md', 3)]
 const tapestry = file('Tapestry', 4)
-const feeds: FamilyFeeds = { marks: () => undefined, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(), lead: async c => c.id === 'hub/mid' ? tapestry : undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {} }
+const feeds: FamilyFeeds = { marks: () => undefined, reach: () => 14 * 86_400_000, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(), lead: async c => c.id === 'hub/mid' ? tapestry : undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {} }
 const settled = async (): Promise<void> => { for (let n = 0; n < 4; n++) await Promise.resolve() }
 
 interface Made { family: FamilyPage; reach: Mock; place: MapPlace; sighted: Mock }

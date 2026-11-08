@@ -1651,6 +1651,25 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ host: LOCAL_HOST, records: [], origins: MOCK_ORIGINS })
   }
 
+  if (url.includes('/api/v1/board/marks')) {
+    // The daemon's join, on the fixture's ledgers: every pairing a launch, each
+    // commit its session's thread's.
+    const sessions = workspaceFixture?.sessions ?? docsExample?.sessions ?? [...MOCK_SESSIONS, ...APP_SESSIONS]
+    const commits = workspaceFixture?.commits ?? []
+    const marks: Record<string, { launches: number[]; commits: number[] }> = {}
+    const owners = new Map<string, string>()
+    for (const row of sessions) {
+      if (!row.uid) continue
+      owners.set(row.session, row.uid)
+      ;(marks[row.uid] ??= { launches: [], commits: [] }).launches.push(row.at)
+    }
+    for (const row of commits) {
+      const uid = row.session ? owners.get(row.session) : undefined
+      if (uid) marks[uid].commits.push(row.at)
+    }
+    return json({ reach_ms: 14 * 86_400_000, marks, origins: workspaceFixture?.feed.origins ?? MOCK_ORIGINS })
+  }
+
   if (url.includes('/api/v1/sent-files/clear') && method === 'POST') {
     dismissedSends.push(body() as { uid: string; origin?: string; path?: string })
     return json({ ok: true })

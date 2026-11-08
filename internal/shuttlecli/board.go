@@ -193,6 +193,8 @@ type boardResponse struct {
 	Family  *boardFamily `json:"family"`
 	Viewer  *string      `json:"viewer"`
 	Records []boardRow   `json:"records"`
+	// ReachMs is how far back the board reaches (its retention).
+	ReachMs int64 `json:"reach_ms"`
 }
 
 func boardSingleLine(text string) string {
