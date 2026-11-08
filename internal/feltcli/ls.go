@@ -42,10 +42,7 @@ func listForOutput(storage *felt.Storage, hasFields []string, jsonMode bool) ([]
 
 func listForSearch(storage *felt.Storage, hasFields []string, jsonMode bool, search lsSearch) ([]*felt.Felt, error) {
 	if search.readsBodies() {
-		if jsonMode {
-			return storage.ListWithModTime()
-		}
-		return storage.List()
+		return storage.ListHavingFrontmatterFields(frontmatterFieldsForOutput(hasFields), jsonMode)
 	}
 	return listForOutput(storage, hasFields, jsonMode)
 }

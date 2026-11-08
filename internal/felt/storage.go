@@ -1474,6 +1474,14 @@ func (s *Storage) ListWithModTime() ([]*Felt, error) {
 	return s.listWithModeHavingFrontmatterFields(ParseFull, true, nil)
 }
 
+// ListHavingFrontmatterFields returns, with full content, the felts whose raw
+// frontmatter contains every requested top-level key (all felts when fields is
+// empty), with modification times when includeModTime. Other fibers cost a
+// frontmatter read, not a full parse.
+func (s *Storage) ListHavingFrontmatterFields(fields []string, includeModTime bool) ([]*Felt, error) {
+	return s.listWithModeHavingFrontmatterFields(ParseFull, includeModTime, fields)
+}
+
 // ListMetadata returns all felts with frontmatter only.
 func (s *Storage) ListMetadata() ([]*Felt, error) {
 	return s.listWithModeHavingFrontmatterFields(ParseMetadataOnly, false, nil)
@@ -1674,7 +1682,7 @@ func (s *Storage) listFilesWithMode(mode ParseMode, includeModTime bool, fields 
 	issues := make([]error, len(files))
 	process := func(i int) {
 		file := files[i]
-		if len(fields) > 0 && mode == ParseMetadataOnly {
+		if len(fields) > 0 {
 			matched, err := fileFrontmatterHasTopLevelFields(file.path, fields)
 			if err != nil {
 				issues[i] = err
