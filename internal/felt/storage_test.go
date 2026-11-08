@@ -2188,7 +2188,7 @@ func TestEnclosingStoreReportsMountPoint(t *testing.T) {
 
 // TestResolveScopedIDRefusesEnclosingStorePath is the misresolution this whole
 // mechanism exists to stop: from inside the substore, a link written out in
-// full to a fiber in another project's tree used to be rescued by the
+// full to a fiber in another project's tree must not be rescued by the
 // basename fallback into the local fiber of the same slug.
 func TestResolveScopedIDRefusesEnclosingStorePath(t *testing.T) {
 	t.Parallel()

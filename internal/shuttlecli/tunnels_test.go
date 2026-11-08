@@ -697,10 +697,9 @@ func TestInstallTunnels_DryRunRemovesNothing(t *testing.T) {
 		t.Errorf("--dry-run must not remove the orphan: %v", err)
 	}
 	// Not just "did not prune": --dry-run is a preview of the whole command, so
-	// the install half must not have run either. It used to write every job and
-	// bootstrap every supervisor before ever reaching the prune it claimed to be
-	// previewing — and a failing Activate returned first, so the orphan listing
-	// people run this for was often never printed at all.
+	// the install half must not run either: no job written, no supervisor
+	// bootstrapped, and no failing Activate standing between the preview and
+	// the orphan listing people run it for.
 	if _, err := os.Stat(filepath.Join(unitDir, "shuttle-tunnel-alpha.service")); !os.IsNotExist(err) {
 		t.Errorf("--dry-run must not write alpha's unit, stat err = %v", err)
 	}
@@ -762,8 +761,8 @@ func TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing(t *testing.T) {
 // TestInstallTunnels_PruneCatchesAnOldLabelPrefix — the haunting prune exists to
 // end. A plist installed under one reverse-DNS prefix, and a fleet file since
 // changed to another, matches neither the kept set nor a prefix-pinned pattern,
-// so the old autossh loop used to run forever with nothing left that knew its
-// name. The generated `.shuttle-tunnel-` infix is what makes it ours, not the
+// and its autossh loop would run forever with nothing left that knew its name.
+// The generated `.shuttle-tunnel-` infix is what makes it ours, not the
 // prefix, so prune recognizes it whatever prefix it was born under.
 func TestInstallTunnels_PruneCatchesAnOldLabelPrefix(t *testing.T) {
 	t.Parallel()

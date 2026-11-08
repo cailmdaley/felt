@@ -122,8 +122,8 @@ brews:
       # Only re-run `felt setup codex` for users who already have Codex
       # integration installed — never silently install Codex hooks for
       # users who didn't ask for them. The detection mirrors the binary's
-      # own feltCodexInstalled(): plugin entry in config.toml (1.0.8+) or
-      # legacy session.sh reference in hooks.json (pre-1.0.8).
+      # own feltCodexInstalled(): the plugin entry in config.toml, or a direct
+      # session.sh reference in hooks.json from a pre-plugin install.
       codex_config = "#{ENV["HOME"]}/.codex/config.toml"
       codex_hooks = "#{ENV["HOME"]}/.codex/hooks.json"
       # TOML quotes keys with single or double quotes depending on the

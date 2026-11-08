@@ -475,12 +475,11 @@ func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 	})
 }
 
-// TestUninstallPluginRemovesMarketplaceAndSkillLinks pins the C decision:
-// `felt uninstall` used to remove the Claude plugin and leave cailmdaley-felt
-// registered in ~/.claude/settings.json, so it was the inverse of `felt setup
-// codex` (which has always removed its marketplace) but not of `felt setup
-// claude`. The marketplace declares exactly one plugin, so nothing else is
-// hanging off it — and the skills `felt setup skills` linked out of its clone
+// TestUninstallPluginRemovesMarketplaceAndSkillLinks: `felt uninstall` is the
+// inverse of `felt setup claude` as well as of `felt setup codex`, so it
+// removes the cailmdaley-felt marketplace from ~/.claude/settings.json along
+// with the plugin. The marketplace declares exactly one plugin, so nothing
+// else is hanging off it — and the skills `felt setup skills` linked out of its clone
 // have to be unlinked first, or removing the clone leaves dangling symlinks.
 func TestUninstallPluginRemovesMarketplaceAndSkillLinks(t *testing.T) {
 	t.Parallel()

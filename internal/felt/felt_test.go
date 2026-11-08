@@ -73,9 +73,8 @@ func TestNewEmptySlug(t *testing.T) {
 
 func TestNewPreservesLongExplicitSlug(t *testing.T) {
 	t.Parallel()
-	// Regression: felt add used to silently truncate basenames at 32 chars
-	// via truncateAtWord, which could collide with existing siblings and
-	// produce confusing "already exists" errors.
+	// An explicit slug is kept whole: truncating it could collide with an
+	// existing sibling and produce a confusing "already exists" error.
 	tests := []struct {
 		slug string
 	}{

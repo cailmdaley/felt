@@ -209,7 +209,7 @@ func checkRelationshipIntegrity(felts []*Felt, external *ExternalRefs, strays []
 		// A reference that resolves to a fiber in the enclosing store is not
 		// broken — this store simply cannot see it. Silence, not an issue,
 		// EXCEPT where an INFERRED external hit shadowed a local basename
-		// rescue: the reader loses a repair that used to fire, and that loss
+		// rescue: the reader loses the local repair that would otherwise apply, and that loss
 		// should be visible rather than silent. A link written out in full
 		// from the enclosing store's root is not that case — it is someone
 		// naming the fiber they meant, and it gets the same silence a healthy

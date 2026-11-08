@@ -374,10 +374,11 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 // line for line by the Elixir suite's table over Shuttle.Remotes.parse_proxy/1.
 // The two readers share the fixture files for everything a fleet file can
 // legally say, but a fixture can only hold readings that SUCCEED — the rejected
-// inputs are the half where the readers actually drifted (Go used to accept a
-// path, a query, a fragment, a leading-zero port and a socks5:// scheme that
-// Elixir read as no proxy at all, so `remotes list` validated a file clean while
-// the daemon silently connected direct and every ts.net remote went stale). So
+// inputs are the half where the readers can drift (a path, a query, a
+// fragment, a leading-zero port or a socks5:// scheme accepted by one reader
+// and read as no proxy by the other would let `remotes list` validate a file
+// clean while the daemon silently connected direct and every ts.net remote
+// went stale). So
 // the table lives in both suites instead: change a rule in one language and the
 // other language's table is what fails.
 func TestParseProxyEndpoint(t *testing.T) {

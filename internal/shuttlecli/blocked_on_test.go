@@ -14,7 +14,7 @@ import (
 const blockerUID = "01JB0CKER00000000000000000"
 
 // A rest --until naming a fiber stores its uid; a text naming nothing is kept
-// as text; a date is a return day and clears the wait; '' clears both.
+// as text; a date is a return day and clears the wait; an empty value clears both.
 func TestRestUntilNamesWhatItWaitsFor(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

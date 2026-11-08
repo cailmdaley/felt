@@ -20,7 +20,8 @@ var (
 // newCrossStoreFixture builds the loom shape: an enclosing store, a project
 // whose `.felt` is a symlink into a subdirectory of it, and fibers on both
 // sides — including a same-slug pair (`debug` here, `ai-futures/portolan/debug`
-// out there) so every test exercises the case that used to misresolve.
+// out there) so every test exercises the case a basename fallback would
+// misresolve.
 func newCrossStoreFixture(t *testing.T) (loomProj, subProj string) {
 	t.Helper()
 	tmp := t.TempDir()

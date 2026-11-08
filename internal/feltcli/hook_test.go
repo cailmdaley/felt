@@ -429,8 +429,7 @@ func TestHookSessionEmptyEnvelope(t *testing.T) {
 	}
 }
 
-// TestHookPreToolGate covers the deny/pass matrix that previously lived in
-// remind.sh: deny on first non-Skill tool in a felt project, pass on Skill:felt
+// TestHookPreToolGate covers the gate's deny/pass matrix: deny on first non-Skill tool in a felt project, pass on Skill:felt
 // (and mark the flag), pass on subsequent tools, pass for Codex sessions, pass
 // outside felt repos. Sibling-skill activations (shuttle, etc) must not satisfy
 // the gate.

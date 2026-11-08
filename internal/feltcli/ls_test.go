@@ -603,7 +603,7 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 	}
 
 	// -n ranks by closed-at: it exists to surface recently finished work, so it
-	// keeps the old all-statuses behavior.
+	// lists every status.
 
 	out, err = runCommand(t, dir, "ls", "-n", "10")
 	if err != nil {

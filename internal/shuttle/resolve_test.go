@@ -152,7 +152,7 @@ func TestResolveBlock_StandingPrevDue(t *testing.T) {
 // TestResolveBlock_ImpossibleSchedule: a grammatical but unsatisfiable schedule
 // (Feb 30) resolves no occurrence — robfig's Next returns the zero time, which
 // ResolveBlock must drop rather than emit as a year-0001 next_due. The daemon
-// then sees an unschedulable (invalid) standing constitution, matching the old behavior.
+// then sees an unschedulable (invalid) standing constitution.
 func TestResolveBlock_ImpossibleSchedule(t *testing.T) {
 	t.Parallel()
 	reg := builtinReg(t)

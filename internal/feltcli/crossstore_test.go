@@ -230,17 +230,15 @@ func TestLsBareStaysLocal(t *testing.T) {
 	}
 }
 
-// TestPartialForeignPathResolvesRegardless: the enclosing-store probe used to
-// be gated on the local basename rescue being about to fire, so whether
-// `felt show portolan/debug` resolved depended on an accident of local naming —
-// a local `debug` made it work, two of them made it fail. The gate is gone;
-// resolution reaches the enclosing store on every local miss.
+// TestPartialForeignPathResolvesRegardless: resolution reaches the enclosing
+// store on every local miss, so whether `felt show portolan/debug` resolves
+// does not depend on how many local fibers share its basename.
 func TestPartialForeignPathResolvesRegardless(t *testing.T) {
 	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 
-	// A second local `debug` twin: under the old gate this ambiguity switched
-	// the probe off and the foreign path stopped resolving.
+	// A second local `debug` twin makes the local basename ambiguous; the
+	// foreign path still resolves.
 	writeFixtureFelt(t, felt.NewStorage(subProj), "notes/debug", "Another local debug")
 
 	out, err := runCommand(t, subProj, "show", "portolan/debug", "--detail", "name")

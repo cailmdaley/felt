@@ -5,8 +5,7 @@
 # Claude/Codex adapter: wrap that text in the SessionStart additionalContext
 # envelope the harness expects.
 #
-# If jq is missing, fall back to `felt hook session`, the compatibility adapter
-# kept in the binary for older installs and dependency-light environments.
+# Without jq, `felt hook session` builds the same envelope in the binary.
 
 set -e
 set -o pipefail
@@ -28,9 +27,7 @@ elif felt_hook_available; then
 fi
 
 # Keep SessionStart non-blocking when felt is absent or too old. Reached only
-# by falling out of the branches above — the `exit 0` and the `exec` are what
-# make that true, and without the first one every healthy session printed this
-# apology underneath its own context.
+# when neither branch above produced context: each exits once it has.
 cat <<'EOF'
 {
   "hookSpecificOutput": {

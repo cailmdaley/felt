@@ -106,7 +106,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("init: .gitignore not recreated")
 	}
 
-	// add — returns the fiber ID (positional arg is now the slug)
+	// add — returns the fiber ID (the first positional arg is the slug)
 	fiberID := strings.TrimSpace(mustFelt(t, dir, "add", "test-fiber", "test fiber", "-s", "open"))
 	if fiberID != "test-fiber" {
 		t.Fatal("add: expected fiber ID in output")

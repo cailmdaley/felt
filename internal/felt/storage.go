@@ -26,8 +26,8 @@ const (
 	DirName = ".felt"
 	// FileExt is the extension for felt files.
 	FileExt = ".md"
-	// LegacyMystConfigName is a MyST project file older felt versions wrote
-	// into the store root. felt no longer creates one; the readers skip it so
+	// LegacyMystConfigName is a MyST project file some store roots carry from
+	// earlier felt releases. felt does not create one; the readers skip it so
 	// a store that still carries one is read cleanly.
 	LegacyMystConfigName = "myst.yml"
 	// GitignoreName is the felt store ignore file generated at init time.
