@@ -2,14 +2,11 @@ package shuttlecli
 
 import (
 	"encoding/xml"
-	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -471,46 +468,18 @@ const (
 	loginShellRC    = "shell-rc"
 )
 
-var loginShell struct {
-	once sync.Once
-	path string
-	err  error
-}
-
-// fakeLoginShell is the package's one fake login shell, named sh so
-// captureLoginEnv accepts it as $SHELL. It is written and run once per test
-// binary: macOS assesses a freshly written executable on its first exec,
-// which can take seconds, and the capture under test gives its shell a 10s
-// budget.
+// fakeLoginShell is a fake login shell named sh, so captureLoginEnv accepts
+// it as $SHELL. sysenvtest.LinkScript links it to one shared copy, written
+// without exposing its descriptor to a parallel fork, which macOS assesses
+// once rather than inside each capture's 10s budget.
 func fakeLoginShell(t *testing.T) string {
 	t.Helper()
-	loginShell.once.Do(func() {
-		dir, err := os.MkdirTemp(testFenceDir, "login-shell-*")
-		if err != nil {
-			loginShell.err = err
-			return
-		}
-		path := filepath.Join(dir, "sh")
-		script := "#!/bin/sh\n" +
-			"echo \"$1\" >> \"$HOME/" + loginShellCalls + "\"\n" +
-			"[ -f \"$HOME/" + loginShellRC + "\" ] && . \"$HOME/" + loginShellRC + "\"\n" +
-			"exec /bin/sh -c \"$2\"\n"
-		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-			loginShell.err = err
-			return
-		}
-		warm := exec.Command(path, "-c", "true")
-		warm.Env = []string{"HOME=" + dir}
-		if out, err := warm.CombinedOutput(); err != nil {
-			loginShell.err = fmt.Errorf("running the fake login shell: %v\n%s", err, out)
-			return
-		}
-		loginShell.path = path
-	})
-	if loginShell.err != nil {
-		t.Fatal(loginShell.err)
-	}
-	return loginShell.path
+	path := filepath.Join(t.TempDir(), "sh")
+	sysenvtest.LinkScript(t, path, "#!/bin/sh\n"+
+		"echo \"$1\" >> \"$HOME/"+loginShellCalls+"\"\n"+
+		"[ -f \"$HOME/"+loginShellRC+"\" ] && . \"$HOME/"+loginShellRC+"\"\n"+
+		"exec /bin/sh -c \"$2\"\n")
+	return path
 }
 
 // writeLoginRC gives the fake login shell run with HOME=home its rc script.
