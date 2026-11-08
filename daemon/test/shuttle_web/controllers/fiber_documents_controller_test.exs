@@ -1150,7 +1150,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert first.status == 200
     [etag] = get_resp_header(first, "etag")
     assert get_resp_header(first, "cache-control") == ["no-cache"]
-    assert etag =~ ~r/^W\/\"[0-9a-f]{64}\"$/
+    assert etag =~ ~r/^W\/\"[0-9a-f]{32}\"$/
 
     unchanged =
       api_conn() |> put_req_header("if-none-match", etag) |> get("/api/v1/fibers/composite")
@@ -1261,6 +1261,18 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert body["origins"]["candide"]["kind"] == "remote"
     assert body["origins"]["candide"]["stale"] == false
     assert body["origins"]["candide"]["fiber_count"] == 1
+    # A fresh origin's poll instant is bookkeeping, not content.
+    assert body["origins"]["candide"]["last_polled_at"] == nil
+
+    # Another poll of an unchanged fleet leaves the validator alone.
+    [etag] = get_resp_header(conn, "etag")
+    :ok = RemoteFiberRegistry.refresh_now()
+    warm_poller!(store)
+
+    unchanged =
+      api_conn() |> put_req_header("if-none-match", etag) |> get("/api/v1/fibers/composite")
+
+    assert unchanged.status == 304
   end
 
   test "GET /api/v1/fibers/composite stamps a remote thread with its hub on this host",

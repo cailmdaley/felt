@@ -30,8 +30,11 @@ defmodule ShuttleWeb.FiberDocumentsController do
   """
 
   use Phoenix.Controller, formats: [:json]
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2, etag_hash: 1, if_none_match?: 2]
-  import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
+
+  import ShuttleWeb.RelayHelpers,
+    only: [relay_bytes: 2, etag_hash: 1, if_none_match?: 2, json_with_validator: 3]
+
+  import ShuttleWeb.TemporalComposite, only: [stale_since: 2, render_error: 1]
 
   alias Shuttle.OriginRouter
   alias Shuttle.Poller.Snapshot
@@ -304,6 +307,11 @@ defmodule ShuttleWeb.FiberDocumentsController do
   from the `shuttle.host` block. `origins` reports per-origin staleness so the
   view can mark an unreachable remote without dropping its last-known cards.
 
+  The body holds only what its readers use, so it is its own validator: a poll
+  over an unchanged fleet answers 304 without encoding the feed. Per-tick
+  bookkeeping stays out of it — an origin carries `last_polled_at` only while
+  stale (the instant its rows date from), and `cache` only its `state`.
+
   This is the local-composer counterpart of `/state/composite`: the kanban talks
   to ONE (local) Shuttle and sees local + every configured remote.
   """
@@ -325,29 +333,29 @@ defmodule ShuttleWeb.FiberDocumentsController do
          %{
            kind: "remote",
            stale: feed.stale,
-           last_polled_at: format_dt(feed.last_polled_at),
+           last_polled_at: stale_since(feed.stale, feed.last_polled_at),
            last_error: render_error(feed.last_error),
            fiber_count: length(feed.fibers),
-           # The owning host's own cache-freshness block (cold/partial/fresh +
-           # refreshed_at), so the board can render "warming / stale as of T"
-           # rather than a binary badge. nil until the remote serves it.
-           cache: Map.get(feed, :cache)
+           # The owning host's cache state (cold/partial/fresh), so a reader
+           # can tell "warming" from a binary badge. nil until the remote
+           # serves it.
+           cache: cache_state(Map.get(feed, :cache))
          }}
       end)
       |> Map.put(local_origin, %{
         kind: "local",
         stale: local_stale,
         fiber_count: length(local_owner_entries),
-        cache: local_cache
+        cache: cache_state(local_cache)
       })
 
-    ShuttleWeb.ConditionalJSON.send(conn, %{
-      host: local_origin,
-      generated_at: DateTime.to_iso8601(DateTime.utc_now()),
-      fibers: fibers,
-      origins: origins
-    })
+    body = %{host: local_origin, fibers: fibers, origins: origins}
+    json_with_validator(conn, body, fn -> body end)
   end
+
+  defp cache_state(%{state: state}), do: %{state: state}
+  defp cache_state(%{"state" => state}), do: %{state: state}
+  defp cache_state(_), do: nil
 
   # The local owner feed: same rows as `GET /api/v1/fibers?shuttle=true`, served
   # from the poller's document cache. A cold cache yields an empty feed marked

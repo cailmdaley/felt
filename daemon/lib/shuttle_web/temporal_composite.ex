@@ -9,7 +9,8 @@ defmodule ShuttleWeb.TemporalComposite do
   with each remote's read of the same feed from `Shuttle.RemoteTemporalRegistry`,
   every item stamped with the origin it came from, plus an `origins` block
   reporting per-origin freshness. The origins block is **verbatim the fibers
-  composite's** — `kind` / `stale` / `last_polled_at` / `last_error` — so the
+  composite's** — `kind` / `stale` / `last_polled_at` (only while stale) /
+  `last_error` — so the
   UI's staleness rendering is one implementation, not four. Each remote's
   fields describe the feed this composite served, not the remote as a whole.
 
@@ -51,16 +52,17 @@ defmodule ShuttleWeb.TemporalComposite do
   @doc """
   A composite's validator parts: this host's id, `local` (the request's
   parameters and the local sources' file tokens), and each remote's name with
-  every field of its view the body reads except the items themselves, which
-  the remote's etag stands for. `last_polled_at` moves on every success, so an
-  etag-less remote (or a 304 that only confirms) still moves the validator;
-  that is correct, since the origins block shows it.
+  every field of its view the body reads. The remote's etag stands for its
+  items; a remote that sent none contributes the items themselves. `last_polled_at` enters only while the remote
+  is stale, as it does the origins block, so a fresh fleet's routine polls
+  leave the validator alone.
   """
   def validator(local, entries) do
     remotes =
       entries
       |> Enum.map(fn {name, entry} ->
-        {name, entry.etag, entry.window, entry.last_polled_at, entry.stale, entry.last_error}
+        {name, entry.etag || entry.items, entry.window,
+         stale_since(entry.stale, entry.last_polled_at), entry.stale, entry.last_error}
       end)
       |> Enum.sort()
 
@@ -81,7 +83,7 @@ defmodule ShuttleWeb.TemporalComposite do
          %{
            kind: "remote",
            stale: entry.stale,
-           last_polled_at: format_dt(entry.last_polled_at),
+           last_polled_at: stale_since(entry.stale, entry.last_polled_at),
            last_error: render_error(entry.last_error)
          },
          remote_extra.(name, entry)
@@ -144,7 +146,16 @@ defmodule ShuttleWeb.TemporalComposite do
     end)
   end
 
-  @doc "ISO-8601 or nil, matching the fibers composite's origins block."
+  @doc """
+  An origin's `last_polled_at` as the origins blocks carry it: the ISO-8601
+  instant its data dates from while it is stale, nil while it is fresh. A
+  fresh origin's poll instant moves every few seconds and is nothing a viewer
+  draws, so it stays out of the body and its validator.
+  """
+  def stale_since(true, last_polled_at), do: format_dt(last_polled_at)
+  def stale_since(_stale, _last_polled_at), do: nil
+
+  @doc "ISO-8601 or nil."
   def format_dt(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
   def format_dt(_), do: nil
 

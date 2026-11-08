@@ -292,7 +292,8 @@ defmodule ShuttleWeb.TemporalCompositeTest do
       assert %{"buckets" => buckets, "origins" => origins} = json_response(conn, 200)
       assert Enum.any?(buckets, &(&1["host"] == "candide" and &1["n"] == 4))
       assert origins["candide"]["last_error"] == "not_set"
-      assert origins["candide"]["last_polled_at"] != nil
+      # The last-seen time rides the block exactly while the origin reads stale.
+      assert is_binary(origins["candide"]["last_polled_at"]) == origins["candide"]["stale"]
     end
   end
 

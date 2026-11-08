@@ -31,7 +31,6 @@ defmodule Shuttle.Profile.Functions do
     {ShuttleWeb.FiberDocumentsController, :serve_owner_feed, 1},
     {ShuttleWeb.FiberDocumentsController, :composite, 2},
     {ShuttleWeb.RelayHelpers, :etag_hash, 1},
-    {ShuttleWeb.ConditionalJSON, :send, 2},
     {Shuttle.Runner.Default, :open_port, 3},
     {Shuttle.FS, :read, 1},
     {Shuttle.FS, :stat, 2},

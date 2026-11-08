@@ -268,11 +268,13 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 
-`GET /fibers/composite` and `/state/composite` return a weak `ETag` and
-`Cache-Control: no-cache`. Their validators exclude the volatile `generated_at`
-field: a 304 means the fiber/state content is semantically unchanged. The board
-keeps its existing copy and tracks poll time itself; remote-origin freshness
-continues to describe the body that would have been returned.
+Every `/composite` route and `/state/composite` return a weak `ETag` and
+`Cache-Control: no-cache`; a matching `If-None-Match` answers 304 without
+encoding the body, and the ledger composites without reading their ledgers. The bodies carry no per-poll bookkeeping, so a
+304 means nothing a reader draws has changed: an origin reports
+`last_polled_at` only while it is stale (the instant its data dates from), and
+the fibers composite reports each origin's `cache` as its `state` alone. The
+board keeps its existing copy on a 304 and tracks poll time itself.
 
 `GET /fibers?fields=index` returns the local wikilink and parent-picker index: only `id`, optional `slug`, and `name` inside each `fiber` row.
 The first request shares one live listing with concurrent callers.

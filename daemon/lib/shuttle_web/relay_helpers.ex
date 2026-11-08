@@ -216,26 +216,24 @@ defmodule ShuttleWeb.RelayHelpers do
   end
 
   @doc """
-  Serve a JSON body behind a **weak validator**, so a hub polling this endpoint
-  over an SSH tunnel pays a header exchange instead of a full transfer whenever
-  nothing has changed.
+  Serve a JSON body behind a **weak validator**, so a poller pays a header
+  exchange instead of a full transfer whenever nothing has changed.
 
-  `parts` is any term that decides the response: the underlying source's cheap
-  fingerprint (an events file's `{mtime, size}`, a git HEAD sha) **plus the
-  request window**, since the same source serves different bytes per window.
+  `parts` is any term that decides the response: either the sources' cheap
+  fingerprints (an events file's `{mtime, size}`, a git HEAD sha) **plus the
+  request window**, or the assembled body itself when it is already in memory.
   It is hashed into a weak ETag; a matching `If-None-Match` short-circuits to
-  304 and `body_fun` is never called — that is the point, the expensive read is
-  skipped, not just the transfer.
-
-  Weak rather than strong (unlike the fibers feed's content etag in
-  `ShuttleWeb.FiberDocumentsController`) because the token is derived from file
-  metadata, not from the served bytes: it changes whenever the source changes,
-  which is the guarantee a cache validator needs, but it is not a hash of the
-  response.
+  304 and `body_fun` is never called, so neither the read nor the JSON
+  encoding is paid. `Cache-Control: no-cache` makes a browser revalidate a
+  stored copy on every request instead of reusing it unasked.
   """
   def json_with_validator(conn, parts, body_fun) when is_function(body_fun, 0) do
     etag = weak_etag(parts)
-    conn = put_resp_header(conn, "etag", etag)
+
+    conn =
+      conn
+      |> put_resp_header("etag", etag)
+      |> put_resp_header("cache-control", "no-cache")
 
     if if_none_match?(conn, etag) do
       send_resp(conn, 304, "")
@@ -245,14 +243,15 @@ defmodule ShuttleWeb.RelayHelpers do
   end
 
   @doc """
-  SHA-256 of the term-encoded parts, hex, truncated to 32 chars —
-  collision-resistant enough for a cache validator, short enough for a header.
+  SHA-256 of the deterministically term-encoded parts, hex, truncated to 32
+  chars — collision-resistant enough for a cache validator, short enough for a
+  header.
 
   Bare: the caller wraps it in weak (`W/"…"`) or strong (`"…"`) quoting, which
   is the distinction each route makes for itself.
   """
   def etag_hash(parts) do
-    :crypto.hash(:sha256, :erlang.term_to_binary(parts))
+    :crypto.hash(:sha256, :erlang.term_to_binary(parts, [:deterministic]))
     |> Base.encode16(case: :lower)
     |> binary_part(0, 32)
   end
@@ -263,13 +262,13 @@ defmodule ShuttleWeb.RelayHelpers do
   def weak_etag(parts), do: ~s(W/"#{etag_hash(parts)}")
 
   @doc """
-  Whether the request's `If-None-Match` names exactly this etag.
+  Whether the request's `If-None-Match` names this etag, alone or in a list.
   """
   def if_none_match?(conn, etag) do
-    case get_req_header(conn, "if-none-match") do
-      [value | _] -> String.trim(value) == etag
-      [] -> false
-    end
+    conn
+    |> get_req_header("if-none-match")
+    |> Enum.flat_map(&String.split(&1, ","))
+    |> Enum.any?(&(String.trim(&1) == etag))
   end
 
   @doc """
