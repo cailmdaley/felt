@@ -84,7 +84,7 @@ defmodule ShuttleWeb.VoiceController do
       receive do
         {:voice_target, target} -> event("target", target)
         {:rex_focus, target} -> event("focus", target)
-        {:board_open, open} -> event("open", open)
+        {:board_open, open} -> event("page", open)
       after
         15_000 -> ": keepalive\n\n"
       end

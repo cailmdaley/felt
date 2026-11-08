@@ -147,7 +147,7 @@ export class Voice {
     const events = new EventSource(`${this.base}/api/v1/voice/events${query.size ? `?${query}` : ''}`)
     events.addEventListener('target', this.pushed)
     events.addEventListener('focus', this.rexMoved)
-    events.addEventListener('open', event => this.onOpen?.(JSON.parse((event as MessageEvent<string>).data) as BoardOpen))
+    events.addEventListener('page', event => this.onOpen?.(JSON.parse((event as MessageEvent<string>).data) as BoardOpen))
     events.addEventListener('error', () => {
       if (this.events === events && events.readyState === EventSource.CLOSED && this.eventsTimer === null) {
         this.events = null

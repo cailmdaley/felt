@@ -180,7 +180,7 @@ describe('live voice', () => {
       const voice = await start(), opened: unknown[] = []
       voice.onOpen = event => opened.push(event)
       const page = { fiber_id: 'uid', origin: 'fir', page: 'tapestry' }
-      live()[0].listeners.get('open')!(new MessageEvent('open', { data: JSON.stringify(page) }))
+      live()[0].listeners.get('page')!(new MessageEvent('page', { data: JSON.stringify(page) }))
       expect(opened).toEqual([page])
       voice.dispose()
     })
