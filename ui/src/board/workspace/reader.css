@@ -35,7 +35,7 @@
 .ws-reader.ws-keyboard button:focus-visible, .ws-reader.ws-keyboard a:focus-visible, .ws-reader.ws-keyboard input:focus-visible {
   outline: var(--ws-focus-width) dashed var(--ws-focus); outline-offset: var(--ws-focus-offset);
 }
-.ws-mono, .ws-labelbar, .ws-receipts {
+.ws-labelbar, .ws-receipts {
   font-family: var(--font-mono);
 }
 /* Expand takes the whole window: no bar above. */
@@ -78,11 +78,10 @@
 .ws-page.ws-receded { visibility: hidden; transform: translateY(var(--ws-neighbour-drop)) scale(var(--ws-receded-scale)); opacity: 0; }
 .ws-page.ws-parked { left: var(--ws-parking-x) !important; transition: none; pointer-events: none; }
 .ws-page.ws-parked::after { content: ''; position: absolute; inset: 0; background: var(--ws-paper); z-index: 4; }
-.ws-stage.ws-instant .ws-track, .ws-stage.ws-instant .ws-page, .ws-stage.ws-resizing .ws-track, .ws-stage.ws-resizing .ws-page { transition: none; }
+.ws-stage.ws-instant .ws-track, .ws-stage.ws-instant .ws-page { transition: none; }
 .ws-stage.ws-swiping .ws-track, .ws-stage.ws-swiping .ws-page { transition: none; }
 /* A released swipe decelerates from the finger's speed instead of starting a fresh crossing. */
 .ws-stage.ws-swipe-release .ws-track { transition: transform var(--ws-swipe-settle) cubic-bezier(0.2, 0.9, 0.3, 1); }
-.ws-stage.ws-resizing iframe { pointer-events: none; }
 .ws-labelbar {
   display: flex; align-items: center; flex: none; height: var(--ws-label-height); gap: var(--ws-small-gap);
   padding: 0 var(--ws-small-gap) 0 var(--ws-inset); border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
@@ -153,9 +152,6 @@
 .ws-prose blockquote { border-left: var(--ws-focus-width) solid var(--ws-hairline); padding-left: var(--ws-inset); color: var(--ws-ink-muted); }
 .ws-prose-header { display: flex; flex-wrap: wrap; gap: var(--ws-small-gap) var(--ws-gap); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-prose) var(--font-mono); border-bottom: var(--ws-line-width) solid var(--ws-hairline); padding-bottom: var(--ws-inset); margin-bottom: var(--ws-gap); }
 .ws-prose .kbn-detail-lede { font-size: var(--type-title); margin-bottom: var(--ws-gap); color: var(--ws-ink); }
-.ws-prose-documents { list-style: none; padding: 0; font: var(--type-label)/var(--leading-ui) var(--font-serif); letter-spacing: 0; }
-.ws-prose-documents button { display: block; width: 100%; padding: var(--ws-inset); text-align: left; border-top: var(--ws-line-width) solid var(--ws-hairline); }
-.ws-prose-documents button:hover { background: var(--ws-hover); }
 .ws-document-state { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: var(--ws-inset); padding: var(--ws-prose-padding); color: var(--ws-ink-muted); }
 .ws-document-state h3 { font: var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--ws-ink); margin: 0; }
 .ws-document-state code { font: var(--type-code-block)/var(--leading-prose) var(--font-mono); user-select: all; overflow-wrap: anywhere; }

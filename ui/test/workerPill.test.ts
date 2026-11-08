@@ -2,8 +2,6 @@
 /**
  * Check the terminal worker pill against the touch stylesheet.
  * The matcher covers the compound selectors used by coarse-pointer rules.
- * The in-browser check runs with `npm run harness:board` and
- * `node scripts/check-worker-tap.mjs`.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

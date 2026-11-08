@@ -3,7 +3,6 @@
  * The Desk never reads a sent-file feed per card.
  */
 import { normalizeSentFiles, type SentFile } from './sentFiles.js'
-import { fileKind } from './attachments.js'
 import { DAY_MS } from './civilDay.js'
 import { docKey, parseDocKey, type DocKey } from './workspace/documents.js'
 import type { KanbanCard } from './KanbanTypes.js'
@@ -41,11 +40,6 @@ export function sendsByFiber(files: readonly SentFile[]): Map<string, SentFile[]
   return out
 }
 
-/** A report mark stands for a drawable file, never an opaque receipt. */
-export function newestReport(files: readonly SentFile[]): SentFile | undefined {
-  return files.find(file => fileKind(file.fullPath) !== 'other')
-}
-
 export class FiberSends {
   private byFiber = new Map<string, SentFile[]>()
   private readAt = -Infinity
@@ -63,10 +57,6 @@ export class FiberSends {
   /** This fiber's sent files, newest first. */
   sends(card: KanbanCard): FiberSend[] {
     return this.of(card).flatMap(file => resolve(card, file) ?? [])
-  }
-  latest(card: KanbanCard): FiberSend | undefined {
-    const file = newestReport(this.of(card))
-    return file ? resolve(card, file) : undefined
   }
 
   /** Read once per minute; failed reads retain the last answer and retry next poll. */

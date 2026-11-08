@@ -6,8 +6,8 @@ import { daemonFetch, isDaemonBooting } from './board/daemonApi.js'
 /**
  * Entry point — mounts the kanban board against the Shuttle daemon.
  *
- * The board is a vanilla-TS/DOM widget (no React); Stash/Capture and the
- * viewer arrive as React islands in later slices. `shuttleBase` defaults to
+ * The board is a vanilla-TS/DOM widget; the Stash, Capture and Settings
+ * forms are React islands loaded on first use. `shuttleBase` defaults to
  * empty (relative) so fetches are same-origin: the served bundle hits its own
  * daemon at :4000 with no CORS, and `npm run dev` reaches :4000 through the
  * Vite proxy. Override with `VITE_SHUTTLE_BASE` to target an absolute daemon.
@@ -15,7 +15,6 @@ import { daemonFetch, isDaemonBooting } from './board/daemonApi.js'
 const shuttleBase =
   (import.meta.env.VITE_SHUTTLE_BASE as string | undefined) ?? ''
 
-// The React forms load on first use, and in the background once the Desk is up.
 type Forms = typeof import('./forms/mountForms.js')
 const withForms = (open: (forms: Forms) => unknown): void => {
   import('./forms/mountForms.js').then(open, () => showToast('Couldn’t load the form; reload the board', 'error'))

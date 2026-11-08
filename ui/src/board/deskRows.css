@@ -52,36 +52,6 @@
 .kbn-cluster-item-verdicts { position: relative; margin-left: auto; }
 .kbn-cluster-item-verdicts[data-verdict-pending] { min-width: 10.5rem; min-height: 19px; }
 
-/* A report leaf carries its kind and a dot until the reader shows it. */
-.kbn-card-report {
-  box-sizing: border-box;
-  display: inline-grid;
-  place-items: center;
-  width: 15px;
-  height: 19px;
-  flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 18%, transparent);
-  border-radius: 1px 4px 1px 1px;
-  background: var(--kbn-paper-bright);
-  color: var(--kbn-ink-muted);
-  font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  line-height: var(--leading-solid);
-}
-.kbn-card-report[data-unseen] { position: relative; color: var(--kbn-ink-soft); }
-.kbn-card-report[data-unseen]::after {
-  content: '';
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--kbn-owed-bright);
-  box-shadow: 0 0 0 1.5px var(--kbn-row-ground, var(--kbn-paper));
-}
-.kbn-card-stale-mark { flex-shrink: 0; color: var(--kbn-ink-muted); font-size: var(--type-meta); }
-
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   :root { --kbn-desk-row: 32px; --kbn-desk-indent: 6px; }
   .kbn-col-list .kbn-card { padding: 0 6px 0 4px; }
@@ -90,7 +60,6 @@
   .kbn-folio .kbn-folio-name { font-size: var(--type-note); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; }
   .kbn-folio .kbn-folio-count { font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; color: var(--kbn-ink-muted); }
   .kbn-col-list .kbn-card > .kbn-card-meta:not(:empty) { gap: 5px; padding: 0; }
-  .kbn-col-list .kbn-card > .kbn-card-meta .kbn-card-report { display: none; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lensbar { width: auto; min-width: 0; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
   .kbn-viewtabs .kbn-lens-chip :is(.kbn-cyclechip-span, .kbn-lens-chip-count) { display: none; }

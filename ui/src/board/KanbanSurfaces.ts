@@ -1,7 +1,6 @@
 import { installFrontierDetails } from './DeskFrontier.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
-import type { FiberSend } from './fiberSends.js'
 import { markVerdictHost, type Verdict } from './workspace/Verdicts.js'
 import { openActionMenu, type ConversationAction } from './conversationMenu.js'
 import { dressVerb, lifecycleVerbsFor, verbSpec } from './workspace/lifecycleVerbs.js'
@@ -138,8 +137,6 @@ interface KanbanSurfaceRendererOptions {
   /** Make this constitution a seat, choosing an office when it has none. */
   makeSeat?: (card: KanbanCard, anchor: HTMLElement) => void | Promise<void>
   openDetail: (card: KanbanCard, family?: boolean) => void
-  /** The newest report a card sent — the row's mark. */
-  getLatestReport?: (card: KanbanCard) => FiberSend | undefined
   /** Opens the Rest popover on the card's own Rest affordance. */
   onRest?: (card: KanbanCard) => void
   /** A verdict through the same undo window the header and keys use. */

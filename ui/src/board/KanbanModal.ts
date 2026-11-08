@@ -364,14 +364,8 @@ export class KanbanModal {
         onRest: card => this.openRestPopover(card),
       },
     )
-    // A new report changes a row's mark; reports are throttled to a minute, so
-    // this redraw is rare.
-    this.fiberSends = new FiberSends(this.shuttleBase, () => {
-      if (this.container && this.lastResponse && this.activeViewId === 'desk') this.render(this.lastResponse)
-      this.workspace?.sendsChanged()
-    })
+    this.fiberSends = new FiberSends(this.shuttleBase, () => this.workspace?.sendsChanged())
     this.surfaces = new KanbanSurfaceRenderer({
-      getLatestReport: card => this.fiberSends?.latest(card),
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
       getLastResponse: () => this.deskResponse ?? this.lastResponse,

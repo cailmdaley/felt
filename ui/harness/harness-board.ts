@@ -1482,7 +1482,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/fibers/work/arxiv/daily-digest?body=true')) {
     return json({ fibers: [{ fiber: { body: MOCK_DIGEST_BODY, outcome: 'Digest delivered.' } }] })
   }
-  if (url.includes('/api/v1/sent-files?') || url.includes('/api/v1/sent-files/session?')) {
+  if (url.includes('/api/v1/sent-files?')) {
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
     if (workspaceFixture) return json({ files: workspaceFixture.receipts.filter(file => file.uid === uid) })
     if (docsExample) return json({ files: [] })

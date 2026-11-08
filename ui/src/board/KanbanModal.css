@@ -1071,40 +1071,14 @@
   color: var(--kbn-ink-muted);
   font-style: italic;
 }
-.kbn-cluster-item-glyph {
-  color: var(--kbn-agent);
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  width: 10px;
-  flex-shrink: 0;
-  text-align: center;
-}
-.kbn-cluster-item-human .kbn-cluster-item-glyph { color: var(--kbn-you); }
-.kbn-cluster-cold .kbn-cluster-item-glyph { opacity: 0.6; }
 .kbn-cluster-item-title {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* "wakes Aug 12" — the return date on a snoozed card. Mono and faint: it's a
-   fact to glance at, never the thing you read first. */
-.kbn-cluster-item-wakes {
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  color: color-mix(in srgb, color-mix(in srgb, var(--kbn-owed-bright) 60%, var(--kbn-ink)) 75%, transparent);
-  white-space: nowrap;
-}
-.kbn-cluster-cold .kbn-cluster-item-wakes { color: color-mix(in srgb, var(--kbn-ink-muted) 60%, transparent); }
-/* A standing constitution asleep on its cron. Cool slate against the snooze chip's
-   warm ochre — the two states are both "at rest" and must never be misread for
-   each other: one you put down, the other put itself down and will get up
-   without you. */
-.kbn-cluster-item-returns { color: color-mix(in srgb, var(--kbn-slate) 80%, transparent); }
-.kbn-cluster-cold .kbn-cluster-item-returns { color: color-mix(in srgb, color-mix(in srgb, var(--kbn-slate) 70%, var(--kbn-ink-faint)) 65%, transparent); }
-/* The row itself carries a hairline left edge in the same slate, so the
-   schedule-driven rows are findable in a cluster without reading each chip. */
+/* A standing constitution asleep on its cron carries a hairline slate left
+   edge, so schedule-driven rows are findable in a cluster at a glance. */
 .kbn-cluster-item-standing { box-shadow: inset 1.5px 0 0 color-mix(in srgb, var(--kbn-slate) 32%, transparent); }
 
 .kbn-col {
@@ -1338,9 +1312,6 @@
 .kbn-flight-band[data-flight-band="yourTurn"] .kbn-flight-caption {
   color: var(--kbn-owed-ink);
 }
-.kbn-card-question {
-  color: var(--kbn-owed-ink);
-}
 .kbn-flight-band + .kbn-flight-band {
   margin-top: 4px;
   padding-top: 8px;
@@ -1480,19 +1451,6 @@
   align-items: baseline;
   gap: 7px;
 }
-.kbn-card-glyph {
-  width: 15px;
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  line-height: var(--leading-solid);
-  text-align: center;
-  color: var(--kbn-owed-bright);
-}
-/* A human-driven role, against the agent's cobalt — the board's one pair. */
-.kbn-card-glyph-human {
-  color: var(--kbn-you);
-}
 /* Plain text: clicking the card opens the workspace reader, so the card's own
    cursor applies. */
 .kbn-card-name {
@@ -1503,179 +1461,27 @@
   text-align: left;
   color: inherit;
 }
-.kbn-card-id {
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  color: var(--kbn-graphite-pale);
-  word-break: break-all;
-  /* Tuck the slug under the title so the breadcrumb reads as part of
-     the title block, not a row of its own. The card-level gap (6px)
-     would otherwise leave it floating. */
-  margin-top: -6px;
-  line-height: var(--leading-tight);
-}
-.kbn-card-outcome {
-  font-size: var(--type-meta);
-  line-height: var(--leading-ui);
-  color: var(--kbn-ink-soft);
-  /* Truncate at N lines with an ellipsis. Aligns the cutoff to a line
-     boundary (no half-cropped letters) and signals truncation explicitly.
-     A surface sets `--card-line-clamp` to give its card more lines. */
-  display: -webkit-box;
-  -webkit-line-clamp: var(--card-line-clamp, 4);
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.kbn-card-outcome > :first-child { margin-top: 0; }
-.kbn-card-outcome > :last-child { margin-bottom: 0; }
-.kbn-card-outcome p {
-  margin: 0.35em 0;
-}
-.kbn-card-outcome h1,
-.kbn-card-outcome h2,
-.kbn-card-outcome h3,
-.kbn-card-outcome h4 {
-  margin: 0.45em 0 0.18em;
-  font-size: inherit;
-  line-height: var(--leading-tight);
-  font-weight: 600;
-}
-.kbn-card-outcome ul,
-.kbn-card-outcome ol {
-  margin: 0.25em 0;
-  padding-left: 1.35em;
-}
-.kbn-card-outcome li {
-  margin: 0.1em 0;
-}
-.kbn-card-outcome code {
-  font-family: var(--font-mono);
-  font-size: var(--type-code);
-  padding: 0 3px;
-  background: color-mix(in srgb, var(--kbn-shade) 5%, transparent);
-  border-radius: 2px;
-}
-.kbn-card-outcome pre {
-  margin: 0.35em 0;
-  padding: 5px 6px;
-  background: color-mix(in srgb, var(--kbn-shade) 4%, transparent);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.kbn-card-outcome pre code {
-  background: transparent;
-  padding: 0;
-}
-.kbn-card-outcome a {
-  color: var(--kbn-owed-deep);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-}
 .kbn-card-meta {
   display: flex; align-items: center;
   gap: 4px;
   margin-top: 2px;
   flex-wrap: wrap;
 }
-/* One height for every small chip/button that can appear in the meta row —
-   due, the phase badge, the held pill, the
-   worker pill — so swapping between them (a worker landing, a review
-   finishing) never makes the row's own height twitch. */
-.kbn-card-due,
-.kbn-card-phase,
-.kbn-card-held,
-.kbn-card-worker {
-  box-sizing: border-box;
-  height: 19px;
-  display: inline-flex;
-  align-items: center;
-}
-.kbn-action {
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  background: color-mix(in srgb, var(--kbn-ink) 4%, transparent);
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 18%, transparent);
-  color: var(--kbn-ink-soft);
-  padding: 3px 8px;
-  border-radius: 2px;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-.kbn-action:hover {
-  background: color-mix(in srgb, var(--kbn-ink) 10%, transparent);
-  color: var(--kbn-ink);
-  border-color: color-mix(in srgb, var(--kbn-ink) 30%, transparent);
-}
-.kbn-action:focus { outline: none; }
-.kbn-action:focus-visible {
-  outline: 1px dashed var(--kbn-ink-muted);
-  outline-offset: 1px;
-}
 /* THE VERDICT PLATE — only Temper and Discard carry pigment. Their ink, tint
    and border are mixed against the paper and ink in force, so the fiber page
    stays legible in every theme. */
-:is(.kbn-action-tempered, .kbn-ctl-temper, .ws-verdict-word[data-verdict='tempered']) { --verdict-pigment: var(--kbn-tempered); }
-:is(.kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word[data-verdict='discarded']) { --verdict-pigment: var(--kbn-discarded); }
-:is(.kbn-action-tempered, .kbn-ctl-temper, .kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word[data-verdict='tempered'], .ws-verdict-word[data-verdict='discarded']) {
+:is(.kbn-ctl-temper, .ws-verdict-word[data-verdict='tempered']) { --verdict-pigment: var(--kbn-tempered); }
+:is(.kbn-ctl-discard, .ws-verdict-word[data-verdict='discarded']) { --verdict-pigment: var(--kbn-discarded); }
+:is(.kbn-ctl-temper, .kbn-ctl-discard, .ws-verdict-word[data-verdict='tempered'], .ws-verdict-word[data-verdict='discarded']) {
   --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 72%, var(--ws-ink, var(--kbn-ink)));
   --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 12%, var(--ws-paper, var(--kbn-paper)));
   --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 24%, var(--ws-paper, var(--kbn-paper)));
   --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 55%, var(--ws-paper, var(--kbn-paper)));
 }
-.kbn-action:is(.kbn-action-tempered, .kbn-action-discard) {
-  background: var(--verdict-tint);
-  color: var(--verdict-ink);
-  border-color: var(--verdict-edge);
-}
-.kbn-action:is(.kbn-action-tempered, .kbn-action-discard):hover {
-  background: var(--verdict-tint-strong);
-  color: var(--verdict-ink);
-  border-color: var(--verdict-pigment);
-}
-.kbn-action:is(.kbn-action-tempered, .kbn-action-discard):focus-visible {
-  outline: 2px solid var(--verdict-pigment);
-  outline-offset: 2px;
-}
 /* Subtler card style inside the drafts column. */
 .kbn-card-drafts {
   background: var(--kbn-recess);
   border-style: dashed;
-}
-.kbn-card-actor,
-.kbn-card-due {
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  flex-shrink: 0;
-}
-/* The base is MUTED, not verdigris. An actor line with no variant is not
-   making a verdict, and the two variants below carry the actual claim. */
-.kbn-card-actor {
-  color: var(--kbn-ink-muted);
-}
-.kbn-card-actor-agent {
-  color: var(--kbn-agent);
-}
-.kbn-card-actor-human {
-  color: var(--kbn-you);
-}
-.kbn-card-due {
-  color: var(--kbn-ink-muted);
-  background: color-mix(in srgb, var(--kbn-ink) 4.5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
-  border-radius: 2px;
-  padding: 1px 5px;
-}
-/* A dep id that resolves to nothing. Dashed, because it is a warning ABOUT the
-   card's frontmatter rather than a state the card is in — nothing is being
-   enforced, and the border says "look at this" quietly. */
-.kbn-card-depwarn {
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  color: var(--kbn-ochre);
-  border: 1px dashed color-mix(in srgb, var(--kbn-ochre) 45%, transparent);
-  padding: 3px 6px;
-  border-radius: 2px;
-  margin-top: 2px;
 }
 /* THE WORKER PILL — the conversation backend control in the reader's head.
    A dot carries the state's
@@ -1685,14 +1491,15 @@
    Each word's box is trimmed to its capitals (cap height to baseline), so
    centring the words centres the capitals in the plate, and the pill's
    baseline is theirs. The dot sits in the plate's left padding, centred on
-   the plate, outside the flow that sets that baseline. */
-.kbn-card-worker, .kbn-card-phase {
+   the plate, outside the flow that sets that baseline. One fixed height, so a
+   worker landing never makes the row twitch. */
+.kbn-card-worker {
   --worker-figures: oldstyle-nums tabular-nums;
   --worker-gap: 0.32em;
-}
-.kbn-card-worker {
   --worker-dot-size: 7px;
   position: relative;
+  box-sizing: border-box;
+  height: 19px;
   display: inline-flex;
   align-items: center;
   gap: var(--worker-gap);
@@ -1742,53 +1549,6 @@
 /* Behind the reader or the Board's veil the Desk is inert and unread; its dots rest. */
 [inert] .kbn-card-worker .ws-worker-dot { animation: none; }
 
-/* Worker-less runtime phase badge (retrying / due / dispatched, and the
-   waiting or attention of an app worker with no session matched). It wears
-   the worker pill's type, unplated; its glyph and a pigmented ink say the
-   state, since no worker's dot is there to carry it. */
-.kbn-card-phase {
-  font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono);
-  font-variant-numeric: var(--worker-figures);
-  color: var(--kbn-owed-ink);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-/* Boot-quarantine hold: the daemon is WITHHOLDING this fresh launch after a
-   restart (parked in pending_launch, awaiting release). Cool, inert slate —
-   deliberately unlike the teal working pill and the warm gold/amber
-   phase chips (dispatch lifecycle). A dashed border reads as a held boundary,
-   not a solid live state; no pulse — it's parked, not churning.
-
-   The badge is the release control: its face stays `⏹︎ held`, and its title
-   explains the global-per-host release — one click frees every held launch
-   on the owning daemon. */
-.kbn-card-held {
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
-  color: color-mix(in srgb, var(--kbn-held) 75%, var(--kbn-ink));
-  background: color-mix(in srgb, var(--kbn-held) 12%, transparent);
-  border: 1px dashed color-mix(in srgb, var(--kbn-held) 45%, transparent);
-  padding: 1px 6px;
-  border-radius: 2px;
-  white-space: nowrap;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
-}
-/* Held is the OWED axis: its tint deepens toward gold. */
-.kbn-card-held:hover,
-.kbn-card-held:focus-visible {
-  color: color-mix(in srgb, var(--kbn-ochre) 85%, var(--kbn-ink));
-  background: color-mix(in srgb, var(--kbn-owed-bright) 14%, transparent);
-  border-color: color-mix(in srgb, var(--kbn-tempered) 55%, transparent);
-}
-.kbn-card-held:focus { outline: none; }
-.kbn-card-held:focus-visible { outline-offset: 2px; }
-.kbn-card-held:disabled { cursor: default; opacity: 0.55; }
-/* retrying, attention and blocked are claims on you: cinnabar ink. */
-.kbn-card-phase:is(.kbn-card-phase-retrying, .kbn-card-phase-attention, .kbn-card-phase-blocked) {
-  color: color-mix(in srgb, var(--kbn-you) 75%, var(--kbn-ink));
-}
 /* Stale-origin card: the originating agent is disconnected. The
    snapshot is preserved (last-known-good) so the card still reads
    and opens in the workspace reader, but drag is disabled because
@@ -2126,28 +1886,6 @@
     font-size: var(--type-note);
     line-height: var(--leading-tight);
   }
-  /* One line, and it is the TAIL that matters — `…/constitutions/den-gate`
-     tells you where you are, `felt/docs/dev/…` does not. `direction: rtl` on a
-     nowrap line puts the ellipsis at the head and keeps the leaf visible; the
-     path's own slashes make it read left-to-right regardless. Generous
-     line-height because `overflow: hidden` on a single line otherwise shaves
-     the descenders off every `p`, `g` and `y` in the path. */
-  .kbn-card-id {
-    font-size: var(--type-meta);
-    line-height: var(--leading-prose);
-    word-break: normal;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    direction: rtl;
-    text-align: left;
-    margin-top: -2px;
-  }
-  .kbn-card-outcome {
-    font-size: var(--type-meta);
-    line-height: var(--leading-prose);
-    -webkit-line-clamp: 1;
-  }
   /* The row clips sideways only, so a verdict's touch target can reach past its plate vertically. */
   .kbn-card-meta {
     flex-wrap: nowrap;
@@ -2155,7 +1893,6 @@
     overflow-y: visible;
     gap: 5px;
   }
-  .kbn-card-meta-spacer { flex: 0 1 auto; }
 
   /* Roles and Resting take the full width under the pager. */
   .kbn-section-roles,
