@@ -1,3 +1,5 @@
+//go:build darwin
+
 // Command cli-differential runs one corpus of felt and shuttle invocations
 // against two builds of both CLIs and reports every observable difference.
 //
