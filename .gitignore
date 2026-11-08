@@ -83,3 +83,6 @@ node_modules/
 **/.claude/first-run
 **/.claude/assistant-daemon-state.json
 ui/harness-dist/
+
+# bin/shuttle-deploy run logs
+/.deploy-*.log
