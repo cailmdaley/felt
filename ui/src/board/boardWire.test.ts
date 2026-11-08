@@ -5,9 +5,8 @@
 // multi-step or conditional, and each one is a composition no single pure
 // function holds:
 //
-//   • Resting drop — the due-preservation policy, whose whole protocol is the
-//     PRESENCE OF A KEY in the JSON body: absent leaves the date, `null`
-//     clears it.
+//   • Resting drop — one `/lifecycle` rest whose `until` is the day dropped
+//     on, or absent so rest keeps a future due and clears an arrived one.
 //   • The fiber controls' due editor — one `/felt-edit` carrying a bare civil
 //     day, never an instant.
 //
@@ -176,7 +175,7 @@ type Private = {
   showBanner: (message: string, kind: 'error' | 'info') => void
   fetchAndRender: () => Promise<void>
   transition: (c: KanbanCard, target: 'tempered' | 'composted' | 'inFlight') => void
-  setSurface: (c: KanbanCard, h: 'now' | 'stashed', o?: { cold?: boolean; due?: string | null }) => void
+  setSurface: (c: KanbanCard, h: 'now' | 'stashed', o?: { due?: string | null }) => void
   livePatch: (
     c: KanbanCard,
     changes: Record<string, unknown>,
@@ -217,75 +216,55 @@ const asStoredUtc = (day: string): string => `${day}T00:00:00Z`
 /** …and on a machine that was in Paris. Same civil day, different encoding. */
 const asStoredParis = (day: string): string => `${day}T00:00:00+02:00`
 
-// ── The Resting drop: a due survives, unless it would bounce ─────────────────
+// ── The Resting drop: one rest, carrying a day or nothing ────────────────────
 
-describe('setSurface → commitSurface — the due key is the whole protocol', () => {
-  it('OMITS `due` entirely when the card is dated in the future', async () => {
-    // Absence of the key is what tells felt to leave the line alone. A `due:
-    // undefined` would serialize away to the same JSON, but only by luck —
-    // assert the key is absent from the parsed body, which is what the daemon
-    // actually reads.
+describe('setSurface → commitSurface — a Resting drop is one rest', () => {
+  const restOf = (fiber: string, extra: Record<string, unknown> = {}) => [{
+    url: `${BASE}/api/v1/lifecycle`, method: 'POST',
+    body: { action: 'rest', fiber, origin: 'local', ...extra },
+  }]
+
+  it('rests a card dated in the future without naming a day — rest keeps it', async () => {
     const c = card({ due: asStoredUtc(dayFromNow(30)) })
     asPrivate(makeBoard()).setSurface(c, 'stashed', {})
     await wire.settled()
-
-    const [body] = wire.bodiesTo('/api/v1/felt-edit')
-    expect(Object.keys(body)).not.toContain('due')
-    expect(body).toEqual({ fiber_id: 'fiber-1', origin: 'local', set: { horizon: 'stashed' }, unset: ['cold'] })
+    expect(wire.writes()).toEqual(restOf('fiber-1'))
   })
 
   it('preserves a future due stored in a NON-UTC offset too', async () => {
     // Same civil day, written on a machine at +02:00. Read as an instant this
     // is a different day, and a west-coast runner could classify it as past.
     const c = card({ due: asStoredParis(dayFromNow(30)) })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
+    const board = asPrivate(makeBoard())
+    const banner = vi.spyOn(board, 'showBanner')
+    board.setSurface(c, 'stashed', {})
     await wire.settled()
-
-    expect(Object.keys(wire.bodiesTo('/api/v1/felt-edit')[0])).not.toContain('due')
+    expect(wire.writes()).toEqual(restOf('fiber-1'))
+    expect(banner).not.toHaveBeenCalled()
   })
 
-  it('CLEARS a due that is already past — it would bounce the card back', async () => {
-    const c = card({ due: asStoredUtc(dayFromNow(-5)) })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
+  it.each([
+    ['already past', -5],
+    ['dated TODAY', 0],
+  ])('reports the cleared due when it is %s — rest clears it', async (_label, offset) => {
+    // Today is the boundary a `new Date(due)` round trip gets wrong in a
+    // negative-offset zone.
+    const c = card({ due: asStoredUtc(dayFromNow(offset)) })
+    const board = asPrivate(makeBoard())
+    const banner = vi.spyOn(board, 'showBanner')
+    board.setSurface(c, 'stashed', {})
     await wire.settled()
-
-    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toMatchObject({ due: null })
+    expect(wire.writes()).toEqual(restOf('fiber-1'))
+    expect(banner).toHaveBeenCalledWith(expect.stringMatching(/already past.*cleared/), 'info')
   })
 
-  it('CLEARS a due dated TODAY — today already reads as drifted', async () => {
-    // The boundary case, and the one a `new Date(due)` round trip gets wrong
-    // in a negative-offset zone: it would read today's UTC-midnight due as
-    // YESTERDAY, which is still cleared, or read tomorrow's as today. Pinning
-    // today keeps the edge honest in both hemispheres.
-    const c = card({ due: asStoredUtc(dayFromNow(0)) })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
-    await wire.settled()
-
-    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toMatchObject({ due: null })
-  })
-
-  it('sends an explicit day verbatim — the day-cell drop wins over both rules', async () => {
+  it('sends an explicit day verbatim as until — the day-cell drop wins over both rules', async () => {
     const target = dayFromNow(9)
     const c = card({ due: asStoredUtc(dayFromNow(-5)) }) // a stale due it overrides
     asPrivate(makeBoard()).setSurface(c, 'stashed', { due: target })
     await wire.settled()
-
     // Bare `YYYY-MM-DD`, byte for byte — not an ISO instant, not re-parsed.
-    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toEqual({
-      fiber_id: 'fiber-1',
-      origin: 'local',
-      set: { horizon: 'stashed' },
-      unset: ['cold'],
-    })
-    expect(wire.bodiesTo('/api/v1/lifecycle')[0]).toMatchObject({ until: target })
-  })
-
-  it('sends an explicit null when the caller means "clear it"', async () => {
-    const c = card({ due: asStoredUtc(dayFromNow(30)) })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', { due: null })
-    await wire.settled()
-
-    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toMatchObject({ due: null })
+    expect(wire.writes()).toEqual(restOf('fiber-1', { until: target }))
   })
 
   it('writes NOTHING when the drop names the day the card already wears', async () => {
@@ -322,99 +301,44 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     }])
   })
 
-  it('redates a resting card without replacing its blocker through rest until', async () => {
+  it('redates a resting card through rest until', async () => {
     const due = dayFromNow(7)
     asPrivate(makeBoard()).setSurface(card({ status: 'open', storedHorizon: 'stashed' }), 'stashed', { due })
     await wire.settled()
-    expect(wire.bodiesTo('/api/v1/lifecycle').every(body => !('until' in body))).toBe(true)
-    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toHaveProperty('due', due)
+    expect(wire.writes()).toEqual(restOf('fiber-1', { until: due }))
   })
 
-  it('snoozes with until on the lifecycle write even if the cold presentation edit fails', async () => {
+  it('banners a refused rest', async () => {
     const board = asPrivate(makeBoard())
     const banner = vi.spyOn(board, 'showBanner')
-    const due = dayFromNow(7)
-    wire.fail('/api/v1/felt-edit')
-    board.setSurface(card({ status: 'closed' }), 'stashed', { due, cold: true })
+    wire.fail('/api/v1/lifecycle')
+    board.setSurface(card({ status: 'closed' }), 'stashed', { due: dayFromNow(7) })
     await wire.settled()
-    expect(wire.bodiesTo('/api/v1/lifecycle')).toEqual([
-      { action: 'rest', fiber: 'fiber-1', origin: 'local', until: due },
-    ])
-    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).not.toHaveProperty('due')
-    expect(banner).toHaveBeenCalledWith(expect.stringMatching(/resting.*presentation/i), 'error')
+    expect(banner).toHaveBeenCalledWith(expect.stringMatching(/Couldn't move.*Resting/), 'error')
   })
 
-  it('rests a non-open card BEFORE the horizon edit — the clean-exit marker rides rest', async () => {
-    const c = card({ id: 'active-1', status: 'active', due: asStoredUtc(dayFromNow(30)) })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
-    await wire.settled()
-
-    expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/lifecycle`,
-      `${BASE}/api/v1/felt-edit`,
-    ])
-    expect(wire.bodiesTo('/api/v1/lifecycle')[0]).toEqual({
-      action: 'rest',
-      fiber: 'active-1',
-      origin: 'local',
-    })
-    // The rest is a lifecycle move, not a date edit — the due still survives.
-    expect(Object.keys(wire.bodiesTo('/api/v1/felt-edit')[0])).not.toContain('due')
-  })
-
-  it('parks an active card whose stale horizon says stashed', async () => {
+  it.each([
+    ['an active card', { id: 'active-1', status: 'active' as const, due: asStoredUtc(dayFromNow(30)) }],
     // Lifecycle placement wins over the planning field: an active oneshot is
     // In flight even when a previous stash left `horizon: stashed` behind.
-    // The drop must therefore stop and park it, rather than claiming it is
-    // already in Resting.
-    const c = card({
-      id: 'active-stashed-1',
-      status: 'active',
-      shuttleKind: 'oneshot',
-      workerState: 'running', tmuxSession: 'tmux-active-stashed',
-      storedHorizon: 'stashed',
-      effectiveHorizon: 'stashed',
-    })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
+    ['an active card whose stale horizon says stashed', {
+      id: 'active-1', status: 'active' as const, shuttleKind: 'oneshot' as const,
+      workerState: 'running' as const, tmuxSession: 'tmux-active-stashed',
+      storedHorizon: 'stashed' as const, effectiveHorizon: 'stashed' as const,
+    }],
+    // An open card can still have a live worker after a force dispatch while
+    // its old horizon remains stashed; the worker wins the classifier.
+    ['an open stashed card whose worker is live', {
+      id: 'active-1', status: 'open' as const, shuttleKind: 'oneshot' as const,
+      workerState: 'running' as const, tmuxSession: 'tmux-open-stashed-live',
+      storedHorizon: 'stashed' as const, effectiveHorizon: 'stashed' as const,
+    }],
+    // Rest clears a verdict itself.
+    ['a card that carries a verdict', { id: 'active-1', status: 'closed' as const, tempered: true }],
+  ])('rests %s in one write; rest stops its worker in the owning Poller', async (_label, over) => {
+    asPrivate(makeBoard()).setSurface(card(over), 'stashed', {})
     await wire.settled()
-
-    // rest stops the worker in the owning Poller; the board sends no /kill.
-    expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/lifecycle`,
-      `${BASE}/api/v1/felt-edit`,
-    ])
-    expect(wire.bodiesTo('/api/v1/lifecycle')[0]).toEqual({
-      action: 'rest',
-      fiber: 'active-stashed-1',
-      origin: 'local',
-    })
-  })
-
-  it('parks an open card whose stale horizon says stashed while its worker is live', async () => {
-    // MTG's exact shape: an open card can still have a live worker after a
-    // force dispatch, while its old horizon remains stashed. The worker wins
-    // the classifier, so dropping it into Resting must stop it rather than
-    // claim the card is already there.
-    const c = card({
-      id: 'open-stashed-live-1',
-      status: 'open',
-      shuttleKind: 'oneshot',
-      workerState: 'running', tmuxSession: 'tmux-open-stashed-live',
-      storedHorizon: 'stashed',
-      effectiveHorizon: 'stashed',
-    })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
-    await new Promise((r) => setTimeout(r, 20))
-
-    expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/lifecycle`,
-      `${BASE}/api/v1/felt-edit`,
-    ])
-    expect(wire.bodiesTo('/api/v1/lifecycle')[0]).toEqual({
-      action: 'rest',
-      fiber: 'open-stashed-live-1',
-      origin: 'local',
-    })
+    expect(wire.writes()).toEqual(restOf('active-1'))
   })
 
   it('does not stop a blocked launch that has no live worker', async () => {
@@ -430,18 +354,6 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     asPrivate(makeBoard()).setSurface(c, 'stashed', {})
     await new Promise((r) => setTimeout(r, 20))
     expect(wire.writes()).toEqual([])
-  })
-
-  it('reopens a card that carries a verdict as a draft — rest refuses one past review', async () => {
-    const c = card({ id: 'done-1', status: 'closed', tempered: true })
-    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
-    await wire.settled()
-
-    expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/transition`,
-      `${BASE}/api/v1/felt-edit`,
-    ])
-    expect(wire.bodiesTo('/api/v1/lifecycle')).toEqual([])
   })
 
   it('unsets horizon and cold on the way back to Now, touching no due', async () => {

@@ -132,7 +132,7 @@ interface KanbanSurfaceRendererOptions {
   setSurface: (
     card: KanbanCard,
     horizon: HorizonKind,
-    opts?: { cold?: boolean; due?: string | null },
+    opts?: { due?: string | null },
   ) => void | Promise<void>
   /** Make this constitution a seat, choosing an office when it has none. */
   makeSeat?: (card: KanbanCard, anchor: HTMLElement) => void | Promise<void>

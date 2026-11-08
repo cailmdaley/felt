@@ -22,7 +22,7 @@
  *     by where the card sits (`dayDropHorizon`): a desk or resting card gets
  *     `due` + `horizon: stashed` (snooze); anything else just gets `due`.
  *   • Drag onto today → onto the desk now (due cleared).
- *   • Drag into Resting → horizon=stashed, keeping any future `due:` (which
+ *   • Drag into Resting → `shuttle rest`, keeping any future `due:` (which
  *     makes it a snooze that returns on its own); an already-elapsed `due:` is
  *     cleared, and said out loud, because it would bounce the card back.
  *   • Drag back up to the now-board → clear horizon/cold.
@@ -32,7 +32,7 @@
  *
  * Classification happens once, frontend-side: `classifyFiber` in
  * `KanbanRules.ts` buckets the composite feed into surfaces. The drag handler's
- * only knob is which surface command plus due/cold tuple to POST.
+ * only knob is which surface and day to send.
  */
 
 import '../styles/type.css'
@@ -1227,11 +1227,10 @@ export class KanbanModal {
    * Compare against the surface the classifier is actually showing, or a
    * drag returns "already in Resting" before it can stop and park the worker.
    */
-  private sameSurface(card: KanbanCard, horizon: HorizonKind, opts: { cold?: boolean }): boolean {
-    const actuallyOnHorizon = horizon === 'stashed'
+  private sameSurface(card: KanbanCard, horizon: HorizonKind): boolean {
+    return horizon === 'stashed'
       ? !hasWorkerToStop(card) && card.status === 'open' && card.effectiveHorizon === 'stashed'
       : card.effectiveHorizon === 'now'
-    return actuallyOnHorizon && (card.cold ?? false) === (opts.cold ?? false)
   }
 
   /**
@@ -1259,9 +1258,9 @@ export class KanbanModal {
   private alreadyOnSurface(
     card: KanbanCard,
     horizon: HorizonKind,
-    opts: { cold?: boolean; due?: string | null },
+    due: string | null | undefined,
   ): boolean {
-    return card.status !== 'closed' && this.sameSurface(card, horizon, opts) && this.sameDueAs(card, opts.due)
+    return card.status !== 'closed' && this.sameSurface(card, horizon) && this.sameDueAs(card, due)
   }
 
   /**
@@ -1271,11 +1270,11 @@ export class KanbanModal {
    *     setSurface(card, 'now', { due }); only due changes, preserving its
    *     lifecycle and worker.
    *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
-   *     onto a date column → setSurface(card, 'stashed', { due }); lifecycle
-   *     rest writes the wake date and resting state atomically. Cold styling
-   *     is a separate edit. `dayDropHorizon` chooses between these gestures
-   *     from the card's current column.
-   *   • Drag into Resting                 → setSurface(card, 'stashed', { cold? }).
+   *     onto a date column → setSurface(card, 'stashed', { due }); `shuttle
+   *     rest --until <day>` writes the wake date and resting state in one
+   *     locked write. `dayDropHorizon` chooses between these gestures from the
+   *     card's current column.
+   *   • Drag into Resting                 → setSurface(card, 'stashed').
    *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
    *
    * When `opts.due` is omitted the existing `due:` is PRESERVED, stashing
@@ -1291,13 +1290,15 @@ export class KanbanModal {
    * — the drop would read as ignored. Such a due is cleared, and `commitSurface`
    * says so in a banner. `dueBouncesFromResting` (KanbanRules) is the test.
    *
-   * Callers can still pass an explicit `due` to override either way: a day
-   * (the date-column snooze) or `null` to clear on purpose.
+   * Rest itself applies both rules (`shuttle rest` keeps a future due and
+   * clears an arrived one); the board predicts them only to place the card
+   * optimistically and to say which date went. A Resting drop takes a day
+   * (the date-column snooze) or nothing; Now takes a day or `null` to clear.
    */
   private setSurface(
     card: KanbanCard,
     horizon: HorizonKind,
-    opts: { cold?: boolean; due?: string | null } = {},
+    opts: { due?: string | null } = {},
   ): void {
 
     // A standing constitution is placed on the timeline by its schedule
@@ -1322,16 +1323,14 @@ export class KanbanModal {
       void this.scheduleDue(card, opts.due)
       return
     }
-    const wantsCold = horizon === 'stashed' ? (opts.cold ?? false) : undefined
-    // A bare stash keeps the card's own `due:` — `due` stays undefined, which
-    // commitSurface reads as "don't send the key", and felt leaves the line
-    // alone. Only a deadline that would bounce the card back is dropped, and
-    // the drop is reported rather than done under the gesture's cover.
+    // A bare stash keeps the card's own `due:`. Only a deadline that would
+    // bounce the card back is dropped, and the drop is reported rather than
+    // done under the gesture's cover.
     const dropsStaleDue =
       horizon === 'stashed' && opts.due === undefined && dueBouncesFromResting(card.due)
     const due = dropsStaleDue ? null : opts.due
 
-    if (this.alreadyOnSurface(card, horizon, { cold: opts.cold, due })) {
+    if (this.alreadyOnSurface(card, horizon, due)) {
       // A genuine no-op: an open/active card already on this surface with these
       // fields. Tell the user rather than leaving the drag feeling broken.
       this.showBanner(`“${card.name}” is already in ${SURFACE_TITLE[horizon]}.`, 'info')
@@ -1344,11 +1343,11 @@ export class KanbanModal {
     // doesn't name a lifecycle column, so an optimistic placement there would
     // be a reclassification.
     if (horizon === 'stashed') {
-      const optimistic = applyOptimisticSurface(this.lastResponse, card.id, { cold: wantsCold, due })
+      const optimistic = applyOptimisticSurface(this.lastResponse, card.id, due)
       if (optimistic) this.applyResponse(optimistic)
     }
 
-    void this.commitSurface(card, horizon, { cold: wantsCold, due, dropsStaleDue })
+    void this.commitSurface(card, horizon, { due, dropsStaleDue })
   }
 
   private async scheduleDue(card: KanbanCard, due: string): Promise<void> {
@@ -1362,83 +1361,53 @@ export class KanbanModal {
   }
 
   /**
-   * Network half of {@link setSurface}: POST the horizon edit, then reconcile.
+   * Network half of {@link setSurface}: one owner-routed write, then reconcile.
    * Runs in the background after the optimistic render (when there was one), so
    * its latency is invisible; banners + snaps back on failure.
    *
+   * Into Resting is `shuttle rest`, the worker's own exit said by hand: the
+   * owning daemon writes `status: open` + `horizon: stashed` inside its Poller
+   * in one locked write, clears any verdict, applies the wake day (`until`) or
+   * keeps a future due and clears an arrived one, and stops a live worker
+   * through its backend. On work already at rest, `until` changes only the
+   * wake day.
+   *
+   * Back to Now holds DRAFTS. Parking a running card there stops its worker —
+   * alive only while in flight — and a card that isn't a draft yet is parked as
+   * one via `/transition target=drafts` (a closed card reopens as a deferred
+   * draft; an armed card pauses). Now is the absence of a planning field, so
+   * the frontmatter edit clears `horizon` and `cold`.
+   *
    * `opts.dropsStaleDue` is the one thing this method reports rather than does:
-   * setSurface decided to clear an already-elapsed deadline, and the human is
-   * told which date went. See `announceSurfaceLanding`.
+   * rest clears an already-elapsed deadline, and the human is told which date
+   * went. See `announceSurfaceLanding`.
    */
   private async commitSurface(
     card: KanbanCard,
     horizon: HorizonKind,
-    opts: { cold?: boolean; due?: string | null; dropsStaleDue?: boolean },
+    opts: { due?: string | null; dropsStaleDue?: boolean },
   ): Promise<void> {
     this.gestureDepth += 1
-    let rested = false
     try {
-      // Into Resting is `shuttle rest`, the worker's own exit said by hand: the
-      // owning daemon writes `status: open` + `horizon: stashed` inside its
-      // Poller, clears the verdict, stamps the clean-exit marker, and stops a
-      // live worker through its backend (tmux or an app conversation). A card
-      // that already carries a verdict is past review, which rest refuses, so
-      // it reopens as a draft first, as every other planning drop does.
-      // setSurface's guards already bannered the states where neither verb
-      // applies (standing). Every card on a Desk column carries a shuttle
-      // block, so the lifecycle verbs always apply — see `shouldIncludeInKanban`.
-      const hasVerdict = card.status === 'closed' && card.tempered !== undefined
-      const alreadyResting = !hasWorkerToStop(card) && card.status === 'open' && card.storedHorizon === 'stashed'
-      if (horizon === 'stashed' && !hasVerdict) {
-        // Re-dating resting work preserves its blocker; --until replaces it.
-        if (!alreadyResting) {
-          await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
-            action: 'rest', fiber: card.id, origin: card.originId,
-            ...(typeof opts.due === 'string' ? { until: opts.due } : {}),
-          }, 'Rest failed')
-          rested = true
-        }
+      if (horizon === 'stashed') {
+        await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
+          action: 'rest', fiber: card.id, origin: card.originId,
+          ...(typeof opts.due === 'string' ? { until: opts.due } : {}),
+        }, 'Rest failed')
       } else {
-        // Any other planning surface (a future date, or back onto the desk)
-        // holds DRAFTS. Parking a running card there stops its worker — alive
-        // only while in-flight — and a card that isn't a draft yet is parked as
-        // one via `/transition target=drafts`: a closed card reopens as a
-        // deferred draft (reopen --as-draft → status:open, verdict cleared,
-        // not armed), an armed card pauses (otherwise an active oneshot
-        // reclassifies straight back to In flight after the refetch).
         await this.killWorkerIfRunning(card)
         if (card.status !== 'open') {
           await this.postTransition(card, 'drafts', 'Park-as-draft failed')
         }
+        const payload: Record<string, unknown> = {
+          fiber_id: card.id, origin: card.originId, unset: ['horizon', 'cold'],
+        }
+        if (opts.due !== undefined) payload.due = opts.due
+        await this.postFeltEdit(payload, 'Surface edit failed')
       }
-      // Rest owns the wake date; cold presentation and explicit date clearing
-      // ride the independent frontmatter edit below.
-      // The horizon "surface" is not stored verbatim — Now is absence (clear
-      // `horizon`+`cold`), future placement is `due:`, and only `stashed`
-      // writes a stored horizon. The daemon `/api/v1/felt-edit` is a raw
-      // frontmatter writer, so this policy lives here, the sole classifier's
-      // twin on the write side.
-      const set: Record<string, string | boolean> = {}
-      const unset: string[] = []
-      if (horizon === 'stashed') {
-        set.horizon = 'stashed'
-        if (opts.cold === true) set.cold = true
-        else if (opts.cold === false) unset.push('cold')
-        // cold === undefined → leave the existing `cold:` line alone.
-      } else {
-        unset.push('horizon', 'cold')
-      }
-      const payload: Record<string, unknown> = { fiber_id: card.id, origin: card.originId }
-      if (Object.keys(set).length > 0) payload.set = set
-      if (unset.length > 0) payload.unset = unset
-      if (opts.due !== undefined && !(rested && typeof opts.due === 'string')) payload.due = opts.due
-      await this.postFeltEdit(payload, 'Surface edit failed')
       this.announceSurfaceLanding(card, horizon, opts)
     } catch (err: unknown) {
-      const msg = errText(err)
-      const message = rested
-        ? `“${card.name}” is resting${typeof opts.due === 'string' ? ` until ${formatDue(opts.due)}` : ''}, but its presentation edit failed: ${msg}`
-        : `Couldn't move “${card.name}” to ${SURFACE_TITLE[horizon]}: ${msg}`
+      const message = `Couldn't move “${card.name}” to ${SURFACE_TITLE[horizon]}: ${errText(err)}`
       this.showBanner(message, 'error')
       this.announce(message)
     }
@@ -2012,7 +1981,7 @@ export class KanbanModal {
         const message = `“${card.name}” is a seat. It keeps its schedule; its current run is unchanged.`
         this.showBanner(message, 'info')
         this.announce(message)
-      } else if (!this.sameSurface(card, 'stashed', { cold: card.cold })) {
+      } else if (!this.sameSurface(card, 'stashed')) {
         this.setSurface(seated, 'stashed')
         return
       } else {
@@ -2531,13 +2500,11 @@ function withSeat(roles: KanbanCard[], seat: KanbanCard): KanbanCard[] {
 export function applyOptimisticSurface(
   resp: KanbanResponse | null,
   cardId: string,
-  opts: { cold?: boolean; due?: string | null } = {},
+  due?: string | null,
 ): KanbanResponse | null {
-  // A planning-surface drop parks the card as a draft (commitSurface's
-  // park-as-draft transition): closed reopens to open with the verdict
-  // cleared, active pauses to open, and the kill strips the worker pill —
-  // mirrored here so the optimistic card matches the committed reclassify
-  // (the no-snap-back invariant).
+  // Rest leaves the card open with the verdict cleared and its worker
+  // stopped — mirrored here so the optimistic card matches the committed
+  // reclassify (the no-snap-back invariant).
   return placeOptimistically(resp, cardId, (card) => ({
     status: 'open',
     tempered: undefined,
@@ -2548,13 +2515,12 @@ export function applyOptimisticSurface(
     storedHorizon: 'stashed',
     effectiveHorizon: 'stashed',
     drifted: false,
-    cold: opts.cold ?? false,
     // The optimistic card must be the card the WRITE produces, or the board
     // shows one frame of a lie and then snaps. `undefined` is setSurface's
     // "leave the date alone" (a bare stash preserves a future deadline), so
     // it keeps the card's own; an explicit day or an explicit `null` — the
     // date-column snooze, and the stale-due clear — wins over it.
-    due: opts.due === undefined ? card.due : (opts.due ?? undefined),
+    due: due === undefined ? card.due : (due ?? undefined),
   }))
 }
 
