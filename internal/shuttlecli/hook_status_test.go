@@ -105,6 +105,10 @@ func TestProgramStatusGatesAndTarget(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, home := isolateEvents(t)
+			// The transcripts sit in each harness's default tree under home.
+			for _, key := range []string{"SHUTTLE_CLAUDE_PROJECTS_DIR", "SHUTTLE_CODEX_SESSIONS_DIR", "SHUTTLE_PI_SESSIONS_DIR"} {
+				env.Unset(key)
+			}
 			env.Set("TMUX", tc.tmux)
 			env.Set("TMUX_PANE", "%1")
 			env.Set("SHUTTLE_PROGRAM_STATUS", tc.off)
