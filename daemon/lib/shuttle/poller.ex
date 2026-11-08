@@ -4516,7 +4516,13 @@ defmodule Shuttle.Poller do
         {record_dispatch_failure(state, fiber, reason), {:error, reason}}
 
       {:error, reason} ->
-        Logger.warning("Dispatch failed for #{fiber_id}: #{inspect(reason)}")
+        # Each retry of an unchanged refusal is the same news; it is logged once.
+        previous = Map.get(state.dispatch_failures, runtime_key_for_fiber(fiber))
+
+        if previous && dispatch_failure_key(previous.reason) == dispatch_failure_key(reason),
+          do: Logger.debug("Dispatch still failing for #{fiber_id}: #{inspect(reason)}"),
+          else: Logger.warning("Dispatch failed for #{fiber_id}: #{inspect(reason)}")
+
         state = record_dispatch_failure(state, fiber, reason)
         {state, {:error, reason}}
     end

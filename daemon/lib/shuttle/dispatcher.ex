@@ -1109,11 +1109,8 @@ defmodule Shuttle.Dispatcher do
 
   # Every preflight refusal takes this shape: a tagged reason the surfaces can
   # match on, and an operator-facing message they render verbatim (the Poller's
-  # `blocked` row, the dispatch API's 422, the CLI's stderr).
-  defp dispatch_refused(tag, message) do
-    Logger.error("Dispatch refused — #{message}")
-    {:error, {tag, message}}
-  end
+  # `blocked` row and log, the dispatch API's 422, the CLI's stderr).
+  defp dispatch_refused(tag, message), do: {:error, {tag, message}}
 
   # `type -t` prints nothing on failure; anything on stderr is the login shell's
   # own noise and is worth quoting when there is some.
