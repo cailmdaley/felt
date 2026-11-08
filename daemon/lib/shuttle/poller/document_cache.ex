@@ -188,22 +188,15 @@ defmodule Shuttle.Poller.DocumentCache do
     end
   end
 
-  @doc "Checks whether the stored mtime matches; cache refresh also checks resolved agent data."
-  def reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at)
-      when is_map(entry),
-      do: true
-
-  def reusable_entry?(_, _), do: false
-
-  @doc "A cache hit requires matching mtimes, paths and resolved agent records."
-  def reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at, candidate)
-      when is_map(entry) and is_map(candidate) do
+  # A cache hit requires matching mtimes, paths and resolved agent records.
+  defp reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at, candidate)
+       when is_map(entry) and is_map(candidate) do
     get_in(entry, [:fiber, "path"]) == candidate["path"] and
       get_in(entry, [:fiber, "shuttle", "resolved", "agent"]) ==
         get_in(candidate, ["shuttle", "resolved", "agent"])
   end
 
-  def reusable_entry?(_, _, _), do: false
+  defp reusable_entry?(_, _, _), do: false
 
   # Build one candidate's document entry directly from its Shuttle-list row. No
   # shell-out and no stat: the row already carries the full kanban projection
@@ -225,6 +218,39 @@ defmodule Shuttle.Poller.DocumentCache do
           [entry | _] -> {:ok, entry}
           [] -> {:error, :invalid_entry}
         end
+    end
+  end
+
+  # Merge the Task-built cache over the live cache, preferring a live entry whose
+  # `modified_at` is strictly newer (a mid-poll `refresh_document` patch that the
+  # Task's pre-mutation snapshot could not see). Only keys the Task build carries
+  # are kept — a fiber the Task evicted (deleted / uninstalled) is not
+  # resurrected from the live cache.
+  @doc false
+  def merge(live, task_built) do
+    Map.new(task_built, fn {key, task_entry} ->
+      case Map.get(live, key) do
+        %{modified_at: live_mt} = live_entry when is_binary(live_mt) ->
+          if modified_after?(live_mt, Map.get(task_entry, :modified_at)),
+            do: {key, live_entry},
+            else: {key, task_entry}
+
+        _ ->
+          {key, task_entry}
+      end
+    end)
+  end
+
+  # Strictly-newer comparison of two ISO8601 mtimes. Parses both so mixed offsets
+  # compare correctly; if either is unparseable, prefer the live patch on any
+  # difference (it is the more recent disk read).
+  defp modified_after?(live_mt, task_mt) do
+    with {:ok, live_dt, _} <- DateTime.from_iso8601(live_mt),
+         true <- is_binary(task_mt),
+         {:ok, task_dt, _} <- DateTime.from_iso8601(task_mt) do
+      DateTime.compare(live_dt, task_dt) == :gt
+    else
+      _ -> live_mt != task_mt
     end
   end
 end

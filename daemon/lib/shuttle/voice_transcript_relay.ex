@@ -1057,7 +1057,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     end
   end
 
-  def delivery_outcome({status, body}) when status in 200..299 do
+  defp delivery_outcome({status, body}) when status in 200..299 do
     case Map.fetch(body, :delivered) do
       {:ok, true} ->
         :delivered
@@ -1077,7 +1077,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
     end
   end
 
-  def delivery_outcome(_), do: :failed
+  defp delivery_outcome(_), do: :failed
 
   defp persist!(%{config: config, persisted: config} = state), do: state
 

@@ -150,26 +150,20 @@ defmodule Shuttle.Poller.Snapshot do
     end)
   end
 
-  @spec build_full_state(State.t()) :: map()
-  def build_full_state(state) do
-    snap = build_snapshot(state)
-
-    running_detail =
-      Enum.map(state.running, fn {runtime_key, meta} ->
-        fiber_id = Poller.fiber_address(meta)
-
-        %{
-          runtime_key: runtime_key,
-          fiber_id: fiber_id,
-          pid: inspect(meta.pid),
-          session: meta.session,
-          agent_id: meta.agent_id,
-          started_at: DateTime.to_unix(meta.started_at, :millisecond),
-          last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond)
-        }
-      end)
-
-    Map.put(snap, :running_detail, running_detail)
+  @doc "Each running worker as `/api/v1/state` details it."
+  @spec running_detail(State.t()) :: [map()]
+  def running_detail(state) do
+    Enum.map(state.running, fn {runtime_key, meta} ->
+      %{
+        runtime_key: runtime_key,
+        fiber_id: Poller.fiber_address(meta),
+        pid: inspect(meta.pid),
+        session: meta.session,
+        agent_id: meta.agent_id,
+        started_at: DateTime.to_unix(meta.started_at, :millisecond),
+        last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond)
+      }
+    end)
   end
 
   @doc """

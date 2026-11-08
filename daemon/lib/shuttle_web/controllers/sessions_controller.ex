@@ -82,7 +82,11 @@ defmodule ShuttleWeb.SessionsController do
             |> for_uid(uid)
             |> Enum.sort_by(&(Composite.item_ms(&1, :at) || 0))
 
-          %{host: Shuttle.Poller.own_host_id(), records: records, origins: Composite.origins(entries)}
+          %{
+            host: Shuttle.Poller.own_host_id(),
+            records: records,
+            origins: Composite.origins(entries)
+          }
         end)
 
       {:error, {:bad_param, key}} ->

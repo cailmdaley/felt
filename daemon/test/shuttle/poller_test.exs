@@ -1230,7 +1230,7 @@ defmodule Shuttle.PollerTest do
 
     # Commit the test fixture through an actual Poller transition before using
     # the mailbox-free reader.
-    GenServer.call(poller, :orchestrator_state)
+    GenServer.call(poller, :sync)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -9164,11 +9164,11 @@ defmodule Shuttle.PollerTest do
 
     :sys.replace_state(poller, fn _ -> state end)
     state = :sys.get_state(poller, @state_timeout)
-    plan = Poller.discovery_plan(state, [store], 0)
+    plan = Shuttle.Poller.Discovery.plan(state, [store], 0)
     assert plan[store] == :hot
 
     before = length(MockRunner.commands())
-    Poller.discover_candidates(state, plan)
+    Shuttle.Poller.Discovery.discover(state, plan)
     cycle_commands = Enum.drop(MockRunner.commands(), before)
 
     assert Enum.any?(cycle_commands, fn {cmd, args} ->

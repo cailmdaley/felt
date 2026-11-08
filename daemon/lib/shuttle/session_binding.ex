@@ -17,7 +17,7 @@ defmodule Shuttle.SessionBinding do
 
   def new, do: %{members: %{}, processes: %{}, launches: %{}}
 
-  def valid_id?(id), do: is_binary(id) and id not in ["", "unknown"]
+  defp valid_id?(id), do: is_binary(id) and id not in ["", "unknown"]
 
   def apply_event(state, event, now) do
     state |> note_launch(event, now) |> apply_receiver_event(event, now)

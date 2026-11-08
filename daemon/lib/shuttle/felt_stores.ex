@@ -188,7 +188,7 @@ defmodule Shuttle.FeltStores do
   prefix matches felt's symlink-resolved `path`. See `Shuttle.Realpath`.
 
   This is the prefix both ownership checks build on — this module's
-  `store_for_fiber/2` and the poller's `run_shuttle_listing/2` — so they must
+  `store_for_fiber/2` and `Shuttle.Poller.Discovery`'s listing — so they must
   canonicalize identically or a store enumerates fibers the other drops.
   Falls back to the expanded path when resolution fails.
   """

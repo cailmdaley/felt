@@ -30,7 +30,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
     # reconcile_orphaned_sessions adopts them as soon as tmux answers.
     case Poller.list_shuttle_sessions(state) do
       {:ok, sessions} ->
-        state = Poller.boot_discover_candidates(state)
+        state = Shuttle.Poller.Discovery.boot_seed(state)
         lookup = candidate_session_lookup(state)
 
         state =

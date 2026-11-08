@@ -19,7 +19,7 @@ defmodule Shuttle.Profile.FunctionsTest do
       assert {Jason, :encode_to_iodata!, 2} in state.active
       assert {Jason, :decode, 1} in state.active
       assert {Jason, :decode, 2} in state.active
-      assert {Shuttle.Poller, :run_shuttle_listing, 5} in state.active
+      assert {Shuttle.Poller.Discovery, :run_shuttle_listing, 5} in state.active
       assert {Shuttle.FeltStores, :felt_show_json, 3} in state.active
       assert {Shuttle.FiberDocuments, :ls_rows, 4} in state.active
 

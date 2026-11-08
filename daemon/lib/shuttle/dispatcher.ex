@@ -1150,12 +1150,12 @@ defmodule Shuttle.Dispatcher do
   defp prompt_context_run_id({:standing_run, run_id, _}), do: run_id
   defp prompt_context_run_id(_), do: nil
 
-  def preflight_terminal(%{cli: "codex", headless: true}, _work_dir, _runner),
+  defp preflight_terminal(%{cli: "codex", headless: true}, _work_dir, _runner),
     do:
       {:error,
        {:invalid_axes, "Codex workers require an interactive agent; headless is not supported."}}
 
-  def preflight_terminal(agent, work_dir, runner) do
+  defp preflight_terminal(agent, work_dir, runner) do
     with :ok <- preflight_wrapper(agent, work_dir, runner), do: ensure_terminal_ready(runner)
   end
 

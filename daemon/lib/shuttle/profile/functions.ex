@@ -12,7 +12,7 @@ defmodule Shuttle.Profile.Functions do
   @functions [
     {Shuttle.Poller, :start_poll_plan_task, 3},
     {Shuttle.Poller, :start_poll_read_task, 4},
-    {Shuttle.Poller, :run_shuttle_listing, 5},
+    {Shuttle.Poller.Discovery, :run_shuttle_listing, 5},
     {Shuttle.Poller, :poll_reads, 2},
     {Shuttle.Poller, :apply_poll_cycle, 2},
     {Shuttle.Poller, :cached_fiber, 2},
@@ -54,7 +54,7 @@ defmodule Shuttle.Profile.Functions do
 
   @max_rows 40
   @source_helpers [
-    "Shuttle.Poller.run_shuttle_listing/5",
+    "Shuttle.Poller.Discovery.run_shuttle_listing/5",
     "Shuttle.FeltStores.felt_show_json/3",
     "Shuttle.FiberDocuments.ls_rows/4"
   ]

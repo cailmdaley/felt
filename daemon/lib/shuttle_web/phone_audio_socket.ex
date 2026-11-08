@@ -40,9 +40,9 @@ defmodule ShuttleWeb.PhoneAudioSocket do
 
   @close_codes %{refused: 4404, ended: 4410, replaced: 4409, failed: 4500}
 
-  @doc "The WebSocket close code for a terminal relay state."
+  # The WebSocket close code for a terminal relay state.
   @spec close_code(:refused | :ended | :replaced | :failed) :: pos_integer()
-  def close_code(state), do: Map.fetch!(@close_codes, state)
+  defp close_code(state), do: Map.fetch!(@close_codes, state)
 
   @doc "`reason` cut to at most `bytes` bytes without splitting a character."
   @spec truncate_utf8(String.t(), non_neg_integer()) :: String.t()

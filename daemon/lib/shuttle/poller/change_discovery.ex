@@ -56,7 +56,7 @@ defmodule Shuttle.Poller.ChangeDiscovery do
         with [header, next] <- String.split(output, "\n", parts: 2),
              {:ok, %{"ids" => ids, "indexed_paths" => indexed_paths}} <- Jason.decode(header),
              true <- is_binary(next) and next != "",
-             {:ok, %{rows: rows}} <- Shuttle.Poller.list_changed_fibers(store, state, ids) do
+             {:ok, %{rows: rows}} <- Shuttle.Poller.Discovery.list_changed(store, state, ids) do
           {:ok, %{index: next, indexed_paths: indexed_paths, ids: ids, rows: rows}}
         else
           error -> {:error, inspect(error)}

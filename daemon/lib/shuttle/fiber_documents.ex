@@ -497,7 +497,8 @@ defmodule Shuttle.FiberDocuments do
   # `kanban_aux_admissible?/1` enforces the host-less half of that sentence, so
   # a due-dated fiber pinned to another host cannot ride the aux clause into
   # this feed.
-  defp owned_kanban_fiber?(fiber, own_host_id) do
+  @doc false
+  def owned_kanban_fiber?(fiber, own_host_id) do
     Shuttle.Poller.host_owned?(fiber["shuttle"], own_host_id) or kanban_aux_admissible?(fiber)
   end
 

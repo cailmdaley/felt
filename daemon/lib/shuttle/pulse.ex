@@ -4,7 +4,7 @@ defmodule Shuttle.Pulse do
   alias Shuttle.{Continuation, FS, Poller}
   require Logger
 
-  def configured?(fiber), do: not is_nil(get_in(fiber, ["shuttle", "pulse"]))
+  defp configured?(fiber), do: not is_nil(get_in(fiber, ["shuttle", "pulse"]))
 
   def config(fiber) do
     block = fiber["shuttle"] || %{}

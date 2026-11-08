@@ -321,7 +321,7 @@ defmodule Shuttle.Remotes do
   @doc false
   # Selection is cached for reconciliation, never authorization. Every new
   # connection to the default path checks the literal ancestry again.
-  def authorize_socket(path) do
+  defp authorize_socket(path) do
     case socket_source(&fresh_document/0) do
       {:configured, configured} ->
         if normalized_tailscale_socket(configured) == path,

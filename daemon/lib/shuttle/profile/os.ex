@@ -67,8 +67,7 @@ defmodule Shuttle.Profile.OS do
   defp cpu_delta(a, b),
     do: %{utime: max(b.utime - a.utime, 0) / @ticks, stime: max(b.stime - a.stime, 0) / @ticks}
 
-  @doc false
-  def parse_stat(text) do
+  defp parse_stat(text) do
     # comm is parenthesized and may itself contain spaces or closing parens.
     case Regex.run(~r/^\d+ \(.*\) (.*)$/s, String.trim(text), capture: :all_but_first) do
       [tail] ->

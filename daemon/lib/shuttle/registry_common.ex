@@ -67,9 +67,9 @@ defmodule Shuttle.RegistryCommon do
     end)
   end
 
-  @doc "True iff `server` resolves to a live process."
+  # True iff `server` resolves to a live process.
   @spec registry_alive?(GenServer.server()) :: boolean()
-  def registry_alive?(server) do
+  defp registry_alive?(server) do
     case GenServer.whereis(server) do
       nil -> false
       pid when is_pid(pid) -> Process.alive?(pid)

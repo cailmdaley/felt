@@ -88,7 +88,7 @@ defmodule ShuttleWeb.ThreadsControllerTest do
     # `:sys.replace_state/2` changes the GenServer fixture without running the
     # normal transition wrapper, so use an actual callback as a publication
     # barrier before exercising the mailbox-free controller reader.
-    GenServer.call(poller, :orchestrator_state)
+    GenServer.call(poller, :sync)
     poller
   end
 
@@ -178,7 +178,7 @@ defmodule ShuttleWeb.ThreadsControllerTest do
 
     poller = quiet_poller!()
     :sys.replace_state(poller, &%{&1 | document_cache_ready: false})
-    GenServer.call(poller, :orchestrator_state)
+    GenServer.call(poller, :sync)
 
     assert %{"error" => "cold"} = get(api_conn(), "/api/v1/threads/hub") |> json_response(503)
   end

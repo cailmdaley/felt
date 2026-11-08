@@ -227,10 +227,9 @@ defmodule Shuttle.SessionLink do
 
   defp schedule_if_needed(state), do: state
 
-  @doc false
-  def retry_delay_ms(attempt, base_ms \\ @retry_ms, max_ms \\ @retry_max_ms)
-      when is_integer(attempt) and attempt >= 1 and is_integer(base_ms) and base_ms > 0 and
-             is_integer(max_ms) and max_ms > 0 do
+  defp retry_delay_ms(attempt, base_ms, max_ms)
+       when is_integer(attempt) and attempt >= 1 and is_integer(base_ms) and base_ms > 0 and
+              is_integer(max_ms) and max_ms > 0 do
     retry_delay_ms(attempt, base_ms, max_ms, base_ms)
   end
 

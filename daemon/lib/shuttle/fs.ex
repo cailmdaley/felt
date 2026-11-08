@@ -125,7 +125,7 @@ defmodule Shuttle.FS do
   def dir?(path), do: match?({:ok, %{type: :directory}}, stat(path))
   def regular?(path), do: match?({:ok, %{type: :regular}}, stat(path))
   def mkdir(path), do: :prim_file.make_dir(path)
-  def rmdir(path), do: :prim_file.del_dir(path)
+  defp rmdir(path), do: :prim_file.del_dir(path)
   def rm(path), do: :prim_file.delete(path)
   def rename(source, target), do: :prim_file.rename(source, target)
   def chmod(path, mode), do: :prim_file.write_file_info(path, file_info(mode: mode))

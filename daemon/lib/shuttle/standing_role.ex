@@ -183,10 +183,6 @@ defmodule Shuttle.StandingRole do
     "adhoc-#{DateTime.to_unix(now, :millisecond)}"
   end
 
-  @spec ad_hoc_run_id?(String.t() | nil) :: boolean()
-  def ad_hoc_run_id?("adhoc-" <> _), do: true
-  def ad_hoc_run_id?(_), do: false
-
   @spec to_snapshot(t(), DateTime.t(), boolean()) :: map()
   def to_snapshot(%__MODULE__{} = role, now, running?) do
     %{
