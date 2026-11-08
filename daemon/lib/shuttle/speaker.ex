@@ -561,7 +561,7 @@ defmodule Shuttle.Speaker do
   # fiber feed can be unavailable at either moment.
   defp target do
     with {:ok, %{"enabled" => true}} <- Shuttle.Voice.Config.read(),
-         %{target: %{"fiber_id" => id}} <- Shuttle.Voice.show() do
+         %{target: %{"fiber_id" => id}} <- Shuttle.Voice.snapshot() do
       fiber_keys(id, [])
     else
       _ -> nil

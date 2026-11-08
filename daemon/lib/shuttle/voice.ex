@@ -67,7 +67,6 @@ defmodule Shuttle.Voice do
       capture_opts: Keyword.get(opts, :capture_opts, []),
       relay: Keyword.get(opts, :relay, &start_relay/2),
       monitor: Keyword.get(opts, :monitor, &monitor/1),
-      cold: Keyword.get(opts, :cold, &cold?/1),
       discard: Keyword.get(opts, :discard, &Shuttle.Voice.TranscriptRelay.discard/1),
       launch: nil,
       observed_at: nil,
@@ -281,7 +280,6 @@ defmodule Shuttle.Voice do
 
     snapshot
     |> Map.put(:preview, preview)
-    |> Map.put(:cold, not is_nil(snapshot.target) and state.cold.(snapshot.target))
     |> Map.put(:level, Recorder.mic_level(state.capture_opts))
     |> put_mode()
     |> put_pending_words(state)
@@ -335,6 +333,9 @@ defmodule Shuttle.Voice do
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: {%Task{ref: ref}, from}} = state),
     do: finish_task(state, from, {:error, "voice reconciliation exited: #{inspect(reason)}"})
+
+  # Trapping exits, it also hears from the ports its helpers open and close.
+  def handle_info({:EXIT, _source, :normal}, state), do: {:noreply, state}
 
   @impl true
   def terminate(_reason, %{task: {task, _}}), do: Task.shutdown(task, :brutal_kill)

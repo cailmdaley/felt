@@ -387,7 +387,7 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 ### Listen
 
-`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, cold, pending, pending_words, preview, level, last, error, recorder}`.
+`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, pending, pending_words, preview, level, last, error, recorder}`.
 `recorder=<host>` selects the recording daemon independently of the worker's `origin`; without it, the receiving daemon answers locally.
 `sources` is `[]` without hark, `["desktop", "phone"]` on macOS, and `["phone"]` on other hosts.
 `source` is `desktop` or `phone`; `launch` is the active recorder's `voice-…` identity or null.

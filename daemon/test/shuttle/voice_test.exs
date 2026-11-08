@@ -38,7 +38,6 @@ defmodule Shuttle.VoiceTest do
       name: Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}"),
       poll_ms: 60_000,
       reconcile: reconcile,
-      cold: fn _ -> false end,
       relay: fn _, _ -> :ok end,
       monitor: fn _ -> %{pending: nil, last: nil} end
     ]
