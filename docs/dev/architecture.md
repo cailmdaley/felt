@@ -251,8 +251,10 @@ generation is part of `Shuttle.Remotes.config_token/0`.
 The Go CLI does not probe the tailnet. `shuttle remotes list` and every verb
 that routes by host name read the local daemon's discovered peers from
 `/api/v1/version` and merge them with the file through `resolveRemotes`, the Go
-mirror of the Elixir resolver. `daemon/test/fixtures/tailnet_peers/` holds the
-shared cases.
+mirror of the Elixir resolver; `daemon/test/fixtures/remotes/` and
+`daemon/test/fixtures/tailnet_peers/` hold the shared parity cases. `shuttle
+remotes list|add|rm|path` manages the file, and `list` doubles as the validator
+behind the board's settings sheet. Nothing about hosts is baked into a build.
 When Tailscale is absent, stopped, or failing, the daemon retains verified peers for up to ten minutes after their last successful probe, then uses the file alone.
 It records the reason, and `shuttle doctor` reports it.
 

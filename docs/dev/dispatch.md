@@ -148,6 +148,18 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   the checkpoint instead of handing off. This is
   the contract, not a gap.
 
+## Lifecycle writes
+
+Every lifecycle write that races polling is serialized with it.
+The board's `accept` and `resume` run `shuttle <verb> <fiber> --local` inside the owning daemon's Poller, so a poll read in flight sees either the old document or the new one, whose status and `handed_off_at` land in one atomic write.
+`Shuttle.LifecycleStore` owns the daemon's own writes — worker exit, force-dispatch and migration — through the CLI's locked document writer.
+`shuttle standing-transition` checks the current owner, UID, run id, dispatch timestamp and human lifecycle state under the lock and skips the write when any has moved.
+`shuttle patch-document` refuses a patch whose source digest is stale.
+Migration applies its two document patches through `shuttle migrate-documents` and journals resource ownership before it changes the backend; an unresolved migration recovery holds every launch, including force, cron and previously observed workers (see [Worker migration](../reference/api.md#worker-migration)).
+
+At boot the daemon runs `shuttle contract` and compares the CLI's level with `@expected_level` in `daemon/lib/shuttle/contract.ex`; on a skew it holds dispatch and names the missing surfaces.
+The boot quarantine's one automatic release, for an opted-in host's hard-killed and previously released daemon, is `Shuttle.DaemonHeartbeat`'s verdict; [Boot quarantine](../shuttle/lifecycle.md#boot-quarantine) gives its conditions.
+
 ## Uncertain launch reservations
 
 Before requesting a worker launch from a terminal backend, Shuttle writes a host-local reservation under `$SHUTTLE_DATA_DIR/terminals/launch-attempts/`.

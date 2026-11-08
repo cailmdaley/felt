@@ -57,19 +57,14 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
 
 ## Critical invariants
 
-- **A host's terminal backend launches its workers.** `host.json` selects `terminal` (`tmux` by default or `rex`); Shuttle's worker name is the identity each backend renders.
-  On Rex, the daemon-written binding to session, window and block IDs is authoritative.
-  Each constitution family has one session and each worker or viewer has one window; only block labels retain worker names for recovery.
-  Family placement is fixed at launch, and closing a worker removes its window, then its session only if empty and daemon-created.
-  Remote Control and Hark use the selected backend too. Rex auxiliary launches retain
-  ownership, exit receipts and output in Shuttle-owned files; a changed server instance
-  makes an old launch dead. Rex hosts need no tmux anchor.
-  A Rex host also observes and stops existing tmux workers when tmux is available.
-  On Linux, `bin/rex-install` installs the checksum-verified snapshot rootlessly; `"terminal": "rex"` selects it in `host.json`.
-  Shuttle starts a missing server on `unix://<data dir>/rex/server.sock` with state in `<data dir>/rex/state`, requesting the Tailscale-identified port 7297 listener and falling back to local-only when startup fails.
-  `SHUTTLE_REX_SERVER` wins over that endpoint or macOS discovery, and workers inherit it.
-  macOS app activation runs only on macOS.
-  Shuttle never stops the server: daemon restarts and CLI installation preserve sessions; `rex server stop` ends every session.
+- **A host's terminal backend launches its workers.** `host.json` selects
+  `terminal`: `tmux` (default) or `rex`. Shuttle's worker name is the identity
+  each backend renders; on Rex, the daemon-written session/window/block binding
+  is authoritative, with one session per constitution family and one window per
+  worker. Remote Control and Hark use the selected backend too. Shuttle starts a
+  missing Rex server but never stops one, so daemon restarts and CLI installs
+  preserve sessions. Details: [`docs/dev/architecture.md`](docs/dev/architecture.md#platform-story),
+  [Rex setup](docs/shuttle/installation.md#rex-terminal-backend).
 - **Execution backends own conversations; shuttle owns task assignment and observation.**
   Claude, Codex and Pi workers use the selected terminal backend. Existing
   conversations retain their native identity across daemon restarts; a closed
@@ -84,15 +79,10 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   daemon. A test enforces the one-way import rule: felt packages cannot depend
   on shuttle or messaging packages.
 - **Shuttle lifecycle writes are serialized with polling.** The board's
-  `accept` and `resume` run `shuttle <verb> <fiber> --local` inside the owning
-  daemon's Poller, serialized with its state changes. A poll read in flight sees
-  the old document or the new one, whose status and `handed_off_at` land in
-  one atomic write. `Shuttle.LifecycleStore` owns worker-exit, force-dispatch and migration writes.
-  Migration applies two locked document patches through `shuttle migrate-documents`
-  and journals resource ownership before changing the backend; unresolved recovery
-  holds every launch, including force, cron and previously observed workers.
-  The CLI's locked `standing-transition` checks the current run and human lifecycle state; `patch-document` refuses a stale source digest.
-  At boot, `shuttle contract` checks level 35 against `daemon/lib/shuttle/contract.ex`; the daemon holds on a skew.
+  `accept` and `resume` run inside the owning daemon's Poller, and the daemon's
+  own writes go through the CLI's locked document writer, which refuses stale
+  state. At boot, `shuttle contract` must match `daemon/lib/shuttle/contract.ex`;
+  the daemon holds on a skew. Details: [`docs/dev/dispatch.md`](docs/dev/dispatch.md#lifecycle-writes).
 - **Live host-addressed content and control use `Shuttle.OriginRouter`.**
   The composite board carries each row's `origin` back to the daemon for
   requests such as `/api/v1/fibers/:id?body=true` and `/file`, so it can display
@@ -113,30 +103,18 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   registry. Loom's `setup.sh` separately owns interactive Pi's global
   `~/.pi/agent/settings.json`; this registry does not configure that default.
 - **Remote daemons come from the tailnet, with `~/.config/shuttle/remotes.json`
-  for exceptions.** Each daemon's `Shuttle.TailnetPeers` reads the tailnet
-  status (the LocalAPI over `defaults.tailscale_socket`, else over
-  `bin/tailscaled-launch`'s `$HOME/.local/state/tailscale/tailscaled.sock` on
-  Linux when it is a socket owned by this uid reached through real, private
-  directories from `$HOME`, else the `tailscale` CLI; `"system"` forces the
-  CLI),
-  probes each same-user peer's `/api/v1/version`, and names every Shuttle daemon
-  by the `host` id it reports; it refreshes every minute.
-  When Tailscale is absent or failing, it retains recently verified peers for up to ten minutes after their last successful probe, then uses the file alone. The file adds hosts outside
-  the tailnet and overrides discovered ones: a configured entry wins over a
-  discovered peer of the same name or URL, `"enabled": false` suppresses one,
-  and `defaults.discover: false` turns discovery off. The daemon
-  (`daemon/lib/shuttle/remotes.ex`) and the Go CLI (`internal/shuttlecli`) read
-  the file at runtime and merge it with the same pure resolver; the CLI takes
-  discovered peers from the local daemon's `/api/v1/version` and never probes
-  the tailnet itself. Nothing about hosts is baked into a build.
-  `shuttle remotes list|add|rm|path` manages the file, and `list` (which shows
-  each peer's source) doubles as the validator used by the board's settings
-  sheet. Shared fixtures (`daemon/test/fixtures/remotes/`,
-  `daemon/test/fixtures/tailnet_peers/`) enforce Go/Elixir parity.
-  `internal/feltcli/hygiene_test.go` fails the build on a personal
-  hostname or path anywhere in the published surface: `daemon/config/`,
-  `daemon/lib/`, `cmd/`, `daemon/share/`, `ui/`, `bin/`, every `.md` file,
-  `Makefile`, and `scripts/bootstrap.sh`. Keep host-specific details in fibers.
+  for exceptions.** Each daemon discovers same-user tailnet peers that answer
+  `/api/v1/version` and names them by the `host` id they report; the file adds
+  hosts outside the tailnet and overrides or suppresses discovered ones. The
+  daemon and the Go CLI merge the two with the same pure resolver, kept in
+  parity by shared fixtures; the CLI takes discovered peers from the local
+  daemon and never probes the tailnet. Nothing about hosts is baked into a
+  build. Details: [`docs/dev/architecture.md`](docs/dev/architecture.md#the-fleet),
+  [Connect your machines](docs/shuttle/remotes.md).
+- **No personal hostname or path in the published surface.**
+  `internal/feltcli/hygiene_test.go` scans `daemon/config/`, `daemon/lib/`,
+  `cmd/`, `daemon/share/`, `ui/`, `bin/`, every `.md` file, `Makefile`, and
+  `scripts/bootstrap.sh`. Keep host-specific details in fibers.
 - **`shuttle.agent` drives agent selection.** The `shuttle:` block's `agent:`
   field resolves against the registry. The default agent is `claude-opus`.
 - **`shuttle.host` drives daemon affinity — strictly.** A daemon dispatches a
@@ -150,9 +128,9 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   same predicate gates orphan resurrection, so a remote restart can't
   re-grab another host's fiber.
 - **Two kinds; one resting place.** `shuttle.kind` is `oneshot` or
-  `standing` (which carries a cron `schedule:`). A retired `pinned` still
-  reads as `oneshot` in the CLI (`shuttle.NormalizeKind`), the daemon
-  (`Poller.block_kind`) and the board, and `shuttle check` warns about it. A
+  `standing` (which carries a cron `schedule:`). The CLI
+  (`shuttle.NormalizeKind`), the daemon (`Poller.block_kind`) and the board
+  read a `pinned` kind as `oneshot`, and `shuttle check` warns about it. A
   constitution at rest is `status: open` + `horizon: stashed`, drawn in
   Resting; `shuttle rest` puts it there without review. "Role" names only an
   identity under `roles/`, never a kind of constitution. A constitution with
@@ -169,21 +147,15 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   and daemon state.
 - **No tag predicate for dispatch — two gates, both explicit.** A fiber is
   Shuttle-managed iff it carries a `shuttle:` block. It dispatches iff (1) its
-  felt `status` is `active` and (2) fresh autonomous work is not held by boot
-  quarantine. A restart parks fresh launches in `pending_launch` until
-  `shuttle daemon release`. A worker that was already running is restored
-  automatically: a finished turn reopens quietly, while durable hook evidence
-  of an interrupted turn supplies the resume prompt; ambiguous turn evidence
-  reopens quietly. Restorations do not release the quarantine. Due standing
-  occurrences retain their scheduled authorization. On a host opting into
-  `quarantine_auto_release`, a hard crash boot can release fresh dispatch if
-  the previous daemon had been released,
-  returned within the heartbeat window on the same machine, and did not
-  crash-loop (`Shuttle.DaemonHeartbeat`). An asked-for restart — every deploy
-  and operator restart, `make stop`, or re-running `bin/shuttle-launch` — leaves
-  a stop marker and holds fresh dispatch. An unreleased hold survives hard
-  kills. There is no `enabled` flag; force-dispatch bypasses the quarantine.
-  Tags are free-form qualitative noticings.
+  felt `status` is `active` and (2) fresh autonomous work is not held by the
+  boot quarantine. Every boot holds fresh launches in `pending_launch` until
+  `shuttle daemon release` (an opted-in host may release itself after a proven
+  hard-kill bounce, never after an asked-for restart); workers that were running
+  restore without it, due standing occurrences keep their scheduled
+  authorization, and force-dispatch bypasses it. There is no `enabled` flag.
+  Tags are free-form qualitative noticings. Details:
+  [Boot quarantine](docs/shuttle/lifecycle.md#boot-quarantine),
+  [`docs/dev/dispatch.md`](docs/dev/dispatch.md).
 
 ## The daily loop
 
@@ -250,54 +222,24 @@ CI runs `npm test`, then type-checks and builds the bundle with
 
 ### Deploying
 
-Restarting the daemon preserves terminal workers: the terminal backend owns their processes, while Shuttle owns their watchers.
-Workers do not deploy for themselves: a verified change goes to the lander seat (see [Landing changes](#landing-changes)), the one driver of `bin/shuttle-deploy`.
+Restarting the daemon preserves terminal workers: the terminal backend owns
+their processes, while Shuttle owns their watchers. Every daemon cycle arms the
+boot quarantine, and a daemon route change ships with its matching UI
+(`make build` builds both).
+
+Workers do not deploy for themselves: a verified change goes to the
+lander seat (see [Landing changes](#landing-changes)), the one driver of
+`bin/shuttle-deploy`:
 
 ```
-resolve one commit → push → preflight origin availability and default-branch freshness
-→ on each host, under its deploy lock and tree lease: prepare the detached SHA root
-→ make build + make cli-install → activate through the selected supervisor
-→ verify SHA, fresh boot, canonical release_path, ready, contract.ok=true,
-  reconciliation_hold=null and incarnation → release quarantine for that incarnation
-→ fast-forward the clean regular checkout → refresh harnesses → prune
+resolve one commit → push → on each host, under its deploy lock: build the SHA
+→ install the CLIs → activate → verify the fresh daemon → release its quarantine
+→ fast-forward the clean checkout → refresh harnesses
 ```
 
-Automated quarantine release posts the verified `{incarnation, release_path}` as `expected` to `/api/v1/quarantine/release`; a replacement incarnation returns HTTP 409 and needs verification.
-
-`bin/shuttle-deploy` uses the fleet in `~/.config/shuttle/remotes.json` and each host's login environment.
-Every run builds the resolved commit in `<main-worktree>.deploy/<sha>`, including default and linked-worktree invocations.
-Remote targets require that origin advertises history containing the commit; an implicit target must descend from the checkout's fetched upstream.
-Use `--ref` for an intentional rollback; an explicit commit object has no ref to push.
-The caller snapshots its entrypoint in memory, and serialized remote scripts travel on stdin rather than in SSH command arguments.
-A ready target coalesces without another build or daemon cycle.
-Host lock waits are bounded by `SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS` (3600 seconds), and name the holder.
-The helper, transaction and local builds hold the locks until their last descriptor closes; preparation, harness and activation command shells drop the lock descriptors before launching children.
-SSH stays attached. Observer EOF, a missed 60-second heartbeat lease or TERM/INT/HUP cancels waits and the owned transaction group, with TERM then KILL after three seconds. The observer sends heartbeats every 15 seconds. A killed deployer cannot leave a waiter that deploys later.
-One absolute `SHUTTLE_DEPLOY_DEADLINE` bounds each attached transaction, including bootstrap, at two hours by default. Pointer selection through verified readiness, quarantine release and rollback receipt defers observer/signal cancellation; activation requires the readiness timeout plus one minute remaining on the deadline; finishing work does not. The hard deadline still terminates a stalled activation.
-One private `~/.shuttle/deploy/last-run.log` is atomically published after lock acquisition, preserving a held transaction's diagnostics from waiters; there are no detached run records or result polling. Lock metadata names the executing node as well as PID/group. File creation does not change the login umask.
-Logging ends at the completion token, independent of background FIFO writers. The bootstrap is fully framed before a login shell can read stdin; query captures and final completion have explicit frames. SSH uses bounded connection and keepalive waits, and scheduler builds get a bounded `srun --immediate=900` queue wait.
-The bootstrap helper is built with capped Go parallelism under `~/.shuttle/deploy/tools`, and its shell waits for the binary to exit before removing the workspace, including on failures.
-This ordering permits cleanup on NFS without an executing binary's `.nfs` file retaining the directory.
-Tree leases live under `~/.shuttle/deploy/leases`.
-Checkout refresh after release is a clean branch fast-forward only; a skipped refresh is advisory, never itself a host failure.
-Pi is inspected after refresh, and a genuinely mismatched package still fails its harness check.
-The previous release is recorded outside the deploy tree so coalescing retains the rollback root.
- A host marked `"build_ui": false` there is built
-with `SKIP_UI=1` and has the deploy host's `ui/dist` rsynced in before the build
-instead — for a cluster login node on a network filesystem, where `npm ci` alone
-costs minutes. It brings each harness's felt plugin up to the new build
-(Claude Code and Codex from the checkout itself, skipped when the receipt
-already passes at `HEAD` from a clean build), and a host whose `felt setup
-receipt` still fails afterwards fails, naming each unhealthy component and
-its repair.
-**Every daemon cycle and operator restart arms the boot quarantine**
-— the cycle touches the daemon's stop marker and sends SIGTERM — so no fresh
-oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing constitutions
-still fire). Only on a host that opted in does a hard-killed, previously
-released daemon back within seconds and without churn releases fresh dispatch. A daemon
-route change must ship with the matching UI; `make build` builds both.
-Fetched-release users do not need this checkout deployment helper. Details:
-[`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).
+Locks, leases, deadlines, cancellation, logs, rollback, cluster builds and
+harness refresh: [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).
+Fetched-release users do not need this helper.
 
 ## License
 
