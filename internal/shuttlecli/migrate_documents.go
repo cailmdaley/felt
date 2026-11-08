@@ -193,16 +193,12 @@ func applyMigrateDocuments(req migrateDocumentsRequest, writeFile func(string, [
 
 func prepareMigrateDocument(doc migrateDocument, raw []byte, mode string) ([]byte, error) {
 	// Keep the body byte-for-byte, including whitespace around its Status block.
-	if !bytes.HasPrefix(raw, []byte("---\n")) {
-		return nil, fmt.Errorf("missing frontmatter delimiter")
+	frontmatter, body, err := felt.SplitFrontmatter(raw, true)
+	if err != nil {
+		return nil, err
 	}
-	end := bytes.Index(raw[4:], []byte("\n---\n"))
-	if end < 0 {
-		return nil, fmt.Errorf("missing closing frontmatter delimiter")
-	}
-	end += 4
 	var document yaml.Node
-	if err := yaml.Unmarshal(raw[4:end], &document); err != nil {
+	if err := yaml.Unmarshal(frontmatter, &document); err != nil {
 		return nil, err
 	}
 	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
@@ -272,8 +268,8 @@ func prepareMigrateDocument(doc migrateDocument, raw []byte, mode string) ([]byt
 		return nil, err
 	}
 	result := append([]byte("---\n"), header...)
-	result = append(result, raw[end+1:]...)
-	return result, nil
+	result = append(result, "---\n"...)
+	return append(result, body...), nil
 }
 
 // migrationLexicalNode copies only the comparison tree. The original nodes
