@@ -224,9 +224,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   end
 
   defp get_local(id, with_body?) do
-    opts = [with_body: with_body?, address: Shuttle.FiberAddresses.lookup(id)]
-
-    case Shuttle.FiberDocuments.get(id, opts) do
+    case Shuttle.FiberDocuments.get(id, with_body: with_body?) do
       {:ok, %{fibers: []}} ->
         {:error, :not_found}
 

@@ -864,10 +864,7 @@ defmodule Shuttle.Threads do
         fiber
 
       true ->
-        case FiberDocuments.get(value,
-               felt_stores: [felt_store],
-               address: Shuttle.FiberAddresses.lookup(value)
-             ) do
+        case FiberDocuments.get(value, felt_stores: [felt_store]) do
           {:ok, %{fibers: [%{fiber: fiber} | _]}} -> fiber
           _ -> nil
         end

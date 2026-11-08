@@ -214,7 +214,9 @@ defmodule Shuttle.FiberDocuments do
     if Keyword.get(opts, :all_matches, false) do
       scan_lookup_all(stores, id, with_body?, cli)
     else
-      with :miss <- address_lookup(stores, id, Keyword.get(opts, :address), with_body?, cli),
+      address = Keyword.get_lazy(opts, :address, fn -> Shuttle.FiberAddresses.lookup(id) end)
+
+      with :miss <- address_lookup(stores, id, address, with_body?, cli),
            :miss <- fast_lookup(stores, id, with_body?, cli) do
         scan_lookup(stores, id, with_body?, cli)
       else
@@ -263,8 +265,8 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  # A caller that knows where felt can read a UID names that `{store, id}`
-  # as `:address` (`Shuttle.FiberAddresses`): felt shows an id directly, where
+  # A UID is read through the `{store, id}` address `Shuttle.FiberAddresses`
+  # knows for it, or the caller's `:address`: felt shows an id directly, where
   # a UID costs a walk of the whole store. The answer counts only when it
   # carries the requested UID, so a stale address falls through to the lookup
   # by UID.

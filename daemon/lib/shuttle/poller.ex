@@ -3945,7 +3945,7 @@ defmodule Shuttle.Poller do
   # The poll cycle fills the cache from `Discovery.discover/2`'s store map; a
   # resolution here is not cached.
   defp store_for_fiber(fiber_id, state) do
-    case Map.get(state.fiber_store_cache, fiber_id) do
+    case Map.get(state.fiber_store_cache, Map.get(state.uid_slug_index, fiber_id, fiber_id)) do
       store when is_binary(store) -> {:ok, store}
       nil -> Shuttle.FeltStores.store_for_fiber(fiber_id, state.felt_stores)
     end
@@ -6028,12 +6028,24 @@ defmodule Shuttle.Poller do
   @doc false
   def fetch_fiber_full(fiber_id, state) do
     host = owning_store(fiber_id, state)
+    args = ["show", fiber_id, "--json" | slug_hint(fiber_id, host, state)]
 
-    with {:ok, output} <- Discovery.run_shuttle(host, state.runner, ["show", fiber_id, "--json"]) do
+    with {:ok, output} <- Discovery.run_shuttle(host, state.runner, args) do
       case Shuttle.FiberDocuments.decode(output) do
         {:ok, fiber} -> {:ok, fiber}
         {:error, _} -> {:error, :invalid_json}
       end
+    end
+  end
+
+  # A polled UID is read at its slug, which Shuttle verifies against the UID
+  # before it would walk the whole store for it.
+  defp slug_hint(fiber_id, host, state) do
+    with slug when is_binary(slug) <- Map.get(state.uid_slug_index, fiber_id),
+         ^host <- Map.get(state.fiber_store_cache, slug) do
+      ["--exact", "--path-hint", slug]
+    else
+      _ -> []
     end
   end
 

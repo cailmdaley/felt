@@ -540,7 +540,7 @@ defmodule Shuttle.FeltStores do
     # JSON error codes distinguish authoritative absence from ambiguity,
     # unreadable stores and a CLI that does not implement this protocol.
     args = ["-C", store, "show", identifier, "-j"]
-    args = if exact, do: args ++ ["--exact"], else: args
+    args = if exact, do: args ++ ["--exact" | path_hint(store, identifier)], else: args
 
     case runner().cmd("felt", args, stderr_to_stdout: false) do
       {output, 0} ->
@@ -564,6 +564,15 @@ defmodule Shuttle.FeltStores do
     end
   rescue
     error -> {:error, {:resolution_failed, Exception.message(error)}}
+  end
+
+  # felt walks the whole store for a UID unless it can verify a path first: the
+  # address this store last answered the UID at. A stale hint costs the walk.
+  defp path_hint(store, identifier) do
+    case Shuttle.FiberAddresses.lookup(identifier) do
+      {^store, id} -> ["--path-hint", id]
+      _ -> []
+    end
   end
 
   # The command runner, behind the same config seam as `Shuttle.Felt` — these
