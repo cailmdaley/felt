@@ -276,7 +276,7 @@ There is no separate recording lifecycle attached to Capture or a scribe claim.
 
 `Shuttle.Voice.TranscriptRelay` ingests Hark JSONL, assigns routes by spoken start, and appends every utterance to recorder-local day files under `<Shuttle.data_dir()>/transcripts/`.
 Cold-dropped, unrouted and discarded words remain readable through `/api/v1/voice/transcript?date&fiber&since`.
-Every delivered batch points at its first spoken time with `shuttle transcript --since HH:MM:SS`, adding `--recorder HOST` when the worker lives on another host.
+A delivered batch is the speaker-labelled text alone; `shuttle transcript --since HH:MM:SS` reads around it.
 Following drops cold batches unless they close with `send`; pinned batches start cold workers without a trigger.
 Both use at-most-once automatic delivery attempts, with durable offsets, buffers, outboxes and per-destination FIFO ordering under `voice-transcript-relays/`.
 No transcript mirror or worker claim is needed to route speech.

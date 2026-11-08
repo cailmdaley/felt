@@ -12,7 +12,7 @@ A following batch for a card without a live worker is dropped unless it ends wit
 Pinned listening sends every batch to its card, starting a cold worker if needed.
 Ending a batch with `send` delivers it promptly; names do not trigger delivery.
 
-Each batch arrives as ordinary input: speaker-labelled paragraphs followed by `— shuttle transcript --since HH:MM:SS` (with `--recorder HOST` when the recording is on another host).
+Each batch arrives as ordinary input: speaker-labelled paragraphs, nothing more. To read around a batch, `shuttle transcript --since HH:MM:SS` (add `--recorder HOST` when the recording is on another host).
 The recognizer can mangle names and jargon; `me` is a voiceprint match, and other labels can include the user or people in the room.
 Use the conversation to judge who is addressing whom, including colleagues; don't filter requests by speaker label.
 
