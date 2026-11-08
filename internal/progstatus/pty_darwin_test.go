@@ -24,3 +24,10 @@ func unlockPTY(t *testing.T, master int) string {
 	}
 	return unix.ByteSliceToString(name[:])
 }
+
+func stopPTYOutput(t *testing.T, slave int) {
+	t.Helper()
+	if err := unix.IoctlSetInt(slave, unix.TIOCSTOP, 0); err != nil {
+		t.Fatalf("stopping PTY output: %v", err)
+	}
+}

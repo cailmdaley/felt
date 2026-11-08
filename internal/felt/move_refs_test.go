@@ -60,7 +60,7 @@ func TestMoveRewritePreservesEditAfterPlanning(t *testing.T) {
 	}
 	writeFiberFile(t, s, "c", "---\nid: fixture-C\nname: C\nstatus: closed\ncustom: keep\n---\n\nSee [[a/x]].\nConcurrent result and [[a/x/y]].\n")
 	for _, w := range writes {
-		if err := w.write(s); err != nil {
+		if err := w.writeJournaled(s, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

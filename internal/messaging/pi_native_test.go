@@ -458,7 +458,7 @@ func TestPiReceiptSkipsOversizedTranscriptRow(t *testing.T) {
 	defer f.Close()
 	appendPiUserRow(t, path, strings.Repeat("x", 4<<20))
 	appendPiUserRow(t, path, "expected message")
-	if !observePiReceipt(context.Background(), f, path, "session", "expected message", time.Now().Add(100*time.Millisecond)) {
+	if !observePiReceipt(context.Background(), f, path, "session", nativeContentHash("expected message"), time.Now().Add(100*time.Millisecond)) {
 		t.Fatal("oversized unrelated row hid the admitted message")
 	}
 }
@@ -479,7 +479,7 @@ func TestPiReceiptWaitsForSessionHeader(t *testing.T) {
 		}
 		appendPiUserRow(t, path, "expected message")
 	}()
-	observed := observePiReceipt(context.Background(), nil, path, "session", "expected message", time.Now().Add(200*time.Millisecond))
+	observed := observePiReceipt(context.Background(), nil, path, "session", nativeContentHash("expected message"), time.Now().Add(200*time.Millisecond))
 	<-done
 	if !observed {
 		t.Fatal("empty session file was mistaken for a missing header")

@@ -215,7 +215,7 @@ func sendPiNativeWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Addre
 	}
 	line, err := bufio.NewReaderSize(io.LimitReader(conn, (512<<10)+1), 4096).ReadBytes('\n')
 	if err != nil {
-		if observePiReceiptHash(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), observationDeadline) {
+		if observePiReceipt(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), observationDeadline) {
 			return piTranscriptReceipt(req), nil, metadata
 		}
 		return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusUnknown, Transport: piNativeTransport, Detail: "Pi native acknowledgement was not received"}, errCode("ambiguous_delivery", "Pi native acknowledgement was not received: %v", err), metadata
@@ -226,7 +226,7 @@ func sendPiNativeWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Addre
 		receipt.Detail = "Pi has no session transcript; delivery is unconfirmed"
 		replyErr = errCode("ambiguous_delivery", "%s", receipt.Detail)
 	}
-	if receipt.Status == StatusUnknown && observePiReceiptHash(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), observationDeadline) {
+	if receipt.Status == StatusUnknown && observePiReceipt(ctx, transcript, r.Transcript, a.ID, nativeContentHash(labeled(req)), observationDeadline) {
 		return piTranscriptReceipt(req), nil, metadata
 	}
 	return receipt, replyErr, metadata
@@ -290,11 +290,7 @@ func openPiReceiptTranscript(path, sessionID string) *os.File {
 	return f
 }
 
-func observePiReceipt(ctx context.Context, f *os.File, path, sessionID, text string, deadline time.Time) bool {
-	return observePiReceiptHash(ctx, f, path, sessionID, nativeContentHash(text), deadline)
-}
-
-func observePiReceiptHash(ctx context.Context, f *os.File, path, sessionID, contentHash string, deadline time.Time) bool {
+func observePiReceipt(ctx context.Context, f *os.File, path, sessionID, contentHash string, deadline time.Time) bool {
 	if path == "" {
 		return false
 	}
@@ -403,7 +399,7 @@ func refreshPiNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, s
 	refreshCtx, cancel := context.WithTimeout(ctx, claudeRetryObservationTimeout)
 	defer cancel()
 	deadline, _ := refreshCtx.Deadline()
-	if !observePiReceiptHash(refreshCtx, f, registration.Transcript, address.ID, stored.PiContentHash, deadline) {
+	if !observePiReceipt(refreshCtx, f, registration.Transcript, address.ID, stored.PiContentHash, deadline) {
 		return nativeReceiptRefresh{}, false
 	}
 	upgraded := stored.Receipt

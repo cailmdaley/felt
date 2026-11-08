@@ -220,21 +220,13 @@ func TestWorktreeScopedStopRefusesForeignOrUnreportedRelease(t *testing.T) {
 			if err := os.WriteFile(ownerPath, []byte(fmt.Sprintf(`{"pid":%d,"birth":%q}`, os.Getpid(), birth)), 0600); err != nil {
 				t.Fatal(err)
 			}
-			calls := 0
-			a.daemonFindPIDs = func(pattern string) ([]int, error) {
-				calls++
-				if calls == 1 {
-					return []int{12345}, nil
-				}
-				return nil, nil
-			}
 			signals := 0
 			a.daemonSignalPID = func(int, syscall.Signal) error { signals++; return nil }
 			a.daemonPause = func(time.Duration) {}
 			_, _, err = executeApp(t, a, t.TempDir(), "daemon", "stop", "--within", root)
 			inside := path != "" && releasePathWithin(root, path)
-			if (err == nil) != inside || (!inside && (calls != 0 || signals != 0)) || (inside && signals != 2) {
-				t.Fatalf("stop release %q: err=%v scans=%d signals=%d", path, err, calls, signals)
+			if (err == nil) != inside || (!inside && signals != 0) || (inside && signals != 2) {
+				t.Fatalf("stop release %q: err=%v signals=%d", path, err, signals)
 			}
 		})
 	}

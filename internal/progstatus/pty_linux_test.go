@@ -21,3 +21,10 @@ func unlockPTY(t *testing.T, master int) string {
 	}
 	return fmt.Sprintf("/dev/pts/%d", n)
 }
+
+func stopPTYOutput(t *testing.T, slave int) {
+	t.Helper()
+	if err := unix.IoctlSetInt(slave, unix.TCXONC, unix.TCOOFF); err != nil {
+		t.Fatalf("stopping PTY output: %v", err)
+	}
+}

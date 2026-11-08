@@ -7,10 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -410,30 +407,6 @@ func (a *app) stopDaemonEndpoint(settings hostSettings, within string) error {
 		}
 	}
 	return a.signalDaemonOwner(owner, syscall.SIGKILL)
-}
-
-func daemonProcessPattern(releaseDir string) string {
-	return regexp.QuoteMeta(filepath.Join(releaseDir, "releases")) + `/[^[:space:]]+/start([[:space:]]|$)`
-}
-
-func (a *app) findDaemonPIDs(pattern string) ([]int, error) {
-	output, err := a.env.Command("pgrep", "-f", pattern).Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("finding daemon process: %w", err)
-	}
-	var pids []int
-	for _, line := range strings.Fields(string(output)) {
-		pid, err := strconv.Atoi(line)
-		if err != nil {
-			return nil, fmt.Errorf("parsing daemon pid %q: %w", line, err)
-		}
-		pids = append(pids, pid)
-	}
-	return pids, nil
 }
 
 func signalDaemonPID(pid int, signal syscall.Signal) error {

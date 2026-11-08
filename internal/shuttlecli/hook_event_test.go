@@ -66,9 +66,11 @@ func writeEvent(t *testing.T, env *sysenv.Env, payload map[string]any) {
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	if err := newApp(env).runEventHook(bytes.NewReader(raw)); err != nil {
-		t.Fatalf("runEventHook: %v", err)
+	var input eventHookInput
+	if err := json.Unmarshal(raw, &input); err != nil {
+		t.Fatalf("decode payload: %v", err)
 	}
+	newApp(env).recordEvent(input)
 }
 
 func readEventLines(t *testing.T, path string) []map[string]any {
@@ -253,7 +255,7 @@ func TestEventWriteGate(t *testing.T) {
 }
 
 // TestEventHookSeedsNothingWithoutStateDir pins the gate against the one path
-// that can reach around it: renderEventLine resolves this machine's identity
+// that can reach around it: renderEvent resolves this machine's identity
 // (for origin_name) BEFORE eventsSink consults the gate, and that resolution's
 // last tier seeds ~/.shuttle/host. If the seed created its parent, one hook
 // event on a machine without Shuttle state would create ~/.shuttle — and with it, from the
@@ -534,8 +536,8 @@ func TestEventDegenerateInput(t *testing.T) {
 	env, path := eventStream(t)
 
 	for _, in := range []string{"", "   ", "not json", "{", `{"hook_event_name":`, `[]`, `"a string"`, `{"hook_event_name":123}`} {
-		if err := newApp(env).runEventHook(strings.NewReader(in)); err != nil {
-			t.Fatalf("runEventHook(%q) = %v, want nil", in, err)
+		if err := newApp(env).runEventAndMessageHook(strings.NewReader(in), io.Discard); err != nil {
+			t.Fatalf("runEventAndMessageHook(%q) = %v, want nil", in, err)
 		}
 	}
 	if lines := readEventLines(t, path); len(lines) != 0 {
@@ -677,10 +679,12 @@ func TestEventHookHelperProcess(t *testing.T) {
 	})
 	a := newApp(env)
 	for _, payload := range payloads {
-		if err := a.runEventHook(strings.NewReader(payload)); err != nil {
-			fmt.Fprintf(os.Stderr, "runEventHook: %v\n", err)
+		var input eventHookInput
+		if err := json.Unmarshal([]byte(payload), &input); err != nil {
+			fmt.Fprintf(os.Stderr, "decode payload: %v\n", err)
 			os.Exit(2)
 		}
+		a.recordEvent(input)
 	}
 	os.Exit(0)
 }
@@ -890,7 +894,11 @@ func TestEventGoldenParity(t *testing.T) {
 		a.eventNow, a.eventRand = now, rand
 		a.eventReceiverPID = func() int { return receivers[ev.payload["session_id"].(string)] }
 		a.eventProcessBirth = func(int) string { return "fixture-birth" }
-		line, ok := a.renderEventLine(bytes.NewReader(raw))
+		var input eventHookInput
+		if err := json.Unmarshal(raw, &input); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		line, ok := a.renderEvent(input)
 		if !ok {
 			t.Fatalf("payload recorded nothing: %v", ev.payload)
 		}

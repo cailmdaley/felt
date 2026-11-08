@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -485,7 +484,6 @@ func TestStopDaemonWithoutListenerDoesNotSignalReleaseSibling(t *testing.T) {
 	env := testEnv(t)
 	sysenvtest.FakeCommand(t, env, "lsof", "#!/bin/sh\nexit 1\n")
 	a := newApp(env)
-	a.daemonFindPIDs = func(string) ([]int, error) { t.Fatal("release-wide process search"); return nil, nil }
 	a.daemonSignalPID = func(int, syscall.Signal) error { t.Fatal("signal without listener owner"); return nil }
 	settings, err := a.resolveHostSettings()
 	if err != nil {
@@ -493,24 +491,6 @@ func TestStopDaemonWithoutListenerDoesNotSignalReleaseSibling(t *testing.T) {
 	}
 	if err := a.stopDaemonEndpoint(settings, ""); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestDaemonProcessPatternMatchesOnlyReleasePath(t *testing.T) {
-	t.Parallel()
-	release := filepath.Join(t.TempDir(), "release.v1")
-	pattern := daemonProcessPattern(release)
-	for _, tc := range []struct {
-		command string
-		want    bool
-	}{
-		{filepath.Join(release, "releases", "1.2.3", "start") + " --", true},
-		{filepath.Join(filepath.Dir(release), "releaseXv1", "releases", "1.2.3", "start") + " --", false},
-	} {
-		matched, err := regexp.MatchString(pattern, tc.command)
-		if err != nil || matched != tc.want {
-			t.Errorf("pattern match %q = %t, %v, want %t", tc.command, matched, err, tc.want)
-		}
 	}
 }
 

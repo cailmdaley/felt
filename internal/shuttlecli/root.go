@@ -125,9 +125,8 @@ type app struct {
 	// runDaemonReleaseVersion runs its version command.
 	execDaemonRelease       func(path string, args ...string) error
 	runDaemonReleaseVersion func(path string) error
-	// daemonFindPIDs, daemonSignalPID and daemonPause find, signal and wait
-	// on daemon processes for daemon stop.
-	daemonFindPIDs  func(pattern string) ([]int, error)
+	// daemonSignalPID signals the daemon owner daemon stop targets;
+	// daemonPause is the wait between its checks and message resolution's.
 	daemonSignalPID func(pid int, signal syscall.Signal) error
 	daemonPause     func(time.Duration)
 	// daemonLifecycleTimeout bounds the local lifecycle POST (resume, accept,
@@ -182,7 +181,6 @@ func newApp(env *sysenv.Env) *app {
 	a.loginEnvCapture = a.captureLoginEnv
 	a.execDaemonRelease = a.execRelease
 	a.runDaemonReleaseVersion = a.runReleaseVersion
-	a.daemonFindPIDs = a.findDaemonPIDs
 	return a
 }
 

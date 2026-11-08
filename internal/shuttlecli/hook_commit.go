@@ -28,7 +28,7 @@ import (
 // (subject, repo, --shortstat counts, session/tmux/cwd provenance) without
 // going back to the repo, which may live on another host.
 //
-// The contract with the harness is runEventHook's: print nothing, exit 0,
+// The contract with the harness is the activity hook's: print nothing, exit 0,
 // always. A tracking hook that can fail a tool call is worse than no tracking
 // hook, so every step below is guarded and any surprise records nothing.
 

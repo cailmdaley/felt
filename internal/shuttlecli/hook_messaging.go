@@ -28,12 +28,12 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if harness == "claude" && input.AgentID != "" {
 		if input.ToolName == "SendUserFile" && input.HookEventName == "PreToolUse" {
 			input.Harness = harness
-			_ = a.recordEvent(input)
+			a.recordEvent(input)
 		}
 		return nil
 	}
 	a.reportProgramStatus(input)
-	_ = a.recordEvent(input)
+	a.recordEvent(input)
 	if input.SessionID == "" {
 		return nil
 	}

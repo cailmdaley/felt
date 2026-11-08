@@ -3,7 +3,6 @@ package shuttlecli
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"strconv"
 	"strings"
 
@@ -226,41 +225,22 @@ func countBackgroundTasks(raw json.RawMessage) int {
 	return len(entries)
 }
 
-// runEventHook decodes the payload, renders the line, and appends it. Every
-// failure — unparseable stdin, unknown event name, disabled stream, unwritable
-// file — returns nil without output.
-func (a *app) runEventHook(stdin io.Reader) error {
-	var input eventHookInput
-	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
-		return nil
-	}
-	return a.recordEvent(input)
-}
-
-// recordEvent appends an already decoded event to the activity stream.
-func (a *app) recordEvent(input eventHookInput) error {
+// recordEvent appends a decoded event to the activity stream. An unknown event
+// name, a disabled stream or an unwritable file records nothing, silently.
+func (a *app) recordEvent(input eventHookInput) {
 	line, ok := a.renderEvent(input)
 	if !ok {
-		return nil
+		return
 	}
 	path, enabled := a.eventsSink()
 	if !enabled {
-		return nil
+		return
 	}
 	_ = a.appendEventLine(path, line)
-	return nil
 }
 
-// renderEventLine builds the newline-terminated JSONL line for a payload, or
-// ok=false when the payload records nothing.
-func (a *app) renderEventLine(stdin io.Reader) (string, bool) {
-	var input eventHookInput
-	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
-		return "", false
-	}
-	return a.renderEvent(input)
-}
-
+// renderEvent builds the newline-terminated JSONL line for an event, or
+// ok=false when the event records nothing.
 func (a *app) renderEvent(input eventHookInput) (string, bool) {
 	eventType, known := eventTypes[input.HookEventName]
 	if input.AgentID != "" && input.ToolName == "SendUserFile" && a.messageHookHarness(input) == "claude" {

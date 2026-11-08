@@ -245,11 +245,6 @@ func (e *strayError) where() string {
 	return ".felt/" + e.rel
 }
 
-func isStrayError(err error) bool {
-	var stray *strayError
-	return errors.As(err, &stray)
-}
-
 // strayReason is the suffix a broken-reference issue carries when the
 // reference names a stray fiber file, or "" when it does not.
 func strayReason(err error) string {
