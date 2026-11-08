@@ -34,7 +34,7 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 - **Resting** — `status: open` with `horizon: stashed`: put down, with no verdict owed. Hubs and seats a human starts by hand rest here between sessions; `shuttle rest` and a drag into Resting put a card here.
 - **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch.
 - **Pulsed** — a oneshot constitution can wake its own conversation on an interval, without a review run per tick.
-- **In flight** — a live worker or owned app conversation, or an armed oneshot.
+- **In flight** — a live worker, or an armed oneshot.
 - **Awaiting review** — `status: closed` with no `tempered`, parked for review.
 - **Tempered** — `closed`, `tempered: true`: accepted by the human or a thread's orchestrator.
 - **Discarded** — `closed`, `tempered: false`: set aside by the human or a thread's orchestrator. The block stays as the record.

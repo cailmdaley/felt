@@ -54,8 +54,8 @@ use `make restart`, then verify both `booted_at` and `git_short_sha` on
 release` warns about a stale build shadowing a fresh one, run `make clean`
 first — stray `.beam` files at the project root shadow the real ones.
 
-Terminal workers live in tmux and app conversations live in the managed Codex
-terminal worker sessions. They survive Shuttle restarts; the daemon re-adopts their ownership.
+Workers live in the host's terminal backend, tmux or Rex, and survive Shuttle
+restarts; the daemon re-adopts their ownership.
 
 **A supervisor owns the daemon's restart policy.**
 Launchd (`io.shuttle.daemon`), the systemd user unit, and the tmux loop read one launch pointer, `~/.shuttle/repo`.
