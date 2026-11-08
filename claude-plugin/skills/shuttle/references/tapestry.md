@@ -6,6 +6,8 @@ The tapestry is the constitution's one page: what this work is, whole, as it sta
 
 **Every tapestry opens on a map, and the map is the very first thing on the page.** No title, stamp or status above it: it largely fills the screen, and everything else comes below. Design it before writing any prose: one visual that carries the whole mental model, meaning the parts, how they connect, how someone uses them and what state each is in. Draw it in code: inline SVG, canvas, or the watercolor-and-ink kit in [tapestry_map.py](../assets/tapestry_map.py). If you can't draw it, you don't yet understand the shape.
 
+**When the work has a primary artifact, the map can be a board.** A paper or a deck shows only what has already landed in it, so a reader back after a day can't see what moved. Make the map a small board with the artifact as one block, beside blocks for what it can't show yet: a new figure, the latest numbers, a lost run, a pending decision. Each block carries the thing itself and its state; a script that re-inlines the artifact keeps the board current with each build.
+
 **Everything hangs from the map.** Each region of the map is a section of the page, and a reader sees the whole, then chooses where to dig. Disclose in layers: map, a short paragraph per region, then `<details>`, nested pages and sub-fibers. Keep the page short: two or three screens below the map.
 
 A PR description is this page at the scale of one change.
