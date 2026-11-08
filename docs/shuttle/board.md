@@ -273,6 +273,7 @@ Following sends after a short quiet, but words for a card without a live worker 
 The recorder's day transcript retains all speech, including unrouted or undelivered words, and every delivered batch points to its time in `shuttle transcript`.
 
 The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
+The board reads its last thirty days at most once a minute, into one store the Desk's report marks, the Board and the family pages share; an unchanged feed answers 304.
 A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).
 
 ## Globe — everything on one sphere
