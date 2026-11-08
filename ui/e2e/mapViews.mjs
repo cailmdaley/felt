@@ -72,14 +72,19 @@ export function registerMapViewJourneys(test) {
     await head.locator('.fp-lead').click()
     const link = head.frameLocator('.fp-doc iframe').getByRole('link', { name: 'Read the independent validation →' })
     await link.waitFor()
-    const scroll = await page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => el.scrollTop)
+    // Back keeps the open document where it stood in the page's view. The page
+    // may grow above it meanwhile (the visited file joins the row's sent files),
+    // which the browser's scroll anchoring absorbs, so scrollTop alone can move.
+    const standing = () => page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => Math.round(el.querySelector('.fp-head > .fp-doc').getBoundingClientRect().top - el.getBoundingClientRect().top))
+    const stood = await standing()
     await link.click()
     await page.locator('.ws-page.ws-selected iframe').waitFor()
     await page.locator('.ws-page.ws-selected .ws-document-back').click()
     await head.frameLocator('.fp-doc iframe').getByRole('link', { name: 'Read the independent validation →' }).waitFor()
     assert.equal(new URL(page.url()).hash, route)
     assert.equal(await analysis.getAttribute('aria-expanded'), 'false')
-    assert.equal(await page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => el.scrollTop), scroll)
+    await until(page, () => !document.querySelector('.ws-track')?.getAnimations({ subtree: true }).some(a => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity))
+    assert.equal(await standing(), stood)
   }, { width: 800, height: 1000 }, 'no-preference')
 
   test('Row keys skim without moving voice or Rex, then enter and leave the page', async page => {
