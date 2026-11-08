@@ -29,16 +29,28 @@ func (a *app) actorSession(flag string) string {
 
 // orchestratorOf is a thread's nearest strict ancestor in its own store that
 // carries a shuttle: block and is not archived (a tempered or discarded
-// verdict), or nil for a constitution with none above it. The daemon reads the
-// relation by the same rule (Shuttle.Threads.orchestrator/2).
+// verdict), or nil for a constitution with none above it. Where the store holds
+// no constitution at the path the thread's creation reference
+// (shuttle.thread_parent) names, that reference stands for its parent: a
+// stub carrying the parent's uid, slug and name, whose document lives on its
+// owner's host. The daemon reads the relation by the same rule
+// (Shuttle.Threads.orchestrator/2).
 func orchestratorOf(st *felt.Storage, f *felt.Felt) *felt.Felt {
+	var pinned *shuttle.ThreadParent
+	if block, ok, err := shuttle.BlockOf(f); err == nil && ok {
+		pinned = block.ThreadParent
+	}
 	for dir := path.Dir(f.ID); dir != "." && dir != "/"; dir = path.Dir(dir) {
-		parent, err := st.Read(dir)
-		if err != nil {
-			continue
+		if parent, err := st.Read(dir); err == nil {
+			if _, ok, err := shuttle.BlockOf(parent); err == nil && ok {
+				if shuttle.Verdict(parent) == "" {
+					return parent
+				}
+				continue
+			}
 		}
-		if _, ok, err := shuttle.BlockOf(parent); err == nil && ok && shuttle.Verdict(parent) == "" {
-			return parent
+		if pinned != nil && pinned.Slug == dir {
+			return &felt.Felt{ID: dir, UID: pinned.UID, Name: pinned.Name}
 		}
 	}
 	return nil

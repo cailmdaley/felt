@@ -10,7 +10,8 @@ import (
 )
 
 // requireReviewReport refuses a worker's own close or ask when it would reach
-// the human and the constitution's tapestry.html has not been written since
+// the human and the constitution's companion page (felt.CompanionNames:
+// tapestry.html, artifact.html or report.html) has not been written since
 // this worker was dispatched. A thread answers to its orchestrator and a
 // standing run to its schedule, so neither is held; the board's verbs carry no
 // worker identity, so the human is never held either.
@@ -34,10 +35,12 @@ func (a *app) requireReviewReport(f *felt.Felt) error {
 	if dispatched.IsZero() {
 		return nil
 	}
-	page := filepath.Join(filepath.Dir(f.Path), "tapestry.html")
-	info, err := os.Stat(page)
-	if err == nil && !info.ModTime().Before(dispatched) {
+	page := felt.CompanionPath(filepath.Dir(f.Path))
+	if info, err := os.Stat(page); page != "" && err == nil && !info.ModTime().Before(dispatched) {
 		return nil
+	}
+	if page == "" {
+		page = filepath.Join(filepath.Dir(f.Path), felt.CompanionNames[0])
 	}
 	return fmt.Errorf("%s goes to the human, whose report is out of date.\n"+
 		"Rewrite %s so it describes the whole constitution as it stands, then run this again.\n"+

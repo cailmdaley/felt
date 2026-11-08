@@ -96,9 +96,9 @@ type Felt struct {
 	// path instead of reverse-deriving it from the slug across filesystem
 	// layouts. Not part of frontmatter (yaml:"-").
 	Path string `yaml:"-" json:"path,omitempty"`
-	// ReportPath is the absolute, symlink-resolved location of a sibling
-	// `tapestry.html` (or legacy `report.html`) next to the fiber's markdown file (same directory as
-	// Path), or "" when no such file exists. Populated during the list-time
+	// ReportPath is the absolute, symlink-resolved location of the fiber's
+	// companion page (CompanionNames) beside its markdown file, or "" when
+	// there is none. Populated during the list-time
 	// walk (which already reads the directory's entries) rather than a
 	// per-fiber stat; empty on single-fiber reads that bypass the walk.
 	ReportPath string `yaml:"-" json:"report_path,omitempty"`

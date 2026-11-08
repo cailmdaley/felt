@@ -124,6 +124,45 @@ func TestReviewReportLeavesStandingRunsAlone(t *testing.T) {
 	}
 }
 
+// Every companion name is a report: a fresh artifact.html lets the close
+// through, a stale one is named in the refusal.
+func TestReviewReportReadsEveryCompanionName(t *testing.T) {
+	t.Parallel()
+	dispatched := time.Now().Add(-time.Hour)
+	for _, c := range []struct {
+		name string
+		at   time.Time
+		held bool
+	}{{"fresh", dispatched.Add(time.Minute), false}, {"stale", dispatched.Add(-time.Minute), true}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			dir, st := newStore(t)
+			seedShuttleRole(t, st, "work", felt.StatusActive, oneshot(), nil)
+			f := dispatchWorker(t, st, "work", dispatched)
+			page := filepath.Join(filepath.Dir(f.Path), "artifact.html")
+			if err := os.WriteFile(page, []byte("<h1>now</h1>"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(page, c.at, c.at); err != nil {
+				t.Fatal(err)
+			}
+			env.Set("SHUTTLE_FIBER_PATH", f.Path)
+			stubWorkerExitTmux(t, env, shuttleTmuxSessionName(f.ID, f.UID), f.Path)
+			out, err := runIn(t, env, dir, "close")
+			if c.held {
+				if err == nil || !strings.Contains(out+err.Error(), "artifact.html") {
+					t.Fatalf("want refusal naming artifact.html, got %v: %s", err, out)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("close: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
 func TestReviewReportReadsAncestryThroughASymlinkedStore(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

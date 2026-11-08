@@ -1556,8 +1556,24 @@ type directoryEntriesCache struct {
 	readDir func(string) ([]os.DirEntry, error)
 }
 
+// CompanionNames are a fiber's companion page names; the first present beside
+// its markdown file is its page.
+var CompanionNames = []string{"tapestry.html", "artifact.html", "report.html"}
+
+// CompanionPath is the companion page in dir, or "" when it holds none.
+func CompanionPath(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	if name := companionName(entries); name != "" {
+		return filepath.Join(dir, name)
+	}
+	return ""
+}
+
 func companionName(entries []os.DirEntry) string {
-	for _, name := range []string{"tapestry.html", "artifact.html", "report.html"} {
+	for _, name := range CompanionNames {
 		for _, entry := range entries {
 			if !entry.IsDir() && entry.Name() == name {
 				return name
@@ -1630,7 +1646,7 @@ func (s *Storage) fiberFileWithReport(id, filePath string, entryPoint bool, cach
 		return fiberFile{}, false
 	}
 	reportName := ""
-	for _, name := range []string{"tapestry.html", "artifact.html", "report.html"} {
+	for _, name := range CompanionNames {
 		if _, err := os.Lstat(filepath.Join(reportDir, name)); err == nil && cache.hasEntry(reportDir, name) {
 			reportName = name
 			break

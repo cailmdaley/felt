@@ -141,3 +141,25 @@ func TestOrchestratorSkipsArchivedAncestors(t *testing.T) {
 		}
 	}
 }
+
+// A thread whose parent's document lives on another host answers to the
+// parent its creation reference pins, as the daemon's containment does.
+func TestOrchestratorFollowsThePinnedParent(t *testing.T) {
+	t.Parallel()
+	_, storage := newStore(t)
+	parent := map[string]any{"uid": "01PARENT0000000000000000000", "host": "elsewhere", "slug": "hub", "name": "Hub"}
+	block := oneshot()
+	block["thread_parent"] = parent
+	seedShuttleRole(t, storage, "hub/t", felt.StatusActive, block, nil)
+	got := orchestratorOf(storage, mustRead(t, storage, "hub/t"))
+	if got == nil || got.ID != "hub" || got.UID != parent["uid"] || got.Name != "Hub" {
+		t.Fatalf("orchestrator %+v, want the pinned hub", got)
+	}
+
+	stray := oneshot()
+	stray["thread_parent"] = map[string]any{"uid": "01OTHER00000000000000000000", "host": "elsewhere", "slug": "other", "name": "Other"}
+	seedShuttleRole(t, storage, "lone/t", felt.StatusActive, stray, nil)
+	if got := orchestratorOf(storage, mustRead(t, storage, "lone/t")); got != nil {
+		t.Fatalf("orchestrator %+v for a reference naming another path", got)
+	}
+}
