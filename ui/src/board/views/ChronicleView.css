@@ -347,9 +347,8 @@
   color: var(--kbn-ink-sepia);
   max-width: 92ch;
 }
-/* The fiber a group of commits belongs to. It used to be a `slug:` prefix — a
-   filing key, so it was set in mono — and it is now the fiber's own NAME, which
-   is prose: it keeps the line's serif and is distinguished by weight and hue. */
+/* The fiber a group of commits belongs to, by its NAME, which is prose: it
+   keeps the line's serif and is distinguished by weight and hue. */
 .chr-face-fiber {
   font-weight: 600;
   color: var(--kbn-agent);

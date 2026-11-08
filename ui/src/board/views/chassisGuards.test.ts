@@ -60,7 +60,7 @@ describe('viewFallbackKind', () => {
   })
 
   it('reports the error once a fetch has failed', () => {
-    // THE defect: this combination used to render nothing at all.
+    // Without an error state this combination renders nothing at all.
     expect(viewFallbackKind({ onDesk: false, hasResponse: false, lastFetchFailed: true }))
       .toBe('error')
   })

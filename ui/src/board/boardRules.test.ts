@@ -51,8 +51,8 @@ describe('effectiveHorizon — snooze is due + stashed, composed', () => {
   it('leaves a plain future-dated card on the desk — a due alone never exiles', () => {
     // The control for the case above: without a stored horizon the same due is
     // just a date the card wears. Only an explicit snooze takes it off the
-    // desk. (The regression this pins: such cards resolved to a `soon` surface
-    // that no longer had anywhere to render, so they vanished from the Desk.)
+    // desk. (Resolved to any other surface, such a card would have nowhere to
+    // render and would vanish from the Desk.)
     const h = effectiveHorizon({ due: dayFromNow(3) }, NOW)
     expect(h.effectiveHorizon).toBe('now')
     expect(h.drifted).toBe(false)

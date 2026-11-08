@@ -290,8 +290,8 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
 
   it('writes NOTHING when the drop names the day the card already wears', async () => {
     // The card carries felt's serialization; the day column supplies the bare
-    // civil day. As a string compare those differ, and the board used to run a
-    // real write (and flicker) for a no-op.
+    // civil day. As strings those differ, so a string compare would run a real
+    // write (and flicker) for a no-op.
     const day = dayFromNow(4)
     const c = card({ due: asStoredUtc(day), storedHorizon: 'stashed' })
     asPrivate(makeBoard()).setSurface(c, 'stashed', { due: day })

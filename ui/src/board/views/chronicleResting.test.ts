@@ -2,21 +2,15 @@
  * Resting (snoozed) fibers on the Chronicle — the row-inclusion bug behind
  * "I dragged a due mark into the past and the row vanished."
  *
- * `buildRows`'s include-set used to be built from `now.*` + `pinned` +
- * `timeline.futureDated` only — `response.stash` (the Desk's
- * Resting region: `horizon:stashed` cards, i.e. snoozed work) was never read.
- * A snoozed, WORKLESS card's only route onto the Chronicle was therefore the
- * activity join, which it can never win by definition. Its due mark could
- * still show — because the row existed via SOME other route at fetch time —
- * but dragging that mark past the point where the daemon's own
- * `effectiveHorizon` promotes the card back onto the desk left a window (the
- * optimistic edit lands locally well before the next poll confirms the
- * reclassification) where the row had nothing left to include it by.
- *
- * The fix reads `restingCards(response)` (the same helper the Desk's own
- * Resting section is built from) into the include-set, so a snoozed card
- * keeps its row regardless of which surface array it currently sits in or
- * how the poll timing lines up.
+ * A snoozed, WORKLESS card cannot reach the Chronicle through the activity
+ * join, so `buildRows` reads `restingCards(response)` (the same helper the
+ * Desk's own Resting section is built from) into its include-set. Without it,
+ * dragging a due mark past the point where the daemon's `effectiveHorizon`
+ * promotes the card back onto the desk leaves a window (the optimistic edit
+ * lands locally well before the next poll confirms the reclassification)
+ * where the row has nothing left to include it by. With it, a snoozed card
+ * keeps its row whichever surface array it sits in and however the poll
+ * timing lines up.
  */
 
 import { describe, expect, it } from 'vitest'

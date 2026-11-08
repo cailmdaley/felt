@@ -891,8 +891,8 @@ export class KanbanModal {
 
   /**
    * Put a stand-in page in the view host when there is no response to mount a
-   * view with — the fix for a temporal tab rendering as a completely blank
-   * page when the composite feed is unreachable.
+   * view with, so a temporal tab never renders blank when the composite feed
+   * is unreachable.
    *
    * Two states, because they are different facts: before the first response we
    * are WAITING, and after a failure the daemon is NOT ANSWERING and there is

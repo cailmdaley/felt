@@ -854,10 +854,9 @@ describe('a row waits on its origin, and only on its own', () => {
  * The optimistic band and the document it stands for.
  *
  * A cycle drawn on the strip appears before the daemon's polled feed carries
- * it. That courtesy cost the page its whole gesture: the ghost was retired only
- * when a poll echoed its NAME, and until then the band took no clicks — a
- * cycle you had just drawn, dated and named did nothing when you clicked it,
- * for up to a poll interval. The id the create hands back closes that window.
+ * it, and it must take clicks at once. Matched to the feed by NAME alone, a
+ * cycle you had just drawn, dated and named would do nothing when clicked for
+ * up to a poll interval; the id the create hands back closes that window.
  */
 describe('retirePendingCycles', () => {
   const ghost = (name: string, id?: string): PendingCycle => ({

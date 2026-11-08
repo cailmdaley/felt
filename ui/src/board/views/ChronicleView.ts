@@ -1774,9 +1774,8 @@ class ChronicleView implements TemporalView {
         this.draft = null
         bandEl.classList.remove('chr-band-resizing')
         const dropped = edge === 'start' ? fromDay : toDay
-        // `originalDay`, not `origin` — this file now uses that word for the
-        // daemon a write routes to, and one of them silently meaning "the day
-        // the edge started on" is a trap for the next reader.
+        // `originalDay`, not `origin`: in this file `origin` is the daemon a
+        // write routes to, never the day the edge started on.
         const originalDay = edge === 'start' ? originStart : originEnd
         if (dropped !== originalDay) void this.writeCycleEdge(band, edge, dropped, ctx)
       }

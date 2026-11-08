@@ -2,9 +2,8 @@
 //
 // `ctx.cards` is the eight work surfaces; cycles are annotations and live only
 // in `response.cycles`. Clicking a cycle band therefore hands `openCard` an id
-// that the cards list has never heard of — which used to resolve to nothing,
-// silently, with no throw and no log. These pin both halves of the fix: cycles
-// resolve, and an id that resolves nowhere says so.
+// that the cards list has never heard of. These pin both halves: cycles
+// resolve, and an id that resolves nowhere says so rather than failing silently.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveOpenTarget } from './KanbanModal.js'
