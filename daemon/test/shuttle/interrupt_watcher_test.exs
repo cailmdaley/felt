@@ -266,7 +266,7 @@ defmodule Shuttle.InterruptWatcherTest do
     refute_received {:emitted, _, _, _, _}
 
     # Reading the stream folds the interrupt.
-    {:ok, _} = EventStream.slice(stream, events, 0, now)
+    _ = EventStream.slice(stream, 0, now)
     assert %{"s" => %{phase: "waiting"}} = EventStream.session_activity(stream)
     assert EventStream.open_turns(stream) == %{}
   end

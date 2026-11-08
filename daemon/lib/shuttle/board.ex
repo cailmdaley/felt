@@ -25,23 +25,6 @@ defmodule Shuttle.Board do
   end
 
   @doc "Read the local projection after catching up with the stream."
-  def all_since(since_ms, opts \\ []) do
-    path = Keyword.get(opts, :events_file, EventStream.default_events_file())
-    stream = Keyword.get(opts, :stream, EventStream)
-
-    records =
-      case EventStream.board_records(stream, path) do
-        {:ok, records} ->
-          records
-
-        :miss ->
-          EventStream.warn_miss("board", path)
-
-          path
-          |> EventStream.fold_files(%{}, &fold(&2, &1))
-          |> prune(System.system_time(:millisecond))
-      end
-
-    since(records, since_ms)
-  end
+  def all_since(since_ms, stream \\ EventStream),
+    do: stream |> EventStream.board_records() |> since(since_ms)
 end

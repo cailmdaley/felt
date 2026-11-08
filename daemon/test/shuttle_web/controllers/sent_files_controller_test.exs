@@ -14,6 +14,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
   use ExUnit.Case, async: true
   import Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
+  alias Shuttle.Test.EventFiles
   alias Shuttle.Test.StubGetFileClient
   import Plug.Conn
   import Phoenix.ConnTest
@@ -89,10 +90,13 @@ defmodule ShuttleWeb.SentFilesControllerTest do
         })
       ])
 
-    files = Shuttle.SentFiles.for_uid(@session_only_uid, events_file: path)
+    files = Shuttle.SentFiles.for_uid(@session_only_uid, stream: EventFiles.start_stream(path))
     assert Enum.map(files, & &1.fullPath) == ["/tmp/report.html", "/tmp/legacy.html"]
 
-    assert Enum.map(Shuttle.SentFiles.all_since(1500, events_file: path), & &1.uid) == [
+    assert Enum.map(
+             Shuttle.SentFiles.all_since(1500, stream: EventFiles.start_stream(path)),
+             & &1.uid
+           ) == [
              @session_only_uid
            ]
   end
@@ -124,7 +128,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
         })
       ])
 
-    opts = [events_file: events, session_ledger_file: ledger]
+    opts = [stream: EventFiles.start_stream(events), session_ledger_file: ledger]
 
     assert [%{fullPath: "/tmp/native-report.html", sessionId: ^session}] =
              Shuttle.SentFiles.for_uid(fiber_uid, opts)
@@ -144,7 +148,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           })
         ])
 
-      files = Shuttle.SentFiles.for_uid(@match_ulid, events_file: path)
+      files = Shuttle.SentFiles.for_uid(@match_ulid, stream: EventFiles.start_stream(path))
 
       assert Enum.map(files, & &1.fullPath) |> Enum.sort() == ["/tmp/one.html", "/tmp/two.png"]
       assert Enum.find(files, &(&1.fullPath == "/tmp/two.png")).basename == "two.png"
@@ -164,7 +168,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           })
         ])
 
-      files = Shuttle.SentFiles.for_uid(@match_ulid, events_file: path)
+      files = Shuttle.SentFiles.for_uid(@match_ulid, stream: EventFiles.start_stream(path))
 
       assert Enum.map(files, & &1.fullPath) |> Enum.sort() ==
                ["/abs/already.png", "/leonardo_work/cmbx/results/scratch/frame3_act.png"]
@@ -177,7 +181,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
       # the path is preserved (pre-cwd-capture behavior, not a crash).
       path = write_fixture([event(%{"toolInput" => %{"files" => ["rel/no-cwd.png"]}})])
 
-      files = Shuttle.SentFiles.for_uid(@match_ulid, events_file: path)
+      files = Shuttle.SentFiles.for_uid(@match_ulid, stream: EventFiles.start_stream(path))
       assert Enum.map(files, & &1.fullPath) == ["rel/no-cwd.png"]
     end
 
@@ -191,7 +195,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           })
         ])
 
-      files = Shuttle.SentFiles.for_uid(@session_only_uid, events_file: path)
+      files = Shuttle.SentFiles.for_uid(@session_only_uid, stream: EventFiles.start_stream(path))
       assert Enum.map(files, & &1.fullPath) == ["/tmp/capture.html"]
     end
 
@@ -205,7 +209,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           event(%{"timestamp" => 5, "toolInput" => %{"files" => ["/tmp/keep.html"]}})
         ])
 
-      files = Shuttle.SentFiles.for_uid(@match_ulid, events_file: path)
+      files = Shuttle.SentFiles.for_uid(@match_ulid, stream: EventFiles.start_stream(path))
       assert Enum.map(files, & &1.fullPath) == ["/tmp/keep.html"]
     end
 
@@ -218,7 +222,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           event(%{"timestamp" => 200, "toolInput" => %{"files" => ["/tmp/new.html"]}})
         ])
 
-      files = Shuttle.SentFiles.for_uid(@match_ulid, events_file: path)
+      files = Shuttle.SentFiles.for_uid(@match_ulid, stream: EventFiles.start_stream(path))
 
       # one /tmp/dup.html survivor, carrying the newest (300) timestamp
       assert Enum.count(files, &(&1.fullPath == "/tmp/dup.html")) == 1
@@ -235,7 +239,9 @@ defmodule ShuttleWeb.SentFilesControllerTest do
         end
 
       path = write_fixture(lines)
-      files = Shuttle.SentFiles.for_uid(@match_ulid, events_file: path, cap: 3)
+
+      files =
+        Shuttle.SentFiles.for_uid(@match_ulid, stream: EventFiles.start_stream(path), cap: 3)
 
       assert length(files) == 3
       # newest three: f10, f9, f8
@@ -243,7 +249,9 @@ defmodule ShuttleWeb.SentFilesControllerTest do
     end
 
     test "a missing events file yields an empty trail (no crash)" do
-      assert Shuttle.SentFiles.for_uid(@match_ulid, events_file: "/no/such/events.jsonl") == []
+      assert Shuttle.SentFiles.for_uid(@match_ulid,
+               stream: EventFiles.start_stream("/no/such/events.jsonl")
+             ) == []
     end
   end
 
@@ -260,7 +268,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           })
         ])
 
-      files = Shuttle.SentFiles.all_since(150, events_file: path)
+      files = Shuttle.SentFiles.all_since(150, stream: EventFiles.start_stream(path))
       assert Enum.map(files, & &1.fullPath) == ["/tmp/b.html", "/tmp/c.html"]
       assert Enum.map(files, & &1.timestamp) == [200, 300]
     end
@@ -285,7 +293,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           })
         ])
 
-      files = Shuttle.SentFiles.all_since(0, events_file: path)
+      files = Shuttle.SentFiles.all_since(0, stream: EventFiles.start_stream(path))
 
       # both dup.html sends survive — no server-side dedup opinion
       assert Enum.count(files, &(&1.fullPath == "/tmp/dup.html")) == 2
@@ -302,7 +310,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           })
         ])
 
-      [entry] = Shuttle.SentFiles.all_since(0, events_file: path)
+      [entry] = Shuttle.SentFiles.all_since(0, stream: EventFiles.start_stream(path))
       assert entry.uid == @session_only_uid
     end
 
@@ -315,12 +323,14 @@ defmodule ShuttleWeb.SentFilesControllerTest do
           event(%{"timestamp" => 5, "toolInput" => %{"files" => ["/tmp/keep.html"]}})
         ])
 
-      files = Shuttle.SentFiles.all_since(0, events_file: path)
+      files = Shuttle.SentFiles.all_since(0, stream: EventFiles.start_stream(path))
       assert Enum.map(files, & &1.fullPath) == ["/tmp/keep.html"]
     end
 
     test "a missing events file yields an empty list (no crash)" do
-      assert Shuttle.SentFiles.all_since(0, events_file: "/no/such/events.jsonl") == []
+      assert Shuttle.SentFiles.all_since(0,
+               stream: EventFiles.start_stream("/no/such/events.jsonl")
+             ) == []
     end
   end
 
@@ -846,14 +856,11 @@ defmodule ShuttleWeb.SentFilesControllerTest do
     end
   end
 
-  # Point the reader's primary path (Shuttle owns the stream now) at a fixture for
-  # the controller's local branch. Clear the legacy Portolan vars so resolution
-  # is unambiguous, and give the test its own (absent) session ledger: the
-  # suite-wide one is appended to by concurrent tests, and its change token is
-  # part of the ETag. Scoped to the test.
+  # Give the controller's local branch a stream over a fixture, and the test its
+  # own (absent) session ledger: the suite-wide one is appended to by concurrent
+  # tests, and its change token is part of the ETag. Scoped to the test.
   defp with_events_file(path) do
-    Enum.each(~w(PORTOLAN_EVENTS_FILE PORTOLAN_DATA_DIR), &Shuttle.Test.Env.delete_env/1)
-    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", path)
+    EventFiles.scope!(path)
     Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", path <> ".sessions")
   end
 

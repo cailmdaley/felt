@@ -12,7 +12,8 @@ defmodule Shuttle.SentFilesProjectionTest do
   """
   use ExUnit.Case, async: true
 
-  alias Shuttle.{EventStream, SentFiles}
+  alias Shuttle.SentFiles
+  alias Shuttle.Test.EventFiles
 
   @match_ulid "01KTS261GJMMRDRHS2QDMEFV3K"
   @other_ulid "01KTCA2CY6X6P126ZMBK9686SH"
@@ -215,20 +216,15 @@ defmodule Shuttle.SentFilesProjectionTest do
 
   # ── stream ──
 
-  defp start_stream(events) do
-    name = :"sent_files_stream_#{System.unique_integer([:positive])}"
+  defp start_stream(events), do: EventFiles.start_stream(events, poll_interval_ms: 10)
 
-    start_supervised!({EventStream, events_file: events, poll_interval_ms: 10, name: name})
-    name
-  end
-
-  # Options that force the held projection, and options that force the direct
-  # full-file scan — the same reader over the same file, two ways in.
-  defp followed(events, ledger, name, extra \\ []),
-    do: [events_file: events, session_ledger_file: ledger, stream: name] ++ extra
+  # Options that read the projection a stream has followed, and options that
+  # read one a fresh stream seeds from the files — two ways into one reader.
+  defp followed(_events, ledger, name, extra \\ []),
+    do: [session_ledger_file: ledger, stream: name] ++ extra
 
   defp scanned(events, ledger, extra \\ []),
-    do: [events_file: events, session_ledger_file: ledger, stream: :no_such_stream] ++ extra
+    do: [session_ledger_file: ledger, stream: start_stream(events)] ++ extra
 
   # A ceiling of ~30 s, reached only when the condition never holds: a passing
   # test returns as soon as it does, however loaded the machine.
@@ -662,23 +658,5 @@ defmodule Shuttle.SentFilesProjectionTest do
                SentFiles.all_since(0, followed(ctx.events, ctx.ledger, name))
              )
            end)
-  end
-
-  test "a stream on a different file is a miss, and the caller reads that file itself", ctx do
-    other = ctx.events <> ".other"
-    File.write!(other, sent_line(ts: 1_000, files: ["/tmp/other-file.html"]) <> "\n")
-    on_exit(fn -> File.rm(other) end)
-
-    append(ctx.events, sent_line(ts: 1_000, files: ["/tmp/followed.html"]))
-    name = start_stream(ctx.events)
-
-    assert EventStream.sent_events(name, other) == :miss
-
-    assert [%{fullPath: "/tmp/other-file.html"}] =
-             SentFiles.all_since(0,
-               events_file: other,
-               session_ledger_file: ctx.ledger,
-               stream: name
-             )
   end
 end

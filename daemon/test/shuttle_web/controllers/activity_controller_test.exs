@@ -16,7 +16,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
   import Shuttle.Test.ApiConn
   import Phoenix.ConnTest
 
-  alias Shuttle.Test.Env
+  alias Shuttle.Test.EventFiles
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -66,7 +66,9 @@ defmodule ShuttleWeb.ActivityControllerTest do
   end
 
   defp buckets!(path, from_ms, to_ms) do
-    {:ok, buckets} = Shuttle.Activity.window(from_ms, to_ms, events_file: path)
+    {:ok, buckets} =
+      Shuttle.Activity.window(from_ms, to_ms, stream: EventFiles.start_stream(path))
+
     buckets
   end
 
@@ -412,7 +414,9 @@ defmodule ShuttleWeb.ActivityControllerTest do
 
     test "a missing events file yields no buckets (no crash)" do
       assert {:ok, []} =
-               Shuttle.Activity.window(@t0, @t0 + @minute, events_file: "/no/such/events.jsonl")
+               Shuttle.Activity.window(@t0, @t0 + @minute,
+                 stream: EventFiles.start_stream("/no/such/events.jsonl")
+               )
     end
   end
 
@@ -576,7 +580,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
 
       assert {:ok, _} =
                Shuttle.Activity.window(@t0, @t0 + Shuttle.Activity.max_range_ms(),
-                 events_file: "/no/such/events.jsonl"
+                 stream: EventFiles.start_stream("/no/such/events.jsonl")
                )
     end
   end
@@ -647,8 +651,6 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  # Point the reader at a fixture.
-  defp with_events_file(path) do
-    Env.put_env("SHUTTLE_EVENTS_FILE", path)
-  end
+  # Give the controller a stream over a fixture.
+  defp with_events_file(path), do: EventFiles.scope!(path)
 end

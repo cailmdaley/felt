@@ -93,7 +93,7 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     File.write!(events, Enum.map_join(events_lines, "", &(Jason.encode!(&1) <> "\n")))
     File.write!(sessions, Enum.map_join(session_lines, "", &(Jason.encode!(&1) <> "\n")))
 
-    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", events)
+    Shuttle.Test.EventFiles.scope!(events)
     Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", sessions)
     Shuttle.Test.Env.put_env("SHUTTLE_COMMITS_FILE", Path.join(dir, "commits.jsonl"))
 

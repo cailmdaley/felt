@@ -86,7 +86,7 @@ defmodule ShuttleWeb.BoardControllerTest do
     }
 
     File.write!(path, Jason.encode!(record) <> "\n")
-    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", path)
+    Shuttle.Test.EventFiles.scope!(path)
     Shuttle.Test.Env.put_env("SHUTTLE_HOST", "host")
 
     entries =
@@ -155,6 +155,7 @@ defmodule ShuttleWeb.BoardControllerTest do
     Shuttle.Test.Env.put_server(Shuttle.Poller, poller)
     dir = Path.join(System.tmp_dir!(), "board-cache-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf(dir) end)
+    Shuttle.Test.EventFiles.scope!(Path.join(dir, "events.jsonl"))
 
     registry =
       start_supervised!(
@@ -190,7 +191,7 @@ defmodule ShuttleWeb.BoardControllerTest do
     now = System.system_time(:millisecond)
     record = %{"type" => "board", "id" => "brd-test", "timestamp" => now, "kind" => "post"}
     File.write!(path, Jason.encode!(record) <> "\n")
-    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", path)
+    Shuttle.Test.EventFiles.scope!(path)
     first = get(api_conn(), "/api/v1/board?since_ms=#{now}")
     assert %{"records" => [^record]} = json_response(first, 200)
     [etag] = get_resp_header(first, "etag")

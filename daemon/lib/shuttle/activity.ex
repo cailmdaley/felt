@@ -229,16 +229,13 @@ defmodule Shuttle.Activity do
   by `{m, s, cwd, k}`. The window is read through `canonical_window/2` (see the
   moduledoc's whole-minutes rule).
 
-  Served from `Shuttle.EventStream` when it is following the requested
-  path; otherwise a one-off fold of that path and its rotated sibling.
+  Served from the fold `Shuttle.EventStream` holds.
 
   Returns `{:error, :inverted_range}` when `to_ms < from_ms` and
   `{:error, :range_too_wide}` past #{@max_range_days} days. A missing events
   file is not an error — it yields an empty list.
 
-  Opts (for tests): `:events_file`, the live stream path (its rotated sibling
-  is that path plus `.1`, exactly as the writer names it); `:stream`, the
-  `Shuttle.EventStream` process to ask.
+  Opts (for tests): `:stream`, the `Shuttle.EventStream` process to ask.
   """
   @spec window(integer(), integer(), keyword()) ::
           {:ok, [bucket()]} | {:error, :inverted_range | :range_too_wide}
@@ -246,7 +243,7 @@ defmodule Shuttle.Activity do
     case check_range(from_ms, to_ms) do
       :ok ->
         {from_ms, to_ms} = canonical_window(from_ms, to_ms)
-        {:ok, buckets(from_ms, to_ms, opts)}
+        {:ok, EventStream.slice(Keyword.get(opts, :stream, EventStream), from_ms, to_ms)}
 
       error ->
         error
@@ -287,33 +284,11 @@ defmodule Shuttle.Activity do
   @spec max_range_days() :: pos_integer()
   def max_range_days, do: @max_range_days
 
-  defp buckets(from_ms, to_ms, opts) do
-    path = Keyword.get(opts, :events_file, EventStream.default_events_file())
-
-    case EventStream.slice(Keyword.get(opts, :stream, EventStream), path, from_ms, to_ms) do
-      {:ok, buckets} ->
-        buckets
-
-      :miss ->
-        EventStream.warn_miss("activity", path)
-        path |> fold_stream() |> slice(from_ms, to_ms)
-    end
-  end
-
   # ── The fold ───────────────────────────────────────────────────────────────
 
   @doc "The fold before any line."
   @spec new_acc() :: acc()
   def new_acc, do: %{tally: :gb_trees.empty(), spells: %{}, pending: %{}, names: %{}}
-
-  @doc """
-  The whole stream at `live` folded from scratch: the rotated sibling
-  (`live <> ".1"`) first, then the live file. Oldest-first is load-bearing:
-  spell and pairing state are a forward fold, so the files are read in the
-  order they were written. A missing file contributes nothing.
-  """
-  @spec fold_stream(Path.t()) :: acc()
-  def fold_stream(live), do: EventStream.fold_files(live, new_acc(), &fold_event(&2, &1))
 
   @doc """
   One decoded event folded onto `acc`: the spell machine, the tool-call

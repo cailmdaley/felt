@@ -66,9 +66,8 @@ defmodule Shuttle.SentFiles do
 
   The trail is what `events.jsonl.1` and `events.jsonl` hold, in that order: a
   send survives one rotation and is gone after the second, when the rename
-  overwrites the file it lived in. The path honors the same env the hook reads,
-  via `Shuttle.EventStream.default_events_file/0`, so the source can't drift
-  from the writer.
+  overwrites the file it lived in. `Shuttle.EventStream` holds the projected
+  events of both files; this module only joins and filters them.
   """
 
   alias Shuttle.EventStream
@@ -95,8 +94,7 @@ defmodule Shuttle.SentFiles do
   By default entries are deduped by `fullPath`; with `:session_id`, only events
   from that exact session are returned and repeated paths are preserved.
 
-  Opts: `:session_id` (exact session to retain every send for); `:events_file`
-  (path to the live JSONL stream; its rotated sibling is that path plus `.1`),
+  Opts: `:session_id` (exact session to retain every send for);
   `:session_ledger_file` (path to the session ledger), `:cap`, `:stream` (the
   `Shuttle.EventStream` process to read from).
   """
@@ -131,10 +129,7 @@ defmodule Shuttle.SentFiles do
   dedup is the client's job (house rule: recorded evidence only, no server-side
   opinion about which send "wins").
 
-  Reads `events.jsonl.1` and `events.jsonl`, same as `for_uid/2` — the pair
-  `Shuttle.EventStream.default_events_file/0` resolves.
-
-  Opts (for tests): `:events_file`, `:session_ledger_file`, `:stream`.
+  Opts (for tests): `:session_ledger_file`, `:stream`.
   """
   @spec all_since(integer(), keyword()) :: [map()]
   def all_since(since_ms, opts \\ []) when is_integer(since_ms) do
@@ -152,9 +147,8 @@ defmodule Shuttle.SentFiles do
   contributes.
 
   Non-sent-file events and events naming no usable path collapse to `[]`, so a
-  single odd line never breaks ingest. This is the ONLY projection of the
-  stream: `Shuttle.EventStream` applies it to each line it reads, and the
-  fallback read applies it to each line of the files. The strings kept are
+  single odd line never breaks ingest. `Shuttle.EventStream` applies it to
+  each line it reads. The strings kept are
   copied out of the event, so the projection never pins the buffer a line was
   read from.
   """
@@ -206,24 +200,9 @@ defmodule Shuttle.SentFiles do
   defp copy(value) when is_binary(value), do: :binary.copy(value)
   defp copy(value), do: value
 
-  # The projected events to read, in file order (oldest-first — `dedupe_newest/1`
-  # depends on it). From the stream when it is following the very path we
-  # resolve; otherwise straight off disk.
-  defp events(opts) do
-    path = Keyword.get(opts, :events_file, EventStream.default_events_file())
-
-    case EventStream.sent_events(Keyword.get(opts, :stream, EventStream), path) do
-      {:ok, events} ->
-        events
-
-      :miss ->
-        EventStream.warn_miss("sent-files", path)
-
-        path
-        |> EventStream.fold_files([], &Enum.reverse(project(&1), &2))
-        |> Enum.reverse()
-    end
-  end
+  # The projected events in file order (oldest-first — `dedupe_newest/1`
+  # depends on it).
+  defp events(opts), do: EventStream.sent_events(Keyword.get(opts, :stream, EventStream))
 
   # Resolve attribution before filtering: a session-ledger claim may arrive
   # after either the send or the clear. File order does not decide the cutoff.

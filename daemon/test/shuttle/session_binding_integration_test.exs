@@ -95,7 +95,7 @@ defmodule Shuttle.SessionBindingIntegrationTest do
       :append
     ])
 
-    EventStream.sent_events(name, replay)
+    EventStream.sent_events(name)
     assert SessionBinding.current(EventStream.session_bindings(name), "anchor") == "switched"
     assert %{runtime: %{session_uuid: "switched", phase: "waiting"}} = snapshot.()
   end

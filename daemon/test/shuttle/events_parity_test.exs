@@ -74,8 +74,14 @@ defmodule Shuttle.EventsParityTest do
   end
 
   describe "SentFiles over the Go-written stream" do
-    test "reads the trail for the fiber whose ULID is embedded in the tmux name" do
-      files = SentFiles.for_uid(@uid_a, events_file: @golden)
+    setup do
+      {:ok, stream: Shuttle.Test.EventFiles.start_stream(@golden, clock: fn -> @now end)}
+    end
+
+    test "reads the trail for the fiber whose ULID is embedded in the tmux name", %{
+      stream: stream
+    } do
+      files = SentFiles.for_uid(@uid_a, stream: stream)
 
       # Both entries of one SendUserFile call, with the relative path resolved
       # against the event's cwd (/repo/felt) and the absolute one untouched.
@@ -86,15 +92,15 @@ defmodule Shuttle.EventsParityTest do
       assert Enum.find(files, &(&1.basename == "frame.png")).timestamp == 1_753_900_002_000
     end
 
-    test "ignores every non-SendUserFile event, including the truncated Write" do
+    test "ignores every non-SendUserFile event, including the truncated Write", %{stream: stream} do
       # The oversized Write is trimmed to `file_path` + `truncated` by the
       # writer. It must not surface as a sent file.
-      files = SentFiles.for_uid(@uid_a, events_file: @golden)
+      files = SentFiles.for_uid(@uid_a, stream: stream)
       refute Enum.any?(files, &(&1.basename == "big.md"))
     end
 
-    test "returns nothing for a fiber with no sends" do
-      assert SentFiles.for_uid("01KVC1N5XMAAMYXDAGR4V6QAAA", events_file: @golden) == []
+    test "returns nothing for a fiber with no sends", %{stream: stream} do
+      assert SentFiles.for_uid("01KVC1N5XMAAMYXDAGR4V6QAAA", stream: stream) == []
     end
   end
 

@@ -23,6 +23,7 @@ socket, daemon state). Go resolves it in `shuttle.DataDir`
 
 **One reader, five projections.** `Shuttle.EventStream` decodes each line once and feeds five pure projections held in memory: activity (`Shuttle.Activity`), sent files (`Shuttle.SentFiles`), turn state (`Shuttle.WaitingTracker`), session succession (`Shuttle.SessionBinding`), and family-board records (`Shuttle.Board`).
 It seeds from `events.jsonl.1` then the live file in `init/1`, before the Poller starts, and afterwards reads only appended bytes.
+Its projections are the only way into the stream's contents inside the daemon: a reader asks the stream, which catches up before answering, and a stream that is down fails the read rather than having it re-read both files.
 A rename rotation, recognized by the live path's inode moving, continues every projection: the tail of the old file is drained, then the new one is read from its start.
 The [family board](family-board.md) retains up to 14 days, bounded by the records in the two event files: rotation drops records held only in the overwritten `.1` file.
 An in-place shrink or an unaccountable replacement rebuilds the file projections from both files, replaying accepted turn events onto remembered session facts rather than replacing a session with an incomplete reconstruction.

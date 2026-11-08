@@ -14,6 +14,7 @@ defmodule Shuttle.ActivityFoldTest do
   use ExUnit.Case, async: true
 
   alias Shuttle.Activity
+  alias Shuttle.Test.EventFiles
   alias Shuttle.Test.LegacyActivityScan, as: Legacy
 
   @t0 1_770_000_000_000
@@ -33,9 +34,6 @@ defmodule Shuttle.ActivityFoldTest do
   end
 
   defp sid(id), do: %{"sessionId" => id}
-
-  defp fold_lines(acc, lines),
-    do: Enum.reduce(lines, acc, &Activity.fold_event(&2, Jason.decode!(&1)))
 
   defp fixture_lines do
     [
@@ -120,7 +118,8 @@ defmodule Shuttle.ActivityFoldTest do
 
   test "fold-then-slice equals the windowed scan for every window in the grid", %{path: path} do
     write!(path, fixture_lines())
-    acc = Activity.fold_stream(path)
+    acc = EventFiles.activity(path)
+    stream = EventFiles.start_stream(path)
 
     windows = for f <- @froms, t <- @tos, f <= t, do: {@t0 + f, @t0 + t + 17 * @s}
     assert length(windows) > 70
@@ -128,13 +127,13 @@ defmodule Shuttle.ActivityFoldTest do
     for {from_ms, to_ms} <- windows do
       {:ok, legacy} = Legacy.window(from_ms, to_ms, events_file: path)
       assert Activity.slice(acc, from_ms, to_ms) == legacy, "window #{from_ms}..#{to_ms}"
-      assert Activity.window(from_ms, to_ms, events_file: path) == {:ok, legacy}
+      assert Activity.window(from_ms, to_ms, stream: stream) == {:ok, legacy}
     end
   end
 
   test "the fixture exercises what it claims", %{path: path} do
     write!(path, fixture_lines())
-    all = Activity.slice(Activity.fold_stream(path), @t0 - @m, @t0 + 200 * @m)
+    all = Activity.slice(EventFiles.activity(path), @t0 - @m, @t0 + 200 * @m)
 
     at = fn m, {s, cwd}, k ->
       Enum.find(all, &(&1.m == @t0 + m and &1.s == s and &1.cwd == cwd and &1.k == k))
@@ -174,7 +173,7 @@ defmodule Shuttle.ActivityFoldTest do
     {:ok, legacy} = Legacy.window(@t0 + 5 * @m, @t0 + 20 * @m, events_file: path)
     assert %{k: "notify"} = hd(legacy)
 
-    assert Activity.slice(Activity.fold_stream(path), @t0 + 5 * @m, @t0 + 20 * @m) == [
+    assert Activity.slice(EventFiles.activity(path), @t0 + 5 * @m, @t0 + 20 * @m) == [
              %{m: @t0 + 11 * @m, s: elem(@a, 0), cwd: elem(@a, 1), k: "agent", n: 1},
              %{m: @t0 + 11 * @m, s: elem(@a, 0), cwd: elem(@a, 1), k: "reply", n: 1}
            ]
@@ -192,7 +191,7 @@ defmodule Shuttle.ActivityFoldTest do
     assert [%{m: m, k: "notify"}] = legacy
     assert m == @t0 + @m
 
-    assert Activity.slice(Activity.fold_stream(path), @t0, @t0 + 2 * @m) == []
+    assert Activity.slice(EventFiles.activity(path), @t0, @t0 + 2 * @m) == []
   end
 
   test "drop_before removes earlier minutes and older pending calls, nothing else", %{path: path} do
@@ -203,14 +202,14 @@ defmodule Shuttle.ActivityFoldTest do
       ev(@a, "stop", 6 * @m)
     ])
 
-    acc = path |> Activity.fold_stream() |> Activity.drop_before(@t0 + 5 * @m + 30 * @s)
+    acc = path |> EventFiles.activity() |> Activity.drop_before(@t0 + 5 * @m + 30 * @s)
 
     assert acc |> Activity.slice(@t0 - @m, @t0 + 10 * @m) |> Enum.map(& &1.m) |> Enum.uniq() ==
              [@t0 + 5 * @m, @t0 + 6 * @m]
 
     # The old call no longer fills when it returns; the newer one does.
     acc =
-      fold_lines(acc, [
+      EventFiles.activity_lines(acc, [
         ev(@a, "post_tool_use", 9 * @m, sid("old")),
         ev(@a, "post_tool_use", 9 * @m, sid("new"))
       ])
@@ -220,7 +219,7 @@ defmodule Shuttle.ActivityFoldTest do
     assert Activity.drop_before(acc, nil) == acc
 
     # Identities that only the dropped minutes referred to are forgotten.
-    b_only = path |> Activity.fold_stream() |> fold_lines([ev(@b, "stop", 0)])
+    b_only = path |> EventFiles.activity() |> EventFiles.activity_lines([ev(@b, "stop", 0)])
     assert map_size(b_only.names) == 2
     assert map_size(Activity.drop_before(b_only, @t0 + 5 * @m).names) == 1
   end

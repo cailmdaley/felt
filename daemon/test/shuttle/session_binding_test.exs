@@ -175,10 +175,10 @@ defmodule Shuttle.SessionBindingTest do
 
     File.rename!(path, path <> ".1")
     File.write!(path, Jason.encode!(event("new", "session_start", @now + 1)) <> "\n")
-    EventStream.sent_events(name, path)
+    EventStream.sent_events(name)
     assert SessionBinding.current(EventStream.session_bindings(name), "old") == "new"
     File.write!(path, "\n")
-    EventStream.sent_events(name, path)
+    EventStream.sent_events(name)
     assert SessionBinding.current(EventStream.session_bindings(name), "old") == "new"
   end
 
@@ -196,10 +196,10 @@ defmodule Shuttle.SessionBindingTest do
     )
 
     File.write!(path, Jason.encode!(old) <> "\n")
-    EventStream.sent_events(name, path)
+    EventStream.sent_events(name)
     assert SessionBinding.current(EventStream.session_bindings(name), "old") == "new"
     File.write!(path, Jason.encode!(event("old", "session_end", @now + 1)) <> "\n")
-    EventStream.sent_events(name, path)
+    EventStream.sent_events(name)
     assert SessionBinding.current(EventStream.session_bindings(name), "old") == "new"
 
     File.write!(
@@ -210,7 +210,7 @@ defmodule Shuttle.SessionBindingTest do
     )
 
     File.rename!(path <> ".replacement", path)
-    EventStream.sent_events(name, path)
+    EventStream.sent_events(name)
     assert SessionBinding.current(EventStream.session_bindings(name), "old") == "newest"
     assert SessionBinding.current(EventStream.session_bindings(name), "new") == "newest"
   end
@@ -237,7 +237,7 @@ defmodule Shuttle.SessionBindingTest do
     assert EventStream.session_activity(name)["sid"].phase == "working"
     File.rename!(path, path <> ".1")
     File.write!(path, Jason.encode!(event("sid", "session_end", @now + 4)) <> "\n")
-    EventStream.sent_events(name, path)
+    EventStream.sent_events(name)
     assert EventStream.session_activity(name)["sid"].phase == "working"
   end
 

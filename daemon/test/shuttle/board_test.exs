@@ -44,15 +44,15 @@ defmodule Shuttle.BoardTest do
     File.write!(path, line.("b"))
     name = :board_projection_test
     start_supervised!({EventStream, name: name, events_file: path, poll_interval_ms: 60_000})
-    assert {:ok, records} = EventStream.board_records(name, path)
+    records = EventStream.board_records(name)
     assert Map.keys(records) |> Enum.sort() == ["a", "b"]
     File.write!(path, line.("c"), [:append])
     File.rename!(path, path <> ".1")
     File.write!(path, line.("d"))
-    assert {:ok, records} = EventStream.board_records(name, path)
+    records = EventStream.board_records(name)
     assert Map.keys(records) |> Enum.sort() == ["b", "c", "d"]
     File.write!(path, "")
-    assert {:ok, records} = EventStream.board_records(name, path)
+    records = EventStream.board_records(name)
     assert Map.keys(records) |> Enum.sort() == ["b", "c"]
   end
 end

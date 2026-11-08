@@ -57,12 +57,11 @@ defmodule Shuttle.EventStream do
 
   ## Reads
 
-  `slice/4` and `sent_events/2` follow the file before they answer, so a read
-  sees everything written before the request with no polling latency; between
-  ticks that costs two `stat`s. Each answers only for the path it is actually
-  following — any other path is a `:miss`, and the caller folds that path
-  itself (`fold_files/3`). That is what keeps an injected fixture, or a crashed
-  stream, correct rather than silently served stale.
+  `slice/3`, `sent_events/1` and `board_records/1` follow the file before they
+  answer, so a read sees everything written before the request with no polling
+  latency; between ticks that costs two `stat`s. They are the only way into the
+  projections: nothing else reads the stream, so a stream that is down makes
+  its readers fail loudly rather than quietly re-reading tens of megabytes.
 
   `session_activity/1` never enters this process's mailbox: the stream
   publishes compact phase and open-turn maps to a protected ETS table named
@@ -83,7 +82,6 @@ defmodule Shuttle.EventStream do
   # A catch-up read that lands during a reseed waits for it; the seed of a
   # full 64 MB pair takes a few seconds on a loaded host.
   @read_timeout_ms 30_000
-  @miss_log_interval_ms 60_000
 
   defmodule State do
     @moduledoc false
@@ -141,37 +139,20 @@ defmodule Shuttle.EventStream do
   @spec rotated(Path.t()) :: Path.t()
   def rotated(live), do: live <> ".1"
 
-  @doc """
-  The activity buckets for the canonical window of `from_ms..to_ms` over
-  `path`, after catching up — or `:miss` if this stream follows a different
-  file or is not running.
-  """
-  @spec slice(GenServer.server(), Path.t(), integer(), integer()) ::
-          {:ok, [Activity.bucket()]} | :miss
-  def slice(server \\ __MODULE__, path, from_ms, to_ms) do
-    GenServer.call(server, {:slice, path, from_ms, to_ms}, @read_timeout_ms)
-  catch
-    :exit, _ -> :miss
-  end
+  @doc "The activity buckets for the canonical window of `from_ms..to_ms`, after catching up."
+  @spec slice(GenServer.server(), integer(), integer()) :: [Activity.bucket()]
+  def slice(server \\ __MODULE__, from_ms, to_ms),
+    do: call(server, {:slice, from_ms, to_ms})
 
-  @doc """
-  The sent-file events of `path` and its rotated sibling, oldest first, after
-  catching up — or `:miss` if this stream follows a different file or is not
-  running.
-  """
-  @spec sent_events(GenServer.server(), Path.t()) :: {:ok, [SentFiles.event()]} | :miss
-  def sent_events(server \\ __MODULE__, path) do
-    GenServer.call(server, {:sent_events, path}, @read_timeout_ms)
-  catch
-    :exit, _ -> :miss
-  end
+  @doc "The sent-file events of both files, oldest first, after catching up."
+  @spec sent_events(GenServer.server()) :: [SentFiles.event()]
+  def sent_events(server \\ __MODULE__),
+    do: call(server, :sent_events)
 
-  @doc "The retained board records, after catching up with the stream."
-  def board_records(server \\ __MODULE__, path) do
-    GenServer.call(server, {:board_records, path}, @read_timeout_ms)
-  catch
-    :exit, _ -> :miss
-  end
+  @doc "The retained board records, after catching up."
+  @spec board_records(GenServer.server()) :: %{optional(String.t()) => map()}
+  def board_records(server \\ __MODULE__),
+    do: call(server, :board_records)
 
   @doc """
   The published phase map: `session => %{last_event_at: ms, phase: phase}` over every
@@ -193,7 +174,7 @@ defmodule Shuttle.EventStream do
   @doc "Catch up from the durable hook stream before reading one session's turn phase."
   @spec catch_up_session_phase(String.t(), atom()) :: String.t() | nil
   def catch_up_session_phase(session_id, server \\ __MODULE__) when is_binary(session_id) do
-    GenServer.call(server, {:session_phase, session_id}, @read_timeout_ms)
+    call(server, {:session_phase, session_id})
   catch
     :exit, _ -> nil
   end
@@ -224,91 +205,17 @@ defmodule Shuttle.EventStream do
     ArgumentError -> SessionBinding.new()
   end
 
-  @doc "The file this stream follows — for tests and diagnostics."
-  @spec events_file(GenServer.server()) :: Path.t() | nil
-  def events_file(server \\ __MODULE__) do
-    GenServer.call(server, :events_file)
-  catch
-    :exit, _ -> nil
-  end
+  # A test may run its own stream in place of the application's.
+  defp call(server, request),
+    do: GenServer.call(Shuttle.Env.server(server), request, @read_timeout_ms)
 
-  @doc """
-  One line decoded, or `nil` for a blank, malformed or non-object line. The
-  one decode every reader of the stream goes through.
-  """
+  @doc "One line decoded, or `nil` for a blank, malformed or non-object line."
   @spec decode(String.t()) :: map() | nil
   def decode(line) do
     case Jason.decode(line) do
       {:ok, event} when is_map(event) -> event
       _ -> nil
     end
-  end
-
-  @doc """
-  Every event of the rotated sibling of `live` and then of `live`, folded onto
-  `acc` with `fun.(event, acc)` in file order and streamed rather than
-  slurped. A missing file contributes nothing; a file that vanishes or becomes
-  unreadable mid-read contributes nothing either. This is what a reader does
-  on a `:miss`.
-  """
-  @spec fold_files(Path.t(), acc, (map(), acc -> acc)) :: acc when acc: term()
-  def fold_files(live, acc, fun) do
-    acc
-    |> fold_file(rotated(live), fun)
-    |> fold_file(live, fun)
-  end
-
-  defp fold_file(acc, path, fun) do
-    if Shuttle.FS.regular?(path) do
-      path
-      |> Shuttle.FS.stream!()
-      |> Enum.reduce(acc, fn line, acc ->
-        case decode(line) do
-          nil -> acc
-          event -> fun.(event, acc)
-        end
-      end)
-    else
-      acc
-    end
-  rescue
-    # A rotation racing this read. Keep what came before this file, but leave
-    # a trace: a silently-swallowed read is otherwise indistinguishable from a
-    # genuinely quiet hour.
-    error ->
-      Logger.debug("event stream: skipped #{path} — #{Exception.message(error)}")
-      acc
-  end
-
-  @doc """
-  Logs that the stream could not answer a `label` read for `path` and its
-  caller is re-reading the files itself — at most once a minute per label, and
-  only for this host's own stream (a fixture path misses by design).
-
-  A miss is correct but costs a full read of a stream that reaches tens of
-  megabytes, the very cost this process exists to remove. Three unrelated
-  conditions collapse into it: the stream follows a different path, it is not
-  running, or the call timed out. Unlogged, a daemon in any of those states
-  looks exactly like one where the stream never helped, which on a CPU-capped
-  host is the worst thing to have to diagnose from load alone. The limit is
-  there because a miss repeats on every poll by construction.
-  """
-  @spec warn_miss(String.t(), Path.t()) :: :ok
-  def warn_miss(label, path) do
-    now = System.monotonic_time(:millisecond)
-    key = {__MODULE__, :last_miss_log, label}
-    last = :persistent_term.get(key, nil)
-
-    if path == default_events_file() and (is_nil(last) or now - last >= @miss_log_interval_ms) do
-      :persistent_term.put(key, now)
-
-      Logger.warning(
-        "#{label}: event stream miss for #{path}; re-reading the whole file. " <>
-          "Check that #{inspect(__MODULE__)} is running and following this path."
-      )
-    end
-
-    :ok
   end
 
   # ── Server ──
@@ -338,30 +245,21 @@ defmodule Shuttle.EventStream do
   end
 
   @impl true
-  def handle_call({:slice, path, from_ms, to_ms}, _from, %State{events_file: path} = state) do
+  def handle_call({:slice, from_ms, to_ms}, _from, state) do
     state = state |> follow() |> publish()
-    {:reply, {:ok, Activity.slice(state.activity, from_ms, to_ms)}, state}
+    {:reply, Activity.slice(state.activity, from_ms, to_ms), state}
   end
 
-  def handle_call({:sent_events, path}, _from, %State{events_file: path} = state) do
+  def handle_call(:sent_events, _from, state) do
     state = state |> follow() |> publish()
-    events = Enum.reverse(state.sent_rotated, Enum.reverse(state.sent_live))
-    {:reply, {:ok, events}, state}
+    {:reply, Enum.reverse(state.sent_rotated, Enum.reverse(state.sent_live)), state}
   end
 
-  def handle_call({:board_records, path}, _from, %State{events_file: path} = state) do
+  def handle_call(:board_records, _from, state) do
     state = state |> follow() |> publish()
     records = state.board_rotated |> Map.merge(state.board_live) |> Board.prune(state.clock.())
-    {:reply, {:ok, records}, state}
+    {:reply, records, state}
   end
-
-  def handle_call({:board_records, _other}, _from, state), do: {:reply, :miss, state}
-
-  def handle_call({:slice, _other, _from_ms, _to_ms}, _from, state), do: {:reply, :miss, state}
-
-  def handle_call({:sent_events, _other}, _from, state), do: {:reply, :miss, state}
-
-  def handle_call(:events_file, _from, state), do: {:reply, state.events_file, state}
 
   def handle_call({:session_phase, session_id}, _from, state) do
     state = state |> follow() |> publish()
@@ -447,6 +345,29 @@ defmodule Shuttle.EventStream do
           board_live: Board.prune(state.board_live, now)
       })
     end
+  end
+
+  # Every event of `path`, folded in file order and streamed rather than slurped.
+  defp fold_file(acc, path, fun) do
+    if Shuttle.FS.regular?(path) do
+      path
+      |> Shuttle.FS.stream!()
+      |> Enum.reduce(acc, fn line, acc ->
+        case decode(line) do
+          nil -> acc
+          event -> fun.(event, acc)
+        end
+      end)
+    else
+      acc
+    end
+  rescue
+    # A rotation racing this read. Keep what came before this file, but leave
+    # a trace: a silently-swallowed read is otherwise indistinguishable from a
+    # genuinely quiet hour.
+    error ->
+      Logger.debug("event stream: skipped #{path} — #{Exception.message(error)}")
+      acc
   end
 
   # A rebuild from the two files that keeps what the waiting map already knew.
