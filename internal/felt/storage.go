@@ -939,10 +939,6 @@ type pendingWrite struct {
 	context   *moveRewriteContext
 }
 
-func (w pendingWrite) write(s *Storage) error {
-	return w.writeJournaled(s, nil, nil)
-}
-
 func (w pendingWrite) writeJournaled(s *Storage, task *moveRewrite, journal *moveJournal) error {
 	path := w.path
 	if path == "" {
@@ -1118,23 +1114,6 @@ func rewriteMovedRef(before, after *scopedIDResolver, sourceOld, sourceNew, targ
 		}
 	}
 	return destination, true
-}
-
-// rewriteFileBody applies rewrite to the body references of the fiber file at
-// path, returning the file's new bytes with its frontmatter untouched.
-func rewriteFileBody(path string, rewrite func(string) (string, bool)) ([]byte, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	_, _, bodyStart, err := frontmatterBounds(content)
-	if err != nil {
-		return nil, err
-	}
-	body, _ := RewriteBodyRefs(string(content[bodyStart:]), rewrite)
-	out := make([]byte, 0, bodyStart+len(body))
-	out = append(out, content[:bodyStart]...)
-	return append(out, body...), nil
 }
 
 // Migrate performs the storage-model normalization pass:
