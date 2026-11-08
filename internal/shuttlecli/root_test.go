@@ -17,11 +17,15 @@ func TestShuttleRootSurfaceIsTopLevel(t *testing.T) {
 			t.Errorf("%q is not a top-level Shuttle command: command=%v err=%v", name, command, err)
 		}
 	}
-	for _, name := range []string{"shuttle", "add", "edit", "find"} {
+	for _, name := range []string{"shuttle", "add", "edit"} {
 		command, _, err := rootCmd.Find([]string{name})
 		if err == nil && command != rootCmd {
 			t.Errorf("%q should not be a command in Shuttle: %q", name, command.CommandPath())
 		}
+	}
+	// find is Shuttle's own verb, fibers and transcripts together, not Felt's.
+	if command, _, err := rootCmd.Find([]string{"find"}); err != nil || command == rootCmd || command.Flags().Lookup("since") == nil {
+		t.Errorf("shuttle find should be Shuttle's fiber-and-transcript search: command=%v err=%v", command, err)
 	}
 	for _, name := range []string{"store", "json"} {
 		if rootCmd.PersistentFlags().Lookup(name) == nil {
