@@ -94,6 +94,10 @@ An untempered standing close stays on Awaiting review, but its next scheduled oc
 An orchestrator leaving with live threads hands off rather than closes.
 More in [references/operating.md](references/operating.md#threads-on-the-board).
 
+## Finding anything
+
+Does this exist, was it discussed, where did we put it: `shuttle find "<words>"` answers in one call. It prints the store's matching fibers first (felt find's ranking and flags: `-s`, `-t`, `--no-body`, `-r`), then this host's Claude, Codex and Pi sessions whose messages match (`--since 30d`, `--harness`), each with its file and line. Something made in a session and never filed — a page in a cleared scratchpad, a recipe, a decision said aloud — is only in its transcript. `felt find` searches fibers alone; `shuttle transcript search` searches sessions alone, with `--fiber` and `--per-message`.
+
 ## Talking to others
 
 ```bash
@@ -117,7 +121,7 @@ Fallback failures return a notice to the sender; native delivery still respects 
 |---|---|
 | Writing a constitution, choosing an agent, drafts vs dispatch | [references/authoring.md](references/authoring.md) |
 | Roles, seats, keeping a charter | [references/roles.md](references/roles.md) |
-| Dispatch rules, board columns, all verbs, claiming a fiber, remote hosts, messaging detail, transcript search | [references/operating.md](references/operating.md) |
+| Dispatch rules, board columns, all verbs, claiming a fiber, remote hosts, messaging detail, transcript filters | [references/operating.md](references/operating.md) |
 | Writing `tapestry.html` | [references/tapestry.md](references/tapestry.md) |
 | A standing constitution's runs | [references/standing-roles.md](references/standing-roles.md) |
 | Getting a branch ready for the human to read before a PR | [references/change-review.md](references/change-review.md) |

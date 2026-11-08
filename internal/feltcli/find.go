@@ -3,9 +3,11 @@ package feltcli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -15,15 +17,7 @@ import (
 const findOuterCap = 20
 
 func (a *app) findCmd() *cobra.Command {
-	var findStatus string
-	var findTags []string
-	var findBody bool
-	var findNoBody bool
-	var findExact bool
-	var findRegex bool
-	var findHasFields []string
-	var findVerbose bool
-	var findLimit int
+	var q FindQuery
 	command := &cobra.Command{
 		Use:   "find [query]",
 		Short: "Search the whole store, beyond this view",
@@ -42,134 +36,207 @@ Plain queries search bodies by default, placing name/slug hits before metadata
 hits and marking body-dependent hits; --no-body restores the metadata-only scope.
 
 --json is one array with a "store" field on each fiber, every match and status
-included; --limit caps it only when given.`,
+included; --limit caps it only when given.
+
+shuttle find runs this same search and adds session transcripts.`,
 		Example: `  felt find covariance
   felt find -t rule: -r "data|vector"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			storage, _, err := felt.RequireStore(a.env, a.dir)
-			if err != nil {
-				return err
-			}
-
-			query := ""
 			if len(args) == 1 {
-				query = plainQuery(args[0], findRegex)
+				q.Query = args[0]
 			}
-			hasFields := splitListFlag(findHasFields)
-			statusExplicit := cmd.Flags().Changed("status")
-			hasFilters := len(findTags) > 0 || len(hasFields) > 0 || query != ""
-			if !hasFilters {
-				return fmt.Errorf("find needs something to search for: a query, -t, or --has-field (felt ls lists this view)")
-			}
-
-			search, err := compileSearch(query, findStatus, !statusExplicit && hasFilters,
-				findTags, hasFields, nil, findExact, findRegex, !findNoBody, findVerbose)
+			q.Changed(cmd)
+			result, err := Find(a.env, a.dir, q, a.json)
 			if err != nil {
 				return err
 			}
-			// --json is a wire: it carries every status the filter asked for and
-			// every match found, so machine consumers never have to guess what a
-			// human-facing trim removed.
-			suppressClosed := !statusExplicit && !a.json
-
-			bodiesLoaded := search.readsBodies()
-			felts, err := listForSearch(storage, nil, a.json, search)
-			if err != nil {
-				return err
-			}
-			shown, collapsed, bodyOnly, closedSuppressed, err := search.run(storage, felts, suppressClosed, bodiesLoaded)
-			if err != nil {
-				return err
-			}
-			if a.json && findBody && !bodiesLoaded {
-				shown, err = hydrateBodies(storage, shown)
-				if err != nil {
-					return err
-				}
-			}
-
-			outerShown, outerCollapsed, outerBodyOnly, outerRoot, outerClosed, err := findOuterHits(storage, search, suppressClosed, a.json, findBody)
-			if err != nil {
-				return err
-			}
-			closedSuppressed += outerClosed
-
 			if a.json {
-				outer := limitOuter(outerShown, findLimit, cmd.Flags().Changed("limit"))
-				hits := make([]findHit, 0, len(shown)+len(outer))
-				for _, f := range shown {
-					hits = append(hits, findHit{Felt: f, Store: storage.Root()})
-				}
-				for _, f := range outer {
-					hits = append(hits, findHit{Felt: f, Store: outerRoot})
-				}
-				// Bodies participate in matching by default, but are an output opt-in.
-				if !findBody {
-					for _, hit := range hits {
-						hit.Body = ""
-					}
-				}
-				return a.outputJSON(hits)
+				return a.outputJSON(result.Hits())
 			}
-
-			if len(shown) == 0 && len(outerShown) == 0 {
-				if query != "" {
-					fmt.Fprintf(a.env.Stdout, "No fibers matching %q\n", query)
-				} else {
-					fmt.Fprintln(a.env.Stdout, "No fibers found")
-				}
-			}
-			for _, f := range shown {
-				fmt.Fprint(a.env.Stdout, formatFeltTwoLine(f, collapsed[f.ID], bodyOnly[f.ID]))
-			}
-
-			if len(outerShown) > 0 {
-				if len(shown) > 0 {
-					fmt.Fprintln(a.env.Stdout)
-				}
-				// With no local hits the block introduces nothing, so it names
-				// the store plainly rather than pointing "elsewhere" from nowhere.
-				if len(shown) > 0 {
-					fmt.Fprintf(a.env.Stdout, "── elsewhere in %s ──\n", outerRoot)
-				} else {
-					fmt.Fprintf(a.env.Stdout, "── in %s ──\n", outerRoot)
-				}
-				printed := limitOuter(outerShown, findLimit, true)
-				for _, f := range printed {
-					fmt.Fprint(a.env.Stdout, formatFeltTwoLine(f, outerCollapsed[f.ID], outerBodyOnly[f.ID]))
-				}
-				if remainder := len(outerShown) - len(printed); remainder > 0 {
-					fmt.Fprintf(a.env.Stdout, "… %d more — refine the query or pass --limit 0\n", remainder)
-				}
-			}
-
-			if closedSuppressed > 0 {
-				fmt.Fprintf(a.env.Stdout, "\n(+%d closed — add -s closed)\n", closedSuppressed)
-			}
+			result.Write(a.env.Stdout)
 			return nil
 		},
 	}
 	command.GroupID = groupSearch
-	command.Flags().StringVarP(&findStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
-	command.Flags().StringArrayVarP(&findTags, "tag", "t", nil, "Filter by tag (repeatable, AND; a trailing colon matches a prefix)")
-	command.Flags().BoolVar(&findBody, "body", false, "With --json, include bodies in results; body search is the default")
-	command.Flags().BoolVar(&findNoBody, "no-body", false, "Search only names and metadata")
-	command.Flags().BoolVarP(&findExact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
-	command.Flags().BoolVarP(&findRegex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
-	command.Flags().StringArrayVar(&findHasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
-	command.Flags().BoolVarP(&findVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
-	// Long-only on purpose: ls's -n is --recent, and one letter meaning two
-	// different things across two sibling search verbs is a trap.
-	command.Flags().IntVar(&findLimit, "limit", findOuterCap, "Cap on entries printed from the enclosing store (0 = no cap)")
+	AddFindFlags(command, &q)
 	return command
 }
 
-// findHit is one fiber in --json, carrying the store that holds it alongside
+// FindQuery is one fiber search over a whole store, as felt find takes it.
+// shuttle find binds the same flags with AddFindFlags and runs the same Find.
+type FindQuery struct {
+	Query          string
+	Status         string
+	StatusExplicit bool
+	Tags           []string
+	HasFields      []string
+	Body           bool
+	NoBody         bool
+	Exact          bool
+	Regex          bool
+	Verbose        bool
+	Limit          int
+	LimitExplicit  bool
+}
+
+// AddFindFlags binds find's fiber-search flags to q.
+func AddFindFlags(command *cobra.Command, q *FindQuery) {
+	flags := command.Flags()
+	flags.StringVarP(&q.Status, "status", "s", "", "Filter by status (open, active, closed, all)")
+	flags.StringArrayVarP(&q.Tags, "tag", "t", nil, "Filter by tag (repeatable, AND; a trailing colon matches a prefix)")
+	flags.BoolVar(&q.Body, "body", false, "With --json, include bodies in results; body search is the default")
+	flags.BoolVar(&q.NoBody, "no-body", false, "Search only names and metadata")
+	flags.BoolVarP(&q.Exact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
+	flags.BoolVarP(&q.Regex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
+	flags.StringArrayVar(&q.HasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
+	flags.BoolVarP(&q.Verbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
+	// Long-only on purpose: ls's -n is --recent, and one letter meaning two
+	// different things across two sibling search verbs is a trap.
+	flags.IntVar(&q.Limit, "limit", findOuterCap, "Cap on entries printed from the enclosing store (0 = no cap)")
+}
+
+// Changed records which of q's flags the caller set explicitly.
+func (q *FindQuery) Changed(command *cobra.Command) {
+	q.StatusExplicit = command.Flags().Changed("status")
+	q.LimitExplicit = command.Flags().Changed("limit")
+}
+
+// FindResult is a completed fiber search: the local view's matches, then the
+// enclosing store's.
+type FindResult struct {
+	query            string
+	jsonMode         bool
+	limit            int
+	limitExplicit    bool
+	local            findBlock
+	outer            findBlock
+	closedSuppressed int
+}
+
+type findBlock struct {
+	shown     []*felt.Felt
+	collapsed map[string]int
+	bodyOnly  map[string]bool
+	store     string
+}
+
+// Find runs q against the store that dir resolves to. jsonMode keeps every
+// status and match, the wire form; otherwise closed matches are counted.
+func Find(env *sysenv.Env, dir string, q FindQuery, jsonMode bool) (*FindResult, error) {
+	storage, _, err := felt.RequireStore(env, dir)
+	if err != nil {
+		return nil, err
+	}
+	query := ""
+	if q.Query != "" {
+		query = plainQuery(q.Query, q.Regex)
+	}
+	hasFields := splitListFlag(q.HasFields)
+	if len(q.Tags) == 0 && len(hasFields) == 0 && query == "" {
+		return nil, fmt.Errorf("find needs something to search for: a query, -t, or --has-field (felt ls lists this view)")
+	}
+	search, err := compileSearch(query, q.Status, !q.StatusExplicit, q.Tags, hasFields, nil, q.Exact, q.Regex, !q.NoBody, q.Verbose)
+	if err != nil {
+		return nil, err
+	}
+	// --json is a wire: it carries every status the filter asked for and
+	// every match found, so machine consumers never have to guess what a
+	// human-facing trim removed.
+	suppressClosed := !q.StatusExplicit && !jsonMode
+
+	bodiesLoaded := search.readsBodies()
+	felts, err := listForSearch(storage, nil, jsonMode, search)
+	if err != nil {
+		return nil, err
+	}
+	shown, collapsed, bodyOnly, closedSuppressed, err := search.run(storage, felts, suppressClosed, bodiesLoaded)
+	if err != nil {
+		return nil, err
+	}
+	if jsonMode && q.Body && !bodiesLoaded {
+		if shown, err = hydrateBodies(storage, shown); err != nil {
+			return nil, err
+		}
+	}
+	outerShown, outerCollapsed, outerBodyOnly, outerRoot, outerClosed, err := findOuterHits(storage, search, suppressClosed, jsonMode, q.Body)
+	if err != nil {
+		return nil, err
+	}
+	result := &FindResult{
+		query:            query,
+		jsonMode:         jsonMode,
+		limit:            q.Limit,
+		limitExplicit:    q.LimitExplicit,
+		local:            findBlock{shown, collapsed, bodyOnly, storage.Root()},
+		outer:            findBlock{outerShown, outerCollapsed, outerBodyOnly, outerRoot},
+		closedSuppressed: closedSuppressed + outerClosed,
+	}
+	// Bodies participate in matching by default, but are an output opt-in.
+	if jsonMode && !q.Body {
+		for _, block := range []findBlock{result.local, result.outer} {
+			for _, f := range block.shown {
+				f.Body = ""
+			}
+		}
+	}
+	return result, nil
+}
+
+// Hits is the --json answer: local hits, then the enclosing store's, each
+// carrying the store that holds it.
+func (r *FindResult) Hits() []FindHit {
+	outer := limitOuter(r.outer.shown, r.limit, r.limitExplicit)
+	hits := make([]FindHit, 0, len(r.local.shown)+len(outer))
+	for _, f := range r.local.shown {
+		hits = append(hits, FindHit{Felt: f, Store: r.local.store})
+	}
+	for _, f := range outer {
+		hits = append(hits, FindHit{Felt: f, Store: r.outer.store})
+	}
+	return hits
+}
+
+// Write prints the human form.
+func (r *FindResult) Write(w io.Writer) {
+	shown, outerShown := r.local.shown, r.outer.shown
+	if len(shown) == 0 && len(outerShown) == 0 {
+		if r.query != "" {
+			fmt.Fprintf(w, "No fibers matching %q\n", r.query)
+		} else {
+			fmt.Fprintln(w, "No fibers found")
+		}
+	}
+	for _, f := range shown {
+		fmt.Fprint(w, formatFeltTwoLine(f, r.local.collapsed[f.ID], r.local.bodyOnly[f.ID]))
+	}
+	if len(outerShown) > 0 {
+		if len(shown) > 0 {
+			fmt.Fprintln(w)
+			fmt.Fprintf(w, "── elsewhere in %s ──\n", r.outer.store)
+		} else {
+			// With no local hits the block introduces nothing, so it names
+			// the store plainly rather than pointing "elsewhere" from nowhere.
+			fmt.Fprintf(w, "── in %s ──\n", r.outer.store)
+		}
+		printed := limitOuter(outerShown, r.limit, true)
+		for _, f := range printed {
+			fmt.Fprint(w, formatFeltTwoLine(f, r.outer.collapsed[f.ID], r.outer.bodyOnly[f.ID]))
+		}
+		if remainder := len(outerShown) - len(printed); remainder > 0 {
+			fmt.Fprintf(w, "… %d more — refine the query or pass --limit 0\n", remainder)
+		}
+	}
+	if r.closedSuppressed > 0 {
+		fmt.Fprintf(w, "\n(+%d closed — add -s closed)\n", r.closedSuppressed)
+	}
+}
+
+// FindHit is one fiber in --json, carrying the store that holds it alongside
 // the fiber's own fields. A merged array of these is the whole answer: local
 // hits under their local ids, outer hits under their full outer ids, and
 // `store` saying which coordinates each is in.
-type findHit struct {
+type FindHit struct {
 	*felt.Felt
 	Store string
 }
@@ -177,7 +244,7 @@ type findHit struct {
 // MarshalJSON splices `store` into the fiber's own JSON. Felt marshals itself
 // (field order, omitempty, the shuttle facet), so embedding alone would let
 // that method swallow the wrapper and drop the field entirely.
-func (h findHit) MarshalJSON() ([]byte, error) {
+func (h FindHit) MarshalJSON() ([]byte, error) {
 	data, err := json.Marshal(h.Felt)
 	if err != nil {
 		return nil, err

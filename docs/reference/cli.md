@@ -84,6 +84,8 @@ people.
 
 ## Session transcript search
 
+`shuttle find "<query>"` searches fibers and transcripts in one call: `felt find`'s fiber hits over the whole store, then the transcript search's session hits below. It takes `felt find`'s flags, plus `--since` and `--harness` for the sessions; `--limit` caps both blocks, and `--json` returns `{query, fibers, transcripts, index, errors}`. A regex or a query-less filter skips the sessions; a half that fails is reported under `errors` while the other still answers.
+
 `shuttle transcript <session-id>` resolves a transcript's native path, materializing a remote transcript into the local cache when needed.
 The same command family searches local Claude Code, Codex, and Pi JSONL transcripts:
 

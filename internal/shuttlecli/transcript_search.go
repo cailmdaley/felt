@@ -107,134 +107,31 @@ func (a *app) transcriptIndexCmd() *cobra.Command {
 	return cmd
 }
 
+// transcriptQuery is one search over this host's transcript index, as
+// `shuttle transcript search` and `shuttle find` take it.
+type transcriptQuery struct {
+	Query           string
+	Sessions        []string
+	ExcludeSessions []string
+	Fiber           string
+	Since           string
+	Project         string
+	Harness         string
+	Limit           int
+	NoIndex         bool
+	IncludeSelf     bool
+	PerMessage      bool
+}
+
 func (a *app) transcriptSearchCmd() *cobra.Command {
-	var sessions, excludeSessions []string
-	var fiber, since, project, harness string
-	var limit int
-	var noIndex, includeSelf, perMessage bool
-	cmd := &cobra.Command{Use: "search <query...>", Short: "Search local harness transcripts by relevance", Long: "Search local harness transcripts by relevance, returning each session's best message and matching-message count. Use --per-message for individual messages. The limit counts sessions by default.", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		query := strings.Join(args, " ")
-		if limit < 1 {
-			return fmt.Errorf("--limit must be positive")
-		}
-		if harness != "" && harness != "claude" && harness != "codex" && harness != "pi" {
-			return fmt.Errorf("--harness must be claude, codex, or pi")
-		}
-		sinceValue, err := parseTranscriptSince(since, a.eventNow())
-		if err != nil {
-			return err
-		}
-		path, err := transcriptindex.DefaultPath(a.env)
-		if err != nil {
-			return err
-		}
-		idx, err := transcriptindex.Open(path)
-		if err != nil {
-			return err
-		}
-		defer idx.Close()
+	q := transcriptQuery{}
+	cmd := &cobra.Command{Use: "search <query...>", Short: "Search local harness transcripts by relevance", Long: "Search local harness transcripts by relevance, returning each session's best message and matching-message count. Use --per-message for individual messages. The limit counts sessions by default. shuttle find runs this search alongside a fiber search.", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		q.Query = strings.Join(args, " ")
 		ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 		defer cancel()
-		stats, err := idx.Stats(ctx)
+		result, err := a.searchTranscripts(ctx, q)
 		if err != nil {
 			return err
-		}
-		errorsList := []string{}
-		ready, err := idx.Ready(ctx)
-		if err != nil {
-			return err
-		}
-		if !ready && stats.UpdatedAt == "" && stats.Messages == 0 {
-			return fmt.Errorf("transcript search index is empty; the daemon builds it in the background when available; if no daemon is running, run `shuttle transcript index`")
-		}
-		if !noIndex {
-			if !ready {
-				return fmt.Errorf("transcript search index has no completed scan; the daemon builds it in the background when available; if no daemon is running, run `shuttle transcript index`")
-			}
-			roots, e := transcriptindex.Roots(a.env)
-			if e != nil {
-				return e
-			}
-			problems, catchErr := idx.CatchUp(ctx, roots, false)
-			for _, problem := range problems {
-				errorsList = append(errorsList, problem)
-			}
-			if catchErr != nil {
-				return catchErr
-			}
-			stats, err = idx.Stats(ctx)
-			if err != nil {
-				return err
-			}
-		}
-		var selected []string
-		ledger, ledgerErr := a.fetchSessionLedger()
-		if ledgerErr != nil {
-			errorsList = append(errorsList, "session ledger unavailable: "+ledgerErr.Error())
-		}
-		if fiber != "" {
-			if ledgerErr != nil {
-				selected = []string{}
-			} else {
-				_, rows, _, resolveErr := a.resolveProvenanceRows(fiber, ledger.Records)
-				if resolveErr != nil {
-					errorsList = append(errorsList, "fiber filter unavailable: "+resolveErr.Error())
-					selected = []string{}
-				} else {
-					selected = []string{}
-					requested := map[string]bool{}
-					for _, session := range sessions {
-						requested[session] = true
-					}
-					for _, row := range rows {
-						if len(sessions) > 0 && !requested[row.Session] && !requested[row.ThreadID] {
-							continue
-						}
-						selected = append(selected, row.Session)
-						if row.ThreadID != "" {
-							selected = append(selected, row.ThreadID)
-						}
-					}
-				}
-			}
-		} else if len(sessions) > 0 {
-			selected = sessions
-		}
-		excluded := append([]string(nil), excludeSessions...)
-		if !includeSelf {
-			if _, session := a.harnessSessionFromEnv(); session != "" {
-				excluded = append(excluded, session)
-			}
-		}
-		hits, err := idx.Search(ctx, query, transcriptindex.Options{Sessions: selected, ExcludeSessions: excluded, Since: sinceValue, Project: project, Harness: harness, Limit: limit, PerMessage: perMessage})
-		if err != nil {
-			return err
-		}
-		result := transcriptSearchResult{Query: query, Index: stats, Hits: []transcriptSearchHit{}, Errors: errorsList}
-		fiberNamesByID := map[string]string{}
-		for _, hit := range hits {
-			fibers := []transcriptFiber{}
-			seenFibers := map[string]bool{}
-			if ledger != nil {
-				for _, row := range ledger.Records {
-					if row.Session == hit.Session || row.ThreadID == hit.Session {
-						id := row.fiber()
-						if id != "" && !seenFibers[id] {
-							seenFibers[id] = true
-							name, ok := fiberNamesByID[id]
-							if !ok {
-								name = filepath.Base(id)
-								if f, e := a.shuttleAddressFiber(id); e == nil {
-									name = f.Name
-								}
-								fiberNamesByID[id] = name
-							}
-							fibers = append(fibers, transcriptFiber{ID: id, Name: name})
-						}
-					}
-				}
-			}
-			result.Hits = append(result.Hits, transcriptSearchHit{Hit: hit, Fibers: fibers})
 		}
 		if a.json {
 			return a.outputJSON(result)
@@ -242,30 +139,159 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 		for _, problem := range result.Errors {
 			fmt.Fprintln(a.env.Stderr, "warning:", problem)
 		}
-		for _, hit := range result.Hits {
-			projectName, fiberLabel := "", ""
-			if hit.Project != "" {
-				projectName = filepath.Base(hit.Project)
-			}
-			if len(hit.Fibers) > 0 {
-				fiberLabel = "[" + strings.Join(fiberNames(hit.Fibers), ", ") + "]"
-			}
-			fmt.Fprintf(a.env.Stdout, "%.4g  %s  %-8s  %s  %s  %s  (%d matches)\n  %s\n  open: %s:%d  (shuttle transcript %s)\n", hit.Score, hit.Timestamp, hit.Harness, projectName, shortSession(hit.Session), fiberLabel, hit.Matches, displaySnippet(a.env.Stdout, hit.Snippet), hit.Path, hit.Line, hit.Session)
-		}
+		writeTranscriptHits(a.env.Stdout, result.Hits)
 		return nil
 	}}
-	cmd.Flags().StringArrayVar(&sessions, "session", nil, "restrict to session ID (repeatable)")
-	cmd.Flags().StringArrayVar(&excludeSessions, "exclude-session", nil, "exclude session ID even with --include-self (repeatable)")
-	cmd.Flags().BoolVar(&includeSelf, "include-self", false, "disable automatic exclusion of the calling harness session")
-	cmd.Flags().StringVar(&fiber, "fiber", "", "restrict to sessions linked to this fiber")
-	cmd.Flags().StringVar(&since, "since", "", "restrict by age (30d or YYYY-MM-DD)")
-	cmd.Flags().StringVar(&project, "project", "", "project path prefix")
-	cmd.Flags().StringVar(&harness, "harness", "", "harness (claude, codex, pi)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 20, "maximum sessions (messages with --per-message)")
-	cmd.Flags().BoolVar(&perMessage, "per-message", false, "return individual messages instead of grouping by session")
-	cmd.Flags().BoolVar(&noIndex, "no-index", false, "search without checking for new transcript content")
+	cmd.Flags().StringArrayVar(&q.Sessions, "session", nil, "restrict to session ID (repeatable)")
+	cmd.Flags().StringArrayVar(&q.ExcludeSessions, "exclude-session", nil, "exclude session ID even with --include-self (repeatable)")
+	cmd.Flags().BoolVar(&q.IncludeSelf, "include-self", false, "disable automatic exclusion of the calling harness session")
+	cmd.Flags().StringVar(&q.Fiber, "fiber", "", "restrict to sessions linked to this fiber")
+	cmd.Flags().StringVar(&q.Since, "since", "", "restrict by age (30d or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&q.Project, "project", "", "project path prefix")
+	cmd.Flags().StringVar(&q.Harness, "harness", "", "harness (claude, codex, pi)")
+	cmd.Flags().IntVarP(&q.Limit, "limit", "n", 20, "maximum sessions (messages with --per-message)")
+	cmd.Flags().BoolVar(&q.PerMessage, "per-message", false, "return individual messages instead of grouping by session")
+	cmd.Flags().BoolVar(&q.NoIndex, "no-index", false, "search without checking for new transcript content")
 	return cmd
 }
+
+// searchTranscripts runs q against this host's transcript index, first
+// catching the index up with new transcript content unless q.NoIndex, and
+// labels each hit with the fibers its session worked on.
+func (a *app) searchTranscripts(ctx context.Context, q transcriptQuery) (transcriptSearchResult, error) {
+	var none transcriptSearchResult
+	if q.Limit < 1 {
+		return none, fmt.Errorf("--limit must be positive")
+	}
+	if q.Harness != "" && q.Harness != "claude" && q.Harness != "codex" && q.Harness != "pi" {
+		return none, fmt.Errorf("--harness must be claude, codex, or pi")
+	}
+	sinceValue, err := parseTranscriptSince(q.Since, a.eventNow())
+	if err != nil {
+		return none, err
+	}
+	path, err := transcriptindex.DefaultPath(a.env)
+	if err != nil {
+		return none, err
+	}
+	idx, err := transcriptindex.Open(path)
+	if err != nil {
+		return none, err
+	}
+	defer idx.Close()
+	stats, err := idx.Stats(ctx)
+	if err != nil {
+		return none, err
+	}
+	errorsList := []string{}
+	ready, err := idx.Ready(ctx)
+	if err != nil {
+		return none, err
+	}
+	if !ready && stats.UpdatedAt == "" && stats.Messages == 0 {
+		return none, fmt.Errorf("transcript search index is empty; the daemon builds it in the background when available; if no daemon is running, run `shuttle transcript index`")
+	}
+	if !q.NoIndex {
+		if !ready {
+			return none, fmt.Errorf("transcript search index has no completed scan; the daemon builds it in the background when available; if no daemon is running, run `shuttle transcript index`")
+		}
+		roots, e := transcriptindex.Roots(a.env)
+		if e != nil {
+			return none, e
+		}
+		problems, catchErr := idx.CatchUp(ctx, roots, false)
+		errorsList = append(errorsList, problems...)
+		if catchErr != nil {
+			return none, catchErr
+		}
+		if stats, err = idx.Stats(ctx); err != nil {
+			return none, err
+		}
+	}
+	var selected []string
+	ledger, ledgerErr := a.fetchSessionLedger()
+	if ledgerErr != nil {
+		errorsList = append(errorsList, "session ledger unavailable: "+ledgerErr.Error())
+	}
+	if q.Fiber != "" {
+		selected = []string{}
+		if ledgerErr == nil {
+			_, rows, _, resolveErr := a.resolveProvenanceRows(q.Fiber, ledger.Records)
+			if resolveErr != nil {
+				errorsList = append(errorsList, "fiber filter unavailable: "+resolveErr.Error())
+			} else {
+				requested := map[string]bool{}
+				for _, session := range q.Sessions {
+					requested[session] = true
+				}
+				for _, row := range rows {
+					if len(q.Sessions) > 0 && !requested[row.Session] && !requested[row.ThreadID] {
+						continue
+					}
+					selected = append(selected, row.Session)
+					if row.ThreadID != "" {
+						selected = append(selected, row.ThreadID)
+					}
+				}
+			}
+		}
+	} else if len(q.Sessions) > 0 {
+		selected = q.Sessions
+	}
+	excluded := append([]string(nil), q.ExcludeSessions...)
+	if !q.IncludeSelf {
+		if _, session := a.harnessSessionFromEnv(); session != "" {
+			excluded = append(excluded, session)
+		}
+	}
+	hits, err := idx.Search(ctx, q.Query, transcriptindex.Options{Sessions: selected, ExcludeSessions: excluded, Since: sinceValue, Project: q.Project, Harness: q.Harness, Limit: q.Limit, PerMessage: q.PerMessage})
+	if err != nil {
+		return none, err
+	}
+	result := transcriptSearchResult{Query: q.Query, Index: stats, Hits: []transcriptSearchHit{}, Errors: errorsList}
+	fiberNamesByID := map[string]string{}
+	for _, hit := range hits {
+		fibers := []transcriptFiber{}
+		seenFibers := map[string]bool{}
+		if ledger != nil {
+			for _, row := range ledger.Records {
+				if row.Session != hit.Session && row.ThreadID != hit.Session {
+					continue
+				}
+				id := row.fiber()
+				if id == "" || seenFibers[id] {
+					continue
+				}
+				seenFibers[id] = true
+				name, ok := fiberNamesByID[id]
+				if !ok {
+					name = filepath.Base(id)
+					if f, e := a.shuttleAddressFiber(id); e == nil {
+						name = f.Name
+					}
+					fiberNamesByID[id] = name
+				}
+				fibers = append(fibers, transcriptFiber{ID: id, Name: name})
+			}
+		}
+		result.Hits = append(result.Hits, transcriptSearchHit{Hit: hit, Fibers: fibers})
+	}
+	return result, nil
+}
+
+func writeTranscriptHits(w io.Writer, hits []transcriptSearchHit) {
+	for _, hit := range hits {
+		projectName, fiberLabel := "", ""
+		if hit.Project != "" {
+			projectName = filepath.Base(hit.Project)
+		}
+		if len(hit.Fibers) > 0 {
+			fiberLabel = "[" + strings.Join(fiberNames(hit.Fibers), ", ") + "]"
+		}
+		fmt.Fprintf(w, "%.4g  %s  %-8s  %s  %s  %s  (%d matches)\n  %s\n  open: %s:%d  (shuttle transcript %s)\n", hit.Score, hit.Timestamp, hit.Harness, projectName, shortSession(hit.Session), fiberLabel, hit.Matches, displaySnippet(w, hit.Snippet), hit.Path, hit.Line, hit.Session)
+	}
+}
+
 func displaySnippet(w io.Writer, snippet string) string {
 	f, ok := w.(*os.File)
 	if !ok {

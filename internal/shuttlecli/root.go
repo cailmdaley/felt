@@ -270,6 +270,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.claudeMailRecoverCmd(),
 		a.shuttleSessionsCmd(),
 		a.shuttleTranscriptCmd(),
+		a.findCmd(),
 		a.remotesCmd(),
 		a.resolveDirCmd(),
 		a.shuttleSendFileCmd(),
