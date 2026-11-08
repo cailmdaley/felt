@@ -1,15 +1,13 @@
 import { attachConversationPicker } from './conversationMenu.js'
-import { humanizeIdleAge } from './utils.js'
+import { age } from './civilDay.js'
 import { conversationDestinations, conversationDevice, linkDestination, resolveDestination, REMOTE_CONTROL_REQUIRED, type ConversationWorker, type WorkerOpener } from './conversationOpening.js'
 import type { KanbanCard } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 
-export { canOpenDesktopApp, atDesktop } from './conversationLinks.js'
-
 /** The pill's hover title: the turn in full, and how long it has held. */
 export function turnTitle(card: TurnInput, nowMs = Date.now()): string {
   const { detail, since } = turnOf(card, nowMs)
-  return since !== undefined && Number.isFinite(since) ? `${detail} (${humanizeIdleAge(nowMs - since)})` : detail
+  return since !== undefined && Number.isFinite(since) ? `${detail} (${age(nowMs - since)})` : detail
 }
 
 type TurnInput = Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale'>

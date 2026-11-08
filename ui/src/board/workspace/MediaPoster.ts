@@ -1,3 +1,4 @@
+import { mediaTime } from '../civilDay.js'
 import './mediaPoster.css'
 
 export interface MediaPoster {
@@ -34,7 +35,7 @@ export function createMediaPoster(kind: 'audio' | 'video'): MediaPoster {
     setAudio(peaks, duration) {
       if (kind !== 'audio') return
       if (durationLabel) {
-        durationLabel.textContent = Number.isFinite(duration) && duration! > 0 ? formatDuration(duration!) : ''
+        durationLabel.textContent = Number.isFinite(duration) && duration! > 0 ? mediaTime(duration!) : ''
         durationLabel.hidden = !durationLabel.textContent
       }
       if (!peaks?.length || !drawPeaks(canvas, peaks)) el.classList.remove('ws-media-poster-ready')
@@ -80,7 +81,3 @@ function drawPeaks(canvas: HTMLCanvasElement, peaks: number[]): boolean {
   return true
 }
 
-function formatDuration(seconds: number): string {
-  const whole = Math.max(0, Math.floor(seconds))
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
-}

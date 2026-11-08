@@ -1,6 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { familyModel, type FamilyModel, type MapFeeds, type MapFile, type MapThread } from '../family/model.js'
-import { htmlEl as el, markPath, markSvg, shortAgo } from '../family/drawing.js'
+import { htmlEl as el, markPath, markSvg } from '../family/drawing.js'
+import { age } from '../civilDay.js'
 import { ASIDE_SECTIONS, SECTION_WORD, opening, outline, tally, underAll, type AsideSection, type Line, type Under } from '../family/outline.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import type { Conversations } from '../conversationOpening.js'
@@ -313,7 +314,7 @@ export class FamilyPage {
     name.textContent = thread === model.root ? thread.name : slug(thread.card)
     name.title = thread.name
     row.querySelector('.fp-word')!.textContent = thread.tone === 'still' ? thread.word : ''
-    row.querySelector('.fp-meta')!.textContent = shortAgo(this.under.get(thread.key)?.lastMove ?? thread.lastMove, model.now)
+    row.querySelector('.fp-meta')!.textContent = age(model.now - (this.under.get(thread.key)?.lastMove ?? thread.lastMove))
     const note = row.querySelector<HTMLElement>('.fp-note')!
     note.textContent = thread.note
     note.hidden = !thread.note
@@ -370,7 +371,7 @@ export class FamilyPage {
       item.setAttribute('aria-pressed', String(file.key === shown))
       item.toggleAttribute('data-unread', file.unread)
       item.append(el('span', 'fp-file-name', file.name))
-      if (file.at) item.append(el('span', 'fp-file-age', shortAgo(file.at, this.model!.now)))
+      if (file.at) item.append(el('span', 'fp-file-age', age(this.model!.now - file.at)))
       return item
     }))
   }

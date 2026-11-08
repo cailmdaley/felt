@@ -9,7 +9,8 @@
  */
 
 import type { MicHandlers } from './mic'
-import { TERMINAL_LINKS, clockTime, type AudioHealth, type LinkState } from './phoneState'
+import { clockSeconds } from '../board/civilDay.js'
+import { TERMINAL_LINKS, type AudioHealth, type LinkState } from './phoneState'
 
 export interface MicLike {
   health(): AudioHealth
@@ -154,7 +155,7 @@ export class AudioSession {
       onLoss: (since, until) => {
         if (this.relay !== relay) return
         this.lostSince = until === null ? since : null
-        if (until !== null) this.warning = `Audio lost from ${clockTime(since)} to ${clockTime(until)}.`
+        if (until !== null) this.warning = `Audio lost from ${clockSeconds(since)} to ${clockSeconds(until)}.`
         this.changed()
       },
     })
@@ -225,7 +226,7 @@ export class AudioSession {
   }
 
   private reportGap(since: number, until: number): void {
-    this.warning = `Audio may be missing from ${clockTime(since)} to ${clockTime(until)} (the screen locked or the browser went to the background).`
+    this.warning = `Audio may be missing from ${clockSeconds(since)} to ${clockSeconds(until)} (the screen locked or the browser went to the background).`
     this.changed()
   }
 
@@ -246,7 +247,7 @@ export class AudioSession {
   private interrupted(why: string): void {
     this.needsRestore = true
     const since = Math.min(this.now(), this.hiddenSince ?? Infinity, this.silentSince ?? Infinity)
-    this.warning = `Audio was interrupted at ${clockTime(since)} (${why}); speech may be missing until the mic is back.`
+    this.warning = `Audio was interrupted at ${clockSeconds(since)} (${why}); speech may be missing until the mic is back.`
     this.changed()
   }
 

@@ -1,5 +1,5 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { civilWeekday, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
+import { civilWeekday, daysBetween, formatCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js'
 
 /**
  * "Rest until": a centered dialog with a month grid and a vim-shaped cursor.
@@ -212,6 +212,3 @@ function addMonths(day: string, months: number): string {
   return `${String(year).padStart(4, '0')}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 }
 
-function daysBetween(from: string, to: string): number {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
-}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, clockTime, zone } from './civilDay.js'
+import { age, ago, clockTime, zone } from './civilDay.js'
 
 describe('board clocks', () => {
   it('formats wall time in the requested zone', () => {
@@ -17,5 +17,6 @@ describe('board clocks', () => {
     ] as const) expect(ago(now - elapsed, now)).toBe(expected)
     expect(ago(now - 4_000, now, { seconds: true })).toBe('4s ago')
     expect(ago(now + 1_000, now)).toBe('just now')
+    expect([age(0), age(45_000), age(12 * 60_000), age(-5_000), age(Number.NaN)]).toEqual(['now', 'now', '12m', 'now', 'now'])
   })
 })

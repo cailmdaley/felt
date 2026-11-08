@@ -14,6 +14,7 @@
 
 import './FileViewerPanel.css'
 import './prose.css'
+import { mediaTime } from './civilDay.js'
 import { thumbnailPreviews } from './workspace/thumbnailPreview.js'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
@@ -402,7 +403,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
       options.onThumbnailSource?.(first.bytes, first.etag)
       finish(true)
       void loadDuration(src, controller.signal).then(seconds => {
-        if (seconds !== null && !disposed) duration.textContent = formatMediaTime(seconds)
+        if (seconds !== null && !disposed) duration.textContent = mediaTime(seconds)
       })
     })
   } else if (kind === 'video') {
@@ -413,7 +414,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     media.tabIndex = -1
     media.addEventListener('play', () => media.pause())
     media.addEventListener('loadedmetadata', () => {
-      if (Number.isFinite(media.duration)) duration.textContent = formatMediaTime(media.duration)
+      if (Number.isFinite(media.duration)) duration.textContent = mediaTime(media.duration)
       finish(true)
     }, { once: true })
     media.addEventListener('error', () => finish(false), { once: true })
@@ -447,10 +448,6 @@ export async function readThumbnailMetadata(src: string, signal: AbortSignal, on
   const first = await peek(src, priority, { fresh, signal })
   // Native playback and preview do not depend on metadata.
   if (first && !signal.aborted) onSource(first.bytes, first.etag)
-}
-
-function formatMediaTime(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`
 }
 
 const liveViewSubscriptions = new WeakMap<HTMLElement, LiveFileSubscription>()

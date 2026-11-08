@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MicHandlers } from './mic'
-import { clockTime, type AudioHealth, type LinkState } from './phoneState'
+import { clockSeconds } from '../board/civilDay.js'
+import { type AudioHealth, type LinkState } from './phoneState'
 import { AudioSession, type LockLike, type MicLike, type RelayEvents, type RelayLike } from './session'
 
 function deferred<T>() {
@@ -188,7 +189,7 @@ describe('audio session recovery', () => {
     expect(session.warning).toBeNull()
     tick(10_000)
     session.returned()
-    const fullGap = `Audio may be missing from ${clockTime(start)} to ${clockTime(start + 180_000)} (the screen locked or the browser went to the background).`
+    const fullGap = `Audio may be missing from ${clockSeconds(start)} to ${clockSeconds(start + 180_000)} (the screen locked or the browser went to the background).`
     expect(session.warning).toBe(fullGap) // Visible before any fresh worklet callback.
     relays[0].emit('connected')
     mic.handlers.onChunk(new ArrayBuffer(4))
@@ -201,7 +202,7 @@ describe('audio session recovery', () => {
     mic.state = 'suspended'
     session.returned()
     expect(session.needsRestore).toBe(true)
-    expect(session.warning).toContain(`interrupted at ${clockTime(start + 180_000)}`)
+    expect(session.warning).toContain(`interrupted at ${clockSeconds(start + 180_000)}`)
 
     // Permission/open can also finish after the tab was hidden.
     const acquiring = harness()

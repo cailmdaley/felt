@@ -218,7 +218,7 @@ does not come from the pin: every zone-dependent computation lives in
 `ui/src/board/civilDay.ts` and takes its zone as a parameter,
 `civilDay.properties.test.ts` checks its laws across the IANA zone database,
 and `ui/test/zoneReads.test.ts` fails on a local-zone `Date` read anywhere
-else (`src/board/workspace/` excepted, whose suite still guards on the pin).
+else.
 CI runs `npm test`, then type-checks and builds the bundle with
 `npm run build`.
 

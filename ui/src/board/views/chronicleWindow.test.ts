@@ -15,7 +15,6 @@ import {
   CHUNK_DAYS,
   chunkBounds,
   chunkIndexOf,
-  daysBetween,
   EDGE_TRIGGER_DAYS,
   FUTURE_BLOCK_DAYS,
   LIVE_QUANTUM_MS,
@@ -27,7 +26,7 @@ import {
   windowOf,
   type ScrollProbe,
 } from './chronicleWindow.js';
-import { civilDayAt, RAIL_START_HOUR, shiftCivilDay, wallClock, zone } from '../civilDay.js';
+import { civilDayAt, daysBetween, RAIL_START_HOUR, shiftCivilDay, wallClock, zone } from '../civilDay.js';
 
 const LA = zone('America/Los_Angeles');
 

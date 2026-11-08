@@ -1,5 +1,4 @@
-import { ago } from '../civilDay.js'
-import type { MapThread, Standing } from './model.js'
+import type { Standing } from './model.js'
 import './family-map.css'
 
 const SVG = 'http://www.w3.org/2000/svg'
@@ -15,10 +14,6 @@ export const htmlEl = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: stri
   if (text !== undefined) el.textContent = text
   return el
 }
-export const shortAgo = (at: number, now: number): string => ago(at, now).replace(/ ago$/, '').replace('just now', 'now')
-
-/** A thread's state and last move, in a line; nothing for a centre with no state of its own. */
-export const standingLine = (thread: MapThread, now: number): string => thread.word ? `${thread.word} · ${shortAgo(thread.lastMove, now)}` : ''
 
 /** A mark's outline around its centre: the tone says whose move, the shape tells kinds of the same tone apart. */
 export function markPath(standing: Standing, r: number): string {

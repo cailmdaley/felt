@@ -35,7 +35,6 @@ import {
 } from './KanbanSurfaces.js'
 import { sessionWindow, stripFacts } from './workspace/Dock.js'
 import { civilDayAt, isoDayLocal, shiftCivilDay } from './civilDay.js'
-import { humanizeIdleAge } from './utils.js'
 
 const NOW = Date.parse('2026-08-08T15:30:00Z')
 const DAY = 86_400_000
@@ -140,25 +139,6 @@ describe('dueBouncesFromResting', () => {
       expect(dueBouncesFromResting(`${dayFromNow(1)}T00:00:00${offset}`, NOW)).toBe(false)
       expect(dueBouncesFromResting(`${dayFromNow(-1)}T00:00:00${offset}`, NOW)).toBe(true)
     }
-  })
-})
-
-describe('humanizeIdleAge', () => {
-  it('reads one unit, coarsening as it grows', () => {
-    expect(humanizeIdleAge(0)).toBe('0m')
-    expect(humanizeIdleAge(45_000)).toBe('0m')          // no seconds, ever
-    expect(humanizeIdleAge(12 * 60_000)).toBe('12m')
-    expect(humanizeIdleAge(59 * 60_000)).toBe('59m')
-    expect(humanizeIdleAge(60 * 60_000)).toBe('1h')
-    expect(humanizeIdleAge(3 * 3_600_000 + 40 * 60_000)).toBe('3h')
-    expect(humanizeIdleAge(23 * 3_600_000)).toBe('23h')
-    expect(humanizeIdleAge(2 * DAY + 5 * 3_600_000)).toBe('2d')
-  })
-
-  it('never renders a negative or absent age as anything but 0m', () => {
-    expect(humanizeIdleAge(-5_000)).toBe('0m')
-    expect(humanizeIdleAge(undefined)).toBe('0m')
-    expect(humanizeIdleAge(Number.NaN)).toBe('0m')
   })
 })
 

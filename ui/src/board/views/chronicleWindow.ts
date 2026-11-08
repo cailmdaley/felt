@@ -28,6 +28,7 @@
  */
 
 import {
+  daysBetween,
   hostZone,
   RAIL_START_HOUR,
   railBounds,
@@ -73,21 +74,9 @@ export const LIVE_QUANTUM_MS = 5 * 60_000
 
 // ── Civil-day arithmetic ─────────────────────────────────────────────────────
 //
-// Strides and differences are pure calendar arithmetic (`shiftCivilDay` in
-// ../civilDay.ts, and `daysBetween` below): exact for civil days precisely
-// because no zone enters either side.
-
-/**
- * Whole days from `from` to `to`, signed. Both sides are parsed as UTC, so the
- * subtraction is a pure calendar difference with no zone and no DST in it —
- * the one place `/ 86_400_000` is not a bug.
- */
-export function daysBetween(from: string, to: string): number {
-  const a = Date.parse(`${from}T00:00:00Z`)
-  const b = Date.parse(`${to}T00:00:00Z`)
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0
-  return Math.round((b - a) / 86_400_000)
-}
+// Strides and differences are pure calendar arithmetic (`shiftCivilDay` and
+// `daysBetween` in ../civilDay.ts): exact for civil days precisely because no
+// zone enters either side.
 
 /** A window from its two ends. */
 export function windowOf(first: string, last: string): DayRange {

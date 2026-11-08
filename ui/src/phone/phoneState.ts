@@ -4,7 +4,7 @@
  * so late audio would count twice.
  */
 
-import { hostZone, wallClock, type Zone } from '../board/civilDay.js'
+import { clockSeconds } from '../board/civilDay.js'
 
 /** The relay socket's state. */
 export type LinkState =
@@ -105,14 +105,6 @@ export function relayUrl(
   return `${protocol}//${host}${prefix}/api/v1/voice/audio${query}`
 }
 
-/** A wall-clock time as HH:MM:SS, in the reader's zone. */
-export function clockTime(ms: number, z: Zone = hostZone()): string {
-  const { hour, minute, second } = wallClock(ms, z)
-  return [hour, minute, second]
-    .map((part) => String(part).padStart(2, '0'))
-    .join(':')
-}
-
 /**
  * The status line. `lostSince` is when audio stopped reaching hark after it
  * had been listening (a drop, or a socket that could not keep up).
@@ -120,8 +112,8 @@ export function clockTime(ms: number, z: Zone = hostZone()): string {
 export function linkWords(link: LinkState, reason: string | null, lostSince: number | null = null): string {
   if (lostSince !== null && !TERMINAL_LINKS.has(link) && link !== 'idle') {
     return link === 'connected'
-      ? `The connection can’t keep up — audio lost since ${clockTime(lostSince)}`
-      : `Reconnecting — audio lost since ${clockTime(lostSince)}`
+      ? `The connection can’t keep up — audio lost since ${clockSeconds(lostSince)}`
+      : `Reconnecting — audio lost since ${clockSeconds(lostSince)}`
   }
   switch (link) {
     case 'idle': return 'Mic off'

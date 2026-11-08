@@ -4,6 +4,7 @@
  */
 import { normalizeSentFiles, type SentFile } from './sentFiles.js'
 import { fileKind } from './attachments.js'
+import { DAY_MS } from './civilDay.js'
 import { docKey, parseDocKey, type DocKey } from './workspace/documents.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
@@ -17,7 +18,7 @@ export interface FiberSend {
 }
 
 /** How far back a sent file still counts. */
-export const SEND_WINDOW_MS = 30 * 86_400_000
+export const SEND_WINDOW_MS = 30 * DAY_MS
 /** The least time between two fleet reads. */
 export const SEND_REFRESH_MS = 60_000
 

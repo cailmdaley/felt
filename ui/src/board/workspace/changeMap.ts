@@ -27,12 +27,14 @@ export function squarify(weights: number[], width: number, height: number) {
 }
 
 /** A reusable area map: counts and navigation come from the caller, not Git. */
+const countFormat = new Intl.NumberFormat('en-US')
+
 export function changeMap(areas: ChangeArea[], navigate: (area: ChangeArea) => void): HTMLElement {
   const root = el('section', 'change-map')
   root.dataset.windowId = 'map'
   const total = areas.reduce((n, a) => n + a.lines, 0)
   const count = areas.reduce((n, a) => n + a.files.length, 0)
-  root.append(el('h2', '', `${total.toLocaleString('en-US')} changed lines in ${count.toLocaleString('en-US')} files`))
+  root.append(el('h2', '', `${countFormat.format(total)} changed lines in ${countFormat.format(count)} files`))
   const canvas = el('div', 'change-map-canvas')
   root.append(canvas)
   const tiles = areas.map(area => {
@@ -41,7 +43,7 @@ export function changeMap(areas: ChangeArea[], navigate: (area: ChangeArea) => v
     tile.className = 'change-map-tile'
     if (!area.lines) tile.style.display = 'none'
     tile.dataset.role = area.role ?? 'implementation'
-    const count = `${area.lines.toLocaleString('en-US')} · ${percent.toFixed(1)}%`
+    const count = `${countFormat.format(area.lines)} · ${percent.toFixed(1)}%`
     tile.title = `${area.name}: ${count}${area.what ? ` — ${area.what}` : ''}`
     tile.setAttribute('aria-label', tile.title)
     tile.append(el('strong', '', area.name), el('span', '', count))

@@ -17,11 +17,6 @@ const SRC = resolve('src')
 /** The one module allowed to read local time. */
 const OWNER = 'board/civilDay.ts'
 
-/** Directories left as they are, with the reason. */
-const EXEMPT: Record<string, string> = {
-  'board/workspace/': 'being rewritten by another team; it moves onto civilDay.ts as part of that rewrite',
-}
-
 /** `Date` methods that read or write the local zone's wall clock. A bare
  *  `toString` is too common a name to flag on its own; it is caught on a
  *  `new Date(…)` receiver below. */
@@ -87,7 +82,7 @@ function localZoneReads(file: string, text: string): string[] {
 it('reads the local zone only through civilDay.ts', () => {
   const reads = sources(SRC).flatMap((path) => {
     const file = relative(SRC, path).split('\\').join('/')
-    if (file === OWNER || Object.keys(EXEMPT).some((dir) => file.startsWith(dir))) return []
+    if (file === OWNER) return []
     return localZoneReads(file, readFileSync(path, 'utf8'))
   })
   expect(reads, 'route these through a civilDay.ts helper that takes a Zone').toEqual([])

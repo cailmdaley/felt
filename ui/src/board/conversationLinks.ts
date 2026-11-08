@@ -4,7 +4,6 @@ const CLAUDE_SESSION = /^https:\/\/claude\.ai\/code\/((?:cse|session)_[A-Za-z0-9
 export function canOpenDesktopApp(userAgent: string, coarse: boolean): boolean {
   return !coarse && !/Android|iPhone|iPad|iPod|Mobile/i.test(userAgent)
 }
-export const atDesktop = canOpenDesktopApp
 
 /** The Claude desktop route for a URL naming exactly one bridged session. */
 export function claudeAppRoute(url: string): string | undefined {

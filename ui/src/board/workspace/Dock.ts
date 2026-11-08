@@ -1,6 +1,7 @@
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
-import { atDesktop, workerPill } from '../appConversation.js'
+import { workerPill } from '../appConversation.js'
+import { canOpenDesktopApp } from '../conversationLinks.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
@@ -765,7 +766,7 @@ export class Dock {
         const next = buildSessionHistory({
           shuttleBase: this.shuttleBase, uid: card.uid, fiberHost: card.shuttleHost,
           liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession, terminalBackend: card.terminalBackend,
-          desktop: atDesktop(navigator.userAgent, coarsePointer()),
+          desktop: canOpenDesktopApp(navigator.userAgent, coarsePointer()),
           onError: showError,
         })
         history?.replaceWith(next)

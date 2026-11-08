@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { buildSessionHistory, claudeAppRoute, selectWorker, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
+import { claudeAppRoute } from './conversationLinks.js'
+import { buildSessionHistory, selectWorker, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
 import type { SessionRecord } from './views/TemporalData.js'
 
 const UID = '01KVTXJ3VQYNZ6TYK342ZHV5CK'

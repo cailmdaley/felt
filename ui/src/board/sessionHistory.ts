@@ -18,7 +18,6 @@
  */
 import { clockTime, formatInstant, instantStamp, hostZone, isoDayLocal, type Zone } from './civilDay.js'
 import { conversationDestinations, resolveDestination, CONVERSATION_OPENING_CHANGED, type ConversationOpening } from './conversationOpening.js'
-export { claudeAppRoute, claudeWebLink } from './conversationLinks.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 
 /** Rows shown before "all N" unfolds the rest. */

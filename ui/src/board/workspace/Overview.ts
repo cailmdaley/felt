@@ -1,4 +1,4 @@
-import { ago, clockTime } from '../civilDay.js'
+import { ago, clockTime, DAY_MS, daysBetween, hostZone, isoDayLocal, type Zone } from '../civilDay.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
@@ -31,7 +31,7 @@ export interface OverviewOptions {
   readLately?(): KanbanCard[]
 }
 export type OverviewLens = 'recent' | 'projects' | 'hosts'
-const WINDOW_MS = 30 * 86400000
+const WINDOW_MS = 30 * DAY_MS
 const MAX_CHANGE_ROWS = 8
 /** An unreachable owner's metadata read retries within this long. */
 const RETRY_MS = 30000
@@ -44,14 +44,10 @@ const HOST_MARKS = ['○', '■', '▲', '◇', '◐', '□', '△', '◆']
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0
 const uidOf = (card: KanbanCard): string => card.uid ?? card.id
 
-/** Calendar-day arithmetic in the viewer's zone, including 23/25-hour DST days. */
-export function overviewDayGroup(timestamp: number, now: number): string {
-  const ordinal = (ms: number): number => {
-    const d = new Date(ms)
-    return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000
-  }
+/** Calendar days in the viewer's zone, including 23/25-hour DST days. */
+export function overviewDayGroup(timestamp: number, now: number, z: Zone = hostZone()): string {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return 'Earlier'
-  const days = ordinal(now) - ordinal(timestamp)
+  const days = daysBetween(isoDayLocal(timestamp, z), isoDayLocal(now, z))
   return days <= 0 ? 'Today' : days === 1 ? 'Yesterday' : days < 7 ? 'This week' : 'Earlier'
 }
 

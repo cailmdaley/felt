@@ -80,10 +80,11 @@ import {
   railCivilDay,
   railDayReader,
   shiftCivilDay,
+  daysBetween,
+  DAY_MS,
   type Zone,
 } from '../civilDay.js'
 import {
-  daysBetween,
   planExtension,
   windowOf,
   type DayRange,
@@ -330,9 +331,6 @@ function railFrac(ms: number, day: string): number {
   if (endMs <= startMs) return 0
   return clamp((ms - startMs) / (endMs - startMs), 0, 1)
 }
-
-const DAY_MS_CONST = 86_400_000
-
 
 // ── Cycles ───────────────────────────────────────────────────────────────────
 //
@@ -906,8 +904,8 @@ function buildFiberRow(
   const dueMs = dueSortMs(card.due)
   let dueMsEquivalent = 0
   if (dueMs !== undefined) {
-    const daysUntilDue = Math.round((dueMs - todayNoonMs) / DAY_MS_CONST)
-    dueMsEquivalent = todayNoonMs - Math.max(0, daysUntilDue) * DAY_MS_CONST
+    const daysUntilDue = Math.round((dueMs - todayNoonMs) / DAY_MS)
+    dueMsEquivalent = todayNoonMs - Math.max(0, daysUntilDue) * DAY_MS
   }
 
   const sortMs = Math.max(workMs, dueMsEquivalent)

@@ -1,5 +1,5 @@
 import type { KanbanCard } from '../KanbanTypes.js'
-import { humanizeIdleAge } from '../utils.js'
+import { age } from '../civilDay.js'
 import { turnOf, type Turn } from '../turn.js'
 
 /**
@@ -11,7 +11,7 @@ import { turnOf, type Turn } from '../turn.js'
  */
 export function workerPlateFacts(card: KanbanCard, now = Date.now()): { turn: Turn; word: string; elapsed?: string; busy: boolean } {
   const { turn, word, since, busy } = turnOf(card, now)
-  const elapsed = since !== undefined && Number.isFinite(since) ? humanizeIdleAge(now - since) : undefined
+  const elapsed = since !== undefined && Number.isFinite(since) ? age(now - since) : undefined
   return { turn, word, elapsed, busy }
 }
 

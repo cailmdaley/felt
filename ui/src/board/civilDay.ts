@@ -47,7 +47,8 @@
 
 const QUARTER_HOUR_MS = 900_000
 const HOUR_MS = 3_600_000
-const DAY_MS = 86_400_000
+/** A day of elapsed time; a civil day can be 23 or 25 hours, so step civil days with `shiftCivilDay`. */
+export const DAY_MS = 86_400_000
 
 /**
  * An IANA time zone, ready to answer wall-clock questions. Build one with
@@ -171,15 +172,25 @@ export function instantStamp(ms: number, z = hostZone()): string {
   return Number.isFinite(ms) ? `${formatInstant(ms, { day: 'numeric', month: 'short', year: 'numeric' }, z)} ${clockTime(ms, z)}` : ''
 }
 
+/**
+ * An elapsed span in one coarsening unit: `12m`, `47h`, `3d`, `2mo`. Hours run
+ * to two days so a fresh age stays precise. Under a minute reads `now`, or
+ * `45s` with `seconds`; a negative or non-finite span reads as none.
+ */
+export function age(elapsedMs: number, options: { seconds?: boolean } = {}): string {
+  const elapsed = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0
+  if (elapsed < 60_000) return options.seconds ? `${Math.floor(elapsed / 1000)}s` : 'now'
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / 60_000)}m`
+  if (elapsed < 48 * HOUR_MS) return `${Math.floor(elapsed / HOUR_MS)}h`
+  if (elapsed < 60 * DAY_MS) return `${Math.floor(elapsed / DAY_MS)}d`
+  return `${Math.floor(elapsed / (30 * DAY_MS))}mo`
+}
+
 /** Format an instant's age; optionally show seconds for live polling. Future instants read as now. */
 export function ago(ms: number, now = Date.now(), options: { seconds?: boolean } = {}): string {
   if (!Number.isFinite(ms)) return ''
-  const elapsed = Math.max(0, now - ms)
-  if (elapsed < 60_000) return options.seconds ? `${Math.floor(elapsed / 1000)}s ago` : 'just now'
-  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / 60_000)}m ago`
-  if (elapsed < 48 * HOUR_MS) return `${Math.floor(elapsed / HOUR_MS)}h ago`
-  if (elapsed < 60 * DAY_MS) return `${Math.floor(elapsed / DAY_MS)}d ago`
-  return `${Math.floor(elapsed / (30 * DAY_MS))}mo ago`
+  const span = age(now - ms, options)
+  return span === 'now' ? 'just now' : `${span} ago`
 }
 
 /** An instant's wall clock in a zone, as a Date read with its UTC getters. */
@@ -353,6 +364,12 @@ export function shiftCivilDay(day: string, delta: number): string {
   return utc === undefined ? day : isoOfWall(new Date(utc + delta * DAY_MS))
 }
 
+/** Whole calendar days from `from` to `to`, signed; 0 when either is not a civil day. */
+export function daysBetween(from: string, to: string): number {
+  const a = civilUtc(from), b = civilUtc(to)
+  return a === undefined || b === undefined ? 0 : Math.round((b - a) / DAY_MS)
+}
+
 /** Day of the week a civil day is, 0 = Sunday. Undefined when not a civil day. */
 export function civilWeekday(day: string): number | undefined {
   const utc = civilUtc(day)
@@ -509,4 +526,10 @@ export function formatSpanMinutes(
   const m = minutes % 60
   if (h <= 0) return `${m}m`
   return `${h}h ${opts.pad ? String(m).padStart(2, '0') : m}m`
+}
+
+/** A media position or length as `m:ss`; a non-finite or negative one reads `0:00`. */
+export function mediaTime(seconds: number): string {
+  const whole = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }

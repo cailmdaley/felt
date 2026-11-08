@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   audioHealth,
-  clockTime,
   closeMeaning,
   linkWords,
   parseRelayStatus,
@@ -39,7 +38,6 @@ describe('the status line', () => {
     expect(linkWords('waiting', 'hark is loading its models')).toBe('Loading models — speech isn’t captured until Listening')
     expect(linkWords('connected', null)).toBe('Listening')
     const since = new Date(2026, 9, 1, 14, 3, 7).getTime()
-    expect(clockTime(since)).toBe('14:03:07')
     expect(linkWords('reconnecting', null, since)).toBe('Reconnecting — audio lost since 14:03:07')
     expect(linkWords('waiting', null, since)).toBe('Reconnecting — audio lost since 14:03:07')
     expect(linkWords('connected', null, since)).toMatch(/audio lost since 14:03:07/)

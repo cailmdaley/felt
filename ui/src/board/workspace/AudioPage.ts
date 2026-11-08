@@ -1,15 +1,12 @@
 import type { DocKey, WorkspaceDocument } from './documents.js'
 import { fileBytesUrl } from '../utils.js'
+import { mediaTime } from '../civilDay.js'
 import { loadDuration, loadWaveform } from './audioWaveform.js'
 import './audio.css'
 
 const KEEP_POSITION = 'shuttle:audio:keep-position'
 export function keepAudioPosition(): boolean {
   try { return localStorage.getItem(KEEP_POSITION) === 'true' } catch { return false }
-}
-export function mediaTime(seconds: number): string {
-  const whole = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 export function seekAudio(audio: HTMLMediaElement, seconds: number): void {
   if (Number.isFinite(audio.duration)) audio.currentTime = Math.max(0, Math.min(audio.duration, seconds))
