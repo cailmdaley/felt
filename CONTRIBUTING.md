@@ -67,9 +67,9 @@ Before opening a PR, verify:
 
 ## Landing
 
-Maintainer lanes do not push `main` or deploy: a tested branch goes to the felt
-lander seat, which lands and deploys it. The rules are under *Landing
-changes* in `AGENTS.md`.
+Maintainer lanes land their own tested work: rebase onto `origin/main`, push
+`main`, deploy with `bin/shuttle-deploy`. The rules are under *Landing changes*
+in `AGENTS.md`.
 
 ## Scope
 

@@ -229,9 +229,8 @@ their processes, while Shuttle owns their watchers. Every daemon cycle arms the
 boot quarantine, and a daemon route change ships with its matching UI
 (`make build` builds both).
 
-Workers do not deploy for themselves: a verified change goes to the
-lander seat (see [Landing changes](#landing-changes)), the one driver of
-`bin/shuttle-deploy`:
+A worker deploys its own verified change with `bin/shuttle-deploy`
+(see [Landing changes](#landing-changes)):
 
 ```
 resolve one commit → push → on each host, under its deploy lock: build the SHA
@@ -255,22 +254,15 @@ Run the targeted local tests before pushing; use the full suite for broad change
 CI is feedback, not a landing or deployment gate: do not wait for CI after pushing.
 The repo's SessionStart hook prints the cached latest completed main CI result when red and refreshes it in the background for the next session.
 
-Work reaches `main` and the fleet through one seat, the felt lander
-(role `felt-lander` in the store; `shuttle roles` finds it). Lanes share
-one deploy lock per host and one quarantine, so landing is one worker's job.
-A lane commits on a branch or worktree, runs the suites its change touches,
-pushes the branch, and sends the seat a land request in the format its charter
-gives, naming the repo (`felt` or `hark`: the seat lands Hark's own repo too); it does not rebase onto `main`, push `main` or run `bin/shuttle-deploy`.
-
-The seat keeps `main` linear: it rebases each lane on `origin/main`, runs the
-suites the diff touches, pushes, and batches ready lanes into one deploy, keeping
-a contract or route change with its matching UI. It deploys
-(`bin/shuttle-deploy --hosts ...`, then `shuttle daemon release`) to the hosts
-the change affects: a UI-only change goes to the hubs whose board is opened;
-daemon or CLI changes go fleet-wide. It verifies those hosts and reports the
-landed SHA and hosts to the requester. A conflict that needs a judgment about
-the work goes back to its lane; a host that needs the human's MFA is reported
-and skipped.
+Each lane lands its own work. It commits on a branch or worktree, runs the
+suites its change touches, rebases onto `origin/main` and reruns them if `main`
+moved, then pushes `main` linearly. It deploys to the hosts the change affects
+(`bin/shuttle-deploy --hosts ...`, then `shuttle daemon release`): a UI-only
+change goes to the hubs whose board is opened; daemon or CLI changes go
+fleet-wide, a contract or route change with its matching UI. The per-host
+deploy lock serializes concurrent lanes; a lane that finds it held waits for it.
+Verify the hosts and report the landed SHA and hosts. A host that needs the
+human's MFA is reported and skipped.
 
 No PRs and no long-lived branches: iteration happens on `main`, one small
 improvement after another, rather than across review boundaries. Hold a landing
