@@ -9,8 +9,8 @@
 //
 // Pins at the left open this session's family page, tapestry and constitution
 // on the board. The audio glyph, drawn in the pins' register, says what the
-// mic hears: ⚇ sound arriving, ⚆ open and quiet, ⊘ muted, and a click toggles
-// the mute; ○ Listening off, and a click starts it as the board's Listen does.
+// mic hears: ⚇ sound arriving, ⚆ open and quiet, ⊘ muted, and a click turns
+// Listening off; ○ Listening off, and a click starts it as the board's Listen does.
 // `n words…` counts what was said but not yet sent, and `✕` drops it;
 // `→ <slug>` names the card words go to when it is not this one. A pinned
 // target is shown even here. With voice unavailable there is no audio side.
@@ -133,7 +133,7 @@ function line($: EngineInterface, ui: { Box: any; Button: any; Text: any }) {
     const words = where + (n ? `${where ? ' ·' : ''} ${n} words…` : '')
     audio = (
       <Box flexDirection="row">
-        <Button key="mic" plain label={glyph} onPress={() => post($, '/api/v1/voice/toggle')} />
+        <Button key="mic" plain label={glyph} onPress={() => post($, '/api/v1/voice', { enabled: false })} />
         {words ? <Text key="words" dimColor>{words}</Text> : null}
         {n ? <Button key="discard" plain dimColor label=" ✕" onPress={() => post($, '/api/v1/voice/discard')} /> : null}
       </Box>
