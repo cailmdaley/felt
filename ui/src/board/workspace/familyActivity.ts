@@ -1,4 +1,6 @@
 import { MAP_WINDOW_MS, type ThreadMarks } from '../family/model.js'
+import { readComposite, windowStart } from '../daemonApi.js'
+import { ThrottledRead } from '../throttledRead.js'
 
 const REFRESH_MS = 120_000
 /** Resumes this close together in this number are the daemon coming back, not work. */
@@ -38,25 +40,21 @@ export function threadMarks(sessions: readonly SessionMark[], commits: readonly 
 /** The fleet's recent launches and commits, read only while a family's view asks. */
 export class FamilyActivity {
   private marks = new Map<string, ThreadMarks>()
-  private readAt = -Infinity
   private readonly base: string
   private readonly onChange: () => void
+  private readonly reader = new ThrottledRead(REFRESH_MS, () => this.read())
   constructor(base: string, onChange: () => void) { this.base = base; this.onChange = onChange }
   of(uid: string): ThreadMarks | undefined { return this.marks.get(uid) }
-  refresh(now = Date.now()): void {
-    if (now - this.readAt < REFRESH_MS) return
-    this.readAt = now
-    const since = Math.floor(now - MAP_WINDOW_MS)
-    const read = async (feed: string): Promise<never[]> => {
-      const res = await fetch(`${this.base}/api/v1/${feed}/composite?since_ms=${since}`, { cache: 'no-store' })
-      if (!res.ok) throw new Error(`${feed} feed unavailable`)
-      const { records } = await res.json()
+  refresh(now = Date.now()): void { void this.reader.run(false, now) }
+  private async read(): Promise<void> {
+    const query = { since_ms: windowStart(Date.now(), MAP_WINDOW_MS) }
+    const records = async (feed: 'sessions' | 'commits'): Promise<never[]> => {
+      const { records } = await readComposite(this.base, feed, query) as { records?: unknown }
       if (!Array.isArray(records)) throw new Error(`${feed} feed malformed`)
       return records as never[]
     }
-    void Promise.all([read('sessions'), read('commits')]).then(([sessions, commits]) => {
-      this.marks = threadMarks(sessions, commits)
-      this.onChange()
-    }, () => { this.readAt = -Infinity })
+    const [sessions, commits] = await Promise.all([records('sessions'), records('commits')])
+    this.marks = threadMarks(sessions, commits)
+    this.onChange()
   }
 }

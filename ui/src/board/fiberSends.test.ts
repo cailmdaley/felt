@@ -27,7 +27,7 @@ describe('FiberSends', () => {
       { fullPath: '/r/report.html', timestamp: 10, uid: 'ULID-1' },
       { fullPath: '/r/plot.png', timestamp: 11, uid: 'work/by-id', host: 'cluster' },
     ]))
-    const reports = new FiberSends('http://daemon', () => {})
+    const reports = new FiberSends('http://daemon')
     await reports.refresh(1_000_000)
     expect(reports.sends(card({ id: 'work/x', uid: 'ULID-1', originId: 'laptop' }))).toEqual([{ key: 'laptop:/r/report.html', fullPath: '/r/report.html', basename: 'report.html', timestamp: 10, owner: 'laptop' }])
     expect(reports.sends(card({ id: 'work/by-id', originId: 'laptop' }))[0]?.owner).toBe('cluster')
@@ -37,11 +37,13 @@ describe('FiberSends', () => {
     const fetcher = feed([{ fullPath: '/r/report.html', timestamp: 10, uid: 'A' }])
     vi.stubGlobal('fetch', fetcher)
     const onChange = vi.fn()
-    const reports = new FiberSends('http://daemon', onChange)
+    const reports = new FiberSends('http://daemon')
+    reports.subscribe(onChange)
     await reports.refresh(0)
     await reports.refresh(SEND_REFRESH_MS - 1)
     expect(fetcher).toHaveBeenCalledTimes(1)
-    expect(String((fetcher.mock.calls[0] as unknown[])[0])).toMatch(/^http:\/\/daemon\/api\/v1\/sent-files\/all\/composite\?since_ms=/)
+    // The window's start is quantized, so an unchanged feed keeps one URL and revalidates.
+    expect(String((fetcher.mock.calls[0] as unknown[])[0])).toMatch(/^http:\/\/daemon\/api\/v1\/sent-files\/all\/composite\?since_ms=\d+$/)
     expect(onChange).toHaveBeenCalledTimes(1)
     await reports.refresh(SEND_REFRESH_MS)
     expect(fetcher).toHaveBeenCalledTimes(2)
@@ -49,7 +51,7 @@ describe('FiberSends', () => {
   })
   it('keeps the last answer when the feed fails', async () => {
     vi.stubGlobal('fetch', feed([{ fullPath: '/r/report.html', timestamp: 10, uid: 'A' }]))
-    const reports = new FiberSends('http://daemon', () => {})
+    const reports = new FiberSends('http://daemon')
     await reports.refresh(0)
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('down') }))
     await reports.refresh(SEND_REFRESH_MS)

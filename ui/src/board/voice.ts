@@ -1,6 +1,7 @@
 import type { KanbanCard } from './KanbanTypes.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
+import { getDaemonJson, postDaemonJson } from './daemonApi.js'
 
 /** How long a view must hold before voice follows it, so a pan does not flap. */
 const SIGHT_MS = 350
@@ -189,11 +190,10 @@ export class Voice {
     const target = { fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name, ...(status?.recorder ? { recorder: status.recorder } : {}) }
     this.revision++
     const task = this.writes.then(async () => {
-      const response = await fetch(`${this.base}/api/v1/voice/target`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target) })
-      if (!response.ok) throw new Error(`Voice request failed (${response.status})`)
+      const status = await postDaemonJson<VoiceStatus>(this.base, '/api/v1/voice/target', target, 'Voice request failed')
       this.revision++
       this.observedView = viewKey
-      this.status = await response.json() as VoiceStatus
+      this.status = status
       this.notify()
     })
     this.writes = task.catch(() => {})
@@ -235,13 +235,9 @@ export class Voice {
     const task = this.writes.then(async () => {
       // Let a phone start select its recorder; every later control stays there.
       const recorder = values.source === 'phone' && values.enabled ? undefined : this.status?.recorder ?? this.recorder
-      const response = await fetch(`${this.base}/api/v1/voice`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...values, ...(recorder ? { recorder } : {}) }) })
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as { error?: string }
-        throw new Error(body.error ?? `Voice request failed (${response.status})`)
-      }
+      const status = await postDaemonJson<VoiceStatus>(this.base, '/api/v1/voice', { ...values, ...(recorder ? { recorder } : {}) }, 'Voice request failed')
       this.revision++
-      this.status = await response.json() as VoiceStatus
+      this.status = status
       this.notify()
       this.claim()
     })
@@ -258,9 +254,7 @@ export class Voice {
     let success = false
     try {
       const query = this.recorder ? `?${new URLSearchParams({ recorder: this.recorder })}` : ''
-      const response = await fetch(`${this.base}/api/v1/voice${query}`, { signal: controller.signal })
-      if (!response.ok) throw new Error('voice unavailable')
-      const status = await response.json() as VoiceStatus
+      const status = await getDaemonJson<VoiceStatus>(`${this.base}/api/v1/voice${query}`, 'Voice unavailable', { signal: controller.signal })
       if (!controller.signal.aborted && revision === this.revision) {
         this.status = status
         if (this.expectedEnabled === status.enabled) this.expectedEnabled = null

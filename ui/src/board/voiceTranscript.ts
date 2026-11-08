@@ -1,4 +1,5 @@
 import { clockSeconds } from './civilDay.js'
+import { getDaemonJson } from './daemonApi.js'
 import type { FiberSlug } from './workspace/voiceStrip.js'
 import './voiceTranscript.css'
 
@@ -23,10 +24,7 @@ export async function readVoiceTranscript(base: string, recorder?: string, fiber
   const query = new URLSearchParams()
   if (recorder) query.set('recorder', recorder)
   if (fiber) query.set('fiber', fiber)
-  const response = await fetch(`${base}/api/v1/voice/transcript${query.size ? `?${query}` : ''}`, { cache: 'no-store' })
-  const body = await response.json()
-  if (!response.ok) throw new Error(body.error ?? `Could not open today's transcript (${response.status})`)
-  return body as VoiceTranscript
+  return getDaemonJson<VoiceTranscript>(`${base}/api/v1/voice/transcript${query.size ? `?${query}` : ''}`, "Could not open today's transcript", { cache: 'no-store' })
 }
 
 export function transcriptLine(row: VoiceTranscriptRow, slugOf: FiberSlug): string {

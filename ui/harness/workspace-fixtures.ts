@@ -29,7 +29,6 @@ export interface WorkspaceExample {
   remote: string
   feed: {
     host: string
-    generated_at: string
     fibers: Array<Record<string, unknown>>
     origins: Record<string, Record<string, unknown>>
   }
@@ -443,11 +442,10 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
   }
   const feed = {
     host: WORKSPACE_HOST,
-    generated_at: iso(0),
     fibers: rows,
     origins: {
-      [WORKSPACE_HOST]: { kind: 'local', stale: false, last_polled_at: iso(0), fiber_count: rows.length - 1 },
-      [WORKSPACE_REMOTE]: { kind: 'remote', stale: false, last_polled_at: iso(-minute), fiber_count: 2 },
+      [WORKSPACE_HOST]: { kind: 'local', stale: false, fiber_count: rows.length - 1 },
+      [WORKSPACE_REMOTE]: { kind: 'remote', stale: false, fiber_count: 2 },
     },
   }
   const fiberIndex = [

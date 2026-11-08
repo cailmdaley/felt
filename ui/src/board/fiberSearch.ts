@@ -4,6 +4,8 @@
 // and names only) and filters per keystroke with `filterParentCandidates`, so
 // there's no per-keystroke round trip to the daemon.
 
+import { getDaemonJson } from './daemonApi.js'
+
 export interface FiberSearchResult {
   id: string
   name: string
@@ -18,11 +20,9 @@ export interface FiberSearchResult {
 export async function fetchFiberIndex(
   shuttleBase: string,
 ): Promise<Array<{ id: string; name: string; uid?: string }>> {
-  const res = await fetch(`${shuttleBase}/api/v1/fibers?fields=index`)
-  if (!res.ok) throw new Error(`${res.status}`)
-  const body = (await res.json()) as {
+  const body = await getDaemonJson<{
     fibers?: Array<{ fiber?: { id?: unknown; uid?: unknown; slug?: unknown; name?: unknown } }>
-  }
+  }>(`${shuttleBase}/api/v1/fibers?fields=index`, 'Fiber index unavailable')
   const out: Array<{ id: string; name: string; uid?: string }> = []
   const seen = new Set<string>()
   for (const row of body.fibers ?? []) {

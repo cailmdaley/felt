@@ -46,7 +46,7 @@ import {
 } from './formKit'
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
-import { daemonErrorMessage } from '../board/daemonApi'
+import { daemonErrorMessage, postDaemonJson } from '../board/daemonApi'
 import type { Host, Project } from './projectModel'
 
 // ---------------------------------------------------------------------------
@@ -418,23 +418,16 @@ export function StashForm({
     }
 
     try {
-      const res = await fetch(`${shuttleBase}/api/v1/fiber/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id,
-          name: trimmedTitle,
-          body,
-          frontmatter,
-          // Owner-routing key — the daemon writes locally when this is its own
-          // origin (or 'local') and forwards to the owning remote otherwise.
-          origin: selectedProject.originId,
-        }),
-      })
-      const data = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
-      if (!res.ok || !data.id) {
-        throw new Error(data.error || `Server returned ${res.status}`)
-      }
+      const data = await postDaemonJson<{ id?: string } | undefined>(shuttleBase, '/api/v1/fiber/create', {
+        id,
+        name: trimmedTitle,
+        body,
+        frontmatter,
+        // Owner-routing key — the daemon writes locally when this is its own
+        // origin (or 'local') and forwards to the owning remote otherwise.
+        origin: selectedProject.originId,
+      }, 'Create failed')
+      if (!data?.id) throw new Error('The daemon created nothing.')
       onCreated(data.id)
     } catch (err) {
       setError(daemonErrorMessage(err))

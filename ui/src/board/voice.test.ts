@@ -32,7 +32,7 @@ describe('live voice', () => {
     let ok = false
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok, status: ok ? 200 : 503, json: async () => status() })))
     const voice = new Voice('')
-    await expect(voice.set({ enabled: true })).rejects.toThrow('Voice request failed (503)')
+    await expect(voice.set({ enabled: true })).rejects.toThrow('Voice request failed (HTTP 503)')
     ok = true
     await voice.set({ enabled: true })
     expect(voice.status?.enabled).toBe(true)

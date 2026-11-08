@@ -1,6 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { fileBytesUrl } from '../utils.js'
 import { fetchDocument, RESOURCE_PRIORITY } from '../documentResources.js'
+import { ThrottledRead } from '../throttledRead.js'
 import { scopeTheme } from './themeScope.js'
 import { invalidateWorkspaceMeasures } from './measures.js'
 import { APPEARANCE_CHANGED, appearance, appearanceTheme, currentScheme, watchAppearance } from '../appearance.js'
@@ -18,8 +19,8 @@ interface ThemeEntry {
   customAvailable: boolean
   compiled: string
   etag?: string
-  readAt: number
-  pending?: Promise<void>
+  /** The owner read of this channel's `theme.css`, at most once per REFRESH_MS. */
+  reader: ThrottledRead
   /** The scope of the sheet this entry holds while it has painted roots. */
   sheet?: string
 }
@@ -123,7 +124,9 @@ export class ChannelThemes {
     if (old && old.key !== key) this.unbind(root)
     let entry = this.entries.get(key)
     if (!entry) {
-      entry = { key, scope: themeScopeId(key), card, base: '', custom: '', customAvailable: false, compiled: '', readAt: -Infinity }
+      const created = { key, scope: themeScopeId(key), card, base: '', custom: '', customAvailable: false, compiled: '' } as ThemeEntry
+      created.reader = this.reader(created)
+      entry = created
       this.entries.set(key, entry)
     }
     this.roots.set(root, entry)
@@ -137,7 +140,7 @@ export class ChannelThemes {
       entry.base = base
       if (oldDir !== card.fiberDir) {
         const hadCustom = entry.customAvailable
-        entry.custom = ''; entry.customAvailable = false; entry.etag = undefined; entry.readAt = -Infinity
+        entry.custom = ''; entry.customAvailable = false; entry.etag = undefined; entry.reader = this.reader(entry)
         if (hadCustom) this.changed(root)
       }
       this.compile(entry)
@@ -252,42 +255,43 @@ export class ChannelThemes {
     if (!sheet.users.size) { sheet.style.remove(); this.sheets.delete(scope) }
   }
   private refresh(entry: ThemeEntry): Promise<void> {
-    if (entry.pending) return entry.pending
-    if (!entry.card.fiberDir || entry.card.uid?.startsWith('other:') || Date.now() - entry.readAt < REFRESH_MS) return Promise.resolve()
-    entry.readAt = Date.now()
+    if (!entry.card.fiberDir || entry.card.uid?.startsWith('other:')) return Promise.resolve()
+    return entry.reader.run()
+  }
+  private reader(entry: ThemeEntry): ThrottledRead {
+    return new ThrottledRead(REFRESH_MS, () => this.load(entry))
+  }
+  private async load(entry: ThemeEntry): Promise<void> {
     const path = `${entry.card.fiberDir}/theme.css`
     const owner = entry.card.originId
     let customAvailable = false
-    entry.pending = (async () => {
-      try {
-        const res = await fetchDocument(fileBytesUrl(this.base, path, owner), {
-          cache: 'no-store', signal: AbortSignal.timeout(25000), rank: RESOURCE_PRIORITY.selected,
-          headers: entry.etag ? { 'If-None-Match': entry.etag } : undefined,
-        })
-        if (this.disposed || entry.card.fiberDir + '/theme.css' !== path || entry.card.originId !== owner || res.status === 304) return
-        if (!res.ok) {
-          if (res.status !== 404) console.warn(`Shuttle theme: ${path} on ${owner} could not be loaded; using the bundled base`)
-          entry.custom = ''; entry.etag = undefined
-        } else {
-          customAvailable = true
-          entry.custom = await res.text()
-          entry.etag = res.headers.get('ETag') ?? undefined
-        }
-      } catch (error) {
-        console.warn(`Shuttle theme: ${path} on ${owner} could not be loaded; using the bundled base`, error)
-        customAvailable = false
+    try {
+      const res = await fetchDocument(fileBytesUrl(this.base, path, owner), {
+        cache: 'no-store', signal: AbortSignal.timeout(25000), rank: RESOURCE_PRIORITY.selected,
+        headers: entry.etag ? { 'If-None-Match': entry.etag } : undefined,
+      })
+      if (this.disposed || entry.card.fiberDir + '/theme.css' !== path || entry.card.originId !== owner || res.status === 304) return
+      if (!res.ok) {
+        if (res.status !== 404) console.warn(`Shuttle theme: ${path} on ${owner} could not be loaded; using the bundled base`)
         entry.custom = ''; entry.etag = undefined
+      } else {
+        customAvailable = true
+        entry.custom = await res.text()
+        entry.etag = res.headers.get('ETag') ?? undefined
       }
-      if (!this.disposed) {
-        const availabilityChanged = entry.customAvailable !== customAvailable
-        entry.customAvailable = customAvailable
-        this.compile(entry); this.paint(entry)
-        if (availabilityChanged) {
-          for (const [root, bound] of this.roots) if (bound === entry) this.changed(root)
-        }
+    } catch (error) {
+      console.warn(`Shuttle theme: ${path} on ${owner} could not be loaded; using the bundled base`, error)
+      customAvailable = false
+      entry.custom = ''; entry.etag = undefined
+    }
+    if (!this.disposed) {
+      const availabilityChanged = entry.customAvailable !== customAvailable
+      entry.customAvailable = customAvailable
+      this.compile(entry); this.paint(entry)
+      if (availabilityChanged) {
+        for (const [root, bound] of this.roots) if (bound === entry) this.changed(root)
       }
-    })().finally(() => { entry.pending = undefined })
-    return entry.pending
+    }
   }
   dispose(): void {
     this.disposed = true

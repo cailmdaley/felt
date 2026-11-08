@@ -1,4 +1,5 @@
 import { clockTime } from '../civilDay.js'
+import { getDaemonJson } from '../daemonApi.js'
 
 /** A session's latest usage, from `GET /api/v1/transcript/usage`. Times are epoch milliseconds. */
 export interface TranscriptUsage {
@@ -15,8 +16,7 @@ export interface TranscriptUsage {
 export async function fetchTranscriptUsage(shuttleBase: string, session: string, host: string | undefined): Promise<TranscriptUsage | null> {
   const query = new URLSearchParams({ session, ...(host ? { host } : {}) })
   try {
-    const response = await fetch(`${shuttleBase}/api/v1/transcript/usage?${query}`)
-    return response.ok ? await response.json() as TranscriptUsage : null
+    return await getDaemonJson<TranscriptUsage>(`${shuttleBase}/api/v1/transcript/usage?${query}`)
   } catch {
     return null
   }

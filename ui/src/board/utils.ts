@@ -137,14 +137,6 @@ export function escapeHtml(text: string): string {
     .replace(/\u00a0/g, '&nbsp;')
 }
 
-// Local/relative image paths in rendered markdown resolve through the Shuttle
-// daemon's owner-routed file route (GET /api/v1/file?path=&origin=). Relative,
-// so both the daemon-served bundle and the dev proxy reach :4000 without CORS.
-// Fiber bodies render with a basePath (the workspace reader supplies the
-// fiber's directory), so relative paths resolve through this route; card
-// outcomes render without one and leave relative paths untouched.
-const FILE_ROUTE = `/api/v1/file`
-
 /** Set for one synchronous render, like the wikilink option below. */
 let untrustedEnabled = false
 
@@ -370,26 +362,18 @@ function escapeAttr(text: string): string {
 }
 
 /**
- * Build the URL a relative or absolute artifact path resolves to through the
- * Shuttle daemon's owner-routed file route (`GET /api/v1/file?path=&origin=`).
- * `http(s)`/`data` URLs pass through unchanged. A relative path needs
- * `opts.basePath` (the fiber's absolute dir) to become the absolute path the
- * route requires; without one it returns `null` so the caller can fall back to
- * a placeholder. `origin` is appended only for a remote-owned fiber, mirroring
- * the route's local-when-absent contract.
+ * The URL a path in rendered markdown resolves to. `http(s)`/`data` URLs pass
+ * through unchanged; a local path goes through the owner-routed file route,
+ * relative to the page, so both the daemon-served bundle and the dev proxy
+ * reach :4000 without CORS. A relative path needs `opts.basePath` (the fiber's
+ * absolute dir — fiber bodies have one, card outcomes do not); without one it
+ * returns `null` so the caller can fall back to a placeholder.
  */
-/** Append the owner-routing `origin` param, mirroring the routes' shared
- *  local-when-absent contract: a local file carries no `origin` at all. */
-function withOrigin(url: string, originId: string | undefined): string {
-  if (originId && originId !== 'local') return `${url}&origin=${encodeURIComponent(originId)}`
-  return url
-}
-
 function fileUrl(rawPath: string, opts?: RenderMarkdownOptions): string | null {
   if (/^https?:\/\//.test(rawPath) || /^data:/.test(rawPath)) return rawPath
   const abs = resolveAbs(rawPath, opts)
   if (abs === null) return null
-  return withOrigin(`${FILE_ROUTE}?path=${encodePathParam(abs)}`, opts?.originId)
+  return fileBytesUrl('', abs, opts?.originId)
 }
 
 /**
@@ -414,18 +398,18 @@ function encodePathParam(abs: string): string {
 }
 
 /**
- * Build the URL a sent deliverable's *raw bytes* resolve to through the
- * daemon's owner-routed file route (`GET /api/v1/file?path=<ABSOLUTE>&origin=`).
- * The daemon streams html/pdf/image/audio/text with the right Content-Type,
- * and HTML served as `text/html` is natively iframe-scrollable — no
- * `standalone` height-handshake. `origin` is appended
- * only for a remote-owned file, mirroring the route's local-when-absent
- * contract. `base` is the shuttle daemon base (`:4000`), '' for a same-origin
- * (daemon-served) bundle.
+ * The board's one builder for a file's *raw bytes*: the daemon's owner-routed
+ * file route (`GET /api/v1/file?path=<ABSOLUTE>&origin=`). The daemon streams
+ * html/pdf/image/audio/text with the right Content-Type, and HTML served as
+ * `text/html` is natively iframe-scrollable — no `standalone`
+ * height-handshake. `origin` is appended only for a remote-owned file, the
+ * route's local-when-absent contract. `base` is the shuttle daemon base
+ * (`:4000`), '' for a same-origin (daemon-served) bundle.
  */
-export function fileBytesUrl(base: string, fullPath: string, originId: string): string {
+export function fileBytesUrl(base: string, fullPath: string, originId: string | undefined): string {
   const abs = fullPath.startsWith('/') ? fullPath : `/${fullPath}`
-  return withOrigin(`${base}${FILE_ROUTE}?path=${encodePathParam(abs)}`, originId)
+  const url = `${base}/api/v1/file?path=${encodePathParam(abs)}`
+  return originId && originId !== 'local' ? `${url}&origin=${encodeURIComponent(originId)}` : url
 }
 
 /** The daemon's document route for one fiber id. Each id SEGMENT is encoded

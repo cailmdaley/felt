@@ -6,7 +6,8 @@ import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
-import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
+import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
+import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
 import { attachConversation, buildSessionHistory } from '../sessionHistory.js'
@@ -1482,10 +1483,6 @@ export class Dock {
     return wrap
   }
 
-  private postJson(path: string, body: Record<string, unknown>, label = 'Save'): Promise<void> {
-    return postDaemonJson(this.shuttleBase, path, body, label)
-  }
-
   /** Open on a card whose start was refused for want of a project directory, with its prompt showing. */
   openStartPrompt(card: KanbanCard, body: DispatchFailureBody): void {
     this.open(card)
@@ -1634,9 +1631,7 @@ export class Dock {
       // The daemon's registry is a bare array (`shuttle agents --json`,
       // degrading to `[]` when Shuttle is unavailable). A non-array body is
       // malformed — treat it as empty rather than trusting it.
-      const res = await fetch(`${this.shuttleBase}/api/v1/agents`)
-      if (!res.ok) throw new Error(`${res.status}`)
-      const raw = (await res.json()) as AgentRecord[]
+      const raw = await getDaemonJson<AgentRecord[]>(`${this.shuttleBase}/api/v1/agents`)
       records = Array.isArray(raw) ? raw : []
     } catch {
       freeze('Agent registry unavailable')
@@ -1780,7 +1775,7 @@ export class Dock {
   ): Promise<boolean> {
     if ('agent' in axes && !axes.agent) return false
     return this.withSaveStatus(statusEl, errorEl, () =>
-      this.postJson('/api/v1/lifecycle', {
+      postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
         action: 'set-agent',
         origin: card.originId,
         fiber: card.id,
@@ -1925,7 +1920,7 @@ export class Dock {
     errorEl: HTMLElement,
   ): Promise<void> {
     try {
-      await this.postJson('/api/v1/lifecycle', {
+      await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
         action: 'install',
         origin: card.originId,
         fiber: card.id,
@@ -1998,7 +1993,7 @@ export class Dock {
             // A non-standing target DROPS the schedule key server-side, and
             // sending `--schedule` alongside it is an error — so the schedule
             // rides only when the target kind actually carries one.
-            await this.postJson(
+            await postDaemonJson(this.shuttleBase,
               '/api/v1/lifecycle',
               targetKind === 'standing'
                 ? { action: 'reshape', origin, fiber: fiberId, kind: 'standing', schedule, tz }
@@ -2007,14 +2002,14 @@ export class Dock {
           } else if (targetKind === 'standing') {
             // Below here the card has NO block yet, so there is nothing to
             // reshape and the create verbs take over.
-            await this.postJson('/api/v1/lifecycle', {
+            await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
               action: 'repeat', origin, fiber: fiberId,
               // Undefined when the block carries none, which a paused install
               // permits; an arming install without one fails loudly.
               schedule, tz, model: card.shuttleAgent, project_dir: card.shuttleProjectDir,
             })
           } else {
-            await this.postJson('/api/v1/lifecycle', {
+            await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
               action: 'install', origin, fiber: fiberId,
               model: card.shuttleAgent, project_dir: card.shuttleProjectDir,
               // A paused draft must stay paused across the install (install
@@ -2027,7 +2022,7 @@ export class Dock {
         // Reparent: the daemon's `/felt-nest` shells `felt nest`/`felt unnest`
         // on the owning host. The grid refetch reconciles the changed id.
         if ('parentId' in changes) {
-          await this.postJson('/api/v1/felt-nest', {
+          await postDaemonJson(this.shuttleBase, '/api/v1/felt-nest', {
             fiber_id: fiberId,
             origin,
             parent: changes.parentId ?? null,
@@ -2046,7 +2041,7 @@ export class Dock {
         // `null` clears it, a string sets it — so the branch tests for the key,
         // not for a truthy value.
         if ('due' in changes) {
-          await this.postJson('/api/v1/felt-edit', {
+          await postDaemonJson(this.shuttleBase, '/api/v1/felt-edit', {
             fiber_id: fiberId,
             origin,
             due: changes.due ?? null,

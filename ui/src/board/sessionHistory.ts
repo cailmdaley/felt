@@ -19,6 +19,7 @@
 import { clockTime, formatInstant, instantStamp, hostZone, isoDayLocal, type Zone } from './civilDay.js'
 import { conversationDestinations, resolveDestination, CONVERSATION_OPENING_CHANGED, type ConversationOpening } from './conversationOpening.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
+import { daemonErrorMessage, getDaemonJson, postDaemonJson, readComposite } from './daemonApi.js'
 
 /** Rows shown before "all N" unfolds the rest. */
 const SESSIONS_SHOWN = 6
@@ -184,20 +185,9 @@ export function linkRequests(
 /** `POST /api/v1/attach`: success opens the conversation's terminal on this display, a failure is said. */
 export async function attachConversation(shuttleBase: string, attach: AttachBody, onError: (message: string) => void): Promise<void> {
   try {
-    const res = await fetch(`${shuttleBase}/api/v1/attach`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(attach),
-    })
-    if (!res.ok) {
-      const detail = await res
-        .json()
-        .then((b: { error?: unknown }) => (typeof b?.error === 'string' ? b.error : ''))
-        .catch(() => '')
-      onError(detail ? `Couldn’t open terminal: ${detail}` : 'Couldn’t open terminal')
-    }
-  } catch {
-    onError('Couldn’t reach the daemon to open the terminal')
+    await postDaemonJson(shuttleBase, '/api/v1/attach', attach, 'the daemon refused')
+  } catch (err) {
+    onError(err instanceof TypeError ? 'Couldn’t reach the daemon to open the terminal' : `Couldn’t open terminal: ${daemonErrorMessage(err)}`)
   }
 }
 
@@ -208,12 +198,8 @@ export async function attachConversation(shuttleBase: string, attach: AttachBody
  */
 export async function selectWorker(shuttleBase: string, tmuxSession: string, shuttleHost?: string): Promise<boolean> {
   try {
-    const res = await fetch(`${shuttleBase}/api/v1/attach`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null, select_only: true }),
-    })
-    return res.ok && (await res.json() as { moved?: unknown }).moved === true
+    const answer = await postDaemonJson<{ moved?: unknown } | undefined>(shuttleBase, '/api/v1/attach', { tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null, select_only: true })
+    return answer?.moved === true
   } catch {
     return false
   }
@@ -371,9 +357,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
         return batches.map(async (batch) => {
           const query = `sessions=${batch.join(',')}${host ? `&host=${encodeURIComponent(host)}` : ''}`
           try {
-            const res = await fetch(`${ctx.shuttleBase}/api/v1/sessions/links?${query}`)
-            if (!res.ok) return
-            const answered = parseSessionLinks(await res.json())
+            const answered = parseSessionLinks(await getDaemonJson(`${ctx.shuttleBase}/api/v1/sessions/links?${query}`))
             const asked = new Set(batch)
             for (const [id, entry] of answered) {
               if (!asked.has(id)) continue
@@ -411,14 +395,9 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
     let records: SessionRecord[] = []
     let unread = false
     try {
-      const res = await fetch(
-        `${ctx.shuttleBase}/api/v1/sessions/composite?since_ms=0&uid=${encodeURIComponent(ctx.uid)}`,
-      )
-      if (res.ok) {
-        const parsed = parseSessions(await res.json(), { host: '', records: [] })
-        origins = parsed.origins ?? {}
-        records = parsed.records
-      } else unread = true
+      const parsed = parseSessions(await readComposite(ctx.shuttleBase, 'sessions', { since_ms: 0, uid: ctx.uid }), { host: '', records: [] })
+      origins = parsed.origins ?? {}
+      records = parsed.records
     } catch {
       unread = true
     }

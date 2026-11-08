@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AgentEntry } from './agents'
+import { getDaemonJson } from '../board/daemonApi.js'
 
 /**
  * The registry's base agents, fetched once per form. `null` until a non-empty
@@ -10,9 +11,8 @@ export function useAgentRegistry(shuttleBase: string): AgentEntry[] | null {
   const [agents, setAgents] = useState<AgentEntry[] | null>(null)
   useEffect(() => {
     let cancelled = false
-    fetch(`${shuttleBase}/api/v1/agents`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((raw: AgentEntry[] | null) => {
+    getDaemonJson<AgentEntry[]>(`${shuttleBase}/api/v1/agents`)
+      .then((raw) => {
         if (cancelled || !Array.isArray(raw)) return
         const list = raw.filter((a) => !a.alias_of)
         if (list.length) setAgents(list)

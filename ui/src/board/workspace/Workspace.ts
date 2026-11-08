@@ -32,11 +32,12 @@ import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
 import { markSeen, unseenSince } from './DocumentSeen.js'
-import type { FiberSend } from '../fiberSends.js'
+import { FiberSends } from '../fiberSends.js'
 import type { BoardOpen } from '../voice.js'
 import { parseRoute, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import { changeReviewTarget } from './changeReviewTarget.js'
+import { daemonFetch } from '../daemonApi.js'
 
 export interface WorkspaceOptions {
   /** The current response's thread graph, built once per response. */
@@ -65,10 +66,8 @@ export interface WorkspaceOptions {
   /** Expand has taken, or given back, the whole window. */
   onExpand?(expanded: boolean): void
   onRest?(card: KanbanCard, anchor: HTMLElement): void
-  /** A card's sent files, newest first. */
-  sends?(card: KanbanCard): FiberSend[]
-  /** Asks for the sent-file feed; throttled by its reader. */
-  refreshSends?(): void
+  /** The fleet's sent files; a workspace without one reads its own. */
+  sends?: FiberSends
 }
 interface ChannelState {
   card: KanbanCard
@@ -111,6 +110,8 @@ export class Workspace {
   readonly dock: Dock
   private readonly verdicts = new Verdicts()
   private readonly activity: FamilyActivity
+  private readonly sends: FiberSends
+  private readonly stopSends: () => void
   private readonly picker: ConstitutionPicker
   /** The list the board bar's Find hangs beneath itself; the phone, without that field, uses `picker`. */
   private readonly barPicker: ConstitutionPicker
@@ -144,6 +145,8 @@ export class Workspace {
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.root = root
+    this.sends = opts.sends ?? new FiberSends(opts.shuttleBase)
+    this.stopSends = this.sends.subscribe(() => this.sendsChanged())
     this.activity = new FamilyActivity(opts.shuttleBase, () => {
       if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
       this.globeHost.onFeeds?.()
@@ -180,6 +183,7 @@ export class Workspace {
     this.themes = new ChannelThemes(opts.shuttleBase)
     this.overview = new Overview({
       shuttleBase: opts.shuttleBase,
+      sends: this.sends,
       themes: this.themes,
       cards: opts.cards,
       onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
@@ -337,7 +341,7 @@ export class Workspace {
   }
   /** A card's sent files, and the open channel's other documents, newest first. */
   private mapFiles(card: KanbanCard): MapFile[] {
-    const files = new Map((this.opts.sends?.(card) ?? []).map(send => [send.key, { key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp) }]))
+    const files = new Map(this.sends.sends(card).map(send => [send.key, { key: send.key, name: send.basename, at: send.timestamp, unread: unseenSince(send.key, send.timestamp) }]))
     const documents = this.channels.get(channelId(card.uid ?? card.id, card.originId))?.channel.documents ?? []
     for (const doc of documents) {
       const at = documentActivity(doc)
@@ -371,10 +375,10 @@ export class Workspace {
   }
   private refreshFamilyFeeds(): void {
     this.activity.refresh()
-    this.opts.refreshSends?.()
+    void this.sends.refresh()
   }
   /** The sent-file feed moved: the open map redraws. */
-  sendsChanged(): void {
+  private sendsChanged(): void {
     if (this.current && this.isActive) this.current.familyPage?.update(this.current.card, this.graph())
     this.globeHost.onFeeds?.()
   }
@@ -943,7 +947,7 @@ export class Workspace {
     const query = `uid=${encodeURIComponent(state.channel.uid)}&origin=${encodeURIComponent(state.channel.owner)}`
     const promise = (async () => {
       try {
-        const res = await fetch(`${this.opts.shuttleBase}/api/v1/sent-files?${query}`, {
+        const res = await daemonFetch(`${this.opts.shuttleBase}/api/v1/sent-files?${query}`, {
           cache: 'no-store',
           headers: cached?.etag ? { 'If-None-Match': cached.etag } : undefined,
           signal: AbortSignal.timeout(25000),
@@ -1118,6 +1122,7 @@ export class Workspace {
     this.barPicker.dispose()
     this.reader.dispose()
     this.overview.dispose()
+    this.stopSends()
     this.themes.dispose()
     this.depth.dispose()
   }

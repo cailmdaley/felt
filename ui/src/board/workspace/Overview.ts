@@ -1,4 +1,4 @@
-import { ago, clockTime, DAY_MS, daysBetween, hostZone, isoDayLocal, type Zone } from '../civilDay.js'
+import { ago, clockTime, daysBetween, hostZone, isoDayLocal, type Zone } from '../civilDay.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
@@ -6,7 +6,8 @@ import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
 import { deskColumn } from '../deskColumn.js'
-import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
+import type { SentFile } from '../sentFiles.js'
+import { FiberSends, SEND_WINDOW_MS } from '../fiberSends.js'
 import { LOAD_POLICY, Thumbnail, pumpThumbnails } from './Thumbnail.js'
 import { leadReceipt, docKey, parseDocKey, documentKind, documentLabels, type DocKey } from './documents.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
@@ -17,6 +18,8 @@ import { ReceiptMotion } from './receiptMotion.js'
 
 export interface OverviewOptions {
   shuttleBase: string
+  /** The fleet's sent files; an overview without one reads its own. */
+  sends?: FiberSends
   themes?: ChannelThemes
   cards(): KanbanCard[]
   onOpen(card: KanbanCard, doc?: DocKey): void
@@ -31,7 +34,6 @@ export interface OverviewOptions {
   readLately?(): KanbanCard[]
 }
 export type OverviewLens = 'recent' | 'projects' | 'hosts'
-const WINDOW_MS = 30 * DAY_MS
 const MAX_CHANGE_ROWS = 8
 /** An unreachable owner's metadata read retries within this long. */
 const RETRY_MS = 30000
@@ -211,11 +213,10 @@ export class Overview {
   private readonly observer?: IntersectionObserver
   private readonly resizeObserver?: ResizeObserver
   private marks = new Map<string, string>()
-  private files: SentFile[] = []
-  private fleetHosts: string[] = []
+  private readonly sends: FiberSends
+  private readonly stopSends: () => void
   private lens: OverviewLens = 'recent'
   private order: KanbanCard[] = []
-  private request?: AbortController
   private visible = true
   /** Model changes reached while the sheet was off screen, waiting to be drawn. */
   private stale = false
@@ -230,12 +231,14 @@ export class Overview {
 
   constructor(opts: OverviewOptions) {
     this.opts = opts
+    this.sends = opts.sends ?? new FiberSends(opts.shuttleBase)
+    this.stopSends = this.sends.subscribe(() => this.sendsChanged())
     this.stopTitles = watchDocumentTitles(() => { if (!this.disposed) this.render() })
     const lens = stored(LENS_STORAGE)
     if (lens === 'recent' || lens === 'projects' || lens === 'hosts') this.lens = lens
     const seen = stored(SEEN_STORAGE)
     this.previousVisit = typeof seen === 'number' && Number.isFinite(seen) && seen > 0 && seen <= Date.now() ? seen : undefined
-    this.seen = this.previousVisit ?? Date.now() - WINDOW_MS
+    this.seen = this.previousVisit ?? Date.now() - SEND_WINDOW_MS
     const stamps = stored(CHANGES_STORAGE)
     if (stamps && typeof stamps === 'object' && !Array.isArray(stamps)) {
       for (const [uid, raw] of Object.entries(stamps)) {
@@ -319,48 +322,27 @@ export class Overview {
     this.render()
   }
 
-  /** Metadata paints immediately; one coalesced feed read finishes asynchronously. */
-  refresh(force = false): void {
+  /** Metadata paints immediately; the fleet's sent files follow on their own throttle. */
+  refresh(): void {
     if (this.disposed) return
-    if (force) {
-      this.request?.abort()
-      this.request = undefined
-    }
     // A poll retries transient failures at once. A fiber its owner answered
     // "not found" for waits for the next visit: every such read asks each host in turn.
-    if (!this.request) for (const [uid, retry] of this.cardRetries) if (!this.missingCards.has(uid)) retry.at = 0
+    for (const [uid, retry] of this.cardRetries) if (!this.missingCards.has(uid)) retry.at = 0
     this.reconcile()
-    if (this.request) return
-    const controller = new AbortController()
-    this.request = controller
-    const sampledAt = Date.now()
-    const since = sampledAt - WINDOW_MS
-    const timeout = setTimeout(() => controller.abort(), 25000)
-    void (async () => {
-      try {
-        const response = await fetch(`${this.opts.shuttleBase}/api/v1/sent-files/all/composite?since_ms=${Math.floor(since)}`, { signal: controller.signal, cache: 'no-store' })
-        if (!response.ok) throw new Error('Receipt feed unavailable')
-        const raw: unknown = await response.json()
-        if (this.disposed || this.request !== controller) return
-        if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { files?: unknown }).files)) throw new Error('Invalid receipt feed')
-        const incoming = normalizeSentFiles(raw)
-        this.files = incoming.filter(file => Number.isFinite(file.timestamp) && file.timestamp > 0 && file.timestamp >= Date.now() - WINDOW_MS)
-        const origins = (raw as { origins?: unknown }).origins
-        if (origins && typeof origins === 'object' && !Array.isArray(origins)) {
-          const hosts = Object.keys(origins)
-          if (hosts.length) {
-            this.fleetHosts = hosts
-          }
-        }
-        text(this.status, '')
-        this.reconcile()
-      } catch {
-        if (!this.disposed && this.request === controller) text(this.status, 'Receipt feed unavailable — showing the last loaded sheet.')
-      } finally {
-        clearTimeout(timeout)
-        if (this.request === controller) this.request = undefined
-      }
-    })()
+    void this.sends.refresh()
+  }
+
+  /** The sent files moved, or their read failed or recovered. */
+  private sendsChanged(): void {
+    if (this.disposed) return
+    text(this.status, this.sends.failed ? 'Receipt feed unavailable — showing the last loaded sheet.' : '')
+    this.reconcile()
+  }
+
+  /** The sent files of the last thirty days, as the sheet files them. */
+  private get files(): SentFile[] {
+    const since = Date.now() - SEND_WINDOW_MS
+    return this.sends.files.filter(file => file.timestamp >= since)
   }
 
   /** Board metadata arrived or changed; folios keep their places. */
@@ -476,7 +458,7 @@ export class Overview {
     this.stopTitles()
     this.receiptMotion.dispose()
     clearTimeout(this.retryTimer)
-    this.request?.abort()
+    this.stopSends()
     for (const controller of this.cardControllers) controller.abort()
     this.observer?.disconnect()
     this.resizeObserver?.disconnect()
@@ -560,7 +542,7 @@ export class Overview {
       this.opts.themes?.unbind(folio.el)
       folio.el.remove(); this.folios.delete(uid)
     }
-    this.marks = overviewHostMarks([...this.fleetHosts, ...known.values()].flatMap(h => typeof h === 'string' ? [h] : [h.originId, ...(h.mirroredOrigins ?? [])]).concat([...this.folios.values()].flatMap(f => f.receipts.map(r => r.owner))))
+    this.marks = overviewHostMarks([...this.sends.hosts, ...known.values()].flatMap(h => typeof h === 'string' ? [h] : [h.originId, ...(h.mirroredOrigins ?? [])]).concat([...this.folios.values()].flatMap(f => f.receipts.map(r => r.owner))))
     this.render()
     if (this.visible && this.el.isConnected) {
       for (const folio of arrived) if (!folio.el.hidden) this.receiptMotion.folio(folio.el)

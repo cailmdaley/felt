@@ -1,55 +1,6 @@
 import type { KanbanCard } from './KanbanTypes.js'
 
 /**
- * Extract the most descriptive error message from a failed daemon response.
- *
- * Shuttle's endpoints don't speak one error format: `/api/v1/lifecycle` and
- * `/api/v1/transition` (on the local→remote forward path) reply `text/plain`
- * with the CLI's stderr ("shuttle exited 1: …", "fiber not found: …", a
- * validation message); the transition controller's local errors reply JSON
- * `{error}`. Parsing every body as JSON would collapse a plain-text one to a
- * bare status code — throwing away the one line that says what went wrong.
- *
- * This reads the body once, prefers a JSON `error` field when present, falls
- * back to the raw text, and only then to `<label> (HTTP <status>)`.
- */
-async function errorMessageFromResponse(res: Response, label: string): Promise<string> {
-  let body = ''
-  try { body = (await res.text()).trim() } catch { /* body unreadable (network/stream error) */ }
-  if (body) {
-    if (body.startsWith('{') || body.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(body) as { error?: unknown; message?: unknown }
-        const field = parsed.error ?? parsed.message
-        if (typeof field === 'string' && field.trim()) return field.trim()
-      } catch { /* not JSON after all — use the raw text below */ }
-    }
-    return body
-  }
-  return `${label} (HTTP ${res.status})`
-}
-
-/**
- * POST one JSON body to a daemon write route, throwing the daemon's own
- * message on a non-2xx. Every write route is owner-routed by the `origin`
- * field in the body, so the board can drive a fiber whose owning host is not
- * this one.
- */
-export async function postDaemonJson(
-  shuttleBase: string,
-  path: string,
-  body: unknown,
-  label: string,
-): Promise<void> {
-  const res = await fetch(`${shuttleBase}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(await errorMessageFromResponse(res, label))
-}
-
-/**
  * The one launch request every gesture sends: `POST /api/v1/dispatch` with
  * `force` + `ad_hoc`, owner-routed by `origin`. The daemon reopens a closed
  * lifecycle itself and launches on the owning host regardless of poll
@@ -58,6 +9,8 @@ export async function postDaemonJson(
  * `user_message` rides inline into the worker's prompt. `project_dir` is a
  * directory a human confirmed after a start was refused for want of one
  * ({@link needsProjectDir}); the owning host's CLI validates and saves it.
+ * A booting daemon's 503 comes back as a response, not a throw: the caller
+ * reads it as "nothing was launched" ({@link dispatchFailureMessage}).
  */
 export function postForceDispatch(
   shuttleBase: string,

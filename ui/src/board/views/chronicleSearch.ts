@@ -25,6 +25,8 @@
  *   3 id substring · 4 outcome · 5 body
  */
 
+import { getDaemonJson } from '../daemonApi.js'
+
 /** Which field the query was found in. Ordered by the rank they imply. */
 export type MatchField = 'name' | 'id' | 'outcome' | 'body'
 
@@ -183,7 +185,5 @@ export async function fetchRecordHits(
   limit = 25,
 ): Promise<SearchHit[]> {
   const params = new URLSearchParams({ q: query, limit: String(limit) })
-  const res = await fetch(`${shuttleBase}/api/v1/search?${params.toString()}`)
-  if (!res.ok) throw new Error(`${res.status}`)
-  return parseSearchResponse(await res.json())
+  return parseSearchResponse(await getDaemonJson(`${shuttleBase}/api/v1/search?${params}`, 'Search failed'))
 }

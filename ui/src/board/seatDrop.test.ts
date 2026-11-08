@@ -6,6 +6,11 @@ import { rolePopover, validRole, type RoleChoice } from './RolePopover.js'
 import { card, response } from './testFixtures.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 
+const postDaemonJson = vi.hoisted(() => vi.fn())
+vi.mock('./daemonApi.js', async importOriginal => ({ ...await importOriginal<typeof import('./daemonApi.js')>(), postDaemonJson }))
+/** The board's writes, without the daemon base each one carries first. */
+const writes = (): unknown[][] => postDaemonJson.mock.calls.map(call => call.slice(1))
+
 const draft = (over: Partial<KanbanCard> = {}) => card({ id: 'work/new-office', name: 'New office', shuttleKind: 'oneshot', ...over })
 const roles = [{ slug: 'analyst', name: 'Analyst', outcome: 'Keeps the science right.' }, { slug: 'editor', name: 'Editor', outcome: 'Keeps writing clear.' }]
 let close: (() => void) | undefined
@@ -27,7 +32,6 @@ interface SeatBoard {
   commitSeat(card: KanbanCard, choice?: RoleChoice): Promise<void>
   closeRolePopover?: () => void
   lastResponse: KanbanResponse
-  postJson: ReturnType<typeof vi.fn>
   setSurface: ReturnType<typeof vi.fn>
   applyResponse: ReturnType<typeof vi.fn>
   fetchAndRender: ReturnType<typeof vi.fn>
@@ -37,7 +41,7 @@ interface SeatBoard {
 function board(fiber = draft()): SeatBoard {
   const modal = new KanbanModal({ shuttleBase: '' }) as unknown as SeatBoard
   modal.lastResponse = response({ now: { drafts: [fiber], inFlight: [], awaitingReview: [] } })
-  modal.postJson = vi.fn().mockResolvedValue(undefined)
+  postDaemonJson.mockReset().mockResolvedValue(undefined)
   modal.setSurface = vi.fn()
   modal.applyResponse = vi.fn()
   modal.fetchAndRender = vi.fn().mockResolvedValue(undefined)
@@ -77,11 +81,11 @@ describe('dropping on the Roles band', () => {
     const fiber = draft({ shuttleRole: 'analyst', status: 'active', workerState: 'running' })
     const modal = board(fiber)
     await modal.commitSeat(fiber)
-    expect(modal.postJson).toHaveBeenCalledExactlyOnceWith('/api/v1/lifecycle', {
+    expect(postDaemonJson).toHaveBeenCalledExactlyOnceWith('', '/api/v1/lifecycle', {
       action: 'seat', fiber: fiber.id, origin: fiber.originId,
     }, expect.any(String))
     expect(modal.setSurface).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ shuttleSeat: true, shuttleRole: 'analyst' }), 'stashed')
-    expect(modal.postJson.mock.invocationCallOrder[0]).toBeLessThan(modal.setSurface.mock.invocationCallOrder[0])
+    expect(postDaemonJson.mock.invocationCallOrder[0]).toBeLessThan(modal.setSurface.mock.invocationCallOrder[0])
   })
   it('does not rest an already-resting card or a standing constitution', async () => {
     for (const fiber of [draft({ effectiveHorizon: 'stashed' }), draft({ shuttleKind: 'standing', status: 'active' })]) {
@@ -98,24 +102,24 @@ describe('dropping on the Roles band', () => {
     band(fiber, (card, anchor) => modal.makeSeat(card, anchor)).dispatchEvent(drop('drop'))
     close = modal.closeRolePopover
     await vi.waitFor(() => expect(document.querySelector('.kbn-role-options')?.textContent).toContain('Analyst'))
-    expect(modal.postJson).not.toHaveBeenCalled()
+    expect(postDaemonJson).not.toHaveBeenCalled()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(document.querySelector('[role="dialog"]')).toBeNull()
-    expect(modal.postJson).not.toHaveBeenCalled()
+    expect(postDaemonJson).not.toHaveBeenCalled()
   })
   it('writes role, seat and rest in order and passes a new office name', async () => {
     const fiber = draft()
     const modal = board(fiber)
     await modal.commitSeat(fiber, { role: 'new-office', new_name: 'New office' })
-    expect(modal.postJson.mock.calls.map(call => call[1].action)).toEqual(['role', 'seat'])
-    expect(modal.postJson.mock.calls[0][1]).toMatchObject({ role: 'new-office', new_name: 'New office' })
+    expect(writes().map(call => (call[1] as { action: string }).action)).toEqual(['role', 'seat'])
+    expect(writes()[0][1]).toMatchObject({ role: 'new-office', new_name: 'New office' })
     expect(modal.setSurface).toHaveBeenCalledOnce()
   })
   it('does not continue after a role write fails', async () => {
     const modal = board()
-    modal.postJson.mockRejectedValueOnce(new Error('No charter'))
+    postDaemonJson.mockRejectedValueOnce(new Error('No charter'))
     await modal.commitSeat(draft(), { role: 'analyst' })
-    expect(modal.postJson).toHaveBeenCalledOnce()
+    expect(postDaemonJson).toHaveBeenCalledOnce()
     expect(modal.setSurface).not.toHaveBeenCalled()
     expect(modal.fetchAndRender).toHaveBeenCalledOnce()
   })

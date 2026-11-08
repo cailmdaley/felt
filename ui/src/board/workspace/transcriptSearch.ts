@@ -1,3 +1,5 @@
+import { daemonFetch } from '../daemonApi.js'
+
 interface TranscriptHitFiber { id: string; name: string }
 
 /** A session's best message, as grouped `shuttle transcript search --json` reports it. */
@@ -71,7 +73,7 @@ export async function searchTranscripts(
   if (filters.since) params.set('since', filters.since)
   if (filters.harness) params.set('harness', filters.harness)
   if (filters.limit) params.set('limit', String(filters.limit))
-  const send = options.fetch ?? ((input, init) => fetch(input, init))
+  const send = options.fetch ?? daemonFetch
   const response = await send(`${shuttleBase.replace(/\/$/, '')}/api/v1/transcripts/search?${params}`, { signal: options.signal })
   let body: unknown = null
   try { body = await response.json() } catch { /* not JSON */ }

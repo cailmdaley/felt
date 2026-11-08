@@ -1,3 +1,5 @@
+import { daemonFetch } from '../board/daemonApi'
+
 /**
  * The native half of "+ Add project…": ask the daemon to raise its own host's
  * OS folder dialog (`POST /api/v1/choose-folder`).
@@ -33,7 +35,7 @@ export function parseChooseFolder(status: number, body: unknown): ChooseFolderRe
 
 export async function chooseFolder(shuttleBase: string): Promise<ChooseFolderResult> {
   try {
-    const res = await fetch(`${shuttleBase}/api/v1/choose-folder`, {
+    const res = await daemonFetch(`${shuttleBase}/api/v1/choose-folder`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -76,7 +78,7 @@ export async function registerProject(
   origin: string,
 ): Promise<RegisterResult> {
   try {
-    const res = await fetch(`${shuttleBase}/api/v1/projects`, {
+    const res = await daemonFetch(`${shuttleBase}/api/v1/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path, origin }),

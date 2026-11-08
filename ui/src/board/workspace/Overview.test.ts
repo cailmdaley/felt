@@ -6,7 +6,9 @@ import { docKey } from './documents.js'
 import { resetDocumentResources } from '../documentResources.js'
 import { resetLanes } from '../requestLanes.js'
 import { cacheDocumentTitle } from './DocumentTitles.js'
-import { Overview, overviewDayGroup, overviewHostMarks } from './Overview.js'
+import { Overview as BaseOverview, overviewDayGroup, overviewHostMarks, type OverviewOptions } from './Overview.js'
+import { FiberSends } from '../fiberSends.js'
+import { windowStart } from '../daemonApi.js'
 import type { ChannelThemes } from './ChannelThemes.js'
 
 const rect = (top: number, left = 0, width = 176, height = 116): DOMRect => ({
@@ -27,6 +29,11 @@ class Observer {
 }
 let overview: Overview
 let cards: KanbanCard[]
+/** The sheet over its own unthrottled store, so every refresh reads the feed. */
+class Overview extends BaseOverview {
+  constructor(opts: OverviewOptions) { super({ sends: new FiberSends(opts.shuttleBase, { intervalMs: 0 }), ...opts }) }
+}
+const since = (at: number): string => String(windowStart(at, 30 * 86400000))
 let feed: { files: unknown[]; origins?: Record<string, unknown> }
 let onOpen = vi.fn<(card: KanbanCard, doc?: string) => void>()
 let onConversation = vi.fn<(card: KanbanCard) => void>()
@@ -118,7 +125,7 @@ describe('Overview receipt membership and identity', () => {
       receipt('beta', '/notes/alpha/report.html', now(), 'host-b'), receipt('alpha', '/old.html', now() - 31 * 86400000),
       receipt('alpha', '/invalid.html', NaN), receipt('alpha', '/zero.html', 0), { uid: 'alpha' }]
     await refresh()
-    expect(fetchMock.mock.calls[0][0]).toBe(`http://daemon/api/v1/sent-files/all/composite?since_ms=${now() - 30 * 86400000}`)
+    expect(fetchMock.mock.calls[0][0]).toBe(`http://daemon/api/v1/sent-files/all/composite?since_ms=${since(now())}`)
     expect(overview.el.querySelectorAll('.ws-overview-rib')).toHaveLength(2)
     expect(folio('alpha').querySelector('.ws-overview-footer')!.textContent).toContain('1 document')
     expect(name('alpha')).toBe('Alpha result')
@@ -211,13 +218,13 @@ describe('Overview receipt membership and identity', () => {
     feed.origins = receiptOrigins(started - 5 * 60_000, true)
     feed.files = [first]
     await refresh()
-    expect(fetchMock.mock.calls[0][0]).toBe(`http://daemon/api/v1/sent-files/all/composite?since_ms=${started - 30 * 86400000}`)
+    expect(fetchMock.mock.calls[0][0]).toBe(`http://daemon/api/v1/sent-files/all/composite?since_ms=${since(started)}`)
 
     vi.setSystemTime(started + 5000)
     feed.files = [receipt('alpha', '/report.html', started + 4000, 'host-b', { sessionId: 'session-b' }),
       receipt('alpha', '/report.html', started + 4000, 'host-a', { sessionId: 'session-b' })]
     await refresh()
-    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('since_ms')).toBe(String(started + 5000 - 30 * 86400000))
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('since_ms')).toBe(since(started + 5000))
     const retained = (overview as unknown as { files: Array<{ uid?: string; host?: string; fullPath: string; timestamp: number; sessionId?: string }> }).files
     expect(retained.map(({ host, uid, fullPath, timestamp, sessionId }) => [host, uid, fullPath, timestamp, sessionId])).toEqual([
       ['host-b', 'alpha', '/report.html', started + 4000, 'session-b'],
@@ -227,12 +234,12 @@ describe('Overview receipt membership and identity', () => {
     vi.setSystemTime(started + 6000)
     fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }))
     overview.refresh(); await settle()
-    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('since_ms')).toBe(String(started + 6000 - 30 * 86400000))
+    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('since_ms')).toBe(since(started + 6000))
     expect((overview as unknown as { files: unknown[] }).files).toHaveLength(2)
 
     feed.files = [receipt('alpha', '/recovered.html', started + 8000, 'host-b', { sessionId: 'session-c' })]
     await refresh()
-    expect(new URL(fetchMock.mock.calls[3][0]).searchParams.get('since_ms')).toBe(String(started + 6000 - 30 * 86400000))
+    expect(new URL(fetchMock.mock.calls[3][0]).searchParams.get('since_ms')).toBe(since(started + 6000))
     expect((overview as unknown as { files: Array<{ fullPath: string }> }).files.map(file => file.fullPath)).toEqual(['/recovered.html'])
 
     vi.setSystemTime(started + 31 * 86400000)
@@ -253,7 +260,7 @@ describe('Overview receipt membership and identity', () => {
     await refresh()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('since_ms')).toBe(String(started + 10_000 - 30 * 86400000))
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('since_ms')).toBe(since(started + 10_000))
     expect((overview as unknown as { files: Array<{ fullPath: string }> }).files.map(file => file.fullPath)).toEqual(['/new-host/history.html'])
   })
 
@@ -356,22 +363,6 @@ describe('Overview receipt membership and identity', () => {
     fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }))
     overview.refresh(); await settle()
     expect(folio('alpha')).toBe(prior)
-  })
-
-  it('a forced post-clear refresh cannot be overwritten by a pre-clear read', async () => {
-    const stale = { ...feed, files: [receipt('alpha', '/report.html')] }
-    feed.files = stale.files
-    await refresh()
-    let finishOld!: (response: Response) => void
-    fetchMock.mockImplementationOnce(() => new Promise<Response>(resolve => { finishOld = resolve }))
-    overview.refresh()
-    feed.files = []
-    overview.refresh(true)
-    await settle()
-    expect(overview.el.querySelector('.ws-overview-folio[data-uid="alpha"]')).toBeNull()
-    finishOld(new Response(JSON.stringify(stale)))
-    await settle()
-    expect(overview.el.querySelector('.ws-overview-folio[data-uid="alpha"]')).toBeNull()
   })
 
   it('coalesces refresh reads and retains the sheet on feed failure', async () => {

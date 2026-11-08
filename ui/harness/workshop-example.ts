@@ -88,8 +88,8 @@ export function workshopExample(now: number) {
     'workshop/participant-guide': 'Prepare a one-page participant guide using [[workshop/venue]] and [[workshop/programme]].\n\n## Desired State\n\nThe guide describes the chosen venue and draft programme. Missing details are clearly marked for the organizer; no names, times, or access arrangements are invented.\n\n## Status\n\nThe venue and draft programme are available. Check venue access and flag the unconfirmed start time and speaker names.',
   }
   return {
-    feed: { host, generated_at: iso(0), fibers: [...rows, cycle],
-      origins: { [host]: { kind: 'local', stale: false, last_polled_at: iso(0), fiber_count: rows.length + 1 } } },
+    feed: { host, fibers: [...rows, cycle],
+      origins: { [host]: { kind: 'local', stale: false, fiber_count: rows.length + 1 } } },
     temporal, sessions, bodies,
   }
 }

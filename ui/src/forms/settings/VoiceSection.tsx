@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { daemonErrorMessage, getDaemonJson, postDaemonJson } from '../../board/daemonApi'
 import type { SettingsHost } from './settingsApi'
 import { useSettingsDraft } from './SettingsDraftContext'
 
@@ -16,26 +17,21 @@ export function VoiceSection({ shuttleBase, host, onChanged }: { shuttleBase: st
   useEffect(() => {
     let cancelled = false
     setLoaded(false)
-    void fetch(`${shuttleBase}/api/v1/voice?recorder=${encodeURIComponent(host.origin)}`).then(async response => {
-      const body = await response.json()
-      if (!response.ok) throw new Error(body.error ?? 'Could not read listening settings')
+    void getDaemonJson<Values>(
+      `${shuttleBase}/api/v1/voice?recorder=${encodeURIComponent(host.origin)}`, 'Could not read listening settings',
+    ).then(body => {
       if (cancelled) return
       setValues({ words: body.words, quiet_seconds: body.quiet_seconds, pinned_quiet_seconds: body.pinned_quiet_seconds })
       setLoaded(true)
-    }).catch((err: Error) => { if (!cancelled) setError(err.message) })
+    }).catch((err: unknown) => { if (!cancelled) setError(daemonErrorMessage(err)) })
     return () => { cancelled = true }
   }, [shuttleBase, host.origin])
   const save = async (): Promise<void> => {
     setBusy(true); setError(null)
     try {
-      const response = await fetch(`${shuttleBase}/api/v1/voice`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...values, recorder: host.origin }),
-      })
-      const body = await response.json()
-      if (!response.ok) throw new Error(body.error ?? 'Could not save listening settings')
+      await postDaemonJson(shuttleBase, '/api/v1/voice', { ...values, recorder: host.origin }, 'Could not save listening settings')
       setDirty(false); onChanged()
-    } catch (err) { setError((err as Error).message) }
+    } catch (err) { setError(daemonErrorMessage(err)) }
     finally { setBusy(false) }
   }
   return <>

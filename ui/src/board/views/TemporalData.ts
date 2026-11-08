@@ -38,7 +38,7 @@
  * one round trip, and the next ask after it settles goes to the daemon.
  */
 
-import { daemonFetch } from '../daemonApi.js'
+import { readComposite } from '../daemonApi.js'
 
 /** One coarse activity bucket. Field names are the wire's — deliberately
  *  terse, because a day of minute buckets is a lot of JSON:
@@ -285,17 +285,6 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
     return value
   }
 
-  /**
-   * Read a feed's cross-host composite. Every failure — 404, 5xx, network
-   * error — returns null and the caller degrades to empty for this window
-   * only; the next window asks again.
-   */
-  const readFeed = async (feed: string, query: string): Promise<unknown> => {
-    const res = await daemonFetch(`${shuttleBase}/api/v1/${feed}/composite?${query}`)
-    if (!res.ok) return null
-    return await res.json()
-  }
-
   return {
     activity(fromMs: number, toMs: number): Promise<ActivityResult> {
       return dedupe(`activity:${fromMs}:${toMs}`, async () => {
@@ -307,10 +296,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
           origins: {},
         }
         try {
-          const body = await readFeed(
-            'activity',
-            `from_ms=${encodeURIComponent(String(fromMs))}&to_ms=${encodeURIComponent(String(toMs))}`,
-          )
+          const body = await readComposite(shuttleBase, 'activity', { from_ms: fromMs, to_ms: toMs })
           return parseActivity(body, empty)
         } catch {
           return empty
@@ -330,10 +316,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
       return dedupe(`sessions:${sinceMs}`, async () => {
         const empty: SessionsResult = { host: '', records: [], origins: {} }
         try {
-          const body = await readFeed(
-            'sessions',
-            `since_ms=${encodeURIComponent(String(sinceMs))}`,
-          )
+          const body = await readComposite(shuttleBase, 'sessions', { since_ms: sinceMs })
           return parseSessions(body, empty)
         } catch {
           return empty
@@ -354,11 +337,7 @@ export function createTemporalFetchers(shuttleBase: string): TemporalFetchers {
       return dedupe(`commits:${sinceMs}:${untilMs}`, async () => {
         const empty: CommitsResult = { host: '', records: [], origins: {} }
         try {
-          const body = await readFeed(
-            'commits',
-            `since_ms=${encodeURIComponent(String(sinceMs))}` +
-              `&until_ms=${encodeURIComponent(String(untilMs))}`,
-          )
+          const body = await readComposite(shuttleBase, 'commits', { since_ms: sinceMs, until_ms: untilMs })
           return parseCommits(body, empty)
         } catch {
           return empty

@@ -610,7 +610,6 @@ const DENSE_SENT_FILES = denseRows.filter((_, i) => i % 2 === 0).map((row, i) =>
 
 const MOCK_FEED = {
   host: 'local',
-  generated_at: iso(0),
   fibers: [
     ...DRAFTS.map(fiber),
     ...denseRows,
@@ -748,7 +747,7 @@ const MOCK_FEED = {
     ]),
   ],
   origins: {
-    local: { kind: 'local', stale: false, last_polled_at: iso(0), fiber_count: 12 },
+    local: { kind: 'local', stale: false, fiber_count: 12 },
     kelvin: { kind: 'remote', stale: true, last_polled_at: iso(-3_600_000), fiber_count: 1 },
   },
 }

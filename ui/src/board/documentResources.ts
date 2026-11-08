@@ -1,5 +1,6 @@
 import { inLane } from './requestLanes.js'
 import { normalizeAbsolutePath } from './workspace/documents.js'
+import { fileBytesUrl } from './utils.js'
 
 /**
  * The document cache: the one reader of document content. Every surface that
@@ -88,9 +89,7 @@ export function resourceKey(src: string): string {
 function bytesUrl(src: string): string {
   const asset = /^(.*)\/api\/v1\/file-assets\/([^/?#]+)(\/[^?#]*)/.exec(src)
   if (!asset) return src.replace(/\/file-info\?/, '/file?')
-  const owner = decodeURIComponent(asset[2])
-  const path = encodeURIComponent(decodeURIComponent(asset[3])).replace(/~/g, '%7E')
-  return `${asset[1]}/api/v1/file?path=${path}${owner === 'local' ? '' : `&origin=${encodeURIComponent(owner)}`}`
+  return fileBytesUrl(asset[1], decodeURIComponent(asset[3]), decodeURIComponent(asset[2]))
 }
 
 function entryFor(src: string): Entry {

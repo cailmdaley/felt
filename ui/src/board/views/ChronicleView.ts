@@ -102,6 +102,7 @@ import {
   rowDiffTotals,
   spellHeight,
 } from './chronicleModel.js'
+import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import './ChronicleView.css'
 
 // ── Window ───────────────────────────────────────────────────────────────────
@@ -1394,9 +1395,7 @@ class ChronicleView implements TemporalView {
     if (this.intentions.has(id)) return
     this.intentions.set(id, '') // claim it, so a re-render does not re-ask
     try {
-      const res = await fetch(`${fiberDocUrl(ctx.shuttleBase, id)}?body=1`)
-      if (!res.ok) return
-      const text = firstParagraph(fiberBodyOf(await res.json()))
+      const text = firstParagraph(fiberBodyOf(await getDaemonJson(`${fiberDocUrl(ctx.shuttleBase, id)}?body=1`)))
       if (!text) return
       this.intentions.set(id, text)
       this.repaintNow()
@@ -1579,20 +1578,13 @@ class ChronicleView implements TemporalView {
   /** Every Chronicle write goes out as one owner-routed `felt-edit` POST;
    *  the throw is what each caller's own catch (or lack of one) hangs on. */
   private async feltEdit(ctx: ViewContext, payload: object): Promise<void> {
-    const res = await fetch(`${ctx.shuttleBase}/api/v1/felt-edit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) throw new Error(`felt-edit returned ${res.status}`)
+    await postDaemonJson(ctx.shuttleBase, '/api/v1/felt-edit', payload, 'felt-edit failed')
   }
 
   /** The fiber's body as it stands right now — what the intention editor opens
    *  on, so a write can send back everything it did not change. */
   private async readBody(id: string, ctx: ViewContext): Promise<string> {
-    const res = await fetch(`${fiberDocUrl(ctx.shuttleBase, id)}?body=1`)
-    if (!res.ok) throw new Error(`fiber read returned ${res.status}`)
-    return fiberBodyOf(await res.json()) ?? ''
+    return fiberBodyOf(await getDaemonJson(`${fiberDocUrl(ctx.shuttleBase, id)}?body=1`, 'fiber read failed')) ?? ''
   }
 
   /**
@@ -2234,28 +2226,23 @@ class ChronicleView implements TemporalView {
     const id = `cycles/${slug}`
 
     try {
-      const created = await fetch(`${ctx.shuttleBase}/api/v1/fiber/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id,
+      const body = await postDaemonJson<{ id?: string } | undefined>(ctx.shuttleBase, '/api/v1/fiber/create', {
+        id,
+        name,
+        body: prose,
+        frontmatter: {
           name,
-          body: prose,
-          frontmatter: {
-            name,
-            status: 'open',
-            tags: ['cycle'],
-            start: startDay,
-            // Omitted, not null, when the era is open-ended: `due` absent is
-            // how a cycle says "still running", and a null would be a date
-            // field the daemon has to interpret.
-            ...(endDay === null ? {} : { due: endDay }),
-          },
-          origin,
-        }),
-      })
-      const body = (await created.json().catch(() => ({}))) as { id?: string; error?: string }
-      if (!created.ok || !body.id) throw new Error(body.error || `create returned ${created.status}`)
+          status: 'open',
+          tags: ['cycle'],
+          start: startDay,
+          // Omitted, not null, when the era is open-ended: `due` absent is
+          // how a cycle says "still running", and a null would be a date
+          // field the daemon has to interpret.
+          ...(endDay === null ? {} : { due: endDay }),
+        },
+        origin,
+      }, 'create failed')
+      if (!body?.id) throw new Error('create returned no id')
       // The fiber exists now, so the band stops being a picture of a cycle and
       // becomes the cycle — clickable, enterable, its face readable — instead
       // of waiting inert for the feed to come round, which is a poll interval

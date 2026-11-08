@@ -12,6 +12,7 @@ import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
 import { buildFileViewer } from '../FileViewerPanel.js'
+import { FiberSends } from '../fiberSends.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
@@ -33,8 +34,9 @@ vi.mock('../FileViewerPanel.js', () => ({
 
 let workspace: Workspace
 type WorkspaceTestOptions = Omit<WorkspaceOptions, 'deskRows'> & { deskRows?: WorkspaceOptions['deskRows'] }
+/** Every refresh reads the sent-file feed, so a test's changed answer is seen at its next step. */
 function makeWorkspace(root: HTMLElement, opts: WorkspaceTestOptions): Workspace {
-  return new Workspace(root, { ...opts, deskRows: opts.deskRows ?? opts.cards })
+  return new Workspace(root, { sends: new FiberSends(opts.shuttleBase, { intervalMs: 0 }), ...opts, deskRows: opts.deskRows ?? opts.cards })
 }
 const cards = [
   card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a', fiberDir: '/notes/alpha', path: 'work/alpha/alpha.md' }),

@@ -1,10 +1,13 @@
 /**
- * The newest report each Desk row marks, from one throttled fleet read.
- * The Desk never reads a sent-file feed per card.
+ * The fleet's sent files over the last thirty days, from one throttled read of
+ * the sent-files composite. The Desk's report marks, the Board's contact sheet
+ * and the family map all draw from this one store; none reads the feed itself.
  */
 import { normalizeSentFiles, type SentFile } from './sentFiles.js'
 import { DAY_MS } from './civilDay.js'
 import { docKey, parseDocKey, type DocKey } from './workspace/documents.js'
+import { readComposite, windowStart } from './daemonApi.js'
+import { ThrottledRead } from './throttledRead.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
 /** A sent file resolved to the host that holds its bytes. */
@@ -17,7 +20,7 @@ export interface FiberSend {
 }
 
 /** How far back a sent file still counts. */
-const SEND_WINDOW_MS = 30 * DAY_MS
+export const SEND_WINDOW_MS = 30 * DAY_MS
 /** The least time between two fleet reads. */
 export const SEND_REFRESH_MS = 60_000
 
@@ -41,15 +44,30 @@ export function sendsByFiber(files: readonly SentFile[]): Map<string, SentFile[]
 }
 
 export class FiberSends {
+  /** Every sent file the window's read returned, in the feed's order. */
+  files: readonly SentFile[] = []
+  /** The hosts the feed's origins block names, as of the last read that named any. */
+  hosts: readonly string[] = []
+  /** Whether the last read failed; `files` is then the last good answer. */
+  failed = false
   private byFiber = new Map<string, SentFile[]>()
-  private readAt = -Infinity
-  private inflight: Promise<void> | null = null
-
+  private readonly listeners = new Set<() => void>()
+  private readonly reader: ThrottledRead
   private readonly base: string
-  private readonly onChange: () => void
   private readonly window: number
-  /** `window` is how far back a read reaches. */
-  constructor(base: string, onChange: () => void, window = SEND_WINDOW_MS) { this.base = base; this.onChange = onChange; this.window = window }
+
+  /** `window` is how far back a read reaches; `intervalMs` the least time between reads. */
+  constructor(base: string, opts: { window?: number; intervalMs?: number } = {}) {
+    this.base = base
+    this.window = opts.window ?? SEND_WINDOW_MS
+    this.reader = new ThrottledRead(opts.intervalMs ?? SEND_REFRESH_MS, () => this.read())
+  }
+
+  /** Call `listener` whenever the files or the read's health change; returns its removal. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
 
   private of(card: KanbanCard): SentFile[] {
     return (card.uid ? this.byFiber.get(card.uid) : undefined) ?? this.byFiber.get(card.id) ?? []
@@ -59,30 +77,33 @@ export class FiberSends {
     return this.of(card).flatMap(file => resolve(card, file) ?? [])
   }
 
-  /** Read once per minute; failed reads retain the last answer and retry next poll. */
+  /** Read at most once per interval; a failed read keeps the last answer and retries at the next ask. */
   refresh(nowMs = Date.now()): Promise<void> {
-    if (this.inflight) return this.inflight
-    if (nowMs - this.readAt < SEND_REFRESH_MS) return Promise.resolve()
-    this.readAt = nowMs
-    this.inflight = Promise.resolve().then(async () => {
-      try {
-        const since = Math.max(0, Math.floor(nowMs - this.window))
-        const res = await fetch(`${this.base}/api/v1/sent-files/all/composite?since_ms=${since}`, { cache: 'no-store' })
-        if (!res.ok) throw new Error('Sent-files feed unavailable')
-        const raw = await res.json()
-        if (!raw || !Array.isArray(raw.files)) throw new Error('Invalid sent-files feed')
-        const next = sendsByFiber(normalizeSentFiles(raw))
-        if (!sameSends(this.byFiber, next)) {
-          this.byFiber = next
-          this.onChange()
-        }
-      } catch {
-        this.readAt = -Infinity
-      } finally {
-        this.inflight = null
-      }
-    })
-    return this.inflight
+    return this.reader.run(false, nowMs)
+  }
+
+  private async read(): Promise<void> {
+    try {
+      const raw = await readComposite(this.base, 'sent-files/all', { since_ms: windowStart(Date.now(), this.window) })
+      if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { files?: unknown }).files)) throw new Error('Invalid sent-files feed')
+      const files = normalizeSentFiles(raw).filter(file => Number.isFinite(file.timestamp) && file.timestamp > 0)
+      const origins = (raw as { origins?: unknown }).origins
+      const hosts = origins && typeof origins === 'object' && !Array.isArray(origins) ? Object.keys(origins) : []
+      const moved = this.failed || !sameFiles(this.files, files) || (hosts.length > 0 && hosts.join('\n') !== this.hosts.join('\n'))
+      this.failed = false
+      if (!moved) return
+      this.files = files
+      if (hosts.length) this.hosts = hosts
+      this.byFiber = sendsByFiber(files)
+      this.notify()
+    } catch (error) {
+      if (!this.failed) { this.failed = true; this.notify() }
+      throw error
+    }
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener()
   }
 }
 
@@ -93,15 +114,11 @@ function resolve(card: KanbanCard, file: SentFile): FiberSend | undefined {
   return { key, fullPath: file.fullPath, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner }
 }
 
-function sameSends(a: Map<string, SentFile[]>, b: Map<string, SentFile[]>): boolean {
-  if (a.size !== b.size) return false
-  for (const [uid, files] of a) {
-    const other = b.get(uid)
-    if (!other || other.length !== files.length) return false
-    for (let i = 0; i < files.length; i++) {
-      const x = files[i], y = other[i]
-      if (x.fullPath !== y.fullPath || x.timestamp !== y.timestamp || x.host !== y.host) return false
-    }
+function sameFiles(a: readonly SentFile[], b: readonly SentFile[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i]
+    if (x.fullPath !== y.fullPath || x.timestamp !== y.timestamp || x.host !== y.host || x.uid !== y.uid || x.sessionId !== y.sessionId) return false
   }
   return true
 }

@@ -48,7 +48,7 @@ import { constitutionAction } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
-import { daemonFetch, isDaemonBooting } from './daemonApi.js'
+import { daemonFetch, isDaemonBooting, postDaemonJson } from './daemonApi.js'
 import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
 import type {
@@ -58,7 +58,7 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
-import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
+import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { deskCardKey, deskOrder, type DeskOrder } from './deskOrdering.js'
@@ -276,8 +276,8 @@ export class KanbanModal {
   private readonly dock: Dock
   private readonly voice: Voice
   private deskKeyboard: DeskKeyboard | null = null
-  /** Each fiber's newest report, for the rows' marks. */
-  private fiberSends: FiberSends | null = null
+  /** The fleet's sent files: the rows' report marks, the Board's sheet and the family maps. */
+  private readonly fiberSends: FiberSends
   private keymapHelp: KeymapHelp | null = null
   private workspaceReturnFocus: HTMLElement | null = null
   private workspaceReturnCard: { id: string; origin: string } | null = null
@@ -365,7 +365,7 @@ export class KanbanModal {
         onRest: card => this.openRestPopover(card),
       },
     )
-    this.fiberSends = new FiberSends(this.shuttleBase, () => this.workspace?.sendsChanged())
+    this.fiberSends = new FiberSends(this.shuttleBase)
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
@@ -411,8 +411,7 @@ export class KanbanModal {
       () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'overview',
     )
     this.workspace = new Workspace(this.container!, {
-      sends: card => this.fiberSends?.sends(card) ?? [],
-      refreshSends: () => { void this.fiberSends?.refresh() },
+      sends: this.fiberSends,
       shuttleBase: this.shuttleBase,
       cards: () => boardCards(this.deskResponse ?? this.lastResponse),
       deskRows: () => this.workspaceCards(),
@@ -1218,7 +1217,7 @@ export class KanbanModal {
     payload: Record<string, unknown>,
     label = 'Frontmatter edit failed',
   ): Promise<void> {
-    await this.postJson('/api/v1/felt-edit', payload, label)
+    await postDaemonJson(this.shuttleBase, '/api/v1/felt-edit', payload, label)
   }
 
   /**
@@ -1393,7 +1392,7 @@ export class KanbanModal {
       if (horizon === 'stashed' && !hasVerdict) {
         // Re-dating resting work preserves its blocker; --until replaces it.
         if (!alreadyResting) {
-          await this.postJson('/api/v1/lifecycle', {
+          await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
             action: 'rest', fiber: card.id, origin: card.originId,
             ...(typeof opts.due === 'string' ? { until: opts.due } : {}),
           }, 'Rest failed')
@@ -1551,9 +1550,11 @@ export class KanbanModal {
       if (this.compositeEtag) headers.set('If-None-Match', this.compositeEtag)
       const res = await daemonFetch(`${this.shuttleBase}/api/v1/fibers/composite`, { headers })
       if (token !== this.inflightFetchToken) return
+      // An unchanged feed skips the transfer and the parse, not the
+      // classification: cards still move with the clock, and a page that
+      // showed a failure redraws from the feed it already holds.
       if (res.status === 304) {
-        this.lastFetchFailed = false
-        this.daemonBooting = false
+        if (this.lastFeed) this.presentFeed(this.lastFeed)
         return
       }
       if (!res.ok) {
@@ -1768,7 +1769,7 @@ export class KanbanModal {
     // A redraw repaints the selection in place: the Desk scrolls only when the
     // selection moves, never under a pointer on its way to another card.
     this.deskKeyboard?.refresh()
-    void this.fiberSends?.refresh()
+    void this.fiberSends.refresh()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
     this.lastResponse = data
@@ -1870,15 +1871,10 @@ export class KanbanModal {
 
   // ── URL + chrome helpers ───────────────────────────────────────────────────
 
-  /** {@link postDaemonJson} against this board's daemon. */
-  private postJson(path: string, body: unknown, label: string): Promise<void> {
-    return postDaemonJson(this.shuttleBase, path, body, label)
-  }
-
   /** The drag/menu lifecycle write: the daemon maps the column `target` -> a
    *  lifecycle action. */
   private async postTransition(card: KanbanCard, target: ColumnKind, label: string): Promise<void> {
-    await this.postJson('/api/v1/transition', { fiber_id: card.id, target, origin: card.originId }, label)
+    await postDaemonJson(this.shuttleBase, '/api/v1/transition', { fiber_id: card.id, target, origin: card.originId }, label)
   }
 
 
@@ -1893,7 +1889,7 @@ export class KanbanModal {
    */
   private async releaseQuarantine(shuttleHost?: string): Promise<void> {
     try {
-      await this.postJson('/api/v1/quarantine/release', { origin: shuttleHost }, 'release failed')
+      await postDaemonJson(this.shuttleBase, '/api/v1/quarantine/release', { origin: shuttleHost }, 'release failed')
       this.announce(`Released held launches${shuttleHost ? ` on ${shuttleHost}` : ''}; dispatch resumes on the next tick.`)
       await this.fetchAndRender()
     } catch (err: unknown) {
@@ -1922,7 +1918,7 @@ export class KanbanModal {
   private async killWorkerIfRunning(card: KanbanCard): Promise<void> {
     if (!hasWorkerToStop(card)) return
     try {
-      await this.postJson(
+      await postDaemonJson(this.shuttleBase,
         '/api/v1/kill',
         { fiber_id: card.id, origin: card.shuttleHost ?? card.originId },
         'kill failed',
@@ -2002,11 +1998,11 @@ export class KanbanModal {
   private async commitSeat(card: KanbanCard, choice?: RoleChoice): Promise<void> {
     try {
       if (choice) {
-        await this.postJson('/api/v1/lifecycle', {
+        await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
           action: 'role', fiber: card.id, origin: card.originId, ...choice,
         }, 'Role assignment failed')
       }
-      await this.postJson('/api/v1/lifecycle', {
+      await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
         action: 'seat', fiber: card.id, origin: card.originId,
       }, 'Seat assignment failed')
       const seated = { ...card, shuttleRole: choice?.role ?? card.shuttleRole, shuttleSeat: true }
@@ -2036,7 +2032,7 @@ export class KanbanModal {
     this.closeRestPopover?.()
     this.closeRestPopover = restPopover(card, async until => {
       try {
-        await this.postJson('/api/v1/lifecycle', {
+        await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
           action: 'rest', fiber: card.id, origin: card.originId, until,
         }, 'Rest failed')
         await this.fetchAndRender()

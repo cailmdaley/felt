@@ -32,7 +32,7 @@ import {
   captureRequestBody,
   type CaptureResponseData,
 } from './captureApi'
-import { daemonErrorMessage } from '../board/daemonApi'
+import { daemonErrorMessage, daemonFetch } from '../board/daemonApi'
 import { isMobileViewport } from '../board/mobile'
 import { agentGroups, resolveEffort, type AgentEntry } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'
@@ -159,7 +159,7 @@ export function CaptureForm({
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`${shuttleBase}/api/v1/capture`, {
+      const res = await daemonFetch(`${shuttleBase}/api/v1/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(captureRequestBody({

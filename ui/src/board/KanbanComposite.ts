@@ -15,7 +15,6 @@
 // Wire shape (post JSON encoding, string-keyed):
 //   {
 //     host: string,                 // the local composer's own host id
-//     generated_at?: string,        // ISO timestamp
 //     fibers: [
 //       {
 //         felt_store: string,       // owning store path
@@ -31,9 +30,10 @@
 //       "<name>": {
 //         kind: "local" | "remote",
 //         stale: boolean,
-//         last_polled_at?: string,
+//         last_polled_at?: string,  // only while stale: when its rows date from
 //         last_error?: string,
 //         fiber_count: number,
+//         cache?: { state },        // the owner's cache state
 //       }, ...
 //     },
 //   }
@@ -132,6 +132,7 @@ export interface CompositeOrigin {
   /** True when this origin's feed is stale (an unreachable remote keeps its
    * last-known rows but is flagged, not dropped). */
   stale: boolean;
+  /** When a stale origin's rows date from; absent while fresh. */
   lastPolledAt?: string;
   lastError?: string;
   fiberCount: number;
@@ -140,7 +141,6 @@ export interface CompositeOrigin {
 export interface CompositeFeed {
   /** The local composer's own host id. */
   host: string;
-  generatedAt?: string;
   entries: CompositeEntry[];
   origins: Record<string, CompositeOrigin>;
 }
@@ -155,7 +155,6 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
   const root = isRecord(body) ? body : {};
 
   const host = typeof root.host === 'string' ? root.host : '';
-  const generatedAt = typeof root.generated_at === 'string' ? root.generated_at : undefined;
 
   const entries: CompositeEntry[] = [];
   for (const item of arrayOfRecords(root.fibers)) {
@@ -192,7 +191,7 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     }
   }
 
-  return { host, generatedAt, entries, origins };
+  return { host, entries, origins };
 }
 
 function parsePulseRuntime(value: unknown): PulseRuntime | undefined {
