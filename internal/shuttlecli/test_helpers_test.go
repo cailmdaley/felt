@@ -10,7 +10,15 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/felt/felttest"
 	"github.com/cailmdaley/felt/internal/sysenv"
+)
+
+// Store fixtures shared with the other CLI package's tests.
+var (
+	newStore  = felttest.NewStore
+	seedFiber = felttest.Seed
+	mustRead  = felttest.MustRead
 )
 
 func mustParseTime(t *testing.T, value string) time.Time {
@@ -22,50 +30,11 @@ func mustParseTime(t *testing.T, value string) time.Time {
 	return parsed
 }
 
-func newStore(t *testing.T) (string, *felt.Storage) {
-	t.Helper()
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-	return dir, storage
-}
-
-// seedFiber writes a fiber straight through storage, bypassing the cmd-layer
-// validation — so a deliberately invalid block can be planted on disk.
-func seedFiber(t *testing.T, storage *felt.Storage, id, uid, status string, block map[string]any, tempered *bool) {
-	t.Helper()
-	f := &felt.Felt{ID: id, UID: uid, Name: id, Status: status, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	if block != nil {
-		if err := f.SetExtraField("shuttle", block); err != nil {
-			t.Fatalf("SetExtraField shuttle: %v", err)
-		}
-	}
-	if tempered != nil {
-		if err := f.SetExtraField("tempered", *tempered); err != nil {
-			t.Fatalf("SetExtraField tempered: %v", err)
-		}
-	}
-	if err := storage.Write(f); err != nil {
-		t.Fatalf("Write %s: %v", id, err)
-	}
-}
-
 // seedShuttleRole seeds a fiber carrying a shuttle: block plus the requested
 // felt-native status and optional tempered verdict.
 func seedShuttleRole(t *testing.T, storage *felt.Storage, id, status string, block map[string]any, tempered *bool) {
 	t.Helper()
 	seedFiber(t, storage, id, "", status, block, tempered)
-}
-
-func mustRead(t *testing.T, storage *felt.Storage, id string) *felt.Felt {
-	t.Helper()
-	f, err := storage.Read(id)
-	if err != nil {
-		t.Fatalf("Read %s: %v", id, err)
-	}
-	return f
 }
 
 func oneshot() map[string]any {
