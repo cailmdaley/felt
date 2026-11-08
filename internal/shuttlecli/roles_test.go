@@ -123,7 +123,7 @@ func TestShuttleRoleNewValidatesBeforeCreation(t *testing.T) {
 		t.Fatal("changed constitution")
 	}
 	profiles, err := listRoleProfiles(st)
-	if err != nil || len(profiles) != 1 {
+	if err != nil || len(profiles) != 0 {
 		t.Fatalf("created charter: %+v %v", profiles, err)
 	}
 }

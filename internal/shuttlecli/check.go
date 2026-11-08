@@ -124,9 +124,7 @@ func roleRoots(st *felt.Storage) map[string]bool {
 		return out
 	}
 	for _, f := range profiles {
-		if strings.HasPrefix(f.ID, "roles/") && strings.Count(f.ID, "/") == 1 {
-			out[strings.TrimPrefix(f.ID, "roles/")] = true
-		}
+		out[strings.TrimPrefix(f.ID, "roles/")] = true
 	}
 	return out
 }

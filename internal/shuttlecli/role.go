@@ -1,7 +1,11 @@
 package shuttlecli
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -93,9 +97,25 @@ roles namespace before assigning the role; existing charters are preserved.`,
 	return cmd
 }
 
-// listRoleProfiles reads metadata from the store that owns the roles namespace.
+// listRoleProfiles reads the metadata of every charter at roles/<slug> in the
+// store that owns the roles namespace. It reads that one directory and the
+// charters in it, never the rest of the store.
 func listRoleProfiles(st *felt.Storage) ([]*felt.Felt, error) {
-	return roleStorage(st).ListMetadata()
+	st = roleStorage(st)
+	entries, err := os.ReadDir(filepath.Join(st.Root(), felt.RolesNamespace))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&fs.ModeSymlink != 0 {
+			ids = append(ids, felt.RolesNamespace+"/"+entry.Name())
+		}
+	}
+	return st.ListMetadataByIDs(ids, nil, false)
 }
 
 func roleStorage(st *felt.Storage) *felt.Storage {
@@ -142,9 +162,7 @@ func (a *app) rolesCmd() *cobra.Command {
 			}
 			roles := make([]profile, 0)
 			for _, f := range profiles {
-				if strings.HasPrefix(f.ID, "roles/") && strings.Count(f.ID, "/") == 1 {
-					roles = append(roles, profile{strings.TrimPrefix(f.ID, "roles/"), f.Name, f.Outcome})
-				}
+				roles = append(roles, profile{strings.TrimPrefix(f.ID, "roles/"), f.Name, f.Outcome})
 			}
 			sort.Slice(roles, func(i, j int) bool { return roles[i].Slug < roles[j].Slug })
 			if a.json {
