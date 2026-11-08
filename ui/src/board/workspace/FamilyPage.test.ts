@@ -54,11 +54,13 @@ describe('the page', () => {
   })
   it('gives each row one mark, coloured by the most urgent thing it holds, and counts what asks under it', () => {
     const { family } = made()
-    for (const el of family.el.querySelectorAll('.fp-row')) expect(el.querySelectorAll('svg')).toHaveLength(1)
+    for (const el of family.el.querySelectorAll('.fp-row')) expect(el.querySelectorAll('.fp-title svg')).toHaveLength(1)
     expect(row(family, 'Asked').dataset.standing).toBe('question')
     expect(row(family, 'Mid').dataset.standing).toBe('turn')
     expect(row(family, 'Mid').querySelector('.fp-meta')!.textContent).toMatch(/^(now|\d+\w+)$/)
-    expect(row(family, 'Mid').querySelector('.fp-count')!.textContent).toBe('1 of 1 ask')
+    const tally = row(family, 'Mid').querySelector<HTMLElement>('.fp-count')!
+    expect(tally.getAttribute('aria-label')).toBe('1 of 1 ask')
+    expect([...tally.querySelectorAll<HTMLElement>('.fp-tally-mark')].map(mark => mark.dataset.standing)).toEqual(['turn'])
   })
   it('holds a lone constitution as its head alone, unfolded', async () => {
     const lone = card({ id: 'solo', status: 'active', shuttleKind: 'oneshot', sessionUuid: 's' })

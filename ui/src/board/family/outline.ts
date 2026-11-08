@@ -56,6 +56,24 @@ export function underAll(model: FamilyModel): ReadonlyMap<string, Under> {
  * resting, drafts) wait behind one fold at the end of their level. An open
  * row lists its own threads beneath it the same way, without dividers.
  */
+/**
+ * Everything under a thread at a glance: one section per live descendant, most
+ * urgent first, and how many are set aside.
+ */
+export function tally(model: FamilyModel, key: string): { live: Section[]; aside: number } {
+  const live: Section[] = []
+  let aside = 0
+  const walk = (thread: MapThread): void => {
+    for (const kid of thread.children.map(child => model.threads.get(child)!)) {
+      const section = own(kid)
+      if (section) live.push(section); else aside += 1
+      walk(kid)
+    }
+  }
+  walk(model.threads.get(key)!)
+  return { live: live.sort((a, b) => rankOf(a) - rankOf(b)), aside }
+}
+
 export function outline(model: FamilyModel, open: ReadonlySet<string>, under: ReadonlyMap<string, Under> = underAll(model)): Line[] {
   const lines: Line[] = []
   const byUrgency = (a: MapThread, b: MapThread): number => {

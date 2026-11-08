@@ -1,5 +1,5 @@
 .ws-family-page { container-type: inline-size; height: 100%; min-height: 0; }
-.ws-family-grid { --fp-gutter: 20px; height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+.ws-family-grid { --fp-gutter: 20px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 .ws-family-scroll { min-height: 0; overflow: auto; }
 .ws-family-announce { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -18,19 +18,27 @@
 .fp-word { grid-area: word; color: var(--fm-text); white-space: nowrap; }
 .fp-word:empty { display: none; }
 .fp-meta { grid-area: meta; color: var(--ws-ink-muted); white-space: nowrap; text-align: right; }
-.fp-count { display: block; margin: 2px 0 0 20px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
+.fp-count { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 3px 0 0 20px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
+.fp-tally-mark { display: inline-flex; }
+.fp-tally-svg { width: 11px; height: 11px; overflow: visible; }
+.fp-tally-aside { margin-left: 3px; opacity: .7; }
 .fp-count:empty { display: none; }
 .fp-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 1px 0 0 20px; overflow: hidden; color: var(--ws-ink-soft); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .fp-note[hidden], .fp-files[hidden] { display: none; }
-/* A thread row's outcome stays folded until the row is highlighted, at once, or hovered a moment. */
-.fp-row:not(.fp-head) > .fp-line > .fp-note { max-height: 0; margin-top: 0; transition: max-height .12s ease-out; }
-.fp-row:not(.fp-head):is([data-selected], :focus-within) > .fp-line > .fp-note { max-height: calc(2em * var(--leading-ui)); margin-top: 1px; }
-.fp-row:not(.fp-head):hover > .fp-line > .fp-note { max-height: calc(2em * var(--leading-ui)); margin-top: 1px; transition-delay: .3s; }
+/* A thread row's outcome stays folded until the row is highlighted, at once,
+   or hovered a moment. Its row of the grid opens to the outcome's own height
+   while the words settle in with a little spring; folding is quick and plain. */
+.fp-row:not(.fp-head) > .fp-line { display: grid; grid-template-rows: auto 0fr auto; transition: grid-template-rows .18s cubic-bezier(.4, 0, .2, 1); }
+.fp-line > .fp-title { grid-row: 1; } .fp-line > .fp-note { grid-row: 2; } .fp-line > .fp-count { grid-row: 3; }
+.fp-row:not(.fp-head) > .fp-line > .fp-note { min-height: 0; margin-top: 0; opacity: 0; transform: translateY(-6px); transition: opacity .12s ease-out, transform .18s ease-out; }
+.fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line { grid-template-rows: auto 1fr auto; transition: grid-template-rows .36s cubic-bezier(.22, 1, .36, 1); }
+.fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line > .fp-note { opacity: 1; transform: none; transition: opacity .24s ease-out .04s, transform .55s var(--fp-spring) .02s; }
+.fp-row:not(.fp-head):hover:not([data-selected], :focus-within) > .fp-line, .fp-row:not(.fp-head):hover:not([data-selected], :focus-within) > .fp-line > .fp-note { transition-delay: .25s; }
 
-.fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; visibility: hidden; }
-.fp-row:not(.fp-head):is(:hover, :focus-within, [data-selected]) .fp-verbs { visibility: visible; }
-.ws-reader .fp-verbs .ws-header-icon { width: 26px; height: 26px; }
-.ws-reader .fp-verbs .ws-header-icon svg { width: 19px; height: 19px; }
+.fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: baseline; gap: 2px; }
+/* Verbs draw at the size of the document glyphs beside them: one row of marks, one weight. */
+.ws-reader .fp-verbs .ws-header-icon { width: 2.6ch; height: auto; font: var(--type-row)/var(--leading-solid) var(--font-mono); }
+.ws-reader .fp-verbs .ws-header-icon svg { width: .95em; height: .95em; vertical-align: -.12em; }
 .fp-docs { grid-area: docs; display: grid; font-size: var(--type-row); line-height: var(--leading-solid); grid-template-columns: 2.6ch 2.6ch 5ch; gap: 2px; white-space: nowrap; }
 .fp-lead { grid-column: 1; } .fp-constitution { grid-column: 2; } .fp-sent { grid-column: 3; justify-self: start; }
 .fp-chip { min-width: 2.2ch; padding: 0 4px; border: 1px solid transparent; border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-soft); font: inherit; cursor: pointer; }
@@ -70,6 +78,12 @@
   .fp-section { padding-left: calc(var(--fp-gutter) + var(--fp-level, 0) * 12px); }
   .fp-title { grid-template-columns: 12px auto minmax(0, 1fr) auto auto; grid-template-areas: 'mark name name name name' '. docs word verbs meta'; row-gap: 3px; }
   .fp-docs, .fp-word { justify-self: start; }
-  .fp-chip, .fp-file { min-height: var(--ws-phone-target); }
+  .fp-chip, .fp-file, .ws-reader .fp-verbs .ws-header-icon { min-height: var(--ws-phone-target); }
 }
-@media (prefers-reduced-motion: reduce) { .fp-aside::before { transition: none; } .fp-row:not(.fp-head) > .fp-line > .fp-note { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .fp-row:not(.fp-head) > .fp-line { transition: none; }
+  .fp-row:not(.fp-head) > .fp-line > .fp-note { transition: none; }
+  .fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line { transition: none; }
+  .fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line > .fp-note { transition: none; }
+  .fp-aside::before { transition: none; }
+}

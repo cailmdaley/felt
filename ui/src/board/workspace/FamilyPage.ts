@@ -1,7 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { familyModel, type FamilyModel, type MapFeeds, type MapFile, type MapThread, type Standing } from '../family/model.js'
 import { htmlEl as el, markPath, markSvg, shortAgo } from '../family/drawing.js'
-import { SECTION_WORD, opening, outline, underAll, type Line, type Under } from '../family/outline.js'
+import { SECTION_WORD, opening, outline, tally, underAll, type Line, type Under } from '../family/outline.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import type { Conversations } from '../conversationOpening.js'
 import { threadKey, type ThreadIndex } from '../threads.js'
@@ -13,6 +13,8 @@ import './family-page.css'
 /** A sent file that is a thread's tapestry or report when its fiber's directory holds none. */
 const LEAD_NAME = /^(tapestry|report)\.html$/i
 /** How the fold of threads set aside names each kind, one and many. */
+/** The most marks a row's tally draws before the rest join the count. */
+const TALLY_MARKS = 16
 const ASIDE_WORDS: Readonly<Record<string, readonly [string, string]>> = { drafts: ['draft', 'drafts'], seat: ['seat', 'seats'] }
 
 /** What the page reads, and how to ask for it again. */
@@ -239,9 +241,27 @@ export class FamilyPage {
     this.fillThread(row, line.thread, line.section ?? 'aside', line.open)
     // A row under a divider that already names its kind keeps the age alone.
     if (line.divided) row.querySelector('.fp-word')!.textContent = ''
-    const { threads, asks } = this.under.get(line.thread.key)!
-    row.querySelector('.fp-count')!.textContent = !threads ? '' : asks ? `${asks} of ${threads} ask` : `${threads} ${threads === 1 ? 'thread' : 'threads'}`
+    this.fillTally(row.querySelector<HTMLElement>('.fp-count')!, line.thread.key)
     return row
+  }
+  /**
+   * What a row holds below it, drawn: a mark for each live thread in its
+   * section's shape and pigment, most urgent first, then a quiet count of the
+   * threads set aside. The words stay for screen readers and the tooltip.
+   */
+  private fillTally(count: HTMLElement, key: string): void {
+    const { threads, asks } = this.under.get(key)!
+    const words = !threads ? '' : asks ? `${asks} of ${threads} ask` : `${threads} ${threads === 1 ? 'thread' : 'threads'}`
+    const { live, aside } = tally(this.model!, key)
+    const shape = JSON.stringify([live, aside])
+    count.title = words
+    count.setAttribute('aria-label', words)
+    if (count.dataset.shape === shape) return
+    count.dataset.shape = shape
+    const shown = live.slice(0, TALLY_MARKS)
+    const marks = shown.map(section => { const mark = el('span', 'fp-tally-mark'); mark.dataset.standing = section; mark.append(markSvg('fp-tally-svg', section, 3.6)); return mark })
+    const more = live.length - shown.length + aside
+    count.replaceChildren(...marks, ...(more ? [el('span', 'fp-tally-aside', `+${more}`)] : []))
   }
   private makeRow(cls: string): HTMLElement {
     const row = el('div', cls); row.setAttribute('role', 'treeitem'); row.tabIndex = -1

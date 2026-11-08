@@ -2,6 +2,7 @@ import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { isAgentCard } from '../KanbanModalShared.js'
 import { onDesk } from './fiberPageState.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
+import { slug } from '../threadOutline.js'
 
 type SessionMode = 'fresh' | 'previous'
 
@@ -89,7 +90,7 @@ export class WorkerActions {
     this.fresh.disabled = this.busy
     this.fresh.title = `A new session for ${card.name}${said ? ', opening with this message' : ''}${live ? '; cuts the running one' : ''}`
     this.fresh.setAttribute('aria-label', `New session for ${card.name}`)
-    this.field.placeholder = live ? `Message ${card.name}` : `${verb} ${card.name} with…`
+    this.field.placeholder = live ? `Message ${slug(card)}` : `${verb} ${slug(card)} with…`
     this.field.setAttribute('aria-label', live ? `Message to ${card.name}` : `Opening message for ${card.name}`)
   }
 

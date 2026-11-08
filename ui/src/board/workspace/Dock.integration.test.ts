@@ -497,7 +497,7 @@ describe('session verbs', () => {
     dock.open(task({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
     const field = band.el.querySelector<HTMLInputElement>('.ws-worker-message')!
     expect(session('Send').disabled).toBe(true)
-    expect(field.placeholder).toBe('Message a/task')
+    expect(field.placeholder).toBe('Message task')
     field.value = 'one more thing'
     field.dispatchEvent(new Event('input'))
     expect(session('Send').disabled).toBe(false)
@@ -516,7 +516,7 @@ describe('session verbs', () => {
     vi.mocked(fetch).mockClear()
     vi.mocked(fetch).mockResolvedValue(response({}))
     const field = actions.el.querySelector<HTMLInputElement>('.ws-worker-message')!
-    expect(field.placeholder).toBe('Resume Thread with…')
+    expect(field.placeholder).toBe('Resume thread with…')
     field.value = 'pick up the plots'
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await flush()
