@@ -386,8 +386,8 @@ seed_deploy_cache_cmd() {
 SH
 }
 
-revision_checkout_cmd() {
-  local checkout="$1" previous="${2:-}"
+revision_checkout_cmd() { # checkout, previous live tree, seed caches (1/0)
+  local checkout="$1" previous="${2:-}" seed="${3:-1}"
   cat <<SH
 set -eu
 source=$(shell_quote "$checkout")
@@ -406,7 +406,7 @@ if ! valid_target; then
   git -C "\$source" worktree prune
   mkdir -p "\$root"
   git -C "\$source" worktree add --detach "\$target" "\$commit"
-  $(seed_deploy_cache_cmd "$previous" "$checkout")
+  $([ "$seed" = 0 ] || seed_deploy_cache_cmd "$previous" "$checkout")
 fi
 valid_target
 SH
@@ -1026,12 +1026,15 @@ deploy_step() {
 }
 
 host_transaction() { # Runs entirely on the target, under host and tree locks.
-  local previous tree cmd before
+  local previous tree cmd before seed
   deploy_step 'observe previous release'
   DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
   previous="$(previous_deploy "$SOURCE")"
   deploy_step 'prepare pinned revision'
-  bash -c "$(revision_checkout_cmd "$SOURCE" "$previous")" 3>&- 4>&- 5>&- \
+  # A host installing shipped artifacts compiles nothing, so it seeds no caches.
+  seed=1
+  [ ! -f "$STAGE/linux/rel.tar.gz" ] || seed=0
+  bash -c "$(revision_checkout_cmd "$SOURCE" "$previous" "$seed")" 3>&- 4>&- 5>&- \
     || { bad 'prepare: could not prepare the pinned revision'; return 1; }
   tree="$ROOT/$TARGET_COMMIT"
   if [ "$MODE" = ui ]; then

@@ -233,7 +233,7 @@ Only registered Git worktrees are removed, so stale ordinary directories do not 
 An unavailable or unreported running release refuses pruning.
 Generated files and local edits do not prevent removal of other trees.
 
-A new worktree seeds `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the previous live tree.
+A new worktree on a host that builds seeds `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the previous live tree; a host installing shipped artifacts seeds nothing.
 If that tree is unavailable or is the target being created, it seeds from the regular checkout instead.
 These are Mix dependencies and compiled artifacts, plus npm dependencies and the `.npm-ci-stamp` that lets `make ui` skip `npm ci`.
 Symlinked cache roots disable seeding.
@@ -412,6 +412,9 @@ The remote unpacks them under its host lock and tree lease: the CLIs into the
 tree and `~/.local/bin`, the release as a new `bin/rel.generation-*` behind
 `bin/rel-built`, the bundle into `ui/dist`. Activation, readiness, quarantine
 release, harness setup and rollback are the same transaction as a built host's.
+On a loaded cluster login node with a network home, file I/O, not compilation,
+is most of a built host's deploy: one measured nibi deploy spent 6 minutes in `git
+worktree add`, 16 seeding build caches and 3 building.
 Shipped hosts still need Git, Python 3 and Go (the lock helper is compiled on
 the host), and no Elixir or Node.
 
