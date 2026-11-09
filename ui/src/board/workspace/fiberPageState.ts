@@ -30,8 +30,10 @@ export function schedulePaused(card: KanbanCard): boolean {
 }
 /** Rest reaches every Shuttle-managed constitution, including one with a
  *  verdict; on a standing one it pauses or resumes the schedule, which a
- *  retired one no longer has. */
+ *  retired one no longer has. A seat at rest is already at rest: only a
+ *  schedule of its own gives Rest something to do there. */
 export function restReachable(card: KanbanCard): boolean {
+  if (card.column === 'roles' && !scheduled(card)) return false
   return isAgentCard(card) && !(standing(card) && card.status === 'closed')
 }
 /** Unreviewed work in flight or awaiting review takes both verdicts, as do

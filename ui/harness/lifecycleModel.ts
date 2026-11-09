@@ -103,7 +103,7 @@ export function served(s: LifeState, nowMs: number): { column: string; turn: str
 export function ownerRow(id: string, s: LifeState, nowMs: number): Record<string, unknown> {
   const runtime = lifeRuntime(s, nowMs)
   return {
-    origin: 'local', felt_store: '/work/model', path: `${id}/${id.split('/').at(-1)}.md`,
+    origin: 'model-host', felt_store: '/work/model', path: `${id}/${id.split('/').at(-1)}.md`,
     fiber: { id, uid: `${id}-uid`, name: id, ...lifeDoc(s) },
     ...served(s, nowMs),
     ...(runtime ? { runtime } : {}),
@@ -141,8 +141,8 @@ export function requestKey(r: LifeRequest): string {
 /**
  * The owner's answer. `refused` is a 4xx naming why; `conflict` is the 409 a
  * second launch of a running worker gets. `cli` is the Shuttle write the owner
- * runs for an accepted request (`--local` and `-C <store>` implied), absent
- * when the owner answers without a document write.
+ * runs (`--local` and `-C <store>` implied); on a refusal it is the write
+ * that refuses. It is absent when the owner answers without a document write.
  */
 export type Outcome = 'ok' | 'refused' | 'conflict'
 export interface Applied { outcome: Outcome; cli?: string[]; next: LifeState }
@@ -150,7 +150,8 @@ export interface Applied { outcome: Outcome; cli?: string[]; next: LifeState }
 const closedLife = (life: Life): boolean => life === 'closed' || life === 'tempered' || life === 'discarded'
 const running = (s: LifeState): boolean => s.worker !== 'none'
 
-/** Arming moves an open or closed fiber to active: its verdict and its rest go, and so does a question nobody answered. */
+/** Arming moves an open or closed fiber to active: its verdict and its rest go, and so does a question nobody answered.
+ *  A reopen clears the question whichever way it reopens. */
 function armed(s: LifeState): LifeState {
   return { ...s, life: 'active', stashed: false, ask: false }
 }
@@ -173,7 +174,8 @@ export function apply(s: LifeState, r: LifeRequest): Applied {
         // Rest reaches any state: open, put down, verdict cleared, worker stopped.
         return { outcome: 'ok', cli: ['rest'], next: { ...s, life: 'open', stashed: true, worker: 'none' } }
       }
-      if (closedLife(s.life)) return same('refused')
+      // The writer refuses to resume a closed fiber: reopen is how it comes back.
+      if (closedLife(s.life)) return { outcome: 'refused', cli: ['resume'], next: s }
       return { outcome: 'ok', cli: ['resume'], next: armed(s) }
     case 'transition':
       return transition(s, r.target)
@@ -198,7 +200,7 @@ function transition(s: LifeState, target: TransitionTarget): Applied {
   }
   if (closedLife(s.life)) {
     return target === 'drafts'
-      ? { outcome: 'ok', cli: ['reopen', '--as-draft'], next: { ...s, life: 'open' } }
+      ? { outcome: 'ok', cli: ['reopen', '--as-draft'], next: { ...s, life: 'open', ask: false } }
       : { outcome: 'ok', cli: ['reopen'], next: armed(s) }
   }
   if (target === 'drafts') return { outcome: 'ok', cli: ['pause'], next: { ...s, life: 'open' } }
@@ -276,7 +278,8 @@ export const VERBS: Record<Verb, VerbSpec> = {
     reached: (_, after) => after.life === 'discarded' && after.worker === 'none',
   },
   rest: {
-    offered: s => !retired(s),
+    // A seat at rest is already at rest, unless it has a schedule to pause.
+    offered: s => !retired(s) && (scheduled(s) || constitutionColumn(s, Date.now()) !== 'roles'),
     label: s => !scheduled(s) ? 'Rest' : s.life === 'open' ? 'Resume schedule' : 'Pause schedule',
     reached: (before, after) => scheduled(before) && before.life === 'open'
       ? after.life === 'active'

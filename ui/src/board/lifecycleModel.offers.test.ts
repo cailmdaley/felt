@@ -1,19 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { ownerRow, STATES, stateKey, VERBS, type LifeState, type Verb } from '../../harness/lifecycleModel.js'
-import { parseCompositeFeed } from './KanbanComposite.js'
-import { cardFromCompositeEntry } from './KanbanReadModel.js'
-import type { KanbanCard } from './KanbanTypes.js'
+import { STATES, stateKey, VERBS, type Verb } from '../../harness/lifecycleModel.js'
+import { modelCard } from './testFixtures.js'
 import { lifecycleVerbsFor, verbSpec } from './workspace/lifecycleVerbs.js'
 import { constitutionAction } from './workspace/fiberPageState.js'
 import type { KeyIntent } from './keymap.js'
-
-const NOW = Date.parse('2026-11-09T12:00:00Z')
-
-/** The card the board builds from the row the owner serves for a state. */
-export function modelCard(s: LifeState, id = 'model/fiber', nowMs = NOW): KanbanCard {
-  const feed = parseCompositeFeed({ host: 'local', fibers: [ownerRow(id, s, nowMs)] })
-  return cardFromCompositeEntry(feed.entries[0], nowMs)
-}
 
 const VERB_ORDER: Verb[] = ['review', 'rest', 'temper', 'discard']
 const INTENT: Record<Verb, KeyIntent> = { review: 'toReview', rest: 'rest', temper: 'temper', discard: 'discard' }

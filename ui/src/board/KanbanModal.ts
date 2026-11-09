@@ -1589,16 +1589,11 @@ export class KanbanModal {
   }
 
   private computeResponseSignature(data: KanbanResponse): string {
-    // Hash the surfaces + staleness — stale-origin cards dim and disable drag
-    // even when the card lists themselves are unchanged. `totals` is a pure
-    // `.length` derivation of those same surfaces, so hashing it could only
-    // produce redundant work.
-    return JSON.stringify({
-      n: data.now,
-      tl: data.timeline,
-      s: data.stash,
-      st: data.staleness,
-    })
+    // Every surface the Desk draws from, and staleness (stale-origin cards dim
+    // and disable drag even when the card lists are unchanged); not the clock
+    // stamp, which moves on every poll, nor `totals`, a derivation of the rest.
+    const { generatedAt: _clock, totals: _derived, ...drawn } = data
+    return JSON.stringify(drawn)
   }
 
   private renderError(msg: string): void {

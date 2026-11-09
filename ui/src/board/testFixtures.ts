@@ -10,6 +10,9 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { WIRE_COLUMN, type CompositeEntry, type CompositeFeed } from './KanbanComposite.js'
 import type { Turn } from './turn.js'
 import { ownerColumn, ownerTurn, stampLifecycle } from '../../harness/ownerLifecycle.js'
+import { ownerRow, type LifeState } from '../../harness/lifecycleModel.js'
+import { parseCompositeFeed } from './KanbanComposite.js'
+import { cardFromCompositeEntry } from './KanbanReadModel.js'
 import { buildKanbanResponseFromComposite, surfaceTotals, type BuildKanbanResponseOptions } from './KanbanReadModel.js'
 import { buildTimelineDays } from './KanbanSurfaces.js'
 import { civilDayAt, hostZone } from './civilDay.js'
@@ -254,3 +257,9 @@ export function dayAt(offset: number): string {
 /** A surface's conversations as one mock: the explicit open calls it with the card, a click's reach with the card and true. */
 export const conversations = (converse: (card: KanbanCard, click?: true) => unknown = () => false): Conversations =>
   ({ open: found => !!converse(found), reach: async found => !!converse(found, true) })
+
+/** The card the board builds from the row the owner serves for a lifecycle model state. */
+export function modelCard(s: LifeState, id = 'model/fiber', nowMs = Date.parse('2026-11-09T12:00:00Z')): KanbanCard {
+  const feed = parseCompositeFeed({ host: 'model-host', fibers: [ownerRow(id, s, nowMs)] })
+  return cardFromCompositeEntry(feed.entries[0], nowMs)
+}
