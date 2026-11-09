@@ -127,6 +127,7 @@ export class FamilyPage {
     this.el.append(grid)
     this.tree.addEventListener('click', event => this.clicked(event))
     this.tree.addEventListener('keydown', event => this.key(event))
+    this.scroller.addEventListener('scroll', () => this.easeHold(), { passive: true })
     bindDrawnPage(this.el, { suspend: () => this.suspend(), resume: () => this.resume(), dispose: () => this.dispose() })
   }
 
@@ -490,8 +491,10 @@ export class FamilyPage {
     this.embedded.delete(key)
   }
   /**
-   * A chip's document unfolds under its row, selecting and entering the thread, and the page
-   * scrolls its top (a sent file's, its bar's) to the top of the view; folding it moves nothing else.
+   * A chip's document unfolds under its row, selecting and entering the thread,
+   * and the page stays where it is: only a slot that would open wholly out of
+   * view is scrolled into it. A document taking another's place keeps the page's
+   * offset whatever its height; folding one moves nothing else.
    */
   private toggleDoc(thread: MapThread, doc: DocKey): void {
     const docs = this.place.docs!
@@ -500,6 +503,8 @@ export class FamilyPage {
       this.paint()
       return
     }
+    const replacing = docs.has(thread.key)
+    if (replacing) this.hold()
     docs.set(thread.key, doc)
     this.select(thread.key)
     this.enter(thread.key)
@@ -507,7 +512,22 @@ export class FamilyPage {
     this.notice(thread, [this.leadOf(thread), ...thread.files].filter(file => file?.key === doc) as MapFile[])
     const sent = this.sentOf(thread).some(file => file.key === doc)
     const slot = this.row(thread.key)?.querySelector<HTMLElement>(sent ? ':scope > .fp-files' : ':scope > .fp-doc')
-    if (slot) this.reveal(slot, true, 0)
+    if (!slot || replacing) return
+    const view = this.scroller.getBoundingClientRect(), box = slot.getBoundingClientRect()
+    if (box.top >= view.bottom || box.bottom <= view.top) this.reveal(slot, false)
+  }
+  /** Keeps the page at least as tall as the view it is scrolled to, so a shorter document swapped in cannot pull it up. */
+  private hold(): void {
+    const view = this.scroller.getBoundingClientRect(), top = this.tree.getBoundingClientRect().top - view.top + this.scroller.scrollTop
+    this.tree.style.minHeight = `${Math.ceil(this.scroller.scrollTop + this.scroller.clientHeight - top)}px`
+  }
+  /** The hold shrinks as the reader scrolls up, and lets go once the page no longer needs it. */
+  private easeHold(): void {
+    const held = parseFloat(this.tree.style.minHeight)
+    if (!held) return
+    const top = this.tree.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top + this.scroller.scrollTop
+    const needed = Math.ceil(this.scroller.scrollTop + this.scroller.clientHeight - top)
+    if (needed < held) this.tree.style.minHeight = needed > 0 ? `${needed}px` : ''
   }
   private markSelected(): void {
     const selected = this.selectedKey
@@ -646,11 +666,13 @@ export class FamilyPage {
    * there. l (or right) goes in: from a row it unfolds the first document under
    * the row, entering the thread, and from a document it unfolds the next in its
    * place (⧉ n lists the sent files and opens the newest); from a sent file in
-   * the list it opens that file in the list's place. From an open sent file, l
-   * steps to the next older and h goes back to the list. h (or left) otherwise
-   * goes out: from a document to its row, folding what it had unfolded; from a
-   * row, it folds every document the page has unfolded, and only a page with
-   * none unfolded is left. Enter does what a click does.
+   * the list it opens that file in the list's place. From an open sent file's
+   * bar, l steps to the next older and h goes back to the list. h (or left)
+   * otherwise goes out: from a document to its row, folding what it had
+   * unfolded; from a row, it folds every document the page has unfolded, and
+   * only a page with none unfolded is left. While a row has a sent file open,
+   * left and right instead step to the newer and older file, as ‹ and › do.
+   * Enter does what a click does.
    */
   private key(event: KeyboardEvent): void {
     const model = this.model, target = event.target as HTMLElement
@@ -661,10 +683,16 @@ export class FamilyPage {
     const thread = model.threads.get(owner)
     const docs = (): HTMLElement[] => [...(this.row(owner)?.querySelectorAll<HTMLElement>('.fp-docs button, .fp-files:not([hidden]) button') ?? [])]
     let next: HTMLElement | undefined
-    const inward = event.key === 'l' || event.key === 'ArrowRight', outward = event.key === 'h' || event.key === 'ArrowLeft'
-    if (thread && (inward || outward) && item.closest('.fp-open')) {
+    const arrow = ({ ArrowLeft: -1, ArrowRight: 1 } as Record<string, number>)[event.key]
+    if (thread && arrow && this.sentOf(thread).some(file => file.key === this.place.docs!.get(owner))) {
       event.preventDefault()
-      if (outward) return this.back(thread)
+      const back = this.step(thread, arrow)
+      if (!item.isConnected) back?.focus({ preventScroll: true })
+      return
+    }
+    if (thread && (event.key === 'h' || event.key === 'l') && item.closest('.fp-open')) {
+      event.preventDefault()
+      if (event.key === 'h') return this.back(thread)
       this.step(thread, 1)?.focus({ preventScroll: true })
       return
     }

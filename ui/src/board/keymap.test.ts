@@ -41,6 +41,7 @@ describe('shared keyboard table', () => {
       [['j', 'k', '↓', '↑'], "Next / previous thread; on a row's documents, next / previous document"],
       [['l', '→'], 'In: a row unfolds its first document ⌗ ☰ ⧉ under it; again, the next in its place'],
       [['h', '←'], 'Out: a document to its row, folding it; a row off the page'],
+      [['←', '→'], 'With a sent file open: the newer / older file in its place'],
       [['Enter'], 'Unfold or fold a row, entering it'],
       [['c'], 'Open the highlighted thread in Rex'],
     ])

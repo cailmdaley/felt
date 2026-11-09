@@ -175,6 +175,7 @@ export const helpSections: readonly HelpSection[] = [
     row(['j', 'k', '↓', '↑'], 'Next / previous thread; on a row\'s documents, next / previous document', []),
     row(['l', '→'], 'In: a row unfolds its first document ⌗ ☰ ⧉ under it; again, the next in its place', on('reader', 'tapestry')),
     row(['h', '←'], 'Out: a document to its row, folding it; a row off the page', []),
+    row(['←', '→'], 'With a sent file open: the newer / older file in its place', []),
     row(['Enter'], 'Unfold or fold a row, entering it', []),
     row(['c'], 'Open the highlighted thread in Rex', []),
   ] },

@@ -82,9 +82,11 @@ export function registerMapViewJourneys(test) {
     await head.locator('.fp-lead').click()
     const link = head.frameLocator('.fp-doc iframe').getByRole('link', { name: 'Read the independent validation →' })
     await link.waitFor()
-    // Back keeps the open document where it stood in the page's view. The page
-    // may grow above it meanwhile (the visited file joins the row's sent files),
-    // which the browser's scroll anchoring absorbs, so scrollTop alone can move.
+    // Back keeps the open document where it stood in the page's view, read
+    // just into. The page may grow above it meanwhile (the visited file
+    // joins the row's sent files), which the browser's scroll anchoring absorbs,
+    // so scrollTop alone can move.
+    await page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => { el.scrollTop += el.querySelector('.fp-head > .fp-doc').getBoundingClientRect().top - el.getBoundingClientRect().top + 20 })
     const standing = () => page.locator('.ws-page.ws-selected .ws-family-scroll').evaluate(el => Math.round(el.querySelector('.fp-head > .fp-doc').getBoundingClientRect().top - el.getBoundingClientRect().top))
     const stood = await standing()
     await link.click()
@@ -96,6 +98,50 @@ export function registerMapViewJourneys(test) {
     await until(page, () => !document.querySelector('.ws-track')?.getAnimations({ subtree: true }).some(a => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity))
     assert.equal(await standing(), stood)
   }, { width: 800, height: 1000 }, 'no-preference')
+
+  test('Opening a sent file and stepping through its send move nothing on the page', async page => {
+    await board(page)
+    // A long page among the sends, to read into before stepping on.
+    await page.evaluate(() => {
+      window.__harness.files.find(file => file.path.endsWith('/paper-review.html')).body = new Blob([
+        `<!doctype html><title>Paper review</title><h1>Paper review</h1>${Array.from({ length: 200 }, (_, n) => `<p>Line ${n + 1} of the review.</p>`).join('')}`,
+      ], { type: 'text/html' })
+    })
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).last().locator('.kbn-card-name').click()
+    const head = tree(page).locator('.fp-head'), scroller = page.locator('.ws-page.ws-selected .ws-family-scroll')
+    const standing = () => scroller.evaluate(el => [Math.round(el.scrollTop), Math.round(el.querySelector('.fp-head .fp-open')?.getBoundingClientRect().top ?? NaN)])
+    const shown = () => head.locator('.fp-open-count').textContent()
+    await head.locator('.fp-sent').click()
+    const review = head.locator('.fp-files .fp-file[data-held$="/paper-review.html"]')
+    if (!await review.count()) await head.locator('.fp-older').click()
+    const [before] = await standing()
+    await review.click()
+    await head.frameLocator('.fp-doc iframe').getByText('Line 200 of the review.').waitFor()
+    await until(page, () => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000)
+    assert.equal((await standing())[0], before, 'opening a file scrolls nothing')
+    const opened = await shown(), [at, of] = opened.split(' of ').map(Number), newer = `${at - 1} of ${of}`
+    // The bar near the top of the view: a step replaces the file under it and leaves the bar be.
+    await scroller.evaluate(el => { el.scrollTop += el.querySelector('.fp-head .fp-open').getBoundingClientRect().top - el.getBoundingClientRect().top - 40 })
+    await page.waitForTimeout(100)
+    const near = await standing()
+    await head.locator('.fp-step').first().click()
+    assert.equal(await shown(), newer)
+    await page.waitForTimeout(300)
+    assert.deepEqual(await standing(), near, 'a step leaves the page and its bar where they stood')
+    await head.evaluate(el => el.focus({ preventScroll: true }))
+    await page.keyboard.press('ArrowRight')
+    assert.equal(await shown(), opened)
+    await until(page, () => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000)
+    assert.deepEqual(await standing(), near, 'right steps to the older file in place')
+    // Read deep into the long page, then step to a short file: the page does not pull up.
+    await scroller.evaluate(el => { el.scrollTop += 2000 })
+    await page.waitForTimeout(100)
+    const deep = await standing()
+    await page.keyboard.press('ArrowLeft')
+    assert.equal(await shown(), newer)
+    await page.waitForTimeout(300)
+    assert.deepEqual(await standing(), deep, 'a shorter file keeps the page at its offset')
+  }, { width: 800, height: 1000 })
 
   test('Row keys skim without moving voice or Rex, then enter and leave the page', async page => {
     await landed(page)
