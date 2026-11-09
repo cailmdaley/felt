@@ -965,7 +965,15 @@ defmodule Shuttle.Threads do
     end)
   end
 
-  @doc "Persist immutable publications before any asynchronous network attempt."
+  @doc """
+  Persist immutable publications before any asynchronous network attempt.
+
+  Every publication reaches the orchestrator's mailbox as context. A close or
+  ask wakes only the session that asked for the thread
+  (`shuttle.thread_parent.asked_by`): the orchestrator, when its own worker
+  asked; otherwise the asking session itself, messaged once when the
+  publication is first captured. A thread nobody asked for wakes no one.
+  """
   def capture_results(entries, own_host) do
     index = index(entries)
     {:ok, baseline, _} = DateTime.from_iso8601(ThreadOutbox.baseline())
@@ -981,28 +989,52 @@ defmodule Shuttle.Threads do
           "thread-" <>
             digest({entry.felt_store, entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
 
+        text = "thread #{address(entry.fiber)} #{verb}: #{text}"
+        parent_uid = Map.fetch!(parent.fiber, "uid")
+        asker = wake && asker(entry.fiber)
+
         {id,
          %{
            "owner" => own_host,
            "store" => parent.felt_store,
-           "parent_uid" => Map.fetch!(parent.fiber, "uid"),
+           "parent_uid" => parent_uid,
            "parent_host" => get_in(parent.fiber, ["shuttle", "host"]),
            "parent_unresolved" => Map.get(parent, :unresolved_parent, false),
-           "anchor_uid" => Map.fetch!(parent.fiber, "uid"),
+           "anchor_uid" => parent_uid,
            "parent_slug" => address(parent.fiber),
            "retained_at" => stamp,
-           "text" => "thread #{address(entry.fiber)} #{verb}: #{text}",
-           "wake" => wake,
+           "text" => text,
+           "wake" => is_map(asker) and asker["fiber"] == parent_uid,
            "signal" => %{
              "uid" => entry.fiber["uid"] || entry.fiber["id"],
              "verb" => verb,
              "stamp" => stamp,
              "owner" => own_host
            }
-         }}
+         }, if(is_map(asker) and asker["fiber"] != parent_uid, do: asker["session"])}
       end
 
-    ThreadOutbox.capture(records)
+    records
+    |> Enum.flat_map(fn
+      {id, record, nil} ->
+        [{id, record}]
+
+      {id, record, session} ->
+        told =
+          record
+          |> Map.take(["owner", "store", "retained_at", "text", "signal"])
+          |> Map.put("session", session)
+
+        [{id, record}, {id <> "-asker", told}]
+    end)
+    |> ThreadOutbox.capture()
+  end
+
+  defp asker(fiber) do
+    case get_in(fiber, ["shuttle", "thread_parent", "asked_by"]) do
+      %{"session" => session} = asker when is_binary(session) and session != "" -> asker
+      _ -> nil
+    end
   end
 
   @doc """
@@ -1091,10 +1123,17 @@ defmodule Shuttle.Threads do
       # new recipient from the child's current ancestry or an old slug.
       stores = Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()])
 
-      with {:ok, record, parent} <- prepare_recipient(id, record, entries, stores),
-           {:ok, current} <- current_signal(record, id),
-           true <- not current or acknowledged?(deliver(parent, record, id)) do
-        ThreadOutbox.acknowledge(id)
+      if is_binary(record["session"]) do
+        with {:ok, current} <- current_signal(record, id),
+             true <- not current or told?(tell_asker(record, id)) do
+          ThreadOutbox.acknowledge(id)
+        end
+      else
+        with {:ok, record, parent} <- prepare_recipient(id, record, entries, stores),
+             {:ok, current} <- current_signal(record, id),
+             true <- not current or acknowledged?(deliver(parent, record, id)) do
+          ThreadOutbox.acknowledge(id)
+        end
       end
     end
 
@@ -1135,6 +1174,25 @@ defmodule Shuttle.Threads do
     |> Enum.frequencies()
     |> Map.merge(mailbox, fn _id, outbox, queued -> outbox + queued end)
   end
+
+  # The session that asked for a thread, when it is not the orchestrator's
+  # worker, hears the result as a waking message of its own.
+  defp tell_asker(record, id) do
+    Shuttle.Messaging.send_message(%{
+      "address" => record["session"],
+      "text" => record["text"],
+      "from" => "shuttle",
+      "wake" => true,
+      "context_if_busy" => true,
+      "message_id" => id
+    })
+  end
+
+  # A refusal is final: the asking session is gone, and the orchestrator's
+  # mailbox holds the same result. Only an unknown outcome is retried.
+  defp told?({:ok, _status, %{"status" => status}}), do: status != "unknown"
+  defp told?({:error, status, _}) when status in 400..499, do: true
+  defp told?(_), do: false
 
   defp acknowledged?({:ok, :queued}), do: true
 

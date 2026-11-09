@@ -571,6 +571,72 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert_receive {:local_message_frame, %{}}
   end
 
+  test "an ordinary send to a large, cold Claude conversation is held as context; --wake still wakes",
+       %{host: host} do
+    root = Path.join(System.tmp_dir!(), "costly_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(root, "project"))
+    Shuttle.Test.Env.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
+    on_exit(fn -> File.rm_rf(root) end)
+    session = "11111111-1111-4111-8111-111111111111"
+    at = DateTime.utc_now() |> DateTime.add(-3, :hour) |> DateTime.to_iso8601()
+
+    File.write!(
+      Path.join([root, "project", session <> ".jsonl"]),
+      Jason.encode!(%{
+        type: "assistant",
+        timestamp: at,
+        message: %{
+          model: "claude-opus-5-5",
+          usage: %{
+            input_tokens: 0,
+            cache_read_input_tokens: 412_000,
+            cache_creation_input_tokens: 0
+          }
+        }
+      }) <> "\n"
+    )
+
+    request = %{
+      "address" => "shuttle://#{host}/claude/#{session}",
+      "text" => "hello",
+      "wake" => true,
+      "context_if_busy" => true,
+      "message_id" => "queued-hook"
+    }
+
+    # Mid-turn, a cold cache is a long tool call: the ordinary policy stands.
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+    assert receipt["detail"] == nil
+    assert_receive {:local_message_frame, %{"context_if_busy" => true, "wake" => true}}
+
+    Shuttle.Test.Env.put_app_env(:waiting_phases_source, fn ->
+      %{session => %{phase: "waiting", last_event_at: 0}}
+    end)
+
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+    assert %{"status" => "queued", "transport" => "claude-hook", "detail" => detail} = receipt
+    assert detail =~ "held as context, not woken: the recipient has 412k tokens of context"
+    assert detail =~ "--fresh" and detail =~ "--wake"
+    assert_receive {:local_message_frame, %{"wake" => false} = frame}
+    refute Map.has_key?(frame, "context_if_busy")
+
+    # A conversation that takes no context gets the send as it was asked.
+    refused = Map.put(request, "message_id", "session-unavailable")
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(refused)) |> json_response(200)
+    assert receipt["status"] == "rejected"
+    refute (receipt["detail"] || "") =~ "held as context"
+    assert_receive {:local_message_frame, %{"wake" => false}}
+    assert_receive {:local_message_frame, %{"wake" => true, "context_if_busy" => true}}
+
+    explicit = request |> Map.delete("context_if_busy") |> Map.put("message_id", "explicit")
+
+    receipt =
+      api_conn() |> post("/api/v1/messages", Jason.encode!(explicit)) |> json_response(200)
+
+    assert receipt["detail"] == nil
+    assert_receive {:local_message_frame, %{"wake" => true}}
+  end
+
   test "an older peer's forward reads as its sender, its retired fields ignored", %{host: host} do
     request = %{
       "address" => "shuttle://#{host}/codex/native%2Fid",

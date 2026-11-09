@@ -179,7 +179,8 @@ defmodule Shuttle.Delivery do
   it. The mailbox keeps it, deduplicated by `message_id`, until a worker of the
   fiber takes it: the live one, or the next one to launch.
 
-  Options: `:wake` starts a turn when a worker is live; `:from` labels the
+  Options: `:wake` starts a turn when a worker is live, in a fresh session when
+  that worker is at rest and costly to wake (`Shuttle.WakeCost`); `:from` labels the
   sender (default `"shuttle"`); `:unless_live` refuses with
   `{:error, :live_worker}` while a worker is live, queueing nothing, so the
   sender messages that worker directly.
@@ -193,7 +194,18 @@ defmodule Shuttle.Delivery do
         {:error, :live_worker}
 
       true ->
-        wake = Keyword.get(opts, :wake, false) and live_context_worker(entry) != nil
+        worker = live_context_worker(entry)
+        # A waking result for a worker that is costly to wake and at rest goes
+        # to a fresh session, launched first, which takes it from the mailbox.
+        fresh =
+          with true <- Keyword.get(opts, :wake, false) and worker != nil,
+               cost when is_map(cost) <- costly_at_rest(entry, worker) do
+            start_fresh(entry, worker, cost)
+          else
+            _ -> false
+          end
+
+        wake = Keyword.get(opts, :wake, false) and worker != nil and not fresh
         from = Keyword.get(opts, :from) || "shuttle"
         args = ["context-mailbox", "put", context_key(entry), message_id, text, "--from", from]
 
@@ -217,10 +229,37 @@ defmodule Shuttle.Delivery do
           if opts[:retained_at], do: args ++ ["--retained-at", opts[:retained_at]], else: args
 
         with {:ok, _} <- Shuttle.CLI.run(args) do
-          flush_context(entry)
+          unless fresh, do: flush_context(entry)
           {:ok, :queued}
         end
     end
+  end
+
+  defp costly_at_rest(entry, worker) do
+    with cost when is_map(cost) <- Shuttle.WakeCost.costly(worker[:session_uuid]),
+         true <- Poller.idle_worker?(Shuttle.Threads.address(entry.fiber)) do
+      cost
+    else
+      _ -> nil
+    end
+  end
+
+  # True when the fresh session launched, or may yet: a busy Poller keeps the
+  # request. Any refusal leaves the live worker to be woken as usual.
+  defp start_fresh(entry, worker, cost) do
+    result =
+      Poller.dispatch_fiber(Shuttle.Threads.address(entry.fiber),
+        force: true,
+        ad_hoc: true,
+        resume_mode: "fresh",
+        user_message:
+          "Shuttle started this session to take a result that arrives as context. " <>
+            "The previous session #{worker[:session_uuid]} was at rest with " <>
+            "#{Shuttle.WakeCost.describe(cost)}; waking it would have re-read all of that uncached. " <>
+            "Read Status first, then `shuttle show #{worker[:session_uuid]}` for what it holds that Status does not."
+      )
+
+    match?({:ok, _}, result) or result == {:error, :poller_busy}
   end
 
   @doc "Offer a fiber's pending context to its current live conversation."

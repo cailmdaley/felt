@@ -138,3 +138,39 @@ func TestThreadRefusesBeforeWriting(t *testing.T) {
 		t.Fatal("overwrote child")
 	}
 }
+
+// A thread records the session that asked for it and the constitution that
+// session works; a command no agent session runs records nobody.
+func TestThreadRecordsWhoAsked(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "testhost")
+	dir, st := newStore(t)
+	seedPlainFiber(t, st, "hub", "")
+	if out, err := runIn(t, env, dir, "install", "hub", "--disabled", "--host", "testhost", "--project-dir", t.TempDir()); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	hub := mustRead(t, st, "hub")
+	asker := func(slug string) *shuttle.ThreadAsker {
+		t.Helper()
+		if out, err := runIn(t, env, dir, "thread", "hub", "Ask", "--slug", slug, "--disabled"); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+		block, _, _ := shuttle.BlockOf(mustRead(t, st, "hub/"+slug))
+		return block.ThreadParent.AskedBy
+	}
+	if got := asker("nobody"); got != nil {
+		t.Fatalf("no session asked, recorded %+v", got)
+	}
+	env.Set("CLAUDE_CODE_SESSION_ID", "outside-session")
+	if got := asker("outside"); got == nil || got.Session != "shuttle://testhost/claude/outside-session" || got.Fiber != "" {
+		t.Fatalf("outside session recorded %+v", got)
+	}
+	env.Set("CLAUDE_CODE_SESSION_ID", "hub-worker")
+	writeMessageIdentityLedger(t, env, []SessionProvenance{
+		{Kind: "dispatch", Host: "testhost", Harness: "claude", Session: "hub-worker", Fiber: hub.ID, UID: hub.UID, FiberPath: hub.Path, At: 1},
+	})
+	if got := asker("orchestrator"); got == nil || got.Session != "shuttle://testhost/claude/hub-worker" || got.Fiber != hub.UID {
+		t.Fatalf("orchestrator's worker recorded %+v, want fiber %s", got, hub.UID)
+	}
+}

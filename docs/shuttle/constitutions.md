@@ -268,7 +268,7 @@ Work that should wait for an orchestrator is a draft thread:
 It stays unarmed until the orchestrator runs `shuttle resume <thread>`.
 Containment relates the work; it does not gate dispatch.
 
-A thread carries its parent's immutable identity and owner hint in `shuttle.thread_parent`.
+A thread carries its parent's immutable identity and owner hint in `shuttle.thread_parent`, with the session that asked for it in `asked_by`.
 Its owner captures results durably even when the parent has no local archive copy.
 Delivery resolves the parent's current authority by identity; an unavailable authority retains the result for retry.
 

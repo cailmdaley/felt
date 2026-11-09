@@ -52,7 +52,8 @@ defmodule Shuttle.Contract do
       "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)",
     34 => "claude-mail-recover (durable native wake for unoffered automatic Claude mail)",
     35 => "context-mailbox put --from and message --request-json from (the sender as given)",
-    36 => "conclude-run (standing runs re-arm on exit); reopen --occurrence and --conclude-run and accept removed"
+    36 =>
+      "conclude-run (standing runs re-arm on exit); reopen --occurrence and --conclude-run and accept removed"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

@@ -860,7 +860,10 @@ defmodule ShuttleWeb.APIControllerTest do
       post(
         api_conn(),
         "/api/v1/dispatch",
-        Jason.encode!(%{fiber_id: "tests/local-card", images: [%{data: Base.encode64("#!/bin/sh")}]})
+        Jason.encode!(%{
+          fiber_id: "tests/local-card",
+          images: [%{data: Base.encode64("#!/bin/sh")}]
+        })
       )
 
     assert conn.status == 400

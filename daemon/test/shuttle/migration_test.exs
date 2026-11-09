@@ -1105,7 +1105,9 @@ defmodule Shuttle.MigrationTest do
           body <> "\n## Status\nSaved concurrently.\n",
           [
             {:put, "status", "closed"}
-          ], before_body: body)
+          ],
+          before_body: body
+        )
       end
 
       run.(request)

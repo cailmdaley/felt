@@ -53,7 +53,7 @@ defmodule Shuttle.ActionsTest do
         end
 
         offered = fiber |> Actions.actions_for(running?) |> Enum.map(& &1.id)
-        assert ("close-tempered" in offered) == (status == "active")
+        assert "close-tempered" in offered == (status == "active")
         refute "close-awaiting-review" in offered
       end
     end
@@ -218,7 +218,7 @@ defmodule Shuttle.ActionsTest do
 
               {:error, :standing_unreviewed} ->
                 assert kind == "standing" and target in ["awaitingReview", "tempered"]
-                assert ("close-tempered" in available) == (status == "active")
+                assert "close-tempered" in available == (status == "active")
                 refute "close-awaiting-review" in available
                 nil
             end

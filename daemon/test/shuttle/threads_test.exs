@@ -114,6 +114,56 @@ defmodule Shuttle.ThreadsTest do
     {:ok, store: dir, data: data}
   end
 
+  # Record who asked for hub/child: `fiber` is the constitution the asking
+  # session worked, the hub's own uid when `:hub`.
+  defp asked_by(store, session, fiber) do
+    path = Path.join(store, ".felt/hub/child/child.md")
+    text = File.read!(path)
+    [_, hub_uid] = Regex.run(~r/thread_parent:\n\s+uid: (\S+)/, text)
+    fiber = if fiber == :hub, do: hub_uid, else: fiber
+
+    asker =
+      "        asked_by:\n            session: #{session}\n" <>
+        if(fiber, do: "            fiber: #{fiber}\n", else: "")
+
+    File.write!(path, String.replace(text, "        name: Hub\n", "        name: Hub\n" <> asker))
+  end
+
+  test "a thread nobody asked for publishes its close and its ask as context that wakes no one",
+       %{store: store} do
+    for {verb, args} <- [{"ask", ["Needs a decision"]}, {"close", ["--local"]}] do
+      assert {:ok, _} = CLI.run_in_store(store, [verb, "hub/child" | args])
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      Threads.capture_results(entries, "test-host")
+    end
+
+    assert [_, _] = pending = Shuttle.ThreadOutbox.pending("test-host")
+    assert Enum.all?(pending, fn {_, record} -> record["wake"] == false end)
+    refute Enum.any?(pending, fn {_, record} -> record["session"] end)
+  end
+
+  test "a session that asked from outside the orchestrator is told itself; the orchestrator gets context",
+       %{store: store} do
+    session = "shuttle://test-host/claude/11111111-1111-4111-8111-111111111111"
+    asked_by(store, session, nil)
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(entries, "test-host")
+    Threads.capture_results(entries, "test-host")
+
+    assert [{id, to_hub}, {asker_id, to_asker}] =
+             Enum.sort_by(Shuttle.ThreadOutbox.pending("test-host"), &elem(&1, 0))
+
+    assert to_hub["wake"] == false
+    assert asker_id == id <> "-asker"
+    assert %{"session" => ^session, "text" => "thread hub/child closed: "} = to_asker
+    refute Map.has_key?(to_asker, "parent_uid")
+
+    # No such session is live: the refusal is final, and the hub keeps the result.
+    Threads.retry_results("test-host", entries)
+    refute Enum.any?(Shuttle.ThreadOutbox.pending("test-host"), &(elem(&1, 0) == asker_id))
+  end
+
   test "created owner-only thread keeps lineage and retries close and ask to parent authority", %{
     store: store
   } do
@@ -412,8 +462,10 @@ defmodule Shuttle.ThreadsTest do
 
       reviewed =
         Enum.find_value(Shuttle.ThreadOutbox.pending("test-host"), fn {_, r} ->
-          if r["wake"] == false, do: r
+          if r["text"] =~ "human verdict", do: r
         end)
+
+      assert reviewed["wake"] == false
 
       assert reviewed["text"] =~
                if(verdict, do: "human verdict: tempered", else: "human verdict: discarded")
@@ -910,7 +962,7 @@ defmodule Shuttle.ThreadsTest do
     end
   end
 
-  test "normal close wakes, quiet close supplies context, and ask always wakes across retry and restart",
+  test "for the orchestrator that asked, a close wakes, a quiet close supplies context, and an ask wakes, across retry and restart",
        %{store: store} do
     alias Shuttle.Test.StubPostClient
     StubPostClient.start!()
@@ -918,6 +970,8 @@ defmodule Shuttle.ThreadsTest do
     Env.put_app_env(:remotes, [%{name: "parent-host", port: 43210}])
     path = Path.join(store, ".felt/hub/hub.md")
     File.write!(path, String.replace(File.read!(path), "host: test-host", "host: parent-host"))
+
+    asked_by(store, "shuttle://parent-host/claude/11111111-1111-4111-8111-111111111111", :hub)
 
     for {verb, args, expected_wake} <- [
           {"close", ["--quiet", "--local"], false},
@@ -1589,6 +1643,7 @@ defmodule Shuttle.ThreadsTest do
         {Bandit, plug: {ScopedAPI, self()}, port: 0, ip: {127, 0, 0, 1}, startup_log: false}
       )
 
+    asked_by(store, "shuttle://test-host/claude/11111111-1111-4111-8111-111111111111", :hub)
     {:ok, {_, api_port}} = ThousandIsland.listener_info(api)
     Env.put_env("SHUTTLE_DAEMON_URL", "http://127.0.0.1:#{api_port}")
     socket = Path.join(System.tmp_dir!(), "th-#{System.unique_integer([:positive])}.sock")
@@ -1828,6 +1883,51 @@ defmodule Shuttle.ThreadsTest do
     end)
 
     assert File.read!(Path.join(store, "received")) == received
+
+    # At rest with a large context and a cold cache, the worker is not woken:
+    # a fresh session replaces it and takes the result from the mailbox.
+    projects = Path.join(store, "projects")
+    File.mkdir_p!(Path.join(projects, "p"))
+    Env.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", projects)
+
+    File.write!(
+      Path.join([projects, "p", native <> ".jsonl"]),
+      Jason.encode!(%{
+        type: "assistant",
+        timestamp: DateTime.utc_now() |> DateTime.add(-3, :hour) |> DateTime.to_iso8601(),
+        message: %{
+          model: "claude-opus-5-5",
+          usage: %{
+            input_tokens: 0,
+            cache_read_input_tokens: 412_000,
+            cache_creation_input_tokens: 0
+          }
+        }
+      }) <> "\n"
+    )
+
+    File.rm!(Path.join(tasks_dir, "1.json"))
+
+    Env.put_app_env(:waiting_phases_source, fn ->
+      %{native => %{phase: "waiting", last_event_at: System.system_time(:millisecond)}}
+    end)
+
+    assert Poller.idle_worker?(poller, "hub")
+    File.rm!(Path.join(store, "ready"))
+    assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+    assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
+    Threads.deliver_results(latest, "test-host")
+    refute_receive {:wake, _}
+
+    await(fn ->
+      case Poller.live_worker(poller, "hub") do
+        %{session_uuid: uuid} when is_binary(uuid) -> uuid != native
+        _ -> false
+      end
+    end)
+
+    assert [_] = pending(data)
   end
 
   defp native_receiver(listener, transcript, ready, test_pid) do

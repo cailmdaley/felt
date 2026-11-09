@@ -62,7 +62,8 @@ defmodule Shuttle.DispatchImages do
 
     with :ok <- Shuttle.FS.mkdir_p(dir), :ok <- Shuttle.FS.chmod(dir, 0o700) do
       Enum.reduce_while(decoded, {:ok, []}, fn {bytes, ext}, {:ok, paths} ->
-        path = Path.join(dir, Base.encode16(:crypto.hash(:sha256, bytes), case: :lower) <> "." <> ext)
+        path =
+          Path.join(dir, Base.encode16(:crypto.hash(:sha256, bytes), case: :lower) <> "." <> ext)
 
         case Shuttle.FS.exists?(path) or put(path, bytes) == :ok do
           true -> {:cont, {:ok, [path | paths]}}

@@ -407,6 +407,8 @@ Hook output and acknowledgment, like native delivery and receipt persistence, ar
 An interrupt while a sibling PostToolUse hook is still running can also discard Shuttle's already-acknowledged context.
 The stock sibling hook is short, but a slow third-party hook widens this window; acknowledgment isn't transcript confirmation.
 `--wake` forces the native wake path, including during a turn.
+An ordinary send (neither `--wake` nor `--context-only`) to a Claude session whose prompt cache is cold and whose context is at least 250k tokens is held as context: the receipt is `queued`, and its detail gives the context size, how long the cache has been cold, and the two ways to act now.
+`--fresh` starts a new session on a fiber with the text as its launch directive, replacing a live worker; the new session is told where the previous conversation is. It needs a fiber target.
 `--context-only` or `--wake=false` queues context without starting a turn, regardless of state.
 Pi and Codex retain their existing paths.
 An active Codex turn accepts context-only mail through native steering; an idle loaded thread receives persistent model context through `thread/inject_items`, without a separate visible TUI turn.

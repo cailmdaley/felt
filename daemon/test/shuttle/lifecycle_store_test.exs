@@ -25,7 +25,10 @@ defmodule Shuttle.LifecycleStoreTest do
     test "recovery stamps the handoff at the run's dispatch instant" do
       with_standing_doc(fn fiber_id, path ->
         assert {:ok, _} = conclude(fiber_id, recovery: true)
-        {:ok, at, _} = DateTime.from_iso8601(read_frontmatter(path)["shuttle"]["runtime"]["handed_off_at"])
+
+        {:ok, at, _} =
+          DateTime.from_iso8601(read_frontmatter(path)["shuttle"]["runtime"]["handed_off_at"])
+
         assert DateTime.compare(at, ~U[2026-01-02 00:00:00Z]) == :eq
       end)
     end

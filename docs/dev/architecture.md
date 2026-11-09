@@ -38,7 +38,8 @@ frontmatter field. The editorial chain lives in the constitution body's
 A child constitution publishes lifecycle results to its nearest ancestor constitution that is not archived (tempered or discarded).
 Only the child's owning daemon publishes them.
 Results reach only that nearest orchestrator; each orchestrator decides what to pass on, with no automatic upward propagation.
-Close wakes the orchestrator by default; `shuttle close --quiet` publishes context without waking, while ask always wakes.
+Every result is context in the orchestrator's mailbox. A close or ask wakes only the session that asked for the thread, recorded by `shuttle thread` in `shuttle.thread_parent.asked_by` as the asking session and the constitution it worked: when that constitution is the orchestrator, its worker is woken; otherwise the asking session is messaged directly, once, from the same outbox. A thread with no recorded asker wakes no one, and `shuttle close --quiet` publishes context whoever asked.
+A wake is weighed against its cost (`Shuttle.WakeCost`: a Claude conversation with a cold prompt cache and at least 250k tokens of context is costly). An ordinary `shuttle message` to a costly conversation is delivered as context, with the cost in its receipt; a waking thread result for a costly worker at rest launches a fresh session, which takes the result from the mailbox. `shuttle message --wake` and `--fresh` are the explicit choices.
 A thread resting until a fiber (`shuttle.blocked_on`, set by `shuttle rest --until`) publishes `unblocked` as context when that fiber closes with any verdict; it never wakes and arms nothing.
 The quiet marker names its exact close timestamp and an ordinary close clears it, so it cannot affect a later publication.
 The outbox freezes the wake choice with the publication through retries and restarts.

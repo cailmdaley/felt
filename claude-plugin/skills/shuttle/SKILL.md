@@ -83,7 +83,7 @@ shuttle resume <thread>                      # arm it
 shuttle threads <id>                         # their state
 ```
 
-A thread's close or ask wakes its orchestrator, and only that one; `close --quiet` delivers the outcome as context instead.
+A thread's close or ask wakes only the session that asked for it with `shuttle thread`: its orchestrator, when the orchestrator's worker asked. Everyone else, including the orchestrator of a thread the human started, receives the result as context on their next turn. `close --quiet` wakes nobody. An asking orchestrator whose session is at rest, large and cold is not woken either: a fresh session takes the result.
 Write a thread's outcome for that orchestrator.
 An orchestrator reads each result against the thread's Desired State; review with the human first a thread they asked for.
 Temper a oneshot with `shuttle close <thread> --tempered=true`.
@@ -100,14 +100,16 @@ Does this exist, was it discussed, where did we put it: `shuttle find "<words>"`
 
 ```bash
 shuttle sessions --json                  # conversations across the fleet
-shuttle message <fiber|session> "…"      # busy Claude receives context; --wake forces a turn
+shuttle message <fiber|session> "…"      # --context-only never wakes; --fresh starts a new session; --wake forces a turn
 shuttle post "…"                         # tell your family without waking anyone
 shuttle board                            # your family's board
 shuttle send-file <path>                 # put a file on the human's board (or your harness's own file tool)
 ```
 
 Messaging a fiber reaches its current worker, or queues for the next one. A busy Claude worker receives context on main-thread prompt submission or tool completion; unoffered mail falls back to native wake after 30 seconds, or sooner when the worker stops working.
-Fallback failures return a notice to the sender; native delivery still respects Claude's approval policy. Use `--wake` to force native delivery immediately; `--context-only` never starts a turn.
+Fallback failures return a notice to the sender; native delivery still respects Claude's approval policy.
+
+**A wake costs the recipient a read of its whole context, uncached once its cache is cold.** Before sending, ask whether the recipient has to act now. Usually it does not: send `--context-only`, which it reads on its next turn at no cost. An ordinary send to a session with a cold cache and 250k tokens or more of context is held as context anyway, and the receipt says what a wake would cost. When the recipient must act and its session is large and cold, prefer `--fresh`: a new session on the fiber takes the message, starting from Status and told where the old conversation is. `--wake` wakes the existing session whatever it costs.
 
 **The family board.** Every constitution tree shares a board: its messages, posts, asks, answers, closes and handoffs, and a count of the human's turns per worker, typed or spoken; `shuttle board --turns` reads the lines. Each turn opens with a few lines of what's new there. Post what the family should know instead of relaying it; address someone with `shuttle message` for a direct request.
 

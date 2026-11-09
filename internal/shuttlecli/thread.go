@@ -21,6 +21,11 @@ The ask becomes its name and lede, followed by empty Desired State and Status
 sections. Host, project_dir, role and agent inherit from the parent unless explicitly
 overridden. Threads are armed (status: active) unless --disabled.
 
+The calling session is recorded as the one that asked. The thread's close or
+ask wakes that asker alone: the parent's worker when the parent's own session
+asked, otherwise the asking session itself, while the parent receives context.
+Run from a shell, or with --take, nobody asked, and results arrive as context.
+
 Changing --host requires an explicit --project-dir, even for a draft: paths on
 different machines are not interchangeable. Inherited paths are kept verbatim;
 explicit paths are validated by the owning daemon for remote threads, never
@@ -100,6 +105,9 @@ remote draft made with --disabled stays in this store while you write it;
 				if host != inherited.Host && !cmd.Flags().Changed("project-dir") {
 					return fmt.Errorf("changing host requires --project-dir; the parent's path belongs to %s", inherited.Host)
 				}
+			}
+			if !take {
+				block.ThreadParent.AskedBy = a.threadAsker()
 			}
 			if take {
 				own, err := a.resolveOwnHost("")
@@ -221,4 +229,18 @@ remote draft made with --disabled stays in this store while you write it;
 	cmd.Flags().BoolVar(&take, "take", false, "Move your live session into the thread and launch a fresh source worker")
 	cmd.Flags().BoolVar(&disabled, "disabled", false, "Create a draft instead of arming it")
 	return cmd
+}
+
+// threadAsker is the calling session and the constitution it works, or nil
+// when no agent session runs the command (a human's shell, the daemon).
+func (a *app) threadAsker() *shuttle.ThreadAsker {
+	session := a.messageCaller()
+	if session == "" {
+		return nil
+	}
+	asker := &shuttle.ThreadAsker{Session: session}
+	if f, err := a.currentWorkerFiber(); err == nil && f != nil {
+		asker.Fiber = f.UID
+	}
+	return asker
 }

@@ -346,6 +346,36 @@ defmodule Shuttle.Messaging do
     do: {:error, 400, OriginRouter.unknown_origin_message(host)}
 
   defp deliver_local(request, address) do
+    with cost when is_map(cost) <- costly_wake(request, address),
+         held = %{
+           request
+           | raw: request.raw |> Map.put("wake", false) |> Map.delete("context_if_busy")
+         },
+         {:ok, status, %{"status" => "queued"} = receipt} <- run_local(held, address) do
+      {:ok, status,
+       Map.put(
+         receipt,
+         "detail",
+         "held as context, not woken: the recipient has #{Shuttle.WakeCost.describe(cost)}, " <>
+           "so a wake re-reads all of it uncached. It reads this on its next turn. " <>
+           "To act now, send again with --fresh (a new session on its fiber) or --wake."
+       )}
+    else
+      # Not costly, or the conversation takes no context: deliver as asked.
+      _ -> run_local(request, address)
+    end
+  end
+
+  # An ordinary send (no explicit --wake) to a Claude conversation that ended
+  # its turn and is costly to wake is delivered as context instead.
+  defp costly_wake(request, address) do
+    if request.raw["wake"] == true and request.raw["context_if_busy"] == true and
+         request.attachments == [] and Harnesses.normalize(address.harness) == "claude" and
+         get_in(Poller.session_activity(), [address.native, :phase]) == "waiting",
+       do: Shuttle.WakeCost.costly(address.native)
+  end
+
+  defp run_local(request, address) do
     payload = Map.put(request.raw, "address", build_address(address.host, address))
 
     frame = Jason.encode!(payload) <> "\n"

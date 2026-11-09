@@ -712,8 +712,9 @@ verdict; without it the fiber waits on Awaiting review. Use:
   shuttle close <fiber> --tempered=false  # discarded
   shuttle close <fiber> --quiet           # context-only result for its orchestrator
 
-A thread's close wakes only its nearest orchestrator by default. --quiet delivers
-its outcome as context without waking that conversation. Ask always wakes.
+A thread's close reaches its nearest orchestrator as context. It wakes only the
+session that asked for the thread with 'shuttle thread'; a thread nobody asked
+for wakes no one. --quiet delivers the outcome as context whoever asked.
 Results never propagate automatically beyond that orchestrator, and a close the
 orchestrator's own session makes is not delivered back to it.
 

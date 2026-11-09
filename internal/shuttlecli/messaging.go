@@ -41,6 +41,7 @@ type messageOptions struct {
 	attachments []string
 	notifyIdle  bool
 	notifyWake  bool
+	fresh       bool
 }
 
 const maxMessageReceiptBytes = 512 << 10
@@ -165,8 +166,17 @@ falls back to native wake through the owning daemon, even after restart.
 A full mailbox, oversized mail, or no sender return address uses native delivery.
 Fallback failures send a notice to the sender; Claude's approval policy still applies.
 Other sessions use their native wake path.
---wake forces a native wake immediately;
---context-only (or --wake=false) never starts a turn.
+
+Every turn re-reads the recipient's whole context, and once its prompt cache is
+cold that read is uncached. An ordinary send to a Claude session whose cache is
+cold and whose context is at least 250k tokens is therefore held as context,
+read on the recipient's next turn, and the receipt says what a wake would cost.
+Choose deliberately:
+  --context-only (or --wake=false) never starts a turn: for anything the
+    recipient need not act on now;
+  --fresh starts a new session on the fiber with the text, replacing its live
+    worker; the new session is told where the previous conversation is;
+  --wake forces a native wake immediately, whatever it costs.
 
 An attachment-free --context-only fiber send uses its durable mailbox regardless
 of worker liveness, except that --notify-when-idle uses session routing while a
@@ -206,12 +216,22 @@ exit 1 means rejected, unknown, or another command error.`,
 			if messageOpts.file != "" && len(args) == 2 {
 				return fmt.Errorf("text and --file are mutually exclusive")
 			}
+			if messageOpts.fresh && (messageOpts.contextOnly || cmd.Flags().Changed("wake") || messageOpts.notifyIdle || len(messageOpts.attachments) != 0 || messageOpts.local) {
+				return fmt.Errorf("--fresh starts a new session with the text; it cannot be combined with --wake, --context-only, --notify-when-idle, --attach or --local")
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			request, err := a.buildMessageRequest(cmd.InOrStdin(), args, messageOpts)
 			if err != nil {
 				return err
+			}
+			if messageOpts.fresh {
+				if err := a.messageFresh(request); err != nil {
+					return err
+				}
+				a.recordBoardMessage(args[0], request)
+				return nil
 			}
 			notifyOnly := request.NotifyWhenIdle && request.Text == "" && len(request.Attachments) == 0
 			if !messageOpts.requestJSON && !messageOpts.local && !notifyOnly {
@@ -297,6 +317,9 @@ exit 1 means rejected, unknown, or another command error.`,
 				}
 			} else {
 				fmt.Fprintf(a.env.Stdout, "%s %s (%s)\n", receipt.Status, receipt.Address, receipt.MessageID)
+				if err == nil && strings.HasPrefix(receipt.Detail, "held as context") {
+					fmt.Fprintln(a.env.Stderr, receipt.Detail)
+				}
 				if receipt.Idle != nil {
 					fmt.Fprintf(a.env.Stderr, "idle subscription: %s", receipt.Idle.State)
 					if receipt.Idle.Signal != "" {
@@ -325,6 +348,7 @@ exit 1 means rejected, unknown, or another command error.`,
 	shuttleMessageCmd.Flags().StringArrayVar(&messageOpts.attachments, "attach", nil, "copy a file to the recipient's host (repeat for multiple files)")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.wake, "wake", true, "force native wake (use --wake=false for context only)")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.contextOnly, "context-only", false, "deliver context without starting or steering a model turn")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.fresh, "fresh", false, "start a new session on the fiber with the text, replacing its live worker")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.notifyIdle, "notify-when-idle", false, "get one notice (as context) when the receiver next goes idle or exits; text is optional")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.notifyWake, "notify-wake", false, "with --notify-when-idle, have the notice start a turn here")
 	shuttleMessageCmd.Flags().StringVar(&messageOpts.from, "from", "", "name the sender (default: the calling session)")

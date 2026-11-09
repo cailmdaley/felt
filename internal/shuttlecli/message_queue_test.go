@@ -335,3 +335,51 @@ func TestThreadSignalCurrentPostsStructuredIdentity(t *testing.T) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
+
+// --fresh asks the owning daemon for a new session on the fiber with the text
+// as its launch directive; a session target has no fiber to start one on.
+func TestMessageFreshStartsANewSessionOnTheFiber(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir(),
+	})
+	isolateMessageFiberStore(env, store)
+	deliver, requests := dormantDeliverStub(http.StatusOK, `{"delivery":"dispatch","delivered":true}`)
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/deliver": deliver})
+
+	fresh := func(target string) (string, error) {
+		var stdout bytes.Buffer
+		a := newApp(env)
+		a.env.Stdout = &stdout
+		var opts messageOptions
+		cmd := a.messageCmd(&opts)
+		opts.id, opts.from, opts.fresh = "msg-fresh", "test sender", true
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		err := cmd.RunE(cmd, []string{target, "take this from Status"})
+		return stdout.String(), err
+	}
+	stdout, err := fresh("work/worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "started a fresh session on work/worker (msg-fresh)\n"; stdout != want {
+		t.Fatalf("receipt = %q, want %q", stdout, want)
+	}
+	got := requests()
+	if len(got) != 1 {
+		t.Fatalf("deliver requests = %d, want 1", len(got))
+	}
+	request := got[0]
+	if request["resume_mode"] != "fresh" || request["fiber_id"] != messageTargetFiberUID || request["origin"] != "worker-node" || request["text"] != "take this from Status" || request["context_only"] != nil {
+		t.Fatalf("request = %v", request)
+	}
+	if _, err := fresh("shuttle://worker-node/claude/11111111-1111-4111-8111-111111111111"); err == nil || !strings.Contains(err.Error(), "--fresh needs a fiber") {
+		t.Fatalf("session target: %v", err)
+	}
+	if len(requests()) != 1 {
+		t.Fatal("a session target reached the daemon")
+	}
+}

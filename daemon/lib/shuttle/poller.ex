@@ -608,6 +608,23 @@ defmodule Shuttle.Poller do
     end
   end
 
+  @doc """
+  Whether `fiber_id`'s live worker is at rest: its turn ended and no task of
+  its own is pending or in progress. False without a live worker.
+  """
+  @spec idle_worker?(GenServer.server(), String.t()) :: boolean()
+  def idle_worker?(server \\ Shuttle.Env.server(__MODULE__), fiber_id) do
+    case published_worker_view(server, fiber_id) do
+      %{worker: worker, fiber: fiber} ->
+        uuid = worker_session_uuid(worker, fiber)
+        cli = worker_cli(worker, fiber)
+        is_binary(uuid) and at_rest?(uuid, cli, elem(Shuttle.HarnessTasks.read(cli, uuid), 0))
+
+      _ ->
+        false
+    end
+  end
+
   @spec dispatch_fiber(String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(fiber_id, opts \\ []),
     do: dispatch_fiber(Shuttle.Env.server(__MODULE__), fiber_id, opts)
@@ -2940,12 +2957,15 @@ defmodule Shuttle.Poller do
 
   defp pulse_idle?(state, worker, fiber) do
     uuid = worker_session_uuid(worker, fiber)
-    cli = worker_cli(worker, fiber)
 
+    is_binary(uuid) and
+      at_rest?(uuid, worker_cli(worker, fiber), get_in(state.task_reads, [uuid, :tasks]) || [])
+  end
+
+  defp at_rest?(uuid, cli, tasks) do
     phase = get_in(session_activity(), [uuid, :phase])
-    tasks = get_in(state.task_reads, [uuid, :tasks]) || []
 
-    is_binary(uuid) and cli in ["claude", "codex"] and
+    cli in ["claude", "codex"] and
       (phase == "waiting" or (cli == "codex" and is_nil(phase))) and
       not Enum.any?(
         tasks,
@@ -3159,7 +3179,8 @@ defmodule Shuttle.Poller do
   # The activity source. Defaults to the host-local event stream; overridable
   # via app env so tests inject a deterministic `session => %{last_event_at,
   # phase}` map without writing to the real events.jsonl.
-  defp session_activity do
+  @doc false
+  def session_activity do
     case Shuttle.Env.app(:waiting_phases_source) do
       fun when is_function(fun, 0) -> fun.()
       _ -> Shuttle.EventStream.session_activity()

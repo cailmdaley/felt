@@ -27,6 +27,19 @@ type ThreadParent struct {
 	Host string `json:"host" yaml:"host"`
 	Slug string `json:"slug" yaml:"slug"`
 	Name string `json:"name" yaml:"name"`
+	// AskedBy is the session that ran `shuttle thread`. Only that asker is
+	// woken by the thread's close or ask; a thread nobody asked for publishes
+	// context that wakes no one.
+	AskedBy *ThreadAsker `json:"asked_by,omitempty" yaml:"asked_by,omitempty"`
+}
+
+// ThreadAsker names the session that asked for a thread, and the constitution
+// that session was working when it asked. When that constitution is the
+// thread's orchestrator, its current worker is woken, so a successor inherits
+// what was asked for; any other asker is messaged as the session it was.
+type ThreadAsker struct {
+	Session string `json:"session" yaml:"session"`
+	Fiber   string `json:"fiber,omitempty" yaml:"fiber,omitempty"`
 }
 
 // Block is the in-memory representation of a Shuttle facet. There is no

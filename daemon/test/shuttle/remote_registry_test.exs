@@ -957,6 +957,7 @@ defmodule Shuttle.RemoteRegistryTest do
         advance.(20)
         :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
       end)
+
       recovery = RemoteRegistry.snapshot(:reg_live_tunnel, "candide").recovery
       assert recovery.state == :tripped
       assert recovery.attempt == 2

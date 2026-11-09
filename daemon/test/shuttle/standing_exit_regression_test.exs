@@ -54,7 +54,10 @@ defmodule Shuttle.StandingExitRegressionTest do
   test "standing exit takes the real Go document lock and preserves a committed body", c do
     helper = Path.join(c.root, "fiber-lock")
     fixture = Path.expand("../fixtures/fiber_lock/main.go", __DIR__)
-    assert {_, 0} = System.cmd("go", ["build", "-p", "2", "-o", helper, fixture], stderr_to_stdout: true)
+
+    assert {_, 0} =
+             System.cmd("go", ["build", "-p", "2", "-o", helper, fixture], stderr_to_stdout: true)
+
     port = Port.open({:spawn_executable, helper}, [:binary, :exit_status, args: [c.path]])
     assert_receive {^port, {:data, "locked\n"}}, 30_000
 
@@ -86,7 +89,10 @@ defmodule Shuttle.StandingExitRegressionTest do
     fiber = show(c.root)
     assert fiber["status"] == "active"
     assert get_in(fiber, ["shuttle", "runtime", "thread_exit_verb"]) == "handed off"
-    {:ok, stamped, _} = DateTime.from_iso8601(get_in(fiber, ["shuttle", "runtime", "handed_off_at"]))
+
+    {:ok, stamped, _} =
+      DateTime.from_iso8601(get_in(fiber, ["shuttle", "runtime", "handed_off_at"]))
+
     assert DateTime.compare(stamped, before) != :lt
     refute StandingRoles.standing_role_due?(fiber)
   end
@@ -126,7 +132,10 @@ defmodule Shuttle.StandingExitRegressionTest do
 
     fiber = show(c.root)
     assert fiber["status"] == "active"
-    {:ok, stamped, _} = DateTime.from_iso8601(get_in(fiber, ["shuttle", "runtime", "handed_off_at"]))
+
+    {:ok, stamped, _} =
+      DateTime.from_iso8601(get_in(fiber, ["shuttle", "runtime", "handed_off_at"]))
+
     assert DateTime.compare(stamped, ~U[2026-01-02 00:00:00Z]) == :eq
     assert StandingRoles.standing_role_due?(fiber)
   end

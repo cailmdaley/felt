@@ -54,8 +54,10 @@ Keep the overview high-level, with outcomes, reports and thread chips making the
 The usual external-action gates still apply, including issues or PRs on repos where the human isn't a developer and messages in others' channels.
 Answering in the orchestrator's conversation lets it carry the decision to the relevant thread with `shuttle message <thread> "<decision>"` and keep the whole effort coherent.
 Answering inside a thread steers that worker directly; when the decision changes other threads or the parent's scope, tell the orchestrator too rather than assuming it sees every exchange.
-Thread close and ask messages wake only that thread's own orchestrator; handoff and rest arrive as context for its next turn.
-That orchestrator decides whether to pass a result further up; results don't automatically wake a chain of ancestors.
+Every thread result reaches that thread's own orchestrator as context for its next turn.
+A close or ask also wakes, but only the session that asked for the thread (`shuttle thread` records it): the orchestrator when its own worker asked, or its next worker; a session outside the orchestrator is messaged directly.
+A thread nobody asked for, such as one the human started from the board or took with `--take`, wakes no one.
+The orchestrator decides whether to pass a result further up; results never wake a chain of ancestors.
 Use `shuttle close <thread> --quiet` for wrap-ups that need no wake.
 Thread messages arrive as `thread <id> <verb>: <outcome or question>`; `unblocked` arrives when the fiber a resting thread waits for (`shuttle rest --until <fiber>`) closes.
 In `shuttle threads`, *Armed* means no worker is running yet; *Armed · host unreachable* means the host is out of this daemon's sight, so the thread may be running there; *N waiting for its next worker* counts results queued until the thread is armed.
@@ -167,7 +169,7 @@ Fallback failures produce a Shuttle notice to the sender without clearing its ou
 Each notice gets five seconds and at most three attempts, spaced at least a minute apart; notice-only entries wait for the minute sweep, and the last failure retires with a diagnostic.
 Large context-only messages use a retained full-message file reference.
 Hook acknowledgment isn't transcript confirmation: a crash around acknowledgment can repeat an offer, and an interrupt during a slow sibling PostToolUse hook can discard acknowledged context.
-Native wake respects Claude's approval policy. Other sessions use their existing wake path. Use `--wake` to force a wake, or `--context-only` to add context without starting a turn. `--notify-when-idle` (with or without text) sends you one notice, as context, when the receiver next ends a turn with nothing queued or running, or exits. Idle is not done. A hook-only embedded Codex session cannot be woken, and Shuttle never pastes into its terminal. Without a route to a host, leave a note in the fiber and `felt sync --push`.
+Native wake respects Claude's approval policy. Other sessions use their existing wake path. Use `--wake` to force a wake, `--context-only` to add context without starting a turn, or `--fresh` to start a new session on the fiber with the message. An ordinary send to a Claude session with a cold cache and at least 250k tokens of context is held as context, and its receipt says what waking would cost. `--notify-when-idle` (with or without text) sends you one notice, as context, when the receiver next ends a turn with nothing queued or running, or exits. Idle is not done. A hook-only embedded Codex session cannot be woken, and Shuttle never pastes into its terminal. Without a route to a host, leave a note in the fiber and `felt sync --push`.
 
 ## Past conversations
 
