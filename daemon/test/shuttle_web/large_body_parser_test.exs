@@ -14,7 +14,7 @@ defmodule ShuttleWeb.LargeBodyParserTest do
   end
 
   test "other routes pass through untouched" do
-    conn = Plug.Test.conn(:post, "/api/v1/dispatch", "{}")
+    conn = Plug.Test.conn(:post, "/api/v1/felt-edit", "{}")
     assert LargeBodyParser.call(conn, []) == conn
   end
 end

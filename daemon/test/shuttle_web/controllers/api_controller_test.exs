@@ -824,6 +824,13 @@ defmodule ShuttleWeb.APIControllerTest do
          "user_message" => "talk to me first",
          "resume_mode" => "previous"
        }, dispatched, :verbatim},
+      # Pasted images ride to the owner, which lands them on the worker's host.
+      {"/api/v1/dispatch",
+       %{
+         "fiber_id" => "tests/remote-card",
+         "user_message" => "see this",
+         "images" => [%{"name" => "shot.png", "data" => Base.encode64(<<0x89, "PNG">>)}]
+       }, dispatched, :verbatim},
       {"/api/v1/transition", %{"fiber_id" => "tests/remote-card", "target" => "drafts"},
        transitioned, Map.put(Jason.decode!(transitioned), "origin", "candide")}
     ]
@@ -846,6 +853,18 @@ defmodule ShuttleWeb.APIControllerTest do
       assert last.url == "http://localhost:4001" <> path, label
       assert Jason.decode!(last.body) == payload, label
     end
+  end
+
+  test "a local dispatch refuses images that are not images before it launches" do
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/dispatch",
+        Jason.encode!(%{fiber_id: "tests/local-card", images: [%{data: Base.encode64("#!/bin/sh")}]})
+      )
+
+    assert conn.status == 400
+    assert Jason.decode!(conn.resp_body)["error"] =~ "PNG"
   end
 
   test "felt-edit relays a tunnel failure as 502" do

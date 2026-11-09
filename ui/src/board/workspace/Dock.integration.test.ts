@@ -188,7 +188,7 @@ describe('band header', () => {
     expect(band.head.dataset.verdictKey).toBeTruthy()
     expect(band.head.dataset.column).toBe('awaitingReview')
     expect(band.el.querySelector('.ws-band-title')?.textContent).toBe('A long and particular name')
-    expect(band.el.querySelector('textarea, [contenteditable]')).toBeNull()
+    expect(band.el.querySelector('textarea:not(.ws-worker-message), [contenteditable]')).toBeNull()
     expect(visibleVerbs(band)).toEqual(['Resume', 'New session', 'Temper', 'Discard'])
     dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
     expect(band.head.dataset.column).toBe('inFlight')
@@ -478,6 +478,37 @@ describe('session verbs', () => {
   const opened = () => new Dock('', saved, undefined, openWorker)
   const openWorker = vi.fn()
   beforeEach(() => { openWorker.mockClear(); dock.reset(); dock = band = opened() })
+
+  it('sends pasted images with the line, which grows and keeps Shift+Enter as a break', async () => {
+    URL.createObjectURL = vi.fn(() => `blob:${Math.random()}`)
+    URL.revokeObjectURL = vi.fn()
+    dock.open(task({ sessionUuid: 'prior' }))
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValue(response({ dispatched: true }))
+    const field = band.el.querySelector<HTMLTextAreaElement>('textarea.ws-worker-message')!
+    const shift = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, cancelable: true })
+    field.dispatchEvent(shift)
+    expect(shift.defaultPrevented).toBe(false)
+    const paste = (files: File[], types: string[]): Event => {
+      const event = new Event('paste', { cancelable: true })
+      Object.defineProperty(event, 'clipboardData', { value: { files, types } })
+      field.dispatchEvent(event)
+      return event
+    }
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' })
+    expect(paste([png], ['Files']).defaultPrevented).toBe(true)
+    expect(paste([new File(['x'], 'a.svg', { type: 'image/svg+xml' })], ['Files']).defaultPrevented).toBe(true)
+    expect(band.el.querySelectorAll('.ws-worker-image')).toHaveLength(1)
+    expect(band.el.querySelector('.ws-worker-receipt')!.textContent).toBe('Only PNG, JPEG, GIF or WebP images')
+    expect(paste([], ['text/plain']).defaultPrevented).toBe(false)
+    field.value = 'look'; field.dispatchEvent(new Event('input'))
+    session('Resume').click()
+    await vi.waitFor(() => expect(band.el.querySelector('.ws-worker-receipt')!.textContent).toBe('Sent'))
+    const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
+    expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ user_message: 'look', resume_mode: 'previous', images: [{ name: 'shot.png', data: 'iVBORw==' }] })
+    expect(band.el.querySelectorAll('.ws-worker-image')).toHaveLength(0)
+    expect(field.value).toBe('')
+  })
 
   it.each([
     ['Start', {}, 'fresh'],
@@ -1012,6 +1043,24 @@ describe('session usage', () => {
     expect(session('Resume').title).toBe(`Resume a/task (Enter) · cache ${said}`)
     expect(band.el.querySelector('.ws-header-facts')!.textContent).toContain('94% cached')
     expect(usageReads()).toEqual([`/api/v1/transcript/usage?session=${id}&host=candide`])
+  })
+
+  it('follows a highlighted thread: its name after the band\'s, its figures and its cache', async () => {
+    const thread = '99999999-2222-3333-4444-555555555555'
+    answering(url => ({ context: url.includes(thread) ? 40_000 : 182_340 }))
+    const root = resting({ name: 'Unions' })
+    dock.open(root)
+    await settle()
+    expect(part('context').textContent).toBe('182k')
+    dock.setActionCard(task({ id: 'a/task/sub', uid: 'sub', name: 'Sub', status: 'closed', sessionUuid: thread, shuttleHost: 'cineca' }))
+    await settle()
+    expect(part('fiber-title').textContent).toBe('Unions / Sub')
+    expect(part('context').textContent).toBe('40k')
+    expect(usageReads().at(-1)).toBe(`/api/v1/transcript/usage?session=${thread}&host=cineca`)
+    dock.setActionCard(root)
+    await settle()
+    expect(part('fiber-title').textContent).toBe('Unions')
+    expect(part('context').textContent).toBe('182k')
   })
 
   it('reads a recorded window against the figure', async () => {

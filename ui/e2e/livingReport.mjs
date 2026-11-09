@@ -131,7 +131,7 @@ export function registerLivingReportJourneys(test) {
       await analysis.locator('.fp-constitution').press('Enter')
       await analysis.locator('.fp-doc .ws-fiber-prose').waitFor()
       assert.equal(new URL(page.url()).hash, route)
-      await named(page, 'Calibrate the shear response')
+      await named(page, 'Calibrate the shear response / Response analysis')
       assert.equal(errors.length, 0, errors.join('\n'))
     }, viewport, 'reduce', phone)
   }

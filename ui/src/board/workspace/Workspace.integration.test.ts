@@ -243,7 +243,7 @@ it('gives r no work on a constitution', async () => {
   const event = new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true })
   document.dispatchEvent(event)
   expect(event.defaultPrevented).toBe(false)
-  expect(document.querySelector('.ws-reader textarea')).toBeNull()
+  expect(document.querySelector('.ws-reader textarea:not(.ws-worker-message)')).toBeNull()
 })
 
 it('steps constitutions in one history entry and returns the last viewed card to Desk', async () => {
@@ -825,7 +825,7 @@ describe('workspace reader integration', () => {
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.focus()
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
     expect(row.getAttribute('aria-selected')).toBe('true')
-    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub')
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / Notch')
     const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
     press('a'); expect(queue).toHaveBeenLastCalledWith(leaf, 'awaitingReview')
     press('x'); expect(queue).toHaveBeenLastCalledWith(leaf, 'composted')
@@ -869,7 +869,7 @@ describe('workspace reader integration', () => {
     send.click(); await settle()
     const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
     expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/other', user_message: 'Hello', resume_mode: 'previous' })
-    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Leaf')
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Leaf / Other')
   })
   it('row verbs select their thread without unfolding it and share the undo queue', async () => {
     workspace.dispose()
@@ -940,7 +940,7 @@ describe('workspace reader integration', () => {
     expect(row('hub/b').getAttribute('aria-expanded')).toBe('true')
     scroller().scrollTop = 333
     scroller().dispatchEvent(new Event('scroll'))
-    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub')
+    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub / hub/b')
     workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-a'); await settle()
     expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub/a')
     workspace.open(feed[0], 'Desk'); await settle()
@@ -964,7 +964,7 @@ describe('workspace reader integration', () => {
     expect(selected()).toBe('family:host-a:hub')
     row('hub/mid').click(); await settle()
     expect(selected()).toBe('family:host-a:hub')
-    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub')
+    expect(document.querySelector('.ws-stage-band .ws-band-title')?.textContent).toBe('hub / hub/mid')
     expect(chosen()).toBe('hub/mid')
     expect(row('hub/mid/leaf')).toBeDefined()
     row('hub/mid').click(); await settle()

@@ -44,7 +44,8 @@ export function registerMapViewJourneys(test) {
     await asks(page, quiet.length + 1)
     assert.deepEqual(await asked(page), [...quiet, 'select:session-analysis'])
     await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-worker] .fp-name')?.title === 'Response analysis')
-    assert.equal(await page.locator('.ws-stage-band .ws-band-title').textContent(), root)
+    // The band names the highlighted thread after its root, and its figures are the thread's.
+    assert.equal(await page.locator('.ws-stage-band .ws-band-title').textContent(), `${root} / Response analysis`)
     await analysis.locator('.fp-constitution').click()
     await analysis.locator('.fp-doc .ws-fiber-prose').waitFor()
     assert.equal(new URL(page.url()).hash, route)

@@ -502,7 +502,9 @@ The queue and current line are journaled, so a daemon restart resumes rather tha
 ### Worker delivery
 
 `POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
-user_message?, project_dir?, release_launch_reservation?, existing_only?}` (plus `origin` to forward).
+user_message?, images?, project_dir?, release_launch_reservation?, existing_only?}` (plus `origin` to forward).
+`images` is up to 8 `{name, data}` objects, `data` base64 PNG, JPEG, GIF or WebP, 20 MB in all; the body may reach 32 MB.
+The owning daemon writes each to `<data dir>/images/<sha256>.<ext>` and appends one `[Image: <path>]` line per image to `user_message`; anything else answers 400 before a launch.
 With `existing_only: true`, only a `previous` message to a live worker is allowed.
 A missing worker returns 422 `no_live_worker` without arming, reopening or launching anything.
 The change reader uses this form.

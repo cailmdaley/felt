@@ -11,6 +11,10 @@ defmodule ShuttleWeb.DispatchController do
       (origin stripped), where the worker must run, and the response is relayed
       verbatim.
 
+  Images pasted into the board's worker line ride as `images`; the owning
+  daemon lands them on its host and names their paths in the message
+  (`Shuttle.DispatchImages`).
+
   The kanban requeue carries the user's directive (`user_message`) and
   continuation mode (`resume_mode ∈ {"previous", "fresh"}` or absent) inline in
   the body. Both ride the dispatch call into the prompt at launch; the remote
@@ -53,11 +57,10 @@ defmodule ShuttleWeb.DispatchController do
     force = truthy?(Map.get(params, "force", false))
     ad_hoc = truthy?(Map.get(params, "ad_hoc", false))
 
-    if is_nil(fiber_id) do
-      conn
-      |> put_status(400)
-      |> json(%{error: "fiber_id is required"})
-    else
+    message = normalize_text(Map.get(params, "user_message"))
+
+    with :ok <- if(is_nil(fiber_id), do: {:error, "fiber_id is required"}, else: :ok),
+         {:ok, message} <- Shuttle.DispatchImages.attach(message, Map.get(params, "images")) do
       result =
         Shuttle.Poller.dispatch_fiber(fiber_id,
           force: force or ad_hoc,
@@ -65,13 +68,15 @@ defmodule ShuttleWeb.DispatchController do
           ad_hoc: ad_hoc,
           release_launch_reservation:
             truthy?(Map.get(params, "release_launch_reservation", false)),
-          user_message: normalize_text(Map.get(params, "user_message")),
+          user_message: message,
           resume_mode: normalize_resume_mode(Map.get(params, "resume_mode")),
           project_dir: normalize_text(Map.get(params, "project_dir"))
         )
 
       {status, body} = ShuttleWeb.DispatchReply.render(fiber_id, result)
       conn |> put_status(status) |> json(body)
+    else
+      {:error, reason} -> conn |> put_status(400) |> json(%{error: reason})
     end
   end
 

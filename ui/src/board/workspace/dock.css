@@ -12,6 +12,7 @@
   min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--ws-ink); font: 500 var(--type-title)/var(--leading-tight) var(--font-serif);
 }
+.ws-band-thread { color: var(--ws-ink-muted); }
 /* One context figure and the cache's warmth: a verdigris dot draining clockwise
    as the entry ages; cold, an alarm-red ring. Context carries its own tint (paintUsage). */
 .ws-band-meter { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; color: var(--ws-ink-muted); white-space: nowrap; font: var(--type-label)/var(--leading-prose) var(--font-mono); }
@@ -41,15 +42,26 @@
 
 /* The worker's line under the band's head: an opening message and the verbs that send it. */
 .ws-band-head:has(+ .ws-worker-acts:not([hidden])) { border-bottom: 0; }
-.ws-worker-acts { display: flex; flex: 1 0 100%; align-items: center; gap: 4px; min-width: 0; }
+.ws-worker-acts { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: flex-end; gap: 4px; min-width: 0; }
 .ws-dock .ws-worker-acts { padding: 0 16px 6px; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-worker-acts[hidden] { display: none; }
+/* The line grows with its text up to a third of the screen, then scrolls. */
 .ws-worker-message {
-  flex: 1 1 0; min-width: 6em; max-width: 48rem; height: var(--ws-control-height); box-sizing: border-box; padding: 0 10px; margin-right: 4px;
+  flex: 1 1 0; min-width: 6em; max-width: 48rem; min-height: var(--ws-control-height); max-height: 33vh; box-sizing: border-box;
+  padding: calc((var(--ws-control-height) - 1lh) / 2 - var(--ws-line-width)) 10px; margin-right: 4px; resize: none; overflow-y: auto;
   border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: transparent;
-  color: var(--ws-ink); font: var(--type-label)/var(--leading-solid) var(--font-serif); text-overflow: ellipsis;
+  color: var(--ws-ink); font: var(--type-label)/var(--leading-prose) var(--font-serif);
 }
-.ws-worker-message::placeholder { color: var(--ws-ink-faint, var(--ws-ink-muted)); opacity: 1; }
+/* Pasted or dropped images wait under the line as thumbnails until the send. */
+.ws-worker-images { flex: 1 0 100%; order: 9; display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-worker-images[hidden] { display: none; }
+.ws-worker-image { position: relative; display: inline-flex; }
+.ws-worker-image img { display: block; height: 48px; max-width: 96px; object-fit: cover; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
+.ws-dock .ws-worker-image-remove {
+  position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--ws-ink); color: var(--ws-paper); font: var(--type-meta)/var(--leading-solid) var(--font-serif); cursor: pointer;
+}
+.ws-worker-message::placeholder { color: var(--ws-ink-faint, var(--ws-ink-muted)); opacity: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-reader .ws-worker-acts .ws-header-icon:disabled { opacity: .45; cursor: default; }
 .ws-worker-receipt { flex: none; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
 .ws-worker-receipt:empty { display: none; }

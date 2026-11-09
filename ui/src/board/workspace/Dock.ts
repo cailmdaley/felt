@@ -6,7 +6,7 @@ import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, linkDestination, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
-import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
+import { dispatchFailureMessage, isAgentCard, needsProjectDir, postForceDispatch, type DispatchFailureBody, type PastedImage } from '../KanbanModalShared.js'
 import { getDaemonJson, postDaemonJson } from '../daemonApi.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
@@ -658,7 +658,7 @@ export class Dock {
 
   /** A worker's own line for an opening message, Resume and New session, for a page to seat beside that worker. */
   workerActionsFor(card: KanbanCard): WorkerActions {
-    return new WorkerActions(card, (target, mode, message, word) => this.startSession(target, mode, word, undefined, message))
+    return new WorkerActions(card, (target, mode, message, word, images) => this.startSession(target, mode, word, undefined, message, images))
   }
 
   /** Retarget the band's lifecycle and worker controls without changing its identity or settings. */
@@ -669,6 +669,7 @@ export class Dock {
       this.errorEl.style.display = 'none'
     }
     this.actionCard = card
+    this.followUsage()
     this.actPaint?.()
   }
 
@@ -698,12 +699,17 @@ export class Dock {
     card = this.card
     this.settingsSync?.(incoming)
     this.historySync?.()
-    if (card.sessionUuid !== this.usageSession) {
-      this.usageSession = card.sessionUuid
-      this.usage = null
-      void this.readUsage(card)
-    }
+    this.followUsage()
     this.actPaint?.()
+  }
+
+  /** The figures follow the highlighted card's session, as the verbs do. */
+  private followUsage(): void {
+    const card = this.actionCard ?? this.card
+    if (!card || card.sessionUuid === this.usageSession) return
+    this.usageSession = card.sessionUuid
+    this.usage = null
+    void this.readUsage(card)
   }
 
   /** Read the card's session usage and repaint; a failed read keeps the last figures, and one that outlives its session or band is dropped. */
@@ -712,7 +718,7 @@ export class Dock {
     if (!session) return
     const epoch = this.epoch
     const usage = await fetchTranscriptUsage(this.shuttleBase, session, card.shuttleHost)
-    if (this.epoch !== epoch || card.sessionUuid !== session) return
+    if (this.epoch !== epoch || this.usageSession !== session) return
     this.usage = usage ?? this.usage
     this.actPaint?.()
   }
@@ -919,6 +925,11 @@ export class Dock {
     const title = document.createElement('h1')
     title.className = 'ws-band-title'
     title.dataset.part = 'fiber-title'
+    // A highlighted thread follows the band's name, as a path: the figures beside it are the thread's.
+    const titleRoot = document.createElement('span')
+    const titleThread = document.createElement('span')
+    titleThread.className = 'ws-band-thread'
+    title.append(titleRoot, titleThread)
     const ancestry = this.ancestry = document.createElement('nav')
     ancestry.className = 'ws-settings-ancestry'
     ancestry.hidden = true
@@ -932,7 +943,7 @@ export class Dock {
     meter.className = 'ws-band-meter'
     meter.dataset.part = 'context-meter'
     meter.append(contextFact, cacheFact)
-    const usageRefresh = window.setInterval(() => { if (!document.hidden) void this.readUsage(card) }, USAGE_REFRESH_MS)
+    const usageRefresh = window.setInterval(() => { if (!document.hidden) void this.readUsage(target()) }, USAGE_REFRESH_MS)
     this.disposers.push(() => window.clearInterval(usageRefresh))
     const identity = document.createElement('div'); identity.className = 'ws-band-identity'
     identity.append(title, meter)
@@ -959,10 +970,14 @@ export class Dock {
       const column = card.column
       this.el.dataset.column = column
       this.head.dataset.column = column
-      if (title.textContent !== card.name) title.textContent = card.name
-      title.title = card.name
+      const act = target()
+      const same = (act.uid ?? act.id) === (card.uid ?? card.id) && act.originId === card.originId
+      if (titleRoot.textContent !== card.name) titleRoot.textContent = card.name
+      const thread = same ? '' : ` / ${act.name}`
+      if (titleThread.textContent !== thread) titleThread.textContent = thread
+      title.title = card.name + thread
       const usage = this.usage
-      paintUsage(contextFact, cacheFact, usage, card.workerAgent ?? card.shuttleAgent)
+      paintUsage(contextFact, cacheFact, usage, act.workerAgent ?? act.shuttleAgent)
       meter.hidden = contextFact.hidden && cacheFact.hidden
       const warm = warmUntil(usage)
       const hit = usage?.hit_share === undefined ? undefined : Math.round(usage.hit_share * 100)
@@ -970,8 +985,6 @@ export class Dock {
       if (facts.textContent !== saidFacts) facts.textContent = saidFacts
       facts.title = hit === undefined ? '' : `The session's recent turns read ${hit}% of their context tokens from the prompt cache`
       facts.hidden = !facts.textContent
-      const act = target()
-      const same = (act.uid ?? act.id) === (card.uid ?? card.id) && act.originId === card.originId
       markVerdictHost(this.head, act)
       for (const [button, verb, key] of [[review, 'review', 'a'], [rest, 'rest', 's'], [temper, 'temper', 't'], [discard, 'discard', 'x']] as const) {
         if (!button) continue
@@ -980,7 +993,7 @@ export class Dock {
       }
       const offered = headerLifecycleVerbsFor(act, !!this.onRest)
       verdict.hidden = !offered.length
-      worker.update(act, same && warm !== undefined ? `cache warm until ${clockTime(warm)}` : '')
+      worker.update(act, warm !== undefined ? `cache warm until ${clockTime(warm)}` : '')
       consoleItem.paint()
       if (rest) rest.hidden = !offered.includes('rest')
       temper.hidden = !offered.includes('temper')
@@ -1549,7 +1562,7 @@ export class Dock {
    * refused start raised ({@link showStartPrompt}). A worker that starts opens
    * on the desktop, where the human talks to it.
    */
-  private async startSession(card: KanbanCard, mode: SessionMode, word?: HTMLElement, projectDir?: string, message = ''): Promise<boolean> {
+  private async startSession(card: KanbanCard, mode: SessionMode, word?: HTMLElement, projectDir?: string, message = '', images: PastedImage[] = []): Promise<boolean> {
     if (this.starting || (mode === 'fresh' && !this.confirmCut(card))) return false
     const epoch = this.epoch
     const original = word?.textContent ?? ''
@@ -1570,7 +1583,7 @@ export class Dock {
     try {
       let res: Response
       try {
-        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, resume_mode: mode, ...(projectDir ? { project_dir: projectDir } : {}) })
+        res = await postForceDispatch(this.shuttleBase, card, { user_message: message, resume_mode: mode, ...(images.length ? { images } : {}), ...(projectDir ? { project_dir: projectDir } : {}) })
       } catch (err: unknown) {
         showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
         return false
@@ -1582,7 +1595,7 @@ export class Dock {
         return true
       }
       if (res.status === 409) showError('A worker is already running for this fiber.')
-      else if (inBand() && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode, message)
+      else if (inBand() && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode, message, images)
       else showError(dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
       return false
     } finally {
@@ -1613,7 +1626,7 @@ export class Dock {
    * ancestor's `project_dir` when the card has one. Start retries the launch
    * mode with the confirmed directory.
    */
-  private showStartPrompt(card: KanbanCard, body: DispatchFailureBody, mode: SessionMode, message = ''): void {
+  private showStartPrompt(card: KanbanCard, body: DispatchFailureBody, mode: SessionMode, message = '', images: PastedImage[] = []): void {
     const errorEl = this.errorEl
     if (!errorEl) return
     const epoch = this.epoch
@@ -1622,7 +1635,7 @@ export class Dock {
       host: body.host ?? card.shuttleHost,
       suggestion: card.inheritedProjectDir,
       onStart: dir => {
-        void this.startSession(card, mode, undefined, dir, message).then(ok => {
+        void this.startSession(card, mode, undefined, dir, message, images).then(ok => {
           if (ok || epoch !== this.epoch || !errorEl.contains(prompt)) return
           const retry = prompt.querySelector<HTMLButtonElement>('button')
           if (retry) retry.disabled = false
