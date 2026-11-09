@@ -85,6 +85,8 @@
 
 .fp-head .fp-name { font: var(--type-title)/var(--leading-tight) var(--font-serif); }
 .fp-head .fp-note { -webkit-line-clamp: 5; margin-left: 0; color: var(--ws-ink); font-size: var(--type-row); }
+/* An unfolded row, or the head once selected, reads its whole outcome. */
+.fp-row:not(.fp-head)[data-open] > .fp-line > .fp-note, .fp-head[data-selected] > .fp-line > .fp-note { display: block; -webkit-line-clamp: unset; }
 .fp-section { margin-bottom: 2px; padding: 12px var(--fp-gutter) 3px calc(var(--fp-gutter) + var(--fp-level, 0) * 16px); border-bottom: 1px solid var(--ws-hairline-soft); color: var(--fm-text); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .fp-aside { padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + 20px + var(--fp-level, 0) * 16px); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); cursor: pointer; outline: none; }
 .fp-aside::before { content: '▸'; display: inline-block; width: 1.2em; margin-left: -1.2em; transition: transform .15s; }
