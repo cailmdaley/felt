@@ -402,8 +402,8 @@ export class FamilyPage {
   }
   /** One send: its age once, at the left, then what it carried, figures drawn small as themselves. */
   private sendLine(thread: MapThread, send: Send): HTMLElement {
-    const line = el('div', 'fp-send'), carried = el('span', 'fp-send-files')
-    carried.append(...send.files.map(sent => {
+    const line = el('div', 'fp-send')
+    line.append(el('span', 'fp-send-age', age(this.model!.now - send.at)), ...send.files.map(sent => {
       const item = el('button', 'fp-file'); item.type = 'button'
       item.dataset.held = sent.file.key; item.dataset.owner = item.dataset.level = thread.key
       item.title = sent.label; item.setAttribute('aria-label', sent.label)
@@ -412,7 +412,6 @@ export class FamilyPage {
       else item.append(el('span', 'fp-file-glyph', SENT_GLYPH[sent.mark]), el('span', 'fp-file-name', sent.label))
       return item
     }))
-    line.append(el('span', 'fp-send-age', age(this.model!.now - send.at)), carried)
     return line
   }
   /** The count of older sends, which unfolds them, or the word that folds them again. */

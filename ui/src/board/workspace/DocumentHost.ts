@@ -520,38 +520,8 @@ export class DocumentHost {
 
   private failure(state: FrameState, error: unknown, stale: boolean): void {
     this.clearNotice(state)
-    const message = error instanceof Error ? error.message : ''
-    const missing = /file request failed: (404|410)\b/.test(message)
-    const notice = document.createElement('div')
-    notice.className = stale ? 'ws-document-status' : 'ws-document-state'
-    notice.setAttribute('role', 'status')
-    const cause = document.createElement('p')
-    const owner = state.frame.doc.owner
-    const unsupportedMedia = message === 'media format is not supported by this browser' || message === 'image format is not supported by this browser'
-    cause.textContent = missing
-      ? `Not found on ${owner}${stale ? ' — showing last loaded copy' : ''}`
-      : unsupportedMedia ? (message.startsWith('image') ? 'This browser cannot show this image' : 'This browser cannot play this format')
-      : `${owner} is unreachable${stale ? ' — showing last loaded copy' : ''}`
-    notice.append(cause)
-    if (unsupportedMedia) {
-      const download = document.createElement('a')
-      download.href = fileBytesUrl(this.options.shuttleBase, state.frame.doc.path, owner)
-      download.download = state.frame.doc.name
-      download.textContent = 'Download'
-      notice.append(download)
-    }
-    if (missing) {
-      const path = document.createElement('code')
-      path.className = 'ws-document-path'
-      path.textContent = state.frame.doc.path
-      path.tabIndex = 0
-      notice.append(path)
-    }
-    const retry = document.createElement('button')
-    retry.type = 'button'
-    retry.textContent = 'Retry'
-    retry.addEventListener('click', () => this.refresh(state.frame.doc.key))
-    notice.append(retry)
+    const { doc } = state.frame
+    const notice = documentFailure(this.options.shuttleBase, doc.path, doc.owner, doc.name, error, stale, () => this.refresh(doc.key))
     state.frame.content.append(notice)
     state.notice = notice
     state.frame.el.classList.toggle('ws-stale', stale)
@@ -773,4 +743,45 @@ function readScroll(key: DocKey): ScrollPosition {
     }
   } catch { /* Storage is optional. */ }
   return { x: 0, y: 0 }
+}
+
+/**
+ * Why a document could not be drawn: missing on its owner, its owner
+ * unreachable, or a format this browser cannot show, with a retry. A stale
+ * notice is a small status over the last loaded copy; otherwise it stands in
+ * the document's place.
+ */
+export function documentFailure(shuttleBase: string, path: string, owner: string, name: string, error: unknown, stale: boolean, retry: () => void): HTMLElement {
+  const message = error instanceof Error ? error.message : ''
+  const missing = /file request failed: (404|410)\b/.test(message)
+  const notice = document.createElement('div')
+  notice.className = stale ? 'ws-document-status' : 'ws-document-state'
+  notice.setAttribute('role', 'status')
+  const cause = document.createElement('p')
+  const unsupportedMedia = message === 'media format is not supported by this browser' || message === 'image format is not supported by this browser'
+  cause.textContent = missing
+    ? `Not found on ${owner}${stale ? ' — showing last loaded copy' : ''}`
+    : unsupportedMedia ? (message.startsWith('image') ? 'This browser cannot show this image' : 'This browser cannot play this format')
+    : `${owner} is unreachable${stale ? ' — showing last loaded copy' : ''}`
+  notice.append(cause)
+  if (unsupportedMedia) {
+    const download = document.createElement('a')
+    download.href = fileBytesUrl(shuttleBase, path, owner)
+    download.download = name
+    download.textContent = 'Download'
+    notice.append(download)
+  }
+  if (missing) {
+    const where = document.createElement('code')
+    where.className = 'ws-document-path'
+    where.textContent = path
+    where.tabIndex = 0
+    notice.append(where)
+  }
+  const again = document.createElement('button')
+  again.type = 'button'
+  again.textContent = 'Retry'
+  again.addEventListener('click', retry)
+  notice.append(again)
+  return notice
 }

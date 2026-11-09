@@ -196,6 +196,37 @@ export function registerMapViewJourneys(test) {
     assert.deepEqual(await asked(page), [...before, 'open:session-morning-post'])
   })
 
+  test('A sent file the board can\'t draw, or that is gone, opens in its slot as a card under its bar, and the page stays live', async page => {
+    await page.goto(url.replace('example=threads', 'example=families'))
+    await page.locator('.kbn-desk .kbn-card').first().waitFor()
+    await page.evaluate(() => { location.hash = '#/board/hub@umber-workstation/family%3Aumber-workstation%3Ahub' })
+    const head = tree(page).locator('.fp-head')
+    await head.locator('.fp-sent').click()
+    await head.locator('.fp-file[data-held$="/Rex.shortcut"]').click()
+    // The bar above names the file; the card says what can be done with it.
+    await head.locator('.fp-open .fp-file-name').getByText('sc/Rex.shortcut', { exact: true }).waitFor()
+    const card = head.locator('.fp-doc .kbn-fileview-unsupported')
+    await card.getByText('Not drawn here · 22,707 bytes').waitFor()
+    assert.equal(await card.getByRole('link', { name: 'Download' }).getAttribute('download'), 'Rex.shortcut')
+    const rect = sel => head.locator(sel).evaluate(el => { const { top, bottom, left, right } = el.getBoundingClientRect(); return { top, bottom, left, right } })
+    const [doc, drawn, bar, note] = await Promise.all(['.fp-doc', '.fp-doc .kbn-fileview-unsupported', '.fp-open', '.fp-note'].map(rect))
+    assert.ok(drawn.top >= doc.top && drawn.bottom <= doc.bottom && drawn.left >= doc.left && drawn.right <= doc.right, `the card sits in its slot: ${JSON.stringify({ doc, drawn })}`)
+    assert.ok(note.bottom <= bar.top && bar.bottom <= doc.top, `outcome, bar and slot stack in flow: ${JSON.stringify({ note, bar, doc })}`)
+    // Every part of the page still answers a click.
+    await tree(page).locator('.fp-row[data-thread$="hub/pipeline-steward"] .fp-name').click()
+    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-row[data-thread$="hub/pipeline-steward"]')?.hasAttribute('data-selected'))
+    await head.locator('.fp-note').click()
+    await until(page, () => document.querySelector('.ws-page.ws-selected .fp-head')?.hasAttribute('data-selected'))
+    await head.locator('.fp-back').click()
+    assert.equal(await head.locator('.fp-doc').isVisible(), false)
+    // A file sent and since deleted says so in the same place.
+    await head.locator('.fp-older').click()
+    await head.locator('.fp-file[data-held$="/agenda.md"]').click()
+    await head.locator('.fp-doc').getByText('Not found on umber-workstation', { exact: true }).waitFor()
+    assert.equal(await head.locator('.fp-doc .kbn-fileview-text-wrap').isVisible(), false, 'the empty viewer gives way to the notice')
+    await head.locator('.fp-back').click()
+  })
+
   test('Rex naming a fiber on two hosts reveals that host\'s copy on the Globe', async page => {
     await board(page)
     await page.evaluate(async () => {

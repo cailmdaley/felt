@@ -1,5 +1,6 @@
 .ws-family-page { container-type: inline-size; height: 100%; min-height: 0; }
-.ws-family-grid { --fp-gutter: 20px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+/* --fp-text is the row's text column, where its name and all it holds start: the mark's 12px and the title's 8px gap. */
+.ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 .ws-family-scroll { min-height: 0; overflow: auto; }
 .ws-family-announce { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -17,12 +18,12 @@
 .fp-word { grid-area: word; color: var(--fm-text); white-space: nowrap; }
 .fp-word:empty { display: none; }
 .fp-meta { grid-area: meta; color: var(--ws-ink-muted); white-space: nowrap; text-align: right; }
-.fp-count { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 3px 0 0 20px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
+.fp-count { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin: 3px 0 0 var(--fp-text); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
 .fp-tally-mark { display: inline-flex; }
 .fp-tally-svg { width: 11px; height: 11px; overflow: visible; }
 .fp-tally-more { margin-left: 3px; opacity: .7; }
 .fp-count:empty { display: none; }
-.fp-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 1px 0 0 20px; overflow: hidden; color: var(--ws-ink-soft); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
+.fp-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 1px 0 0 var(--fp-text); overflow: hidden; color: var(--ws-ink-soft); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .fp-note[hidden], .fp-files[hidden] { display: none; }
 /* A thread row's outcome stays folded until the row is highlighted, at once,
    or hovered a moment. Its row of the grid opens to the outcome's own height
@@ -44,51 +45,56 @@
 .fp-chip:hover, .fp-chip:focus-visible { border-color: var(--ws-hairline); color: var(--ws-ink); outline: none; }
 .fp-chip[aria-pressed='true'], .fp-chip[aria-expanded='true'] { border-color: var(--ws-ink-soft); background: var(--ws-hover); color: var(--ws-ink); }
 .fp-chip[data-unread] { color: var(--ws-fresh); }
-/* A row's sends, one line each: the age once at the left, then what the send carried. */
-.fp-files { display: grid; gap: 1px; margin: 4px 0 4px 20px; cursor: default; }
-.fp-send { display: grid; grid-template-columns: 4ch minmax(0, 1fr); column-gap: 10px; align-items: start; }
-.fp-send-age { padding-top: 3px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); white-space: nowrap; text-align: right; }
-.fp-send-files { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 4px; min-width: 0; }
-.fp-file { position: relative; display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; padding: 1px 6px; border: 1px solid transparent; border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink); font: var(--type-label)/var(--leading-ui) var(--font-serif); text-align: left; cursor: pointer; }
-.fp-file:hover, .fp-file:focus-visible { background: var(--ws-hover); outline: none; }
-.fp-file-image:hover, .fp-file-image:focus-visible { border-color: var(--ws-ink-soft); }
+/* A row's sends, one line each, on the row's text column: the age in a fixed column, then what the send carried, every item on one centre line and one gap apart. */
+.fp-files { --fp-age: 4ch; --fp-item-gap: 14px; display: grid; gap: 2px; margin: 4px 0 4px var(--fp-text); cursor: default; }
+/* The age hangs in the line's padding, so a carried item that wraps keeps to the items' column. */
+.fp-send { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--fp-item-gap); min-width: 0; padding-left: calc(var(--fp-age) + var(--fp-item-gap)); font: var(--type-meta)/var(--leading-ui) var(--font-mono); }
+.fp-send-age { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); white-space: nowrap; }
+.fp-send > .fp-send-age { flex: none; width: var(--fp-age); margin-left: calc(-1 * (var(--fp-age) + var(--fp-item-gap))); }
+/* An item's box is its content; its hover plate and a figure's frame draw just outside it. */
+.fp-file { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; color: var(--ws-ink); font: var(--type-label)/var(--leading-ui) var(--font-serif); text-align: left; cursor: pointer; }
+.fp-file::before { content: ''; position: absolute; inset: -1px -6px; z-index: -1; border: 1px solid transparent; border-radius: var(--ws-control-radius); }
+.fp-file:is(:hover, :focus-visible) { outline: none; }
+.fp-file:is(:hover, :focus-visible)::before { background: var(--ws-hover); }
 .fp-file-glyph { flex: none; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
 .fp-file-name { min-width: 0; overflow-wrap: anywhere; }
 .fp-file[data-unread] .fp-file-name::before, .fp-file-image[data-unread]::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 1px; background: var(--ws-fresh); transform: rotate(45deg); }
-.fp-file-image { padding: 2px; border-color: var(--ws-hairline-soft); }
-.fp-file-image[data-unread]::after { position: absolute; top: -2px; right: -2px; margin: 0; }
+.fp-file-image::before { inset: -3px; border-color: var(--ws-hairline-soft); }
+.fp-file-image:is(:hover, :focus-visible)::before { border-color: var(--ws-ink-soft); }
+.fp-file-image[data-unread]::after { position: absolute; top: -5px; right: -5px; margin: 0; }
 .fp-thumb { width: 60px; height: 44px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--ws-hairline-soft); }
 .fp-thumb .ws-thumbnail-face { padding: 4px; }
-.fp-older { justify-self: start; margin: 2px 0 0 calc(4ch + 10px); padding: 1px 6px; border: 0; border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-muted); font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); cursor: pointer; }
+.fp-older { justify-self: start; margin: 2px 0 0 -6px; padding: 1px 6px; border: 0; border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-muted); font: italic var(--type-meta)/var(--leading-ui) var(--font-serif); cursor: pointer; }
 .fp-older:hover, .fp-older:focus-visible { background: var(--ws-hover); color: var(--ws-ink); outline: none; }
-/* An open sent file's bar, in the list's place: the way back, its name and age, and the files either side. */
-.fp-open { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+/* An open sent file's bar, in the list's place and on one centre line: the way back, its name and age, and the files either side. */
+.fp-open { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .fp-open .fp-file-name { color: var(--ws-ink); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
-.fp-open-name { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; flex: 0 1 auto; }
+.fp-open-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
 .fp-open-count { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); white-space: nowrap; }
-.fp-back, .fp-step { flex: none; padding: 1px 6px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-ui) var(--font-mono); cursor: pointer; }
+/* The bar's controls stand as tall as the row's chips. */
+.fp-back, .fp-step { flex: none; display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono); cursor: pointer; }
 .fp-step { border-color: transparent; }
-.fp-open > .fp-send-age { margin-right: auto; padding-top: 0; }
+.fp-open > .fp-send-age { margin-right: auto; }
 .fp-back:hover, .fp-back:focus-visible, .fp-step:not(:disabled):hover, .fp-step:focus-visible { border-color: var(--ws-ink-soft); background: var(--ws-hover); color: var(--ws-ink); outline: none; }
 .fp-step:disabled { opacity: .35; cursor: default; }
-/* A document unfolded under its row: the page's full width, at its own full height, in the page's one scroll. */
-.fp-doc { margin: 6px calc(-1 * var(--fp-gutter)) 8px calc(-1 * (var(--fp-gutter) + var(--fp-indent, 0px))); border-block: 1px solid var(--ws-hairline-soft); background: var(--ws-paper); cursor: auto; }
+/* A document unfolded under its row, framed on the row's text column, at its own full height, in the page's one scroll. */
+.fp-doc { margin: 6px 0 8px var(--fp-text); border: 1px solid var(--ws-hairline-soft); background: var(--ws-paper); cursor: auto; }
 .fp-doc[hidden] { display: none; }
 .fp-doc .kbn-fileview-frame-wrap { height: 160px; }
 /* A PDF unfolds at its stage's own height, not a frame's. */
 .fp-doc .kbn-fileview-frame-wrap:has(> .kbn-fileview-pdf-stage) { height: auto; }
 .fp-doc .kbn-fileview-text-wrap, .fp-doc .ws-prose-scroll { overflow: visible; }
-.fp-doc .kbn-fileview-image-wrap { padding: 12px var(--fp-gutter); }
+.fp-doc .kbn-fileview-image-wrap { padding: 12px; }
 .fp-doc .kbn-fileview-image { max-height: none; }
 .fp-doc .kbn-fileview-pdf-stage { height: 85vh; }
 .fp-head { padding-top: 12px; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--ws-hairline-soft); }
 
 .fp-head .fp-name { font: var(--type-title)/var(--leading-tight) var(--font-serif); }
-.fp-head .fp-note { -webkit-line-clamp: 5; margin-left: 0; color: var(--ws-ink); font-size: var(--type-row); }
+.fp-head .fp-note { -webkit-line-clamp: 5; color: var(--ws-ink); font-size: var(--type-row); }
 /* An unfolded row, or the head once selected, reads its whole outcome. */
 .fp-row:not(.fp-head)[data-open] > .fp-line > .fp-note, .fp-head[data-selected] > .fp-line > .fp-note { display: block; -webkit-line-clamp: unset; }
 .fp-section { margin-bottom: 2px; padding: 12px var(--fp-gutter) 3px calc(var(--fp-gutter) + var(--fp-level, 0) * 16px); border-bottom: 1px solid var(--ws-hairline-soft); color: var(--fm-text); font: var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-.fp-aside { padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + 20px + var(--fp-level, 0) * 16px); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); cursor: pointer; outline: none; }
+.fp-aside { padding: 4px var(--fp-gutter) 4px calc(var(--fp-gutter) + var(--fp-text) + var(--fp-level, 0) * 16px); color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); cursor: pointer; outline: none; }
 .fp-aside::before { content: '▸'; display: inline-block; width: 1.2em; margin-left: -1.2em; transition: transform .15s; }
 .fp-aside[aria-expanded='true']::before { transform: rotate(90deg); }
 .fp-aside[data-selected] { background: var(--ws-hover); }

@@ -2140,3 +2140,27 @@ describe('a family has one page', () => {
     }), { numRuns: 20 })
   }, 120_000)
 })
+
+it('a file embedded on a constitution\'s page that cannot be drawn says why in its place, and retries there', async () => {
+  const embed = (workspace as unknown as { embed(card: KanbanCard, doc: string): { el: HTMLElement; dispose(): void } }).embed.bind(workspace)
+  const embedded = embed(cards[0], docKey('host-a', '/notes/alpha/gone.md', 'host-a'))
+  const options = () => vi.mocked(buildFileViewer).mock.calls.filter(call => call[1] === '/notes/alpha/gone.md').at(-1)![5]!
+  const viewer = embedded.el.firstElementChild as HTMLElement
+  options().onState!({ status: 'error', error: new Error('file request failed: 404'), hasContent: false })
+  await settle()
+  const notice = embedded.el.querySelector<HTMLElement>('.ws-document-state')!
+  expect(notice.textContent).toContain('Not found on host-a')
+  expect(notice.parentElement).toBe(embedded.el)
+  expect(viewer.hidden).toBe(true)
+  notice.querySelector('button')!.click()
+  expect(vi.mocked(buildFileViewer).mock.calls.filter(call => call[1] === '/notes/alpha/gone.md')).toHaveLength(2)
+  expect(embedded.el.querySelector('.ws-document-state')).toBeNull()
+  options().onState!({ status: 'error', error: new Error('file request failed: 503'), hasContent: true })
+  await settle()
+  expect(embedded.el.querySelector('.ws-document-status')?.textContent).toContain('showing last loaded copy')
+  expect((embedded.el.firstElementChild as HTMLElement).hidden).toBe(false)
+  options().onState!({ status: 'ready' })
+  await settle()
+  expect(embedded.el.querySelector('.ws-document-status')).toBeNull()
+  embedded.dispose()
+})

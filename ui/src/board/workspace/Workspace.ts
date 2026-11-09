@@ -12,13 +12,14 @@ import { cardFromCompositeEntry, isQuestion } from '../KanbanReadModel.js'
 import { ownColumn } from '../deskColumn.js'
 import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
 import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
-import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
+import { basename, fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { deskCardKey, type DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { COMPANION_NAMES, channelLead, documentActivity, familyKey, fiberKey, isDrawn, leadReceipt, buildChannel, normalizeAbsolutePath, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { conversationDevice } from '../conversationOpening.js'
 import { selectWorker } from '../sessionHistory.js'
 import { buildFiberProse } from './FiberProse.js'
+import { documentFailure } from './DocumentHost.js'
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { forwardDocumentKey, frameBridge } from './DocumentBridge.js'
@@ -669,12 +670,28 @@ export class Workspace {
       if (!state.loaded) void this.load(state).then(draw)
       return { el: box, dispose: () => {} }
     }
-    const viewer = buildFileViewer(this.opts.shuttleBase, file.path, file.owner, undefined, undefined, {
-      active: true, fit: true, onNavigate: href => this.openRelative(file, href),
-      onDocumentKey: key => { this.mapPage(this.current)?.choose(card); forwardDocumentKey(box, key, box.querySelector('iframe')) },
-    })
-    box.append(viewer)
-    return { el: box, dispose: () => disposeFileViewer(viewer) }
+    // A file that cannot be drawn says why in its place; a stale one keeps its last copy under a note.
+    let viewer: HTMLElement, notice: HTMLElement | undefined, generation = 0
+    const mount = (): void => {
+      const drawn = ++generation
+      notice = undefined
+      viewer = buildFileViewer(this.opts.shuttleBase, file.path, file.owner, undefined, undefined, {
+        active: true, fit: true, onNavigate: href => this.openRelative(file, href),
+        onDocumentKey: key => { this.mapPage(this.current)?.choose(card); forwardDocumentKey(box, key, box.querySelector('iframe')) },
+        onState: state => queueMicrotask(() => {
+          if (drawn !== generation) return
+          notice?.remove(); notice = undefined
+          const failed = state.status === 'error'
+          viewer.hidden = failed && !state.hasContent
+          if (!failed) return
+          notice = documentFailure(this.opts.shuttleBase, file.path, file.owner, basename(file.path), state.error, state.hasContent, () => { disposeFileViewer(viewer); mount() })
+          box.append(notice)
+        }),
+      })
+      box.replaceChildren(viewer)
+    }
+    mount()
+    return { el: box, dispose: () => { generation++; disposeFileViewer(viewer) } }
   }
   private prose(key: DocKey): HTMLElement {
     const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)

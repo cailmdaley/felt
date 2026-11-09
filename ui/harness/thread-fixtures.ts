@@ -175,19 +175,20 @@ function addHubSends(example: WorkspaceExample, now: number): void {
   const store = '/fixture-store/workspace/hub', project = '/fixture-project'
   const figure = (hue: number, label: string): Blob => new Blob([`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220"><rect width="320" height="220" fill="hsl(${hue} 30% 94%)"/><path d="M20 190 C 90 40, 160 160, 300 30" fill="none" stroke="hsl(${hue} 55% 38%)" stroke-width="5"/><text x="20" y="34" font-family="Georgia" font-size="22" fill="#333">${label}</text></svg>`], { type: 'image/svg+xml' })
   const page = (title: string): Blob => new Blob([`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body style="font:16px Georgia;margin:32px"><h1>${title}</h1><p>A report sent to the hub.</p></body></html>`], { type: 'text/html' })
-  const sends: Array<[hours: number, files: Array<[path: string, body: Blob]>]> = [
+  // A file sent as a blob the board can't draw, and one sent and since deleted.
+  const sends: Array<[hours: number, files: Array<[path: string, body: Blob | null]>]> = [
     [.4, [[`${store}/psf-coupling/report.html`, page('PSF coupling')], [`${project}/scripts/psf_fit.py`, new Blob(['print(1)\n'])],
       [`${project}/plots/psf-residuals.png`, blobFor(imageData, 'image/png')], [`${project}/plots/rho-stats.svg`, figure(210, 'rho stats')], [`${project}/plots/leakage.svg`, figure(20, 'leakage')]]],
-    [2.5, [[`${store}/cosmology/report.html`, page('Blinded cosmology')]]],
+    [2.5, [[`${store}/cosmology/report.html`, page('Blinded cosmology')], [`${project}/sc/Rex.shortcut`, new Blob([new Uint8Array(22_707)], { type: 'application/octet-stream' })]]],
     [6, [[`${store}/learn/report.html`, page('Lessons')], [`${project}/notes/covariance.pdf`, new Blob(['%PDF-1.4'], { type: 'application/pdf' })]]],
     [11, [[`${project}/plots/tile-01.svg`, figure(140, 'tile 1')], [`${project}/plots/tile-02.svg`, figure(160, 'tile 2')], [`${project}/plots/tile-03.svg`, figure(180, 'tile 3')]]],
     [22, [[`${store}/footprint/report.html`, page('Footprint')]]],
     [31, [[`${store}/response/report.html`, page('Shear response')], [`${store}/response/fit_response.py`, new Blob(['print(2)\n'])]]],
-    [52, [[`${project}/notes/meeting.md`, new Blob(['# Meeting\n'])]]],
+    [52, [[`${project}/notes/meeting.md`, new Blob(['# Meeting\n'])], [`${project}/notes/agenda.md`, null]]],
     [80, [[`${store}/photo-z/report.html`, page('Photo-z calibration')]]],
   ]
   for (const [hours, files] of sends) for (const [fullPath, body] of files) {
-    example.files.push({ owner: WORKSPACE_HOST, path: fullPath, mime: body.type || 'text/plain', body })
+    if (body) example.files.push({ owner: WORKSPACE_HOST, path: fullPath, mime: body.type || 'text/plain', body })
     example.receipts.push({ fullPath, basename: fullPath.split('/').at(-1), timestamp: now - hours * 3_600_000, sessionId: 'session-hub', uid: 'hub', host: WORKSPACE_HOST })
   }
 }

@@ -153,6 +153,11 @@
 .ws-document-state a, .ws-document-state button { align-self: flex-start; padding: var(--ws-small-gap) var(--ws-inset); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); color: var(--ws-ink-soft); background: var(--ws-paper); text-decoration: none; font: var(--type-label)/var(--leading-ui) var(--font-serif); letter-spacing: 0; }
 .ws-document-state a:hover, .ws-document-state button:hover { border-color: var(--ws-ink-faint); color: var(--ws-ink); }
 .ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--type-label)/var(--leading-ui) var(--font-serif); z-index: 2; }
+/* A document embedded in a page flows at its own height, and so do its states: they stand in its place, never over the page. */
+.ws-embedded { position: relative; }
+.ws-embedded > [hidden] { display: none; }
+.ws-embedded .ws-document-state { position: static; gap: 8px; padding: 14px 16px; }
+.ws-embedded .ws-document-state > p:first-child { font-size: var(--type-row); }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-reader { top: 0; --ws-stage-inset: 0px; --ws-stage-top: 0px; --ws-prose-padding: 24px 16px 48px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
