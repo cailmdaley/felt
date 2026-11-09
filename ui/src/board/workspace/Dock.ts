@@ -954,7 +954,7 @@ export class Dock {
     leave.innerHTML = headerIcon('leave')
     if (this.voice && shuttleManaged) {
       this.listen = new ListenControl({
-        card, voice: this.voice.controller, phone: this.phone, shuttleBase: this.shuttleBase,
+        card: () => this.actionCard ?? card, voice: this.voice.controller, phone: this.phone, shuttleBase: this.shuttleBase,
         fiberSlug: (fiber, origin) => this.fiberSlug?.(fiber, origin),
       })
     }

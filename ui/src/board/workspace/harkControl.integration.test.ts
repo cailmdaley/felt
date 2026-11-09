@@ -136,3 +136,11 @@ it('closes a stale menu on target or recorder changes and restores focus on Esca
   expect(q('[role=menu]')).toBeNull()
   expect(document.activeElement).toBe(q('.listen-dropdown'))
 })
+it('pins to the highlighted thread, as the band\'s other verbs act on it', async () => {
+  mount({ enabled: true, state: 'listening', recorder: 'recorder' })
+  dock.setActionCard(card({ id: 'work/a/sub', uid: 'sub', originId: 'owner', name: 'Sub', shuttleKind: 'oneshot' }))
+  dropdown(); item('Pin to this card').click()
+  await vi.waitFor(() => expect(voice.status?.follow).toBe(false))
+  expect(JSON.parse(fetcher.mock.calls.find(([url, init]) => url === '/api/v1/voice' && init?.method === 'POST')![1].body).target)
+    .toEqual({ fiber_id: 'sub', origin: 'owner', name: 'Sub' })
+})

@@ -7,7 +7,8 @@ import { anchorPopover, type Release } from './anchoredPopover.js'
 import type { FiberSlug } from './voiceStrip.js'
 
 export interface ListenOptions {
-  card: KanbanCard
+  /** The card a pin lands on: the band's highlighted thread, else its own. */
+  card: () => KanbanCard
   voice: Voice
   phone?: PhoneListening
   shuttleBase: string
@@ -176,7 +177,7 @@ export class ListenControl {
   }
   private showMenu(): void {
     if (this.menu) { this.closeMenu(); return }
-    const { card, voice } = this.opts
+    const { voice } = this.opts, card = this.opts.card()
     const state = voice.status
     const menu = this.menu = document.createElement('div')
     menu.className = 'ws-select-picker'
