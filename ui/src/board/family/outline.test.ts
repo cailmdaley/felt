@@ -11,7 +11,7 @@ const at = (back: number): string => new Date(now - back * hour).toISOString()
 const running = (phase: string, age: number): Partial<KanbanCard> => ({ status: 'active', workerState: 'running', runtimePhase: phase as KanbanCard['runtimePhase'], lastActivityAt: now - age * hour, workerStartedAt: now - 100 * hour })
 const thread = (id: string, over: Partial<KanbanCard>, orchestrator = 'hub'): KanbanCard => card({ id, orchestrator, createdAt: at(200), ...over })
 const root = card({ id: 'hub', createdAt: at(300), ...running('working', 0) })
-const model = (cards: KanbanCard[]) => familyModel(new ThreadIndex(cards), cards[0], cards[0], noFeeds, now)
+const model = (cards: KanbanCard[]) => familyModel(new ThreadIndex(cards), cards[0], noFeeds, now)
 const said = (lines: Line[]): string[] => lines.map(line => line.kind === 'section' ? `[${line.section}]` : line.kind === 'aside' ? `${'  '.repeat(line.level)}(${line.threads.length} aside)` : `${'  '.repeat(line.level)}${line.thread.card.id.split('/').at(-1)}`)
 
 const family = [root,

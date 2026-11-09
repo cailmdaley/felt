@@ -171,7 +171,7 @@ describe('band header', () => {
   it('says no state word beside the title, and marks the state for colour, kept current', () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 's', workerState: 'running', tmuxSession: 't', runtimePhase: 'working' }))
-    expect([...band.el.querySelector('.ws-band-identity')!.children].map(child => child.className)).toEqual(['ws-band-title', 'ws-band-meter'])
+    expect([...band.el.querySelector('.ws-band-identity')!.children].map(child => child.className)).toEqual(['ws-header-icon ws-band-back', 'ws-band-title', 'ws-band-meter'])
     expect(band.el.querySelector('.ws-band-head [data-part="lifecycle"]')).toBeNull()
     expect(band.el.dataset.column).toBe('inFlight')
     dock.open(task({ status: 'closed', sessionUuid: 's' }))

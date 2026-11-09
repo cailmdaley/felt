@@ -34,7 +34,7 @@ export function forestOf(index: ThreadIndex, cards: readonly KanbanCard[], feeds
     const root = index.card(card)
     if (card.isCycle || index.parentOf(root) || seen.has(persistentId(root))) continue
     seen.add(persistentId(root))
-    const model = familyModel(index, root, root, feeds, now)
+    const model = familyModel(index, root, feeds, now)
     const seed = (thread: MapThread): ThreadSeed => {
       threads.set(persistentId(thread.card), thread)
       if (isSettled(thread, index)) settled.add(persistentId(thread.card))

@@ -301,13 +301,13 @@ export class Workspace {
   /** A refused Desk launch enters the document channel and exposes its recovery form. */
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
     this.startPrompt = { card, failure }
-    this.open(card)
+    this.enter(card)
   }
 
   /** A Question card leads with its report, even after a previous visit to prose. */
   openQuestion(card: KanbanCard): void {
     this.landOnLead(this.ensure(card))
-    this.open(card)
+    this.enter(card)
   }
   private landOnLead(state: ChannelState): void {
     state.leadLanding = true
@@ -324,17 +324,25 @@ export class Workspace {
   /** A Desk or Chronicle click lands on the fiber's map, at its body, and reaches its worker. */
   openFromDesk(card: KanbanCard): void {
     const map = this.landOnMap(card)
-    if (map) this.open(card, undefined, map)
+    if (map) this.enter(map.root, undefined, map.page)
     else if (card.status === 'active' && isQuestion(card)) this.openQuestion(card)
     else this.open(card)
     void this.reach(card)
   }
-  /** Readies a fiber of a family to land on its constitution's page, at its row, and names the page; undefined for a fiber with none. */
-  private landOnMap(card: KanbanCard): DocKey | undefined {
+  /**
+   * Readies a fiber of a family to land on its root's page, at its row, and
+   * names the root and the page; undefined for a fiber with none. A family has
+   * one page, whichever of its fibers it was entered by.
+   */
+  private landOnMap(card: KanbanCard): { root: KanbanCard; page: DocKey } | undefined {
     if (!this.landsOnPage(card)) return undefined
-    const state = this.ensure(card)
+    const root = this.familyRoot(card), state = this.ensure(root)
     if (!state.familyPage?.flyTo(card)) Object.assign(state.mapPlace, placeAt(card), { open: state.mapPlace.open })
-    return familyKey(state.channel.owner, state.channel.uid)
+    return { root: state.card, page: familyKey(state.channel.owner, state.channel.uid) }
+  }
+  private familyRoot(card: KanbanCard): KanbanCard {
+    const index = this.graph()
+    return index.family(index.card(card)).root
   }
   /** The map, while it is what the reader shows. */
   private mapPage(state: ChannelState | null): FamilyPage | undefined {
@@ -384,19 +392,20 @@ export class Workspace {
     this.globeHost.onFeeds?.()
   }
   private graph(): ThreadIndex { return this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()) }
-  /** A fiber in a family of threads carries the map among its pages, and so does a constitution alone, past its draft. */
+  /** The root of a family of threads carries the family's page, and so does a constitution alone, past its draft. */
   private hasMap(card: KanbanCard): boolean {
     const index = this.graph(), current = index.card(card)
-    return index.children(index.family(current).root).length > 0 || (current.shuttleKind !== undefined && index.state(current) !== 'drafts')
+    if (index.family(current).root !== current) return false
+    return index.children(current).length > 0 || (current.shuttleKind !== undefined && index.state(current) !== 'drafts')
   }
-  /** A fiber of a family lands on its constitution's page, except a draft, which opens on its own to be written. */
+  /** A fiber of a family lands on its root's page, except a draft, which opens on its own to be written. */
   private landsOnPage(card: KanbanCard): boolean {
     const index = this.graph()
-    return this.hasMap(card) && index.state(index.card(card)) !== 'drafts'
+    return this.hasMap(this.familyRoot(card)) && index.state(index.card(card)) !== 'drafts'
   }
   /** A fiber that lands on its constitution's page opens there. */
   private familyLanding(state: ChannelState): DocKey | undefined {
-    return this.landsOnPage(state.card) ? familyKey(state.channel.owner, state.channel.uid) : undefined
+    return this.hasMap(state.card) && this.landsOnPage(state.card) ? familyKey(state.channel.owner, state.channel.uid) : undefined
   }
 
   /** The open thread's orchestrator; false outside a thread. */
@@ -404,7 +413,10 @@ export class Workspace {
     const index = this.opts.threadIndex?.()
     return index?.parentOf(index.card(card))
   }
+  /** `b`: on a family's page, the highlight climbs to its orchestrator's row; on a thread's own page, its orchestrator opens. */
   openOrchestrator(): boolean {
+    const page = this.mapPage(this.current)
+    if (page) return page.selectParent()
     const parent = this.current && this.isActive ? this.orchestrator(this.current.card) : undefined
     if (!parent) return false
     this.open(parent, this.origin, undefined, this.overview.hasMetadata(parent))
@@ -421,7 +433,17 @@ export class Workspace {
     return true
   }
 
+  /**
+   * Opens a fiber at one of its pages. A thread with none named lands on its
+   * row of its family's one page; a family's root comes back to its page as it
+   * was left.
+   */
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, scan = false): void {
+    const map = doc === undefined && deskCardKey(this.familyRoot(card)) !== deskCardKey(card) ? this.landOnMap(card) : undefined
+    if (map) this.enter(map.root, origin, map.page, true, scan)
+    else this.enter(card, origin, doc, authoritative, scan)
+  }
+  private enter(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, scan = false): void {
     this.origin = origin
     const id = deskCardKey(card)
     this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
@@ -601,6 +623,7 @@ export class Workspace {
     dock.setNav({
       ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) }) })),
       desk: () => this.escapeHome(),
+      back: { label: this.history.backLabel, go: () => this.reader.back() },
       constitution: () => { const page = proseDocument(state.channel); if (page) this.visit(page.key) },
     })
   }
@@ -916,7 +939,7 @@ export class Workspace {
     const shown = state?.card
     if (this.isActive && shown && shown.originId === owner && (shown.uid === id || shown.id === id)) return
     const map = known && this.landOnMap(known)
-    if (map) this.open(known, this.origin, map)
+    if (map) this.enter(map.root, this.origin, map.page)
     else void this.openFiber(id, owner)
   }
   /** Opens a fiber, or one of its pages: its constitution, its tapestry, or its row on its constitution's page, unfolded to the files it holds. */
@@ -932,7 +955,7 @@ export class Workspace {
     if (this.disposed || epoch !== this.routeEpoch) return
     const doc = page === 'constitution' ? fiberKey(home, card.uid ?? card.id)
       : page === 'tapestry' ? companion && docKey(home, companion.path, home, dir)
-      : page && this.landOnMap(card)
+      : undefined
     this.open(card, this.origin, doc)
   }
 

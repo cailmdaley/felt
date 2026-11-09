@@ -67,8 +67,6 @@ export interface FamilyModel {
   mass: number
   lastMove: number
   counts: Record<Attention, number>
-  /** The open thread, when the map holds it. */
-  current: string | null
 }
 
 /** The card has a conversation to open: a live worker, or a past session. */
@@ -95,7 +93,7 @@ const WORD: Partial<Record<Standing, string>> = { question: 'question', blocked:
 const stillWord = (card: KanbanCard): string => card.held ? 'held' : card.dispatchedAt || card.sessionUuid ? 'stopped' : 'armed'
 
 /** The family under `root`, ready to draw: one model every drawing reads. */
-export function familyModel(index: ThreadIndex, root: KanbanCard, current: KanbanCard, feeds: MapFeeds, now: number): FamilyModel {
+export function familyModel(index: ThreadIndex, root: KanbanCard, feeds: MapFeeds, now: number): FamilyModel {
   const threads = new Map<string, MapThread>(), reach = feeds.reach()
   const walk = (node: TreeNode, parent: string | null): MapThread => {
     const { card, depth } = node
@@ -145,11 +143,9 @@ export function familyModel(index: ThreadIndex, root: KanbanCard, current: Kanba
     const state = index.state(thread.card)
     aside[state === 'drafts' ? 'drafts' : state === 'archived' ? 'archived' : 'resting']++
   }
-  const own = current.uid ?? current.id
   const counts = Object.fromEntries(ATTENTION.map(kind => [kind, attention.filter(thread => thread.standing === kind).length])) as Record<Attention, number>
   return {
     now, root: top, threads, order, attention, aside, counts,
     mass: all.reduce((sum, thread) => sum + mass(thread), 0), lastMove: Math.max(...all.map(thread => thread.lastMove)),
-    current: all.find(thread => (thread.card.uid ?? thread.card.id) === own)?.key ?? null,
   }
 }

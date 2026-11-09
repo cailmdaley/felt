@@ -371,6 +371,8 @@ interface AgentRecord {
 export interface BandNav {
   ancestry?: readonly Ancestor[]
   desk?: () => void
+  /** Back where the reader was opened from, named. */
+  back?: { label: string; go: () => void }
   /** Opens the constitution's own page. */
   constitution?: () => void
 }
@@ -402,6 +404,7 @@ export class Dock {
   private headRoot: HTMLElement | null = null
   /** The band's × returns directly to the Desk, never a lifecycle write. */
   private leave: HTMLButtonElement | null = null
+  private back: HTMLButtonElement | null = null
   private ancestry: HTMLElement | null = null
   private drawerClose: (() => boolean) | null = null
   private card: KanbanCard | null = null
@@ -492,6 +495,12 @@ export class Dock {
     paintAncestry(this.ancestry, nav.ancestry ?? [])
     this.openConstitution = nav.constitution ?? null
     if (this.constitutionButton) this.constitutionButton.hidden = !this.openConstitution
+    if (this.back) {
+      this.back.hidden = !nav.back
+      this.back.onclick = nav.back?.go ?? null
+      const label = nav.back ? `Back to ${nav.back.label}` : ''
+      this.back.title = label; this.back.setAttribute('aria-label', label)
+    }
     if (this.leave) {
       this.leave.hidden = !nav.desk
       this.leave.onclick = nav.desk ?? null
@@ -569,7 +578,7 @@ export class Dock {
     this.saveTail = Promise.resolve()
     this.root?.replaceChildren()
     this.headRoot?.replaceChildren()
-    this.ancestry = this.leave = null
+    this.ancestry = this.leave = this.back = null
     this.drawerClose = null
   }
 
@@ -945,8 +954,14 @@ export class Dock {
     meter.append(contextFact, cacheFact)
     const usageRefresh = window.setInterval(() => { if (!document.hidden) void this.readUsage(target()) }, USAGE_REFRESH_MS)
     this.disposers.push(() => window.clearInterval(usageRefresh))
+    const back = this.back = document.createElement('button')
+    back.type = 'button'
+    back.className = 'ws-header-icon ws-band-back'
+    back.dataset.part = 'band-back'
+    back.hidden = true
+    back.innerHTML = headerIcon('back')
     const identity = document.createElement('div'); identity.className = 'ws-band-identity'
-    identity.append(title, meter)
+    identity.append(back, title, meter)
     const leave = this.leave = document.createElement('button')
     leave.type = 'button'
     leave.className = 'ws-header-icon ws-band-leave'

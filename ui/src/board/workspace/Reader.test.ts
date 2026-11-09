@@ -149,7 +149,7 @@ describe('Reader', () => {
     const reader = makeReader(alpha, themes)
     expect(reader.el.querySelector('[data-part="plain-toggle"]')).toBeNull()
 
-    reader.el.querySelector<HTMLButtonElement>('.ws-menu-button')!.click()
+    reader.el.querySelector<HTMLButtonElement>('.ws-phone-document-menu')!.click()
     const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-menu [data-part="plain-toggle"]')!
     expect(toggle.textContent).toBe("Plain (drop this constitution's theme)")
     expect(toggle.hidden).toBe(true)
@@ -281,11 +281,11 @@ describe('Reader', () => {
 
   it('leaves activation keys to focused controls while keeping native Reader modality', () => {
     const reader = makeReader()
-    const expand = reader.el.querySelector<HTMLButtonElement>('.ws-expand-button')!
+    const back = reader.el.querySelector<HTMLButtonElement>('.ws-document-back')!
     for (const key of ['Enter', ' ']) {
-      expand.focus()
+      back.focus()
       const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
-      expand.dispatchEvent(event)
+      back.dispatchEvent(event)
       expect(event.defaultPrevented).toBe(false)
       expect(reader.el.classList.contains('ws-expand-mode')).toBe(false)
       expect(reader.el.classList.contains('ws-keyboard')).toBe(true)
@@ -333,19 +333,6 @@ describe('Reader', () => {
       openSheet(reader, () => { toggle.click(); expect(toggle.getAttribute('aria-expanded')).toBe('true') })
     })
 
-    it('seats the desktop toggle in the selected page\'s header line, before Expand', () => {
-      const reader = makeReader()
-      const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-files-toggle')!
-      expect(toggle.hidden).toBe(true)
-      reader.show(sent, sent.documents[0].key, 'Board', alpha)
-      expect(toggle.hidden).toBe(false)
-      expect(toggle.parentElement).toBe(reader.host.get(sent.documents[0].key)!.label)
-      expect(toggle.nextElementSibling?.classList.contains('ws-expand-button')).toBe(true)
-      reader.select(sent.documents[1].key)
-      expect(toggle.parentElement).toBe(reader.host.get(sent.documents[1].key)!.label)
-      openSheet(reader, () => toggle.click())
-    })
-
     it('marks unread files on the toggle at every width', () => {
       for (const phone of [false, true]) {
         viewport.phone = phone
@@ -357,13 +344,6 @@ describe('Reader', () => {
         expect(toggle.hasAttribute('data-attention')).toBe(true)
         disposeReader(reader)
       }
-    })
-
-    it('opens the sheet from the document menu', () => {
-      const reader = makeReader()
-      reader.show(sent, sent.documents[0].key, 'Board', alpha)
-      reader.el.querySelector<HTMLButtonElement>('.ws-menu-button')!.click()
-      openSheet(reader, () => reader.showSentFiles())
     })
   })
 

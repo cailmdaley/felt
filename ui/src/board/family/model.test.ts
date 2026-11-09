@@ -10,7 +10,7 @@ const running = (phase: string, age: number): Partial<KanbanCard> => ({ status: 
 const thread = (id: string, over: Partial<KanbanCard>): KanbanCard => card({ id, orchestrator: 'hub', createdAt: new Date(now - 200 * hour).toISOString(), ...over })
 const model = (cards: KanbanCard[], feeds = noFeeds) => {
   const index = new ThreadIndex(cards)
-  return familyModel(index, cards[0], cards[0], feeds, now)
+  return familyModel(index, cards[0], feeds, now)
 }
 const root = card({ id: 'hub', createdAt: new Date(now - 300 * hour).toISOString() })
 
@@ -67,14 +67,10 @@ it('takes the last move from every source it knows, never past now', () => {
 it('uses the index copy of the followed root for family attention', () => {
   const raw = card({ id: 'hub', ...running('waiting', 1), ask: { text: 'Which?', at: new Date(now - hour).toISOString() } })
   const index = new ThreadIndex([{ ...raw, followed: true }])
-  const result = familyModel(index, raw, raw, noFeeds, now)
+  const result = familyModel(index, raw, noFeeds, now)
   expect(result.counts.question).toBe(0)
   expect(result.counts.turn).toBe(0)
   expect(result.root.standing).toBe('working')
-})
-it('names the open thread when the family holds it', () => {
-  const child = thread('hub/t', running('working', 1)), index = new ThreadIndex([root, child])
-  expect(familyModel(index, root, child, noFeeds, now).current).toBe(familyModel(index, root, child, noFeeds, now).attention[0].key)
 })
 it('reads an in-flight thread with no worker as what it is, ahead of finished work', () => {
   const m = model([root,

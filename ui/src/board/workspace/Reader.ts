@@ -125,7 +125,7 @@ export class Reader {
   private readonly settingsMenu: SettingsMenu
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly observer: ResizeObserver | null
-  private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
+  private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement }>()
   private channel: Channel | null = null
   private fresh: ReadonlySet<DocKey> = new Set()
   private currentCard: KanbanCard | null = null
@@ -338,12 +338,6 @@ export class Reader {
     this.closeMenu()
     this.settingsMenu.show(content, opener, opener.closest<HTMLElement>('.ws-dock') ?? this.el)
   }
-  /** The sheet of sent files, returning to the menu that opened it. */
-  showSentFiles(): void {
-    this.closeMenu()
-    const opener = this.phone.matches ? this.navbar.querySelector<HTMLElement>('.ws-phone-document-menu') : this.host.get(this.selected ?? '')?.label.querySelector<HTMLElement>('.ws-menu-button')
-    this.openFilesSheet(opener ?? undefined)
-  }
   private openFilesSheet(opener: HTMLElement = this.filesToggle): void {
     if (!this.runSettled) return
     this.el.append(this.pageSheet.el)
@@ -433,13 +427,17 @@ export class Reader {
     const glyph = element('span', 'ws-kind-glyph')
     const title = element('span', 'ws-label-title')
     const provenance = element('span', 'ws-provenance')
-    const expand = button('ws-icon-button ws-expand-button', '⤢', () => this.toggleExpand(), 'Expand document')
-    const menu = button('ws-icon-button ws-menu-button', '⋯', () => this.openMenu(frame.doc, menu), 'Document menu')
     const back = button('ws-document-back', '', () => this.back(), `Back to ${this.backDestination}`)
     back.append(element('span', 'ws-back-label', this.backDestination))
     back.title = `Back to ${this.backDestination}`
-    frame.label.append(back, glyph, title, provenance, expand, menu)
-    this.labels.set(frame, { glyph, title, provenance, expand })
+    frame.label.append(back, glyph, title, provenance)
+    // A drawn page has nothing to say about itself beyond what the band says.
+    if (isDrawn(frame.doc)) frame.el.dataset.drawn = ''
+    else {
+      const menu = button('ws-icon-button ws-menu-button', '⋯', () => this.openMenu(frame.doc, menu), 'Document menu')
+      frame.label.append(menu)
+    }
+    this.labels.set(frame, { glyph, title, provenance })
     frame.label.addEventListener('dblclick', e => {
       if (!(e.target as Element).closest('button,a') && frame.doc.key === this.selected) this.toggleExpand()
     })
@@ -460,8 +458,6 @@ export class Reader {
       parts.provenance.textContent = metadata.summary
       parts.provenance.title = metadata.summary
     }
-    parts.expand.textContent = this.expanded ? '⤡' : '⤢'
-    parts.expand.setAttribute('aria-label', this.expanded ? 'Restore size' : 'Expand document')
   }
 
   private measure(name: string, fallback: number): number {
@@ -538,7 +534,6 @@ export class Reader {
     if (same) return
     const menu = element('div', 'ws-menu')
     menu.setAttribute('aria-label', 'Document and constitution actions')
-    menu.append(button('ws-menu-item', 'Sent files', () => this.showSentFiles()))
     const url = isDrawn(doc) ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
     for (const [label, download] of (doc.kind === 'family' ? [['Open in new tab', false]] : [['Open in new tab', false], ['Download', true]]) as Array<[string, boolean]>) {
       const a = element('a', 'ws-menu-item', label)
@@ -609,11 +604,9 @@ export class Reader {
   refreshChannels(): void {
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
-  /** The toggle stands in the phone's top bar, or in the selected page's header line before Expand. */
+  /** The phone's top bar holds the toggle, marked while a sent file is unread. */
   private paintFilesToggle(): void {
     const documents = this.channel ? sentDocuments(this.channel) : []
-    const line = this.phone.matches ? this.trail : this.host.get(this.selected ?? '')?.label
-    if (line && this.filesToggle.parentElement !== line) line.insertBefore(this.filesToggle, line.querySelector('.ws-expand-button, .ws-phone-document-menu'))
     this.filesToggle.hidden = !documents.length
     this.filesToggle.setAttribute('aria-expanded', String(this.pageSheet.isOpen))
     this.filesToggle.toggleAttribute('data-attention', this.fresh.size > 0)

@@ -122,11 +122,11 @@ export class FamilyPage {
     this.scope = { index, card }
     if (!this.awake) return
     this.feeds.refresh()
-    const current = index.card(card), root = index.family(current).root, cards = [root, ...index.subtree(root)]
+    const root = index.family(index.card(card)).root, cards = [root, ...index.subtree(root)]
     const signature = JSON.stringify([threadKey(card), Math.floor(now / 60_000), cards, cards.map(thread => this.feeds.files(thread))])
     if (signature === this.signature) return
     this.signature = signature
-    this.model = familyModel(index, root, current, this.feeds, now)
+    this.model = familyModel(index, root, this.feeds, now)
     this.under = underAll(this.model)
     const landing = [...this.model.threads.values()].find(thread => fiberOf(thread.card) === this.place.landing)
     if (landing && this.landed !== `${landing.key}@${fiberOf(root)}`) this.land(landing)
@@ -167,8 +167,17 @@ export class FamilyPage {
   }
   /** The thread the page rests on, which voice follows: the thread last entered, else the constitution heading it. */
   get settled(): KanbanCard | undefined { return (this.model?.threads.get(this.place.entered ?? '') ?? this.model?.root)?.card }
-  /** The highlighted thread, excluding the head and the set-aside fold. */
-  get selection(): KanbanCard | undefined { return this.place.selected ? this.model?.threads.get(this.place.selected)?.card : undefined }
+  /** The highlighted thread, the head included; undefined on the set-aside fold. */
+  get selection(): KanbanCard | undefined { return this.selectedThread?.card }
+  /** `b`: the highlight climbs to the selected thread's orchestrator; false at the head. */
+  selectParent(): boolean {
+    const parent = this.selectedThread?.parent
+    if (!parent) return false
+    this.select(parent)
+    const row = this.row(parent)
+    if (row) { row.focus({ preventScroll: true }); this.reveal(row, false) }
+    return true
+  }
 
   private get selectedKey(): string | null { return this.place.selected ?? this.model?.root.key ?? null }
   private get selectedThread(): MapThread | undefined { return this.model?.threads.get(this.selectedKey ?? '') }
@@ -304,7 +313,6 @@ export class FamilyPage {
     row.dataset.standing = thread.tone
     row.toggleAttribute('data-open', open)
     row.toggleAttribute('data-worker', thread.key === this.place.worker)
-    row.toggleAttribute('data-current', thread.key === model.current)
     const mark = row.querySelector('.fp-mark')!
     mark.querySelector('path')!.setAttribute('d', markPath(thread.tone, 4.5))
     let tip = mark.querySelector<SVGTitleElement>('title')

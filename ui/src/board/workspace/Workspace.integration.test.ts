@@ -14,6 +14,7 @@ import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
 import { buildFileViewer } from '../FileViewerPanel.js'
 import { FiberSends } from '../fiberSends.js'
+import fc from 'fast-check'
 
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
@@ -743,7 +744,7 @@ describe('workspace reader integration', () => {
     const index = new ThreadIndex(raw)
     const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c) }))
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[4], feed[1], feed[5]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(feed[2], 'Desk'); await settle()
+    workspace.open(feed[2], 'Desk', 'fiber:host-a:hub-sub'); await settle()
     expect(walked()).toEqual(['draft', 'settled-ask', 'hub', 'hub-sub', 'review'])
     await step('k')
     expect(landed()).toBe('In flight · hub')
@@ -774,17 +775,24 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await settle()
     expect(title()).toBe('hub')
+    // A thread with no page named lands on its row of the family's one page, under the family's name.
     workspace.open(feed[1], 'Desk'); await settle()
+    expect(title()).toBe('hub / hub/sub')
+    // b climbs the highlight to the orchestrator's row, the page staying put.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
+    await settle()
+    expect(title()).toBe('hub')
+    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-sub'); await settle()
     expect(title()).toBe('hub/sub')
     const links = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-stage-band .ws-settings-ancestry .ws-ancestry-link')]
     expect(links().map(b => b.textContent)).toEqual(['hub'])
     links()[0].click(); await settle()
     expect(title()).toBe('hub')
-    workspace.open(feed[2], 'Desk'); await settle()
+    workspace.open(feed[2], 'Desk', 'fiber:host-a:hub-sub-leaf'); await settle()
     expect(links().map(b => b.textContent)).toEqual(['hub', 'hub/sub'])
     links()[0].click(); await settle()
     expect(title()).toBe('hub')
-    workspace.open(feed[1], 'Desk'); await settle()
+    workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-sub'); await settle()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await settle()
     expect(title()).toBe('hub')
@@ -802,15 +810,9 @@ describe('workspace reader integration', () => {
       expect(rows.map(row => row.dataset.key)).toEqual(['host-a:/notes/alpha/table.html', 'host-a:/notes/alpha/report.html'])
     } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal') }
   })
-  it('hides the toggle for a constitution with no sent files, and answers the menu with the empty sheet', async () => {
+  it('hides the toggle for a constitution with no sent files', async () => {
     workspace.open(cards[1], 'Desk'); await settle()
     expect(document.querySelector<HTMLElement>('.ws-files-toggle')!.hidden).toBe(true)
-    const showModal = vi.fn()
-    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
-    try {
-      workspace.reader.showSentFiles()
-      expect(showModal).toHaveBeenCalledOnce()
-    } finally { Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal') }
   })
   it('routes lifecycle keys, console verbs and the worker line to the highlighted thread', async () => {
     workspace.dispose()
@@ -845,7 +847,7 @@ describe('workspace reader integration', () => {
     press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }), 'composted')
     expect(document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-discard')!.title).toBe('Discard (x)')
   })
-  it('uses the page card at the head, and sends to a highlighted live worker', async () => {
+  it('heads the band with the family whichever thread it was entered by, acts on the head, and sends to a highlighted live worker', async () => {
     workspace.dispose()
     const hub = card({ id: 'hub', uid: 'hub', originId: 'host-a', name: 'Hub', status: 'active', shuttleKind: 'oneshot' })
     const leaf = card({ id: 'hub/leaf', uid: 'leaf', originId: 'host-a', name: 'Leaf', orchestrator: 'hub', status: 'active', shuttleKind: 'oneshot', sessionUuid: 'session', workerState: 'running' })
@@ -856,10 +858,12 @@ describe('workspace reader integration', () => {
     const queue = vi.spyOn(workspace, 'queueVerdict').mockReturnValue(true)
     const conversation = vi.spyOn(dock, 'openConversation').mockReturnValue(true)
     workspace.open(leaf, 'Desk'); await settle()
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / Leaf')
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click()
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub')
     const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
-    press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'leaf' }), 'composted')
-    press('c'); expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'leaf' }))
+    press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }), 'composted')
+    press('c'); expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }))
     const other = [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(row => row.querySelector<HTMLElement>('.fp-name')?.title === 'Other')!
     other.click()
     const input = document.querySelector<HTMLInputElement>('.ws-worker-message')!
@@ -869,7 +873,7 @@ describe('workspace reader integration', () => {
     send.click(); await settle()
     const dispatch = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/api/v1/dispatch'))!
     expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/other', user_message: 'Hello', resume_mode: 'previous' })
-    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Leaf / Other')
+    expect(document.querySelector('.ws-band-title')?.textContent).toBe('Hub / Other')
   })
   it('row verbs select their thread without unfolding it and share the undo queue', async () => {
     workspace.dispose()
@@ -908,14 +912,13 @@ describe('workspace reader integration', () => {
     workspace.open(feed[0], 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:hub')
     expect(pages()[0]).toBe('family:host-a:hub')
-    expect(document.querySelector('.ws-selected .fp-head[data-current] .fp-name')?.textContent).toBe('hub')
+    expect(document.querySelector('.ws-selected .fp-head .fp-name')?.textContent).toBe('hub')
 
     workspace.open(feed[1], 'Desk'); await settle()
-    expect(selected()).toBe('family:host-a:hub-leaf')
-    expect(pages().indexOf('family:host-a:hub-leaf')).toBeLessThan(pages().indexOf('fiber:host-a:hub-leaf'))
+    expect(selected()).toBe('family:host-a:hub')
     expect(chosen()).toBe('hub/leaf')
     expect(row('hub/leaf').getAttribute('aria-expanded')).toBe('true')
-    expect(row('hub/leaf').hasAttribute('data-current')).toBe(true)
+    expect(workspace.familyDocument(feed[1])).toBeUndefined()
 
     workspace.open(feed[2], 'Desk'); await settle()
     expect(selected()).toBe('family:host-a:lone')
@@ -989,7 +992,7 @@ describe('workspace reader integration', () => {
     workspace.open(feed[1], 'Desk', 'fiber:host-a:hub-mid'); await settle()
     expect(selected()).toBe('fiber:host-a:hub-mid')
     workspace.openFromDesk(feed[1]); await settle()
-    expect(selected()).toBe('family:host-a:hub-mid')
+    expect(selected()).toBe('family:host-a:hub')
     expect(chosen()).toBe('hub/mid')
     workspace.openFromDesk(feed[0]); await settle()
     expect(selected()).toBe('family:host-a:hub')
@@ -1014,7 +1017,7 @@ describe('workspace reader integration', () => {
     expect(chosen()).toBe('hub/mid')
     expect(row('hub/mid').hasAttribute('data-worker')).toBe(true)
     workspace.follow('other-kid', 'host-a'); await settle()
-    expect(selected()).toBe('family:host-a:other-kid')
+    expect(selected()).toBe('family:host-a:other')
     expect(chosen()).toBe('other/kid')
     workspace.open(feed[3], 'Desk', 'fiber:host-a:other-kid'); await settle()
     workspace.follow('other-kid', 'host-a'); await settle()
@@ -1041,7 +1044,7 @@ describe('workspace reader integration', () => {
     await workspace.openFiber('hub-mid', 'host-a', 'tapestry'); await settle()
     expect(selected()).toBe(docKey('host-a', '/notes/hub/mid/tapestry.html', 'host-a', '/notes/hub/mid'))
     await workspace.openFiber('hub-mid', 'host-a', 'files'); await settle()
-    expect(selected()).toBe('family:host-a:hub-mid')
+    expect(selected()).toBe('family:host-a:hub')
     expect(document.querySelector('.ws-selected .fp-row[aria-selected="true"]')?.hasAttribute('data-open')).toBe(true)
   })
 
@@ -1129,7 +1132,7 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(false)
     workspace.follow('hub-mid', 'host-a'); await settle()
     expect(workspace.isActive).toBe(true)
-    expect(selected()).toBe('family:host-a:hub-mid')
+    expect(selected()).toBe('family:host-a:hub')
     workspace.follow('far', 'host-b'); await settle()
     expect(selected()).toBe('family:host-b:far')
     expect(sight.mock.lastCall?.[0].id).toBe('far')
@@ -1242,7 +1245,7 @@ describe('workspace reader integration', () => {
     await press('h')
     expect(workspace.isActive).toBe(false)
   })
-  it('leaves Download and Refresh off the map\'s document menu', async () => {
+  it('draws the map with no header line or document menu under its band', async () => {
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
     const feed = [thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/a', orchestrator: 'hub', status: 'active' })]
@@ -1250,11 +1253,10 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[0], 'Desk'); await settle()
-    document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!.click()
-    const items = [...document.querySelectorAll('.ws-menu .ws-menu-item')].map(item => item.textContent)
-    expect(items).toContain('Copy path')
-    expect(items).not.toContain('Download')
-    expect(items).not.toContain('Refresh')
+    expect(document.querySelector('.ws-selected')?.hasAttribute('data-drawn')).toBe(true)
+    expect(document.querySelector('.ws-selected .ws-menu-button')).toBeNull()
+    expect(document.querySelector('.ws-selected .ws-expand-button')).toBeNull()
+    expect(document.querySelector<HTMLElement>('.ws-stage-band [data-part="band-back"]')?.hidden).toBe(false)
   })
   it('unfolds a family row on a page that was one constitution until the family formed', async () => {
     workspace.dispose()
@@ -1512,7 +1514,7 @@ describe('workspace reader integration', () => {
     workspace.reader.openDocument('fiber:host-a:alpha')
     expect(frame.el.classList.contains('ws-receded')).toBe(true)
     await pop(() => workspace.reader.back())
-    document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!.click()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', bubbles: true, cancelable: true }))
     expect(frame.el.classList.contains('ws-expanded')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(frame.el.classList.contains('ws-expanded')).toBe(false)
@@ -1638,14 +1640,13 @@ describe('workspace reader integration', () => {
     workspace.open(cards[0])
     await settle()
     const escape = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) }
-    const expand = document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!
-    expand.click()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', bubbles: true, cancelable: true }))
     const popover = vi.spyOn(workspace.dock, 'handleEscape').mockReturnValueOnce(true).mockReturnValue(false)
     escape()
     expect(popover).toHaveBeenCalledOnce()
     expect(document.querySelector('.ws-selected.ws-expanded')).not.toBeNull()
 
-    document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!.click()
+    document.querySelector<HTMLButtonElement>('.ws-phone-document-menu')!.click()
     expect(document.querySelector('.ws-menu')).not.toBeNull()
     escape()
     expect(document.querySelector('.ws-menu')).toBeNull()
@@ -1768,21 +1769,6 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(true)
   })
 
-  it('leaves Enter and Space activation on native expand controls alone', async () => {
-    workspace.open(cards[0])
-    await settle()
-    const expand = document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!
-    for (const key of ['Enter', ' ']) {
-      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
-      expand.dispatchEvent(event)
-      expect(event.defaultPrevented).toBe(false)
-      expect(document.querySelector('.ws-selected.ws-expanded')).toBeNull()
-      expand.click()
-      expect(document.querySelector('.ws-selected.ws-expanded')).not.toBeNull()
-      expand.click()
-    }
-  })
-
   it('uses j/k for constitution order and held arrows for document scrolling', async () => {
     workspace.open(cards[1])
     await settle()
@@ -1838,14 +1824,10 @@ describe('workspace reader integration', () => {
   it('keeps label controls and their keyboard focus through metadata polls', async () => {
     workspace.open(cards[0])
     await settle()
-    const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
+    const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-document-back')!
     control.focus()
     workspace.update()
-    expect(document.querySelector('.ws-selected .ws-menu-button')).toBe(control)
-    expect(document.activeElement).toBe(control)
-    control.click()
-    workspace.update()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(document.querySelector('.ws-selected .ws-document-back')).toBe(control)
     expect(document.activeElement).toBe(control)
     expect(control.isConnected).toBe(true)
   })
@@ -1951,7 +1933,7 @@ describe('workspace reader integration', () => {
     workspace.open(cards[0])
     await settle()
     expect(document.activeElement).not.toBe(document.querySelector('.ws-return'))
-    const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
+    const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-document-back')!
     const press = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
     control.dispatchEvent(press)
     expect(press.defaultPrevented).toBe(true)
@@ -2110,4 +2092,51 @@ describe('workspace reader integration', () => {
     expect(workspace.overview.el.hidden).toBe(false)
     expect(window.location.hash).toBe('#/board')
   })
+})
+
+describe('a family has one page', () => {
+  /** Trees of threads as parent indices: node n > 0 hangs under some earlier node. */
+  const trees = fc.array(fc.nat(), { minLength: 1, maxLength: 6 }).map(picks => picks.map((pick, n) => pick % (n + 1)))
+  const step = fc.oneof(
+    fc.record({ act: fc.constantFrom('open', 'desk', 'follow', 'row'), at: fc.nat() }),
+    fc.record({ act: fc.constantFrom('head', 'b'), at: fc.constant(0) }),
+  )
+  it('heads its band with the root and acts on the highlighted row, however it is entered and walked', async () => {
+    await fc.assert(fc.asyncProperty(trees, fc.array(step, { minLength: 1, maxLength: 8 }), async (parents, steps) => {
+      const ids = ['root', ...parents.map((parent, n) => `t${n + 1}`)]
+      const path = (n: number): string => n === 0 ? 'root' : `${path(parents[n - 1])}/${ids[n]}`
+      const feed = ids.map((id, n) => card({
+        id: path(n), uid: id, name: id === 'root' ? 'Root' : id, originId: 'host-a', shuttleKind: 'oneshot', status: 'active', path: `${path(n)}.md`,
+        ...(n ? { orchestrator: ids[parents[n - 1]] } : {}),
+      }))
+      bodyCards = feed
+      workspace.dispose()
+      const dock = new Dock('', changed)
+      vi.spyOn(dock, 'openConversation').mockReturnValue(true)
+      workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock })
+      const queue = vi.spyOn(workspace, 'queueVerdict').mockReturnValue(true)
+      const title = (): string | null | undefined => document.querySelector('.ws-stage-band .ws-band-title')?.textContent
+      const chosen = (): string | null | undefined => document.querySelector('.ws-selected [role="treeitem"][aria-selected="true"] .fp-name')?.getAttribute('title')
+      const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+      workspace.openFromDesk(feed[0]); await settle()
+      for (const { act, at } of steps) {
+        const target = feed[at % feed.length]
+        if (act === 'open') workspace.open(target, 'Desk')
+        else if (act === 'desk') workspace.openFromDesk(target)
+        else if (act === 'follow') workspace.follow(target.uid!, 'host-a')
+        else if (act === 'row') [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row:not(.fp-head)')].find(row => row.querySelector<HTMLElement>('.fp-name')?.title === target.name)?.click()
+        else if (act === 'head') document.querySelector<HTMLElement>('.ws-selected .fp-head')?.click()
+        else press('b')
+        await settle()
+        expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('family:host-a:root')
+        const highlighted = chosen()
+        expect(highlighted).toBeDefined()
+        expect(title()).toBe(highlighted === 'Root' ? 'Root' : `Root / ${highlighted}`)
+        press('x')
+        expect(queue.mock.lastCall?.[0].name).toBe(highlighted)
+      }
+      document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click(); await settle()
+      expect(title()).toBe('Root')
+    }), { numRuns: 20 })
+  }, 120_000)
 })

@@ -324,13 +324,13 @@ export class KanbanModal {
     // address (`sessionLink`, stamped by the owning daemon), and to nothing
     // when it doesn't — never to a terminal on some other machine.
     this.openWorkerAfterGesture = this.onOpenWorker
-      ? (tmuxSessionName, shuttleHost) => {
+      ? (tmuxSessionName, shuttleHost, past) => {
           if (coarsePointer()) {
             const link = this.sessionLinkFor(tmuxSessionName)
             if (link) window.location.assign(link)
             return
           }
-          window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost), 0)
+          window.setTimeout(() => this.onOpenWorker?.(tmuxSessionName, shuttleHost, past), 0)
         }
       : undefined
     this.onStashClick = options.onStashClick

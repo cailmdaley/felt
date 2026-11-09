@@ -78,6 +78,9 @@
   padding: 0 var(--ws-small-gap) 0 var(--ws-inset); border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
   color: var(--ws-ink-muted); background: var(--ws-paper); font-size: var(--type-meta); user-select: none;
 }
+/* Under a band, the band holds the way back, and a drawn page draws no header line at all. */
+.ws-reader:has(.ws-stage-band:not([hidden])) .ws-document-back { display: none; }
+.ws-reader:has(.ws-stage-band:not([hidden])) .ws-page[data-drawn] .ws-labelbar { display: none; }
 .ws-kind-glyph { flex: none; color: var(--ws-ink-muted); }
 /* The header line's controls speak at the chrome's own size. */
 .ws-labelbar .ws-icon-button { font: var(--type-row)/var(--leading-solid) var(--font-serif); color: var(--ws-ink-muted); }

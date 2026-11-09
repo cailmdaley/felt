@@ -13,6 +13,8 @@
   color: var(--ws-ink); font: 500 var(--type-title)/var(--leading-tight) var(--font-serif);
 }
 .ws-band-thread { color: var(--ws-ink-muted); }
+/* Back sits at the name's left, the way out of the page the band heads. */
+.ws-band-back { flex: none; align-self: center; margin-left: -8px; }
 /* One context figure and the cache's warmth: a verdigris dot draining clockwise
    as the entry ages; cold, an alarm-red ring. Context carries its own tint (paintUsage). */
 .ws-band-meter { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; color: var(--ws-ink-muted); white-space: nowrap; font: var(--type-label)/var(--leading-prose) var(--font-mono); }
@@ -112,7 +114,7 @@
   .ws-band-head { gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
   .ws-dock .ws-worker-acts { padding: 0 8px 6px; }
   .ws-band-identity { flex: none; }
-  .ws-band-title { display: none; }
+  .ws-band-title, .ws-band-back { display: none; }
   .ws-band-acts { flex-wrap: nowrap; flex: none; }
   .ws-band-acts > .kbn-ctl-verdict { flex: none; flex-wrap: nowrap; white-space: nowrap; padding-left: 0; border-left: 0; }
 }
