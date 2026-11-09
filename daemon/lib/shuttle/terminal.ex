@@ -407,26 +407,44 @@ defmodule Shuttle.Terminal do
   defp await_gone(_runner, name, [], _opts),
     do: {"worker of #{name} is still running after SIGKILL", 1}
 
+  # Unknown liveness ends the ladder at once, as stopped: no signal can settle
+  # a worker nothing can observe, every further look repeats a scan that may
+  # take seconds on a loaded host, and refusing would leave the human no way to
+  # stop it. A launch still refuses while that worker cannot be ruled out
+  # (`check_available/3`), so stopping it never makes room for a second one.
   defp await_gone(runner, name, [{signal, wait_ms} | rest], opts) do
     if signal, do: signal_worker(runner, name, signal)
     deadline = System.monotonic_time(:millisecond) + wait_ms
 
-    if gone_by?(runner, name, deadline, opts),
-      do: {"", 0},
-      else: await_gone(runner, name, rest, opts)
+    case gone_by(runner, name, deadline, opts) do
+      :gone ->
+        {"", 0}
+
+      :unknown ->
+        WorkerProcess.warn_once({:unobservable_stop, name}, fn ->
+          "stopped #{name} without seeing it exit: no terminal shows it, it has no " <>
+            "launch receipt, and the process table could not be read"
+        end)
+
+        {"", 0}
+
+      :alive ->
+        await_gone(runner, name, rest, opts)
+    end
   end
 
-  defp gone_by?(runner, name, deadline, opts) do
-    cond do
-      status(runner, name, opts) == :gone ->
-        true
+  defp gone_by(runner, name, deadline, opts) do
+    case status(runner, name, opts) do
+      :alive ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          :alive
+        else
+          Process.sleep(@stop_poll_ms)
+          gone_by(runner, name, deadline, opts)
+        end
 
-      System.monotonic_time(:millisecond) >= deadline ->
-        false
-
-      true ->
-        Process.sleep(@stop_poll_ms)
-        gone_by?(runner, name, deadline, opts)
+      settled ->
+        settled
     end
   end
 

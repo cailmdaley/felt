@@ -266,6 +266,13 @@ drift apart.
 - **The links:** `internal/shuttlecli/lifecycle_model_test.go` runs every CLI
   write the table names on every document. `daemon/test/shuttle/lifecycle_model_test.exs`
   checks the served column and each `/transition` resolution.
+  `daemon/test/shuttle/lifecycle_model_worker_test.exs` drives a real Poller
+  holding each kind of worker through kill, dispatch (fresh or resuming, with
+  or without a message) and `c`'s reopen, and with the process scan up or
+  failing, and checks each answer and the worker left against the table.
+  The model leaves the scan out. With the scan failing, resuming a gone
+  worker's conversation is refused until a scan can show that no other
+  process holds it. The test names that one exception.
   `ui/src/board/lifecycleModel.offers.test.ts` checks the board's offers,
   words and keys.
 - **The fuzz:** `ui/src/board/lifecycleModel.properties.test.ts` mounts the
@@ -276,7 +283,8 @@ drift apart.
   on the worker: `send` types into the constitution page's worker line, and
   the band must say "Sent" exactly when the owner delivered the message;
   `open` presses `c` through the board's real terminal opener
-  (`workerOpener`), and the owner must accept the one request it makes. A
+  (`workerOpener`). The owner must accept the one request it makes, unless
+  the worker is unseen. Then it refuses, and the opener must say why. A
   second property serves a family (a root and two threads), enters its page
   by any of them, highlights a random row with `j`, and presses a verb key or
   `c`: every request must name the highlighted fiber. Each property runs 25

@@ -5635,37 +5635,49 @@ defmodule Shuttle.Poller do
     meta = if key, do: Map.get(state.running, key)
     session = if meta, do: meta.session, else: live_session_for_fiber(state, fiber_id, uid)
 
-    if session do
-      case Shuttle.WorkerBackend.stop(state.runner, session) do
-        {_, 0} ->
-          result =
-            Shuttle.Continuation.mark_handed_off(
-              state.runner,
-              owning_store(fiber_id, state),
-              fiber_id
+    cond do
+      # A worker nothing can observe would be let go by the stop, but the
+      # launch after it still refuses; refuse first, keeping it held and its
+      # marker untouched.
+      session && Shuttle.Terminal.status(state.runner, session) == :unknown ->
+        {:error, :already_running, state}
+
+      session ->
+        cut_stopping(state, fiber_id, key, meta, session)
+
+      true ->
+        {:ok, state}
+    end
+  end
+
+  defp cut_stopping(state, fiber_id, key, meta, session) do
+    case Shuttle.WorkerBackend.stop(state.runner, session) do
+      {_, 0} ->
+        result =
+          Shuttle.Continuation.mark_handed_off(
+            state.runner,
+            owning_store(fiber_id, state),
+            fiber_id
+          )
+
+        if meta, do: stop_watcher(meta)
+        state = if key, do: remove_running(state, key), else: state
+
+        case result do
+          :ok ->
+            {:ok, state}
+
+          {:error, reason} ->
+            Logger.warning(
+              "Could not mark stopped worker #{fiber_id} handed off: #{inspect(reason)}; fresh dispatch refused"
             )
 
-          if meta, do: stop_watcher(meta)
-          state = if key, do: remove_running(state, key), else: state
+            {:error, {:handoff_failed, reason}, state}
+        end
 
-          case result do
-            :ok ->
-              {:ok, state}
-
-            {:error, reason} ->
-              Logger.warning(
-                "Could not mark stopped worker #{fiber_id} handed off: #{inspect(reason)}; fresh dispatch refused"
-              )
-
-              {:error, {:handoff_failed, reason}, state}
-          end
-
-        {output, _} ->
-          Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
-          {:ok, state}
-      end
-    else
-      {:ok, state}
+      {output, _} ->
+        Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
+        {:ok, state}
     end
   end
 

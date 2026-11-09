@@ -125,7 +125,7 @@ class ModelOwner {
       case 'lifecycle':
         return this.answer(route, body, body.action === 'rest' || body.action === 'resume' ? { route: 'lifecycle', action: body.action } : null)
       case 'kill': return this.answer(route, body, { route: 'kill' })
-      case 'dispatch': return this.answer(route, body, { route: 'dispatch', said: typeof body.user_message === 'string' && body.user_message !== '' })
+      case 'dispatch': return this.answer(route, body, { route: 'dispatch', said: typeof body.user_message === 'string' && body.user_message !== '', fresh: body.resume_mode === 'fresh' })
       case 'attach': return this.answer(route, body, { route: 'attach', past: typeof body.session === 'string' })
       case 'felt-edit':
         return this.answer(route, body, Array.isArray(body.unset) && body.unset.includes('horizon') ? { route: 'unstash' } : null)
@@ -158,6 +158,7 @@ function boardCard(data: KanbanResponse | null): KanbanCard | undefined {
 let board: KanbanModal
 let inside: BoardInternals
 let owner: ModelOwner
+let openerSaid: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
@@ -179,7 +180,8 @@ afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.useRealT
 async function mount(states: Record<string, LifeState>, parents: Record<string, string> = {}): Promise<void> {
   owner = new ModelOwner(states, parents)
   vi.stubGlobal('fetch', vi.fn(owner.fetch))
-  board = new KanbanModal({ shuttleBase: '', onOpenWorker: workerOpener('', vi.fn()) })
+  openerSaid = vi.fn()
+  board = new KanbanModal({ shuttleBase: '', onOpenWorker: workerOpener('', openerSaid) })
   inside = board as unknown as BoardInternals
   vi.spyOn(inside, 'startPolling').mockImplementation(() => {})
   board.mount(document.body)
@@ -290,7 +292,13 @@ describe('the board keeps the lifecycle model across random gesture sequences', 
               await finish()
               const attached = owner.sent.slice(sentBefore).filter(s => s.route === 'attach')
               expect(attached, `c reached the owner other than once: ${story()}`).toHaveLength(1)
-              expect(attached[0].outcome, `the owner could not open the conversation c asked for: ${story()}`).toBe('ok')
+              // A worker the owner cannot rule out keeps its conversation; the human is told why c opened nothing.
+              if (before.worker === 'unseen') {
+                expect(attached[0].outcome, `the owner reopened a conversation an unseen worker may hold: ${story()}`).toBe('refused')
+                expect(openerSaid, `c opened nothing and said nothing: ${story()}`).toHaveBeenCalled()
+              } else {
+                expect(attached[0].outcome, `the owner could not open the conversation c asked for: ${story()}`).toBe('ok')
+              }
               continue
             }
             const reached = await perform(verb)

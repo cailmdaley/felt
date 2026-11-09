@@ -229,13 +229,21 @@ defmodule Shuttle.Terminal.ReceiptsTest do
       end
     end
 
-    test "a stop with no reachable terminal is prompt and stops exactly what is gone",
+    # A terminal that closed or holds nothing leaves a stop that succeeds unless
+    # the worker is seen alive: an unobservable worker is let go, never waited
+    # on. A terminal that cannot be reached closed nothing, so only a gone
+    # worker is stopped.
+    test "a stop with no terminal to show the worker is prompt and stops all but the living",
          %{dir: dir} do
       for terminal <- [:absent, :unknown], receipt <- @receipts, scan <- @scans do
         name = observe(dir, terminal, receipt, scan)
-        gone? = expected(terminal, receipt, scan) == :gone
+        liveness = expected(terminal, receipt, scan)
+
+        stopped? =
+          if terminal == :absent, do: liveness != :alive, else: liveness == :gone
+
         {micros, {_, code}} = :timer.tc(fn -> Terminal.stop(Runner, name) end)
-        assert code == if(gone?, do: 0, else: 1), inspect({terminal, receipt, scan})
+        assert code == if(stopped?, do: 0, else: 1), inspect({terminal, receipt, scan})
         assert micros < 2_000_000, inspect({terminal, receipt, scan})
       end
     end

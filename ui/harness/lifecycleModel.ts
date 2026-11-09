@@ -11,8 +11,9 @@
  *    state that follows. `lifecycleTable()` enumerates it into
  *    `daemon/test/fixtures/lifecycle/model.json`. The Shuttle CLI (Go) holds
  *    every row with a write to it; the daemon (mix) holds the served column
- *    and each `/transition` resolution. The worker rows (kill, dispatch,
- *    attach) are the board's assumption until a daemon test reads them.
+ *    and each `/transition` resolution; `lifecycle_model_worker_test.exs`
+ *    drives a real Poller through the worker rows (kill, dispatch, attach)
+ *    for each worker it can hold.
  *  - The gesture layer (`VERBS`) is the board's contract: for each state, the
  *    verbs the board offers, their words, and the state each verb must leave.
  *    `lifecycleModel.properties.test.ts` drives the real board against an owner
@@ -124,7 +125,7 @@ export type LifeRequest =
   | { route: 'transition'; target: TransitionTarget }
   | { route: 'lifecycle'; action: 'rest' | 'resume' }
   | { route: 'kill' }
-  | { route: 'dispatch'; said: boolean }
+  | { route: 'dispatch'; said: boolean; fresh: boolean }
   | { route: 'attach'; past: boolean }
   | { route: 'unstash' }
 
@@ -134,8 +135,7 @@ export const REQUESTS: readonly LifeRequest[] = [
   { route: 'lifecycle', action: 'rest' },
   { route: 'lifecycle', action: 'resume' },
   { route: 'kill' },
-  { route: 'dispatch', said: false },
-  { route: 'dispatch', said: true },
+  ...[false, true].flatMap(fresh => [false, true].map(said => ({ route: 'dispatch', said, fresh }) as const)),
   { route: 'attach', past: false },
   { route: 'attach', past: true },
   { route: 'unstash' },
@@ -145,7 +145,7 @@ export function requestKey(r: LifeRequest): string {
   switch (r.route) {
     case 'transition': return `transition:${r.target}`
     case 'lifecycle': return `lifecycle:${r.action}`
-    case 'dispatch': return r.said ? 'dispatch:said' : 'dispatch'
+    case 'dispatch': return `dispatch${r.fresh ? ':fresh' : ''}${r.said ? ':said' : ''}`
     case 'attach': return r.past ? 'attach:past' : 'attach'
     default: return r.route
   }
@@ -175,20 +175,27 @@ export function apply(s: LifeState, r: LifeRequest): Applied {
   const same = (outcome: Outcome): Applied => ({ outcome, next: s })
   switch (r.route) {
     case 'kill':
-      // Stopping is prompt and total: a held worker with no terminal is forgotten, not waited on.
+      // Stopping is prompt and total. A held worker with no terminal is not
+      // waited on: a gone one is reaped, an unseen one let go (a launch still
+      // refuses while it cannot be ruled out, so letting go makes no room for a second).
       return { outcome: 'ok', next: { ...s, worker: 'none' } }
     case 'unstash':
       return { outcome: 'ok', next: { ...s, stashed: false } }
     case 'dispatch':
+      // A fresh start cuts a live worker and launches in its place.
+      if (s.worker === 'live' && r.fresh) return { outcome: 'ok', next: { ...armed(s), worker: 'live' }, delivered: r.said }
       // A message for a live worker is typed into its conversation, and answers its question.
       if (s.worker === 'live' && r.said) return { outcome: 'ok', next: { ...s, ask: false }, delivered: true }
-      // A second launch of a worker the owner can reach, or cannot rule out, is refused.
+      // A second launch of a worker the owner can reach, or cannot rule out, is
+      // refused; a fresh start leaves an unseen worker held rather than cut it.
       if (s.worker === 'live' || s.worker === 'unseen') return same('conflict')
       // A gone worker is reaped and replaced; the launch carries what was said.
       return { outcome: 'ok', next: { ...armed(s), worker: 'live' }, delivered: r.said }
     case 'attach':
-      // A live terminal is revealed; any other opens the past session, if the request names it.
-      return s.worker === 'live' || r.past ? same('ok') : same('refused')
+      // A live terminal is revealed; any other opens the past session, if the
+      // request names it and no worker the owner cannot rule out may hold it.
+      if (s.worker === 'live') return same('ok')
+      return r.past && s.worker !== 'unseen' ? same('ok') : same('refused')
     case 'lifecycle':
       if (r.action === 'rest') {
         // Rest reaches any state: open, put down, verdict cleared, worker stopped.
