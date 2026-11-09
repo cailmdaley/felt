@@ -30,7 +30,7 @@
  * the shrunk sequence that reproduces it.
  */
 import fc from 'fast-check'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { apply, ownerRow, served, STATES, stateKey, VERBS, type LifeRequest, type LifeState, type Outcome, type Verb } from '../../harness/lifecycleModel.js'
 import { workerOpener } from './sessionHistory.js'
 import { isAgentCard } from './KanbanModalShared.js'
@@ -158,7 +158,7 @@ function boardCard(data: KanbanResponse | null): KanbanCard | undefined {
 let board: KanbanModal
 let inside: BoardInternals
 let owner: ModelOwner
-let openerSaid: ReturnType<typeof vi.fn>
+let openerSaid: Mock<(message: string) => void>
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
@@ -180,7 +180,7 @@ afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.useRealT
 async function mount(states: Record<string, LifeState>, parents: Record<string, string> = {}): Promise<void> {
   owner = new ModelOwner(states, parents)
   vi.stubGlobal('fetch', vi.fn(owner.fetch))
-  openerSaid = vi.fn()
+  openerSaid = vi.fn<(message: string) => void>()
   board = new KanbanModal({ shuttleBase: '', onOpenWorker: workerOpener('', openerSaid) })
   inside = board as unknown as BoardInternals
   vi.spyOn(inside, 'startPolling').mockImplementation(() => {})
