@@ -21,6 +21,11 @@
  *  - `open` presses `c`. One request reaches the owner, and it accepts it: a
  *    held worker whose terminal is gone opens its past session.
  *
+ * A second property serves a family: a root and two threads in random
+ * states. It enters the family's page by any of them, walks the highlight to
+ * a random row with `j`, and performs a gesture on it by its key. Every
+ * request must name the highlighted fiber, and no other fiber may change.
+ *
  * `LIFECYCLE_FUZZ_RUNS` deepens it; a failure prints the fast-check seed and
  * the shrunk sequence that reproduces it.
  */
@@ -43,37 +48,73 @@ const RUNS = Number(env.LIFECYCLE_FUZZ_RUNS ?? 25)
 const SEED = env.LIFECYCLE_FUZZ_SEED === undefined ? 20261109 : Number(env.LIFECYCLE_FUZZ_SEED)
 const ID = 'model/fiber'
 
-interface Sent { route: string; body: Record<string, unknown>; outcome: Outcome | 'unmodeled'; delivered?: boolean }
+interface Sent { route: string; body: Record<string, unknown>; fiber?: string; outcome: Outcome | 'unmodeled'; delivered?: boolean }
 type Gesture = Verb | 'send' | 'open'
 const MESSAGE = 'Use the 400-mock catalogue.'
 
-/** The owning daemon, answering every lifecycle request from the model. */
+/** A held worker's terminal and its past session, named for its fiber so a request says whose it is. */
+const workerName = (id: string): string => `${id.replaceAll('/', '-')}-worker`
+const sessionName = (id: string): string => `${id.replaceAll('/', '-')}-session`
+
+/** The owning daemon of one constitution family, answering every lifecycle request from the model. */
 class ModelOwner {
-  state: LifeState
+  states: Map<string, LifeState>
   sent: Sent[] = []
-  constructor(state: LifeState) { this.state = state }
+  private readonly parents: Record<string, string>
+  /** `states` by fiber id; `parents` names each thread's orchestrator. */
+  constructor(states: Record<string, LifeState>, parents: Record<string, string> = {}) {
+    this.states = new Map(Object.entries(states))
+    this.parents = parents
+  }
+  /** The single fiber's state, for a family of one. */
+  get state(): LifeState { return this.states.get(ID)! }
+
+  /** The fiber a request names: by id, or by its worker's terminal or past session. */
+  private fiberOf(body: Record<string, unknown>): string | undefined {
+    const named = body.fiber_id ?? body.fiber
+    if (typeof named === 'string') return named
+    return [...this.states.keys()].find(id => body.tmux_session === workerName(id) || body.session === sessionName(id))
+  }
 
   private answer(route: string, body: Record<string, unknown>, request: LifeRequest | null): Response {
-    if (!request) {
-      this.sent.push({ route, body, outcome: 'unmodeled' })
+    const fiber = this.fiberOf(body)
+    const state = fiber === undefined ? undefined : this.states.get(fiber)
+    if (!request || !fiber || !state) {
+      this.sent.push({ route, body, fiber, outcome: 'unmodeled' })
       return Response.json({})
     }
-    const held = this.state.worker
-    const { outcome, next, delivered } = apply(this.state, request)
-    this.sent.push({ route, body, outcome, delivered })
-    this.state = next
+    const { outcome, next, delivered } = apply(state, request)
+    this.sent.push({ route, body, fiber, outcome, delivered })
+    this.states.set(fiber, next)
     // A launch and a 409 both name the worker, and its terminal when the owner can find one.
-    const worker = (w: LifeState['worker']) => ({ tmux_session: 'model-worker', terminal: w === 'live' ? 'rex' : null })
+    const worker = (w: LifeState['worker']) => ({ tmux_session: workerName(fiber), terminal: w === 'live' ? 'rex' : null })
     if (outcome === 'ok') return Response.json(route === 'dispatch' ? { dispatched: true, ...worker(next.worker) } : { ok: true })
-    if (outcome === 'conflict') return Response.json({ dispatched: false, reason: 'already_running', ...worker(held) }, { status: 409 })
+    if (outcome === 'conflict') return Response.json({ dispatched: false, reason: 'already_running', ...worker(state.worker) }, { status: 409 })
     return Response.json({ error: 'refused' }, { status: route === 'attach' ? 502 : 422 })
+  }
+
+  /** `/fibers/composite`: each fiber as the model serves it, its worker and session named for it. */
+  private rows(): Record<string, unknown>[] {
+    return [...this.states].map(([id, s]) => {
+      const row = ownerRow(id, s, Date.now()) as { fiber: { shuttle: { runtime: object } }; runtime?: object }
+      row.fiber.shuttle.runtime = { ...row.fiber.shuttle.runtime, session_uuid: sessionName(id) }
+      if (row.runtime) row.runtime = { ...row.runtime, tmux_session: workerName(id), session_uuid: sessionName(id) }
+      // A thread names its orchestrator by uid, as the owner serves it.
+      return { ...row, ...(this.parents[id] ? { orchestrator: `${this.parents[id]}-uid` } : {}) }
+    })
   }
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), 'http://owner.test')
     const route = url.pathname.replace(/^\/api\/v1\//, '')
     if (init?.method !== 'POST') {
-      if (route === 'fibers/composite') return Response.json({ host: 'model-host', fibers: [ownerRow(ID, this.state, Date.now())] })
+      if (route === 'fibers/composite') return Response.json({ host: 'model-host', fibers: this.rows() })
+      // A page's body read, by id or uid: the fiber's row, with its body.
+      if (route.startsWith('fibers/') && url.searchParams.get('body') === 'true') {
+        const id = route.slice('fibers/'.length).split('/').map(decodeURIComponent).join('/')
+        const row = this.rows().find(r => { const f = r.fiber as { id: string; uid: string }; return f.id === id || f.uid === id })
+        return row ? Response.json({ host: 'model-host', fibers: [{ ...row, fiber: { ...(row.fiber as object), body: '' } }] }) : Response.json({ fibers: [] }, { status: 404 })
+      }
       return Response.json({ fibers: [], files: [], entries: [] })
     }
     const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>
@@ -83,7 +124,7 @@ class ModelOwner {
         return this.answer(route, body, body.action === 'rest' || body.action === 'resume' ? { route: 'lifecycle', action: body.action } : null)
       case 'kill': return this.answer(route, body, { route: 'kill' })
       case 'dispatch': return this.answer(route, body, { route: 'dispatch', said: typeof body.user_message === 'string' && body.user_message !== '' })
-      case 'attach': return this.answer(route, body, typeof body.tmux_session === 'string' || typeof body.session === 'string' ? { route: 'attach', past: typeof body.session === 'string' } : null)
+      case 'attach': return this.answer(route, body, { route: 'attach', past: typeof body.session === 'string' })
       case 'felt-edit':
         return this.answer(route, body, Array.isArray(body.unset) && body.unset.includes('horizon') ? { route: 'unstash' } : null)
       default: return this.answer(route, body, null)
@@ -133,8 +174,8 @@ beforeEach(() => {
 })
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-async function mount(state: LifeState): Promise<void> {
-  owner = new ModelOwner(state)
+async function mount(states: Record<string, LifeState>, parents: Record<string, string> = {}): Promise<void> {
+  owner = new ModelOwner(states, parents)
   vi.stubGlobal('fetch', vi.fn(owner.fetch))
   board = new KanbanModal({ shuttleBase: '', onOpenWorker: workerOpener('', vi.fn()) })
   inside = board as unknown as BoardInternals
@@ -149,8 +190,8 @@ function press(key: string, target: EventTarget = document): void {
 }
 
 /** The card on the Desk, selected, so the band acts on it; undefined once it has left the Desk. */
-function selected(): KanbanCard | undefined {
-  const card = inside.workspaceCards().find(c => c.id === ID)
+function selected(id = ID): KanbanCard | undefined {
+  const card = inside.workspaceCards().find(c => c.id === id)
   if (card) inside.deskKeyboard.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
   return card
 }
@@ -215,7 +256,7 @@ describe('the board keeps the lifecycle model across random gesture sequences', 
       fc.constantFrom(...STATES),
       fc.array(fc.nat(), { minLength: 1, maxLength: 3 }),
       async (start, picks) => {
-        await mount(start)
+        await mount({ [ID]: start })
         try {
           for (const pick of picks) {
             const before = owner.state
@@ -262,6 +303,71 @@ describe('the board keeps the lifecycle model across random gesture sequences', 
             }
             expect(boardCard(inside.lastResponse)?.column, `the board draws the card where the owner does not: ${story()}`)
               .toBe(modelCard(after).column)
+          }
+        } finally {
+          board.unmount(); document.body.replaceChildren()
+        }
+      },
+    ), { seed: SEED, numRuns: RUNS, endOnFailure: true })
+  }, 120_000)
+})
+
+const THREADS = [`${ID}/a`, `${ID}/b`]
+
+/** The family page's rows, head first, by the fiber each names. */
+function familyRows(): Array<{ el: HTMLElement; id: string }> {
+  return [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')]
+    .map(el => ({ el, id: el.querySelector<HTMLElement>('.fp-name')?.title ?? '' }))
+    .filter(row => row.id === ID || THREADS.includes(row.id))
+}
+
+describe('the band acts on the highlighted thread of a family', () => {
+  it('every request a gesture sends names the highlighted fiber, and leaves the others alone', async () => {
+    await fc.assert(fc.asyncProperty(
+      fc.tuple(fc.constantFrom(...STATES), fc.constantFrom(...STATES), fc.constantFrom(...STATES)),
+      fc.nat(),
+      fc.array(fc.tuple(fc.nat(), fc.nat()), { minLength: 1, maxLength: 3 }),
+      async ([root, a, b], entry, steps) => {
+        await mount({ [ID]: root, [THREADS[0]]: a, [THREADS[1]]: b }, Object.fromEntries(THREADS.map(id => [id, ID])))
+        try {
+          // The page is entered by any of its fibers the Desk lists.
+          const family = [ID, ...THREADS]
+          if (!selected(family[entry % family.length]) && !selected()) return
+          press('o')
+          await settle()
+          for (const [row, pick] of steps) {
+            const rows = familyRows()
+            if (rows.length === 0) return
+            // The highlight moves from the head by j, as a human walks the page.
+            rows[0].el.focus()
+            for (let i = 0; i < row % rows.length; i++) document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
+            await settle()
+            const lit = familyRows().find(r => r.el.getAttribute('aria-selected') === 'true')
+            expect(lit, 'the page highlights no row').toBeDefined()
+            const target = lit!.id
+            const state = owner.states.get(target)!
+            const card = inside.workspaceCards().find(c => c.id === target)
+            const offered: Gesture[] = [
+              ...(Object.keys(VERBS) as Verb[]).filter(verb => VERBS[verb].offered(state)),
+              ...(card && inside.dock.canOpenConversation(card) ? ['open' as const] : []),
+            ]
+            if (offered.length === 0) continue
+            const gesture = offered[pick % offered.length]
+                  const before = new Map(owner.states)
+            const sentBefore = owner.sent.length
+            // The key goes where a human's would: to the focused row, bubbling up.
+            press(gesture === 'open' ? 'c' : VERB_KEY[gesture as Verb], document.activeElement ?? document)
+            await settle()
+            const popover = document.querySelector<HTMLElement>('.kbn-rest-popover')
+            if (popover) { press('n', popover); await settle() }
+            await finish()
+            const sent = owner.sent.slice(sentBefore)
+            const story = `${gesture} with ${target} highlighted (${stateKey(state)})\n  sent: ${JSON.stringify(sent)}\n  band: ${document.querySelector('.ws-band-title')?.textContent}; family: ${[...before].map(([id, s]) => `${id}=${stateKey(s)}`).join(' ')}`
+            expect(sent.length, `the gesture reached no owner: ${story}`).toBeGreaterThan(0)
+            expect(sent.map(s => s.fiber), `the band acted on a fiber that was not highlighted: ${story}`).toEqual(sent.map(() => target))
+            for (const [id, s] of before) {
+              if (id !== target) expect(stateKey(owner.states.get(id)!), `${id} changed though ${target} was highlighted: ${story}`).toBe(stateKey(s))
+            }
           }
         } finally {
           board.unmount(); document.body.replaceChildren()
