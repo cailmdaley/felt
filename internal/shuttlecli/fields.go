@@ -39,16 +39,17 @@ func setTempered(f *felt.Felt, value *bool) error {
 // standing constitution also concludes its current run
 // (shuttle.runtime.handed_off_at = now), so it next fires at its schedule's
 // next tick rather than catching up an occurrence it was paused or retired
-// across.
+// across. An already armed one is left as it stands, its due occurrence kept.
 func unclose(f *felt.Felt, status string) error {
 	wasClosed := f.Status == felt.StatusClosed
 	wasResting := f.Status == felt.StatusOpen && horizonStashed(f)
+	wasActive := f.Status == felt.StatusActive
 	f.Status = status
 	f.ClosedAt = nil
 	if err := setTempered(f, nil); err != nil {
 		return err
 	}
-	if status == felt.StatusActive && shuttle.StoredKind(f) == "standing" {
+	if status == felt.StatusActive && !wasActive && shuttle.StoredKind(f) == "standing" {
 		if err := shuttle.SetRuntimeField(f, "handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return err
 		}

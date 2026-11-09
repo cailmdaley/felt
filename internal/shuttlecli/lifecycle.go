@@ -238,6 +238,13 @@ this host is killed.` + workerExitIdentityHelp,
 			if actor != "" {
 				fields["actor"] = actor
 			}
+			// A standing run's worker leaves with handoff, which keeps the
+			// schedule; resting its own fiber would pause it until resumed.
+			if candidate, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true); lookupErr == nil && a.isOwnFiber(candidate) {
+				if block, ok, _ := shuttle.BlockOf(candidate); ok && block.Kind == "standing" {
+					return fmt.Errorf("%s is a standing constitution: its run ends with 'shuttle handoff', which keeps the schedule; rest would pause it until someone resumes it (pausing is the human's call, from the board)", args[0])
+				}
+			}
 			if !restLocal {
 				anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
 				if routed, err := a.routeLifecycle(cmd, "rest", args[0], anyBlock, fields); routed {

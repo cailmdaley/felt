@@ -66,7 +66,7 @@ Commit, `felt -C <store> sync --push`, then pick one. `close`, `handoff` and `re
 - **`shuttle close`** — the Desired State is met. The card goes to Awaiting review. Have a fresh-context subagent review substantive changes first.
 - **`shuttle -C <store> ask <id> "<question>"`** — a human decision would unlock work. Rewrite `tapestry.html` first, leading with the background the human needs and the options; then keep working on what isn't blocked. `--clear` withdraws it.
 - **`shuttle handoff`** — the next slice needs a fresh worker: context is running low, at a sub-task boundary. `shuttle set-agent <id> <agent>` first to change who comes next. A standing run always hands off, which keeps its schedule; it asks first when its constitution says the run needs review.
-- **`shuttle rest`** — the human drove this session and nothing needs review; the card goes back to Resting.
+- **`shuttle rest`** — the human drove this session and nothing needs review; the card goes back to Resting. Not for a standing run: rest would pause its schedule, so it refuses one's own worker.
 - **Nothing** — an ordinary conversational pause. A worker idle with nothing of its own running shows as the human's turn; one waiting on its background jobs or subagents stays Working.
 
 The human's words name the command, not a summary: "hand off" means `handoff`; "close out", "wrap it up" or "I'm done for now" mean `close`, even with more to do; "rest it" means `rest`.

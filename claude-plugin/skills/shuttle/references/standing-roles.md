@@ -46,7 +46,7 @@ schedule's next tick rather than catching up occurrences it was stopped across.
 Due-ness is computed from the cron against the role's last service (the later
 of `shuttle.runtime.dispatched_at` and `handed_off_at`, or creation) — nothing
 due is stored, so a manual ad-hoc dispatch **cannot consume the next scheduled
-slot**. A tick missed while the daemon was down or the laptop asleep fires once
+slot** (an ad-hoc run still in flight across a tick concludes after it, so that tick is served by the ad-hoc run). A tick missed while the daemon was down or the laptop asleep fires once
 on the next poll; a worker that exited while the daemon was down has its run
 concluded at its dispatch instant, so that catch-up still fires.
 

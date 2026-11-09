@@ -405,8 +405,6 @@ defmodule Shuttle.Poller.Snapshot do
   defp format_block_reason({tag, message}) when Shuttle.Dispatcher.refusal?(tag, message),
     do: message
 
-  defp format_block_reason({:occurrence_rearm_failed, message}), do: message
-
   defp format_block_reason({:arm_refused, %{message: message}}),
     do: "start refused: #{message}"
 

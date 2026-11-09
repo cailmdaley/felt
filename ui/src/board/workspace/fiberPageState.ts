@@ -21,7 +21,7 @@ export function standing(card: KanbanCard): boolean {
 /** A constitution on a clock that Rest stops: a standing one's cron, or a
  *  seat's pulse. Its Rest pauses that schedule and takes no wake day. */
 export function scheduled(card: KanbanCard): boolean {
-  return standing(card) || (isAgentCard(card) && !card.isCycle && !!card.shuttlePulse)
+  return standing(card) || (isAgentCard(card) && !card.isCycle && card.shuttleSeat === true && !!card.shuttlePulse)
 }
 /** A scheduled constitution whose schedule is paused (`status: open`): it
  *  fires again only once its schedule is resumed. */

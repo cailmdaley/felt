@@ -530,7 +530,7 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			status:   felt.StatusClosed,
 			own:      "testhost",
 			neverRun: true,
-			want:     []string{"closed (NOT armed", "→ To review — closed, awaiting a verdict", "shuttle reopen role"},
+			want:     []string{"closed (NOT armed", "→ Closed without a verdict, off its schedule", "shuttle reopen role"},
 		},
 		{
 			name:   "paused",

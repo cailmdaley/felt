@@ -178,3 +178,21 @@ func TestConcludeRunCommand(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// A standing run's own worker cannot pause its schedule by resting.
+func TestStandingWorkerRestRefused(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "test-host")
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "work", felt.StatusActive, standingBlockFixture(dir, nil), nil)
+	f := dispatchWorker(t, st, "work", time.Now().Add(-time.Hour))
+	env.Set("SHUTTLE_FIBER_PATH", f.Path)
+	stubWorkerExitTmux(t, env, shuttleTmuxSessionName(f.ID, f.UID), f.Path)
+	if _, err := runIn(t, env, dir, "rest"); err == nil || !strings.Contains(err.Error(), "shuttle handoff") {
+		t.Fatalf("own standing rest must refuse: %v", err)
+	}
+	if got := mustRead(t, st, "work"); got.Status != felt.StatusActive {
+		t.Fatalf("refused rest changed status to %s", got.Status)
+	}
+}
