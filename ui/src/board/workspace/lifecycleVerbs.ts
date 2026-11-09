@@ -44,7 +44,8 @@ export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lifecycle
  *  schedule, and retire it. */
 export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): LifecycleVerb[] {
   const reachable = lifecycleVerbsFor(card, canRest)
-  if (card.column === 'roles') return []
+  // A seat at rest keeps only its clock: a scheduled one can pause or resume it.
+  if (card.column === 'roles') return scheduled(card) ? reachable.filter(verb => verb === 'rest') : []
   if (standing(card)) return reachable
   if (card.column === 'awaitingReview') return reachable.filter(verb => verb === 'temper' || verb === 'discard')
   if (card.column === 'inFlight' || hasLiveWorker(card)) return reachable.filter(verb => verb === 'review' || verb === 'rest')

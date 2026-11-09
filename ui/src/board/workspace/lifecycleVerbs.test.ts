@@ -54,4 +54,11 @@ describe('a seat with a pulse names Rest as its schedule’s', () => {
     expect(verbSpec('rest', card(atRest)).label).toBe('Resume schedule')
     expect(verbSpec('rest', card({ id: 'plain', status: 'active', shuttleKind: 'oneshot' })).label).toBe('Rest')
   })
+
+  it('keeps its clock in the header while resting among the Roles', () => {
+    const seat = { id: 'post', status: 'active', shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'vizier', column: 'roles' } as const
+    expect(labels(headerLifecycleVerbsFor(card(seat), true), seat)).toEqual(['Pause schedule'])
+    const plain = { id: 'desk', status: 'open', shuttleKind: 'oneshot', shuttleSeat: true, shuttleRole: 'editor', column: 'roles' } as const
+    expect(headerLifecycleVerbsFor(card(plain), true)).toEqual([])
+  })
 })
