@@ -7,14 +7,14 @@
   padding: 4px 16px;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
-.ws-band-identity { flex: 1 1 0; display: flex; align-items: baseline; gap: 0 12px; min-width: 0; }
+.ws-band-identity { flex: 1 1 0; display: flex; align-items: center; gap: 0 12px; min-width: 0; }
 .ws-band-title {
   min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--ws-ink); font: 500 var(--type-title)/var(--leading-tight) var(--font-serif);
 }
 .ws-band-thread { color: var(--ws-ink-muted); }
 /* Back sits at the name's left, the way out of the page the band heads. */
-.ws-band-back { flex: none; align-self: center; margin-left: -8px; }
+.ws-band-back { flex: none; margin: 0 -6px 0 -8px; }
 /* One context figure and the cache's warmth: a verdigris dot draining clockwise
    as the entry ages; cold, an alarm-red ring. Context carries its own tint (paintUsage). */
 .ws-band-meter { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; color: var(--ws-ink-muted); white-space: nowrap; font: var(--type-label)/var(--leading-prose) var(--font-mono); }
