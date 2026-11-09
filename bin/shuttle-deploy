@@ -18,7 +18,11 @@
 # A per-tree kernel lease protects preparation and builds from pruning.
 # Hosts already serving the ready target coalesce without another cycle.
 # A host whose harness plugins disagree with its felt build fails after its daemon
-# step has run. Each host builds its CLI and daemon using its login-shell
+# step has run. A Linux x86_64 host with glibc 2.28 or newer builds nothing:
+# the deploy host builds its artifacts once per run (static CLIs, and a daemon
+# release with its own ERTS from an EL8 container: scripts/build-linux-release.sh)
+# and every such host unpacks them. Any other host, or any host when the deploy
+# host has no container runtime, builds its CLI and daemon using its login-shell
 # environment, and its UI too unless it is marked `"build_ui": false` — see the
 # bundle note below. The operator agent registry is synced too: the board reads
 # the local registry, while owner-routed mutations resolve agents on the
@@ -699,6 +703,36 @@ ensure_local_ui() {
   LOCAL_UI_BUILT=1
 }
 
+# Linux artifacts are built once per run, from the pinned local tree under its
+# lease, the first time a host can take them. A failed build is not retried;
+# its hosts build for themselves.
+LINUX_BUILT=0 # 0 untried, 1 built, 2 failed
+ensure_linux_artifacts() {
+  case "$LINUX_BUILT" in 1) return 0 ;; 2) return 1 ;; esac
+  say "Linux artifacts ($TARGET_SHA, built here once for every Linux host)"
+  if run_transaction "" "$REPO" linux "" "" "$UI_SNAPSHOT"; then
+    LINUX_BUILT=1 LOCAL_UI_BUILT=1
+  else
+    LINUX_BUILT=2
+    return 1
+  fi
+}
+
+# Why a host cannot run the shipped artifacts; empty when it can. The release's
+# native code needs x86_64 and the system glibc (the one /lib64's loader uses).
+shipped_refusal() { # host
+  local probe arch glibc
+  command -v container >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 \
+    || { echo "the deploy host has no container runtime"; return; }
+  probe="$(run_value "$1" 'uname -sm; /usr/bin/getconf GNU_LIBC_VERSION 2>/dev/null || getconf GNU_LIBC_VERSION')" \
+    || { echo "could not probe its platform"; return; }
+  arch="$(printf '%s\n' "$probe" | sed -n 1p)"
+  glibc="$(printf '%s\n' "$probe" | sed -n '2s/^glibc //p')"
+  [ "$arch" = "Linux x86_64" ] || { echo "it is $arch, not Linux x86_64"; return; }
+  [ -n "$glibc" ] && [ "$(printf '2.28\n%s\n' "$glibc" | sort -V | head -n 1)" = 2.28 ] \
+    || echo "its glibc ${glibc:-is unknown} is older than 2.28"
+}
+
 # Ship ui/dist into a non-building host's checkout. --delete because ui/dist is
 # wholly generated: a file left from an older bundle is never referenced by the
 # new index.html and only accumulates.
@@ -949,6 +983,32 @@ $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
     || { bad "could not activate, verify and release on ${HOST:-local}"; return 1; }
 }
 
+# Place shipped artifacts as `make build && make cli-install` would: the CLIs
+# in the tree and ~/.local/bin, the release as a new generation behind
+# bin/rel-built, marked .assembling until the symlink names it.
+install_shipped_cmd() { # tree, shipped directory
+  cat <<SH
+set -eu
+tree=$(shell_quote "$1")
+ship=$(shell_quote "$2")
+for cli in felt shuttle; do
+  install -m 755 "\$ship/\$cli" "\$tree/\$cli"
+  mkdir -p "\$HOME/.local/bin"
+  install -m 755 "\$ship/\$cli" "\$HOME/.local/bin/.\$cli.new"
+  mv -f "\$HOME/.local/bin/.\$cli.new" "\$HOME/.local/bin/\$cli"
+done
+mkdir -p "\$tree/bin"
+assembly=\$(mktemp -d "\$tree/bin/.rel.assembly-XXXXXXXX")
+generation="\$tree/bin/rel.generation-\${assembly##*-}"
+touch "\$assembly/.assembling"
+mv "\$assembly" "\$generation"
+tar -xzf "\$ship/rel.tar.gz" -C "\$generation"
+python3 -c 'import os,sys; dest,gen=sys.argv[1:]; os.symlink(os.path.basename(gen), gen+".link"); os.replace(gen+".link",dest)' "\$tree/bin/rel-built" "\$generation"
+rm "\$generation/.assembling"
+printf 'installed shipped CLIs and release %s\\n' "\$generation"
+SH
+}
+
 built_release() {
   local path="$1/bin/rel"
   [ ! -d "$1/bin/rel-built" ] || path="$1/bin/rel-built"
@@ -976,24 +1036,44 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
     cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
     return 0
   fi
+  if [ "$MODE" = linux ]; then
+    [ -x "$tree/scripts/build-linux-release.sh" ] \
+      || { bad "build Linux artifacts: $TARGET_SHA predates scripts/build-linux-release.sh"; return 1; }
+    if [ ! -f "$tree/ui/dist/index.html" ]; then
+      deploy_step 'build UI'
+      bash -c "cd $(shell_quote "$tree") && make ui" 5>&- || { bad 'build UI: failed'; return 1; }
+    fi
+    cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
+    deploy_step 'build Linux artifacts'
+    [ -z "$DEPLOY_VERSION" ] || export SHUTTLE_VERSION="$DEPLOY_VERSION" GOFLAGS="-ldflags=-X=main.version=$DEPLOY_VERSION -X=main.commit=$TARGET_COMMIT"
+    bash "$tree/scripts/build-linux-release.sh" "$tree" "$LINUX_OUT" 3>&- 4>&- 5>&- \
+      || { bad 'build Linux artifacts: failed'; return 1; }
+    return 0
+  fi
   EXPECTED_RELEASE="$(built_release "$tree")" || return 1
   deploy_step 'inspect current release'
   before="$(version_json || true)"
   if target_is_live "$before"; then
     ok "already ready on $TARGET_SHA at $EXPECTED_RELEASE; coalescing without a daemon cycle"
   else
-    if [ "$SKIP_UI" = 1 ]; then
+    if [ -f "$STAGE/ui/dist/index.html" ]; then
       rm -rf "$tree/ui/dist" && mkdir -p "$tree/ui/dist" && cp -R "$STAGE/ui/dist/." "$tree/ui/dist/" \
         || { bad 'ship UI: could not publish the staged bundle'; return 1; }
     fi
-    deploy_step 'build/install CLIs'
-    cmd="$(build_checkout_cmd "$tree" "$SKIP_UI")"
-    case "${BUILD_WRAP%% *}" in
-      srun|*/srun)
-        case " $BUILD_WRAP " in *' --immediate'*|*' -I'*) ;; *) BUILD_WRAP="$BUILD_WRAP --immediate=900";; esac;;
-    esac
-    [ -z "$BUILD_WRAP" ] || cmd="$BUILD_WRAP bash -lc $(shell_quote "$cmd")"
-    bash -c "$cmd" 5>&- || { bad 'build/install CLIs: failed'; return 1; }
+    if [ -f "$STAGE/linux/rel.tar.gz" ]; then
+      deploy_step 'install shipped CLIs and release'
+      bash -c "$(install_shipped_cmd "$tree" "$STAGE/linux")" 3>&- 4>&- 5>&- \
+        || { bad 'install shipped CLIs and release: failed'; return 1; }
+    else
+      deploy_step 'build/install CLIs'
+      cmd="$(build_checkout_cmd "$tree" "$SKIP_UI")"
+      case "${BUILD_WRAP%% *}" in
+        srun|*/srun)
+          case " $BUILD_WRAP " in *' --immediate'*|*' -I'*) ;; *) BUILD_WRAP="$BUILD_WRAP --immediate=900";; esac;;
+      esac
+      [ -z "$BUILD_WRAP" ] || cmd="$BUILD_WRAP bash -lc $(shell_quote "$cmd")"
+      bash -c "$cmd" 5>&- || { bad 'build/install CLIs: failed'; return 1; }
+    fi
   fi
   if [ -n "$SNAPSHOT" ]; then
     cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
@@ -1026,7 +1106,7 @@ target_is_live() {
 
 transaction_script() {
   local name
-  for name in TARGET_COMMIT TARGET_SHA DEPLOY_REF DEPLOY_VERSION BOLD GREEN RED RESET; do
+  for name in TARGET_COMMIT TARGET_SHA DEPLOY_REF DEPLOY_VERSION LINUX_OUT BOLD GREEN RED RESET; do
     printf '%s=%s\n' "$name" "$(shell_quote "${!name}")"
   done
   printf 'SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=%s\nSHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=%s\n' \
@@ -1035,7 +1115,7 @@ transaction_script() {
     "$(shell_quote "${1:-local}")" "$(shell_quote "$2")" "$(shell_quote "$3")" \
     "$(shell_quote "$4")" "$(shell_quote "$5")" "$(shell_quote "$6")" "$(shell_quote "$7")"
   declare -f shell_quote ok bad run_local deploy_step deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
-    build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
+    build_checkout_cmd install_shipped_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
     version_ready version_launch_health built_release target_is_live wait_for_sha release_quarantine release_verified_deploy finish_verified_deploy verify_and_release activation_window prune_deploy_cmd \
     remember_previous_cmd refresh_checkout_cmd harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
     remote_host_cycle host_transaction
@@ -1113,13 +1193,22 @@ exit \"\$status\""
 }
 
 deploy_remote() {
-  local host="$1" dir dest flags stage
+  local host="$1" dir dest flags stage refusal
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dest:$dir)"
   ssh $flags "$dest" true || try_handshake "$host" \
     || { bad 'ssh: could not establish a connection'; return 1; }
   stage="$(run_value "$host" 'mktemp -d')" || { bad 'stage: failed'; return 1; }
-  if ! builds_ui "$host"; then
+  refusal="$(shipped_refusal "$host")"
+  [ -n "$refusal" ] || ensure_linux_artifacts || refusal="the Linux artifact build failed"
+  if [ -z "$refusal" ]; then
+    rsync -az -e "ssh $flags" "$LINUX_OUT/" "$dest:$stage/linux/" \
+      || { bad 'ship Linux artifacts: failed'; return 1; }
+    ok "shipped CLIs and release (built once on $(hostname -s))"
+  else
+    ok "builds on the host: $refusal"
+  fi
+  if [ -z "$refusal" ] || ! builds_ui "$host"; then
     ship_ui "$dest" "$stage" "$flags" || return 1
   fi
   if [ -f "$AGENTS_FILE" ]; then
@@ -1155,6 +1244,7 @@ printf '%s' "$LOCK_SOURCE" > "$LOCAL_TOOL/main.go"
 printf '%s\n' "$LOCK_MOD" > "$LOCAL_TOOL/go.mod"
 GOMAXPROCS=2 GOFLAGS=-p=2 go build -C "$LOCAL_TOOL" -o lock . || exit 1
 UI_SNAPSHOT="$RUN_DIR/ui"
+LINUX_OUT="$RUN_DIR/linux"
 mkdir -p "$UI_SNAPSHOT"
 
 FAILED=""

@@ -1049,3 +1049,79 @@ version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-0
 		t.Fatalf("wrong daemon version accepted: %v\n%s", err, out)
 	}
 }
+
+func TestDeployHostInstallsShippedArtifactsWithoutBuilding(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	events := filepath.Join(dir, "events")
+	home := filepath.Join(dir, "home")
+	ship := filepath.Join(dir, "stage", "linux")
+	release := filepath.Join(dir, "release")
+	for _, path := range []string{filepath.Join(dir, "sha"), filepath.Join(dir, "stage", "ui", "dist"), ship, filepath.Join(release, "bin"), home} {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, body := range map[string]string{
+		filepath.Join(dir, "stage", "ui", "dist", "index.html"): "bundle",
+		filepath.Join(ship, "felt"):                             "felt-linux",
+		filepath.Join(ship, "shuttle"):                          "shuttle-linux",
+		filepath.Join(release, "bin", "shuttled"):               "launcher",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := exec.Command("tar", "-czf", filepath.Join(ship, "rel.tar.gz"), "-C", release, ".").CombinedOutput(); err != nil {
+		t.Fatalf("tar: %v\n%s", err, out)
+	}
+	harness := `ok() { :; }
+bad() { echo "$1" >&2; }
+deploy_step() { :; }
+previous_deploy() { :; }
+revision_checkout_cmd() { printf '%s' 'echo "prepare pinned" >> "$EVENTS"'; }
+version_json() { :; }
+target_is_live() { return 1; }
+make() { printf 'make %s\n' "$*" >> "$EVENTS"; }
+export -f make
+config_migration_cmd() { :; }
+remote_host_cycle() { printf 'cycle %s\n' "$(built_release "$1")" >> "$EVENTS"; }
+finish_verified_deploy() { :; }
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "install_shipped_cmd") + shellFunction(t, string(script), "built_release") + shellFunction(t, string(script), "host_transaction") + `host_transaction`
+	cmd := exec.Command("bash", "-c", harness)
+	cmd.Env = append(os.Environ(), "HOME="+home, "SOURCE="+dir, "ROOT="+dir, "TARGET_COMMIT=sha", "MODE=deploy", "STAGE="+filepath.Join(dir, "stage"), "SNAPSHOT=", "EVENTS="+events, "SKIP_UI=0", "BUILD_WRAP=", "DEPLOY_VERSION=")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("shipped deploy: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := filepath.Join(dir, "sha")
+	generation, err := filepath.EvalSymlinks(filepath.Join(tree, "bin", "rel-built"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "prepare pinned\ncycle " + generation + "\n"; string(got) != want {
+		t.Fatalf("events = %q; want %q (no make)", got, want)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(tree, "felt"):                     "felt-linux",
+		filepath.Join(tree, "shuttle"):                  "shuttle-linux",
+		filepath.Join(home, ".local", "bin", "felt"):    "felt-linux",
+		filepath.Join(home, ".local", "bin", "shuttle"): "shuttle-linux",
+		filepath.Join(generation, "bin", "shuttled"):    "launcher",
+		filepath.Join(tree, "ui", "dist", "index.html"): "bundle",
+	} {
+		if body, err := os.ReadFile(path); err != nil || string(body) != want {
+			t.Errorf("%s = %q, %v; want %q", path, body, err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(generation, ".assembling")); !os.IsNotExist(err) {
+		t.Errorf("published generation still marked .assembling: %v", err)
+	}
+}

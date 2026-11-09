@@ -47,7 +47,11 @@ export ERL_TOP="$PWD"
 # dependencies. Dropping wx does NOT make the build C++-free: the BEAM JIT is
 # C++, so beam.smp still links libstdc++. Measured on EL8 this lands at
 # GLIBCXX_3.4.21 / GCC_4.2.0, well under the floors the gate enforces.
-./configure --prefix="${prefix}" \
+# OTP_CONFIGURE_FLAGS adds to these: the deploy's shipped release links a
+# static OpenSSL (scripts/build-linux-release.sh), so its crypto NIF loads on
+# hosts with only libcrypto.so.3 as well as on EL8's libcrypto.so.1.1.
+# shellcheck disable=SC2086  # word splitting is the point
+./configure --prefix="${prefix}" ${OTP_CONFIGURE_FLAGS:-} \
   --without-javac --without-wx --without-odbc \
   --without-debugger --without-observer --without-et
 make -j"$(nproc)"

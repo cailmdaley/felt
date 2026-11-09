@@ -245,7 +245,7 @@ Use `--hosts local,hub-a` to deploy a subset.
 
 Push the verified revision, then deploy it on each host:
 
-1. Under the host lock and tree lease, prepare the pinned detached checkout, run `make build`, then explicitly run `make cli-install` in the host's login environment.
+1. Under the host lock and tree lease, prepare the pinned detached checkout. A host taking [shipped artifacts](#what-is-built-where) installs them; any other runs `make build`, then explicitly `make cli-install`, in its login environment.
 2. Prepare the pin-only supervisor migration with the checkout-built CLI.
    Every environment entry except `SHUTTLE_RELEASE` stays verbatim, including
    host identity, proxies, and an absent `TMUX_TMPDIR`.
@@ -281,8 +281,8 @@ This prevents concurrent cooperating starts and start/install races from launchi
 It does not serialize creation of external supervisor definitions or protect direct execution of the release launcher.
 Two supervisors created concurrently can still exist, but their CLI starts cannot own the same endpoint concurrently; remove the unwanted supervisor rather than leaving it to retry.
 
-The helper builds both CLIs, the daemon, and — on every host that is not marked
-`"build_ui": false` — the UI, on that host.
+What each host builds and what it is shipped is set out in
+[what is built where](#what-is-built-where).
 An autonomous worker should deploy a built, tested, independently reviewed change.
 Restarting briefly interrupts the API and board; existing tmux workers keep running.
 Every daemon cycle quarantines fresh launches until `shuttle daemon release`:
@@ -392,6 +392,42 @@ the deployed commit fails the host.
 ### The Rex title helper
 
 On a Mac with Rex, `make cli-install` builds `scripts/shuttle-rex-title.c` into `~/.local/bin/shuttle-rex-title` if nothing is there, then asks macOS for Accessibility once. An ad-hoc-signed grant is bound to the binary's code hash, so deploys never rebuild it. To change the helper, delete the file, remove its entry from the Accessibility list, and grant the new one. It disclaims responsibility on exec, so macOS checks its grant whichever process runs it, and the daemon spawns it four times a second while Rex is in front and every two seconds while it is behind, for as long as voice follows Rex or the board watches it. `lsappinfo listen` tells the daemon which app is in front. `shuttle doctor` reports the state as `Rex session following`.
+
+### What is built where
+
+The deploy host (the Mac running `bin/shuttle-deploy`) builds for itself with
+`make build`. A remote that is Linux x86_64 with a system glibc of 2.28 or newer
+builds nothing: the helper probes `uname -sm` and `/usr/bin/getconf
+GNU_LIBC_VERSION` over SSH, and for every host that qualifies it ships the same
+artifacts, built once per run by `scripts/build-linux-release.sh` from the
+pinned local tree under its lease:
+
+| Artifact | Built | Runs on |
+|---|---|---|
+| `felt`, `shuttle` | `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build` on the Mac | any Linux x86_64, no libc dependency |
+| daemon release (`rel.tar.gz`) | `mix release` in an `almalinux:8` linux/amd64 container, with its own ERTS and the board bundle in `priv/` | glibc ≥ 2.28; OTP links a static OpenSSL, so no host libcrypto |
+| `ui/dist` | `make ui` on the Mac | everywhere |
+
+The remote unpacks them under its host lock and tree lease: the CLIs into the
+tree and `~/.local/bin`, the release as a new `bin/rel.generation-*` behind
+`bin/rel-built`, the bundle into `ui/dist`. Activation, readiness, quarantine
+release, harness setup and rollback are the same transaction as a built host's.
+Shipped hosts still need Git, Python 3 and Go (the lock helper is compiled on
+the host), and no Elixir or Node.
+
+The builder image (EL8, static OpenSSL `EL8_OPENSSL_VERSION`, OTP and Elixir
+from `.github/el8-toolchain.env`) is built once per toolchain recipe and cached
+by the container runtime (Apple's `container`, else `docker`); its first build
+compiles OpenSSL and OTP under emulation. Mix's deps, build and Hex caches
+persist under `~/.cache/felt-linux-release`. The build boots the release in the
+container to prove the crypto NIF loads, then gates it with
+`scripts/check-glibc-floor.sh`.
+
+A host builds for itself, and the deploy log says why, when it is another OS or
+architecture, its glibc is older than 2.28, the deploy host has no container
+runtime, the artifact build failed, or the target revision predates
+`scripts/build-linux-release.sh`. `build_wrap` and `build_ui` apply only to
+such a host.
 
 ### The bundle on a host that does not build it
 
