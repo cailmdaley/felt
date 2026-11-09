@@ -61,7 +61,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
     case 'scroll':
       if (fields(p, ['intent', 'instant']) && typeof p.intent === 'string') return SCROLL_INTENTS.includes(p.intent) && (p.instant === undefined || typeof p.instant === 'boolean')
       return fields(p, ['x', 'y']) && coordinate(p.x) && coordinate(p.y)
-    case 'restore': return fields(p, ['x', 'y']) && coordinate(p.x) && coordinate(p.y)
+    case 'restore': return fields(p, ['x', 'y', 'clamp']) && coordinate(p.x) && coordinate(p.y) && (p.clamp === undefined || typeof p.clamp === 'boolean')
     case 'fit': return fields(p, [])
     case 'height': return fields(p, ['height']) && coordinate(p.height) && p.height > 0
     case 'swipe':
@@ -264,7 +264,9 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
       let sent = 0, frame = 0
       const measure = (): void => {
         frame = 0
-        const height = Math.ceil(Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0))
+        // The root's scroll height never falls below the frame's, so a page that
+        // shrank is measured by its own box.
+        const height = Math.ceil(Math.max(document.documentElement.getBoundingClientRect().height, document.body?.scrollHeight ?? 0))
         if (height !== sent) { sent = height; send('height', { height }) }
       }
       const schedule = (): void => { if (!frame) frame = requestAnimationFrame(measure) }
@@ -277,6 +279,8 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     else if (data.type === 'restore' && Number.isFinite(payload.x) && Number.isFinite(payload.y)) {
       cancelRestore()
       pendingRestore = { x: Math.max(0, payload.x), y: Math.max(0, payload.y) }
+      // A loaded page clamps at once; one still laying out holds the offset a while.
+      if (payload.clamp === true) return restore(true)
       restoreTimer = setTimeout(() => restore(true), 3000)
       restore()
     } else if (data.type === 'scroll' && active) {

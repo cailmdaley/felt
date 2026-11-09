@@ -33,6 +33,9 @@ beforeEach(() => {
   })
 })
 
+/** The replacement frame, loading out of sight beside the shown one. */
+const staged = (viewer: HTMLElement): HTMLIFrameElement => viewer.querySelector<HTMLIFrameElement>('iframe[style*="opacity"]')!
+
 describe('workspace file viewer hooks', () => {
   it('pins viewport-height units in styles, leaving prose untouched', () => {
     const html = `<style>.a { height: 100vh; min-height: 12.5svh; max-height: .5dvh }</style><p style="height: 25lvh; margin: -1.25vh">100vh</p>`
@@ -170,10 +173,14 @@ describe('workspace file viewer hooks', () => {
     expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
 
     watch.content!('<h1>Second</h1>')
-    const next = viewer.querySelectorAll('iframe')[1]
-    expect(viewer.querySelector('iframe')).toBe(initial)
+    const next = staged(viewer)
+    expect(viewer.querySelector('iframe:not([style])')).toBe(initial)
     expect(initial.srcdoc).toContain('First')
+    // Moving a frame reloads it: the staged frame stays where it loaded.
+    const moved = new MutationObserver(() => {})
+    moved.observe(viewer, { childList: true })
     ready(next)
+    expect(moved.takeRecords().flatMap(record => [...record.addedNodes, ...record.removedNodes])).toEqual([initial])
     expect(viewer.querySelector('iframe')).toBe(next)
     expect(onFrame).toHaveBeenLastCalledWith(next, true)
   })
@@ -189,7 +196,7 @@ describe('workspace file viewer hooks', () => {
     expect(onState).toHaveBeenLastCalledWith({ status: 'error', error, hasContent: true })
     expect(viewer.querySelector('iframe')!.srcdoc).toContain('First')
     watch.content!('Second')
-    const staging = viewer.querySelectorAll('iframe')[1]
+    const staging = staged(viewer)
     disposeFileViewer(viewer)
     onState.mockClear()
     ready(staging)
@@ -207,7 +214,7 @@ describe('workspace file viewer hooks', () => {
     const first = viewer.querySelector('iframe')!
     expect(frameBridge(first)).toBeDefined()
     watch.content!('Changed before initial readiness')
-    const next = viewer.querySelectorAll('iframe')[1]
+    const next = staged(viewer)
     ready(next)
     expect(frameBridge(first)).toBeUndefined()
     expect(removed.mock.calls.filter(([event]) => event === 'message')).toHaveLength(1)
@@ -234,7 +241,7 @@ describe('workspace file viewer hooks', () => {
     message(first, 'ready', { media: false })
     expect(onWeight.mock.calls).toEqual([[2]])
     watch.content!('A light replacement')
-    ready(viewer.querySelectorAll('iframe')[1])
+    ready(staged(viewer))
     expect(onWeight.mock.calls).toEqual([[2], [1]])
   })
 
@@ -248,8 +255,7 @@ describe('workspace file viewer hooks', () => {
     watch.content!('Changed')
     watch.recover!()
     expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error' }))
-    const staged = viewer.querySelectorAll('iframe')[1]
-    ready(staged)
+    ready(staged(viewer))
     expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
   })
 
@@ -346,7 +352,7 @@ describe('workspace file viewer hooks', () => {
     expect(onWeight).toHaveBeenLastCalledWith(3)
 
     watch.content!('<h1>Revised report</h1>' + html)
-    frame = viewer.querySelectorAll('iframe')[1]
+    frame = staged(viewer)
     ready(frame)
     expect(onWeight).toHaveBeenLastCalledWith(1)
     layout(frame)

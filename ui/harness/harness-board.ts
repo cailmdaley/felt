@@ -1774,6 +1774,7 @@ try {
     events: harnessEvents,
     windowless,
     nativeFiles: nativeWorkspaceFiles,
+    files: workspaceFixture?.files,
     feedSpanMs: FEED_SPAN_MS,
     feedFromMs: now - FEED_SPAN_MS,
     feedToMs: now,

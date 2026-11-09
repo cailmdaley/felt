@@ -17,6 +17,8 @@ describe('bounded document messages', () => {
     expect(documentMessage(envelope('select', { candidate: 'x'.repeat(257) }))).toBe(false)
     expect(documentMessage(envelope('unknown', {}))).toBe(false)
     expect(documentMessage(envelope('scroll', { x: 0, y: Infinity }))).toBe(false)
+    expect(documentMessage(envelope('restore', { x: 0, y: 2500, clamp: true }))).toBe(true)
+    expect(documentMessage(envelope('restore', { x: 0, y: 2500, clamp: 'yes' }))).toBe(false)
     expect(documentMessage(envelope('key', { key: 'ArrowRight', altKey: 'yes' }))).toBe(false)
     expect(documentMessage(envelope('references:resolved', { targets: [{ candidate: 'a', title: 'a'.repeat(257), audio: false }] }))).toBe(false)
   })

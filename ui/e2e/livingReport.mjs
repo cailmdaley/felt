@@ -4,6 +4,17 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { familySends, familyTree, openThread, pageBack, sentFiles, showFile, threadRow } from './familyNav.mjs'
 
+const REPORT = '/calibration-report/report.html'
+/** The report's bytes as its owner serves them; the board's watcher finds a change on its next poll. */
+async function serve(page, html) {
+  await page.evaluate(([html, suffix]) => {
+    window.__harness.files.find(file => file.path.endsWith(suffix)).body = new Blob([html], { type: 'text/html' })
+  }, [html, REPORT])
+  await page.clock.runFor(4_000)
+}
+const grown = html => html.replace('<h2 id="conclusions">', `<h2 id="grown">A new section</h2>${'<p>More of the report.</p>'.repeat(40)}<h2 id="conclusions">`)
+const shrunk = html => html.replace(/<p>Report line 21:[\s\S]*<\/body>/, '<p id="shrunk">The rest was cut.</p></body>')
+
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
 const selected = page => page.locator('.ws-page.ws-selected')
@@ -32,6 +43,51 @@ async function report(page) {
   await page.waitForTimeout(100)
 }
 export function registerLivingReportJourneys(test) {
+  test('A live rewrite keeps the reader in place, on the report\'s page and unfolded on its family\'s page', async page => {
+    await page.goto(url)
+    const original = await page.evaluate(suffix => window.__harness.files.find(file => file.path.endsWith(suffix)).body.text(), REPORT)
+    await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header) .kbn-card-name').click()
+    await selected(page).waitFor()
+    await showFile(page, REPORT)
+    await frame(page).locator('#report-sentinel').waitFor()
+    const inner = async () => (await selected(page).locator('iframe').elementHandle()).contentFrame()
+    const reading = async () => (await inner()).evaluate(() => [Math.round(document.scrollingElement.scrollTop), document.scrollingElement.scrollHeight - innerHeight])
+    await (await inner()).evaluate(() => document.scrollingElement.scrollTo(0, 2500))
+    await page.waitForTimeout(200)
+    assert.equal((await reading())[0], 2500)
+    // A section grows below the reader: the new page shows where the old one stood.
+    await serve(page, grown(original))
+    await frame(page).locator('#grown').waitFor({ timeout: 15_000 })
+    assert.equal((await reading())[0], 2500, 'the reader stays at its offset in the rewritten report')
+    // The report shrinks past the reader: the new page shows clamped to its end at once.
+    await serve(page, shrunk(original))
+    await frame(page).locator('#shrunk').waitFor({ timeout: 15_000 })
+    const [cut, end] = await reading()
+    assert.ok(end > 0 && end < 2500, `the shortened report ends above the old offset (${end})`)
+    assert.equal(cut, end, 'the reader lands at the shortened report\'s end, without a pass through its top')
+
+    // Unfolded on the family's page, the report is drawn whole and the page scrolls.
+    await serve(page, original)
+    const head = (await familyTree(page)).locator('.fp-head')
+    await head.locator('.fp-lead').click()
+    await head.frameLocator('.fp-doc iframe').locator('#report-sentinel').waitFor()
+    const scroller = selected(page).locator('.ws-family-scroll')
+    const standing = () => scroller.evaluate(el => [Math.round(el.scrollTop), Math.round(el.querySelector('.fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height)])
+    await page.waitForFunction(() => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000, undefined, { polling: 40 })
+    await scroller.evaluate(el => el.scrollTo(0, 2500))
+    await page.waitForTimeout(200)
+    const [at, tall] = await standing()
+    assert.equal(at, 2500)
+    await serve(page, grown(original))
+    await head.frameLocator('.fp-doc iframe').locator('#grown').waitFor({ timeout: 15_000 })
+    await page.waitForFunction(tall => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height > tall, tall, { polling: 40 })
+    assert.equal((await standing())[0], 2500, 'the family page keeps its offset while the report grows under it')
+    await serve(page, shrunk(original))
+    await head.frameLocator('.fp-doc iframe').locator('#shrunk').waitFor({ timeout: 15_000 })
+    await page.waitForFunction(tall => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height < tall / 2, tall, { polling: 40 })
+    const [held] = await standing(), max = await scroller.evaluate(el => el.scrollHeight - el.clientHeight)
+    assert.equal(held, Math.min(2500, max), 'a shorter report leaves the page at its offset, or clamped to its end')
+  }, { width: 1440, height: 900 }, 'reduce')
   for (const [device, viewport, phone] of [['desktop', { width: 1440, height: 900 }, false], ['phone', { width: 390, height: 844 }, true]]) {
     test(`Living report (${device}): band, fragments, reload ancestry, nested files, sends and family`, async page => {
       const context = page.context()

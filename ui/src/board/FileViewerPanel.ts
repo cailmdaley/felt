@@ -698,8 +698,11 @@ function buildHtmlViewer(
         embedded.bridge = bridge
         bridge.command('active', { active: embedded.active })
         if (options.fit) bridge.command('fit')
-        if (position) bridge.command('restore', position)
-        iframe.replaceWith(frame)
+        // The staged page has loaded at the size it will show at: a shorter one clamps.
+        if (position) bridge.command('restore', { ...position, clamp: true })
+        // Moving a frame reloads its document, so the staged frame already sits
+        // where it will stay and the swap only removes its predecessor.
+        iframe.remove()
         iframe = frame
         htmlWeight = frameWeights.get(frame) ?? byteWeights.get(frame) ?? 1
         publishWeight()
@@ -717,7 +720,7 @@ function buildHtmlViewer(
       stagingFrame = next
       byteWeights.set(next, weight)
       stagingBridge = frameBridge(next) ?? null
-      wrap.append(next)
+      iframe.before(next)
       next.srcdoc = srcdoc
     },
     (error) => {
