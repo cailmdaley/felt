@@ -245,6 +245,41 @@ editing the test.
 - Keep a named example beside the property for each regression worth naming, with its story in a comment.
 - Mutate the rule (off-by-one, a dropped case) and watch the property go red before you trust it.
 
+## 5. The lifecycle model
+
+A constitution's lifecycle crosses three codebases: the board offers a verb,
+the daemon resolves the request, and the Shuttle CLI writes the document. Each
+link is tested on its own against one written model, so that the links cannot
+drift apart.
+
+- **The model:** `ui/harness/lifecycleModel.ts`. A state is kind ×
+  status/verdict × rest × seat × ask × worker, where a worker is `none`, `live`
+  or `gone` (`gone` means the owner holds a worker whose terminal no longer
+  exists). `apply` gives the owner's answer to each request: outcome, CLI
+  write, next state. `VERBS` gives the board's side: when each verb is
+  offered, its word, and the state it promises.
+- **The table:** `daemon/test/fixtures/lifecycle/model.json`, written by
+  `cd ui && npm run lifecycle:model`. `ui/test/lifecycleModel.test.ts` fails
+  while the table is stale.
+- **The links:** `internal/shuttlecli/lifecycle_model_test.go` runs every CLI
+  write the table names on every document. `daemon/test/shuttle/lifecycle_model_test.exs`
+  checks the served column and each `/transition` resolution.
+  `ui/src/board/lifecycleModel.offers.test.ts` checks the board's offers,
+  words and keys.
+- **The fuzz:** `ui/src/board/lifecycleModel.properties.test.ts` mounts the
+  real Desk against a fetch stub that answers from `apply`, then runs random
+  sequences of offered verbs. After each verb it checks that every request
+  was accepted, that the promised state was reached, that the card visibly
+  changed, and that the card is drawn in the owner's column. It runs 25
+  sequences by default. Set `LIFECYCLE_FUZZ_RUNS=1000` for a deep run and
+  `LIFECYCLE_FUZZ_SEED` to replay a reported seed.
+
+To add a request, add it to `REQUESTS` and `apply`, regenerate the table, and
+teach the daemon or Go link what it resolves to. To add a verb, give it
+`offered`, `label` and `reached` in `VERBS`, then teach the fuzz's `perform`
+how a human does it. When a link disagrees with the model, decide which one
+is wrong before you change either.
+
 ## Gotchas
 
 - In vitest, `toEqual([])` passes against `[undefined, undefined]`. Use `toStrictEqual` or `toHaveLength` when the absence of elements is what you're asserting.
