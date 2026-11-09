@@ -1,14 +1,18 @@
 # Writing tapestry.html
 
-The tapestry is the constitution's one page: what this work is, whole, as it stands. It says what was built or found, how the parts fit, how it is used and where it stands. It describes the work, never the latest stretch of it: a reader who has never seen the fiber should leave with the mental model, and one back after a week should find the same map with its present state. Its form follows the work: a visual index to sub-fibers and findings, the slides of a talk being built, PDFs side by side for a paper review. The constitution's chat header shows its thumbnail; clicking opens it full-size.
+The tapestry is the constitution's one page: what this work is, whole, as it stands. It says what was built or found, how the parts fit, how it is used and where it stands. It describes the work, never the latest stretch of it: a reader who has never seen the fiber should leave with the mental model, and one back after a week should find the same picture with its present state. Its form follows the work: a visual index to sub-fibers and findings, the slides of a talk being built, PDFs side by side for a paper review. The constitution's chat header shows its thumbnail; clicking opens it full-size.
 
-## Start with the map
+## The first screen
 
-**Every tapestry opens on a map, and the map is the very first thing on the page.** No title, stamp or status above it: it largely fills the screen, and everything else comes below. Design it before writing any prose: one visual that carries the whole mental model, meaning the parts, how they connect, how someone uses them and what state each is in. Draw it in code: inline SVG, canvas, or the watercolor-and-ink kit in [tapestry_map.py](../assets/tapestry_map.py). If you can't draw it, you don't yet understand the shape.
+**A tapestry opens on one screen that can be read at a glance.** The human comes back after hours or days away, with hundreds of chat lines unread, and this screen is what fills their display. Without scrolling, it tells them what this work is, where it stands, and what needs them, if anything.
 
-**When the work has a primary artifact, the map can be a board.** A paper or a deck shows only what has already landed in it, so a reader back after a day can't see what moved. Make the map a small board with the artifact as one block, beside blocks for what it can't show yet: a new figure, the latest numbers, a lost run, a pending decision. Each block carries the thing itself and its state; a script that re-inlines the artifact keeps the board current with each build.
+**Make it beautiful, and make the beauty carry the state.** The human wants to open their work and enjoy looking at it. Choose the form that fits the shape of this work, and be inventive: a diagram of a pipeline's stages, a chart of a territory, a column of strata, a board, a list set like a page of a good book. Draw it in code: inline SVG, canvas, or the watercolor-and-ink kit in [tapestry_map.py](../assets/tapestry_map.py). The test of any form is that the picture is the summary. A drawing the reader admires and then scrolls past to learn what happened has failed, and so has a status list nobody enjoys opening. For a morning's email, the first screen is the messages that need an answer.
 
-**Everything hangs from the map.** Each region of the map is a section of the page, and a reader sees the whole, then chooses where to dig. Disclose in layers: map, a short paragraph per region, then `<details>`, nested pages and sub-fibers. Keep the page short: two or three screens below the map.
+**When the work has a primary artifact, the first screen can be a board.** A paper or a deck shows only what has already landed in it, so a reader back after a day can't see what moved. Make a small board with the artifact as one block, beside blocks for what it can't show yet: a new figure, the latest numbers, a lost run, a pending decision. Each block carries the thing itself and its state; a script that re-inlines the artifact keeps the board current with each build.
+
+**Everything hangs from the first screen.** Each part of it is a section of the page, and a reader sees the whole, then chooses where to dig. Disclose in layers: first screen, a short paragraph per part, then `<details>`, nested pages and sub-fibers. Keep the page short: two or three screens below the first.
+
+**Test the glance before a stop the human will review.** Take a headless screenshot of the first screen alone and give it to a Haiku subagent with no other context. Ask it what this is, where it stands, and what the human needs to do. Rewrite the screen until its answers are right.
 
 A PR description is this page at the scale of one change.
 
@@ -46,8 +50,8 @@ The second is shorter, tells the reader what to do, and stays true next month. T
 
 ## Shape
 
-**Before `shuttle ask`, rewrite `tapestry.html` to lead with the question, directly below the map.**
-Only the map goes above this opening:
+**Before `shuttle ask`, rewrite `tapestry.html` to lead with the question, directly below the first screen.**
+Only the first screen goes above this opening:
 
 1. **Short background** — pitched at what the human knows since their last engagement, only enough to frame the question.
 2. **Question and options/tradeoffs** — what their view would help with, the alternatives and their costs when there are alternatives.
@@ -59,9 +63,9 @@ Keep working after raising the ask, and clear it when it becomes moot.
 
 Without an outstanding ask, the default skeleton is:
 
-1. **The map, then what this is** — a title and a sentence or two that would make sense to a stranger.
+1. **The first screen, then what this is** — a title and a sentence or two that would make sense to a stranger.
 2. **Where it stands** — a few verdict-bearing sentences, and the action the human takes next if any. Not "we worked on the covariance" but "the cut-sky Gaussian covariance under-covers by 20–35% at low z, so every σ below uses the 200-seed ensemble instead. Nothing needs your decision."
-3. **One section per region of the map** — what it is, how it works, why it is that way. Named for the claim, grouped by meaning, never by when it landed. Every claim carries its receipt — the number, the plot, the command, the sub-fiber — so the reader can challenge it cheaply. A part with its own sub-fiber carries the verdict, the number and the link, **not the argument**.
+3. **One section per part of the first screen** — what it is, how it works, why it is that way. Named for the claim, grouped by meaning, never by when it landed. Every claim carries its receipt — the number, the plot, the command, the sub-fiber — so the reader can challenge it cheaply. A part with its own sub-fiber carries the verdict, the number and the link, **not the argument**.
 4. **Open questions** — short, each one actionable.
 5. **Pointers to depth** — sub-fibers, stats files, the spec, the code. Long derivations live where they were made.
 
@@ -69,7 +73,7 @@ Without an outstanding ask, the default skeleton is:
 
 **Differentiate confidence visibly.** "The bias looks small — m ≈ 2×10⁻³, one field only, treat it as a working number" is a complete and honest finding. An inferred-but-unverified claim says so inline. Never report a result you did not observe.
 
-**Length tracks what it takes to hold the work, not effort.** A session that confirmed the plan changes the state on the map, nothing more.
+**Length tracks what it takes to hold the work, not effort.** A session that confirmed the plan changes the state on the first screen, nothing more.
 
 **Every element earns its place** by changing what the reader understands or decides next. Status badges, provenance panels, effort logs, review histories and considered-alternatives sections rarely do.
 
