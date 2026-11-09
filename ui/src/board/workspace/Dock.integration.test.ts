@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { bandFacts, Dock, stripFacts } from './Dock.js'
+import { alreadyRunningMessage, bandFacts, Dock, stripFacts } from './Dock.js'
 import { clockTime } from '../civilDay.js'
 import { CLAUDE_OPENING_KEY } from '../conversationOpening.js'
 import { card, settle } from '../testFixtures.js'
@@ -588,11 +588,26 @@ describe('session verbs', () => {
 
   it('opens the running worker a start finds', async () => {
     dock.open(task({ sessionUuid: 'prior' }))
-    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'busy-worker' }, 409))
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'busy-worker', terminal: 'rex' }, 409))
     session('Resume').click()
     await settle()
     expect(openWorker).toHaveBeenCalledWith('busy-worker', 'owner')
     expect(saved).toHaveBeenCalledOnce()
+  })
+
+  it('says a held worker it cannot reach received nothing', async () => {
+    dock.open(task({ sessionUuid: 'prior' }))
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'phantom', terminal: null }, 409))
+    session('Resume').click()
+    await settle()
+    expect(band.el.querySelector('.kbn-detail-error')?.textContent).toMatch(/cannot reach its terminal, so nothing opened/)
+    expect(openWorker).not.toHaveBeenCalled()
+    expect(saved).not.toHaveBeenCalled()
+  })
+
+  it('never reads a 409 as a delivered message', () => {
+    expect(alreadyRunningMessage({ tmux_session: 'w', terminal: 'rex' }, true)).toBe('A worker is already running for this fiber; the message was not sent.')
+    expect(alreadyRunningMessage({ tmux_session: 'w', terminal: null }, true)).toMatch(/cannot reach its terminal, so the message was not sent/)
   })
 
   it('names a sessionless conflict and gives the verbs back', async () => {

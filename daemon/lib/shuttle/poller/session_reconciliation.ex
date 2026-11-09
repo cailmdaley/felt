@@ -24,12 +24,13 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # restarting; the workers kept running. Each live session is mapped back to its
   # fiber and re-watched (or killed if the fiber has since closed).
   def adopt_orphans(%State{} = state) do
-    # An {:error, :unknown} scan (wedged tmux, timeout) means the session list
+    # A partial scan (terminals listed, process scan failed) adopts what it
+    # positively saw. An {:error, :unknown} scan (wedged tmux, timeout) means the session list
     # is UNCERTAIN, not empty — adopting off an empty read would boot the
     # daemon believing no workers exist. Skip; the per-poll
     # reconcile_orphaned_sessions adopts them as soon as tmux answers.
     case Poller.list_shuttle_sessions(state) do
-      {:ok, sessions} ->
+      {complete, sessions} when complete in [:ok, :partial] ->
         state = Shuttle.Poller.Discovery.boot_seed(state)
         lookup = candidate_session_lookup(state)
 
@@ -39,7 +40,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
           end)
 
         listings_ok? = Enum.all?(state.felt_stores, &Map.has_key?(state.last_full_listings, &1))
-        complete_adoption(state, listings_ok?)
+        if complete == :ok, do: complete_adoption(state, listings_ok?), else: state
 
       {:error, :unknown} ->
         Logger.warning("tmux session scan unavailable (unknown state); skipping boot adoption")
@@ -54,6 +55,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   def reconcile_orphaned_sessions(%State{} = state, scan, listings_ok?) do
     case scan do
       {:ok, sessions} -> state |> adopt_unwatched(sessions) |> complete_adoption(listings_ok?)
+      {:partial, sessions} -> adopt_orphan_sessions(state, sessions)
       {:error, :unknown} -> state
     end
   end
@@ -72,6 +74,11 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
   defp adopt_unwatched(%State{} = state, sessions) do
     state = %{state | closed_session_retries: Map.take(state.closed_session_retries, sessions)}
+    adopt_orphan_sessions(state, sessions)
+  end
+
+  # A partial inventory adopts what it saw but forgets nothing it missed.
+  defp adopt_orphan_sessions(%State{} = state, sessions) do
     running_sessions = Enum.map(state.running, fn {_, meta} -> meta.session end) |> MapSet.new()
 
     orphan_sessions = Enum.reject(sessions, &MapSet.member?(running_sessions, &1))

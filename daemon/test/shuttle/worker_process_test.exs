@@ -248,4 +248,33 @@ defmodule Shuttle.WorkerProcessTest do
     assert {:error, {:unknown, message}} = WorkerProcess.check_free(PsRunner, @uuid)
     assert message =~ "could not check"
   end
+
+  @tag :tmp_dir
+  test "the Linux /proc walk reads this uid's processes and never reads a stuck one's argv",
+       %{tmp_dir: dir} do
+    {:ok, %{uid: uid}} = File.stat(dir)
+
+    for {pid, stat, cmdline} <- [
+          {812, "812 (bash) S 700 812", "bash\0-l\0/tmp/shuttle-run-leaf-shuttle.42.sh\0"},
+          {813, "813 (claude (x)) S 812 813", "claude\0--resume\0#{@uuid}\0"},
+          {814, "814 (claude) D 812 814", "unreadable"}
+        ] do
+      File.mkdir_p!(Path.join(dir, "#{pid}"))
+      File.write!(Path.join([dir, "#{pid}", "stat"]), stat)
+      File.write!(Path.join([dir, "#{pid}", "cmdline"]), cmdline)
+    end
+
+    File.mkdir_p!(Path.join(dir, "self"))
+
+    assert {:ok, procs} = WorkerProcess.proc_scan(dir, uid)
+
+    assert Enum.sort_by(procs, & &1.pid) == [
+             %{pid: 812, ppid: 700, args: "bash -l /tmp/shuttle-run-leaf-shuttle.42.sh"},
+             %{pid: 813, ppid: 812, args: "claude --resume #{@uuid}"},
+             %{pid: 814, ppid: 812, args: ""}
+           ]
+
+    assert WorkerProcess.session_process(procs, "leaf-shuttle").pid == 812
+    assert {:ok, []} = WorkerProcess.proc_scan(dir, uid + 1)
+  end
 end

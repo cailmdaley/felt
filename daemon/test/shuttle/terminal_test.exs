@@ -445,7 +445,7 @@ defmodule Shuttle.TerminalTest do
       assert ["-c", "/tmp", "bash", "-l", path] = Enum.drop_while(args, &(&1 != "-c"))
 
       on_exit(fn -> File.rm(path) end)
-      assert File.read!(path) == "echo worker\n"
+      assert ["printf " <> _, "echo worker", ""] = String.split(File.read!(path), "\n")
       assert {:ok, %{mode: mode}} = File.stat(path)
       assert Bitwise.band(mode, 0o777) == 0o700
       assert Path.basename(path) =~ "shuttle-run-#{name}."
@@ -571,7 +571,7 @@ defmodule Shuttle.TerminalTest do
       send(pid, :finish_launch)
       assert Task.await(first) == :ok
       assert Task.await(second) == {:error, :already_running}
-      assert File.read!(path) == "echo worker"
+      assert ["printf " <> _, "echo worker"] = String.split(File.read!(path), "\n")
     end
 
     test "different names do not share a launch lock" do
@@ -727,15 +727,17 @@ defmodule Shuttle.TerminalTest do
              )
   end
 
-  test "worker listing requires a successful process scan even with positive terminal names" do
+  test "a failed process scan leaves the terminals' positive names as a partial listing" do
     Process.put(:list_result, {"no server running", 1})
     stub(@absent)
     assert Terminal.list_workers(StubRunner) == {:ok, []}
     Process.put(:ps_result, {"ps failed", 1})
-    assert Terminal.list_workers(StubRunner) == {:error, :unknown}
+    assert Terminal.list_workers(StubRunner) == {:partial, []}
     Process.put(:list_result, {"leaf-01KTHDNZS287ZSSG8X8V59XKWB-shuttle\nother\n", 0})
 
-    assert Terminal.list_workers(StubRunner) == {:error, :unknown}
+    assert Terminal.list_workers(StubRunner) ==
+             {:partial, ["leaf-01KTHDNZS287ZSSG8X8V59XKWB-shuttle"]}
+
     hidden = "hidden-01KTHDNZS287ZSSG8X8V59XKWC-shuttle"
     Process.put(:ps_result, {String.replace(@run_script_ps, "leaf-01ABC-shuttle", hidden), 0})
 

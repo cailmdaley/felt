@@ -2,9 +2,13 @@ defmodule Shuttle.Terminal do
   @moduledoc """
   Worker terminal lifecycle and conservative liveness policy.
 
-  A terminal or run-script process gives positive `:alive` evidence. Only
-  positive absence from every backend AND a successful process scan finding
-  no run script gives `:gone`. Every other observation is `:unknown`.
+  A terminal or run-script process gives positive `:alive` evidence. A
+  worker's launch receipt (`Shuttle.Terminal.Receipts`) is decisive both ways:
+  its recorded pid running the run script is `:alive`, that pid gone is
+  `:gone`, with no process-table scan. Without a receipt, only positive
+  absence from every backend AND a successful process scan finding no run
+  script gives `:gone` — or, when the scan fails, a pre-receipt launch whose
+  reserved script is gone. Every other observation is `:unknown`.
   Unknown liveness retains a worker with launch evidence, but does not create
   one or prevent a fiber's first launch.
 
@@ -13,7 +17,7 @@ defmodule Shuttle.Terminal do
   """
 
   alias Shuttle.{Dispatcher, WorkerProcess}
-  alias Shuttle.Terminal.{LaunchAttempts, Tmux}
+  alias Shuttle.Terminal.{LaunchAttempts, Receipts, Tmux}
 
   @type status :: :alive | :gone | :unknown
 
@@ -70,10 +74,23 @@ defmodule Shuttle.Terminal do
       Enum.find_value(observations, fn {backend, probe} -> if probe == :present, do: backend end)
     )
 
-    cond do
-      :present in probes -> :alive
-      true -> process_status(runner, name, observations, hd(backends))
+    if :present in probes do
+      :alive
+    else
+      case Receipts.status(runner, name) do
+        :exited -> :gone
+        :running -> unreachable(name, hd(backends))
+        :none -> process_status(runner, name, observations, hd(backends))
+      end
     end
+  end
+
+  defp unreachable(name, backend) do
+    WorkerProcess.warn_once({:unreachable, name}, fn ->
+      "#{backend.id()} cannot see session #{name}, but its run script is running"
+    end)
+
+    :alive
   end
 
   # Bound Rex addresses win. For unbound names, a positive tmux probe avoids
@@ -110,7 +127,7 @@ defmodule Shuttle.Terminal do
           :alive
       end
     else
-      {:error, :unknown} -> :unknown
+      {:error, :unknown} -> if Receipts.legacy_exited?(name), do: :gone, else: :unknown
     end
   end
 
@@ -246,6 +263,7 @@ defmodule Shuttle.Terminal do
          :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)),
          :ok <- LaunchAttempts.clear(name) do
       path = WorkerProcess.script_path(name)
+      {:ok, script_text} = Receipts.put(name, path, script_text)
       Shuttle.FS.write_private!(path, script_text, 0o700)
 
       case LaunchAttempts.record(name, path, %{
@@ -299,8 +317,9 @@ defmodule Shuttle.Terminal do
         refresh_layout(runner, backend)
         await_gone(runner, name, Enum.filter(stop_ladder(), &elem(&1, 0)), opts)
 
+      # An unreachable terminal does not matter once its worker is gone.
       {:error, message} ->
-        {message, 1}
+        if status(runner, name, opts) == :gone, do: {"", 0}, else: {message, 1}
     end
   end
 
@@ -318,7 +337,8 @@ defmodule Shuttle.Terminal do
   def rename(runner, from, to, opts \\ []) do
     backend = holder(runner, from)
 
-    with :ok <- backend.rename(runner, from, to) do
+    with :ok <- backend.rename(runner, from, to),
+         :ok <- Receipts.move(from, to) do
       if backend == Shuttle.Terminal.Rex do
         with :ok <- Shuttle.Terminal.RexBindings.put_fiber(to, opts[:fiber]) do
           refresh_layout(runner, backend)
@@ -351,14 +371,18 @@ defmodule Shuttle.Terminal do
     end
   end
 
-  @doc "Union worker terminals with run-script processes, preserving uncertain observations."
+  @doc """
+  Union worker terminals with run-script processes. `{:partial, names}` when
+  the terminals listed but the process scan failed: every name is live, but a
+  live worker without a visible terminal may be missing.
+  """
   def list_workers(runner) do
     with {:ok, names} <- list_all(runner) do
       listed = Enum.filter(names, &Dispatcher.shuttle_session?/1)
 
       case WorkerProcess.scan(runner) do
         {:ok, procs} -> {:ok, Enum.uniq(listed ++ WorkerProcess.sessions(procs))}
-        {:error, :unknown} -> {:error, :unknown}
+        {:error, :unknown} -> {:partial, listed}
       end
     end
   end
@@ -407,12 +431,18 @@ defmodule Shuttle.Terminal do
   end
 
   # The run script leads its process group, which holds the harness. Signal
-  # both the group and process in case it does not lead one.
+  # both the group and process in case it does not lead one. The launch
+  # receipt names the pid without a process scan.
   defp signal_worker(runner, name, signal) do
-    with {:ok, procs} <- WorkerProcess.scan(runner),
-         %{pid: pid} <- WorkerProcess.session_process(procs, name) do
-      runner.cmd("kill", ["-#{signal}", "--", "-#{pid}", "#{pid}"], stderr_to_stdout: true)
-    end
+    pid =
+      Receipts.running_pid(runner, name) ||
+        with {:ok, procs} <- WorkerProcess.scan(runner),
+             %{pid: pid} <- WorkerProcess.session_process(procs, name),
+             do: pid,
+             else: (_ -> nil)
+
+    if pid,
+      do: runner.cmd("kill", ["-#{signal}", "--", "-#{pid}", "#{pid}"], stderr_to_stdout: true)
 
     :ok
   end

@@ -38,7 +38,9 @@ config :shuttle,
   # And the same for the userspace tailscaled socket under $HOME: no test may
   # dial through the developer's real LocalAPI by default.
   tailscale_home: false,
-  tailnet_dial_test_cacerts_enabled: true
+  tailnet_dial_test_cacerts_enabled: true,
+  # Process scans go through each test's runner (`ps`), never the host's /proc.
+  proc_scan: false
 
 # Test daemon identity. Application start freezes SHUTTLE_HOST when it is set
 # and asks `shuttle host --json` otherwise, so pinning it keeps the suite

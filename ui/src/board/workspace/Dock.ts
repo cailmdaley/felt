@@ -1608,13 +1608,18 @@ export class Dock {
         showError(`Shuttle did not answer (${(err as { message?: string })?.message ?? String(err)}). Check the board before trying again.`)
         return false
       }
-      const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string }
-      if (res.ok || (res.status === 409 && body.tmux_session)) {
+      const body = (await res.json().catch(() => ({}))) as DispatchFailureBody & { tmux_session?: string, terminal?: string | null }
+      // A 409 names the worker the daemon holds. With nothing to deliver, a
+      // reachable one is where the human was going; anything said, or a
+      // worker whose terminal the daemon cannot find, did not arrive.
+      const said = !!message || images.length > 0
+      const reachable = res.status === 409 && !!body.tmux_session && !!body.terminal
+      if (res.ok || (reachable && !said)) {
         this.onSaved()
         if (body.tmux_session && !coarsePointer()) this.onOpenWorker?.(body.tmux_session, card.originId)
         return true
       }
-      if (res.status === 409) showError('A worker is already running for this fiber.')
+      if (res.status === 409) showError(alreadyRunningMessage(body, said))
       else if (inBand() && needsProjectDir(body) && epoch === this.epoch) this.showStartPrompt(card, body, mode, message, images)
       else showError(dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status))
       return false
@@ -2120,4 +2125,10 @@ export class Dock {
         }
     })
   }
+}
+
+/** Why a start answered 409 delivered nothing, in the words the human acts on. */
+export function alreadyRunningMessage(body: { tmux_session?: string, terminal?: string | null }, said: boolean): string {
+  if (body.tmux_session && !body.terminal) return `Shuttle holds a worker for this fiber but cannot reach its terminal, so ${said ? 'the message was not sent' : 'nothing opened'}. Stop it, then resume.`
+  return said ? 'A worker is already running for this fiber; the message was not sent.' : 'A worker is already running for this fiber.'
 }

@@ -51,7 +51,7 @@ defmodule Shuttle.Poller.StandingRoles do
           maybe_mark_dead_standing_role(acc, fiber, live)
         end)
 
-      {:error, :unknown} ->
+      _incomplete ->
         Logger.warning(
           "tmux session scan unavailable (unknown state); skipping dead " <>
             "standing-role reconciliation this tick"

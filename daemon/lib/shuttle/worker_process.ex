@@ -11,7 +11,8 @@ defmodule Shuttle.WorkerProcess do
   two harness processes interleaving one conversation in one worktree. This
   module is how the daemon tells the two apart.
 
-  Holder evidence starts with `ps` over the daemon's own uid:
+  Holder evidence starts with the process table of the daemon's own uid
+  (`/proc` on Linux, `ps` elsewhere):
 
     * **The run script.** Every tmux session the daemon starts runs
       `bash -l <tmp>/shuttle-run-<session>.<n>.sh` (`script_path/1`). The
@@ -56,19 +57,16 @@ defmodule Shuttle.WorkerProcess do
   end
 
   @doc """
-  The processes of this daemon's uid: `ps -ww -o pid=,ppid=,args= -U <uid>`,
-  which Linux procps and macOS ps both accept. `{:error, :unknown}` when the
-  scan cannot answer.
+  The processes of this daemon's uid. On Linux the daemon walks `/proc`
+  itself; elsewhere `ps -ww -o pid=,ppid=,args= -U <uid>`. `ps` walks every
+  process on the host, which on a loaded shared login node outlasts its
+  timeout. `{:error, :unknown}` when the scan cannot answer.
   """
   @spec scan(module()) :: {:ok, [proc()]} | {:error, :unknown}
   def scan(runner) do
     with {:ok, uid} <- own_uid(),
-         {output, 0} <-
-           runner.cmd("ps", ["-ww", "-o", "pid=,ppid=,args=", "-U", uid],
-             stderr_to_stdout: true,
-             timeout_ms: @scan_timeout_ms
-           ) do
-      {:ok, parse(output)}
+         {:ok, procs} <- scan_as(runner, uid) do
+      {:ok, procs}
     else
       failure ->
         warn_once(:scan_failed, fn ->
@@ -77,6 +75,63 @@ defmodule Shuttle.WorkerProcess do
         end)
 
         {:error, :unknown}
+    end
+  end
+
+  defp scan_as(runner, uid) do
+    root = Shuttle.Env.app(:proc_root, "/proc")
+
+    if Shuttle.Env.app(:proc_scan, true) and
+         (Shuttle.Env.app(:os_type) || :os.type()) == {:unix, :linux} and Shuttle.FS.dir?(root) do
+      proc_scan(root, String.to_integer(uid))
+    else
+      case runner.cmd("ps", ["-ww", "-o", "pid=,ppid=,args=", "-U", uid],
+             stderr_to_stdout: true,
+             timeout_ms: @scan_timeout_ms
+           ) do
+        {output, 0} -> {:ok, parse(output)}
+        failure -> failure
+      end
+    end
+  end
+
+  # A process in uninterruptible sleep can block a read of its argv; it is
+  # listed with no args rather than read. The walk as a whole is bounded.
+  @doc false
+  def proc_scan(root, uid) do
+    task =
+      Task.async(fn ->
+        with {:ok, entries} <- Shuttle.FS.ls(root) do
+          {:ok, Enum.flat_map(entries, &proc_entry(root, &1, uid))}
+        end
+      end)
+
+    case Task.yield(task, @scan_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:ok, procs}} -> {:ok, procs}
+      other -> {:proc_scan_failed, other}
+    end
+  end
+
+  defp proc_entry(root, entry, uid) do
+    dir = Path.join(root, entry)
+
+    with {pid, ""} <- Integer.parse(entry),
+         {:ok, %{uid: ^uid}} <- Shuttle.FS.stat(dir),
+         {:ok, stat} <- Shuttle.FS.read(Path.join(dir, "stat")),
+         [state, ppid | _] <- stat |> String.split(") ") |> List.last() |> String.split(" "),
+         {ppid, ""} <- Integer.parse(ppid) do
+      [%{pid: pid, ppid: ppid, args: proc_args(dir, state)}]
+    else
+      _ -> []
+    end
+  end
+
+  defp proc_args(_dir, "D"), do: ""
+
+  defp proc_args(dir, _state) do
+    case Shuttle.FS.read(Path.join(dir, "cmdline")) do
+      {:ok, raw} -> raw |> String.replace(<<0>>, " ") |> String.trim()
+      _ -> ""
     end
   end
 

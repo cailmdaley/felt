@@ -4903,7 +4903,7 @@ defmodule Shuttle.Poller do
     state =
       case sessions do
         {:ok, _names} -> reconcile_fiber_closures(state)
-        {:error, :unknown} -> state
+        _incomplete -> state
       end
 
     state = reconcile_missing_running_sessions(state)
@@ -4914,7 +4914,7 @@ defmodule Shuttle.Poller do
 
     sessions =
       case sessions do
-        {:ok, names} -> {:ok, names -- retired}
+        {complete, names} when complete in [:ok, :partial] -> {complete, names -- retired}
         error -> error
       end
 

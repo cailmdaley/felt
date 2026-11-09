@@ -5440,10 +5440,10 @@ defmodule Shuttle.PollerTest do
                {:ok, ["orphan-01KTHDNZS287ZSSG8X8V59XKW1-shuttle"]}
     end
 
-    test "tmux absence the process scan cannot check is unknown, not empty" do
+    test "tmux absence the process scan cannot check is partial, not empty" do
       MockRunner.set_tmux_server_missing(true)
       MockRunner.set_ps_result({"ps: boom", 1})
-      assert Poller.list_shuttle_sessions(%{runner: MockRunner}) == {:error, :unknown}
+      assert Poller.list_shuttle_sessions(%{runner: MockRunner}) == {:partial, []}
 
       MockRunner.set_ps_result({"", 0})
       assert Poller.list_shuttle_sessions(%{runner: MockRunner}) == {:ok, []}

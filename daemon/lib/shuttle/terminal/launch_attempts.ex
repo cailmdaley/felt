@@ -36,6 +36,17 @@ defmodule Shuttle.Terminal.LaunchAttempts do
     end)
   end
 
+  @doc "The run script a reservation recorded, read without settling the reservation."
+  def recorded_script(name) do
+    with {:ok, raw} <- FS.read(path(name)),
+         script when is_binary(script) <- decode(name, raw)["script"],
+         true <- script_path?(script) do
+      script
+    else
+      _ -> nil
+    end
+  end
+
   def dispatch_pending?(%{"dispatch" => %{"dispatched_at" => stamp}} = info),
     do: info["dispatch_mirrored"] != stamp
 

@@ -197,7 +197,7 @@ defmodule Shuttle.Migration do
         with :ok <- verify_identity(Rex, runner, identity["block_id"], identity),
              :ok <- verify_rex_endpoint(runner, from, identity),
              :ok <- verify_rex_endpoint(runner, to, identity),
-             do: rename(Rex, runner, to, identity)
+             do: renamed(Rex, runner, from, to, identity)
 
       {:ok, false} ->
         reconcile_names(Rex, runner, from, to, identity)
@@ -279,7 +279,7 @@ defmodule Shuttle.Migration do
 
   defp reconcile_name(backend, runner, from, to, true, false, identity) do
     with :ok <- verify_identity(backend, runner, from, identity),
-         do: rename(backend, runner, to, identity)
+         do: renamed(backend, runner, from, to, identity)
   end
 
   defp reconcile_name(backend, runner, _, to, false, true, identity),
@@ -297,6 +297,12 @@ defmodule Shuttle.Migration do
     else
       _ -> {:error, :backend_unobservable}
     end
+  end
+
+  # A renamed terminal keeps its run script's launch receipt.
+  defp renamed(backend, runner, from, to, identity) do
+    with :ok <- rename(backend, runner, to, identity),
+         do: Shuttle.Terminal.Receipts.move(from, to)
   end
 
   defp rename(Rex, runner, to, %{"session_id" => sid, "block_id" => bid}),
