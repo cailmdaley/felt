@@ -18,7 +18,7 @@
     "perf:typing": "npm run harness:board && node e2e/typing.mjs",
     "screenshots:docs": "npm run harness:board && node scripts/capture-docs.mjs",
     "video:docs": "node scripts/render-tour.mjs",
-    "lifecycle:model": "UPDATE_LIFECYCLE_MODEL=1 TZ=America/Los_Angeles vitest run harness/lifecycleModel.test.ts"
+    "lifecycle:model": "UPDATE_LIFECYCLE_MODEL=1 TZ=America/Los_Angeles vitest run test/lifecycleModel.test.ts"
   },
   "dependencies": {
     "@pierre/diffs": "1.6.2",

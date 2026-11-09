@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { apply, lifecycleTable, REQUESTS, STATES, stateKey, VERBS, type Verb } from './lifecycleModel.js'
+import { apply, lifecycleTable, REQUESTS, STATES, stateKey, VERBS, type Verb } from '../harness/lifecycleModel.js'
 
 const TABLE = fileURLToPath(new URL('../../daemon/test/fixtures/lifecycle/model.json', import.meta.url))
 /** The table is read against a fixed instant, so it never depends on the day it was written. */
