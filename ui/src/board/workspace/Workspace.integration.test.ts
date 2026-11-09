@@ -2103,7 +2103,7 @@ describe('a family has one page', () => {
   )
   it('heads its band with the root and acts on the highlighted row, however it is entered and walked', async () => {
     await fc.assert(fc.asyncProperty(trees, fc.array(step, { minLength: 1, maxLength: 8 }), async (parents, steps) => {
-      const ids = ['root', ...parents.map((parent, n) => `t${n + 1}`)]
+      const ids = ['root', ...parents.map((_, n) => `t${n + 1}`)]
       const path = (n: number): string => n === 0 ? 'root' : `${path(parents[n - 1])}/${ids[n]}`
       const feed = ids.map((id, n) => card({
         id: path(n), uid: id, name: id === 'root' ? 'Root' : id, originId: 'host-a', shuttleKind: 'oneshot', status: 'active', path: `${path(n)}.md`,
