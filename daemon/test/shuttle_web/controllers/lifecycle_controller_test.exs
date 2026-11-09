@@ -710,36 +710,34 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              ~s(shuttle exited 1: no fiber found matching "science/cmbx/explorations/spt-talk-push")
   end
 
-  # accept and resume are Shuttle's to write: the controller runs
-  # `shuttle <verb> <fiber> --local` in the fiber's owning store (through
+  # resume is Shuttle's to write: the controller runs
+  # `shuttle resume <fiber> --local` in the fiber's owning store (through
   # the Poller when one is running — none is in this suite) and relays Shuttle's
   # answer. The document write is covered by the CLI's Go tests
   # (internal/shuttlecli/lifecycle_test.go).
-  for verb <- ~w(accept resume) do
-    test "#{verb} runs Shuttle's writer with --local in the owning store" do
-      store = fixture_store!("shuttle-lifecycle-#{unquote(verb)}", "tests/standing", "Standing")
-      args_file = install_fake_cli!()
+  test "resume runs Shuttle's writer with --local in the owning store" do
+    store = fixture_store!("shuttle-lifecycle-resume", "tests/standing", "Standing")
+    args_file = install_fake_cli!()
 
-      conn =
-        post(
-          api_conn(),
-          "/api/v1/lifecycle",
-          Jason.encode!(%{"action" => unquote(verb), "fiber" => "tests/standing"})
-        )
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "resume", "fiber" => "tests/standing"})
+      )
 
-      assert conn.status == 200
-      assert conn.resp_body == "ok\n"
+    assert conn.status == 200
+    assert conn.resp_body == "ok\n"
 
-      assert File.read!(args_file) ==
-               "-C\n#{store}\n#{unquote(verb)}\ntests/standing\n--fiber-path\ntests/standing\n--local\n"
-    end
+    assert File.read!(args_file) ==
+             "-C\n#{store}\nresume\ntests/standing\n--fiber-path\ntests/standing\n--local\n"
   end
 
-  test "accept relays Shuttle's refusal as a 422 with the cobra prefix stripped" do
-    fixture_store!("shuttle-lifecycle-accept-refused", "tests/standing-tempered", "Tempered")
+  test "resume relays Shuttle's refusal as a 422 with the cobra prefix stripped" do
+    fixture_store!("shuttle-lifecycle-resume-refused", "tests/standing-closed", "Closed")
 
     install_fake_cli!("""
-    printf 'Error: fiber tests/standing-tempered is not acceptable (accept requires status active|closed + untempered)\\n' >&2
+    printf 'Error: fiber tests/standing-closed has status: closed; use shuttle reopen to arm it\\n' >&2
     exit 1
     """)
 
@@ -747,14 +745,30 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       post(
         api_conn(),
         "/api/v1/lifecycle",
-        Jason.encode!(%{"action" => "accept", "fiber" => "tests/standing-tempered"})
+        Jason.encode!(%{"action" => "resume", "fiber" => "tests/standing-closed"})
       )
 
     assert conn.status == 422
 
     assert conn.resp_body ==
-             "shuttle exited 1: fiber tests/standing-tempered is not acceptable " <>
-               "(accept requires status active|closed + untempered)"
+             "shuttle exited 1: fiber tests/standing-closed has status: closed; " <>
+               "use shuttle reopen to arm it"
+  end
+
+  test "accept is not a lifecycle action" do
+    fixture_store!("shuttle-lifecycle-accept", "tests/standing", "Standing")
+    args_file = install_fake_cli!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "accept", "fiber" => "tests/standing"})
+      )
+
+    assert conn.status == 400
+    assert conn.resp_body =~ ~s(unknown lifecycle action "accept")
+    refute File.exists?(args_file)
   end
 
   # The lifecycle controller shells felt for fiber-store resolution and

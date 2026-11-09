@@ -526,13 +526,6 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			want:         []string{"owner testhost dispatch hold unknown", "no project_dir, so its worker starts in the felt store", "shuttle resume role --project-dir <dir>"},
 		},
 		{
-			name:         "closed, no project_dir",
-			status:       felt.StatusClosed,
-			own:          "testhost",
-			noProjectDir: true,
-			want:         []string{"→ To review — the next occurrence", "project_dir is missing", "shuttle resume role --project-dir <dir>"},
-		},
-		{
 			name:     "closed never-run draft",
 			status:   felt.StatusClosed,
 			own:      "testhost",
@@ -540,11 +533,11 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			want:     []string{"closed (NOT armed", "→ To review — closed, awaiting a verdict", "shuttle reopen role"},
 		},
 		{
-			name:   "closed",
-			status: felt.StatusClosed,
+			name:   "paused",
+			status: felt.StatusOpen,
 			own:    "testhost",
 			want: []string{
-				"status:      closed (awaiting review", "→ To review — the owner attempts to re-arm", "shuttle accept role",
+				"status:      open (schedule paused", "→ Schedule paused", "shuttle resume role",
 			},
 		},
 	} {

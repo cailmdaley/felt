@@ -144,19 +144,24 @@ shuttle repeat <fiber> \
   --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
 ```
 
-shuttle computes due-ness from the cron expression against now, and stores
-nothing. So no dispatch can silently consume a slot. The
-`active → closed → active` document transition records that an occurrence ran.
+shuttle computes due-ness from the cron expression against the run's last
+service (its dispatch or handoff stamp), and stores nothing. So no dispatch can
+silently consume a slot.
 
-An untempered closed standing run with a dispatch on record stays on Awaiting review until accepted or an occurrence after both its last service and close arrives.
-A never-run closed draft stays closed.
-The next occurrence after both its last service and its close supersedes the unreviewed result and starts fresh work.
-Accepting it (`shuttle accept` or `close --tempered=true` on a recorded run) concludes the run and re-arms it for the schedule's next tick.
-Without a dispatch on record, `close --tempered=true` records an ordinary verdict and leaves the fiber closed.
-The outcome stays the card's headline until the next run writes its own.
-Discard (`close --tempered=false`) ends automatic scheduling, and Rest pauses it by writing `status: open`.
-A stashed horizon alone does not stop a schedule.
-Plain close keeps an existing standing verdict; reopen explicitly clears it.
+A standing constitution has no review. Its cycle is scheduled → running →
+scheduled: a run's exit leaves it `status: active`, its outcome the latest
+digest, and it fires again at the next tick. A run whose content needs you asks
+(`shuttle ask`); the card then waits on your turn with the question, still on
+its schedule. Say in the constitution's body when a run should ask, and what it
+holds until you answer. Keep runs additive: products go to their own channel (a
+notification, an email, a dated file), not only to a field the next run
+overwrites.
+
+Two verbs stop a schedule. **Pause schedule** (`shuttle rest`, `status: open`)
+is undone by **Resume schedule** (`shuttle resume`), which picks it up from the
+next tick. **Retire** (`shuttle close --tempered=false`) ends it; `shuttle
+reopen` brings it back. `shuttle close` refuses a standing constitution without
+`--tempered=false`. A stashed horizon alone does not stop a schedule.
 
 Oneshots alone make a coherent system. Ignore standing until you want it.
 

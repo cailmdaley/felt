@@ -98,9 +98,12 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   // from that: the drag routes it through force-dispatch, which bypasses
   // status, schedule and review gates. Awaiting review is likewise a plain
   // drop — it closes the card with the verdict cleared and stops the worker.
+  // A standing constitution's only column is In flight, to run it now: its
+  // schedule is paused with Rest, and it never waits in Awaiting review.
   for (const target of ['drafts', 'inFlight', 'awaitingReview'] as const) {
     if (column === target) continue
     if (restingSeat && target === 'drafts') continue
+    if (planningIgnored(card) && target !== 'inFlight') continue
     out.push({
       id: target,
       label: COLUMN_TITLES[target],

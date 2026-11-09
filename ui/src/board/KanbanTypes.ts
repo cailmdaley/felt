@@ -71,7 +71,7 @@ export interface KanbanCard {
   createdAt: string
   closedAt?: string
   /** File mtime the owning daemon reports (`modified_at`). Tracks last activity
-   * — a launch/accept/edit rewrites the frontmatter. */
+   * — a launch/rest/edit rewrites the frontmatter. */
   modifiedAt?: string
   tempered?: boolean
   /**

@@ -1076,9 +1076,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A standing constitution asleep on its cron carries a hairline slate left
-   edge, so schedule-driven rows are findable in a cluster at a glance. */
+/* A standing constitution at rest, armed or paused, carries a hairline slate
+   left edge, so schedule-driven rows are findable in a cluster at a glance. */
 .kbn-cluster-item-standing { box-shadow: inset 1.5px 0 0 color-mix(in srgb, var(--kbn-slate) 32%, transparent); }
+/* A standing constitution's schedule: when it next fires, or that it is paused. */
+.kbn-cluster-item-schedule {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--type-meta);
+  font-style: normal;
+  color: var(--kbn-ink-muted);
+}
+.kbn-cluster-item[data-schedule="paused"] .kbn-cluster-item-schedule { font-style: italic; }
 
 .kbn-col {
   display: flex;

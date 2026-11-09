@@ -136,14 +136,14 @@ func TestRemoteResumeLetsOwnerValidateItsDocument(t *testing.T) {
 }
 
 func TestLocalOwnerViewLifecycleCarriesIntrinsicIdentity(t *testing.T) {
-	for _, command := range [][]string{{"rest"}, {"close"}, {"reopen"}, {"accept"}, {"resume"}, {"dispatch"}, {"dispatch", "--release-launch-reservation"}} {
+	for _, command := range [][]string{{"rest"}, {"close"}, {"reopen"}, {"resume"}, {"dispatch"}, {"dispatch", "--release-launch-reservation"}} {
 		verb := command[0]
 		t.Run(strings.Join(command, " "), func(t *testing.T) {
 			env := remoteLifecycleEnv(t)
 			loom, st := newStore(t)
 			status := felt.StatusActive
-			if verb == "accept" || verb == "resume" {
-				status = felt.StatusClosed
+			if verb == "resume" {
+				status = felt.StatusOpen
 			}
 			seedShuttleRole(t, st, "science/team/design/rex", status, map[string]any{"kind": "standing", "schedule": map[string]any{"expr": "0 0 * * *"}, "host": "hub", "project_dir": t.TempDir()}, nil)
 			f, err := st.Read("science/team/design/rex")

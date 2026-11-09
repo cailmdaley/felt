@@ -22,9 +22,8 @@ defmodule Shuttle.Transition do
        availability set by construction (the `resolve ⊆ availability` invariant
        — see `gotcha-shuttle-resolve-invoke-daemon-split`), so a second read
        could only disagree with the first by racing it. Then the mutation:
-       pause/reopen/close shell the Shuttle CLI's frontmatter writer,
-       accept-run runs Shuttle's `accept` inside the Poller, and dispatch-ad-hoc
-       force-dispatches through it.
+       pause/reopen/close shell the Shuttle CLI's frontmatter writer, and
+       dispatch-ad-hoc force-dispatches through the Poller.
 
     3. **Forward branch** = `POST <remote>/api/v1/transition` with `origin`
        omitted, so the owning daemon runs its OWN local branch against its
@@ -41,7 +40,6 @@ defmodule Shuttle.Transition do
   alias Shuttle.{
     ActionQueries,
     FeltStores,
-    LifecycleService,
     OriginRouter,
     Poller,
     RemoteFiberRegistry,
@@ -107,7 +105,7 @@ defmodule Shuttle.Transition do
         {:ok, action}
 
       {:error, reason}
-      when reason in [:unknown_target, :standing_temper_unavailable, :standing_review_unavailable] ->
+      when reason in [:unknown_target, :standing_unreviewed] ->
         {:error, reason}
 
       # Any other resolve failure is an unresolvable fiber (unknown id,
@@ -123,7 +121,7 @@ defmodule Shuttle.Transition do
   # pause / reopen / close shell Shuttle's frontmatter writer (status, tempered,
   # closed-at). The document carries the entire lifecycle (status + tempered) —
   # there is no runtime row to reset, so close/reopen are single document writes
-  # and re-arm/awaiting are recomputed from the document on the next poll.
+  # and dispatch eligibility is recomputed from the document on the next poll.
   defp invoke_action(fiber_id, "pause", felt_store),
     do: run_shuttle("pause", fiber_id, [], felt_store)
 
@@ -136,12 +134,6 @@ defmodule Shuttle.Transition do
   # card lands where it was dropped instead of snapping back.
   defp invoke_action(fiber_id, "reopen-draft", felt_store),
     do: run_shuttle("reopen", fiber_id, ["--as-draft"], felt_store)
-
-  # accept-run goes through `Shuttle.LifecycleService`, which runs Shuttle's
-  # `accept` writer inside the Poller, serialized with its state changes.
-  defp invoke_action(fiber_id, "accept-run", _felt_store) do
-    :accept |> LifecycleService.transition(fiber_id) |> invoke_result()
-  end
 
   defp invoke_action(fiber_id, "close-awaiting-review", felt_store),
     do: run_shuttle("close", fiber_id, [], felt_store)
@@ -175,7 +167,6 @@ defmodule Shuttle.Transition do
   defp invoke_result({:command_error, status, output}),
     do: {:error, {:command_error, status, output}}
 
-  defp invoke_result({:error, :timeout, reason}), do: {:error, reason}
   defp invoke_result({:error, reason}), do: {:error, reason}
 
   # ── Forward branch: relay to the owning remote daemon ──
@@ -217,15 +208,10 @@ defmodule Shuttle.Transition do
   def http_error({:unknown_origin, origin}),
     do: {400, OriginRouter.unknown_origin_message(origin)}
 
-  def http_error(:standing_temper_unavailable),
+  def http_error(:standing_unreviewed),
     do:
       {422,
-       "Accept applies only to an untempered active or closed standing run. Reopen to revive a paused or reviewed constitution, or Rest to put it down."}
-
-  def http_error(:standing_review_unavailable),
-    do:
-      {422,
-       "A standing verdict stays in place on close. Reopen to clear it and start work again."}
+       "A standing constitution has no review: its runs keep the schedule and ask when they need you. Pause its schedule (Rest) or retire it (Discard)."}
 
   def http_error(:unknown_target), do: {400, "unknown_target"}
   def http_error(:already_running), do: {409, "already_running"}

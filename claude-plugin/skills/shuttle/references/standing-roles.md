@@ -1,59 +1,54 @@
 # Standing Constitutions
 
-A standing constitution is an **installed responsibility** — a cron-scheduled fiber that the daemon dispatches recurrently. One fiber, one durable concern, one place the user looks. Email triage. Daily PR survey. Weekly inbox catch-up. The pattern: the human writes the constitution once; shuttle dispatches a worker on the schedule; each run writes its work product into `outcome` and exits to awaiting-review; the human accepts; the cycle repeats.
+A standing constitution is an **installed responsibility** — a cron-scheduled fiber that the daemon dispatches recurrently. One fiber, one durable concern, one place the user looks. Email triage. Daily PR survey. Weekly inbox catch-up. The pattern: the human writes the constitution once; shuttle dispatches a worker on the schedule; each run does the work, delivers its products, and hands off; the schedule carries on. A run that needs the human asks.
 
 This reference covers what is specific to standing constitutions. Board gestures, columns, and verbs are shared across kinds and live in [operating.md](operating.md).
 
 ---
 
-## The cyclic state machine
-
-Lifecycle is `status` + `tempered`, uniform across kinds.
+## The state machine
 
 ```
-                      ┌──────────────┐
-                      │ status:active │ ← armed; dispatches when an occurrence is due
-                      │  (scheduled)  │
-                      └──────┬───────┘
-                             │
-                  cron tick │  daemon dispatches
-                             ▼
-                      ┌──────────────┐
-                      │   running    │ ← live tmux worker (read from tmux, never stored)
-                      │  (inFlight)  │
-                      └──────┬───────┘
-                             │
-                  worker exits │  daemon writes status:closed (untempered)
-                             ▼
-                      ┌──────────────┐
-                      │status:closed │ ← awaiting review; outcome holds latest digest
-                      │ (awaitingRev)│   until accepted or the next occurrence
-                      └──────┬───────┘
-                             │
-          accept or next tick │  serialized re-arm
-                             ▼
-                      ┌──────────────┐
-                      │ status:active │ ← re-armed; next run = the schedule's next tick
-                      │  (scheduled)  │
-                      └──────────────┘
+            ┌────────────────────────┐   cron tick    ┌──────────────┐
+            │ scheduled              │ ─────────────▶ │ running      │
+            │ status: active         │                │ live worker  │
+            │ (Resting, next launch) │ ◀───────────── │              │
+            └───┬────────────▲───────┘  run exits     └──────────────┘
+                │            │          (handoff, or the worker just ends)
+   Pause        │            │ Resume schedule
+   schedule     ▼            │
+            ┌────────────────┴───────┐
+            │ paused                 │        Retire (close --tempered=false)
+            │ status: open           │        ends the schedule from any state
+            └────────────────────────┘
 ```
 
-The `active → closed → active` document transition encodes "already ran this
-occurrence." Due-ness is computed from the cron against the role's last
-service (`shuttle.runtime.dispatched_at` or `handed_off_at`) — nothing due is
-stored, so a manual ad-hoc dispatch **cannot consume the next
-scheduled slot** (the slot is computed, never a stored timestamp a dispatch
-could spend). While a run awaits review (`status: closed` + untempered),
-the card remains on Awaiting review until accepted or the next occurrence after both its last service and close arrives.
-At that occurrence the owning daemon reopens it without concluding the run, then launches fresh work, superseding the unreviewed result.
-A just-closed run cannot re-fire its served occurrence, including after a daemon restart.
+There is no review state. A run's exit leaves the constitution `status: active`
+with `shuttle.runtime.handed_off_at` stamped (by the worker's `shuttle handoff`,
+or by the daemon when the worker exits without one), and it fires again at the
+schedule's next tick. Its `outcome` is kept as the last run's digest.
 
-**`shuttle accept` accepts a run** (re-arms and stamps `handed_off_at`, so it rests until the next tick; the outcome is kept).
-**`shuttle close --tempered=true` does the same for a recorded run**, with the same acceptance gate and next-due message.
-Without a dispatch on record it records an ordinary verdict and leaves the fiber closed.
-**`shuttle close --tempered=false` ends the schedule**; `rest` pauses it.
-Existing verdicts are never automatically cleared; a plain close keeps them too (`reopen` can explicitly bring a retired role back).
-Automatic re-arming requires a dispatch on record, so a never-run closed draft stays closed.
+**Asking is the review surface.** A run whose content needs the human — rows to
+cut, a draft to approve before it sends — ends with `shuttle ask <id>
+"<question>"` and then `shuttle handoff`. The card stays armed and goes in front
+of the human as a question (In flight, Your turn). Answering (a message to the
+fiber) or clearing the ask returns it to Resting. An unanswered ask does not
+stop the next tick: the next run finds it on its fiber and does what its
+constitution says, for example holding a send until it is answered.
+
+**Two verbs stop a schedule:** *Pause schedule* (`shuttle rest`, `status:
+open`), undone by *Resume schedule* (`shuttle resume`), and *Retire* (`shuttle
+close --tempered=false`), undone by `shuttle reopen`. Arming either way concludes
+the run (`handed_off_at = now`), so the constitution next fires at the
+schedule's next tick rather than catching up occurrences it was stopped across.
+`shuttle close` without `--tempered=false` refuses a standing constitution.
+
+Due-ness is computed from the cron against the role's last service (the later
+of `shuttle.runtime.dispatched_at` and `handed_off_at`, or creation) — nothing
+due is stored, so a manual ad-hoc dispatch **cannot consume the next scheduled
+slot**. A tick missed while the daemon was down or the laptop asleep fires once
+on the next poll; a worker that exited while the daemon was down has its run
+concluded at its dispatch instant, so that catch-up still fires.
 
 ---
 
@@ -72,17 +67,15 @@ there; the daemon owns the runtime block.
 
 ## Worker exit handoff
 
-Write the run's work product into `outcome`, rewrite `## Status`, and exit
-with `shuttle handoff` — always, never by setting `status: closed`
-yourself.
-The locked exit write checks the current owner, UID, run id, dispatch timestamp and human lifecycle state, preserving newer runs and human decisions.
-Recovery publishes a recorded scheduled handoff for review; ad-hoc and unrecorded absences do not supply that conclusion.
-Human resume and reopen, including from an open pause, record a rearm distinct from a worker handoff.
-On exit the daemon writes `status: closed` (untempered) for review, unless the run was already accepted and re-armed.
-A scheduled occurrence must be after both the last service and the close to supersede that result.
-The owner's conditional re-arm cleans dirty markers at the old dispatch timestamp, so delayed launches stay armed and always start fresh.
-A verdict prevents automatic re-arming; Rest pauses it by writing `status: open`.
-A stashed horizon alone does not stop scheduling.
+Deliver the run's products, write its digest into `outcome`, rewrite `##
+Status`, and exit with `shuttle handoff` — always. If the constitution asks for
+review under some condition and it holds, `shuttle ask` first. Never close a
+standing constitution yourself: `close` refuses it, and `--tempered=false`
+retires it for good.
+
+The daemon's exit write is conditional on the run it observed (owner, UID, run
+id and dispatch timestamp) and on the constitution still being armed, so a
+newer run, a handoff, or a human pause or retirement is left as it stands.
 
 ---
 
@@ -92,15 +85,13 @@ A stashed horizon alone does not stop scheduling.
 |---|---|
 | Scheduled cron dispatch | **Always fresh** — standing constitutions never auto-resume |
 | Ad-hoc dispatch (kanban drag, `--ad-hoc`) | **Always fresh** |
-| Kanban modal **Resume** on an awaiting run | Resume — the button carries `resume_mode: previous`; session id from `shuttle.runtime.session_uuid` |
+| Board **Resume** on the last run's session | Resume — the button carries `resume_mode: previous`; session id from `shuttle.runtime.session_uuid` |
 | Daemon recovery / orphan adoption | Fresh |
 
 The unifying rule: **resume is opt-in via deliberate gesture, never a
-default.** The failure mode this rules out: dispatching a freshly-accepted
-run with `--resume <uuid>` lands the worker in a transcript whose last turn
-was "Run accepted. Exiting." — it idles instead of running the
-responsibility. After accept, the cycle has rolled over; the next run is a
-*new* run.
+default.** A run that handed off ended its conversation with the handoff;
+dispatching the next run into it would land the worker in a transcript whose
+work is done. The next run is a *new* run.
 
 ---
 
@@ -134,6 +125,11 @@ archive, what to escalate. Read fresh from disk every dispatch.>
 <How the worker should structure its outcome. Tight; skim-able. Section
 headings the user expects.>
 
+## When to Ask
+
+<The conditions under which a run asks for review (`shuttle ask`), and what it
+holds until the ask is answered. Omit it for a role that never needs review.>
+
 ## Standing Exclusions / Edge Cases
 
 <Special-case rules the worker can't derive from "do the thing.">
@@ -148,16 +144,21 @@ dispatch is gated by the `shuttle:` block, never a tag.
 
 ## Patterns
 
-**Outcome is the work product surface.** The kanban card shows it verbatim —
-it is the user's daily skim. A three-section template (Action needed /
-Upcoming / Worth noting) works well.
+**Say when to ask, in the constitution.** Whether a run needs the human is the
+constitution's call, written in its body: "ask for review when the sweep finds
+new rows", "ask before sending a draft to anyone outside the group". A role
+whose output must not take effect unapproved doesn't send until its ask is
+answered, and a later run that finds the ask still open holds too.
 
-**Read the outcome at start.** Accept keeps it, so a fresh run finds the
-previous run's digest there: read it for continuity, then replace it with
-this run's own rather than stacking a second digest on top. On a resume it is
-the awaiting run you are continuing.
+**Runs are additive.** Nothing important lives only in a field the next run
+overwrites. Products go to their own channel — a phone notification, an email, a
+dated file beside the fiber or in the project — with git as the backstop. The
+outcome is the latest digest, not the archive.
 
-**Resume of an awaiting run** (the modal, with a directive) is the
-"rerun this with this directive" path: it dispatches now, into the awaiting
-run's session. `shuttle resume` instead re-arms the role and concludes
-the run, so the next run comes at the schedule's next tick.
+**Outcome is the digest surface.** The card shows it verbatim — it is the
+user's skim. A three-section template (Action needed / Upcoming / Worth noting)
+works well.
+
+**Read the outcome at start.** A fresh run finds the previous run's digest
+there: read it for continuity, then replace it with this run's own rather than
+stacking a second digest on top.

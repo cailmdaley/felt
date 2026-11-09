@@ -15,7 +15,7 @@ import { showToast } from '../utils.js'
 import { coarsePointer } from '../mobile.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
-import { headerLifecycleVerbsFor, iconVerb, verbSpec, type LifecycleVerb } from './lifecycleVerbs.js'
+import { headerLifecycleVerbsFor, iconVerb, labelVerb, type LifecycleVerb } from './lifecycleVerbs.js'
 import { WorkerActions } from './workerActions.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
@@ -986,10 +986,8 @@ export class Dock {
       facts.title = hit === undefined ? '' : `The session's recent turns read ${hit}% of their context tokens from the prompt cache`
       facts.hidden = !facts.textContent
       markVerdictHost(this.head, act)
-      for (const [button, verb, key] of [[review, 'review', 'a'], [rest, 'rest', 's'], [temper, 'temper', 't'], [discard, 'discard', 'x']] as const) {
-        if (!button) continue
-        const label = `${verbSpec(verb).label}${same ? '' : ` ${slug(act)}`} (${key})`
-        button.title = label; button.setAttribute('aria-label', label)
+      for (const [button, verb] of [[review, 'review'], [rest, 'rest'], [temper, 'temper'], [discard, 'discard']] as const) {
+        if (button) labelVerb(button, verb, act, same ? '' : slug(act))
       }
       const offered = headerLifecycleVerbsFor(act, !!this.onRest)
       verdict.hidden = !offered.length

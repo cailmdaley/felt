@@ -15,7 +15,9 @@ defmodule Shuttle.Lifecycle do
   @doc """
   The Desk column: `drafts`, `in_flight`, `awaiting_review`, `tempered`,
   `discarded`, `resting` (a draft put down, or a standing constitution between
-  firings) or `roles` (a seat at rest). `live?` is whether its worker runs;
+  firings or with its schedule paused) or `roles` (a seat at rest). An armed
+  standing constitution whose last run asked a question waits in flight, on
+  the human's turn. `live?` is whether its worker runs;
   `today` is the civil day a `due:` is read against, this host's as
   `shuttle status` reads it.
   """
@@ -29,7 +31,7 @@ defmodule Shuttle.Lifecycle do
       status == "closed" -> "awaiting_review"
       live? -> "in_flight"
       seat_at_rest?(shuttle, status) -> "roles"
-      status == "active" and shuttle["kind"] == "standing" -> "resting"
+      shuttle["kind"] == "standing" and not asking?(fiber) -> "resting"
       status == "active" -> "in_flight"
       stashed?(fiber, today) -> "resting"
       true -> "drafts"

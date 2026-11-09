@@ -18,16 +18,14 @@ defmodule Shuttle.Actions do
 
   @spec resolve_transition(map(), String.t(), boolean()) ::
           {:ok, map()}
-          | {:error,
-             :unknown_target | :standing_temper_unavailable | :standing_review_unavailable}
+          | {:error, :unknown_target | :standing_unreviewed}
   def resolve_transition(fiber, target, running? \\ false)
 
   def resolve_transition(fiber, target, running?) when target in @transition_targets do
     target = normalize_target(target)
 
     case action_for_target(fiber, target, running?) do
-      nil when target == "awaitingReview" -> {:error, :standing_review_unavailable}
-      nil -> {:error, :standing_temper_unavailable}
+      nil -> {:error, :standing_unreviewed}
       action -> {:ok, render_action(action)}
     end
   end
@@ -68,24 +66,11 @@ defmodule Shuttle.Actions do
     status = Map.get(fiber, "status")
 
     cond do
-      standing?(shuttle) and target == "awaitingReview" and not untempered?(fiber) ->
+      # A standing constitution has no review: its runs keep the schedule and
+      # ask when they need the human. Drafts pauses the schedule, composted
+      # retires it, inFlight runs it now; review and temper resolve to nothing.
+      standing?(shuttle) and target in ["awaitingReview", "tempered"] ->
         nil
-
-      standing?(shuttle) and target == "tempered" and
-          (not untempered?(fiber) or status not in ["active", "closed"]) ->
-        nil
-
-      # Temper on a STANDING constitution with no verdict is ACCEPT in every non-draft
-      # state — running (an interactive run just wrapped, worker alive or freshly
-      # killed), armed (`status: active`, exit not yet marked awaiting), or
-      # awaiting (`status: closed`). close_tempered is a ONESHOT terminus;
-      # resolving it here checked a standing constitution off for good (the morning-post
-      # temper bug, 2026-06-12). This clause MUST precede the generic `running?`
-      # clauses — a live or just-killed worker is exactly the state where status
-      # hasn't flipped to closed yet.
-      standing?(shuttle) and untempered?(fiber) and status != "open" and
-          target == "tempered" ->
-        :accept_run
 
       # A live worker: the close columns end it, drafts pauses it. inFlight is
       # the column it already lives in (a no-op same-column drop); resolve it to
@@ -104,32 +89,6 @@ defmodule Shuttle.Actions do
       running? and target == "composted" ->
         :close_composted
 
-      # A CLOSED standing constitution with no verdict (`tempered` unset) is the
-      # new-model AWAITING signal: status:closed + untempered = "ran this cycle,
-      # pending a human verdict" — felt-native, no `review.state`. A STANDING
-      # constitution re-arms to active; a oneshot closes for good. The verdict
-      # gestures for a standing constitution: inFlight/tempered = keep it
-      # (accept-run → advance the schedule), composted = reject (close-composted),
-      # drafts = park the role as a paused draft (reopen-draft — stopping a role
-      # for now is not the same verdict as composting it), awaitingReview = no-op
-      # (a same-column drop stays in review). This clause MUST precede the generic
-      # `status == "closed"` clauses below — those resolve a closed fiber to
-      # reopen/close, which would TERMINATE the role instead of re-arming it
-      # (the slice-1 entanglement). Tempered-true and composted (tempered:false)
-      # closed runs, and every closed oneshot, are termini and fall
-      # through to the generic clauses.
-      status == "closed" and standing?(shuttle) and untempered?(fiber) and
-          target in ["inFlight", "tempered"] ->
-        :accept_run
-
-      status == "closed" and standing?(shuttle) and untempered?(fiber) and
-          target == "composted" ->
-        :close_composted
-
-      status == "closed" and standing?(shuttle) and untempered?(fiber) and
-          target == "awaitingReview" ->
-        :close_awaiting_review
-
       # A closed fiber dragged to Drafts reopens AS A DRAFT (status:open,
       # verdict cleared — `shuttle reopen --as-draft`): the gesture means
       # "plan this again," not "run it now," so it must not arm the dispatch
@@ -146,7 +105,6 @@ defmodule Shuttle.Actions do
         :reopen
 
       # A oneshot can return to Awaiting review by clearing its verdict.
-      # A standing verdict needs an explicit reopen instead.
       status == "closed" and target == "awaitingReview" ->
         :close_awaiting_review
 
@@ -170,7 +128,7 @@ defmodule Shuttle.Actions do
       # An armed fiber (`status: active`). drafts parks it (pause → status:open).
       # inFlight ("launch it now") force-dispatches, which surfaces the real
       # dispatch outcome (spawned, or a concrete error). This holds for both an
-      # armed standing constitution (ad-hoc tick) and an armed oneshot (launch).
+      # armed standing constitution (an ad-hoc run) and an armed oneshot.
       target == "drafts" ->
         :pause
 
@@ -195,7 +153,6 @@ defmodule Shuttle.Actions do
   defp invocation(:pause), do: %{verb: "pause"}
   defp invocation(:reopen), do: %{verb: "reopen"}
   defp invocation(:reopen_draft), do: %{verb: "reopen", as_draft: true}
-  defp invocation(:accept_run), do: %{verb: "accept"}
   defp invocation(:dispatch_ad_hoc), do: %{verb: "dispatch", ad_hoc: true}
   defp invocation(:close_awaiting_review), do: %{verb: "close"}
   defp invocation(:close_tempered), do: %{verb: "close", tempered: true}
@@ -216,13 +173,6 @@ defmodule Shuttle.Actions do
     end
   end
 
-  # Only STANDING constitutions have the active→closed→active cron lifecycle
-  # that the accept re-arm advances (accept writes `status: active`). A
-  # oneshot's accept is the tempered terminus.
+  # A STANDING constitution runs on its schedule and is never reviewed.
   defp standing?(shuttle), do: Shuttle.Poller.block_kind(shuttle) == "standing"
-
-  # `tempered` absent (nil) is the no-verdict state — the awaiting signal for a
-  # closed fiber. `tempered: true` (accepted oneshot terminus) and
-  # `tempered: false` (composted) both have a verdict and are NOT awaiting.
-  defp untempered?(fiber), do: is_nil(Map.get(fiber, "tempered"))
 end

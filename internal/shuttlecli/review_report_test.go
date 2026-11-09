@@ -119,8 +119,8 @@ func TestReviewReportLeavesStandingRunsAlone(t *testing.T) {
 	f := dispatchWorker(t, st, "work", time.Now().Add(-time.Hour))
 	env.Set("SHUTTLE_FIBER_PATH", f.Path)
 	stubWorkerExitTmux(t, env, shuttleTmuxSessionName(f.ID, f.UID), f.Path)
-	if out, err := runIn(t, env, dir, "close"); err != nil {
-		t.Fatalf("close: %v\n%s", err, out)
+	if out, err := runIn(t, env, dir, "handoff"); err != nil {
+		t.Fatalf("handoff: %v\n%s", err, out)
 	}
 }
 

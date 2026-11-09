@@ -454,7 +454,7 @@ defmodule Shuttle.Dispatcher do
   Renders a standing-role run prompt for one scheduled occurrence.
 
   The fresh dispatch prompt plus the run id and whether the run is scheduled
-  or ad-hoc. How a standing run proceeds and hands off for review lives in the
+  or ad-hoc. How a standing run proceeds, asks and hands off lives in the
   shuttle skill's `references/standing-roles.md`, not the prompt.
   """
   @spec render_standing_run_prompt(String.t(), String.t(), keyword()) :: String.t()

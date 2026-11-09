@@ -160,13 +160,13 @@ offline and validate before they touch disk. When a fiber's
 `shuttle.host` names a remote in the resolved fleet (an enabled entry in
 `~/.config/shuttle/remotes.json`, or a tailnet peer the local daemon
 discovered),
-`pause`, `resume`, `close`, `reopen`, `accept`, `set-agent`, `set-model`,
+`pause`, `resume`, `close`, `reopen`, `set-agent`, `set-model`,
 `set-outcome`, `reshape`, and `uninstall` route through the local daemon to the
 owner; `dispatch` does the same. `snapshot`, `dispatch`, `status --all`/`--remote`,
 `sessions`, `transcript`, `message`, and
 `validate-identity` talk to the local daemon (127.0.0.1:4000 or a unix socket,
-per `shuttle host`). `accept` and `resume` on a fiber this host owns go
-through its daemon when it answers, which applies them with `--local` inside
+per `shuttle host`). `resume` on a fiber this host owns goes
+through its daemon when it answers, which applies it with `--local` inside
 its Poller, serialized with the Poller's state changes (a poll read in flight
 sees the old document or the new one, written in one atomic step); a daemon
 that cannot be reached means the document is written directly. A daemon that
@@ -202,9 +202,9 @@ settles status (`install`/`repeat` arm to `active`, `install --disabled`
 parks at `open`); an arming create refuses a closed fiber — arming
 something already reviewed needs an explicit `reopen`. `reshape` touches only the block's shape — `kind`, and a standing
 constitution's schedule — and leaves status and verdict fields exactly as found, so a
-role in Awaiting review can be reshaped in place without being re-armed; `kind`
+paused or closed constitution can be reshaped in place without being re-armed; `kind`
 is optional, so `reshape <fiber> --schedule "0 7 * * *"` is a schedule-only
-edit. Lifecycle moves (`pause`/`resume`/`close`/`reopen`/`accept`) are
+edit. Lifecycle moves (`pause`/`resume`/`close`/`reopen`) are
 untouched by any of this.
 
 ### Lifecycle
@@ -214,11 +214,10 @@ untouched by any of this.
 | `shuttle claim <fiber>` | Associate the current terminal conversation with an installed draft without launching or activating a worker (`--session <native-id>`, `--tmux-session <name>`, `--json`) |
 | `shuttle migrate <to-fiber>` | Move the caller's live conversation to another installed fiber on the same host without ending it. Infer the source from current session/pane identity; `--from <fiber>` overrides it. The destination must have no live worker. The source gets a fresh worker from `## Status`; `--rest` leaves it resting, or `--disabled` leaves it open in Drafts. The destination receives the session UUID, watcher and current assignment; exact-session messages still reach it. Repeating the same session/destination succeeds without a second move. No conversation context is copied or merged. Supports `--json` |
 | `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
-| `shuttle resume <fiber>` | Set status to `active`; a standing constitution awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one; remote paths are validated and saved by the owner, without changing the local Git mirror. `--local` skips the daemon |
-| `shuttle accept <fiber>` | Resolve the human verdict on an untempered standing constitution, closed or still active: it re-arms and its run concludes (`handed_off_at`). The outcome is kept. A oneshot is refused. `--local` skips the daemon |
+| `shuttle resume <fiber>` | Set status to `active`; a standing constitution resumes its schedule with its run concluded (`handed_off_at`), so it runs at the schedule's next tick; a closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one; remote paths are validated and saved by the owner, without changing the local Git mirror. `--local` skips the daemon |
 | `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works in any state, including standing and tempered/discarded. `--until` says what the rest lasts until: a `YYYY-MM-DD` return day, or a fiber or free text it waits for (`shuttle.blocked_on`, a fiber stored by uid, whose close reaches the thread's orchestrator as context and arms nothing); `--until ''` rests undated and waiting for nothing. On a constitution already at rest, `--until` changes only that; `resume` and `close` clear the wait. Routes through the owning daemon, which writes it inside its Poller and stops the worker through its terminal backend; `--local` writes here and stops nothing, and an unreachable daemon is bypassed with a local write and tmux kill |
 | `shuttle reopen <fiber>` | Reopen a closed/reviewed fiber for active work (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
-| `shuttle close <fiber>` | Set status to `closed`; `--tempered=true\|false` records a verdict. Without the flag, a standing verdict stays in place and a oneshot's is cleared. For standing constitutions with a dispatch on record, `--tempered=true` is `accept` (same gate and next-due message); without one it records an ordinary verdict and leaves the fiber closed; an untempered closed run with a dispatch on record stays on Awaiting review until accepted or the next occurrence after both its last service and close re-arms it. A never-run closed draft stays closed. `--tempered=false` ends the schedule; `rest` pauses it. A stashed horizon alone does not stop scheduling. Reopen explicitly clears an existing standing verdict. A thread wakes only its nearest orchestrator by default; `--quiet` sends its outcome as context without waking. The next ordinary close wakes again; ask always wakes. Results never automatically propagate further. A worker closing its own top-level oneshot for review must have written `tapestry.html` since its dispatch |
+| `shuttle close <fiber>` | Set status to `closed`; `--tempered=true\|false` records a verdict. Without the flag a oneshot's verdict is cleared. A standing constitution has no review: `close` refuses it unless `--tempered=false`, which retires it and ends its schedule; `rest` pauses it. A thread wakes only its nearest orchestrator by default; `--quiet` sends its outcome as context without waking. The next ordinary close wakes again; ask always wakes. Results never automatically propagate further. A worker closing its own top-level oneshot for review must have written `tapestry.html` since its dispatch |
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--project-dir`); leaves the current session running. The agent is a registry id or alias: any other name, a model name included, is refused with `<id> is not an agent; \`shuttle agents\` lists them`, as `set-model`, `install -m`, `repeat -m` and `thread --agent` refuse it |
 | `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys |
 | `shuttle roles [--json]` | List one-level charters at `roles/<slug>` in the shared namespace, with `slug`, `name`, and `outcome`; JSON is an array (empty as `[]`) |

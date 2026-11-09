@@ -30,14 +30,14 @@ export const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐' 
  * Where a fiber stands in its life, as the temporal views need to say it.
  *
  * This is the card's served Desk column seen from the side. `resting` folds
- * the two columns off the desk — Resting (put down, or an armed standing
- * constitution between firings) and the Roles — because from a row on the
+ * the two columns off the desk — Resting (put down, or a standing
+ * constitution between firings or with its schedule paused) and the Roles — because from a row on the
  * chronicle they are one claim: nothing is owed here now.
  *
  *   ◇ draft            written, not armed
  *   ▶ in flight        a worker is running, or the fiber is armed to run
  *   ◦ awaiting review  closed, no verdict yet
- *   ⏾ resting          put down, or waiting on its cron
+ *   ⏾ resting          put down, waiting on its cron, or its schedule paused
  *   ✓ tempered         closed and kept
  *   ✗ discarded        closed and let go
  *

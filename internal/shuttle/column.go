@@ -1,6 +1,7 @@
 package shuttle
 
 import (
+	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -42,8 +43,10 @@ func Verdict(f *felt.Felt) string {
 
 // Column is the Desk column a constitution sits in: drafts, in_flight,
 // awaiting_review, tempered, discarded, resting (a draft put down, or a
-// standing constitution between firings) or roles (a seat at rest). live is
-// whether its worker runs; today is the civil day a due date is read against.
+// standing constitution between firings or with its schedule paused) or roles
+// (a seat at rest). An armed standing constitution whose last run asked a
+// question waits in flight, on the human's turn. live is whether its worker
+// runs; today is the civil day a due date is read against.
 // The daemon, which holds the live runtime, serves the same column on every
 // board row (Shuttle.Lifecycle.column/3); daemon/test/fixtures/columns holds
 // the two equal.
@@ -59,7 +62,7 @@ func Column(f *felt.Felt, block *Block, live bool, today time.Time) string {
 		return "in_flight"
 	case block.Seat && block.Role != "" && (f.Status != felt.StatusActive || block.Kind == "standing"):
 		return "roles"
-	case f.Status == felt.StatusActive && block.Kind == "standing":
+	case block.Kind == "standing" && !(f.Status == felt.StatusActive && block.Ask != nil && strings.TrimSpace(block.Ask.Text) != ""):
 		return "resting"
 	case f.Status == felt.StatusActive:
 		return "in_flight"

@@ -692,13 +692,11 @@ export class KanbanSurfaceRenderer {
 
     const hint = document.createElement('span')
     hint.className = 'kbn-role-chip-hint'
-    let detail = ''
+    const detail = scheduleNote(card) ?? ''
     if (isSleepingOnSchedule(card)) {
       const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null
       hint.textContent = returns ? `↻ ${returns}` : '↻'
-      const schedule = card.scheduleText ?? card.shuttleSchedule
-      detail = [schedule, returns && `next ${returns}`].filter(Boolean).join(' · ')
-    }
+    } else if (detail) hint.textContent = 'paused'
     hint.hidden = hint.textContent === ''
 
     el.append(dot, name, hint)
@@ -1038,11 +1036,12 @@ export class KanbanSurfaceRenderer {
     staleness: KanbanOriginStaleness | undefined,
   ): HTMLElement {
     const isStale = staleness?.status === 'stale'
-    const sleeping = isSleepingOnSchedule(card)
+    const schedule = scheduleNote(card)
     const agentName = this.agentName(card)
     const el = document.createElement('div')
     el.className = isAgentCard(card) ? 'kbn-cluster-item kbn-cluster-item-agent' : 'kbn-cluster-item kbn-cluster-item-human'
-    if (sleeping) el.classList.add('kbn-cluster-item-standing')
+    if (schedule) el.classList.add('kbn-cluster-item-standing')
+    if (card.shuttleKind === 'standing' && card.status === 'open') el.dataset.schedule = 'paused'
     el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
     el.dataset.cardUid = card.uid ?? card.id
@@ -1051,8 +1050,9 @@ export class KanbanSurfaceRenderer {
     // The agent is inventory, not a next move: it rides in the label and the
     // line's title, and the workspace names it, so the title gets the width.
     const who = agentName ? ` — ${agentName}` : ''
-    el.setAttribute('aria-label', `${card.name}${who}`)
-    el.title = `${card.name}${who}`
+    const said = schedule ? ` — ${schedule}` : ''
+    el.setAttribute('aria-label', `${card.name}${who}${said}`)
+    el.title = `${card.name}${who}${said}`
 
     if (!isStale) this.installDraggable(el, card, false)
 
@@ -1061,6 +1061,13 @@ export class KanbanSurfaceRenderer {
     title.className = 'kbn-cluster-item-title'
     title.textContent = card.name
     el.append(glyph, title)
+    // A standing constitution says its schedule: paused, or when it next fires.
+    if (schedule) {
+      const note = document.createElement('span')
+      note.className = 'kbn-cluster-item-schedule'
+      note.textContent = schedule
+      el.append(note)
+    }
 
 
     // A verdict waits out its undo window at the line's right end.
@@ -1354,8 +1361,8 @@ export class KanbanSurfaceRenderer {
   /** The line's actions: the header's verbs for this card, then what only a live worker or a held launch offers. */
   rowActions(card: KanbanCard, stale: boolean, anchor: HTMLElement): ConversationAction[] {
     const actions: ConversationAction[] = stale ? [] : lifecycleVerbsFor(card, !!this.o.onRest).map(verb => ({
-      label: verbSpec(verb).label,
-      dress: (item: HTMLButtonElement) => { dressVerb(item, verb) },
+      label: verbSpec(verb, card).label,
+      dress: (item: HTMLButtonElement) => { dressVerb(item, verb, card) },
       run: () => {
         if (verb === 'rest') { this.o.onRest?.(card); return }
         const verdict: Verdict = verb === 'review' ? 'awaitingReview' : verb === 'temper' ? 'tempered' : 'composted'
@@ -1666,10 +1673,12 @@ function splitByPathDepth(cards: KanbanCard[], depth: number): Array<{ key: stri
  * standing constitution asleep on its cron (it dispatches itself regardless of
  * whether `nextLaunchAt` parsed to a shown date). Anything else has no
  * appointment at all: nothing is going to surface it again, so a person is
- * the only mechanism that ever will.
+ * the only mechanism that ever will. A standing constitution whose schedule
+ * is paused has none, whatever its `due:` says: only a resume brings it back.
  */
 function hasScheduledReturn(card: KanbanCard): boolean {
-  return isSleepingOnSchedule(card) || !!card.due
+  if (card.shuttleKind === 'standing') return isSleepingOnSchedule(card)
+  return !!card.due
 }
 
 /**
@@ -1776,6 +1785,20 @@ export function formatLaunchDay(iso: string): string {
   const ms = instantMs(iso)
   if (ms === undefined) return ''
   return formatInstant(ms, { month: 'short', day: 'numeric' })
+}
+
+/**
+ * What a standing constitution at rest says about its schedule: `Paused ·
+ * weekdays at 09:00` when its schedule is paused, `weekdays at 09:00 · next
+ * Aug 12` when it is armed between firings. Undefined for anything else.
+ */
+export function scheduleNote(card: KanbanCard): string | undefined {
+  if (card.shuttleKind !== 'standing') return undefined
+  const cadence = card.scheduleText ?? card.shuttleSchedule
+  if (card.status === 'open') return ['Paused', cadence].filter(Boolean).join(' · ')
+  if (!isSleepingOnSchedule(card)) return undefined
+  const next = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : ''
+  return [cadence, next && `next ${next}`].filter(Boolean).join(' · ') || undefined
 }
 
 /** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,

@@ -93,23 +93,13 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   A fiber without a ULID `id:` is refused with `{:uid_missing, message}`, a preflight refusal like the others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
 - **Standing constitutions** — `shuttle.kind: standing` with a cron
   `schedule:`.
-  Nothing due is stored: an armed (`active`, untempered) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at`, `closed-at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
+  Nothing due is stored: an armed (`active`) one is due when a cron occurrence has passed since it was last serviced — the latest of `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation (`StandingRoles.standing_role_due?/1`).
   Scheduled run IDs name that most recent occurrence (`prev_due`); manual dispatch is ad-hoc (`adhoc-<ms>`).
-  The locked exit write checks the current owner, UID, run id, dispatch timestamp and human lifecycle state, preserving newer runs and human decisions.
-  Recovery publishes a recorded scheduled handoff for review; ad-hoc and unrecorded absences do not supply that conclusion.
-  Human resume and reopen, including from an open pause, record a rearm distinct from a worker handoff.
-  Worker exit or an untempered close puts the run on Awaiting review without ending its schedule.
-  At the next occurrence after both its last service and close, the owning Poller runs `reopen --occurrence` inside its serialized tick, even in boot quarantine.
-  Under the document lock, the CLI checks current ownership, standing kind, closed status, absence of a verdict, a dispatch on record, and that the occurrence is still due.
-  It atomically arms the document and cleans dirty markers with `handed_off_at = dispatched_at`, preserving the service anchor so the occurrence stays due and launches fresh.
-  A capacity or backend wait leaves it armed; a failed re-arm is visible in the ordinary blocked state and retries on the failure cooldown.
-  A changed state quietly skips the write.
-  Until then it stays closed; `status: active` remains the dispatch gate.
-  `shuttle accept`, `close --tempered=true` on a recorded run, or `resume` re-arms and concludes the run by stamping `handed_off_at` in the same write, resting it until the next tick.
-  Without a dispatch on record, `close --tempered=true` records a verdict and leaves the fiber closed.
-  Existing verdicts (true or false), never-run closed drafts, paused/rested constitutions and another host's fibers are never automatically re-armed.
-  A stashed horizon alone does not stop a schedule; Rest pauses it by writing `status: open`.
-  Plain close preserves a standing verdict; only an explicit reopen clears it.
+  A run's exit leaves the constitution `active`: a worker that handed off already stamped `handed_off_at`; for one that exited without, the daemon shells `shuttle conclude-run`, which stamps it under the document lock only if the observed run (owner, UID, run id, dispatch timestamp) is current, still armed and unconcluded, so newer runs and human pauses or retirements are preserved.
+  The dead-orphan pass concludes a run whose worker exited while the daemon was down at its dispatch instant, so an occurrence missed meanwhile still fires once.
+  An outstanding `ask` does not gate dispatch; the card waits In flight on the human's turn between runs.
+  Arming a standing constitution (`resume`, `reopen`, a forced start) stamps `handed_off_at = now` in the same write, resting it until its next tick.
+  `close` refuses a standing constitution except `--tempered=false`, which retires it; `rest` pauses it by writing `status: open`. A stashed horizon alone does not stop a schedule.
 - **A finished run is finished — there is no reopen.** When a oneshot's
   worker is gone, `Dispatcher.check_resume_intent/2` decides between resuming
   its transcript and starting fresh. A `handed_off_at` newer than
@@ -151,9 +141,9 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 ## Lifecycle writes
 
 Every lifecycle write that races polling is serialized with it.
-The board's `accept` and `resume` run `shuttle <verb> <fiber> --local` inside the owning daemon's Poller, so a poll read in flight sees either the old document or the new one, whose status and `handed_off_at` land in one atomic write.
+The board's `resume` and `rest` run `shuttle <verb> <fiber> --local` inside the owning daemon's Poller, so a poll read in flight sees either the old document or the new one, whose status and `handed_off_at` land in one atomic write.
 `Shuttle.LifecycleStore` owns the daemon's own writes — worker exit, force-dispatch and migration — through the CLI's locked document writer.
-`shuttle standing-transition` checks the current owner, UID, run id, dispatch timestamp and human lifecycle state under the lock and skips the write when any has moved.
+`shuttle conclude-run` checks the current owner, UID, run id, dispatch timestamp and lifecycle state under the lock and skips the write when any has moved.
 `shuttle patch-document` refuses a patch whose source digest is stale.
 Migration applies its two document patches through `shuttle migrate-documents` and journals resource ownership before it changes the backend; an unresolved migration recovery holds every launch, including force, cron and previously observed workers (see [Worker migration](../reference/api.md#worker-migration)).
 

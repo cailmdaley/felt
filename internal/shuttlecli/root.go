@@ -255,7 +255,6 @@ func (a *app) rootCmd() *cobra.Command {
 		a.closeCmd(),
 		a.reopenCmd(),
 		a.setOutcomeCmd(),
-		a.acceptCmd(),
 		a.setModelCmd(),
 		a.setAgentCmd(),
 		a.seatCmd(),

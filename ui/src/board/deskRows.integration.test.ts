@@ -41,7 +41,7 @@ describe('a Resting line takes its verdicts', () => {
   const standing = resting({ id: 'standing', uid: 'U-STAND', shuttleKind: 'standing', status: 'active', shuttleSchedule: '0 8 * * *' })
   const todo = resting({ id: 'todo', uid: 'U-TODO' })
   const data = response({ stash: [once, standing, todo] })
-  it('offers Temper and Discard on a constitution at rest, Discard alone on a standing one, none on a plain note', () => {
+  it('offers Temper and Discard on a constitution at rest, Pause schedule and Retire on a standing one, none on a plain note', () => {
     const root = new KanbanSurfaceRenderer(options(data)).renderStashSection(restingOrder(data.stash), {})
     document.body.append(root)
     const labels = (id: string) => {
@@ -52,7 +52,7 @@ describe('a Resting line takes its verdicts', () => {
       return labels
     }
     expect(labels('once')).toEqual(['Rest', 'Temper', 'Discard'])
-    expect(labels('standing')).toEqual(['Rest', 'Discard'])
+    expect(labels('standing')).toEqual(['Pause schedule', 'Retire'])
     expect(labels('todo')).toEqual([])
     expect(root.querySelector<HTMLElement>('[data-fiber-id="once"] .kbn-cluster-item-verdicts')?.dataset.verdictKey).toBeTruthy()
   })

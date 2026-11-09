@@ -260,7 +260,6 @@ func TestRemoteEarlyLifecycleNeverUsesLocalSnapshot(t *testing.T) {
 	for _, tc := range []struct{ verb, status, kind string }{
 		{"resume", felt.StatusOpen, "oneshot"},
 		{"resume", felt.StatusClosed, "standing"},
-		{"accept", felt.StatusClosed, "standing"},
 		{"rest", felt.StatusActive, "oneshot"},
 	} {
 		t.Run(tc.verb+tc.status+tc.kind, func(t *testing.T) {

@@ -1,25 +1,23 @@
 defmodule Shuttle.LifecycleService do
   @moduledoc """
-  The daemon's serialized writers for `accept`, `resume`, `reopen`, `close`, `pause`, `rest`, `role`, `seat`
+  The daemon's serialized writers for `resume`, `reopen`, `close`, `pause`, `rest`, `role`, `seat`
   and worker-question clearing.
 
   `:clear_ask` shells `shuttle ask <fiber> --clear` through the same serialized
-  write and document-cache refresh path as `accept` and `resume`.
+  write and document-cache refresh path as `resume`.
 
   Role and seat edits share the Poller's write boundary so they cannot overwrite a
   concurrent worker-exit lifecycle write.
 
   Shuttle is their writer: `shuttle -C <store> <verb> <fiber> --local`.
-  For accept/resume/rest, it re-arms
-  the constitution (accept, resume) or puts it in Resting (rest), and
-  concludes its run (`shuttle.runtime.handed_off_at = now`) in a single
-  document write, so the poller never reads a re-armed constitution without
-  the stamp that keeps its just-served occurrence from firing again. A rest
-  then stops any live worker through the Poller's backend-aware stop, the one
-  `/kill` uses, so an app conversation is interrupted as a tmux worker is.
+  Resume arms the constitution; on a standing one it also concludes the run
+  (`shuttle.runtime.handed_off_at = now`) in the same document write, so the
+  poller never reads it armed without the stamp that rests it until its next
+  tick. Rest puts it in Resting (pausing a standing schedule), then stops any
+  live worker through the Poller's backend-aware stop, the one `/kill` uses,
+  so an app conversation is interrupted as a tmux worker is.
 
-  `/api/v1/lifecycle` and the kanban's `accept-run` transition both come
-  through `transition/3`. With the Poller running, the write happens inside it
+  `/api/v1/lifecycle` comes through `transition/3`. With the Poller running, the write happens inside it
   (`Poller.lifecycle_transition/4`), serialized with the Poller's state
   changes, and the fiber's document-cache entry is refreshed after. A poll read
   already in flight (poll reads run in their own task) sees the old document or
@@ -30,12 +28,12 @@ defmodule Shuttle.LifecycleService do
 
   alias Shuttle.{FeltStores, Poller}
 
-  @type verb :: :accept | :resume | :reopen | :close | :pause | :rest | :role | :seat | :clear_ask
+  @type verb :: :resume | :reopen | :close | :pause | :rest | :role | :seat | :clear_ask
 
   @spec transition(verb(), String.t(), [String.t()], String.t() | nil) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
   def transition(verb, identifier, args \\ [], path_hint \\ nil)
-      when verb in [:accept, :resume, :reopen, :close, :pause, :rest, :role, :seat, :clear_ask] and
+      when verb in [:resume, :reopen, :close, :pause, :rest, :role, :seat, :clear_ask] and
              is_binary(identifier) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id} = resolved} <-
            FeltStores.resolve_request(identifier, path_hint) do
@@ -66,7 +64,7 @@ defmodule Shuttle.LifecycleService do
   end
 
   def write(verb, fiber_id, opts)
-      when verb in [:accept, :resume, :reopen, :close, :pause, :rest, :role, :seat] do
+      when verb in [:resume, :reopen, :close, :pause, :rest, :role, :seat] do
     {args, opts} = Keyword.pop(opts, :args, [])
     Shuttle.CLI.run_lifecycle(Atom.to_string(verb), fiber_id, args, opts)
   end

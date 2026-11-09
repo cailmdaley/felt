@@ -34,7 +34,6 @@ defmodule Shuttle.Poller do
     DaemonHeartbeat,
     Dispatcher,
     LifecycleService,
-    LifecycleStore,
     StandingRole,
     WorkerWatcher
   }
@@ -515,7 +514,7 @@ defmodule Shuttle.Poller do
 
   The kanban serves card state (status, tempered, outcome, tags, …) from this
   cache, refreshed on the poll. Any action that mutates a fiber document
-  (transition pause/reopen/close, accept-run, force-dispatch re-arm, set-outcome,
+  (transition pause/reopen/close, force-dispatch re-arm, set-outcome,
   set-model) must call this immediately after the write so the UI's
   post-mutation refetch sees the new state instead of snapping back to stale
   cached state until the next poll tick. A re-read (not a field patch) keeps the
@@ -711,7 +710,7 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Run Shuttle's `accept` / `resume` / `rest` / `role` / `seat` writer (`Shuttle.LifecycleService.write/3`)
+  Run Shuttle's `resume` / `rest` / `role` / `seat` writer (`Shuttle.LifecycleService.write/3`)
   inside the Poller, serialized with its state changes, then refresh the
   fiber's document-cache entry so the board reads the transition at once. A
   poll read in flight sees the old document or the new one, whose status and
@@ -2687,15 +2686,13 @@ defmodule Shuttle.Poller do
     state = reconcile_pulses(state, candidates)
     state = deliver_thread_results(state)
 
-    # Downtime recovery: a standing constitution whose tmux session is gone but whose
-    # document is still armed (status:active, no verdict) never fired
-    # `handle_worker_exit` (the daemon was down across the exit). Mark such
-    # runs awaiting (status:closed) until acceptance or an occurrence after close.
-    # Oneshots need no analog: a status:active oneshot with no live session is
-    # simply eligible again on the next tick — retries collapsed into the poll
-    # loop.
+    # Downtime recovery: a standing constitution whose tmux session is gone but
+    # whose run is unconcluded never fired `handle_worker_exit` (the daemon was
+    # down across the exit). Conclude such runs at their dispatch instant; the
+    # role stays armed. Oneshots need no analog: a status:active oneshot with no
+    # live session is simply eligible again on the next tick — retries
+    # collapsed into the poll loop.
     state = StandingRoles.reconcile_dead_standing_roles(state, candidates, sessions)
-    {candidates, state} = rearm_due_awaiting_standing(state, candidates)
 
     # Parking is dispatch-authority bookkeeping, not capacity accounting: while
     # quarantined, the parked map is rebuilt from the current dispatchable set
@@ -2969,8 +2966,6 @@ defmodule Shuttle.Poller do
   # handle on, and a config fix or pause would not clear a paused resume loop
   # without waiting out the cooldown. Active fibers with persistent failures
   # keep their entry across cycles so the kanban can show the failure count.
-  # An occurrence re-arm refusal belongs only to the document state that failed;
-  # a resume, rest or configuration change clears it and its cooldown.
   #
   # Entries are keyed by runtime key and kept only under the candidate's
   # CURRENT key, so an entry recorded under a fiber's slug is dropped once the
@@ -2978,19 +2973,13 @@ defmodule Shuttle.Poller do
   defp evict_stale_by_candidates(map, candidates) do
     by_key = Map.new(candidates, &{runtime_key_for_fiber(&1), &1})
 
-    Map.filter(map, fn {key, entry} ->
+    Map.filter(map, fn {key, _entry} ->
       case Map.get(by_key, key) do
         nil ->
           false
 
         fiber ->
-          case entry do
-            %{reason: {:occurrence_rearm_failed, _}, occurrence_state: original} ->
-              awaiting_standing?(fiber) and occurrence_rearm_state(fiber) == original
-
-            _ ->
-              Map.get(fiber, "status") in ["open", "active"]
-          end
+          Map.get(fiber, "status") in ["open", "active"]
       end
     end)
   end
@@ -3569,9 +3558,8 @@ defmodule Shuttle.Poller do
     {resume, %{state | parked_launches: parked}}
   end
 
-  # Does this constitution's worker exit close it to awaiting-review? Only a
-  # STANDING (cron-driven) one does, unless its run was accepted and concluded.
-  # Awaiting review lasts until acceptance or an occurrence after the close.
+  # A STANDING (cron-driven) constitution's exit concludes its run and leaves it
+  # armed for the next tick; a oneshot's exit leaves it to the poll loop.
   defp standing?(fiber), do: fiber_kind(fiber) == "standing"
 
   # PURE — fiber frontmatter and in-memory runtime maps only. Every gate that
@@ -3597,10 +3585,10 @@ defmodule Shuttle.Poller do
       # `status: active` is the SOLE dispatch gate. A fiber is shuttle-managed
       # iff it carries a shuttle: block;
       # it dispatches iff status is active. `open` is a draft/paused (not
-      # dispatched); `closed` is awaiting review or a verdict. A standing run
-      # stays closed until accepted or its next occurrence re-arms it through
-      # the serialized tick path. Only active documents reach dispatch; an
-      # existing tempered verdict is never automatically cleared.
+      # dispatched); `closed` is awaiting review or a verdict. A standing
+      # constitution stays active between runs; paused (`open`) or retired
+      # (`closed`), it does not dispatch. An existing tempered verdict is never
+      # automatically cleared.
       status != "active" ->
         false
 
@@ -4171,14 +4159,12 @@ defmodule Shuttle.Poller do
   #          `--project-dir` does and writes nothing;
   #        * otherwise the block's `project_dir` must be declared and be a
   #          directory on this host;
-  #   3. the arm: a confirmed directory rides `shuttle reopen --project-dir
-  #      --conclude-run` — the same raw input `resolve-dir` checked, so the CLI
-  #      expands it to the same path — which saves it and arms the fiber in one
-  #      write, concluding a standing constitution's run as the re-arm below does, so a
-  #      start refused after the write leaves it armed. Without one, a closed
-  #      or paused standing constitution is re-armed (`LifecycleStore.rearm`)
-  #      and a closed
-  #      oneshot reopened (`shuttle reopen`).
+  #   3. the arm: a confirmed directory rides `shuttle reopen --project-dir` —
+  #      the same raw input `resolve-dir` checked, so the CLI expands it to the
+  #      same path — which saves it and arms the fiber in one write. Without
+  #      one, a closed fiber or a paused standing constitution is reopened
+  #      (`shuttle reopen`). Arming a standing constitution concludes its run,
+  #      so a start refused after the write leaves it armed for its next tick.
   #
   # A refusal is `{:arm_refused, %{message, needs}}`. `needs: "project_dir"` is
   # set only from the directory checks in step 2, which the daemon made itself;
@@ -4272,7 +4258,7 @@ defmodule Shuttle.Poller do
   # The raw input, not `resolve-dir`'s answer: the CLI expands it the same way
   # both times, so the directory checked is the directory saved.
   defp arm_start(state, fiber, {:confirmed, raw}),
-    do: cli_reopen(state, Map.get(fiber, "id", ""), ["--project-dir", raw, "--conclude-run"])
+    do: cli_reopen(state, Map.get(fiber, "id", ""), ["--project-dir", raw])
 
   defp arm_start(state, fiber, :declared) do
     fiber_id = Map.get(fiber, "id", "")
@@ -4282,10 +4268,7 @@ defmodule Shuttle.Poller do
       status == "active" ->
         :ok
 
-      fiber_kind(fiber) == "standing" ->
-        rearm_standing(state, fiber_id)
-
-      status == "closed" ->
+      status == "closed" or fiber_kind(fiber) == "standing" ->
         cli_reopen(state, fiber_id, [])
 
       # A oneshot draft: the dispatcher's best-effort reopen moves its card.
@@ -4293,76 +4276,6 @@ defmodule Shuttle.Poller do
         :ok
     end
   end
-
-  # Re-arm a closed or paused standing constitution so the board's start both
-  # spawns it and leaves it armed for its schedule. A failed re-arm refuses
-  # the launch before a terminal is created.
-  defp rearm_standing(state, fiber_id) do
-    case LifecycleStore.rearm(fiber_id,
-           runner: state.runner,
-           felt_stores: state.felt_stores,
-           own_host_id: state.own_host_id
-         ) do
-      {:ok, msg} ->
-        Logger.info("force-dispatch re-arm #{fiber_id}: #{String.trim(msg)}")
-        :ok
-
-      {:error, reason} ->
-        arm_refused(fiber_id, reason, nil)
-    end
-  end
-
-  defp awaiting_standing?(fiber) do
-    standing?(fiber) and fiber["status"] == "closed" and is_nil(fiber["tempered"]) and
-      not is_nil(Shuttle.Continuation.dispatched_at(fiber))
-  end
-
-  # The locked CLI operation checks the current document, cleans dirty markers
-  # at their dispatch timestamp, and arms without consuming the due occurrence.
-  defp rearm_due_awaiting_standing(state, candidates) do
-    Enum.map_reduce(candidates, state, fn fiber, state ->
-      if state.contract_check.ok and awaiting_standing?(fiber) and
-           host_owned?(fiber["shuttle"], state.own_host_id) and
-           not preflight_cooldown_open?(state, runtime_key_for_fiber(fiber)) and
-           StandingRoles.standing_role_due?(Map.put(fiber, "status", "active")) do
-        slug = Map.fetch!(fiber, "id")
-        store = owning_store(slug, state)
-
-        case LifecycleService.write(:reopen, slug,
-               runner: state.runner,
-               felt_store: store,
-               args: ["--occurrence"]
-             ) do
-          {:ok, _} ->
-            state = refresh_document_entry(state, slug, [store])
-            current = cached_fiber(state, slug) || fiber
-            current = current |> Map.put("id", slug) |> Map.put("uid", Map.get(fiber, "uid"))
-            {current, state}
-
-          failure ->
-            reason = {:occurrence_rearm_failed, occurrence_failure_message(failure)}
-            Logger.warning("Scheduled re-arm #{slug} failed: #{inspect(failure)}")
-            {fiber, record_dispatch_failure(state, fiber, reason)}
-        end
-      else
-        {fiber, state}
-      end
-    end)
-  end
-
-  defp occurrence_rearm_state(fiber) do
-    {Map.take(fiber, ~w(status tempered closed_at)),
-     Map.drop(fiber["shuttle"] || %{}, ["resolved"])}
-  end
-
-  defp occurrence_failure_message({:command_error, code, output}),
-    do: cli_text(output, "shuttle reopen exited #{code}")
-
-  defp occurrence_failure_message({:error, reason}),
-    do: "Could not run shuttle reopen: #{Exception.format_exit(reason)}"
-
-  defp occurrence_failure_message(_),
-    do: "Could not arm the scheduled occurrence; check the daemon log."
 
   defp cli_reopen(state, fiber_id, args) do
     case Shuttle.CLI.run_lifecycle("reopen", fiber_id, args,
@@ -4963,9 +4876,6 @@ defmodule Shuttle.Poller do
         {:backend_not_ready, _} ->
           Map.merge(entry, %{attempts: 0, waiting: true, retryable: true})
 
-        {:occurrence_rearm_failed, _} ->
-          Map.put(entry, :occurrence_state, occurrence_rearm_state(fiber))
-
         _ ->
           entry
       end
@@ -5250,7 +5160,7 @@ defmodule Shuttle.Poller do
                 state
 
               standing?(fiber) ->
-                StandingRoles.mark_standing_awaiting(fiber_id,
+                StandingRoles.conclude_standing_run(fiber_id,
                   observed: Map.get(meta, :run_observation, fiber),
                   runner: state.runner,
                   own_host_id: state.own_host_id
@@ -5384,8 +5294,7 @@ defmodule Shuttle.Poller do
              :work_dir_missing,
              :project_dir_missing,
              :tmux_server_unavailable,
-             :transcript_held,
-             :occurrence_rearm_failed
+             :transcript_held
            ] ->
         DateTime.diff(DateTime.utc_now(), at, :millisecond) < @preflight_cooldown_ms
 

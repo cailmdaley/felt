@@ -27,6 +27,7 @@ import {
   clusterStashCards,
   findCardById,
   formatLaunchDay,
+  scheduleNote,
   sortDatedByReturn,
   splitStashByReturn,
 } from './KanbanSurfaces.js'
@@ -1248,25 +1249,31 @@ describe('Resting holds standing constitutions asleep between runs', () => {
     expect(restingCards(resp)).toEqual([])
   })
 
-  it('leaves a CLOSED standing constitution in Awaiting review — it wants a verdict, not a nap', () => {
-    // What the daemon actually does (shuttle standing-roles reference): a
-    // standing constitution's run ends `status:closed` + untempered, which IS the
-    // awaiting-review state, and `shuttle accept` re-arms it to `active`.
-    // So a closed role is not parked — it is holding a work product for you —
-    // and drawing it asleep in Resting would hide the one thing it needs.
-    const resp = boardOf([role({ status: 'closed', outcome: 'Paid 3 bills' })])
-    expect(resp.now.awaitingReview.map((c) => c.id)).toEqual(['ops/monthly-report'])
-    expect(restingCards(resp)).toEqual([])
+  it('draws a PAUSED standing constitution in Resting, saying it is paused and its schedule', () => {
+    // Pause writes status:open + horizon:stashed and keeps the schedule. An
+    // open role is not armed: no next launch, and no `due:` wakes it.
+    const resp = boardOf([role({ status: 'open', horizon: 'stashed', due: dayFromNow(-2), shuttleScheduleText: 'monthly on the 12th at 09:00' })])
+    expect(resp.now.drafts).toEqual([])
+    expect(resp.stash.map((c) => c.id)).toEqual(['ops/monthly-report'])
+    const paused = resp.stash[0]
+    expect(paused.nextLaunchAt).toBeUndefined()
+    expect(isSleepingOnSchedule(paused)).toBe(false)
+    expect(scheduleNote(paused)).toBe('Paused · monthly on the 12th at 09:00')
+    // Nothing brings it back on its own, so it sits with the undated watch list.
+    expect(splitStashByReturn([paused]).undated.map((c) => c.id)).toEqual(['ops/monthly-report'])
   })
 
-  it('leaves a PAUSED standing constitution in Drafts, where pause put it', () => {
-    // `shuttle pause` writes status:open and preserves the schedule. An
-    // open role is not armed, so it has no next launch to sleep until.
-    const resp = boardOf([role({ status: 'open' })])
-    expect(resp.now.drafts.map((c) => c.id)).toEqual(['ops/monthly-report'])
+  it('says an armed standing constitution\'s schedule and next firing', () => {
+    const armed = restingCards(boardOf([role({ shuttleScheduleText: 'monthly on the 12th at 09:00' })]))[0]
+    expect(scheduleNote(armed)).toBe(`monthly on the 12th at 09:00 · next ${formatLaunchDay(armed.nextLaunchAt!)}`)
+  })
+
+  it('serves an armed standing constitution whose run asked something In flight, as a question', () => {
+    // The run's review is its own ask: the human's turn, like any asking card.
+    const resp = boardOf([role({ shuttleAsk: { text: 'Pay the electricity bill now?', at: at0 } })])
+    expect(resp.now.inFlight.map((c) => c.id)).toEqual(['ops/monthly-report'])
+    expect(resp.now.inFlight[0].turn).toBe('question')
     expect(restingCards(resp)).toEqual([])
-    expect(resp.now.drafts[0].nextLaunchAt).toBeUndefined()
-    expect(isSleepingOnSchedule(resp.now.drafts[0])).toBe(false)
   })
 
   it('files a far-off role in the SAME list as an imminent one', () => {

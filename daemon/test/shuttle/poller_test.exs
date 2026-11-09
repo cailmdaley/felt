@@ -130,7 +130,7 @@ defmodule Shuttle.PollerTest do
 
   defmodule RefusedArmRunner do
     def cmd("shuttle", args, opts) do
-      if "standing-transition" in args,
+      if "reopen" in args,
         do: {"simulated arm failure", 1},
         else: MockRunner.cmd("shuttle", args, opts)
     end
@@ -138,7 +138,7 @@ defmodule Shuttle.PollerTest do
     def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
   end
 
-  test "force start refuses a failed standing rearm before terminal launch" do
+  test "force start refuses a failed standing reopen before terminal launch" do
     id = "tests/refused-arm"
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
@@ -608,6 +608,13 @@ defmodule Shuttle.PollerTest do
   # RFC3339 UTC — the clean-exit signal the daemon compares against dispatched_at.
   defp write_handoff_marker(id, at \\ DateTime.utc_now()) do
     MockRunner.put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(at)})
+  end
+
+  # The on-disk document's status and its run's handoff instant.
+  defp doc_status_and_handoff(path) do
+    {:ok, _, _, fm, _} = Shuttle.FiberDoc.read_path(path)
+    {:ok, at, _} = DateTime.from_iso8601(fm["shuttle"]["runtime"]["handed_off_at"])
+    {fm["status"], at}
   end
 
   # Inject the resolved occurrences Shuttle computes for a standing role — the
@@ -2222,7 +2229,7 @@ defmodule Shuttle.PollerTest do
     assert {:ok, :no_session} = Poller.kill_session(poller, "tests/killme")
   end
 
-  # rest goes through the Poller like accept and resume: the --local write
+  # rest goes through the Poller like resume: the --local write
   # lands `status: open` first, then the worker is stopped through its
   # backend and its runtime torn down, so no tick between the two can launch
   # a successor.
@@ -2844,7 +2851,7 @@ defmodule Shuttle.PollerTest do
 
     refute Enum.any?(MockRunner.commands(), fn
              {"tmux", ["new-session" | _]} -> true
-             {"shuttle", [verb | _]} -> verb in ["reopen", "rearm", "install"]
+             {"shuttle", [verb | _]} -> verb in ["reopen", "install"]
              _ -> false
            end)
 
@@ -3208,9 +3215,9 @@ defmodule Shuttle.PollerTest do
            )
   end
 
-  test "a standing worker exit DOES close the role to awaiting-review (status:closed)" do
-    # A STANDING (cron) worker's exit marks it awaiting, so the cron does not re-fire it this cycle.
-    # This is what guards the gate against being broadened to skip standing too.
+  test "a standing worker exit without handoff concludes its run and leaves it armed" do
+    # A STANDING (cron) worker's exit stamps handed_off_at, so the cron does not
+    # re-fire the occurrence it served; the role stays active for its next tick.
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     fiber_id = "tests/standing-exit-closes"
@@ -3242,8 +3249,12 @@ defmodule Shuttle.PollerTest do
     end_worker_session(poller, fiber_id)
     :sys.get_state(poller, @state_timeout)
 
-    doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
-    assert doc =~ ~r/status:\s*closed/
+    path = "#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md"
+    assert {:ok, _, _, fm, _} = Shuttle.FiberDoc.read_path(path)
+    assert fm["status"] == "active"
+    refute Map.has_key?(fm, "closed-at")
+    assert is_binary(fm["shuttle"]["runtime"]["handed_off_at"])
+    assert fm["shuttle"]["runtime"]["thread_exit_verb"] == "handed off"
   end
 
   # Inject a running entry with a chosen start time, then deliver a worker exit —
@@ -4473,8 +4484,8 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_fiber(fiber_id, fiber)
 
     # The standing role is read straight from the document, with no runtime
-    # store. Phase is schedule-derived; awaiting/accepted are document facts
-    # (status:closed/tempered), not stored.
+    # store. Phase is schedule-derived; paused/retired are document facts
+    # (status:open/closed), not stored.
     MockRunner.set_shuttle(
       fiber_id,
       """
@@ -4551,30 +4562,40 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
+  # A standing role whose last run concluded fires at the next occurrence after
+  # that service, whatever else the document says — unless the human paused or
+  # retired its schedule, or another host owns it. An outstanding ask does not
+  # hold the schedule back.
   for scenario <- [
         :due,
         :quarantine,
         :not_yet_due,
-        :tempered_false,
-        :tempered_true,
-        :other_host,
+        :asking,
         :stashed,
-        :rested
+        :rested,
+        :retired,
+        :other_host
       ] do
-    test "awaiting standing schedule: #{scenario}" do
-      check_awaiting_standing_schedule(unquote(scenario))
+    test "concluded standing schedule: #{scenario}" do
+      check_concluded_standing_schedule(unquote(scenario))
     end
   end
 
-  defp check_awaiting_standing_schedule(scenario) do
-    fiber_id = "tests/standing-awaiting"
+  defp check_concluded_standing_schedule(scenario) do
+    fiber_id = "tests/standing-concluded"
     now = DateTime.utc_now()
     serviced = DateTime.add(now, -120, :second)
     occurrence = DateTime.add(now, if(scenario == :not_yet_due, do: -180, else: -60), :second)
-    status = if scenario == :rested, do: "open", else: "closed"
-    attrs = %{"status" => status, "closed_at" => DateTime.to_iso8601(serviced)}
-    attrs = if scenario == :tempered_false, do: Map.put(attrs, "tempered", false), else: attrs
-    attrs = if scenario == :tempered_true, do: Map.put(attrs, "tempered", true), else: attrs
+
+    status =
+      case scenario do
+        :rested -> "open"
+        :retired -> "closed"
+        _ -> "active"
+      end
+
+    attrs = %{"status" => status}
+    attrs = if scenario == :retired, do: Map.put(attrs, "tempered", false), else: attrs
 
     attrs =
       if scenario in [:stashed, :rested], do: Map.put(attrs, "horizon", "stashed"), else: attrs
@@ -4595,7 +4616,17 @@ defmodule Shuttle.PollerTest do
       status
     )
 
-    MockRunner.put_shuttle_fields(fiber_id, %{"dispatched_at" => DateTime.to_iso8601(serviced)})
+    MockRunner.put_shuttle_fields(fiber_id, %{
+      "dispatched_at" => DateTime.to_iso8601(serviced),
+      "handed_off_at" => DateTime.to_iso8601(serviced)
+    })
+
+    if scenario == :asking do
+      MockRunner.put_shuttle_fields(fiber_id, %{
+        "ask" => %{"text" => "send these?", "at" => DateTime.to_iso8601(serviced)}
+      })
+    end
+
     set_resolved_occurrences(fiber_id, occurrence, DateTime.add(now, 60, :second))
 
     {:ok, poller} =
@@ -4608,19 +4639,15 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    fires? = scenario in [:due, :quarantine, :stashed]
+    fires? = scenario in [:due, :quarantine, :asking, :stashed]
 
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end) == fires?
 
-    assert MockRunner.fiber(fiber_id)["status"] == if(fires?, do: "active", else: status)
+    assert MockRunner.fiber(fiber_id)["status"] == status
 
     if fires? do
-      # The tick's re-arm must not consume the occurrence with a handoff stamp.
-      assert get_in(MockRunner.fiber(fiber_id), ["shuttle", "runtime", "handed_off_at"]) ==
-               DateTime.to_iso8601(serviced)
-
       assert [%{fiber_id: ^fiber_id, state: "running"}] = Poller.snapshot(poller).eligible
       sync_poll_cycle!(poller)
 
@@ -4630,17 +4657,14 @@ defmodule Shuttle.PollerTest do
     end
   end
 
-  # Awaiting is a DOCUMENT fact (status:closed + untempered), not a runtime-store
-  # review row (slices 4/6). Action resolution reads the document straight — so
-  # `accept-run` is available on a closed+untempered standing role (the kanban
-  # "temper the weekly arXiv role" gesture re-arms it).
-  test "actions reflect doc awaiting (status:closed + untempered) for a standing role" do
+  # Action resolution reads the document straight: a standing role has no
+  # review, so its Temper and Awaiting review drops resolve to nothing, while
+  # inFlight runs it now.
+  test "actions read a standing role's document: no review, inFlight runs it now" do
     fiber_id = "tests/standing-actions-overlay"
-    fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "closed"})
+    fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"]})
     MockRunner.set_fiber(fiber_id, fiber)
 
-    # The document is the authority: status:closed with no `tempered` is the
-    # awaiting signal. No review block anywhere.
     MockRunner.set_shuttle(
       fiber_id,
       """
@@ -4648,8 +4672,7 @@ defmodule Shuttle.PollerTest do
       schedule:
         expr: "0 9 * * 1"
         tz: Europe/Paris
-      """,
-      "closed"
+      """
     )
 
     {:ok, poller} =
@@ -4667,24 +4690,28 @@ defmodule Shuttle.PollerTest do
     assert_eventually(fn ->
       {:ok, actions} = ActionQueries.actions_for(fiber_id, query_opts)
       ids = Enum.map(actions, &(Map.get(&1, :id) || Map.get(&1, "id")))
-      assert "accept-run" in ids
+      assert "dispatch-ad-hoc" in ids
+      refute "close-tempered" in ids
+      refute "close-awaiting-review" in ids
 
-      assert {:ok, %{id: "accept-run"}} =
+      assert {:ok, %{id: "dispatch-ad-hoc"}} =
+               ActionQueries.resolve_action(fiber_id, "inFlight", query_opts)
+
+      assert {:error, :standing_unreviewed} =
                ActionQueries.resolve_action(fiber_id, "tempered", query_opts)
     end)
   end
 
-  # Accepting a standing run through the Poller re-arms the felt document
-  # (status:active, verdict cleared) and that re-arm survives the next poll —
+  # Resuming a paused standing role through the Poller arms the felt document
+  # (status:active, run concluded) and that arm survives the next poll —
   # there is no runtime cache to clobber it. The document is the truth.
-  test "accept through the Poller re-arms the document and survives the next poll" do
-    fiber_id = "tests/standing-accept-sticks"
+  test "resume through the Poller arms the document and survives the next poll" do
+    fiber_id = "tests/standing-resume-sticks"
 
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
-    # Awaiting is a document fact (status:closed + untempered). accept re-arms it
-    # from the doc schedule (status:active).
-    fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "closed"})
+    # Paused is a document fact (status:open). resume arms it (status:active).
+    fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "open"})
     MockRunner.set_fiber(fiber_id, fiber)
 
     MockRunner.set_shuttle(
@@ -4695,41 +4722,43 @@ defmodule Shuttle.PollerTest do
         expr: "0 9 * * 1"
         tz: Europe/Paris
       """,
-      "closed"
+      "open"
     )
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_accept_sticks,
+        name: :test_poller_resume_sticks,
         runner: MockRunner,
         poll_interval_ms: 60_000,
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
+    assert {:ok, _output} = Poller.lifecycle_transition(poller, :resume, fiber_id)
 
-    # The document is re-armed to status:active.
-    armed = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-sticks.md")
+    # The document is armed to status:active with its run concluded, so it
+    # waits for its next tick.
+    armed = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-resume-sticks.md")
     assert armed =~ "status: active"
+    assert armed =~ "handed_off_at:"
 
     sync_poll_cycle!(poller)
 
-    # Still active after the poll — nothing clobbers the document back to awaiting.
-    assert File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-sticks.md") =~
+    # Still active after the poll — nothing clobbers the document back to paused.
+    assert File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-resume-sticks.md") =~
              "status: active"
   end
 
-  # Shuttle writes accept/resume: the Poller shells `shuttle -C <owning store>
+  # Shuttle writes resume: the Poller shells `shuttle -C <owning store>
   # <verb> <slug> --local` between poll cycles,
   # then re-reads the fiber into its document cache so the board shows the
   # re-arm without waiting for the next poll.
   test "lifecycle_transition shells Shuttle's --local writer and refreshes the document cache" do
-    fiber_id = "tests/standing-accept-refresh"
+    fiber_id = "tests/standing-resume-refresh"
     store = MockRunner.felt_root()
 
     MockRunner.set_fiber(
       fiber_id,
-      make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "closed"})
+      make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "open"})
     )
 
     MockRunner.set_shuttle(
@@ -4740,12 +4769,12 @@ defmodule Shuttle.PollerTest do
         expr: "0 9 * * 1"
         tz: Europe/Paris
       """,
-      "closed"
+      "open"
     )
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_accept_refresh,
+        name: :test_poller_resume_refresh,
         runner: MockRunner,
         poll_interval_ms: 60_000,
         felt_stores: [store]
@@ -4754,13 +4783,13 @@ defmodule Shuttle.PollerTest do
     assert wait_until(fn -> :sys.get_state(poller, @state_timeout).document_cache_ready end)
 
     :sys.suspend(poller)
-    transition = Task.async(fn -> Poller.lifecycle_transition(poller, :accept, fiber_id) end)
+    transition = Task.async(fn -> Poller.lifecycle_transition(poller, :resume, fiber_id) end)
     Process.sleep(20)
-    refute {"shuttle", ["-C", store, "accept", fiber_id, "--local"]} in MockRunner.commands()
+    refute {"shuttle", ["-C", store, "resume", fiber_id, "--local"]} in MockRunner.commands()
     :sys.resume(poller)
     assert {:ok, _output} = Task.await(transition, @state_timeout)
 
-    assert {"shuttle", ["-C", store, "accept", fiber_id, "--local"]} in MockRunner.commands()
+    assert {"shuttle", ["-C", store, "resume", fiber_id, "--local"]} in MockRunner.commands()
 
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
 
@@ -4768,18 +4797,18 @@ defmodule Shuttle.PollerTest do
              Enum.find(body.fibers, &(&1.fiber["slug"] == fiber_id))
   end
 
-  test "an accept that lands during a poll read is not clobbered when the poll completes" do
-    # Regression for Symptom B of the poll-merge wedge: a standing-role `accept`
-    # re-arms the felt document (status:active), but a poll Task already in flight
-    # — snapshotted while the role was still the closed (awaiting) document —
-    # must not revert the acceptance when it completes. The poll Task only reads;
-    # the document is the single source of truth, so the accept stands.
-    fiber_id = "tests/standing-accept-during-poll"
+  test "a resume that lands during a poll read is not clobbered when the poll completes" do
+    # Regression for Symptom B of the poll-merge wedge: a standing-role `resume`
+    # arms the felt document (status:active), but a poll Task already in flight
+    # — snapshotted while the role was still the paused document — must not
+    # revert the resume when it completes. The poll Task only reads; the
+    # document is the single source of truth, so the resume stands.
+    fiber_id = "tests/standing-resume-during-poll"
 
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
-    # Awaiting is a document fact (status:closed + untempered).
-    fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "closed"})
+    # Paused is a document fact (status:open).
+    fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "open"})
     MockRunner.set_fiber(fiber_id, fiber)
 
     MockRunner.set_shuttle(
@@ -4790,29 +4819,29 @@ defmodule Shuttle.PollerTest do
         expr: "0 9 * * 1"
         tz: Europe/Paris
       """,
-      "closed"
+      "open"
     )
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_accept_during_poll,
+        name: :test_poller_resume_during_poll,
         runner: MockRunner,
         poll_interval_ms: 60_000,
         felt_stores: [MockRunner.felt_root()]
       )
 
-    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-during-poll.md"
+    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-resume-during-poll.md"
 
     # Hold the next poll inside its read-only felt walk; its snapshot still sees
-    # the role as the closed (awaiting) document.
+    # the role as the paused document.
     settle_poller!(poller)
     cycles = :sys.get_state(poller, @state_timeout).poll_cycles
     MockRunner.hold_ls()
     send(poller, :run_poll_cycle)
     assert_receive {:ls_held, reader}
 
-    # Accept while the poll is still reading (the GenServer stays responsive).
-    assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
+    # Resume while the poll is still reading (the GenServer stays responsive).
+    assert {:ok, _output} = Poller.lifecycle_transition(poller, :resume, fiber_id)
     assert File.read!(doc_path) =~ "status: active"
 
     # The held poll completes and applies against current state.
@@ -4820,7 +4849,7 @@ defmodule Shuttle.PollerTest do
     assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > cycles end)
 
     assert File.read!(doc_path) =~ "status: active",
-           "a poll completing after the accept reverted the acceptance to awaiting"
+           "a poll completing after the resume reverted it to paused"
   end
 
   test "direct ad-hoc dispatch creates an ad-hoc standing run before the schedule is due" do
@@ -4876,19 +4905,19 @@ defmodule Shuttle.PollerTest do
            |> length() == 1
   end
 
-  test "ad-hoc dispatch of an awaiting standing role spawns" do
-    # Awaiting is represented in the document as status:closed + untempered. Every
-    # explicit dispatch carries `force` (the controller folds `force or ad_hoc`;
-    # Shuttle.Transition passes both), and force IS the human's "go" from the
-    # board (New session / Resume / drag) — so an awaiting role spawns, re-arming
-    # the doc on the way (the re-arm itself is exercised in
+  test "ad-hoc dispatch of a retired standing role reopens it and spawns" do
+    # Every explicit dispatch carries `force` (the controller folds `force or
+    # ad_hoc`; Shuttle.Transition passes both), and force IS the human's "go"
+    # from the board (New session / Resume / drag) — so a retired role spawns,
+    # reopened on the way (the arm itself is exercised in
     # dispatch_integration_test against a real store).
-    fiber_id = "tests/standing-awaiting-refuses-adhoc"
+    fiber_id = "tests/standing-retired-adhoc"
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     fiber =
       make_fiber(fiber_id, %{
         "status" => "closed",
+        "tempered" => false,
         "closed-at" => "2026-05-24T10:00:00Z",
         "tags" => ["constitution", "standing"]
       })
@@ -4909,7 +4938,7 @@ defmodule Shuttle.PollerTest do
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_standing_awaiting_refuses_adhoc,
+        name: :test_poller_standing_retired_adhoc,
         runner: MockRunner,
         poll_interval_ms: 60_000,
         felt_stores: [MockRunner.felt_root()]
@@ -4921,8 +4950,14 @@ defmodule Shuttle.PollerTest do
              cmd == "tmux" and hd(args) == "new-session"
            end)
 
-    # Forced ad_hoc (the human board action) dispatches the awaiting role.
+    # Forced ad_hoc (the human board action) reopens and dispatches the role.
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
+
+    assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "shuttle" and match?(["-C", _, "reopen", ^fiber_id | _], args)
+           end)
+
+    assert MockRunner.fiber(fiber_id)["status"] == "active"
 
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -5525,6 +5560,7 @@ defmodule Shuttle.PollerTest do
 
   test "poller dispatches a due standing role with run context and does not hot-loop after exit" do
     # Uses new-format "kind: standing" (vs legacy "mode: standing") to test backward compat.
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
     fiber = make_fiber("tests/standing-due", %{"tags" => ["constitution", "standing"]})
     MockRunner.set_fiber("tests/standing-due", fiber)
 
@@ -5566,28 +5602,9 @@ defmodule Shuttle.PollerTest do
       assert is_binary(run_id)
     end)
 
-    # Simulate the worker exit. In production the exit handler's standing branch
-    # writes status:closed to the felt document (mark_standing_awaiting) BEFORE it
-    # releases the claim, so no poll after the exit ever sees the role armed. The
-    # MockRunner's `felt ls` reads its in-memory map, not the on-disk write
-    # mark_awaiting performs, so mirror that document close here — atomically with
-    # the exit — to reproduce the production ordering. With an every-minute cron,
-    # this closed-state is the ONLY thing preventing immediate re-dispatch (slice
-    # 2 dropped the completed_standing_runs MapSet): the `active → closed → active`
-    # document transition is the sole per-cycle gate.
-    MockRunner.set_shuttle(
-      "tests/standing-due",
-      """
-      enabled: true
-      kind: standing
-      agent: claude-sonnet
-      schedule:
-        expr: "* * * * *"
-        tz: Europe/Paris
-      """,
-      "closed"
-    )
-
+    # The exit concludes the run (handed_off_at = now) and leaves the role
+    # armed. With an every-minute cron, that stamp is the ONLY thing keeping
+    # the occurrence it served from re-firing on the next poll.
     end_worker_session(poller, "tests/standing-due")
     sync_poll_cycle!(poller)
 
@@ -5595,9 +5612,10 @@ defmodule Shuttle.PollerTest do
            |> Enum.filter(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
            |> length() == 1
 
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "felt" and Enum.take(args, 2) == ["standing", "review"]
-           end)
+    concluded = MockRunner.fiber("tests/standing-due")
+    assert concluded["status"] == "active"
+    assert is_binary(get_in(concluded, ["shuttle", "runtime", "handed_off_at"]))
+    refute Shuttle.Poller.StandingRoles.standing_role_due?(concluded)
   end
 
   # Slice 4: a stale stored next_due_at no longer fires the role — due-ness is
@@ -5657,8 +5675,8 @@ defmodule Shuttle.PollerTest do
   end
 
   # Slice 4: the snapshot state is schedule-derived (scheduled/due/dormant/
-  # running), never a review-derived "review"/"accepted". Awaiting/accepted are
-  # document facts the kanban classifier reads from status/tempered.
+  # running), never a review-derived "review"/"accepted". Paused/retired are
+  # document facts the kanban classifier reads from status.
   test "snapshot standing state is schedule-derived, not review-derived" do
     sleeping = make_fiber("tests/standing-review", %{"tags" => ["constitution", "standing"]})
 
@@ -6672,12 +6690,12 @@ defmodule Shuttle.PollerTest do
     File.rm_rf!(Path.join([MockRunner.felt_dir(), "tests/host-absent.md"]))
   end
 
-  test "poller marks an armed standing role awaiting when its worker died while the daemon was down" do
-    # Slice 6 dead-orphan handling on the tmux-scan substrate: a standing role
-    # whose document is armed (status:active, no verdict) but whose tmux session
-    # is gone never fired handle_worker_exit (daemon was down across the exit), so
-    # the poll-scan marks it awaiting (status:closed) — never re-dispatched, never
-    # re-fired off the schedule mid-cycle.
+  test "poller concludes a standing run whose worker died while the daemon was down" do
+    # Dead-orphan handling on the tmux-scan substrate: a standing role whose run
+    # is unconcluded but whose tmux session is gone never fired
+    # handle_worker_exit (daemon was down across the exit), so the poll-scan
+    # concludes the run at its dispatch instant — the role stays armed, and is
+    # never re-dispatched off this observation.
     fiber_id = "tests/standing-dead-orphan"
 
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
@@ -6692,9 +6710,10 @@ defmodule Shuttle.PollerTest do
       tz: Europe/Paris
     """)
 
-    # The marker discriminator: a dispatch marker with no handoff (and no re-arm)
-    # after it marks this as a daemon-down-across-exit dead orphan.
-    write_dispatch_marker(fiber_id, "dead-session-uuid")
+    # The marker discriminator: a dispatch marker with no handoff after it
+    # marks this as a daemon-down-across-exit dead orphan.
+    dispatched = DateTime.utc_now()
+    write_dispatch_marker(fiber_id, "dead-session-uuid", dispatched)
 
     doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-dead-orphan.md"
 
@@ -6708,17 +6727,18 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    assert wait_until(fn -> File.read!(doc_path) =~ "status: closed" end)
+    assert wait_until(fn -> File.read!(doc_path) =~ "handed_off_at:" end)
+    assert doc_status_and_handoff(doc_path) == {"active", dispatched}
 
-    # No worker was spawned — the role was marked awaiting, not dispatched.
+    # No worker was spawned — the run was concluded, not dispatched.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)
   end
 
-  test "a second scheduled run that dies dirty awaits review despite its prior handoff" do
-    # A dispatch retains the preceding run's handoff. The later dirty death
-    # still owes review; recovery cannot manufacture a human conclusion.
+  test "a second scheduled run that dies dirty is concluded despite its prior handoff" do
+    # A dispatch retains the preceding run's handoff. The later dirty death is
+    # still unconcluded, so recovery stamps it at its own dispatch instant.
     fiber_id = "tests/standing-inverted-markers"
 
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
@@ -6748,12 +6768,7 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    assert File.read!(doc_path) =~ "status: closed"
-
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
-               "--handed-off-at" in args
-           end)
+    assert doc_status_and_handoff(doc_path) == {"active", dispatched}
 
     # No worker was spawned.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -6762,11 +6777,9 @@ defmodule Shuttle.PollerTest do
   end
 
   test "poller leaves a scheduled standing role armed when a dead ADHOC extra-run is its last run" do
-    # Fix #2: a force-dispatched ad-hoc extra-run that dies dirty (daemon down
-    # across its exit) must NOT close the SCHEDULED standing role to awaiting —
-    # that would disrupt the cron cadence and force a human temper. A COMPLETED
-    # ad-hoc run reaches awaiting-review through handle_worker_exit, not this
-    # reconciler, so leaving a crashed ad-hoc run's role armed is safe.
+    # A force-dispatched ad-hoc extra-run that dies dirty (daemon down across
+    # its exit) is concluded like a scheduled one: the role stays armed on its
+    # cron cadence.
     fiber_id = "tests/standing-dead-adhoc"
 
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
@@ -6781,7 +6794,8 @@ defmodule Shuttle.PollerTest do
 
     # Plausible-but-orphaned markers (dispatched, NO handoff — a genuine dirty
     # death, not an inversion) carrying an ad-hoc run_id.
-    write_dispatch_marker(fiber_id, "dead-adhoc-uuid")
+    dispatched = DateTime.utc_now()
+    write_dispatch_marker(fiber_id, "dead-adhoc-uuid", dispatched)
     MockRunner.put_shuttle_fields(fiber_id, %{"run_id" => "adhoc-1751558400000"})
 
     doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/standing-dead-adhoc.md"
@@ -6796,19 +6810,19 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    # The scheduled role's document is untouched: still armed, never closed.
-    assert File.read!(doc_path) =~ "status: active"
-    refute File.read!(doc_path) =~ "status: closed"
+    # The scheduled role stays armed, its ad-hoc run concluded.
+    assert wait_until(fn -> File.read!(doc_path) =~ "handed_off_at:" end)
+    assert doc_status_and_handoff(doc_path) == {"active", dispatched}
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)
   end
 
-  test "a wedged tmux ls does not mark live standing roles dead" do
+  test "a wedged tmux ls does not conclude live standing runs" do
     # `tmux ls` timing out means the session list is UNKNOWN, not empty.
-    # Reading it as "no sessions" mass-marked every armed standing role
-    # awaiting (status:closed — a fiber WRITE) off a single wedged scan.
+    # Reading it as "no sessions" would conclude every armed standing role's
+    # run (a fiber WRITE) off a single wedged scan.
     # Uncertainty counts as present (Shuttle.Terminal): the dead-orphan pass must
     # skip the tick and let the next healthy scan decide.
     fiber_id = "tests/standing-tmux-wedged"
@@ -6842,14 +6856,14 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    # The role's document is untouched: still armed, never flipped to closed.
+    # The role's document is untouched: still armed, its run unconcluded.
     assert File.read!(doc_path) =~ "status: active"
-    refute File.read!(doc_path) =~ "status: closed"
+    refute File.read!(doc_path) =~ "handed_off_at:"
   end
 
   for backend <- [Shuttle.Terminal.Tmux, Shuttle.Terminal.Rex] do
     @tag backend: backend
-    test "a partial #{inspect(backend)} inventory and failed ps cannot close an invisible standing worker",
+    test "a partial #{inspect(backend)} inventory and failed ps cannot conclude an invisible standing worker",
          %{backend: backend} do
       Env.put_app_env(:terminal_backend, backend)
 
@@ -6894,10 +6908,10 @@ defmodule Shuttle.PollerTest do
       sync_poll_cycle!(poller)
       path = "#{MockRunner.felt_dir()}/#{id}/standing-partial-inventory.md"
       assert File.read!(path) =~ "status: active"
-      refute File.read!(path) =~ "status: closed"
+      refute File.read!(path) =~ "handed_off_at:"
 
       refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "shuttle" and "standing-transition" in args
+               cmd == "shuttle" and "conclude-run" in args
              end)
     end
   end
@@ -7511,7 +7525,7 @@ defmodule Shuttle.PollerTest do
         {fn -> Poller.dispatch_fiber(poller, "tests/t", []) end,
          &match?({:error, :poller_busy}, &1)},
       lifecycle_transition:
-        {fn -> Poller.lifecycle_transition(poller, :accept, "tests/t") end,
+        {fn -> Poller.lifecycle_transition(poller, :resume, "tests/t") end,
          &match?({:error, :timeout, _}, &1)}
     ]
 
@@ -8065,7 +8079,9 @@ defmodule Shuttle.PollerTest do
 
     notify_worker_exit(poller, id)
     :sys.get_state(poller, @state_timeout)
-    assert MockRunner.fiber(id)["status"] == "closed"
+    fiber = MockRunner.fiber(id)
+    assert fiber["status"] == "active"
+    assert get_in(fiber, ["shuttle", "runtime", "thread_exit_verb"]) == "handed off"
   end
 
   test "watcher exit cannot conclude a newer dispatch than its observation" do

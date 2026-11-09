@@ -107,7 +107,7 @@ defmodule ShuttleWeb.APIControllerTest do
 
     refute Enum.any?(MockRunner.commands(), fn
              {"tmux", ["new-session" | _]} -> true
-             {"shuttle", [verb | _]} -> verb in ["reopen", "rearm", "install"]
+             {"shuttle", [verb | _]} -> verb in ["reopen", "install"]
              _ -> false
            end)
   end
@@ -474,7 +474,7 @@ defmodule ShuttleWeb.APIControllerTest do
     assert [{"shuttle", reopen_args}] = shuttle_calls("reopen")
 
     assert Enum.drop_while(reopen_args, &(&1 != "reopen")) ==
-             ["reopen", fiber_id, "--project-dir", raw, "--conclude-run", "--local"]
+             ["reopen", fiber_id, "--project-dir", raw, "--local"]
 
     assert shuttle_calls("set-agent") == []
     assert spawn_dir() == checkout

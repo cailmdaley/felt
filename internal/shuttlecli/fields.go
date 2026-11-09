@@ -35,7 +35,11 @@ func setTempered(f *felt.Felt, value *bool) error {
 }
 
 // unclose moves a fiber to status (open or active), clearing the review
-// verdict and closed-at: the card leaves Awaiting review entirely.
+// verdict and closed-at: the card leaves Awaiting review entirely. Arming a
+// standing constitution also concludes its current run
+// (shuttle.runtime.handed_off_at = now), so it next fires at its schedule's
+// next tick rather than catching up an occurrence it was paused or retired
+// across.
 func unclose(f *felt.Felt, status string) error {
 	wasClosed := f.Status == felt.StatusClosed
 	wasResting := f.Status == felt.StatusOpen && horizonStashed(f)
@@ -44,7 +48,13 @@ func unclose(f *felt.Felt, status string) error {
 	if err := setTempered(f, nil); err != nil {
 		return err
 	}
-	if wasClosed || wasResting || (status == felt.StatusActive && shuttle.StoredKind(f) == "standing") {
+	if status == felt.StatusActive && shuttle.StoredKind(f) == "standing" {
+		if err := shuttle.SetRuntimeField(f, "handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+		return shuttle.SetRuntimeField(f, "thread_exit_verb", "rearmed")
+	}
+	if wasClosed || wasResting {
 		return shuttle.SetRuntimeField(f, "thread_exit_verb", "rearmed")
 	}
 	return nil

@@ -4,16 +4,15 @@ defmodule Shuttle.Opener do
   alias Shuttle.{Env, Kitty, OpenTrace, OriginRouter, Remote, Terminal}
   alias Shuttle.Terminal.Rex
 
+  @doc "The words for a terminal that is gone."
+  def absent_message(name), do: "Cannot locate terminal #{name}; it is absent or unobservable"
+
   @doc """
   Open a conversation's terminal and bring it forward: a Rex display selects the
   worker's window, creating a viewer for a tmux worker, and activates the app;
   a kitty display opens a tab. A Rex terminal that is gone, here or on its
   owner, answers `{:error, {:absent, name}}`.
   """
-
-  @doc "The words for a terminal that is gone."
-  def absent_message(name), do: "Cannot locate terminal #{name}; it is absent or unobservable"
-
   @spec open(String.t(), String.t() | nil) :: :ok | {:error, String.t() | {:absent, String.t()}}
   def open(name, host \\ nil)
 

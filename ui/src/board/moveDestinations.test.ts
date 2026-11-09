@@ -70,10 +70,10 @@ describe('moveDestinations', () => {
     // Rest carries none, so clearing the flag is the move.
     ['a resting cold card is offered Resting', { status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', cold: true }, null,
       ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed']],
-    // setSurface's standing guard: "it runs on its schedule". Drag-to-In-flight
-    // still runs it now.
-    ['a standing constitution is withheld both surfaces', { shuttleKind: 'standing', effectiveHorizon: 'stashed' }, null,
-      ['drafts', 'inFlight', 'awaitingReview']],
+    // setSurface's and transition's standing guards: "it runs on its
+    // schedule". Drag-to-In-flight still runs it now.
+    ['a standing constitution is offered In flight alone', { shuttleKind: 'standing', effectiveHorizon: 'stashed' }, null,
+      ['inFlight']],
     ['a cycle is offered nothing: a span of time is not work', { isCycle: true }, null, []],
   ]
 

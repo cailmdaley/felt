@@ -125,7 +125,7 @@ An unavailable owner fails the request, and a duplicate document is refused rath
 
 `POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
 fields, and runs the matching `shuttle <action>` on the owning host:
-`install`, `repeat`, `reshape`, `pause`, `rest`, `resume`, `accept`, `close`, `reopen`,
+`install`, `repeat`, `reshape`, `pause`, `rest`, `resume`, `close`, `reopen`,
 `set-model`, `set-agent`, `role`, `seat`, `set-outcome` or
 `uninstall`.
 Lifecycle requests can carry `fiber_path`, an exact namespace path verified against the requested UID before a full UID search.
@@ -137,7 +137,7 @@ The `role` action takes `role: <role-slug>`, or `clear: true` to remove both rol
 An optional `new_name: "Office name"` passes `--new "Office name"` to the CLI to create a missing charter in the shared namespace.
 Existing charters are preserved, and without `new_name` the charter must already exist.
 The `seat` action sets `shuttle.seat: true` and requires an assigned role; `clear: true` removes the seat field.
-`accept`, `resume`, `role`, `seat` and `rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
+`resume`, `role`, `seat` and `rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
 owning daemon's Poller, serialized with its state changes — a rest then stops
 any live worker through its backend — which then refreshes
 that fiber's document cache; a poll read in flight sees the old document or

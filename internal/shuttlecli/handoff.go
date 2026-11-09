@@ -161,16 +161,6 @@ func stampHandedOff(path string, check func(*felt.Felt) error) (string, error) {
 				return err
 			}
 		}
-		// A human can conclude a standing run while its worker is finishing.
-		// The worker's later handoff cannot revoke that current-run verdict.
-		if shuttle.StandingRunDisposition(shuttle.RunFacts{
-			DispatchedAt: runtimeString(f, "dispatched_at"),
-			HandedOffAt:  runtimeString(f, "handed_off_at"),
-			ExitVerb:     runtimeString(f, "thread_exit_verb"),
-		}) == shuttle.RunRearmed {
-			at = runtimeString(f, "handed_off_at")
-			return nil
-		}
 		if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {
 			return err
 		}

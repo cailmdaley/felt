@@ -19,7 +19,7 @@ defmodule Shuttle.PollerPublicationTest do
       {"delivered\n", 0}
     end
 
-    def cmd("shuttle", ["-C", _store, "accept" | _] = args, opts) do
+    def cmd("shuttle", ["-C", _store, "resume" | _] = args, opts) do
       send(Shuttle.Env.app(:publication_test_pid), {:lifecycle_write, self(), args})
       Store.cmd("shuttle", args, opts)
     end
@@ -200,15 +200,15 @@ defmodule Shuttle.PollerPublicationTest do
     end)
   end
 
-  test "lifecycle writes wait for the Poller and publish the accepted document before replying",
+  test "lifecycle writes wait for the Poller and publish the resumed document before replying",
        %{root: root} do
-    id = "tests/published-accept"
-    Store.set_fiber(id, make_fiber(id, %{"status" => "closed"}))
+    id = "tests/published-resume"
+    Store.set_fiber(id, make_fiber(id, %{"status" => "open"}))
 
     Store.set_shuttle(
       id,
       "kind: standing\nschedule:\n  expr: '0 9 * * 1'\n  tz: Europe/Paris\n",
-      "closed"
+      "open"
     )
 
     {:ok, poller} = boot(root)
@@ -216,7 +216,7 @@ defmodule Shuttle.PollerPublicationTest do
     path = Store.fiber(id)["path"]
 
     :sys.suspend(poller)
-    transition = Task.async(fn -> Poller.lifecycle_transition(poller, :accept, id) end)
+    transition = Task.async(fn -> Poller.lifecycle_transition(poller, :resume, id) end)
 
     try do
       await(fn ->
@@ -224,12 +224,12 @@ defmodule Shuttle.PollerPublicationTest do
 
         Enum.any?(
           messages,
-          &match?({:"$gen_call", _, {:lifecycle_transition, :accept, ^id, []}}, &1)
+          &match?({:"$gen_call", _, {:lifecycle_transition, :resume, ^id, []}}, &1)
         )
       end)
 
       refute_received {:lifecycle_write, _, _}
-      assert File.read!(path) =~ "status: closed"
+      assert File.read!(path) =~ "status: open"
       assert {:ok, ^before} = Poller.published_state_response(poller) |> same_age(before)
       assert Task.yield(transition, 0) == nil
     after
@@ -237,10 +237,10 @@ defmodule Shuttle.PollerPublicationTest do
     end
 
     assert {:ok, _output} = Task.await(transition, 10_000)
-    assert_received {:lifecycle_write, ^poller, ["-C", ^root, "accept", ^id, "--local"]}
+    assert_received {:lifecycle_write, ^poller, ["-C", ^root, "resume", ^id, "--local"]}
     assert File.read!(path) =~ "status: active"
-    {:ok, after_accept} = Poller.published_state_response(poller)
-    assert after_accept.etag != before.etag
+    {:ok, after_resume} = Poller.published_state_response(poller)
+    assert after_resume.etag != before.etag
     assert {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
     assert entry.fiber["status"] == "active"
   end

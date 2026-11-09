@@ -44,9 +44,7 @@ The worker asks four questions, in order. The answer sets `status`, and
 **1. Is the desired state realized?** Run `shuttle close <fiber>` and exit.
 The card lands in Awaiting review.
 A human accepts it or resumes it.
-For a standing constitution with a dispatch on record, an occurrence after both its last service and close can supersede the unreviewed result and start fresh work.
-A plain close preserves an existing standing verdict; `reopen` explicitly clears it.
-A never-run closed standing draft stays closed.
+A standing run never closes: it has no review, and `close` refuses it (see 4).
 
 Substantive work needs independent fresh-eyes review before the session that
 produced it closes — a subagent reviewer in-session, or leave the fiber `active`
@@ -70,8 +68,8 @@ It works in any state and stops a live worker through the owning daemon's serial
 
 **4. More work, not blocked?** Leave the fiber active and just hand off. The
 daemon starts a fresh worker next eligible tick, and it lands on your `## Status`.
-A standing run that has not been accepted is published for review on worker exit and waits for acceptance or a subsequent scheduled occurrence.
-Acceptance keeps that run armed through its worker's handoff and exit.
+A standing run always ends this way: its exit leaves the constitution armed, and it runs again at the schedule's next tick.
+When a run's content needs the human, it asks with `shuttle ask` before handing off; the card waits on the human's turn with the question while staying on its schedule.
 
 ### Close, handoff and rest
 
@@ -79,15 +77,15 @@ shuttle obeys the vocabulary literally. Know which word does what.
 
 | You say | The worker does | Next |
 |---|---|---|
-| "hand off" | Continue with `shuttle handoff <fiber>` | Daemon redispatches when eligible; a standing run follows its schedule and review lifecycle |
-| "close it out" | Run `shuttle close <fiber>`; it sets `status: closed` — never handoff | Card waits for review; an untempered standing run can re-arm at a subsequent occurrence |
+| "hand off" | Continue with `shuttle handoff <fiber>` | Daemon redispatches when eligible; a standing run fires at its next tick |
+| "close it out" | Run `shuttle close <fiber>`; it sets `status: closed` — never handoff | Card waits for review; a standing constitution has no review, so close refuses it |
 | "put it to rest" | Run `shuttle rest <fiber>`; `status: open`, `horizon: stashed` | Card goes to Resting; no new worker |
 
 Closing puts the work back on a human's desk. It claims nothing about
 completion. A worker should never upgrade a close-out into a continuation
 because the work looks unfinished — unfinished is often exactly why you want it
 back.
-For a standing responsibility, Rest (`status: open`) pauses the schedule and a verdict ends it.
+For a standing responsibility, Rest (`status: open`) pauses the schedule (the board's Pause schedule), Resume picks it up from the next tick, and `close --tempered=false` retires it (the board's Retire).
 A stashed horizon alone does neither.
 
 ### Tempered — human only
@@ -186,7 +184,7 @@ Oneshot workers that were running restore from their durable continuation marker
 A finished or ambiguous turn reopens its conversation quietly; an interrupted turn receives a continuation prompt.
 Restoration preserves the conversation regardless of transcript age.
 Oneshot seats follow the same rule.
-Standing cron runs retain their close-to-review lifecycle when their worker dies; a due occurrence carries its own authorization and passes through the quarantine.
+A standing run whose worker died is concluded at its dispatch instant and stays armed; a due occurrence carries its own authorization and passes through the quarantine.
 CLI/daemon contract and reconciliation holds remain independent gates.
 
 The guard exists because a daemon that restarts repeatedly (an overloaded

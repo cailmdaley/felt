@@ -5,7 +5,7 @@ defmodule Shuttle.StandingExitRegressionTest do
   defmodule FailingWriter do
     @behaviour Shuttle.Runner
     def cmd("shuttle", args, opts) do
-      if "standing-transition" in args or "mark-runtime" in args,
+      if "conclude-run" in args or "mark-runtime" in args,
         do: {"simulated document write failure", 1},
         else: Shuttle.Runner.Default.cmd("shuttle", args, opts)
     end
@@ -34,7 +34,7 @@ defmodule Shuttle.StandingExitRegressionTest do
       project_dir: #{root}
       agent: claude-sonnet
       schedule:
-        expr: "0 9 1 1 *"
+        expr: "0 9 * * *"
         tz: UTC
       runtime:
         dispatched_at: 2026-01-02T00:00:00Z
@@ -59,7 +59,7 @@ defmodule Shuttle.StandingExitRegressionTest do
     assert_receive {^port, {:data, "locked\n"}}, 30_000
 
     try do
-      task = Task.async(fn -> LifecycleStore.mark_awaiting("role") end)
+      task = Task.async(fn -> LifecycleStore.conclude("role") end)
       assert Task.yield(task, 200) == nil, "daemon mutation bypassed the CLI's advisory lock"
 
       text =
@@ -67,71 +67,85 @@ defmodule Shuttle.StandingExitRegressionTest do
 
       File.write!(c.path, text)
       Port.command(port, "\n")
-      assert {:ok, _} = Task.await(task, 30_000)
+      assert {:ok, "concluded" <> _} = Task.await(task, 30_000)
       assert File.read!(c.path) =~ "Concurrent committed result."
-      assert File.read!(c.path) =~ "status: closed"
+      assert File.read!(c.path) =~ "status: active"
+      assert File.read!(c.path) =~ "handed_off_at:"
     after
       if Port.info(port), do: Port.command(port, "\n")
     end
   end
 
-  for verb <- ["accept", "rest"] do
-    test "a stale dead-run observation cannot undo #{verb}", context do
-      assert {:ok, _} = Shuttle.CLI.run(["-C", context.root, unquote(verb), "role", "--local"])
-      accepted = File.read!(context.path)
-      StandingRoles.reconcile_dead_standing_roles(context.state, [context.candidate], {:ok, []})
-      assert File.read!(context.path) == accepted
-    end
+  test "an exit without handoff concludes the run and rests the role until its next tick", c do
+    assert StandingRoles.standing_role_due?(show(c.root)),
+           "fixture: an occurrence elapsed since the observed dispatch"
+
+    before = DateTime.utc_now()
+    assert {:ok, "concluded" <> _} = LifecycleStore.conclude("role")
+
+    fiber = show(c.root)
+    assert fiber["status"] == "active"
+    assert get_in(fiber, ["shuttle", "runtime", "thread_exit_verb"]) == "handed off"
+    {:ok, stamped, _} = DateTime.from_iso8601(get_in(fiber, ["shuttle", "runtime", "handed_off_at"]))
+    assert DateTime.compare(stamped, before) != :lt
+    refute StandingRoles.standing_role_due?(fiber)
   end
 
-  test "a clean scheduled handoff during downtime owes review", c do
-    text =
-      File.read!(c.path)
-      |> String.replace(
-        "    run_id: scheduled-2",
-        "    run_id: scheduled-2\n    handed_off_at: 2026-01-03T00:00:00Z\n    thread_exit_verb: handed off"
-      )
-
-    File.write!(c.path, text)
-
-    candidate =
-      put_in(c.candidate, ["shuttle", "runtime", "handed_off_at"], "2026-01-03T00:00:00Z")
-
-    candidate = put_in(candidate, ["shuttle", "runtime", "thread_exit_verb"], "handed off")
-    StandingRoles.reconcile_dead_standing_roles(c.state, [candidate], {:ok, []})
-    assert File.read!(c.path) =~ "status: closed"
-  end
-
-  test "accept followed by a later dispatch stamp does not manufacture a conclusion", c do
-    assert {:ok, _} = Shuttle.CLI.run(["-C", c.root, "accept", "role", "--local"])
-    assert {:ok, output} = Shuttle.CLI.run(["-C", c.root, "show", "role", "--json"])
-    accepted = Jason.decode!(output)
-    prior_handoff = get_in(accepted, ["shuttle", "runtime", "handed_off_at"])
-    {:ok, at, _} = DateTime.from_iso8601(prior_handoff)
-    next_dispatch = DateTime.add(at, 2, :second) |> DateTime.to_iso8601()
-
+  test "an exit after the worker handed off leaves the document as it stands", c do
     assert {:ok, _} =
              Shuttle.CLI.run([
                "-C",
                c.root,
                "mark-runtime",
                "role",
-               "--dispatched-at",
-               next_dispatch,
-               "--run-id",
-               "scheduled-3"
+               "--handed-off-at",
+               "2026-01-03T00:00:00Z"
              ])
 
-    assert {:ok, output} = Shuttle.CLI.run(["-C", c.root, "show", "role", "--json"])
-    candidate = Jason.decode!(output)
-    assert get_in(candidate, ["shuttle", "runtime", "handed_off_at"]) == prior_handoff
-    StandingRoles.reconcile_dead_standing_roles(c.state, [candidate], {:ok, []})
-    assert File.read!(c.path) =~ "status: closed"
-    assert {:ok, _, _, fm, _} = Shuttle.FiberDoc.read_path(c.path)
-    assert get_in(fm, ["shuttle", "runtime", "handed_off_at"]) == prior_handoff
+    handed_off = File.read!(c.path)
+    assert {:ok, "left" <> _} = LifecycleStore.conclude("role")
+    assert File.read!(c.path) == handed_off
   end
 
-  test "a failed close is retried by the next healthy absence observation", c do
+  for {name, args} <- [
+        {"paused", ["rest", "role", "--local"]},
+        {"retired", ["close", "role", "--tempered=false", "--local"]}
+      ] do
+    test "a #{name} role is untouched by the exit and recovery writers", c do
+      assert {:ok, _} = Shuttle.CLI.run(["-C", c.root | unquote(args)])
+      settled = File.read!(c.path)
+
+      assert {:ok, "left" <> _} = LifecycleStore.conclude("role", observed: c.candidate)
+      StandingRoles.reconcile_dead_standing_roles(c.state, [c.candidate], {:ok, []})
+      assert File.read!(c.path) == settled
+    end
+  end
+
+  test "recovery concludes a dead run at its dispatch instant and a missed tick still fires", c do
+    StandingRoles.reconcile_dead_standing_roles(c.state, [c.candidate], {:ok, []})
+
+    fiber = show(c.root)
+    assert fiber["status"] == "active"
+    {:ok, stamped, _} = DateTime.from_iso8601(get_in(fiber, ["shuttle", "runtime", "handed_off_at"]))
+    assert DateTime.compare(stamped, ~U[2026-01-02 00:00:00Z]) == :eq
+    assert StandingRoles.standing_role_due?(fiber)
+  end
+
+  test "a concluded run is skipped by recovery without a write", c do
+    StandingRoles.reconcile_dead_standing_roles(c.state, [c.candidate], {:ok, []})
+    concluded = File.read!(c.path)
+    candidate = show(c.root) |> Map.put("id", "role") |> Map.put("path", c.path)
+
+    StandingRoles.reconcile_dead_standing_roles(
+      %{c.state | runner: FailingWriter},
+      [candidate],
+      {:ok, []}
+    )
+
+    assert File.read!(c.path) == concluded
+  end
+
+  test "a failed conclusion is retried by the next healthy absence observation", c do
     # An unavailable writer cannot conclude the run; the document remains the
     # input for the next poll, independent of the lost watcher notification.
     StandingRoles.reconcile_dead_standing_roles(
@@ -140,18 +154,14 @@ defmodule Shuttle.StandingExitRegressionTest do
       {:ok, []}
     )
 
-    assert File.read!(c.path) =~ "status: active"
+    refute File.read!(c.path) =~ "handed_off_at:"
     StandingRoles.reconcile_dead_standing_roles(c.state, [c.candidate], {:ok, []})
-    assert File.read!(c.path) =~ "status: closed"
+    assert File.read!(c.path) =~ "handed_off_at:"
+    assert File.read!(c.path) =~ "status: active"
   end
 
-  test "force rearm propagates a failed CLI mutation without arming the document", c do
-    File.write!(c.path, String.replace(File.read!(c.path), "status: active", "status: closed"))
-    before = File.read!(c.path)
-
-    assert {:error, _} =
-             LifecycleStore.rearm("role", runner: FailingWriter, felt_stores: [c.root])
-
-    assert File.read!(c.path) == before
+  defp show(root) do
+    assert {:ok, output} = Shuttle.CLI.run(["-C", root, "show", "role", "--json"])
+    output |> Jason.decode!() |> Map.put("id", "role")
   end
 end

@@ -31,9 +31,9 @@ const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): Ke
 const constitutionBindings = (subject: string): KeyBinding[] => [
   bind(['c', '.'], 'conversation', `Open ${subject}'s conversation`),
   bind(['t'], 'temper', `Temper ${subject} (${VERDICT_UNDO} undo)`),
-  bind(['x'], 'discard', `Discard ${subject} (${VERDICT_UNDO} undo)`),
+  bind(['x'], 'discard', `Discard ${subject}, or retire a standing one (${VERDICT_UNDO} undo)`),
   bind(['a'], 'toReview', `Move ${subject} to Awaiting review (${VERDICT_UNDO} undo)`),
-  bind(['s'], 'rest', `Rest ${subject}, with or without a date`),
+  bind(['s'], 'rest', `Rest ${subject}, with or without a date; pause or resume a standing one's schedule`),
   bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
 ]
 
@@ -158,9 +158,9 @@ export const helpSections: readonly HelpSection[] = [
   { title: 'A constitution', note: `The selected card, or the open fiber. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
     row(['c', '.'], 'Open its conversation', everywhere('conversation')),
     row(['t'], 'Temper', [...on('desk', 'temper'), ...on('reader', 'temper')]),
-    row(['x'], 'Discard', [...on('desk', 'discard'), ...on('reader', 'discard')]),
+    row(['x'], 'Discard; retire a standing one', [...on('desk', 'discard'), ...on('reader', 'discard')]),
     row(['a'], 'Move to Awaiting review', [...on('desk', 'toReview'), ...on('reader', 'toReview')]),
-    row(['s'], 'Rest, with or without a date', [...on('desk', 'rest'), ...on('reader', 'rest')]),
+    row(['s'], 'Rest, with or without a date; pause or resume a standing one\'s schedule', [...on('desk', 'rest'), ...on('reader', 'rest')]),
     row(['z'], 'Undo the latest pending verdict', [...on('desk', 'undoVerdict'), ...on('reader', 'undoVerdict')]),
     row(['b'], 'Go to its orchestrator', on('reader', 'orchestrator')),
   ] },

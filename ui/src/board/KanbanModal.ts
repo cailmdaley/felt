@@ -44,7 +44,7 @@ import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock } from './workspace/Dock.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
-import { constitutionAction } from './workspace/fiberPageState.js'
+import { constitutionAction, schedulePaused, scheduled } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
@@ -358,7 +358,7 @@ export class KanbanModal {
       {
         voice: { controller: this.voice },
         phone: this.phoneAudio,
-        onRest: card => this.openRestPopover(card),
+        onRest: card => this.rest(card),
       },
     )
     this.fiberSends = new FiberSends(this.shuttleBase)
@@ -372,7 +372,7 @@ export class KanbanModal {
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       makeSeat: (card, anchor) => this.makeSeat(card, anchor),
       openDetail: (card, family) => { if (family) this.openDocumentChannel(card, this.workspace?.familyDocument(card)); else this.openDocumentChannel(card) },
-      onRest: card => this.openRestPopover(card),
+      onRest: card => this.rest(card),
       getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       conversation: { can: card => this.dock.canOpenConversation(card), open: card => { this.dock.openConversation(card) } },
@@ -427,7 +427,7 @@ export class KanbanModal {
       find: this.findEl ?? undefined,
       focusFind: () => this.focusFind(),
       reveal: card => !!this.activeView?.reveal?.(card.uid ?? card.id, card.originId),
-      onRest: card => this.openRestPopover(card),
+      onRest: card => this.rest(card),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
     this.voice.onRex = ({ fiber_id: id, origin }) => {
@@ -1068,6 +1068,14 @@ export class KanbanModal {
       this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
       return
     }
+    // A standing constitution runs now (In flight) or is retired (Discarded);
+    // its schedule is paused and resumed with Rest, and it is never closed for
+    // review or tempered: a run's exit re-arms it.
+    if (card.shuttleKind === 'standing' && target !== 'inFlight' && target !== 'composted') {
+      this.showBanner(`“${card.name}” is a standing constitution — pause its schedule (s) or retire it (x) instead.`, 'info')
+      this.announce(`${card.name} runs on its schedule; pause or retire it instead.`)
+      return
+    }
     if ((target === 'tempered' || target === 'composted') && this.workspace && !opts.verdictCommitted) {
       this.workspace.queueVerdict(card, target)
       return
@@ -1302,8 +1310,8 @@ export class KanbanModal {
     // silently ignored by the read model and just leaves dead frontmatter.
     // Reject the planning gesture with an explanation rather than no-op. The
     // lifecycle gestures still work: drag to In flight runs it now (that's
-    // `transition` → force-dispatch, not this path), and Temper / Compost
-    // close it.
+    // `transition` → force-dispatch, not this path), Rest pauses its
+    // schedule, and Retire closes it.
     if (card.shuttleKind === 'standing') {
       this.showBanner(
         `“${card.name}” is a standing constitution — it runs on its schedule. Edit the schedule to change when it runs, or drag it to In flight to run it now.`,
@@ -1731,7 +1739,7 @@ export class KanbanModal {
     }
 
     this.deskEl.append(this.surfaces.renderNowSection(order.now, staleness, lens))
-    // Resting draws snoozed work and standing constitutions asleep between runs.
+    // Resting draws snoozed work and standing constitutions between runs or paused.
     this.deskEl.append(this.surfaces.renderStashSection(order.resting, staleness))
     const rolesBand = this.surfaces.renderRolesSection(order.roles, staleness)
     if (rolesBand) this.deskEl.append(rolesBand)
@@ -1999,7 +2007,15 @@ export class KanbanModal {
 
   private closeRestPopover?: () => void
 
-  private openRestPopover(card: KanbanCard): void {
+  /**
+   * The Rest verb. On a constitution with a schedule (a standing one's cron, a
+   * seat's pulse) Rest is the schedule's: it pauses an armed schedule at once,
+   * with no wake day (only a resume brings it back), and resumes a paused one,
+   * which next fires at its schedule's next tick. Anything else rests until a
+   * day the popover asks for, or none.
+   */
+  private rest(card: KanbanCard): void {
+    if (scheduled(card)) { void this.toggleSchedule(card); return }
     this.closeRestPopover?.()
     this.closeRestPopover = restPopover(card, async until => {
       try {
@@ -2011,6 +2027,20 @@ export class KanbanModal {
         this.showBanner(`Rest failed: ${errText(error)}`, 'error')
       }
     })
+  }
+
+  private async toggleSchedule(card: KanbanCard): Promise<void> {
+    const resume = schedulePaused(card)
+    const verb = resume ? 'Resume schedule' : 'Pause schedule'
+    try {
+      await postDaemonJson(this.shuttleBase, '/api/v1/lifecycle', {
+        action: resume ? 'resume' : 'rest', fiber: card.id, origin: card.originId,
+      }, `${verb} failed`)
+      this.announce(resume ? `Resumed “${card.name}”'s schedule.` : `Paused “${card.name}”'s schedule.`)
+    } catch (error) {
+      this.showBanner(`${verb} failed: ${errText(error)}`, 'error')
+    }
+    await this.fetchAndRender()
   }
 
   private handleKanbanKeyDown(e: KeyboardEvent): void {
@@ -2046,7 +2076,7 @@ export class KanbanModal {
       if (intent && constitutionAction(intent, selected, {
         verdict: (card, verdict) => { this.workspace?.queueVerdict(card, verdict) },
         conversation: card => this.dock.openConversation(card),
-        rest: card => this.openRestPopover(card),
+        rest: card => this.rest(card),
       })) {
         e.preventDefault(); e.stopPropagation()
         return
@@ -2393,35 +2423,6 @@ export function applyOptimisticTransition(
   if (!card) return null
 
   const moved: KanbanCard = { ...card }
-  // Any UNTEMPERED non-draft state counts, not just awaiting (status:closed):
-  // Temper can land while the run is still status:active (worker alive or just
-  // killed, exit writer not yet run) and the daemon resolves it to accept
-  // there too. Mirrors the daemon's lifecycle actions.
-  const isStandingAwaiting =
-    card.status !== 'open' && card.tempered === undefined && card.shuttleKind === 'standing'
-  if (target === 'tempered' && isStandingAwaiting) {
-    // Dropping the awaiting run of a standing constitution on Tempered is
-    // ACCEPT — the daemon re-arms it (status:active, verdict cleared) rather
-    // than terminating it, so the card's home is the timeline at its next
-    // launch, NOT the past lane. Honoring
-    // the re-arm here keeps optimism equal to the committed reclassify
-    // (the no-snap-back invariant).
-    moved.status = 'active'
-    moved.tempered = undefined
-    moved.closedAt = undefined
-    moved.workerState = undefined
-    moved.tmuxSession = undefined
-    moved.runtimePhase = undefined
-    moved.turn = 'none'
-    // A standing seat re-armed between runs rests among the Roles.
-    if (moved.shuttleSeat === true && moved.shuttleRole) {
-      moved.column = 'roles'
-      return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
-    }
-    moved.column = 'resting'
-    timeline.futureDated = [...timeline.futureDated, moved]
-    return withSurfaces(resp, { now, timeline, stash, roles })
-  }
   moved.column = target
   if (target === 'tempered' || target === 'composted') {
     moved.status = 'closed'

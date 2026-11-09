@@ -3,93 +3,77 @@ defmodule Shuttle.LifecycleStoreTest do
 
   alias Shuttle.LifecycleStore
 
-  test "standing exit preserves an explicit pause" do
-    with_doc_awaiting_role(
-      fn fiber_id, path ->
+  @dispatched "    dispatched_at: 2026-01-02T00:00:00Z\n    run_id: scheduled-2\n"
+
+  describe "conclude/2 — the standing-exit writer" do
+    test "stamps the unconcluded run's handoff and leaves the role armed" do
+      with_standing_doc(fn fiber_id, path ->
+        assert {:ok, message} = conclude(fiber_id)
+        assert message =~ "concluded"
+
+        fm = read_frontmatter(path)
+        assert fm["status"] == "active"
+        refute Map.has_key?(fm, "closed-at")
+        refute Map.has_key?(fm, "tempered")
+        runtime = fm["shuttle"]["runtime"]
+        assert is_binary(runtime["handed_off_at"])
+        assert runtime["thread_exit_verb"] == "handed off"
+        assert runtime["custom_marker"] == "keep"
+      end)
+    end
+
+    test "recovery stamps the handoff at the run's dispatch instant" do
+      with_standing_doc(fn fiber_id, path ->
+        assert {:ok, _} = conclude(fiber_id, recovery: true)
+        {:ok, at, _} = DateTime.from_iso8601(read_frontmatter(path)["shuttle"]["runtime"]["handed_off_at"])
+        assert DateTime.compare(at, ~U[2026-01-02 00:00:00Z]) == :eq
+      end)
+    end
+
+    test "leaves handed-off, undispatched, paused, retired and foreign documents byte-identical" do
+      for opts <- [
+            [runtime: @dispatched <> "    handed_off_at: 2026-01-03T00:00:00Z\n"],
+            [runtime: ""],
+            [status: "open"],
+            [status: "closed", tempered: false],
+            [host: "other-host"]
+          ] do
+        with_standing_doc(
+          fn id, path ->
+            before = File.read!(path)
+            assert {:ok, message} = conclude(id)
+            assert message =~ "as it stands"
+            assert File.read!(path) == before
+          end,
+          opts
+        )
+      end
+    end
+
+    test "a newer run than the observed one is left as it stands" do
+      with_standing_doc(fn fiber_id, path ->
+        {:ok, _, _, fm, _} = Shuttle.FiberDoc.read_path(path)
+        observed = put_in(fm, ["shuttle", "runtime", "run_id"], "scheduled-1")
         before = File.read!(path)
-        assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
+        assert {:ok, _} = conclude(fiber_id, observed: observed)
         assert File.read!(path) == before
-      end,
-      status: "open"
-    )
-  end
-
-  test "standing exit preserves a current human rearm" do
-    with_doc_awaiting_role(
-      fn fiber_id, path ->
-        text = File.read!(path)
-
-        text =
-          String.replace(
-            text,
-            "  runtime:",
-            "  runtime:\n    dispatched_at: 2026-01-01T00:00:00Z\n    handed_off_at: 2026-01-02T00:00:00Z\n    thread_exit_verb: rearmed"
-          )
-
-        File.write!(path, text)
-        assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
-        assert File.read!(path) == text
-      end,
-      status: "active"
-    )
-  end
-
-  describe "mark_awaiting/1 — the standing-exit writer (active → closed, untempered)" do
-    test "flips status:active → closed with closed-at, no verdict, and reads as doc-awaiting" do
-      with_doc_awaiting_role(
-        fn fiber_id, path ->
-          assert {:ok, message} = LifecycleStore.mark_awaiting(fiber_id)
-          assert message =~ "awaiting review"
-
-          fm = read_frontmatter(path)
-          assert fm["status"] == "closed"
-          assert is_binary(fm["closed-at"])
-          refute Map.has_key?(fm, "tempered")
-          assert fm["shuttle"]["runtime"]["thread_exit_verb"] == "closed"
-        end,
-        status: "active"
-      )
+      end)
     end
   end
 
-  test "the exit writer leaves paused, closed and reviewed documents byte-identical" do
-    for {status, verdict} <- [
-          {"open", nil},
-          {"closed", nil},
-          {"active", false},
-          {"active", true},
-          {"closed", false},
-          {"closed", true}
-        ] do
-      with_doc_awaiting_role(
-        fn id, path ->
-          before = File.read!(path)
-          assert {:ok, message} = LifecycleStore.mark_awaiting(id)
-          assert message =~ "skipped"
-          assert File.read!(path) == before
-        end,
-        status: status,
-        tempered: verdict
-      )
-    end
-  end
-
-  describe "the standing-only writers refuse a oneshot" do
-    # mark_awaiting (the standing worker-exit closer) and rearm (the
-    # force-dispatch re-arm) belong to the cron lifecycle. A oneshot — and a
-    # legacy `kind: pinned`, read as one — is refused by kind and left alone.
+  describe "the standing-only writer refuses a oneshot" do
+    # conclude belongs to the cron lifecycle. A oneshot — and a `kind: pinned`,
+    # read as one — is refused by kind and left alone.
     for kind <- ["oneshot", "pinned"] do
-      test "mark_awaiting and rearm leave a #{kind} document untouched" do
+      test "conclude leaves a #{kind} document untouched" do
         with_oneshot_doc(
           fn fiber_id, path ->
             before = File.read!(path)
-            assert {:error, msg} = LifecycleStore.mark_awaiting(fiber_id)
-            assert msg =~ "standing"
-            assert {:error, msg} = LifecycleStore.rearm(fiber_id)
+            assert {:error, msg} = conclude(fiber_id)
             assert msg =~ "standing"
             assert File.read!(path) == before
           end,
-          status: "open",
+          status: "active",
           kind: unquote(kind)
         )
       end
@@ -116,10 +100,10 @@ defmodule Shuttle.LifecycleStoreTest do
                   ]
                   |> Enum.join("\n")
 
-    test "mark_awaiting preserves the outcome block scalar byte-for-byte and only flips status" do
+    test "conclude preserves the outcome block scalar byte-for-byte and only adds run markers" do
       with_rich_outcome_role(
         fn fiber_id, path, original ->
-          assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
+          assert {:ok, _} = conclude(fiber_id)
 
           written = File.read!(path)
 
@@ -136,13 +120,10 @@ defmodule Shuttle.LifecycleStoreTest do
           assert written =~ "outcome: |-"
           refute written =~ ~s(outcome: ")
 
-          # Surgical: only the intended keys changed. Every other authored line is
-          # byte-identical to the original; status flips active → closed.
-          assert_only_keys_changed(original, written, %{
-            "status" => "closed",
-            "closed-at" => :added,
-            "tempered" => :removed
-          })
+          # Surgical: every authored line is byte-identical to the original;
+          # the run's handoff markers are added under shuttle.runtime.
+          assert_only_keys_changed(original, written, %{})
+          assert written =~ "handed_off_at:"
         end,
         status: "active"
       )
@@ -151,11 +132,11 @@ defmodule Shuttle.LifecycleStoreTest do
     test "writing twice in a row is idempotent — no churn, no key reordering" do
       with_rich_outcome_role(
         fn fiber_id, path, _original ->
-          assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
+          assert {:ok, _} = conclude(fiber_id)
           first = File.read!(path)
 
-          # An already-closed document is not another worker exit.
-          assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
+          # A concluded run is not another worker exit.
+          assert {:ok, _} = conclude(fiber_id)
           second = File.read!(path)
 
           assert first == second,
@@ -168,7 +149,7 @@ defmodule Shuttle.LifecycleStoreTest do
     test "daemon-owned runtime keys nested under shuttle: are evicted, block scalar untouched" do
       with_rich_outcome_role(
         fn fiber_id, path, _original ->
-          assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
+          assert {:ok, _} = conclude(fiber_id)
           written = File.read!(path)
 
           # The runtime keys seeded inside shuttle: are gone, the durable shuttle
@@ -180,7 +161,7 @@ defmodule Shuttle.LifecycleStoreTest do
           assert parsed["outcome"] == @rich_outcome
           assert parsed["shuttle"]["kind"] == "standing"
           assert parsed["shuttle"]["runtime"]["custom_marker"] == "keep"
-          assert parsed["shuttle"]["runtime"]["thread_exit_verb"] == "closed"
+          assert parsed["shuttle"]["runtime"]["thread_exit_verb"] == "handed off"
           refute Map.has_key?(parsed["shuttle"], "next_due_at")
           refute Map.has_key?(parsed["shuttle"], "last_run_at")
         end,
@@ -226,6 +207,8 @@ defmodule Shuttle.LifecycleStoreTest do
       agent: claude-opus
       runtime:
         custom_marker: keep
+        dispatched_at: 2026-01-02T00:00:00Z
+        run_id: scheduled-2
       next_due_at: 2026-06-15T08:00:00Z
       last_run_at: 2026-06-14T08:00:00Z
       schedule:
@@ -300,13 +283,18 @@ defmodule Shuttle.LifecycleStoreTest do
     String.match?(line, ~r{^#{Regex.escape(key)}:(?:\s|$)})
   end
 
-  # Builds a real on-disk felt fiber (resolvable by the felt CLI) in the
-  # new-model awaiting shape, points SHUTTLE_STORES at the fixture, and runs
-  # `fun.(fiber_id, path)`. There is no runtime store anymore (slice 6): the
-  # felt document carries the entire lifecycle.
-  defp with_doc_awaiting_role(fun, opts) do
-    status = Keyword.get(opts, :status, "closed")
+  defp conclude(fiber_id, opts \\ []),
+    do: LifecycleStore.conclude(fiber_id, Keyword.put_new(opts, :own_host_id, "test-host"))
+
+  # Builds a real on-disk felt fiber (resolvable by the felt CLI): a standing
+  # constitution with an unconcluded run on record unless `:runtime` replaces
+  # its run markers. Points SHUTTLE_STORES at the fixture and runs
+  # `fun.(fiber_id, path)`.
+  defp with_standing_doc(fun, opts \\ []) do
+    status = Keyword.get(opts, :status, "active")
     tempered = Keyword.get(opts, :tempered, nil)
+    host = Keyword.get(opts, :host, "test-host")
+    runtime = Keyword.get(opts, :runtime, @dispatched)
 
     loom =
       Path.join(
@@ -322,15 +310,16 @@ defmodule Shuttle.LifecycleStoreTest do
 
     File.write!(path, """
     ---
+    id: 01KTCA2CYQXYRS3F77JZNJD8HY
     name: Daily French practice
     status: #{status}
     #{tempered_line}shuttle:
       kind: standing
-      host: test-host
+      host: #{host}
       agent: claude-sonnet
       runtime:
         custom_marker: keep
-      schedule:
+    #{runtime}  schedule:
         expr: "0 8 * * *"
         tz: Europe/Paris
     ---
@@ -347,7 +336,7 @@ defmodule Shuttle.LifecycleStoreTest do
     end
   end
 
-  # Schedule-less variant of with_doc_awaiting_role: a oneshot block (or the
+  # Schedule-less variant of with_standing_doc: a oneshot block (or the
   # legacy kind passed as :kind).
   defp with_oneshot_doc(fun, opts) do
     status = Keyword.get(opts, :status, "open")

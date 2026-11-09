@@ -32,10 +32,10 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 
 - **Drafts** — `status: open`, on the desk.
 - **Resting** — `status: open` with `horizon: stashed`: put down, with no verdict owed. Hubs and seats a human starts by hand rest here between sessions; `shuttle rest` and a drag into Resting put a card here.
-- **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch.
+- **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch. A paused one (`status: open`) rests there too, drawn as paused with its schedule. One whose last run asked a question waits In flight, on your turn, until the ask is answered.
 - **Pulsed** — a oneshot constitution can wake its own conversation on an interval, without a review run per tick.
 - **In flight** — a live worker, or an armed oneshot.
-- **Awaiting review** — `status: closed` with no `tempered`, parked for review.
+- **Awaiting review** — `status: closed` with no `tempered`, parked for review. Standing constitutions never land here.
 - **Tempered** — `closed`, `tempered: true`: accepted by the human or a thread's orchestrator.
 - **Discarded** — `closed`, `tempered: false`: set aside by the human or a thread's orchestrator. The block stays as the record.
 
@@ -81,7 +81,7 @@ pulse:
 The window includes its start and excludes its end; it may cross midnight.
 The named IANA timezone sets the wall clock.
 Pulse applies to any oneshot constitution, whether or not it is a seat.
-Standing constitutions keep their cron schedule and review lifecycle.
+Standing constitutions keep their cron schedule instead.
 
 The daemon sends each pulse to the constitution's own conversation.
 With a window, its first tick starts a fresh session from the fiber; a busy conversation keeps running until it becomes idle, then the reset proceeds.
@@ -103,10 +103,9 @@ shuttle repeat  <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris   # standing
 shuttle reshape <fiber> [kind]         # change kind or schedule in place
 shuttle set-agent <fiber> <agent-id>   # change the agent (--effort, --chrome)
 shuttle pause   <fiber>                # back to draft, schedule kept; kills a live worker unless --no-kill
-shuttle rest    <fiber>                # into Resting without review; stops a live worker
-shuttle resume  <fiber>                # arm; a standing constitution awaiting review re-arms for its next tick
-shuttle accept  <fiber>                # accept a standing run: re-arms for its next tick
-shuttle close   <fiber> [--tempered=true|false]
+shuttle rest    <fiber>                # into Resting without review; pauses a standing schedule; stops a live worker
+shuttle resume  <fiber>                # arm; a standing constitution resumes its schedule from the next tick
+shuttle close   <fiber> [--tempered=true|false]   # a standing constitution takes only --tempered=false: retire
 shuttle reopen  <fiber> [--as-draft]   # reopen for active work, or as an unarmed draft
 shuttle uninstall <fiber>              # remove the block (see below)
 
@@ -115,7 +114,7 @@ shuttle ps                             # live workers
 shuttle snapshot                       # the daemon's state
 ```
 
-The daemon acts on each change at its next poll. Lifecycle verbs, from `reshape` to `uninstall`, work from any host in the fleet: for a fiber another host owns, they go through the owner's daemon, as the board does. `accept` and `resume` keep the outcome, so the last run's digest stays the card's headline until the next run writes its own.
+The daemon acts on each change at its next poll. Lifecycle verbs, from `reshape` to `uninstall`, work from any host in the fleet: for a fiber another host owns, they go through the owner's daemon, as the board does. `resume` keeps the outcome, so a standing constitution's last digest stays the card's headline until the next run writes its own.
 
 ## Claiming a fiber into your session
 

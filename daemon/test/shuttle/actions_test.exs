@@ -3,66 +3,68 @@ defmodule Shuttle.ActionsTest do
 
   alias Shuttle.Actions
 
-  # Lifecycle is status + tempered, uniform across kinds (slice 5: no enabled
-  # flag, no review axis). Awaiting review is `status: closed` + untempered.
+  # Lifecycle is status + tempered. A oneshot awaits review at `status: closed`
+  # + untempered; a standing constitution has no review — drafts pauses its
+  # schedule, composted retires it, inFlight runs it now.
 
-  test "a standing verdict cannot be revoked by an Awaiting review drop" do
-    for verdict <- [true, false], running <- [true, false] do
-      fiber = %{"status" => "closed", "tempered" => verdict, "shuttle" => %{"kind" => "standing"}}
-      refute Enum.any?(Actions.actions_for(fiber, running), &(&1.id == "close-awaiting-review"))
+  describe "standing constitutions have no review" do
+    @pause {"pause", %{verb: "pause"}}
+    @reopen {"reopen", %{verb: "reopen"}}
+    @reopen_draft {"reopen-draft", %{verb: "reopen", as_draft: true}}
+    @ad_hoc {"dispatch-ad-hoc", %{verb: "dispatch", ad_hoc: true}}
+    @retire {"close-composted", %{verb: "close", tempered: false}}
 
-      assert {:error, :standing_review_unavailable} =
-               Actions.resolve_transition(fiber, "awaitingReview", running)
+    # {status, tempered, running?} => drafts, inFlight, composted
+    @standing_resolutions [
+      {{"active", nil, false}, [@pause, @ad_hoc, @retire]},
+      {{"active", nil, true}, [@pause, @pause, @retire]},
+      {{"open", nil, false}, [@pause, @reopen, @retire]},
+      {{"closed", false, false}, [@reopen_draft, @reopen, @retire]},
+      {{"closed", nil, false}, [@reopen_draft, @reopen, @retire]}
+    ]
+
+    test "drafts, inFlight and composted resolve by state; review and temper resolve to nothing" do
+      for {{status, tempered, running?}, expected} <- @standing_resolutions do
+        fiber =
+          %{"id" => "work/standing", "status" => status, "shuttle" => %{"kind" => "standing"}}
+          |> then(&if(is_nil(tempered), do: &1, else: Map.put(&1, "tempered", tempered)))
+
+        label = "standing status=#{status} tempered=#{inspect(tempered)} running=#{running?}"
+
+        for {target, {id, invocation}} <- Enum.zip(~w(drafts inFlight composted), expected) do
+          assert Actions.resolve_transition(fiber, target, running?) ==
+                   {:ok, %{id: id, invocation: invocation}},
+                 "#{label} dragged to #{target} must resolve to #{id}"
+        end
+
+        for target <- ~w(awaitingReview tempered) do
+          assert Actions.resolve_transition(fiber, target, running?) ==
+                   {:error, :standing_unreviewed},
+                 "#{label} dragged to #{target} must resolve to nothing"
+        end
+
+        offered = fiber |> Actions.actions_for(running?) |> Enum.map(& &1.id)
+        refute "close-tempered" in offered
+        refute "close-awaiting-review" in offered
+      end
+    end
+
+    test "a standing constitution at rest is retired by Discard" do
+      sleeping = %{
+        "id" => "work/standing",
+        "status" => "active",
+        "horizon" => "stashed",
+        "shuttle" => %{"kind" => "standing"}
+      }
+
+      assert {:ok, %{id: "close-composted", invocation: %{verb: "close", tempered: false}}} =
+               Actions.resolve_transition(sleeping, "composted")
     end
   end
 
-  test "armed standing-role in-flight transition resolves to ad-hoc dispatch" do
-    fiber = armed_standing()
-
-    assert {:ok, %{id: "dispatch-ad-hoc", invocation: %{verb: "dispatch", ad_hoc: true}}} =
-             Actions.resolve_transition(fiber, "inFlight")
-  end
-
-  test "temper on a running or armed standing role resolves to accept-run, never close-tempered" do
-    # The morning-post temper bug (2026-06-12): Cail clicked Temper right as an
-    # interactive run wrapped — worker alive (or just killed by the kanban),
-    # `status: active` because the exit writer hadn't marked awaiting yet. The
-    # old `running? → close_tempered` clause checked the standing role off for
-    # good. Temper on an untempered cyclical role is ACCEPT in every non-draft
-    # state.
-    running = armed_standing()
-
-    assert {:ok, %{id: "accept-run", invocation: %{verb: "accept"}}} =
-             Actions.resolve_transition(running, "tempered", true)
-
-    # Armed but idle (worker killed, status not yet flipped) — same verb.
-    assert {:ok, %{id: "accept-run", invocation: %{verb: "accept"}}} =
-             Actions.resolve_transition(running, "tempered")
-
-    # Drag-safety invariant: the resolved action is in the available set.
-    assert Enum.any?(Actions.actions_for(running, true), &(&1.id == "accept-run"))
-
-    # Tempering a parked standing draft would arm it, so no Temper is offered.
-    draft = Map.put(armed_standing(), "status", "open")
-
-    assert {:error, :standing_temper_unavailable} = Actions.resolve_transition(draft, "tempered")
-
-    # Oneshots keep the terminus: running + tempered = close-tempered.
+  test "oneshots keep the verdict terminus: running + tempered closes tempered" do
     oneshot = %{"id" => "work/once", "status" => "active", "shuttle" => %{"kind" => "oneshot"}}
-
     assert {:ok, %{id: "close-tempered"}} = Actions.resolve_transition(oneshot, "tempered", true)
-  end
-
-  test "closed + composted standing role (tempered:false) is a terminus, reopen to revive" do
-    # A rejected standing role requires explicit reopen to revive; accepting
-    # a run cannot clear its existing verdict.
-    fiber = Map.merge(armed_standing(), %{"status" => "closed", "tempered" => false})
-
-    assert {:ok, %{id: "reopen", invocation: %{verb: "reopen"}}} =
-             Actions.resolve_transition(fiber, "inFlight")
-
-    assert {:error, :standing_temper_unavailable} = Actions.resolve_transition(fiber, "tempered")
-    refute Enum.any?(Actions.actions_for(fiber), &(&1.id in ["accept-run", "close-tempered"]))
   end
 
   test "oneshot transition vocabulary stays lifecycle-shaped" do
@@ -147,12 +149,6 @@ defmodule Shuttle.ActionsTest do
 
     assert {:ok, %{id: "close-composted", invocation: %{verb: "close", tempered: false}}} =
              Actions.resolve_transition(resting, "composted")
-
-    # A standing constitution asleep on its schedule is discarded, not accepted.
-    sleeping = Map.merge(armed_standing(), %{"horizon" => "stashed"})
-
-    assert {:ok, %{id: "close-composted", invocation: %{verb: "close", tempered: false}}} =
-             Actions.resolve_transition(sleeping, "composted")
   end
 
   test "draft oneshot (status: open) dragged to inFlight reopens (arms it)" do
@@ -211,16 +207,9 @@ defmodule Shuttle.ActionsTest do
               {:ok, %{id: id}} ->
                 id
 
-              {:error, :standing_temper_unavailable} ->
-                assert kind == "standing" and target == "tempered" and
-                         (status == "open" or not is_nil(tempered))
-
-                refute "accept-run" in available
+              {:error, :standing_unreviewed} ->
+                assert kind == "standing" and target in ["awaitingReview", "tempered"]
                 refute "close-tempered" in available
-                nil
-
-              {:error, :standing_review_unavailable} ->
-                assert kind == "standing" and target == "awaitingReview" and not is_nil(tempered)
                 refute "close-awaiting-review" in available
                 nil
             end
@@ -250,43 +239,6 @@ defmodule Shuttle.ActionsTest do
                end)
     end
 
-    test "a CLOSED standing role WITH A VERDICT (tempered set) resolves to close/reopen, never accept-run" do
-      # The verdict-protection invariant in new-model terms. Awaiting is now
-      # `status: closed` + tempered UNSET; the moment a verdict lands (`tempered`
-      # present, true or false) the role is a terminus, not awaiting, so the
-      # awaiting re-arm clauses must NOT fire. accept-run is reserved for
-      # genuinely-awaiting (untempered) closed roles; a role the user already
-      # ruled on falls through to the generic closed clauses.
-      fiber = %{
-        "id" => "work/closed-verdict",
-        "status" => "closed",
-        "tempered" => false,
-        "shuttle" => %{"kind" => "standing"}
-      }
-
-      assert {:error, :standing_temper_unavailable} =
-               Actions.resolve_transition(fiber, "tempered")
-
-      assert {:ok, %{id: "close-composted", invocation: %{verb: "close", tempered: false}}} =
-               Actions.resolve_transition(fiber, "composted")
-
-      # The open-lifecycle columns clear the verdict, each with the meaning of
-      # its own column: inFlight arms (reopen → active), drafts parks as a
-      # paused draft (reopen-draft → open). Awaiting review cannot clear the
-      # verdict. accept-run must NOT appear for a
-      # closed role that already has a verdict.
-      assert {:ok, %{id: "reopen"}} = Actions.resolve_transition(fiber, "inFlight")
-
-      assert {:ok, %{id: "reopen-draft", invocation: %{verb: "reopen", as_draft: true}}} =
-               Actions.resolve_transition(fiber, "drafts")
-
-      assert {:error, :standing_review_unavailable} =
-               Actions.resolve_transition(fiber, "awaitingReview")
-
-      available = Actions.actions_for(fiber) |> Enum.map(& &1.id)
-      refute "accept-run" in available
-    end
-
     test "a draft standing role can still be composted (the canary repro)" do
       # canary-local-snapshot: a draft standing role (status: open) used to expose
       # `[:reopen]` only, so dragging it to any close column 409'd. It must offer
@@ -303,9 +255,6 @@ defmodule Shuttle.ActionsTest do
       refute "close-tempered" in actions
 
       assert {:ok, %{id: "close-composted"}} = Actions.resolve_transition(fiber, "composted")
-
-      assert {:error, :standing_temper_unavailable} =
-               Actions.resolve_transition(fiber, "tempered")
     end
   end
 
@@ -322,60 +271,37 @@ defmodule Shuttle.ActionsTest do
     end
   end
 
-  describe "awaiting roles (closed + untempered)" do
-    # A closed role with no verdict ran its cycle and awaits the human verdict.
-    # Every column a card can be dropped on has the meaning of that column, and
-    # accept is the one kind-aware verb: a STANDING role re-arms (accept-run →
-    # active) from the accept gestures (inFlight/tempered), and drafts parks it
-    # as a paused draft — stopping a role for now is not composting it.
-    # Composted rejects the run
-    # and the same-column awaitingReview drop is non-destructive: it stays in
-    # review, never silently composting the pending run. No awaiting role
-    # collapses to the generic reopen a closed oneshot gets, nor offers a
-    # continue verb.
-    @accept_run {"accept-run", %{verb: "accept"}}
-    @compost {"close-composted", %{verb: "close", tempered: false}}
-    @stay_in_review {"close-awaiting-review", %{verb: "close"}}
-
+  describe "an awaiting oneshot (closed + untempered)" do
+    # A closed oneshot with no verdict ran and awaits the human verdict. Every
+    # column a card can be dropped on has the meaning of that column: drafts
+    # parks it as a paused draft, inFlight reopens it, tempered and composted
+    # record the verdict, and the same-column awaitingReview drop stays in
+    # review.
     @awaiting_resolutions %{
-      "standing" => %{
-        "drafts" => {"reopen-draft", %{verb: "reopen", as_draft: true}},
-        "inFlight" => @accept_run,
-        "awaitingReview" => @stay_in_review,
-        "tempered" => @accept_run,
-        "composted" => @compost
-      }
+      "drafts" => {"reopen-draft", %{verb: "reopen", as_draft: true}},
+      "inFlight" => {"reopen", %{verb: "reopen"}},
+      "awaitingReview" => {"close-awaiting-review", %{verb: "close"}},
+      "tempered" => {"close-tempered", %{verb: "close", tempered: true}},
+      "composted" => {"close-composted", %{verb: "close", tempered: false}}
     }
 
     test "each column resolves to its verdict, and the actions offered are exactly those" do
-      for {kind, by_target} <- @awaiting_resolutions do
-        fiber = %{"id" => "work/#{kind}", "status" => "closed", "shuttle" => %{"kind" => kind}}
+      fiber = %{"id" => "work/oneshot", "status" => "closed", "shuttle" => %{"kind" => "oneshot"}}
 
-        assert Enum.sort(Map.keys(by_target)) == Enum.sort(@kanban_targets),
-               "#{kind}: every kanban column needs a row"
+      assert Enum.sort(Map.keys(@awaiting_resolutions)) == Enum.sort(@kanban_targets)
 
-        for {target, {id, invocation}} <- by_target do
-          assert Actions.resolve_transition(fiber, target) ==
-                   {:ok, %{id: id, invocation: invocation}},
-                 "awaiting #{kind} dragged to #{target} must resolve to #{id}"
-        end
-
-        offered = fiber |> Actions.actions_for() |> Enum.map(& &1.id) |> Enum.sort()
-
-        resolved =
-          by_target |> Map.values() |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> Enum.sort()
-
-        assert offered == resolved, "awaiting #{kind} offers #{inspect(offered)}"
+      for {target, {id, invocation}} <- @awaiting_resolutions do
+        assert Actions.resolve_transition(fiber, target) ==
+                 {:ok, %{id: id, invocation: invocation}},
+               "awaiting oneshot dragged to #{target} must resolve to #{id}"
       end
-    end
-  end
 
-  # An armed standing role: status:active, no verdict.
-  defp armed_standing do
-    %{
-      "id" => "work/standing",
-      "status" => "active",
-      "shuttle" => %{"kind" => "standing"}
-    }
+      offered = fiber |> Actions.actions_for() |> Enum.map(& &1.id) |> Enum.sort()
+
+      resolved =
+        @awaiting_resolutions |> Map.values() |> Enum.map(&elem(&1, 0)) |> Enum.sort()
+
+      assert offered == resolved
+    end
   end
 end

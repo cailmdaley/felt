@@ -548,11 +548,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
           do: {resolved <> "\n", 0},
           else: {"project dir \"#{resolved}\": stat #{resolved}: no such file or directory\n", 1}
 
-      command == "shuttle" and match?(["standing-transition" | _], drop_cli_store(args)) ->
+      command == "shuttle" and match?(["conclude-run" | _], drop_cli_store(args)) ->
         result = Shuttle.Runner.Default.cmd(command, args, opts)
 
         case drop_cli_store(args) do
-          ["standing-transition", "--request-json", request] ->
+          ["conclude-run", "--request-json", request] ->
             %{"path" => path} = Jason.decode!(request)
 
             case Shuttle.FiberDoc.read_path(path) do
@@ -565,7 +565,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
                           {id,
                            fiber
                            |> Map.put("status", fm["status"])
-                           |> Map.put("shuttle", fm["shuttle"])},
+                           |> Map.put(
+                             "shuttle",
+                             Map.merge(
+                               fm["shuttle"],
+                               Map.take(fiber["shuttle"] || %{}, ["resolved"])
+                             )
+                           )},
                         else: {id, fiber}
                     end)
 
@@ -582,11 +588,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
         result
 
-      # `shuttle reopen <id> [--project-dir <raw>] [--conclude-run] --local`:
-      # answers the result a test set; else, like the CLI, expands a given
-      # directory once, refuses one that is not a directory, and saves it as it
-      # arms the fiber — concluding a standing role's run only under
-      # --conclude-run.
+      # `shuttle reopen <id> [--project-dir <raw>] --local`: answers the result
+      # a test set; else, like the CLI, expands a given directory once, refuses
+      # one that is not a directory, and saves it as it arms the fiber —
+      # concluding a standing role's run, as arming one does.
       command == "shuttle" and match?(["reopen" | _], drop_cli_store(args)) ->
         case Agent.get(server(), &Map.get(&1, :reopen_result)) do
           nil ->
@@ -598,22 +603,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
                 if File.dir?(dir) do
                   put_shuttle_fields(id, %{"project_dir" => dir})
-                  apply_lifecycle_write("reopen", id, "--conclude-run" in flags)
+                  apply_lifecycle_write("reopen", id)
                   {"", 0}
                 else
                   {"project dir \"#{dir}\": stat #{dir}: no such file or directory\n", 1}
                 end
 
               _ ->
-                apply_lifecycle_write("reopen", id, "--conclude-run" in flags)
-
-                if "--occurrence" in flags do
-                  runtime = get_in(fiber(id), ["shuttle", "runtime"]) || %{}
-
-                  if runtime["dispatched_at"] && is_nil(runtime["handed_off_at"]),
-                    do: put_shuttle_fields(id, %{"handed_off_at" => runtime["dispatched_at"]})
-                end
-
+                apply_lifecycle_write("reopen", id)
                 {"", 0}
             end
 
@@ -898,14 +895,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
   defp lifecycle_write?(args),
     do:
       match?(
-        [verb, _id, "--local"] when verb in ["accept", "resume", "rest"],
+        [verb, _id, "--local"] when verb in ["resume", "rest"],
         drop_cli_store(args)
       )
 
   defp drop_cli_store(["-C", _store | rest]), do: rest
   defp drop_cli_store(args), do: args
 
-  defp apply_lifecycle_write(verb, id, conclude? \\ true) do
+  defp apply_lifecycle_write(verb, id) do
     fiber = fiber(id) || %{"id" => id, "shuttle" => %{}}
     kind = get_in(fiber, ["shuttle", "kind"])
     status = if verb == "rest", do: "open", else: "active"
@@ -913,7 +910,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
     if verb == "rest",
       do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
 
-    if conclude? and kind == "standing",
+    if kind == "standing",
       do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
 
     Agent.update(server(), fn state ->

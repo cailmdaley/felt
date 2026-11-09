@@ -250,7 +250,7 @@ defmodule Shuttle.PreparedLaunchTest do
     refute_received :prepared_create
   end
 
-  for conclusion <- [:review, :human_rearm, :accepted_close, :occurrence_rearm, :newer_run] do
+  for conclusion <- [:unconcluded, :handed_off, :paused, :retired, :newer_run] do
     @tag :launch_record
     @tag skip: is_nil(System.find_executable("tmux"))
     test "recovered ad-hoc observed exit respects #{conclusion}", %{root: root} do
@@ -308,26 +308,20 @@ defmodule Shuttle.PreparedLaunchTest do
                facts["dispatched_at"]
 
       case unquote(conclusion) do
-        :review ->
+        :unconcluded ->
           :ok
 
-        :human_rearm ->
+        :handed_off ->
           FeltStoreRunner.put_shuttle_fields(id, %{
             "handed_off_at" => "2099-01-01T00:00:00Z",
-            "thread_exit_verb" => "rearmed"
+            "thread_exit_verb" => "handed off"
           })
 
-        :accepted_close ->
-          FeltStoreRunner.put_shuttle_fields(id, %{
-            "handed_off_at" => "2099-01-01T00:00:00Z",
-            "thread_exit_verb" => "tempered"
-          })
+        :paused ->
+          set_doc_status(id, "status: open")
 
-        :occurrence_rearm ->
-          FeltStoreRunner.put_shuttle_fields(id, %{
-            "handed_off_at" => facts["dispatched_at"],
-            "thread_exit_verb" => "rearmed"
-          })
+        :retired ->
+          set_doc_status(id, "status: closed\ntempered: false")
 
         :newer_run ->
           FeltStoreRunner.put_shuttle_fields(id, %{
@@ -344,13 +338,20 @@ defmodule Shuttle.PreparedLaunchTest do
       assert_receive {:DOWN, ^monitor, :process, _, :normal}
       eventually(fn -> :sys.get_state(poller).running == %{} end)
 
-      if unquote(conclusion) == :review do
-        assert FeltStoreRunner.fiber(id)["status"] == "closed"
-        refute FeltStoreRunner.fiber(id)["tempered"]
+      if unquote(conclusion) == :unconcluded do
+        fiber = FeltStoreRunner.fiber(id)
+        assert fiber["status"] == "active"
+        assert get_in(fiber, ["shuttle", "runtime", "thread_exit_verb"]) == "handed off"
+        assert is_binary(get_in(fiber, ["shuttle", "runtime", "handed_off_at"]))
       else
         assert File.read!(FeltStoreRunner.fiber(id)["path"]) == before_exit
       end
     end
+  end
+
+  defp set_doc_status(id, replacement) do
+    path = FeltStoreRunner.fiber(id)["path"]
+    File.write!(path, String.replace(File.read!(path), "status: active", replacement))
   end
 
   defp assert_unresolved(poller, id, session, facts, root) do

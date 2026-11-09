@@ -65,7 +65,7 @@ Commit, `felt -C <store> sync --push`, then pick one. `close`, `handoff` and `re
 
 - **`shuttle close`** — the Desired State is met. The card goes to Awaiting review. Have a fresh-context subagent review substantive changes first.
 - **`shuttle -C <store> ask <id> "<question>"`** — a human decision would unlock work. Rewrite `tapestry.html` first, leading with the background the human needs and the options; then keep working on what isn't blocked. `--clear` withdraws it.
-- **`shuttle handoff`** — the next slice needs a fresh worker: context is running low, at a sub-task boundary. `shuttle set-agent <id> <agent>` first to change who comes next. A standing constitution always hands off.
+- **`shuttle handoff`** — the next slice needs a fresh worker: context is running low, at a sub-task boundary. `shuttle set-agent <id> <agent>` first to change who comes next. A standing run always hands off, which keeps its schedule; it asks first when its constitution says the run needs review.
 - **`shuttle rest`** — the human drove this session and nothing needs review; the card goes back to Resting.
 - **Nothing** — an ordinary conversational pause. A worker idle with nothing of its own running shows as the human's turn; one waiting on its background jobs or subagents stays Working.
 
@@ -86,9 +86,9 @@ shuttle threads <id>                         # their state
 A thread's close or ask wakes its orchestrator, and only that one; `close --quiet` delivers the outcome as context instead.
 Write a thread's outcome for that orchestrator.
 An orchestrator reads each result against the thread's Desired State; review with the human first a thread they asked for.
-Temper a oneshot with `shuttle close <thread> --tempered=true`; accept a standing run with `shuttle accept <thread>` (`close --tempered=true` does the same).
-An untempered standing close stays on Awaiting review, but its next scheduled occurrence supersedes that verdict and runs.
-`close --tempered=false` discards the constitution and ends its schedule; `rest` pauses it.
+Temper a oneshot with `shuttle close <thread> --tempered=true`.
+A standing thread has no review: its runs re-arm on exit and ask when they need a decision.
+`close --tempered=false` discards a constitution and ends a standing schedule; `rest` pauses it.
 An orchestrator leaving with live threads hands off rather than closes.
 More in [references/operating.md](references/operating.md#threads-on-the-board).
 

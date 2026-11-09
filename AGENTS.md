@@ -81,7 +81,7 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   daemon. A test enforces the one-way import rule: felt packages cannot depend
   on shuttle or messaging packages.
 - **Shuttle lifecycle writes are serialized with polling.** The board's
-  `accept` and `resume` run inside the owning daemon's Poller, and the daemon's
+  `resume` and `rest` run inside the owning daemon's Poller, and the daemon's
   own writes go through the CLI's locked document writer, which refuses stale
   state. At boot, `shuttle contract` must match `daemon/lib/shuttle/contract.ex`;
   the daemon holds on a skew. Details: [`docs/dev/dispatch.md`](docs/dev/dispatch.md#lifecycle-writes).
@@ -130,7 +130,9 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   same predicate gates orphan resurrection, so a remote restart can't
   re-grab another host's fiber.
 - **Two kinds; one resting place.** `shuttle.kind` is `oneshot` or
-  `standing` (which carries a cron `schedule:`). The CLI
+  `standing` (which carries a cron `schedule:` and has no review: a run's exit
+  re-arms it, a run that needs the human asks, `rest` pauses the schedule and
+  `close --tempered=false` retires it). The CLI
   (`shuttle.NormalizeKind`), the daemon (`Poller.block_kind`) and the board
   read a `pinned` kind as `oneshot`, and `shuttle check` warns about it. A
   constitution at rest is `status: open` + `horizon: stashed`, drawn in

@@ -150,10 +150,12 @@ const shuttleBlockWithRun = (dispatchedMsAgo: number, ranForMs: number) => ({
   },
 })
 
-/** A standing constitution's block — the chip trail renders its cron humanized. */
-const standingBlock = (expr: string) => ({
+/** A standing constitution's block, with the schedule its owner resolves: the
+ *  cron in words, and the next firing while it is armed. */
+const standingBlock = (expr: string, text?: string, nextDue?: string) => ({
   ...shuttleBlock('standing'),
   schedule: { expr, tz: 'Europe/Paris' },
+  ...(text ? { resolved: { schedule_text: text, ...(nextDue ? { next_due: nextDue } : {}) } } : {}),
 })
 
 /** Civil day N days from today, as the bare `YYYY-MM-DD` felt writes. */
@@ -391,7 +393,8 @@ const RESTING: MockFiber[] = [
   })),
 ]
 
-// A standing constitution, for the humanized-cron summary in the fiber controls.
+// Standing constitutions in Resting: one armed between firings, one with its
+// schedule paused.
 const STANDING: MockFiber[] = [
   {
     id: 'loom/email/morning-post/run',
@@ -400,7 +403,16 @@ const STANDING: MockFiber[] = [
     status: 'active',
     outcome: 'Groups the routine auto-archives; itemizes the signal.',
     tags: ['loom', 'email'],
-    shuttle: standingBlock('0 9 * * 1-5'),
+    shuttle: standingBlock('0 9 * * 1-5', 'weekdays at 09:00', iso(18 * 3_600_000)),
+  },
+  {
+    id: 'loom/evening-digest',
+    name: 'Evening digest',
+    status: 'open',
+    horizon: 'stashed',
+    outcome: 'Summarises the day\'s threads that are still open.',
+    tags: ['loom', 'email'],
+    shuttle: standingBlock('0 18 * * *', 'daily at 18:00'),
   },
 ]
 

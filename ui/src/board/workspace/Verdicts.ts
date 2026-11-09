@@ -8,14 +8,17 @@ import './verdicts.css'
  * moving work to Awaiting review (closing it with the verdict cleared). */
 export type Verdict = 'tempered' | 'composted' | 'awaitingReview'
 
-const VERDICT_WORD = { tempered: 'Tempered', composted: 'Discarded', awaitingReview: 'To review' } as const
+const VERDICT_WORD = { tempered: ['Tempered', 'temper'], composted: ['Discarded', 'discard'], awaitingReview: ['To review', 'move to review'] } as const
+/** A verdict's past-tense word and its verb for this card: a standing constitution is retired, not discarded. */
+const verdictWords = (card: KanbanCard, verdict: Verdict): readonly [string, string] =>
+  verdict === 'composted' && card.shuttleKind === 'standing' ? ['Retired', 'retire'] : VERDICT_WORD[verdict]
 const VERDICT_KIND = { tempered: 'tempered', composted: 'discarded', awaitingReview: 'review' } as const
 
 /** A verdict, or a move to review, stops any worker the card owns, so it asks
  * first, as "New session" does; on a finished run it stays a single gesture. */
 export function confirmWorkerStop(card: KanbanCard, verdict: Verdict): boolean {
   return !hasWorkerToStop(card) ||
-    window.confirm(`“${card.name}” has a live worker. This stops it — ${{ tempered: 'temper', composted: 'discard', awaitingReview: 'move to review' }[verdict]} anyway?`)
+    window.confirm(`“${card.name}” has a live worker. This stops it — ${verdictWords(card, verdict)[1]} anyway?`)
 }
 
 /** A fiber's identity across hosts and renames: the undo queue's key. */
@@ -31,9 +34,7 @@ export function markVerdictHost(host: HTMLElement, card: KanbanCard): void {
   host.dataset.verdictKey = verdictKey(card)
 }
 
-const VERDICT_BY_KIND = { tempered: 'tempered', discarded: 'composted', review: 'awaitingReview' } as const
-
-interface Pending { timer: number; verdict: (typeof VERDICT_KIND)[Verdict]; name: string; due: number }
+interface Pending { timer: number; verdict: (typeof VERDICT_KIND)[Verdict]; word: string; name: string; due: number }
 
 /** Session-local safety: only an expired undo window authorizes a lifecycle write.
  * Navigation leaves timers alone. Closing the browser tab (or disposing this
@@ -63,8 +64,9 @@ export class Verdicts {
       commit()
       this.paint()
     }, VERDICT_DELAY_MS)
-    this.pending.set(key, { timer, verdict: VERDICT_KIND[verdict], name: card.name, due: Date.now() + VERDICT_DELAY_MS })
-    this.live.textContent = `${VERDICT_WORD[verdict]} ${card.name} · undo z`
+    const [word] = verdictWords(card, verdict)
+    this.pending.set(key, { timer, verdict: VERDICT_KIND[verdict], word, name: card.name, due: Date.now() + VERDICT_DELAY_MS })
+    this.live.textContent = `${word} ${card.name} · undo z`
     this.paint()
   }
   /** z cancels the latest remaining verdict; each visible undo names its own. */
@@ -111,7 +113,7 @@ export class Verdicts {
     const word = document.createElement('span')
     word.className = 'ws-verdict-word'
     word.dataset.verdict = pending.verdict
-    word.textContent = VERDICT_WORD[VERDICT_BY_KIND[pending.verdict]]
+    word.textContent = pending.word
     const dot = document.createElement('span')
     dot.setAttribute('aria-hidden', 'true')
     dot.textContent = '·'

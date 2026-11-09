@@ -12,7 +12,7 @@ import (
 
 func TestDocumentSnapshotPatchRejectsACompletedConcurrentEdit(t *testing.T) {
 	t.Parallel()
-	st, req := seedStandingTransition(t)
+	st, req := seedConclude(t, felt.StatusActive, map[string]any{"dispatched_at": "2026-01-02T00:00:00Z", "run_id": "r"})
 	original, err := os.ReadFile(req.Path)
 	if err != nil {
 		t.Fatal(err)

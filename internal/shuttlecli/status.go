@@ -439,10 +439,6 @@ func (a *app) runStatusOneFiber(query string) error {
 	return nil
 }
 
-func hasDispatchedRun(f *felt.Felt) bool {
-	return !dispatchedAt(f).IsZero()
-}
-
 // dispatchedAt is the current worker's launch stamp, zero when none is recorded.
 func dispatchedAt(f *felt.Felt) time.Time {
 	runtime := felt.MappingValueNode(f.ExtraFields[shuttle.FacetKey], shuttle.RuntimeKey)
@@ -476,17 +472,14 @@ func (a *app) dispatchAssessment(f *felt.Felt, block *shuttle.Block, column, unt
 		case "tempered", "discarded":
 			return fmt.Sprintf("→ %s — reviewed and archived; daemon will NOT dispatch. Use `%s` to clear the verdict and arm it.", columnTitle(column), arm("reopen"))
 		default:
-			if block.Kind == "standing" && hasDispatchedRun(f) {
-				if noProjectDir {
-					return fmt.Sprintf("→ To review — the next occurrence after its last service and close needs an owner-side re-arm, but project_dir is missing. Use `%s` to accept and arm it.", arm("resume"))
-				}
-				return fmt.Sprintf("→ To review — the owner attempts to re-arm at the next occurrence after its last service and close. `shuttle accept %s` accepts it and rests it until the next tick; `shuttle close %s --tempered=false` ends its schedule.", f.ID, f.ID)
-			}
 			return fmt.Sprintf("→ To review — closed, awaiting a verdict; daemon will NOT dispatch. `shuttle close %s --tempered=true|false` records one; `%s` arms it again.", f.ID, arm("reopen"))
 		}
 	case felt.StatusOpen:
 		switch column {
 		case "resting":
+			if block.Kind == "standing" {
+				return fmt.Sprintf("→ Schedule paused (status: open); daemon will NOT dispatch. Use `%s` to resume the schedule from its next tick.", arm("resume"))
+			}
 			if until != "" {
 				until = " until " + until
 			}
@@ -582,10 +575,10 @@ func writeBlockSummary(out io.Writer, b *shuttle.Block, f *felt.Felt, armed bool
 	switch {
 	case statusNow == "":
 		fmt.Fprintln(out, "  status:      (missing — NOT armed; resume or set status: active in the markdown)")
-	case statusNow == felt.StatusClosed && b.Kind == "standing" && readTempered(f) == nil && hasDispatchedRun(f):
-		fmt.Fprintln(out, "  status:      closed (awaiting review — the next occurrence may re-arm it)")
 	case statusNow == felt.StatusClosed:
 		fmt.Fprintln(out, "  status:      closed (NOT armed — reopen to dispatch)")
+	case statusNow == felt.StatusOpen && b.Kind == "standing":
+		fmt.Fprintln(out, "  status:      open (schedule paused — NOT armed; resume to dispatch)")
 	case statusNow == felt.StatusOpen && column == "resting":
 		fmt.Fprintln(out, "  status:      open (resting — NOT armed; resume to dispatch)")
 	case statusNow == felt.StatusOpen && column == "roles":

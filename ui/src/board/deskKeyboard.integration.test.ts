@@ -247,6 +247,59 @@ describe('Rest controls', () => {
   })
 })
 
+describe('a standing constitution on the Desk', () => {
+  const armed = card({ id: 'post', uid: 'post', originId: 'remote', status: 'active', shuttleKind: 'standing', shuttleSchedule: '0 9 * * 1-5', scheduleText: 'weekdays at 09:00' })
+  const paused = card({ id: 'digest', uid: 'digest', status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', shuttleKind: 'standing', shuttleSchedule: '0 7 * * *', scheduleText: 'daily at 07:00' })
+  const desk = () => response({ stash: [armed, paused] })
+  const lifecycle = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle')).map(([, init]) => JSON.parse(String(init?.body)))
+  const menu = (uid: string) => {
+    document.querySelector<HTMLElement>(`[data-card-uid="${uid}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+  }
+
+  it('reads as scheduled or paused, with its schedule', () => {
+    draw(desk())
+    expect(document.querySelector('[data-card-uid="digest"] .kbn-cluster-item-schedule')?.textContent).toBe('Paused · daily at 07:00')
+    expect(document.querySelector<HTMLElement>('[data-card-uid="digest"]')!.dataset.schedule).toBe('paused')
+    expect(document.querySelector('[data-card-uid="post"] .kbn-cluster-item-schedule')?.textContent).toBe('weekdays at 09:00')
+  })
+
+  it('pauses an armed schedule from its menu at once, posting rest with no wake day', async () => {
+    draw(desk())
+    expect(menu('post').map(item => item.textContent)).toEqual(['Pause schedule', 'Retire', 'Move…'])
+    activate(menu('post').find(item => item.textContent === 'Pause schedule')!, 'Enter')
+    await settle()
+    expect(document.querySelector('.kbn-rest-popover')).toBeNull()
+    expect(lifecycle()).toEqual([{ action: 'rest', fiber: 'post', origin: 'remote' }])
+  })
+
+  it('resumes a paused schedule from its menu', async () => {
+    draw(desk())
+    expect(menu('digest').map(item => item.textContent)).toEqual(['Resume schedule', 'Retire', 'Move…'])
+    activate(menu('digest').find(item => item.textContent === 'Resume schedule')!, 'Enter')
+    await settle()
+    expect(lifecycle()).toEqual([{ action: 'resume', fiber: 'digest', origin: 'local' }])
+  })
+
+  it('takes s as pause, x as retire, and refuses t', async () => {
+    draw(desk())
+    press('j')
+    const uid = selected()!
+    expect(['post', 'digest']).toContain(uid)
+    expect(press('t').defaultPrevented).toBe(false)
+    expect(document.querySelector(`[data-card-uid="${uid}"] .ws-verdict-undo`)).toBeNull()
+    expect(press('x').defaultPrevented).toBe(true)
+    expect(document.querySelector(`[data-card-uid="${uid}"] .ws-verdict-undo`)?.textContent).toBe('Retired·undo z')
+    press('z')
+    press('s')
+    await settle()
+    expect(document.querySelector('.kbn-rest-popover')).toBeNull()
+    expect(lifecycle()).toEqual([uid === 'post'
+      ? { action: 'rest', fiber: 'post', origin: 'remote' }
+      : { action: 'resume', fiber: 'digest', origin: 'local' }])
+  })
+})
+
 describe('Desk constitution keys', () => {
   const agentDesk = () => response({ now: {
     drafts: [card({ id: 'plan', uid: 'plan', shuttleKind: 'oneshot' })],

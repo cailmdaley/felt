@@ -21,7 +21,7 @@ defmodule Shuttle.Contract do
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
   # A message's sender is what its CLI or API caller names.
-  @expected_level 35
+  @expected_level 36
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -51,7 +51,8 @@ defmodule Shuttle.Contract do
     33 =>
       "standing-transition (conditional run disposition) and patch-document (locked source-image CAS)",
     34 => "claude-mail-recover (durable native wake for unoffered automatic Claude mail)",
-    35 => "context-mailbox put --from and message --request-json from (the sender as given)"
+    35 => "context-mailbox put --from and message --request-json from (the sender as given)",
+    36 => "conclude-run (standing runs re-arm on exit); reopen --occurrence and --conclude-run and accept removed"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

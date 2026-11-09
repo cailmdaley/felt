@@ -405,10 +405,9 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 				t.Fatalf("quiet close payload = %#v", body)
 			}
 		}},
-		{"accept", felt.StatusClosed, map[string]any{"kind": "standing", "host": "worker", "agent": "claude-opus", "project_dir": project, "schedule": map[string]any{"expr": "0 9 * * *", "tz": "UTC"}}, []string{"accept", "accept"}, "accept", nil},
-		{"temper-standing", felt.StatusClosed, map[string]any{"kind": "standing", "host": "worker", "agent": "claude-opus", "project_dir": project, "schedule": map[string]any{"expr": "0 9 * * *", "tz": "UTC"}}, []string{"close", "temper-standing", "--tempered=true"}, "close", func(t *testing.T, body map[string]any) {
-			if body["tempered"] != true {
-				t.Fatalf("standing acceptance payload = %#v", body)
+		{"retire-standing", felt.StatusActive, map[string]any{"kind": "standing", "host": "worker", "agent": "claude-opus", "project_dir": project, "schedule": map[string]any{"expr": "0 9 * * *", "tz": "UTC"}}, []string{"close", "retire-standing", "--tempered=false"}, "close", func(t *testing.T, body map[string]any) {
+			if body["tempered"] != false {
+				t.Fatalf("standing retirement payload = %#v", body)
 			}
 		}},
 		{"rest", felt.StatusActive, remoteShuttleBlock(project), []string{"rest", "rest"}, "rest", nil},
@@ -618,7 +617,7 @@ func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
 	}))
 
 	for _, verb := range [][]string{
-		{"pause"}, {"rest"}, {"resume"}, {"close"}, {"reopen"}, {"accept"}, {"set-outcome", "--outcome", "x"},
+		{"pause"}, {"rest"}, {"resume"}, {"close"}, {"reopen"}, {"set-outcome", "--outcome", "x"},
 		{"set-model", "claude-opus"}, {"set-agent", "claude-opus"}, {"role", "--clear"}, {"seat", "--clear"}, {"reshape", "oneshot"}, {"uninstall"},
 	} {
 		argv := append([]string{verb[0], "work/task"}, verb[1:]...)

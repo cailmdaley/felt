@@ -1,15 +1,18 @@
 defmodule Shuttle.LifecycleStore do
   @moduledoc """
-  Conditional standing-run transitions and migration writes through Shuttle's
+  Conditional standing-run conclusion and migration writes through Shuttle's
   locked document writer. The document owns lifecycle and run disposition.
   """
 
   alias Shuttle.FiberDoc
 
-  def mark_awaiting(fiber_id, opts \\ []), do: transition(fiber_id, "awaiting", opts)
-  def rearm(fiber_id, opts \\ []), do: transition(fiber_id, "rearm", opts)
-
-  defp transition(fiber_id, action, opts) do
+  @doc """
+  Conclude the observed standing run whose worker exited without handing off:
+  `shuttle conclude-run` stamps `handed_off_at` under the document lock and
+  leaves the constitution armed for its next tick. A newer run, a handoff, or a
+  human pause or retirement is left as it stands.
+  """
+  def conclude(fiber_id, opts \\ []) do
     with {:ok, path, _, fm, _} <- FiberDoc.read(fiber_id) do
       observed = Keyword.get(opts, :observed, fm)
       runtime = get_in(observed, ["shuttle", "runtime"]) || %{}
@@ -20,24 +23,17 @@ defmodule Shuttle.LifecycleStore do
         "host" => Keyword.get(opts, :own_host_id, Shuttle.Env.get("SHUTTLE_HOST")),
         "dispatched_at" => Map.get(runtime, "dispatched_at", ""),
         "run_id" => Map.get(runtime, "run_id", ""),
-        "action" => action,
         "recovery" => Keyword.get(opts, :recovery, false)
       }
 
-      case Shuttle.CLI.run(["standing-transition", "--request-json", Jason.encode!(request)],
+      case Shuttle.CLI.run(["conclude-run", "--request-json", Jason.encode!(request)],
              runner: Keyword.get(opts, :runner, Shuttle.Runner.Default)
            ) do
         {:ok, output} ->
           case Jason.decode(output) do
-            {:ok, %{"changed" => true}} ->
-              {:ok,
-               "marked #{fiber_id} #{if action == "awaiting", do: "awaiting review", else: "rearmed"}\n"}
-
-            {:ok, %{"changed" => false}} ->
-              {:ok, "skipped #{action} for #{fiber_id} (state changed or run rearmed)\n"}
-
-            _ ->
-              {:error, "invalid standing-transition reply: #{output}"}
+            {:ok, %{"changed" => true}} -> {:ok, "concluded #{fiber_id}'s run\n"}
+            {:ok, %{"changed" => false}} -> {:ok, "left #{fiber_id} as it stands\n"}
+            _ -> {:error, "invalid conclude-run reply: #{output}"}
           end
 
         {:command_error, _, output} ->

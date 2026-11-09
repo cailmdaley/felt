@@ -8,7 +8,7 @@ import type { Conversations } from '../conversationOpening.js'
 import { threadKey, threadState, type ThreadIndex } from '../threads.js'
 import { fiberKey, type DocKey } from './documents.js'
 import { slug } from '../threadOutline.js'
-import { headerLifecycleVerbsFor, iconVerb, type LifecycleVerb } from './lifecycleVerbs.js'
+import { headerLifecycleVerbsFor, iconVerb, verbSpec, type LifecycleVerb } from './lifecycleVerbs.js'
 import './family-page.css'
 
 /** A sent file that is a thread's tapestry or report when its fiber's directory holds none. */
@@ -322,11 +322,11 @@ export class FamilyPage {
     this.fillDocs(row, thread)
     const verbs = row.querySelector<HTMLElement>('.fp-verbs')!
     const offered = thread !== model.root && this.act ? headerLifecycleVerbsFor(thread.card, this.canRest) : []
-    const shape = JSON.stringify([offered, slug(thread.card)])
+    const shape = JSON.stringify([offered.map(verb => verbSpec(verb, thread.card).label), slug(thread.card)])
     if (verbs.dataset.shape !== shape) {
       verbs.dataset.shape = shape
       verbs.replaceChildren(...offered.map(verb => {
-        const button = iconVerb(verb, slug(thread.card))
+        const button = iconVerb(verb, thread.card, slug(thread.card))
         button.addEventListener('click', event => { event.stopPropagation(); this.select(thread.key); this.act!(this.model!.threads.get(thread.key)!.card, verb, button) })
         return button
       }))

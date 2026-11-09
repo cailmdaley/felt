@@ -139,9 +139,10 @@ Two gestures carry different meanings. **Drag-and-drop** advances the card's
 state.
 **The fiber page's controls** give you another worker on the same run.
 
-Drag-to-tempered acts by kind: on a standing constitution it accepts and
-re-arms, on a oneshot it writes the terminus. The outcome stays: the last run's digest is the card's headline until
-the next run writes its own.
+A standing constitution takes no review or temper: its card offers **Pause
+schedule** (Resume schedule once paused) and **Retire**, and a drag to Awaiting
+review or Tempered is refused. Its outcome is the last run's digest, the card's
+headline until the next run writes its own.
 
 Opening a Desk card enters its constitution's documents.
 The constitution's band (see [the reader](#board-what-the-work-produced)) carries its worker's line and Listen; the folded settings hold the next launch's agent, effort, surface and kind, plus the card's due day and parent.

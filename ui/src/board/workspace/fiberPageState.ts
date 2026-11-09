@@ -14,37 +14,56 @@ export function onDesk(card: KanbanCard): boolean {
 function constitution(card: KanbanCard): boolean {
   return isAgentCard(card) && !card.isCycle
 }
-/** Rest reaches every Shuttle-managed constitution, including one with a verdict. */
+/** A standing constitution: it runs on its cron, and its lifecycle is its schedule's. */
+export function standing(card: KanbanCard): boolean {
+  return constitution(card) && card.shuttleKind === 'standing'
+}
+/** A constitution on a clock that Rest stops: a standing one's cron, or a
+ *  seat's pulse. Its Rest pauses that schedule and takes no wake day. */
+export function scheduled(card: KanbanCard): boolean {
+  return standing(card) || (isAgentCard(card) && !card.isCycle && !!card.shuttlePulse)
+}
+/** A scheduled constitution whose schedule is paused (`status: open`): it
+ *  fires again only once its schedule is resumed. */
+export function schedulePaused(card: KanbanCard): boolean {
+  return scheduled(card) && card.status === 'open'
+}
+/** Rest reaches every Shuttle-managed constitution, including one with a
+ *  verdict; on a standing one it pauses or resumes the schedule, which a
+ *  retired one no longer has. */
 export function restReachable(card: KanbanCard): boolean {
-  return isAgentCard(card)
+  return isAgentCard(card) && !(standing(card) && card.status === 'closed')
 }
 /** Unreviewed work in flight or awaiting review takes both verdicts, as do
- *  oneshot drafts. Open standing constitutions and idle scheduled standing
- *  cards take Discard alone: Temper accepts a standing run, not a paused or
- *  idle responsibility. A seat at rest takes none. */
+ *  oneshot drafts and work put down. A standing constitution takes Discard
+ *  alone, as Retire: a run's exit re-arms it, and its review is the run's own
+ *  ask. A seat at rest takes none. */
 export function verdictsFor(card: KanbanCard): Array<'temper' | 'discard'> {
   if (!constitution(card)) return []
   const column = card.column
   if (column === 'roles') return []
-  if (card.shuttleKind === 'standing' && card.status === 'open')
-    return card.shuttleSeat === true || card.tempered != null ? [] : ['discard']
+  if (standing(card)) return card.status === 'closed' ? [] : ['discard']
   if (column === 'drafts' || column === 'inFlight' || column === 'awaitingReview') return ['temper', 'discard']
   if (column !== 'resting' || card.shuttleSeat === true) return []
-  return card.shuttleKind === 'standing' ? ['discard'] : ['temper', 'discard']
+  return ['temper', 'discard']
 }
 /** Whether a card takes any verdict. */
 export function verdictReachable(card: KanbanCard): boolean {
   return verdictsFor(card).length > 0
 }
-/** Work still on its way, a draft or in flight, can be moved to Awaiting review. */
+/** Work still on its way, a draft or in flight, can be moved to Awaiting
+ *  review; a standing constitution never waits there. */
 export function reviewReachable(card: KanbanCard): boolean {
-  return constitution(card) && (card.column === 'drafts' || card.column === 'inFlight')
+  return constitution(card) && !standing(card) && (card.column === 'drafts' || card.column === 'inFlight')
 }
-/** The column's name for the page's status line; empty for a fiber with no column. */
+/** The column's name for the page's status line, or a standing constitution's
+ *  schedule state at rest; empty for a fiber with no column. */
 export function fiberPageKicker(card: KanbanCard): string {
   if (card.isCycle) return 'Cycle'
   if (!isAgentCard(card)) return ''
-  return card.column === 'awaitingReview' ? 'Awaiting your review' : DESK_COLUMN_TITLE[card.column]
+  if (card.column === 'awaitingReview') return 'Awaiting your review'
+  if (card.column === 'resting' && standing(card)) return schedulePaused(card) ? 'Schedule paused' : 'Scheduled'
+  return DESK_COLUMN_TITLE[card.column]
 }
 
 /** What a surface does once a constitution key has reached a card. */

@@ -357,20 +357,22 @@ function byNameAsc(a: KanbanCard, b: KanbanCard): number {
  *
  * A role asleep on its cron is resting in every sense that matters to a person
  * reading the desk — it is not gone, it is not waiting on them, it comes back
- * on a day. So it is drawn in Resting, wearing its next launch ("↻ returns
- * Aug 12") rather than a snooze's "wakes".
+ * on a day. So it is drawn in Resting, wearing its schedule and next launch
+ * ("weekdays at 09:00 · next Aug 12") rather than a snooze's "wakes".
  *
  * The response shape is untouched: `timeline.futureDated` keeps carrying these
  * cards (drag resolution reads them through `findCardById`), and this is the
  * JOIN, done at render time, not a second home for the card.
  *
- * The three statuses that are NOT here, and why they need nothing:
- *   status:open standing   → paused/draft, its column `drafts` — on the desk.
- *   status:closed standing → an awaiting run needing a verdict; its column is
- *                            `awaitingReview` and it belongs there, not
- *                            asleep in Resting. Accept re-arms it (`shuttle
- *                            accept` → `status:active`) and it lands back here.
+ * A standing constitution whose schedule is paused (`status:open`) is served
+ * `resting` too, and arrives on `resp.stash` with the snoozed work: it does
+ * not fire, and no `due:` wakes it; only a resume does.
+ *
+ * Two standing states that are NOT here:
  *   a running standing constitution → the liveness branch sends it to `inFlight`.
+ *   an armed one whose run asked something → its owner serves it `inFlight`,
+ *                            the human's turn; answering the ask clears it
+ *                            and it returns here.
  */
 export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return [];

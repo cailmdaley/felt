@@ -8,7 +8,7 @@ defmodule ShuttleWeb.LifecycleController do
   identical `/lifecycle` (origin stripped) and relayed verbatim. The local
   branch delegates to Shuttle CLI verbs, so the validated offline frontmatter
   writer remains the single implementation of
-  install/pause/rest/resume/repeat/accept/close/reopen/set-model/set-agent/role/seat/set-outcome/uninstall.
+  install/pause/rest/resume/repeat/close/reopen/set-model/set-agent/role/seat/set-outcome/uninstall.
 
   `install`/`repeat` are CREATE verbs — they refuse a fiber that already
   carries a shuttle block. Changing the SHAPE of an existing block (its kind,
@@ -25,7 +25,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
-  @allowed ~w(install pause rest resume repeat reshape accept close reopen set-model set-agent role seat set-outcome uninstall)
+  @allowed ~w(install pause rest resume repeat reshape close reopen set-model set-agent role seat set-outcome uninstall)
 
   @kinds ~w(oneshot standing)
 
@@ -97,7 +97,6 @@ defmodule ShuttleWeb.LifecycleController do
 
   # Lifecycle transitions go through `Shuttle.LifecycleService`, which runs
   # Shuttle's writer inside the Poller, serialized with its state changes.
-  defp execute("accept", %{"fiber" => fiber} = params), do: lifecycle(:accept, fiber, params)
 
   defp execute("resume", %{"fiber" => fiber} = params),
     do: lifecycle_with_args(:resume, fiber, params)
@@ -306,9 +305,6 @@ defmodule ShuttleWeb.LifecycleController do
     |> Shuttle.CLI.run_lifecycle(fiber_id, rest, felt_store: felt_store)
     |> clean_result()
   end
-
-  defp lifecycle(verb, fiber, params),
-    do: verb |> LifecycleService.transition(fiber, [], params["fiber_path"]) |> clean_result()
 
   defp clean_result({:command_error, status, output}),
     do: {:command_error, status, clean_command_output(output)}
