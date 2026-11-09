@@ -29,6 +29,7 @@ import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
 import { Overview } from './Overview.js'
 import { FamilyPage, placeAt, type EmbeddedDocument, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
+import { fiberHolding } from './sendLines.js'
 import type { GlobeHost } from '../globe/GlobeStage.js'
 import type { MapFile } from '../family/model.js'
 import { FamilyActivity } from './familyActivity.js'
@@ -160,6 +161,8 @@ export class Workspace {
       lead: card => this.mapLead(card),
       embed: (card, doc) => this.embed(card, doc),
       seen: files => markSeen(files),
+      fiberAt: path => fiberHolding(path, this.opts.cards()),
+      shuttleBase: opts.shuttleBase,
     }
     this.globeHost = {
       feeds: this.mapFeeds,

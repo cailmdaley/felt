@@ -22,7 +22,7 @@ const file = (name: string, back: number, unread = false): MapFile => ({ key: `d
 /** Mid's sent files, newest first as the feed gives them. */
 const sent = [file('new.png', 1, true), file('mid.md', 2), file('old.md', 3)]
 const tapestry = file('Tapestry', 4)
-const feeds: FamilyFeeds = { marks: () => undefined, reach: () => 14 * 86_400_000, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(), lead: async c => c.id === 'hub/mid' ? tapestry : undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {} }
+const feeds: FamilyFeeds = { marks: () => undefined, reach: () => 14 * 86_400_000, files: c => c.id === 'hub/mid' ? sent : [], refresh: vi.fn(), lead: async c => c.id === 'hub/mid' ? tapestry : undefined, embed: () => ({ el: document.createElement('div'), dispose: () => {} }), seen: () => {}, fiberAt: () => undefined, shuttleBase: '' }
 
 interface Made { family: FamilyPage; reach: Mock; place: MapPlace; sighted: Mock }
 function made(over: { feeds?: FamilyFeeds; place?: MapPlace; known?: KanbanCard[] } = {}): Made {
@@ -153,7 +153,7 @@ describe('a row', () => {
     await settle()
     click(row(family, 'Mid').querySelector('.fp-sent')!)
     click(row(family, 'Mid').querySelector<HTMLElement>('.fp-file')!)
-    row(family, 'Mid').querySelector<HTMLElement>('.fp-file')!.focus()
+    row(family, 'Mid').querySelector<HTMLElement>('.fp-back')!.focus()
     expect(place.docs!.size).toBe(1)
     click(row(family, 'Mid').querySelector('.fp-sent')!)
     expect(place.docs!.size).toBe(0)
@@ -254,7 +254,7 @@ describe('keys', () => {
     expect(reach).toHaveBeenCalledExactlyOnceWith(mid)
   })
   it('unfolds a row\'s first document with l, the next in its place with l again, and goes back out with h', async () => {
-    const { family, reach } = made()
+    const { family, reach, place } = made()
     const leave = vi.fn(); family.leave = leave
     await settle()
     family.focus()
@@ -266,14 +266,19 @@ describe('keys', () => {
     keys('l')
     expect(at()).toBe('☰')
     expect(doc().hidden).toBe(false)
+    const open = (): string | undefined => place.docs!.get(row(family, 'Mid').dataset.thread!)
     keys('l')
-    expect(at()).toContain('new.png')
+    expect(at(), 'an open sent file rests on its way back').toBe('← sends')
+    expect(open()).toBe('doc:new.png')
     expect(doc().hidden).toBe(false)
     keys('l')
-    expect(at()).toContain('mid.md')
+    expect(open()).toBe('doc:mid.md')
+    keys('h')
+    expect(at(), 'back to the list, on the file just open').toContain('mid.md')
+    expect(doc().hidden).toBe(true)
+    expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-files')!.hidden).toBe(false)
     keys('h')
     expect(at()).toBe('Mid')
-    expect(doc().hidden).toBe(true)
     expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-files')!.hidden).toBe(true)
     keys('h')
     expect(leave).toHaveBeenCalledOnce()
@@ -434,5 +439,67 @@ describe('its frame', () => {
     const disposed = vi.fn(), family = new FamilyPage(conversations(), feeds, placeAt(root), disposed)
     disposeFileViewer(family.el)
     expect(disposed).toHaveBeenCalledOnce()
+  })
+})
+
+describe('sends', () => {
+  /** Mid's sends: eight moments, the newest carrying a page from another fiber's directory, a script and two figures. */
+  const at = (n: number): number => now - n * hour
+  const sentAt = (path: string, back: number): MapFile => ({ key: `host-a:${path}`, name: path.split('/').pop()!, at: at(back), unread: false })
+  const sends = [
+    sentAt('/loom/gc/report.html', 1), sentAt('/work/fits/fit.py', 1), sentAt('/work/plots/a.png', 1), sentAt('/work/plots/b.png', 1),
+    ...Array.from({ length: 7 }, (_, n) => sentAt(`/loom/meet-${n}/report.html`, n + 2)),
+  ]
+  const fibers = (path: string): string | undefined => /^\/loom\/(gc|meet-\d)\//.exec(path)?.[1]
+  const open = async (): Promise<Made> => {
+    const made_ = made({ feeds: { ...feeds, files: c => c.id === 'hub/mid' ? sends : [], fiberAt: fibers } })
+    await settle()
+    click(row(made_.family, 'Mid').querySelector('.fp-sent')!)
+    return made_
+  }
+  const lines = (family: FamilyPage): string[] => [...row(family, 'Mid').querySelectorAll('.fp-send')].map(line =>
+    [line.querySelector('.fp-send-age')!.textContent, ...[...line.querySelectorAll('.fp-file')].map(item => item.getAttribute('aria-label'))].join(' '))
+
+  it('draws one line per send, its age once, its files named by their fiber or directory, figures as thumbnails, the older sends folded', async () => {
+    const { family } = await open()
+    expect(lines(family)).toEqual(['1h gc fits/fit.py plots/a.png plots/b.png', '2h meet-0', '3h meet-1', '4h meet-2', '5h meet-3'])
+    const first = row(family, 'Mid').querySelector('.fp-send')!
+    expect([...first.querySelectorAll('.fp-file-glyph')].map(glyph => glyph.textContent)).toEqual(['⌗', '›_'])
+    expect(first.querySelectorAll('.fp-file-image .fp-thumb')).toHaveLength(2)
+    const older = row(family, 'Mid').querySelector<HTMLElement>('.fp-older')!
+    expect(older.textContent).toBe('3 older sends')
+    click(older)
+    expect(lines(family)).toHaveLength(8)
+    expect(document.activeElement).toBe(row(family, 'Mid').querySelector('.fp-older'))
+    expect(row(family, 'Mid').querySelector('.fp-older')!.textContent).toBe('fewer')
+  })
+  it('opens a file in the list\'s place, steps through the files from there, and goes back to the list on that file', async () => {
+    const { family, place } = await open()
+    const shown = (): string | undefined => place.docs!.get(row(family, 'Mid').dataset.thread!)
+    click(row(family, 'Mid').querySelector('[aria-label="fits/fit.py"]')!)
+    expect(shown()).toBe('host-a:/work/fits/fit.py')
+    expect(row(family, 'Mid').querySelectorAll('.fp-send')).toHaveLength(0)
+    expect(row(family, 'Mid').querySelector('.fp-open')!.textContent).toBe('← sends›_fits/fit.py1h‹2 of 11›')
+    expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(false)
+    click(row(family, 'Mid').querySelector('.fp-step:last-of-type')!)
+    expect(shown()).toBe('host-a:/work/plots/a.png')
+    row(family, 'Mid').querySelector<HTMLElement>('.fp-back')!.focus()
+    for (let n = 0; n < 6; n++) press(document.activeElement!, 'l')
+    expect(shown(), 'l steps on to older files, into the folded sends').toBe('host-a:/loom/meet-4/report.html')
+    press(document.activeElement!, 'h')
+    expect(shown()).toBeUndefined()
+    expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(true)
+    expect(lines(family), 'the folded sends unfold to show the file').toHaveLength(8)
+    expect(document.activeElement!.getAttribute('aria-label')).toBe('meet-4')
+    press(document.activeElement!, 'l')
+    expect(shown(), 'l on a listed file opens that file').toBe('host-a:/loom/meet-4/report.html')
+    click(row(family, 'Mid').querySelector('.fp-back')!)
+    expect(document.activeElement!.getAttribute('aria-label')).toBe('meet-4')
+  })
+  it('lets go of its thumbnails when the list folds', async () => {
+    const { family } = await open()
+    expect(document.querySelectorAll('.fp-thumb')).toHaveLength(2)
+    click(row(family, 'Mid').querySelector('.fp-sent')!)
+    expect(document.querySelectorAll('.fp-thumb')).toHaveLength(0)
   })
 })

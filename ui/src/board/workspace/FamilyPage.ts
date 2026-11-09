@@ -6,13 +6,19 @@ import { ASIDE_SECTIONS, SECTION_WORD, opening, outline, tally, underAll, type A
 import { bindDrawnPage } from '../FileViewerPanel.js'
 import type { Conversations } from '../conversationOpening.js'
 import { threadKey, threadState, type ThreadIndex } from '../threads.js'
-import { fiberKey, type DocKey } from './documents.js'
+import { fiberKey, parseDocKey, type DocKey } from './documents.js'
 import { slug } from '../threadOutline.js'
 import { headerLifecycleVerbsFor, iconVerb, verbSpec, type LifecycleVerb } from './lifecycleVerbs.js'
+import { SENT_GLYPH, sendLines, type Send, type SentFile } from './sendLines.js'
+import { Thumbnail } from './Thumbnail.js'
 import './family-page.css'
 
 /** A sent file that is a thread's tapestry or report when its fiber's directory holds none. */
 const LEAD_NAME = /^(tapestry|report)\.html$/i
+/** The sends a row's list shows before the older ones fold behind a count. */
+const SHOWN_SENDS = 5
+/** The height a sent figure is drawn at on its send's line, in px. */
+const THUMB_HEIGHT = 44
 /** The most marks a row's tally draws before the rest join the count. */
 const TALLY_MARKS = 16
 /** How the fold of threads set aside names each kind, one and many. */
@@ -29,6 +35,10 @@ export interface FamilyFeeds extends MapFeeds {
   embed(card: KanbanCard, doc: DocKey): EmbeddedDocument
   /** Records that the human has seen these files. */
   seen(files: readonly MapFile[]): void
+  /** The short name of the fiber whose directory holds a path. */
+  fiberAt(path: string): string | undefined
+  /** Where the daemon serves files from, for a sent figure's thumbnail. */
+  shuttleBase: string
 }
 
 /** A document unfolded under its row, and how to let it go. */
@@ -62,8 +72,8 @@ export const placeAt = (card: KanbanCard): MapPlace => ({ open: new Set(), selec
  * order they ask for attention under one divider per kind, then the threads
  * set aside behind one fold.
  * A row leads with its name and what it came to (or what it asks); a click
- * unfolds it to what it holds (tapestry or report, constitution, sent files
- * oldest to newest) and its own threads, laid out the same way, and a second
+ * unfolds it to what it holds (tapestry or report, constitution, sends
+ * newest first) and its own threads, laid out the same way, and a second
  * click folds it. A document's chip unfolds that document under the row, full
  * width and at its full height, in the page's one scroll; a second click folds
  * it. A click moves Rex quietly to the thread's worker; only `c` opens a
@@ -98,6 +108,8 @@ export class FamilyPage {
   leave?: () => void
   /** Each unfolded document, by thread, kept across repaints so a page holds its place. */
   private readonly embedded = new Map<string, EmbeddedDocument & { doc: DocKey }>()
+  /** Each thread's sent figures, by file, kept while its list is open so going back to it draws them at once. */
+  private readonly thumbs = new Map<string, Map<string, Thumbnail>>()
 
   /**
    * `conversations` moves Rex quietly to a thread's existing window;
@@ -222,6 +234,7 @@ export class FamilyPage {
     const order = [this.fillHead(model.root), ...this.lines.map(line => this.fill(line))]
     for (const [key, row] of this.rows) if (!keys.has(key)) { row.remove(); this.rows.delete(key) }
     for (const key of this.embedded.keys()) if (!keys.has(key)) this.dropDoc(key)
+    for (const key of [...this.thumbs.keys()]) if (!keys.has(key)) this.keepThumbs(key, new Set())
     order.forEach((row, n) => { if (this.tree.children[n] !== row) this.tree.insertBefore(row, this.tree.children[n] ?? null) })
     this.markSelected()
     if (lostSelection) this.selectionChanged()
@@ -344,15 +357,16 @@ export class FamilyPage {
   /**
    * What a thread holds, on its row in the one order every surface keeps, in
    * the mod's glyphs: ⌗ its tapestry or report, ☰ its constitution, ⧉ n its
-   * sent files, which unfold as a list, newest first.
+   * sent files, which unfold under the row as its sends, newest first. A sent
+   * file opened takes the list's place, with the way back to it above.
    */
   private fillDocs(row: HTMLElement, thread: MapThread): void {
     const lead = this.leadOf(thread), shown = this.place.docs!.get(thread.key)
-    const files = thread.files.filter(file => file.key !== lead?.key)
-    const listed = this.place.open.has(`files:${thread.key}`) && files.length > 0
-    const shape = JSON.stringify([lead?.key, lead?.unread, files.map(file => [file.key, file.unread]), listed, shown, Math.floor(this.model!.now / 60_000)])
+    const files = this.sentOf(thread), open = files.find(file => file.key === shown)
+    const listed = this.place.open.has(`files:${thread.key}`) && files.length > 0, older = this.place.open.has(`older:${thread.key}`)
+    const shape = JSON.stringify([lead?.key, lead?.unread, files.map(file => [file.key, file.unread]), listed, older, shown, Math.floor(this.model!.now / 60_000)])
     const docs = row.querySelector<HTMLElement>('.fp-docs')!, list = row.querySelector<HTMLElement>('.fp-files')!
-    list.hidden = !listed
+    list.hidden = !listed && !open
     if (docs.dataset.shape === shape) return
     docs.dataset.shape = shape
     const chip = (cls: string, glyph: string, label: string, held?: string): HTMLButtonElement => {
@@ -373,15 +387,89 @@ export class FamilyPage {
     }
     for (const [n, file] of [lead, ...files].entries()) if (file?.unread) chips[n === 0 ? 0 : chips.length - 1]?.toggleAttribute('data-unread', true)
     docs.replaceChildren(...chips)
-    list.replaceChildren(...(listed ? files : []).map(file => {
+    const sends = listed || open ? sendLines(files, path => this.feeds.fiberAt(path)) : []
+    if (open) list.replaceChildren(this.openBar(thread, sends, open))
+    else {
+      const drawn = older ? sends : sends.slice(0, SHOWN_SENDS)
+      list.replaceChildren(...drawn.map(send => this.sendLine(thread, send)), ...this.olderToggle(thread, sends.length, older))
+      this.keepThumbs(thread.key, new Set(drawn.flatMap(send => send.files.map(sent => sent.file.key))))
+    }
+  }
+  /** A thread's sent files, which its tapestry or report leaves for its own chip. */
+  private sentOf(thread: MapThread): MapFile[] {
+    const lead = this.leadOf(thread)
+    return thread.files.filter(file => file.key !== lead?.key)
+  }
+  /** One send: its age once, at the left, then what it carried, figures drawn small as themselves. */
+  private sendLine(thread: MapThread, send: Send): HTMLElement {
+    const line = el('div', 'fp-send'), carried = el('span', 'fp-send-files')
+    carried.append(...send.files.map(sent => {
       const item = el('button', 'fp-file'); item.type = 'button'
-      item.dataset.held = file.key; item.dataset.owner = item.dataset.level = thread.key
-      item.setAttribute('aria-pressed', String(file.key === shown))
-      item.toggleAttribute('data-unread', file.unread)
-      item.append(el('span', 'fp-file-name', file.name))
-      if (file.at) item.append(el('span', 'fp-file-age', age(this.model!.now - file.at)))
+      item.dataset.held = sent.file.key; item.dataset.owner = item.dataset.level = thread.key
+      item.title = sent.label; item.setAttribute('aria-label', sent.label)
+      item.toggleAttribute('data-unread', sent.file.unread)
+      if (sent.mark === 'image') { item.classList.add('fp-file-image'); item.append(this.thumbOf(thread.key, sent).el) }
+      else item.append(el('span', 'fp-file-glyph', SENT_GLYPH[sent.mark]), el('span', 'fp-file-name', sent.label))
       return item
     }))
+    line.append(el('span', 'fp-send-age', age(this.model!.now - send.at)), carried)
+    return line
+  }
+  /** The count of older sends, which unfolds them, or the word that folds them again. */
+  private olderToggle(thread: MapThread, sends: number, older: boolean): HTMLElement[] {
+    const rest = sends - SHOWN_SENDS
+    if (rest <= 0) return []
+    const toggle = el('button', 'fp-older', older ? 'fewer' : `${rest} older ${rest === 1 ? 'send' : 'sends'}`); toggle.type = 'button'
+    toggle.dataset.older = toggle.dataset.level = thread.key
+    toggle.setAttribute('aria-expanded', String(older))
+    return [toggle]
+  }
+  /** The open sent file's bar: back to the sends, its name and age, and the files either side of it. */
+  private openBar(thread: MapThread, sends: Send[], open: MapFile): HTMLElement {
+    const all = sends.flatMap(send => send.files), at = all.findIndex(sent => sent.file.key === open.key), sent = all[at]
+    const bar = el('div', 'fp-open')
+    const button = (cls: string, glyph: string, label: string): HTMLButtonElement => {
+      const button = el('button', cls, glyph); button.type = 'button'
+      button.title = label; button.setAttribute('aria-label', label)
+      button.dataset.owner = button.dataset.level = thread.key
+      return button
+    }
+    const back = button('fp-back', '← sends', 'Back to the sends'); back.dataset.back = thread.key
+    const name = el('span', 'fp-open-name')
+    name.append(el('span', 'fp-file-glyph', sent.mark === 'image' ? '▨' : SENT_GLYPH[sent.mark]), el('span', 'fp-file-name', sent.label))
+    name.title = sent.label
+    const step = (by: number, glyph: string, word: string): HTMLButtonElement => {
+      const to = all[at + by], move = button('fp-step', glyph, to ? `${word}: ${to.label}` : word)
+      if (to) move.dataset.held = to.file.key
+      else move.disabled = true
+      return move
+    }
+    bar.append(back, name, el('span', 'fp-send-age', age(this.model!.now - open.at)), step(-1, '‹', 'Newer'), el('span', 'fp-open-count', `${at + 1} of ${all.length}`), step(1, '›', 'Older'))
+    return bar
+  }
+  /** A sent figure's thumbnail, made once while its row's list is open. */
+  private thumbOf(owner: string, sent: SentFile): Thumbnail {
+    const kept = this.thumbs.get(owner) ?? new Map<string, Thumbnail>()
+    this.thumbs.set(owner, kept)
+    let thumb = kept.get(sent.file.key)
+    if (thumb) return thumb
+    const file = parseDocKey(sent.file.key)!
+    const made: Thumbnail = thumb = new Thumbnail({
+      key: `family:${sent.file.key}`, shuttleBase: this.feeds.shuttleBase, className: 'fp-thumb', fallback: sent.label, captioned: true,
+      file: { fullPath: file.path, owner: file.owner, basename: sent.label },
+      priority: () => this.awake && made.el.isConnected && !made.el.closest('[hidden]') ? 2 : 0,
+      distance: () => 0,
+      onAspect: aspect => { made.el.style.width = `${Math.round(Math.min(Math.max(aspect, .6), 2.4) * THUMB_HEIGHT)}px` },
+    })
+    kept.set(sent.file.key, thumb)
+    return thumb
+  }
+  /** Lets go of a row's figures its list no longer draws; an empty set lets go of them all. */
+  private keepThumbs(owner: string, drawn: ReadonlySet<string>): void {
+    const kept = this.thumbs.get(owner)
+    if (!kept) return
+    for (const [key, thumb] of kept) if (!drawn.has(key)) { thumb.dispose(); kept.delete(key) }
+    if (!kept.size) this.thumbs.delete(owner)
   }
   /** The document the thread has unfolded, drawn under its row. */
   private seatDoc(slot: HTMLElement, thread: MapThread): void {
@@ -404,7 +492,7 @@ export class FamilyPage {
   }
   /**
    * A chip's document unfolds under its row, selecting and entering the thread, and the page
-   * scrolls its top to the top of the view; folding it moves nothing else.
+   * scrolls its top (a sent file's, its bar's) to the top of the view; folding it moves nothing else.
    */
   private toggleDoc(thread: MapThread, doc: DocKey): void {
     const docs = this.place.docs!
@@ -418,7 +506,8 @@ export class FamilyPage {
     this.enter(thread.key)
     this.paint()
     this.notice(thread, [this.leadOf(thread), ...thread.files].filter(file => file?.key === doc) as MapFile[])
-    const slot = this.row(thread.key)?.querySelector<HTMLElement>(':scope > .fp-doc')
+    const sent = this.sentOf(thread).some(file => file.key === doc)
+    const slot = this.row(thread.key)?.querySelector<HTMLElement>(sent ? ':scope > .fp-files' : ':scope > .fp-doc')
     if (slot) this.reveal(slot, true, 0)
   }
   private markSelected(): void {
@@ -448,6 +537,9 @@ export class FamilyPage {
     const target = event.target as Element, model = this.model
     if (!model || event.detail > 1 || target.closest('.fp-doc')) return
     const held = target.closest<HTMLElement>('[data-held]'), files = target.closest<HTMLElement>('[data-files]')
+    const back = target.closest<HTMLElement>('[data-back]'), older = target.closest<HTMLElement>('[data-older]')
+    if (back) { this.back(model.threads.get(back.dataset.back!)!); return }
+    if (older) { this.toggleOlder(older.dataset.older!); return }
     if (held) { this.toggleDoc(model.threads.get(held.dataset.owner!)!, held.dataset.held!); return }
     if (files) { this.select(files.dataset.files!); this.toggleFiles(files.dataset.files!); return }
     const key = target.closest<HTMLElement>('[role="treeitem"]')?.dataset.row
@@ -463,17 +555,42 @@ export class FamilyPage {
   }
   /** A thread's ⧉ n list unfolds or folds; folding it folds a sent file open from it, and a cursor in it returns to ⧉ n. */
   private toggleFiles(key: string): void {
-    const list = this.row(key)?.querySelector<HTMLElement>('.fp-files')
-    const shown = this.place.docs!.get(key)
-    if (this.place.open.has(`files:${key}`) && list) {
+    const list = this.row(key)?.querySelector<HTMLElement>('.fp-files'), thread = this.model!.threads.get(key)!
+    const opened = this.sentOf(thread).some(file => file.key === this.place.docs!.get(key))
+    if ((this.place.open.has(`files:${key}`) || opened) && list) {
       const within = list.contains(document.activeElement)
-      if ([...list.querySelectorAll<HTMLElement>('[data-held]')].some(item => item.dataset.held === shown)) this.place.docs!.delete(key)
+      if (opened) this.place.docs!.delete(key)
       this.place.open.delete(`files:${key}`)
       this.paint()
       if (within) this.row(key)?.querySelector<HTMLElement>('[data-files]')?.focus({ preventScroll: true })
       return
     }
     this.toggle(`files:${key}`)
+  }
+  /** A row's older sends unfold below its newest, or fold away again, the cursor staying on the toggle. */
+  private toggleOlder(key: string): void {
+    if (!this.place.open.delete(`older:${key}`)) this.place.open.add(`older:${key}`)
+    this.paint()
+    this.row(key)?.querySelector<HTMLElement>('[data-older]')?.focus({ preventScroll: true })
+  }
+  /** From a sent file open in the list's place, back to the list, its line for that file shown and under the cursor. */
+  private back(thread: MapThread): void {
+    const files = this.sentOf(thread), was = files.find(file => file.key === this.place.docs!.get(thread.key))
+    this.place.docs!.delete(thread.key)
+    this.place.open.add(`files:${thread.key}`)
+    if (was && new Set(files.filter(file => file.at > was.at).map(file => file.at)).size >= SHOWN_SENDS) this.place.open.add(`older:${thread.key}`)
+    this.paint()
+    const item = was && this.findDoc(thread.key, was.key)
+    if (!item) return
+    item.focus({ preventScroll: true })
+    this.reveal(item, false)
+  }
+  /** The sent file a step newer or older than the one open, opened in its place; the cursor stays on the way back. */
+  private step(thread: MapThread, by: number): HTMLElement | undefined {
+    const files = sendLines(this.sentOf(thread), () => undefined).flatMap(send => send.files.map(sent => sent.file))
+    const to = files[files.findIndex(file => file.key === this.place.docs!.get(thread.key)) + by]
+    if (to) this.toggleDoc(thread, to.key)
+    return this.row(thread.key)?.querySelector<HTMLElement>('.fp-back') ?? undefined
   }
   private toggle(key: string): void {
     if (!this.place.open.delete(key)) this.place.open.add(key)
@@ -529,10 +646,12 @@ export class FamilyPage {
    * row's documents they move on from its row, leaving the document unfolded
    * there. l (or right) goes in: from a row it unfolds the first document under
    * the row, entering the thread, and from a document it unfolds the next in its
-   * place (⧉ n lists the sent files and unfolds the newest). h (or left) goes
-   * out: from a document to its row, folding what it had unfolded; from a row,
-   * it folds every document the page has unfolded, and only a page with none
-   * unfolded is left. Enter does what a click does.
+   * place (⧉ n lists the sent files and opens the newest); from a sent file in
+   * the list it opens that file in the list's place. From an open sent file, l
+   * steps to the next older and h goes back to the list. h (or left) otherwise
+   * goes out: from a document to its row, folding what it had unfolded; from a
+   * row, it folds every document the page has unfolded, and only a page with
+   * none unfolded is left. Enter does what a click does.
    */
   private key(event: KeyboardEvent): void {
     const model = this.model, target = event.target as HTMLElement
@@ -543,13 +662,20 @@ export class FamilyPage {
     const thread = model.threads.get(owner)
     const docs = (): HTMLElement[] => [...(this.row(owner)?.querySelectorAll<HTMLElement>('.fp-docs button, .fp-files:not([hidden]) button') ?? [])]
     let next: HTMLElement | undefined
+    const inward = event.key === 'l' || event.key === 'ArrowRight', outward = event.key === 'h' || event.key === 'ArrowLeft'
+    if (thread && (inward || outward) && item.closest('.fp-open')) {
+      event.preventDefault()
+      if (outward) return this.back(thread)
+      this.step(thread, 1)?.focus({ preventScroll: true })
+      return
+    }
     const step = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 }[event.key]
     if (step) {
       const rows = [...this.tree.querySelectorAll<HTMLElement>('[role="treeitem"]')]
       next = rows[rows.indexOf(this.row(owner)!) + step]
     } else if (event.key === 'l' || event.key === 'ArrowRight') {
       if (onRow && !thread) { this.toggle(owner); return void event.preventDefault() }
-      const chip = onRow ? docs()[0] : docs()[docs().indexOf(item) + 1]
+      const chip = onRow ? docs()[0] : item.closest('.fp-send') ? item : docs()[docs().indexOf(item) + 1]
       if (chip) next = this.show(thread!, chip)
       else if (onRow) { this.enter(owner); if (!this.place.open.has(owner) && thread !== model.root) this.toggle(owner) }
       if (!next) return void event.preventDefault()
@@ -575,17 +701,20 @@ export class FamilyPage {
     const at = next.dataset.row ? model.threads.get(next.dataset.row) : undefined
     this.announcement.textContent = at ? [at.name, at.note].filter(Boolean).join('. ') : next.title || next.textContent || ''
   }
-  /** Unfolds a chip's document under its row (⧉ n: its list, and the newest file), returning the chip to rest on. */
+  /** Unfolds a chip's document under its row (⧉ n: its list, and the newest file), returning what to rest on: the chip, or an open sent file's way back. */
   private show(thread: MapThread, chip: HTMLElement): HTMLElement | undefined {
+    if (chip.dataset.older) return
     if (chip.dataset.files) {
       if (!this.place.open.has(`files:${thread.key}`)) this.toggle(`files:${thread.key}`)
-      const first = this.row(thread.key)?.querySelector<HTMLElement>('.fp-files [data-held]') ?? undefined
-      return first && this.show(thread, first)
+      const newest = sendLines(this.sentOf(thread), () => undefined)[0]?.files[0]
+      return newest && this.unfold(thread, newest.file.key)
     }
-    const held = chip.dataset.held!
+    return this.unfold(thread, chip.dataset.held!)
+  }
+  private unfold(thread: MapThread, held: DocKey): HTMLElement | undefined {
     if (this.place.docs!.get(thread.key) !== held) this.toggleDoc(thread, held)
     else this.enter(thread.key)
-    return this.findDoc(thread.key, held)
+    return this.findDoc(thread.key, held) ?? this.row(thread.key)?.querySelector<HTMLElement>('.fp-back') ?? undefined
   }
   private findDoc(owner: string, held: string): HTMLElement | undefined {
     return [...(this.row(owner)?.querySelectorAll<HTMLElement>('[data-held]') ?? [])].find(doc => doc.dataset.held === held)
@@ -600,6 +729,7 @@ export class FamilyPage {
   dispose(): void {
     this.suspend()
     for (const key of [...this.embedded.keys()]) this.dropDoc(key)
+    for (const key of [...this.thumbs.keys()]) this.keepThumbs(key, new Set())
     this.disposed()
   }
 }

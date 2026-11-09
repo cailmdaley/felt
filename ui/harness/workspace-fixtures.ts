@@ -48,7 +48,7 @@ const inlineBlob = (data: string, mime: string): Blob => {
   return new Blob([bytes], { type: mime })
 }
 
-const blobFor = (data: string, mime: string): Blob => inlineBlob(data, mime)
+export const blobFor = (data: string, mime: string): Blob => inlineBlob(data, mime)
 // An empty ZIP's end-of-central-directory record is a complete archive.
 const zipBytes = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...Array<number>(18).fill(0)])
 
