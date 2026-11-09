@@ -153,7 +153,10 @@ scheduled: a run's exit leaves it `status: active`, its outcome the latest
 digest, and it fires again at the next tick. A run whose content needs you asks
 (`shuttle ask`); the card then waits on your turn with the question, still on
 its schedule. Say in the constitution's body when a run should ask, and what it
-holds until you answer. Keep runs additive: products go to their own channel (a
+holds until you answer. When you are done with a run that waits on you — you
+talked with its worker, or answered its question — **Temper run** (`shuttle
+close --tempered=true`) ends it: the ask clears, the worker stops, and the
+constitution stays armed for its next tick. Keep runs additive: products go to their own channel (a
 notification, an email, a dated file), not only to a field the next run
 overwrites.
 
@@ -161,7 +164,7 @@ Two verbs stop a schedule. **Pause schedule** (`shuttle rest`, `status: open`)
 is undone by **Resume schedule** (`shuttle resume`), which picks it up from the
 next tick. **Retire** (`shuttle close --tempered=false`) ends it; `shuttle
 reopen` brings it back. `shuttle close` refuses a standing constitution without
-`--tempered=false`. A stashed horizon alone does not stop a schedule.
+a verdict. A stashed horizon alone does not stop a schedule.
 
 Oneshots alone make a coherent system. Ignore standing until you want it.
 

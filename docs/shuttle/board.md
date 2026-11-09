@@ -139,9 +139,10 @@ Two gestures carry different meanings. **Drag-and-drop** advances the card's
 state.
 **The fiber page's controls** give you another worker on the same run.
 
-A standing constitution takes no review or temper: its card offers **Pause
-schedule** (Resume schedule once paused) and **Retire**, and a drag to Awaiting
-review or Tempered is refused. Its outcome is the last run's digest, the card's
+A standing constitution takes no review: its card offers **Pause schedule**
+(Resume schedule once paused) and **Retire**, and, leading them while a run
+waits on you (its worker live, or its question open), **Temper run**, which ends
+that run and keeps the schedule. A drag to Awaiting review is refused. Its outcome is the last run's digest, the card's
 headline until the next run writes its own.
 
 Opening a Desk card enters its constitution's documents.

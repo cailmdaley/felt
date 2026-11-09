@@ -26,10 +26,11 @@ func handedOffAt(t *testing.T, f *felt.Felt) time.Time {
 	return shuttle.RuntimeTimestamp(shuttleRuntimeMap(t, f)["handed_off_at"])
 }
 
-// A standing constitution has no review: only retirement closes it.
+// A standing constitution has no review: only retirement closes it, and
+// Temper ends its current run (internal/shuttlecli/standing_verbs_test.go).
 func TestStandingCloseRetiresOrRefuses(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{{"close", "f", "--local"}, {"close", "f", "--tempered=true", "--local"}} {
+	for _, args := range [][]string{{"close", "f", "--local"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)

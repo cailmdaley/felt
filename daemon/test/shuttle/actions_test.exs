@@ -5,7 +5,8 @@ defmodule Shuttle.ActionsTest do
 
   # Lifecycle is status + tempered. A oneshot awaits review at `status: closed`
   # + untempered; a standing constitution has no review — drafts pauses its
-  # schedule, composted retires it, inFlight runs it now.
+  # schedule, composted retires it, inFlight runs it now, and tempered ends the
+  # current run of an armed one.
 
   describe "standing constitutions have no review" do
     @pause {"pause", %{verb: "pause"}}
@@ -23,7 +24,7 @@ defmodule Shuttle.ActionsTest do
       {{"closed", nil, false}, [@reopen_draft, @reopen, @retire]}
     ]
 
-    test "drafts, inFlight and composted resolve by state; review and temper resolve to nothing" do
+    test "drafts, inFlight and composted resolve by state; review resolves to nothing, and temper only on an armed one" do
       for {{status, tempered, running?}, expected} <- @standing_resolutions do
         fiber =
           %{"id" => "work/standing", "status" => status, "shuttle" => %{"kind" => "standing"}}
@@ -37,14 +38,22 @@ defmodule Shuttle.ActionsTest do
                  "#{label} dragged to #{target} must resolve to #{id}"
         end
 
-        for target <- ~w(awaitingReview tempered) do
-          assert Actions.resolve_transition(fiber, target, running?) ==
+        assert Actions.resolve_transition(fiber, "awaitingReview", running?) ==
+                 {:error, :standing_unreviewed},
+               "#{label} dragged to awaitingReview must resolve to nothing"
+
+        # Temper ends the current run of an armed one and keeps its schedule.
+        if status == "active" do
+          assert Actions.resolve_transition(fiber, "tempered", running?) ==
+                   {:ok, %{id: "close-tempered", invocation: %{verb: "close", tempered: true}}}
+        else
+          assert Actions.resolve_transition(fiber, "tempered", running?) ==
                    {:error, :standing_unreviewed},
-                 "#{label} dragged to #{target} must resolve to nothing"
+                 "#{label} dragged to tempered must resolve to nothing"
         end
 
         offered = fiber |> Actions.actions_for(running?) |> Enum.map(& &1.id)
-        refute "close-tempered" in offered
+        assert ("close-tempered" in offered) == (status == "active")
         refute "close-awaiting-review" in offered
       end
     end
@@ -209,7 +218,7 @@ defmodule Shuttle.ActionsTest do
 
               {:error, :standing_unreviewed} ->
                 assert kind == "standing" and target in ["awaitingReview", "tempered"]
-                refute "close-tempered" in available
+                assert ("close-tempered" in available) == (status == "active")
                 refute "close-awaiting-review" in available
                 nil
             end

@@ -1285,6 +1285,24 @@ test('Temper remains available by key for drafts and work in flight through the 
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
 })
 
+test('A standing run waiting on you is tempered with t: no question, an undo window, then the schedule keeps it', async p => {
+  await p.goto(`${url}&standing-review`); await chooseDeskColumn(p, 1)
+  await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
+  const verdict = band(p).getByRole('group', { name: 'Verdict', exact: true })
+  assert.deepEqual(await verdict.locator('button:visible').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label'))),
+    ['Temper run (t)', 'Pause schedule (s)', 'Retire (x)'], 'Temper run leads the band')
+  assert.equal(await band(p).getByRole('button', { name: 'Close for review (a)', exact: true }).count(), 0)
+  const asked = []
+  p.on('dialog', dialog => { asked.push(dialog.message()); void dialog.dismiss().catch(() => {}) })
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  await appFocus(p); await p.keyboard.press('t')
+  await band(p).locator('.ws-verdict-undo').waitFor()
+  assert.deepEqual(asked, [], 'ending a standing run is the point of Temper run, so it does not ask')
+  assert.match(await band(p).locator('.ws-verdict-undo').innerText(), /Run tempered/)
+  await p.clock.runFor(6000)
+  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition') && JSON.parse(r.body ?? '{}').target === 'tempered'))
+})
+
 test('Pending verdicts on two fibers commit independently', async p => {
   await open(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
@@ -2227,7 +2245,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await choose(p, 'remote-summary.pdf')
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /basalt-login-02/)
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
-    await leave(p); await chooseDeskColumn(p, 1)
+    await leave(p)
+    // A standing constitution's cadence: the same review, on a schedule.
+    await p.goto(`${url}&standing-review`); await chooseDeskColumn(p, 1)
     await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
     await bandMenu(p, 'Settings')
     const cadence = band(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')

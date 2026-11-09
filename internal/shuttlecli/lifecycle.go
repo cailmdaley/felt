@@ -719,8 +719,10 @@ orchestrator's own session makes is not delivered back to it.
 
 A standing constitution has no review: its runs end with 'shuttle handoff',
 which keeps the schedule, and ask with 'shuttle ask' when they need the human.
-On a standing constitution only --tempered=false applies: it retires the
-constitution and ends its schedule. 'shuttle rest' pauses the schedule instead.
+On a standing constitution --tempered=true tempers its current run: the ask
+clears, the run is concluded, and the schedule stays armed for its next tick.
+--tempered=false retires the constitution and ends its schedule. 'shuttle
+rest' pauses the schedule instead.
 
 A worker closing its own top-level oneshot for review must have written the
 fiber's tapestry.html since it was dispatched; 'shuttle rest' leaves when
@@ -804,8 +806,11 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				}
 			}
 
-			if block.Kind == "standing" && (tempered == nil || *tempered) {
+			if block.Kind == "standing" && tempered == nil {
 				return standingCloseError(args[0])
+			}
+			if block.Kind == "standing" && *tempered {
+				return a.temperStandingRun(st, f, args[0], ref, closeActor)
 			}
 
 			f.Status = felt.StatusClosed
@@ -876,7 +881,48 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 // standingCloseError refuses a close that would put a standing constitution
 // up for review: its runs re-arm on exit and ask when they need the human.
 func standingCloseError(id string) error {
-	return fmt.Errorf("%s is a standing constitution and has no review: a run ends with 'shuttle handoff' (the schedule continues) and asks with 'shuttle ask'; pause the schedule with 'shuttle rest %s' or retire it with 'shuttle close %s --tempered=false'", id, id, id)
+	return fmt.Errorf("%s is a standing constitution and has no review: a run ends with 'shuttle handoff' (the schedule continues) and asks with 'shuttle ask'; temper its current run with 'shuttle close %s --tempered=true', pause the schedule with 'shuttle rest %s' or retire it with 'shuttle close %s --tempered=false'", id, id, id, id)
+}
+
+// temperStandingRun is Temper on an armed standing constitution: the human
+// has seen the current run, and it is over. The run's ask is cleared and
+// handed_off_at stamped, so the schedule fires again at its next tick; the
+// constitution stays active. The owning daemon stops a live worker after the
+// write. A paused or retired constitution has no run to temper.
+func (a *app) temperStandingRun(st *felt.Storage, f *felt.Felt, id string, ref felt.Ref, actor string) error {
+	if f.Status != felt.StatusActive {
+		return fmt.Errorf("%s has no run to temper: its schedule is %s", id, map[bool]string{true: "retired", false: "paused"}[f.Status == felt.StatusClosed])
+	}
+	if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
+		return err
+	}
+	if err := clearBlockedOn(f); err != nil {
+		return err
+	}
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {
+		return err
+	}
+	if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "tempered"); err != nil {
+		return err
+	}
+	evictStandingRuntimeKeys(f)
+	if err := markOrchestratorAct(st, f, at, a.actorSession(actor)); err != nil {
+		return err
+	}
+	if err := a.writeFiber(st, f); err != nil {
+		return fmt.Errorf("writing fiber: %w", err)
+	}
+	by := a.boardWorkerParty()
+	if session := a.actorSession(actor); session != "" {
+		if by == nil {
+			by = &boardParty{}
+		}
+		by.Session = session
+	}
+	a.recordBoard(boardRecord{Kind: "run_tempered", Fiber: f.UID, By: by})
+	fmt.Fprintf(a.env.Stdout, "tempered the current run of %s%s\n  schedule: armed for its next tick\n", id, ref.Location())
+	return nil
 }
 
 // ---- reopen ----------------------------------------------------------------

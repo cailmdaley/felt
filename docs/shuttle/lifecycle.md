@@ -85,7 +85,7 @@ Closing puts the work back on a human's desk. It claims nothing about
 completion. A worker should never upgrade a close-out into a continuation
 because the work looks unfinished — unfinished is often exactly why you want it
 back.
-For a standing responsibility, Rest (`status: open`) pauses the schedule (the board's Pause schedule), Resume picks it up from the next tick, and `close --tempered=false` retires it (the board's Retire).
+For a standing responsibility, `close --tempered=true` tempers the run waiting on you and keeps the schedule (the board's Temper run), Rest (`status: open`) pauses the schedule (the board's Pause schedule), Resume picks it up from the next tick, and `close --tempered=false` retires it (the board's Retire).
 A stashed horizon alone does neither.
 
 ### Tempered — human only

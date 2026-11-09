@@ -4658,9 +4658,9 @@ defmodule Shuttle.PollerTest do
   end
 
   # Action resolution reads the document straight: a standing role has no
-  # review, so its Temper and Awaiting review drops resolve to nothing, while
-  # inFlight runs it now.
-  test "actions read a standing role's document: no review, inFlight runs it now" do
+  # review, so its Awaiting review drop resolves to nothing, Temper ends the
+  # current run of the armed role, and inFlight runs it now.
+  test "actions read a standing role's document: no review, temper ends the run, inFlight runs it now" do
     fiber_id = "tests/standing-actions-overlay"
     fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"]})
     MockRunner.set_fiber(fiber_id, fiber)
@@ -4691,14 +4691,17 @@ defmodule Shuttle.PollerTest do
       {:ok, actions} = ActionQueries.actions_for(fiber_id, query_opts)
       ids = Enum.map(actions, &(Map.get(&1, :id) || Map.get(&1, "id")))
       assert "dispatch-ad-hoc" in ids
-      refute "close-tempered" in ids
+      assert "close-tempered" in ids
       refute "close-awaiting-review" in ids
 
       assert {:ok, %{id: "dispatch-ad-hoc"}} =
                ActionQueries.resolve_action(fiber_id, "inFlight", query_opts)
 
-      assert {:error, :standing_unreviewed} =
+      assert {:ok, %{id: "close-tempered"}} =
                ActionQueries.resolve_action(fiber_id, "tempered", query_opts)
+
+      assert {:error, :standing_unreviewed} =
+               ActionQueries.resolve_action(fiber_id, "awaitingReview", query_opts)
     end)
   end
 

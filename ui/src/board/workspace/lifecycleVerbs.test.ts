@@ -12,13 +12,19 @@ describe('a standing constitution names its schedule’s verbs', () => {
   const running = { ...armed, id: 'running', workerState: 'running' } as const
   const paused = { ...armed, id: 'paused', status: 'open', effectiveHorizon: 'stashed' } as const
 
-  it('offers Pause schedule and Retire while armed — between runs, mid-run, or asking', () => {
-    for (const over of [armed, asking, running]) {
+  it('offers Pause schedule and Retire between runs', () => {
+    for (const verbs of [lifecycleVerbsFor(card(armed), true), headerLifecycleVerbsFor(card(armed), true)])
+      expect(labels(verbs, armed)).toEqual(['Pause schedule', 'Retire'])
+    expect(card(armed).column).toBe('resting')
+    expect(verbSpec('rest', card(armed)).icon).toBe('pause')
+  })
+
+  it('leads with Temper run while a run waits on the human — mid-run or asking', () => {
+    for (const over of [asking, running]) {
       for (const verbs of [lifecycleVerbsFor(card(over), true), headerLifecycleVerbsFor(card(over), true)])
-        expect(labels(verbs, over)).toEqual(['Pause schedule', 'Retire'])
+        expect(labels(verbs, over)).toEqual(['Temper run', 'Pause schedule', 'Retire'])
     }
     expect(card(asking).column).toBe('inFlight')
-    expect(card(armed).column).toBe('resting')
   })
 
   it('offers Resume schedule and Retire while paused, from Resting', () => {
@@ -28,8 +34,8 @@ describe('a standing constitution names its schedule’s verbs', () => {
     expect(verbSpec('rest', card(paused)).icon).toBe('resume')
   })
 
-  it('never offers Temper or Close for review, and nothing once retired', () => {
-    for (const over of [armed, asking, running, paused])
+  it('never offers Close for review, Temper between runs or paused, and nothing once retired', () => {
+    for (const over of [armed, paused])
       expect(lifecycleVerbsFor(card(over), true)).not.toContain('temper')
     for (const over of [armed, asking, running, paused])
       expect(lifecycleVerbsFor(card(over), true)).not.toContain('review')

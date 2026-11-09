@@ -105,7 +105,7 @@ shuttle set-agent <fiber> <agent-id>   # change the agent (--effort, --chrome)
 shuttle pause   <fiber>                # back to draft, schedule kept; kills a live worker unless --no-kill
 shuttle rest    <fiber>                # into Resting without review; pauses a standing schedule; stops a live worker
 shuttle resume  <fiber>                # arm; a standing constitution resumes its schedule from the next tick
-shuttle close   <fiber> [--tempered=true|false]   # a standing constitution takes only --tempered=false: retire
+shuttle close   <fiber> [--tempered=true|false]   # standing: true tempers the current run, false retires
 shuttle reopen  <fiber> [--as-draft]   # reopen for active work, or as an unarmed draft
 shuttle uninstall <fiber>              # remove the block (see below)
 

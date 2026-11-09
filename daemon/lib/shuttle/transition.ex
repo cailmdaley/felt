@@ -211,7 +211,7 @@ defmodule Shuttle.Transition do
   def http_error(:standing_unreviewed),
     do:
       {422,
-       "A standing constitution has no review: its runs keep the schedule and ask when they need you. Pause its schedule (Rest) or retire it (Discard)."}
+       "A standing constitution has no review: its runs keep the schedule and ask when they need you. Temper the run waiting on you, pause its schedule, or retire it."}
 
   def http_error(:unknown_target), do: {400, "unknown_target"}
   def http_error(:already_running), do: {409, "already_running"}

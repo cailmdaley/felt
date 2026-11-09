@@ -238,6 +238,8 @@ func boardPhrase(r boardRow) string {
 		return member + " handed off"
 	case "rested":
 		return member + " rested"
+	case "run_tempered":
+		return actor + " tempered " + member + "'s run"
 	case "unblocked":
 		return member + " unblocked"
 	default:

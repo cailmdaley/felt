@@ -13,9 +13,11 @@ defmodule Shuttle.LifecycleService do
   Resume arms the constitution; on a standing one it also concludes the run
   (`shuttle.runtime.handed_off_at = now`) in the same document write, so the
   poller never reads it armed without the stamp that rests it until its next
-  tick. Rest puts it in Resting (pausing a standing schedule), then stops any
-  live worker through the Poller's backend-aware stop, the one `/kill` uses,
-  so an app conversation is interrupted as a tmux worker is.
+  tick. Rest puts it in Resting (pausing a standing schedule), and a verdict
+  (`close --tempered=…`) closes it or, on a standing constitution, tempers its
+  current run; each then stops any live worker through the Poller's
+  backend-aware stop, the one `/kill` uses, so an app conversation is
+  interrupted as a tmux worker is.
 
   `/api/v1/lifecycle` comes through `transition/3`. With the Poller running, the write happens inside it
   (`Poller.lifecycle_transition/4`), serialized with the Poller's state

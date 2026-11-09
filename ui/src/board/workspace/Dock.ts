@@ -1019,6 +1019,10 @@ export class Dock {
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')
       review.hidden = !offered.includes('review')
+      // Offered verbs keep the order the card gives them (a standing run leads with Temper run).
+      const buttons = { review, rest, temper, discard } as const
+      const ordered = offered.flatMap(verb => buttons[verb] ? [buttons[verb]!] : [])
+      if (ordered.some((button, index) => verdict.children[index] !== button)) verdict.prepend(...ordered)
       sessionsSection.hidden = !sheetCard.uid
       const settingsLabel = `Settings${same ? '' : ` ${slug(act)}`}`
       settingsItem.title = settingsLabel; settingsItem.setAttribute('aria-label', settingsLabel)

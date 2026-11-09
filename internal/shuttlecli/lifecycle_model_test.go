@@ -14,7 +14,7 @@ import (
 // with the daemon and the board: for every state and request, whether the
 // owner accepts it, the Shuttle write it runs, and the state that follows.
 type lifecycleTable struct {
-	States  map[string]lifecycleTableState `json:"states"`
+	States  map[string]lifecycleTableState          `json:"states"`
 	Answers map[string]map[string][]json.RawMessage `json:"answers"`
 }
 

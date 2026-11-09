@@ -2345,11 +2345,16 @@ defmodule Shuttle.Poller do
         args: args ++ if(is_map(target), do: LifecycleService.hint_args(target), else: [])
       )
 
-    # A rest disarms first (the write above lands `status: open` before any
-    # stop), then stops the worker, so its exit cannot be read as a reason to
-    # relaunch. A failed stop is reported; the document is already at rest.
+    # A rest or a verdict writes first (the document is at rest, closed, or a
+    # standing run concluded before any stop), then stops the worker, so its
+    # exit cannot be read as a reason to relaunch. A failed stop is reported;
+    # the document has already moved.
+    stops_worker? =
+      verb == :rest or (verb == :pause and "--no-kill" not in args) or
+        (verb == :close and Enum.any?(args, &String.starts_with?(&1, "--tempered=")))
+
     {result, state} =
-      case {verb == :rest or (verb == :pause and "--no-kill" not in args), result} do
+      case {stops_worker?, result} do
         {true, {:ok, output}} ->
           case stop_worker(state, address) do
             {{:ok, :no_session}, state} -> {{:ok, output}, state}

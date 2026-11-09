@@ -9,14 +9,19 @@ import './verdicts.css'
 export type Verdict = 'tempered' | 'composted' | 'awaitingReview'
 
 const VERDICT_WORD = { tempered: ['Tempered', 'temper'], composted: ['Discarded', 'discard'], awaitingReview: ['To review', 'move to review'] } as const
-/** A verdict's past-tense word and its verb for this card: a standing constitution is retired, not discarded. */
+/** A verdict's past-tense word and its verb for this card: a standing
+ *  constitution's run is tempered, and the constitution retired, not discarded. */
 const verdictWords = (card: KanbanCard, verdict: Verdict): readonly [string, string] =>
-  verdict === 'composted' && card.shuttleKind === 'standing' ? ['Retired', 'retire'] : VERDICT_WORD[verdict]
+  card.shuttleKind !== 'standing' ? VERDICT_WORD[verdict]
+    : verdict === 'composted' ? ['Retired', 'retire']
+    : verdict === 'tempered' ? ['Run tempered', 'temper the run'] : VERDICT_WORD[verdict]
 const VERDICT_KIND = { tempered: 'tempered', composted: 'discarded', awaitingReview: 'review' } as const
 
 /** A verdict, or a move to review, stops any worker the card owns, so it asks
  * first, as "New session" does; on a finished run it stays a single gesture. */
 export function confirmWorkerStop(card: KanbanCard, verdict: Verdict): boolean {
+  // Ending a standing run's worker is what Temper run is for.
+  if (verdict === 'tempered' && card.shuttleKind === 'standing') return true
   return !hasWorkerToStop(card) ||
     window.confirm(`“${card.name}” has a live worker. This stops it — ${verdictWords(card, verdict)[1]} anyway?`)
 }

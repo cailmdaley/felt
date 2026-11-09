@@ -162,7 +162,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     [WORKSPACE_HOST]: { kind: 'local' as const, stale: false, lastPolledAt: iso(0) },
     [WORKSPACE_REMOTE]: { kind: 'remote' as const, stale: false, lastPolledAt: iso(-minute) },
   }
-  const fibers = [
+  const fibers: Array<{ id: string; uid: string; name: string; status: string; age: number; outcome: string; host: string; role?: string; inCardIndex?: boolean }> = [
     {
       id: WORKSPACE_ID,
       uid: WORKSPACE_UID,
@@ -241,6 +241,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       host: WORKSPACE_HOST,
     }] : []),
   ]
+  const standingReview = new URLSearchParams(location.search).has('standing-review')
   const previews = new URLSearchParams(location.search).getAll('theme-preview')
   const previewFor = (uid: string): string | undefined => previews.find(value => value.startsWith(`${uid}:`))?.slice(uid.length + 1)
   const rows = fibers.filter(fiber => fiber.inCardIndex !== false).map((fiber, index) => {
@@ -265,8 +266,9 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
         closed_at: fiber.status === 'closed' ? iso(-fiber.age * day) : undefined,
         shuttle: {
           role: fiber.role,
-          kind: fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
-          schedule: fiber.id === 'pipeline/spin/remote-review' ? { expr: '0 9 * * *', tz: 'UTC' } : undefined,
+          // `?standing-review` makes the remote review a standing constitution, for journeys about a schedule.
+          kind: standingReview && fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
+          schedule: standingReview && fiber.id === 'pipeline/spin/remote-review' ? { expr: '0 9 * * *', tz: 'UTC' } : undefined,
           host: fiber.host,
           agent: 'claude-opus',
           effort: 'high',

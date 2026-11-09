@@ -190,6 +190,11 @@ function transition(s: LifeState, target: TransitionTarget): Applied {
     next: { ...s, life: tempered === undefined ? 'closed' : tempered ? 'tempered' : 'discarded' },
   })
   // A standing constitution has no review: its runs keep the schedule.
+  // Tempered ends the run of an armed one: its ask clears, its run is
+  // concluded, and it stays armed for the next tick.
+  if (s.kind === 'standing' && target === 'tempered' && s.life === 'active') {
+    return { outcome: 'ok', cli: ['close', '--tempered=true'], next: { ...s, ask: false } }
+  }
   if (s.kind === 'standing' && (target === 'awaitingReview' || target === 'tempered')) return { outcome: 'refused', next: s }
   if (target === 'awaitingReview') return close()
   if (target === 'tempered') return close(true)
@@ -260,6 +265,11 @@ function verdictable(s: LifeState, nowMs = Date.now()): boolean {
   return column === 'resting' && s.seat === 'none'
 }
 
+/** An armed standing run waiting on the human: its worker is held, or it asked. A seat at rest among the Roles has none. */
+function runAwaitsHuman(s: LifeState, nowMs = Date.now()): boolean {
+  return s.kind === 'standing' && s.life === 'active' && (s.worker !== 'none' || s.ask) && constitutionColumn(s, nowMs) !== 'roles'
+}
+
 export const VERBS: Record<Verb, VerbSpec> = {
   review: {
     offered: s => s.kind === 'oneshot' && ['drafts', 'in_flight'].includes(constitutionColumn(s, Date.now())),
@@ -267,9 +277,14 @@ export const VERBS: Record<Verb, VerbSpec> = {
     reached: (_, after) => after.life === 'closed' && after.worker === 'none',
   },
   temper: {
-    offered: s => verdictable(s),
-    label: () => 'Temper',
-    reached: (_, after) => after.life === 'tempered' && after.worker === 'none',
+    // On a standing constitution, Temper run: offered while an armed run waits
+    // on the human (its worker is held, or it asked), it ends that run and
+    // keeps the schedule.
+    offered: s => verdictable(s) || runAwaitsHuman(s),
+    label: s => s.kind === 'standing' ? 'Temper run' : 'Temper',
+    reached: (before, after) => before.kind === 'standing'
+      ? after.life === 'active' && !after.ask && after.worker === 'none'
+      : after.life === 'tempered' && after.worker === 'none',
   },
   discard: {
     // A seat at rest takes no verdict: its office keeps it.
@@ -287,4 +302,12 @@ export const VERBS: Record<Verb, VerbSpec> = {
     // Rest on a constitution already at rest only changes what it waits for.
     mayLookSame: s => !scheduled(s) && s.life === 'open' && s.stashed && s.worker === 'none',
   },
+}
+
+const VERB_ORDER: readonly Verb[] = ['review', 'rest', 'temper', 'discard']
+/** The verbs the board offers a state, in the order it draws them: header
+ *  order, except that a standing run waiting on the human leads with Temper run. */
+export function offeredVerbs(s: LifeState): Verb[] {
+  const verbs = VERB_ORDER.filter(verb => VERBS[verb].offered(s))
+  return s.kind === 'standing' && verbs.includes('temper') ? ['temper', ...verbs.filter(verb => verb !== 'temper')] : verbs
 }

@@ -1,4 +1,4 @@
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
 import { isAgentCard } from '../KanbanModalShared.js'
 import type { KeyIntent } from '../keymap.js'
@@ -36,15 +36,21 @@ export function restReachable(card: KanbanCard): boolean {
   if (card.column === 'roles' && !scheduled(card)) return false
   return isAgentCard(card) && !(standing(card) && card.status === 'closed')
 }
+/** A standing constitution's run that waits on the human: its worker is
+ *  still live, or it ended with a question. Temper ends it and keeps the
+ *  schedule. */
+export function runAwaitsHuman(card: KanbanCard): boolean {
+  return standing(card) && card.status === 'active' && (hasLiveWorker(card) || !!card.ask?.text?.trim())
+}
 /** Unreviewed work in flight or awaiting review takes both verdicts, as do
- *  oneshot drafts and work put down. A standing constitution takes Discard
- *  alone, as Retire: a run's exit re-arms it, and its review is the run's own
- *  ask. A seat at rest takes none. */
+ *  oneshot drafts and work put down. A standing constitution takes Discard as
+ *  Retire, and Temper only while a run waits on the human: a run's exit
+ *  re-arms it, and its review is the run's own ask. A seat at rest takes none. */
 export function verdictsFor(card: KanbanCard): Array<'temper' | 'discard'> {
   if (!constitution(card)) return []
   const column = card.column
   if (column === 'roles') return []
-  if (standing(card)) return card.status === 'closed' ? [] : ['discard']
+  if (standing(card)) return card.status === 'closed' ? [] : runAwaitsHuman(card) ? ['temper', 'discard'] : ['discard']
   if (column === 'drafts' || column === 'inFlight' || column === 'awaitingReview') return ['temper', 'discard']
   if (column !== 'resting' || card.shuttleSeat === true) return []
   return ['temper', 'discard']

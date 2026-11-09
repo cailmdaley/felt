@@ -68,7 +68,11 @@ defmodule Shuttle.Actions do
     cond do
       # A standing constitution has no review: its runs keep the schedule and
       # ask when they need the human. Drafts pauses the schedule, composted
-      # retires it, inFlight runs it now; review and temper resolve to nothing.
+      # retires it, inFlight runs it now, and tempered ends the current run of
+      # an armed one, keeping the schedule; review resolves to nothing.
+      standing?(shuttle) and target == "tempered" and status == "active" ->
+        :close_tempered
+
       standing?(shuttle) and target in ["awaitingReview", "tempered"] ->
         nil
 

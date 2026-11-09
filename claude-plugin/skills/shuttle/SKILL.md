@@ -87,7 +87,7 @@ A thread's close or ask wakes its orchestrator, and only that one; `close --quie
 Write a thread's outcome for that orchestrator.
 An orchestrator reads each result against the thread's Desired State; review with the human first a thread they asked for.
 Temper a oneshot with `shuttle close <thread> --tempered=true`.
-A standing thread has no review: its runs re-arm on exit and ask when they need a decision.
+A standing thread has no review: its runs re-arm on exit and ask when they need a decision; `--tempered=true` on it ends the run waiting on you and keeps the schedule.
 `close --tempered=false` discards a constitution and ends a standing schedule; `rest` pauses it.
 An orchestrator leaving with live threads hands off rather than closes.
 More in [references/operating.md](references/operating.md#threads-on-the-board).

@@ -44,7 +44,7 @@ import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock } from './workspace/Dock.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
-import { constitutionAction, schedulePaused, scheduled } from './workspace/fiberPageState.js'
+import { constitutionAction, runAwaitsHuman, schedulePaused, scheduled } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
@@ -1068,11 +1068,12 @@ export class KanbanModal {
       this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
       return
     }
-    // A standing constitution runs now (In flight) or is retired (Discarded);
-    // its schedule is paused and resumed with Rest, and it is never closed for
-    // review or tempered: a run's exit re-arms it.
-    if (card.shuttleKind === 'standing' && target !== 'inFlight' && target !== 'composted') {
-      this.showBanner(`“${card.name}” is a standing constitution — pause its schedule (s) or retire it (x) instead.`, 'info')
+    // A standing constitution runs now (In flight), has the run waiting on
+    // the human tempered (Tempered, which keeps the schedule), or is retired
+    // (Discarded); its schedule is paused and resumed with Rest, and it is
+    // never closed for review: a run's exit re-arms it.
+    if (card.shuttleKind === 'standing' && target !== 'inFlight' && target !== 'composted' && !(target === 'tempered' && runAwaitsHuman(card))) {
+      this.showBanner(`“${card.name}” is a standing constitution — temper a run waiting on you (t), pause its schedule (s) or retire it (x).`, 'info')
       this.announce(`${card.name} runs on its schedule; pause or retire it instead.`)
       return
     }
@@ -1168,7 +1169,9 @@ export class KanbanModal {
         await this.postTransition(card, target, 'Transition failed')
       }
       this.announce(
-        moved
+        moved && target === 'tempered' && card.shuttleKind === 'standing'
+          ? `Tempered the run of “${card.name}”; it runs again at its next scheduled time.`
+          : moved
           ? `Moved “${card.name}” to ${COLUMN_TITLES[target]}.`
           : `“${card.name}” needs a project directory before it can start.`,
       )
@@ -2417,6 +2420,8 @@ export function applyOptimisticTransition(
   const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
+  // A standing run tempered stays armed on its schedule: the refetch places it.
+  if (target === 'tempered' && card.shuttleKind === 'standing') return null
   const moved: KanbanCard = { ...card }
   moved.column = target
   if (target === 'tempered' || target === 'composted') {

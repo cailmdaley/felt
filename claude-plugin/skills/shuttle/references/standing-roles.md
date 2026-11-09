@@ -14,7 +14,8 @@ This reference covers what is specific to standing constitutions. Board gestures
             │ status: active         │                │ live worker  │
             │ (Resting, next launch) │ ◀───────────── │              │
             └───┬────────────▲───────┘  run exits     └──────────────┘
-                │            │          (handoff, or the worker just ends)
+                │            │          (handoff, or the worker just ends),
+                │            │          or the human tempers the run
    Pause        │            │ Resume schedule
    schedule     ▼            │
             ┌────────────────┴───────┐
@@ -36,12 +37,19 @@ fiber) or clearing the ask returns it to Resting. An unanswered ask does not
 stop the next tick: the next run finds it on its fiber and does what its
 constitution says, for example holding a send until it is answered.
 
+**Temper run is the human's "seen, done, come back next time".** While a run
+waits on the human — its worker still live (the human was talking with it), or
+its ask open — the board leads with *Temper run* (`t`; `shuttle close <id>
+--tempered=true`). It clears the ask, stamps `handed_off_at`, stops the worker,
+and leaves the constitution armed for its next tick. A paused or retired
+constitution has no run to temper, and the CLI refuses it.
+
 **Two verbs stop a schedule:** *Pause schedule* (`shuttle rest`, `status:
 open`), undone by *Resume schedule* (`shuttle resume`), and *Retire* (`shuttle
 close --tempered=false`), undone by `shuttle reopen`. Arming either way concludes
 the run (`handed_off_at = now`), so the constitution next fires at the
 schedule's next tick rather than catching up occurrences it was stopped across.
-`shuttle close` without `--tempered=false` refuses a standing constitution.
+`shuttle close` without a verdict refuses a standing constitution.
 
 Due-ness is computed from the cron against the role's last service (the later
 of `shuttle.runtime.dispatched_at` and `handed_off_at`, or creation) — nothing

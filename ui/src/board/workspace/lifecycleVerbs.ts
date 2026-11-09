@@ -18,30 +18,35 @@ export const VERB_KEY: Record<LifecycleVerb, string> = { review: 'a', rest: 's',
 
 /**
  * A verb as this card names it. On a constitution with a schedule (a standing
- * one's cron, a seat's pulse) Rest pauses it, or resumes a paused one; a
- * standing constitution's Discard retires it.
+ * one's cron, a seat's pulse) Rest pauses it, or resumes a paused one. On a
+ * standing constitution Temper ends the run waiting on the human and keeps
+ * the schedule, and Discard retires it.
  */
 export function verbSpec(verb: LifecycleVerb, card?: KanbanCard): LifecycleVerbSpec {
   const spec = LIFECYCLE_VERBS.find(spec => spec.verb === verb)!
   if (!card) return spec
   if (verb === 'rest' && scheduled(card)) return schedulePaused(card)
     ? { ...spec, label: 'Resume schedule', icon: 'resume' }
-    : { ...spec, label: 'Pause schedule' }
+    : { ...spec, label: 'Pause schedule', icon: 'pause' }
+  if (verb === 'temper' && standing(card)) return { ...spec, label: 'Temper run' }
   if (verb === 'discard' && standing(card)) return { ...spec, label: 'Retire' }
   return spec
 }
 
-/** The verbs a card offers, in header order; Rest only where a rest can be taken. */
+/** The verbs a card offers, in header order; Rest only where a rest can be
+ *  taken. A standing run waiting on the human leads with Temper run, the
+ *  gesture that ends it and keeps the schedule. */
 export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): LifecycleVerb[] {
   if (!onDesk(card)) return []
   const verdicts = verdictsFor(card)
-  return LIFECYCLE_VERBS.map(spec => spec.verb).filter(verb =>
+  const verbs = LIFECYCLE_VERBS.map(spec => spec.verb).filter(verb =>
     verb === 'review' ? reviewReachable(card) : verb === 'rest' ? canRest && restReachable(card) : verdicts.includes(verb))
+  return standing(card) && verbs.includes('temper') ? ['temper', ...verbs.filter(verb => verb !== 'temper')] : verbs
 }
 
 /** The header keeps only the actions called for by the card's current state.
- *  A standing constitution always offers its two: pause or resume its
- *  schedule, and retire it. */
+ *  A standing constitution offers pause or resume of its schedule and Retire,
+ *  and Temper run while a run waits on the human. */
 export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): LifecycleVerb[] {
   const reachable = lifecycleVerbsFor(card, canRest)
   // A seat at rest keeps only its clock: a scheduled one can pause or resume it.

@@ -2,25 +2,27 @@ import { describe, expect, it } from 'vitest'
 import { card } from '../testFixtures.js'
 import { fiberPageKicker, restReachable, reviewReachable, verdictsFor } from './fiberPageState.js'
 
-it('offers a standing constitution Discard alone, never Temper, wherever it stands but retired', () => {
+it('offers a standing constitution Retire, and Temper only while an armed run waits on the human', () => {
   for (const status of ['open', 'active'])
     for (const effectiveHorizon of ['now', 'stashed'] as const)
-      for (const workerState of [undefined, 'running'] as const) {
-        const standing = card({ id: 'standing', status, shuttleKind: 'standing', effectiveHorizon, workerState })
-        expect(verdictsFor(standing)).toEqual(['discard'])
-        expect(reviewReachable(standing)).toBe(false)
-      }
+      for (const workerState of [undefined, 'running'] as const)
+        for (const ask of [undefined, { text: 'Cut these?', at: '2026-01-01T09:00:00Z' }]) {
+          const standing = card({ id: 'standing', status, shuttleKind: 'standing', effectiveHorizon, workerState, ask })
+          const waiting = status === 'active' && (workerState !== undefined || ask !== undefined)
+          expect(verdictsFor(standing)).toEqual(waiting ? ['temper', 'discard'] : ['discard'])
+          expect(reviewReachable(standing)).toBe(false)
+        }
   for (const tempered of [undefined, true, false])
     expect(verdictsFor(card({ id: 'retired', status: 'closed', shuttleKind: 'standing', tempered }))).toEqual([])
   expect(verdictsFor(card({ id: 'oneshot', status: 'open', shuttleKind: 'oneshot' }))).toEqual(['temper', 'discard'])
 })
 
-it('offers no verdicts for an idle standing seat, whether paused or armed; a running one retires', () => {
+it('offers no verdicts for an idle standing seat, whether paused or armed; a running one tempers its run or retires', () => {
   for (const status of ['open', 'active']) {
     const seat = card({ id: 'seat', status, shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'warden' })
     expect(verdictsFor(seat)).toEqual([])
   }
-  expect(verdictsFor(card({ id: 'seat', status: 'active', shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'warden', workerState: 'running' }))).toEqual(['discard'])
+  expect(verdictsFor(card({ id: 'seat', status: 'active', shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'warden', workerState: 'running' }))).toEqual(['temper', 'discard'])
 })
 
 it('names a standing constitution at rest by its schedule', () => {
