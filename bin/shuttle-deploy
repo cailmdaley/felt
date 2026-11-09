@@ -718,10 +718,13 @@ ensure_linux_artifacts() {
   fi
 }
 
-# Why a host cannot run the shipped artifacts; empty when it can. The release's
-# native code needs x86_64 and the system glibc (the one /lib64's loader uses).
+# Why a host takes no shipped artifacts; empty when it takes them. A host
+# already serving the target coalesces and needs nothing. The release's native
+# code needs x86_64 and the system glibc (the one /lib64's loader uses).
 shipped_refusal() { # host
-  local probe arch glibc
+  local probe arch glibc live
+  live="$(run_value "$1" "$(daemon_call "" /api/v1/version)" 2>/dev/null | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  [ "$live" != "$TARGET_SHA" ] || { echo "it already runs $TARGET_SHA"; return; }
   command -v container >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 \
     || { echo "the deploy host has no container runtime"; return; }
   probe="$(run_value "$1" 'uname -sm; /usr/bin/getconf GNU_LIBC_VERSION 2>/dev/null || getconf GNU_LIBC_VERSION')" \
@@ -1000,10 +1003,12 @@ done
 mkdir -p "\$tree/bin"
 assembly=\$(mktemp -d "\$tree/bin/.rel.assembly-XXXXXXXX")
 generation="\$tree/bin/rel.generation-\${assembly##*-}"
+trap 'rm -rf "\$assembly" "\$generation" "\$generation.link"' 0
 touch "\$assembly/.assembling"
 mv "\$assembly" "\$generation"
 tar -xzf "\$ship/rel.tar.gz" -C "\$generation"
 python3 -c 'import os,sys; dest,gen=sys.argv[1:]; os.symlink(os.path.basename(gen), gen+".link"); os.replace(gen+".link",dest)' "\$tree/bin/rel-built" "\$generation"
+trap - 0
 rm "\$generation/.assembling"
 printf 'installed shipped CLIs and release %s\\n' "\$generation"
 SH
@@ -1045,7 +1050,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
     fi
     cp -R "$tree/ui/dist/." "$SNAPSHOT/" || { bad 'snapshot UI: failed'; return 1; }
     deploy_step 'build Linux artifacts'
-    [ -z "$DEPLOY_VERSION" ] || export SHUTTLE_VERSION="$DEPLOY_VERSION" GOFLAGS="-ldflags=-X=main.version=$DEPLOY_VERSION -X=main.commit=$TARGET_COMMIT"
+    [ -z "$DEPLOY_VERSION" ] || export SHUTTLE_VERSION="$DEPLOY_VERSION" GOFLAGS="'-ldflags=-X=main.version=$DEPLOY_VERSION -X=main.commit=$TARGET_COMMIT'"
     bash "$tree/scripts/build-linux-release.sh" "$tree" "$LINUX_OUT" 3>&- 4>&- 5>&- \
       || { bad 'build Linux artifacts: failed'; return 1; }
     return 0
@@ -1206,7 +1211,7 @@ deploy_remote() {
       || { bad 'ship Linux artifacts: failed'; return 1; }
     ok "shipped CLIs and release (built once on $(hostname -s))"
   else
-    ok "builds on the host: $refusal"
+    ok "nothing shipped: $refusal"
   fi
   if [ -z "$refusal" ] || ! builds_ui "$host"; then
     ship_ui "$dest" "$stage" "$flags" || return 1

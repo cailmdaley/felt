@@ -33,10 +33,11 @@ here=$(cd "$(dirname "$0")" && pwd -P)
 [ -f "$tree/ui/dist/index.html" ] || { echo "build-linux-release: $tree/ui/dist has no bundle" >&2; exit 1; }
 
 if command -v container >/dev/null 2>&1; then
-  runtime=container platform=(--arch amd64)
+  # Apple's default container (4 CPUs, 1 GiB) is too small for mix release.
+  runtime=container platform=(--arch amd64) limits=(--cpus 8 --memory 8g)
   container system status >/dev/null 2>&1 || container system start >/dev/null
 elif command -v docker >/dev/null 2>&1; then
-  runtime=docker platform=(--platform linux/amd64)
+  runtime=docker platform=(--platform linux/amd64) limits=()
 else
   echo "build-linux-release: needs Apple's container CLI or docker" >&2
   exit 1
@@ -85,13 +86,14 @@ mkdir -p "$cache"
 rm -rf "$out/rel" "$out/rel.tar.gz"
 
 echo "build-linux-release: daemon release in $image" >&2
-"$runtime" run --rm "${platform[@]}" --cpus 8 --memory 8g \
+"$runtime" run --rm "${platform[@]}" ${limits[@]+"${limits[@]}"} \
   -v "$tree:$tree" -v "$common:$common" -v "$out:/out" -v "$cache:/cache" \
   -e MIX_ENV=prod -e MIX_DEPS_PATH=/cache/deps -e MIX_BUILD_ROOT=/cache/_build -e HEX_HOME=/cache/hex \
-  -e SHUTTLE_VERSION="${SHUTTLE_VERSION:-}" -w "$tree/daemon" "$image" bash -euc '
+  -e SHUTTLE_VERSION="${SHUTTLE_VERSION:-}" -e COMMIT="$(git -C "$tree" rev-parse HEAD)" -w "$tree/daemon" "$image" bash -euc '
     [ -n "$SHUTTLE_VERSION" ] || unset SHUTTLE_VERSION
     mix deps.get
     mix shuttle.gen_version
+    grep -q "\"$COMMIT\"" lib/shuttle/build_info.ex || { echo "build_info.ex does not name $COMMIT" >&2; exit 1; }
     mix compile
     mix compile.app --force
     mix release shuttled --path /out/rel --overwrite

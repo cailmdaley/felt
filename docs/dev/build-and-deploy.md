@@ -423,6 +423,9 @@ persist under `~/.cache/felt-linux-release`. The build boots the release in the
 container to prove the crypto NIF loads, then gates it with
 `scripts/check-glibc-floor.sh`.
 
+A host already serving the target is shipped nothing and coalesces; when no
+host needs them, the artifacts are never built. The build checks that the
+release's build info names the target commit.
 A host builds for itself, and the deploy log says why, when it is another OS or
 architecture, its glibc is older than 2.28, the deploy host has no container
 runtime, the artifact build failed, or the target revision predates
