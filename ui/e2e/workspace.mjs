@@ -11,7 +11,7 @@ import { registerNavigationJourneys } from './navBack.mjs'
 import { registerDeskThreadJourneys } from './deskThreads.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
-import { sentFiles as sentFileRows } from './familyNav.mjs'
+import { familySends, pageBack, showFile } from './familyNav.mjs'
 import { registerCapGeometryJourneys } from './capGeometry.mjs'
 import { registerRenderedTypeJourneys } from './renderedType.mjs'
 
@@ -58,12 +58,6 @@ async function bandMenu(p, label) {
     await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }); return
   }
   await headerAction(p, ['Settings', 'Sessions'].includes(label) ? 'Settings' : label)
-}
-/** Sent-file rows, in the sheet the document menu opens. */
-async function sentFiles(p) {
-  const settings = p.locator('.ws-settings-menu:not([hidden])')
-  if (await settings.count()) { await p.keyboard.press('Escape'); await settings.waitFor({ state: 'hidden' }) }
-  return sentFileRows(p)
 }
 
 test('The layout-shift guard ignores hidden geometry but catches visible movement', async p => {
@@ -119,16 +113,7 @@ async function choose(p, label) {
   }
   if (await isSelected(p, label)) return
   if (label === 'Constitution') await headerAction(p, 'Constitution')
-  else {
-    const rows = await sentFiles(p)
-    const target = rows.and(p.locator(`[data-key$="/${label === 'calibration-report' ? 'report.html' : label}"]`))
-    if (!await target.count()) {
-      const more = p.locator('[data-part="sent-files-more"]:visible')
-      if (await more.count()) await more.click()
-    }
-    await target.click()
-    await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
-  }
+  else await showFile(p, `/${label === 'calibration-report' ? 'report.html' : label}`)
   await pageFor(p, label).and(p.locator('.ws-selected')).waitFor()
 }
 
@@ -944,16 +929,15 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
       return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
     }
   })
-  // The open fiber's receipts are read on their own cadence.
-  await p.clock.fastForward(15_001)
-  const first = (await sentFiles(p)).first()
-  assert.match(await first.getAttribute('data-key'), /brief.md$/)
-  assert.equal(await first.locator('.ws-sent-new').count(), 1)
-  await p.keyboard.press('Escape'); await poll(p, () => !document.querySelector('.ws-page-sheet').open)
-  assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
-  // The fleet's are read past their interval while the Board is off screen, as a Desk redraw reads them.
-  await leave(p); await p.clock.fastForward(60_001)
+  // The fleet's receipts are read past their interval: the arrival marks the
+  // family page's list and leads it, and the open report stays as it was.
+  await p.clock.fastForward(60_001)
   await p.evaluate(() => window.__harness.modal.fiberSends.refresh())
+  await pageBack(p)
+  await selected(p).locator('.fp-head .fp-sent[data-unread]').waitFor()
+  assert.match(await (await familySends(p)).first().getAttribute('data-held'), /\/brief\.md$/)
+  assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
+  await leave(p)
   await barTab(p, 'board').click()
   await poll(p, () => document.querySelector('.ws-overview-ribbon [title*="brief.md"]'))
   if (reducedMotion !== 'reduce') await poll(p, () => window.__receiptAnimations.length)
@@ -1489,8 +1473,8 @@ test('Text, markdown, code, image, archive and missing-file cause', async p => {
   assert.match(await selected(p).locator('.ws-document-path').innerText(), /\/deliverables\/not-produced.csv$/)
 })
 
-test('A live-arriving image opens at full resolution from Sent files', async p => {
-  await open(p)
+test('A live-arriving image opens at full resolution from its send on the family page', async p => {
+  await land(p)
   await p.evaluate(() => {
     const original = window.fetch
     window.fetch = async (...args) => {
@@ -1505,16 +1489,16 @@ test('A live-arriving image opens at full resolution from Sent files', async p =
     }
   })
   await p.clock.fastForward(15001)
-  const imageCard = (await sentFiles(p)).and(p.locator('[data-key$="/live-arrival.png"]'))
+  await p.evaluate(() => window.__harness.modal.fiberSends.refresh())
+  await selected(p).locator('.fp-head .fp-sent[data-unread]').waitFor()
+  const imageCard = (await familySends(p)).and(p.locator('[data-held$="/live-arrival.png"]'))
   await imageCard.waitFor()
-  await imageCard.locator('.ws-sent-new').waitFor()
   await imageCard.click()
-  await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
-  const image = selected(p).locator('.kbn-fileview-image')
+  const image = selected(p).locator('.fp-head .fp-doc .kbn-fileview-image')
   await image.waitFor()
   const geometry = await image.evaluate(async img => {
     await img.decode()
-    const rect = img.getBoundingClientRect(), content = img.closest('.ws-content').getBoundingClientRect()
+    const rect = img.getBoundingClientRect(), content = img.closest('.fp-doc').getBoundingClientRect()
     return { natural: [img.naturalWidth, img.naturalHeight], drawn: [rect.width, rect.height], content: [content.width, content.height] }
   })
   assert.deepEqual(geometry.natural, [3000, 600], 'the reader decodes the source image rather than the strip-sized representation')
@@ -2377,7 +2361,8 @@ test('Custom theme is scoped with private keyframes, hoisted fonts and condition
 test('Plain removes custom and bundled styling, persists, and can restore custom CSS', async p => {
   await p.locator('[data-view="board"]').click()
   await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').click()
-  await choose(p, 'Constitution')
+  // Plain lives in a file's ⋯ menu; a drawn page has none.
+  await choose(p, 'calibration-report')
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
   const plain = await openPlainThemeMenu(p)
   await plain.click()
@@ -2638,7 +2623,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the bar and label bar (${device})`, async p => {
   await open(p); await reportReady(p)
-  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="board"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-selected .ws-expand-button']) {
+  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="board"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-stage-band [data-part="band-back"]']) {
     await still(p, `hovering ${control}`, () => p.locator(control).hover(), { allow: [control] })
   }
   await p.mouse.move(viewport.width / 2, viewport.height - 4)

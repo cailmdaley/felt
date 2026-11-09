@@ -371,8 +371,8 @@ interface AgentRecord {
 export interface BandNav {
   ancestry?: readonly Ancestor[]
   desk?: () => void
-  /** Back where the reader was opened from, named. */
-  back?: { label: string; go: () => void }
+  /** Back where the reader was opened from; `nameBack` names it. */
+  back?: () => void
   /** Opens the constitution's own page. */
   constitution?: () => void
 }
@@ -405,6 +405,7 @@ export class Dock {
   /** The band's × returns directly to the Desk, never a lifecycle write. */
   private leave: HTMLButtonElement | null = null
   private back: HTMLButtonElement | null = null
+  private backLabel = ''
   private ancestry: HTMLElement | null = null
   private drawerClose: (() => boolean) | null = null
   private card: KanbanCard | null = null
@@ -490,6 +491,13 @@ export class Dock {
   openSettings?: (content: HTMLElement, opener: HTMLElement) => void
   closeSettings?: (after: () => void) => void
 
+  /** Names where the band's back goes, as the visited path changes under it. */
+  nameBack(label: string): void {
+    this.backLabel = label
+    if (!this.back) return
+    this.back.title = `Back to ${label}`
+    this.back.setAttribute('aria-label', this.back.title)
+  }
   setNav(nav: BandNav): void {
     if (!this.ancestry) return
     paintAncestry(this.ancestry, nav.ancestry ?? [])
@@ -497,9 +505,8 @@ export class Dock {
     if (this.constitutionButton) this.constitutionButton.hidden = !this.openConstitution
     if (this.back) {
       this.back.hidden = !nav.back
-      this.back.onclick = nav.back?.go ?? null
-      const label = nav.back ? `Back to ${nav.back.label}` : ''
-      this.back.title = label; this.back.setAttribute('aria-label', label)
+      this.back.onclick = nav.back ?? null
+      this.nameBack(this.backLabel)
     }
     if (this.leave) {
       this.leave.hidden = !nav.desk

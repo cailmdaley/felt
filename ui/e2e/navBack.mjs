@@ -1,4 +1,4 @@
-import { familyTree, openThread, threadRow } from './familyNav.mjs'
+import { familyTree, openThread, pageBack, threadRow } from './familyNav.mjs'
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url'
 
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=nav-back`
 const selected = page => page.locator('.ws-page.ws-selected')
-const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
+/** The band names a thread after its family's root, whose page it opens on. */
+const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent.endsWith(name), name)
 
 export function registerNavigationJourneys(test) {
   for (const [device, viewport, phone] of [
@@ -19,14 +20,15 @@ export function registerNavigationJourneys(test) {
       await page.screenshot({ path: resolve(process.env.NAV_BACK_SHOTS, `${device}-${name}.png`) })
     }
     const checkBack = async label => {
-      const control = phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')
+      // The phone's top bar spells the destination out; the band's back names it to the pointer and to assistive tech.
+      const control = phone ? page.locator('.ws-return') : page.locator('.ws-stage-band [data-part="band-back"]')
       assert.equal(await control.getAttribute('aria-label'), `Back to ${label}`)
       assert.equal(await control.getAttribute('title'), `Back to ${label}`)
       assert.ok(await control.isVisible())
-      assert.equal(await control.locator('.ws-back-label').textContent(), label)
-      assert.ok(await control.locator('.ws-back-label').isVisible())
-      if (!phone) assert.equal(await control.evaluate(el => getComputedStyle(el).textIndent), '0px')
+      if (!phone) assert.equal(await selected(page).locator('.ws-document-back').isVisible(), false, 'the band holds the only way back')
       if (phone) {
+        assert.equal(await control.locator('.ws-back-label').textContent(), label)
+        assert.ok(await control.locator('.ws-back-label').isVisible())
         const scroll = selected(page).locator('.ws-family-scroll')
         if (await scroll.count()) await scroll.evaluate(el => el.scrollTo(0, 0))
         await control.hover()
@@ -74,8 +76,7 @@ export function registerNavigationJourneys(test) {
     await checkBack('Family')
     await shot('03-linked-file')
     const fileHash = new URL(page.url()).hash
-    const fileBack = phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')
-    await fileBack.click()
+    await pageBack(page)
     await selected(page).locator('.fp-doc').getByRole('link', { name: 'Open validation', exact: true }).waitFor()
     assert.equal(new URL(page.url()).hash, familyHash)
     await shot('05-chevron-to-sibling')

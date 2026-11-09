@@ -1,4 +1,4 @@
-import { sentFiles } from './familyNav.mjs'
+import { showFile } from './familyNav.mjs'
 // The document cache's request budget, measured on the harness's Music channel:
 // a report and nineteen recordings. Opening it fetches each document's bytes at
 // most once, and an idle minute on it costs only validator checks.
@@ -72,11 +72,7 @@ try {
   print('idle minute', idle)
   // Select three sent recordings: each selected one decodes its waveform once.
   for (let step = 0; step < 3; step++) {
-    const rows = await sentFiles(p)
-    const filename = `take-${String(step + 1).padStart(2, '0')}.${step % 2 ? 'wav' : 'mp3'}`
-    const recording = rows.and(p.locator(`[data-key$="/${filename}"]`))
-    if (!await recording.count()) await p.locator('.ws-page-sheet[open] [data-part="sent-files-more"]').click()
-    await recording.click()
+    await showFile(p, `/take-${String(step + 1).padStart(2, '0')}.${step % 2 ? 'wav' : 'mp3'}`)
     await selected().locator('.ws-audio-page[data-waveform="decoded"]').waitFor()
     await p.clock.runFor(3_000)
     await p.waitForTimeout(300)

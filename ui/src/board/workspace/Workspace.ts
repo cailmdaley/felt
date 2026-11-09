@@ -613,6 +613,12 @@ export class Workspace {
     this.dock.setActionCard(this.actionCard(state.card))
     return this.dock
   }
+  /** The reader's and the band's way back name where the visited path leads. */
+  private nameBack(): void {
+    const label = this.history.backLabel
+    this.reader.setBackDestination(label)
+    this.dock.nameBack(label)
+  }
   /** Seat the band over the channel's pages, with its links. */
   private seatBand(state: ChannelState): void {
     const dock = this.controls(state)
@@ -626,7 +632,7 @@ export class Workspace {
     dock.setNav({
       ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) }) })),
       desk: () => this.escapeHome(),
-      back: { label: this.history.backLabel, go: () => this.reader.back() },
+      back: () => this.reader.back(),
       constitution: () => { const page = proseDocument(state.channel); if (page) this.visit(page.key) },
     })
   }
@@ -779,7 +785,7 @@ export class Workspace {
     const sameChannel = this.current === state && this.isActive
     if (sameChannel && state.loaded && state.runFinal && route.doc && state.channel.documents.some(doc => doc.key === route.doc)) {
       this.select(route.doc)
-      this.reader.setBackDestination(this.history.backLabel)
+      this.nameBack()
       this.startTimer()
       return
     }
@@ -854,7 +860,7 @@ export class Workspace {
     this.refreshProse(state)
     this.namePage(state, selected)
     this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
-    this.reader.setBackDestination(this.history.backLabel)
+    this.nameBack()
     if (selected === this.familyDocument(state.card)) this.focusMap(state)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.seatBand(state)

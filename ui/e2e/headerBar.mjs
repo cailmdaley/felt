@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
+import { familySends, familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
 const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
+/** A thread's band names it after its family's root, whose page it opens on; a draft opens on its own. */
+const threadNamed = (page, name) => page.waitForFunction(names => names.includes(document.querySelector('.ws-stage-band .ws-band-title')?.textContent), [name, `${title} / ${name}`])
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
   const name = page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${title}"])`).first().locator('.kbn-card-name')
@@ -21,14 +23,14 @@ async function openRoot(page) {
   }
   await named(page, title)
 }
-// Find changes the channel whose lifecycle the band acts on; row entry does not.
+// Find highlights the thread whose lifecycle the band acts on.
 async function visitChannel(page, name) {
   await page.evaluate(() => document.activeElement?.blur())
   await page.keyboard.press('/')
   const find = page.locator('.kbn-viewtabs-find input')
   await find.fill(name)
   await page.locator('.ws-switcher .ws-channel-row').filter({ has: page.getByText(name, { exact: true }) }).click()
-  await named(page, name)
+  await threadNamed(page, name)
 }
 const visibleHeaderVerbs = header => header.locator('.kbn-ctl-verdict button').evaluateAll(buttons =>
   buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
@@ -186,8 +188,8 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(row.x >= 0 && row.x + row.width <= width && row.height <= 64, `the band is one row inside the phone: ${JSON.stringify(row)}`)
       const centers = await header.locator('.ws-band-acts button:visible').evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
       assert.ok(centers.length >= 2 && Math.max(...centers) - Math.min(...centers) < 2, `the verbs share one row: ${centers}`)
-      for (const name of [...expected, 'Settings']) {
-        const control = bandControl(header, name)
+      // Settings names the highlighted thread it acts on, so it is found by its part.
+      for (const [name, control] of [...expected.map(name => [name, bandControl(header, name)]), ['Settings', header.locator('.ws-band-settings')]]) {
         await control.scrollIntoViewIfNeeded()
         const box = await control.boundingBox()
         assert.ok(box.x >= 0 && box.x + box.width <= width + 1 && box.height >= 44, `${name} scrolls into reach: ${JSON.stringify(box)}`)
@@ -201,7 +203,7 @@ export function registerHeaderBarJourneys(test) {
     const fold = family.locator('.kbn-thread-count')
     if (await fold.getAttribute('aria-expanded') === 'false') await fold.click()
     await family.locator('.kbn-thread-row[title="Response analysis"] .kbn-thread-name').click()
-    await named(page, 'Response analysis')
+    await threadNamed(page, 'Response analysis')
     await assertBand(['Close for review', 'Rest'])
     const reviewInk = await bandControl(header, 'Close for review').evaluate(el => {
       const neutral = document.createElement('span')
@@ -303,10 +305,14 @@ export function registerHeaderBarJourneys(test) {
       await openThread(page, await row(title), title, press)
     }
     await page.evaluate(() => { document.activeElement?.blur(); document.body.focus() })
-    await page.keyboard.press('Enter')
-    await page.waitForFunction(() => document.querySelector('.ws-reader').classList.contains('ws-expand-mode'))
-    await page.keyboard.press('Enter')
-    await page.waitForFunction(() => !document.querySelector('.ws-reader').classList.contains('ws-expand-mode'))
+    // Expand is a key, Enter or o, with no button of its own.
+    assert.equal(await page.locator('.ws-expand-button').count(), 0)
+    for (const key of ['Enter', 'o']) {
+      await page.keyboard.press(key)
+      await page.waitForFunction(() => document.querySelector('.ws-reader').classList.contains('ws-expand-mode'))
+      await page.keyboard.press(key)
+      await page.waitForFunction(() => !document.querySelector('.ws-reader').classList.contains('ws-expand-mode'))
+    }
     await page.setViewportSize({ width: 1440, height: 400 })
     await header.getByRole('button', { name: 'Constitution', exact: true }).click()
     await page.evaluate(() => { document.activeElement?.blur(); document.body.focus() })
@@ -334,7 +340,6 @@ export function registerHeaderBarJourneys(test) {
         assert.equal(await head().count(), 1)
         assert.equal(await head().locator('.fp-name').innerText(), title)
         assert.ok(await head().locator('.fp-mark').isVisible())
-        assert.equal(await head().getAttribute('data-current'), '')
         assert.equal(await threadRow(page, page.locator('.ws-page.ws-selected .fp-tree'), name).getAttribute('aria-selected'), 'true')
         if (process.env.WORKSPACE_SHOTS && name === 'Choose the response cut') {
           await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
@@ -387,10 +392,15 @@ export function registerHeaderBarJourneys(test) {
       await page.keyboard.press('Escape')
       await sheet.waitFor({ state: 'hidden' })
       assert.equal(await header.getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
-      const files = await sentFiles(page)
-      assert.ok(await files.locator('time').count(), 'sent files carry timestamps')
-      await page.keyboard.press('Escape')
-      await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
+      if (device === 'desktop') {
+        await familySends(page)
+        assert.ok(await page.locator('.ws-page.ws-selected .fp-head .fp-send-age').count(), 'sends carry their age')
+      } else {
+        const files = await sentFiles(page)
+        assert.ok(await files.locator('time').count(), 'sent files carry timestamps')
+        await page.keyboard.press('Escape')
+        await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
+      }
       // A verdict leaves settings before opening its undo window.
       await header.getByRole('button', { name: 'Settings', exact: true }).click()
       await bandControl(header, 'Temper').click()

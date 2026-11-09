@@ -157,26 +157,42 @@ export function swipeSettleTime(remaining: number, velocity: number, crossing: n
   return Math.round(Math.max(160, Math.min(crossing, remaining / speed * 1.6)))
 }
 
-/** Small scroll reversals accumulate; document tops always reveal the return control. */
+/**
+ * Small scroll reversals accumulate; document tops always reveal the return
+ * control. The bar's own coming and going resizes the page, and the scroll
+ * that follows (a clamp at the bottom, or the browser's scroll anchoring) is
+ * not the reader's, so it neither shows nor hides the bar.
+ */
 export class PhoneTopbar {
   private key = ''
   private anchor = 0
   private previous = 0
   private direction = 0
+  private hidden = false
+  private settling = 0
   private readonly show: (hidden: boolean) => void
   constructor(show: (hidden: boolean) => void) { this.show = show }
   select(key: string, y = 0): void {
     if (key === this.key) return
     this.key = key; this.anchor = this.previous = y; this.direction = 0
-    this.show(false)
+    this.set(false)
   }
   scroll(key: string, y: number): void {
     if (key !== this.key || !Number.isFinite(y)) return
     y = Math.max(0, y)
+    if (this.settling) { this.anchor = this.previous = y; return }
     const direction = Math.sign(y - this.previous)
     if (direction && direction !== this.direction) { this.anchor = this.previous; this.direction = direction }
     this.previous = y
-    if (y <= 2) { this.show(false); this.anchor = y }
-    else if (Math.abs(y - this.anchor) >= 8) { this.show(direction > 0); this.anchor = y }
+    if (y <= 2) { this.set(false); this.anchor = y }
+    else if (Math.abs(y - this.anchor) >= 8) { this.set(direction > 0); this.anchor = y }
+  }
+  private set(hidden: boolean): void {
+    const moved = hidden !== this.hidden
+    this.hidden = hidden
+    this.show(hidden)
+    if (!moved || typeof requestAnimationFrame !== 'function') return
+    const settle = ++this.settling
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (this.settling === settle) this.settling = 0 }))
   }
 }

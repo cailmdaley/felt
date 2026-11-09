@@ -1,17 +1,14 @@
 import assert from 'node:assert/strict'
-import { sentFiles } from './familyNav.mjs'
+import { pageBack, showFile } from './familyNav.mjs'
 
 /** Runs with the workspace journeys, against the same owner-routed file harness. */
 export function registerChangeJourneys(test) {
-  const sent = async (page, suffix) => {
-    await (await sentFiles(page)).and(page.locator(`[data-key$="${suffix}"]`)).click()
-  }
   const open = async page => {
     page.setDefaultTimeout(30_000)
     await page.goto(page.url().replace('example=workspace', 'example=change'))
     await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
     await page.locator('.ws-stage-band .ws-band-head').waitFor()
-    await sent(page, '/family.change.json')
+    await showFile(page, '/family.change.json')
     await page.locator('.ws-selected .change-reader').waitFor()
     await page.locator('.ws-selected .change-map').waitFor()
     await page.locator('.ws-selected .change-chapter-link').first().click()
@@ -109,7 +106,7 @@ export function registerChangeJourneys(test) {
     await link.press('Enter')
     await page.locator('.ws-selected .change-reader').waitFor()
     assert.equal(popups.length, 0, 'relative change links stay in the workspace after the report bridge is ready')
-    await page.locator('.ws-selected .ws-document-back').click()
+    await pageBack(page)
     await page.frameLocator('.ws-selected .fp-doc iframe').getByRole('link', { name: 'Read the change →' }).waitFor()
     assert.equal(new URL(page.url()).hash, route)
   })

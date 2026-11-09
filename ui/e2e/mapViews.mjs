@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { pageBack } from './familyNav.mjs'
 
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const root = 'Calibrate the shear response'
@@ -88,7 +89,7 @@ export function registerMapViewJourneys(test) {
     const stood = await standing()
     await link.click()
     await page.locator('.ws-page.ws-selected iframe').waitFor()
-    await page.locator('.ws-page.ws-selected .ws-document-back').click()
+    await pageBack(page)
     await head.frameLocator('.fp-doc iframe').getByRole('link', { name: 'Read the independent validation →' }).waitFor()
     assert.equal(new URL(page.url()).hash, route)
     assert.equal(await analysis.getAttribute('aria-expanded'), 'false')
@@ -277,9 +278,9 @@ export function registerMapViewJourneys(test) {
     await page.waitForTimeout(300)
     const place = await box(report)
     await clickOn(page, report)
-    await page.locator('.ws-page.ws-selected .ws-document-back').waitFor()
+    await page.locator('.ws-stage-band [data-part="band-back"]').waitFor()
     assert.equal(await page.locator('.kbn-viewtabs .kbn-viewtab-active').getAttribute('data-view'), 'globe', 'the file stands over the Globe')
-    await page.locator('.ws-page.ws-selected .ws-document-back').click()
+    await pageBack(page)
     await until(page, () => !document.querySelector('.kbn-reader-open'))
     assert.equal(new URL(page.url()).hash, '#/globe')
     await report.waitFor()

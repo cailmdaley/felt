@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
+import { familySends, familyTree, openThread, pageBack, sentFiles, showFile, threadRow } from './familyNav.mjs'
 
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
@@ -22,15 +22,12 @@ async function shot(page, name) {
 }
 async function back(page, phone) {
   if (phone) await frame(page).locator('body').evaluate(() => window.scrollBy(0, -100)).catch(() => {})
-  const button = phone ? page.locator('.ws-navbar .ws-return') : selected(page).locator('.ws-document-back')
-  if (phone) await button.focus()
-  await button.click()
+  if (phone) await page.locator('.ws-navbar .ws-return').focus()
+  await pageBack(page)
   await page.waitForTimeout(100)
 }
-async function report(page, phone) {
-  if (!await page.locator('.ws-selected[data-key$="/report.html"]').count()) {
-    await (await sentFiles(page)).and(page.locator('[data-key$="/report.html"]')).click()
-  }
+async function report(page) {
+  if (!await page.locator('.ws-selected[data-key$="/report.html"]').count()) await showFile(page, '/report.html')
   await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
   await page.waitForTimeout(100)
 }
@@ -60,7 +57,7 @@ export function registerLivingReportJourneys(test) {
       await shot(page, `${device}-top`)
 
       // The report opens in the existing nested reader.
-      await report(page, phone)
+      await report(page)
       await shot(page, `${device}-report`)
       // Local fragments stay in srcdoc, retain identity and keep the key bridge alive.
       const identity = await frame(page).locator('#report-identity').textContent()
@@ -71,7 +68,7 @@ export function registerLivingReportJourneys(test) {
       assert.ok(await frame(page).locator('#conclusions').evaluate(el => Math.abs(el.getBoundingClientRect().top) < 10))
       await page.keyboard.press('Escape')
       await selected(page).locator('.ws-fiber-prose').waitFor()
-      await report(page, phone)
+      await report(page)
       await link(page, 'Validation conclusions')
       await frame(page).locator('#validation-conclusions').waitFor()
       assert.ok(await frame(page).locator('#validation-conclusions').evaluate(el => Math.abs(el.getBoundingClientRect().top) < 10))
@@ -107,11 +104,12 @@ export function registerLivingReportJourneys(test) {
       await back(page, phone)
       await selected(page).locator('.ws-fiber-prose').waitFor()
 
-      assert.ok(await (await sentFiles(page)).count() > 0)
-      await shot(page, `${device}-sheet`)
-      await page.keyboard.press('Escape')
-      await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
-      if (!phone) {
+      if (phone) {
+        assert.ok(await (await sentFiles(page)).count() > 0)
+        await shot(page, `${device}-sheet`)
+        await page.keyboard.press('Escape')
+        await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
+      } else {
         await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
         const menu = page.locator('.ws-settings-menu:not([hidden])')
         await menu.waitFor()
@@ -126,6 +124,7 @@ export function registerLivingReportJourneys(test) {
       }
       // Entering a thread and unfolding its constitution keep the family's page.
       const tree = await familyTree(page), route = new URL(page.url()).hash
+      if (!phone) assert.ok(await (await familySends(page)).count() > 0, 'the family page lists the sends')
       const analysis = threadRow(page, tree, 'Response analysis')
       await openThread(page, analysis, 'Response analysis')
       await analysis.locator('.fp-constitution').press('Enter')
