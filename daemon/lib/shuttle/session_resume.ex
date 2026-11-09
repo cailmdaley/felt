@@ -160,8 +160,11 @@ defmodule Shuttle.SessionResume do
     Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), 5_000)
     |> Map.get(:eligible, [])
     |> Enum.flat_map(fn row ->
+      # A worker whose launch receipt shows its run script exited no longer
+      # holds its conversation, though the Poller has yet to reap it.
       tmux =
-        if is_binary(row[:tmux_session]) do
+        if is_binary(row[:tmux_session]) and
+             Terminal.Receipts.status(runner(), row[:tmux_session]) != :exited do
           case SessionLedger.latest_for_uid(row[:uid]) do
             %{"session" => id} -> [id]
             _ -> []

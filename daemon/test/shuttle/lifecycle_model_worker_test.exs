@@ -99,6 +99,19 @@ defmodule Shuttle.LifecycleModelWorkerTest do
 
     session = running(poller, fiber_id)
 
+    # The daemon's published view names the worker's conversation, as it does
+    # to `c` on a real host once the Poller has published.
+    if session do
+      uid = MockRunner.fiber(fiber_id)["uid"]
+
+      assert wait_until(fn ->
+               case Shuttle.SessionLedger.latest_for_uid(uid) do
+                 %{"session" => id} -> id in SessionResume.live_sessions()
+                 _ -> false
+               end
+             end)
+    end
+
     receipt = session && String.trim_trailing(Receipts.pid_path(session), ".pid")
 
     case worker do
@@ -227,7 +240,7 @@ defmodule Shuttle.LifecycleModelWorkerTest do
         {outcome(reply),
          if(req == "attach:past", do: held(worker), else: worker_after(poller, fiber_id))}
 
-      assert got == want
+      assert got == want, inspect(reply)
     end
   end
 end
