@@ -1,7 +1,7 @@
 import './app.css'
 import { KanbanModal } from './board/KanbanModal.js'
 import { showToast } from './board/utils.js'
-import { daemonFetch, isDaemonBooting } from './board/daemonApi.js'
+import { workerOpener } from './board/sessionHistory.js'
 
 /**
  * Entry point — mounts the kanban board against the Shuttle daemon.
@@ -62,29 +62,7 @@ const board = new KanbanModal({
   onSettingsClick: () => {
     withForms(({ openSettings }) => openSettings({ shuttleBase, onResult: (msg, ok) => showToast(msg, ok ? 'success' : 'error') }))
   },
-  // The worker pill → open the worker's tmux session in kitty. The
-  // web app can't open a terminal itself (Portolan does it natively); the
-  // daemon does, via POST /api/v1/attach (not owner-routed — the tab opens on
-  // the host serving this UI, ssh-ing out for a remote worker). Success raises
-  // the terminal; only failures surface a toast.
-  onOpenWorker: (tmuxSession, shuttleHost, past) => {
-    void daemonFetch(`${shuttleBase}/api/v1/attach`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null, ...(past ? { session: past } : {}) }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const detail = await res.json()
-            .then((body: { error?: unknown }) => typeof body?.error === 'string' ? body.error : '')
-            .catch(() => '')
-          showToast(detail ? `Couldn’t open terminal: ${detail}` : 'Couldn’t open terminal', 'error')
-        }
-      })
-      .catch((error: unknown) => {
-        if (!isDaemonBooting(error)) showToast('Couldn’t reach the daemon to open the terminal', 'error')
-      })
-  },
+  onOpenWorker: workerOpener(shuttleBase, message => showToast(message, 'error')),
 })
 
 board.mount(host)

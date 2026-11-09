@@ -253,10 +253,12 @@ link is tested on its own against one written model, so that the links cannot
 drift apart.
 
 - **The model:** `ui/harness/lifecycleModel.ts`. A state is kind ×
-  status/verdict × rest × seat × ask × worker, where a worker is `none`, `live`
-  or `gone` (`gone` means the owner holds a worker whose terminal no longer
-  exists). `apply` gives the owner's answer to each request: outcome, CLI
-  write, next state. `VERBS` gives the board's side: when each verb is
+  status/verdict × rest × seat × ask × worker, where a worker is `none`,
+  `live`, `gone` (the owner holds a worker whose terminal it can see is gone)
+  or `unseen` (the owner cannot observe it at all). The board is served
+  `gone` and `unseen` alike and learns which from the owner's answer. `apply`
+  gives the owner's answer to each request: outcome, CLI write, next state,
+  and whether a message was delivered. `VERBS` gives the board's side: when each verb is
   offered, its word, and the state it promises.
 - **The table:** `daemon/test/fixtures/lifecycle/model.json`, written by
   `cd ui && npm run lifecycle:model`. `ui/test/lifecycleModel.test.ts` fails
@@ -270,7 +272,11 @@ drift apart.
   real Desk against a fetch stub that answers from `apply`, then runs random
   sequences of offered verbs. After each verb it checks that every request
   was accepted, that the promised state was reached, that the card visibly
-  changed, and that the card is drawn in the owner's column. It runs 25
+  changed, and that the card is drawn in the owner's column. Two gestures act
+  on the worker: `send` types into the constitution page's worker line, and
+  the band must say "Sent" exactly when the owner delivered the message;
+  `open` presses `c` through the board's real terminal opener
+  (`workerOpener`), and the owner must accept the one request it makes. It runs 25
   sequences by default. Set `LIFECYCLE_FUZZ_RUNS=1000` for a deep run and
   `LIFECYCLE_FUZZ_SEED` to replay a reported seed.
 

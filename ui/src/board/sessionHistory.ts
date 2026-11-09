@@ -17,9 +17,9 @@
  * is not asked.
  */
 import { clockTime, formatInstant, instantStamp, hostZone, isoDayLocal, type Zone } from './civilDay.js'
-import { conversationDestinations, resolveDestination, CONVERSATION_OPENING_CHANGED, type ConversationOpening } from './conversationOpening.js'
+import { conversationDestinations, resolveDestination, CONVERSATION_OPENING_CHANGED, type ConversationOpening, type WorkerOpener } from './conversationOpening.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
-import { daemonErrorMessage, getDaemonJson, postDaemonJson, readComposite } from './daemonApi.js'
+import { daemonErrorMessage, daemonFetch, getDaemonJson, isDaemonBooting, postDaemonJson, readComposite } from './daemonApi.js'
 
 /** Rows shown before "all N" unfolds the rest. */
 const SESSIONS_SHOWN = 6
@@ -188,6 +188,33 @@ export async function attachConversation(shuttleBase: string, attach: AttachBody
     await postDaemonJson(shuttleBase, '/api/v1/attach', attach, 'the daemon refused')
   } catch (err) {
     onError(err instanceof TypeError ? 'Couldn’t reach the daemon to open the terminal' : `Couldn’t open terminal: ${daemonErrorMessage(err)}`)
+  }
+}
+
+/**
+ * The board's worker opener (`c`, the band's console, a worker pill): `POST
+ * /api/v1/attach` with the live terminal and `past`, the session the daemon
+ * reopens when that terminal has gone. The request is not owner-routed: the
+ * tab opens on the host serving this board, which reaches out to a remote
+ * worker. Success raises the terminal; only a failure is said, through `say`.
+ */
+export function workerOpener(shuttleBase: string, say: (message: string) => void): WorkerOpener {
+  return (tmuxSession, shuttleHost, past) => {
+    void daemonFetch(`${shuttleBase}/api/v1/attach`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null, ...(past ? { session: past } : {}) }),
+    })
+      .then(async res => {
+        if (res.ok) return
+        const detail = await res.json()
+          .then((body: { error?: unknown }) => typeof body?.error === 'string' ? body.error : '')
+          .catch(() => '')
+        say(detail ? `Couldn’t open terminal: ${detail}` : 'Couldn’t open terminal')
+      })
+      .catch((error: unknown) => {
+        if (!isDaemonBooting(error)) say('Couldn’t reach the daemon to open the terminal')
+      })
   }
 }
 
