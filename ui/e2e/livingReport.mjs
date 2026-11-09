@@ -35,6 +35,8 @@ async function back(page, phone) {
   if (phone) await frame(page).locator('body').evaluate(() => window.scrollBy(0, -100)).catch(() => {})
   if (phone) await page.locator('.ws-navbar .ws-return').focus()
   await pageBack(page)
+  // Let go of the top bar, so a reading scrolled past its fold collapses it now rather than under the next tap.
+  if (phone) await page.evaluate(() => { if (document.activeElement?.closest('.ws-navbar')) document.activeElement.blur() })
   await page.waitForTimeout(100)
 }
 async function report(page) {
@@ -101,14 +103,16 @@ export function registerLivingReportJourneys(test) {
       await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]:not(.kbn-card-header) .kbn-card-name').click()
       // The Desk opens the family's frontier; ancestry reaches the report's owner.
       if (await band(page).locator('.ws-band-title').textContent() !== 'Calibrate the shear response') {
-        await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
+        await selected(page).locator('.fp-row[data-selected] .ws-acts-settings').click()
         await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
       }
       await named(page, 'Calibrate the shear response')
-      await band(page).locator('.ws-band-head').waitFor()
+      await band(page).locator('.ws-dock').waitFor()
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
       await shot(page, `${device}-landing`)
-      await band(page).getByRole('button', { name: 'Constitution', exact: true }).click()
+      // The family's page draws the root's row, so the band leaves its acts (and its ☰) to it; the receded constitution's page is a click away.
+      assert.equal(await band(page).locator('.ws-band-constitution').isVisible(), false)
+      await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
       await selected(page).locator('.ws-fiber-prose').waitFor()
       await shot(page, `${device}-top`)
 
@@ -166,7 +170,8 @@ export function registerLivingReportJourneys(test) {
         await page.keyboard.press('Escape')
         await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
       } else {
-        await band(page).getByRole('button', { name: 'Settings', exact: true }).click()
+        const settings = band(page).locator('.ws-band-head[data-acts] .ws-acts-settings')
+        await settings.click()
         const menu = page.locator('.ws-settings-menu:not([hidden])')
         await menu.waitFor()
         assert.ok(await menu.locator('.kbn-ctl-history').count() > 0, 'sessions live in settings')
@@ -176,7 +181,7 @@ export function registerLivingReportJourneys(test) {
         await shot(page, 'desktop-settings')
         await page.keyboard.press('Escape')
         await menu.waitFor({ state: 'hidden' })
-        assert.equal(await band(page).getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
+        assert.equal(await settings.evaluate(el => el === document.activeElement), true)
       }
       // Entering a thread and unfolding its constitution keep the family's page.
       const tree = await familyTree(page), route = new URL(page.url()).hash

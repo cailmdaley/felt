@@ -365,6 +365,8 @@ export class FamilyPage {
       acts = this.actsFor(() => this.model!.threads.get(key)!.card)
       this.acts.set(key, acts)
     }
+    // An act zone, as the band is: a channel theme's rules stop at the row's controls.
+    slot.dataset.part = 'act'
     if (acts.el.parentElement !== slot) slot.replaceChildren(acts.el)
     acts.paint()
   }

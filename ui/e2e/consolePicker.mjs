@@ -10,7 +10,9 @@ const shots = process.env.CONSOLE_PICKER_SHOTS
 if (shots) await mkdir(shots, { recursive: true })
 const selected = p => p.locator('.ws-page.ws-selected')
 const band = p => p.locator('.ws-stage-band')
-const opener = p => band(p).locator('.ws-band-console')
+/** The console on the highlighted row: a fiber's acts live on its row of the family page. */
+const lit = p => selected(p).locator('.fp-row[data-selected] > .fp-line .fp-verbs')
+const opener = p => lit(p).locator('.ws-acts-console')
 const items = p => p.getByRole('menuitemradio')
 async function shot(p, name) {
   if (await items(p).count()) await pickerReadable(p, false)
@@ -27,16 +29,18 @@ async function pickerReadable(p, requireFocus = true) {
 async function open(p, backend) {
   await p.goto(`${base}&console=${backend}`)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
-  await band(p).locator('.ws-band-head').waitFor({ state: 'visible' })
+  await lit(p).locator('.ws-fiber-acts').waitFor({ state: 'visible' })
 }
 async function headerFits(p) {
-  const geometry = await band(p).locator('.ws-band-head').evaluate(header => {
-    const bounds = header.getBoundingClientRect()
-    const controls = [...header.querySelectorAll('.listen-control,.kbn-ctl-verdict,.ws-band-console,.ws-band-settings,.ws-band-leave,.ws-band-identity')]
+  // The band leaves the acts to the rows: none on its first line, one console on the highlighted row.
+  assert.equal(await band(p).locator('.ws-band-head .ws-acts-console:visible').count(), 0, 'the band carries no console while the rows do')
+  assert.equal(await lit(p).locator('.ws-acts-console:visible').count(), 1, 'the highlighted row carries one console opener')
+  const geometry = await lit(p).evaluate(slot => {
+    const row = slot.closest('.fp-title')
+    const controls = [...row.querySelectorAll('.fp-name,.fp-docs,.fp-meta,.ws-fiber-acts > *')]
       .filter(el => el.checkVisibility()).map(el => ({ name: el.className, rect: el.getBoundingClientRect().toJSON() }))
-    return { bounds: bounds.toJSON(), controls, opening: header.querySelectorAll('.ws-band-console').length }
+    return { controls }
   })
-  assert.equal(geometry.opening, 1, 'the band carries one console opener')
   const controls = geometry.controls
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
     const a = controls[i].rect, b = controls[j].rect
@@ -88,9 +92,18 @@ try {
     // c opens the conversation where the remembered opening says.
     await p.keyboard.press('c')
     assert.equal(await p.evaluate(() => window.__conversationLinks.at(-1)), 'https://claude.ai/code/session_fixture')
-    // The band's console opens the same place, on both surfaces.
+    // The row's console opens the same place, on both surfaces.
     assert.match(await opener(p).getAttribute('aria-label'), /^Open [\w-]+'s conversation in Claude browser \(c\)$/, 'the console names its destination and key')
     assert.equal(await opener(p).getAttribute('href'), 'https://claude.ai/code/session_fixture', 'a web destination is a native link')
+    // On a page with no row for the fiber, the band carries the same console.
+    const rowLabel = await opener(p).getAttribute('aria-label')
+    await p.locator('.ws-page[data-key$="/report.html"]').first().dispatchEvent('click')
+    const bandConsole = band(p).locator('.ws-band-head[data-acts] .ws-acts-console')
+    await bandConsole.waitFor()
+    assert.equal(await bandConsole.getAttribute('aria-label'), rowLabel)
+    assert.equal(await bandConsole.getAttribute('href'), 'https://claude.ai/code/session_fixture')
+    await p.evaluate(() => document.activeElement?.blur()); await p.keyboard.press('l')
+    await lit(p).locator('.ws-fiber-acts').waitFor({ state: 'visible' })
     if (phone) {
       assert.equal(await opener(p).getAttribute('target'), null, 'a phone opens Claude in place so iOS can hand it to the app')
       assert.equal(await opener(p).evaluate(el => getComputedStyle(el).userSelect), 'none', 'the held console is a picker anchor, not text')

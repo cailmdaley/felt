@@ -61,7 +61,8 @@
   white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--ws-ink); font: var(--type-label)/var(--leading-prose) var(--font-serif);
 }
-.ws-worker-message:empty::before { content: attr(data-placeholder); color: var(--ws-ink-faint); pointer-events: none; }
+/* The placeholder keeps one line beside the tools, ending in an ellipsis. */
+.ws-worker-message:empty::before { content: attr(data-placeholder); display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ws-ink-faint); pointer-events: none; }
 .ws-worker-message[hidden] { display: none; }
 /* Pasted or dropped images wait under the text as thumbnails until the send. */
 .ws-worker-images { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; }
@@ -123,7 +124,7 @@
   .ws-band-head { gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
   .ws-band-head:not([data-acts]) { display: none; }
   .ws-band-identity { flex: none; }
-  .ws-band-title, .ws-band-back { display: none; }
+  .ws-band-title, .ws-reader .ws-band-back { display: none; }
   .ws-dock .ws-worker-acts { --ws-box-line: var(--ws-phone-target); margin: 6px 8px; }
   .ws-reader .ws-worker-tools .listen-dropdown { width: 32px; }
 }

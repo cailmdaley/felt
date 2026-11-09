@@ -9,19 +9,27 @@ const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?exa
 const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
 /** A thread's band names it after its family's root, whose page it opens on; a draft opens on its own. */
 const threadNamed = (page, name) => page.waitForFunction(names => names.includes(document.querySelector('.ws-stage-band .ws-band-title')?.textContent), [name, `${title} / ${name}`])
+const band = page => page.locator('.ws-stage-band')
+/**
+ * The fiber's acts where they show: the band's, on a page with no row for the
+ * fiber (a draft's own page, a report); otherwise the highlighted row's on its
+ * family's page.
+ */
+const acts = page => band(page).locator('.ws-band-head[data-acts] > .ws-fiber-acts')
+  .or(page.locator('.ws-page.ws-selected .fp-row[data-selected] > .fp-line .fp-verbs > .ws-fiber-acts'))
 async function openRoot(page) {
   // Click the row's own name: its crumb leads to the root.
   const name = page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${title}"])`).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
-  const header = page.locator('.ws-stage-band .ws-band-head')
-  await header.waitFor()
+  await band(page).locator('.ws-dock').waitFor()
   // A family's Desk row opens its frontier; these journeys exercise the root.
-  if (await header.locator('h1').textContent() !== title) {
-    await header.getByRole('button', { name: 'Settings', exact: true }).click()
+  if (await band(page).locator('.ws-band-title').textContent() !== title) {
+    await acts(page).locator('.ws-acts-settings').click()
     await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
   }
   await named(page, title)
+  await acts(page).waitFor()
 }
 // Find highlights the thread whose lifecycle the band acts on.
 async function visitChannel(page, name) {
@@ -32,21 +40,25 @@ async function visitChannel(page, name) {
   await page.locator('.ws-switcher .ws-channel-row').filter({ has: page.getByText(name, { exact: true }) }).click()
   await threadNamed(page, name)
 }
-const visibleHeaderVerbs = header => header.locator('.kbn-ctl-verdict button').evaluateAll(buttons =>
+/** The lifecycle verbs the shown acts draw, by word. */
+const shownVerbs = page => acts(page).locator('.ws-acts-verbs > button').evaluateAll(buttons =>
   buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
-/** A band control by its verb, or by its whole label for navigation. */
-const bandControl = (header, name) => header.locator(`.kbn-ctl-verdict button[data-verb="${name}"], button[aria-label="${name}"]`)
-/** The worker line's verbs under the band's head. */
-const workerVerbs = page => page.locator('.ws-stage-band .ws-worker-acts button').evaluateAll(buttons =>
+/** A lifecycle verb in the shown acts, by its word. */
+const actVerb = (page, word) => acts(page).locator(`.ws-acts-verbs > button[data-verb="${word}"]`)
+/** The message box's verbs under the band's head. */
+const workerVerbs = page => page.locator('.ws-stage-band .ws-worker-acts button[data-verb]').evaluateAll(buttons =>
   buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
-const assertLifecycleInk = async (header, scheme) => {
-  const renderedTheme = await header.evaluate(el => ({
+const assertLifecycleInk = async (page, scheme) => {
+  const strip = acts(page)
+  // A fiber off the Desk has no acts to draw.
+  if (!await strip.count()) return
+  const renderedTheme = await strip.evaluate(el => ({
     appearance: document.documentElement.dataset.wsAppearance,
     pageTheme: el.closest('.ws-reader')?.dataset.wsThemeName,
   }))
   assert.equal(renderedTheme.appearance, scheme, `the document resolves to ${scheme}: ${JSON.stringify(renderedTheme)}`)
   assert.equal(renderedTheme.pageTheme, scheme === 'dark' ? 'night-chart' : 'portolan', `the selected page uses the ${scheme} bundled theme: ${JSON.stringify(renderedTheme)}`)
-  const verbs = await header.locator('.kbn-ctl-verdict button').evaluateAll(buttons => buttons
+  const verbs = await strip.locator('.ws-acts-verbs > button').evaluateAll(buttons => buttons
     .filter(button => button.checkVisibility())
     .map(button => {
       const style = getComputedStyle(button)
@@ -56,7 +68,8 @@ const assertLifecycleInk = async (header, scheme) => {
         color: style.color,
       }
     }))
-  const neutral = await header.evaluate(el => {
+  // Neutral ink as the strip resolves it, in the same zone as its verbs.
+  const neutral = await strip.evaluate(el => {
     const sample = document.createElement('span')
     sample.style.cssText = 'position:fixed;left:-9999px;color:var(--ws-ink-muted)'
     el.append(sample)
@@ -85,7 +98,7 @@ async function captureListenState(page, scene, width, scheme) {
   })
 }
 export function registerHeaderBarJourneys(test) {
-  test('Lifecycle state selects the header verbs; only verdicts carry pigment', async page => {
+  test("Lifecycle state selects a fiber's verbs; only verdicts carry pigment", async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       const scheme = new URLSearchParams(location.search).get('e2e-appearance') || 'light'
@@ -94,40 +107,40 @@ export function registerHeaderBarJourneys(test) {
     for (const scheme of ['light', 'dark']) {
       await page.goto(`${url}&e2e-appearance=${scheme}`)
       await openRoot(page)
-      const header = page.locator('.ws-stage-band .ws-band-head')
-      assert.deepEqual(await visibleHeaderVerbs(header), ['Temper', 'Discard'], 'Awaiting review offers its verdicts')
+      assert.deepEqual(await shownVerbs(page), ['Rest', 'Temper', 'Discard'], 'Awaiting review offers its verdicts')
       assert.deepEqual(await workerVerbs(page), ['Resume', 'New session'])
-      await assertLifecycleInk(header, scheme)
+      await assertLifecycleInk(page, scheme)
       const visits = [
-        ['Response analysis', ['Close for review', 'Rest'], ['Send', 'New session']],
-        ['Draft the validation plan', ['Rest'], ['Start']],
+        ['Response analysis', ['Close for review', 'Rest', 'Temper', 'Discard'], ['Send', 'New session']],
+        // A draft opens on its own page, where no row stands for it: the band carries its acts.
+        ['Draft the validation plan', ['Close for review', 'Rest', 'Temper', 'Discard'], ['Start']],
         ['Next validation', [], ['Start']],
-        ['Accepted pilot', [], ['Start']],
-        ['Discarded pilot', [], ['Start']],
+        ['Accepted pilot', ['Rest'], ['Start']],
+        ['Discarded pilot', ['Rest'], ['Start']],
       ]
       for (const [name, verbs, worker] of visits) {
         await visitChannel(page, name)
-        assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
+        assert.deepEqual(await shownVerbs(page), verbs, `${name} draws the verbs its state offers`)
+        if (name === 'Draft the validation plan') assert.equal(await band(page).locator('.ws-band-head[data-acts] .ws-fiber-acts').isVisible(), true, "the band carries a draft's acts")
         assert.deepEqual(await workerVerbs(page), worker, `${name} offers its worker's verbs`)
-        await assertLifecycleInk(header, scheme)
+        await assertLifecycleInk(page, scheme)
       }
     }
   }, { width: 1000, height: 900 })
-  test('Width changes keep visible focus on the band', async page => {
+  test("Width changes keep visible focus on the highlighted row's acts", async page => {
     await page.goto(url)
     await openRoot(page)
-    const header = page.locator('.ws-stage-band .ws-band-head')
     const focused = locator => locator.evaluate(el => el === document.activeElement)
-    for (const name of ['Settings', 'Temper', 'Constitution']) {
-      const control = bandControl(header, name)
+    for (const [name, control] of [['Settings', acts(page).locator('.ws-acts-settings')], ['Temper', actVerb(page, 'Temper')], ['Constitution', page.locator('.ws-page.ws-selected .fp-row[data-selected] .fp-constitution')]]) {
       await control.focus()
       for (const width of [850, 390, 1440]) {
         await page.setViewportSize({ width, height: 900 })
         assert.ok(await focused(control), `${name} keeps focus at ${width}`)
+        assert.ok(await control.isVisible(), `${name} stays drawn at ${width}`)
       }
     }
   }, { width: 1440, height: 900 })
-  test('The band title holds one line down to a 701px viewport, with the verbs its state selects', async page => {
+  test('The band title holds one line down to a 701px viewport, with the verbs its state selects on the row', async page => {
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
@@ -137,43 +150,39 @@ export function registerHeaderBarJourneys(test) {
       assert.deepEqual([geometry.wrap, geometry.overflow], ['nowrap', 'ellipsis'])
       assert.ok(geometry.height <= geometry.line + 1, JSON.stringify(geometry))
       assert.equal(await header.locator('h1').getAttribute('title'), title)
-      assert.deepEqual(await visibleHeaderVerbs(header), ['Temper', 'Discard'], `Awaiting review draws only its verbs at ${width}`)
+      assert.equal(await header.locator('.ws-fiber-acts').isVisible(), false, `the family's page carries the acts, not the band, at ${width}`)
+      assert.deepEqual(await shownVerbs(page), ['Rest', 'Temper', 'Discard'], `Awaiting review draws its verbs on its row at ${width}`)
     }
   }, { width: 1440, height: 900 })
-  test('The band keeps its title and every verb inside open desktop columns', async page => {
+  test('The band keeps its title and controls on one line, and each row its acts, inside open desktop columns', async page => {
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
     let labelSize
     const check = async () => {
-      const sizes = await header.locator('.ws-band-acts button, .ws-band-head > button').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => el.getBoundingClientRect().height))
+      const sizes = await header.locator('.ws-header-icon').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => el.getBoundingClientRect().height))
       labelSize ??= sizes[0]
-      assert.ok(sizes.every(size => size === labelSize), `every band control keeps one height: ${sizes}`)
-      await page.waitForFunction(() => {
-        const title = document.querySelector('.ws-stage-band .ws-band-title')
-        const header = title?.closest('header'), box = header?.getBoundingClientRect()
-        return title && box && title.clientWidth > 0 &&
-          [...header.querySelectorAll('.kbn-ctl-verdict button')].filter(button => button.checkVisibility()).every(button => {
-            const b = button.getBoundingClientRect()
-            return b.left >= box.left && b.right <= box.right && b.top >= box.top && b.bottom <= box.bottom
-          })
-      })
+      assert.ok(sizes.length >= 1 && sizes.every(size => size === labelSize), `every band control keeps one height: ${sizes}`)
+      const centres = await header.locator('.ws-header-icon, h1').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
+      assert.ok(Math.max(...centres) - Math.min(...centres) < 1.5, `the band's head keeps one centre line: ${centres}`)
       assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= parseFloat(getComputedStyle(el).lineHeight) + 1))
-      for (const name of ['Temper', 'Discard']) {
-        const verb = bandControl(header, name)
-        assert.ok(await verb.isVisible())
-        assert.ok(await verb.evaluate(el => {
-          const b = el.getBoundingClientRect(), h = el.closest('header').getBoundingClientRect()
-          return b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom
-        }), `${name} fits inside the header`)
-      }
+      // The highlighted row draws every act inside the page, on the row's own line.
+      await page.waitForFunction(() => {
+        const strip = document.querySelector('.ws-page.ws-selected .fp-row[data-selected] .ws-fiber-acts')
+        const page = strip?.closest('.ws-page')?.getBoundingClientRect(), row = strip?.closest('.fp-title')?.getBoundingClientRect()
+        return strip && page && row && [...strip.querySelectorAll('button, a')].filter(control => control.checkVisibility()).every(control => {
+          const b = control.getBoundingClientRect()
+          return b.left >= page.left && b.right <= page.right && b.top >= row.top - 4 && b.bottom <= row.bottom + 4
+        })
+      })
+      for (const name of ['Temper', 'Discard']) assert.ok(await actVerb(page, name).isVisible(), `${name} stays drawn`)
     }
     for (const width of [1440, 850, 701, 1440]) {
       await page.setViewportSize({ width, height: 900 }); await check()
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-narrow-desktop-light.png') })
     }
   }, { width: 1440, height: 900 })
-  test('The 390px phone band is one row of verbs that slides sideways, leaving the name to the top bar', async page => {
+  test('The 390px phone band leaves the name to the top bar; the highlighted row carries its acts on a line of their own', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
@@ -181,31 +190,39 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-stage-band .ws-band-head')
-    const assertBand = async (expected, width = 390) => {
-      assert.deepEqual(await visibleHeaderVerbs(header), expected)
-      assert.equal(await header.locator('h1').isVisible(), false, 'the top bar names the page')
-      const row = await header.boundingBox()
-      assert.ok(row.x >= 0 && row.x + row.width <= width && row.height <= 64, `the band is one row inside the phone: ${JSON.stringify(row)}`)
-      const centers = await header.locator('.ws-band-acts button:visible').evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
-      assert.ok(centers.length >= 2 && Math.max(...centers) - Math.min(...centers) < 2, `the verbs share one row: ${centers}`)
-      // Settings names the highlighted thread it acts on, so it is found by its part.
-      for (const [name, control] of [...expected.map(name => [name, bandControl(header, name)]), ['Settings', header.locator('.ws-band-settings')]]) {
-        await control.scrollIntoViewIfNeeded()
+    const assertRow = async (expected, width = 390) => {
+      assert.deepEqual(await shownVerbs(page), expected)
+      assert.equal(await header.isVisible(), false, "the top bar names the page; the band's head stands only where it carries acts")
+      const strip = acts(page)
+      const row = await strip.boundingBox()
+      assert.ok(row.x >= 0 && row.x + row.width <= width, `the acts fit the phone: ${JSON.stringify(row)}`)
+      const centres = await strip.locator('button:visible, a:visible').evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
+      assert.ok(centres.length >= 2 && Math.max(...centres) - Math.min(...centres) < 2, `the acts share one line: ${centres}`)
+      const own = await strip.evaluate(el => {
+        const title = el.closest('.fp-title'), name = title.querySelector('.fp-name').getBoundingClientRect(), docs = title.querySelector('.fp-docs').getBoundingClientRect()
+        return el.getBoundingClientRect().top >= Math.max(name.bottom, docs.bottom) - 1
+      })
+      assert.ok(own, 'the acts take a line of their own under the row')
+      for (const [name, control] of [...expected.map(name => [name, actVerb(page, name)]), ['Settings', strip.locator('.ws-acts-settings')]]) {
         const box = await control.boundingBox()
-        assert.ok(box.x >= 0 && box.x + box.width <= width + 1 && box.height >= 44, `${name} scrolls into reach: ${JSON.stringify(box)}`)
+        assert.ok(box.x >= 0 && box.x + box.width <= width + 1 && box.height >= 44, `${name} is a full touch target in reach: ${JSON.stringify(box)}`)
       }
-      await header.evaluate(el => { el.scrollLeft = 0 })
+      // Only the highlighted row draws its acts on a phone.
+      assert.equal(await page.locator('.ws-page.ws-selected .fp-row:not([data-selected]) > .fp-line .fp-verbs').evaluateAll(slots => slots.filter(slot => slot.checkVisibility()).length), 0)
     }
-    await assertBand(['Temper', 'Discard'])
-    await page.locator('.ws-band-leave').click()
+    await assertRow(['Rest', 'Temper', 'Discard'])
+    // The phone leaves the reader by its keys and top bar; the band's × stands with the head it hides.
+    for (let step = 0; step < 32 && await page.locator('.kbn-reader-open').count(); step++) {
+      await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Escape'); await page.waitForTimeout(30)
+    }
     await page.locator('.kbn-folio-seg[data-folio="1"]').click()
     const family = page.locator('[data-column="inFlight"] .kbn-card[data-fiber-id="research/workspace/calibration-report"]').filter({ has: page.locator('.kbn-thread-count[title*="working"]') })
     const fold = family.locator('.kbn-thread-count')
     if (await fold.getAttribute('aria-expanded') === 'false') await fold.click()
     await family.locator('.kbn-thread-row[title="Response analysis"] .kbn-thread-name').click()
     await threadNamed(page, 'Response analysis')
-    await assertBand(['Close for review', 'Rest'])
-    const reviewInk = await bandControl(header, 'Close for review').evaluate(el => {
+    await assertRow(['Close for review', 'Rest', 'Temper', 'Discard'])
+    const reviewInk = await actVerb(page, 'Close for review').evaluate(el => {
       const neutral = document.createElement('span')
       neutral.style.color = 'var(--ws-ink-muted, var(--kbn-ink-muted))'
       el.parentElement.append(neutral)
@@ -224,21 +241,21 @@ export function registerHeaderBarJourneys(test) {
       await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'working-phone-light.png') })
     }
   }, { width: 390, height: 844 })
-  test('Listen stays one control inside the band at every width', async page => {
+  test('Listen stays one control inside the message box at every width', async page => {
     await page.goto(url); await openRoot(page)
-    const header = page.locator('.ws-stage-band .ws-band-head')
+    const box = page.locator('.ws-stage-band .ws-worker-acts')
     for (const width of [1440, 1000, 701, 390, 320]) {
       await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
-      const arm = header.locator('.listen-mic')
-      await arm.scrollIntoViewIfNeeded()
-      const [band, control] = await Promise.all([header.boundingBox(), header.locator('.listen-control').boundingBox()])
-      assert.ok(control.x >= band.x - 1 && control.x + control.width <= band.x + band.width + 1, `Listen sits inside the band at ${width}: ${JSON.stringify({ band, control })}`)
+      const arm = box.locator('.listen-mic')
+      const [outer, control] = await Promise.all([box.boundingBox(), box.locator('.listen-control').boundingBox()])
+      assert.ok(control.x >= outer.x - 1 && control.x + control.width <= outer.x + outer.width + 1 && control.y >= outer.y - 1 && control.y + control.height <= outer.y + outer.height + 1, `Listen sits inside the message box at ${width}: ${JSON.stringify({ outer, control })}`)
+      assert.ok(outer.x >= 0 && outer.x + outer.width <= width, `the message box fits the viewport at ${width}`)
+      assert.equal(await box.locator('.listen-control').count(), 1)
       assert.equal(await arm.getAttribute('aria-label'), 'Listen')
       if (process.env.WORKSPACE_SHOTS && [1440, 390, 320].includes(width)) {
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
         await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `listen-band-control-${width}-light.png`) })
       }
-      await header.evaluate(el => { el.scrollLeft = 0 })
     }
   }, { width: 1440, height: 900 })
   test('Listen keeps its pin while another card is viewed, with Stop in its menu', async page => {
@@ -297,7 +314,6 @@ export function registerHeaderBarJourneys(test) {
   test('Thread rows own Enter and Space while body focus keeps expand and paging shortcuts', async page => {
     await page.goto(url)
     await openRoot(page)
-    const header = page.locator('.ws-stage-band .ws-band-head')
     const row = async name => name === title ? (await familyTree(page)).locator('.fp-head') : threadRow(page, await familyTree(page), name)
     for (const key of ['Enter', 'Space']) {
       const press = async target => { await target.focus(); await page.keyboard.press(key) }
@@ -314,7 +330,9 @@ export function registerHeaderBarJourneys(test) {
       await page.waitForFunction(() => !document.querySelector('.ws-reader').classList.contains('ws-expand-mode'))
     }
     await page.setViewportSize({ width: 1440, height: 400 })
-    await header.getByRole('button', { name: 'Constitution', exact: true }).click()
+    // The constitution's own page, receded behind its family's.
+    await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
+    await page.locator('.ws-page.ws-selected[data-key^="fiber:"]').waitFor()
     await page.evaluate(() => { document.activeElement?.blur(); document.body.focus() })
     const scroller = page.locator('.ws-selected .ws-prose-scroll')
     await page.waitForFunction(() => {
@@ -361,37 +379,51 @@ export function registerHeaderBarJourneys(test) {
       const header = page.locator('.ws-stage-band .ws-band-head')
       assert.equal(title.length, 90)
       assert.equal(await header.locator('h1').getAttribute('title'), title)
-      const geometry = await header.evaluate(el => {
-        const box = el.getBoundingClientRect()
-        return { barHeight: box.height, left: box.left, right: box.right, wraps: el.scrollWidth > el.clientWidth }
-      })
-      assert.ok(geometry.barHeight <= (device === 'desktop' ? 96 : 64), JSON.stringify(geometry))
-      assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
-      for (const label of device === 'desktop' ? ['Settings', 'Constitution', 'Temper', 'Discard'] : ['Settings', 'Constitution']) {
-        const icon = bandControl(header, label)
-        assert.equal(await icon.getAttribute('title'), await icon.getAttribute('aria-label'))
+      if (device === 'desktop') {
+        const geometry = await header.evaluate(el => {
+          const box = el.getBoundingClientRect()
+          return { barHeight: box.height, left: box.left, right: box.right }
+        })
+        assert.ok(geometry.barHeight <= 96, JSON.stringify(geometry))
+        assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
+      } else {
+        assert.equal(await header.isVisible(), false, "the top bar names the page; the family's rows carry the acts")
+        const dock = await band(page).locator('.ws-dock').boundingBox()
+        assert.ok(dock.x >= 0 && dock.x + dock.width <= viewport.width, JSON.stringify(dock))
+      }
+      // The root's row draws its acts as one stroke grid, one size, on the row's centre line.
+      const strip = acts(page)
+      const icons = strip.locator('.ws-header-icon:visible')
+      assert.ok(await icons.count() >= 4)
+      const size = device === 'desktop' ? 15 : 20
+      for (const icon of await icons.all()) {
+        const label = await icon.getAttribute('aria-label')
+        assert.equal(await icon.getAttribute('title'), label)
         assert.deepEqual(await icon.evaluate(el => {
           const svg = el.querySelector('svg'), box = svg?.getBoundingClientRect(), css = svg && getComputedStyle(svg)
           return { viewBox: svg?.getAttribute('viewBox'), inheritsColor: css?.stroke === getComputedStyle(el).color, width: box?.width, height: box?.height, weight: css?.strokeWidth }
-        }), { viewBox: '0 0 16 16', inheritsColor: true, width: 20, height: 20, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
+        }), { viewBox: '0 0 16 16', inheritsColor: true, width: size, height: size, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
         await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
       }
+      const centres = await icons.evaluateAll(els => els.map(el => { const r = el.querySelector('svg').getBoundingClientRect(); return r.top + r.height / 2 }))
+      assert.ok(Math.max(...centres) - Math.min(...centres) < 1, `the acts share one vertical centre in ${device}/${scheme}: ${centres}`)
       if (device === 'desktop') {
-        const centers = await header.locator('.ws-band-acts .ws-header-icon:visible svg').evaluateAll(svgs => svgs.map(svg => svg.getBoundingClientRect()).filter(box => box.height).map(box => box.top + box.height / 2))
-        assert.ok(centers.length >= 1 && Math.max(...centers) - Math.min(...centers) < 1, `lifecycle icons share one vertical center in ${device}/${scheme}: ${centers}`)
+        const name = await strip.evaluate(el => { const r = el.closest('.fp-title').querySelector('.fp-mark').getBoundingClientRect(); return r.top + r.height / 2 })
+        assert.ok(Math.abs(centres[0] - name) < 1.5, `the acts sit on the row's centre line: ${centres[0]} vs ${name}`)
       }
       if (process.env.WORKSPACE_SHOTS) {
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
         await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `header-${device}-${scheme}.png`) })
       }
-      await header.getByRole('button', { name: 'Settings', exact: true }).click()
+      const settings = strip.locator('.ws-acts-settings')
+      await settings.click()
       const sheet = page.getByRole('group', { name: 'Settings', exact: true })
       await sheet.waitFor()
       assert.ok(await sheet.locator('.kbn-ctl-history').count())
       assert.equal(await sheet.locator('.ws-band-open').count(), 0, 'the way to the conversation stays outside Settings')
       await page.keyboard.press('Escape')
       await sheet.waitFor({ state: 'hidden' })
-      assert.equal(await header.getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
+      assert.equal(await settings.evaluate(el => el === document.activeElement), true)
       if (device === 'desktop') {
         await familySends(page)
         assert.ok(await page.locator('.ws-page.ws-selected .fp-head .fp-send-age').count(), 'sends carry their age')
@@ -402,13 +434,38 @@ export function registerHeaderBarJourneys(test) {
         await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
       }
       // A verdict leaves settings before opening its undo window.
-      await header.getByRole('button', { name: 'Settings', exact: true }).click()
-      await bandControl(header, 'Temper').click()
+      await settings.click()
+      await actVerb(page, 'Temper').click()
       assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
-      const undo = header.getByRole('button', { name: `Undo verdict on ${title}`, exact: true })
+      const undo = strip.getByRole('button', { name: `Undo verdict on ${title}`, exact: true })
       await undo.waitFor(); await undo.click()
-      assert.equal(await header.locator('.ws-verdict-undo').count(), 0)
+      assert.equal(await strip.locator('.ws-verdict-undo').count(), 0)
       assert.equal(await page.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length), 0)
     }, viewport)
   }
+  test("A row's ⚙ opens Settings under it, and another row's ⚙ moves the menu there", async page => {
+    await page.goto(url)
+    await openRoot(page)
+    const menu = page.locator('.ws-settings-menu:not([hidden])')
+    const under = async (gear, label) => {
+      const [box, anchor] = await Promise.all([menu.boundingBox(), gear.boundingBox()])
+      assert.ok(Math.abs(box.y - (anchor.y + anchor.height)) <= 8, `${label}: the menu opens against its ⚙: ${JSON.stringify({ box, anchor })}`)
+    }
+    const tree = await familyTree(page)
+    await openThread(page, tree.locator('.fp-head'), title)
+    const root = acts(page).locator('.ws-acts-settings')
+    await root.click(); await menu.waitFor(); await under(root, 'root')
+    // A row clear of the open menu shows its acts under the pointer.
+    const thread = threadRow(page, tree, 'Discarded pilot')
+    await thread.hover()
+    const gear = thread.locator('> .fp-line .ws-acts-settings')
+    await gear.click()
+    assert.equal(await thread.getAttribute('aria-selected'), 'true', 'a row act highlights its row first')
+    await threadNamed(page, 'Discarded pilot')
+    await menu.waitFor(); await under(gear, 'thread')
+    assert.equal(await menu.locator('.ws-band-sheet-name').innerText(), 'Discarded pilot', 'the sheet names the thread it writes to')
+    await page.keyboard.press('Escape')
+    await menu.waitFor({ state: 'hidden' })
+    assert.equal(await gear.evaluate(el => el === document.activeElement), true)
+  }, { width: 1440, height: 900 })
 }

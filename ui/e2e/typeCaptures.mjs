@@ -19,10 +19,10 @@ async function openRoot(page) {
   const name = page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${root}"])`).first().locator('.kbn-card-name')
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
-  const header = page.locator('.ws-stage-band .ws-band-head')
-  await header.waitFor()
-  if (await header.locator('h1').textContent() !== root) {
-    await header.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.locator('.ws-stage-band .ws-dock').waitFor()
+  if (await page.locator('.ws-stage-band .ws-band-title').textContent() !== root) {
+    // The highlighted row carries the fiber's acts, its ⚙ among them.
+    await page.locator('.ws-page.ws-selected .fp-row[data-selected] .ws-acts-settings').click()
     await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
   }
   await page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, root)
@@ -36,7 +36,8 @@ const surfaces = {
   async constitution(page) {
     await page.goto(`${base}?example=threads&long-title`)
     await openRoot(page)
-    await page.locator('.ws-stage-band').getByRole('button', { name: 'Constitution', exact: true }).click()
+    // The family's page carries the acts, so the constitution's own page is reached where it recedes.
+    await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
     await page.locator('.ws-selected .ws-fiber-prose').waitFor()
   },
   async listening(page) {
