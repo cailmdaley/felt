@@ -15,6 +15,8 @@ import { resetLanes } from '../requestLanes.js'
 import { buildFileViewer } from '../FileViewerPanel.js'
 import { FiberSends } from '../fiberSends.js'
 import fc from 'fast-check'
+/** The fiber's acts as drawn: on its row on a family page, else in the band. */
+const shownActs = (): HTMLElement => [...document.querySelectorAll<HTMLElement>('.ws-fiber-acts')].find(el => !el.closest('[hidden]'))!
 
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
@@ -552,7 +554,7 @@ describe('workspace reader integration', () => {
       onVisibility: visibility, dock: new Dock('', changed, commit) })
     workspace.open(reviewing); await settle()
     vi.useFakeTimers()
-    const pair = document.querySelector<HTMLElement>('.ws-fiber-acts')!
+    const pair = shownActs()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
     expect(pair.dataset.verdictPending).toBe('discarded')
     expect(pair.querySelector(':scope > .ws-verdict-undo')?.textContent).toBe('Discarded·undo z')
@@ -561,7 +563,7 @@ describe('workspace reader integration', () => {
     expect(pair.hasAttribute('data-verdict-pending')).toBe(false)
     pair.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
     expect(commit).not.toHaveBeenCalled()
-    expect(document.querySelectorAll('.ws-fiber-acts .ws-verdict-undo')).toHaveLength(1)
+    expect(shownActs().querySelectorAll('.ws-verdict-undo')).toHaveLength(1)
     expect(pair.querySelector('.ws-verdict-undo')?.textContent).toMatch(/^Tempered/)
     live = { ...reviewing, id: 'elsewhere/renamed', path: 'elsewhere/renamed/renamed.md', fiberDir: '/notes/renamed' }
     vi.advanceTimersByTime(3999)
@@ -582,7 +584,7 @@ describe('workspace reader integration', () => {
     workspace.open(reviewing); await settle()
     vi.useFakeTimers()
     workspace.queueVerdict(reviewing, 'composted')
-    expect(document.querySelectorAll('.ws-fiber-acts .ws-verdict-undo')).toHaveLength(1)
+    expect(shownActs().querySelectorAll('.ws-verdict-undo')).toHaveLength(1)
     live = change === 'removed' ? [] : [{ ...reviewing,
       ...(change === 'replacement' ? { uid: 'UID-B' } : { originId: 'host-b' }) }]
     bodyCards = live
@@ -598,7 +600,7 @@ describe('workspace reader integration', () => {
       workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [fiber], origin: () => 'Desk',
         onVisibility: visibility, dock: new Dock('', changed, commit) })
       workspace.open(fiber); await settle()
-      return document.querySelector<HTMLElement>('.ws-fiber-acts')!
+      return shownActs()
     }
     const flying = card({ id: 'work/fly', uid: 'fly-uid', name: 'Fly', originId: 'host-a', status: 'active',
       workerState: 'running', shuttleKind: 'oneshot', path: 'work/fly/fly.md', fiberDir: '/notes/fly' })
@@ -769,7 +771,9 @@ describe('workspace reader integration', () => {
     const title = (): string | null | undefined => document.querySelector('.ws-stage-band .ws-band-title')?.textContent
     workspace.open(feed[0], 'Desk'); await settle()
     expect(title()).toBe('hub')
-    expect(document.querySelector('.ws-band-head button[aria-label="Settings"]')).not.toBeNull()
+    // The band leaves the fiber's acts to its row on the family page.
+    expect(document.querySelector('.ws-selected .fp-head .fp-verbs .ws-acts-settings')).not.toBeNull()
+    expect(document.querySelector<HTMLElement>('.ws-stage-band .ws-band-head > .ws-fiber-acts')!.hidden).toBe(true)
     // A root has no orchestrator: no way back on its line, and b does nothing.
     expect(document.querySelector<HTMLElement>('.ws-stage-band .ws-settings-ancestry')?.hidden).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
@@ -833,10 +837,10 @@ describe('workspace reader integration', () => {
     press('x'); expect(queue).toHaveBeenLastCalledWith(leaf, 'composted')
     press('t'); expect(queue).toHaveBeenLastCalledWith(leaf, 'tempered')
     press('s'); expect(onRest).toHaveBeenLastCalledWith(leaf, workspace.reader.el)
-    const rest = document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-rest')!
+    const rest = row.querySelector<HTMLButtonElement>('.fp-verbs .kbn-ctl-rest')!
     expect(rest.title).toBe('Rest notch (s)')
     rest.click(); expect(onRest).toHaveBeenLastCalledWith(leaf, rest)
-    document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-review')!.click()
+    row.querySelector<HTMLButtonElement>('.fp-verbs .kbn-ctl-review')!.click()
     expect(queue).toHaveBeenLastCalledWith(leaf, 'awaitingReview')
     const primary = document.querySelector<HTMLButtonElement>('.ws-worker-primary')!
     expect(primary.getAttribute('aria-label')).toBe('Resume Notch')
@@ -845,7 +849,7 @@ describe('workspace reader integration', () => {
     expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/notch', resume_mode: 'previous' })
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click()
     press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }), 'composted')
-    expect(document.querySelector<HTMLButtonElement>('.ws-stage-band .kbn-ctl-discard')!.title).toBe('Discard (x)')
+    expect(document.querySelector<HTMLButtonElement>('.ws-selected .fp-head .fp-verbs .kbn-ctl-discard')!.title).toBe('Discard hub (x)')
   })
   it('heads the band with the family whichever thread it was entered by, acts on the head, and sends to a highlighted live worker', async () => {
     workspace.dispose()
@@ -866,8 +870,8 @@ describe('workspace reader integration', () => {
     press('c'); expect(conversation).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }))
     const other = [...document.querySelectorAll<HTMLElement>('.ws-selected .fp-row')].find(row => row.querySelector<HTMLElement>('.fp-name')?.title === 'Other')!
     other.click()
-    const input = document.querySelector<HTMLInputElement>('.ws-worker-message')!
-    input.value = 'Hello'; input.dispatchEvent(new Event('input'))
+    const input = document.querySelector<HTMLElement>('.ws-worker-message')!
+    input.textContent = 'Hello'; input.dispatchEvent(new Event('input'))
     const send = document.querySelector<HTMLButtonElement>('.ws-worker-primary')!
     expect(send.getAttribute('aria-label')).toBe('Send Other')
     send.click(); await settle()
@@ -890,7 +894,7 @@ describe('workspace reader integration', () => {
     discard.click()
     expect(row.getAttribute('aria-selected')).toBe('true')
     expect(row.getAttribute('aria-expanded')).toBe('false')
-    expect(document.querySelector('.ws-fiber-acts .ws-verdict-undo')).not.toBeNull()
+    expect(row.querySelector('.fp-verbs .ws-verdict-undo')).not.toBeNull()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true, cancelable: true }))
     vi.advanceTimersByTime(6000)
     expect(commit).not.toHaveBeenCalled()
@@ -1608,7 +1612,7 @@ describe('workspace reader integration', () => {
       workerState: 'running', tmuxSession: 'new-worker', sessionUuid: 'new-session', runtimePhase: 'working', turn: 'working', column: 'inFlight' }]
     workspace.update()
     expect(document.querySelector('.ws-stage-band .ws-dock')).toBe(band)
-    expect(band.querySelector<HTMLElement>('.ws-band-console')!.hidden).toBe(false)
+    expect(band.querySelector<HTMLElement>('.ws-acts-console')!.hidden).toBe(false)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const fresh = band.querySelector<HTMLButtonElement>('.ws-worker-acts button[data-verb="New session"]')!
     fresh.click()
@@ -1706,8 +1710,8 @@ describe('workspace reader integration', () => {
     workspace.open(live)
     await settle()
     // The band's console and c reach the conversation; the top bar draws no second opener.
-    expect(document.querySelector('.ws-navbar .ws-band-console')).toBeNull()
-    const opener = document.querySelectorAll<HTMLElement>('.ws-band-console')
+    expect(document.querySelector('.ws-navbar .ws-acts-console')).toBeNull()
+    const opener = document.querySelectorAll<HTMLElement>('.ws-acts-console')
     expect(opener).toHaveLength(1)
     opener[0].click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a', undefined)

@@ -1,5 +1,5 @@
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
-import { headerIcon, type HeaderIcon } from './headerIcon.js'
+import { headerIcon } from './headerIcon.js'
 import { attachConversationPicker } from '../conversationMenu.js'
 import { canOpenDesktopApp } from '../conversationLinks.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
@@ -15,7 +15,7 @@ import { showToast } from '../utils.js'
 import { coarsePointer } from '../mobile.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
-import { headerLifecycleVerbsFor, iconVerb, labelVerb, type LifecycleVerb } from './lifecycleVerbs.js'
+import { iconVerb, labelVerb, lifecycleVerbsFor, type LifecycleVerb } from './lifecycleVerbs.js'
 import { WorkerActions } from './workerActions.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
@@ -373,9 +373,20 @@ export interface BandNav {
   desk?: () => void
   /** Back where the reader was opened from; `nameBack` names it. */
   back?: () => void
-  /** Opens the constitution's own page. */
+  /** Opens the constitution's own page: the band's acts carry it where no row's ☰ does. */
   constitution?: () => void
 }
+
+/** A fiber's own acts, drawn wherever a row stands for it: its lifecycle verbs, its conversation and its settings. */
+export interface FiberActs {
+  readonly el: HTMLElement
+  /** Follow the fiber's state: which verbs it offers, and in what words. */
+  paint(): void
+  dispose(): void
+}
+
+/** What each lifecycle verb but Rest asks of the undo queue. */
+const VERB_VERDICT = { review: 'awaitingReview', temper: 'tempered', discard: 'composted' } as const
 
 /** Settings provenance: agent, office and host, with no office repeating the name. */
 export function bandFacts(card: KanbanCard): string {
@@ -395,13 +406,15 @@ export interface DockOptions {
 const USAGE_REFRESH_MS = 15_000
 
 /**
- * The band above a constitution's pages: its name, Listen, its lifecycle
- * verbs and settings as icons, and its worker line. It stays in place while
- * the pages beneath it change.
+ * The band above a constitution's pages, two lines that stay in place while
+ * the pages beneath change. The first is identity and navigation: back, the
+ * name (with the highlighted thread's after it), the context meter, and ×.
+ * The second is the message box, with Listen, Send and New session inside it.
+ * A fiber's verbs live on its row ({@link actsFor}); only where no row stands
+ * for the fiber (a page other than its family's) does the band draw them.
  */
 export class Dock {
   private root: HTMLElement | null = null
-  private headRoot: HTMLElement | null = null
   /** The band's × returns directly to the Desk, never a lifecycle write. */
   private leave: HTMLButtonElement | null = null
   private back: HTMLButtonElement | null = null
@@ -415,8 +428,16 @@ export class Dock {
   private searchRenderToken = 0
   /** Opens a file in the reader's viewer; the workspace seats it. */
   openFile?: (path: string, title?: string, owner?: string) => void
-  private constitutionButton: HTMLButtonElement | null = null
+  /** The family page draws a row for the band's fiber, so the band leaves the verbs to it. */
+  private rows = false
+  /** Opens the band's fiber's own page, from the ☰ its acts carry. */
   private openConstitution: (() => void) | null = null
+  /** The band stands over the page, so its settings sheet can open; the reader seats it. */
+  private seated = true
+  /** Every fiber's acts drawn now, by its repaint: the band's and each row's. */
+  private readonly liveActs = new Set<() => void>()
+  /** Opens the settings sheet for a fiber, under the control that asked; null while no band is built, and the acts draw no ⚙. */
+  private settingsFor: ((card: KanbanCard, opener: HTMLElement) => void) | null = null
   private listen: ListenControl | null = null
   private voiceStrip: VoiceStrip | null = null
   private disposers: (() => void)[] = []
@@ -476,18 +497,6 @@ export class Dock {
     return this.root
   }
 
-  /** The band's verbs, built once so a repaint re-seats the same controls under the pointer and the focus. */
-  get head(): HTMLElement {
-    if (!this.headRoot) {
-      this.headRoot = document.createElement('div')
-      this.headRoot.className = 'ws-fiber-acts ws-band-acts'
-      this.headRoot.dataset.part = 'act'
-      this.headRoot.dataset.act = 'verdict'
-      this.headRoot.addEventListener('click', event => event.stopPropagation())
-    }
-    return this.headRoot
-  }
-
   openSettings?: (content: HTMLElement, opener: HTMLElement) => void
   closeSettings?: (after: () => void) => void
 
@@ -502,7 +511,7 @@ export class Dock {
     if (!this.ancestry) return
     paintAncestry(this.ancestry, nav.ancestry ?? [])
     this.openConstitution = nav.constitution ?? null
-    if (this.constitutionButton) this.constitutionButton.hidden = !this.openConstitution
+    this.actPaint?.()
     if (this.back) {
       this.back.hidden = !nav.back
       this.back.onclick = nav.back ?? null
@@ -570,7 +579,8 @@ export class Dock {
     this.searchRenderToken++
     this.fiberIndex = null
     this.card = this.actionCard = null
-    this.constitutionButton = this.openConstitution = null
+    this.settingsFor = this.openConstitution = null
+    this.repaintActs()
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
     this.starting = false
@@ -584,7 +594,6 @@ export class Dock {
     this.savesPending = 0
     this.saveTail = Promise.resolve()
     this.root?.replaceChildren()
-    this.headRoot?.replaceChildren()
     this.ancestry = this.leave = this.back = null
     this.drawerClose = null
   }
@@ -636,9 +645,9 @@ export class Dock {
    * links keep their gesture semantics; long-press or right-click picks
    * another destination.
    */
-  private buildConsole(target: () => KanbanCard): { el: HTMLAnchorElement; paint: () => void } {
+  private buildConsole(target: () => KanbanCard): { el: HTMLAnchorElement; paint: () => void; dispose: () => void } {
     const el = document.createElement('a')
-    el.className = 'ws-header-icon ws-band-console'
+    el.className = 'ws-header-icon ws-acts-console'
     el.dataset.part = 'console'
     el.tabIndex = 0
     el.innerHTML = headerIcon('console')
@@ -652,7 +661,7 @@ export class Dock {
       if (el.hasAttribute('href') || (event.key !== 'Enter' && event.key !== ' ')) return
       event.preventDefault(); el.click()
     })
-    this.disposers.push(attachConversationPicker(el, () => conversationDestinations(target(), conversationDevice(), this.onOpenWorker)))
+    const dispose = attachConversationPicker(el, () => conversationDestinations(target(), conversationDevice(), this.onOpenWorker))
     const paint = (): void => {
       const card = target(), route = this.conversationRoute(card)
       el.hidden = !route
@@ -669,7 +678,71 @@ export class Dock {
       el.setAttribute('aria-label', `${label} (c)`)
       el.title = route.reopen ? `${label} (c)` : `${label} (c)\nLong-press or right-click to choose where to open.`
     }
-    return { el, paint }
+    return { el, paint, dispose }
+  }
+
+  /**
+   * A fiber's acts, for whatever draws a row for it: the lifecycle verbs it
+   * offers ({@link lifecycleVerbsFor}, the lifecycle model's set), its
+   * conversation (as `c` opens it) and its settings sheet. The whole strip is
+   * the fiber's verdict host, so an undo window takes its place.
+   */
+  actsFor(target: () => KanbanCard, constitution?: () => (() => void) | null): FiberActs {
+    const el = document.createElement('span')
+    el.className = 'ws-fiber-acts'
+    el.dataset.part = 'acts'
+    el.setAttribute('role', 'group')
+    const verbs = document.createElement('span')
+    verbs.className = 'ws-acts-verbs'
+    const made = new Map<LifecycleVerb, HTMLButtonElement>()
+    const verb = (name: LifecycleVerb): HTMLButtonElement => {
+      const button = iconVerb(name)
+      button.addEventListener('click', () => {
+        const card = target()
+        if (name === 'rest') this.onRest?.(card, button)
+        else this.verdict(card, VERB_VERDICT[name])
+      })
+      made.set(name, button)
+      return button
+    }
+    const conversation = this.buildConsole(target)
+    const settings = document.createElement('button')
+    settings.type = 'button'
+    settings.className = 'ws-header-icon ws-acts-settings'
+    settings.dataset.part = 'settings'
+    settings.innerHTML = headerIcon('settings')
+    settings.setAttribute('aria-haspopup', 'true')
+    settings.setAttribute('aria-expanded', 'false')
+    settings.addEventListener('click', () => this.settingsFor?.(target(), settings))
+    el.append(verbs, conversation.el)
+    // A row's own ☰ chip unfolds its constitution; the band's acts open the page instead.
+    const page = constitution && document.createElement('button')
+    if (page) {
+      page.type = 'button'
+      page.className = 'ws-header-icon ws-band-constitution'
+      page.innerHTML = headerIcon('constitution')
+      page.title = 'Constitution'; page.setAttribute('aria-label', 'Constitution')
+      page.addEventListener('click', () => constitution!()?.())
+      el.append(page)
+    }
+    el.append(settings)
+    const paint = (): void => {
+      const card = target(), who = slug(card)
+      markVerdictHost(el, card)
+      el.setAttribute('aria-label', `${who}'s acts`)
+      const offered = lifecycleVerbsFor(card, !!this.onRest)
+      const buttons = offered.map(name => made.get(name) ?? verb(name))
+      offered.forEach((name, i) => labelVerb(buttons[i], name, card, who))
+      if (buttons.length !== verbs.children.length || buttons.some((button, i) => verbs.children[i] !== button)) verbs.replaceChildren(...buttons)
+      conversation.paint()
+      if (page) page.hidden = !constitution!()
+      settings.hidden = !this.seated || !this.settingsFor
+      settings.title = `Settings for ${who}`
+      settings.setAttribute('aria-label', settings.title)
+    }
+    paint()
+    this.liveActs.add(paint)
+    return { el, paint, dispose: () => { this.liveActs.delete(paint); conversation.dispose() } }
   }
 
   /** A worker's own line for an opening message, Resume and New session, for a page to seat beside that worker. */
@@ -677,8 +750,13 @@ export class Dock {
     return new WorkerActions(card, (target, mode, message, word, images) => this.startSession(target, mode, word, undefined, message, images))
   }
 
-  /** Retarget the band's lifecycle and worker controls without changing its identity or settings. */
-  setActionCard(card: KanbanCard): void {
+  /**
+   * Retarget the band's figures and message box without changing its identity
+   * or settings. `rows` says a family page beneath draws the fiber's row, and
+   * with it the fiber's acts.
+   */
+  setActionCard(card: KanbanCard, rows = false): void {
+    this.rows = rows
     const previous = this.actionCard ?? this.card
     if (previous && ((previous.uid ?? previous.id) !== (card.uid ?? card.id) || previous.originId !== card.originId) && this.errorEl) {
       this.errorEl.replaceChildren()
@@ -739,7 +817,18 @@ export class Dock {
     this.actPaint?.()
   }
 
+  /** Whether the band stands over the page; without it the acts draw no ⚙. */
+  setSeated(seated: boolean): void {
+    if (this.seated === seated) return
+    this.seated = seated
+    this.repaintActs()
+  }
+
+  /** Repaint every fiber's acts drawn now, as the band they reach comes and goes. */
+  private repaintActs(): void { for (const paint of this.liveActs) paint() }
+
   refreshConversationOpening(): void {
+    this.repaintActs()
     this.actPaint?.()
     this.root?.querySelectorAll('.kbn-ctl-history').forEach((history) => {
       history.dispatchEvent(new Event(CONVERSATION_OPENING_CHANGED))
@@ -853,27 +942,12 @@ export class Dock {
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot ws-band-status'
     foot.append(errorEl, statusEl)
-    // The lifecycle verbs are icons like navigation's, each named with its key.
-    // The undo window replaces them in the band's row, which carries the card's verdict key.
-    const verdict = document.createElement('div')
-    verdict.className = 'kbn-ctl-verdict'
-    verdict.setAttribute('role', 'group')
-    verdict.setAttribute('aria-label', 'Verdict')
-    markVerdictHost(this.head, card)
-    const verb = (name: LifecycleVerb, run: (button: HTMLButtonElement) => void): HTMLButtonElement => {
-      const button = iconVerb(name)
-      button.addEventListener('click', () => run(button))
-      verdict.append(button)
-      return button
-    }
     const target = (): KanbanCard => this.actionCard ?? card
-    const review = verb('review', () => this.verdict(target(), 'awaitingReview'))
-    const onRest = this.onRest
-    const rest = onRest ? verb('rest', button => onRest(target(), button)) : null
-    const temper = verb('temper', () => this.verdict(target(), 'tempered'))
-    const discard = verb('discard', () => this.verdict(target(), 'composted'))
     const worker = this.workerActionsFor(card)
     this.disposers.push(() => worker.dispose())
+    // Where no row stands for the fiber, the band draws its acts.
+    const acts = this.actsFor(target, () => this.openConstitution)
+    this.disposers.push(acts.dispose)
 
     // A single settings sheet owns configuration and history.
     const drawer = document.createElement('div')
@@ -892,19 +966,9 @@ export class Dock {
     const firstHistory = sheet.history()
     if (firstHistory) sessionsSection.append(firstHistory)
     drawer.append(settingsSection, sessionsSection)
-
-    const item = (label: string, name: HeaderIcon, cls: string, run: () => void): HTMLButtonElement => {
-      const button = ctlButton('', cls)
-      button.classList.remove('kbn-ctl-btn')
-      button.classList.add('ws-header-icon')
-      button.title = label; button.setAttribute('aria-label', label)
-      button.innerHTML = headerIcon(name)
-      button.addEventListener('click', run)
-      return button
-    }
-    const settingsItem = item('Settings', 'settings', 'ws-band-settings', () => {
-      // The gear follows the highlighted thread, as the verbs beside it do.
-      const act = target()
+    let drawerOpener: HTMLElement | null = null
+    // The sheet is drawn for the fiber whose ⚙ asked; the band's own card keeps its sheet in step with runtime polls.
+    this.settingsFor = (act, opener) => {
       if ((act.uid ?? act.id) !== (sheetCard.uid ?? sheetCard.id) || act.originId !== sheetCard.originId) {
         const own = (act.uid ?? act.id) === (card.uid ?? card.id) && act.originId === card.originId
         sheetCard = act
@@ -916,22 +980,18 @@ export class Dock {
         settingsSection.replaceChildren(sheetName, sheet.settings)
         const history = sheet.history()
         sessionsSection.replaceChildren(...(history ? [history] : []))
-        sessionsSection.hidden = !act.uid
       }
+      sessionsSection.hidden = !act.uid
       if (sheet.ledger.hidden) sheet.toggle.click()
       const unfold = sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')
       if (unfold?.getAttribute('aria-expanded') !== 'true') unfold?.click()
-      if (this.openSettings) this.openSettings(drawer, settingsItem)
-      else drawer.hidden = !drawer.hidden
-    })
-    settingsItem.setAttribute('aria-haspopup', 'true')
-    settingsItem.setAttribute('aria-expanded', 'false')
-    const consoleItem = this.buildConsole(target)
-    const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-band-constitution', () => { this.openConstitution?.() })
-    constitutionItem.hidden = !this.openConstitution
+      if (this.openSettings) { this.openSettings(drawer, opener); return }
+      drawerOpener = opener
+      drawer.hidden = !drawer.hidden
+    }
     this.drawerClose = () => {
       if (this.openSettings || drawer.hidden) return false
-      drawer.hidden = true; settingsItem.focus({ preventScroll: true }); return true
+      drawer.hidden = true; drawerOpener?.focus({ preventScroll: true }); return true
     }
     const facts = document.createElement('p'); facts.className = 'ws-header-facts'
     drawer.append(facts)
@@ -980,18 +1040,16 @@ export class Dock {
         fiberSlug: (fiber, origin) => this.fiberSlug?.(fiber, origin),
       })
     }
-    // Listen keeps its own slot; the strip beside it says where the words go.
+    // Listen keeps its own slot at the head of the box's tools; the strip beside it says where spoken words go.
     const voiceStrip = this.voiceStrip = new VoiceStrip()
     const unsubscribe = this.voice?.controller.subscribe(() => this.paintVoice())
     if (unsubscribe) this.disposers.push(unsubscribe)
     this.paintVoice()
-    this.head.replaceChildren(...(this.listen ? [this.listen.el] : []), voiceStrip.el, verdict)
-    header.append(identity, this.head, consoleItem.el, constitutionItem, settingsItem, leave)
+    if (this.listen) worker.seat(this.listen.el, voiceStrip.el)
+    header.append(identity, acts.el, leave)
     body.append(header, worker.el, drawer, foot)
     this.actPaint = () => {
-      const column = card.column
-      this.el.dataset.column = column
-      this.head.dataset.column = column
+      this.el.dataset.column = card.column
       const act = target()
       const same = (act.uid ?? act.id) === (card.uid ?? card.id) && act.originId === card.originId
       if (titleRoot.textContent !== card.name) titleRoot.textContent = card.name
@@ -1007,27 +1065,13 @@ export class Dock {
       if (facts.textContent !== saidFacts) facts.textContent = saidFacts
       facts.title = hit === undefined ? '' : `The session's recent turns read ${hit}% of their context tokens from the prompt cache`
       facts.hidden = !facts.textContent
-      markVerdictHost(this.head, act)
-      for (const [button, verb] of [[review, 'review'], [rest, 'rest'], [temper, 'temper'], [discard, 'discard']] as const) {
-        if (button) labelVerb(button, verb, act, same ? '' : slug(act))
-      }
-      const offered = headerLifecycleVerbsFor(act, !!this.onRest)
-      verdict.hidden = !offered.length
       worker.update(act, warm !== undefined ? `cache warm until ${clockTime(warm)}` : '')
-      consoleItem.paint()
-      if (rest) rest.hidden = !offered.includes('rest')
-      temper.hidden = !offered.includes('temper')
-      discard.hidden = !offered.includes('discard')
-      review.hidden = !offered.includes('review')
-      // Offered verbs keep the order the card gives them (a standing run leads with Temper run).
-      const buttons = { review, rest, temper, discard } as const
-      const ordered = offered.flatMap(verb => buttons[verb] ? [buttons[verb]!] : [])
-      if (ordered.some((button, index) => verdict.children[index] !== button)) verdict.prepend(...ordered)
-      sessionsSection.hidden = !sheetCard.uid
-      const settingsLabel = `Settings${same ? '' : ` ${slug(act)}`}`
-      settingsItem.title = settingsLabel; settingsItem.setAttribute('aria-label', settingsLabel)
+      acts.el.hidden = this.rows
+      if (!this.rows) acts.paint()
+      header.toggleAttribute('data-acts', !this.rows)
     }
     this.actPaint()
+    this.repaintActs()
     return body
   }
 
@@ -1590,7 +1634,7 @@ export class Dock {
     if (this.starting || (mode === 'fresh' && !this.confirmCut(card))) return false
     const epoch = this.epoch
     const original = word?.textContent ?? ''
-    if (word) word.textContent = mode === 'fresh' ? 'Starting…' : 'Resuming…'
+    if (word) word.textContent = mode === 'fresh' ? 'Starting…' : message || images.length ? 'Sending…' : 'Resuming…'
     this.starting = true
     this.actPaint?.()
     const inBand = (): boolean => {

@@ -333,10 +333,10 @@ export class Reader {
     this.band.hidden = !el
     if (this.active) this.layout(false)
   }
-  /** The settings dropdown under its ⚙, kept inside the band's styling boundary. */
-  showSettings(content: HTMLElement, opener: HTMLElement): void {
+  /** The settings dropdown under the ⚙ that asked, kept inside the band's styling boundary (`host`) wherever that ⚙ sits. */
+  showSettings(content: HTMLElement, opener: HTMLElement, host: HTMLElement = opener.closest<HTMLElement>('.ws-dock') ?? this.el): void {
     this.closeMenu()
-    this.settingsMenu.show(content, opener, opener.closest<HTMLElement>('.ws-dock') ?? this.el)
+    this.settingsMenu.show(content, opener, host)
   }
   private openFilesSheet(opener: HTMLElement = this.filesToggle): void {
     if (!this.runSettled) return

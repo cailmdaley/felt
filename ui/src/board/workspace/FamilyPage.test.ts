@@ -6,6 +6,8 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import type { MapFile } from '../family/model.js'
 import { disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { FamilyPage, placeAt, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
+import { Dock } from './Dock.js'
+import { lifecycleVerbsFor, verbSpec } from './lifecycleVerbs.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
 const when = (back: number): string => new Date(now - back * hour).toISOString()
@@ -210,20 +212,27 @@ describe('a row', () => {
     expect(chips(family, 'Mid')).toEqual(['⌗', '☰', '⧉ 3'])
     expect(row(family, 'Mid').querySelector('.fp-lead')!.getAttribute('aria-label')).toBe('Tapestry')
   })
-  it('offers the console verbs for each thread state, and a click does not unfold or enter it', () => {
+  it('draws each fiber\'s acts on its row, the head\'s included, as the lifecycle offers them; a click acts without unfolding', () => {
     const work = { ...mid, shuttleKind: 'oneshot' as const }, review = { ...done, tempered: undefined, column: 'awaitingReview' as const, shuttleKind: 'oneshot' as const }
-    const act = vi.fn(), reach = vi.fn(async () => true)
-    const family = new FamilyPage({ reach }, feeds, { open: new Set(), selected: null }, vi.fn(), vi.fn(), vi.fn(), act, true)
+    const transition = vi.fn(), reach = vi.fn(async () => true)
+    const dock = new Dock('', vi.fn(), transition, undefined, { onRest: vi.fn() })
+    const family = new FamilyPage({ reach }, feeds, { open: new Set(), selected: null }, vi.fn(), vi.fn(), vi.fn(), target => dock.actsFor(target))
     family.update(root, new ThreadIndex([root, work, review]), now)
-    expect(row(family, 'Mid').querySelectorAll('.fp-verbs button')).toHaveLength(2)
-    expect(row(family, 'Done').querySelectorAll('.fp-verbs button')).toHaveLength(2)
-    expect(row(family, 'hub').querySelectorAll('.fp-verbs button')).toHaveLength(0)
+    const verbs = (name: string): string[] => [...row(family, name).querySelectorAll<HTMLButtonElement>('.fp-verbs .ws-acts-verbs button')].map(button => button.dataset.verb!)
+    for (const [name, card] of [['Mid', work], ['Done', review], ['hub', root]] as const) {
+      expect(verbs(name), name).toEqual(lifecycleVerbsFor(card, true).map(verb => verbSpec(verb, card).label))
+      expect(row(family, name).querySelector('.fp-verbs .ws-acts-settings'), name).not.toBeNull()
+      expect(row(family, name).querySelector<HTMLElement>('.fp-verbs .ws-fiber-acts')!.dataset.verdictKey, name).toBeTruthy()
+    }
     const close = row(family, 'Mid').querySelector<HTMLButtonElement>('.kbn-ctl-review')!
+    vi.stubGlobal('confirm', () => true)
     click(close)
-    expect(act).toHaveBeenCalledExactlyOnceWith(work, 'review', close)
+    vi.unstubAllGlobals()
+    expect(transition).toHaveBeenCalledExactlyOnceWith(work, 'awaitingReview')
     expect(family.selection).toEqual(work)
     expect(row(family, 'Mid').getAttribute('aria-expanded')).toBe('false')
     expect(reach).not.toHaveBeenCalled()
+    family.dispose()
   })
   it('keeps the set-aside behind its fold until asked', () => {
     const { family } = made()

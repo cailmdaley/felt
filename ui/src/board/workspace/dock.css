@@ -1,5 +1,6 @@
-/* The band over a constitution's pages: its name, then Listen and every verb as
-   icons of one size and weight, in one row; the name gives way when it is tight. */
+/* The band over a constitution's pages, two lines: identity and navigation
+   (back, the name, the context meter, ×), then the message box. The name gives
+   way when it is tight. */
 .ws-stage-band { flex: none; min-width: 0; container: band / inline-size; }
 .ws-stage-band[hidden] { display: none; }
 .ws-band-head {
@@ -26,11 +27,12 @@
   background: conic-gradient(var(--ws-cache-warm) calc(var(--ws-cache-left) * 1turn), transparent 0);
 }
 .ws-band-cache[data-cache='cold'] { border-color: var(--ws-cache-cold); background: transparent; }
-.ws-band-acts { position: relative; flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 2px 8px; min-width: 0; min-height: 36px; }
-/* The lifecycle icons sit with the navigation icons after them, set apart by a rule. */
-.ws-band-acts > .kbn-ctl-verdict { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 2px; margin: 0; padding-left: 8px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
-.ws-band-acts > .kbn-ctl-verdict[hidden] { display: none; }
-.ws-band-acts > .ws-verdict-undo { justify-content: flex-end; }
+/* A fiber's acts: its lifecycle verbs, then its conversation and settings set a little apart. The band draws them only where no row does. */
+.ws-fiber-acts { position: relative; flex: none; display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 2px; min-width: 0; }
+.ws-acts-verbs { display: inline-flex; align-items: center; gap: 2px; }
+.ws-acts-verbs:empty { display: none; }
+.ws-acts-verbs + * { margin-left: 6px; }
+.ws-fiber-acts > .ws-verdict-undo { justify-content: flex-end; }
 /* Settings keeps the further ancestors reachable without a second header row. */
 .ws-settings-ancestry { margin-bottom: 12px; }
 /* A highlighted thread's settings name the thread they write to. */
@@ -42,20 +44,27 @@
 .ws-band-status { padding: 6px 16px; }
 .ws-dock .ws-band-status:not(:has(.kbn-detail-error:not([style*='display: none']), .kbn-detail-save-status:not(:empty))) { display: none; }
 
-/* The worker's line under the band's head: an opening message and the verbs that send it. */
+/* The message box under the band's head. Its tools float at the right of its
+   first line, so the text's first line runs up to them and every later line
+   takes the box's full width beneath them. The box grows with its text to a
+   third of the screen, then scrolls, its tools held at its top. */
 .ws-band-head:has(+ .ws-worker-acts:not([hidden])) { border-bottom: 0; }
-.ws-worker-acts { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: flex-end; gap: 4px; min-width: 0; }
-.ws-dock .ws-worker-acts { padding: 0 16px 6px; border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-worker-acts { --ws-box-line: 36px; min-width: 0; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: transparent; cursor: text; }
+.ws-worker-acts:focus-within { border-color: var(--ws-ink-soft); }
+.ws-dock .ws-worker-acts { margin: 2px 16px 8px; }
 .ws-worker-acts[hidden] { display: none; }
-/* The line grows with its text up to a third of the screen, then scrolls. */
+.ws-worker-compose { max-height: 33vh; overflow-y: auto; padding: 0 2px 0 10px; }
+.ws-worker-tools { position: sticky; top: 0; z-index: 1; float: right; background: var(--ws-paper); display: flex; align-items: center; gap: 2px; height: var(--ws-box-line); margin-left: 8px; cursor: default; }
+/* One centre line: the text's first line sits on the tools' centre. */
 .ws-worker-message {
-  flex: 1 1 0; min-width: 6em; max-width: 48rem; min-height: var(--ws-control-height); max-height: 33vh; box-sizing: border-box;
-  padding: calc((var(--ws-control-height) - 1lh) / 2 - var(--ws-line-width)) 10px; margin-right: 4px; resize: none; overflow-y: auto;
-  border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: transparent;
+  min-height: 1lh; padding: calc((var(--ws-box-line) - 1lh) / 2) 0; outline: none;
+  white-space: pre-wrap; overflow-wrap: anywhere;
   color: var(--ws-ink); font: var(--type-label)/var(--leading-prose) var(--font-serif);
 }
-/* Pasted or dropped images wait under the line as thumbnails until the send. */
-.ws-worker-images { flex: 1 0 100%; order: 9; display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-worker-message:empty::before { content: attr(data-placeholder); color: var(--ws-ink-faint); pointer-events: none; }
+.ws-worker-message[hidden] { display: none; }
+/* Pasted or dropped images wait under the text as thumbnails until the send. */
+.ws-worker-images { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; }
 .ws-worker-images[hidden] { display: none; }
 .ws-worker-image { position: relative; display: inline-flex; }
 .ws-worker-image img { display: block; height: 48px; max-width: 96px; object-fit: cover; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
@@ -63,13 +72,12 @@
   position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%;
   background: var(--ws-ink); color: var(--ws-paper); font: var(--type-meta)/var(--leading-solid) var(--font-serif); cursor: pointer;
 }
-.ws-worker-message::placeholder { color: var(--ws-ink-faint, var(--ws-ink-muted)); opacity: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-reader .ws-worker-acts .ws-header-icon:disabled { opacity: .45; cursor: default; }
-.ws-worker-receipt { flex: none; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
+.ws-worker-receipt { flex: none; margin-right: 4px; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
 .ws-worker-receipt:empty { display: none; }
 
 /* The destination's slug sits beside Listen; a pin stays visible while muted. */
-.ws-voice-strip { flex: 0 1 auto; min-width: 0; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-solid) var(--font-serif); }
+.ws-voice-strip { flex: 0 1 auto; min-width: 0; max-width: 18ch; margin-right: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-solid) var(--font-serif); }
 .ws-voice-strip[hidden] { display: none; }
 
 /* Immediate actions use a shared stroke-icon grid and native keyboard focus. */
@@ -106,17 +114,18 @@
   }
 }
 
-/* On the phone the top bar names the page; the band is one row of verbs that slides sideways. */
+/* On the phone the top bar names the page and goes back, so the band's first
+   line stands only where it carries a fiber's acts; the message box stays. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-band-meter { display: none; }
   .kbn-verb-menu [role='menuitem'] { min-height: 44px; height: 44px; }
-  .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
+  .ws-reader .ws-header-icon { width: var(--ws-phone-target); height: var(--ws-phone-target); }
   .ws-band-head { gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
-  .ws-dock .ws-worker-acts { padding: 0 8px 6px; }
+  .ws-band-head:not([data-acts]) { display: none; }
   .ws-band-identity { flex: none; }
   .ws-band-title, .ws-band-back { display: none; }
-  .ws-band-acts { flex-wrap: nowrap; flex: none; }
-  .ws-band-acts > .kbn-ctl-verdict { flex: none; flex-wrap: nowrap; white-space: nowrap; padding-left: 0; border-left: 0; }
+  .ws-dock .ws-worker-acts { --ws-box-line: var(--ws-phone-target); margin: 6px 8px; }
+  .ws-reader .ws-worker-tools .listen-dropdown { width: 32px; }
 }
 
 .ws-dock {
@@ -311,7 +320,7 @@
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--type-label); }
   .ws-dock :is(.kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
   /* iOS zooms the page into any field set under 16px. */
-  .ws-dock :is(input, select, textarea) { font-size: var(--type-prose); }
+  .ws-dock :is(input, select, textarea, .ws-worker-message) { font-size: var(--type-prose); }
 }
 
 /* The agent and effort lists, opened as anchored popovers under their select. */

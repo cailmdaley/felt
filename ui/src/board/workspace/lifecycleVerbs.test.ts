@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { card } from '../testFixtures.js'
-import { headerLifecycleVerbsFor, iconVerb, lifecycleVerbsFor, verbSpec } from './lifecycleVerbs.js'
+import { iconVerb, lifecycleVerbsFor, verbSpec } from './lifecycleVerbs.js'
 
 const labels = (verbs: ReturnType<typeof lifecycleVerbsFor>, over: Parameters<typeof card>[0]) =>
   verbs.map(verb => verbSpec(verb, card(over)).label)
@@ -13,7 +13,7 @@ describe('a standing constitution names its schedule’s verbs', () => {
   const paused = { ...armed, id: 'paused', status: 'open', effectiveHorizon: 'stashed' } as const
 
   it('offers Pause schedule and Retire between runs', () => {
-    for (const verbs of [lifecycleVerbsFor(card(armed), true), headerLifecycleVerbsFor(card(armed), true)])
+    for (const verbs of [lifecycleVerbsFor(card(armed), true)])
       expect(labels(verbs, armed)).toEqual(['Pause schedule', 'Retire'])
     expect(card(armed).column).toBe('resting')
     expect(verbSpec('rest', card(armed)).icon).toBe('pause')
@@ -21,7 +21,7 @@ describe('a standing constitution names its schedule’s verbs', () => {
 
   it('leads with Temper run while a run waits on the human — mid-run or asking', () => {
     for (const over of [asking, running]) {
-      for (const verbs of [lifecycleVerbsFor(card(over), true), headerLifecycleVerbsFor(card(over), true)])
+      for (const verbs of [lifecycleVerbsFor(card(over), true)])
         expect(labels(verbs, over)).toEqual(['Temper run', 'Pause schedule', 'Retire'])
     }
     expect(card(asking).column).toBe('inFlight')
@@ -29,7 +29,7 @@ describe('a standing constitution names its schedule’s verbs', () => {
 
   it('offers Resume schedule and Retire while paused, from Resting', () => {
     expect(card(paused).column).toBe('resting')
-    for (const verbs of [lifecycleVerbsFor(card(paused), true), headerLifecycleVerbsFor(card(paused), true)])
+    for (const verbs of [lifecycleVerbsFor(card(paused), true)])
       expect(labels(verbs, paused)).toEqual(['Resume schedule', 'Retire'])
     expect(verbSpec('rest', card(paused)).icon).toBe('resume')
   })
@@ -61,10 +61,10 @@ describe('a seat with a pulse names Rest as its schedule’s', () => {
     expect(verbSpec('rest', card({ id: 'plain', status: 'active', shuttleKind: 'oneshot' })).label).toBe('Rest')
   })
 
-  it('keeps its clock in the header while resting among the Roles', () => {
+  it('keeps only its clock while resting among the Roles', () => {
     const seat = { id: 'post', status: 'active', shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'vizier', column: 'roles' } as const
-    expect(labels(headerLifecycleVerbsFor(card(seat), true), seat)).toEqual(['Pause schedule'])
+    expect(labels(lifecycleVerbsFor(card(seat), true), seat)).toEqual(['Pause schedule'])
     const plain = { id: 'desk', status: 'open', shuttleKind: 'oneshot', shuttleSeat: true, shuttleRole: 'editor', column: 'roles' } as const
-    expect(headerLifecycleVerbsFor(card(plain), true)).toEqual([])
+    expect(lifecycleVerbsFor(card(plain), true)).toEqual([])
   })
 })

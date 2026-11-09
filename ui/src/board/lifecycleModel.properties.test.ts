@@ -31,7 +31,7 @@
  */
 import fc from 'fast-check'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import { apply, ownerRow, served, STATES, stateKey, VERBS, type LifeRequest, type LifeState, type Outcome, type Verb } from '../../harness/lifecycleModel.js'
+import { apply, offeredVerbs, ownerRow, served, STATES, stateKey, VERBS, type LifeRequest, type LifeState, type Outcome, type Verb } from '../../harness/lifecycleModel.js'
 import { workerOpener } from './sessionHistory.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import { onDesk } from './workspace/fiberPageState.js'
@@ -200,7 +200,7 @@ function selected(id = ID): KanbanCard | undefined {
   return card
 }
 
-const workerLine = (): HTMLTextAreaElement | null => document.querySelector<HTMLTextAreaElement>('.ws-worker-acts:not([hidden]) .ws-worker-message')
+const workerLine = (): HTMLElement | null => document.querySelector<HTMLElement>('.ws-worker-acts:not([hidden]) .ws-worker-message:not([hidden])')
 const receipt = (): string => document.querySelector('.ws-worker-receipt')?.textContent ?? ''
 const bandError = (): string => [...document.querySelectorAll<HTMLElement>('.kbn-detail-error, .shuttle-toast.error')].filter(el => el.style.display !== 'none').map(el => el.textContent ?? '').join(' ')
 
@@ -231,11 +231,11 @@ async function send(): Promise<{ receipt: string; left: string; error: string } 
   await settle()
   const line = workerLine()
   if (!line) return undefined
-  line.value = MESSAGE
+  line.textContent = MESSAGE
   line.dispatchEvent(new Event('input'))
   line.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
   for (let i = 0; i < 4; i++) await settle()
-  const said = { receipt: receipt(), left: line.value, error: bandError() }
+  const said = { receipt: receipt(), left: line.textContent ?? '', error: bandError() }
   press('Escape')
   await finish()
   return said
@@ -331,8 +331,8 @@ function familyRows(): Array<{ el: HTMLElement; id: string }> {
     .filter(row => row.id === ID || THREADS.includes(row.id))
 }
 
-describe('the band acts on the highlighted thread of a family', () => {
-  it('every request a gesture sends names the highlighted fiber, and leaves the others alone', async () => {
+describe('a family page acts on the highlighted thread', () => {
+  it('its row draws the offered verbs, and every request a key or the row sends names that fiber and leaves the others alone', async () => {
     await fc.assert(fc.asyncProperty(
       fc.tuple(fc.constantFrom(...STATES), fc.constantFrom(...STATES), fc.constantFrom(...STATES)),
       fc.nat(),
@@ -361,12 +361,20 @@ describe('the band acts on the highlighted thread of a family', () => {
               ...(Object.keys(VERBS) as Verb[]).filter(verb => VERBS[verb].offered(state)),
               ...(card && inside.dock.canOpenConversation(card) ? ['open' as const] : []),
             ]
+            // The highlighted row draws the fiber's acts: the verbs the model offers, in its words.
+            const acts = lit!.el.querySelector<HTMLElement>(':scope > .fp-line .fp-verbs .ws-fiber-acts')
+            expect(acts, `the highlighted row draws no acts (${stateKey(state)})`).not.toBeNull()
+            expect([...acts!.querySelectorAll<HTMLButtonElement>('.ws-acts-verbs button')].map(button => button.dataset.verb), `the row offers other verbs than the model (${stateKey(state)})`)
+              .toEqual(offeredVerbs(state).map(verb => VERBS[verb].label(state)))
             if (offered.length === 0) continue
             const gesture = offered[pick % offered.length]
-                  const before = new Map(owner.states)
+            const before = new Map(owner.states)
             const sentBefore = owner.sent.length
-            // The key goes where a human's would: to the focused row, bubbling up.
-            press(gesture === 'open' ? 'c' : VERB_KEY[gesture as Verb], document.activeElement ?? document)
+            // A human acts by the key, which goes to the focused row and bubbles up, or by the row's own control.
+            const control = gesture === 'open' ? acts!.querySelector<HTMLElement>('.ws-acts-console')
+              : acts!.querySelector<HTMLElement>(`.ws-acts-verbs button[data-verb="${VERBS[gesture as Verb].label(state)}"]`)
+            if (Math.floor(pick / offered.length) % 2 && control && !control.hasAttribute('href')) control.click()
+            else press(gesture === 'open' ? 'c' : VERB_KEY[gesture as Verb], document.activeElement ?? document)
             await settle()
             const popover = document.querySelector<HTMLElement>('.kbn-rest-popover')
             if (popover) { press('n', popover); await settle() }

@@ -25,7 +25,7 @@ beforeEach(() => {
 afterEach(() => { dock.reset(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren() })
 function consoleFor(current: KanbanCard): HTMLAnchorElement {
   dock.open(current)
-  const found = dock.el.querySelectorAll<HTMLAnchorElement>('.ws-band-console')
+  const found = dock.el.querySelectorAll<HTMLAnchorElement>('.ws-acts-console')
   expect(found.length).toBe(1)
   return found[0]
 }

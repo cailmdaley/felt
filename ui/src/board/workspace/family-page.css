@@ -1,6 +1,6 @@
 .ws-family-page { container-type: inline-size; height: 100%; min-height: 0; }
 /* --fp-text is the row's text column, where its name and all it holds start: the mark's 12px and the title's 8px gap. */
-.ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+.ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-acts: 144px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 .ws-family-scroll { min-height: 0; overflow: auto; }
 .ws-family-announce { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -12,7 +12,7 @@
 .fp-row:focus-visible, .fp-aside:focus-visible { outline: 1px solid var(--ws-hairline); outline-offset: -1px; }
 .fp-line { position: relative; }
 .fp-row[data-worker] > .fp-line::before { content: ''; position: absolute; top: 1px; bottom: 1px; left: -8px; width: 2px; border-radius: 1px; background: var(--fm-tone); }
-.fp-title { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto 84px 4ch; grid-template-areas: 'mark name word docs verbs meta'; align-items: baseline; column-gap: 8px; font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
+.fp-title { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto var(--fp-acts) 4ch; grid-template-areas: 'mark name word docs verbs meta'; align-items: baseline; column-gap: 8px; font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
 .fp-mark { grid-area: mark; align-self: center; width: 10px; height: 10px; overflow: visible; }
 .fp-name { grid-area: name; min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); font: 500 var(--type-row)/var(--leading-tight) var(--font-mono); }
 .fp-word { grid-area: word; color: var(--fm-text); white-space: nowrap; }
@@ -35,10 +35,17 @@
 .fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line > .fp-note { opacity: 1; transform: none; transition: opacity .24s ease-out .04s, transform .55s var(--fp-spring) .02s; }
 .fp-row:not(.fp-head):hover:not([data-selected], :focus-within) > .fp-line, .fp-row:not(.fp-head):hover:not([data-selected], :focus-within) > .fp-line > .fp-note { transition-delay: .25s; }
 
-.fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: baseline; gap: 2px; }
-/* Verbs draw at the size of the document glyphs beside them: one row of marks, one weight. */
-.ws-reader .fp-verbs .ws-header-icon { width: 2.6ch; height: auto; font: var(--type-row)/var(--leading-solid) var(--font-mono); }
-.ws-reader .fp-verbs .ws-header-icon svg { width: .95em; height: .95em; vertical-align: -.12em; }
+/* A row's acts (Dock.actsFor) keep one column wide enough for all six, so the
+   columns before them stand still from row to row. They show on the
+   highlighted row and under the pointer; elsewhere they keep their place
+   quietly, unless an undo window is drawn there. */
+.fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; align-self: center; visibility: hidden; }
+.fp-row:is([data-selected], :focus-within) > .fp-line .fp-verbs, .fp-verbs:has([data-verdict-pending]) { visibility: visible; }
+@media (hover: hover) { .fp-row:hover > .fp-line .fp-verbs { visibility: visible; } }
+/* Acts draw at the size of the document glyphs beside them: one row of marks, one weight. */
+.ws-reader .fp-verbs .ws-header-icon { width: 22px; height: 22px; }
+.ws-reader .fp-verbs .ws-header-icon svg { width: 15px; height: 15px; }
+.fp-verbs .ws-acts-verbs + * { margin-left: 4px; }
 .fp-docs { grid-area: docs; display: grid; font-size: var(--type-row); line-height: var(--leading-solid); grid-template-columns: 2.6ch 2.6ch 5ch; gap: 2px; white-space: nowrap; }
 .fp-lead { grid-column: 1; } .fp-constitution { grid-column: 2; } .fp-sent { grid-column: 3; justify-self: start; }
 .fp-chip { min-width: 2.2ch; padding: 0 4px; border: 1px solid transparent; border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-soft); font: inherit; cursor: pointer; }
@@ -104,9 +111,14 @@
   .ws-family-grid { --fp-gutter: 16px; }
   .fp-row { --fp-indent: calc(var(--fp-level, 0) * 12px); }
   .fp-section { padding-left: calc(var(--fp-gutter) + var(--fp-level, 0) * 12px); }
-  .fp-title { grid-template-columns: 12px auto minmax(0, 1fr) auto auto; grid-template-areas: 'mark name name name name' '. docs word verbs meta'; row-gap: 3px; }
+  .fp-title { grid-template-columns: 12px auto minmax(0, 1fr) auto; grid-template-areas: 'mark name name name' '. docs word meta' '. verbs verbs verbs'; row-gap: 3px; }
   .fp-docs, .fp-word { justify-self: start; }
-  .fp-chip, .fp-file, .fp-back, .fp-step, .ws-reader .fp-verbs .ws-header-icon { min-height: var(--ws-phone-target); }
+  .fp-chip, .fp-file, .fp-back, .fp-step { min-height: var(--ws-phone-target); }
+  /* On a narrow page only the highlighted row draws its acts, on a line of their own at full touch size. */
+  .fp-verbs { justify-content: flex-start; display: none; }
+  .fp-row[data-selected] > .fp-line .fp-verbs, .fp-verbs:has([data-verdict-pending]) { display: flex; }
+  .ws-reader .fp-verbs .ws-header-icon { width: var(--ws-phone-target); height: var(--ws-phone-target); }
+  .ws-reader .fp-verbs .ws-header-icon svg { width: 20px; height: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .fp-row:not(.fp-head) > .fp-line { transition: none; }

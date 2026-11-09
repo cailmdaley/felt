@@ -21,8 +21,6 @@
 .ws-verdict-undo button:hover { color: var(--ws-ink); }
 .ws-verdict-undo kbd { font: inherit; font-variant-caps: normal; letter-spacing: 0; }
 .ws-verdict-undo button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
-/* The fiber page's pair sits at its line's right end; so does the line. */
-.kbn-ctl-verdict > .ws-verdict-undo { justify-content: flex-end; }
 /* On a Desk card the line takes the card's foot (KanbanModal.css). */
 @keyframes ws-verdict-arrive { from { opacity: 0; } }
 @keyframes ws-verdict-leave { to { opacity: .3; } }
@@ -43,10 +41,4 @@
 .ws-fiber-prose .ws-fiber-roles a.kbn-wikilink-live { color: inherit; text-decoration: none; }
 .ws-fiber-prose .ws-fiber-roles a.kbn-wikilink-live:is(:hover, :focus-visible) {
   color: var(--ws-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
-}
-.ws-fiber-acts .kbn-ctl-verdict { display: flex; align-items: center; gap: 2px; margin-left: auto; }
-.ws-fiber-acts .kbn-ctl-verdict[hidden] { display: none; }
-.ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-verdict { gap: 6px; }
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-fiber-acts .kbn-ctl-verdict { gap: var(--ws-small-gap); }
 }

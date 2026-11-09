@@ -8,7 +8,7 @@ import type { Conversations } from '../conversationOpening.js'
 import { threadKey, threadState, type ThreadIndex } from '../threads.js'
 import { fiberKey, parseDocKey, type DocKey } from './documents.js'
 import { slug } from '../threadOutline.js'
-import { headerLifecycleVerbsFor, iconVerb, verbSpec, type LifecycleVerb } from './lifecycleVerbs.js'
+import type { FiberActs } from './Dock.js'
 import { SENT_GLYPH, sendLines, type Send, type SentFile } from './sendLines.js'
 import { Thumbnail } from './Thumbnail.js'
 import './family-page.css'
@@ -102,8 +102,10 @@ export class FamilyPage {
   private readonly disposed: () => void
   private readonly sighted: () => void
   private readonly selectionChanged: () => void
-  private readonly act?: (card: KanbanCard, verb: LifecycleVerb, anchor: HTMLElement) => void
-  private readonly canRest: boolean
+  /** Draws a fiber's acts for its row; the band owns what they do. */
+  private readonly actsFor?: (target: () => KanbanCard) => FiberActs
+  /** Each row's acts, by thread. */
+  private readonly acts = new Map<string, FiberActs>()
   /** `h` from a row: off the page, back where it was opened from. */
   leave?: () => void
   /** Each unfolded document, by thread, kept across repaints so a page holds its place. */
@@ -115,8 +117,8 @@ export class FamilyPage {
    * `conversations` moves Rex quietly to a thread's existing window;
    * `sighted` hears the selection move.
    */
-  constructor(conversations: Pick<Conversations, 'reach'>, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, sighted: () => void = () => {}, selectionChanged: () => void = () => {}, act?: (card: KanbanCard, verb: LifecycleVerb, anchor: HTMLElement) => void, canRest = false) {
-    this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.sighted = sighted; this.selectionChanged = selectionChanged; this.act = act; this.canRest = canRest
+  constructor(conversations: Pick<Conversations, 'reach'>, feeds: FamilyFeeds, place: MapPlace, disposed: () => void, sighted: () => void = () => {}, selectionChanged: () => void = () => {}, actsFor?: (target: () => KanbanCard) => FiberActs) {
+    this.conversations = conversations; this.feeds = feeds; this.place = place; this.disposed = disposed; this.sighted = sighted; this.selectionChanged = selectionChanged; this.actsFor = actsFor
     this.place.docs ??= new Map()
     this.tree.setAttribute('role', 'tree')
     this.tree.setAttribute('aria-label', 'The constitution and its threads, most urgent first')
@@ -126,6 +128,11 @@ export class FamilyPage {
     grid.append(this.scroller, this.announcement)
     this.el.append(grid)
     this.tree.addEventListener('click', event => this.clicked(event))
+    // A row's act highlights its row before it acts, so the band and keys follow the fiber acted on.
+    this.tree.addEventListener('click', event => {
+      const key = (event.target as Element).closest('.fp-verbs')?.closest<HTMLElement>('[role="treeitem"]')?.dataset.row
+      if (key) this.select(key)
+    }, true)
     this.tree.addEventListener('keydown', event => this.key(event))
     this.scroller.addEventListener('scroll', () => this.easeHold(), { passive: true })
     bindDrawnPage(this.el, { suspend: () => this.suspend(), resume: () => this.resume(), dispose: () => this.dispose() })
@@ -233,7 +240,7 @@ export class FamilyPage {
     const lostSelection = this.place.selected !== null && !keys.has(this.place.selected)
     if (lostSelection) this.place.selected = null
     const order = [this.fillHead(model.root), ...this.lines.map(line => this.fill(line))]
-    for (const [key, row] of this.rows) if (!keys.has(key)) { row.remove(); this.rows.delete(key) }
+    for (const [key, row] of this.rows) if (!keys.has(key)) { row.remove(); this.rows.delete(key); this.dropActs(key) }
     for (const key of this.embedded.keys()) if (!keys.has(key)) this.dropDoc(key)
     for (const key of [...this.thumbs.keys()]) if (!keys.has(key)) this.keepThumbs(key, new Set())
     order.forEach((row, n) => { if (this.tree.children[n] !== row) this.tree.insertBefore(row, this.tree.children[n] ?? null) })
@@ -342,18 +349,28 @@ export class FamilyPage {
     note.hidden = !thread.note
     row.setAttribute('aria-label', [thread.name, thread.word].filter(Boolean).join(', '))
     this.fillDocs(row, thread)
-    const verbs = row.querySelector<HTMLElement>('.fp-verbs')!
-    const offered = thread !== model.root && this.act ? headerLifecycleVerbsFor(thread.card, this.canRest) : []
-    const shape = JSON.stringify([offered.map(verb => verbSpec(verb, thread.card).label), slug(thread.card)])
-    if (verbs.dataset.shape !== shape) {
-      verbs.dataset.shape = shape
-      verbs.replaceChildren(...offered.map(verb => {
-        const button = iconVerb(verb, thread.card, slug(thread.card))
-        button.addEventListener('click', event => { event.stopPropagation(); this.select(thread.key); this.act!(this.model!.threads.get(thread.key)!.card, verb, button) })
-        return button
-      }))
-    }
+    this.fillActs(row.querySelector<HTMLElement>('.fp-verbs')!, thread.key)
     this.seatDoc(row.querySelector<HTMLElement>('.fp-doc')!, thread)
+  }
+  /**
+   * The fiber's acts on its row: its lifecycle verbs, its conversation and its
+   * settings, drawn by the band ({@link Dock.actsFor}) so a row and the band
+   * never offer different sets. They show on the highlighted row, and under the
+   * pointer; the others stay quiet.
+   */
+  private fillActs(slot: HTMLElement, key: string): void {
+    if (!this.actsFor) return
+    let acts = this.acts.get(key)
+    if (!acts) {
+      acts = this.actsFor(() => this.model!.threads.get(key)!.card)
+      this.acts.set(key, acts)
+    }
+    if (acts.el.parentElement !== slot) slot.replaceChildren(acts.el)
+    acts.paint()
+  }
+  private dropActs(key: string): void {
+    this.acts.get(key)?.dispose()
+    this.acts.delete(key)
   }
   /**
    * What a thread holds, on its row in the one order every surface keeps, in
@@ -554,7 +571,7 @@ export class FamilyPage {
 
   private clicked(event: MouseEvent): void {
     const target = event.target as Element, model = this.model
-    if (!model || event.detail > 1 || target.closest('.fp-doc')) return
+    if (!model || event.detail > 1 || target.closest('.fp-doc, .fp-verbs')) return
     const held = target.closest<HTMLElement>('[data-held]'), files = target.closest<HTMLElement>('[data-files]')
     const back = target.closest<HTMLElement>('[data-back]'), older = target.closest<HTMLElement>('[data-older]')
     if (back) { this.back(model.threads.get(back.dataset.back!)!); return }
@@ -757,6 +774,7 @@ export class FamilyPage {
     this.suspend()
     for (const key of [...this.embedded.keys()]) this.dropDoc(key)
     for (const key of [...this.thumbs.keys()]) this.keepThumbs(key, new Set())
+    for (const key of [...this.acts.keys()]) this.dropActs(key)
     this.disposed()
   }
 }

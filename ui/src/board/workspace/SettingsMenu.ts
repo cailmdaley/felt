@@ -23,7 +23,9 @@ export class SettingsMenu {
   }
   get isOpen(): boolean { return !this.el.hidden }
   show(content: HTMLElement, opener: HTMLElement, host: HTMLElement): void {
-    if (this.isOpen) { this.close(); return }
+    // The ⚙ that opened it closes it; another ⚙ moves it there.
+    if (this.isOpen && this.opener === opener) { this.close(); return }
+    if (this.isOpen) this.hide()
     this.opener = opener
     host.append(this.el)
     content.hidden = false

@@ -1,4 +1,4 @@
-import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
+import type { KanbanCard } from '../KanbanTypes.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { onDesk, restReachable, reviewReachable, schedulePaused, scheduled, standing, verdictsFor } from './fiberPageState.js'
 
@@ -42,21 +42,6 @@ export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lifecycle
   const verbs = LIFECYCLE_VERBS.map(spec => spec.verb).filter(verb =>
     verb === 'review' ? reviewReachable(card) : verb === 'rest' ? canRest && restReachable(card) : verdicts.includes(verb))
   return standing(card) && verbs.includes('temper') ? ['temper', ...verbs.filter(verb => verb !== 'temper')] : verbs
-}
-
-/** The header keeps only the actions called for by the card's current state.
- *  A standing constitution offers pause or resume of its schedule and Retire,
- *  and Temper run while a run waits on the human. */
-export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): LifecycleVerb[] {
-  const reachable = lifecycleVerbsFor(card, canRest)
-  // A seat at rest keeps only its clock: a scheduled one can pause or resume it.
-  if (card.column === 'roles') return scheduled(card) ? reachable.filter(verb => verb === 'rest') : []
-  if (standing(card)) return reachable
-  if (card.column === 'awaitingReview') return reachable.filter(verb => verb === 'temper' || verb === 'discard')
-  if (card.column === 'inFlight' || hasLiveWorker(card)) return reachable.filter(verb => verb === 'review' || verb === 'rest')
-  if (card.column === 'drafts') return reachable.filter(verb => verb === 'rest')
-  if (['resting', 'tempered', 'composted'].includes(card.column)) return []
-  return reachable
 }
 
 /** Name a verb's button for the card it acts on: its word, an optional target, and its key. */

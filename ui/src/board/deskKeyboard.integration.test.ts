@@ -214,17 +214,15 @@ describe('Reader Rest lifecycle', () => {
 })
 
 describe('Rest controls', () => {
-  it.each([true, false])('a reviewed constitution keeps Rest on its keyboard while its header offers session actions, tempered=%s', async tempered => {
+  it.each([true, false])('a reviewed constitution offers Rest alone among its verbs, and on its keyboard, tempered=%s', async tempered => {
     const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot', sessionUuid: 'finished-session' })
     draw(response({ timeline: { past: [finished], futureDated: [] } }))
     inside.setView('chronicle')
     inside.openDocumentChannel(finished)
     await settle()
-    const rest = document.querySelector<HTMLButtonElement>('.ws-reader .kbn-ctl-rest')!
-    expect(rest).not.toBeNull()
-    expect(rest.hidden).toBe(true)
-    expect([...document.querySelectorAll<HTMLButtonElement>('.ws-reader .ws-worker-acts button')].filter(button => !button.hidden).map(button => button.dataset.verb)).toEqual(['Resume', 'New session'])
-    expect(document.querySelector<HTMLElement>('.ws-reader .kbn-ctl-temper')!.hidden).toBe(true)
+    const acts = [...document.querySelectorAll<HTMLElement>('.ws-reader .ws-fiber-acts')].find(el => !el.closest('[hidden]'))!
+    expect([...acts.querySelectorAll<HTMLButtonElement>('.ws-acts-verbs button')].map(button => button.dataset.verb)).toEqual(['Rest'])
+    expect([...document.querySelectorAll<HTMLButtonElement>('.ws-reader .ws-worker-acts button[data-verb]')].filter(button => !button.hidden).map(button => button.dataset.verb)).toEqual(['Resume', 'New session'])
     const target = document.querySelector<HTMLElement>('.ws-reader .ws-return')!
     target.focus()
     press('s', {}, target)

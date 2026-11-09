@@ -27,7 +27,7 @@ const bandConsole = (current: KanbanCard, openWorker?: WorkerOpener): HTMLAnchor
   const dock = new Dock('', vi.fn(), undefined, openWorker)
   dock.open(current)
   document.body.append(dock.el)
-  return dock.el.querySelector<HTMLAnchorElement>('.ws-band-console')!
+  return dock.el.querySelector<HTMLAnchorElement>('.ws-acts-console')!
 }
 const opensInPlace = (opener: HTMLAnchorElement): boolean => !opener.hidden && !opener.hasAttribute('href')
 

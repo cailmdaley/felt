@@ -611,7 +611,7 @@ export class Workspace {
   private controls(state: ChannelState | null): Dock | undefined {
     if (!state?.metadataKnown || state.channel.uid.startsWith('other:') || !onDesk(state.card)) return undefined
     this.dock.open(state.card)
-    this.dock.setActionCard(this.actionCard(state.card))
+    this.steerBand(state)
     return this.dock
   }
   /** The reader's and the band's way back name where the visited path leads. */
@@ -624,10 +624,12 @@ export class Workspace {
   private seatBand(state: ChannelState): void {
     const dock = this.controls(state)
     this.reader.setBand(dock?.el ?? null)
+    // With no band, nothing a row's ⚙ could open stands behind it.
+    this.dock.setSeated(!!dock)
     if (!dock) return
     const ancestry: KanbanCard[] = []
     for (let parent = this.orchestrator(state.card); parent; parent = this.orchestrator(parent)) ancestry.unshift(parent)
-    dock.openSettings = (content, opener) => this.reader.showSettings(content, opener)
+    dock.openSettings = (content, opener) => this.reader.showSettings(content, opener, dock.el)
     dock.closeSettings = after => this.reader.closeSettings(after)
     dock.openFile = (path, title, owner) => this.openFile(path, title, owner)
     dock.setNav({
@@ -731,16 +733,17 @@ export class Workspace {
   private actionCard(card: KanbanCard): KanbanCard {
     return this.mapPage(this.current)?.selection ?? card
   }
+  /** The band follows the highlighted fiber, and leaves its acts to the rows while the family page draws them. */
+  private steerBand(state: ChannelState): void {
+    this.dock.setActionCard(this.actionCard(state.card), this.mapPage(state) !== undefined)
+  }
   private family(): HTMLElement {
     const state = this.current!
     state.familyPage ??= new FamilyPage({ reach: card => this.reach(card) }, this.mapFeeds, state.mapPlace,
       () => { state.familyPage = undefined },
       () => { if (this.current === state) this.sight(state) },
-      () => { if (this.current === state && this.isActive) this.dock.setActionCard(this.actionCard(state.card)) },
-      (card, verb, anchor) => {
-        if (verb === 'rest') this.opts.onRest?.(card, anchor)
-        else this.queueVerdict(card, ({ review: 'awaitingReview', temper: 'tempered', discard: 'composted' } as const)[verb])
-      }, !!this.opts.onRest)
+      () => { if (this.current === state && this.isActive) this.steerBand(state) },
+      target => this.dock.actsFor(target))
     state.familyPage.leave ??= () => this.returnToOrigin()
     state.familyPage.update(state.card, this.graph())
     return state.familyPage.el
@@ -906,7 +909,7 @@ export class Workspace {
     state.selected = key
     state.routedFile = undefined
     this.reader.select(key)
-    this.dock.setActionCard(this.actionCard(state.card))
+    this.steerBand(state)
     if (key === this.familyDocument(state.card)) this.focusMap(state)
     this.namePage(state, key)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }

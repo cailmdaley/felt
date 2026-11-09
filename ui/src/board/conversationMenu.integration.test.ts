@@ -23,7 +23,7 @@ const bandConsole = (current: KanbanCard, openWorker?: WorkerOpener): HTMLAnchor
   const dock = new Dock('', vi.fn(), undefined, openWorker)
   dock.open(current)
   document.body.append(dock.el)
-  return dock.el.querySelector<HTMLAnchorElement>('.ws-band-console')!
+  return dock.el.querySelector<HTMLAnchorElement>('.ws-acts-console')!
 }
 const buildConsole = (openWorker = vi.fn(), sessionLink: string | undefined = web): HTMLAnchorElement =>
   bandConsole(card({ id: 'test', status: 'active', workerState: 'running', tmuxSession: 'worker', shuttleHost: 'remote', sessionLink }), openWorker)
