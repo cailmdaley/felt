@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
-  open: undefined as undefined | ((session: string, host?: string) => void),
+  open: undefined as undefined | ((session: string, host?: string, past?: string) => void),
   toast: vi.fn(),
 }))
 vi.mock('./board/KanbanModal.js', () => ({
@@ -30,6 +30,14 @@ describe('worker pill terminal errors', () => {
     expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({
       tmux_session: 'codex-terminal-probe', shuttle_host: 'remote-a',
     })
+  })
+
+  it('names the worker\'s past session, which the daemon reopens if the terminal has gone', async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ attached: true }))
+    vi.stubGlobal('fetch', fetch)
+    state.open!('worker', 'fir', 'past-session')
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled())
+    expect(JSON.parse(fetch.mock.calls[0]![1]!.body as string)).toEqual({ tmux_session: 'worker', shuttle_host: 'fir', session: 'past-session' })
   })
 
   it.each(['not JSON', JSON.stringify({ error: { reason: 'timeout' } })])('uses a sentence for malformed error responses: %s', async body => {

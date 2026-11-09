@@ -420,8 +420,7 @@ defmodule Shuttle.OpenerTest do
     Env.put_app_env(:remotes, [%{name: "remote-a", url: "https://remote.example.test"}])
     assert {:error, reason} = Opener.open(@name, "remote-a")
     assert reason =~ "no ssh path"
-    assert {:error, reason} = Opener.open(@name)
-    assert reason =~ "absent or unobservable"
+    assert {:error, {:absent, @name}} = Opener.open(@name)
     assert requests("session.create") == []
   end
 

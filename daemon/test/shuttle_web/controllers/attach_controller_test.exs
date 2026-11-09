@@ -70,6 +70,30 @@ defmodule ShuttleWeb.AttachControllerTest do
     refute_received {:selected, _, _}
   end
 
+  test "a worker's terminal that has gone falls back to reopening its past session" do
+    Env.put_app_env(:remotes, [])
+    Env.put_app_env(:attach_result, {:error, {:absent, "worker"}})
+
+    assert %{"error" => absent} =
+             post(api_conn(), "/api/v1/attach", Jason.encode!(%{tmux_session: "worker"}))
+             |> json_response(502)
+
+    assert absent =~ "Cannot locate terminal worker"
+
+    body = %{
+      tmux_session: "worker",
+      session: "00000000-0000-4000-8000-000000000001",
+      shuttle_host: "nowhere"
+    }
+
+    # The resume path answers: here, for a host this daemon cannot route to.
+    assert %{"error" => reason} =
+             post(api_conn(), "/api/v1/attach", Jason.encode!(body)) |> json_response(422)
+
+    assert reason =~ "unknown origin"
+    assert_received {:opened, "worker", "nowhere"}
+  end
+
   test "unsupported remote Rex errors reach the board as a 502" do
     message = "opening a worker on a remote Rex server is not supported yet"
     Env.put_app_env(:attach_result, {:error, message})

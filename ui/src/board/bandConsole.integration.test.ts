@@ -37,7 +37,7 @@ describe("the band's console opens the conversation, as c does", () => {
     expect(opener.getAttribute('role')).toBe('button')
     expect(opener.getAttribute('aria-label')).toBe("Open debug's conversation in Terminal (c)")
     opener.click()
-    expect(openWorker.mock.calls).toEqual([['shuttle-debug', 'host-a']])
+    expect(openWorker.mock.calls).toEqual([['shuttle-debug', 'host-a', undefined]])
   })
   it("follows Claude's opening preference, as a native link", () => {
     const live = worker({ workerAgent: 'claude-opus', sessionLink: 'https://claude.ai/code/session_test' })
@@ -68,7 +68,7 @@ describe("the band's console opens the conversation, as c does", () => {
     expect(openWorker).not.toHaveBeenCalled()
     saveConversationOpening('terminal')
     expect(dock.openConversation(live)).toBe(true)
-    expect(openWorker).toHaveBeenCalledWith('shuttle-debug', 'host-a')
+    expect(openWorker).toHaveBeenCalledWith('shuttle-debug', 'host-a', undefined)
   })
   it('reopens a past session on its host when no worker is up', async () => {
     const opener = consoleFor(worker({ workerState: undefined, tmuxSession: undefined, status: 'closed', sessionUuid: 'past-session' }))
@@ -87,6 +87,6 @@ describe("the band's console opens the conversation, as c does", () => {
     dock.setActionCard(worker({ id: 'lander', uid: 'lander-uid', tmuxSession: 'shuttle-lander' }))
     expect(opener.getAttribute('aria-label')).toBe("Open lander's conversation in Terminal (c)")
     opener.click()
-    expect(openWorker.mock.calls).toEqual([['shuttle-lander', 'host-a']])
+    expect(openWorker.mock.calls).toEqual([['shuttle-lander', 'host-a', undefined]])
   })
 })

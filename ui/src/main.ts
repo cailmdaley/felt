@@ -67,11 +67,11 @@ const board = new KanbanModal({
   // daemon does, via POST /api/v1/attach (not owner-routed — the tab opens on
   // the host serving this UI, ssh-ing out for a remote worker). Success raises
   // the terminal; only failures surface a toast.
-  onOpenWorker: (tmuxSession, shuttleHost) => {
+  onOpenWorker: (tmuxSession, shuttleHost, past) => {
     void daemonFetch(`${shuttleBase}/api/v1/attach`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null }),
+      body: JSON.stringify({ tmux_session: tmuxSession, shuttle_host: shuttleHost ?? null, ...(past ? { session: past } : {}) }),
     })
       .then(async (res) => {
         if (!res.ok) {

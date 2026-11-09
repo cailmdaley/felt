@@ -7,9 +7,14 @@ defmodule Shuttle.Opener do
   @doc """
   Open a conversation's terminal and bring it forward: a Rex display selects the
   worker's window, creating a viewer for a tmux worker, and activates the app;
-  a kitty display opens a tab.
+  a kitty display opens a tab. A Rex terminal that is gone, here or on its
+  owner, answers `{:error, {:absent, name}}`.
   """
-  @spec open(String.t(), String.t() | nil) :: :ok | {:error, String.t()}
+
+  @doc "The words for a terminal that is gone."
+  def absent_message(name), do: "Cannot locate terminal #{name}; it is absent or unobservable"
+
+  @spec open(String.t(), String.t() | nil) :: :ok | {:error, String.t() | {:absent, String.t()}}
   def open(name, host \\ nil)
 
   def open(name, host) when is_binary(name) and name != "" do
@@ -101,7 +106,7 @@ defmodule Shuttle.Opener do
           Rex.reveal_tmux(name, nil, nil, fiber: Shuttle.Terminal.RexTree.fiber_for(name))
 
         nil ->
-          {:error, "Cannot locate terminal #{name}; it is absent or unobservable"}
+          {:error, {:absent, name}}
       end
     else
       OpenTrace.step(:kitty, fn -> kitty().open(name, nil) end)
@@ -163,7 +168,7 @@ defmodule Shuttle.Opener do
       {{:ok, binding}, true} -> Rex.select_binding(runner, binding)
       {{:ok, binding}, _} -> Rex.reveal_binding(runner, binding, quiet: true)
       {_, true} -> {:ok, false}
-      _ -> {:error, "Cannot locate terminal #{name}; it is absent or unobservable"}
+      _ -> {:error, {:absent, name}}
     end
   end
 
@@ -189,6 +194,9 @@ defmodule Shuttle.Opener do
 
         {:error,
          "No Rex app client is attached to #{remote.name}. Choose Add Remote Host… in the Rex app and enter #{address}"}
+
+      {:ok, %{"code" => "absent", "name" => name}} when is_binary(name) ->
+        {:error, {:absent, name}}
 
       {:ok, %{"error" => message}} when is_binary(message) ->
         {:error, "#{remote.name}: #{message}"}

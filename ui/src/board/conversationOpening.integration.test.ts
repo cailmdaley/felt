@@ -37,7 +37,7 @@ describe('conversation opening', () => {
     const opener = bandConsole(worker, attach)
     expect(opensInPlace(opener)).toBe(true)
     opener.click()
-    expect(attach).toHaveBeenCalledWith('test-shuttle', undefined)
+    expect(attach).toHaveBeenCalledWith('test-shuttle', undefined, undefined)
   })
 
   it.each([
@@ -81,7 +81,7 @@ describe('conversation opening', () => {
     const open = vi.fn()
     const codex = bandConsole(card({ id: 'codex', status: 'active', workerState: 'running', tmuxSession: 'codex-shuttle' }), open)
     codex.click()
-    expect(open).toHaveBeenCalledWith('codex-shuttle', undefined)
+    expect(open).toHaveBeenCalledWith('codex-shuttle', undefined, undefined)
   })
 
   it('keeps a stored Rex preference', () => {

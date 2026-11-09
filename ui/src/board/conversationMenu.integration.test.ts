@@ -43,7 +43,7 @@ it('right-click offers all destinations without activating the default and marks
   expect(browser.rel).toBe('noopener noreferrer')
   items()[0].click()
   expect(conversationOpening()).toBe('terminal')
-  expect(attach).toHaveBeenCalledWith('worker', 'remote')
+  expect(attach).toHaveBeenCalledWith('worker', 'remote', undefined)
   expect(document.querySelector('[role="menu"]')).toBeNull()
 })
 

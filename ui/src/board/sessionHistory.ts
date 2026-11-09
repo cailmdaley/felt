@@ -67,7 +67,7 @@ export function parseSessionLinks(body: unknown): Map<string, SessionLinkEntry> 
 
 /** What `POST /api/v1/attach` is sent: a live worker's tmux, or a session to resume. */
 export type AttachBody =
-  | { tmux_session: string; shuttle_host: string | null }
+  | { tmux_session: string; session?: string; shuttle_host: string | null }
   | { session: string; shuttle_host: string | null }
 
 type SessionTarget =
@@ -108,7 +108,7 @@ export function sessionTargets(
     if (live && ctx.liveTmux) {
       terminal = {
         kind: 'terminal',
-        body: { tmux_session: ctx.liveTmux, shuttle_host: ctx.fiberHost ?? null },
+        body: { tmux_session: ctx.liveTmux, session: record.session, shuttle_host: ctx.fiberHost ?? null },
         label: 'attach',
         title: `Attach to ${ctx.liveTmux}`,
       }

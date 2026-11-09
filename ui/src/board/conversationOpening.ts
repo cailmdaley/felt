@@ -37,8 +37,9 @@ export type ConversationDestination = { id: ConversationOpening; label: string; 
   | { href: string; run?: never }
   | { run: () => void; href?: never }
 )
-export type ConversationWorker = Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'terminalBackend' | 'rexSession' | 'shuttleHost' | 'launchError'>
-export type WorkerOpener = (session: string, host?: string) => void
+export type ConversationWorker = Pick<KanbanCard, 'tmuxSession' | 'sessionUuid' | 'sessionLink' | 'terminalBackend' | 'rexSession' | 'shuttleHost' | 'launchError'>
+/** Opens a worker's terminal; `past`, its harness session, is reopened instead when the terminal has gone. */
+export type WorkerOpener = (session: string, host?: string, past?: string) => void
 /** A thread's conversation, two ways: `open` is the explicit act, true if it had a destination; `reach` is a click's quiet move, true once Rex moved. */
 export interface Conversations { open(card: KanbanCard): boolean; reach(card: KanbanCard): Promise<boolean> }
 
@@ -47,7 +48,7 @@ export function conversationDestinations(card: ConversationWorker, device: Conve
   const destinations: ConversationDestination[] = []
   if (device.desktop && card.tmuxSession && openWorker) {
     const session = card.tmuxSession
-    destinations.push({ id: 'terminal', label: card.terminalBackend === 'rex' ? 'Rex' : 'Terminal', run: () => openWorker(session, card.shuttleHost) })
+    destinations.push({ id: 'terminal', label: card.terminalBackend === 'rex' ? 'Rex' : 'Terminal', run: () => openWorker(session, card.shuttleHost, card.sessionUuid) })
   }
   const web = claudeWebLink(card.sessionLink)
   if (web) {

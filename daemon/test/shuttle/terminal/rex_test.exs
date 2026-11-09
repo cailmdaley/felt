@@ -255,7 +255,9 @@ defmodule Shuttle.Terminal.RexTest do
         "name" => "missing"
       })
 
-    assert %{"error" => reason} = Jason.decode!(conn.resp_body)
+    assert %{"error" => reason, "code" => "absent", "name" => "missing"} =
+             Jason.decode!(conn.resp_body)
+
     assert reason =~ "absent or unobservable"
     refute Enum.any?(FakeRex.calls(), fn {bin, _, _} -> bin == "open" end)
   end

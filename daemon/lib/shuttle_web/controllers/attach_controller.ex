@@ -7,6 +7,8 @@ defmodule ShuttleWeb.AttachController do
     * `{ "tmux_session": "...", "shuttle_host": "..." }` — a live worker's
       session, from the ▸ aloft / ☞ needs-you-now pill or a History row marked
       live.
+    * both keys — a worker that may have just ended: its terminal when it is
+      there, else its session reopened as below.
     * `{ "session": "<uuid>", "shuttle_host": "..." }` — a past harness session,
       from a History row. The host that ran it first starts (or finds) the
       terminal resuming it (`Shuttle.SessionResume`; forwarded to
@@ -54,6 +56,11 @@ defmodule ShuttleWeb.AttachController do
         |> put_status(422)
         |> json(%{code: "no_app_client", error: "No Rex app client is attached"})
 
+      {:error, {:absent, name}} ->
+        conn
+        |> put_status(422)
+        |> json(%{code: "absent", name: name, error: Shuttle.Opener.absent_message(name)})
+
       {:error, reason} ->
         conn |> put_status(422) |> json(%{error: reason})
     end
@@ -84,6 +91,18 @@ defmodule ShuttleWeb.AttachController do
        when is_binary(session),
        do: json(conn, %{moved: false, session: session})
 
+  # A worker that has just ended leaves its past session: the live terminal
+  # when it is there, else that session reopened.
+  defp create_traced(conn, %{"tmux_session" => tmux, "session" => past} = params)
+       when is_binary(tmux) and is_binary(past) do
+    host = Map.get(params, "shuttle_host")
+
+    case OpenTrace.step(:display, fn -> opener().open(tmux, host) end) do
+      {:error, {:absent, _}} -> create_traced(conn, Map.delete(params, "tmux_session"))
+      result -> attached(conn, tmux, result)
+    end
+  end
+
   defp create_traced(conn, %{"tmux_session" => session} = params) when is_binary(session) do
     attach(conn, session, Map.get(params, "shuttle_host"))
   end
@@ -108,8 +127,11 @@ defmodule ShuttleWeb.AttachController do
     conn |> put_status(400) |> json(%{error: "tmux_session or session is required"})
   end
 
-  defp attach(conn, tmux, host) do
-    case OpenTrace.step(:display, fn -> opener().open(tmux, host) end) do
+  defp attach(conn, tmux, host),
+    do: attached(conn, tmux, OpenTrace.step(:display, fn -> opener().open(tmux, host) end))
+
+  defp attached(conn, tmux, result) do
+    case result do
       :ok ->
         json(conn, %{attached: true, session: tmux})
 
@@ -168,6 +190,7 @@ defmodule ShuttleWeb.AttachController do
   end
 
   defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error({:absent, name}), do: Shuttle.Opener.absent_message(name)
 
   defp format_error({:display_failed, reason}),
     do: "could not prepare the terminal: #{inspect(reason)}"
