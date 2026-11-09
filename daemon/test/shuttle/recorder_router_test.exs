@@ -53,7 +53,7 @@ defmodule Shuttle.RecorderRouterTest do
 
   test "desktop defaults local, phone chooses a capable recorder, and an address always wins" do
     RecorderClient.set(probes())
-    assert {:ok, :local} = RecorderRouter.select_start(%{"origin" => "agent-host"})
+    assert {:ok, :local} = RecorderRouter.select_start(%{"origin" => "agent-host"}, hears: true)
     assert RecorderClient.calls() == []
 
     assert {:ok, {:remote, %Remote{name: "mac-recorder"}}} =
@@ -135,6 +135,65 @@ defmodule Shuttle.RecorderRouterTest do
              |> json_response(400)
 
     assert RecorderClient.calls() == []
+  end
+
+  @tag :tmp_dir
+  test "a host that cannot hear reads and controls the first desktop recorder, probing once",
+       %{tmp_dir: root} do
+    Env.put_env("SHUTTLE_VOICE_FILE", Path.join(root, "voice.json"))
+    Env.put_env("SHUTTLE_DATA_DIR", root)
+    Env.put_app_env(:hark_dir, Path.join(root, "hark"))
+    observed = %{available: false, capture: nil}
+
+    Env.start_scoped!(
+      {Shuttle.Voice,
+       name: Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}"),
+       poll_ms: 60_000,
+       reconcile: fn _enabled, _opts -> {:ok, observed} end,
+       relay: fn _, _ -> :ok end,
+       monitor: fn _ -> %{pending: nil, last: nil} end}
+    )
+
+    {:ok, _} = Shuttle.Voice.update(%{})
+    url = "http://mac-recorder.example/api/v1/voice"
+
+    RecorderClient.set(
+      probes()
+      |> Map.put(
+        {:get_file, url <> "?recorder=mac-recorder"},
+        {:ok, 200, "application/json",
+         ~s({"available":true,"mode":"pinned","destination":{"fiber_id":"card"}})}
+      )
+      |> Map.put({:post, url}, {:ok, 200, ~s({"available":true,"mode":"off"})})
+      |> Map.put({:post, url <> "/discard"}, {:ok, 200, ~s({"discarded":3})})
+    )
+
+    for _ <- 1..2 do
+      assert %{
+               "recorder" => "mac-recorder",
+               "available" => true,
+               "destination" => %{"fiber_id" => "card"}
+             } =
+               api_conn() |> get("/api/v1/voice") |> json_response(200)
+    end
+
+    assert %{"recorder" => "mac-recorder", "mode" => "off"} =
+             api_conn() |> post("/api/v1/voice", ~s({"enabled":false})) |> json_response(200)
+
+    assert %{"recorder" => "mac-recorder", "discarded" => 3} =
+             api_conn() |> post("/api/v1/voice/discard", "{}") |> json_response(200)
+
+    calls = RecorderClient.calls()
+    assert Enum.count(calls, &match?({:get, _, _, _}, &1)) == 3
+
+    assert [{:post, ^url, %{"enabled" => false, "recorder_forwarded" => true}, _}, _] =
+             Enum.filter(calls, &match?({:post, _, _, _}, &1))
+  end
+
+  test "a host that cannot hear and finds no desktop recorder answers for itself" do
+    RecorderClient.set(%{})
+    assert {:ok, :local} = RecorderRouter.select_start(%{}, hears: false)
+    assert Enum.count(RecorderClient.calls()) == 3
   end
 
   test "speaker selection uses addressed capability probes without starting audio" do

@@ -1,8 +1,9 @@
 defmodule Shuttle.RecorderRouter do
   @moduledoc """
   Selects the recording host independently of the agent's owner. Phone requests
-  prefer a reachable device-capable recorder; explicit recorder addresses pin
-  all subsequent requests. Selection only reads capability, never starts audio.
+  prefer a reachable device-capable recorder, as every request does on a host
+  that cannot hear; explicit recorder addresses pin all subsequent requests.
+  Selection only reads capability, never starts audio.
   """
   alias Shuttle.{OriginRouter, Poller, RegistryCommon, Remote}
 
@@ -21,7 +22,7 @@ defmodule Shuttle.RecorderRouter do
         addressed(recorder, opts)
 
       params["source"] == "phone" ->
-        prefer_phone(opts)
+        desktop(opts)
 
       true ->
         addressed(params["origin"], opts)
@@ -51,10 +52,27 @@ defmodule Shuttle.RecorderRouter do
     end
   end
 
-  # Non-phone starts record here, even when the agent lives on another host.
+  @doc """
+  The recorder for voice reads and controls. Non-phone requests record here,
+  even when the agent lives on another host; a host that cannot hear answers
+  from the first remote whose desktop can, so a session on any host sees and
+  drives the human's recorder.
+  """
   def select_start(params, opts \\ []) do
-    select(Map.delete(params, "origin"), opts)
+    params = Map.delete(params, "origin")
+
+    if params["recorder"] in [nil, ""] and params["source"] != "phone" and
+         not Keyword.get_lazy(opts, :hears, fn -> Shuttle.Voice.snapshot().available end),
+       do: listener(opts),
+       else: select(params, opts)
   end
+
+  # Bands poll every 150 ms to 5 s and a probe waits on the slowest remote,
+  # so the choice holds for a while.
+  @listener_ms 30_000
+
+  defp listener(opts),
+    do: Shuttle.RuntimeCache.fetch({__MODULE__, :listener}, @listener_ms, fn -> desktop(opts) end)
 
   defp addressed(host, opts) do
     case OriginRouter.route_host(host, opts) do
@@ -66,7 +84,8 @@ defmodule Shuttle.RecorderRouter do
     end
   end
 
-  defp prefer_phone(opts) do
+  # The first reachable remote whose desktop can record, else this host.
+  defp desktop(opts) do
     case probe(opts, &("/api/v1/voice?recorder=" <> URI.encode_www_form(&1.name)), fn
            %{"available" => true, "sources" => sources} when is_list(sources) ->
              "desktop" in sources

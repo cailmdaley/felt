@@ -12,6 +12,20 @@ defmodule ShuttleWeb.VoiceTranscriptControllerTest do
     Env.put_env("SHUTTLE_DATA_DIR", root)
     Env.put_app_env(:remotes, [])
     Env.put_app_env(:voice_fibers, fn -> [%{"uid" => "uid-a", "slug" => "project/card-a"}] end)
+    Env.put_env("SHUTTLE_VOICE_FILE", Path.join(root, "voice.json"))
+    Env.put_app_env(:hark_dir, Path.join(root, "hark"))
+
+    # This host is a recorder, so unaddressed reads stay here.
+    Env.start_scoped!(
+      {Shuttle.Voice,
+       name: Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}"),
+       poll_ms: 60_000,
+       reconcile: fn _enabled, _opts -> {:ok, %{available: true, capture: nil}} end,
+       relay: fn _, _ -> :ok end,
+       monitor: fn _ -> %{pending: nil, last: nil} end}
+    )
+
+    {:ok, _} = Shuttle.Voice.update(%{})
     :ok
   end
 

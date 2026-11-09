@@ -319,6 +319,7 @@ The snapshot's running-worker rows carry the same checklist, and the owner feed 
 Listen's recorder and the receiving worker's owner are separate addresses.
 Use the `recorder` returned by `/voice` for subsequent polling, controls, transcript reads and phone audio.
 A phone-source request without an explicit recorder probes reachable fleet daemons and prefers an available desktop-capable recorder; it defaults to this daemon when none qualifies.
+On a daemon whose own voice is unavailable, every unaddressed read and control does the same, so a session's band on any host shows and drives the human's recorder; that choice is held for 30 s.
 Probes are addressed reads of `/voice`, bounded to 800 ms, and cannot recursively select another recorder.
 All recorder control forwarding is one-hop and single-attempt; an uncertain response never causes a fallback start.
 
