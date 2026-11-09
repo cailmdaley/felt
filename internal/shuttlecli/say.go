@@ -17,8 +17,9 @@ with a speaker, renders it with pocket-tts in the voice of the calling worker's
 role (the charter's voice: field, else dylan_thomas), and plays it after any
 lines already queued. Playback holds while the human is talking.
 
-Speak only inside a conversation the human is having with you by voice: one line,
-the rest on the card. Never unprompted.
+Speak only inside a conversation the human is having with you by voice, and then
+speak the whole reply as several short, interruptible lines; the card keeps the
+exact wording. Never unprompted.
 
 A worker is identified from its session; --fiber names the speaker from a
 terminal, and --voice overrides the voice for this line.`,

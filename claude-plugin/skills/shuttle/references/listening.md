@@ -30,7 +30,7 @@ The transcript includes each line's speaker and routed card, including unrouted,
 
 `shuttle say "<text>"` speaks one line on the user's speaker in your role's voice, holding playback while the user is talking.
 While Listen has a card in view, other cards' lines wait until the user opens them or says "play"; "next" moves on.
-Speak only inside a conversation the user is clearly having with you by voice: answer in one spoken line and put the rest on the card.
+Speak only inside a conversation the user is clearly having with you by voice. Then speak the whole reply, as several short lines they can interrupt: the voice may be all they're taking in, so don't cut it to one line and leave the rest on the card, which keeps the exact wording. Hold while they say they're thinking aloud, and treat "skip" as a control word.
 Never speak unprompted or narrate replies to typed turns.
 
 ## Notes from a pinned call
