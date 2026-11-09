@@ -413,7 +413,7 @@ tree and `~/.local/bin`, the release as a new `bin/rel.generation-*` behind
 `bin/rel-built`, the bundle into `ui/dist`. Activation, readiness, quarantine
 release, harness setup and rollback are the same transaction as a built host's.
 On a loaded cluster login node with a network home, file I/O, not compilation,
-is most of a built host's deploy: one measured nibi deploy spent 6 minutes in `git
+is most of a built host's deploy: one measured cluster deploy spent 6 minutes in `git
 worktree add`, 16 seeding build caches and 3 building.
 Shipped hosts still need Git, Python 3 and Go (the lock helper is compiled on
 the host), and no Elixir or Node.
