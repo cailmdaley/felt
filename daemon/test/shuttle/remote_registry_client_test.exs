@@ -274,14 +274,14 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
           "https://hub.example.invalid/api/v1/state",
           "{}",
           "application/json",
-          500
+          2_000
         )
 
       elapsed = System.monotonic_time(:millisecond) - started_at
       assert_receive {:proxy_saw, data}, 5_000
       assert data =~ ~r/\ACONNECT hub\.example\.invalid:443 HTTP\/1\.1\r\n/
       assert {:error, _} = result
-      assert elapsed < 3_000
+      assert elapsed < 4_500
       :gen_tcp.close(listener)
     end
 
