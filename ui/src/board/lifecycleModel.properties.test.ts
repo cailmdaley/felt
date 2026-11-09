@@ -69,11 +69,13 @@ class ModelOwner {
   /** The single fiber's state, for a family of one. */
   get state(): LifeState { return this.states.get(ID)! }
 
-  /** The fiber a request names: by id, or by its worker's terminal or past session. */
+  /** The fiber a request names: by id, or by its worker's terminal and past session, which must agree. */
   private fiberOf(body: Record<string, unknown>): string | undefined {
     const named = body.fiber_id ?? body.fiber
     if (typeof named === 'string') return named
-    return [...this.states.keys()].find(id => body.tmux_session === workerName(id) || body.session === sessionName(id))
+    const ids = new Set([...this.states.keys()].filter(id => body.tmux_session === workerName(id) || body.session === sessionName(id)))
+    const [id] = ids
+    return ids.size === 1 && (body.tmux_session === undefined || body.tmux_session === workerName(id)) && (body.session === undefined || body.session === sessionName(id)) ? id : undefined
   }
 
   private answer(route: string, body: Record<string, unknown>, request: LifeRequest | null): Response {
@@ -295,8 +297,8 @@ describe('the board keeps the lifecycle model across random gesture sequences', 
             // A verdict archives the card off the Desk; its remaining verbs live on other surfaces.
             if (!reached) return
             const after = owner.state
-            const refused = owner.sent.slice(sentBefore).filter(s => s.outcome === 'refused' || s.outcome === 'conflict')
-            expect(refused, `the owner refused a request: ${story()}`).toEqual([])
+            const refused = owner.sent.slice(sentBefore).filter(s => s.outcome !== 'ok')
+            expect(refused, `the owner refused a request, or got one the model does not know: ${story()}`).toEqual([])
             expect(VERBS[verb].reached(before, after), `${verb} did not do what it promised: ${story()}`).toBe(true)
             if (!VERBS[verb].mayLookSame?.(before)) {
               expect(drawn(after), `${verb} changed nothing the human can see: ${story()}\n  drawn: ${drawn(before)}`).not.toBe(drawn(before))

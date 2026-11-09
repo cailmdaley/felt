@@ -9,8 +9,10 @@
  *    a force `/dispatch`, a `/felt-edit` that unsets the horizon) it says
  *    whether the owner accepts it, which Shuttle CLI write it runs, and the
  *    state that follows. `lifecycleTable()` enumerates it into
- *    `daemon/test/fixtures/lifecycle/model.json`, which the daemon (mix) and
- *    the Shuttle CLI (Go) hold their own halves to.
+ *    `daemon/test/fixtures/lifecycle/model.json`. The Shuttle CLI (Go) holds
+ *    every row with a write to it; the daemon (mix) holds the served column
+ *    and each `/transition` resolution. The worker rows (kill, dispatch,
+ *    attach) are the board's assumption until a daemon test reads them.
  *  - The gesture layer (`VERBS`) is the board's contract: for each state, the
  *    verbs the board offers, their words, and the state each verb must leave.
  *    `lifecycleModel.properties.test.ts` drives the real board against an owner
