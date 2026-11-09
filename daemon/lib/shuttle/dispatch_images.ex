@@ -60,11 +60,11 @@ defmodule Shuttle.DispatchImages do
   defp write(decoded) do
     dir = Path.join(Shuttle.data_dir(), "images")
 
-    with :ok <- File.mkdir_p(dir), :ok <- File.chmod(dir, 0o700) do
+    with :ok <- Shuttle.FS.mkdir_p(dir), :ok <- Shuttle.FS.chmod(dir, 0o700) do
       Enum.reduce_while(decoded, {:ok, []}, fn {bytes, ext}, {:ok, paths} ->
         path = Path.join(dir, Base.encode16(:crypto.hash(:sha256, bytes), case: :lower) <> "." <> ext)
 
-        case File.exists?(path) or put(path, bytes) == :ok do
+        case Shuttle.FS.exists?(path) or put(path, bytes) == :ok do
           true -> {:cont, {:ok, [path | paths]}}
           false -> {:halt, {:error, "could not store an image on this host"}}
         end
@@ -81,13 +81,12 @@ defmodule Shuttle.DispatchImages do
   defp put(path, bytes) do
     tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
 
-    with :ok <- File.write(tmp, bytes, [:exclusive]),
-         :ok <- File.chmod(tmp, 0o600),
-         :ok <- File.rename(tmp, path) do
+    with :ok <- Shuttle.FS.write_private(tmp, bytes),
+         :ok <- Shuttle.FS.rename(tmp, path) do
       :ok
     else
       error ->
-        File.rm(tmp)
+        Shuttle.FS.rm(tmp)
         error
     end
   end
