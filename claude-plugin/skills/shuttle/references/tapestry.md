@@ -12,7 +12,7 @@ The tapestry is the constitution's one page: what this work is, whole, as it sta
 
 **Everything hangs from the first screen.** Each part of it is a section of the page, and a reader sees the whole, then chooses where to dig. Disclose in layers: first screen, a short paragraph per part, then `<details>`, nested pages and sub-fibers. Keep the page short: two or three screens below the first.
 
-**Test the glance before a stop the human will review.** Take a headless screenshot of the first screen alone and give it to a Haiku subagent with no other context. Ask it what this is, where it stands, and what the human needs to do. Rewrite the screen until its answers are right.
+**Test the glance before a stop the human will review.** Take a headless screenshot of the first screen alone and give it to a fresh agent on the cheapest model you can launch, with no other context. Ask it what this is, where it stands, and what the human needs to do. Rewrite the screen until its answers are right.
 
 A PR description is this page at the scale of one change.
 
