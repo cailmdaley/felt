@@ -70,6 +70,13 @@ export function registerMapViewJourneys(test) {
     assert.equal(await file.getAttribute('aria-pressed'), 'true')
     await file.click()
     assert.equal(await head.locator('.fp-doc').isVisible(), false)
+    // A PDF unfolds whole: its pages and toolbar, not a frame's slice of them.
+    const pdf = head.locator('.fp-files .fp-file').filter({ hasText: 'response.pdf' })
+    await pdf.click()
+    await head.locator('.fp-doc .pdfViewer canvas').first().waitFor()
+    const [doc, stage] = await Promise.all(['.fp-doc', '.fp-doc .kbn-fileview-pdf-stage'].map(sel => head.locator(sel).evaluate(el => el.getBoundingClientRect().height)))
+    assert.ok(doc >= stage, `the unfolded PDF shows its whole stage (${doc}px row for a ${stage}px stage)`)
+    await pdf.click()
     await head.locator('.fp-lead').click()
     const link = head.frameLocator('.fp-doc iframe').getByRole('link', { name: 'Read the independent validation →' })
     await link.waitFor()

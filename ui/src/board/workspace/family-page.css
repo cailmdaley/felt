@@ -55,6 +55,8 @@
 .fp-doc { margin: 6px calc(-1 * var(--fp-gutter)) 8px calc(-1 * (var(--fp-gutter) + var(--fp-indent, 0px))); border-block: 1px solid var(--ws-hairline-soft); background: var(--ws-paper); cursor: auto; }
 .fp-doc[hidden] { display: none; }
 .fp-doc .kbn-fileview-frame-wrap { height: 160px; }
+/* A PDF unfolds at its stage's own height, not a frame's. */
+.fp-doc .kbn-fileview-frame-wrap:has(> .kbn-fileview-pdf-stage) { height: auto; }
 .fp-doc .kbn-fileview-text-wrap, .fp-doc .ws-prose-scroll { overflow: visible; }
 .fp-doc .kbn-fileview-image-wrap { padding: 12px var(--fp-gutter); }
 .fp-doc .kbn-fileview-image { max-height: none; }
