@@ -160,6 +160,24 @@ it('routes board links through the parent while keeping ordinary fragments local
   expect(messages).not.toHaveBeenCalled()
 })
 
+it('asks the board to scroll a fitted page to its fragment, which the page cannot do itself', async () => {
+  reportHtml = `<svg><a href="#ledger"><text>ledger</text></a></svg><a href="#">top</a><details id="ledger"></details>`
+  const frame = await report()
+  const win = frame.contentWindow! as Window & typeof globalThis
+  win.ResizeObserver = class { observe() {} disconnect() {} } as unknown as typeof ResizeObserver
+  win.postMessage({ protocol: 'shuttle-document', version: 1, type: 'active', payload: { active: true } }, '*')
+  win.postMessage({ protocol: 'shuttle-document', version: 1, type: 'fit', payload: {} }, '*')
+  const ledger = frame.contentDocument!.getElementById('ledger')!
+  ledger.getBoundingClientRect = () => ({ top: 1800 } as DOMRect)
+  ledger.scrollIntoView = vi.fn()
+  messages.mockClear()
+  frame.contentDocument!.querySelector('svg a')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }))
+  expect(messages).toHaveBeenCalledWith(expect.objectContaining({ type: 'reveal', payload: { top: 1800 } }), '*')
+  expect(ledger.scrollIntoView).not.toHaveBeenCalled()
+  frame.contentDocument!.querySelector<HTMLAnchorElement>('a[href="#"]')!.click()
+  expect(messages).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'reveal', payload: { top: 0 } }), '*')
+})
+
 it('renders read-model constitution chips in minified opaque reports and forwards their identity', async () => {
   reportHtml = '<p>[[work/thread]] work/thread</p>'
   const frame = await report()

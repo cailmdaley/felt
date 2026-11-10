@@ -611,6 +611,14 @@ function buildHtmlViewer(
         }
       } else if (message.type === 'height' && options.fit && frame === iframe) {
         fit(message.payload.height as number)
+      } else if (message.type === 'reveal' && options.fit && frame === iframe) {
+        // The board's own scroller carries a fitted page: bring the fragment's
+        // offset to its top, as the page would have scrolled itself.
+        const mark = document.createElement('div')
+        mark.style.cssText = `position:absolute;left:0;top:${message.payload.top as number}px;width:1px;height:1px;pointer-events:none`
+        wrap.append(mark)
+        mark.scrollIntoView({ block: 'start' })
+        mark.remove()
       } else if (message.type === 'ready') {
         if (announced) return
         announced = true

@@ -64,6 +64,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
     case 'restore': return fields(p, ['x', 'y', 'clamp']) && coordinate(p.x) && coordinate(p.y) && (p.clamp === undefined || typeof p.clamp === 'boolean')
     case 'fit': return fields(p, [])
     case 'height': return fields(p, ['height']) && coordinate(p.height) && p.height > 0
+    case 'reveal': return fields(p, ['top']) && coordinate(p.top)
     case 'swipe':
       if (fields(p, ['phase']) && p.phase === 'cancel') return true
       if (fields(p, ['phase', 'dx']) && p.phase === 'move') return travel(p.dx)
@@ -178,6 +179,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     window.history[name] = (state: unknown, unused: string) => native(state, unused)
   }
   let active = false
+  let fitted = false
   let scroller: HTMLElement | null = null
   let pendingRestore: ScrollPosition | null = null
   let restoreTimer: ReturnType<typeof setTimeout> | undefined
@@ -260,6 +262,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
       }
     } else if (data.type === 'pause') pause()
     else if (data.type === 'fit') {
+      fitted = true
       // The host draws the page at its full height: report it whenever layout moves it.
       let sent = 0, frame = 0
       const measure = (): void => {
@@ -328,8 +331,12 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     let id: string
     try { id = decodeURIComponent(hash.replace(/^#/, '')) } catch { return }
     const target = document.getElementById(id) ?? document.getElementsByName(id)[0]
-    if (target) target.scrollIntoView()
-    else if (!id || id === 'top') window.scrollTo(0, 0)
+    if (!target && id && id !== 'top') return
+    // A fitted page is as tall as its frame, so the board scrolls to the
+    // target; WebKit never lets an opaque frame scroll its parent itself.
+    if (fitted) send('reveal', { top: target ? Math.max(0, target.getBoundingClientRect().top + window.scrollY) : 0 })
+    else if (target) target.scrollIntoView()
+    else window.scrollTo(0, 0)
   }
   window.addEventListener('message', event => {
     if (event.source === window.parent && event.data?.protocol === protocol && event.data?.version === version
