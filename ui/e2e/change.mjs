@@ -81,6 +81,17 @@ export function registerChangeJourneys(test) {
     assert.equal(await page.locator('.ws-selected .change-diff-window').count(), 84)
     assert.ok(await page.locator('.ws-selected diffs-container').count() < 10)
   })
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) test(`A sent change unfolds under its row at a reading height (${viewport.width}px)`, async page => {
+    page.setDefaultTimeout(30_000)
+    await page.goto(page.url().replace('example=workspace', 'example=change'))
+    await page.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Calibrate the shear response"])`).click()
+    const head = page.locator('.ws-selected .fp-row[aria-selected="true"]')
+    await head.locator('.fp-sent').click()
+    await head.locator('.fp-files .fp-file[data-held$="/family.change.json"]').click()
+    await head.locator('.fp-doc .change-map').waitFor()
+    const scroll = await head.locator('.fp-doc .change-scroll').evaluate(el => el.getBoundingClientRect().height)
+    assert.ok(scroll >= viewport.height / 2, `the unfolded reader shows its map, not only its tabs (${scroll}px of ${viewport.height}px)`)
+  }, viewport)
   test('A tapestry relative link opens by keyboard and Back returns to the tapestry', async page => {
     page.setDefaultTimeout(30_000)
     await page.addInitScript(() => {

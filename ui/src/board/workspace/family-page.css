@@ -94,6 +94,8 @@
 .fp-doc .kbn-fileview-image-wrap { padding: 12px; }
 .fp-doc .kbn-fileview-image { max-height: none; }
 .fp-doc .kbn-fileview-pdf-stage { height: 85vh; }
+/* A change reader scrolls inside itself, so it unfolds at the PDF's stage height, never its content's. */
+.fp-doc .kbn-fileview-change { height: 85vh; }
 .fp-head { padding-top: 12px; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--ws-hairline-soft); }
 
 .fp-head .fp-name { font: var(--type-title)/var(--leading-tight) var(--font-serif); }
