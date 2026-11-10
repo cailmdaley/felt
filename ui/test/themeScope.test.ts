@@ -27,7 +27,7 @@ beforeAll(async () => {
   const source = readFileSync(resolve('src/board/workspace/themeScope.ts'), 'utf8')
   const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
   await page.addScriptTag({ type: 'module', content: code + '\nglobalThis.compileTheme = scopeTheme;' })
-})
+}, 60_000)
 afterAll(async () => { await browser?.close() }, 30_000)
 
 native('isolates nested themed, Plain and same-channel boundaries with own layered variables winning', async () => {

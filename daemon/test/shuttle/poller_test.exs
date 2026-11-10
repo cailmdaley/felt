@@ -614,7 +614,8 @@ defmodule Shuttle.PollerTest do
   defp doc_status_and_handoff(path) do
     {:ok, _, _, fm, _} = Shuttle.FiberDoc.read_path(path)
     {:ok, at, _} = DateTime.from_iso8601(fm["shuttle"]["runtime"]["handed_off_at"])
-    {fm["status"], at}
+    # The written stamp drops trailing zeros; compare at the clock's precision.
+    {fm["status"], %{at | microsecond: {elem(at.microsecond, 0), 6}}}
   end
 
   # Inject the resolved occurrences Shuttle computes for a standing role — the
