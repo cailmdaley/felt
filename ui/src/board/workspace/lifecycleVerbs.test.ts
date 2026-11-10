@@ -59,11 +59,11 @@ describe('a standing constitution names its schedule’s verbs', () => {
 
 describe('a row’s verb button wears the verb that fits its state', () => {
   const lead = (over: Parameters<typeof card>[0], canRest = true) => leadVerb(card(over), lifecycleVerbsFor(card(over), canRest))
-  it('closes working work for review, tempers work awaiting it, and rests work at rest', () => {
+  it('closes working work for review and tempers work awaiting it or at rest', () => {
     expect(lead({ id: 'working', status: 'active', shuttleKind: 'oneshot', workerState: 'running' })).toBe('review')
     expect(lead({ id: 'draft', status: 'open', shuttleKind: 'oneshot', column: 'drafts' })).toBe('review')
     expect(lead({ id: 'done', status: 'closed', shuttleKind: 'oneshot', column: 'awaitingReview' })).toBe('temper')
-    expect(lead({ id: 'resting', status: 'open', shuttleKind: 'oneshot', effectiveHorizon: 'stashed' })).toBe('rest')
+    expect(lead({ id: 'resting', status: 'open', shuttleKind: 'oneshot', effectiveHorizon: 'stashed' })).toBe('temper')
   })
   it('never leads with Discard: a card offering only Discard keeps it in the menu', () => {
     for (const over of [{ id: 'a', status: 'active' }, { id: 'b', status: 'closed', column: 'awaitingReview' }, { id: 'c', status: 'open', effectiveHorizon: 'stashed' }] as const)

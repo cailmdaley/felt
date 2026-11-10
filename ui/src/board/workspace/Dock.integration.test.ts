@@ -171,7 +171,7 @@ describe('band header', () => {
     expect(visible({ status: 'active', sessionUuid: 'idle' })).toEqual(['Resume', 'New session', 'Close for review', 'Rest', 'Temper', 'Discard'])
     // Work awaiting review wears Temper on the verb button's face; the rest follow in its menu.
     expect(visible({ status: 'closed', sessionUuid: 'review' })).toEqual(['Resume', 'New session', 'Temper', 'Rest', 'Discard'])
-    expect(visible({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resting' })).toEqual(['Resume', 'New session', 'Rest', 'Temper', 'Discard'])
+    expect(visible({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resting' })).toEqual(['Resume', 'New session', 'Temper', 'Rest', 'Discard'])
     expect(visible({ status: 'closed', tempered: true, sessionUuid: 'tempered' })).toEqual(['Resume', 'New session', 'Rest'])
     expect(visible({ status: 'closed', tempered: false, sessionUuid: 'discarded' })).toEqual(['Resume', 'New session', 'Rest'])
     controls.reset()

@@ -46,12 +46,14 @@ export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lifecycle
 
 /**
  * The verb a row's button wears on its face, of those it offers: Temper where
- * work waits on the human's review, else the first verb that moves the work on
- * (Close for review, then Rest or its schedule's pause and resume). Discard
- * never leads; undefined when it is all there is.
+ * work waits on the human's review or a oneshot rests (opening its terminal is
+ * how it resumes), else the first verb that moves the work on (Close for
+ * review, then Rest or its schedule's pause and resume). Discard never leads;
+ * undefined when it is all there is.
  */
 export function leadVerb(card: KanbanCard, offered: readonly LifecycleVerb[]): LifecycleVerb | undefined {
-  if (offered.includes('temper') && (card.column === 'awaitingReview' || runAwaitsHuman(card))) return 'temper'
+  const restingOneshot = card.effectiveHorizon === 'stashed' && !scheduled(card)
+  if (offered.includes('temper') && (card.column === 'awaitingReview' || runAwaitsHuman(card) || restingOneshot)) return 'temper'
   return offered.find(verb => verb !== 'discard')
 }
 
