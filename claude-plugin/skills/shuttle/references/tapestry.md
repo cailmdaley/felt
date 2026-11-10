@@ -12,7 +12,7 @@ The tapestry is the constitution's one page: what this work is, whole, as it sta
 
 **Let the ornament count.** A repeated mark (trees, sails, houses, reeds) stands one for each thing it represents, so the reader can count it; a fixed number of trees is decoration that competes with the counts beside it. Write numbers in ordinary numerals.
 
-**An allegory comes with its key.** When the form borrows a reference or names its parts with puns, say what the reference is and what each part means, one click below the first screen.
+**Explain an allegory once.** When the form borrows a reference or names its parts with puns, tell the human what the reference is and what each part means the first time they see it. Keep the key in the code that draws it, not on the page.
 
 **When the work has a primary artifact, the first screen can be a board.** A paper or a deck shows only what has already landed in it, so a reader back after a day can't see what moved. Make a small board with the artifact as one block, beside blocks for what it can't show yet: a new figure, the latest numbers, a lost run, a pending decision. Each block carries the thing itself and its state; a script that re-inlines the artifact keeps the board current with each build.
 
