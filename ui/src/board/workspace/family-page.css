@@ -1,6 +1,6 @@
 .ws-family-page { container-type: inline-size; height: 100%; min-height: 0; }
 /* --fp-text is the row's text column, where its name and all it holds start: the mark's 12px and the title's 8px gap. */
-.ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-views: 112px; --fp-acts: 244px; --fp-control: 24px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+.ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-views: 118px; --fp-acts: 244px; --fp-control: 24px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 .ws-family-scroll { min-height: 0; overflow: auto; }
 .ws-family-announce { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -60,11 +60,10 @@
 /* What a thread holds, as one segmented control: each segment in a place of
    its own (tapestry, constitution, sends), drawn on the acts' stroke grid; the
    segments a row has share one outline, and the one open is pressed into it. */
-.fp-docs { --fp-seg: 28px; grid-area: docs; justify-self: end; display: grid; grid-auto-flow: column; height: var(--fp-control); margin-top: calc((var(--fp-line) - var(--fp-control)) / 2); white-space: nowrap; }
+.fp-docs { --fp-seg: 28px; --fp-sends: 50px; grid-area: docs; justify-self: start; display: grid; grid-template-columns: var(--fp-seg) var(--fp-seg) var(--fp-sends); column-gap: 4px; height: var(--fp-control); margin-top: calc((var(--fp-line) - var(--fp-control)) / 2); white-space: nowrap; }
 .fp-docs:empty { visibility: hidden; }
-.fp-chip { --fp-edge: var(--ws-hairline-soft); position: relative; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: var(--fp-seg); height: 100%; margin: 0; padding: 0 6px; border: 1px solid var(--fp-edge); border-left-width: 0; border-radius: 0; background: var(--ws-paper); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono); cursor: pointer; }
-.fp-chip:first-child { border-left-width: 1px; border-radius: var(--ws-control-radius) 0 0 var(--ws-control-radius); }
-.fp-chip:last-child { border-top-right-radius: var(--ws-control-radius); border-bottom-right-radius: var(--ws-control-radius); }
+.fp-chip { --fp-edge: var(--ws-hairline-soft); position: relative; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: var(--fp-seg); height: 100%; margin: 0; padding: 0 6px; border: 1px solid var(--fp-edge); border-radius: var(--ws-control-radius); background: var(--ws-paper); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono); cursor: pointer; }
+.fp-lead { grid-column: 1; } .fp-constitution { grid-column: 2; } .fp-sent { grid-column: 3; justify-content: flex-start; }
 .fp-chip > svg { flex: none; width: 15px; height: 15px; }
 .fp-row:is([data-selected], :hover) .fp-chip { --fp-edge: var(--ws-hairline); }
 .fp-chip:is(:hover, :focus-visible) { background: var(--ws-hover); color: var(--ws-ink); outline: none; }
@@ -138,7 +137,8 @@
   .ws-family-grid { --fp-control: 36px; }
   .fp-title { grid-template-columns: 12px auto minmax(0, 1fr) auto; grid-template-areas: 'mark name name meta' '. docs verbs verbs'; row-gap: 2px; }
   .fp-word { display: none; }
-  .fp-docs { --fp-seg: 44px; justify-self: start; margin-top: 4px; }
+  .fp-docs { --fp-seg: 44px; grid-template-columns: none; grid-auto-flow: column; margin-top: 4px; }
+  .fp-docs > .fp-chip { grid-column: auto; }
   .fp-chip > svg { width: 18px; height: 18px; }
   .fp-file, .fp-back, .fp-step { min-height: var(--ws-phone-target); }
   /* A touch target is 44px however tall its drawing. */
