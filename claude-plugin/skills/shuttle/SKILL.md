@@ -111,6 +111,8 @@ Fallback failures return a notice to the sender; native delivery still respects 
 
 **A wake costs the recipient a read of its whole context, uncached once its cache is cold.** Before sending, ask whether the recipient has to act now. Usually it does not: send `--context-only`, which it reads on its next turn at no cost. An ordinary send to a session with a cold cache and 250k tokens or more of context is held as context anyway, and the receipt says what a wake would cost. When the recipient must act and its session is large and cold, prefer `--fresh`: a new session on the fiber takes the message, starting from Status and told where the old conversation is. `--wake` wakes the existing session whatever it costs.
 
+**The human sees only files you send.** They never open a path from your report. A screenshot, figure or page they should look at goes to them with `shuttle send-file` (or your harness's file tool) or into the tapestry; a file you aren't sending isn't worth naming.
+
 **The family board.** Every constitution tree shares a board: its messages, posts, asks, answers, closes and handoffs, and a count of the human's turns per worker, typed or spoken; `shuttle board --turns` reads the lines. Each turn opens with a few lines of what's new there. Post what the family should know instead of relaying it; address someone with `shuttle message` for a direct request.
 
 **Human gates.** Ask the human before posting anywhere in their voice or outside their remit: issues or PRs on repos they don't develop, messages in other people's channels.
