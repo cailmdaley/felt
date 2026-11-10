@@ -51,7 +51,7 @@ export async function pageBack(page) {
   const phone = page.viewportSize().width <= 700
   await page.locator(phone ? '.ws-navbar .ws-return' : '.ws-stage-band [data-part="band-back"]').click()
 }
-/** A thread's sent files on its family's page, its row's ⧉ list unfolded, newest send first. */
+/** A thread's sent files on its family's page, its row's sends segment unfolded, newest send first. */
 export async function familySends(page, row = page.locator('.ws-page.ws-selected .fp-head')) {
   const all = row.locator('.fp-sent')
   if (await all.getAttribute('aria-expanded') !== 'true') await all.click()

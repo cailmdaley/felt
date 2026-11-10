@@ -20,7 +20,9 @@ const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
 const selected = page => page.locator('.ws-page.ws-selected')
 const band = page => page.locator('.ws-stage-band')
 const named = (page, name) => page.waitForFunction(name => document.querySelector('.ws-stage-band .ws-band-title')?.textContent === name, name)
-const frame = page => selected(page).frameLocator('iframe')
+/** The report's frame on show; a live rewrite stages its successor beside it, unseen, until it loads. */
+const SHOWN = 'iframe:not([style*="opacity"])'
+const frame = page => selected(page).frameLocator(SHOWN)
 async function link(page, name) {
   const target = frame(page).getByRole('link', { name, exact: true })
   await target.scrollIntoViewIfNeeded()
@@ -52,7 +54,7 @@ export function registerLivingReportJourneys(test) {
     await selected(page).waitFor()
     await showFile(page, REPORT)
     await frame(page).locator('#report-sentinel').waitFor()
-    const inner = async () => (await selected(page).locator('iframe').elementHandle()).contentFrame()
+    const inner = async () => (await selected(page).locator(SHOWN).elementHandle()).contentFrame()
     const reading = async () => (await inner()).evaluate(() => [Math.round(document.scrollingElement.scrollTop), document.scrollingElement.scrollHeight - innerHeight])
     await (await inner()).evaluate(() => document.scrollingElement.scrollTo(0, 2500))
     await page.waitForTimeout(200)
@@ -72,7 +74,7 @@ export function registerLivingReportJourneys(test) {
     await serve(page, original)
     const head = (await familyTree(page)).locator('.fp-head')
     await head.locator('.fp-lead').click()
-    await head.frameLocator('.fp-doc iframe').locator('#report-sentinel').waitFor()
+    await head.locator('.fp-doc').frameLocator(SHOWN).locator('#report-sentinel').waitFor()
     const scroller = selected(page).locator('.ws-family-scroll')
     const standing = () => scroller.evaluate(el => [Math.round(el.scrollTop), Math.round(el.querySelector('.fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height)])
     await page.waitForFunction(() => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap')?.getBoundingClientRect().height > 3000, undefined, { polling: 40 })
@@ -81,11 +83,11 @@ export function registerLivingReportJourneys(test) {
     const [at, tall] = await standing()
     assert.equal(at, 2500)
     await serve(page, grown(original))
-    await head.frameLocator('.fp-doc iframe').locator('#grown').waitFor({ timeout: 15_000 })
+    await head.locator('.fp-doc').frameLocator(SHOWN).locator('#grown').waitFor({ timeout: 15_000 })
     await page.waitForFunction(tall => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height > tall, tall, { polling: 40 })
     assert.equal((await standing())[0], 2500, 'the family page keeps its offset while the report grows under it')
     await serve(page, shrunk(original))
-    await head.frameLocator('.fp-doc iframe').locator('#shrunk').waitFor({ timeout: 15_000 })
+    await head.locator('.fp-doc').frameLocator(SHOWN).locator('#shrunk').waitFor({ timeout: 15_000 })
     await page.waitForFunction(tall => document.querySelector('.ws-selected .fp-head .kbn-fileview-frame-wrap').getBoundingClientRect().height < tall / 2, tall, { polling: 40 })
     const [held] = await standing(), max = await scroller.evaluate(el => el.scrollHeight - el.clientHeight)
     assert.equal(held, Math.min(2500, max), 'a shorter report leaves the page at its offset, or clamped to its end')
@@ -110,7 +112,7 @@ export function registerLivingReportJourneys(test) {
       await band(page).locator('.ws-dock').waitFor()
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
       await shot(page, `${device}-landing`)
-      // The family's page draws the root's row, so the band leaves its acts (and its ☰) to it; the receded constitution's page is a click away.
+      // The family's page draws the root's row, so the band leaves its acts (and its constitution button) to it; the receded constitution's page is a click away.
       assert.equal(await band(page).locator('.ws-band-constitution').isVisible(), false)
       await page.locator('.ws-page[data-key^="fiber:"]').first().dispatchEvent('click')
       await selected(page).locator('.ws-fiber-prose').waitFor()

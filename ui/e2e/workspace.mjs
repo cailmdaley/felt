@@ -14,6 +14,7 @@ import { registerHeaderBarJourneys } from './headerBar.mjs'
 import { familySends, familyTree, pageBack, showFile } from './familyNav.mjs'
 import { registerCapGeometryJourneys } from './capGeometry.mjs'
 import { registerRenderedTypeJourneys } from './renderedType.mjs'
+import { closeVerbMenu, hitBox, offeredVerbs, pressVerb, verbCaret, verbControl, verbFace } from './verbs.mjs'
 
 const browser = await launchBrowser()
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
@@ -54,12 +55,10 @@ async function open(p, expected = 'calibration-report') {
  */
 const acts = p => band(p).locator('.ws-band-head[data-acts] > .ws-fiber-acts')
   .or(selected(p).locator('.fp-row[data-selected] > .fp-line .fp-verbs > .ws-fiber-acts'))
-/** A lifecycle verb in the shown acts, by its word. */
-const actVerb = (p, word) => acts(p).locator(`.ws-acts-verbs > button[data-verb="${word}"]`)
 async function headerAction(p, label) {
   if (label === 'Settings') { await acts(p).locator('.ws-acts-settings').click(); return }
   if (label === 'Constitution') {
-    // The band's ☰ opens the constitution's page where the band carries the acts; from the family's page, its receded page.
+    // The band's constitution button opens the constitution's page where the band carries the acts; from the family's page, its receded page.
     const page = band(p).locator('.ws-band-head[data-acts] .ws-band-constitution')
     if (await page.isVisible()) await page.click()
     else await pageFor(p, 'Constitution').dispatchEvent('click')
@@ -1041,8 +1040,10 @@ test('On a report the band carries the fiber\'s acts, with the undo line in thei
   await open(p)
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
   const pair = band(p).getByRole('group', { name: "calibration-report's acts", exact: true })
+  // Work awaiting review wears Temper on its verb button's face; the caret names the rest with their keys.
   assert.ok(await pair.getByRole('button', { name: 'Temper calibration-report (t)', exact: true }).isVisible())
-  assert.ok(await pair.getByRole('button', { name: 'Discard calibration-report (x)', exact: true }).isVisible())
+  assert.ok(await pair.getByRole('button', { name: 'More verbs for calibration-report: Rest (s), Discard (x)', exact: true }).isVisible())
+  assert.deepEqual(await offeredVerbs(pair), ['Temper', 'Rest', 'Discard'])
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await appFocus(p); await p.keyboard.press('t')
@@ -1055,9 +1056,8 @@ test('On a report the band carries the fiber\'s acts, with the undo line in thei
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   assert.equal(await band(p).locator('.ws-band-open').count(), 0)
-  // Its family's page draws its row, so the highlighted row carries its acts.
-  assert.ok(await actVerb(p, 'Close for review').isVisible())
-  assert.ok(await actVerb(p, 'Rest').isVisible())
+  // Its family's page draws its row, so the highlighted row carries its acts, Close for review on the face.
+  assert.deepEqual(await offeredVerbs(acts(p)), ['Close for review', 'Rest', 'Temper', 'Discard'])
 })
 
 async function verdictLook(locator) {
@@ -1067,8 +1067,9 @@ async function verdictLook(locator) {
     const rgb = color => { context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3) }
     const luminance = color => rgb(color).map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0)
     const style = getComputedStyle(el)
-    // A bare verb stands on its surface: the act zone, or the fiber page's paper.
+    // A bare verb stands on its surface: its menu, the act zone, or the fiber page's paper.
     const fillColor = style.backgroundColor !== 'rgba(0, 0, 0, 0)' ? style.backgroundColor
+      : el.closest('[role="menu"], .ws-acts-verbs') ? getComputedStyle(el.closest('[role="menu"], .ws-acts-verbs')).backgroundColor
       : el.closest('.ws-dock') ? getComputedStyle(el.closest('.ws-dock')).backgroundColor
       : getComputedStyle(el.closest('.ws-reader')?.querySelector('[data-part="veil"]') ?? document.body).getPropertyValue('--ws-ground').trim() || getComputedStyle(document.body).backgroundColor
     const ink = luminance(style.color), fill = luminance(fillColor)
@@ -1081,12 +1082,19 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
   if (theme) { const themed = new URL(url); themed.searchParams.set('theme-preview', `01KVBR1F9BWBVKF97473PV67K8:${theme}`); await p.goto(themed.href) }
   await open(p)
   const looks = {}
-  looks.act = [await verdictLook(band(p).locator('.ws-fiber-acts .kbn-ctl-temper')), await verdictLook(band(p).locator('.ws-fiber-acts .kbn-ctl-discard'))]
+  // Temper on the verb button's face, its mark in the pigment; Discard in its caret's menu.
+  const verdicts = async strip => {
+    const temper = await verdictLook(verbFace(strip).and(p.locator('.kbn-ctl-temper')).locator('svg'))
+    const discard = await verdictLook(await verbControl(strip, 'Discard'))
+    await closeVerbMenu(p)
+    return [temper, discard]
+  }
+  looks.act = await verdicts(band(p).locator('.ws-fiber-acts'))
   await familyTree(p)
-  looks.row = [await verdictLook(acts(p).locator('.kbn-ctl-temper')), await verdictLook(acts(p).locator('.kbn-ctl-discard'))]
+  looks.row = await verdicts(acts(p))
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  await band(p).locator('.ws-fiber-acts .kbn-ctl-discard').click()
+  await pressVerb(band(p).locator('.ws-fiber-acts'), 'Discard')
   looks.line = [await verdictLook(band(p).locator('.ws-fiber-acts > .ws-verdict-undo .ws-verdict-word'))]
   for (const [surface, [temper, discard]] of Object.entries(looks)) {
     if (temper && discard) { assert.ok(tealish(temper.color), `${surface} Temper ink is verdigris: ${temper.color}`); assert.ok(reddish(discard.color), `${surface} Discard ink is red: ${discard.color}`) }
@@ -1167,10 +1175,15 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   await headerAction(p, 'Settings')
   await p.locator('.ws-settings-menu:not([hidden])').waitFor()
   const settings = await acts(p).locator('.ws-acts-settings').boundingBox()
-  for (const verb of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
-    const box = await acts(p).locator(`.ws-acts-verbs ${verb}`).boundingBox()
-    assert.ok(box.height >= 44 && box.width === settings.width, `${verb} is a full-height target the size of the band's other icons: ${JSON.stringify(box)}`)
+  // The verb button stands as tall as the band's other icons; its face (Temper) and its caret (Discard and the rest) each answer a full-height tap.
+  const pill = await acts(p).locator('.ws-acts-verbs').boundingBox()
+  assert.equal(pill.height, settings.height, `the verb button is as tall as the band's other icons: ${JSON.stringify({ pill, settings })}`)
+  for (const [part, control] of [['Temper', verbFace(acts(p))], ['the caret', verbCaret(acts(p))]]) {
+    const box = await hitBox(control)
+    assert.ok(box.height >= 44, `${part} is a full-height target: ${JSON.stringify(box)}`)
   }
+  assert.equal(await verbFace(acts(p)).getAttribute('data-verb'), 'Temper')
+  assert.ok((await offeredVerbs(acts(p))).includes('Discard'), 'Discard is a menu away')
 }, { width: 844, height: 390 }, 'reduce', true)
 
 test('A key discard waits on the constitution in place of the pair; undo, then Temper, makes one delayed write', async p => {
@@ -1229,7 +1242,8 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
     ? p.getByRole('menu')
     : band(p).locator('.ws-fiber-acts')
   if (surface === 'Desk') await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).click({ button: 'right' })
-  await controls.getByRole(surface === 'Desk' ? 'menuitem' : 'button', { name: /Discard/ }).click()
+  if (surface === 'Desk') await controls.getByRole('menuitem', { name: /Discard/ }).click()
+  else await pressVerb(controls, 'Discard')
   const host = surface === 'Desk' ? p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="${name}"])`).locator('.kbn-card-meta') : controls
   assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
@@ -1277,7 +1291,9 @@ test('Temper reaches drafts and work in flight, in their acts and by key, throug
   await chooseDeskColumn(p, 0)
   await p.locator('[data-column="drafts"] .kbn-col-head').click()
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Weekly shear summary"])`).click()
-  assert.ok(await actVerb(p, 'Temper').isVisible(), "a draft's acts offer Temper beside its key")
+  const temper = await verbControl(acts(p), 'Temper')
+  assert.ok(await temper.isVisible() && await temper.getAttribute('aria-keyshortcuts') === 't', "a draft's acts offer Temper beside its key")
+  await closeVerbMenu(p)
   await p.keyboard.press('t')
   await acts(p).locator('.ws-verdict-undo').waitFor()
   await p.keyboard.press('z')
@@ -1308,8 +1324,8 @@ test('A standing run waiting on you is tempered with t: no question, an undo win
   await p.goto(`${url}&standing-review`); await chooseDeskColumn(p, 1)
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   assert.deepEqual(await acts(p).locator('.ws-acts-verbs > button:visible').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label'))),
-    ['Temper run remote-review (t)', 'Pause schedule remote-review (s)', 'Retire remote-review (x)'], 'Temper run leads the acts')
-  assert.equal(await actVerb(p, 'Close for review').count(), 0)
+    ['Temper run remote-review (t)', 'More verbs for remote-review: Pause schedule (s), Retire (x)'], 'Temper run leads the acts')
+  assert.ok(!(await offeredVerbs(acts(p))).includes('Close for review'))
   const asked = []
   p.on('dialog', dialog => { asked.push(dialog.message()); void dialog.dismiss().catch(() => {}) })
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
@@ -2177,13 +2193,15 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     }
     await open(p)
     assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
+    // Temper on the verb button's face, Discard in its caret's menu: each in reach, at touch size on the phone.
     for (const verb of ['Temper', 'Discard']) {
-      const button = actVerb(p, verb)
+      const button = await verbControl(acts(p), verb)
       await button.scrollIntoViewIfNeeded()
-      const box = await button.boundingBox()
-      assert.ok(box.x >= 0 && box.x + box.width <= viewport.width)
-      if (device === 'phone') assert.ok(box.height >= 44)
+      const box = await hitBox(button)
+      assert.ok(box.x >= 0 && box.x + box.width <= viewport.width, `${verb} is in reach: ${JSON.stringify(box)}`)
+      if (device === 'phone') assert.ok(box.height >= 44, `${verb} is a touch target: ${JSON.stringify(box)}`)
     }
+    await closeVerbMenu(p)
     await shot('awaiting-review')
     await appFocus(p); await p.keyboard.press('t')
     const line = acts(p).locator(':scope > .ws-verdict-undo')
@@ -2657,8 +2675,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await p.locator(`.kbn-desk .kbn-card:not(.kbn-card-header):has(.kbn-card-name[title*="Remote covariance review"])`).click()
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.fp-title'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
-  // Its family's page draws its row, so the highlighted row carries the verbs.
-  for (const control of ['.kbn-ctl-review', '.kbn-ctl-rest']) {
+  // Its family's page draws its row, so the highlighted row carries the verb button: Close for review on its face, the rest behind its caret.
+  assert.equal(await verbFace(acts(p)).getAttribute('data-verb'), 'Close for review')
+  for (const control of ['.ws-verb-face', '.ws-verb-more']) {
     assert.ok(await acts(p).locator(control).isVisible())
     if (!phone) await still(p, `hovering ${control}`, () => acts(p).locator(control).hover(), { allow: [`.fp-row[data-selected] ${control}`] })
   }

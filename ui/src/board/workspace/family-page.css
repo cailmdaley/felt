@@ -144,7 +144,7 @@
   .fp-chip > svg { width: 18px; height: 18px; }
   .fp-file, .fp-back, .fp-step { min-height: var(--ws-phone-target); }
   /* A touch target is 44px however tall its drawing. */
-  .fp-chip::before, .ws-acts-verbs > button::before { content: ''; position: absolute; inset: -4px 0; }
+  .fp-chip::before, .ws-acts-verbs > button::before { content: ''; position: absolute; inset: calc((100% - var(--ws-phone-target)) / 2) 0; }
   .ws-acts-verbs > button { position: relative; }
   .fp-verbs { height: calc(var(--fp-control) + 8px); display: none; }
   .fp-row[data-selected] > .fp-line .fp-verbs, .fp-verbs:has([data-verdict-pending]) { display: flex; }

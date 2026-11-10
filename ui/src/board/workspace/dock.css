@@ -141,6 +141,10 @@
   .ws-band-meter { display: none; }
   .kbn-verb-menu [role='menuitem'] { min-height: 44px; height: 44px; }
   .ws-reader .ws-header-icon { width: var(--ws-phone-target); height: var(--ws-phone-target); }
+  /* The band's verb button stands as tall as the icons beside it, and each of its halves answers a full touch target inside the pill's border. */
+  .ws-fiber-acts { --ws-act: var(--ws-phone-target); }
+  .ws-acts-verbs > button { position: relative; }
+  .ws-acts-verbs > button::before { content: ''; position: absolute; inset: calc((100% - var(--ws-phone-target)) / 2) 0; }
   .ws-band-head { gap: 6px; padding: 2px 8px; overflow-x: auto; scrollbar-width: none; }
   .ws-band-head:not([data-acts]) { display: none; }
   .ws-band-identity { flex: none; }

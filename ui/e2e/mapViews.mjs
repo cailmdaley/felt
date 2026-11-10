@@ -59,9 +59,12 @@ export function registerMapViewJourneys(test) {
 
     const head = tree(page).locator('.fp-head')
     await head.locator('.fp-lead').waitFor()
-    const chips = await head.locator('.fp-docs button').allTextContents()
-    assert.deepEqual(chips.slice(0, 2), ['⌗', '☰'])
-    assert.match(chips[2], /^⧉ [1-9]\d*$/)
+    // One segmented control, in the order every surface keeps: tapestry, constitution, sends with their count, each a stroke mark.
+    const chips = await head.locator('.fp-docs button').evaluateAll(buttons => buttons.map(b => ({ segment: b.classList[1], mark: b.querySelector(':scope > svg')?.getAttribute('viewBox'), text: b.textContent, label: b.getAttribute('aria-label') })))
+    assert.deepEqual(chips.map(chip => [chip.segment, chip.mark]), [['fp-lead', '0 0 16 16'], ['fp-constitution', '0 0 16 16'], ['fp-sent', '0 0 16 16']])
+    assert.deepEqual(chips.slice(0, 2).map(chip => chip.text), ['', ''])
+    assert.match(chips[2].text, /^[1-9]\d*$/)
+    assert.match(chips[2].label, new RegExp(`^${chips[2].text} sent files?$`))
     await head.locator('.fp-sent').click()
     assert.equal(await head.locator('.fp-sent').getAttribute('aria-expanded'), 'true')
     const file = head.locator('.fp-files .fp-file').first(), held = await file.getAttribute('data-held')

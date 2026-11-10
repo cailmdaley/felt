@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { familySends, familyTree, openThread, sentFiles, threadRow } from './familyNav.mjs'
+import { hitBox, offeredVerbs, verbCaret, verbFace } from './verbs.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&long-title`
@@ -40,11 +41,8 @@ async function visitChannel(page, name) {
   await page.locator('.ws-switcher .ws-channel-row').filter({ has: page.getByText(name, { exact: true }) }).click()
   await threadNamed(page, name)
 }
-/** The lifecycle verbs the shown acts draw, by word. */
-const shownVerbs = page => acts(page).locator('.ws-acts-verbs > button').evaluateAll(buttons =>
-  buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
-/** A lifecycle verb in the shown acts, by its word. */
-const actVerb = (page, word) => acts(page).locator(`.ws-acts-verbs > button[data-verb="${word}"]`)
+/** The lifecycle verbs the shown acts offer, by word: the verb button's face, then its menu's. */
+const shownVerbs = page => offeredVerbs(acts(page))
 /** The message box's verbs under the band's head. */
 const workerVerbs = page => page.locator('.ws-stage-band .ws-worker-acts button[data-verb]').evaluateAll(buttons =>
   buttons.filter(button => button.checkVisibility()).map(button => button.dataset.verb))
@@ -107,7 +105,7 @@ export function registerHeaderBarJourneys(test) {
     for (const scheme of ['light', 'dark']) {
       await page.goto(`${url}&e2e-appearance=${scheme}`)
       await openRoot(page)
-      assert.deepEqual(await shownVerbs(page), ['Rest', 'Temper', 'Discard'], 'Awaiting review offers its verdicts')
+      assert.deepEqual(await shownVerbs(page), ['Temper', 'Rest', 'Discard'], 'Awaiting review leads with Temper and offers the rest')
       assert.deepEqual(await workerVerbs(page), ['Resume', 'New session'])
       await assertLifecycleInk(page, scheme)
       const visits = [
@@ -131,7 +129,7 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(url)
     await openRoot(page)
     const focused = locator => locator.evaluate(el => el === document.activeElement)
-    for (const [name, control] of [['Settings', acts(page).locator('.ws-acts-settings')], ['Temper', actVerb(page, 'Temper')], ['Constitution', page.locator('.ws-page.ws-selected .fp-row[data-selected] .fp-constitution')]]) {
+    for (const [name, control] of [['Settings', acts(page).locator('.ws-acts-settings')], ['Temper', verbFace(acts(page))], ['Constitution', page.locator('.ws-page.ws-selected .fp-row[data-selected] .fp-constitution')]]) {
       await control.focus()
       for (const width of [850, 390, 1440]) {
         await page.setViewportSize({ width, height: 900 })
@@ -151,7 +149,7 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(geometry.height <= geometry.line + 1, JSON.stringify(geometry))
       assert.equal(await header.locator('h1').getAttribute('title'), title)
       assert.equal(await header.locator('.ws-fiber-acts').isVisible(), false, `the family's page carries the acts, not the band, at ${width}`)
-      assert.deepEqual(await shownVerbs(page), ['Rest', 'Temper', 'Discard'], `Awaiting review draws its verbs on its row at ${width}`)
+      assert.deepEqual(await shownVerbs(page), ['Temper', 'Rest', 'Discard'], `Awaiting review draws its verbs on its row at ${width}`)
     }
   }, { width: 1440, height: 900 })
   test('The band keeps its title and controls on one line, and each row its acts, inside open desktop columns', async page => {
@@ -175,14 +173,15 @@ export function registerHeaderBarJourneys(test) {
           return b.left >= page.left && b.right <= page.right && b.top >= row.top - 4 && b.bottom <= row.bottom + 4
         })
       })
-      for (const name of ['Temper', 'Discard']) assert.ok(await actVerb(page, name).isVisible(), `${name} stays drawn`)
+      assert.ok(await verbFace(acts(page)).isVisible() && await verbCaret(acts(page)).isVisible(), 'the verb button stays drawn')
+      assert.deepEqual(await shownVerbs(page), ['Temper', 'Rest', 'Discard'], 'Temper leads and Discard stays a menu away')
     }
     for (const width of [1440, 850, 701, 1440]) {
       await page.setViewportSize({ width, height: 900 }); await check()
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-narrow-desktop-light.png') })
     }
   }, { width: 1440, height: 900 })
-  test('The 390px phone band leaves the name to the top bar; the highlighted row carries its acts on a line of their own', async page => {
+  test("The 390px phone band leaves the name to the top bar; the highlighted row's second line carries its views and acts", async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
@@ -198,19 +197,22 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(row.x >= 0 && row.x + row.width <= width, `the acts fit the phone: ${JSON.stringify(row)}`)
       const centres = await strip.locator('button:visible, a:visible').evaluateAll(els => els.map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
       assert.ok(centres.length >= 2 && Math.max(...centres) - Math.min(...centres) < 2, `the acts share one line: ${centres}`)
-      const own = await strip.evaluate(el => {
-        const title = el.closest('.fp-title'), name = title.querySelector('.fp-name').getBoundingClientRect(), docs = title.querySelector('.fp-docs').getBoundingClientRect()
-        return el.getBoundingClientRect().top >= Math.max(name.bottom, docs.bottom) - 1
+      // Two lines: the name with its age, then the views and the acts side by side.
+      const lines = await strip.evaluate(el => {
+        const title = el.closest('.fp-title'), name = title.querySelector('.fp-name').getBoundingClientRect(), docs = title.querySelector('.fp-docs').getBoundingClientRect(), own = el.getBoundingClientRect()
+        return { below: own.top >= name.bottom - 1 && docs.top >= name.bottom - 1, beside: docs.right <= own.left + 1, centres: [docs.top + docs.height / 2, own.top + own.height / 2] }
       })
-      assert.ok(own, 'the acts take a line of their own under the row')
-      for (const [name, control] of [...expected.map(name => [name, actVerb(page, name)]), ['Settings', strip.locator('.ws-acts-settings')]]) {
-        const box = await control.boundingBox()
-        assert.ok(box.x >= 0 && box.x + box.width <= width + 1 && box.height >= 44, `${name} is a full touch target in reach: ${JSON.stringify(box)}`)
+      assert.ok(lines.below && lines.beside && Math.abs(lines.centres[0] - lines.centres[1]) < 2, `the views and acts share the line under the name: ${JSON.stringify(lines)}`)
+      // Every act is a full touch target in reach: its hit area (the pill's drawing grows to it) is 44px tall.
+      for (const [name, control] of [['the verb face', verbFace(strip)], ['the caret', verbCaret(strip)], ['Settings', strip.locator('.ws-acts-settings')]]) {
+        if (name === 'the caret' && expected.length < 2) continue
+        const reach = await hitBox(control)
+        assert.ok(reach.x >= 0 && reach.x + reach.width <= width + 1 && reach.height >= 44, `${name} is a full touch target in reach: ${JSON.stringify(reach)}`)
       }
       // Only the highlighted row draws its acts on a phone.
       assert.equal(await page.locator('.ws-page.ws-selected .fp-row:not([data-selected]) > .fp-line .fp-verbs').evaluateAll(slots => slots.filter(slot => slot.checkVisibility()).length), 0)
     }
-    await assertRow(['Rest', 'Temper', 'Discard'])
+    await assertRow(['Temper', 'Rest', 'Discard'])
     // The phone leaves the reader by its keys and top bar; the band's × stands with the head it hides.
     for (let step = 0; step < 32 && await page.locator('.kbn-reader-open').count(); step++) {
       await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Escape'); await page.waitForTimeout(30)
@@ -222,7 +224,7 @@ export function registerHeaderBarJourneys(test) {
     await family.locator('.kbn-thread-row[title="Response analysis"] .kbn-thread-name').click()
     await threadNamed(page, 'Response analysis')
     await assertRow(['Close for review', 'Rest', 'Temper', 'Discard'])
-    const reviewInk = await actVerb(page, 'Close for review').evaluate(el => {
+    const reviewInk = await verbFace(acts(page)).evaluate(el => {
       const neutral = document.createElement('span')
       neutral.style.color = 'var(--ws-ink-muted, var(--kbn-ink-muted))'
       el.parentElement.append(neutral)
@@ -391,18 +393,26 @@ export function registerHeaderBarJourneys(test) {
         const dock = await band(page).locator('.ws-dock').boundingBox()
         assert.ok(dock.x >= 0 && dock.x + dock.width <= viewport.width, JSON.stringify(dock))
       }
-      // The root's row draws its acts as one stroke grid, one size, on the row's centre line.
+      // The root's row draws its acts on one stroke grid, on the row's centre line:
+      // the verb button's face and caret, then the session pair at one size.
       const strip = acts(page)
-      const icons = strip.locator('.ws-header-icon:visible')
-      assert.ok(await icons.count() >= 4)
+      const icons = strip.locator(':is(button, a):has(> svg):visible')
+      // The face, the caret and settings everywhere; the console beside them where this device has a route to the conversation (the harness's desktop, not its phone).
+      assert.equal(await icons.count(), device === 'desktop' ? 4 : 3)
       const size = device === 'desktop' ? 15 : 20
       for (const icon of await icons.all()) {
         const label = await icon.getAttribute('aria-label')
-        assert.equal(await icon.getAttribute('title'), label)
-        assert.deepEqual(await icon.evaluate(el => {
-          const svg = el.querySelector('svg'), box = svg?.getBoundingClientRect(), css = svg && getComputedStyle(svg)
-          return { viewBox: svg?.getAttribute('viewBox'), inheritsColor: css?.stroke === getComputedStyle(el).color, width: box?.width, height: box?.height, weight: css?.strokeWidth }
-        }), { viewBox: '0 0 16 16', inheritsColor: true, width: size, height: size, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
+        const caret = await icon.evaluate(el => el.matches('.ws-verb-more'))
+        // The caret's tooltip lists the verbs it holds; every other act's tooltip is its name.
+        if (!caret) assert.equal(await icon.getAttribute('title'), label)
+        const mark = await icon.evaluate(el => {
+          const svg = el.querySelector('svg'), box = svg.getBoundingClientRect(), css = getComputedStyle(svg)
+          return { viewBox: svg.getAttribute('viewBox'), inheritsColor: css.stroke === css.color, width: box.width, height: box.height, weight: css.strokeWidth, session: el.matches('.ws-header-icon') }
+        })
+        const { viewBox, inheritsColor, weight } = mark
+        assert.deepEqual({ viewBox, inheritsColor, weight }, { viewBox: '0 0 16 16', inheritsColor: true, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
+        if (mark.session) assert.deepEqual([mark.width, mark.height], [size, size], `${label} draws at the session pair's size`)
+        else assert.ok(mark.width === mark.height && mark.width <= size, `${label}'s mark is square and no larger than the pair's: ${mark.width}`)
         await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
       }
       const centres = await icons.evaluateAll(els => els.map(el => { const r = el.querySelector('svg').getBoundingClientRect(); return r.top + r.height / 2 }))
@@ -435,7 +445,7 @@ export function registerHeaderBarJourneys(test) {
       }
       // A verdict leaves settings before opening its undo window.
       await settings.click()
-      await actVerb(page, 'Temper').click()
+      await verbFace(strip).click()
       assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
       const undo = strip.getByRole('button', { name: `Undo verdict on ${title}`, exact: true })
       await undo.waitFor(); await undo.click()
