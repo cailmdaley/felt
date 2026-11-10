@@ -52,7 +52,7 @@
 .fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; height: var(--fp-line); visibility: hidden; }
 .fp-row:is([data-selected], :focus-within) > .fp-line .fp-verbs, .fp-verbs:has([data-verdict-pending]) { visibility: visible; }
 @media (hover: hover) { .fp-row:hover > .fp-line .fp-verbs { visibility: visible; } }
-.fp-verbs .ws-fiber-acts { --ws-act: var(--fp-control); --ws-act-icon: 15px; gap: 8px; }
+.fp-verbs .ws-fiber-acts { --ws-act: var(--fp-control); --ws-act-icon: 15px; flex: 1; justify-content: space-between; gap: 8px; }
 .fp-verbs .ws-acts-session { display: grid; grid-template-columns: var(--fp-control) var(--fp-control); gap: 2px; }
 .ws-reader .fp-verbs .ws-acts-session .ws-header-icon { grid-row: 1; width: var(--fp-control); height: var(--fp-control); color: var(--ws-ink-soft); }
 .ws-reader .fp-verbs .ws-acts-session .ws-header-icon svg { width: 15px; height: 15px; }
@@ -60,9 +60,8 @@
 /* What a thread holds, as one segmented control: each segment in a place of
    its own (tapestry, constitution, sends), drawn on the acts' stroke grid; the
    segments a row has share one outline, and the one open is pressed into it. */
-.fp-docs { --fp-seg: 28px; grid-area: docs; justify-self: start; display: grid; grid-template-columns: var(--fp-seg) var(--fp-seg) auto; height: var(--fp-control); margin-top: calc((var(--fp-line) - var(--fp-control)) / 2); white-space: nowrap; }
+.fp-docs { --fp-seg: 28px; grid-area: docs; justify-self: end; display: grid; grid-auto-flow: column; height: var(--fp-control); margin-top: calc((var(--fp-line) - var(--fp-control)) / 2); white-space: nowrap; }
 .fp-docs:empty { visibility: hidden; }
-.fp-lead { grid-column: 1; } .fp-constitution { grid-column: 2; } .fp-sent { grid-column: 3; }
 .fp-chip { --fp-edge: var(--ws-hairline-soft); position: relative; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: var(--fp-seg); height: 100%; margin: 0; padding: 0 6px; border: 1px solid var(--fp-edge); border-left-width: 0; border-radius: 0; background: var(--ws-paper); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono); cursor: pointer; }
 .fp-chip:first-child { border-left-width: 1px; border-radius: var(--ws-control-radius) 0 0 var(--ws-control-radius); }
 .fp-chip:last-child { border-top-right-radius: var(--ws-control-radius); border-bottom-right-radius: var(--ws-control-radius); }
@@ -71,7 +70,7 @@
 .fp-chip:is(:hover, :focus-visible) { background: var(--ws-hover); color: var(--ws-ink); outline: none; }
 .fp-chip:focus-visible { box-shadow: inset 0 0 0 1px var(--ws-state-working); }
 .fp-chip:is([aria-pressed='true'], [aria-expanded='true']) { background: var(--ws-fill); color: var(--ws-ink); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ws-ink) 16%, transparent); }
-.fp-chip[data-unread] { color: var(--ws-fresh); }
+.fp-chip[data-unread] { padding-right: 9px; color: var(--ws-fresh); }
 .fp-chip[data-unread]::after { content: ''; position: absolute; top: 3px; right: 3px; width: 4px; height: 4px; background: var(--ws-fresh); transform: rotate(45deg); }
 /* A row's sends, one line each, on the row's text column: the age in a fixed column, then what the send carried, every item on one centre line and one gap apart. */
 .fp-files { --fp-age: 4ch; --fp-item-gap: 14px; display: grid; gap: 2px; margin: 4px 0 4px var(--fp-text); cursor: default; }
@@ -139,8 +138,7 @@
   .ws-family-grid { --fp-control: 36px; }
   .fp-title { grid-template-columns: 12px auto minmax(0, 1fr) auto; grid-template-areas: 'mark name name meta' '. docs verbs verbs'; row-gap: 2px; }
   .fp-word { display: none; }
-  .fp-docs { --fp-seg: 44px; grid-template-columns: none; grid-auto-flow: column; margin-top: 4px; }
-  .fp-docs > .fp-chip { grid-column: auto; }
+  .fp-docs { --fp-seg: 44px; justify-self: start; margin-top: 4px; }
   .fp-chip > svg { width: 18px; height: 18px; }
   .fp-file, .fp-back, .fp-step { min-height: var(--ws-phone-target); }
   /* A touch target is 44px however tall its drawing. */
