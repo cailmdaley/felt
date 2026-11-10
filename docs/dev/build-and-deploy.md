@@ -193,7 +193,10 @@ Locking does not depend on the installed CLI version.
 The helper, transaction shell and local build subprocesses inherit the lock descriptors. The locks drop only when the last holder closes them or exits, including cancelled build descendants, not when cancellation starts or the helper alone dies.
 Preparation, harness and activation command shells close descriptors 3 and 4; background launchers and newly started tmux servers cannot retain a finished deploy's locks. The activation control descriptor is closed in those commands and builds too.
 An `srun` job on another node inherits no local descriptor and relies on its submitting client's lifetime and cancellation. Kernel lock release does not delete lock files.
-Different hosts can deploy concurrently.
+Different hosts can deploy concurrently, and one helper run deploys its remotes concurrently.
+It deploys the deploy host first, then stages each remote in turn: the SSH preflight and any interactive handshake, the platform probe, and the shipped files (the Linux artifacts are built during the first eligible remote's staging).
+Then every staged remote's transaction runs at once, each with its own bootstrap, lifetime FIFO and cancellation; their output lines carry the host name.
+Interrupting the helper cancels every running transaction.
 Do not delete lock files to recover a deploy; their existence is not evidence that they are held.
 
 ### Transaction ownership and diagnostics

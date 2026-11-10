@@ -17,6 +17,9 @@
 # builds, refreshes harnesses, activates, verifies and releases quarantine.
 # A per-tree kernel lease protects preparation and builds from pruning.
 # Hosts already serving the ready target coalesce without another cycle.
+# The deploy host runs first; then each remote is staged in turn (handshake,
+# probe, shipped files) and all remote transactions run concurrently, each
+# line prefixed with its host.
 # A host whose harness plugins disagree with its felt build fails after its daemon
 # step has run. A Linux x86_64 host with glibc 2.28 or newer builds nothing:
 # the deploy host builds its artifacts once per run (static CLIs, and a daemon
@@ -59,7 +62,7 @@ set -uo pipefail
 
 for arg in "$@"; do
   case "$arg" in
-    -h|--help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
   esac
 done
 
@@ -236,7 +239,7 @@ while [ $# -gt 0 ]; do
       done
       [ -f "$FLEET_FILE" ] || printf 'no fleet file at %s — local only\n' "$FLEET_FILE"
       exit 0 ;;
-    -h|--help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
@@ -1182,14 +1185,19 @@ status=\$?
 kill -KILL -- \"-\$child\" 2>/dev/null || true
 child=''
 exit \"\$status\""
-  printf '%s' "$bootstrap" > "$RUN_DIR/bootstrap"
+  # Each transaction has its own bootstrap and lifetime FIFO. The deployer
+  # process alone holds the FIFO's write end: here, or opened before forking
+  # a concurrent remote (LIFELINE_HELD), so its death cancels every observer.
+  local run="$RUN_DIR/${host:-local}-$mode"
+  printf '%s' "$bootstrap" > "$run.bootstrap"
+  [ -p "$run.lifetime" ] || mkfifo "$run.lifetime" || return 1
   printf '  %s: attached transaction; cancellation follows its observer\n' "${host:-local}" >&2
-  exec 6<> "$RUN_DIR/lifetime"
+  [ -n "${LIFELINE_HELD:-}" ] || exec 6<> "$run.lifetime"
   if [ -z "$host" ]; then
-    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" bash -c "$RUN_SOURCE" -- "$token" < "$RUN_DIR/lifetime" 6>&- &
+    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$run.bootstrap" "$token" bash -c "$RUN_SOURCE" -- "$token" < "$run.lifetime" 6>&- &
   else
-    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" ssh -o BatchMode=yes \
-      $(fleet_flags "$host") "$(fleet_ssh "$host")" "bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$token")" < "$RUN_DIR/lifetime" 6>&- &
+    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$run.bootstrap" "$token" ssh -o BatchMode=yes \
+      $(fleet_flags "$host") "$(fleet_ssh "$host")" "bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$token")" < "$run.lifetime" 6>&- &
   fi
   active=$!
   wait "$active"
@@ -1200,7 +1208,10 @@ exit \"\$status\""
   [ "$status" = 0 ] || { bad "attached transaction failed (exit $status); see ~/.shuttle/deploy/last-run.log"; return 1; }
 }
 
-deploy_remote() {
+# Staging runs serially, so interactive handshakes meet the human one at a
+# time and the Linux artifacts are built before any transaction starts. It
+# records the remote stage directory for remote_transaction.
+stage_remote() {
   local host="$1" dir dest flags stage refusal
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dest:$dir)"
@@ -1223,7 +1234,19 @@ deploy_remote() {
     rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:$stage/agents.json" \
       || { bad 'stage agent registry: failed'; return 1; }
   fi
-  run_transaction "$host" "$dir" deploy "$stage" "$(fleet_build_wrap "$host")" ""
+  printf '%s' "$stage" > "$RUN_DIR/$host.stage"
+}
+
+# One remote's transaction, run concurrently with the others in a subshell
+# that first closes its copies of the deployer's lifeline descriptors: the
+# deployer's exit or cancellation reaches every observer as EOF.
+remote_transaction() { # host, line prefix (empty for none)
+  local host="$1" prefix="$2" fd
+  for fd in $LIFELINE_FDS; do eval "exec $fd>&-"; done
+  HOST="$host" LIFELINE_HELD=1
+  run_transaction "$host" "$(fleet_dir "$host")" deploy "$(cat "$RUN_DIR/$host.stage")" "$(fleet_build_wrap "$host")" "" 2>&1 |
+    while IFS= read -r line; do printf '%s%s\n' "$prefix" "$line"; done
+  return "${PIPESTATUS[0]}"
 }
 
 LOCK_SOURCE="$(<"$REPO/scripts/deploy-lock/main.go")"
@@ -1234,13 +1257,14 @@ $(grep -E '^(go|toolchain) ' "$REPO/go.mod")"
 RUN_SOURCE="$(<"$REPO/scripts/deploy-run.sh")"
 DEPLOYER="$(hostname):$$"
 RUN_DIR="$(mktemp -d)" || exit 1
-mkfifo "$RUN_DIR/lifetime" || exit 1
-LOCAL_TOOL= active=
+LOCAL_TOOL= active= RUNNING= LIFELINE_FDS=
 cleanup() { rm -rf "$RUN_DIR" "$LOCAL_TOOL"; }
 cancel_deploy() {
   trap '' TERM INT HUP
   exec 6>&-
+  for fd in $LIFELINE_FDS; do eval "exec $fd>&-"; done
   if [ -n "$active" ]; then kill -TERM "$active" 2>/dev/null || true; wait "$active" || true; kill -KILL -- "-$active" 2>/dev/null || true; fi
+  for pid in $RUNNING; do wait "$pid" || true; done
   exit "$1"
 }
 trap cleanup EXIT
@@ -1255,12 +1279,41 @@ UI_SNAPSHOT="$RUN_DIR/ui"
 LINUX_OUT="$RUN_DIR/linux"
 mkdir -p "$UI_SNAPSHOT"
 
-FAILED=""
+# The deploy host goes first (it builds the bundle the others are shipped);
+# each remote is then staged in turn and all their transactions run at once.
+FAILED="" STAGED=""
 for h in $HOSTS; do
   HOST="$h"
-  if [ "$h" = local ]; then deploy_local || FAILED="$FAILED $h"
-  else deploy_remote "$h" || FAILED="$FAILED $h"; fi
+  if [ "$h" = local ]; then deploy_local || FAILED="$FAILED $h"; fi
 done
+for h in $HOSTS; do
+  [ "$h" != local ] || continue
+  HOST="$h"
+  if stage_remote "$h"; then STAGED="$STAGED $h"; else FAILED="$FAILED $h"; fi
+done
+HOST=
+if [ -n "$STAGED" ]; then
+  say "deploying$STAGED concurrently"
+  fd=10
+  set -- $STAGED
+  for h in $STAGED; do
+    mkfifo "$RUN_DIR/$h-deploy.lifetime" || exit 1
+    eval "exec $fd<> \"\$RUN_DIR/\$h-deploy.lifetime\""
+    LIFELINE_FDS="$LIFELINE_FDS $fd"
+    prefix=
+    [ $# = 1 ] || prefix="$(printf '%-9s ' "$h")"
+    remote_transaction "$h" "$prefix" &
+    RUNNING="$RUNNING $!"
+    fd=$((fd + 1))
+  done
+  set -- $RUNNING
+  for h in $STAGED; do
+    wait "$1" || FAILED="$FAILED $h"
+    shift
+  done
+  for fd in $LIFELINE_FDS; do eval "exec $fd>&-"; done
+  RUNNING= LIFELINE_FDS=
+fi
 
 echo
 if [ -z "$FAILED" ]; then
