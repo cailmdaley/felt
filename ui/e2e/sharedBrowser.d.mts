@@ -18,7 +18,7 @@ export interface SharedBrowser {
   endpoint(): Promise<string>
   status(): Promise<SharedBrowserStatus>
   stop(): Promise<boolean>
-  reap(minutes: number): Promise<{ result: string; pid?: number | null; targetCount?: number; idleForMs?: number }>
+  reap(minutes: number): Promise<{ result: string; pid?: number | null; idleForMs?: number }>
   withLock<T>(action: () => Promise<T>): Promise<T>
 }
 

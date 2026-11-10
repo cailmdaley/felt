@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { findBrowser, sharedBrowser, system as browserSystem } from '../e2e/sharedBrowser.mjs'
@@ -219,6 +219,20 @@ describe('health: an endpoint that does not answer never causes a kill', () => {
     expect((await w.browser.status())).toMatchObject({ state: 'orphaned', processCount: 2 })
     expect(await w.browser.reap(30)).toEqual({ result: 'reaped', pid: null })
     expect(w.signals).toEqual([[203, 'SIGTERM'], [204, 'SIGTERM']])
+    expect(w.table).toEqual([])
+    w.cleanup()
+  })
+
+  it('reaps a browser nobody asked for within the threshold, and leaves a fresher one running', async () => {
+    const w = world()
+    w.table = ours(w.browser.profileDir)
+    const used = join(dirname(w.browser.logFile), `browser-${port}.used`)
+    writeFileSync(used, '')
+    expect(await w.browser.reap(120)).toMatchObject({ result: 'active' })
+    expect(w.signals).toEqual([])
+    const hoursAgo = new Date(Date.now() - 3 * 3_600_000)
+    utimesSync(used, hoursAgo, hoursAgo)
+    expect(await w.browser.reap(120)).toEqual({ result: 'reaped', pid: 202 })
     expect(w.table).toEqual([])
     w.cleanup()
   })

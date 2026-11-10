@@ -48,6 +48,8 @@ RUN useradd -m -u ${uid} -s /bin/bash tester
 USER tester
 ENV GOFLAGS=-buildvcs=false GOTOOLCHAIN=local
 EOF
+  # Apple's builder is a 2 GiB VM that outlives the build.
+  [ "$runtime" != container ] || container builder stop >/dev/null 2>&1 || true
 fi
 
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/felt-test-linux"

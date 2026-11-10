@@ -108,8 +108,8 @@ It hands out an endpoint only when the browser answering on the port is the one 
 
 `start` and `endpoint` launch the browser when it is not running and refresh its idle clock; `status` reports `running`, `unresponsive` (alive but not answering CDP), `orphaned` (helpers whose browser process died) or `stopped`, with the PID, endpoint, process count, and RSS.
 A browser that does not answer is reported, never killed: `stop` is the only way to end it.
-`reap` defaults to 30 idle minutes; `SHARED_BROWSER_IDLE_MINUTES` changes that threshold.
-It treats blank tabs and Chrome's internal New Tab targets as idle; any other page keeps the browser running.
+`reap` stops a browser nobody has asked for in 120 minutes, whatever tabs lanes left open in it; `SHARED_BROWSER_IDLE_MINUTES` changes that threshold.
+`start` and `endpoint` leave one detached watcher per port that runs `reap` every five minutes and exits with the browser, so an abandoned browser does not stay resident; a lane that outlives the threshold asks for the endpoint again.
 `reap` also clears orphaned helpers and leaves an unresponsive browser alone.
 `start`, `endpoint`, `stop`, and `reap` serialise on an `flock` taken through `perl`, which the OS releases when its holder dies.
 Both it and the e2e suites find their browser in Puppeteer's Chrome for Testing cache, a Chrome for Testing install, Playwright's cache for the revision `playwright-core` pins (honouring `PLAYWRIGHT_BROWSERS_PATH`, including `0`), `CHROME_PATH`, then system Chrome or Chromium; Playwright's headless-shell builds are not used.

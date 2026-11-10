@@ -69,6 +69,8 @@ if ! "$runtime" image inspect "$image" >/dev/null 2>&1; then
   # default 2-CPU builder (`container builder start --cpus 8 --memory 8g`).
   echo "build-linux-release: building $image (once per toolchain recipe)" >&2
   printf '%s\n' "$dockerfile" | "$runtime" build "${platform[@]}" -t "$image" -f - "$here" >&2
+  # Apple's builder is a VM that outlives the build.
+  [ "$runtime" != container ] || container builder stop >/dev/null 2>&1 || true
 fi
 
 echo "build-linux-release: CLIs (linux/amd64)" >&2

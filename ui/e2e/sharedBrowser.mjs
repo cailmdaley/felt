@@ -33,7 +33,7 @@ export const system = {
   },
 }
 
-export const timing = { readyMs: 30_000, pollMs: 150, probeMs: 750, graceMs: 5_000, killMs: 2_000, lockMs: 45_000 }
+export const timing = { readyMs: 30_000, pollMs: 150, probeMs: 750, graceMs: 5_000, killMs: 2_000, lockMs: 45_000, watchMs: 300_000 }
 
 export function sharedBrowser({
   env = process.env,
@@ -189,30 +189,22 @@ export function sharedBrowser({
     return withLock(() => terminate(processes()))
   }
 
-  // Stops the browser when every CDP target is idle and no client asked for it within `minutes`.
+  // Stops the browser when no client asked for its endpoint within `minutes`, whatever tabs it holds.
   async function reap(minutes) {
     return withLock(async () => {
       const list = processes(), root = rootOf(list)
       if (!root) return await terminate(list) ? { result: 'reaped', pid: null } : { result: 'not running' }
-      const health = await probe(), targets = health?.ours ? await json('/json/list') : null
-      if (!Array.isArray(targets)) return { result: 'unresponsive', pid: root.pid }
+      if (!(await probe())?.ours) return { result: 'unresponsive', pid: root.pid }
       const lastUsed = await stat(usedFile).then(info => info.mtimeMs, () => null)
       if (lastUsed === null) await touch()
       const idleForMs = lastUsed === null ? 0 : Date.now() - lastUsed
-      if (!targets.every(idleTarget) || idleForMs < minutes * 60_000) return { result: 'active', targetCount: targets.length, idleForMs }
+      if (idleForMs < minutes * 60_000) return { result: 'active', idleForMs }
       await terminate(processes())
       return { result: 'reaped', pid: root.pid }
     })
   }
 
   return { port, profileDir, logFile, args, endpoint, status, stop, reap, withLock }
-}
-
-// Chromium exposes its New Tab screen as page, iframe, and browser UI targets.
-export function idleTarget(target) {
-  const url = target.url ?? ''
-  if (target.type === 'page') return url.startsWith('about:blank') || url === 'chrome://newtab/'
-  return target.type === 'browser_ui' || target.type === 'iframe' && url.startsWith('chrome-untrusted://new-tab-page/')
 }
 
 async function executable(path) {
@@ -290,9 +282,30 @@ export async function findBrowser({ env = process.env, home = env.HOME || homedi
 
 const formatRss = kib => kib >= 1024 * 1024 ? `${(kib / 1024 / 1024).toFixed(2)} GiB` : `${(kib / 1024).toFixed(1)} MiB`
 
+const idleMinutes = arg => {
+  const minutes = Number(arg ?? process.env.SHARED_BROWSER_IDLE_MINUTES ?? 120)
+  if (!Number.isFinite(minutes) || minutes < 0) throw new Error(`Idle minutes must be non-negative; received ${arg}`)
+  return minutes
+}
+
+// One detached watcher per port reaps the browser once it has sat idle, and exits with it.
+function ensureWatcher(port) {
+  const watching = ` watch ${port}`
+  if (system.processes().some(item => item.command.includes('shared-browser') && item.command.endsWith(watching))) return
+  spawnProcess(process.execPath, [process.argv[1], 'watch', String(port)], { detached: true, stdio: 'ignore' }).unref()
+}
+
 export async function main([command, ...args], browser = sharedBrowser()) {
-  if (command === 'start' || command === 'endpoint') console.log(await browser.endpoint())
-  else if (command === 'status') {
+  if (command === 'start' || command === 'endpoint') {
+    console.log(await browser.endpoint())
+    ensureWatcher(browser.port)
+  } else if (command === 'watch') {
+    for (;;) {
+      await sleep(timing.watchMs)
+      const { result } = await browser.reap(idleMinutes())
+      if (result === 'reaped' || result === 'not running') return
+    }
+  } else if (command === 'status') {
     const current = await browser.status()
     if (args.includes('--json')) console.log(JSON.stringify(current, null, 2))
     else {
@@ -305,11 +318,9 @@ export async function main([command, ...args], browser = sharedBrowser()) {
     }
   } else if (command === 'stop') console.log(await browser.stop() ? 'stopped' : 'not running')
   else if (command === 'reap') {
-    const minutes = Number(args[0] ?? process.env.SHARED_BROWSER_IDLE_MINUTES ?? 30)
-    if (!Number.isFinite(minutes) || minutes < 0) throw new Error(`Idle minutes must be non-negative; received ${args[0]}`)
-    const result = await browser.reap(minutes)
+    const result = await browser.reap(idleMinutes(args[0]))
     console.log(result.result === 'reaped' ? `reaped${result.pid ? ` pid ${result.pid}` : ' orphaned helpers'}`
-      : result.result === 'active' ? `active: ${result.targetCount} CDP target(s), idle ${Math.floor(result.idleForMs / 60_000)}m`
+      : result.result === 'active' ? `active: idle ${Math.floor(result.idleForMs / 60_000)}m`
       : result.result === 'unresponsive' ? `unresponsive: pid ${result.pid} does not answer CDP; left running` : result.result)
-  } else console.log('Usage: bin/shared-browser <start|endpoint|status|stop|reap [idle-minutes]>')
+  } else console.log('Usage: bin/shared-browser <start|endpoint|status|stop|reap [idle-minutes]|watch>')
 }
