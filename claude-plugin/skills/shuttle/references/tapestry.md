@@ -8,11 +8,17 @@ The tapestry is the constitution's one page: what this work is, whole, as it sta
 
 **Make it beautiful, and make the beauty carry the state.** The human wants to open their work and enjoy looking at it. Choose the form that fits the shape of this work, and be inventive: a diagram of a pipeline's stages, a chart of a territory, a column of strata, a board, a list set like a page of a good book. Draw it in code: inline SVG, canvas, or the watercolor-and-ink kit in [tapestry_map.py](../assets/tapestry_map.py). The test of any form is that the picture is the summary. A drawing the reader admires and then scrolls past to learn what happened has failed, and so has a status list nobody enjoys opening. For a morning's email, the first screen is the messages that need an answer.
 
+**Set what needs the human in reading type.** In a drawn first screen, the items that need the human sit together as a short list at body size on a plain ground, such as a cartouche or a plate. Captions scattered across the picture don't count. Every label over drawn ground gets a plate or a halo, and none may collide at desktop or phone width.
+
+**Let the ornament count.** A repeated mark (trees, sails, houses, reeds) stands one for each thing it represents, so the reader can count it; a fixed number of trees is decoration that competes with the counts beside it. Write numbers in ordinary numerals.
+
+**An allegory comes with its key.** When the form borrows a reference or names its parts with puns, say what the reference is and what each part means, one click below the first screen.
+
 **When the work has a primary artifact, the first screen can be a board.** A paper or a deck shows only what has already landed in it, so a reader back after a day can't see what moved. Make a small board with the artifact as one block, beside blocks for what it can't show yet: a new figure, the latest numbers, a lost run, a pending decision. Each block carries the thing itself and its state; a script that re-inlines the artifact keeps the board current with each build.
 
 **Everything hangs from the first screen.** Each part of it is a section of the page, and a reader sees the whole, then chooses where to dig. Disclose in layers: first screen, a short paragraph per part, then `<details>`, nested pages and sub-fibers. Keep the page short: two or three screens below the first.
 
-**Test the glance before a stop the human will review.** Take a headless screenshot of the first screen alone and give it to a fresh agent on the cheapest model you can launch, with no other context. Ask it what this is, where it stands, and what the human needs to do. Rewrite the screen until its answers are right.
+**Test the glance before a stop the human will review.** Take a headless screenshot of the first screen alone and give it to a fresh agent on the cheapest model you can launch, with no other context. Ask it what this is, where it stands, and what the human needs to do. Rewrite the screen until its answers are right. Look at it where the human reads it, in Shuttle's reader as well as the bare file, at desktop and phone widths.
 
 A PR description is this page at the scale of one change.
 
