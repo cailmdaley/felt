@@ -84,6 +84,7 @@ defmodule Shuttle.Voice do
         muted: Recorder.voice_muted?(Keyword.get(opts, :capture_opts, [])),
         state: if(route_error, do: "failed", else: "off"),
         target: target,
+        cold: false,
         pending: nil,
         preview: nil,
         last: read_last(),
@@ -285,17 +286,22 @@ defmodule Shuttle.Voice do
     |> put_pending_words(state)
   end
 
-  # Words the live recording's relay holds unsent, read from the relay each time.
-  defp put_pending_words(snapshot, %{launch: nil}), do: Map.put(snapshot, :pending_words, 0)
+  # What the live recording's relay holds unsent, read from the relay each time:
+  # the words of its finished lines, and how long until the quiet gap sends them.
+  defp put_pending_words(snapshot, %{launch: nil}),
+    do: Map.merge(snapshot, %{pending_words: 0, sends_in_ms: nil})
 
   defp put_pending_words(snapshot, state) do
-    words =
+    status =
       case state.monitor.(state.launch) do
-        %{pending_words: words} -> words
-        _ -> 0
+        %{pending_words: _} = status -> status
+        _ -> %{}
       end
 
-    Map.put(snapshot, :pending_words, words)
+    Map.merge(snapshot, %{
+      pending_words: Map.get(status, :pending_words, 0),
+      sends_in_ms: Map.get(status, :sends_in_ms)
+    })
   end
 
   defp put_mode(%{enabled: true} = snapshot) do
@@ -628,6 +634,10 @@ defmodule Shuttle.Voice do
           muted: Recorder.voice_muted?(state.capture_opts),
           state: phase,
           target: state.target,
+          # Words to a cold target are dropped unless they end with "send".
+          cold:
+            enabled and not is_nil(state.target) and state.target["pinned"] != true and
+              cold?(state.target),
           pending: status.pending,
           preview:
             if(words && preview_pin && preview_pin.target,

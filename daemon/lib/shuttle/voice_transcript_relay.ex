@@ -445,6 +445,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
      %{
        pending: pending,
        pending_words: pending_words(state.config),
+       sends_in_ms: sends_in_ms(state.config, state),
        last: state.config["last"],
        error: state.error
      }, state}
@@ -800,6 +801,16 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
          do: flush_buffer(acc, buffer, state),
          else: acc
     end)
+  end
+
+  # How long until the quiet gap sends the buffered words; nil with nothing
+  # buffered or while speech still runs.
+  defp sends_in_ms(config, state) do
+    waits =
+      for %{"last_word_at" => at} when not is_nil(at) <- config["buffers"],
+          do: state.thresholds.()["quiet_seconds"] * 1_000 - (state.clock.() - at)
+
+    if waits != [] and not speaking?(config), do: max(Enum.min(waits), 0)
   end
 
   defp voice_silence(at, %{"start" => start, "end" => finish}) do

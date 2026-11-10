@@ -1163,6 +1163,23 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     Path.join([c.root, "relays", digest <> ".json"])
   end
 
+  test "status counts down the quiet gap, and holds it while speech runs", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    start_monitor(c, kind: "voice", routes: routes)
+    assert %{pending_words: 0, sends_in_ms: nil} = poll(c)
+
+    record(c.path, DateTime.utc_now() |> DateTime.to_iso8601(), "a first thought")
+    assert %{pending_words: 3, sends_in_ms: wait} = poll(c)
+    assert wait in 1..4_000
+
+    File.write!(Path.rootname(c.path) <> ".partial", "and a second")
+
+    assert %{pending_words: 3, sends_in_ms: nil} =
+             TranscriptRelay.status("launch", server: c.name)
+  end
+
   defp start_monitor(c, extra \\ []) do
     if is_nil(extra[:routes]) do
       route(Path.join(c.root, "routes.jsonl"), "2026-11-06T10:00:00Z", "fiber-a")

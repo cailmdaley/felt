@@ -408,7 +408,7 @@ prevents an older daemon from silently dropping fields it does not recognize.
 
 ### Listen
 
-`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, pending, pending_words, preview, level, last, error, recorder}`.
+`GET /voice` returns `{available, sources, enabled, muted, follow, system_audio, words, quiet_seconds, pinned_quiet_seconds, source, launch, state, mode, destination, paused, target, cold, pending, pending_words, sends_in_ms, preview, level, last, error, recorder}`.
 `recorder=<host>` selects the recording daemon independently of the worker's `origin`; without it, the receiving daemon answers locally.
 `sources` is `[]` without hark, `["desktop", "phone"]` on macOS, and `["phone"]` on other hosts.
 `source` is `desktop` or `phone`; `launch` is the active recorder's `voice-…` identity or null.
@@ -417,8 +417,9 @@ prevents an older daemon from silently dropping fields it does not recognize.
 `target` is `{fiber_id, origin, name, slug, pinned, source?}` or null; the optional source names the view that selected it, such as `board` or `rex`.
 `destination` is `{fiber_id, origin, name}` while enabled and null otherwise.
 `paused` reflects mic `muted` while enabled and is false when off.
-`cold` says whether the target lacks a live owner-published worker; an idle live worker is warm, while an unreadable owner is cold.
+`cold` says whether the followed target lacks a live conversation, so its words are dropped unless they end with "send"; an idle live worker is warm, an unreadable owner is cold, and a pinned target is never cold.
 `pending` is `{fiber_id, words, text}` or null, and `pending_words` totals finalized unsent words across buffers, excluding speaker labels.
+`sends_in_ms` is the time until the quiet gap sends the buffered words, or null with nothing buffered or while speech runs.
 `preview` is `{fiber_id, origin, text}` or null, pinned to the target where the in-progress partial began; it is display-only and clears when muted, disabled, empty or stopped.
 `level` is `{mic, at}` or null, the latest microphone peak in dBFS and its ISO 8601 arrival time, absent after one second without a meter update.
 `last` is `{fiber_id, origin?, text?, at, status, detail?}` or null, with status `delivered`, `unconfirmed` or `failed`.

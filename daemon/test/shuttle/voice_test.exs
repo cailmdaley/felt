@@ -216,6 +216,21 @@ defmodule Shuttle.VoiceTest do
     refute Target.cold?(%{"fiber_id" => "idle", "origin" => "owner"})
   end
 
+  test "the state says when the followed target is cold, so its words need \"send\"" do
+    Env.put_app_env(:voice_target_entries, fn -> [] end)
+    assert {:ok, %{cold: false}} = Voice.update(%{"enabled" => true})
+    assert {:ok, _} = Voice.target(%{"fiber_id" => "a"})
+    assert {:ok, %{cold: true}} = Voice.update(%{})
+
+    warm = %{
+      fiber: %{"id" => "a", "shuttle" => %{"host" => "test-host"}},
+      runtime: %{phase: "waiting"}
+    }
+
+    Env.put_app_env(:voice_target_entries, fn -> [warm] end)
+    assert {:ok, %{cold: false}} = Voice.update(%{})
+  end
+
   test "partial words are a display-only preview pinned to the target they began under",
        c do
     transcript = Path.join(c.root, "voice.txt")

@@ -36,12 +36,14 @@ const BELOW = { options: { placement: 'below' } } as const
 const label = async (ui: any, key: string) => (await ui.find({ type: 'Button', key }))?.text
 const start = async ($: any) => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-test('sound arriving here: a loud glyph, the words counted, and a discard', ABOVE, async ($, on) => {
+test('sound arriving here: a loud glyph, the words counted, here named, and a cancel', ABOVE, async ($, on) => {
   const { posts } = daemon(on, { ...HERE, pending_words: 12, level: { mic: -30 } })
   await start($)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'mic')).toBe('⚇')
-  expect(await ui.find({ type: 'Text', text: ' 12 words…' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 12 words' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' → here' })).toBeDefined()
+  expect(await label(ui, 'discard')).toBe('  ✕ cancel')
   await ui.press({ key: 'discard' })
   await ui.press({ key: 'mic' })
   expect(posts).toEqual([
@@ -59,7 +61,7 @@ test('room noise below speech level keeps the soft glyph', ABOVE, async ($, on) 
   await ui.unmount()
 })
 
-test('a quiet open mic is the soft glyph alone', ABOVE, async ($, on) => {
+test('a quiet open mic is the soft glyph and where words would go', ABOVE, async ($, on) => {
   daemon(on, { ...HERE, level: { mic: -60 } })
   await start($)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -73,7 +75,46 @@ test('following another card names its slug, and its words when there are some',
   daemon(on, { ...HERE, destination: { fiber_id: 'ai-futures/felt/voice-modes', name: 'Voice modes' }, pending_words: 8 })
   await start($)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: ' → voice-modes · 8 words…' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 8 words' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: ' → voice-modes' }))?.props.dimColor).toBe(false)
+  await ui.unmount()
+})
+
+test('the line in progress counts, and its last words show while speech runs', ABOVE, async ($, on) => {
+  daemon(on, { ...HERE, pending_words: 4, preview: { text: 'and then the other thing is sometimes i want to cancel it' }, sends_in_ms: null })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: ' 16 words' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' · “…sometimes i want to cancel it”' })).toBeDefined()
+  expect(await label(ui, 'discard')).toBe('  ✕ cancel')
+  await ui.unmount()
+})
+
+test('quiet after words counts down to the send', ABOVE, async ($, on) => {
+  daemon(on, { ...HERE, pending_words: 12, sends_in_ms: 8200 })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: ' · sends in 9s' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('words for a card with no worker say they need "send"', ABOVE, async ($, on) => {
+  daemon(on, { ...HERE, destination: { fiber_id: 'a/voice-modes' }, cold: true, pending_words: 8, sends_in_ms: 3000 })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: ' · asleep, say “send”' }))?.props.color).toBe('warning')
+  await ui.unmount()
+})
+
+test('the last batch shows what became of it for ten seconds', ABOVE, async ($, on) => {
+  // The mocked clock starts at 0: this batch went four seconds ago.
+  const last = { at: new Date(-4000).toISOString(), status: 'delivered', text: 'me: okay basically perfect.\nme: last thing\n' }
+  const { clock } = daemon(on, { ...HERE, last })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: ' · ✓ 5 words sent' }))?.props.color).toBe('success')
+  await clock.advance(7000)
+  expect(await ui.find({ type: 'Text', key: 'fate' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -82,7 +123,8 @@ test('a pinned ULID destination shows its name and a pin', ABOVE, async ($, on) 
   await start($)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'mic')).toBe('⚆')
-  expect(await ui.find({ type: 'Text', text: ' 📌 → Standup · 2 words…' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 📌 → Standup' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 2 words' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -91,7 +133,7 @@ test('a pinned target is visible here even while muted', ABOVE, async ($, on) =>
   await start($)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await label(ui, 'mic')).toBe('⊘')
-  expect(await ui.find({ type: 'Text', text: ' 📌 → Holistic hark' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' 📌 → here' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -206,7 +248,7 @@ for (const [placement, options, request] of [
       }
       const audio = row?.children[expected.length]
       expect(audio?.props).toEqual({ flexDirection: 'row' })
-      expect(audio?.children.map((child: any) => child.props?.label ?? child.children?.[0])).toEqual(['⚇', ' 12 words…', ' ✕'])
+      expect(audio?.children.map((child: any) => child.props?.label ?? child.children?.[0])).toEqual(['⚇', ' 12 words', ' → here', '  ✕ cancel'])
       await ui.unmount()
     })
   }
