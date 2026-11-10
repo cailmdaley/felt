@@ -16,6 +16,9 @@ export interface ConstitutionPickerOptions {
   onEscape?(): void
 }
 
+/** The word a closed card's row wears: tempered and discarded work is archived, review work awaits the human. */
+const CLOSED_STATE: Partial<Record<KanbanCard['column'], string>> = { tempered: 'tempered', composted: 'discarded', awaitingReview: 'awaiting review' }
+
 /** The floating list of constitutions, filtered by Find. */
 export class ConstitutionPicker {
   readonly el = document.createElement('div')
@@ -104,7 +107,10 @@ export class ConstitutionPicker {
       row.el.setAttribute('aria-current', String(!!this.opts.current?.(card)))
       row.el.title = card.outcome ?? card.path
       if (row.name.textContent !== card.name) row.name.textContent = card.name
-      if (row.owner.textContent !== card.originId) row.owner.textContent = card.originId
+      const state = CLOSED_STATE[card.column]
+      if (state) row.el.dataset.state = state; else delete row.el.dataset.state
+      const owner = state ? `${card.originId} · ${state}` : card.originId
+      if (row.owner.textContent !== owner) row.owner.textContent = owner
       if (row.el !== cursor) this.list.insertBefore(row.el, cursor)
       cursor = row.el.nextSibling
     }

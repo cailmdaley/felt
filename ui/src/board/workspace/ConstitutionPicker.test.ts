@@ -35,3 +35,21 @@ it('sets its rows before a supplement, and drops rows Find no longer matches', (
   expect([...list.querySelectorAll<HTMLElement>('.ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['beta'])
   expect(supplement.refresh).toHaveBeenLastCalledWith('beta')
 })
+
+it('says a closed card\'s state on its row, dims it, and still opens it', () => {
+  const onOpen = vi.fn()
+  const cards = [
+    card({ id: 'live', column: 'inFlight' }), card({ id: 'done', column: 'tempered' }),
+    card({ id: 'dropped', column: 'composted' }), card({ id: 'review', column: 'awaitingReview' }),
+  ]
+  picker = new ConstitutionPicker({ cards: () => cards, onOpen })
+  document.body.append(picker.el)
+  picker.refresh()
+  const row = (id: string) => picker!.el.querySelector<HTMLElement>(`[data-channel-uid="${id}"]`)!
+  expect(row('live').dataset.state).toBeUndefined()
+  expect(row('done').dataset.state).toBe('tempered')
+  expect(row('dropped').querySelector('small')!.textContent).toContain('discarded')
+  expect(row('review').dataset.state).toBe('awaiting review')
+  row('done').click()
+  expect(onOpen).toHaveBeenCalledWith(cards[1])
+})
