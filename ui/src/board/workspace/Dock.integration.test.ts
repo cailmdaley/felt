@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { alreadyRunningMessage, bandFacts, Dock, stripFacts } from './Dock.js'
+import { offeredVerbs, pressVerb } from './testActs.js'
 import { clockTime } from '../civilDay.js'
 import { CLAUDE_OPENING_KEY } from '../conversationOpening.js'
 import { card, settle } from '../testFixtures.js'
@@ -31,7 +32,7 @@ const actsOf = (view: Dock): HTMLElement => view.el.querySelector<HTMLElement>('
 /** The message box's verbs, then the band's lifecycle verbs, as drawn. */
 const shownVerbs = (view: Dock): string[] => [
   ...(view.el.querySelector<HTMLElement>('.ws-worker-acts')?.hidden ? [] : [...view.el.querySelectorAll<HTMLButtonElement>('.ws-worker-acts button')].filter(button => !button.hidden).map(button => button.dataset.verb!)),
-  ...(actsOf(view).hidden ? [] : [...actsOf(view).querySelectorAll<HTMLButtonElement>('.ws-acts-verbs button')].map(button => button.dataset.verb!)),
+  ...(actsOf(view).hidden ? [] : offeredVerbs(actsOf(view))),
 ]
 /** The message box's field, and typing into it. */
 const messageField = (root: ParentNode = band.el): HTMLElement => root.querySelector<HTMLElement>('.ws-worker-message')!
@@ -127,13 +128,13 @@ describe('band header', () => {
     for (const verb of actsOf(band).querySelectorAll('.ws-acts-verbs button svg path')) expect(verb.getAttribute('d')).not.toBe('m4 4 8 8m0-8-8 8')
   })
 
-  it('draws the lifecycle verbs as icons like navigation, and the worker line\'s verbs with their words', () => {
+  it('draws the lifecycle verb on its button\'s face with its word, as the worker line draws its verbs', () => {
     dock.reset()
     dock.open(task({ status: 'active', sessionUuid: 'words' }))
     const words = (selector: string) => [...band.el.querySelectorAll<HTMLButtonElement>(selector)].filter(button => !button.hidden).map(button => button.querySelector('.ws-header-word')?.textContent)
     expect(words('.ws-worker-acts button')).toEqual(['Resume', 'New session'])
     expect(band.el.querySelector('.ws-band-head .ws-header-word')).toBeNull()
-    expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-review')!.textContent).toBe('')
+    expect(band.el.querySelector<HTMLButtonElement>('.ws-verb-face')!.textContent).toBe('Close for review')
   })
 
   it('draws its first line as identity and navigation, and the acts only where no row stands for the fiber', () => {
@@ -168,7 +169,8 @@ describe('band header', () => {
     expect(visible({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
       .toEqual(['Send', 'New session', 'Close for review', 'Rest', 'Temper', 'Discard'])
     expect(visible({ status: 'active', sessionUuid: 'idle' })).toEqual(['Resume', 'New session', 'Close for review', 'Rest', 'Temper', 'Discard'])
-    expect(visible({ status: 'closed', sessionUuid: 'review' })).toEqual(['Resume', 'New session', 'Rest', 'Temper', 'Discard'])
+    // Work awaiting review wears Temper on the verb button's face; the rest follow in its menu.
+    expect(visible({ status: 'closed', sessionUuid: 'review' })).toEqual(['Resume', 'New session', 'Temper', 'Rest', 'Discard'])
     expect(visible({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resting' })).toEqual(['Resume', 'New session', 'Rest', 'Temper', 'Discard'])
     expect(visible({ status: 'closed', tempered: true, sessionUuid: 'tempered' })).toEqual(['Resume', 'New session', 'Rest'])
     expect(visible({ status: 'closed', tempered: false, sessionUuid: 'discarded' })).toEqual(['Resume', 'New session', 'Rest'])
@@ -220,8 +222,11 @@ describe('band header', () => {
     dock.reset(); dock = band = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
     dock.open(task({ status: 'active', sessionUuid: 's' }))
     document.body.append(band.el)
-    const buttons = [...actsOf(band).querySelectorAll<HTMLButtonElement>('.ws-header-icon')].filter(button => !button.hidden)
-    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Close for review task (a)', 'Rest task (s)', 'Temper task (t)', 'Discard task (x)', "Reopen task's last session on owner (c)", 'Settings for task'])
+    const pill = [...actsOf(band).querySelectorAll<HTMLButtonElement>('.ws-acts-verbs > button')]
+    expect(pill.map(b => b.getAttribute('aria-label'))).toEqual(['Close for review task (a)', 'More verbs for task: Rest (s), Temper (t), Discard (x)'])
+    expect(pill.map(b => b.getAttribute('aria-haspopup'))).toEqual([null, 'menu'])
+    const buttons = [...actsOf(band).querySelectorAll<HTMLButtonElement>('.ws-acts-session .ws-header-icon')].filter(button => !button.hidden)
+    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(["Reopen task's last session on owner (c)", 'Settings for task'])
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
       expect(button.tabIndex).toBe(0)
@@ -267,16 +272,15 @@ describe('band header', () => {
     const rest = vi.fn(() => confirm.focus())
     dock.reset(); dock = band = new Dock('', saved, undefined, undefined, { onRest: rest })
     dock.open(task({ status: 'active' })); document.body.append(band.el)
-    const button = actsOf(band).querySelector<HTMLButtonElement>('.kbn-ctl-rest')!
-    button.click()
-    expect(rest).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), button)
+    pressVerb(actsOf(band), 'Rest')
+    expect(rest).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), actsOf(band).querySelector('.ws-acts-verbs'))
     expect(document.activeElement).toBe(confirm)
   })
 
   it.each([['open', 'open'], ['closed', 'closed']])('offers no verdicts on a %s fiber without a shuttle block', (_label, status) => {
     // A note or a role opened from a link is not on the Desk's lifecycle.
     dock.open(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
-    expect(actsOf(band).querySelectorAll('.ws-acts-verbs button')).toHaveLength(0)
+    expect(offeredVerbs(actsOf(band))).toEqual([])
   })
 })
 
@@ -382,8 +386,8 @@ describe('shared verdict controls', () => {
     document.body.append(band.el)
     expect(band.el.dataset.part).toBe('act'); expect(band.el.dataset.act).toBe('band')
     expect(actsOf(band).dataset.part).toBe('acts'); expect(actsOf(band).dataset.verdictKey).toBeTruthy()
-    actsOf(band).querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
-    actsOf(band).querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
+    pressVerb(actsOf(band), 'Temper')
+    pressVerb(actsOf(band), 'Discard')
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
       ['task-uid', 'tempered'], ['task-uid', 'composted'],
     ])
@@ -396,7 +400,7 @@ describe('shared verdict controls', () => {
     const band = new Dock('', saved, transition)
     band.open(task({ status: 'active', sessionUuid: 'review' }))
     document.body.append(band.el)
-    actsOf(band).querySelector<HTMLButtonElement>('.kbn-ctl-review')!.click()
+    pressVerb(actsOf(band), 'Close for review')
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([['task-uid', 'awaitingReview']])
     band.reset()
     await settle()

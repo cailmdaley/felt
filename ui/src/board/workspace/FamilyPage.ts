@@ -9,7 +9,8 @@ import { threadKey, threadState, type ThreadIndex } from '../threads.js'
 import { fiberKey, parseDocKey, type DocKey } from './documents.js'
 import { slug } from '../threadOutline.js'
 import type { FiberActs } from './Dock.js'
-import { SENT_GLYPH, sendLines, type Send, type SentFile } from './sendLines.js'
+import { SENT_ICON, sendLines, type Send, type SentFile } from './sendLines.js'
+import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { Thumbnail } from './Thumbnail.js'
 import './family-page.css'
 
@@ -24,6 +25,11 @@ const TALLY_MARKS = 16
 /** How the fold of threads set aside names each kind, one and many. */
 const ASIDE_WORDS: Readonly<Record<AsideSection, readonly [string, string]>> = {
   resting: ['resting', 'resting'], drafts: ['draft', 'drafts'], roles: ['seat', 'seats'], archived: ['archived', 'archived'],
+}
+
+/** A sent file's mark, drawn on the acts' stroke grid in the view control's vocabulary. */
+const fileIcon = (mark: SentFile['mark']): HTMLElement => {
+  const icon = el('span', 'fp-file-glyph'); icon.dataset.mark = mark; icon.innerHTML = headerIcon(SENT_ICON[mark]); return icon
 }
 
 /** What the page reads, and how to ask for it again. */
@@ -375,10 +381,12 @@ export class FamilyPage {
     this.acts.delete(key)
   }
   /**
-   * What a thread holds, on its row in the one order every surface keeps, in
-   * the mod's glyphs: ⌗ its tapestry or report, ☰ its constitution, ⧉ n its
-   * sent files, which unfold under the row as its sends, newest first. A sent
-   * file opened takes the list's place, with the way back to it above.
+   * What a thread holds, as one segmented control on its row, in the one order
+   * every surface keeps: its tapestry or report, its constitution, and its sent
+   * files with their count, which unfold under the row as its sends, newest
+   * first. Only the segments a thread has are drawn, and the one open is
+   * pressed. A sent file opened takes the list's place, with the way back to it
+   * above.
    */
   private fillDocs(row: HTMLElement, thread: MapThread): void {
     const lead = this.leadOf(thread), shown = this.place.docs!.get(thread.key)
@@ -389,18 +397,20 @@ export class FamilyPage {
     list.hidden = !listed && !open
     if (docs.dataset.shape === shape) return
     docs.dataset.shape = shape
-    const chip = (cls: string, glyph: string, label: string, held?: string): HTMLButtonElement => {
-      const button = el('button', `fp-chip ${cls}`, glyph); button.type = 'button'
+    const chip = (cls: string, icon: HeaderIcon, label: string, held?: string, count?: number): HTMLButtonElement => {
+      const button = el('button', `fp-chip ${cls}`); button.type = 'button'
+      button.innerHTML = headerIcon(icon)
+      if (count !== undefined) button.append(el('span', 'fp-chip-count', String(count)))
       button.title = label; button.setAttribute('aria-label', label)
       button.dataset.owner = button.dataset.level = thread.key
       if (held) { button.dataset.held = held; button.setAttribute('aria-pressed', String(held === shown)) }
       return button
     }
     const chips: HTMLElement[] = []
-    if (lead) chips.push(chip('fp-lead', '⌗', lead.name, lead.key))
-    if (thread.card.path) chips.push(chip('fp-constitution', '☰', 'Constitution', fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id)))
+    if (lead) chips.push(chip('fp-lead', 'tapestry', lead.name, lead.key))
+    if (thread.card.path) chips.push(chip('fp-constitution', 'constitution', 'Constitution', fiberKey(thread.card.originId, thread.card.uid ?? thread.card.id)))
     if (files.length) {
-      const all = chip('fp-sent', `⧉ ${files.length}`, `${files.length} sent ${files.length === 1 ? 'file' : 'files'}`)
+      const all = chip('fp-sent', 'sends', `${files.length} sent ${files.length === 1 ? 'file' : 'files'}`, undefined, files.length)
       all.dataset.files = thread.key
       all.setAttribute('aria-expanded', String(listed))
       chips.push(all)
@@ -429,7 +439,7 @@ export class FamilyPage {
       item.title = sent.label; item.setAttribute('aria-label', sent.label)
       item.toggleAttribute('data-unread', sent.file.unread)
       if (sent.mark === 'image') { item.classList.add('fp-file-image'); item.append(this.thumbOf(thread.key, sent).el) }
-      else item.append(el('span', 'fp-file-glyph', SENT_GLYPH[sent.mark]), el('span', 'fp-file-name', sent.label))
+      else item.append(fileIcon(sent.mark), el('span', 'fp-file-name', sent.label))
       return item
     }))
     return line
@@ -455,7 +465,7 @@ export class FamilyPage {
     }
     const back = button('fp-back', '← sends', 'Back to the sends'); back.dataset.back = thread.key
     const name = el('span', 'fp-open-name')
-    name.append(el('span', 'fp-file-glyph', sent.mark === 'image' ? '▨' : SENT_GLYPH[sent.mark]), el('span', 'fp-file-name', sent.label))
+    name.append(fileIcon(sent.mark), el('span', 'fp-file-name', sent.label))
     name.title = sent.label
     const step = (by: number, glyph: string, word: string): HTMLButtonElement => {
       const to = all[at + by], move = button('fp-step', glyph, to ? `${word}: ${to.label}` : word)
@@ -591,7 +601,7 @@ export class FamilyPage {
     else if (!thread) { this.toggle(key); return }
     this.enter(key)
   }
-  /** A thread's ⧉ n list unfolds or folds; folding it folds a sent file open from it, and a cursor in it returns to ⧉ n. */
+  /** A thread's sends list unfolds or folds; folding it folds a sent file open from it, and a cursor in it returns to the sends segment. */
   private toggleFiles(key: string): void {
     const list = this.row(key)?.querySelector<HTMLElement>('.fp-files'), thread = this.model!.threads.get(key)!
     const opened = this.sentOf(thread).some(file => file.key === this.place.docs!.get(key))
@@ -684,7 +694,7 @@ export class FamilyPage {
    * row's documents they move on from its row, leaving the document unfolded
    * there. l (or right) goes in: from a row it unfolds the first document under
    * the row, entering the thread, and from a document it unfolds the next in its
-   * place (⧉ n lists the sent files and opens the newest); from a sent file in
+   * place (the sends segment lists the sent files and opens the newest); from a sent file in
    * the list it opens that file in the list's place. From an open sent file's
    * bar, l steps to the next older and h goes back to the list. h (or left)
    * otherwise goes out: from a document to its row, folding what it had
@@ -747,7 +757,7 @@ export class FamilyPage {
     const at = next.dataset.row ? model.threads.get(next.dataset.row) : undefined
     this.announcement.textContent = at ? [at.name, at.note].filter(Boolean).join('. ') : next.title || next.textContent || ''
   }
-  /** Unfolds a chip's document under its row (⧉ n: its list, and the newest file), returning what to rest on: the chip, or an open sent file's way back. */
+  /** Unfolds a segment's document under its row (sends: its list, and the newest file), returning what to rest on: the segment, or an open sent file's way back. */
   private show(thread: MapThread, chip: HTMLElement): HTMLElement | undefined {
     if (chip.dataset.older) return
     if (chip.dataset.files) {

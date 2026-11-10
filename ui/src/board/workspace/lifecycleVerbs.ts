@@ -1,6 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
-import { onDesk, restReachable, reviewReachable, schedulePaused, scheduled, standing, verdictsFor } from './fiberPageState.js'
+import { onDesk, restReachable, reviewReachable, runAwaitsHuman, schedulePaused, scheduled, standing, verdictsFor } from './fiberPageState.js'
 
 /** A lifecycle verb a constitution offers wherever it is acted on: the opened card's header and the Desk row's menu. */
 export type LifecycleVerb = 'review' | 'rest' | 'temper' | 'discard'
@@ -44,6 +44,17 @@ export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lifecycle
   return standing(card) && verbs.includes('temper') ? ['temper', ...verbs.filter(verb => verb !== 'temper')] : verbs
 }
 
+/**
+ * The verb a row's button wears on its face, of those it offers: Temper where
+ * work waits on the human's review, else the first verb that moves the work on
+ * (Close for review, then Rest or its schedule's pause and resume). Discard
+ * never leads; undefined when it is all there is.
+ */
+export function leadVerb(card: KanbanCard, offered: readonly LifecycleVerb[]): LifecycleVerb | undefined {
+  if (offered.includes('temper') && (card.column === 'awaitingReview' || runAwaitsHuman(card))) return 'temper'
+  return offered.find(verb => verb !== 'discard')
+}
+
 /** Name a verb's button for the card it acts on: its word, an optional target, and its key. */
 export function labelVerb(button: HTMLButtonElement, verb: LifecycleVerb, card?: KanbanCard, target = ''): void {
   const spec = verbSpec(verb, card)
@@ -51,23 +62,17 @@ export function labelVerb(button: HTMLButtonElement, verb: LifecycleVerb, card?:
   button.dataset.verb = spec.label
   button.title = label
   button.setAttribute('aria-label', label)
-  if (button.dataset.icon !== spec.icon) { button.dataset.icon = spec.icon; button.innerHTML = headerIcon(spec.icon) }
 }
 
-/** The console and thread rows share the same stroke icon and keyboard label. */
-export function iconVerb(verb: LifecycleVerb, card?: KanbanCard, target = ''): HTMLButtonElement {
-  const button = document.createElement('button')
-  button.type = 'button'
-  button.className = `ws-header-icon ${verbSpec(verb).cls}`
-  labelVerb(button, verb, card, target)
-  return button
-}
-
-/** Draw a button as the header draws a lifecycle verb: its stroke icon, then its word, in its pigment. */
+/** Draw a menu item as the header draws a lifecycle verb: its stroke icon, its word, in its pigment, and the key it answers to. */
 export function dressVerb(button: HTMLButtonElement, verb: LifecycleVerb, card?: KanbanCard): HTMLButtonElement {
   const spec = verbSpec(verb, card)
   button.classList.add(spec.cls)
-  return dressAction(button, spec.icon, spec.label)
+  dressAction(button, spec.icon, spec.label)
+  button.dataset.verb = spec.label
+  // The menu draws the key from here, beside the word (dock.css).
+  button.setAttribute('aria-keyshortcuts', VERB_KEY[verb])
+  return button
 }
 
 /** Draw a menu item as a header action: its stroke icon, then its word. */

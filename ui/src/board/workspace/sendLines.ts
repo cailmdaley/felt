@@ -1,11 +1,13 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { MapFile } from '../family/model.js'
+import type { HeaderIcon } from './headerIcon.js'
 import { slug } from '../threadOutline.js'
 import { COMPANION_NAMES, documentKind, normalizeAbsolutePath, parseDocKey } from './documents.js'
 
 /** How a sent file is drawn on its send's line: an image as itself, anything else as a glyph and a name. */
 export type SentMark = 'image' | 'page' | 'pdf' | 'code' | 'other'
-export const SENT_GLYPH: Readonly<Record<Exclude<SentMark, 'image'>, string>> = { page: '⌗', pdf: '▤', code: '›_', other: '◦' }
+/** Each mark's stroke icon, shared with the view control: a page is drawn as a thread's tapestry is. */
+export const SENT_ICON: Readonly<Record<SentMark, HeaderIcon>> = { image: 'artifact', page: 'tapestry', pdf: 'pdf', code: 'code', other: 'file' }
 export interface SentFile { file: MapFile; label: string; mark: SentMark }
 /** The files one send carried, which share its moment. */
 export interface Send { at: number; files: SentFile[] }

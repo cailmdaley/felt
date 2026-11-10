@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+import { pressVerb } from './testActs.js'
 import { card, servedFeed, settle } from '../testFixtures.js'
 import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import type { Turn } from '../turn.js'
@@ -837,10 +838,11 @@ describe('workspace reader integration', () => {
     press('x'); expect(queue).toHaveBeenLastCalledWith(leaf, 'composted')
     press('t'); expect(queue).toHaveBeenLastCalledWith(leaf, 'tempered')
     press('s'); expect(onRest).toHaveBeenLastCalledWith(leaf, workspace.reader.el)
-    const rest = row.querySelector<HTMLButtonElement>('.fp-verbs .kbn-ctl-rest')!
-    expect(rest.title).toBe('Rest notch (s)')
-    rest.click(); expect(onRest).toHaveBeenLastCalledWith(leaf, rest)
-    row.querySelector<HTMLButtonElement>('.fp-verbs .kbn-ctl-review')!.click()
+    const verbs = row.querySelector<HTMLElement>('.fp-verbs')!
+    expect(verbs.querySelector<HTMLButtonElement>('.ws-verb-more')!.title).toBe('More: Rest (s), Temper (t), Discard (x)')
+    pressVerb(verbs, 'Rest'); expect(onRest).toHaveBeenLastCalledWith(leaf, verbs.querySelector('.ws-acts-verbs'))
+    expect(verbs.querySelector<HTMLButtonElement>('.ws-verb-face')!.title).toBe('Close for review notch (a)')
+    pressVerb(verbs, 'Close for review')
     expect(queue).toHaveBeenLastCalledWith(leaf, 'awaitingReview')
     const primary = document.querySelector<HTMLButtonElement>('.ws-worker-primary')!
     expect(primary.getAttribute('aria-label')).toBe('Resume Notch')
@@ -849,7 +851,7 @@ describe('workspace reader integration', () => {
     expect(JSON.parse(String(dispatch[1]!.body))).toMatchObject({ fiber_id: 'hub/notch', resume_mode: 'previous' })
     document.querySelector<HTMLElement>('.ws-selected .fp-head')!.click()
     press('x'); expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'hub' }), 'composted')
-    expect(document.querySelector<HTMLButtonElement>('.ws-selected .fp-head .fp-verbs .kbn-ctl-discard')!.title).toBe('Discard hub (x)')
+    expect(document.querySelector<HTMLButtonElement>('.ws-selected .fp-head .fp-verbs .ws-verb-more')!.getAttribute('aria-label')).toContain('Discard (x)')
   })
   it('heads the band with the family whichever thread it was entered by, acts on the head, and sends to a highlighted live worker', async () => {
     workspace.dispose()
@@ -888,17 +890,17 @@ describe('workspace reader integration', () => {
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed, commit, undefined, { onRest }), onRest })
     workspace.open(hub, 'Desk'); await settle()
     const row = document.querySelector<HTMLElement>('.ws-selected .fp-row:not(.fp-head)')!
-    const discard = row.querySelector<HTMLButtonElement>('.fp-verbs .kbn-ctl-discard')!
-    expect(discard.title).toBe('Discard notch (x)')
+    const verbs = row.querySelector<HTMLElement>('.fp-verbs')!
+    expect(verbs.querySelector('.ws-verb-more')!.getAttribute('aria-label')).toBe('More verbs for notch: Rest (s), Discard (x)')
     vi.useFakeTimers()
-    discard.click()
+    pressVerb(verbs, 'Discard')
     expect(row.getAttribute('aria-selected')).toBe('true')
     expect(row.getAttribute('aria-expanded')).toBe('false')
     expect(row.querySelector('.fp-verbs .ws-verdict-undo')).not.toBeNull()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true, cancelable: true }))
     vi.advanceTimersByTime(6000)
     expect(commit).not.toHaveBeenCalled()
-    discard.click(); vi.advanceTimersByTime(4000)
+    pressVerb(verbs, 'Discard'); vi.advanceTimersByTime(4000)
     expect(commit).toHaveBeenCalledExactlyOnceWith(leaf, 'composted')
   })
   it('lands a family\'s constitution on its page, first in its run, a leaf thread there too at its unfolded row, and one outside a family on its own page', async () => {

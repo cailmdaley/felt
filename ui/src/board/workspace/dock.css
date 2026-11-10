@@ -28,11 +28,27 @@
 }
 .ws-band-cache[data-cache='cold'] { border-color: var(--ws-cache-cold); background: transparent; }
 /* A fiber's acts: its lifecycle verbs, then its conversation and settings set a little apart. The band draws them only where no row does. */
-.ws-fiber-acts { position: relative; flex: none; display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 2px; min-width: 0; }
-.ws-acts-verbs { display: inline-flex; align-items: center; gap: 2px; }
-.ws-acts-verbs:empty { display: none; }
-.ws-acts-verbs + * { margin-left: 6px; }
+/* A fiber's acts: one verb button, then the session pair (conversation and
+   settings) set a little apart. The band draws them only where no row does.
+   --ws-act is the height every act stands at, --ws-act-icon its marks' size. */
+.ws-fiber-acts { --ws-act: 30px; --ws-act-icon: 16px; position: relative; flex: none; display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 10px; min-width: 0; font: var(--type-note)/var(--leading-solid) var(--font-serif); }
 .ws-fiber-acts > .ws-verdict-undo { justify-content: flex-end; }
+.ws-acts-session { display: inline-flex; align-items: center; gap: 2px; }
+/* The verb button: one pill whose face is the verb that fits, and whose caret, on the same pill, opens the rest. */
+.ws-acts-verbs { box-sizing: border-box; display: inline-flex; align-items: stretch; height: var(--ws-act); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); }
+.ws-acts-verbs[hidden] { display: none; }
+.ws-acts-verbs > button { display: inline-flex; align-items: center; margin: 0; border: 0; background: transparent; color: var(--ws-ink-soft); font: inherit; cursor: pointer; }
+.ws-acts-verbs > button[hidden] { display: none; }
+.ws-acts-verbs > button:first-child, .ws-acts-verbs > [hidden] + button { border-top-left-radius: calc(var(--ws-control-radius) - 1px); border-bottom-left-radius: calc(var(--ws-control-radius) - 1px); }
+.ws-acts-verbs > button:last-child, .ws-acts-verbs > button:has(+ [hidden]) { border-top-right-radius: calc(var(--ws-control-radius) - 1px); border-bottom-right-radius: calc(var(--ws-control-radius) - 1px); }
+.ws-acts-verbs > button svg { flex: none; width: var(--ws-act-icon); height: var(--ws-act-icon); }
+.ws-verb-face { gap: 6px; padding: 0 9px 0 7px; white-space: nowrap; }
+.ws-verb-face:is(.kbn-ctl-temper, .kbn-ctl-discard) > svg { color: var(--verdict-ink); }
+.ws-verb-more { justify-content: center; width: calc(var(--ws-act) * .7); padding: 0; }
+.ws-verb-face:not([hidden]) + .ws-verb-more { border-left: 1px solid var(--ws-hairline-soft) !important; }
+.ws-verb-more > svg { width: calc(var(--ws-act-icon) * .8); height: calc(var(--ws-act-icon) * .8); color: var(--ws-ink-muted); }
+.ws-acts-verbs > button:is(:hover, :focus-visible, [aria-expanded='true']) { background: var(--ws-hover); color: var(--ws-ink); outline: none; }
+.ws-acts-verbs:has(:focus-visible) { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
 /* Settings keeps the further ancestors reachable without a second header row. */
 .ws-settings-ancestry { margin-bottom: 12px; }
 /* A highlighted thread's settings name the thread they write to. */
@@ -96,6 +112,10 @@
 .ws-header-word { font: var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
 /* A Desk row's menu lists the same verbs, drawn as the header draws them. */
 .kbn-verb-menu .ws-header-icon.ws-header-verb { display: grid; justify-content: start; width: 100%; padding: 0 10px 0 8px; }
+/* A verb's key sits at the item's right, drawn from its aria-keyshortcuts. */
+.kbn-verb-menu .ws-header-verb[aria-keyshortcuts] { grid-template-columns: auto minmax(0, 1fr) auto; }
+.kbn-verb-menu .ws-header-verb > .ws-header-word { justify-self: start; }
+.kbn-verb-menu .ws-header-verb[aria-keyshortcuts]::after { content: attr(aria-keyshortcuts); margin-left: 16px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
 /* Its plain items (Move…, Release boot quarantine) keep the verbs' height, type and word column. */
 .kbn-verb-menu .kbn-verb-menu-plain {
   display: block; width: 100%; height: 36px; box-sizing: border-box; padding: 0 10px 0 31px; margin: 0;

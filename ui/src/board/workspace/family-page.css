@@ -1,6 +1,6 @@
 .ws-family-page { container-type: inline-size; height: 100%; min-height: 0; }
 /* --fp-text is the row's text column, where its name and all it holds start: the mark's 12px and the title's 8px gap. */
-.ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-acts: 144px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+.ws-family-grid { --fp-gutter: 20px; --fp-text: 20px; --fp-views: 112px; --fp-acts: 244px; --fp-control: 24px; --fp-spring: linear(0, .32 9%, .78 20%, 1.06 32%, 1.12 39%, 1.08 47%, 1 58%, .98 68%, 1); height: 100%; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
 .ws-family-scroll { min-height: 0; overflow: auto; }
 .ws-family-announce { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -12,8 +12,16 @@
 .fp-row:focus-visible, .fp-aside:focus-visible { outline: 1px solid var(--ws-hairline); outline-offset: -1px; }
 .fp-line { position: relative; }
 .fp-row[data-worker] > .fp-line::before { content: ''; position: absolute; top: 1px; bottom: 1px; left: -8px; width: 2px; border-radius: 1px; background: var(--fm-tone); }
-.fp-title { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto var(--fp-acts) 4ch; grid-template-areas: 'mark name word docs verbs meta'; align-items: baseline; column-gap: 8px; font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
-.fp-mark { grid-area: mark; align-self: center; width: 10px; height: 10px; overflow: visible; }
+/* The title line: every mark on it (state, name, word, views, acts, age)
+   centres on the name's first line, a band --fp-line tall. Text cells are
+   padded out to it; the mark and the controls centre inside it. The
+   views and the acts keep columns of their own width, so each lands at the
+   same x on every row. */
+.fp-title { --fp-line: 26px; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto var(--fp-views) var(--fp-acts) 4ch; grid-template-areas: 'mark name word docs verbs meta'; align-items: start; column-gap: 8px; font: var(--type-meta)/var(--leading-tight) var(--font-mono); }
+/* A line of text keeps its role's leading and is padded out to the band, so its first line centres there. */
+.fp-name, .fp-word, .fp-meta { padding-block: calc((var(--fp-line) - var(--leading-tight) * 1em) / 2); }
+.fp-head .fp-title { --fp-line: 28px; }
+.fp-mark { grid-area: mark; width: 10px; height: 10px; margin-top: calc((var(--fp-line) - 10px) / 2); overflow: visible; }
 .fp-name { grid-area: name; min-width: 0; overflow-wrap: anywhere; color: var(--ws-ink); font: 500 var(--type-row)/var(--leading-tight) var(--font-mono); }
 .fp-word { grid-area: word; color: var(--fm-text); white-space: nowrap; }
 .fp-word:empty { display: none; }
@@ -35,23 +43,36 @@
 .fp-row:not(.fp-head):is([data-selected], :focus-within, :hover) > .fp-line > .fp-note { opacity: 1; transform: none; transition: opacity .24s ease-out .04s, transform .55s var(--fp-spring) .02s; }
 .fp-row:not(.fp-head):hover:not([data-selected], :focus-within) > .fp-line, .fp-row:not(.fp-head):hover:not([data-selected], :focus-within) > .fp-line > .fp-note { transition-delay: .25s; }
 
-/* A row's acts (Dock.actsFor) keep one column wide enough for all six, so the
-   columns before them stand still from row to row. They show on the
-   highlighted row and under the pointer; elsewhere they keep their place
-   quietly, unless an undo window is drawn there. */
-.fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; align-self: center; visibility: hidden; }
+/* A row's acts (Dock.actsFor): the verb button, then the session pair, in a
+   column of their own, the session pair at its right edge so the caret and
+   the pair land at one x on every row. They show on the highlighted row and
+   under the pointer; elsewhere they keep their place quietly, unless an undo
+   window is drawn there. Settings sits first in the pair, so a row with no
+   conversation to open leaves its gap at the end, beside the age. */
+.fp-verbs { grid-area: verbs; display: flex; justify-content: flex-end; align-items: center; height: var(--fp-line); visibility: hidden; }
 .fp-row:is([data-selected], :focus-within) > .fp-line .fp-verbs, .fp-verbs:has([data-verdict-pending]) { visibility: visible; }
 @media (hover: hover) { .fp-row:hover > .fp-line .fp-verbs { visibility: visible; } }
-/* Acts draw at the size of the document glyphs beside them: one row of marks, one weight. */
-.ws-reader .fp-verbs .ws-header-icon { width: 22px; height: 22px; }
-.ws-reader .fp-verbs .ws-header-icon svg { width: 15px; height: 15px; }
-.fp-verbs .ws-acts-verbs + * { margin-left: 4px; }
-.fp-docs { grid-area: docs; display: grid; font-size: var(--type-row); line-height: var(--leading-solid); grid-template-columns: 2.6ch 2.6ch 5ch; gap: 2px; white-space: nowrap; }
-.fp-lead { grid-column: 1; } .fp-constitution { grid-column: 2; } .fp-sent { grid-column: 3; justify-self: start; }
-.fp-chip { min-width: 2.2ch; padding: 0 4px; border: 1px solid transparent; border-radius: var(--ws-control-radius); background: none; color: var(--ws-ink-soft); font: inherit; cursor: pointer; }
-.fp-chip:hover, .fp-chip:focus-visible { border-color: var(--ws-hairline); color: var(--ws-ink); outline: none; }
-.fp-chip[aria-pressed='true'], .fp-chip[aria-expanded='true'] { border-color: var(--ws-ink-soft); background: var(--ws-hover); color: var(--ws-ink); }
+.fp-verbs .ws-fiber-acts { --ws-act: var(--fp-control); --ws-act-icon: 15px; gap: 8px; }
+.fp-verbs .ws-acts-session { display: grid; grid-template-columns: var(--fp-control) var(--fp-control); gap: 2px; }
+.ws-reader .fp-verbs .ws-acts-session .ws-header-icon { grid-row: 1; width: var(--fp-control); height: var(--fp-control); color: var(--ws-ink-soft); }
+.ws-reader .fp-verbs .ws-acts-session .ws-header-icon svg { width: 15px; height: 15px; }
+.fp-verbs .ws-acts-settings { grid-column: 1; } .fp-verbs .ws-acts-console { grid-column: 2; }
+/* What a thread holds, as one segmented control: each segment in a place of
+   its own (tapestry, constitution, sends), drawn on the acts' stroke grid; the
+   segments a row has share one outline, and the one open is pressed into it. */
+.fp-docs { --fp-seg: 28px; grid-area: docs; justify-self: start; display: grid; grid-template-columns: var(--fp-seg) var(--fp-seg) auto; height: var(--fp-control); margin-top: calc((var(--fp-line) - var(--fp-control)) / 2); white-space: nowrap; }
+.fp-docs:empty { visibility: hidden; }
+.fp-lead { grid-column: 1; } .fp-constitution { grid-column: 2; } .fp-sent { grid-column: 3; }
+.fp-chip { --fp-edge: var(--ws-hairline-soft); position: relative; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: var(--fp-seg); height: 100%; margin: 0; padding: 0 6px; border: 1px solid var(--fp-edge); border-left-width: 0; border-radius: 0; background: var(--ws-paper); color: var(--ws-ink-soft); font: var(--type-meta)/var(--leading-solid) var(--font-mono); cursor: pointer; }
+.fp-chip:first-child { border-left-width: 1px; border-radius: var(--ws-control-radius) 0 0 var(--ws-control-radius); }
+.fp-chip:last-child { border-top-right-radius: var(--ws-control-radius); border-bottom-right-radius: var(--ws-control-radius); }
+.fp-chip > svg { flex: none; width: 15px; height: 15px; }
+.fp-row:is([data-selected], :hover) .fp-chip { --fp-edge: var(--ws-hairline); }
+.fp-chip:is(:hover, :focus-visible) { background: var(--ws-hover); color: var(--ws-ink); outline: none; }
+.fp-chip:focus-visible { box-shadow: inset 0 0 0 1px var(--ws-state-working); }
+.fp-chip:is([aria-pressed='true'], [aria-expanded='true']) { background: var(--ws-fill); color: var(--ws-ink); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ws-ink) 16%, transparent); }
 .fp-chip[data-unread] { color: var(--ws-fresh); }
+.fp-chip[data-unread]::after { content: ''; position: absolute; top: 3px; right: 3px; width: 4px; height: 4px; background: var(--ws-fresh); transform: rotate(45deg); }
 /* A row's sends, one line each, on the row's text column: the age in a fixed column, then what the send carried, every item on one centre line and one gap apart. */
 .fp-files { --fp-age: 4ch; --fp-item-gap: 14px; display: grid; gap: 2px; margin: 4px 0 4px var(--fp-text); cursor: default; }
 /* The age hangs in the line's padding, so a carried item that wraps keeps to the items' column. */
@@ -63,7 +84,8 @@
 .fp-file::before { content: ''; position: absolute; inset: -1px -6px; z-index: -1; border: 1px solid transparent; border-radius: var(--ws-control-radius); }
 .fp-file:is(:hover, :focus-visible) { outline: none; }
 .fp-file:is(:hover, :focus-visible)::before { background: var(--ws-hover); }
-.fp-file-glyph { flex: none; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-mono); }
+.fp-file-glyph { flex: none; display: inline-flex; color: var(--ws-ink-muted); }
+.fp-file-glyph > svg { width: 13px; height: 13px; }
 .fp-file-name { min-width: 0; overflow-wrap: anywhere; }
 .fp-file[data-unread] .fp-file-name::before, .fp-file-image[data-unread]::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 1px; background: var(--ws-fresh); transform: rotate(45deg); }
 .fp-file-image::before { inset: -3px; border-color: var(--ws-hairline-soft); }
@@ -113,14 +135,27 @@
   .ws-family-grid { --fp-gutter: 16px; }
   .fp-row { --fp-indent: calc(var(--fp-level, 0) * 12px); }
   .fp-section { padding-left: calc(var(--fp-gutter) + var(--fp-level, 0) * 12px); }
-  .fp-title { grid-template-columns: 12px auto minmax(0, 1fr) auto; grid-template-areas: 'mark name name name' '. docs word meta' '. verbs verbs verbs'; row-gap: 3px; }
-  .fp-docs, .fp-word { justify-self: start; }
-  .fp-chip, .fp-file, .fp-back, .fp-step { min-height: var(--ws-phone-target); }
-  /* On a narrow page only the highlighted row draws its acts, on a line of their own at full touch size. */
-  .fp-verbs { justify-content: flex-start; display: none; }
+  /* Two lines: the name with its age, then what it holds and, on the highlighted row, its acts, at touch size. */
+  .ws-family-grid { --fp-control: 36px; }
+  .fp-title { grid-template-columns: 12px auto minmax(0, 1fr) auto; grid-template-areas: 'mark name name meta' '. docs verbs verbs'; row-gap: 2px; }
+  .fp-word { display: none; }
+  .fp-docs { --fp-seg: 44px; grid-template-columns: none; grid-auto-flow: column; margin-top: 4px; }
+  .fp-docs > .fp-chip { grid-column: auto; }
+  .fp-chip > svg { width: 18px; height: 18px; }
+  .fp-file, .fp-back, .fp-step { min-height: var(--ws-phone-target); }
+  /* A touch target is 44px however tall its drawing. */
+  .fp-chip::before, .ws-acts-verbs > button::before { content: ''; position: absolute; inset: -4px 0; }
+  .ws-acts-verbs > button { position: relative; }
+  .fp-verbs { height: calc(var(--fp-control) + 8px); display: none; }
   .fp-row[data-selected] > .fp-line .fp-verbs, .fp-verbs:has([data-verdict-pending]) { display: flex; }
-  .ws-reader .fp-verbs .ws-header-icon { width: var(--ws-phone-target); height: var(--ws-phone-target); }
-  .ws-reader .fp-verbs .ws-header-icon svg { width: 20px; height: 20px; }
+  .fp-verbs .ws-fiber-acts { --ws-act-icon: 19px; flex: 1; justify-content: space-between; gap: 6px; margin-left: 10px; }
+  .fp-verbs .ws-acts-session { grid-template-columns: var(--ws-phone-target) var(--ws-phone-target); gap: 0; }
+  .ws-reader .fp-verbs .ws-acts-session .ws-header-icon { width: var(--ws-phone-target); height: var(--ws-phone-target); }
+  .ws-reader .fp-verbs .ws-acts-session .ws-header-icon svg { width: 20px; height: 20px; }
+  /* The face keeps its mark and its word in the tooltip; the pill stays narrow enough to share the line. */
+  .fp-verbs .ws-verb-word { display: none; }
+  .fp-verbs .ws-verb-face { padding: 0 10px; }
+  .fp-verbs .ws-verb-more { width: 34px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .fp-row:not(.fp-head) > .fp-line { transition: none; }

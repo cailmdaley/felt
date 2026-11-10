@@ -7,7 +7,8 @@ import type { MapFile } from '../family/model.js'
 import { disposeFileViewer, resumeFileViewer, suspendFileViewer } from '../FileViewerPanel.js'
 import { FamilyPage, placeAt, type FamilyFeeds, type MapPlace } from './FamilyPage.js'
 import { Dock } from './Dock.js'
-import { lifecycleVerbsFor, verbSpec } from './lifecycleVerbs.js'
+import { leadVerb, lifecycleVerbsFor, verbSpec } from './lifecycleVerbs.js'
+import { offeredVerbs } from './testActs.js'
 
 const now = 1_800_000_000_000, hour = 3_600_000
 const when = (back: number): string => new Date(now - back * hour).toISOString()
@@ -38,7 +39,9 @@ function made(over: { feeds?: FamilyFeeds; place?: MapPlace; known?: KanbanCard[
 const row = (family: FamilyPage, name: string): HTMLElement => [...family.el.querySelectorAll<HTMLElement>('.fp-row')].find(el => el.querySelector<HTMLElement>('.fp-name')!.title === name)!
 const said = (family: FamilyPage): string[] => [...family.el.querySelector('.fp-tree')!.children].map(el =>
   el.classList.contains('fp-section') ? `[${el.textContent}]` : el.classList.contains('fp-aside') ? `(${el.textContent})` : el.querySelector<HTMLElement>('.fp-name')!.title)
-const chips = (family: FamilyPage, name: string): string[] => [...row(family, name).querySelectorAll('.fp-docs button')].map(el => el.textContent!)
+/** A view segment in the notation the help sheet uses: ⌗ tapestry, ☰ constitution, ⧉ n sends. */
+const segment = (el: Element): string => el.classList.contains('fp-lead') ? '⌗' : el.classList.contains('fp-constitution') ? '☰' : `⧉ ${el.textContent}`
+const chips = (family: FamilyPage, name: string): string[] => [...row(family, name).querySelectorAll('.fp-docs button')].map(segment)
 const files = (family: FamilyPage, name: string): string[] => [...row(family, name).querySelectorAll('.fp-file-name')].map(el => el.textContent!)
 const click = (el: Element): void => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })) }
 const press = (el: Element, key: string): KeyboardEvent => { const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); el.dispatchEvent(event); return event }
@@ -55,7 +58,7 @@ describe('the page', () => {
   })
   it('gives each row one mark for its own state, files it under the most urgent thing it holds, and draws what is under it', () => {
     const { family } = made()
-    for (const el of family.el.querySelectorAll('.fp-row')) expect(el.querySelectorAll('.fp-title svg')).toHaveLength(1)
+    for (const el of family.el.querySelectorAll('.fp-row')) expect(el.querySelectorAll('.fp-title > svg')).toHaveLength(1)
     expect(row(family, 'Asked').dataset.standing).toBe('question')
     expect(row(family, 'Asked').querySelector('.fp-mark title')!.textContent).toBe('question')
     expect(row(family, 'Asked').querySelector('.fp-word')!.textContent, 'the mark says it; no word repeats it').toBe('')
@@ -218,9 +221,10 @@ describe('a row', () => {
     const dock = new Dock('', vi.fn(), transition, undefined, { onRest: vi.fn() })
     const family = new FamilyPage({ reach }, feeds, { open: new Set(), selected: null }, vi.fn(), vi.fn(), vi.fn(), target => dock.actsFor(target))
     family.update(root, new ThreadIndex([root, work, review]), now)
-    const verbs = (name: string): string[] => [...row(family, name).querySelectorAll<HTMLButtonElement>('.fp-verbs .ws-acts-verbs button')].map(button => button.dataset.verb!)
+    const verbs = (name: string): string[] => offeredVerbs(row(family, name).querySelector('.fp-verbs')!)
     for (const [name, card] of [['Mid', work], ['Done', review], ['hub', root]] as const) {
-      expect(verbs(name), name).toEqual(lifecycleVerbsFor(card, true).map(verb => verbSpec(verb, card).label))
+      const offered = lifecycleVerbsFor(card, true), lead = leadVerb(card, offered)
+      expect(verbs(name), name).toEqual([...lead ? [lead] : [], ...offered.filter(verb => verb !== lead)].map(verb => verbSpec(verb, card).label))
       expect(row(family, name).querySelector('.fp-verbs .ws-acts-settings'), name).not.toBeNull()
       expect(row(family, name).querySelector<HTMLElement>('.fp-verbs .ws-fiber-acts')!.dataset.verdictKey, name).toBeTruthy()
     }
@@ -244,7 +248,7 @@ describe('a row', () => {
 })
 
 describe('keys', () => {
-  const at = (): string => (document.activeElement as HTMLElement).querySelector<HTMLElement>('.fp-name')?.title || document.activeElement!.textContent!
+  const at = (): string => { const active = document.activeElement as HTMLElement; return active.querySelector<HTMLElement>('.fp-name')?.title || (active.closest('.fp-docs') ? segment(active) : active.textContent!) }
   const keys = (...names: string[]): void => { for (const name of names) press(document.activeElement!, name) }
   it('moves the highlight without entering; l enters the thread and focuses its first chip', async () => {
     const { family, reach, sighted } = made()
@@ -473,7 +477,7 @@ describe('sends', () => {
     const { family } = await open()
     expect(lines(family)).toEqual(['1h gc fits/fit.py plots/a.png plots/b.png', '2h meet-0', '3h meet-1', '4h meet-2', '5h meet-3'])
     const first = row(family, 'Mid').querySelector('.fp-send')!
-    expect([...first.querySelectorAll('.fp-file-glyph')].map(glyph => glyph.textContent)).toEqual(['⌗', '›_'])
+    expect([...first.querySelectorAll<HTMLElement>('.fp-file-glyph')].map(glyph => glyph.dataset.mark)).toEqual(['page', 'code'])
     expect(first.querySelectorAll('.fp-file-image .fp-thumb')).toHaveLength(2)
     const older = row(family, 'Mid').querySelector<HTMLElement>('.fp-older')!
     expect(older.textContent).toBe('3 older sends')
@@ -488,7 +492,7 @@ describe('sends', () => {
     click(row(family, 'Mid').querySelector('[aria-label="fits/fit.py"]')!)
     expect(shown()).toBe('host-a:/work/fits/fit.py')
     expect(row(family, 'Mid').querySelectorAll('.fp-send')).toHaveLength(0)
-    expect(row(family, 'Mid').querySelector('.fp-open')!.textContent).toBe('← sends›_fits/fit.py1h‹2 of 11›')
+    expect(row(family, 'Mid').querySelector('.fp-open')!.textContent).toBe('← sendsfits/fit.py1h‹2 of 11›')
     expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(false)
     click(row(family, 'Mid').querySelector('.fp-step:last-of-type')!)
     expect(shown()).toBe('host-a:/work/plots/a.png')

@@ -5,6 +5,7 @@ import { type KanbanResponse } from './KanbanTypes.js'
 import { card, response, voiceStatus, settle } from './testFixtures.js'
 import type { Workspace } from './workspace/Workspace.js'
 import { MOBILE_MEDIA } from './mobile.js'
+import { offeredVerbs } from './workspace/testActs.js'
 import type { VoiceStatus } from './voice.js'
 
 interface BoardInternals {
@@ -221,7 +222,7 @@ describe('Rest controls', () => {
     inside.openDocumentChannel(finished)
     await settle()
     const acts = [...document.querySelectorAll<HTMLElement>('.ws-reader .ws-fiber-acts')].find(el => !el.closest('[hidden]'))!
-    expect([...acts.querySelectorAll<HTMLButtonElement>('.ws-acts-verbs button')].map(button => button.dataset.verb)).toEqual(['Rest'])
+    expect(offeredVerbs(acts)).toEqual(['Rest'])
     expect([...document.querySelectorAll<HTMLButtonElement>('.ws-reader .ws-worker-acts button[data-verb]')].filter(button => !button.hidden).map(button => button.dataset.verb)).toEqual(['Resume', 'New session'])
     const target = document.querySelector<HTMLElement>('.ws-reader .ws-return')!
     target.focus()

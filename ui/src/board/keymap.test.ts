@@ -39,7 +39,7 @@ describe('shared keyboard table', () => {
     const page = helpSections.find(section => section.title === "A constitution's page")!
     expect(page.rows.map(row => [row.keys, row.label])).toEqual([
       [['j', 'k', '↓', '↑'], "Next / previous thread; on a row's documents, next / previous document"],
-      [['l', '→'], 'In: a row unfolds its first document ⌗ ☰ ⧉ under it; again, the next in its place'],
+      [['l', '→'], 'In: a row unfolds its first document (tapestry, constitution, sends) under it; again, the next in its place'],
       [['h', '←'], 'Out: a document to its row, folding it; a row off the page'],
       [['←', '→'], 'With a sent file open: the newer / older file in its place'],
       [['Enter'], 'Unfold or fold a row, entering it'],

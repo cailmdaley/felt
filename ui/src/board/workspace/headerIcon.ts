@@ -16,6 +16,12 @@ const shapes = {
   newSession: '<path d="M8 2v12M2 8h12"/>',
   start: '<path d="M4.5 2.5v11l9-5.5Z"/>',
   send: '<path d="M2 8h11M9 4l4 4-4 4"/>',
+  more: '<path d="m4.5 6.5 3.5 3.5 3.5-3.5"/>',
+  tapestry: '<path d="M5.5 2v12M10.5 2v12M2 5.5h12M2 10.5h12"/>',
+  sends: '<rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5v-3h-8v8h3"/>',
+  pdf: '<path d="M3.5 1.5h6l3 3v10h-9Z"/><path d="M9.5 1.5v3h3"/>',
+  code: '<path d="m3 4.5 3.5 3.5L3 11.5M8.5 11.5H13"/>',
+  file: '<rect x="3.5" y="1.5" width="9" height="13" rx="1"/>',
 } as const
 
 export type HeaderIcon = keyof typeof shapes

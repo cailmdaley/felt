@@ -1,6 +1,6 @@
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon } from './headerIcon.js'
-import { attachConversationPicker } from '../conversationMenu.js'
+import { attachConversationPicker, openActionMenu } from '../conversationMenu.js'
 import { canOpenDesktopApp } from '../conversationLinks.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, conversationOpening, linkDestination, resolveDestination, openDestination, type ConversationDestination, type WorkerOpener } from '../conversationOpening.js'
@@ -15,7 +15,7 @@ import { showToast } from '../utils.js'
 import { coarsePointer } from '../mobile.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
-import { iconVerb, labelVerb, lifecycleVerbsFor, type LifecycleVerb } from './lifecycleVerbs.js'
+import { dressVerb, labelVerb, leadVerb, lifecycleVerbsFor, verbSpec, VERB_KEY, type LifecycleVerb } from './lifecycleVerbs.js'
 import { WorkerActions } from './workerActions.js'
 import { VoiceStrip, voiceLine, type FiberSlug } from './voiceStrip.js'
 import { fetchTranscriptUsage, paintUsage, warmUntil, type TranscriptUsage } from './transcriptUsage.js'
@@ -373,7 +373,7 @@ export interface BandNav {
   desk?: () => void
   /** Back where the reader was opened from; `nameBack` names it. */
   back?: () => void
-  /** Opens the constitution's own page: the band's acts carry it where no row's ☰ does. */
+  /** Opens the constitution's own page: the band's acts carry it where no row's constitution segment does. */
   constitution?: () => void
 }
 
@@ -430,7 +430,7 @@ export class Dock {
   openFile?: (path: string, title?: string, owner?: string) => void
   /** The family page draws a row for the band's fiber, so the band leaves the verbs to it. */
   private rows = false
-  /** Opens the band's fiber's own page, from the ☰ its acts carry. */
+  /** Opens the band's fiber's own page, from the constitution button its acts carry. */
   private openConstitution: (() => void) | null = null
   /** The band stands over the page, so its settings sheet can open; the reader seats it. */
   private seated = true
@@ -682,29 +682,17 @@ export class Dock {
   }
 
   /**
-   * A fiber's acts, for whatever draws a row for it: the lifecycle verbs it
-   * offers ({@link lifecycleVerbsFor}, the lifecycle model's set), its
-   * conversation (as `c` opens it) and its settings sheet. The whole strip is
-   * the fiber's verdict host, so an undo window takes its place.
+   * A fiber's acts, for whatever draws a row for it: its lifecycle verbs as one
+   * button ({@link verbButton}), then its session pair, its conversation (as `c`
+   * opens it) and its settings sheet. The whole strip is the fiber's verdict
+   * host, so an undo window takes its place.
    */
   actsFor(target: () => KanbanCard, constitution?: () => (() => void) | null): FiberActs {
     const el = document.createElement('span')
     el.className = 'ws-fiber-acts'
     el.dataset.part = 'acts'
     el.setAttribute('role', 'group')
-    const verbs = document.createElement('span')
-    verbs.className = 'ws-acts-verbs'
-    const made = new Map<LifecycleVerb, HTMLButtonElement>()
-    const verb = (name: LifecycleVerb): HTMLButtonElement => {
-      const button = iconVerb(name)
-      button.addEventListener('click', () => {
-        const card = target()
-        if (name === 'rest') this.onRest?.(card, button)
-        else this.verdict(card, VERB_VERDICT[name])
-      })
-      made.set(name, button)
-      return button
-    }
+    const verbs = this.verbButton(target)
     const conversation = this.buildConsole(target)
     const settings = document.createElement('button')
     settings.type = 'button'
@@ -714,8 +702,10 @@ export class Dock {
     settings.setAttribute('aria-haspopup', 'true')
     settings.setAttribute('aria-expanded', 'false')
     settings.addEventListener('click', () => this.settingsFor?.(target(), settings))
-    el.append(verbs, conversation.el)
-    // A row's own ☰ chip unfolds its constitution; the band's acts open the page instead.
+    const session = document.createElement('span')
+    session.className = 'ws-acts-session'
+    session.append(conversation.el)
+    // A row's own constitution segment unfolds it; the band's acts open the page instead.
     const page = constitution && document.createElement('button')
     if (page) {
       page.type = 'button'
@@ -723,17 +713,15 @@ export class Dock {
       page.innerHTML = headerIcon('constitution')
       page.title = 'Constitution'; page.setAttribute('aria-label', 'Constitution')
       page.addEventListener('click', () => constitution!()?.())
-      el.append(page)
+      session.append(page)
     }
-    el.append(settings)
+    session.append(settings)
+    el.append(verbs.el, session)
     const paint = (): void => {
       const card = target(), who = slug(card)
       markVerdictHost(el, card)
       el.setAttribute('aria-label', `${who}'s acts`)
-      const offered = lifecycleVerbsFor(card, !!this.onRest)
-      const buttons = offered.map(name => made.get(name) ?? verb(name))
-      offered.forEach((name, i) => labelVerb(buttons[i], name, card, who))
-      if (buttons.length !== verbs.children.length || buttons.some((button, i) => verbs.children[i] !== button)) verbs.replaceChildren(...buttons)
+      verbs.paint(card, who)
       conversation.paint()
       if (page) page.hidden = !constitution!()
       settings.hidden = !this.seated || !this.settingsFor
@@ -743,6 +731,64 @@ export class Dock {
     paint()
     this.liveActs.add(paint)
     return { el, paint, dispose: () => { this.liveActs.delete(paint); conversation.dispose() } }
+  }
+
+  /**
+   * A fiber's lifecycle verbs as one button: its face is the verb that fits
+   * the fiber's state ({@link leadVerb}), and a caret on the same pill opens a
+   * menu of the rest, each with its key. The set is the lifecycle model's
+   * ({@link lifecycleVerbsFor}); Discard and Retire only ever sit in the menu.
+   */
+  private verbButton(target: () => KanbanCard): { el: HTMLElement; paint(card: KanbanCard, who: string): void } {
+    const el = document.createElement('span')
+    el.className = 'ws-acts-verbs'
+    el.setAttribute('role', 'group')
+    const face = document.createElement('button')
+    face.type = 'button'
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'ws-verb-more'
+    more.innerHTML = headerIcon('more')
+    more.setAttribute('aria-haspopup', 'menu')
+    more.setAttribute('aria-expanded', 'false')
+    el.append(face, more)
+    let offered: LifecycleVerb[] = [], lead: LifecycleVerb | undefined, drawn = ''
+    const act = (verb: LifecycleVerb, anchor: HTMLElement): void => {
+      const card = target()
+      if (verb === 'rest') this.onRest?.(card, anchor)
+      else this.verdict(card, VERB_VERDICT[verb])
+    }
+    face.addEventListener('click', () => { if (lead) act(lead, face) })
+    more.addEventListener('click', () => {
+      const card = target(), box = el.getBoundingClientRect()
+      openActionMenu(more, offered.filter(verb => verb !== lead).map(verb => ({
+        label: verbSpec(verb, card).label,
+        dress: (item: HTMLButtonElement) => { dressVerb(item, verb, card) },
+        run: () => act(verb, el),
+      })), `${slug(card)}'s other verbs`, { x: box.left, y: box.bottom + 4 })
+    })
+    const paint = (card: KanbanCard, who: string): void => {
+      offered = lifecycleVerbsFor(card, !!this.onRest)
+      lead = leadVerb(card, offered)
+      const rest = offered.filter(verb => verb !== lead)
+      el.hidden = !offered.length
+      el.setAttribute('aria-label', `${who}'s verbs`)
+      face.hidden = !lead
+      more.hidden = !rest.length
+      const words = rest.map(verb => `${verbSpec(verb, card).label} (${VERB_KEY[verb]})`).join(', ')
+      more.title = `More: ${words}`
+      more.setAttribute('aria-label', `More verbs for ${who}: ${words}`)
+      if (!lead) return
+      const spec = verbSpec(lead, card)
+      face.className = `ws-verb-face ${spec.cls}`
+      labelVerb(face, lead, card, who)
+      if (drawn === `${spec.icon}:${spec.label}`) return
+      drawn = `${spec.icon}:${spec.label}`
+      face.innerHTML = headerIcon(spec.icon)
+      const word = document.createElement('span'); word.className = 'ws-verb-word'; word.textContent = spec.label
+      face.append(word)
+    }
+    return { el, paint }
   }
 
   /** A worker's own line for an opening message, Resume and New session, for a page to seat beside that worker. */

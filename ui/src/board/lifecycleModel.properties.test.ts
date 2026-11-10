@@ -30,6 +30,7 @@
  * the shrunk sequence that reproduces it.
  */
 import fc from 'fast-check'
+import { offeredVerbs as rowVerbs, pressVerb } from './workspace/testActs.js'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { apply, offeredVerbs, ownerRow, served, STATES, stateKey, VERBS, type LifeRequest, type LifeState, type Outcome, type Verb } from '../../harness/lifecycleModel.js'
 import { workerOpener } from './sessionHistory.js'
@@ -364,16 +365,20 @@ describe('a family page acts on the highlighted thread', () => {
             // The highlighted row draws the fiber's acts: the verbs the model offers, in its words.
             const acts = lit!.el.querySelector<HTMLElement>(':scope > .fp-line .fp-verbs .ws-fiber-acts')
             expect(acts, `the highlighted row draws no acts (${stateKey(state)})`).not.toBeNull()
-            expect([...acts!.querySelectorAll<HTMLButtonElement>('.ws-acts-verbs button')].map(button => button.dataset.verb), `the row offers other verbs than the model (${stateKey(state)})`)
-              .toEqual(offeredVerbs(state).map(verb => VERBS[verb].label(state)))
+            // One button wears a verb on its face and holds the rest in its menu; the set is the model's, and Discard never leads.
+            const drawn = rowVerbs(acts!)
+            expect([...drawn].sort(), `the row offers other verbs than the model (${stateKey(state)})`)
+              .toEqual(offeredVerbs(state).map(verb => VERBS[verb].label(state)).sort())
+            if (offeredVerbs(state).some(verb => verb !== 'discard')) expect(drawn[0], `Discard leads the row's verbs (${stateKey(state)})`).not.toBe(VERBS.discard.label(state))
             if (offered.length === 0) continue
             const gesture = offered[pick % offered.length]
             const before = new Map(owner.states)
             const sentBefore = owner.sent.length
             // A human acts by the key, which goes to the focused row and bubbles up, or by the row's own control.
-            const control = gesture === 'open' ? acts!.querySelector<HTMLElement>('.ws-acts-console')
-              : acts!.querySelector<HTMLElement>(`.ws-acts-verbs button[data-verb="${VERBS[gesture as Verb].label(state)}"]`)
-            if (Math.floor(pick / offered.length) % 2 && control && !control.hasAttribute('href')) control.click()
+            const opener = acts!.querySelector<HTMLElement>('.ws-acts-console')
+            const byControl = Math.floor(pick / offered.length) % 2 === 1
+            if (byControl && gesture !== 'open') pressVerb(acts!, VERBS[gesture as Verb].label(state))
+            else if (byControl && opener && !opener.hasAttribute('href')) opener.click()
             else press(gesture === 'open' ? 'c' : VERB_KEY[gesture as Verb], document.activeElement ?? document)
             await settle()
             const popover = document.querySelector<HTMLElement>('.kbn-rest-popover')
