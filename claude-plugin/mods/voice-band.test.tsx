@@ -90,6 +90,14 @@ test('the line in progress counts, and its last words show while speech runs', A
   await ui.unmount()
 })
 
+test('a tail that opens on the transcript\'s own ellipsis is not marked twice', ABOVE, async ($, on) => {
+  daemon(on, { ...HERE, pending_words: 0, preview: { text: 'one two three four five ...and then it trails off here' }, sends_in_ms: null })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: ' · “...and then it trails off here”' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('quiet after words counts down to the send', ABOVE, async ($, on) => {
   daemon(on, { ...HERE, pending_words: 12, sends_in_ms: 8200 })
   await start($)

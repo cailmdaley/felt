@@ -83,8 +83,9 @@ const plural = (n: number) => `${n} word${n === 1 ? '' : 's'}`
 function fate(v: Voice, n: number): { text: string; color?: string } | null {
   const partial = v.preview?.text.trim().replace(/[.…\s]+$/, '')
   if (partial) {
-    const words = partial.split(/\s+/)
-    return { text: `“${words.length > TAIL ? '…' : ''}${words.slice(-TAIL).join(' ')}”` }
+    const words = partial.split(/\s+/), tail = words.slice(-TAIL).join(' ')
+    // The cut is marked once: a tail that opens on the transcript's own ellipsis keeps it.
+    return { text: `“${words.length > TAIL && !/^(…|\.\.)/.test(tail) ? '…' : ''}${tail}”` }
   }
   if (n && v.cold) return { text: 'asleep, say “send”', color: 'warning' }
   if (n && v.sends_in_ms != null) return { text: `sends in ${Math.ceil(v.sends_in_ms / 1000)}s` }
