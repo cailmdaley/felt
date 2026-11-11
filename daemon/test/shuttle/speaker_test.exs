@@ -483,4 +483,49 @@ defmodule Shuttle.SpeakerTest do
     assert voice.("a/unvoiced") == "dylan_thomas"
     assert voice.(nil) == "dylan_thomas"
   end
+
+  describe "echo?/3" do
+    @line %{text: "Open Arena and start a draft whenever you like.", from: 10_000, to: 14_000}
+
+    test "the line heard back while it plays, cut off or misheard, is its echo" do
+      assert Speaker.echo?("Open arena and start a draft whenever you", {10_200, 13_900}, [@line])
+      assert Speaker.echo?("Open arena and start a dra", {10_200, 12_000}, [@line])
+      assert Speaker.echo?("Oh pen arena and start a draft", {10_200, 12_000}, [@line])
+    end
+
+    test "the human talking over it is not" do
+      refute Speaker.echo?("No wait, hold on a second", {11_000, 12_000}, [@line])
+      refute Speaker.echo?("Start the next draft tomorrow please", {11_000, 12_000}, [@line])
+    end
+
+    test "the line's words long after it played are the human's" do
+      refute Speaker.echo?("start a draft", {30_000, 31_000}, [@line])
+      assert Speaker.echo?("start a draft", {15_500, 16_000}, [@line])
+      assert Speaker.echo?("start a draft", {30_000, 31_000}, [%{@line | to: nil}])
+      refute Speaker.echo?("start a draft", {11_000, 12_000}, [])
+    end
+  end
+
+  test "the played log spans each stretch a line was heard", %{
+    pid: pid,
+    server: server,
+    world: world
+  } do
+    {:ok, _} = Speaker.speak(%{"text" => "a line to hear", "voice" => "jean"}, server)
+    assert_receive {:play, _, one}
+    assert [%{text: "a line to hear", to: nil}] = Speaker.played(server)
+
+    set(world, %{partial: "wait wait"})
+    assert_receive {:stop, ^one}
+    assert [%{to: to}] = Speaker.played(server)
+    assert is_integer(to)
+
+    set(world, %{partial: nil, now: 10_000})
+    assert_receive {:play, _, two}
+    assert [%{to: ^to}, %{text: "a line to hear", to: nil}] = Speaker.played(server)
+    send(pid, {two, {:exit_status, 0}})
+    Process.sleep(20)
+    assert [_, %{to: stop}] = Speaker.played(server)
+    assert is_integer(stop)
+  end
 end

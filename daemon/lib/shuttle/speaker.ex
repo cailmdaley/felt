@@ -28,6 +28,10 @@ defmodule Shuttle.Speaker do
 
   The queue, the current line and its offset are journaled, so a daemon restart
   resumes a held or playing line rather than losing it.
+
+  What was played, and when by the wall clock, is kept for two minutes
+  (`played/1`), so live voice can recognise the speaker's own lines when hark
+  hears them back, on the system track or through the mic (`echo?/3`).
   """
   use GenServer
   require Logger
@@ -39,6 +43,8 @@ defmodule Shuttle.Speaker do
   @rewind_ms 500
   @quiet_ms 1_500
   @hold_ms 4_000
+  @played_ms 120_000
+  @echo_slack_ms 2_000
 
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -86,6 +92,38 @@ defmodule Shuttle.Speaker do
         {:error, "text is required"}
     end
   end
+
+  @doc "The lines played in the last two minutes: `%{text, from, to}` in wall ms, `to` nil while playing."
+  def played(opts \\ []) do
+    GenServer.call(server(opts), :played, 1_000)
+  catch
+    :exit, _ -> []
+  end
+
+  @doc """
+  Whether hark's utterance `text`, heard over `{from, to}` (wall ms), is the
+  speaker's own voice: some line in `played` overlaps it within #{@echo_slack_ms} ms,
+  and at most one word in three (at least one) is not a word of those lines. A
+  word cut off mid-way counts when it begins a spoken word.
+  """
+  def echo?(text, {from, to}, played) do
+    spoken =
+      for %{text: line, from: start, to: stop} <- played,
+          start - @echo_slack_ms <= to,
+          is_nil(stop) or stop + @echo_slack_ms >= from,
+          word <- words(line),
+          into: MapSet.new(),
+          do: word
+
+    heard = words(text)
+    stray = Enum.count(heard, &(not spoken_word?(&1, spoken)))
+    MapSet.size(spoken) > 0 and heard != [] and stray <= max(1, div(length(heard), 3))
+  end
+
+  defp spoken_word?(word, spoken),
+    do:
+      MapSet.member?(spoken, word) or
+        (String.length(word) >= 2 and Enum.any?(spoken, &String.starts_with?(&1, word)))
 
   def available?, do: not is_nil(Shuttle.Env.find_executable("afplay"))
 
@@ -180,10 +218,12 @@ defmodule Shuttle.Speaker do
        journal: journal,
        saved: saved,
        heard: {nil, nil},
+       played: [],
        talked: nil,
        error: nil,
        timer: nil,
        clock: Keyword.get(opts, :clock, fn -> System.monotonic_time(:millisecond) end),
+       wall: Keyword.get(opts, :wall, fn -> System.system_time(:millisecond) end),
        poll_ms: Keyword.get(opts, :poll_ms, @poll_ms),
        hold_ms: Keyword.get(opts, :hold_ms, @hold_ms),
        partial: Keyword.get(opts, :partial, &partial/0),
@@ -199,6 +239,7 @@ defmodule Shuttle.Speaker do
 
   @impl true
   def handle_call(:show, _from, state), do: {:reply, snapshot(state), state}
+  def handle_call(:played, _from, state), do: {:reply, state.played, state}
 
   def handle_call({:mute, muted}, _from, state) when is_boolean(muted) do
     state = hold_or_play(%{state | muted: muted}) |> save()
@@ -239,7 +280,7 @@ defmodule Shuttle.Speaker do
     Logger.info("speaker: afplay exited #{status} for #{current.item.fiber_id || "?"}")
     cleanup(current)
     error = if status == 0, do: state.error, else: "afplay exited #{status}"
-    {:noreply, advance(%{state | current: nil, error: error}) |> save()}
+    {:noreply, advance(%{played_stop(state) | current: nil, error: error}) |> save()}
   end
 
   def handle_info(:poll, state),
@@ -407,12 +448,12 @@ defmodule Shuttle.Speaker do
         Logger.info("speaker: skipped for #{current.item.fiber_id || "?"}")
         if current.handle, do: state.stop.(current.handle)
         cleanup(current)
-        advance(%{state | current: nil})
+        advance(%{played_stop(state) | current: nil})
 
       held and current.handle ->
         state.stop.(current.handle)
         offset = current.offset + now - current.started
-        %{state | current: %{current | handle: nil, offset: offset}}
+        %{played_stop(state) | current: %{current | handle: nil, offset: offset}}
 
       not held and is_nil(current.handle) ->
         start(state, current)
@@ -420,6 +461,23 @@ defmodule Shuttle.Speaker do
       true ->
         state
     end
+  end
+
+  # The played log: a line opens an entry each time it starts and closes it
+  # when it stops; entries closed more than two minutes ago are dropped.
+  defp played_start(state, text) do
+    now = state.wall.()
+
+    played =
+      Enum.filter(state.played, &(is_nil(&1.to) or now - &1.to < @played_ms)) ++
+        [%{text: text, from: now, to: nil}]
+
+    %{state | played: played}
+  end
+
+  defp played_stop(state) do
+    now = state.wall.()
+    %{state | played: Enum.map(state.played, &if(is_nil(&1.to), do: %{&1 | to: now}, else: &1))}
   end
 
   defp start(state, current) do
@@ -433,6 +491,7 @@ defmodule Shuttle.Speaker do
     case segment do
       {:ok, path} ->
         if current.segment, do: Shuttle.FS.rm(current.segment)
+        state = played_start(state, Map.get(current.item, :said, current.item.text))
 
         %{
           state

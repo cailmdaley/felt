@@ -384,6 +384,7 @@ end
 defmodule Shuttle.Voice.TranscriptRelay.Worker do
   @moduledoc false
   use GenServer
+  require Logger
   alias Shuttle.FileTail
 
   @closing ~r/(?:^\s*|[,;:.!?]\s*)send[.!?]*\s*$/iu
@@ -415,6 +416,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
         GenServer.call(Keyword.fetch!(opts, :coordinator), {:deliver, message}, :infinity)
       end,
       observe: Keyword.get(opts, :observe, &Shuttle.Recorder.show/0),
+      played: Keyword.get(opts, :played, &Shuttle.Speaker.played/0),
       thresholds: Keyword.get(opts, :thresholds, &Shuttle.Voice.Config.thresholds/0),
       cold: Keyword.get(opts, :cold, &Shuttle.Voice.cold?/1),
       clock: Keyword.get(opts, :clock, fn -> System.system_time(:millisecond) end),
@@ -666,6 +668,8 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
 
     case FileTail.advance(path, config["json_offset"], max_bytes: 65_536) do
       {:append, lines, offset} ->
+        played = state.played.()
+
         next =
           Enum.reduce(lines, Map.put(config, "ingested", []), fn line, acc ->
             case Jason.decode(line) do
@@ -673,7 +677,12 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
               when is_binary(wall) and is_binary(text) and is_binary(speaker) ->
                 case DateTime.from_iso8601(row["wall_start"] || wall) do
                   {:ok, at, _} ->
-                    add_voice_row(acc, at, row, text, speaker, state)
+                    if Shuttle.Speaker.echo?(text, heard_over(at, row), played) do
+                      Logger.info("voice: dropped the speaker's own line, heard back: #{text}")
+                      acc
+                    else
+                      add_voice_row(acc, at, row, text, speaker, state)
+                    end
 
                   _ ->
                     raise ArgumentError,
@@ -811,6 +820,19 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
           do: state.thresholds.()["quiet_seconds"] * 1_000 - (state.clock.() - at)
 
     if waits != [] and not speaking?(config), do: max(Enum.min(waits), 0)
+  end
+
+  # The utterance's span on the wall clock, in ms.
+  defp heard_over(at, row) do
+    from = DateTime.to_unix(at, :millisecond)
+
+    case row do
+      %{"start" => start, "end" => finish} when is_number(start) and is_number(finish) ->
+        {from, from + round((finish - start) * 1_000)}
+
+      _ ->
+        {from, from}
+    end
   end
 
   defp voice_silence(at, %{"start" => start, "end" => finish}) do

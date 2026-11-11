@@ -36,7 +36,8 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
       observe: fn -> Agent.get(observation, & &1) end,
       thresholds: fn -> %{"words" => 10, "quiet_seconds" => 4} end,
       deliver: deliver,
-      cold: fn _ -> false end
+      cold: fn _ -> false end,
+      played: fn -> [] end
     ]
 
     {:ok,
@@ -72,6 +73,38 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     File.mkdir_p!(Path.join(c.root, "relays"))
     start_supervised!({TranscriptRelay, c.opts})
     assert File.read!(Path.join(old, "marker")) == "old"
+  end
+
+  test "the speaker's own line, heard back, is neither delivered nor transcribed", c do
+    at = fn iso -> iso |> DateTime.from_iso8601() |> elem(1) |> DateTime.to_unix(:millisecond) end
+
+    played = [
+      %{
+        text: "Hey, Cail, I'm the magic agent and I heard you. The unconfirmed words landed.",
+        from: at.("2026-11-06T10:00:01Z"),
+        to: at.("2026-11-06T10:00:09Z")
+      }
+    ]
+
+    File.write!(c.path, "")
+
+    record(
+      c.path,
+      "2026-11-06T10:00:02Z",
+      "Hey, Kale, I'm the magic agent and I heard you. The unc."
+    )
+
+    record(c.path, "2026-11-06T10:00:05Z", "Hey, magic agent, the draft is up. Send.")
+    start_monitor(c, played: fn -> played end)
+    poll(c)
+    sync_tasks(c)
+
+    assert_receive {:delivery, %{text: text}}, 1_000
+    assert text =~ "the draft is up"
+    refute text =~ "heard you"
+
+    assert {:ok, %{rows: [%{"text" => "Hey, magic agent, the draft is up. Send."}]}} =
+             Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
   end
 
   test "the day transcript keeps routed, unrouted, cold-dropped and discarded utterances", c do
@@ -1185,7 +1218,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
       route(Path.join(c.root, "routes.jsonl"), "2026-11-06T10:00:00Z", "fiber-a")
     end
 
-    opts = Keyword.merge(c.opts, Keyword.take(extra, [:deliver, :cold]))
+    opts = Keyword.merge(c.opts, Keyword.take(extra, [:deliver, :cold, :played]))
     start_supervised!({TranscriptRelay, opts})
 
     row = %{
