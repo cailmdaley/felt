@@ -81,7 +81,7 @@ test('following another card names its slug, and its words when there are some',
 })
 
 test('the line in progress counts, and its last words show while speech runs', ABOVE, async ($, on) => {
-  daemon(on, { ...HERE, pending_words: 4, preview: { text: 'and then the other thing is sometimes i want to cancel it' }, sends_in_ms: null })
+  daemon(on, { ...HERE, pending_words: 4, preview: { text: 'and then the other thing is sometimes i want to cancel it...' }, sends_in_ms: null })
   await start($)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: ' 16 words' })).toBeDefined()

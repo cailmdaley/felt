@@ -81,7 +81,7 @@ const plural = (n: number) => `${n} word${n === 1 ? '' : 's'}`
 
 // What is happening to the words, most pressing first.
 function fate(v: Voice, n: number): { text: string; color?: string } | null {
-  const partial = v.preview?.text.trim()
+  const partial = v.preview?.text.trim().replace(/[.…\s]+$/, '')
   if (partial) {
     const words = partial.split(/\s+/)
     return { text: `“${words.length > TAIL ? '…' : ''}${words.slice(-TAIL).join(' ')}”` }

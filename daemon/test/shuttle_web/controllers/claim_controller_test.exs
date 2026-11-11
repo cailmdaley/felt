@@ -56,7 +56,7 @@ defmodule ShuttleWeb.ClaimControllerTest do
       %{poller: poller, sid: sid, bid: bid, canonical: FiberUid.session("claimed")}
     end
 
-    test "live voice uses Rex paste and reports its receipt unconfirmed", ctx do
+    test "live voice uses Rex paste and reports the input delivered", ctx do
       conn =
         post(
           api_conn(),
@@ -84,7 +84,7 @@ defmodule ShuttleWeb.ClaimControllerTest do
           })
         )
 
-      assert %{"delivered" => nil, "delivery" => "input"} = json_response(response, 202)
+      assert %{"delivered" => true, "delivery" => "input"} = json_response(response, 200)
       calls = FakeRex.calls()
 
       assert Enum.any?(calls, fn {_bin, args, opts} ->

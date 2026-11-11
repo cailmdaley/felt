@@ -315,9 +315,10 @@ defmodule Shuttle.RexFocus do
   fibers carry with their `shuttle.host`.
   """
   def title_target(title, bindings, fibers, own_host \\ Shuttle.Poller.own_host_id()) do
-    case title_binding(title, bindings) do
-      %{fiber: id} -> fiber_target(id, fibers)
-      nil -> remote_title_target(title, fibers, own_host)
+    # Several windows on one fiber share a title and name the same worker.
+    case title_bindings(title, bindings) |> Enum.uniq_by(& &1.fiber) do
+      [%{fiber: id}] -> fiber_target(id, fibers)
+      _ -> remote_title_target(title, fibers, own_host)
     end
   end
 
@@ -356,37 +357,39 @@ defmodule Shuttle.RexFocus do
     end
   end
 
-  defp title_binding(title, %{"bindings" => bindings}) do
-    alias Shuttle.Terminal.RexTree
-
-    matches =
-      bindings
-      |> Enum.flat_map(fn
-        {_, %{"fiber" => fiber, "family" => family} = binding}
-        when is_binary(fiber) and is_binary(family) ->
-          [
-            %{
-              fiber: fiber,
-              family: family,
-              depth: binding["depth"] || 0,
-              window_id: binding["window_id"]
-            }
-          ]
-
-        _ ->
-          []
-      end)
-      |> RexTree.layout()
-      |> Enum.filter(fn entry ->
-        window = RexTree.display_label(entry.label)
-        session = RexTree.display_label(RexTree.session_label(entry.family))
-        normalize_title(title) == normalize_title(window <> " - " <> session)
-      end)
-
-    case matches do
+  # The one window a title names, for callers that act on the window itself.
+  defp title_binding(title, doc) do
+    case title_bindings(title, doc) do
       [match] -> match
       _ -> nil
     end
+  end
+
+  defp title_bindings(title, %{"bindings" => bindings}) do
+    alias Shuttle.Terminal.RexTree
+
+    bindings
+    |> Enum.flat_map(fn
+      {_, %{"fiber" => fiber, "family" => family} = binding}
+      when is_binary(fiber) and is_binary(family) ->
+        [
+          %{
+            fiber: fiber,
+            family: family,
+            depth: binding["depth"] || 0,
+            window_id: binding["window_id"]
+          }
+        ]
+
+      _ ->
+        []
+    end)
+    |> RexTree.layout()
+    |> Enum.filter(fn entry ->
+      window = RexTree.display_label(entry.label)
+      session = RexTree.display_label(RexTree.session_label(entry.family))
+      normalize_title(title) == normalize_title(window <> " - " <> session)
+    end)
   end
 
   # The window and session labels a worker's own daemon projects for it,

@@ -54,7 +54,7 @@ defmodule Shuttle.RexFocusTest do
     assert nil == RexFocus.target(%{"type" => "client_changed"}, bindings(), fibers())
   end
 
-  test "title mapping uses worker and session labels, rejects program titles and ambiguity" do
+  test "title mapping uses worker and session labels, rejects program titles, and two windows on one fiber name it" do
     bindings = bindings()
 
     assert %{"fiber_id" => "project/task"} =
@@ -73,8 +73,11 @@ defmodule Shuttle.RexFocusTest do
     assert %{"fiber_id" => "project/task"} =
              RexFocus.title_target("\u2060\u2003└ task - project/root", child, fibers())
 
-    ambiguous = put_in(bindings, ["bindings", "another"], bindings["bindings"]["worker"])
-    assert nil == RexFocus.title_target("task - project/task", ambiguous, fibers())
+    # A second window on the same fiber, as a reopened conversation beside its worker.
+    twice = put_in(bindings, ["bindings", "another"], bindings["bindings"]["worker"])
+
+    assert %{"fiber_id" => "project/task"} =
+             RexFocus.title_target("task - project/task", twice, fibers())
   end
 
   test "a remote worker's window resolves through the served fiber tree to its origin" do

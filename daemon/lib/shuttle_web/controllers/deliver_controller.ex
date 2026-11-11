@@ -19,7 +19,8 @@ defmodule ShuttleWeb.DeliverController do
 
   The answer names what happened in `delivery`: `"message"` with the messaging
   `receipt`, or `"resume"` / `"dispatch"` with the `/dispatch` envelope.
-  `delivered` is `true` when the worker has the text, `false` when it did not
+  `delivered` is `true` when the worker has the text or its terminal took it
+  as typed input, `false` when it did not
   get it, and `null` (status 202) when the text was sent but its arrival is
   unconfirmed: a receipt of status `"unknown"`, or an owner that did not answer
   in time. `detail` then says what is known.
@@ -150,14 +151,7 @@ defmodule ShuttleWeb.DeliverController do
     do: {400, %{error: "message_id is required for context"}}
 
   defp reply({:input, {:ok, _}}, fiber_id),
-    do:
-      {202,
-       %{
-         delivery: "input",
-         fiber_id: fiber_id,
-         delivered: nil,
-         detail: "Input submitted to the terminal; its receipt is unconfirmed"
-       }}
+    do: {200, %{delivery: "input", fiber_id: fiber_id, delivered: true}}
 
   defp reply({:input, {:error, :no_live_worker}}, fiber_id),
     do:
