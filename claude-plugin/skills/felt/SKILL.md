@@ -48,6 +48,8 @@ Freed, Σ_nl runs to the prior edge in a third of the mocks ([[bao-analysis/mock
 
 A bare `.felt/<slug>.md` at a store's root is the project's entry point. A project's `.felt` may be a symlink into a larger shared store: `felt ls` and `tree` stay in the project's view, `felt find` searches the whole store, and any id works with `show` and `edit`. Linking a project into a store has a data-loss trap: follow <https://cailmdaley.github.io/felt/concepts/cross-project/>.
 
+felt is the notes and nothing else: this skill is all an agent needs to read, search and write a store, including one shared with other people. Launching agents, the board and messages between sessions belong to Shuttle, which has its own skill and is optional.
+
 ## Commands
 
 ```

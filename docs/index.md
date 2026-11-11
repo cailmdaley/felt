@@ -12,6 +12,19 @@ You can use felt on its own, with any editor and no background service.
 It uses the same fibers, starts agents in your project, and shows their progress and results in a browser board.
 Start with felt for notes, or go to [Set up Shuttle](shuttle/setup.md) if you want agents to run tasks.
 
+## felt is the notes; Shuttle is the live sessions
+
+| | felt | Shuttle |
+|---|---|---|
+| Holds | fibers: notes, decisions, tasks and the files beside them | the sessions working on those fibers |
+| Does | record, search, link, nest, and sync through Git | start agents on tasks, show them on a board, carry messages between sessions, search their transcripts |
+| Runs as | the `felt` command; nothing in the background | the `shuttle` command and a background service |
+| An agent needs | the felt skill | the shuttle skill as well |
+
+The felt skill is enough to start.
+A person who joins a store that someone else shares with them needs only felt: they read, search and write fibers, and Git carries the changes.
+Shuttle becomes useful when you want agents launched for you, a board to follow them on, or sessions that message each other.
+
 ## Set up with your agent
 
 We recommend asking your existing agent to help you set up Shuttle.

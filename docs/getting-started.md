@@ -5,6 +5,7 @@
 The linked instructions are readable by you as well as the agent.
 
 The walkthrough below is for using **felt on its own**: install the command-line tools, create a note, and record a decision.
+felt is the notes, and it needs no background service; Shuttle adds the live side (launching agents, the board, messages between sessions) and can be set up later or never.
 You can follow it yourself or ask your agent to work through it with you.
 
 ## Install
