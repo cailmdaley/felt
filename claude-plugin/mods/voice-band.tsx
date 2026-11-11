@@ -1,9 +1,9 @@
 // The Shuttle line, read from Shuttle's daemon: on the prompt's hint row
 // (placement `below`) or as a band above the prompt (`above`).
 //
-//   ⧉ ⌗ ☰ ⚇ 12 words → here · “…and then the other thing”  ✕ cancel
-//   ⧉ ⌗ ☰ ⚆ 12 words → here · sends in 9s  ✕ cancel
-//   ⧉ ⌗ ☰ ⚆ 8 words → voice-modes · asleep, say “send”  ✕ cancel
+//   ⧉ ⌗ ☰ ⚇ → here 12 words · “…and then the other thing” ✕
+//   ⧉ ⌗ ☰ ⚆ → here 12 words · sends in 9s ✕
+//   ⧉ ⌗ ☰ ⚆ → voice-modes 8 words · asleep, say “send” ✕
 //   ⧉ ⌗ ☰ ⚆ → here · ✓ 12 words sent
 //   ⧉ ⌗ ☰ ⚆ 📌 → voice-modes
 //   ⧉ ⌗ ☰ ⊘
@@ -13,12 +13,12 @@
 // on the board. The audio glyph, drawn in the pins' register, says what the
 // mic hears: ⚇ sound arriving, ⚆ open and quiet, ⊘ muted, and a click turns
 // Listening off; ○ Listening off, and a click starts it as the board's Listen does.
-// `n words` counts what was said and not yet sent, the line in progress
-// included. `→ here` or `→ <slug>` names where the words go, bright when that
-// is another card. Then what is happening to them: the last words heard while
+// `→ here` or `→ <slug>` names where the words go, bright when that is another
+// card. `n words` counts what was said and not yet sent, the line in progress
+// included. Then what is happening to them: the last words heard while
 // speech runs, the seconds until the quiet gap sends them, that the card is
 // asleep and takes only words ending in "send", or for ten seconds what became
-// of the last batch. `✕ cancel` drops the unsent words.
+// of the last batch. A dim red `✕` drops the unsent words.
 // With voice unavailable there is no audio side.
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -169,10 +169,10 @@ function line($: EngineInterface, ui: { Box: any; Button: any; Text: any }) {
     audio = (
       <Box flexDirection="row">
         <Button key="mic" plain label={glyph} onPress={() => post($, '/api/v1/voice', { enabled: false })} />
-        {n ? <Text key="words">{` ${plural(n)}`}</Text> : null}
         {where ? <Text key="where" dimColor={!elsewhere}>{` ${where}`}</Text> : null}
+        {n ? <Text key="words">{` ${plural(n)}`}</Text> : null}
         {what ? <Text key="fate" dimColor={!what.color} color={what.color} wrap="truncate-end">{` · ${what.text}`}</Text> : null}
-        {n ? <Button key="discard" plain label="  ✕ cancel" onPress={() => { $.ui.toast(`${plural(n)} cancelled`); return post($, '/api/v1/voice/discard') }} /> : null}
+        {n ? <Button key="discard" plain label="cancel" onPress={() => { $.ui.toast(`${plural(n)} cancelled`); return post($, '/api/v1/voice/discard') }}>{' '}<Text color="error" dimColor>✕</Text></Button> : null}
       </Box>
     )
   }

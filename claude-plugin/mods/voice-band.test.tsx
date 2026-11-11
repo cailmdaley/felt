@@ -43,7 +43,7 @@ test('sound arriving here: a loud glyph, the words counted, here named, and a ca
   expect(await label(ui, 'mic')).toBe('⚇')
   expect(await ui.find({ type: 'Text', text: ' 12 words' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' → here' })).toBeDefined()
-  expect(await label(ui, 'discard')).toBe('  ✕ cancel')
+  expect(await label(ui, 'discard')).toBe(' ✕')
   await ui.press({ key: 'discard' })
   await ui.press({ key: 'mic' })
   expect(posts).toEqual([
@@ -86,7 +86,7 @@ test('the line in progress counts, and its last words show while speech runs', A
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: ' 16 words' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' · “…sometimes i want to cancel it”' })).toBeDefined()
-  expect(await label(ui, 'discard')).toBe('  ✕ cancel')
+  expect(await label(ui, 'discard')).toBe(' ✕')
   await ui.unmount()
 })
 
@@ -248,7 +248,7 @@ for (const [placement, options, request] of [
       }
       const audio = row?.children[expected.length]
       expect(audio?.props).toEqual({ flexDirection: 'row' })
-      expect(audio?.children.map((child: any) => child.props?.label ?? child.children?.[0])).toEqual(['⚇', ' 12 words', ' → here', '  ✕ cancel'])
+      expect(audio?.children.map((child: any) => child.props?.label ?? child.children?.[0])).toEqual(['⚇', ' → here', ' 12 words', 'cancel'])
       await ui.unmount()
     })
   }
