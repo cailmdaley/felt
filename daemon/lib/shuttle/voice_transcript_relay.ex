@@ -387,7 +387,8 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
   require Logger
   alias Shuttle.FileTail
 
-  @closing ~r/(?:^\s*|[,;:.!?]\s*)send[.!?]*\s*$/iu
+  # "sent" closes too: it is what the transcriber often hears for "send".
+  @closing ~r/(?:^\s*|[,;:.!?]\s*)sen[dt][.!?]*\s*$/iu
   @partial_stale_seconds 60
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)

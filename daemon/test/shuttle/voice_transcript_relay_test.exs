@@ -1091,6 +1091,21 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     assert text == "me: open the notebook\n"
   end
 
+  test "a closing clause heard as sent closes too, and a sentence ending in sent does not", c do
+    routes = Path.join(c.root, "routes.jsonl")
+    route(routes, "2026-11-06T10:00:00Z", "fiber-a")
+    File.write!(c.path, "")
+    start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
+    record(c.path, "2026-11-06T10:00:01Z", "that is the mail I sent.")
+    poll(c)
+    refute_receive {:delivery, _}, 50
+    record(c.path, "2026-11-06T10:00:02Z", "open the notebook. Sent.")
+    poll(c)
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert text =~ "open the notebook"
+    refute text =~ ~r/sent\.?\s*$/i
+  end
+
   test "the closing send leaves the message, and a send inside it stays", c do
     routes = Path.join(c.root, "routes.jsonl")
     route(routes, "2026-11-06T10:00:00Z", "fiber-a")
