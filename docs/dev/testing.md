@@ -142,6 +142,19 @@ does not rescue a short inner one: if a task's call carries a two-second
 deadline, a thirty-second `Task.await` around it still fails when the call
 does. Make incidental deadlines failure-only all the way down, and tag the
 tests whose subject is a deadline `:timing`.
+In the daemon, a bare `assert_receive` already waits 10 s, the suite's
+failure-only default; don't pass it a shorter bound. A `wait_until` loop's
+bound is about 30 s. Where production code waits on an interval, the
+interval is an option or app-env key that tests shrink, with the shipped value
+pinned once: the Poller's `:publish_debounce_ms` (`start_poller!/1` sets 0),
+`:profile_second_ms`, `:worker_stop_ladder`, `:paste_submit_delay_ms` (0 in
+`config/test.exs`), `:dispatch_call_timeout_ms`. A test that edits an
+operator document the daemon caches for a second writes it through
+`Shuttle.RuntimeDocuments.change/2`, which drops the cached snapshot, rather
+than sleeping the second out. Serialize daemon processes with
+`Shuttle.Lock.transaction/2`, never `:global.trans/2`: a `:global` lock
+answers contention with a random 0.25-8 s backoff, which once accounted for
+most of the time of the suites that exercise the thread outbox.
 In Go, a loop that polls on a ticker takes its ticks as a channel, which
 production fills from a `time.Ticker` and a test fills one tick at a time:
 `watchHookIdle` in `internal/messaging` counts quiet polls rather than
@@ -165,7 +178,7 @@ and add your test to its file.
 
 **Daemon** (`daemon/test/`):
 
-- **Dispatch lifecycle and quarantine:** `shuttle/poller_*_test.exs` (one file per Poller topic, sharing `Shuttle.Test.PollerCase`), `dispatcher_test.exs`, `dispatch_integration_test.exs`, `continuation_test.exs`, `standing_role_test.exs`, `lifecycle_store_test.exs`, `daemon_heartbeat_test.exs`, and `shuttle_web/controllers/{api,lifecycle,quarantine,kill}_controller_test.exs`.
+- **Dispatch lifecycle and quarantine:** `shuttle/poller_*_test.exs` (one file per Poller topic, sharing `Shuttle.Test.PollerCase`), `dispatcher_test.exs`, `dispatch_integration_*_test.exs` (`Shuttle.Test.DispatchIntegrationCase`), `threads_*_test.exs` (`Shuttle.Test.ThreadsCase`), `continuation_test.exs`, `standing_role_test.exs`, `lifecycle_store_test.exs`, `daemon_heartbeat_test.exs`, and `shuttle_web/controllers/{api,lifecycle,quarantine,kill}_controller_test.exs`.
 - **Worker execution:** `terminal`, `rex`, `retained_terminal`, `tmux_server`, `worker_watcher`, `worker_process`, `runner`, `kitty`.
 - **Remotes and the tailnet:** `remotes_test.exs` (Go/Elixir parity fixtures in `test/fixtures/remotes/`), `tailnet_peers`, `tailnet_dial`, `remote_registry*`, `remote_{fiber,temporal}_registry`, `fleet_controller`.
 - **Owner routing:** `origin_router`, `file_relay`, `relay_helpers`.
@@ -230,8 +243,10 @@ Reuse before writing. Each language has one place for shared support:
 - **Daemon:** `daemon/test/support/`.
   - `Shuttle.Test.Env`: scoped env, app env and `PATH`, and scoped servers.
   - `Shuttle.Test.FakeCli`: fake executables. They are content-addressed and warmed once, and vary their behaviour by scoped env, never by a rewritten script. On macOS a freshly written executable costs about a second on its first exec.
-  - `FeltStoreRunner`: an in-memory felt store behind the runner seam.
+  - `FeltStoreRunner`: an in-memory felt store behind the runner seam. A test about daemon logic answers the CLIs through it (or a local runner module); the real `felt` and `shuttle` are for the suites that hold the CLI boundary itself: `dispatch_integration_*`, `threads_*`, `cross_host_identity_integration` and the parity tables. `Shuttle.CLI` takes its runner from the `:felt_runner` app-env key.
   - `PollerHelpers`: `start_poller!` and `make_fiber`.
+  - Case templates for suites split across modules: `PollerCase`, `ThreadsCase`, `RexRealCase`, `DispatchIntegrationCase`. A module runs its own tests one after another, so a module whose tests add up to more than ~15 s belongs in several topical modules sharing a template.
+  - `TimelineFormatter` and `StackSampler`, for finding where the suite's time goes (see [Daemon suite time](#daemon-suite-time)).
   - `ApiConn`, `StubPostClient`, `StubGetFileClient`, `ForwardStub` and `Ledgers`.
 - **CLIs:** each package's `test_helpers_test.go`, plus `sysenvtest` for an injected environment and fake commands. Use `newStore`/`seedFiber` for stores on disk and `serveDaemon` for a fake daemon (`shuttlecli`; `daemonStub` in `provenance_test.go` routes by path).
   - A test that needs a real felt executable uses `asFeltExecutable` (`feltcli/cli_harness_test.go`): a launcher that runs the test binary itself as felt at a chosen version. Don't run `go build` or `go list` from a test; under the `TestMain` fence's fresh `HOME` the go command starts from empty build and module caches.
@@ -327,6 +342,28 @@ teach the daemon or Go link what it resolves to. To add a verb, give it
 `offered`, `label` and `reached` in `VERBS`, then teach the fuzz's `perform`
 how a human does it. When a link disagrees with the model, decide which one
 is wrong before you change either.
+
+## Daemon suite time
+
+`mix test`'s wall time is a critical path, not a sum: about 13 s loading the
+test files, then the asynchronous phase, which lasts as long as its slowest
+module because a module runs its tests one after another, then the
+`async: false` modules one at a time. A long module or a synchronous one
+costs the whole suite; many short modules cost little.
+`mix test --slowest N` and `--slowest-modules N` imply `--trace`, which runs
+one test at a time, so their totals are the serial sum and say nothing about
+the wall time.
+
+To see the critical path, run
+`SHUTTLE_TEST_TIMELINE=/tmp/timeline mix test --formatter ExUnit.CLIFormatter --formatter Shuttle.Test.TimelineFormatter`:
+the file records when each module starts and finishes and how long each
+test takes. To see what a slow test waits on, wrap the slow part in
+`Shuttle.Test.StackSampler.run(fun, fn -> [pid] end)`, which prints the
+stacks the named processes spend their time in.
+
+The production boot gate is the suite's floor: its realistic case holds a
+boot stage past sixteen seconds by design, and a change under `lib/` first
+recompiles `_build/production-boot`.
 
 ## Gotchas
 
