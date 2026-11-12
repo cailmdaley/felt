@@ -194,6 +194,7 @@ remote draft made with --disabled stays in this store while you write it;
 				}
 			} else {
 				child.Touch(child.CreatedAt)
+				st.StampRole(child)
 				if err := a.writeFiber(st, child); err != nil {
 					return err
 				}

@@ -44,6 +44,7 @@ Freed, Σ_nl runs to the prior edge in a third of the mocks ([[bao-analysis/mock
 - **body** — opens with a lede readable alone (`felt show -d summary` shows only that). `[[wikilinks]]` sit in the sentence that says why the link matters.
 - **companion files** — plots, PDFs, reports sit beside the markdown and move with it.
 - **your own fields** — any frontmatter a project needs survives every edit (`--set key=value`, or edit the file). An `inputs:` entry with `from: <fiber>` declares a data-flow edge (`felt show <id> --consumers`).
+- **role** — who is responsible for open work: `role: sam` (Sam's own) or `role: analyst/sam` (Sam, in the analyst office); the person is the last segment. felt stamps a new open fiber with `git config felt.person` of the repository holding it (set once per checkout of a shared store); hand work over by editing it (`felt edit <id> --role <person>`).
 - **stamps** — `id:` (a ULID that survives moves), `created-at`, `updated-at`, `closed-at` are felt's; leave them alone.
 
 A bare `.felt/<slug>.md` at a store's root is the project's entry point. A project's `.felt` may be a symlink into a larger shared store: `felt ls` and `tree` stay in the project's view, `felt find` searches the whole store, and any id works with `show` and `edit`. Linking a project into a store has a data-loss trap: follow <https://cailmdaley.github.io/felt/concepts/cross-project/>.
@@ -58,7 +59,7 @@ felt find "word"                            # does a fiber on this exist? whole 
 felt tree -L 1                              # orient
 felt add <parent>/<slug> "name" -o "outcome" [-t tag] [-s open]
 felt edit <id> -s closed -o "what was learned"
-felt ls [-t tag]                            # open and active work
+felt ls [-t tag]                            # your open and active work (--person all: everyone's)
 felt sync / felt sync --push                # merge the store's upstream / publish
 ```
 

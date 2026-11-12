@@ -77,6 +77,7 @@ type FindQuery struct {
 	Exact          bool
 	Regex          bool
 	Verbose        bool
+	Person         string
 	Limit          int
 	LimitExplicit  bool
 }
@@ -91,6 +92,7 @@ func AddFindFlags(command *cobra.Command, q *FindQuery) {
 	flags.BoolVarP(&q.Exact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
 	flags.BoolVarP(&q.Regex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
 	flags.StringArrayVar(&q.HasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
+	flags.StringVar(&q.Person, "person", "", "Only fibers whose role names this person (all: every person)")
 	flags.BoolVarP(&q.Verbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
 	// Long-only on purpose: ls's -n is --recent, and one letter meaning two
 	// different things across two sibling search verbs is a trap.
@@ -140,6 +142,7 @@ func Find(env *sysenv.Env, dir string, q FindQuery, jsonMode bool) (*FindResult,
 	if err != nil {
 		return nil, err
 	}
+	search.person = q.Person
 	bodiesLoaded := search.readsBodies()
 	felts, err := listForSearch(storage, nil, jsonMode, search)
 	if err != nil {

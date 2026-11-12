@@ -77,6 +77,11 @@ type Felt struct {
 	Outcome     string     `yaml:"outcome,omitempty" json:"outcome,omitempty"`
 	Due         *time.Time `yaml:"due,omitempty" json:"due,omitempty"`
 	Description string     `yaml:"description,omitempty" json:"description,omitempty"`
+	// Role names who is responsible for open work: `<office>` or
+	// `<office>/<person>`, the person being the last segment (see RolePerson).
+	// Create stamps an open fiber with `<person>` from git config felt.person
+	// (see StampRole); handing work over is editing it.
+	Role string `yaml:"role,omitempty" json:"role,omitempty"`
 	// ExtraFields holds all non-native top-level frontmatter keys. felt does
 	// not parse or validate their semantics; it preserves them on round-trip
 	// and surfaces them in JSON so downstream tools can own their contracts.
@@ -446,6 +451,9 @@ type nativeFrontmatter struct {
 	Outcome     string     `yaml:"outcome,omitempty"`
 	Due         *time.Time `yaml:"due,omitempty"`
 	Description string     `yaml:"description,omitempty"`
+	// Role is last so its position in the file is where a felt build that does
+	// not know it would round-trip it: the first extra field.
+	Role string `yaml:"role,omitempty"`
 }
 
 // legacyFrontmatterTitleKey is a read-only INBOUND alias for `name`: parse
@@ -513,6 +521,7 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 		Outcome:     fm.Outcome,
 		Due:         fm.Due,
 		Description: fm.Description,
+		Role:        fm.Role,
 	}
 
 	// Capture unknown top-level keys so Marshal can round-trip them.
@@ -730,6 +739,7 @@ func (f *Felt) Marshal() ([]byte, error) {
 		Outcome:     f.Outcome,
 		Due:         f.Due,
 		Description: f.Description,
+		Role:        f.Role,
 	}
 
 	yamlBytes, err := yaml.Marshal(fm)

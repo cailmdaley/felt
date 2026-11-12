@@ -20,9 +20,12 @@ The rule: **felt owns the fiber; each additional field has its own owner.**
 | `outcome` | string | `felt edit -o/--outcome`; `shuttle set-outcome` |
 | `due` | date | `-D/--due` (`YYYY-MM-DD`) |
 | `description` | string | **file only** — no CLI flag |
+| `role` | `<person>` or `<office>/<person>` | `felt add -R/--role`, `felt edit -R/--role`; on creating open work, felt, from `git config felt.person` in the repository holding the fiber ([sharing a store](cross-project.md#sharing-a-store-with-other-people)) |
 
 felt parses, validates, and formats these. `description` stands apart: felt
-owns it natively, but only a file edit sets it.
+owns it natively, but only a file edit sets it. `role` names who is responsible for
+open work; its last segment is the person, and Shuttle reads its first as a
+constitution's office ([roles](roles.md)).
 
 ## Project-owned fields
 

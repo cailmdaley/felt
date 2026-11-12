@@ -20,6 +20,7 @@ func (a *app) editCmd() *cobra.Command {
 	var editUntag []string
 	var editBody string
 	var editOutcome string
+	var editRole string
 	var editSet []string
 	var editUnset []string
 	command := &cobra.Command{
@@ -76,6 +77,12 @@ own, structured ones included.`,
 				}
 				if cmd.Flags().Changed("outcome") {
 					f.Outcome = editOutcome
+				}
+				if cmd.Flags().Changed("role") {
+					if editRole != "" && !felt.ValidRole(editRole) {
+						return invalidRoleError(editRole)
+					}
+					f.Role = editRole
 				}
 				if cmd.Flags().Changed("due") {
 					if editDue == "" {
@@ -143,6 +150,7 @@ own, structured ones included.`,
 	command.Flags().StringVarP(&editBody, "body", "b", "", "Replace the whole body")
 	command.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
 	command.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
+	command.Flags().StringVarP(&editRole, "role", "R", "", "Hand over: <person> or <office>/<person> (empty clears)")
 	command.Flags().StringArrayVar(&editSet, "set", nil, "Set a top-level scalar key felt does not own (key=value; repeatable)")
 	command.Flags().StringArrayVar(&editUnset, "unset", nil, "Remove a top-level key felt does not own (repeatable)")
 	return command
@@ -151,7 +159,7 @@ own, structured ones included.`,
 // editFlagNames is the canonical list of edit's top-level metadata flags, in
 // the order they are reported. Drives both the "any change requested?" gate and
 // the mechanical event's fields_changed payload.
-var editFlagNames = []string{"name", "status", "due", "tag", "untag", "body", "outcome", "set", "unset"}
+var editFlagNames = []string{"name", "status", "due", "role", "tag", "untag", "body", "outcome", "set", "unset"}
 
 // collectChangedEditFields lists which top-level edit flags the user actually
 // flipped, so the mechanical event payload reflects intent.
@@ -217,4 +225,9 @@ func unsetExtraField(f *felt.Felt, key string) error {
 		return fmt.Errorf("--unset %q targets a native field; clear it with its dedicated flag (e.g. --%s \"\")", key, key)
 	}
 	return f.SetExtraField(key, nil)
+}
+
+// invalidRoleError refuses a role that is not <person> or <office>/<person>.
+func invalidRoleError(role string) error {
+	return fmt.Errorf("role must be <person> or <office>/<person>, each a lowercase slug, got %q", role)
 }

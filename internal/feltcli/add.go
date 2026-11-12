@@ -14,6 +14,7 @@ func (a *app) addCmd() *cobra.Command {
 	var addDue string
 	var addTags []string
 	var addOutcome string
+	var addRole string
 	var addTopLevel, addNamespace bool
 	command := &cobra.Command{
 		Use:   "add <slug> <name>",
@@ -97,6 +98,12 @@ resolution and uses <slug> as spelled.`,
 			if addOutcome != "" {
 				f.Outcome = addOutcome
 			}
+			if addRole != "" {
+				if !felt.ValidRole(addRole) {
+					return invalidRoleError(addRole)
+				}
+				f.Role = addRole
+			}
 
 			// Seed the durable recency anchor at creation time, so a fresh clone
 			// orders a never-edited fiber by when it was born, not file mtime.
@@ -116,6 +123,7 @@ resolution and uses <slug> as spelled.`,
 	command.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	command.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable or comma-separated)")
 	command.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome: what was decided or learned")
+	command.Flags().StringVarP(&addRole, "role", "R", "", "Who is responsible: <person>, or <office>/<person> (open work defaults to git config felt.person)")
 	command.Flags().BoolVar(&addNamespace, "namespace", false, "Use the exact path relative to the enclosing store, independent of this project view")
 	command.Flags().BoolVar(&addTopLevel, "top-level", false, "Use <slug> as spelled; don't resolve it against existing fibers")
 	return command

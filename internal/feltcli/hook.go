@@ -198,11 +198,16 @@ func (a *app) buildSessionContext() string {
 
 	// Partition once so every fiber appears in exactly one section. Active and
 	// open fibers are the in-flight working set; closed and untracked fibers
-	// form the recent context tail.
+	// form the recent context tail. In-flight work whose role names someone
+	// other than the person its repository works for is left out, as bare ls
+	// leaves it out.
 	var inFlight, recent []*felt.Felt
+	persons := felt.NewPersonLookup()
 	for _, f := range felts {
 		if f.IsActive() || f.IsOpen() {
-			inFlight = append(inFlight, f)
+			if !persons.OtherPersons(f) {
+				inFlight = append(inFlight, f)
+			}
 		} else {
 			recent = append(recent, f)
 		}

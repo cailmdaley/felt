@@ -608,7 +608,8 @@ func (s *Storage) CheckAvailableID(id string) error {
 	return nil
 }
 
-// Create publishes a new fiber without replacing an existing document.
+// Create publishes a new fiber without replacing an existing document,
+// stamping an open fiber's role (see StampRole).
 // The availability check shares Update's advisory lock, and publication itself
 // is create-if-absent so even an uncoordinated creator cannot be overwritten.
 func (s *Storage) Create(f *Felt) error {
@@ -626,12 +627,14 @@ func (s *Storage) Create(f *Felt) error {
 	if strings.TrimSpace(f.UID) == "" {
 		f.UID = NewULID()
 	}
+	path := s.Path(f.ID)
+	s.StampRole(f)
 	data, err := f.Marshal()
 	if err != nil {
 		return err
 	}
 	s.forgetWalk()
-	if err := atomicfile.WriteNewUnsynced(s.Path(f.ID), data, 0644); err != nil {
+	if err := atomicfile.WriteNewUnsynced(path, data, 0644); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("fiber %q already exists", f.ID)
 		}

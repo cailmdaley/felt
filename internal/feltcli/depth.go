@@ -60,6 +60,9 @@ func writeHeader(sb *strings.Builder, f *felt.Felt) {
 	if len(f.Tags) > 0 {
 		fmt.Fprintf(sb, "Tags:     %s\n", strings.Join(f.Tags, ", "))
 	}
+	if f.Role != "" {
+		fmt.Fprintf(sb, "Role:     %s\n", f.Role)
+	}
 }
 
 func renderCompact(f *felt.Felt) string {
