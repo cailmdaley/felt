@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,7 +21,9 @@ func (a *app) roleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "role <fiber> [role]",
 		Short: "Set a constitution's office, or clear its role and seat",
-		Long: `Sets shuttle.role to a single role slug with a charter at roles/<slug>.
+		Long: `Sets shuttle.role to a single role slug whose charter is roles/<slug> at the
+top of the shared store, or <mount>/roles/<slug> in a repository linked in at
+its top level (see the roles concept page).
 --clear removes both shuttle.role and shuttle.seat. Lifecycle and runtime state
 are untouched. --new "Office name" creates a missing charter in the shared
 roles namespace before assigning the role; existing charters are preserved.`,
@@ -64,9 +67,13 @@ roles namespace before assigning the role; existing charters are preserved.`,
 					return err
 				}
 			} else {
-				if !roleRoots(st)[args[1]] {
+				charters, _, err := roleCharters(st)
+				if err != nil {
+					return err
+				}
+				if charters[args[1]] == nil {
 					if !cmd.Flags().Changed("new") {
-						return fmt.Errorf("role %q has no charter at roles/%s", args[1], args[1])
+						return noCharterError(args[1])
 					}
 					charter := &felt.Felt{
 						ID: "roles/" + args[1], Name: newName, Tags: []string{"role"},
@@ -97,12 +104,56 @@ roles namespace before assigning the role; existing charters are preserved.`,
 	return cmd
 }
 
-// listRoleProfiles reads the metadata of every charter at roles/<slug> in the
-// store that owns the roles namespace. It reads that one directory and the
-// charters in it, never the rest of the store.
-func listRoleProfiles(st *felt.Storage) ([]*felt.Felt, error) {
+// roleCharters finds every role's charter in the shared store (the enclosing
+// store when st is a view): the fiber at roles/<slug> at its top, or at
+// <mount>/roles/<slug> where <mount> is a top-level entry of its .felt/ that
+// links to a directory. The store's own charter wins a slug collision, then
+// mounts in name order; the charters a winner hides are returned as shadowed.
+// It reads those roles/ directories and their charters, never the rest of the
+// store.
+func roleCharters(st *felt.Storage) (charters map[string]*felt.Felt, shadowed []*felt.Felt, err error) {
 	st = roleStorage(st)
-	entries, err := os.ReadDir(filepath.Join(st.Root(), felt.RolesNamespace))
+	root := st.Root()
+	ids, err := charterIDs(root, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, entry := range entries {
+		if entry.Type()&fs.ModeSymlink == 0 {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(root, entry.Name())); err != nil || !info.IsDir() {
+			continue
+		}
+		mounted, err := charterIDs(root, entry.Name()+"/")
+		if err != nil {
+			return nil, nil, err
+		}
+		ids = append(ids, mounted...)
+	}
+	found, err := st.ListMetadataByIDs(ids, nil, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	charters = map[string]*felt.Felt{}
+	for _, f := range found {
+		slug := path.Base(f.ID)
+		if charters[slug] != nil {
+			shadowed = append(shadowed, f)
+			continue
+		}
+		charters[slug] = f
+	}
+	return charters, shadowed, nil
+}
+
+// charterIDs lists the candidate charter ids <prefix>roles/<slug> under root.
+func charterIDs(root, prefix string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(prefix), felt.RolesNamespace))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -111,11 +162,16 @@ func listRoleProfiles(st *felt.Storage) ([]*felt.Felt, error) {
 	}
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || entry.Type()&fs.ModeSymlink != 0 {
-			ids = append(ids, felt.RolesNamespace+"/"+entry.Name())
+		if (entry.IsDir() || entry.Type()&fs.ModeSymlink != 0) && shuttle.ValidRole(entry.Name()) {
+			ids = append(ids, prefix+felt.RolesNamespace+"/"+entry.Name())
 		}
 	}
-	return st.ListMetadataByIDs(ids, nil, false)
+	return ids, nil
+}
+
+// noCharterError names where a role's charter may live.
+func noCharterError(role string) error {
+	return fmt.Errorf("role %q has no charter at roles/%s or <mount>/roles/%s", role, role, role)
 }
 
 func roleStorage(st *felt.Storage) *felt.Storage {
@@ -145,24 +201,25 @@ func createRoleCharter(st *felt.Storage, charter *felt.Felt) error {
 
 func (a *app) rolesCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "roles", Short: "List role charters in the shared namespace", Args: cobra.NoArgs,
+		Use: "roles", Short: "List role charters in the shared store and its mounts", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, _, err := felt.RequireStore(a.env, a.dir)
 			if err != nil {
 				return err
 			}
-			profiles, err := listRoleProfiles(st)
+			charters, _, err := roleCharters(st)
 			if err != nil {
 				return err
 			}
 			type profile struct {
 				Slug    string `json:"slug"`
+				ID      string `json:"id"`
 				Name    string `json:"name"`
 				Outcome string `json:"outcome"`
 			}
-			roles := make([]profile, 0)
-			for _, f := range profiles {
-				roles = append(roles, profile{strings.TrimPrefix(f.ID, "roles/"), f.Name, f.Outcome})
+			roles := make([]profile, 0, len(charters))
+			for slug, f := range charters {
+				roles = append(roles, profile{slug, f.ID, f.Name, f.Outcome})
 			}
 			sort.Slice(roles, func(i, j int) bool { return roles[i].Slug < roles[j].Slug })
 			if a.json {

@@ -53,8 +53,21 @@ describe('constitution role', () => {
     expect(onFiber).toHaveBeenCalledWith('roles/surveyor')
   })
 
-  it('opens only the exact charter, never a suffix, case or title match', async () => {
-    const shuttleBase = daemon(['projects/roles/scribe', 'Roles/Scribe', 'scribe-notes'])
+  it('opens a charter in a mount, the store\'s own first', async () => {
+    for (const [ids, want] of [
+      [['shared/roles/scribe'], 'shared/roles/scribe'],
+      [['shared/roles/scribe', 'roles/scribe'], 'roles/scribe'],
+    ] as const) {
+      const onFiber = vi.fn()
+      const pane = buildFiberProse({ ...card, shuttleRole: 'scribe' }, channel, { shuttleBase: daemon([...ids]), onFiber, onFile: vi.fn() })
+      await settle()
+      pane.querySelector<HTMLAnchorElement>('.ws-fiber-role a.kbn-wikilink-live')!.click()
+      expect(onFiber).toHaveBeenCalledWith(want)
+    }
+  })
+
+  it('opens only a charter, never a deeper path, holder, case or title match', async () => {
+    const shuttleBase = daemon(['a/b/roles/scribe', 'roles/scribe/opus', 'Roles/Scribe', 'scribe-notes'])
     const pane = buildFiberProse({ ...card, shuttleRole: 'scribe' }, channel, { shuttleBase, onFiber: vi.fn(), onFile: vi.fn() })
     await settle()
     const role = pane.querySelector('.ws-fiber-role')!

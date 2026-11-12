@@ -484,6 +484,47 @@ defmodule Shuttle.SpeakerTest do
     assert voice.(nil) == "dylan_thomas"
   end
 
+  test "finds a charter in a mount, the store's own winning a collision", %{
+    tmp_dir: root,
+    server: server
+  } do
+    store = Path.join(root, "store")
+    shared = Path.join(root, "shared")
+
+    for {dir, role, voice} <- [
+          {shared, "analyst", "cosette"},
+          {shared, "tutor", "marius"},
+          {Path.join(store, ".felt"), "tutor", "jean"},
+          {Path.join(shared, "deep"), "buried", "javert"}
+        ] do
+      charter = Path.join([dir, "roles", role, role <> ".md"])
+      File.mkdir_p!(Path.dirname(charter))
+      File.write!(charter, "---\nname: #{role}\nvoice: #{voice}\n---\n")
+    end
+
+    File.ln_s!(shared, Path.join([store, ".felt", "shared"]))
+
+    fibers = fn ->
+      for role <- ~w(analyst tutor buried), do: %{"id" => role, "shuttle" => %{"role" => role}}
+    end
+
+    opts = [fibers: fibers, stores: fn -> [store] end] ++ server
+
+    voice = fn fiber_id ->
+      {:ok, %{voice: voice}} = Speaker.speak(%{"text" => "hi", "fiber_id" => fiber_id}, opts)
+      voice
+    end
+
+    assert voice.("analyst") == "cosette"
+    assert voice.("tutor") == "jean"
+    assert voice.("buried") == "dylan_thomas"
+
+    voices = Speaker.voices(bank: Path.join(root, "none"), stores: fn -> [store] end)
+    assert %{role: "analyst"} = Enum.find(voices, &(&1.name == "cosette"))
+    assert %{role: "tutor"} = Enum.find(voices, &(&1.name == "jean"))
+    assert %{role: nil} = Enum.find(voices, &(&1.name == "marius"))
+  end
+
   describe "echo?/3" do
     @line %{text: "Open Arena and start a draft whenever you like.", from: 10_000, to: 14_000}
 

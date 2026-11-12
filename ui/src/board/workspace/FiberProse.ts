@@ -6,7 +6,7 @@ import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import '../prose.css'
 import './fiber-prose.css'
 import type { Channel } from './documents.js'
-import { buildRoleLedger, roleSlug } from './RolePage.js'
+import { buildRoleLedger, charterId, roleSlug } from './RolePage.js'
 
 /** The outcome as the reading surface's lede, including math and references. */
 export function ledeHtml(outcome: string): string {
@@ -64,8 +64,8 @@ export function installBodyFileLinks(
 
 /**
  * The office for the status line, left of the worker pill: the role
- * is a wikilink to its fiber `roles/<slug>`, live when the index names that
- * exact id and plain text otherwise.
+ * is a wikilink to its charter (`roles/<slug>`, or `<mount>/roles/<slug>`),
+ * live when the index names one and plain text otherwise.
  */
 function roleChip(slug: string | undefined, opts: { shuttleBase: string; onFiber: (id: string) => void }): HTMLElement | null {
   if (!slug) return null
@@ -83,7 +83,7 @@ function roleChip(slug: string | undefined, opts: { shuttleBase: string; onFiber
   link.textContent = slug
   role.append(link)
   el.append(role)
-  void installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, exact: true })
+  void installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, resolve: (_, index) => charterId(slug, index.map(row => row.id)) })
   return el
 }
 

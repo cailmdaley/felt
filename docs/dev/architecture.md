@@ -85,8 +85,9 @@ before substantive work and publish committed changes with
 `felt sync --push`. The syncing agent first commits the store's dirty fiber
 changes, whoever wrote them, including daemon lifecycle writes. Mixed commits
 are fine. A worker resolves relevant conflicts with the work's
-context. Role charters under `roles/<role>/` have intrinsic IDs and no host
-owner. A task's optional `shuttle.role` names one role charter; `shuttle.seat`
+context. Role charters at `roles/<role>`, or `<mount>/roles/<role>` in a repository
+linked in at the store's top level ([the rule](../concepts/roles.md#where-a-charter-lives)),
+have intrinsic IDs and no host owner. A task's optional `shuttle.role` names one role charter; `shuttle.seat`
 marks whether the constitution is a seat of that office.
 Synchronizing a constitution does not change its `shuttle.host` dispatch gate.
 Armed cross-host creation writes through the owner daemon; dispatch never depends on archive synchronization.

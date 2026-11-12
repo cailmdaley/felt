@@ -1,7 +1,8 @@
 defmodule ShuttleWeb.RolesController do
   @moduledoc """
-  Lists shared role charters through `shuttle roles --json` in the configured
-  stores. Roles are synchronized documents, so this read is local, not
+  Lists role charters through `shuttle roles --json` in the configured stores,
+  each with its slug and its charter's fiber id there (`roles/<slug>`, or
+  `<mount>/roles/<slug>`). Roles are synchronized documents, so this read is local, not
   owner-routed. An unavailable or malformed CLI response contributes no roles.
   """
   use Phoenix.Controller, formats: [:json]

@@ -43,7 +43,7 @@ Diagonal agrees to 3%. `validate/offdiag.py` loads the mocks; plotting is unfini
 - **outcome** — the card's headline: where the work stands and what the reader should do next. Start it with "Blocked: …" when stuck.
 - **`## Desired State`** — the contract: checkable done-conditions and what to leave alone, never steps. Workers choose the path.
 - **`## Status`** — the handoff to the next worker: what landed, what's stuck, what to know. Rewritten, never appended.
-- **`role`** — the office this work belongs to. Its charter, the fiber `roles/<role>` in the shared store, holds the office's playbooks, human gates and the people it serves.
+- **`role`** — the office this work belongs to. Its charter, the fiber `roles/<role>` at the top of the shared store or in a repository linked in there (`felt show roles/<role>` finds either), holds the office's playbooks, human gates and the people it serves.
 - **`tapestry.html`** — beside the fiber: one page describing the whole constitution as it stands, never the latest stretch. It opens on one screen, drawn in code, that shows at a glance what the work is, where it stands and what needs the human; everything else sits below. Its form follows the work: findings with their figures, the talk's slides themselves, embedded PDFs for a paper review. Rewritten whole, never appended ([references/tapestry.md](references/tapestry.md)).
 
 Armed cross-host creation and control go through the owning daemon's existing routes.

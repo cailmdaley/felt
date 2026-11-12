@@ -28,7 +28,13 @@ defmodule ShuttleWeb.RolesControllerTest do
   test "reads configured stores through Shuttle and returns unique sorted profiles", %{
     stores: [one, two]
   } do
-    editor = %{"slug" => "editor", "name" => "Editor", "outcome" => "Keeps text true."}
+    editor = %{
+      "slug" => "editor",
+      "id" => "shared/roles/editor",
+      "name" => "Editor",
+      "outcome" => "Keeps text true."
+    }
+
     warden = %{"slug" => "warden", "name" => "Warden", "outcome" => ""}
 
     Env.put_app_env(:roles_reply, fn

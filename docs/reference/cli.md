@@ -220,13 +220,14 @@ untouched by any of this.
 | `shuttle close <fiber>` | Set status to `closed`; `--tempered=true\|false` records a verdict. Without the flag a oneshot's verdict is cleared. A standing constitution has no review: `close` refuses it without a verdict; `--tempered=true` tempers its current run (clears the ask, concludes the run, keeps the schedule armed) and `--tempered=false` retires it and ends its schedule; `rest` pauses it. A thread wakes only its nearest orchestrator by default; `--quiet` sends its outcome as context without waking. The next ordinary close wakes again; ask always wakes. Results never automatically propagate further. A worker closing its own top-level oneshot for review must have written `tapestry.html` since its dispatch |
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--project-dir`); leaves the current session running. The agent is a registry id or alias: any other name, a model name included, is refused with `<id> is not an agent; \`shuttle agents\` lists them`, as `set-model`, `install -m`, `repeat -m` and `thread --agent` refuse it |
 | `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys |
-| `shuttle roles [--json]` | List one-level charters at `roles/<slug>` in the shared namespace, with `slug`, `name`, and `outcome`; JSON is an array (empty as `[]`) |
+| `shuttle roles [--json]` | List role charters ([where a charter lives](../concepts/roles.md#where-a-charter-lives)), with `slug`, `id` (the charter's fiber id in the shared store), `name`, and `outcome`; JSON is an array (empty as `[]`) |
 | `shuttle role <fiber> <role-slug> [--new "Office name"]` | Set `shuttle.role` to a role charter slug; `--new` creates a missing charter, and `--clear` clears both role and seat. Preserves lifecycle and execution settings |
 | `shuttle seat <fiber>` | Set `shuttle.seat: true`; requires `shuttle.role`. `--clear` removes the seat field. Preserves lifecycle and execution settings |
 
 Older CLIs can duplicate UID-less documents and delete the sender's copy when resuming across store views; cross-host documents need an intrinsic `id:` UID.
 
-`roles` and `role --new` use the enclosing shared store's `roles/` namespace when the project is a view into that store.
+`roles` and `role` find charters by [the charter rule](../concepts/roles.md#where-a-charter-lives): `roles/<slug>` at the top of the shared store (the enclosing store when the project is a view into it), or `<mount>/roles/<slug>` in a repository linked in at its top level, the store's own winning a collision.
+`role --new` creates a missing charter in the shared store's own `roles/`.
 Nested charter notes are excluded from the list.
 `role --new` validates the slug before creating anything and leaves existing charters untouched.
 A new charter starts with a short lede naming the constitution it serves and asking its holders to grow the charter.

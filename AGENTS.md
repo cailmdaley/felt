@@ -25,8 +25,8 @@ orchestration; the daemon is the production dispatcher.
 Before `felt sync`, agents commit the store's dirty fiber changes, including
 other sessions' edits and daemon lifecycle writes; mixed commits are fine.
 Sync before substantive work and publish with `felt sync --push`. Resolve Git
-conflicts with the work's context. Role charters live under `roles/`
-and have no host owner. A constitution's `shuttle.host` selects the daemon
+conflicts with the work's context. Role charters live at `roles/<role>` or `<mount>/roles/<role>`
+(docs/concepts/roles.md) and have no host owner. A constitution's `shuttle.host` selects the daemon
 allowed to execute it; synchronizing its file does not transfer execution.
 Armed cross-host creation and control use the owner daemon's existing APIs; the owner writes its store directly, independently of Git archive state.
 The daemon never runs Git or `felt sync`; a missing document returns not-found with its host and identifier.

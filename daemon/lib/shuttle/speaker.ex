@@ -165,9 +165,8 @@ defmodule Shuttle.Speaker do
 
     claims =
       for store <- stores,
-          {:ok, roles} <- [Shuttle.FS.ls(Path.join([store, ".felt", "roles"]))],
-          role <- Enum.sort(roles),
-          voice = charter_voice(role, [store]),
+          {role, charter} <- Enum.sort(charters(store)),
+          voice = voice_at(charter),
           into: %{},
           do: {voice, role}
 
@@ -186,14 +185,51 @@ defmodule Shuttle.Speaker do
 
   defp charter_voice(role, stores) do
     Enum.find_value(stores, fn store ->
-      case Shuttle.FiberDoc.read_path(Path.join([store, ".felt", "roles", role, role <> ".md"])) do
-        {:ok, _path, _raw, %{"voice" => voice}, _body} when is_binary(voice) and voice != "" ->
-          voice
-
-        _ ->
-          nil
+      case charters(store) do
+        %{^role => charter} -> voice_at(charter)
+        _ -> nil
       end
     end)
+  end
+
+  defp voice_at(charter) do
+    case Shuttle.FiberDoc.read_path(charter) do
+      {:ok, _path, _raw, %{"voice" => voice}, _body} when is_binary(voice) and voice != "" ->
+        voice
+
+      _ ->
+        nil
+    end
+  end
+
+  # Role slug => charter file. A role's charter is roles/<slug> at the top of
+  # the store, or <mount>/roles/<slug> where <mount> is a top-level entry of
+  # its .felt/ that links to a directory. The store's own charter wins a
+  # collision, then mounts in name order.
+  defp charters(store) do
+    felt = Path.join(store, ".felt")
+
+    mounts =
+      case Shuttle.FS.ls(felt) do
+        {:ok, names} ->
+          for name <- Enum.sort(names),
+              dir = Path.join(felt, name),
+              match?({:ok, %{type: :symlink}}, Shuttle.FS.lstat(dir)),
+              Shuttle.FS.dir?(dir),
+              do: dir
+
+        _ ->
+          []
+      end
+
+    for dir <- [felt | mounts],
+        {:ok, roles} <- [Shuttle.FS.ls(Path.join(dir, "roles"))],
+        role <- Enum.sort(roles),
+        charter = Path.join([dir, "roles", role, role <> ".md"]),
+        Shuttle.FS.regular?(charter),
+        reduce: %{} do
+      found -> Map.put_new(found, role, charter)
+    end
   end
 
   defp server(opts), do: Keyword.get(opts, :server, Shuttle.Env.server(__MODULE__))

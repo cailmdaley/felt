@@ -1,6 +1,6 @@
 # Roles
 
-Every worker holds a role. A role is an office, such as editor, scribe or surveyor. It is the fiber `roles/<role>` at the top of the shared store (the `Felt store:` your launch prompt names, such as the loom), and its body, the charter, carries what the office has learned across tasks: its remit, the human gates it must respect, the people its work touches, and where its playbooks live. Taking up the right role before you touch the work is how that learning reaches you. A worker that skips it rediscovers the playbooks and misses the gates.
+Every worker holds a role. A role is an office, such as editor, scribe or surveyor. It is the fiber `roles/<role>` at the top of the shared store (the `Felt store:` your launch prompt names), or `<mount>/roles/<role>` in a repository linked in at that store's top level, such as one shared with other people; the store's own wins when both exist. Its body, the charter, carries what the office has learned across tasks: its remit, the human gates it must respect, the people its work touches, and where its playbooks live. Taking up the right role before you touch the work is how that learning reaches you. A worker that skips it rediscovers the playbooks and misses the gates.
 
 ## Taking up a role
 
@@ -11,9 +11,9 @@ shuttle:
   role: surveyor
 ```
 
-After syncing, read it with `felt -C <store> show roles/<role>`. The role says what kind of work this is, not who you are: `shuttle.agent` decides which model runs, and the session ledger records who ran each session.
+After syncing, read it with `felt -C <store> show roles/<role>`, which finds the charter in either place. The role says what kind of work this is, not who you are: `shuttle.agent` decides which model runs, and the session ledger records who ran each session.
 
-**If there is no role, or the role doesn't fit the work**, find the charter that does. `shuttle roles` lists the offices, and `roles/roles.md`, where the store keeps one, maps kinds of work to them. Read the charters that look close, and work under the one whose remit matches what this task is really asking for. A quick task that closes in one sitting can borrow a charter's practice without being assigned to it. A constitution that hands off, recurs or is resumed is persistent responsibility, and gets a role:
+**If there is no role, or the role doesn't fit the work**, find the charter that does. `shuttle roles` lists the offices with each charter's id, and `roles/roles.md`, where the store keeps one, maps kinds of work to them. Read the charters that look close, and work under the one whose remit matches what this task is really asking for. A quick task that closes in one sitting can borrow a charter's practice without being assigned to it. A constitution that hands off, recurs or is resumed is persistent responsibility, and gets a role:
 
 ```bash
 shuttle role <task> surveyor

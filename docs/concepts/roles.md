@@ -1,9 +1,26 @@
 # Roles
 
-Roles are ordinary Git-synchronized fibers under `roles/<role>/`. A role charter
-holds the durable context of an office; create one when that context is useful
-with `felt add roles/<role> "<Name>"`. Project knowledge belongs in the fibers
-that own the subject matter.
+Roles are ordinary Git-synchronized fibers. A role charter holds the durable
+context of an office; create one when that context is useful with
+`felt add roles/<role> "<Name>"`. Project knowledge belongs in the fibers that
+own the subject matter.
+
+## Where a charter lives
+
+A role's charter is the fiber `roles/<role>` at the top of the shared store (the
+enclosing store when the current store is a view of it), or
+`<mount>/roles/<role>`, where `<mount>` is a top-level entry of the shared
+store's `.felt/` that is a symlink to a directory: a repository linked in, such
+as one shared with other people ([sharing a store](cross-project.md#sharing-a-store-with-other-people)).
+A charter at `shared/roles/analyst` is the `analyst` office as surely as one at
+`roles/analyst`. When both exist, the store's own `roles/<role>` wins and
+`shuttle check` warns about the one it shadows. A charter two levels down
+(`a/b/roles/<role>`) is not one.
+
+`felt show roles/<role>` reaches a charter in either place, because felt
+resolves an id by its unique tail; this is how workers read one.
+
+## Holding a role
 
 A constitution can name one role with `shuttle.role: <role-slug>`. Setting
 `shuttle.seat: true` marks it as a seat of that office and requires a role.

@@ -2,7 +2,7 @@ package shuttlecli
 
 import (
 	"fmt"
-	"strings"
+	"path"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -26,7 +26,17 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 				return err
 			}
 			issues := make([]felt.CheckIssue, 0)
-			var roles map[string]bool
+			// An unreadable roles namespace yields no charters, so every role
+			// is reported rather than none.
+			charters, shadowed, _ := roleCharters(storage)
+			for _, f := range shadowed {
+				slug := path.Base(f.ID)
+				issues = append(issues, felt.CheckIssue{
+					Level:   felt.CheckLevelWarning,
+					FiberID: f.ID,
+					Message: fmt.Sprintf("charter for role %q is shadowed by %s, which wins", slug, charters[slug].ID),
+				})
+			}
 			for _, fiber := range fibers {
 				if _, exists := fiber.ExtraFields["collaboration"]; exists {
 					issues = append(issues, felt.CheckIssue{
@@ -74,15 +84,12 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 					})
 				}
 				if block, ok, err := shuttle.BlockOf(fiber); err == nil && ok && block.Role != "" && shuttle.ValidRole(block.Role) {
-					if roles == nil {
-						roles = roleRoots(storage)
-					}
-					if !roles[block.Role] {
+					if charters[block.Role] == nil {
 						issues = append(issues, felt.CheckIssue{
 							Level:   felt.CheckLevelWarning,
 							FiberID: fiber.ID,
 							Path:    shuttle.FacetKey + ".role",
-							Message: fmt.Sprintf("role %q has no charter: there is no roles/%s fiber", block.Role, block.Role),
+							Message: noCharterError(block.Role).Error(),
 						})
 					}
 				}
@@ -112,19 +119,4 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 		},
 	}
 	return shuttleCheckCmd
-}
-
-// roleRoots is the set of role slugs with a charter at roles/<slug> in the
-// store that owns the roles. An unreadable store yields an empty set, so every
-// role is reported rather than none.
-func roleRoots(st *felt.Storage) map[string]bool {
-	out := map[string]bool{}
-	profiles, err := listRoleProfiles(st)
-	if err != nil {
-		return out
-	}
-	for _, f := range profiles {
-		out[strings.TrimPrefix(f.ID, "roles/")] = true
-	}
-	return out
 }

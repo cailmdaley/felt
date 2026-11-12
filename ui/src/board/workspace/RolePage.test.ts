@@ -27,10 +27,13 @@ const names = (root: ParentNode, selector: string) => [...root.querySelectorAll(
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('role page', () => {
-  it('is exactly a fiber at roles/<slug>, never a holder beneath it or a role elsewhere', () => {
+  it('is a fiber at roles/<slug> or <mount>/roles/<slug>, never a holder beneath it or a role deeper', () => {
     expect(roleSlug(role)).toBe('surveyor')
+    expect(roleSlug(card({ id: 'shared/roles/surveyor' }))).toBe('surveyor')
     expect(roleSlug(card({ id: 'roles/surveyor/opus' }))).toBeNull()
-    expect(roleSlug(card({ id: 'projects/roles/surveyor' }))).toBeNull()
+    expect(roleSlug(card({ id: 'shared/roles/surveyor/opus' }))).toBeNull()
+    expect(roleSlug(card({ id: 'a/b/roles/surveyor' }))).toBeNull()
+    expect(roleSlug(card({ id: 'roles/roles/surveyor' }))).toBeNull()
     expect(roleSlug(card({ id: 'roles' }))).toBeNull()
   })
 
