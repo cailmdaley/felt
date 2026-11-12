@@ -44,9 +44,15 @@ func runHandoff(t *testing.T, env *sysenv.Env, transcript string) string {
 	return envelope.HookSpecificOutput.AdditionalContext
 }
 
-// nodeHandoff asks claude-plugin/hooks/lib/handoff.mjs, which Pi's handoff
-// uses, what it would say for usage after the levels in sent.
-func nodeHandoff(t *testing.T, node string, env *sysenv.Env, usage handoffUsage, sent []string) string {
+// handoffCase is one usage and the levels already sent before it.
+type handoffCase struct {
+	Usage handoffUsage `json:"usage"`
+	Sent  []string     `json:"sent"`
+}
+
+// nodeHandoffs asks claude-plugin/hooks/lib/handoff.mjs, which Pi's handoff
+// uses, what it would say for each case, in one node process.
+func nodeHandoffs(t *testing.T, node string, env *sysenv.Env, cases []handoffCase) []string {
 	t.Helper()
 	lib, err := filepath.Abs(filepath.Join("..", "..", "claude-plugin", "hooks", "lib", "handoff.mjs"))
 	if err != nil {
@@ -56,21 +62,29 @@ func nodeHandoff(t *testing.T, node string, env *sysenv.Env, usage handoffUsage,
 const fs = await import("node:fs");
 const { pathToFileURL } = await import("node:url");
 const lib = await import(pathToFileURL(process.argv[1]).href);
-const { usage, sent } = JSON.parse(fs.readFileSync(0, "utf8"));
-try {
-  const level = lib.nextHandoff(usage, new Set(sent), lib.handoffThresholds(process.env));
-  if (level) process.stdout.write(lib.handoffMessage(usage, level));
-} catch {}
+const said = JSON.parse(fs.readFileSync(0, "utf8")).map(({ usage, sent }) => {
+  try {
+    const level = lib.nextHandoff(usage, new Set(sent), lib.handoffThresholds(process.env));
+    return level ? lib.handoffMessage(usage, level) : "";
+  } catch {
+    return "";
+  }
+});
+process.stdout.write(JSON.stringify(said));
 `
 	cmd := exec.Command(node, "--input-type=module", "-e", script, lib)
 	cmd.Env = env.Environ()
-	payload, _ := json.Marshal(map[string]any{"usage": usage, "sent": sent})
+	payload, _ := json.Marshal(cases)
 	cmd.Stdin = bytes.NewReader(payload)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("node: %v", err)
 	}
-	return string(out)
+	var said []string
+	if err := json.Unmarshal(out, &said); err != nil || len(said) != len(cases) {
+		t.Fatalf("node said %q: %v", out, err)
+	}
+	return said
 }
 
 // The Codex hook and Pi's handoff share thresholds and wording: for the same
@@ -102,21 +116,24 @@ func TestHandoffHookMatchesTheSharedLibrary(t *testing.T) {
 			state := t.TempDir()
 			env.Set("SHUTTLE_HANDOFF_STATE_DIR", state)
 			transcript := filepath.Join(t.TempDir(), "rollout.jsonl")
-			var sent []string
+			var cases []handoffCase
+			var said []string
+			sent := []string{}
 			for _, step := range steps {
 				if err := os.WriteFile(transcript, []byte(codexTokenRow(step.tokens, step.window)), 0600); err != nil {
 					t.Fatal(err)
 				}
-				usage := handoffUsage{float64(step.tokens), float64(step.window), "codex"}
-				want := nodeHandoff(t, node, env, usage, sent)
-				got := runHandoff(t, env, transcript)
-				if got != want {
-					t.Fatalf("%d/%d after %v:\ngo   %q\nnode %q", step.tokens, step.window, sent, got, want)
-				}
+				cases = append(cases, handoffCase{handoffUsage{float64(step.tokens), float64(step.window), "codex"}, sent})
+				said = append(said, runHandoff(t, env, transcript))
 				claims, _ := filepath.Glob(filepath.Join(state, "*", "*"))
-				sent = sent[:0]
+				sent = []string{}
 				for _, claim := range claims {
 					sent = append(sent, filepath.Base(claim))
+				}
+			}
+			for i, want := range nodeHandoffs(t, node, env, cases) {
+				if said[i] != want {
+					t.Fatalf("%v after %v:\ngo   %q\nnode %q", cases[i].Usage, cases[i].Sent, said[i], want)
 				}
 			}
 		})

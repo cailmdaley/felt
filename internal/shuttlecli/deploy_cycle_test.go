@@ -117,8 +117,16 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 		return 0
 	}
 	firstPID := waitHealthy(true)
-	// Let the loop finish its start turn and enter the healthy-listener poll wait.
-	time.Sleep(3 * time.Second)
+	// The loop has finished its start turn once it stands down for the
+	// healthy listener.
+	loopLog := filepath.Join(home, ".shuttle", "shuttle.log")
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(fleetRead(loopLog), "standing down") {
+		if time.Now().After(deadline) {
+			t.Fatalf("respawn loop never stood down: %s", fleetRead(loopLog))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
 	// Run deploy's actual remote host cycle function in dash. Its probe sees a
 	// reachable manager and a matching current-format inactive unit; it must
