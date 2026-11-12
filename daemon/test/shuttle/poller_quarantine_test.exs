@@ -1,5 +1,22 @@
 defmodule Shuttle.PollerQuarantineTest do
   # The Poller: the boot quarantine, the daemon heartbeat and the contract gate.
+  #
+  # Auto-release: a kernel that kills the beam on a CPU rlimit is not a human
+  # asking for a hold, but every (re)start arms the quarantine.
+  # `Shuttle.DaemonHeartbeat` gives the daemon evidence about its previous
+  # incarnation, and `Poller.init/1` releases the hold iff that evidence proves
+  # a fast bounce: a fresh heartbeat, the recorded workers still live by this
+  # daemon's own adoption, and no crash loop. Everything else (a real gap, a
+  # loop, a missing or garbage file, a contract skew) still holds. These tests
+  # are the boundary in both directions.
+  #
+  # The contract gate: `Poller.init/1` shells `shuttle contract` once and
+  # compares it to `Shuttle.Contract.expected_level/0`. A mismatch or an
+  # unparseable or nonzero exit, an unknown subcommand included, rides the same
+  # dispatch gate as the quarantine: fresh launches park, observed work still
+  # resumes, and the reason surfaces on `snapshot().contract` and
+  # `pending_launch`. `config/test.exs` disables `boot_quarantine`, so these
+  # tests exercise the gate in isolation from it.
   use Shuttle.Test.PollerCase, async: true
 
   # ── Boot quarantine ──

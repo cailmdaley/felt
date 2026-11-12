@@ -137,8 +137,6 @@ defmodule Shuttle.Test.PollerCase do
     def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
   end
 
-  # ── Claim (write-and-claim) ──
-
   defmodule CrashAfterCreateRunner do
     def cmd("tmux", ["new-session" | _] = args, opts) do
       MockRunner.cmd("tmux", args, opts)
@@ -423,18 +421,6 @@ defmodule Shuttle.Test.PollerCase do
     end
   end
 
-  # ── Boot-quarantine auto-release (daemon heartbeat continuity) ──
-  #
-  # A kernel that kills the beam on a CPU rlimit is not a human asking for a
-  # hold, but every (re)start arms the quarantine — so a kill nobody asked for
-  # silently stopped all new work until someone noticed. `Shuttle.DaemonHeartbeat`
-  # gives the daemon evidence about its own previous incarnation, and
-  # `Poller.init/1` releases the hold IFF that evidence proves a fast bounce:
-  # fresh heartbeat, the recorded workers still live BY THIS DAEMON'S OWN
-  # adoption, and no crash loop. Everything else — a real gap, a loop, a
-  # missing/garbage file, a contract skew — still holds. These tests are the
-  # boundary in both directions; the value of the change is entirely there.
-
   # Under this test's throwaway SHUTTLE_DATA_DIR (the suite-wide pin is dropped
   # in setup), so it is cleaned up with the rest of the markers.
   def heartbeat_file, do: Path.join(Shuttle.Env.get("SHUTTLE_DATA_DIR"), "heartbeat.json")
@@ -578,16 +564,6 @@ defmodule Shuttle.Test.PollerCase do
     if row[:stop_marker], do: :ok = DaemonHeartbeat.mark_stopped(heartbeat_file())
   end
 
-  # ── CLI/daemon contract handshake ──
-  #
-  # `Shuttle.Poller.init/1` shells `shuttle contract` once and compares it
-  # to `Shuttle.Contract.expected_level/0`. A mismatch or unparseable/nonzero
-  # exit, including an unknown subcommand, rides the same dispatch gate
-  # as boot quarantine: fresh launches park, already-observed work still
-  # resumes, and the reason surfaces on `snapshot().contract` /
-  # `pending_launch`. `config/test.exs` disables `boot_quarantine`, so these
-  # tests exercise the skew gate in isolation from it.
-
   # A CLI level the daemon does not expect.
   def skewed_contract_level, do: Shuttle.Contract.expected_level() + 1
 
@@ -708,13 +684,6 @@ defmodule Shuttle.Test.PollerCase do
       Enum.count(Shuttle.Test.FakeRex.calls(), fn {_, args, _} ->
         "session.close_window" in args
       end)
-
-  # ── Multi-host tests ──
-  #
-  # These tests exercise the multi-felt-store path directly against the file
-  # system; they bypass MockRunner's in-memory fiber store and write real
-  # .felt/ directories instead. Store resolution is the Poller's cold path,
-  # `FeltStores.store_for_fiber/2` over its configured `felt_stores`.
 
   # Helper: write a minimal fiber .md file with a shuttle: block into
   # <host>/.felt/<id>/<basename>.md so read_fiber_shuttle_block can find it.

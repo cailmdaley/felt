@@ -1,5 +1,9 @@
 defmodule Shuttle.PollerStoresTest do
   # The Poller: project directories, felt stores and dispatch call timeouts.
+  #
+  # The multi-store tests write real .felt/ directories rather than
+  # MockRunner's in-memory store: store resolution is the Poller's cold path,
+  # `FeltStores.store_for_fiber/2` over its configured `felt_stores`.
   use Shuttle.Test.PollerCase, async: true
 
   test "poller uses shuttle.project_dir as work_dir when it exists" do
