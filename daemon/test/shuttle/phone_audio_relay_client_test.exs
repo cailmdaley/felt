@@ -22,7 +22,7 @@ defmodule Shuttle.PhoneAudioRelay.ClientTest do
       )
 
     {:ok, {_, port}} = ThousandIsland.listener_info(pid)
-    assert {:error, :upgrade_rejected} = Client.connect("http://127.0.0.1:#{port}/first")
+    assert {:error, :upgrade_rejected} = Client.connect("http://127.0.0.1:#{port}/first", 30_000)
     assert_receive {:request, "/first"}
     refute_receive {:request, _}
   end
@@ -67,7 +67,7 @@ defmodule Shuttle.PhoneAudioRelay.ClientTest do
       )
 
     {:ok, {_, port}} = ThousandIsland.listener_info(pid)
-    assert {:error, {:tls_alert, _}} = Client.connect("https://127.0.0.1:#{port}/first")
+    assert {:error, {:tls_alert, _}} = Client.connect("https://127.0.0.1:#{port}/first", 30_000)
     refute_receive {:request, _}
   end
 
@@ -145,7 +145,8 @@ defmodule Shuttle.PhoneAudioRelay.PrivateTransportTest do
 
     assert {:ok, browser} =
              Shuttle.PhoneAudioRelay.Client.connect(
-               "http://127.0.0.1:#{port}/api/v1/voice/audio?recorder=recorder&launch=private-L1"
+               "http://127.0.0.1:#{port}/api/v1/voice/audio?recorder=recorder&launch=private-L1",
+               30_000
              )
 
     assert_receive {:recorder, _, "private-L1"}, 10_000
