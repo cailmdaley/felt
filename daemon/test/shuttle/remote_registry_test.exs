@@ -146,14 +146,15 @@ defmodule Shuttle.RemoteRegistryTest do
     {clock, advance}
   end
 
-  defp wait_until(fun, attempts \\ 1_000)
+  # About 30 s, reached only when the condition never holds.
+  defp wait_until(fun, attempts \\ 3_000)
   defp wait_until(_fun, 0), do: flunk("condition did not become true")
 
   defp wait_until(fun, attempts) do
     if fun.() do
       :ok
     else
-      Process.sleep(1)
+      Process.sleep(10)
       wait_until(fun, attempts - 1)
     end
   end
@@ -1777,11 +1778,12 @@ defmodule Shuttle.RemoteRegistryTest do
       {:ok, path: path}
     end
 
+    # Through the daemon's own document writer, which drops the snapshot the
+    # registry caches for a second, so the next reload reads the new fleet.
     defp write_fleet(path, entries) do
-      File.write!(path, Jason.encode!(%{"version" => 1, "remotes" => entries}))
-      # POSIX mtime is 1-second granular; the change token folds in size, and
-      # these fleets differ in length, so the edit is always observable.
-      :ok
+      Shuttle.RuntimeDocuments.change(path, fn ->
+        File.write!(path, Jason.encode!(%{"version" => 1, "remotes" => entries}))
+      end)
     end
 
     test "an empty boot keeps ticking and discovers a later fleet-file peer", %{path: path} do
@@ -1808,15 +1810,15 @@ defmodule Shuttle.RemoteRegistryTest do
           tick_interval_ms: 5
         )
 
-      Process.sleep(15)
-      assert MockClient.calls(url) == 0
-
       write_fleet(path, [%{"name" => "cineca", "port" => 4002, "poll_interval_ms" => 60_000}])
 
-      wait_until(fn -> MockClient.calls(url) == 1 end)
+      # The probe's answer lands after the call that fetched it.
+      wait_until(fn -> match?(%{"cineca" => %{stale: false}}, RemoteRegistry.snapshots(pid)) end)
 
       assert %{"cineca" => %{snapshot: %{"host" => "cineca"}, stale: false}} =
                RemoteRegistry.snapshots(pid)
+
+      assert MockClient.calls(url) == 1
     end
 
     test "an added remote is initialized and an existing one keeps its recovery state",
@@ -1847,7 +1849,6 @@ defmodule Shuttle.RemoteRegistryTest do
       ])
 
       MockClient.set("http://127.0.0.1:4002/api/v1/state", {:ok, snapshot_with_running(["b"])})
-      Process.sleep(1_010)
       :ok = RemoteRegistry.poll_now(:reg_fleet_add)
 
       snapshots = RemoteRegistry.snapshots(:reg_fleet_add)
@@ -1885,7 +1886,6 @@ defmodule Shuttle.RemoteRegistryTest do
       assert map_size(RemoteRegistry.snapshots(:reg_fleet_rm)) == 2
 
       write_fleet(path, [%{"name" => "candide", "port" => 4001, "poll_interval_ms" => 1}])
-      Process.sleep(1_010)
       :ok = RemoteRegistry.poll_now(:reg_fleet_rm)
 
       snapshots = RemoteRegistry.snapshots(:reg_fleet_rm)

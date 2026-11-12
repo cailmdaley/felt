@@ -262,7 +262,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
           )
 
         send(registry, {:tick, make_ref()})
-        assert_receive {:fetch_started, :old, old_task}, 5_000
+        assert_receive {:fetch_started, :old, old_task}
         old_monitor = Process.monitor(old_task)
         MockClient.set(url, {:blocked, self(), :new, feed_body([sample_fiber("new")])})
 
@@ -274,9 +274,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
             end
           end)
 
-        assert_receive {:fetch_started, :new, ^registry}, 5_000
+        assert_receive {:fetch_started, :new, ^registry}
         send(old_task, {:release, :old})
-        assert_receive {:DOWN, ^old_monitor, :process, ^old_task, :normal}, 5_000
+        assert_receive {:DOWN, ^old_monitor, :process, ^old_task, :normal}
         send(registry, {:release, :new})
         assert Task.await(refresh, 5_000) == :ok
 
@@ -702,8 +702,13 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       {:ok, path: path}
     end
 
-    defp write_fleet(path, entries),
-      do: File.write!(path, Jason.encode!(%{"version" => 1, "remotes" => entries}))
+    # Through the daemon's own document writer, which drops the snapshot the
+    # registry caches for a second, so the next refresh reads the new fleet.
+    defp write_fleet(path, entries) do
+      Shuttle.RuntimeDocuments.change(path, fn ->
+        File.write!(path, Jason.encode!(%{"version" => 1, "remotes" => entries}))
+      end)
+    end
 
     test "an empty boot keeps ticking and discovers a later peer without restart", %{
       dir: dir,
@@ -765,7 +770,6 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         {:ok, feed_body([sample_fiber("b")])}
       )
 
-      Process.sleep(1_010)
       :ok = RemoteFiberRegistry.refresh_now(pid)
 
       feeds = RemoteFiberRegistry.feeds(pid)
@@ -776,7 +780,6 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert [%{"fiber" => %{"id" => "a"}}] = feeds["candide"].fibers
 
       write_fleet(path, [%{"name" => "cineca", "port" => 4002}])
-      Process.sleep(1_010)
       :ok = RemoteFiberRegistry.refresh_now(pid)
       assert Map.keys(RemoteFiberRegistry.feeds(pid)) == ["cineca"]
     end
