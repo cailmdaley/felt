@@ -198,16 +198,11 @@ func (a *app) buildSessionContext() string {
 
 	// Partition once so every fiber appears in exactly one section. Active and
 	// open fibers are the in-flight working set; closed and untracked fibers
-	// form the recent context tail. In-flight work whose role names someone
-	// other than the person its repository works for is left out, as bare ls
-	// leaves it out.
+	// form the recent context tail.
 	var inFlight, recent []*felt.Felt
-	persons := felt.NewPersonLookup()
 	for _, f := range felts {
 		if f.IsActive() || f.IsOpen() {
-			if !persons.OtherPersons(f) {
-				inFlight = append(inFlight, f)
-			}
+			inFlight = append(inFlight, f)
 		} else {
 			recent = append(recent, f)
 		}
@@ -260,8 +255,7 @@ func formatHookEntry(f *felt.Felt, recency time.Time, withOutcome bool) string {
 	icon := felt.StatusIcon(f.Status)
 	line1 := fmt.Sprintf("%s %s\n", icon, hookEntryHead(f, recency))
 
-	tagStr := tagSuffix(f)
-	line2 := fmt.Sprintf("    %s%s\n", f.DisplayName(), tagStr)
+	line2 := fmt.Sprintf("    %s%s\n", f.DisplayName(), tagSuffix(f))
 
 	if !withOutcome || f.Outcome == "" {
 		return line1 + line2

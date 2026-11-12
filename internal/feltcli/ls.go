@@ -82,12 +82,9 @@ statuses.
 Query matches under a matching ancestor fold into it with a count; -v lists
 them flat. --json is neither folded nor stripped of closed matches.
 
---person <name> keeps only fibers whose role names that person (the role's
-last segment). Without it, bare ls hides open work whose role names someone
-other than the person its repository works for (git config felt.person) and
-counts it in a trailing hint; --person all shows it. An office alone
-(role: editor) names nobody, so bare ls counts it among other people's. Queries, filters and
---json are not filtered by person unless --person is given.
+Every listing shows everyone's work, each fiber's role (who answers for it)
+as @<role> before its tags. --person <name> keeps only fibers whose role
+names that person (the role's last segment).
 
 ls never leaves this view. When this .felt is mounted inside a larger store,
 felt find searches the rest of it.`,
@@ -238,13 +235,6 @@ felt find searches the rest of it.`,
 			// Containment collapse: a query that matches a directory fiber also
 			// matches every descendant by slug, which buries the one hit worth
 			// seeing under its whole subtree. Show the ancestor with a count.
-			// Bare ls is the reader's own todo list: open work that is someone
-			// else's, in a repository that says whom it works for, is counted
-			// instead of printed.
-			others := 0
-			if !statusExplicit && !hasFilters && lsPerson == "" {
-				filtered, others = partitionOutOtherPersons(filtered)
-			}
 			shown, filtered, collapsed, closedSuppressed := finish(filtered, exactMatches, suppressClosed, query != "" && !lsVerbose)
 
 			if len(shown) == 0 {
@@ -263,13 +253,9 @@ felt find searches the rest of it.`,
 				fmt.Fprintf(out, "\n(+%d closed — add -s closed)\n", closedSuppressed)
 			}
 
-			if others > 0 {
-				fmt.Fprintf(out, "\n(%d open %s other people's — add --person all)\n", others, pluralize(others, "fiber is", "fibers are"))
-			}
-
 			// Show count of hidden fibers when the default filter is active
 			if !statusExplicit && !hasFilters {
-				hidden := len(felts) - len(filtered) - others
+				hidden := len(felts) - len(filtered)
 				if hidden > 0 {
 					fmt.Fprintf(out, "\n(%d more — use -s all to see everything)\n", hidden)
 				}
@@ -302,7 +288,7 @@ felt find searches the rest of it.`,
 	command.Flags().StringArrayVar(&lsAny, "any", nil, "Match any field:<name> or tag:<tag> filter (repeatable)")
 	command.Flags().StringVar(&lsIDsFrom, "ids-from", "", "Read fiber ids from a file (one id per line) without walking the store")
 	command.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only these top-level fields (repeatable or comma-separated)")
-	command.Flags().StringVar(&lsPerson, "person", "", "Only fibers whose role names this person (all: every person, also in bare ls)")
+	command.Flags().StringVar(&lsPerson, "person", "", "Only fibers whose role names this person")
 	command.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
 	if view.Binary != "" && view.Binary != "felt" {
 		command.Example = strings.ReplaceAll(command.Example, "felt ls", view.commandName("ls"))
@@ -326,7 +312,7 @@ type lsSearch struct {
 	regex           bool
 	body            bool
 	verbose         bool
-	person          string // "" or "all": every person
+	person          string // "": every person
 }
 
 func (search lsSearch) readsBodies() bool {
@@ -453,7 +439,7 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, nameMatches, met
 	anyFilters := search.anyFilters
 	tags, exact, regex, body := search.tags, search.exact, search.regex, search.body
 	for _, f := range felts {
-		if search.person != "" && search.person != "all" && (f.Role == "" || felt.RolePerson(f.Role) != search.person) {
+		if search.person != "" && (f.Role == "" || felt.RolePerson(f.Role) != search.person) {
 			continue
 		}
 		if effectiveStatus != "all" && effectiveStatus != "" {
@@ -998,18 +984,4 @@ func printContainmentNode(w io.Writer, node *ContainmentNode, prefix string, las
 	for i, child := range node.Children {
 		printContainmentNode(w, child, childPrefix, i == len(node.Children)-1, depth+1, maxDepth)
 	}
-}
-
-// partitionOutOtherPersons drops the fibers whose role names someone other
-// than the person their holding repository works for, and returns how many it
-// dropped.
-func partitionOutOtherPersons(felts []*felt.Felt) ([]*felt.Felt, int) {
-	persons := felt.NewPersonLookup()
-	kept := make([]*felt.Felt, 0, len(felts))
-	for _, f := range felts {
-		if !persons.OtherPersons(f) {
-			kept = append(kept, f)
-		}
-	}
-	return kept, len(felts) - len(kept)
 }

@@ -53,7 +53,7 @@ felt is the notes and nothing else: this skill is all an agent needs to read, se
 
 ## Roles
 
-`role: analyst/sam` says Sam answers for this open work, in the analyst office: the office is the first segment, the person the last. `role: sam` is Sam's own desk, an office like any other with its charter at `roles/sam`, which is Sam's page. An office alone, `role: analyst`, names nobody, and bare `felt ls` counts it as other people's. felt stamps open fibers created without a role with `git config felt.person` of the repository that holds them (set once per checkout of a shared store), and bare `felt ls` shows your own open work. Hand work over by editing the field: `felt edit <id> -R <person>`. An office's charter is `roles/<office>`, at the top of the store or of a repository linked in there, and `roles/<office>/<person>` is that person's instance: read the charter, then the instance if there is one. `felt roles` lists the offices; `felt show roles/<office>` finds a charter in either place.
+`role: analyst/sam` says Sam answers for this open work, in the analyst office: the office is the first segment, the person the last. `role: sam` is Sam's own desk, an office like any other with its charter at `roles/sam`, which is Sam's page. An office alone, `role: analyst`, names nobody yet. felt stamps open fibers created without a role with `git config felt.person` of the repository that holds them (set once per checkout of a shared store). A role says who is responsible and hides nothing: `felt ls` lists everyone's work, each line showing its role as `@analyst/sam`, and `--person <name>` narrows to one person. Hand work over by editing the field: `felt edit <id> -R <person>`. An office's charter is `roles/<office>`, at the top of the store or of a repository linked in there, and `roles/<office>/<person>` is that person's instance: read the charter, then the instance if there is one. `felt roles` lists the offices; `felt show roles/<office>` finds a charter in either place.
 
 ## Commands
 
@@ -63,7 +63,7 @@ felt find "word"                            # does a fiber on this exist? whole 
 felt tree -L 1                              # orient
 felt add <parent>/<slug> "name" -o "outcome" [-t tag] [-s open]
 felt edit <id> -s closed -o "what was learned"
-felt ls [-t tag]                            # your open and active work (--person all: everyone's)
+felt ls [-t tag]                            # open and active work, role as @<role> (--person <name>: one person's)
 felt roles                                  # the offices and their charters
 felt sync / felt sync --push                # merge the store's upstream / publish
 ```

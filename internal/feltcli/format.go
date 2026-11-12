@@ -32,11 +32,16 @@ func formatFeltTwoLine(f *felt.Felt, collapsed int, bodyOnly bool) string {
 	return line1 + line2
 }
 
-// tagSuffix renders a fiber's tags as the parenthesized suffix both two-line
-// renderers append after the display name — empty when it has none.
+// tagSuffix renders what both two-line renderers append after the display
+// name: the fiber's role as @<role>, then its tags in parentheses, each
+// omitted when absent.
 func tagSuffix(f *felt.Felt) string {
-	if len(f.Tags) == 0 {
-		return ""
+	var s string
+	if f.Role != "" {
+		s = " @" + f.Role
 	}
-	return fmt.Sprintf(" (%s)", strings.Join(f.Tags, ", "))
+	if len(f.Tags) > 0 {
+		s += fmt.Sprintf(" (%s)", strings.Join(f.Tags, ", "))
+	}
+	return s
 }

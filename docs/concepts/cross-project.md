@@ -205,7 +205,7 @@ Keep the link out of the larger store's Git history (add it to that store's `.gi
 Three conventions keep several people's agents out of each other's way.
 None of them needs a field in the fibers.
 
-- **The top-level tree is the owner.** Each person's agents write under that person's top-level directories and read everywhere. `felt ls` run from inside a person's tree lists their open work; `felt find` searches everyone's.
+- **The top-level tree is the owner.** Each person's agents write under that person's top-level directories and read everywhere. `felt ls` run from inside a person's tree lists the open work there; `felt find` searches everyone's.
 - **Links are written from the shared store's root.** `[[analysis/likelihood]]` resolves in the shared repository on its own and, from a fiber inside the mount, in the larger store too, where the same fiber's id is `shared/analysis/likelihood`.
 - **The repository's `AGENTS.md` tells agents to search before they write,** and names whose tree is whose.
 
@@ -217,9 +217,8 @@ git -C ~/shared config felt.person sam
 
 felt then stamps every open fiber created in that repository `role: sam`, reading the config of the repository that physically holds the new fiber, so a fiber added through the link in the larger store takes the shared checkout's config, not the larger store's.
 A role is `<office>` or `<office>/<person>` (`analyst/sam`); the person responsible is its last segment, so `role: sam` is Sam's own desk, an office like any other with its charter at `roles/sam`. Handing work over is editing it: `felt edit <id> --role <person>`.
-Bare `felt ls`, and the open work listed at the start of an agent's session, then show your own open work: an open fiber whose role's last segment is not its repository's `felt.person` is counted in a trailing hint instead of printed. That includes an office with nobody named, `role: editor`, which is on nobody's list until someone takes it.
-`felt ls --person all` shows everyone's, `--person <name>` one person's, and `felt find --person <name>` narrows a search.
-A fiber without a role, or in a repository with no `felt.person`, is never hidden.
+A role says who answers for a fiber; it hides nothing. `felt ls`, and the open work listed at the start of an agent's session, show everyone's work, each line carrying its role as `@analyst/sam` before the tags.
+`felt ls --person <name>` keeps one person's, and `felt find --person <name>` narrows a search.
 
 felt carries the notes and nothing else.
 Messages between people's agents, if wanted, travel some other way: the shared repository itself can carry them as files, with each person's own hook delivering what arrives.

@@ -28,8 +28,9 @@ person the last, so `role: analyst/sam` is Sam in the analyst office and
 `role: sam` is Sam's own desk. A person's desk is an office like any other,
 with its charter at `roles/<person>`: that charter is the person's page, and
 `shuttle check` asks for it as it asks for any office's. An office alone,
-`role: analyst`, names nobody, so bare `felt ls` counts it as other people's
-work. felt stamps a new open fiber with `git config felt.person` of the
+`role: analyst`, names nobody yet. `felt ls` and the session's open-work
+listing show every fiber whoever holds it, its role as `@analyst/sam` before
+its tags. felt stamps a new open fiber with `git config felt.person` of the
 repository that holds it; handing work over is editing the field. Shuttle reads
 a constitution's office as the role's first segment: its charter is
 `roles/<office>`, and the person's instance `roles/<office>/<person>` is

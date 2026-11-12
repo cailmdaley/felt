@@ -172,32 +172,3 @@ func TestValidRoleAndPerson(t *testing.T) {
 		t.Fatal("RolePerson is not the last segment")
 	}
 }
-
-func TestPersonLookupOtherPersons(t *testing.T) {
-	isolateGitConfig(t)
-	mine := t.TempDir()
-	gitRepo(t, mine, "alice")
-	bare := t.TempDir()
-	gitRepo(t, bare, "")
-	deep := filepath.Join(mine, "a", "b")
-	if err := os.MkdirAll(deep, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p := NewPersonLookup()
-	for _, tc := range []struct {
-		role, dir string
-		want      bool
-	}{
-		{"", mine, false},
-		{"alice", mine, false},
-		{"analyst/alice", mine, false},
-		{"sam", mine, true},
-		{"analyst/sam", deep, true},
-		{"sam", bare, false},
-	} {
-		f := &Felt{Role: tc.role, Path: filepath.Join(tc.dir, "x.md")}
-		if got := p.OtherPersons(f); got != tc.want {
-			t.Errorf("OtherPersons(role=%q in %s) = %v, want %v", tc.role, tc.dir, got, tc.want)
-		}
-	}
-}
