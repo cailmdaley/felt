@@ -174,3 +174,41 @@ func TestAddShowAndEditRole(t *testing.T) {
 		}
 	}
 }
+
+// An office with nobody named, `role: editor`, is on nobody's list: bare ls
+// and the session context count it as other people's, and --person all
+// shows it.
+func TestOfficeAloneIsNotMine(t *testing.T) {
+	t.Parallel()
+	dir, storage := newStore(t)
+	for _, args := range [][]string{{"init", "-q"}, {"config", felt.PersonConfigKey, "alice"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	at := mustParseTime(t, "2026-04-10T09:00:00Z")
+	for _, f := range []*felt.Felt{
+		{ID: "roles/editor", Name: "Editor", CreatedAt: at},
+		{ID: "desk", Name: "Desk", Status: felt.StatusOpen, Role: "alice", CreatedAt: at},
+		{ID: "office", Name: "Office", Status: felt.StatusOpen, Role: "editor", CreatedAt: at},
+	} {
+		if err := storage.Write(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bare, err := runCommand(t, dir, "ls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bare, " desk\n") || strings.Contains(bare, " office\n") || !strings.Contains(bare, "(1 open fiber is other people's") {
+		t.Fatalf("bare ls:\n%s", bare)
+	}
+	all, err := runCommand(t, dir, "ls", "--person", "all")
+	if err != nil || !strings.Contains(all, " office\n") {
+		t.Fatalf("ls --person all: %v\n%s", err, all)
+	}
+	inFlight := sectionBody(sessionContextFor(t, dir), "## Active / Open")
+	if strings.Contains(inFlight, "office") || !strings.Contains(inFlight, "desk") {
+		t.Fatalf("Active / Open:\n%s", inFlight)
+	}
+}

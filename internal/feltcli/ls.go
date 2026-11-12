@@ -85,7 +85,8 @@ them flat. --json is neither folded nor stripped of closed matches.
 --person <name> keeps only fibers whose role names that person (the role's
 last segment). Without it, bare ls hides open work whose role names someone
 other than the person its repository works for (git config felt.person) and
-counts it in a trailing hint; --person all shows it. Queries, filters and
+counts it in a trailing hint; --person all shows it. An office alone
+(role: editor) names nobody, so bare ls counts it among other people's. Queries, filters and
 --json are not filtered by person unless --person is given.
 
 ls never leaves this view. When this .felt is mounted inside a larger store,

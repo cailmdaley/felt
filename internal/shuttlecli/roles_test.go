@@ -359,3 +359,32 @@ func TestRoleIsTopLevelAndNamesAPerson(t *testing.T) {
 		t.Fatalf("legacy role not moved: %q", old.Role)
 	}
 }
+
+// A person's desk is an office like any other: a constitution held at
+// `role: sam` in sam's own checkout still needs the charter roles/sam.
+func TestCheckAsksADeskForItsCharter(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, st := newStore(t)
+	for _, args := range [][]string{{"init", "-q"}, {"config", felt.PersonConfigKey, "sam"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	seedShuttleRole(t, st, "desk", felt.StatusOpen, oneshot(), nil)
+	f := mustRead(t, st, "desk")
+	f.Role = "sam"
+	if err := st.Write(f); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runIn(t, env, dir, "check")
+	if err != nil || !strings.Contains(out, `role "sam" has no charter`) {
+		t.Fatalf("check without roles/sam: %v\n%s", err, out)
+	}
+	if err := st.Write(&felt.Felt{ID: "roles/sam", Name: "Sam"}); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runIn(t, env, dir, "check"); err != nil || strings.Contains(out, "has no charter") {
+		t.Fatalf("check with roles/sam: %v\n%s", err, out)
+	}
+}

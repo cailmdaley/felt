@@ -23,9 +23,13 @@ resolves an id by its unique tail; this is how workers read one.
 ## Holding a role
 
 A fiber's top-level `role:` names who answers for its open work: `<office>` or
-`<office>/<person>`, each a slug. The person is the last segment, so
-`role: sam` is Sam's own desk and `role: analyst/sam` is Sam in the analyst
-office. felt stamps a new open fiber with `git config felt.person` of the
+`<office>/<person>`, each a slug. The office is the first segment and the
+person the last, so `role: analyst/sam` is Sam in the analyst office and
+`role: sam` is Sam's own desk. A person's desk is an office like any other,
+with its charter at `roles/<person>`: that charter is the person's page, and
+`shuttle check` asks for it as it asks for any office's. An office alone,
+`role: analyst`, names nobody, so bare `felt ls` counts it as other people's
+work. felt stamps a new open fiber with `git config felt.person` of the
 repository that holds it; handing work over is editing the field. Shuttle reads
 a constitution's office as the role's first segment: its charter is
 `roles/<office>`, and the person's instance `roles/<office>/<person>` is

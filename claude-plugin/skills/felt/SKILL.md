@@ -53,7 +53,7 @@ felt is the notes and nothing else: this skill is all an agent needs to read, se
 
 ## Roles
 
-`role: analyst/sam` says Sam answers for this open work, in the analyst office; a bare person, `role: sam`, is Sam's own desk. felt stamps open fibers created without a role with `git config felt.person` of the repository that holds them (set once per checkout of a shared store), and bare `felt ls` shows your own open work. Hand work over by editing the field: `felt edit <id> -R <person>`. An office's charter is `roles/<office>`, at the top of the store or of a repository linked in there, and `roles/<office>/<person>` is that person's instance: read the charter, then the instance if there is one. `felt roles` lists the offices; `felt show roles/<office>` finds a charter in either place.
+`role: analyst/sam` says Sam answers for this open work, in the analyst office: the office is the first segment, the person the last. `role: sam` is Sam's own desk, an office like any other with its charter at `roles/sam`, which is Sam's page. An office alone, `role: analyst`, names nobody, and bare `felt ls` counts it as other people's. felt stamps open fibers created without a role with `git config felt.person` of the repository that holds them (set once per checkout of a shared store), and bare `felt ls` shows your own open work. Hand work over by editing the field: `felt edit <id> -R <person>`. An office's charter is `roles/<office>`, at the top of the store or of a repository linked in there, and `roles/<office>/<person>` is that person's instance: read the charter, then the instance if there is one. `felt roles` lists the offices; `felt show roles/<office>` finds a charter in either place.
 
 ## Commands
 

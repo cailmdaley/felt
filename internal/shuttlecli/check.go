@@ -3,7 +3,6 @@ package shuttlecli
 import (
 	"fmt"
 	"path"
-	"path/filepath"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -30,7 +29,6 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 			// An unreadable roles namespace yields no charters, so every role
 			// is reported rather than none.
 			charters, shadowed, _ := storage.RoleCharters()
-			persons := felt.NewPersonLookup()
 			for _, f := range shadowed {
 				slug := path.Base(f.ID)
 				issues = append(issues, felt.CheckIssue{
@@ -99,10 +97,7 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 				}
 				if block, ok, err := shuttle.BlockOf(fiber); err == nil && ok && block.Role != "" && shuttle.ValidRole(block.Role) {
 					office := shuttle.OfficeOf(block.Role)
-					// A role that is only a person is that person's desk, which
-					// needs no charter.
-					desk := office == block.Role && office == persons.For(filepath.Dir(fiber.Path))
-					if charters[office] == nil && !desk {
+					if charters[office] == nil {
 						issues = append(issues, felt.CheckIssue{
 							Level:   felt.CheckLevelWarning,
 							FiberID: fiber.ID,
