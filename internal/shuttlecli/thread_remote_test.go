@@ -239,6 +239,12 @@ func TestRemoteThreadCreatesOnOwnerAndCanBeControlledWithoutMirror(t *testing.T)
 	if child, _ := allCreates[1]["frontmatter"].(map[string]any); child["role"] != "editor/sam" {
 		t.Fatalf("child of a remote-only parent lost its person: %#v", child)
 	}
+	for _, create := range allCreates {
+		frontmatter, _ := create["frontmatter"].(map[string]any)
+		if _, inBlock := frontmatter["shuttle"].(map[string]any)["role"]; inBlock {
+			t.Fatalf("owner create sent a role inside the block: %#v", frontmatter)
+		}
+	}
 }
 
 func TestThreadRemoteDirectoryOffline(t *testing.T) {

@@ -36,8 +36,13 @@ func remoteFiberCreatePayload(f *felt.Felt, block *shuttle.Block) map[string]any
 	if f.Description != "" {
 		frontmatter["description"] = f.Description
 	}
-	if f.Role != "" {
-		frontmatter["role"] = f.Role
+	// The role travels at the top level; the block carries none.
+	role := f.Role
+	if role == "" {
+		role = block.Role
+	}
+	if role != "" {
+		frontmatter["role"] = role
 	}
 	if !f.CreatedAt.IsZero() {
 		frontmatter["created-at"] = f.CreatedAt
@@ -57,7 +62,9 @@ func remoteFiberCreatePayload(f *felt.Felt, block *shuttle.Block) map[string]any
 			frontmatter[key] = value
 		}
 	}
-	frontmatter["shuttle"] = block
+	withoutRole := *block
+	withoutRole.Role = ""
+	frontmatter["shuttle"] = &withoutRole
 	return map[string]any{
 		"id": f.ID, "uid": f.UID, "name": f.Name, "body": f.Body,
 		"frontmatter": frontmatter,

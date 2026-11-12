@@ -58,6 +58,7 @@ defmodule ShuttleWeb.FiberController do
          {:ok, uid} <- optional_string(params, "uid", ""),
          :ok <- validate_uid(uid),
          {:ok, frontmatter} <- normalize_frontmatter(params, name),
+         frontmatter = promote_block_role(frontmatter),
          {:ok, frontmatter} <- normalize_shuttle_host(frontmatter),
          :ok <- validate_status(frontmatter["status"]),
          :ok <- validate_shuttle(frontmatter["shuttle"], frontmatter["status"]),
@@ -130,6 +131,21 @@ defmodule ShuttleWeb.FiberController do
         {:error, "frontmatter must be an object"}
     end
   end
+
+  # A fiber's role is its top-level `role:`. A role sent inside the shuttle
+  # block becomes the top-level role unless the request names one, so `felt
+  # add` never stamps its default person over it; the block keeps none.
+  defp promote_block_role(%{"shuttle" => %{"role" => role} = shuttle} = frontmatter)
+       when is_binary(role) do
+    frontmatter = Map.put(frontmatter, "shuttle", Map.delete(shuttle, "role"))
+
+    case frontmatter["role"] do
+      top when is_binary(top) and top != "" -> frontmatter
+      _ -> Map.put(frontmatter, "role", role)
+    end
+  end
+
+  defp promote_block_role(frontmatter), do: frontmatter
 
   # Auto-stamp `host:` on new fibers with a shuttle block. Cross-host
   # blocks (an explicit `host:` that doesn't equal this daemon's identity)

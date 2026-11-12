@@ -244,6 +244,38 @@ defmodule ShuttleWeb.FiberControllerTest do
     assert length(String.split(File.read!(path), "due:")) == 2
   end
 
+  test "POST /api/v1/fiber/create takes a block role as the top-level role", %{tmp: tmp} do
+    # The checkout works for cail, so `felt add` would stamp `role: cail` on
+    # open work that arrived without a top-level role.
+    for args <- [["init", "-q"], ["config", "felt.person", "cail"]] do
+      assert {_, 0} = System.cmd("git", ["-C", tmp | args], stderr_to_stdout: true)
+    end
+
+    created = fn id, frontmatter ->
+      conn =
+        api_conn()
+        |> post(
+          "/api/v1/fiber/create",
+          Jason.encode!(%{id: id, name: id, frontmatter: frontmatter})
+        )
+
+      assert conn.status == 200, conn.resp_body
+      %{"path" => path} = Jason.decode!(conn.resp_body)
+      {:ok, parsed} = path |> File.read!() |> frontmatter() |> YamlElixir.read_from_string()
+      parsed
+    end
+
+    block = %{kind: "oneshot", project_dir: tmp, role: "editor"}
+
+    parsed = created.("tests/office", %{status: "open", shuttle: block})
+    assert parsed["role"] == "editor"
+    refute Map.has_key?(parsed["shuttle"], "role")
+
+    parsed = created.("tests/named", %{status: "open", role: "editor/sam", shuttle: block})
+    assert parsed["role"] == "editor/sam"
+    refute Map.has_key?(parsed["shuttle"], "role")
+  end
+
   test "POST /api/v1/fiber/create preserves source identity and document metadata", %{tmp: tmp} do
     uid = "01JARZ3NDEKTSV4RRFFQ69G5FA"
 
