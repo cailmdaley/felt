@@ -57,11 +57,16 @@ func shortSocketDir(t *testing.T) string {
 }
 
 func TestStopUnixEndpoint(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("lsof"); err != nil {
 		t.Skip("unclaimed listener recovery requires lsof")
 	}
-	t.Run("live", func(t *testing.T) { testStopEndpoint(t, false, "unix") })
+	t.Run("live", func(t *testing.T) {
+		t.Parallel()
+		testStopEndpoint(t, false, "unix")
+	})
 	t.Run("stale", func(t *testing.T) {
+		t.Parallel()
 		socket := filepath.Join(t.TempDir(), "stale.sock")
 		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 		if err != nil {

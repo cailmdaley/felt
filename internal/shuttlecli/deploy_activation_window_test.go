@@ -103,6 +103,7 @@ exec "$FAKE_BIN/curl-ungated" "$@"
 }
 
 func TestDeployCancelledActivationRetainsRollbackBeforeAcknowledgement(t *testing.T) {
+	t.Parallel()
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
 	first, log := f.start(t, "rollback-base")

@@ -108,6 +108,7 @@ func TestPruneCheckoutGenerationsRetainsReferencesAndAssembly(t *testing.T) {
 }
 
 func TestDaemonAssemblyOutputsAreIgnored(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	root := t.TempDir()
 	ignore, err := os.ReadFile("../../.gitignore")

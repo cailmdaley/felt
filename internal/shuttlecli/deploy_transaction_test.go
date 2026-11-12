@@ -517,6 +517,7 @@ func TestDeployKilledWaiterNeverAcquiresAfterHolder(t *testing.T) {
 }
 
 func TestDeployTransactionSSHNeverPrompts(t *testing.T) {
+	t.Parallel()
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
 	cmd, log := f.start(t, "batch-mode")

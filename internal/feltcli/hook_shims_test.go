@@ -41,6 +41,7 @@ func TestRecorderHookSchedule(t *testing.T) {
 }
 
 func TestHookCommandsSurviveRemovedPluginRoot(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join("..", "..", "claude-plugin", "hooks", "hooks.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +90,7 @@ func TestHookCommandsSurviveRemovedPluginRoot(t *testing.T) {
 }
 
 func TestReminderShimDelegatesPayloadDecoding(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "must-not-run")
 	calls := filepath.Join(dir, "calls")
@@ -142,9 +144,11 @@ func TestReminderShimDelegatesPayloadDecoding(t *testing.T) {
 }
 
 func TestHookShimsOneInvocationAndOldBinary(t *testing.T) {
+	t.Parallel()
 	for _, hook := range []string{"event.sh", "remind.sh", "touch.sh", "handoff.sh"} {
 		for _, status := range []string{"0", "1", "127"} {
 			t.Run(hook+status, func(t *testing.T) {
+				t.Parallel()
 				dir := t.TempDir()
 				binary := filepath.Join(dir, "binary")
 				calls := filepath.Join(dir, "calls")

@@ -17,6 +17,7 @@ import (
 )
 
 func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name              string
 		manager, listener string
@@ -218,6 +219,7 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 }
 
 func TestRespawnLoopRejectsMarkerInUnrelatedArgv(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	home, _ := env.UserHomeDir()
 	bin := filepath.Join(home, ".local", "bin")

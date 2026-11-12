@@ -165,6 +165,7 @@ func TestDaemonOwnerClaimsAreScopedToEndpointProcesses(t *testing.T) {
 }
 
 func TestDaemonOwnerInstallerHandoffToManagerChild(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	installer := startOwnerHelper(t, home, "install", "")
 	fmt.Fprintln(installer.in, "GO")
@@ -201,6 +202,7 @@ func TestDaemonOwnerInstallerHandoffToManagerChild(t *testing.T) {
 // Mutation: move the marker assignment from the tmux command into the script.
 // Linux ps eww will no longer expose it, and this real-process test fails.
 func TestRespawnLoopRealTmuxProcess(t *testing.T) {
+	t.Parallel()
 	tmux, err := exec.LookPath("tmux")
 	if err != nil {
 		t.Skip("tmux unavailable")
@@ -282,8 +284,10 @@ func TestRespawnLoopRealTmuxProcess(t *testing.T) {
 }
 
 func TestDeploySelectedTmuxDisablesCompetingSystemd(t *testing.T) {
+	t.Parallel()
 	for _, selection := range []string{"tmux", "live-tmux"} {
 		t.Run(selection, func(t *testing.T) {
+			t.Parallel()
 			_, _, tmux, supervisor := runLauncherRestart(t, "systemd", selection)
 			disabled, created := strings.Index(tmux, "disabled-before-loop"), strings.Index(tmux, "new-session")
 			if disabled < 0 || created <= disabled || !strings.Contains(supervisor, "disable --now shuttle-daemon.service") || strings.Contains(supervisor, "restart") {

@@ -104,8 +104,10 @@ func TestBoardDeliveredOnlyDigestRetainsCursor(t *testing.T) {
 }
 
 func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
+	t.Parallel()
 	for _, harness := range []string{"claude", "codex", "pi"} {
 		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
 			env := messageHookEnv(t, "host")
 			env.Set("SHUTTLE_EVENTS", "")
 			sink := filepath.Join(t.TempDir(), "events.jsonl")
@@ -302,6 +304,7 @@ func TestBoardDigestWriteFailureRetainsCursor(t *testing.T) {
 }
 
 func TestBoardMailboxWriteFailureRetainsMessage(t *testing.T) {
+	t.Parallel()
 	env := messageHookEnv(t, "host")
 	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"family":{"label":"family"},"records":[{"id":"id","timestamp":1793300000000,"kind":"post","member":"member","text":"new"}]}`)
@@ -324,6 +327,7 @@ func TestBoardMailboxWriteFailureRetainsMessage(t *testing.T) {
 }
 
 func TestBoardDigestCombinedWithMailbox(t *testing.T) {
+	t.Parallel()
 	env := messageHookEnv(t, "host")
 	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"family": map[string]any{"label": "family"}, "records": []map[string]any{{"id": "one", "timestamp": time.Now().UnixMilli(), "kind": "post", "member": "child", "text": "hello"}}})

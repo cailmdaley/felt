@@ -74,6 +74,7 @@ func TestDaemonStartCannotBypassPrelistenClaim(t *testing.T) {
 }
 
 func TestDaemonHandoffTimeoutStopsPendingService(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	bin := t.TempDir()
 	calls := filepath.Join(bin, "calls")
@@ -107,6 +108,7 @@ func TestDaemonHandoffTimeoutStopsPendingService(t *testing.T) {
 }
 
 func TestSupervisorEndpointUsesManagerAndRenderedPort(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, managerEnv, dropins, want string }{
 		{"caller override excluded", "", "", "tcp://127.0.0.1:4401"},
 		{"manager listen wins", "SHUTTLE_LISTEN=tcp://127.0.0.1:4410", "", "tcp://127.0.0.1:4410"},
@@ -116,6 +118,7 @@ func TestSupervisorEndpointUsesManagerAndRenderedPort(t *testing.T) {
 		{"unrelated dropins kept", "", "DropInPaths=DIR/host.conf DIR/ld.conf", "tcp://127.0.0.1:4401"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			env := testEnv(t)
 			bin := t.TempDir()
 			unitDir := t.TempDir()

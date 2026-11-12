@@ -331,6 +331,7 @@ func shellFunction(t *testing.T, script, name string) string {
 }
 
 func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing.T) {
+	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)

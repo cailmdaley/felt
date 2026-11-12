@@ -203,6 +203,7 @@ func TestClaudeSubagentToolsDoNotCountAsParentTurn(t *testing.T) {
 }
 
 func TestSubagentStopNeverTouchesReceiverRegistrations(t *testing.T) {
+	t.Parallel()
 	for _, harness := range []string{"claude", "codex", "pi"} {
 		t.Run(harness, func(t *testing.T) {
 			env := messageHookEnv(t, "host")

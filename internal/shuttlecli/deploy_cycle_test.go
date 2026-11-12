@@ -29,6 +29,7 @@ func TestDeployCycleListenerChild(t *testing.T) {
 }
 
 func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
+	t.Parallel()
 	tmux, err := exec.LookPath("tmux")
 	if err != nil {
 		t.Skip("real tmux is required")

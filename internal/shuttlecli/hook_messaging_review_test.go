@@ -12,6 +12,7 @@ import (
 )
 
 func TestHookOutputSurvivesSiblingValidationFailure(t *testing.T) {
+	t.Parallel()
 	env := messageHookEnv(t, "host")
 	env.Set("PATH", t.TempDir())
 	env.Set("SHUTTLE_BOARD", "off")

@@ -77,6 +77,7 @@ try {
 // usage, configuration and already-sent levels, Go says what the JS library
 // says, one level at a time.
 func TestHandoffHookMatchesTheSharedLibrary(t *testing.T) {
+	t.Parallel()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node unavailable")
@@ -92,6 +93,7 @@ func TestHandoffHookMatchesTheSharedLibrary(t *testing.T) {
 	steps := []struct{ tokens, window int }{{100_000, 200_000}, {160_000, 200_000}, {190_000, 200_000}, {190_000, 200_000}, {600_000, 0}, {800_000, 0}}
 	for _, config := range configs {
 		t.Run(strings.TrimSpace(strings.ReplaceAll(strings.Trim(jsonString(config), "{}"), `"`, "")), func(t *testing.T) {
+			t.Parallel()
 			env, _ := envWithHome(t)
 			clearHandoffEnv(env)
 			for key, value := range config {

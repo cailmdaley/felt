@@ -16,6 +16,7 @@ import (
 var installedTestRexBin, _ = (&app{env: sysenv.OS()}).rexBin()
 
 func TestRexTerminalRealIsolatedServer(t *testing.T) {
+	t.Parallel()
 	if installedTestRexBin == "" {
 		t.Skip("rex is not installed")
 	}

@@ -8,9 +8,11 @@ import (
 )
 
 func TestMoveCommandRetriesAfterRename(t *testing.T) {
+	t.Parallel()
 	for _, verb := range []string{"nest", "unnest"} {
 		for _, spelling := range []string{"old", "new"} {
 			t.Run(verb+"/"+spelling, func(t *testing.T) {
+				t.Parallel()
 				dir, storage := newStore(t)
 				for _, id := range []string{"a", "a/x", "b", "ref"} {
 					f := &felt.Felt{ID: id, Name: id}
@@ -53,6 +55,7 @@ func TestMoveCommandRetriesAfterRename(t *testing.T) {
 }
 
 func TestAbandonPendingMovePreservesDocuments(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, id := range []string{"a", "a/x", "b", "ref"} {
 		f := &felt.Felt{ID: id, Name: id, Body: "See [[a/x]]."}

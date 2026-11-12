@@ -13,6 +13,7 @@ import (
 )
 
 func TestDeployWaitingAttemptPreservesOwnersLog(t *testing.T) {
+	t.Parallel()
 	f := newDeployFleet(t)
 	defer fleetTouch(t, f.gate)
 	first, log := f.start(t, "log-owner")
@@ -40,6 +41,7 @@ func TestDeployWaitingAttemptPreservesOwnersLog(t *testing.T) {
 }
 
 func TestDeployStoppedObserverCannotLeaveRollbackWaiter(t *testing.T) {
+	t.Parallel()
 	f := newDeployFleet(t)
 	if e := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("new target\n"), 0600); e != nil {
 		t.Fatal(e)
@@ -89,8 +91,10 @@ func TestDeployStoppedObserverCannotLeaveRollbackWaiter(t *testing.T) {
 }
 
 func TestDeployLoggerDoesNotWaitForEscapedWriters(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"background-profile", "real-tmux"} {
 		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
 			f := newDeployFleet(t)
 			runner, e := os.ReadFile("../../scripts/deploy-run.sh")
 			if e != nil {
