@@ -496,7 +496,7 @@ defmodule Shuttle.ThreadsOutboxTest do
     stale_hook.()
     assert [_] = pending(data)
     assert {:ok, _} = Shuttle.Delivery.flush_context(parent)
-    File.write!(gate, "offer\n")
+    File.write!(gate, "offer\n", [:raw])
     await(fn -> File.exists?(Path.join(store, "rounds")) end)
     assert pending(data) == []
     received_result = File.read!(Path.join(store, "received"))
@@ -559,7 +559,7 @@ defmodule Shuttle.ThreadsOutboxTest do
     Threads.deliver_results(latest, "test-host")
     refute_receive {:wake, _}
     received = File.read!(Path.join(store, "received"))
-    File.write!(gate, "offer\n")
+    File.write!(gate, "offer\n", [:raw])
 
     await(fn ->
       length(String.split(File.read!(Path.join(store, "rounds")), "\n", trim: true)) == 2

@@ -153,7 +153,7 @@ defmodule Shuttle.Terminal.CodexRexRealTest do
     {:ok, poller} = start_poller!(opts)
     await_boot_cycle!(poller)
     Env.put_server(Poller, poller)
-    assert :ok = File.write(gate, "start\n")
+    assert :ok = File.write(gate, "start\n", [:raw])
 
     assert {:ok, %{"session_id" => sid, "block_id" => bid}} = Backend.identity(Runner, name)
 

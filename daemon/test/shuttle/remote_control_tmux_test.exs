@@ -150,7 +150,7 @@ defmodule Shuttle.RemoteControlTmuxTest do
 
     # Release the fake host to die immediately. remain-on-exit must already be
     # set, otherwise there is no pane left to report the status and screen.
-    File.write!(fifo, "exit\n")
+    File.write!(fifo, "exit\n", [:raw])
 
     await(&pane_settled_dead?/0)
 
