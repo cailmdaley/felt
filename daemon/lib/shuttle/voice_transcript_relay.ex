@@ -450,6 +450,7 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
        pending_words: pending_words(state.config),
        sends_in_ms: sends_in_ms(state.config, state),
        last: state.config["last"],
+       heard_at: state.config["heard_at"],
        error: state.error
      }, state}
   end
@@ -700,6 +701,13 @@ defmodule Shuttle.Voice.TranscriptRelay.Worker do
           end)
 
         :ok = Shuttle.Voice.Transcript.append(next["ingested"])
+
+        next =
+          case List.last(next["ingested"]) do
+            %{"t" => t} -> Map.put(next, "heard_at", t)
+            nil -> next
+          end
+
         next |> Map.delete("ingested") |> Map.put("json_offset", offset)
 
       _ ->

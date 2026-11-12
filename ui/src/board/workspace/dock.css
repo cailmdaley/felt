@@ -283,12 +283,10 @@
 .ws-reader .ws-dock .listen-mic:disabled { opacity: .6; cursor: default; }
 .ws-reader .ws-dock .listen-failed .listen-mic { color: var(--ws-stop); }
 @media (pointer: coarse) { .ws-reader .ws-dock .listen-dropdown { width: 32px; } }
+.ws-dock .listen-route { padding: 6px 10px 4px; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .listen-cadence { display: grid; gap: 4px; padding: 8px 10px; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .listen-cadence input { width: 5em; color: var(--ws-ink); background: var(--ws-fill); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
 .ws-dock .listen-control .ws-select-option { border: 0; background: transparent; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
-.ws-dock .listen-control [role="menuitemcheckbox"] { display: flex; justify-content: space-between; gap: 24px; }
-.ws-dock .listen-control [role="menuitemcheckbox"]::after { content: ''; width: 1em; }
-.ws-dock .listen-control [role="menuitemcheckbox"][aria-checked="true"]::after { content: '✓'; }
 .voice-error { padding: 8px 10px; max-width: 260px; font-size: var(--type-note); color: var(--ws-ink-muted); white-space: normal; }
 .ws-dock .kbn-detail-error { color: var(--ws-red); font: var(--type-label)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .ws-dock .kbn-start-prompt { display: flex; flex-direction: column; gap: var(--ws-small-gap); color: var(--ws-ink); }

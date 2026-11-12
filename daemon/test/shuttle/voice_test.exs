@@ -837,6 +837,92 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{"words" => 42}} = Config.read()
   end
 
+  test "a meeting is Listen pinned with system audio, and stopping or following ends it" do
+    card = %{"fiber_id" => "meet/card", "origin" => "test-host"}
+
+    assert {:error, "system audio is a meeting" <> _} =
+             Voice.update(%{"enabled" => true, "system_audio" => true})
+
+    assert {:ok, %{system_audio: false}} = Voice.update(%{"meeting" => false})
+
+    response =
+      api_conn()
+      |> post("/api/v1/voice", Jason.encode!(%{meeting: true, target: card}))
+      |> json_response(200)
+
+    assert %{
+             "mode" => "meeting",
+             "enabled" => true,
+             "muted" => false,
+             "follow" => false,
+             "system_audio" => true,
+             "target" => %{"fiber_id" => "meet/card", "pinned" => true}
+           } = response
+
+    assert {:ok, %{mode: "meeting"}} = Voice.update(%{"muted" => true})
+    assert {:ok, %{"system_audio" => true}} = Config.read()
+
+    assert {:ok, %{mode: "following", system_audio: false}} = Voice.update(%{"meeting" => false})
+
+    assert {:ok, %{mode: "meeting"}} = Voice.update(%{"meeting" => true, "target" => card})
+    assert {:ok, %{mode: "following", system_audio: false}} = Voice.update(%{"follow" => true})
+
+    assert {:ok, %{mode: "meeting"}} = Voice.update(%{"meeting" => true, "target" => card})
+    assert {:ok, %{mode: "off", system_audio: false}} = Voice.update(%{"enabled" => false})
+    assert {:ok, %{"system_audio" => false, "enabled" => false}} = Config.read()
+
+    # Pinned outside a meeting, ending none leaves the pin alone.
+    assert {:ok, %{mode: "pinned"}} =
+             Voice.update(%{"enabled" => true, "follow" => false, "target" => card})
+
+    assert {:ok, %{mode: "pinned"}} = Voice.update(%{"meeting" => false})
+  end
+
+  test "a settings file left with system audio while following reads as no meeting", c do
+    File.write!(
+      Path.join(c.root, "voice.json"),
+      ~s({"enabled":true,"follow":true,"system_audio":true})
+    )
+
+    assert {:ok, %{"system_audio" => false}} = Config.read()
+    assert {:ok, %{mode: "following", system_audio: false}} = Voice.update(%{})
+  end
+
+  test "a meeting ends itself after a stretch in which no track was heard", c do
+    stop_supervised!(Voice)
+    {:ok, wall} = Agent.start_link(fn -> 1_000_000 end)
+    {:ok, heard} = Agent.start_link(fn -> nil end)
+    advance = fn ms -> Agent.update(wall, &(&1 + ms)) end
+    at = fn ms -> ms |> DateTime.from_unix!(:millisecond) |> DateTime.to_iso8601() end
+
+    opts =
+      Keyword.merge(c.opts,
+        wall: fn -> Agent.get(wall, & &1) end,
+        meeting_idle_ms: 60_000,
+        monitor: fn _ -> %{pending: nil, last: nil, heard_at: Agent.get(heard, & &1)} end
+      )
+
+    pid = Env.start_scoped!({Voice, opts})
+    start_voice(c)
+    card = %{"fiber_id" => "meet/card", "origin" => "test-host"}
+    assert {:ok, %{mode: "meeting"}} = Voice.update(%{"meeting" => true, "target" => card})
+    tick = fn -> send(pid, :tick) && Voice.update(%{}) end
+
+    advance.(50_000)
+    assert {:ok, %{mode: "meeting"}} = tick.()
+
+    # Words on any track hold it open.
+    Agent.update(heard, fn _ -> at.(Agent.get(wall, & &1)) end)
+    assert {:ok, %{mode: "meeting"}} = tick.()
+    advance.(50_000)
+    assert {:ok, %{mode: "meeting"}} = tick.()
+
+    advance.(10_000)
+    send(pid, :tick)
+    assert {:ok, %{mode: "following", enabled: true, system_audio: false}} = Voice.update(%{})
+    assert {:ok, %{"system_audio" => false, "follow" => true}} = Config.read()
+  end
+
   test "voice API answers from the local recorder" do
     response = api_conn() |> post("/api/v1/voice", Jason.encode!(%{enabled: true}))
     assert response.status == 200

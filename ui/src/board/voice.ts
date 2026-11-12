@@ -25,8 +25,8 @@ export interface VoiceStatus {
   target: (RexMove & { source?: string }) | null
   last: { fiber_id: string; at: string; status: 'delivered' | 'unconfirmed' | 'failed'; detail?: string } | null
   error: string | null
-  /** Whether Listen follows the view or stays pinned to a card. */
-  mode?: 'off' | 'following' | 'pinned'
+  /** Whether Listen follows the view, stays pinned to a card, or records a meeting there. */
+  mode?: 'off' | 'following' | 'pinned' | 'meeting'
   /** Where words go right now. */
   destination?: RexMove | null
   paused?: boolean
@@ -67,7 +67,8 @@ export interface VoiceUpdate {
   enabled?: boolean
   muted?: boolean
   follow?: boolean
-  system_audio?: boolean
+  /** true starts a meeting on `target`, unmuted; false ends one and follows again. */
+  meeting?: boolean
   words?: number
   quiet_seconds?: number
   pinned_quiet_seconds?: number

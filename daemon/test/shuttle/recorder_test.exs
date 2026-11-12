@@ -411,7 +411,7 @@ defmodule Shuttle.RecorderTest do
     File.write!(Path.join(dir, "system-paused"), "")
 
     assert {:ok, %{system_audio: true, launch: ^launch}} =
-             Shuttle.Voice.update(%{"system_audio" => true})
+             Shuttle.Voice.update(%{"meeting" => true, "target" => %{"fiber_id" => "meet"}})
 
     assert {:ok, %{"system_audio" => true}} = Shuttle.Voice.Config.read()
     refute File.exists?(Path.join(dir, "system-paused"))

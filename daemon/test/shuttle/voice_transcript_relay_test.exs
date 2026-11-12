@@ -609,7 +609,8 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
              last: %{
                "status" => "unconfirmed",
                "detail" => "The message may have arrived. The transcript retains the words."
-             }
+             },
+             heard_at: "2026-11-06T10:00:01Z"
            } =
              TranscriptRelay.status("launch", server: c.name)
 

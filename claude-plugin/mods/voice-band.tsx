@@ -6,6 +6,7 @@
 //   ⧉ ⌗ ☰ ⚆ → voice-modes 8 words · asleep, say “send” ✕
 //   ⧉ ⌗ ☰ ⚆ → here · ✓ 12 words sent
 //   ⧉ ⌗ ☰ ⚆ 📌 → voice-modes
+//   ⧉ ⌗ ☰ ⚆ ⏺ → weekly-sync
 //   ⧉ ⌗ ☰ ⊘
 //   ⧉ ⌗ ☰ ○
 //
@@ -14,7 +15,7 @@
 // mic hears: ⚇ sound arriving, ⚆ open and quiet, ⊘ muted, and a click turns
 // Listening off; ○ Listening off, and a click starts it as the board's Listen does.
 // `→ here` or `→ <slug>` names where the words go, bright when that is another
-// card. `n words` counts what was said and not yet sent, the line in progress
+// card, after 📌 when pinned and ⏺ in a meeting (pinned, the computer's audio too). `n words` counts what was said and not yet sent, the line in progress
 // included. Then what is happening to them: the last words heard while
 // speech runs, the seconds until the quiet gap sends them, that the card is
 // asleep and takes only words ending in "send", or for ten seconds what became
@@ -25,8 +26,7 @@ import type { EngineInterface, Register } from 'claude-code'
 type Ref = { fiber_id: string; name?: string } | null
 type Voice = {
   available: boolean
-  mode: 'off' | 'following' | 'pinned'
-  follow: boolean
+  mode: 'off' | 'following' | 'pinned' | 'meeting'
   destination: Ref
   paused: boolean
   cold?: boolean
@@ -164,7 +164,7 @@ function line($: EngineInterface, ui: { Box: any; Button: any; Text: any }) {
     const glyph = v.paused ? '⊘' : sounding ? '⚇' : '⚆'
     const n = v.paused ? 0 : (v.pending_words ?? 0) + count(v.preview?.text)
     const elsewhere = !mine(v.destination?.fiber_id)
-    const pin = !v.follow && v.destination ? '📌 ' : ''
+    const pin = !v.destination ? '' : v.mode === 'meeting' ? '⏺ ' : v.mode === 'pinned' ? '📌 ' : ''
     const where = v.destination && (pin || !v.paused) ? `${pin}→ ${elsewhere ? slug(v.destination) : 'here'}` : ''
     const what = v.paused ? null : fate(v, n)
     audio = (

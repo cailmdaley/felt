@@ -65,7 +65,7 @@ it('mutes and unmutes a phone through the same recorder controls, without reopen
   expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual({ muted: false, recorder: 'recorder-host' })
   expect(Mic.open).toHaveBeenCalledOnce()
   dock.el.querySelector<HTMLButtonElement>('.listen-dropdown')!.click()
-  expect([...dock.el.querySelectorAll('[role^=menuitem]')].map(el => el.textContent)).toEqual(['Follow me', 'Pin to this card', "Today's transcript", 'Stop listening'])
+  expect([...dock.el.querySelectorAll('[role^=menuitem]')].map(el => el.textContent)).toEqual(['Pin to this card', "Today's transcript", 'Stop listening'])
 })
 it('closes local audio when Stop is confirmed and does not stop it for mute or a failed status read', async () => {
   mic().click(); await settle()

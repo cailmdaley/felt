@@ -1,5 +1,10 @@
 defmodule Shuttle.Voice.Config do
-  @moduledoc "Persistent Listen settings, shared with hark through --settings."
+  @moduledoc """
+  Persistent Listen settings, shared with hark through --settings.
+
+  `system_audio` is a meeting: it holds only while Listen is on and pinned, so
+  stopping Listen or following again ends it.
+  """
 
   @defaults %{
     "enabled" => false,
@@ -25,7 +30,7 @@ defmodule Shuttle.Voice.Config do
       {:ok, bytes} ->
         with {:ok, config} <- Jason.decode(bytes),
              :ok <- validate(config),
-             do: {:ok, Map.merge(@defaults, Map.take(config, Map.keys(@defaults)))}
+             do: {:ok, settle(Map.merge(@defaults, Map.take(config, Map.keys(@defaults))))}
 
       {:error, reason} ->
         {:error, Shuttle.FS.format_error(reason)}
@@ -70,6 +75,9 @@ defmodule Shuttle.Voice.Config do
 
   def validate(_), do: {:error, "voice settings must be a JSON object"}
 
+  defp settle(%{"enabled" => true, "follow" => false} = config), do: config
+  defp settle(config), do: Map.put(config, "system_audio", false)
+
   def update(params) when map_size(params) == 0, do: :ok
 
   def update(params) do
@@ -81,7 +89,7 @@ defmodule Shuttle.Voice.Config do
       end
 
     with {:ok, config} <- config,
-         config <- Map.merge(config, Map.take(params, Map.keys(@defaults))),
+         config <- settle(Map.merge(config, Map.take(params, Map.keys(@defaults)))),
          :ok <- validate(config),
          {:ok, _} <- Shuttle.ConfigFiles.write(:voice, Jason.encode!(config)),
          do: :ok

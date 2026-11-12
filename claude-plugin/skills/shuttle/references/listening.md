@@ -6,7 +6,8 @@ You can also inspect a predecessor's session transcript to recover what its hand
 
 ## Spoken input
 
-The user starts Listen and chooses whether it follows their view or is pinned to one card, and whether to transcribe system audio as well as the mic.
+The user starts Listen and chooses whether it follows their view or is pinned to one card.
+A meeting is Listen pinned to one card that also transcribes the computer's audio, for a call played on it.
 Following sends words to the card in view; a line stays with the card selected when it began.
 A following batch for a card without a live worker is dropped unless it ends with `send`, which starts the worker.
 Pinned listening sends every batch to its card, starting a cold worker if needed.
@@ -35,11 +36,13 @@ Never speak unprompted or narrate replies to typed turns.
 
 ## Notes from a pinned call
 
-For a new topic, the user captures a card, then pins Listen to it; enable System audio for a call played on the computer.
-For an existing card, stay its worker and take notes there or in a child meeting fiber, as fits the work.
+When the user says a meeting is starting, run `shuttle meeting start` in the card's worker: Listen turns on, unmuted, pinned to your card, and transcribes the computer's audio as well as the mic (`--fiber` names another card).
+When they say it is over, run `shuttle meeting end`, which stops the computer's audio and follows their view again.
+The meeting also ends when Listen stops, when the user follows again, or after twenty minutes with nothing heard.
+For a new topic, the user captures a card first; for an existing card, stay its worker and take notes there or in a child meeting fiber, as fits the work.
 Read the `roles/scribe` charter if one exists.
 Shuttle delivers batches automatically; use `shuttle transcript` to read around them and recover gaps.
-There is no end-of-call message: consolidate when the user asks or the conversation ends, and remind them to stop Listen if it remains on.
+Consolidate when the user asks or the conversation ends.
 
 Keep running notes of topics, explicit decisions, action items, open questions, and their source times and speaker labels.
 Act when addressed, deliver useful files with `shuttle send-file`, and keep a self-contained report live when the call needs one ([tapestry.md](tapestry.md)).

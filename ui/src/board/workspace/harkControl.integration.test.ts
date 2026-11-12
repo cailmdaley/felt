@@ -55,13 +55,22 @@ it('starts unmuted, mutes with a slash, unmutes, and stops only from the menu', 
   await vi.waitFor(() => expect(mic().getAttribute('aria-label')).toBe('Listen'))
   expect(q('.ws-voice-strip').hidden).toBe(true)
 })
-it('offers only routing, cadence, day transcript and Stop', () => {
-  mount(); dropdown()
-  expect(items().map(item => item.textContent)).toEqual(['Follow me', 'System audio', 'Pin to this card', "Today's transcript", 'Stop listening'])
-  expect(item('Follow me').getAttribute('aria-checked')).toBe('true')
-  expect(item('System audio').getAttribute('aria-checked')).toBe('false')
-  expect(item('Stop listening').disabled).toBe(true)
-  expect(q('[aria-label="Quiet seconds (following)"]')).not.toBeNull()
+const route = () => dock.el.querySelector('.listen-route')?.textContent ?? null
+const here = target
+const there = { fiber_id: 'b', origin: 'owner', name: 'Beta' }
+it.each([
+  ['off', {}, null, ['Start meeting on this card', "Today's transcript"]],
+  ['following', { enabled: true }, 'Following you: words go to a', ['Pin to this card', 'Start meeting on this card', "Today's transcript", 'Stop listening']],
+  ['pinned here', { enabled: true, follow: false }, 'Pinned to a', ['Follow me', 'Start meeting on this card', "Today's transcript", 'Stop listening']],
+  ['pinned elsewhere', { enabled: true, follow: false, target: there }, 'Pinned to b', ['Follow me', 'Pin to this card', 'Start meeting on this card', "Today's transcript", 'Stop listening']],
+  ['in a meeting', { enabled: true, follow: false, system_audio: true }, 'Meeting on a', ['End meeting', "Today's transcript", 'Stop listening']],
+  ['muted in a meeting', { enabled: true, muted: true, follow: false, system_audio: true, target: there }, 'Meeting on b', ['End meeting', "Today's transcript", 'Stop listening']],
+] as Array<[string, Partial<VoiceStatus>, string | null, string[]]>)('%s: names the route and offers only the moves from it', (_name, over, named, actions) => {
+  mount({ target: here, ...over }); dropdown()
+  expect(route()).toBe(named)
+  expect(items().map(item => item.textContent)).toEqual(actions)
+  expect(q('[aria-label^="Quiet seconds"]')).not.toBeNull()
+  if (named) expect(mic().title).toBe(`${over.muted ? 'Muted. ' : ''}${named}`)
 })
 it('pins atomically to this card and resumes following without disabling Listen', async () => {
   mount({ enabled: true, state: 'listening', recorder: 'recorder' })
@@ -72,26 +81,36 @@ it('pins atomically to this card and resumes following without disabling Listen'
   expect(q('.ws-voice-strip').textContent).toBe('📌 a')
   dropdown()
   expect(items().some(item => item.textContent === 'Pin to this card')).toBe(false)
-  expect(item('Follow me').getAttribute('aria-checked')).toBe('false')
   item('Follow me').click()
   await vi.waitFor(() => expect(voice.status?.follow).toBe(true))
   expect(voice.status?.enabled).toBe(true)
   expect(q('.ws-voice-strip').textContent).toBe('a')
 })
 it('offers pin here when pinned elsewhere, including another host with the same id', () => {
-  mount({ follow: false, target: { ...target, origin: 'elsewhere' } }); dropdown()
+  mount({ enabled: true, follow: false, target: { ...target, origin: 'elsewhere' } }); dropdown()
   expect(item('Pin to this card')).toBeDefined()
 })
-it('toggles system transcription live on the recorder, retaining mute and pin', async () => {
-  mount({ enabled: true, muted: true, follow: false, recorder: 'audio-host' }); dropdown()
-  item('System audio').click()
+it('starts a meeting on this card and ends it on the recorder', async () => {
+  mount({ recorder: 'audio-host', target: there }); dropdown()
+  fetcher.mockImplementation(async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? '{}'))
+    if (init?.method === 'POST') current = body.meeting
+      ? { ...current, enabled: true, muted: false, follow: false, system_audio: true, target: body.target, state: 'listening' }
+      : { ...current, follow: true, system_audio: false }
+    return Response.json(current)
+  })
+  item('Start meeting on this card').click()
   await vi.waitFor(() => expect(voice.status?.system_audio).toBe(true))
-  expect(voice.status).toMatchObject({ enabled: true, muted: true, follow: false })
-  const write = fetcher.mock.calls.find(([url]) => url === '/api/v1/voice')!
-  expect(JSON.parse(write[1].body)).toEqual({ system_audio: true, recorder: 'audio-host' })
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ meeting: true, target, recorder: 'audio-host' })
+  expect(q('.listen-control').dataset.mode).toBe('meeting')
+  expect(q('.ws-voice-strip').textContent).toBe('⏺ a')
+  dropdown(); item('End meeting').click()
+  await vi.waitFor(() => expect(voice.status?.system_audio).toBe(false))
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ meeting: false, recorder: 'audio-host' })
+  expect(q('.listen-control').dataset.mode).toBe('following')
 })
-it.each([{ source: 'phone' as const }, { sources: ['phone'] as VoiceStatus['sources'] }])('hides System audio when the recorder cannot use it: %j', over => {
-  mount(over); dropdown(); expect(items().some(item => item.textContent === 'System audio')).toBe(false)
+it.each([{ source: 'phone' as const }, { sources: ['phone'] as VoiceStatus['sources'] }])('offers no meeting when the recorder cannot hear the computer: %j', over => {
+  mount({ enabled: true, ...over }); dropdown(); expect(items().some(item => item.textContent === 'Start meeting on this card')).toBe(false)
 })
 it.each([true, false])('edits only the current quiet threshold on the recorder (follow=%s)', async follow => {
   mount({ follow, recorder: 'audio host' }); dropdown()

@@ -64,7 +64,7 @@ time.
 | `POST /voice/toggle` | recorder-routed | Start Listen unmuted when off; otherwise flip mic mute |
 | `POST /voice/discard` | recorder-routed | Drop unsent buffered words and return the number discarded |
 | `GET /voice/transcript` | recorder-addressed | Read the recorder-local day transcript as `{date, rows, recorder}`; filters `date`, `fiber`, `since` |
-| `POST /voice` | recorder-routed | Update `{enabled?, muted?, follow?, system_audio?, source?, target?}`; returns voice state |
+| `POST /voice` | recorder-routed | Update `{enabled?, muted?, follow?, meeting?, system_audio?, source?, target?}`; returns voice state |
 | `GET /voice/events` | recorder-routed for `target`, local for `focus` | The board's one live stream: server-sent `target` events, and with `rex=1` `focus` events `{fiber_id, origin, name}` when Rex's worker changes, voice on or off; every stream carries `page` events from `POST /board/open` (not `open`, which EventSource reserves for the connection) |
 | `POST /voice/target` | recorder-routed | Route following to `{fiber_id, origin?, name?}`, the board's view; returns voice state, unchanged unless following |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
@@ -413,7 +413,7 @@ prevents an older daemon from silently dropping fields it does not recognize.
 `sources` is `[]` without hark, `["desktop", "phone"]` on macOS, and `["phone"]` on other hosts.
 `source` is `desktop` or `phone`; `launch` is the active recorder's `voice-…` identity or null.
 `state` is `off`, `starting`, `listening`, or `failed`.
-`mode` is `off` when disabled, otherwise `following` or `pinned` according to `follow`.
+`mode` is `off` when disabled, `meeting` while system audio is on, otherwise `following` or `pinned` according to `follow`.
 `target` is `{fiber_id, origin, name, slug, pinned, source?}` or null; the optional source names the view that selected it, such as `board` or `rex`.
 `destination` is `{fiber_id, origin, name}` while enabled and null otherwise.
 `paused` reflects mic `muted` while enabled and is false when off.
@@ -425,8 +425,8 @@ prevents an older daemon from silently dropping fields it does not recognize.
 `last` is `{fiber_id, origin?, text?, at, status, detail?}` or null, with status `delivered`, `unconfirmed` or `failed`.
 `enabled` is persisted intent even when capture fails; invalid settings fail off with a visible configuration error.
 
-`POST /voice` accepts `{enabled?, muted?, follow?, system_audio?, words?, quiet_seconds?, pinned_quiet_seconds?, source?, target?, recorder?}` and returns the same state.
-The four switch fields must be booleans, and `source`, when supplied, must be `desktop` or `phone`.
+`POST /voice` accepts `{enabled?, muted?, follow?, meeting?, system_audio?, words?, quiet_seconds?, pinned_quiet_seconds?, source?, target?, recorder?}` and returns the same state.
+The five switch fields must be booleans, and `source`, when supplied, must be `desktop` or `phone`.
 A pin is one request: `{follow: false, target: {fiber_id, origin?, name?}}`.
 `target` requires `follow: false`; omitting it when turning follow off retains the current target.
 A pin can be set while disabled and survives daemon restarts through the route journal and persisted follow setting.
@@ -438,7 +438,12 @@ Invalid input and control failures return 422; unknown recorder addresses return
 Without an explicit recorder it prefers a reachable desktop-capable fleet recorder, while an explicit `recorder` pins the request.
 Desktop starts use `hark --voice`, adding `--system-audio` when the setting is on.
 The desktop recorder retains system audio as its echo-cancellation reference even when system transcription is off.
-`system_audio` toggles live through hark's `system-paused` flag file and persists across launches.
+`system_audio` is a meeting: Listen on and pinned to a card, transcribing the computer's audio as well as the mic.
+`{meeting: true, target}` starts one, unmuted and pinned to `target` (the current pin without one); `{meeting: false}` ends it and follows again, and is a no-op outside a meeting.
+`system_audio: true` is refused unless the result is enabled, pinned and has a target.
+Stopping Listen or `{follow: true}` ends the meeting, and so do twenty minutes in which no track was heard; the daemon logs the self-ending.
+A settings file holding `system_audio` while off or following reads as no meeting.
+The setting applies live through hark's `system-paused` flag file and persists across launches.
 Phone audio has no system track; it retains the desktop preference without applying a system gate.
 Changing source replaces the recorder after stopping the old launch.
 `source` is a runtime choice, not a `voice.json` setting; a surviving phone launch is adopted after daemon restart.

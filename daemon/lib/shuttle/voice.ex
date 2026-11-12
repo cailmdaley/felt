@@ -1,6 +1,13 @@
 defmodule Shuttle.Voice do
-  @moduledoc "Owns the live voice switch, spoken-time route journal and recorder reconciliation."
+  @moduledoc """
+  Owns the live voice switch, spoken-time route journal and recorder reconciliation.
+
+  A meeting is Listen pinned to one card with system audio transcribed too. It
+  ends when Listen stops, when Listen follows again, or after twenty minutes in
+  which no track was heard.
+  """
   use GenServer
+  require Logger
   alias Shuttle.{Recorder, Voice.Config}
 
   def start_link(opts \\ []),
@@ -71,6 +78,10 @@ defmodule Shuttle.Voice do
       discard: Keyword.get(opts, :discard, &Shuttle.Voice.TranscriptRelay.discard/1),
       launch: nil,
       observed_at: nil,
+      wall: Keyword.get(opts, :wall, fn -> System.system_time(:millisecond) end),
+      meeting_idle_ms: Keyword.get(opts, :meeting_idle_ms, 20 * 60_000),
+      meeting_since: nil,
+      heard_at: nil,
       snapshot: %{
         available: false,
         sources: [],
@@ -156,7 +167,9 @@ defmodule Shuttle.Voice do
     do: {:reply, {:error, "fiber_id is required"}, state}
 
   def handle_call({:update, params}, from, state) do
-    with :ok <- validate_update(params),
+    params = meeting_params(params, state)
+
+    with :ok <- validate_update(params, state),
          :ok <- Config.validate(Map.take(params, ~w(words quiet_seconds pinned_quiet_seconds))) do
       {:noreply, enqueue(state, {params, from})}
     else
@@ -164,13 +177,36 @@ defmodule Shuttle.Voice do
     end
   end
 
-  defp validate_update(params) do
+  # `meeting: true` starts one on the target, unmuted; `meeting: false` ends
+  # the current one, following again, and is a no-op outside a meeting.
+  defp meeting_params(%{"meeting" => true} = params, _state) do
+    params
+    |> Map.delete("meeting")
+    |> Map.merge(%{
+      "enabled" => true,
+      "muted" => false,
+      "follow" => false,
+      "system_audio" => true
+    })
+  end
+
+  defp meeting_params(%{"meeting" => false} = params, state) do
+    params = Map.delete(params, "meeting")
+
+    if state.snapshot.system_audio,
+      do: Map.merge(params, %{"system_audio" => false, "follow" => true}),
+      else: params
+  end
+
+  defp meeting_params(params, _state), do: params
+
+  defp validate_update(params, state) do
     cond do
       Enum.any?(
-        ~w(enabled muted follow system_audio),
+        ~w(enabled muted follow system_audio meeting),
         &(Map.has_key?(params, &1) and not is_boolean(params[&1]))
       ) ->
-        {:error, "enabled, muted, follow and system_audio must be booleans"}
+        {:error, "enabled, muted, follow, system_audio and meeting must be booleans"}
 
       Map.has_key?(params, "source") and params["source"] not in ~w(desktop phone) ->
         {:error, "source must be desktop or phone"}
@@ -181,6 +217,12 @@ defmodule Shuttle.Voice do
 
       Map.has_key?(params, "target") and params["follow"] != false ->
         {:error, "target requires follow: false"}
+
+      params["system_audio"] == true and
+          not (Map.get(params, "enabled", state.snapshot.enabled) and
+                 Map.get(params, "follow", state.snapshot.follow) == false and
+                   not is_nil(params["target"] || state.target)) ->
+        {:error, "system audio is a meeting: Listen on, pinned to a card (meeting: true, target)"}
 
       true ->
         :ok
@@ -229,7 +271,7 @@ defmodule Shuttle.Voice do
       target = %{
         "fiber_id" => id,
         "slug" => fiber["slug"] || fiber["id"] || params["slug"] || id,
-        "origin" => origin || Shuttle.Poller.own_host_id(),
+        "origin" => origin || get_in(fiber, ["shuttle", "host"]) || Shuttle.Poller.own_host_id(),
         "pinned" => not state.snapshot.follow,
         "name" =>
           fiber["name"] || params["name"] || known_name(state.target, id) ||
@@ -308,8 +350,15 @@ defmodule Shuttle.Voice do
   defp put_mode(%{enabled: true} = snapshot) do
     destination = snapshot.target && Map.take(snapshot.target, ~w(fiber_id name origin))
 
+    mode =
+      cond do
+        snapshot.system_audio -> "meeting"
+        snapshot.follow -> "following"
+        true -> "pinned"
+      end
+
     Map.merge(snapshot, %{
-      mode: if(snapshot.follow, do: "following", else: "pinned"),
+      mode: mode,
       destination: destination,
       paused: snapshot.muted
     })
@@ -324,7 +373,21 @@ defmodule Shuttle.Voice do
   @impl true
   def handle_info(:tick, state) do
     Process.send_after(self(), :tick, state.poll_ms)
-    {:noreply, if(state.task, do: state, else: enqueue(state, {%{}, nil}))}
+
+    cond do
+      state.task ->
+        {:noreply, state}
+
+      meeting_idle?(state) ->
+        Logger.info(
+          "voice: ended the meeting on #{(state.target || %{})["fiber_id"]}: nothing heard for #{div(state.meeting_idle_ms, 60_000)} min"
+        )
+
+        {:noreply, enqueue(state, {%{"system_audio" => false, "follow" => true}, nil})}
+
+      true ->
+        {:noreply, enqueue(state, {%{}, nil})}
+    end
   end
 
   def handle_info({ref, result}, %{task: {%Task{ref: ref}, from}} = state) do
@@ -348,6 +411,11 @@ defmodule Shuttle.Voice do
   def terminate(_reason, %{task: {task, _}}), do: Task.shutdown(task, :brutal_kill)
   def terminate(_reason, _state), do: :ok
 
+  defp meeting_idle?(%{meeting_since: since} = state) when is_integer(since),
+    do: state.wall.() - max(since, state.heard_at || since) >= state.meeting_idle_ms
+
+  defp meeting_idle?(_state), do: false
+
   defp finish_task(state, from, result) do
     state =
       case result do
@@ -363,7 +431,8 @@ defmodule Shuttle.Voice do
               :preview_pin,
               :source,
               :launch,
-              :observed_at
+              :observed_at,
+              :heard_at
             ])
           )
 
@@ -414,7 +483,11 @@ defmodule Shuttle.Voice do
       end
 
     if from, do: GenServer.reply(from, reply)
-    state = %{state | task: nil, snapshot: snapshot}
+
+    meeting_since =
+      if snapshot.system_audio, do: state.meeting_since || state.wall.()
+
+    state = %{state | task: nil, snapshot: snapshot, meeting_since: meeting_since}
 
     case state.queue do
       [] -> {:noreply, state}
@@ -441,7 +514,9 @@ defmodule Shuttle.Voice do
                  Map.new(Map.take(params, ~w(enabled follow system_audio)), fn {key, value} ->
                    {String.to_existing_atom(key), value}
                  end)
-               )
+               ),
+             meeting_since:
+               if(params["system_audio"] == true, do: state.wall.(), else: state.meeting_since)
          },
          {:ok, state} <- update_target(state, params) do
       launch_update(state, params, from)
@@ -661,6 +736,7 @@ defmodule Shuttle.Voice do
               end,
             launch: if(row && not match?({:error, _}, relay_result), do: row.launch),
             observed_at: now,
+            heard_at: heard_ms(status[:heard_at]) || state.heard_at,
             idle: is_nil(row) or not enabled,
             idle_key: key,
             capture_error: nil
@@ -692,6 +768,15 @@ defmodule Shuttle.Voice do
         }
     end
   end
+
+  defp heard_ms(iso) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, at, _} -> DateTime.to_unix(at, :millisecond)
+      _ -> nil
+    end
+  end
+
+  defp heard_ms(_), do: nil
 
   # A preview belongs to the line in progress: the worker in view when its first
   # words appeared, until the transcript gains a finished line.

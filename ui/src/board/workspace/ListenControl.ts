@@ -4,7 +4,7 @@ import type { PhoneListening, PhoneListeningAttempt } from '../phoneListening.js
 import { isMobileViewport } from '../mobile.js'
 import { TranscriptPanel } from '../voiceTranscript.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
-import type { FiberSlug } from './voiceStrip.js'
+import { listenMode, type FiberSlug } from './voiceStrip.js'
 
 export interface ListenOptions {
   /** The card a pin lands on: the band's highlighted thread, else its own. */
@@ -39,7 +39,11 @@ function iconButton(className: string): HTMLButtonElement {
   return button
 }
 
-/** One mic toggle, with routing and the less frequent actions in ▾. */
+/**
+ * One mic toggle, with routing and the less frequent actions in ▾. The menu
+ * names the current route (following, pinned to a card, or a meeting there)
+ * and offers only the moves that change it.
+ */
 export class ListenControl {
   readonly el = document.createElement('span')
   private readonly button = iconButton('listen-mic')
@@ -140,20 +144,30 @@ export class ListenControl {
       this.button.replaceChildren(svg(ICONS.mic, ...(muted ? [ICONS.slash] : [])))
       this.paintedIcon = drawn
     }
-    const target = state?.target
-    const name = target ? this.opts.fiberSlug(target.fiber_id, target.origin) ?? target.fiber_id.split('/').at(-1) : 'nothing yet'
+    const mode = listenMode(state)
     const label = on ? muted ? 'Unmute' : 'Mute' : 'Listen'
-    const title = on ? `${muted ? 'Muted. ' : ''}${state?.follow ? 'Following you: words go to' : 'Pinned: words go to'} ${name}${state?.system_audio ? '. Hearing system audio too' : ''}`
+    const title = on ? `${muted ? 'Muted. ' : ''}${this.route()}`
       : isMobileViewport() ? 'Listen with this phone’s mic' : 'Listen: words go to the card in view'
     this.button.disabled = this.starting || (!on && (isMobileViewport() ? !this.opts.phone : !state?.available || !state.sources.includes('desktop')))
     this.button.title = failure ? `${failure} — ${title}` : title
     this.button.setAttribute('aria-label', label)
     if (on) this.button.setAttribute('aria-pressed', String(muted))
     else this.button.removeAttribute('aria-pressed')
-    this.el.dataset.mode = on ? state?.follow ? 'following' : 'pinned' : 'off'
+    this.el.dataset.mode = mode
     this.el.classList.toggle('listen-failed', !!failure)
     this.el.classList.toggle('listen-muted', muted)
     this.button.classList.toggle('listen-on', on)
+  }
+
+  /** Where words go now, in words. */
+  private route(): string {
+    const state = this.opts.voice.status, target = state?.target
+    const name = target ? this.opts.fiberSlug(target.fiber_id, target.origin) ?? target.fiber_id.split('/').at(-1) : 'nothing yet'
+    switch (listenMode(state)) {
+      case 'meeting': return `Meeting on ${name}`
+      case 'pinned': return `Pinned to ${name}`
+      default: return `Following you: words go to ${name}`
+    }
   }
 
   private closeMenu(): void {
@@ -165,13 +179,11 @@ export class ListenControl {
   private readonly outside = (event: PointerEvent): void => {
     if (!this.menu?.contains(event.target as Node) && !this.el.contains(event.target as Node)) this.closeMenu()
   }
-  private item(label: string, act: () => void, checked?: boolean, disabled = false): void {
+  private item(label: string, act: () => void): void {
     const button = document.createElement('button')
     button.type = 'button'; button.className = 'ws-select-option'; button.textContent = label
     button.setAttribute('aria-label', label)
-    button.setAttribute('role', checked === undefined ? 'menuitem' : 'menuitemcheckbox')
-    if (checked !== undefined) button.setAttribute('aria-checked', String(checked))
-    button.disabled = disabled
+    button.setAttribute('role', 'menuitem')
     button.onclick = () => { this.closeMenu(); act() }
     this.menu!.append(button)
   }
@@ -183,20 +195,27 @@ export class ListenControl {
     menu.className = 'ws-select-picker'
     menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'Listening options')
     this.menuState = this.signature()
-    this.item('Follow me', () => this.change({ follow: !state?.follow }), state?.follow ?? true)
-    if (state?.source !== 'phone' && !isMobileViewport() && state?.sources.includes('desktop')) {
-      this.item('System audio', () => this.change({ system_audio: !state.system_audio }), state.system_audio)
+    const mode = listenMode(state)
+    if (mode !== 'off') {
+      const route = document.createElement('div')
+      route.className = 'listen-route'; route.textContent = this.route()
+      menu.append(route)
     }
     const target = state?.target
     const here = target?.origin === card.originId && [card.uid, card.id].includes(target?.fiber_id)
-    if (state?.follow || !here) this.item('Pin to this card', () => this.change({ follow: false, target: { fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name } }))
+    const thisCard = { fiber_id: card.uid ?? card.id, origin: card.originId, name: card.name }
+    const meetings = state?.source !== 'phone' && !isMobileViewport() && !!state?.sources.includes('desktop')
+    if (mode === 'meeting') this.item('End meeting', () => this.change({ meeting: false }))
+    if (mode === 'pinned') this.item('Follow me', () => this.change({ follow: true }))
+    if (mode === 'following' || (mode === 'pinned' && !here)) this.item('Pin to this card', () => this.change({ follow: false, target: thisCard }))
+    if (mode !== 'meeting' && meetings) this.item('Start meeting on this card', () => this.change({ meeting: true, target: thisCard }))
     const quiet = this.cadence(state?.follow ?? true)
     menu.append(quiet)
     this.item("Today's transcript", () => {
       this.transcript?.dispose()
       this.transcript = new TranscriptPanel(this.opts.shuttleBase, state?.recorder, card.uid ?? card.id, this.opts.fiberSlug, this.dropdown)
     })
-    this.item('Stop listening', () => this.stop(), undefined, !state?.enabled)
+    if (mode !== 'off') this.item('Stop listening', () => this.stop())
     const note = this.failure() ?? (state?.source === 'phone' ? this.opts.phone?.session.warning : null)
     if (note) { const error = document.createElement('div'); error.className = 'voice-error'; error.textContent = note; menu.append(error) }
     menu.addEventListener('keydown', event => {

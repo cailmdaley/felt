@@ -5,7 +5,7 @@
  * against mocked daemon routes, then opens from `file://`. The feed still runs
  * through the board's real classifier (`parseCompositeFeed` →
  * `buildKanbanResponseFromComposite`), so the DOM and CSS are production code.
- * `?voice=off|following|pinned|muted|failed|phone` stages Listen.
+ * `?voice=off|following|pinned|meeting|muted|failed|phone` stages Listen.
  * `?capture` opens ordinary Capture.
  * `?example=workspace` selects the fictional documentation example; add
  * `?transcript=live` to give its constitution a live worker, or
@@ -100,10 +100,10 @@ const voiceScenario = search.get('voice') ?? 'off'
 const voiceTarget = { fiber_id: workspaceFixture ? WORKSPACE_ID : 'work/spt3g_papers/bmodes-2d/run', origin: workspaceFixture ? WORKSPACE_HOST : FOREIGN_HOST, name: 'Null tests' }
 let mockVoice: Record<string, unknown> = {
   available: true, sources: ['desktop', 'phone'], enabled: voiceScenario !== 'off', muted: voiceScenario === 'muted',
-  follow: voiceScenario !== 'pinned', system_audio: search.get('system_audio') === 'on',
+  follow: !['pinned', 'meeting'].includes(voiceScenario), system_audio: voiceScenario === 'meeting',
   source: voiceScenario === 'phone' ? 'phone' : 'desktop', launch: voiceScenario === 'off' ? null : 'voice-harness',
   state: voiceScenario === 'off' ? 'off' : voiceScenario === 'failed' ? 'failed' : 'listening',
-  mode: voiceScenario === 'off' ? 'off' : voiceScenario === 'pinned' ? 'pinned' : 'following',
+  mode: voiceScenario === 'off' ? 'off' : voiceScenario === 'pinned' || voiceScenario === 'meeting' ? voiceScenario : 'following',
   target: voiceTarget, destination: voiceScenario === 'off' ? null : voiceTarget,
   last: null, error: voiceScenario === 'failed' ? 'The microphone is unavailable.' : null, recorder: recorderHost,
 }
@@ -1421,11 +1421,14 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   if (url.split('?')[0].endsWith('/api/v1/voice')) {
     if (init?.method === 'POST') {
-      const request = body()
+      const { meeting, ...request } = body()
+      if (meeting === true) Object.assign(request, { enabled: true, muted: false, follow: false, system_audio: true })
+      if (meeting === false && mockVoice.system_audio) Object.assign(request, { follow: true, system_audio: false })
       mockVoice = { ...mockVoice, ...request, error: null }
+      if (!mockVoice.enabled || mockVoice.follow) mockVoice.system_audio = false
       if (request.follow === true) mockVoice.target = mockViewed
       mockVoice.state = mockVoice.enabled ? 'listening' : 'off'
-      mockVoice.mode = mockVoice.enabled ? mockVoice.follow ? 'following' : 'pinned' : 'off'
+      mockVoice.mode = mockVoice.enabled ? mockVoice.system_audio ? 'meeting' : mockVoice.follow ? 'following' : 'pinned' : 'off'
       mockVoice.destination = mockVoice.enabled ? mockVoice.target : null
       mockVoice.launch = mockVoice.enabled ? 'voice-harness' : null
     }

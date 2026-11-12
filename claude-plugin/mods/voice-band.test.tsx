@@ -145,6 +145,14 @@ test('a pinned target is visible here even while muted', ABOVE, async ($, on) =>
   await ui.unmount()
 })
 
+test('a meeting marks its card with ⏺, muted or not', ABOVE, async ($, on) => {
+  daemon(on, { ...OFF, mode: 'meeting', follow: false, paused: true, destination: { fiber_id: '01OTHER', name: 'Standup' } })
+  await start($)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: ' ⏺ → Standup' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('muted is the struck glyph alone', ABOVE, async ($, on) => {
   daemon(on, { ...HERE, paused: true, pending_words: 3, destination: { fiber_id: 'a/b' } })
   await start($)

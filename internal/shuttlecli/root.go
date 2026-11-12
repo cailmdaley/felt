@@ -264,6 +264,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.shuttleSayCmd(),
 		a.shuttleVoicesCmd(),
 		a.shuttleInboxCmd(),
+		a.shuttleMeetingCmd(),
 		a.shuttleMessageCmd(),
 		a.idleWatchCmd(),
 		a.claudeMailRecoverCmd(),

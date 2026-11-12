@@ -15,6 +15,7 @@ left, then the mic's state, where the words go and what is happening to them.
 ⧉ ⌗ ☰ ⚆ → voice-modes 8 words · asleep, say “send” ✕
 ⧉ ⌗ ☰ ⚆ → here · ✓ 12 words sent
 ⧉ ⌗ ☰ ⚆ 📌 → voice-modes
+⧉ ⌗ ☰ ⚆ ⏺ → weekly-sync
 ⧉ ⌗ ☰ ⊘
 ⧉ ⌗ ☰ ○
 ```
@@ -33,7 +34,7 @@ order:
 | Part | Text |
 | --- | --- |
 | glyph | `⚇` speech (above -36 dBFS; holds until below -44 dBFS), `⚆` mic open and quiet, `⊘` muted, `○` Listening off |
-| where they go | ` → here`, dim; ` → <slug>` for another card, bright; `📌` before the arrow when pinned, shown even while muted |
+| where they go | ` → here`, dim; ` → <slug>` for another card, bright; `📌` before the arrow when pinned and `⏺` in a meeting, shown even while muted |
 | words said and not yet sent, the line in progress included | ` n words` |
 | speech running | ` · “…last six words”` of the line in progress |
 | quiet, words waiting | ` · sends in Ns`, counting down the quiet gap |

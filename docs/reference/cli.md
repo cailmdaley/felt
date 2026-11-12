@@ -268,6 +268,8 @@ constitution open; activating it could launch another worker.
 | `shuttle say "<text>"` | Queue a spoken line on the speaker host, in the voice of the calling worker's role (its charter's `voice:`); playback waits behind queued lines and while the human talks, and a line whose card is out of view is held for `inbox`. `--fiber` names the speaker from a plain terminal; `--voice` overrides the voice for this line. For voice conversations with the human only |
 | `shuttle voices` | List the voice bank and pocket-tts built-ins on the speaker host, each with the role whose charter claims it |
 | `shuttle inbox` | List spoken lines held because their card is out of view; `--play` opens the card waiting longest (routes Listen to it and plays its lines), `--next` moves to the next card, `--stop` leaves the rest held |
+| `shuttle meeting start` | Start a meeting: Listen on, unmuted, pinned to the calling worker's card (`--fiber` names one from a terminal), transcribing the computer's audio as well as the mic. The meeting also ends when Listen stops, when Listen follows again, or after twenty minutes with nothing heard |
+| `shuttle meeting end` | End the meeting: stop transcribing the computer's audio and follow the view again; a no-op outside a meeting |
 | `shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `shuttle agents` | List the effective agent registry (`--source builtin\|user`) |
 | `shuttle agents resolve <agent>` | Resolve one agent with its axes (`--effort`, `--chrome`) |
