@@ -79,7 +79,7 @@ Use `--mode` to select cases and `--output` to retain API requests, hook inputs/
 
 ## Real Rex tests
 
-`daemon/test/shuttle/terminal/rex_real_test.exs` and `internal/shuttlecli/terminal_rex_real_test.go` start a private Rex server on a temporary Unix socket with its own state directory.
+The daemon's `test/shuttle/terminal/rex_real_*_test.exs` (four modules sharing `Shuttle.Test.RexRealCase`, so they run side by side) and `internal/shuttlecli/terminal_rex_real_test.go` start a private Rex server on a temporary Unix socket with its own state directory.
 They run when Rex is installed and skip when it is absent.
 The daemon suite launches sibling workers without a live family root, checks one session with ordered, labelled windows, then stops both and checks that the owned session is gone.
 `terminal/rex_families_test.exs` covers family resolution, concurrent sibling launches, window-local close, exact-window reveal, viewer tabs and human-window preservation with the fixture-backed runner.
