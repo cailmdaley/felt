@@ -18,8 +18,27 @@ import (
 )
 
 // activationMargin is the deadline activation keeps beyond the readiness
-// timeout for the work that finishes it. The tests link a shorter one with -X.
-var activationMargin = "1m"
+// timeout for the work that finishes it, and cancelGrace is how long a
+// cancelled group has between TERM and KILL. Tests link shorter ones with -X.
+var (
+	activationMargin = "1m"
+	cancelGrace      = "3s"
+)
+
+// heartbeatLease is how long the target waits for an observer heartbeat
+// before treating the transport as lost: SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS,
+// 60 by default. The observer sends one every quarter lease.
+func heartbeatLease() (time.Duration, error) {
+	value := os.Getenv("SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS")
+	if value == "" {
+		return time.Minute, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("invalid SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS: %q", value)
+	}
+	return time.Duration(n) * time.Second, nil
+}
 
 func deadline() (time.Time, error) {
 	key, value := "SHUTTLE_DEPLOY_DEADLINE", os.Getenv("SHUTTLE_DEPLOY_DEADLINE")
@@ -167,7 +186,8 @@ func owned(ctx context.Context, until time.Time, cmd *exec.Cmd, control *os.File
 			feed.Close()
 		}
 		_ = syscall.Kill(-os.Getpid(), syscall.SIGTERM)
-		grace = time.After(3 * time.Second)
+		wait, _ := time.ParseDuration(cancelGrace)
+		grace = time.After(wait)
 	}
 	for {
 		select {
@@ -273,6 +293,10 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
+		lease, err := heartbeatLease()
+		if err != nil {
+			return err
+		}
 		input, keepalive, err := os.Pipe()
 		if err != nil {
 			return err
@@ -294,7 +318,7 @@ func run(args []string) error {
 				cause(e)
 				return
 			}
-			ticker := time.NewTicker(15 * time.Second)
+			ticker := time.NewTicker(lease / 4)
 			defer ticker.Stop()
 			for {
 				select {

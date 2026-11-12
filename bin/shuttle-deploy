@@ -1194,10 +1194,10 @@ exit \"\$status\""
   printf '  %s: attached transaction; cancellation follows its observer\n' "${host:-local}" >&2
   [ -n "${LIFELINE_HELD:-}" ] || exec 6<> "$run.lifetime"
   if [ -z "$host" ]; then
-    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$run.bootstrap" "$token" bash -c "$RUN_SOURCE" -- "$token" < "$run.lifetime" 6>&- &
+    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$run.bootstrap" "$token" bash -c "$RUN_SOURCE" -- "$token" "$HEARTBEAT_LEASE" < "$run.lifetime" 6>&- &
   else
     env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$run.bootstrap" "$token" ssh -o BatchMode=yes \
-      $(fleet_flags "$host") "$(fleet_ssh "$host")" "bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$token")" < "$run.lifetime" 6>&- &
+      $(fleet_flags "$host") "$(fleet_ssh "$host")" "bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$token") $HEARTBEAT_LEASE" < "$run.lifetime" 6>&- &
   fi
   active=$!
   wait "$active"
@@ -1255,6 +1255,11 @@ LOCK_SOURCE="$(<"$REPO/scripts/deploy-lock/main.go")"
 LOCK_MOD="module shuttle-deploy-lock
 $(grep -E '^(go|toolchain) ' "$REPO/go.mod")"
 RUN_SOURCE="$(<"$REPO/scripts/deploy-run.sh")"
+# The observer heartbeats every quarter lease; a target that hears nothing for
+# a whole lease cancels its transaction.
+HEARTBEAT_LEASE="${SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS:-60}"
+case "$HEARTBEAT_LEASE" in ''|*[!0-9]*|0) echo "invalid SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS: $HEARTBEAT_LEASE" >&2; exit 2 ;; esac
+export SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS="$HEARTBEAT_LEASE"
 DEPLOYER="$(hostname):$$"
 RUN_DIR="$(mktemp -d)" || exit 1
 LOCAL_TOOL= active= RUNNING= LIFELINE_FDS=

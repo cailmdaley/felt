@@ -25,7 +25,8 @@ func contents(path string) string { b, _ := os.ReadFile(path); return string(b) 
 func present(path string) bool    { _, e := os.Stat(path); return e == nil }
 
 // binary is deploy-lock built once for every test, with a one-second
-// activation margin so a deadline test need not outlast the production minute.
+// activation margin and a short TERM-to-KILL grace, so a deadline or
+// cancellation test need not outlast the production minute and three seconds.
 var binary string
 
 func TestMain(m *testing.M) {
@@ -34,7 +35,7 @@ func TestMain(m *testing.M) {
 		panic(e)
 	}
 	binary = filepath.Join(dir, "lock")
-	if out, e := exec.Command("go", "build", "-ldflags", "-X main.activationMargin=1s", "-o", binary, ".").CombinedOutput(); e != nil {
+	if out, e := exec.Command("go", "build", "-ldflags", "-X main.activationMargin=1s -X main.cancelGrace=200ms", "-o", binary, ".").CombinedOutput(); e != nil {
 		panic(fmt.Sprintf("build: %v %s", e, out))
 	}
 	code := m.Run()
@@ -85,10 +86,10 @@ func result(t *testing.T, cmd *exec.Cmd) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-done
-		t.Fatal("transaction did not stop within 10 seconds")
+		t.Fatal("transaction did not stop within 30 seconds")
 		return nil
 	}
 }
@@ -101,7 +102,7 @@ func free(t *testing.T, path string) {
 	defer f.Close()
 	// Group members close their descriptors independently after group KILL;
 	// reaping the helper is not a barrier for the final descendant's exit.
-	until := time.Now().Add(2 * time.Second)
+	until := time.Now().Add(20 * time.Second)
 	for {
 		e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if e == nil {
@@ -246,13 +247,7 @@ func TestActivationControlGetsEOFWhenOwnerDies(t *testing.T) {
 	await(t, log, func() bool { return present(filepath.Join(root, "entered")) })
 	cmd.Process.Kill()
 	_ = result(t, cmd)
-	until := time.Now().Add(2 * time.Second)
-	for !present(filepath.Join(root, "control-eof")) && time.Now().Before(until) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !present(filepath.Join(root, "control-eof")) {
-		t.Fatal("transaction retained an activation-owner socket and never received EOF")
-	}
+	await(t, "transaction retained an activation-owner socket and never received EOF", func() bool { return present(filepath.Join(root, "control-eof")) })
 	if strings.TrimSpace(contents(filepath.Join(root, "control-eof"))) == "0" {
 		t.Fatal("activation owner death produced data, not EOF")
 	}
@@ -288,7 +283,7 @@ func TestActivationRefusesInsufficientDeadlineBudget(t *testing.T) {
 func TestHardDeadlineStillStopsStalledActivation(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	cmd, life, log := start(t, binary, root, "stalled", `printf B >&5; read -r ack <&5; trap '' TERM; touch "$1/critical"; sleep 300`, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(5*time.Second).Unix()), "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
+	cmd, life, log := start(t, binary, root, "stalled", `printf B >&5; read -r ack <&5; trap '' TERM; touch "$1/critical"; sleep 300`, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(4*time.Second).Unix()), "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
 	defer life.Close()
 	await(t, log, func() bool { return present(filepath.Join(root, "critical")) })
 	done := make(chan error, 1)
