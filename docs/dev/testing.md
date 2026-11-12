@@ -238,6 +238,21 @@ Reuse before writing. Each language has one place for shared support:
   - A package whose code writes files sets `FELT_TEST_FSYNC=0` in its `TestMain`. Every production fsync goes through `atomicfile.Sync` or `atomicfile.SyncDir` (a guard test in `internal/atomicfile` holds this), and that variable turns them off for the test process and the CLIs it runs. On macOS each fsync is an `F_FULLFSYNC`, which made up most of the plugin-setup tests' wall time.
 - **Board:** `ui/src/board/testFixtures.ts` (`card`, `response`, `captureFetch`), `testDevices.ts` (`matchMediaFor` and the device presets), and `ui/harness/workspace-fixtures.ts` for the browser harness.
 
+**Deploy tests.** Test a shell function of `bin/shuttle-deploy` on its own:
+`shellFunction` extracts it, and the harness stubs its collaborators
+(`deploy_test.go`). A whole run goes through `newDeployFleet`
+(`shuttlecli/deploy_transaction_test.go`): the real script and lock helper
+against fake SSH, build, API and supervisor. A fleet run costs about two
+seconds of process launches, so one run proves every property its path can
+carry at once (`deploy_flow_test.go`), and the fakes check what every run
+must hold (batch-only bounded SSH, a capped, home-hosted lock build). Its real
+waits are knobs, never sleeps: the lock helper is linked with a short
+`cancelGrace` (and in `scripts/deploy-lock`, a short `activationMargin`), and
+`SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS`, `SHUTTLE_DEPLOY_READY_*` and
+`SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS` shrink the others. A cancelled
+transaction is proven gone by its lock helper's process group
+(`awaitTransactionGone`), not by a second deployment.
+
 Parity between the Go and Elixir implementations of the same resolver is a
 shared fixture table under `daemon/test/fixtures/<resolver>/`, read by both
 suites. A change to one implementation changes the table, and the other

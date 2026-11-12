@@ -117,7 +117,7 @@ exec `+shellQuote(realRm)+` "$@"
 	if err != nil {
 		t.Fatal(err)
 	}
-	link(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n [ \"$2\" = -C ] || { echo 'lock helper builds outside its module' >&2; exit 33; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\n grep -q '^toolchain ' \"$3/go.mod\" || { echo 'lock helper has no pinned toolchain' >&2; exit 34; }\nfi\n"+lockBuildCache(realGo)+"exec '"+realGo+"' \"$@\"\n")
+	link(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"$1\" = build ]; then\n [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n [ \"$2\" = -C ] || { echo 'lock helper builds outside its module' >&2; exit 33; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\n grep -q '^toolchain ' \"$3/go.mod\" || { echo 'lock helper has no pinned toolchain' >&2; exit 34; }\nfi\n"+lockBuildCache(realGo)+"exec '"+realGo+"' \"$@\"\n")
 	realSleep, err := exec.LookPath("sleep")
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ if [ "${FAIL_SSH_PREFLIGHT:-0}" = 1 ] && [ "$*" = true ]; then echo preflight-ss
 # isolated login shim sources this fixture's profile and preserves stderr.
 exec /usr/bin/env -i TEST_REMOTE=1 SHUTTLE_TEST_SSH_HELPER=1 SHUTTLE_TEST_GO_CACHES_PINNED=1 HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local DEPLOY_LOCK_CACHE="$DEPLOY_LOCK_CACHE" \
  FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
- CHECK_CLEANUP_ORDER="${CHECK_CLEANUP_ORDER:-0}" FAIL_LOCK_BUILD="${FAIL_LOCK_BUILD:-0}" FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
+ CHECK_CLEANUP_ORDER="${CHECK_CLEANUP_ORDER:-0}" FAIL_LOCK_BUILD="${FAIL_LOCK_BUILD:-0}" FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" RELEASE_BUSY_ONCE="${RELEASE_BUSY_ONCE:-0}" SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS="${SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS:-5}" \
  ACTIVATION_GATE="${ACTIVATION_GATE:-0}" CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" `+shellQuote(testBinary)+` -test.run=^TestDeploySSHHelperProcess$ -- "$*"
 `)
 	link(filepath.Join(f.bin, "make"), `#!/bin/sh
@@ -249,14 +249,16 @@ fi
 // lockBuildCache is the fake go's answer to the deploy's lock-helper build
 // (`go build -C <tool dir> -o lock .`): the first build of each distinct
 // main.go and go.mod runs the real compiler into DEPLOY_LOCK_CACHE, and every
-// later one hard-links that executable into the tool dir. Every fleet builds
+// later one hard-links that executable into the tool dir. The helper is linked
+// with a 200ms TERM-to-KILL grace, so a cancelled fleet does not wait out the
+// production three seconds. Every fleet builds
 // the same source twice (deployer and host), and a fresh build costs a link
 // plus macOS's first-exec assessment of the new binary.
 func lockBuildCache(realGo string) string {
 	return `if [ $# = 6 ] && [ "$1 $2 $4 $5 $6" = "build -C -o lock ." ] && [ -n "${DEPLOY_LOCK_CACHE:-}" ]; then
  built="$DEPLOY_LOCK_CACHE/$(cat "$3/go.mod" "$3/main.go" | cksum | tr ' ' -)"
  if [ ! -f "$built" ]; then
-  mkdir -p "$DEPLOY_LOCK_CACHE" && '` + realGo + `' build -C "$3" -o "$built.$$" . && mv -f "$built.$$" "$built" || exit 1
+  mkdir -p "$DEPLOY_LOCK_CACHE" && '` + realGo + `' build -C "$3" -ldflags=-X=main.cancelGrace=200ms -o "$built.$$" . && mv -f "$built.$$" "$built" || exit 1
  fi
  ln -f "$built" "$3/lock" 2>/dev/null || cp "$built" "$3/lock"
  exit
@@ -326,56 +328,6 @@ func fleetTouch(t *testing.T, path string) {
 	}
 }
 
-func TestDeployTransactionLaunchHoldsRefuseReleaseAndPruning(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct{ name, before, after, diagnostic string }{
-		{"contract", `"contract":{"ok":true}`, `"contract":{"ok":false,"reason":"CLI skew"}`, "CLI skew"},
-		{"migration", `"reconciliation_hold":null`, `"reconciliation_hold":{"reason":"backend conflict"}`, "backend conflict"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			f := newDeployFleet(t)
-			launcher := filepath.Join(f.repo, "bin/shuttle-launch")
-			if err := os.WriteFile(launcher, []byte(strings.ReplaceAll(fleetRead(launcher), tc.before, tc.after)), 0755); err != nil {
-				t.Fatal(err)
-			}
-			f.git(t, f.repo, "add", "bin/shuttle-launch")
-			f.git(t, f.repo, "commit", "-m", "held launcher")
-			f.git(t, f.repo, "push", "origin", "main")
-			f.sha = f.git(t, f.repo, "rev-parse", "HEAD")
-			fleetTouch(t, f.gate)
-			cmd, log := f.start(t, "held-"+tc.name)
-			if err := cmd.Wait(); err == nil {
-				t.Fatalf("held deployment succeeded: %s", fleetRead(log))
-			}
-			if !strings.Contains(fleetRead(log), tc.diagnostic) {
-				t.Fatalf("missing launch-hold diagnostic: %s", fleetRead(log))
-			}
-			if events := fleetRead(f.events); strings.Contains(events, "release\n") || strings.Contains(events, "prune\n") {
-				t.Fatalf("held deployment authorized work or pruned rollback: %s", events)
-			}
-		})
-	}
-}
-
-func TestDeployCallerScriptIsImmutableDuringCheckoutEdits(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	cmd, log := f.start(t, "caller-edited")
-	deployAwait(t, "build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
-	replacement := strings.Repeat("# replacement bytes\n", 10000) + "printf 'mutated caller executed\\n' >&2; exit 66\n"
-	if err := os.WriteFile(filepath.Join(f.repo, "bin/shuttle-deploy"), []byte(replacement), 0755); err != nil {
-		t.Fatal(err)
-	}
-	fleetTouch(t, f.gate)
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("caller changed during deployment: %v %s", err, fleetRead(log))
-	}
-	if strings.Contains(fleetRead(log), "mutated caller executed") {
-		t.Fatal("running deploy read changed script bytes")
-	}
-}
-
 func TestDeploySSHParsesJoinedArgumentsAndLoadsLoginProfile(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
@@ -389,28 +341,6 @@ func TestDeploySSHParsesJoinedArgumentsAndLoadsLoginProfile(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "joined argument's value: yes") || !strings.Contains(string(out), "login-stderr-token") {
 		t.Fatalf("SSH quoting, login profile or stderr lost: %s", out)
-	}
-	fleetTouch(t, f.gate)
-	deploy, log := f.start(t, "quoted-paths")
-	if err := deploy.Wait(); err != nil {
-		t.Fatalf("quoted-path deployment: %v %s", err, fleetRead(log))
-	}
-}
-
-func TestDeployBootstrapCleanupWaitsForHelperExit(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	cmd, log := f.start(t, "cleanup-order", "CHECK_CLEANUP_ORDER=1")
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("deploy: %v %s", err, fleetRead(log))
-	}
-	if strings.Contains(fleetRead(log), "cleanup-before-helper-exit") {
-		t.Fatalf("NFS executable cleaned before helper exit: %s", fleetRead(log))
-	}
-	entries, err := os.ReadDir(filepath.Join(f.home, ".shuttle/deploy/tools"))
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("bootstrap workspace leaked: %v %v", entries, err)
 	}
 }
 
@@ -444,9 +374,12 @@ func TestDeploySSHHelperProcess(t *testing.T) {
 	finish(0)
 }
 
+// Every way a running transaction can lose its deployer or transport cancels
+// the whole transaction group on the target: once the host lock is free, no
+// process of the cancelled transaction survives to build or cycle later.
 func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 	t.Parallel()
-	for _, how := range []string{"ssh", "runner-term", "helper-term", "helper-kill", "deployer-int", "deployer-kill", "deadline", "local"} {
+	for _, how := range []string{"ssh", "runner-term", "helper-term", "helper-kill", "deployer-int", "deployer-kill", "local"} {
 		t.Run(how, func(t *testing.T) {
 			t.Parallel()
 			f := newDeployFleet(t)
@@ -454,12 +387,9 @@ func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 			if how == "local" {
 				host = "local"
 			}
-			var extra []string
-			if how == "deadline" {
-				extra = []string{fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(45*time.Second).Unix())}
-			}
-			cmd, log := f.startHost(t, "cancel-"+how, host, extra...)
+			cmd, log := f.startHost(t, "cancel-"+how, host)
 			deployAwait(t, "build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
+			holder := f.lockHolder(t)
 			switch how {
 			case "ssh", "runner-term":
 				pidFile := "ssh.pid"
@@ -474,41 +404,17 @@ func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 				syscall.Kill(pid, sig)
 			case "deployer-kill":
 				cmd.Process.Kill()
-			case "helper-term", "helper-kill":
-				info := fleetRead(filepath.Join(f.home, ".shuttle/deploy.lock"))
-				if !strings.Contains(info, "; pid=") {
-					t.Fatalf("missing holder in %s: %q; events=%s log=%s", f.home, info, fleetRead(f.events), fleetRead(log))
-				}
-				start := strings.Index(info, "; pid=") + 6
-				end := strings.Index(info[start:], ";")
-				pid, _ := strconv.Atoi(info[start : start+end])
-				sig := syscall.SIGTERM
-				if how == "helper-kill" {
-					sig = syscall.SIGKILL
-				}
-				syscall.Kill(pid, sig)
+			case "helper-term":
+				syscall.Kill(holder, syscall.SIGTERM)
+			case "helper-kill":
+				syscall.Kill(holder, syscall.SIGKILL)
 			case "deployer-int", "local":
 				cmd.Process.Signal(syscall.SIGINT)
 			}
 			if e := cmd.Wait(); e == nil {
 				t.Fatalf("cancel reported success: %s", fleetRead(log))
 			}
-			deployAwait(t, "lock free: "+log, func() bool {
-				file, e := os.OpenFile(filepath.Join(f.home, ".shuttle/deploy.lock"), os.O_RDWR, 0600)
-				if e != nil {
-					return false
-				}
-				defer file.Close()
-				return syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil
-			})
-			fleetTouch(t, f.gate)
-			next, nextlog := f.startHost(t, "after-"+how, host)
-			if e := next.Wait(); e != nil {
-				t.Fatalf("next deploy: %v %s", e, fleetRead(nextlog))
-			}
-			if n := strings.Count(fleetRead(f.events), "cycle\n"); n != 1 {
-				t.Fatalf("cancelled deployment later cycled: %d %s", n, fleetRead(f.events))
-			}
+			f.awaitTransactionGone(t, holder)
 			if !strings.Contains(fleetRead(f.events), "umask 0027") {
 				t.Fatalf("login umask changed: %s", fleetRead(f.events))
 			}
@@ -519,43 +425,28 @@ func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 	}
 }
 
-func TestDeployKilledWaiterNeverAcquiresAfterHolder(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	holder, log := f.start(t, "holder")
-	deployAwait(t, "holder build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
-	if e := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("second target"), 0600); e != nil {
-		t.Fatal(e)
+// lockHolder is the pid of the lock helper holding the host lock. It leads
+// the process group its transaction runs in.
+func (f *deployFleet) lockHolder(t *testing.T) int {
+	t.Helper()
+	info := fleetRead(filepath.Join(f.home, ".shuttle/deploy.lock"))
+	var pid, pgid int
+	if i := strings.Index(info, "; pid="); i < 0 {
+		t.Fatalf("missing holder: %q; events=%s", info, fleetRead(f.events))
+	} else if _, e := fmt.Sscanf(info[i:], "; pid=%d; pgid=%d;", &pid, &pgid); e != nil || pid != pgid {
+		t.Fatalf("holder %q: pid %d pgid %d %v", info, pid, pgid, e)
 	}
-	f.git(t, f.repo, "add", "tracked")
-	f.git(t, f.repo, "commit", "-m", "second target")
-	f.git(t, f.repo, "push", "origin", "main")
-	waiter, waitlog := f.start(t, "waiter")
-	deployAwait(t, "waiter: "+waitlog, func() bool { return strings.Contains(fleetRead(waitlog), "waiting for") })
-	waiter.Process.Kill()
-	if e := waiter.Wait(); e == nil {
-		t.Fatal("killed waiter succeeded")
-	}
-	deployAwait(t, "cancelled waiter: "+waitlog, func() bool {
-		return strings.Contains(fleetRead(waitlog), "observer EOF")
-	})
-	fleetTouch(t, f.gate)
-	if e := holder.Wait(); e != nil {
-		t.Fatalf("holder %v: %s", e, fleetRead(log))
-	}
-	if builds := strings.Count(fleetRead(f.events), "build "); builds != 1 {
-		t.Fatalf("forgotten waiter ran later: %s", fleetRead(f.events))
-	}
+	return pid
 }
 
-func TestDeployTransactionSSHNeverPrompts(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	cmd, log := f.start(t, "batch-mode")
-	if e := cmd.Wait(); e != nil {
-		t.Fatalf("background transaction SSH permits prompting: %v %s", e, fleetRead(log))
-	}
+// awaitTransactionGone waits until the host lock is free and no process is
+// left in the cancelled transaction's group.
+func (f *deployFleet) awaitTransactionGone(t *testing.T, group int) {
+	t.Helper()
+	deployAwait(t, "lock free", func() bool { return f.lockFree(t) })
+	deployAwait(t, fmt.Sprintf("transaction group %d gone", group), func() bool {
+		return syscall.Kill(-group, 0) == syscall.ESRCH
+	})
 }
 
 func TestDeploySSHPreflightIsBoundedAndRetainsStderr(t *testing.T) {
@@ -591,17 +482,6 @@ func TestDeployBootstrapFailureReportsStepAndCleansWorkspace(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("bootstrap workspace leaked: %v", entries)
-	}
-}
-
-func TestDeployCommitRefDoesNotPushAnObjectAsABranch(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	cmd := exec.Command("bash", filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", "fake", "--ref", f.sha[:8])
-	cmd.Env = f.env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("commit ref deployment: %v %s", err, out)
 	}
 }
 
@@ -681,174 +561,19 @@ func TestDeployRevisionPreparationRepairsInterruptedTrees(t *testing.T) {
 	run()
 }
 
-func TestDeployCoalescingRetainsActualRollbackTree(t *testing.T) {
+// A remote daemon that never proves a ready boot within the forwarded
+// readiness timeout fails the host before quarantine release and pruning.
+// scripts/test-shuttle-deploy.sh holds each launch hold to the same refusal.
+func TestDeployRemoteVerificationFailureHoldsReleaseAndPruning(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
-	f.env = append(f.env, "CHECK_REAL_PRUNE=1")
-	run := func(name string) {
-		t.Helper()
-		cmd, log := f.start(t, name)
-		if err := cmd.Wait(); err != nil {
-			t.Fatalf("deploy: %v %s", err, fleetRead(log))
-		}
+	cmd, log := f.start(t, "remote-booting", "BOOTING_LAUNCHER=1", "CHECK_POLL=1", "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
+	if err := cmd.Wait(); err == nil || !strings.Contains(fleetRead(log), "is still booting after") {
+		t.Fatalf("remote timeout override lost: %v %s", err, fleetRead(log))
 	}
-	run("first-target")
-	previous := f.sha
-	if err := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("next"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	f.git(t, f.repo, "commit", "-am", "next")
-	f.git(t, f.repo, "push")
-	f.sha = f.git(t, f.repo, "rev-parse", "HEAD")
-	run("next-target")
-	run("coalesced-target")
-	if _, err := os.Stat(filepath.Join(f.remote+".deploy", previous)); err != nil {
-		t.Fatalf("coalesced deploy pruned true rollback tree: %v", err)
-	}
-}
-
-func TestDeployForwardsRemoteReadinessOverrides(t *testing.T) {
-	t.Parallel()
-	for _, timeout := range []string{"0", "30"} {
-		t.Run(timeout, func(t *testing.T) {
-			t.Parallel()
-			f := newDeployFleet(t)
-			fleetTouch(t, f.gate)
-			cmd, log := f.start(t, "remote-ready", "BOOTING_LAUNCHER=1", "CHECK_POLL=1", "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS="+timeout, "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1")
-			err := cmd.Wait()
-			if timeout == "0" {
-				if err == nil || !strings.Contains(fleetRead(log), "is still booting after") || strings.Contains(fleetRead(f.events), "poll-interval") {
-					t.Fatalf("remote timeout override lost: %v %s", err, fleetRead(log))
-				}
-			} else if err != nil || !strings.Contains(fleetRead(f.events), "poll-interval 1\n") {
-				t.Fatalf("remote poll override lost: %v %s %s", err, fleetRead(log), fleetRead(f.events))
-			}
-		})
-	}
-}
-
-func TestDeployRefreshesCheckoutAfterReleaseBeforePiInspection(t *testing.T) {
-	t.Parallel()
-	for _, dirty := range []bool{false, true} {
-		t.Run(fmt.Sprint(dirty), func(t *testing.T) {
-			t.Parallel()
-			f := newDeployFleet(t)
-			fleetTouch(t, f.gate)
-			old := f.sha
-			if err := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("new"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			f.git(t, f.repo, "commit", "-am", "new")
-			f.git(t, f.repo, "push")
-			f.sha = f.git(t, f.repo, "rev-parse", "HEAD")
-			extra := []string{"PI_CHECKOUT=" + f.remote}
-			if dirty {
-				if err := os.WriteFile(filepath.Join(f.remote, "tracked"), []byte("my edits"), 0600); err != nil {
-					t.Fatal(err)
-				}
-				extra = nil
-			}
-			cmd, log := f.start(t, "fresh-checkout", extra...)
-			if err := cmd.Wait(); err != nil {
-				t.Fatalf("deploy: %v %s", err, fleetRead(log))
-			}
-			got := f.git(t, f.remote, "rev-parse", "HEAD")
-			if !dirty && got != f.sha {
-				t.Fatalf("regular checkout stayed stale: %s", got)
-			}
-			if dirty && (got != old || !strings.Contains(fleetRead(log), "checkout freshness: left")) {
-				t.Fatalf("dirty checkout not preserved/advised: %s %s", got, fleetRead(log))
-			}
-			if !dirty {
-				events := fleetRead(f.events)
-				if strings.Index(events, "release\n") > strings.Index(events, "pi-inspect "+f.sha) || !strings.Contains(events, "pi-inspect "+f.sha) {
-					t.Fatalf("Pi inspected before release/freshness: %s", events)
-				}
-			}
-		})
-	}
-}
-
-func TestDeployRollbackDoesNotExposeLeasesToOldPruners(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	cmd, log := f.startArgs(t, "old-pruner", "fake", []string{"--ref", f.sha}, "CHECK_OLD_PRUNE=1")
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("rollback: %v %s", err, fleetRead(log))
-	}
-	if _, err := os.Stat(filepath.Join(f.remote+".deploy", ".leases")); !os.IsNotExist(err) {
-		t.Fatalf("lease metadata exposed to old pruner: %v", err)
-	}
-}
-
-func TestDeployRetriesReleaseWhileThePollerIsBusy(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	cmd, log := f.start(t, "busy-release", "RELEASE_BUSY_ONCE=1", "SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS=0")
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("deploy with a busy Poller: %v %s", err, fleetRead(log))
-	}
-}
-
-func TestDeployLockBootstrapIsBoundedAndHomeHosted(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	cmd, log := f.start(t, "bounded-bootstrap", "CHECK_LOCK_BUILD=1")
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("lock bootstrap: %v %s", err, fleetRead(log))
-	}
-}
-
-func TestDeployLauncherCannotRetainTransactionLocks(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	cmd, log := f.start(t, "background-launcher", "BACKGROUND_LAUNCHER=1")
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("deploy: %v %s", err, fleetRead(log))
-	}
-	if pid, err := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "background.pid")))); err != nil || pid <= 0 {
-		t.Fatalf("background launcher did not run: %v %s", err, fleetRead(log))
-	}
-	lock, err := os.OpenFile(filepath.Join(f.home, ".shuttle", "deploy.lock"), os.O_RDWR, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatalf("finished deploy's background launcher retained host lock: %v", err)
-	}
-}
-
-func TestDeployConcurrentRunsCoalesceUnderHostLock(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	first, firstLog := f.start(t, "first")
-	deployAwait(t, "first build: "+firstLog, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
-	second, secondLog := f.start(t, "second")
-	deployAwait(t, "second waiting: "+secondLog, func() bool { return strings.Contains(fleetRead(secondLog), "deploy-lock: waiting for") })
-	if got := strings.Count(fleetRead(f.events), "build "); got != 1 {
-		t.Fatalf("overlapping builds=%d", got)
-	}
-	if log := fleetRead(secondLog); !strings.Contains(log, "deployer=") || !strings.Contains(log, "target="+f.sha) {
-		t.Fatalf("holder not named: %s", log)
-	}
-	fleetTouch(t, f.gate)
-	for i, cmd := range []*exec.Cmd{first, second} {
-		if err := cmd.Wait(); err != nil {
-			t.Fatalf("deploy %d: %v\nfirst: %s\nsecond: %s", i, err, fleetRead(firstLog), fleetRead(secondLog))
-		}
-	}
-	events := fleetRead(f.events)
-	if strings.Count(events, "build ") != 1 || strings.Count(events, "cycle\n") != 1 || strings.Count(events, "release\n") != 2 {
-		t.Fatalf("concurrent deploy events: %s", events)
-	}
-	if !strings.Contains(fleetRead(secondLog), "coalescing without a daemon cycle") {
-		t.Fatalf("coalescing not reported: %s", fleetRead(secondLog))
+	if events := fleetRead(f.events); strings.Contains(events, "poll-interval") || strings.Contains(events, "release\n") || strings.Contains(events, "prune\n") {
+		t.Fatalf("unverified deployment waited, released or pruned: %s", events)
 	}
 }
 
@@ -874,41 +599,7 @@ func TestDeployRemotePreflightRejectsUnpublishedAndImplicitRollback(t *testing.T
 			if got := fleetRead(f.events); got != "" {
 				t.Fatalf("preflight touched a host: %s\n%s", got, fleetRead(log))
 			}
-			if kind == "behind" {
-				cmd, log = f.startArgs(t, "explicit-rollback", "fake", []string{"--ref", f.sha})
-				if err := cmd.Wait(); err != nil {
-					t.Fatalf("explicit rollback refused: %v %s", err, fleetRead(log))
-				}
-			}
 		})
-	}
-}
-
-func TestDeployPinsDefaultRevisionWhenMainMoves(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	cmd, log := f.start(t, "moving-main", "SSH_GATE=1")
-	deployAwait(t, "target resolved", func() bool { _, err := os.Stat(filepath.Join(f.root, "ssh-entered")); return err == nil })
-	if err := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("new main\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	f.git(t, f.repo, "commit", "-am", "main moved")
-	newer := f.git(t, f.repo, "rev-parse", "HEAD")
-	f.git(t, f.repo, "push")
-	fleetTouch(t, filepath.Join(f.root, "ssh-go"))
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("deploy: %v %s", err, fleetRead(log))
-	}
-	events := fleetRead(f.events)
-	if !strings.Contains(events, "build "+f.sha+" build") || strings.Contains(events, newer) {
-		t.Fatalf("moving main changed target: %s", events)
-	}
-	if !strings.Contains(fleetRead(f.state), f.sha) {
-		t.Fatalf("wrong daemon: %s", fleetRead(f.state))
-	}
-	if got := f.git(t, f.remote, "rev-parse", "HEAD"); got != f.sha {
-		t.Fatalf("source branch moved: %s", got)
 	}
 }
 
@@ -950,28 +641,6 @@ func TestDeployLocalDefaultsToStableRootFromLinkedWorktree(t *testing.T) {
 	}
 	if got := f.git(t, linked, "branch", "--show-current"); got != "work" {
 		t.Fatalf("linked branch changed: %s", got)
-	}
-}
-
-func TestDeployShipsPinnedUISnapshotBeforeWrappedBuild(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	fleet := fmt.Sprintf(`{"remotes":[{"name":"fake","ssh":"fake","checkout":%q,"build_ui":false,"build_wrap":"build-wrapper"}]}`, f.remote)
-	if err := os.WriteFile(filepath.Join(f.root, "remotes.json"), []byte(fleet), 0600); err != nil {
-		t.Fatal(err)
-	}
-	cmd, log := f.start(t, "shipped-ui")
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("shipped deploy: %v %s", err, fleetRead(log))
-	}
-	events := fleetRead(f.events)
-	ship, wrap, build := strings.Index(events, "rsync "), strings.Index(events, "wrapper\n"), strings.Index(events, "build "+f.sha+" build SKIP_UI=1")
-	if ship < 0 || wrap <= ship || build <= wrap {
-		t.Fatalf("UI must ship before the wrapped build: %s", events)
-	}
-	if got := fleetRead(filepath.Join(f.remote+".deploy", f.sha, "ui", "dist", "index.html")); strings.TrimSpace(got) != "bundle" {
-		t.Fatalf("wrong shipped bundle: %q", got)
 	}
 }
 

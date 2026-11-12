@@ -65,30 +65,6 @@ run_value '' "printf '%s\\n' \"/a b's/c\""
 	}
 }
 
-func TestDeployLoginNoiseAndReadsCannotConsumeBootstrap(t *testing.T) {
-	t.Parallel()
-	f := newDeployFleet(t)
-	fleetTouch(t, f.gate)
-	profile := `umask 027
-shopt -q login_shell || exit 77
-printf 'profile stdout notice'
-printf 'profile stderr notice\n' >&2
-read -r ignored || :
-[ -z "$ignored" ] || exit 78
-export LOGIN_PROFILE_LOADED=yes
-`
-	if e := os.WriteFile(filepath.Join(f.home, ".bash_profile"), []byte(profile), 0600); e != nil {
-		t.Fatal(e)
-	}
-	cmd, log := f.start(t, "noisy-login")
-	if e := cmd.Wait(); e != nil {
-		t.Fatalf("deployment under noisy, reading profile: %v %s", e, fleetRead(log))
-	}
-	if strings.Count(fleetRead(f.events), "cycle\n") != 1 {
-		t.Fatalf("bootstrap did not complete: %s", fleetRead(f.events))
-	}
-}
-
 func TestDeployLoginProfileZeroExitCannotFakeCompletion(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
