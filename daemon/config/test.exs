@@ -40,7 +40,10 @@ config :shuttle,
   tailscale_home: false,
   tailnet_dial_test_cacerts_enabled: true,
   # Process scans go through each test's runner (`ps`), never the host's /proc.
-  proc_scan: false
+  proc_scan: false,
+  # A pasted message is submitted at once, not after the 400 ms a live TUI
+  # needs to take a paste; no test terminal is a live TUI.
+  paste_submit_delay_ms: 0
 
 # Test daemon identity. Application start freezes SHUTTLE_HOST when it is set
 # and asks `shuttle host --json` otherwise, so pinning it keeps the suite
