@@ -1,6 +1,5 @@
 defmodule Shuttle.DispatchIntegrationTest do
-  # sync: on_exit kills every Shuttle.TaskSupervisor child, other tests' included.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Shuttle.Test.TranscriptHelpers
 
@@ -18,7 +17,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   # ── Integration Runner ─────────────────────────────────────────────────────
   # Passes content and Shuttle commands to their owning real CLI, scoped to a
   # temporary store. Intercepts `tmux` calls with an in-memory session set.
-  # Named Agent so it can be injected as a module reference into Dispatcher.
+  # One instance per test, found through the test's scope, so the module can
+  # be injected as a runner into Dispatcher.
 
   defmodule IntegrationRunner do
     import Shuttle.Test.TmuxSessions
@@ -28,38 +28,36 @@ defmodule Shuttle.DispatchIntegrationTest do
     use Agent
 
     def start_link(_ \\ []) do
-      Agent.start_link(
-        fn -> %{felt_store: "", commands: [], tmux_sessions: MapSet.new()} end,
-        name: __MODULE__
-      )
+      Agent.start_link(fn -> %{felt_store: "", commands: [], tmux_sessions: MapSet.new()} end)
     end
 
+    defp server, do: Shuttle.Test.Env.server!(__MODULE__)
+
     def reset(felt_store) do
-      Agent.update(__MODULE__, fn _ ->
+      Agent.update(server(), fn _ ->
         %{felt_store: felt_store, commands: [], tmux_sessions: MapSet.new()}
       end)
     end
 
     def add_tmux_session(session),
-      do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
+      do: Agent.update(server(), &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
 
     def remove_tmux_session(session),
-      do:
-        Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
+      do: Agent.update(server(), &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
 
-    def commands, do: Agent.get(__MODULE__, & &1.commands)
-    def tmux_sessions, do: Agent.get(__MODULE__, & &1.tmux_sessions)
+    def commands, do: Agent.get(server(), & &1.commands)
+    def tmux_sessions, do: Agent.get(server(), & &1.tmux_sessions)
 
     # The process scan's answers, in order; the last one repeats. Defaults to
     # no processes.
     def set_ps_results(results) when is_list(results) and results != [],
-      do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
+      do: Agent.update(server(), &Map.put(&1, :ps_results, results))
 
     @impl true
     def cmd(command, args, opts) when command in ["felt", "shuttle"] do
-      felt_store = Agent.get(__MODULE__, & &1.felt_store)
+      felt_store = Agent.get(server(), & &1.felt_store)
 
-      Agent.update(__MODULE__, fn s ->
+      Agent.update(server(), fn s ->
         %{s | commands: s.commands ++ [{command, args}]}
       end)
 
@@ -85,11 +83,11 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
 
     def cmd("tmux", ["has-session", "-t", session], _opts) do
-      Agent.update(__MODULE__, fn s ->
+      Agent.update(server(), fn s ->
         %{s | commands: s.commands ++ [{"tmux", ["has-session", "-t", session]}]}
       end)
 
-      sessions = Agent.get(__MODULE__, & &1.tmux_sessions)
+      sessions = Agent.get(server(), & &1.tmux_sessions)
       if tmux_session_exists?(sessions, session), do: {"", 0}, else: {"can't find session", 1}
     end
 
@@ -97,7 +95,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       # args = ["new-session", "-d", "-s", session, "-c", work_dir, "bash", "-l", script_path]
       session = Enum.at(args, 3)
 
-      Agent.update(__MODULE__, fn s ->
+      Agent.update(server(), fn s ->
         %{
           s
           | commands: s.commands ++ [{"tmux", args}],
@@ -109,7 +107,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
 
     def cmd("ps", args, _opts) do
-      Agent.get_and_update(__MODULE__, fn s ->
+      Agent.get_and_update(server(), fn s ->
         s = %{s | commands: s.commands ++ [{"ps", args}]}
 
         case Map.get(s, :ps_results, [{"", 0}]) do
@@ -120,7 +118,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
 
     def cmd(cmd, args, _opts) do
-      Agent.update(__MODULE__, fn s -> %{s | commands: s.commands ++ [{cmd, args}]} end)
+      Agent.update(server(), fn s -> %{s | commands: s.commands ++ [{cmd, args}]} end)
       {"", 0}
     end
   end
@@ -144,7 +142,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   # ── Setup ──────────────────────────────────────────────────────────────────
 
   setup do
-    start_supervised!(IntegrationRunner)
+    Shuttle.Test.Env.start_scoped!(IntegrationRunner)
+    test = self()
     host = mk_tmp_felt_store()
     IntegrationRunner.reset(host)
 
@@ -169,9 +168,10 @@ defmodule Shuttle.DispatchIntegrationTest do
       # still be backfilling (fiber marker, session ledger) when the test's
       # assertion is already satisfied — a straggler writing into host/data_dir
       # makes the recursive deletes below race a recreate ("file already
-      # exists"). This suite is async: false, so every child here is ours:
-      # kill and await them before sweeping.
-      for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor) do
+      # exists"). Kill and await this test's tasks before sweeping.
+      for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor),
+          {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
+          test in Keyword.get(dictionary, :"$callers", []) do
         ref = Process.monitor(pid)
         Process.exit(pid, :kill)
 
