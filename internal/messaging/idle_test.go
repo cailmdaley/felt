@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -73,7 +74,7 @@ func testClaudeNativeIdle(t *testing.T, background bool) {
 		rec.EventsOffset = info.Size()
 	}
 	w := newIdlePoller(t)
-	go func() { w.done <- watchIdle(w.ctx, env, rec, w.polls) }()
+	go func() { w.done <- watchIdle(w.ctx, env, rec, w.polls, w.now) }()
 	// The first poll reaches a hook watcher only once the turn's Stop has
 	// been read; without background work the native notice already ended
 	// the watch.
@@ -84,7 +85,7 @@ func testClaudeNativeIdle(t *testing.T, background bool) {
 		}
 		want += 30000
 		writeEvents(t, events, hookEvent{Timestamp: want, Type: "stop", SessionID: "session"})
-		n, done = w.poll(3 * idleHookQuietPolls)
+		n, done = w.poll(3 * quietPolls)
 	}
 	if !done || n.State != NoticeIdle || n.FinishedAt.UnixMilli() != want {
 		t.Fatalf("%v %+v", done, n)
@@ -149,13 +150,20 @@ func writeEvents(t *testing.T, path string, events ...hookEvent) {
 	}
 }
 
-// idlePoller drives an idle watcher one poll at a time, so a test counts
-// polls instead of waiting out the grace window.
+// idlePoller drives an idle watcher one poll at a time on a clock of its own
+// that each poll advances by idleHookPoll, so a test counts polls instead of
+// waiting out the grace window.
 type idlePoller struct {
 	ctx   context.Context
 	polls chan time.Time
 	done  chan IdleNotice
+	clock atomic.Int64
 }
+
+// quietPolls is how many polls the grace window spans.
+const quietPolls = int(idleHookQuiet / idleHookPoll)
+
+func (w *idlePoller) now() time.Time { return time.Unix(0, w.clock.Load()) }
 
 func newIdlePoller(t *testing.T) *idlePoller {
 	t.Helper()
@@ -168,7 +176,7 @@ func newIdlePoller(t *testing.T) *idlePoller {
 func startHookIdle(t *testing.T, path string, offset int64) *idlePoller {
 	t.Helper()
 	w := newIdlePoller(t)
-	go func() { n, _ := watchHookIdle(w.ctx, path, "s", offset, w.polls); w.done <- n }()
+	go func() { n, _ := watchHookIdle(w.ctx, path, "s", offset, w.polls, w.now); w.done <- n }()
 	return w
 }
 
@@ -176,13 +184,23 @@ func startHookIdle(t *testing.T, path string, offset int64) *idlePoller {
 // one before, and returns the notice if the watcher ends first.
 func (w *idlePoller) poll(n int) (IdleNotice, bool) {
 	for range n {
-		select {
-		case w.polls <- time.Time{}:
-		case notice := <-w.done:
+		w.clock.Add(int64(idleHookPoll))
+		if notice, done := w.tick(); done {
 			return notice, true
 		}
 	}
 	return IdleNotice{}, false
+}
+
+// tick delivers one poll without advancing the clock, as a ticker delivers a
+// tick that waited in its channel.
+func (w *idlePoller) tick() (IdleNotice, bool) {
+	select {
+	case w.polls <- time.Time{}:
+		return IdleNotice{}, false
+	case notice := <-w.done:
+		return notice, true
+	}
 }
 
 // A stop with background work, or one followed by activity inside the grace
@@ -198,16 +216,38 @@ func TestHookIdleNeedsQuietStop(t *testing.T) {
 		hookEvent{Timestamp: 3, Type: "user_prompt_submit", SessionID: "s"},
 		hookEvent{Timestamp: 4, Type: "stop", SessionID: "s", BackgroundTasks: 1},
 		hookEvent{Timestamp: 5, Type: "stop", SessionID: "other"})
-	if n, done := w.poll(3 * idleHookQuietPolls); done {
+	if n, done := w.poll(3 * quietPolls); done {
 		t.Fatalf("premature %+v", n)
 	}
 	writeEvents(t, path, hookEvent{Timestamp: 6, Type: "stop", SessionID: "s"})
-	if n, done := w.poll(idleHookQuietPolls - 1); done {
+	if n, done := w.poll(quietPolls - 1); done {
 		t.Fatalf("idle inside the grace window: %+v", n)
 	}
-	n, done := w.poll(3 * idleHookQuietPolls)
+	n, done := w.poll(3 * quietPolls)
 	if !done || n.State != NoticeIdle || n.FinishedAt.UnixMilli() != 6 {
 		t.Fatalf("%v %+v", done, n)
+	}
+}
+
+// The grace runs from when the stop is read, however many ticks arrive in
+// it: a tick that waited in the ticker's channel while the watch began counts
+// for no time, so activity late in the window still cancels the stop.
+func TestHookIdleGraceIgnoresStaleTick(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	writeEvents(t, path, hookEvent{Timestamp: 1, Type: "stop", SessionID: "s"})
+	w := startHookIdle(t, path, 0)
+	if n, done := w.tick(); done {
+		t.Fatalf("idle on a stale tick: %+v", n)
+	}
+	// The last tick is taken only once the watcher has judged the poll before.
+	w.poll(quietPolls - 1)
+	if n, done := w.tick(); done {
+		t.Fatalf("idle inside the grace window: %+v", n)
+	}
+	writeEvents(t, path, hookEvent{Timestamp: 2, Type: "user_prompt_submit", SessionID: "s"})
+	if n, done := w.poll(3 * quietPolls); done {
+		t.Fatalf("idle after a continuation: %+v", n)
 	}
 }
 
@@ -215,7 +255,7 @@ func TestHookIdleSessionEndIsExit(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	writeEvents(t, path, hookEvent{Timestamp: 9, Type: "session_end", SessionID: "s"})
-	n, err := watchHookIdle(context.Background(), path, "s", 0, nil)
+	n, err := watchHookIdle(context.Background(), path, "s", 0, nil, time.Now)
 	if err != nil || n.State != NoticeExited {
 		t.Fatalf("%+v %v", n, err)
 	}
@@ -241,11 +281,11 @@ func TestHookIdleWaitsForSpawnedAgents(t *testing.T) {
 		hookEvent{Timestamp: 1, Type: "post_tool_use", SessionID: "s", Tool: "spawn_agent"},
 		hookEvent{Timestamp: 2, Type: "stop", SessionID: "s"})
 	w := startHookIdle(t, path, 0)
-	if n, done := w.poll(3 * idleHookQuietPolls); done {
+	if n, done := w.poll(3 * quietPolls); done {
 		t.Fatalf("premature %+v", n)
 	}
 	writeEvents(t, path, hookEvent{Timestamp: 3, Type: "subagent_stop", SessionID: "s"})
-	if n, done := w.poll(3 * idleHookQuietPolls); !done || n.State != NoticeIdle {
+	if n, done := w.poll(3 * quietPolls); !done || n.State != NoticeIdle {
 		t.Fatalf("%v %+v", done, n)
 	}
 }

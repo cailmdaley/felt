@@ -51,11 +51,11 @@ const (
 const IdleSubscriptionLifetime = 12 * time.Hour
 
 // A hook-event watcher reads the stream once per idleHookPoll, and a quiet
-// stop is idle after idleHookQuietPolls reads with no further activity: a
-// grace of about two seconds.
+// stop is idle once idleHookQuiet has passed since the watcher read it with
+// no further activity.
 const (
-	idleHookPoll       = 250 * time.Millisecond
-	idleHookQuietPolls = 8
+	idleHookPoll  = 250 * time.Millisecond
+	idleHookQuiet = 2 * time.Second
 )
 
 // IdleSubscription is the receipt's account of the subscription.
@@ -167,12 +167,12 @@ func ReadIdleRecord(path string) (IdleRecord, error) {
 func WatchIdle(ctx context.Context, env *sysenv.Env, rec IdleRecord) IdleNotice {
 	ticker := time.NewTicker(idleHookPoll)
 	defer ticker.Stop()
-	return watchIdle(ctx, env, rec, ticker.C)
+	return watchIdle(ctx, env, rec, ticker.C, time.Now)
 }
 
 // watchIdle is WatchIdle with a hook-event watcher reading the stream at
-// each poll.
-func watchIdle(ctx context.Context, env *sysenv.Env, rec IdleRecord, polls <-chan time.Time) IdleNotice {
+// each poll and measuring its grace with now.
+func watchIdle(ctx context.Context, env *sysenv.Env, rec IdleRecord, polls <-chan time.Time, now func() time.Time) IdleNotice {
 	deadline := time.Unix(rec.CreatedAt, 0).Add(IdleSubscriptionLifetime)
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
@@ -190,11 +190,11 @@ func watchIdle(ctx context.Context, env *sysenv.Env, rec IdleRecord, polls <-cha
 		// stop or an exit ends it.
 		if err == nil && n.State == NoticeIdle {
 			if after, busy := claudeStopLeftWork(ctx, eventsFile(env), a.ID, rec.EventsOffset, n.FinishedAt); busy {
-				n, err = watchHookIdle(ctx, eventsFile(env), a.ID, after, polls)
+				n, err = watchHookIdle(ctx, eventsFile(env), a.ID, after, polls, now)
 			}
 		}
 	case IdleSignalHookEvents:
-		n, err = watchHookIdle(ctx, eventsFile(env), a.ID, rec.EventsOffset, polls)
+		n, err = watchHookIdle(ctx, eventsFile(env), a.ID, rec.EventsOffset, polls, now)
 	default:
 		err = fmt.Errorf("unknown idle signal %q", rec.Signal)
 	}
@@ -331,12 +331,13 @@ type hookEvent struct {
 }
 
 // watchHookIdle tails the event stream from offset, reading it again at each
-// poll. A `stop` with no background task becomes idle after
-// idleHookQuietPolls polls with no further activity for the session; any
-// activity in that window cancels it.
-func watchHookIdle(ctx context.Context, path, sessionID string, offset int64, polls <-chan time.Time) (IdleNotice, error) {
+// poll. A `stop` with no background task becomes idle once idleHookQuiet has
+// passed on now since it was read, with no further activity for the session;
+// any activity in that window cancels it. A poll only wakes the watcher, so a
+// tick that waited in its channel cannot shorten the grace.
+func watchHookIdle(ctx context.Context, path, sessionID string, offset int64, polls <-chan time.Time, now func() time.Time) (IdleNotice, error) {
 	var candidate *hookEvent
-	quiet := 0
+	var seen time.Time
 	// Codex stops do not count spawned agents; the stream does, as
 	// spawn_agent/followup_task tool calls less subagent_stop events.
 	children := 0
@@ -351,7 +352,7 @@ func watchHookIdle(ctx context.Context, path, sessionID string, offset int64, po
 		case "stop":
 			if e.BackgroundTasks == 0 {
 				ev := e
-				candidate, quiet = &ev, 0
+				candidate, seen = &ev, now()
 			} else {
 				candidate = nil
 			}
@@ -376,14 +377,13 @@ func watchHookIdle(ctx context.Context, path, sessionID string, offset int64, po
 		if exited != nil {
 			return *exited, nil
 		}
-		if candidate != nil && children <= 0 && quiet >= idleHookQuietPolls {
+		if candidate != nil && children <= 0 && now().Sub(seen) >= idleHookQuiet {
 			return IdleNotice{State: NoticeIdle, FinishedAt: time.UnixMilli(candidate.Timestamp)}, nil
 		}
 		select {
 		case <-ctx.Done():
 			return IdleNotice{}, ctx.Err()
 		case <-polls:
-			quiet++
 		}
 	}
 }
