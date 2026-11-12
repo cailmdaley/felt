@@ -35,6 +35,7 @@ var processReadAllowlist = map[string]string{
 	"felt/storage.go Storage.BackfillIntrinsicIDs os.Stderr": "a store walk's warning about a file it could not backfill is a diagnostic on the process stderr, never command output",
 	"felt/storage.go Storage.listFilesWithMode os.Stderr":    "a store walk's warnings about unparseable or unhydrated files are diagnostics on the process stderr, never command output",
 	"felt/storage.go storageReadWorkers os.Getenv":           "FELT_READ_WORKERS configures the storage pool across all command entry points",
+	"atomicfile/atomicfile.go - os.Getenv":                   "FELT_TEST_FSYNC=0 turns off fsync for a whole test process and the CLIs it runs; files reach atomicfile with no Env",
 	"felt/person.go PersonAt exec.Command":                   "felt.person is the git config of the repository holding a fiber, read where Storage creates fibers; Storage carries no Env",
 }
 

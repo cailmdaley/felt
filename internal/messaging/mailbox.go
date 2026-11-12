@@ -833,7 +833,7 @@ func mailboxWrite(path string, b []byte, exclusive bool) error {
 	}
 	defer os.Remove(f.Name())
 	if _, err = f.Write(b); err == nil {
-		err = f.Sync()
+		err = atomicfile.Sync(f)
 	}
 	closeErr := f.Close()
 	if err == nil {
@@ -867,7 +867,7 @@ func mailboxWriteReservationWith(path string, b []byte, link func(string, string
 	tempPath := f.Name()
 	defer os.Remove(tempPath)
 	if _, err = f.Write(b); err == nil {
-		err = f.Sync()
+		err = atomicfile.Sync(f)
 	}
 	closeErr := f.Close()
 	if err == nil {

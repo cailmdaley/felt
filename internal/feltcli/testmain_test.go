@@ -42,6 +42,7 @@ func TestMain(m *testing.M) {
 		"HOME":            home,
 		"XDG_CACHE_HOME":  filepath.Join(dir, "cache"),
 		"XDG_CONFIG_HOME": filepath.Join(dir, "config"),
+		"FELT_TEST_FSYNC": "0",
 	} {
 		if err := os.Setenv(key, value); err != nil {
 			panic(err)

@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/spf13/cobra"
 )
 
@@ -361,7 +362,7 @@ func replaceBinaryPairWithRename(feltPath string, binaries map[string][]byte, re
 			cleanupTemps()
 			return fmt.Errorf("writing staged %q: %w", target.path, err)
 		}
-		if err := file.Sync(); err != nil {
+		if err := atomicfile.Sync(file); err != nil {
 			_ = file.Close()
 			cleanupTemps()
 			return fmt.Errorf("syncing staged %q: %w", target.path, err)

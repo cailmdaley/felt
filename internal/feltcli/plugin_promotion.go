@@ -897,7 +897,7 @@ func copyTree(source, destination string) error {
 		// would otherwise present a valid-looking generation over garbage.
 		var syncErr error
 		if copyErr == nil {
-			syncErr = out.Sync()
+			syncErr = atomicfile.Sync(out)
 		}
 		closeErr := out.Close()
 		if copyErr != nil {

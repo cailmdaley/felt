@@ -25,6 +25,12 @@
 // Once the rename has succeeded the new content is in place, so a failing
 // directory sync afterwards is not reported as a failed write.
 //
+// Every fsync felt and shuttle make goes through Sync or SyncDir. A process
+// started with FELT_TEST_FSYNC=0 skips them all, and so do the CLIs it runs,
+// which inherit the variable: test suites set it in TestMain, since their
+// files live in temp dirs no power loss needs to survive, and on macOS the
+// F_FULLFSYNC behind each sync otherwise dominates their wall time.
+//
 // Because the target's inode is swapped rather than rewritten, a replacement
 // differs from an in-place os.WriteFile:
 //
@@ -45,6 +51,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -140,7 +147,7 @@ func (f *File) Commit() error {
 	name := f.Name()
 	var err error
 	if f.durable {
-		err = f.Sync()
+		err = Sync(f.File)
 	}
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
@@ -175,6 +182,9 @@ func (f *File) Abort() {
 // is tolerated: it never offered the durability the sync buys, and refusing to
 // write there would trade a narrower crash window for a tool that cannot run.
 func SyncDir(dir string) error {
+	if !fsyncEnabled() {
+		return nil
+	}
 	d, err := os.Open(dir)
 	if err != nil {
 		return err
@@ -185,6 +195,17 @@ func SyncDir(dir string) error {
 	}
 	return nil
 }
+
+// Sync is f.Sync: it flushes f's content to stable storage.
+func Sync(f *os.File) error {
+	if !fsyncEnabled() {
+		return nil
+	}
+	return f.Sync()
+}
+
+// fsyncEnabled is false in a process started with FELT_TEST_FSYNC=0.
+var fsyncEnabled = sync.OnceValue(func() bool { return os.Getenv("FELT_TEST_FSYNC") != "0" })
 
 // TolerableSyncError reports fsync refusals from filesystems that simply do
 // not support it. ENOTSUP and EOPNOTSUPP are the same errno on Linux but

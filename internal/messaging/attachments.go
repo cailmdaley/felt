@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -162,7 +163,7 @@ func materializeAttachment(path, dir string, attachment Attachment) error {
 		_, err = tmp.Write(attachment.Data)
 	}
 	if err == nil {
-		err = tmp.Sync()
+		err = atomicfile.Sync(tmp)
 	}
 	closeErr := tmp.Close()
 	if err == nil {

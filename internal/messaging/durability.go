@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+
+	"github.com/cailmdaley/felt/internal/atomicfile"
 )
 
 // ensureDir creates path and syncs each newly affected directory entry. This
@@ -48,5 +50,5 @@ func syncDir(path string) error {
 		return err
 	}
 	defer f.Close()
-	return f.Sync()
+	return atomicfile.Sync(f)
 }
