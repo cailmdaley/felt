@@ -82,7 +82,8 @@ defmodule Shuttle.PollerBootTest do
     assert {:ok, poller} = Task.await(starter, 30_000)
     assert Poller.snapshot(name) == %{}
     send(adoption_process, :finish_adoption)
-    :sys.get_state(poller, 30_000)
+    # The shipped publication debounce, which `start_poller!/1` shrinks to zero.
+    assert %{publish_debounce_ms: 1_000} = :sys.get_state(poller, 30_000)
     assert adoption_process == poller
     assert %{boot_quarantine: true} = Poller.snapshot(name)
     assert Process.alive?(poller)

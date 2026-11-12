@@ -59,6 +59,8 @@ defmodule Shuttle.Test.PollerHelpers do
     isolate_host_state!()
     opts = Keyword.put_new_lazy(opts, :daemon_heartbeat_file, &test_heartbeat_file/0)
     opts = Keyword.put_new(opts, :change_interval_ms, :infinity)
+    # A change publishes once the Poller's mailbox drains, not a second later.
+    opts = Keyword.put_new(opts, :publish_debounce_ms, 0)
 
     # No name (or the singleton's own) starts an unnamed Poller and makes it
     # this test's `Shuttle.Poller` (`Shuttle.Env.server/1`), so concurrent

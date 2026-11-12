@@ -74,6 +74,8 @@ defmodule Shuttle.Poller do
   @dispatch_call_timeout_ms 30_000
   @orchestrator_state_call_timeout_ms 30_000
   @published_state_key :shuttle_poller_published_state
+  # How long a change waits to be published, so a burst of transitions
+  # encodes the state once. The `:publish_debounce_ms` option overrides it.
   @published_state_debounce_ms 1_000
 
   # Resume-loop circuit breaker. A still-active oneshot whose worker exits is
@@ -143,6 +145,7 @@ defmodule Shuttle.Poller do
       :poll_interval_ms,
       :max_concurrent_workers,
       :heartbeat_interval_ms,
+      :publish_debounce_ms,
       :tick_timer_ref,
       :tick_token,
       :stall_timeout_ms,
@@ -1038,6 +1041,7 @@ defmodule Shuttle.Poller do
     %State{
       self_ref: self_ref,
       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, @default_poll_interval_ms),
+      publish_debounce_ms: Keyword.get(opts, :publish_debounce_ms, @published_state_debounce_ms),
       max_concurrent_workers:
         Keyword.get_lazy(opts, :max_concurrent_workers, fn ->
           Shuttle.Host.max_concurrent_workers(:infinity)
@@ -1336,7 +1340,7 @@ defmodule Shuttle.Poller do
         publish_projection(%{state | published_timer_ref: nil})
       else
         if is_nil(state.published_timer_ref) do
-          ref = Process.send_after(self(), :publish_state, @published_state_debounce_ms)
+          ref = Process.send_after(self(), :publish_state, state.publish_debounce_ms)
           %{state | published_timer_ref: ref}
         else
           state
