@@ -650,6 +650,7 @@ var nativeFields = map[string]nativeFieldSpec{
 	"outcome":        {accessor: func(f *felt.Felt) (any, bool) { return f.Outcome, f.Outcome != "" }, prefilterKey: "outcome", prefilterable: true},
 	"due":            {accessor: func(f *felt.Felt) (any, bool) { return f.Due, f.Due != nil }, prefilterKey: "due", prefilterable: true},
 	"description":    {accessor: func(f *felt.Felt) (any, bool) { return f.Description, f.Description != "" }, prefilterKey: "description", prefilterable: true},
+	"role":           {accessor: func(f *felt.Felt) (any, bool) { return f.Role, f.Role != "" }, prefilterKey: "role", prefilterable: true},
 	"body":           {accessor: func(f *felt.Felt) (any, bool) { return f.Body, f.Body != "" }, prefilterable: false},
 	"modified_at":    {accessor: feltModifiedAtValue, prefilterable: false},
 	"modified-at":    {accessor: feltModifiedAtValue, prefilterable: false},

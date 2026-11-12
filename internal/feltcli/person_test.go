@@ -3,6 +3,7 @@ package feltcli
 import (
 	"encoding/json"
 	"os/exec"
+	"sort"
 	"strings"
 	"testing"
 
@@ -210,5 +211,42 @@ func TestOfficeAloneIsNotMine(t *testing.T) {
 	inFlight := sectionBody(sessionContextFor(t, dir), "## Active / Open")
 	if strings.Contains(inFlight, "office") || !strings.Contains(inFlight, "desk") {
 		t.Fatalf("Active / Open:\n%s", inFlight)
+	}
+}
+
+// role is a native field like due or outcome: field selectors, filters and
+// metadata search reach it.
+func TestRoleIsASelectableAndSearchableField(t *testing.T) {
+	t.Parallel()
+	dir := newPersonStore(t)
+	ids := func(args ...string) []string {
+		t.Helper()
+		out, err := runCommand(t, dir, append([]string{"ls", "--json", "--json-field", "id,role"}, args...)...)
+		if err != nil {
+			t.Fatalf("ls %v: %v\n%s", args, err, out)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal([]byte(out), &rows); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, row := range rows {
+			if role, ok := row["role"]; ok {
+				got = append(got, row["id"].(string)+"="+role.(string))
+			} else {
+				got = append(got, row["id"].(string))
+			}
+		}
+		sort.Strings(got)
+		return got
+	}
+	if got := strings.Join(ids("-s", "all", "--has-field", "role"), " "); got != "done=analyst/sam mine=analyst/alice theirs=sam" {
+		t.Fatalf("--has-field role: %s", got)
+	}
+	if got := strings.Join(ids("-s", "all", "--any", "field:role"), " "); got != "done=analyst/sam mine=analyst/alice theirs=sam" {
+		t.Fatalf("--any field:role: %s", got)
+	}
+	if got := strings.Join(ids("-s", "all", "--no-body", "analyst/sam"), " "); got != "done=analyst/sam" {
+		t.Fatalf("metadata search on role: %s", got)
 	}
 }
