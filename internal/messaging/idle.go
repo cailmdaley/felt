@@ -371,13 +371,16 @@ func watchHookIdle(ctx context.Context, path, sessionID string, offset int64, po
 	tail := eventTail{path: path, offset: offset}
 	defer tail.close()
 	for {
+		// Read the clock before the stream: whatever was written by then is
+		// judged in this pass, so the grace never ends on an unread continuation.
+		at := now()
 		if err := tail.read(observe); err != nil {
 			return IdleNotice{}, err
 		}
 		if exited != nil {
 			return *exited, nil
 		}
-		if candidate != nil && children <= 0 && now().Sub(seen) >= idleHookQuiet {
+		if candidate != nil && children <= 0 && at.Sub(seen) >= idleHookQuiet {
 			return IdleNotice{State: NoticeIdle, FinishedAt: time.UnixMilli(candidate.Timestamp)}, nil
 		}
 		select {
