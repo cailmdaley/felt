@@ -101,6 +101,9 @@ type app struct {
 	// messageResolveWait bounds how long fiber-addressed messages wait for a
 	// restarting host's session ledger to become trustworthy again.
 	messageResolveWait time.Duration
+	// eventsLockWait bounds how long an event append waits for the stream's
+	// rotation lock before dropping its line.
+	eventsLockWait time.Duration
 
 	env           *sysenv.Env
 	json          bool   // --json
@@ -159,6 +162,7 @@ func newApp(env *sysenv.Env) *app {
 		daemonSignalPID:           signalDaemonPID,
 		daemonPause:               time.Sleep,
 		messageResolveWait:        90 * time.Second,
+		eventsLockWait:            30 * time.Second,
 		daemonLifecycleTimeout:    daemonPostTimeout,
 		boardEntropy:              rand.Reader,
 		eventNow:                  time.Now,

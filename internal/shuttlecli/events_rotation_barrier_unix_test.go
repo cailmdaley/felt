@@ -15,7 +15,7 @@ func TestEventAppendWaitsForRotationBarrier(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	unlock := lockEventsRotation(path + eventsLockSuffix)
+	unlock, _ := lockEventsRotation(path+eventsLockSuffix, time.Second)
 	locked := true
 	defer func() {
 		if locked {
@@ -40,6 +40,29 @@ func TestEventAppendWaitsForRotationBarrier(t *testing.T) {
 	}
 	b, err := os.ReadFile(path)
 	if err != nil || string(b) != "stop\n" {
+		t.Fatalf("live file = %q, %v", b, err)
+	}
+}
+
+// A holder stuck past the wait costs the waiting writer its line, not its
+// session; the abandoned request hands the lock back once it is granted, so
+// the next writer is not blocked by it.
+func TestEventAppendDropsLinePastLockWait(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "events")
+	unlock, _ := lockEventsRotation(path+eventsLockSuffix, time.Second)
+	a := newApp(testEnv(t))
+	a.eventsLockWait = 50 * time.Millisecond
+	if err := a.appendEventLine(path, "dropped\n"); err == nil {
+		t.Fatal("append returned without the lock")
+	}
+	unlock()
+	a.eventsLockWait = 5 * time.Second
+	if err := a.appendEventLine(path, "kept\n"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != "kept\n" {
 		t.Fatalf("live file = %q, %v", b, err)
 	}
 }
