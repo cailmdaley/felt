@@ -47,6 +47,7 @@ defmodule Shuttle.Speaker do
   @hold_ms 4_000
   @played_ms 120_000
   @echo_slack_ms 2_000
+  @target_ms 300
 
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -684,16 +685,21 @@ defmodule Shuttle.Speaker do
   # The ids of the fiber live voice is routed to, while Listening is switched
   # on. The switch is read from its config, since Voice's snapshot reports off
   # until its first reconcile after boot. Both sides resolve ids, since the
-  # fiber feed can be unavailable at either moment.
+  # fiber feed can be unavailable at either moment. While Voice is busy the
+  # last answer stands, so a slow Voice cannot stall `speak`.
   defp target do
-    with {:ok, %{"enabled" => true}} <- Shuttle.Voice.Config.read(),
-         %{target: %{"fiber_id" => id}} <- Shuttle.Voice.snapshot() do
-      fiber_keys(id, [])
-    else
-      _ -> nil
-    end
+    target =
+      with {:ok, %{"enabled" => true}} <- Shuttle.Voice.Config.read(),
+           %{target: %{"fiber_id" => id}} <- Shuttle.Voice.snapshot(timeout: @target_ms) do
+        fiber_keys(id, [])
+      else
+        _ -> nil
+      end
+
+    Process.put(:speaker_target, target)
+    target
   catch
-    :exit, _ -> nil
+    :exit, _ -> Process.get(:speaker_target)
   end
 
   defp schedule(%{timer: timer} = state) when not is_nil(timer), do: state

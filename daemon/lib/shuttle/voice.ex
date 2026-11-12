@@ -9,7 +9,8 @@ defmodule Shuttle.Voice do
   def show(opts \\ []), do: GenServer.call(server(opts), :show)
 
   @doc "The switch, state and target alone, cheap enough to read on every Rex poll."
-  def snapshot(opts \\ []), do: GenServer.call(server(opts), :snapshot)
+  def snapshot(opts \\ []),
+    do: GenServer.call(server(opts), :snapshot, Keyword.get(opts, :timeout, 5_000))
 
   @doc "Delivers `{:voice_target, target}` to the calling process on every new route."
   def subscribe, do: Registry.register(__MODULE__.Streams, :target, nil)
