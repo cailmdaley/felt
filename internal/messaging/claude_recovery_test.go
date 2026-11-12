@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -93,9 +94,15 @@ func TestClaudeAbandonedFallbackRetriesOnlyBeforeWrite(t *testing.T) {
 }
 
 func TestClaudeFallbackRefusalReachesSenderAndNeverRepeatsWrite(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{"held", "denied", "expired", "refused", "dropped"} {
 		t.Run(status, func(t *testing.T) {
+			t.Parallel()
 			env := testEnv(t)
+			code := "wake_refused"
+			if status == "held" {
+				code = "wake_held"
+			}
 			req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, _ *os.File) {
 				reg, _ := readClaudeNative(env, "session")
 				c, err := net.Dial("unix", strings.TrimPrefix(frame["from"].(string), "uds:"))
@@ -105,6 +112,7 @@ func TestClaudeFallbackRefusalReachesSenderAndNeverRepeatsWrite(t *testing.T) {
 				}
 				defer c.Close()
 				_ = json.NewEncoder(c).Encode(map[string]any{"type": "control", "action": "peer_message_status", "status": status, "orig_msg_id": frame["uuid"], "from": "uds:" + reg.Socket})
+				io.Copy(io.Discard, c) // stay connected: macOS has no peer PID after close
 			})
 			req.ContextIfBusy = true
 			_ = SetMailboxState(env, "claude", "session", "host", "working")
@@ -115,7 +123,7 @@ func TestClaudeFallbackRefusalReachesSenderAndNeverRepeatsWrite(t *testing.T) {
 			var firstNotice Request
 			notify := func(_ context.Context, notice Request) error {
 				notices++
-				if notice.Address != req.From || notice.ContextIfBusy || !strings.Contains(notice.Text, req.MessageID) {
+				if notice.Address != req.From || notice.ContextIfBusy || !strings.Contains(notice.Text, req.MessageID) || !strings.Contains(notice.Text, code) {
 					t.Fatalf("bad notice: %+v", notice)
 				}
 				if notices == 1 {
