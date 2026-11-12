@@ -471,6 +471,17 @@ defmodule Shuttle.SpeakerTest do
     refute Speaker.talking?("stop", line)
     assert Speaker.talking?("hold on a second", line)
     assert Speaker.talking?("the outbox, wait, stop", line)
+
+    # Echo mangled here and there, as through speakers, is still echo.
+    long =
+      "Then a fortieth of a sigma, and the last spectrum is identical, grinding through certificate plumbing."
+
+    refute Speaker.talking?(
+             "Then a 40th of a sigma and the last spectrum identical grinding through a certificate plumbing CAD",
+             long
+           )
+
+    assert Speaker.talking?("Then a 40th of a sigma hey I think", long)
   end
 
   test "lists the bank and built-ins with the roles that hold them", %{tmp_dir: root} do

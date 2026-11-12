@@ -798,14 +798,15 @@ defmodule Shuttle.Speaker do
 
   @doc """
   Whether hark's pending words say the human is talking over `line`. Live voice hears
-  the speaker too, so words of the line itself are its echo; two other words
-  are the human.
+  the speaker too, so words of the line itself are its echo, and the recognizer
+  mangles a word of it now and then; two foreign words among the last three
+  heard are the human.
   """
   def talking?(nil, _line), do: false
 
   def talking?(partial, line) do
     spoken = MapSet.new(words(line))
-    Enum.count(words(partial), &(not MapSet.member?(spoken, &1))) >= 2
+    Enum.count(Enum.take(words(partial), -3), &(not MapSet.member?(spoken, &1))) >= 2
   end
 
   defp words(text),
