@@ -32,14 +32,14 @@ Ask whether other people have accounts on this machine if that isn't established
 ## Install the tools
 
 Use the prebuilt release unless the user is developing Shuttle.
-This guide targets **2.0.0-rc.2**; explain that it is a release candidate before installing it.
+This guide targets **2.0.0-rc.4**; explain that it is a release candidate before installing it.
 Keep the explicit version pin: the latest stable release does not provide this setup flow.
 Install `tmux` with the machine's package manager, and confirm that the chosen agent is installed and signed in.
 Then install felt, Shuttle, and the daemon:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=2.0.0-rc.2 SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=2.0.0-rc.4 SHUTTLE_DAEMON=1 sh
 felt --version
 shuttle --help
 tmux -V

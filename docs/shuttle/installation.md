@@ -82,14 +82,14 @@ needs:
 
 ## Fetch the release
 
-These commands select **2.0.0-rc.2** for prerelease testing.
+These commands select **2.0.0-rc.4** for prerelease testing.
 Stable updates and Homebrew do not select release candidates automatically.
 
 The install script always installs both Go CLIs. Set `SHUTTLE_DAEMON=1` to
 also unpack the daemon release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.2 SHUTTLE_DAEMON=1 sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.4 SHUTTLE_DAEMON=1 sh
 ```
 
 !!! warning "Environment variables go after the pipe"
@@ -165,7 +165,7 @@ login and restarts itself when it dies. No checkout, no toolchain. Run the steps
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=2.0.0-rc.2 SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=2.0.0-rc.4 SHUTTLE_DAEMON=1 sh
 ```
 
 `SHUTTLE_DAEMON=1` goes *after* the pipe, for the reason in the warning above: in front
@@ -288,10 +288,10 @@ and the daemon release when requested:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=2.0.0-rc.2 SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=2.0.0-rc.4 SHUTTLE_DAEMON=1 sh
 ```
 
-Replace `2.0.0-rc.2` with the tag you want. Both variables sit after the pipe, for
+Replace `2.0.0-rc.4` with the tag you want. Both variables sit after the pipe, for
 the reason above: an install that silently drops `FELT_VERSION` fetches the
 latest stable instead. The tag is accepted with or without its leading `v`. If
 it has no `shuttled_<os>_<arch>.tar.gz` asset for your platform, the install
