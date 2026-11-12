@@ -1251,7 +1251,9 @@ defmodule Shuttle.TailnetDialTest do
         Enum.map(remotes, fn {name, host} -> %{"name" => name, "url" => "https://#{host}"} end)
     }
 
-    File.write!(path, Jason.encode!(document))
+    # Through the daemon's own document writer, which drops the snapshot it
+    # caches for a second, so the next refresh reads the new fleet.
+    Shuttle.RuntimeDocuments.change(path, fn -> File.write!(path, Jason.encode!(document)) end)
   end
 
   defp short_idle_budget do
