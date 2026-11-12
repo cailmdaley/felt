@@ -14,7 +14,10 @@ defmodule Shuttle.SpeakerTest do
       clock: fn -> Agent.get(world, & &1.now) end,
       partial: fn -> Agent.get(world, & &1.partial) end,
       target: fn -> Agent.get(world, & &1.target) end,
-      render: fn text, voice -> {:ok, "#{voice}:#{text}"} end,
+      render: fn text, voice ->
+        send(parent, {:render, text})
+        {:ok, "#{voice}:#{text}"}
+      end,
       play: fn path ->
         handle = make_ref()
         send(parent, {:play, path, handle})
@@ -55,6 +58,35 @@ defmodule Shuttle.SpeakerTest do
     send(pid, {two, {:exit_status, 0}})
     Process.sleep(20)
     assert %{speaking: nil, queued: 0} = Speaker.show(server)
+  end
+
+  test "the next line renders while the current one plays", %{pid: pid, server: server} do
+    {:ok, _} = Speaker.speak(%{"text" => "first", "voice" => "jean"}, server)
+    assert_receive {:play, "jean:first", one}
+    {:ok, _} = Speaker.speak(%{"text" => "second", "voice" => "jean"}, server)
+    assert_receive {:render, "second"}
+    refute_receive {:play, _, _}, 50
+
+    send(pid, {one, {:exit_status, 0}})
+    assert_receive {:play, "jean:second", _}
+  end
+
+  test "a rendered line whose card left view waits with its card",
+       %{pid: pid, server: server, world: world} do
+    {:ok, _} = Speaker.speak(%{"text" => "now", "voice" => "jean"}, server)
+    assert_receive {:play, "jean:now", one}
+
+    {:ok, _} =
+      Speaker.speak(%{"text" => "later", "voice" => "jean", "fiber_id" => "a/two"}, server)
+
+    assert_receive {:render, "later"}
+    set(world, %{target: ["a/one"]})
+    send(pid, {one, {:exit_status, 0}})
+    refute_receive {:play, _, _}, 50
+    assert %{speaking: nil, held: [%{fiber_id: "a/two", n: 1}]} = Speaker.show(server)
+
+    set(world, %{target: ["a/two"]})
+    assert_receive {:play, "jean:later", _}
   end
 
   test "the line being spoken carries its card's name", %{server: server} do

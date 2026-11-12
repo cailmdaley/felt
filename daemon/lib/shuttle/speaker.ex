@@ -1,7 +1,9 @@
 defmodule Shuttle.Speaker do
   @moduledoc """
   Speaks lines on this host, one at a time in arrival order, each in the voice of
-  its fiber's role. Rendering is pocket-tts; playback is afplay.
+  its fiber's role. Rendering is pocket-tts; playback is afplay. The next line
+  renders while the current one plays, so only a line that arrives to silence
+  waits for its render.
 
   While live voice has a target, only lines from that constitution play; the
   rest wait, per fiber and in order, until it is in view. Without a target
@@ -246,6 +248,7 @@ defmodule Shuttle.Speaker do
        queue: :queue.from_list(saved.queue),
        current: saved.current,
        render: nil,
+       ahead: nil,
        muted: saved.muted,
        inbox: saved.inbox,
        card: saved.card,
@@ -291,7 +294,10 @@ defmodule Shuttle.Speaker do
     do: {:reply, {:error, "muted must be a boolean"}, state}
 
   def handle_call({:speak, item}, _from, state) do
-    ahead = :queue.len(state.queue) + if(state.current || state.render, do: 1, else: 0)
+    ahead =
+      :queue.len(state.queue) +
+        Enum.count([state.current, state.ahead, state.render], &(not is_nil(&1)))
+
     held = not in_view?(item, state.target.())
     state = advance(%{state | queue: :queue.in(item, state.queue)}) |> schedule() |> save()
     {:reply, {:ok, %{voice: item.voice, ahead: ahead, held: held}}, state}
@@ -370,7 +376,9 @@ defmodule Shuttle.Speaker do
   defp save(%{journal: nil} = state), do: state
 
   defp save(state) do
-    rendering = if state.render, do: [elem(state.render, 1)], else: []
+    rendering =
+      if(state.ahead, do: [state.ahead.item], else: []) ++
+        if state.render, do: [elem(state.render, 1)], else: []
 
     saved = %{
       queue: rendering ++ :queue.to_list(state.queue),
@@ -392,10 +400,36 @@ defmodule Shuttle.Speaker do
     end
   end
 
+  # Play the rendered line once nothing is current, then render the next.
+  defp advance(state), do: state |> promote() |> render_next()
+
+  # The rendered line becomes current while it is still in view; otherwise it
+  # goes back to the head of the queue to wait with the rest of its card.
+  defp promote(%{current: nil, ahead: %{item: item, wav: wav}} = state) do
+    if in_view?(item, state.target.()) do
+      current = %{
+        item: item,
+        wav: wav,
+        segment: nil,
+        handle: nil,
+        offset: 0,
+        started: nil,
+        before: state.partial.()
+      }
+
+      hold_or_play(%{state | current: current, ahead: nil})
+    else
+      Shuttle.FS.rm(wav)
+      %{state | ahead: nil, queue: :queue.in_r(item, state.queue)}
+    end
+  end
+
+  defp promote(state), do: state
+
   # The first queued line from the constitution in view, or the first of all
   # when nothing is in view. The first line of a card the inbox opened opens
   # with the card's name.
-  defp advance(%{current: nil, render: nil} = state) do
+  defp render_next(%{render: nil, ahead: nil} = state) do
     target = state.target.()
 
     case Enum.split_while(:queue.to_list(state.queue), &(not in_view?(&1, target))) do
@@ -421,20 +455,10 @@ defmodule Shuttle.Speaker do
     end
   end
 
-  defp advance(state), do: state
+  defp render_next(state), do: state
 
   defp rendered(state, item, {:ok, wav}) do
     Logger.info("speaker: rendered #{inspect(item.voice)} for #{item.fiber_id || "?"} to #{wav}")
-
-    current = %{
-      item: item,
-      wav: wav,
-      segment: nil,
-      handle: nil,
-      offset: 0,
-      started: nil,
-      before: state.partial.()
-    }
 
     state =
       if state.announce && item.fiber_id == state.announce,
@@ -442,8 +466,8 @@ defmodule Shuttle.Speaker do
         else: state
 
     {:noreply,
-     %{state | render: nil, current: current, error: nil}
-     |> hold_or_play()
+     %{state | render: nil, ahead: %{item: item, wav: wav}, error: nil}
+     |> advance()
      |> schedule()
      |> save()}
   end
@@ -675,7 +699,7 @@ defmodule Shuttle.Speaker do
   defp schedule(%{timer: timer} = state) when not is_nil(timer), do: state
 
   defp schedule(state) do
-    if state.current || state.render || not :queue.is_empty(state.queue),
+    if state.current || state.ahead || state.render || not :queue.is_empty(state.queue),
       do: %{state | timer: Process.send_after(self(), :poll, state.poll_ms)},
       else: state
   end
@@ -686,12 +710,13 @@ defmodule Shuttle.Speaker do
   end
 
   defp snapshot(state) do
-    speaking =
-      case state.current || (state.render && elem(state.render, 1)) do
-        nil -> nil
-        %{item: item} -> Map.take(item, [:fiber_id, :name, :voice, :text])
-        item -> Map.take(item, [:fiber_id, :name, :voice, :text])
-      end
+    # The line playing, rendered or rendering, in that order; the rest wait.
+    lines =
+      [state.current, state.ahead, state.render && elem(state.render, 1)]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&Map.get(&1, :item, &1))
+
+    speaking = List.first(lines) && Map.take(hd(lines), [:fiber_id, :name, :voice, :text])
 
     target = state.target.()
     {ready, held} = Enum.split_with(:queue.to_list(state.queue), &in_view?(&1, target))
@@ -699,7 +724,7 @@ defmodule Shuttle.Speaker do
     %{
       available: available?(),
       speaking: speaking,
-      queued: length(ready),
+      queued: length(ready) + max(length(lines) - 1, 0),
       held: held_by_card(state, held),
       inbox: %{playing: state.inbox, card: state.card},
       paused: not is_nil(state.current) and is_nil(state.current.handle),

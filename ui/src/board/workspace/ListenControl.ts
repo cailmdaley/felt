@@ -143,7 +143,7 @@ export class ListenControl {
     const target = state?.target
     const name = target ? this.opts.fiberSlug(target.fiber_id, target.origin) ?? target.fiber_id.split('/').at(-1) : 'nothing yet'
     const label = on ? muted ? 'Unmute' : 'Mute' : 'Listen'
-    const title = on ? `${muted ? 'Muted. ' : ''}${state?.follow ? 'Following you: words go to' : 'Pinned: words go to'} ${name}`
+    const title = on ? `${muted ? 'Muted. ' : ''}${state?.follow ? 'Following you: words go to' : 'Pinned: words go to'} ${name}${state?.system_audio ? '. Hearing system audio too' : ''}`
       : isMobileViewport() ? 'Listen with this phone’s mic' : 'Listen: words go to the card in view'
     this.button.disabled = this.starting || (!on && (isMobileViewport() ? !this.opts.phone : !state?.available || !state.sources.includes('desktop')))
     this.button.title = failure ? `${failure} — ${title}` : title
