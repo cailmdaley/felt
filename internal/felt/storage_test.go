@@ -2264,6 +2264,13 @@ func TestEnclosingStoreFollowsTheMountLinkHopByHop(t *testing.T) {
 	if local, ok := external.Localize("science/cmbx/local"); !ok || local != "local" {
 		t.Errorf("Localize(science/cmbx/local) = %q, %v", local, ok)
 	}
+
+	// From the loom, a directory inside the linked subtree is scoped by its
+	// place in the loom, as the loom's walk names the fibers there.
+	env := sysenv.New(t.TempDir(), nil)
+	if got := CommandScope(env, loomProj, filepath.Join(loom.root, "science", "cmbx", "local")); got != "science/cmbx/local" {
+		t.Errorf("CommandScope inside the linked subtree = %q, want science/cmbx/local", got)
+	}
 }
 
 // TestResolveScopedIDRefusesEnclosingStorePath is the misresolution this whole
