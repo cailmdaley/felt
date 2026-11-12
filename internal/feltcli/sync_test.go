@@ -533,6 +533,7 @@ func TestSyncAlsoSyncsMountedRepositories(t *testing.T) {
 		}
 		peerCommit(t, store, "store-upstream.md")
 		peerCommit(t, science, "science-upstream.md")
+		writeSyncFile(t, science.clone, ".felt/draft.md", "uncommitted\n")
 
 		out, err := runCommand(t, store.clone, "sync")
 		if err != nil {
@@ -546,6 +547,9 @@ func TestSyncAlsoSyncsMountedRepositories(t *testing.T) {
 		}
 		if n := strings.Count(out, "Syncing "+realPath(t, science.clone)+","); n != 1 {
 			t.Fatalf("mounted repository synced %d times, want once:\n%s", n, out)
+		}
+		if !strings.Contains(out, realPath(t, science.clone)+" has 1 uncommitted change(s) under .felt") {
+			t.Fatalf("uncommitted fiber changes in a mounted repository should be named:\n%s", out)
 		}
 		if !strings.Contains(out, "Skipped "+realPath(t, local.clone)+": ") {
 			t.Fatalf("a mount with no upstream should be skipped with a note:\n%s", out)

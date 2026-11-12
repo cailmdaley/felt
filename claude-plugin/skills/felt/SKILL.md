@@ -68,7 +68,7 @@ Plain queries search bodies by default, placing name/slug hits before metadata h
 
 ## Practice
 
-**Keep the archive together.** Before `felt sync`, commit the store's dirty fiber changes, whoever wrote them, including daemon lifecycle writes; mixed commits are fine. Then sync before substantive work and publish with `felt sync --push`. The agent running sync owns resolving conflicts from context. Never discard another session's edits, and report a sync you couldn't complete. The daemon never runs Git or commits; agents maintain the archive.
+**Keep the archive together.** Before `felt sync`, commit the store's dirty fiber changes, whoever wrote them, including daemon lifecycle writes; mixed commits are fine. A subtree that is a link into another repository is committed in that repository (`git add .felt` in the store stops at the link); sync covers both and names a mounted repository that holds uncommitted changes. Then sync before substantive work and publish with `felt sync --push`. The agent running sync owns resolving conflicts from context. Never discard another session's edits, and report a sync you couldn't complete. The daemon never runs Git or commits; agents maintain the archive.
 
 **Search before you file.** When a fiber already holds the concern, extend it; a second one splits its history.
 

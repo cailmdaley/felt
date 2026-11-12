@@ -110,6 +110,8 @@ per repository, naming each. A symlink to a directory outside git mounts
 nothing. A mounted repository whose branch tracks no remote branch is skipped
 with a note; one that fails is reported by its path after the others have run, and
 sync exits non-zero.
+Sync commits nothing, in the store or in a mounted repository.
+`git add .felt` in the store stops at the link, so changes to mounted fibers are committed in their own repository; sync says when one holds uncommitted fiber changes.
 
 The same holds one level down. When the mounted directory is itself a store
 that projects link into (`~/store/.felt/science` → `~/science/.felt`, and
@@ -185,6 +187,33 @@ link from one into the other reads as broken from either side, and the warning
 is accurate. If the link matters, join the stores; mirroring the target into
 both is worth it only for a stable reference document, and often the link reads
 just as well as prose. Do not silence the warning by inventing a stub fiber.
+
+## Sharing a store with other people
+
+A store that several people write to is a project-as-canonical store in a repository they all push to.
+Each person clones it and, if they keep a larger store of their own, links it in:
+
+```bash
+git clone git@example.org:group/science.git ~/science
+ln -s ~/science/.felt ~/store/.felt/science
+```
+
+Link to the repository's whole `.felt/`, not to a directory inside it.
+The Shuttle daemon discovers a mounted store only when the link's target is named `.felt`.
+Keep the link out of the larger store's Git history (add it to that store's `.gitignore`): a tracked link would make Git replace the directory on every other machine, deleting ignored files beside the fibers.
+
+Three conventions keep several people's agents out of each other's way.
+None of them needs a field in the fibers.
+
+- **The top-level tree is the owner.** Each person's agents write under that person's top-level directories and read everywhere. `felt ls` run from inside a person's tree lists their open work; `felt find` searches everyone's.
+- **Links are written from the shared store's root.** `[[cmbx/likelihood]]` resolves in the shared repository on its own and, from a fiber inside the mount, in the larger store too, where the same fiber's id is `science/cmbx/likelihood`.
+- **The repository's `AGENTS.md` tells agents to search before they write,** and names whose tree is whose.
+
+felt carries the notes and nothing else.
+Messages between people's agents, if wanted, travel some other way: the shared repository itself can carry them as files, with each person's own hook delivering what arrives.
+
+Moving an existing subtree of a store into such a repository is the [linking procedure](#linking-a-project-without-losing-fibers) with one more hazard: other machines hold the same subtree.
+Untrack the subtree in the larger store and ignore the path, push that, and on each machine pull first and link second, so that Git removes the tracked files and leaves untracked and ignored ones for you to carry over.
 
 ## If the shuttle daemon runs on this machine
 

@@ -36,7 +36,8 @@ runs the same sync in each mounted repository, once per repository and at any
 depth, naming each one. A symlink to a directory outside Git mounts nothing.
 A mounted repository whose branch tracks no remote branch is skipped with a
 note; one that fails is reported by its path after the others have run, and
-sync exits non-zero.
+sync exits non-zero. Sync commits nothing in a mounted repository either: it
+says when one holds uncommitted fiber changes, which are committed there.
 
 sync never stages, stashes, or force-pushes, and commits nothing of yours; a
 diverged upstream makes a merge commit. It refuses to start with
@@ -93,6 +94,14 @@ func (a *app) syncStoreAndMounts(parent context.Context, storeRoot string, push 
 			}
 		case err != nil:
 			failures = append(failures, fmt.Errorf("syncing %s, mounted at %s: %w", mount.repo, mount.at, err))
+		}
+		// The store's own `git add .felt` stops at the link, so work in a
+		// mounted repository is committed there or not at all.
+		if dirty, _ := a.runSyncGit(parent, mount.repo, syncGitTimeout, "status", "--porcelain", "--", felt.DirName); strings.TrimSpace(dirty) != "" {
+			n := len(strings.Split(strings.TrimSpace(dirty), "\n"))
+			if _, err := fmt.Fprintf(output, "%s has %d uncommitted change(s) under %s: commit them in that repository, then sync again to publish.\n", mount.repo, n, felt.DirName); err != nil {
+				return err
+			}
 		}
 	}
 	return errors.Join(failures...)
