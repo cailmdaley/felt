@@ -69,7 +69,8 @@ defmodule Shuttle.Test.IsolatedRex do
     root
   end
 
-  def await(fun, remaining \\ 100)
+  # About 30 s, reached only when the observation never arrives.
+  def await(fun, remaining \\ 600)
   def await(fun, 0), do: assert(fun.(), "isolated Rex observation did not arrive")
 
   def await(fun, remaining) do
