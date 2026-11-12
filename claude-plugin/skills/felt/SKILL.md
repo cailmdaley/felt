@@ -80,7 +80,7 @@ Plain queries search bodies by default, placing name/slug hits before metadata h
 
 **File while it's fresh.** When a decision, finding or correction from the user lands, file it under its parent then, without asking — reconstructed later, it has drifted. No empty stubs.
 
-**Correct errors; date outgrown beliefs.** A body says what is true now, outcome first. A value that was never right is an error: correct it in place; git holds the history. A belief that was right when written and has since been outgrown is part of the record: keep it, dated, with a link to what replaced it. No "Update:" paragraphs or "v2" markers.
+**Correct, don't append.** A body says what is true now. When understanding moves, rewrite the sentences it moved, outcome first; git holds the history. No "Update:" paragraphs or "v2" markers.
 
 **Sweep before you leave.** File what stayed implicit — including what you decided *not* to do — and bring the outcome and status of every fiber you touched up to date.
 
