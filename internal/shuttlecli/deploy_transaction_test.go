@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 // The real deploy script and lock helper talk to a fake SSH host, build tool,
@@ -51,6 +53,13 @@ func newDeployFleet(t *testing.T) *deployFleet {
 			t.Fatal(err)
 		}
 	}
+	// Fake tools are shared content-addressed copies (sysenvtest.LinkScript):
+	// macOS assesses each new executable on its first exec, and every fleet
+	// writes the same ones.
+	link := func(path, body string) {
+		t.Helper()
+		sysenvtest.LinkScript(t, path, body)
+	}
 	for _, relative := range []string{"bin/shuttle-deploy", "go.mod", "scripts/deploy-lock/main.go", "scripts/deploy-run.sh"} {
 		data, err := os.ReadFile(filepath.Join("../..", relative))
 		if err != nil {
@@ -86,12 +95,12 @@ fi
 		t.Fatal(err)
 	}
 	write(filepath.Join(f.home, ".bash_profile"), "umask 027\nexport LOGIN_PROFILE_LOADED=yes\n")
-	write(filepath.Join(f.bin, "bash"), "#!/bin/sh\ncase \"$1\" in\n-lc) shift; LOGIN_CODE=$1; export LOGIN_CODE; shift; exec '"+realBash+"' --noprofile -l -c '. \"$HOME/.bash_profile\"; eval \"$LOGIN_CODE\"' \"$@\";;\nesac\nexec '"+realBash+"' \"$@\"\n")
+	link(filepath.Join(f.bin, "bash"), "#!/bin/sh\ncase \"$1\" in\n-lc) shift; LOGIN_CODE=$1; export LOGIN_CODE; shift; exec '"+realBash+"' --noprofile -l -c '. \"$HOME/.bash_profile\"; eval \"$LOGIN_CODE\"' \"$@\";;\nesac\nexec '"+realBash+"' \"$@\"\n")
 	realRm, err := exec.LookPath("rm")
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "rm"), `#!/bin/sh
+	link(filepath.Join(f.bin, "rm"), `#!/bin/sh
 if [ "${CHECK_CLEANUP_ORDER:-0}" = 1 ]; then
  case "$*" in *"/.shuttle/deploy/tools/lock."*)
  pid=$(sed -n 's/.*; pid=\([0-9]*\);.*/\1/p' "$HOME/.shuttle/deploy.lock")
@@ -104,12 +113,12 @@ exec `+shellQuote(realRm)+` "$@"
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n [ \"$2\" = -C ] || { echo 'lock helper builds outside its module' >&2; exit 33; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\n grep -q '^toolchain ' \"$3/go.mod\" || { echo 'lock helper has no pinned toolchain' >&2; exit 34; }\nfi\nexec '"+realGo+"' \"$@\"\n")
+	link(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n [ \"$2\" = -C ] || { echo 'lock helper builds outside its module' >&2; exit 33; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\n grep -q '^toolchain ' \"$3/go.mod\" || { echo 'lock helper has no pinned toolchain' >&2; exit 34; }\nfi\nexec '"+realGo+"' \"$@\"\n")
 	realSleep, err := exec.LookPath("sleep")
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "sleep"), "#!/bin/sh\nif [ \"${CHECK_POLL:-0}\" = 1 ] && [ -f \"$FLEET_ROOT/readiness-observed\" ]; then\n echo \"poll-interval $1\" >> \"$EVENTS\"\n sed 's/\"ready\":false/\"ready\":true/' \"$STATE\" > \"$STATE.next\"; mv \"$STATE.next\" \"$STATE\"\nelse exec '"+realSleep+"' \"$@\"; fi\n")
+	link(filepath.Join(f.bin, "sleep"), "#!/bin/sh\nif [ \"${CHECK_POLL:-0}\" = 1 ] && [ -f \"$FLEET_ROOT/readiness-observed\" ]; then\n echo \"poll-interval $1\" >> \"$EVENTS\"\n sed 's/\"ready\":false/\"ready\":true/' \"$STATE\" > \"$STATE.next\"; mv \"$STATE.next\" \"$STATE\"\nelse exec '"+realSleep+"' \"$@\"; fi\n")
 	cache, err := exec.Command(realGo, "env", "GOCACHE").Output()
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +128,7 @@ exec `+shellQuote(realRm)+` "$@"
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "ssh"), `#!/bin/sh
+	link(filepath.Join(f.bin, "ssh"), `#!/bin/sh
 echo ssh >> "$EVENTS"
 echo $$ > "$FLEET_ROOT/ssh.pid"
 for option in ConnectTimeout=15 ServerAliveInterval=15 ServerAliveCountMax=3; do
@@ -137,7 +146,7 @@ exec /usr/bin/env -i TEST_REMOTE=1 SHUTTLE_TEST_SSH_HELPER=1 SHUTTLE_TEST_GO_CAC
  CHECK_CLEANUP_ORDER="${CHECK_CLEANUP_ORDER:-0}" FAIL_LOCK_BUILD="${FAIL_LOCK_BUILD:-0}" FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
  ACTIVATION_GATE="${ACTIVATION_GATE:-0}" CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" `+shellQuote(testBinary)+` -test.run=^TestDeploySSHHelperProcess$ -- "$*"
 `)
-	write(filepath.Join(f.bin, "make"), `#!/bin/sh
+	link(filepath.Join(f.bin, "make"), `#!/bin/sh
 case "$1" in
  build)
   echo "umask $(umask)" >> "$EVENTS"
@@ -153,14 +162,14 @@ case "$1" in
     mkdir -p ui/dist
     echo '<html>pinned bundle</html>' > ui/dist/index.html
   fi
-  cp "$FAKE_BIN/shuttle" ./shuttle
+  ln -f "$FAKE_BIN/shuttle" ./shuttle
   ;;
  ui) mkdir -p ui/dist; echo bundle > ui/dist/index.html ;;
  cli-install) : ;;
  *) exit 19 ;;
 esac
 `)
-	write(filepath.Join(f.bin, "rsync"), `#!/bin/sh
+	link(filepath.Join(f.bin, "rsync"), `#!/bin/sh
 previous=
 for arg in "$@"; do source="$previous"; previous="$arg"; done
 dest="${previous#*:}"
@@ -168,14 +177,14 @@ printf 'rsync %s %s\n' "$source" "$dest" >> "$EVENTS"
 if [ -d "$source" ]; then mkdir -p "$dest"; cp -R "$source/." "$dest/"
 else mkdir -p "$(dirname "$dest")"; cp "$source" "$dest"; fi
 `)
-	write(filepath.Join(f.bin, "build-wrapper"), "#!/bin/sh\necho wrapper >> \"$EVENTS\"\nexec \"$@\"\n")
-	write(filepath.Join(f.bin, "felt"), `#!/bin/sh
+	link(filepath.Join(f.bin, "build-wrapper"), "#!/bin/sh\necho wrapper >> \"$EVENTS\"\nexec \"$@\"\n")
+	link(filepath.Join(f.bin, "felt"), `#!/bin/sh
 case "$*" in
  'setup receipt --json') printf '{\n  "bundles": [],\n  "status": "healthy"\n}\n';;
  *) exit 0;;
 esac
 `)
-	write(filepath.Join(f.bin, "shuttle"), `#!/bin/sh
+	link(filepath.Join(f.bin, "shuttle"), `#!/bin/sh
 case "$1 $2" in
  'host --json') printf '{"data_dir":"%s/.shuttle","listen":"tcp://127.0.0.1:54321"}\n' "$HOME";;
  'host check-owner') exit 0;;
@@ -196,7 +205,7 @@ case "$1 $2" in
  *) echo "unexpected shuttle $*" >&2; exit 20;;
 esac
 `)
-	write(filepath.Join(f.bin, "curl"), `#!/bin/sh
+	link(filepath.Join(f.bin, "curl"), `#!/bin/sh
 case "$*" in *'/quarantine/release'*)
  case "$*" in *'"expected":{'*'"incarnation": "fixture-incarnation"'*) ;; *) echo missing-expected-incarnation >&2; exit 22;; esac
  if [ "${RELEASE_BUSY_ONCE:-0}" = 1 ] && [ ! -f "$FLEET_ROOT/release-busy" ]; then touch "$FLEET_ROOT/release-busy"; exit 22; fi
@@ -208,9 +217,9 @@ if grep -q '"ready":false' "$STATE"; then touch "$FLEET_ROOT/readiness-observed"
 cat "$STATE"
 `)
 	for name, body := range map[string]string{"systemctl": "exit 1", "launchctl": "exit 1", "lsof": "exit 0", "pi": "exit 0"} {
-		write(filepath.Join(f.bin, name), "#!/bin/sh\n"+body+"\n")
+		link(filepath.Join(f.bin, name), "#!/bin/sh\n"+body+"\n")
 	}
-	write(filepath.Join(f.bin, "pi"), `#!/bin/sh
+	link(filepath.Join(f.bin, "pi"), `#!/bin/sh
 if [ -n "${PI_CHECKOUT:-}" ]; then
  echo "pi-inspect $(git -C "$PI_CHECKOUT" rev-parse HEAD)" >> "$EVENTS"
  printf '  %s\n    %s\n' "$PI_CHECKOUT" "$PI_CHECKOUT"

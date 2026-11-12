@@ -94,9 +94,7 @@ func TestReminderShimDelegatesPayloadDecoding(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "must-not-run")
 	calls := filepath.Join(dir, "calls")
-	if err := os.WriteFile(binary, []byte("#!/bin/bash\nprintf x >> \"$CALLS\"\nIFS= read -r input || true\nprintf '%s' \"$input\" > \"$PAYLOAD\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
+	linkScript(t, binary, "#!/bin/bash\nprintf x >> \"$CALLS\"\nIFS= read -r input || true\nprintf '%s' \"$input\" > \"$PAYLOAD\"\n")
 	if err := os.WriteFile(filepath.Join(dir, "felt-reminded-activated"), preToolActivationMarker("/transcript/current.jsonl"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -153,9 +151,7 @@ func TestHookShimsOneInvocationAndOldBinary(t *testing.T) {
 				binary := filepath.Join(dir, "binary")
 				calls := filepath.Join(dir, "calls")
 				script := "#!/bin/bash\nprintf '%s\\n' \"$*\" >> \"$CALLS\"\nexit " + status + "\n"
-				if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
-					t.Fatal(err)
-				}
+				linkScript(t, binary, script)
 				cmd := exec.Command("bash", filepath.Join("..", "..", "claude-plugin", "hooks", hook))
 				cmd.Env = append(os.Environ(), "FELT_BIN="+binary, "SHUTTLE_BIN="+binary, "CALLS="+calls)
 				cmd.Stdin = strings.NewReader("{}")
