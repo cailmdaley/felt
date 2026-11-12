@@ -27,4 +27,12 @@ defmodule Shuttle.Test.FiberUid do
   @doc "The worker session name of `fiber_id` under its `for/1` uid."
   @spec session(String.t()) :: String.t()
   def session(fiber_id), do: Shuttle.Dispatcher.session_name(fiber_id, __MODULE__.for(fiber_id))
+
+  @doc """
+  A native worker name no other test, in this VM or a concurrent one, shares.
+  A test that runs a real worker needs one: the process scan that decides
+  whether a name is already running sees every process of the user.
+  """
+  @spec name(String.t()) :: String.t()
+  def name(prefix), do: "#{prefix}-#{System.pid()}-#{System.unique_integer([:positive])}"
 end

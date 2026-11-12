@@ -18,7 +18,7 @@ defmodule Shuttle.Terminal.RexRealClaimTest do
         start_poller!(runner: ClaimRunner, own_host_id: "test-host", felt_stores: [store])
 
       await_boot_cycle!(p)
-      source = "capture-native"
+      source = FiberUid.name("capture-native")
 
       assert :ok =
                Terminal.launch(ClaimRunner, source, root, "trap 'rm -f \"$0\"' EXIT\nsleep 300\n",
@@ -108,7 +108,7 @@ defmodule Shuttle.Terminal.RexRealClaimTest do
   test "an exited auto-closing block leaves an empty session which the backend removes", %{
     root: root
   } do
-    name = "probe-exit-#{System.unique_integer([:positive])}-shuttle"
+    name = Shuttle.Test.FiberUid.name("probe-exit") <> "-shuttle"
     path = WorkerProcess.script_path(name)
     File.write!(path, "exit 0\n")
     on_exit(fn -> File.rm(path) end)
@@ -120,7 +120,7 @@ defmodule Shuttle.Terminal.RexRealClaimTest do
   end
 
   test "an empty worker session is preserved after its binding is lost", %{root: root} do
-    name = "probe-lost-#{System.unique_integer([:positive])}-shuttle"
+    name = Shuttle.Test.FiberUid.name("probe-lost") <> "-shuttle"
     path = WorkerProcess.script_path(name)
     File.write!(path, "exit 0\n")
     on_exit(fn -> File.rm(path) end)

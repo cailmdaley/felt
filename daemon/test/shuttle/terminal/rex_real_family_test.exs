@@ -45,18 +45,20 @@ defmodule Shuttle.Terminal.RexRealFamilyTest do
       family = "work/crash-family"
       Shuttle.Test.RexFamilyStore.write(root, [family, family <> "/a", family <> "/b"])
 
+      sibling = Shuttle.Test.FiberUid.name("crash-sibling-a")
+
       if unquote(operation) == "session.new_window" do
         assert :ok =
                  Terminal.launch(
                    @runner,
-                   "crash-sibling-a",
+                   sibling,
                    root,
-                   Backend.script("crash-sibling-a").env <> "sleep 300\n",
+                   Backend.script(sibling).env <> "sleep 300\n",
                    fiber: family <> "/a"
                  )
       end
 
-      name = "crash-binding-b"
+      name = Shuttle.Test.FiberUid.name("crash-binding-b")
       Env.put_app_env(:rex_crash_operation, unquote(operation))
 
       assert catch_throw(
@@ -102,8 +104,8 @@ defmodule Shuttle.Terminal.RexRealFamilyTest do
       assert {"", 0} = Terminal.stop(@runner, name, backends: [Backend])
 
       if unquote(operation) == "session.new_window" do
-        assert :present = Backend.probe(@runner, "crash-sibling-a")
-        assert {"", 0} = Terminal.stop(@runner, "crash-sibling-a", backends: [Backend])
+        assert :present = Backend.probe(@runner, sibling)
+        assert {"", 0} = Terminal.stop(@runner, sibling, backends: [Backend])
       end
 
       assert {:ok, []} = Rex.sessions(@runner)
@@ -115,7 +117,7 @@ defmodule Shuttle.Terminal.RexRealFamilyTest do
     # Not macOS, so the open never reaches for the operator's Rex app.
     Env.put_app_env(:os_type, {:unix, :linux})
     Env.put_app_env(:terminal_backend, Backend)
-    name = "hide-#{System.unique_integer([:positive])}-shuttle"
+    name = Shuttle.Test.FiberUid.name("hide") <> "-shuttle"
     path = WorkerProcess.script_path(name)
     pidfile = Path.join(root, "hidden-pid")
     File.write!(path, Backend.script(name).env <> "echo $$ > '#{pidfile}'\nsleep 300\n")
@@ -181,7 +183,7 @@ defmodule Shuttle.Terminal.RexRealFamilyTest do
   test "a 120-character fiber leaf launches with bounded display and block labels", %{root: root} do
     Env.put_app_env(:terminal_backend, Backend)
     fiber = "work/" <> String.duplicate("x", 120)
-    name = Shuttle.Dispatcher.session_name(fiber, "01KVBR5K0FZHZQK18845TZ01Q2")
+    name = Shuttle.Test.FiberUid.session(fiber)
     assert :ok = Terminal.launch(@runner, name, root, "sleep 60\n", fiber: fiber)
     on_exit(fn -> File.rm(WorkerProcess.script_path(name)) end)
     assert {:ok, %{"bindings" => %{^name => binding}}} = RexBindings.read()

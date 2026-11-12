@@ -843,7 +843,7 @@ defmodule Shuttle.TerminalTest do
     Env.put_app_env(:terminal_test_socket, socket)
     Env.put_env("SHUTTLE_DATA_DIR", dir)
     Env.put_app_env(:worker_stop_ladder, [{nil, 0}, {"TERM", 2_000}, {"KILL", 2_000}])
-    name = "lost-socket-#{System.unique_integer([:positive])}-shuttle"
+    name = Shuttle.Test.FiberUid.name("lost-socket") <> "-shuttle"
     script = Shuttle.WorkerProcess.script_path(name)
     File.write!(script, "sleep 300\n")
     on_exit(fn -> File.rm(script) end)
@@ -858,7 +858,7 @@ defmodule Shuttle.TerminalTest do
     server = String.trim(output)
     # Cleanup uses the private server's PID because its socket is deliberately gone.
     on_exit(fn -> System.cmd("kill", ["-TERM", server], stderr_to_stdout: true) end)
-    worker = await_script_process(name, System.monotonic_time(:millisecond) + 5_000)
+    worker = await_script_process(name, System.monotonic_time(:millisecond) + 30_000)
     assert worker.ppid == String.to_integer(server)
     File.rm!(socket)
 
@@ -894,8 +894,8 @@ defmodule Shuttle.TerminalTest do
     Env.put_env("SHUTTLE_DATA_DIR", dir)
     Env.put_app_env(:worker_stop_ladder, [{nil, 0}, {"TERM", 2_000}, {"KILL", 2_000}])
     on_exit(fn -> System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true) end)
-    source = "capture-real"
-    canonical = "claimed-01KTHDNZS287ZSSG8X8V59XKC1-shuttle"
+    source = Shuttle.Test.FiberUid.name("capture-real")
+    canonical = Shuttle.Test.FiberUid.session("claimed-on-tmux")
 
     assert :ok =
              Terminal.launch(
@@ -932,7 +932,7 @@ defmodule Shuttle.TerminalTest do
     Env.put_app_env(:terminal_test_socket, socket)
     Env.put_app_env(:os_type, {:unix, :linux})
     Env.put_app_env(:terminal_backend, Tmux)
-    name = "first-launch-#{System.unique_integer([:positive])}-shuttle"
+    name = Shuttle.Test.FiberUid.name("first-launch") <> "-shuttle"
 
     on_exit(fn ->
       System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true)

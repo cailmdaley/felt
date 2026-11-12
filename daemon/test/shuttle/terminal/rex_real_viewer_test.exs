@@ -13,10 +13,12 @@ defmodule Shuttle.Terminal.RexRealViewerTest do
     assert {:ok, sid} =
              Backend.viewer(@runner, "probe-parent@tmux", command, fiber: "a/design/rex")
 
+    thread = Shuttle.Test.FiberUid.name("probe-tree-thread")
+
     assert :ok =
              Terminal.launch(
                @runner,
-               "probe-tree-thread",
+               thread,
                root,
                "trap 'rm -f \"$0\"' EXIT\nsleep 60\n",
                fiber: "a/design/rex/thread"
@@ -35,7 +37,7 @@ defmodule Shuttle.Terminal.RexRealViewerTest do
     await(fn -> match?({:ok, [%{"label" => "└ thread"}]}, Rex.windows(@runner, sid)) end)
     assert {:ok, _} = Terminal.list(@runner, "probe-")
     assert {:ok, [%{"session_id" => ^sid, "label" => "design/rex"}]} = Rex.sessions(@runner)
-    assert {"", 0} = Terminal.stop(@runner, "probe-tree-thread")
+    assert {"", 0} = Terminal.stop(@runner, thread)
   end
 
   @tag skip: Shuttle.Test.IsolatedRex.skip?(["tmux"])

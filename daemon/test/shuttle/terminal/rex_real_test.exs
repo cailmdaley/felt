@@ -33,7 +33,7 @@ defmodule Shuttle.Terminal.RexRealTest do
   @tag skip: Shuttle.Test.IsolatedRex.skip?() or :os.type() != {:unix, :linux}
   @tag :linux
   test "a live worker receipt answers watcher probes without Rex CLI calls", %{root: root} do
-    name = "receipt-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle"
+    name = Shuttle.Test.FiberUid.session("receipt")
     Env.put_app_env(:terminal_backend, Backend)
     assert :ok = Terminal.launch(@runner, name, root, Backend.script(name).env <> "sleep 300\n")
     {:ok, binding} = RexBindings.read()
@@ -46,7 +46,7 @@ defmodule Shuttle.Terminal.RexRealTest do
 
   @tag skip: not Shuttle.Test.IsolatedRex.restore_supported?()
   test "restored windows from a restarted server are not adopted as workers", %{root: root} do
-    name = "restore-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle"
+    name = Shuttle.Test.FiberUid.session("restore")
     script = Path.join(root, "worker.sh")
     File.write!(script, "sleep 300\n")
     assert :ok = Backend.launch(@runner, name, root, script, [])
@@ -90,7 +90,7 @@ defmodule Shuttle.Terminal.RexRealTest do
 
   test "isolated launch, immutable binding, environment, bracketed paste, native rename and stop",
        %{root: root} do
-    name = "probe-r3-#{System.unique_integer([:positive])}-shuttle"
+    name = Shuttle.Test.FiberUid.name("probe-r3") <> "-shuttle"
     path = WorkerProcess.script_path(name)
     receipt = Path.join(root, "env")
     pidfile = Path.join(root, "pid")
