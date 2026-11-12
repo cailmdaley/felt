@@ -113,7 +113,7 @@ exec `+shellQuote(realRm)+` "$@"
 	if err != nil {
 		t.Fatal(err)
 	}
-	link(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n [ \"$2\" = -C ] || { echo 'lock helper builds outside its module' >&2; exit 33; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\n grep -q '^toolchain ' \"$3/go.mod\" || { echo 'lock helper has no pinned toolchain' >&2; exit 34; }\nfi\nexec '"+realGo+"' \"$@\"\n")
+	link(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n [ \"$2\" = -C ] || { echo 'lock helper builds outside its module' >&2; exit 33; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\n grep -q '^toolchain ' \"$3/go.mod\" || { echo 'lock helper has no pinned toolchain' >&2; exit 34; }\nfi\n"+lockBuildCache(realGo)+"exec '"+realGo+"' \"$@\"\n")
 	realSleep, err := exec.LookPath("sleep")
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ shift
 if [ "${FAIL_SSH_PREFLIGHT:-0}" = 1 ] && [ "$*" = true ]; then echo preflight-ssh-stderr-token >&2; exit 255; fi
 # Real SSH joins arguments, then the remote shell parses that command. The
 # isolated login shim sources this fixture's profile and preserves stderr.
-exec /usr/bin/env -i TEST_REMOTE=1 SHUTTLE_TEST_SSH_HELPER=1 SHUTTLE_TEST_GO_CACHES_PINNED=1 HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local \
+exec /usr/bin/env -i TEST_REMOTE=1 SHUTTLE_TEST_SSH_HELPER=1 SHUTTLE_TEST_GO_CACHES_PINNED=1 HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local DEPLOY_LOCK_CACHE="$DEPLOY_LOCK_CACHE" \
  FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
  CHECK_CLEANUP_ORDER="${CHECK_CLEANUP_ORDER:-0}" FAIL_LOCK_BUILD="${FAIL_LOCK_BUILD:-0}" FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
  ACTIVATION_GATE="${ACTIVATION_GATE:-0}" CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" `+shellQuote(testBinary)+` -test.run=^TestDeploySSHHelperProcess$ -- "$*"
@@ -227,7 +227,7 @@ fi
 `)
 	// No listener PID can ever reach xargs/kill; the fake returns an empty list.
 	write(f.state, `{"git_short_sha":"0000000","release_path":"/old","ready":true,"booted_at":"2026-01-01T00:00:00Z"}`)
-	f.env = append(append(os.Environ(), f.env...), "HOME="+f.home, "PATH="+f.bin+":"+os.Getenv("PATH"), "FAKE_BIN="+f.bin, "FLEET_ROOT="+f.root, "EVENTS="+f.events, "STATE="+f.state, "BUILD_GATE="+f.gate, "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0", "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1", "SHUTTLE_AGENTS_FILE="+filepath.Join(f.root, "absent"), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+	f.env = append(append(os.Environ(), f.env...), "HOME="+f.home, "PATH="+f.bin+":"+os.Getenv("PATH"), "FAKE_BIN="+f.bin, "FLEET_ROOT="+f.root, "EVENTS="+f.events, "STATE="+f.state, "BUILD_GATE="+f.gate, "DEPLOY_LOCK_CACHE="+filepath.Join(testFenceDir, "deploy-lock"), "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0", "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1", "SHUTTLE_AGENTS_FILE="+filepath.Join(f.root, "absent"), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
 	f.git(t, f.repo, "init", "-b", "main")
 	f.git(t, f.repo, "add", ".")
 	f.git(t, f.repo, "commit", "-m", "target")
@@ -240,6 +240,24 @@ fi
 	write(fleet, fmt.Sprintf(`{"remotes":[{"name":"fake","ssh":"fake","checkout":%q}]}`, f.remote))
 	f.env = append(f.env, "SHUTTLE_REMOTES_FILE="+fleet)
 	return f
+}
+
+// lockBuildCache is the fake go's answer to the deploy's lock-helper build
+// (`go build -C <tool dir> -o lock .`): the first build of each distinct
+// main.go and go.mod runs the real compiler into DEPLOY_LOCK_CACHE, and every
+// later one hard-links that executable into the tool dir. Every fleet builds
+// the same source twice (deployer and host), and a fresh build costs a link
+// plus macOS's first-exec assessment of the new binary.
+func lockBuildCache(realGo string) string {
+	return `if [ $# = 6 ] && [ "$1 $2 $4 $5 $6" = "build -C -o lock ." ] && [ -n "${DEPLOY_LOCK_CACHE:-}" ]; then
+ built="$DEPLOY_LOCK_CACHE/$(cat "$3/go.mod" "$3/main.go" | cksum | tr ' ' -)"
+ if [ ! -f "$built" ]; then
+  mkdir -p "$DEPLOY_LOCK_CACHE" && '` + realGo + `' build -C "$3" -o "$built.$$" . && mv -f "$built.$$" "$built" || exit 1
+ fi
+ ln -f "$built" "$3/lock" 2>/dev/null || cp "$built" "$3/lock"
+ exit
+fi
+`
 }
 
 func (f *deployFleet) git(t *testing.T, dir string, args ...string) string {
