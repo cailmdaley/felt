@@ -612,7 +612,7 @@ defmodule Shuttle.PollerScanTest do
     settle_poller!(poller)
     MockRunner.hold_ls()
     send(poller, :run_poll_cycle)
-    assert_receive {:ls_held, reader}, 5_000
+    assert_receive {:ls_held, reader}
 
     state = :sys.get_state(poller, @state_timeout)
     assert state.poll_check_in_progress

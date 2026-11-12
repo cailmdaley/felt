@@ -684,7 +684,7 @@ defmodule Shuttle.Terminal.RexTest do
     end)
 
     rename = Task.async(fn -> Rex.rename(FakeRex, sid(), "canonical") end)
-    assert_receive {:rename_paused, renamer}, 2_000
+    assert_receive {:rename_paused, renamer}
 
     launch =
       Task.async(fn -> Shuttle.Terminal.launch(FakeRex, "canonical", "/tmp", "sleep 30\n") end)

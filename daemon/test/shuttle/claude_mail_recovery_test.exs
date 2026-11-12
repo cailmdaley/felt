@@ -25,7 +25,7 @@ defmodule Shuttle.ClaudeMailRecoveryTest do
     :sys.get_state(pid)
     refute_receive {:recover, _, _, _}, 30
     send(first, {:result, {:ok, ~s({"pending":false})}})
-    assert_receive {:recover, second, _, _}, 1_500
+    assert_receive {:recover, second, _, _}
     send(second, {:result, {:ok, ~s({"pending":false})}})
     stop_supervised!(ClaudeMailRecovery)
 
@@ -64,7 +64,7 @@ defmodule Shuttle.ClaudeMailRecoveryTest do
           log =
             ExUnit.CaptureLog.capture_log(fn ->
               send(task, if(result == :crash, do: :crash, else: {:result, result}))
-              assert_receive {:recover, next, _, _}, 500
+              assert_receive {:recover, next, _, _}
               send(self(), {:next_recovery, next})
             end)
 

@@ -335,7 +335,7 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
     end)
 
     closing = Task.async(fn -> Backend.close(FakeRex, "a") end)
-    assert_receive {:cleanup_paused, closer}, 2_000
+    assert_receive {:cleanup_paused, closer}
     launching = Task.async(fn -> launch("b", @root <> "/b") end)
     assert Task.yield(launching, 100) == nil
     send(closer, :continue)

@@ -219,7 +219,7 @@ defmodule Shuttle.Terminal.RexTreeTest do
     end)
 
     projection = Task.async(fn -> RexTree.refresh(FakeRex) end)
-    assert_receive {:projection_paused, projector}, 2_000
+    assert_receive {:projection_paused, projector}
     update = Task.async(fn -> RexBindings.put_fiber("worker", "a/design/rex/thread") end)
     assert Task.yield(update, 1_000) == {:ok, :ok}
     send(projector, :continue)

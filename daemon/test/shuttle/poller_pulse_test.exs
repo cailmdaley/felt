@@ -104,7 +104,7 @@ defmodule Shuttle.PollerPulseTest do
     due(poller)
     before = File.read!(FeltStoreRunner.fiber("watch")["path"])
     cycle(poller)
-    assert_receive {:pulse_sent, task, payload}, 5000
+    assert_receive {:pulse_sent, task, payload}
     assert payload["address"] == "shuttle://local/claude/#{uuid}"
     assert payload["idle_only"] == true
     assert payload["text"] =~ "Previous pulse: none (first pulse)"
@@ -175,7 +175,7 @@ defmodule Shuttle.PollerPulseTest do
   } do
     due(poller)
     cycle(poller)
-    assert_receive {:pulse_sent, task, _}, 5000
+    assert_receive {:pulse_sent, task, _}
     send(task, :crash)
     await(fn -> :sys.get_state(poller).pulse_jobs == %{} end)
     cycle(poller)
@@ -248,7 +248,7 @@ defmodule Shuttle.PollerPulseTest do
   } do
     due(poller)
     cycle(poller)
-    assert_receive {:pulse_sent, task, _}, 5000
+    assert_receive {:pulse_sent, task, _}
     send(task, :reject)
     await(fn -> :sys.get_state(poller).pulse_jobs == %{} end)
     assert [row] = Map.values(Pulse.load())

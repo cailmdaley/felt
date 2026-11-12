@@ -78,7 +78,7 @@ defmodule Shuttle.ProfileTest do
     owner = Process.whereis(Shuttle.Profile)
     monitor = Process.monitor(owner)
     Process.exit(request, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 5000
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
     assert :trace.session_info(:all) == before_sessions
   end
 
@@ -173,7 +173,7 @@ defmodule Shuttle.ProfileTest do
     owner = Process.whereis(Shuttle.Profile)
     monitor = Process.monitor(owner)
     Process.exit(request, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
     refute Enum.any?(:trace.session_info(:all), fn {name, _} -> name == :shuttle_profile end)
 
     refute Enum.any?(:telemetry.list_handlers([:phoenix, :endpoint, :start]), fn handler ->

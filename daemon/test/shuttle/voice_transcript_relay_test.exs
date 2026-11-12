@@ -53,7 +53,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     File.write!(c.path, "")
     record(c.path, "2026-11-06T10:00:01Z", "already delivered, send")
     start_monitor(c)
-    assert_receive {:delivery, _}, 1_000
+    assert_receive {:delivery, _}
     sync_tasks(c)
     stop_supervised!(TranscriptRelay)
     old = Path.join(c.root, "meeting-transcript-relays")
@@ -99,7 +99,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     poll(c)
     sync_tasks(c)
 
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     assert text =~ "the draft is up"
     refute text =~ "heard you"
 
@@ -164,7 +164,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:01Z", "words after torn row, send")
     start_monitor(c)
     assert %{error: nil} = poll(c)
-    assert_receive {:delivery, _}, 1_000
+    assert_receive {:delivery, _}
 
     assert {:ok, %{rows: [%{"text" => "words after torn row, send"}]}} =
              Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
@@ -183,7 +183,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     poll(c)
     Agent.update(c.now, fn _ -> 6_000 end)
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}
 
     assert text ==
              "me: one phrase two phrases\n"
@@ -213,7 +213,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     # A mode change on the same card is also a buffer boundary.
     route(routes, "2026-11-06T10:00:02Z", "fiber-b")
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-b", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: text}}
     assert text =~ "meeting words"
   end
 
@@ -258,11 +258,11 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:09Z", "late old words")
     record(c.path, "2026-11-06T10:00:11Z", "new words, send")
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: first}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: first}}
     sync_tasks(c)
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: late}}, 1_000
-    assert_receive {:delivery, %{fiber_id: "fiber-b", text: new}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: late}}
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: new}}
     assert first =~ "first phrase"
     assert late =~ "late old words"
     assert new =~ "new words"
@@ -295,7 +295,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
 
     start_monitor(c, kind: "voice", routes: routes)
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}
     assert text =~ "me: still heard"
   end
 
@@ -307,8 +307,8 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:00.499999Z", "old, send")
     record(c.path, "2026-11-06T10:00:00.500000Z", "new, send")
     start_monitor(c, kind: "voice", routes: routes)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: old}}, 1_000
-    assert_receive {:delivery, %{fiber_id: "fiber-b", text: new}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: old}}
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: new}}
     assert old =~ "old"
     assert new =~ "new"
   end
@@ -330,14 +330,14 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
-    assert_receive {:attempt, first, %{text: text}}, 1_000
+    assert_receive {:attempt, first, %{text: text}}
     assert text =~ "first"
     poll(c)
     refute_receive {:attempt, _, _}, 20
     send(first, :accept)
     sync_tasks(c)
     poll(c)
-    assert_receive {:attempt, second, %{text: text}}, 1_000
+    assert_receive {:attempt, second, %{text: text}}
     assert text =~ "second"
     send(second, :accept)
     sync_tasks(c)
@@ -359,7 +359,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
-    assert_receive {:attempt, old, %{text: text}}, 1_000
+    assert_receive {:attempt, old, %{text: text}}
     assert text =~ "old"
     next = Path.join(c.root, "next.txt")
     File.write!(next, "")
@@ -379,7 +379,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
 
     refute_receive {:attempt, _, _}, 50
     send(old, :accept)
-    assert_receive {:attempt, new, %{text: text}}, 1_000
+    assert_receive {:attempt, new, %{text: text}}
     assert text =~ "new"
     send(new, :accept)
   end
@@ -421,10 +421,10 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
-    assert_receive {:attempt, old, %{text: "old"}}, 1_000
+    assert_receive {:attempt, old, %{text: "old"}}
     refute_receive {:attempt, _, _}, 20
     send(old, :accept)
-    assert_receive {:attempt, new, %{text: "new"}}, 1_000
+    assert_receive {:attempt, new, %{text: "new"}}
     send(new, :accept)
   end
 
@@ -443,7 +443,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     start_monitor(c, routes: routes)
     pid = worker(c)
     for _ <- 1..4, do: send(pid, :poll)
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     for i <- 1..5, do: assert(text =~ "phrase#{i}")
     assert {:ok, %{rows: rows}} = Shuttle.Voice.Transcript.read(%{"date" => "2026-11-06"})
     assert Enum.map(rows, &String.trim(&1["text"])) == ~w(phrase1 phrase2 phrase3 phrase4 phrase5)
@@ -464,7 +464,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     c = %{c | opts: Keyword.put(c.opts, :observe, observe)}
     start_monitor(c, kind: "voice", routes: routes)
     poll(c)
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     assert text =~ "last spoken words\n"
     refute text =~ "# ended"
   end
@@ -482,7 +482,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     refute_receive {:delivery, _}, 20
     Agent.update(c.observation, fn _ -> {:ok, %{capture: nil}} end)
     poll(c)
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     assert text =~ "complete words"
     refute text =~ "#"
     assert File.read!(json) =~ "{\"wall\":"
@@ -490,7 +490,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     pid = worker(c)
     ref = Process.monitor(pid)
     send(pid, :poll)
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
   end
 
   test "a colleague's speaker label is kept without attributing their request to Cail", c do
@@ -508,7 +508,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     )
 
     start_monitor(c, kind: "voice", routes: routes)
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
 
     assert text ==
              "S2: Claude make this plot\n"
@@ -534,7 +534,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_monitor(c, kind: "voice", routes: routes)
-    assert_receive {:delivery, %{text: first}}, 1_000
+    assert_receive {:delivery, %{text: first}}
 
     assert first ==
              "me: one two\nS2: three four\nme: five\n"
@@ -542,12 +542,12 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     sync_tasks(c)
     record(c.path, "2026-11-06T10:10:05Z", "no timestamp, send")
     poll(c)
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     assert text == "me: no timestamp\n"
     sync_tasks(c)
     record(c.path, "2026-11-06T10:20:06Z", "after silence, send")
     poll(c)
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     assert text == "me: after silence\n"
   end
 
@@ -573,8 +573,8 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
-    assert_receive {:attempt, stalled, %{fiber_id: "fiber-a"}}, 1_000
-    assert_receive {:attempt, _, %{fiber_id: "fiber-b"}}, 1_000
+    assert_receive {:attempt, stalled, %{fiber_id: "fiber-a"}}
+    assert_receive {:attempt, _, %{fiber_id: "fiber-b"}}
     sync_target(c, "fiber-b")
     send(stalled, :fail)
     sync_tasks(c)
@@ -602,7 +602,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
-    assert_receive {:delivery, _}, 1_000
+    assert_receive {:delivery, _}
     sync_tasks(c)
 
     assert %{
@@ -648,13 +648,13 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:01Z", "late anchor, send")
     record(c.path, "2026-11-06T10:00:12Z", "late middle, send")
     start_supervised!({TranscriptRelay, c.opts})
-    assert_receive {:delivery, %{fiber_id: "anchor", text: anchor}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "anchor", text: anchor}}
     assert anchor =~ "late anchor"
-    assert_receive {:delivery, %{fiber_id: "fiber-b", text: initial}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: initial}}
     assert initial =~ "initial words"
     sync_tasks(c)
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-b", text: middle}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-b", text: middle}}
     assert middle =~ "late middle"
     refute middle =~ "late anchor"
   end
@@ -707,7 +707,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
       File.write!(c.path, "")
       record(c.path, "2026-11-06T10:00:01Z", "healthy words, send")
       start_monitor(c)
-      assert_receive {:delivery, %{text: text}}, 1_000
+      assert_receive {:delivery, %{text: text}}
       assert text =~ "healthy"
       assert %{error: error} = TranscriptRelay.status("broken", server: c.name)
       assert is_binary(error) and error != ""
@@ -755,7 +755,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
                server: c.name
              )
 
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     assert text =~ "still healthy"
   end
 
@@ -780,7 +780,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     File.rmdir!(path)
     File.rename!(path <> ".saved", path)
     start_supervised!({TranscriptRelay, c.opts})
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     assert text =~ "buffered words more words are added"
   end
 
@@ -791,7 +791,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:01Z", "durable words, send")
     File.mkdir!(Shuttle.Voice.last_path())
     start_monitor(c, kind: "voice", routes: routes)
-    assert_receive {:delivery, first}, 1_000
+    assert_receive {:delivery, first}
     sync_tasks(c)
     assert %{error: error} = TranscriptRelay.status("launch", server: c.name)
     assert is_binary(error) and error != ""
@@ -822,7 +822,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
-    assert_receive {:delivered_side_effect, %{fiber_id: "fiber-a"}}, 1_000
+    assert_receive {:delivered_side_effect, %{fiber_id: "fiber-a"}}
     sync_tasks(c)
 
     assert %{last: %{"status" => "unconfirmed"}} =
@@ -849,7 +849,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
-    assert_receive {:delivery, %{fiber_id: "fiber-a"}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a"}}
     stop_supervised!(TranscriptRelay)
     start_supervised!({TranscriptRelay, Keyword.put(c.opts, :deliver, deliver)})
 
@@ -944,7 +944,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
       start_supervised!({TranscriptRelay, c.opts})
       # The old relay never attaches its reserved outbox to a delivery request.
       # Its quarantine must not permanently hold the newer same-target batch.
-      assert_receive {:delivery, %{text: "new", fiber_id: "fiber-a"}}, 1_000
+      assert_receive {:delivery, %{text: "new", fiber_id: "fiber-a"}}
       refute_receive {:delivery, %{text: "old"}}, 20
       assert %{error: error} = TranscriptRelay.status("old", server: c.name)
       assert is_binary(error) and error != ""
@@ -1002,7 +1002,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
                server: c.name
              )
 
-    assert_receive {:delivery, %{fiber_id: "other", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "other", text: text}}
     assert text =~ "healthy relay"
   end
 
@@ -1050,7 +1050,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:02Z", "check the plot, send")
     poll(c)
 
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}
     assert text == "me: check the plot\n"
 
     sync_tasks(c)
@@ -1076,7 +1076,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
       start_monitor(c, routes: routes, cold: fn _ -> true end)
       record(c.path, "2026-11-06T10:00:01Z", "do the work" <> unquote(punctuation) <> " Send.")
       poll(c)
-      assert_receive {:delivery, %{text: text}}, 1_000
+      assert_receive {:delivery, %{text: text}}
       assert String.starts_with?(text, "me: do the work\n")
     end
   end
@@ -1088,7 +1088,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     start_monitor(c, kind: "voice", routes: routes, cold: fn _ -> true end)
     record(c.path, "2026-11-06T10:00:01Z", "open the notebook, send.")
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}
     assert text == "me: open the notebook\n"
   end
 
@@ -1102,7 +1102,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     refute_receive {:delivery, _}, 50
     record(c.path, "2026-11-06T10:00:02Z", "open the notebook. Sent.")
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}
     assert text =~ "open the notebook"
     refute text =~ ~r/sent\.?\s*$/i
   end
@@ -1115,7 +1115,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     record(c.path, "2026-11-06T10:00:01Z", "send Ana the plot")
     record(c.path, "2026-11-06T10:00:02Z", "Send.")
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}
     assert text == "me: send Ana the plot\n"
   end
 
@@ -1129,7 +1129,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     refute_receive {:delivery, _}, 300
     record(c.path, "2026-11-06T10:00:02Z", "then this, send")
     poll(c)
-    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}, 1_000
+    assert_receive {:delivery, %{fiber_id: "fiber-a", text: text}}
     assert text == "me: then this\n"
   end
 
@@ -1148,7 +1148,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     refute_receive {:delivery, _}, 20
     Agent.update(c.now, fn _ -> 5_000 end)
     poll(c)
-    assert_receive {:delivery, %{text: text}}, 1_000
+    assert_receive {:delivery, %{text: text}}
     assert text == "me: early words warm words\n"
   end
 
@@ -1183,7 +1183,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     end
 
     start_monitor(c, kind: "voice", routes: routes, deliver: deliver)
-    assert_receive {:attempt, first, %{text: text}}, 1_000
+    assert_receive {:attempt, first, %{text: text}}
     assert text == "me: already sending\n"
 
     assert %{pending: %{text: "me a private thought"}, pending_words: 3} = poll(c)
@@ -1274,7 +1274,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
         ) do
       task = state.task_handles[ref]
       monitor = Process.monitor(task.pid)
-      assert_receive {:DOWN, ^monitor, :process, _, _}, 1_000
+      assert_receive {:DOWN, ^monitor, :process, _, _}
     end
 
     GenServer.call(pid, :status)

@@ -116,7 +116,7 @@ defmodule Shuttle.PollerBootTest do
          poll_interval_ms: 60_000}
       )
 
-    assert_receive {:adopting, ^pid}, 5_000
+    assert_receive {:adopting, ^pid}
 
     trace = :trace.session_create(:adoption_watchers, self(), [])
     :trace.function(trace, {Poller, :start_watcher, 3}, [{:_, [], [{:return_trace}]}], [:local])
@@ -130,7 +130,7 @@ defmodule Shuttle.PollerBootTest do
                      5_000
 
       monitor = Process.monitor(first)
-      assert_receive {:DOWN, ^monitor, :process, ^first, _}, 2_000
+      assert_receive {:DOWN, ^monitor, :process, ^first, _}
       state = :sys.get_state(pid, 30_000)
       assert state.boot_hold == nil
       watchers = Enum.map(Map.values(state.running), & &1.pid)

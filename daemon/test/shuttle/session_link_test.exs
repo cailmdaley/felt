@@ -341,7 +341,7 @@ defmodule Shuttle.SessionLinkTest do
     ])
 
     SessionLink.resolve(@session, opts)
-    assert_receive {:pass_complete, offset, observed_size}, 1_000
+    assert_receive {:pass_complete, offset, observed_size}
     assert offset > before
     assert offset < observed_size
     shorter_size = offset + 64

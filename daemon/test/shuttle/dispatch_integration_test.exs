@@ -2360,7 +2360,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     cycles = :sys.get_state(poller).poll_cycles
     Agent.update(gate, fn _ -> true end)
     send(poller, :run_poll_cycle)
-    assert_receive {:listing_observed, reader}, 5_000
+    assert_receive {:listing_observed, reader}
     write_fiber(host, "edited", content.("Changed"))
     File.rm_rf!(Path.join([host, ".felt", "deleted"]))
 
@@ -2402,7 +2402,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert eventually(fn -> Map.has_key?(:sys.get_state(poller).change_indexes, host) end)
     Agent.update(gate, fn _ -> true end)
     write_fiber(host, "edited", content.("Read by task"))
-    assert_receive {:listing_observed, reader}, 5_000
+    assert_receive {:listing_observed, reader}
     write_fiber(host, "edited", content.("Serialized"))
     assert :ok = Poller.refresh_document(poller, "edited")
     send(reader, :continue_listing)

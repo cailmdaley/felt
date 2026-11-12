@@ -174,7 +174,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     MockClient.hold("/api/v1/board")
     {_pid, name} = start_registry(dir)
     assert %{items: []} = RemoteTemporalRegistry.entries_nowait(name, :board)["candide"]
-    assert_receive {:fetch_held, fetcher}, 1000
+    assert_receive {:fetch_held, fetcher}
     assert %{items: []} = RemoteTemporalRegistry.entries_nowait(name, :board)["candide"]
     assert MockClient.calls("/api/v1/board") == 1
     send(fetcher, :release)
@@ -276,7 +276,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     {pid, name} = start_registry(dir)
     MockClient.hold("/api/v1/sent-files/all")
     pending = Task.async(fn -> candide(name, :sent_files) end)
-    assert_receive {:fetch_held, fetcher}, 5_000
+    assert_receive {:fetch_held, fetcher}
     state = :sys.get_state(pid)
     ref = Map.fetch!(state.in_flight, {"candide", :sent_files})
 

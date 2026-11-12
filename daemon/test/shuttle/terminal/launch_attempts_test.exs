@@ -80,10 +80,10 @@ defmodule Shuttle.Terminal.LaunchAttemptsTest do
         args: [script]
       ])
 
-    assert_receive {^port, {:data, "ready\n"}}, 2_000
+    assert_receive {^port, {:data, "ready\n"}}
     {:os_pid, pid} = Port.info(port, :os_pid)
     assert {"", 0} = System.cmd("/bin/kill", ["-KILL", Integer.to_string(pid)])
-    assert_receive {^port, {:exit_status, 137}}, 2_000
+    assert_receive {^port, {:exit_status, 137}}
     assert File.exists?(script)
     assert LaunchAttempts.pending?("worker")
   end

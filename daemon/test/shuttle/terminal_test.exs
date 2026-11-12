@@ -583,8 +583,8 @@ defmodule Shuttle.TerminalTest do
         for name <- names,
             do: Task.async(fn -> Terminal.launch(ConcurrentRunner, name, "/tmp", "true") end)
 
-      assert_receive {:launching, first, name1, path1}, 1_000
-      assert_receive {:launching, second, name2, path2}, 1_000
+      assert_receive {:launching, first, name1, path1}
+      assert_receive {:launching, second, name2, path2}
       on_exit(fn -> Enum.each([path1, path2], &File.rm/1) end)
       assert Enum.sort([name1, name2]) == Enum.sort(names)
       send(first, :finish_launch)
