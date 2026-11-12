@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -53,6 +52,14 @@ func TestBuildChangeRepositoryIdentityRealGit(t *testing.T) {
 		}
 	}
 	check("main-repository", "")
+	git("config", "remote.origin.url", "git@github.com:example/real-repo.git")
+	check("real-repo", "https://github.com/example/real-repo")
+	git("config", "--unset", "remote.origin.url")
+	check("main-repository", "")
+}
+
+func TestChangeOriginNamesRepositoryAndForge(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ origin, name, forge string }{
 		{"git@github.com:example/real-repo.git", "real-repo", "https://github.com/example/real-repo"},
 		{"git@gitlab.com:group/subgroup/real-repo.git", "real-repo", "https://gitlab.com/group/subgroup/real-repo"},
@@ -62,11 +69,13 @@ func TestBuildChangeRepositoryIdentityRealGit(t *testing.T) {
 		{"ssh://git@github.com/example/ssh-repo.git", "ssh-repo", ""},
 		{"/srv/git/local-repo.git", "local-repo", ""},
 	} {
-		t.Run(strings.ReplaceAll(tc.name+tc.origin, "/", "_"), func(t *testing.T) {
-			git("config", "remote.origin.url", tc.origin)
-			check(tc.name, tc.forge)
-		})
+		name, forge := changeOrigin(tc.origin)
+		got := ""
+		if forge != nil {
+			got = *forge
+		}
+		if name != tc.name || got != tc.forge {
+			t.Errorf("changeOrigin(%q) = %q, %q; want %q, %q", tc.origin, name, got, tc.name, tc.forge)
+		}
 	}
-	git("config", "--unset", "remote.origin.url")
-	check("main-repository", "")
 }
