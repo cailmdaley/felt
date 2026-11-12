@@ -47,7 +47,7 @@ defmodule Shuttle.Test.FakeCli do
     dir = Path.join([System.tmp_dir!(), "shuttle-fake-cli", binary_part(hash, 0, 16)])
 
     # One writer per script set; later callers find the finished dir.
-    :global.trans({{__MODULE__, dir}, self()}, fn ->
+    Shuttle.Lock.transaction({__MODULE__, dir}, fn ->
       unless File.dir?(dir), do: write_warmed!(dir, scripts)
     end)
 

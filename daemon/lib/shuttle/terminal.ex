@@ -298,7 +298,7 @@ defmodule Shuttle.Terminal do
   end
 
   @doc "Serialize a terminal mutation; a shared key also protects backend-wide indexes."
-  def with_lock(key, fun), do: :global.trans({{__MODULE__, key}, self()}, fun)
+  def with_lock(key, fun), do: Shuttle.Lock.transaction({__MODULE__, key}, fun)
 
   @doc "Hang up the terminal, then wait and signal its worker until positively gone."
   def stop(runner, name, opts \\ []) do

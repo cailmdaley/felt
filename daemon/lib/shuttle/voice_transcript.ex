@@ -24,7 +24,7 @@ defmodule Shuttle.Voice.Transcript do
     for {day, rows} <- Enum.group_by(rows, &date(&1["t"])) do
       path = Path.join(directory(), day <> ".jsonl")
 
-      :global.trans({{__MODULE__, path}, self()}, fn ->
+      Shuttle.Lock.transaction({__MODULE__, path}, fn ->
         :ok = Shuttle.FS.mkdir_p(directory())
         bytes = read_tail(path)
         existing = decode_rows(bytes)

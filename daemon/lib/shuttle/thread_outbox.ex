@@ -134,7 +134,7 @@ defmodule Shuttle.ThreadOutbox do
   defp transaction(boot?, fun) do
     root = Path.join(Shuttle.data_dir(), "thread-outbox")
 
-    :global.trans({{__MODULE__, root}, self()}, fn ->
+    Shuttle.Lock.transaction({__MODULE__, root}, fn ->
       baseline = prepare!(root, boot?)
       {cutoff, prune?} = retention_cutoff(root, boot?)
 

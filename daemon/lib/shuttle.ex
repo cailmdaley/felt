@@ -178,6 +178,9 @@ defmodule Shuttle.Application do
   @doc false
   def child_specs do
     core = [
+      # Serializes terminal mutations, outbox transactions and document
+      # writes; every later child may take its keys.
+      Shuttle.Lock,
       {Registry, keys: :duplicate, name: Shuttle.Voice.Streams},
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},

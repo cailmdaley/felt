@@ -37,5 +37,5 @@ defmodule Shuttle.RuntimeDocuments do
   end
 
   defp key(path), do: {__MODULE__, path}
-  defp locked(path, fun), do: :global.trans({Env.scope_key(key(path)), self()}, fun)
+  defp locked(path, fun), do: Shuttle.Lock.transaction(Env.scope_key(key(path)), fun)
 end

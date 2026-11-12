@@ -496,7 +496,7 @@ defmodule Shuttle.Recorder do
     if Process.get(:shuttle_capture_lock) do
       fun.()
     else
-      :global.trans({{__MODULE__, :capture}, self()}, fn ->
+      Shuttle.Lock.transaction({__MODULE__, :capture}, fn ->
         Process.put(:shuttle_capture_lock, true)
 
         try do

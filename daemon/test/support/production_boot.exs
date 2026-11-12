@@ -156,6 +156,7 @@ try do
   # This manifest is deliberately independent of config/test.exs and of the
   # application builder: disabling a production child turns this gate red.
   for module <- [
+        Shuttle.Lock,
         Shuttle.EventStream,
         Shuttle.Voice,
         Shuttle.RexFocus,
