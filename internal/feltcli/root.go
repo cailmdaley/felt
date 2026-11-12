@@ -96,6 +96,8 @@ conventions such as inputs.from. Extra top-level YAML is preserved untouched.
 Status is opt-in:   · none (default)   ○ open   ◐ active   ● closed
 open and active mean someone should act; a note, decision, or finding stays
 statusless. Close a todo with an outcome that says what was learned.
+role: names who answers for open work, <person> or <office>/<person>; felt
+stamps open fibers with git config felt.person, and bare ls shows yours.
 
 Views and stores: a project .felt that symlinks into a larger store is a view.
 ls lists the view, find searches the whole store, and an id reaches anywhere:
@@ -104,7 +106,8 @@ show, edit, tree, nest, and rm act on the fiber where it lives.
 Common paths:
   felt add analysis/covariance "Covariance method" -o "one-line outcome"
   felt edit analysis/covariance -o "what was learned" -s closed
-  felt ls                           open and active fibers in this view
+  felt ls                           your open and active fibers in this view
+  felt roles                        the offices and their charters
   felt ls "query"                   search; closed matches are counted, not shown
   felt ls "query" --no-body -r      regex, metadata only
   felt find "query"                 search the whole store
@@ -194,6 +197,7 @@ func (a *app) rootCmd() *cobra.Command {
 		NewLsCmd(a.env, view),
 		a.treeCmd(),
 		a.findCmd(),
+		NewRolesCmd(a.env, view),
 		a.checkCmd(),
 		a.initCmd(),
 		a.syncCmd(),

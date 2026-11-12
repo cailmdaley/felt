@@ -123,7 +123,7 @@ func TestShuttleRoleNewValidatesBeforeCreation(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("changed constitution")
 	}
-	charters, _, err := roleCharters(st)
+	charters, _, err := st.RoleCharters()
 	if err != nil || len(charters) != 0 {
 		t.Fatalf("created charter: %+v %v", charters, err)
 	}
@@ -154,7 +154,7 @@ func TestShuttleRoleNewPreservesMalformedCharter(t *testing.T) {
 			if st.Path("roles/editor") != charterPath {
 				t.Fatal("fixture is not the storage-resolved destination")
 			}
-			if charters, _, _ := roleCharters(st); charters["editor"] != nil {
+			if charters, _, _ := st.RoleCharters(); charters["editor"] != nil {
 				t.Fatal("malformed charter unexpectedly indexed")
 			}
 			before, err := os.ReadFile(st.Path("hub"))

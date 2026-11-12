@@ -29,7 +29,7 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 			issues := make([]felt.CheckIssue, 0)
 			// An unreadable roles namespace yields no charters, so every role
 			// is reported rather than none.
-			charters, shadowed, _ := roleCharters(storage)
+			charters, shadowed, _ := storage.RoleCharters()
 			persons := felt.NewPersonLookup()
 			for _, f := range shadowed {
 				slug := path.Base(f.ID)
@@ -107,7 +107,7 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 							Level:   felt.CheckLevelWarning,
 							FiberID: fiber.ID,
 							Path:    "role",
-							Message: noCharterError(office).Error(),
+							Message: felt.NoCharterError(office).Error(),
 						})
 					}
 				}

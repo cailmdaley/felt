@@ -257,6 +257,8 @@ func Resolve(f *felt.Felt, reg *AgentRegistry, now time.Time) error {
 // SetRole makes role the fiber's role, removing any `shuttle.role` from its
 // facet; an empty role clears it.
 func SetRole(f *felt.Felt, role string) error {
-	f.Role = role
+	if err := f.SetRole(role); err != nil {
+		return err
+	}
 	return SetNodeField(f, "role", nil)
 }

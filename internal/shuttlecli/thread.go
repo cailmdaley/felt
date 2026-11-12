@@ -186,7 +186,7 @@ remote draft made with --disabled stays in this store while you write it;
 				child.Status = felt.StatusOpen
 			}
 			if cmd.Flags().Changed("role") {
-				block.Role = qualifyRole(block.Role, st.Path(child.ID))
+				block.Role = felt.QualifyRole(block.Role, st.Path(child.ID))
 			}
 			if err := shuttle.SetConfig(child, block); err != nil {
 				return err

@@ -68,6 +68,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 		"nest",
 		"recover-move",
 		"rm",
+		"roles",
 		"session",
 		"setup",
 		"show",

@@ -1,13 +1,7 @@
 package shuttlecli
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -68,21 +62,21 @@ roles/ before assigning the role; existing charters are preserved.`,
 					return err
 				}
 			} else {
-				role = qualifyRole(args[1], st.Path(f.ID))
+				role = felt.QualifyRole(args[1], st.Path(f.ID))
 				office := shuttle.OfficeOf(role)
-				charters, _, err := roleCharters(st)
+				charters, _, err := st.RoleCharters()
 				if err != nil {
 					return err
 				}
 				if charters[office] == nil {
 					if !cmd.Flags().Changed("new") {
-						return noCharterError(office)
+						return felt.NoCharterError(office)
 					}
 					charter := &felt.Felt{
 						ID: "roles/" + office, Name: newName, Tags: []string{"role"},
 						Body: fmt.Sprintf("The %s office serves the constitution %q. Its holders grow this charter with the office's remit, playbooks, and human gates.\n", newName, f.Name),
 					}
-					if err := createRoleCharter(roleStorage(st), charter); err != nil {
+					if err := createRoleCharter(st.RoleStorage(), charter); err != nil {
 						return fmt.Errorf("creating role charter: %w", err)
 					}
 				}
@@ -107,83 +101,6 @@ roles/ before assigning the role; existing charters are preserved.`,
 	return cmd
 }
 
-// roleCharters finds every role's charter in the shared store (the enclosing
-// store when st is a view): the fiber at roles/<slug> at its top, or at
-// <mount>/roles/<slug> where <mount> is a top-level entry of its .felt/ that
-// links to a directory. The store's own charter wins a slug collision, then
-// mounts in name order; the charters a winner hides are returned as shadowed.
-// It reads those roles/ directories and their charters, never the rest of the
-// store.
-func roleCharters(st *felt.Storage) (charters map[string]*felt.Felt, shadowed []*felt.Felt, err error) {
-	st = roleStorage(st)
-	root := st.Root()
-	ids, err := charterIDs(root, "")
-	if err != nil {
-		return nil, nil, err
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, entry := range entries {
-		if entry.Type()&fs.ModeSymlink == 0 {
-			continue
-		}
-		if info, err := os.Stat(filepath.Join(root, entry.Name())); err != nil || !info.IsDir() {
-			continue
-		}
-		mounted, err := charterIDs(root, entry.Name()+"/")
-		if err != nil {
-			return nil, nil, err
-		}
-		ids = append(ids, mounted...)
-	}
-	found, err := st.ListMetadataByIDs(ids, nil, false)
-	if err != nil {
-		return nil, nil, err
-	}
-	charters = map[string]*felt.Felt{}
-	for _, f := range found {
-		slug := path.Base(f.ID)
-		if charters[slug] != nil {
-			shadowed = append(shadowed, f)
-			continue
-		}
-		charters[slug] = f
-	}
-	return charters, shadowed, nil
-}
-
-// charterIDs lists the candidate charter ids <prefix>roles/<slug> under root.
-func charterIDs(root, prefix string) ([]string, error) {
-	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(prefix), felt.RolesNamespace))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if (entry.IsDir() || entry.Type()&fs.ModeSymlink != 0) && shuttle.ValidRole(entry.Name()) {
-			ids = append(ids, prefix+felt.RolesNamespace+"/"+entry.Name())
-		}
-	}
-	return ids, nil
-}
-
-// noCharterError names where a role's charter may live.
-func noCharterError(role string) error {
-	return fmt.Errorf("role %q has no charter at roles/%s or <mount>/roles/%s", role, role, role)
-}
-
-func roleStorage(st *felt.Storage) *felt.Storage {
-	if external := st.ExternalRefs(); external != nil {
-		return felt.NewStorage(external.ProjectDir())
-	}
-	return st
-}
-
 // createRoleCharter checks the destination independently of the metadata index,
 // which omits malformed documents. The lock serializes competing role creators;
 // availability is checked again under it before the write.
@@ -200,52 +117,4 @@ func createRoleCharter(st *felt.Storage, charter *felt.Felt) error {
 		return err
 	}
 	return st.Write(charter)
-}
-
-func (a *app) rolesCmd() *cobra.Command {
-	return &cobra.Command{
-		Use: "roles", Short: "List role charters in the shared store and its mounts", Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			st, _, err := felt.RequireStore(a.env, a.dir)
-			if err != nil {
-				return err
-			}
-			charters, _, err := roleCharters(st)
-			if err != nil {
-				return err
-			}
-			type profile struct {
-				Slug    string `json:"slug"`
-				ID      string `json:"id"`
-				Name    string `json:"name"`
-				Outcome string `json:"outcome"`
-			}
-			roles := make([]profile, 0, len(charters))
-			for slug, f := range charters {
-				roles = append(roles, profile{slug, f.ID, f.Name, f.Outcome})
-			}
-			sort.Slice(roles, func(i, j int) bool { return roles[i].Slug < roles[j].Slug })
-			if a.json {
-				return a.outputJSON(roles)
-			}
-			for _, role := range roles {
-				fmt.Fprintf(a.env.Stdout, "%s\t%s\t%s\n", role.Slug, role.Name, role.Outcome)
-			}
-			return nil
-		},
-	}
-}
-
-// qualifyRole stores a bare office given for the fiber at file as
-// <office>/<person> when the repository holding it names a person; a role
-// already naming a person, or naming that person alone, is kept as given.
-func qualifyRole(role, file string) string {
-	if strings.Contains(role, "/") {
-		return role
-	}
-	person := felt.PersonAt(file)
-	if person == "" || person == role {
-		return role
-	}
-	return role + "/" + person
 }

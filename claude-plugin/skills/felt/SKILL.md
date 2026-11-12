@@ -44,12 +44,16 @@ Freed, Σ_nl runs to the prior edge in a third of the mocks ([[bao-analysis/mock
 - **body** — opens with a lede readable alone (`felt show -d summary` shows only that). `[[wikilinks]]` sit in the sentence that says why the link matters.
 - **companion files** — plots, PDFs, reports sit beside the markdown and move with it.
 - **your own fields** — any frontmatter a project needs survives every edit (`--set key=value`, or edit the file). An `inputs:` entry with `from: <fiber>` declares a data-flow edge (`felt show <id> --consumers`).
-- **role** — who is responsible for open work: `role: sam` (Sam's own) or `role: analyst/sam` (Sam, in the analyst office); the person is the last segment. felt stamps a new open fiber with `git config felt.person` of the repository holding it (set once per checkout of a shared store); hand work over by editing it (`felt edit <id> --role <person>`).
+- **role** — who answers for open work ([Roles](#roles)).
 - **stamps** — `id:` (a ULID that survives moves), `created-at`, `updated-at`, `closed-at` are felt's; leave them alone.
 
 A bare `.felt/<slug>.md` at a store's root is the project's entry point. A project's `.felt` may be a symlink into a larger shared store: `felt ls` and `tree` stay in the project's view, `felt find` searches the whole store, and any id works with `show` and `edit`. Linking a project into a store has a data-loss trap: follow <https://cailmdaley.github.io/felt/concepts/cross-project/>.
 
 felt is the notes and nothing else: this skill is all an agent needs to read, search and write a store, including one shared with other people. Launching agents, the board and messages between sessions belong to Shuttle, which has its own skill and is optional.
+
+## Roles
+
+`role: analyst/sam` says Sam answers for this open work, in the analyst office; a bare person, `role: sam`, is Sam's own desk. felt stamps open fibers created without a role with `git config felt.person` of the repository that holds them (set once per checkout of a shared store), and bare `felt ls` shows your own open work. Hand work over by editing the field: `felt edit <id> -R <person>`. An office's charter is `roles/<office>`, at the top of the store or of a repository linked in there, and `roles/<office>/<person>` is that person's instance: read the charter, then the instance if there is one. `felt roles` lists the offices; `felt show roles/<office>` finds a charter in either place.
 
 ## Commands
 
@@ -60,6 +64,7 @@ felt tree -L 1                              # orient
 felt add <parent>/<slug> "name" -o "outcome" [-t tag] [-s open]
 felt edit <id> -s closed -o "what was learned"
 felt ls [-t tag]                            # your open and active work (--person all: everyone's)
+felt roles                                  # the offices and their charters
 felt sync / felt sync --push                # merge the store's upstream / publish
 ```
 
@@ -75,7 +80,7 @@ Plain queries search bodies by default, placing name/slug hits before metadata h
 
 **File while it's fresh.** When a decision, finding or correction from the user lands, file it under its parent then, without asking — reconstructed later, it has drifted. No empty stubs.
 
-**Correct, don't append.** A body says what is true now. When understanding moves, rewrite the sentences it moved, outcome first; git holds the history. No "Update:" paragraphs or "v2" markers.
+**Correct errors; date outgrown beliefs.** A body says what is true now, outcome first. A value that was never right is an error: correct it in place; git holds the history. A belief that was right when written and has since been outgrown is part of the record: keep it, dated, with a link to what replaced it. No "Update:" paragraphs or "v2" markers.
 
 **Sweep before you leave.** File what stayed implicit — including what you decided *not* to do — and bring the outcome and status of every fiber you touched up to date.
 

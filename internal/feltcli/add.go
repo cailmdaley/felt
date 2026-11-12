@@ -98,11 +98,8 @@ resolution and uses <slug> as spelled.`,
 			if addOutcome != "" {
 				f.Outcome = addOutcome
 			}
-			if addRole != "" {
-				if !felt.ValidRole(addRole) {
-					return invalidRoleError(addRole)
-				}
-				f.Role = addRole
+			if err := f.SetRole(addRole); err != nil {
+				return err
 			}
 
 			// Seed the durable recency anchor at creation time, so a fresh clone

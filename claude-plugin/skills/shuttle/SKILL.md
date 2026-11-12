@@ -43,7 +43,7 @@ Diagonal agrees to 3%. `validate/offdiag.py` loads the mocks; plotting is unfini
 - **outcome** — the card's headline: where the work stands and what the reader should do next. Start it with "Blocked: …" when stuck.
 - **`## Desired State`** — the contract: checkable done-conditions and what to leave alone, never steps. Workers choose the path.
 - **`## Status`** — the handoff to the next worker: what landed, what's stuck, what to know. Rewritten, never appended.
-- **`role`** — the office this work belongs to. Its charter, the fiber `roles/<role>` at the top of the shared store or in a repository linked in there (`felt show roles/<role>` finds either), holds the office's playbooks, human gates and the people it serves.
+- **`role`** — who answers for the work and in which office (`<office>/<person>`): the felt skill says what a role is. Shuttle reads the office for the charter, the seat and the voice.
 - **`tapestry.html`** — beside the fiber: one page describing the whole constitution as it stands, never the latest stretch. It opens on one screen, drawn in code, that shows at a glance what the work is, where it stands and what needs the human; everything else sits below. Its form follows the work: findings with their figures, the talk's slides themselves, embedded PDFs for a paper review. Rewritten whole, never appended ([references/tapestry.md](references/tapestry.md)).
 
 Armed cross-host creation and control go through the owning daemon's existing routes.
@@ -53,7 +53,7 @@ The owner writes its store directly; an unreachable owner fails without a local 
 ## Working as a worker
 
 1. **Survey.** Your launch prompt names your fiber and its `Felt store:` (`<store>` below). `felt -C <store> sync`, then `felt -C <store> show <id>` — fresh, since it may have changed since launch. Read `## Status`, the tapestry, and the role's charter. A launch message is the current directive. If the previous session ended without a handoff it was cut off, so Status may lag: check its transcript and the working tree. A standing run (`Run:` in the launch prompt) reads [references/standing-roles.md](references/standing-roles.md) first.
-2. **Take up the role.** No role, or the wrong one: find the fitting charter (`shuttle roles`) and assign it (`shuttle role <id> <role>`; `--new "<Office name>"` creates a missing charter, which you then write) ([references/roles.md](references/roles.md)). Recipes and lessons that would hold on any task in the office go in the charter, not in Status.
+2. **Take up the role.** No role, or the wrong one: find the fitting charter (`felt roles`) and assign it (`shuttle role <id> <role>`; `--new "<Office name>"` creates a missing charter, which you then write) ([references/roles.md](references/roles.md)). Recipes and lessons that would hold on any task in the office go in the charter, not in Status.
 3. **Work.** Decide rather than ask; when a choice is load-bearing, make it and lay out the alternatives in the tapestry.
 4. **Keep the surfaces current.** Refresh `## Status` and the outcome at each transition, so another session could take over at any moment. Commit as you go, and see background jobs through before you leave.
 

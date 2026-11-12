@@ -79,10 +79,9 @@ own, structured ones included.`,
 					f.Outcome = editOutcome
 				}
 				if cmd.Flags().Changed("role") {
-					if editRole != "" && !felt.ValidRole(editRole) {
-						return invalidRoleError(editRole)
+					if err := f.SetRole(editRole); err != nil {
+						return err
 					}
-					f.Role = editRole
 				}
 				if cmd.Flags().Changed("due") {
 					if editDue == "" {
@@ -225,9 +224,4 @@ func unsetExtraField(f *felt.Felt, key string) error {
 		return fmt.Errorf("--unset %q targets a native field; clear it with its dedicated flag (e.g. --%s \"\")", key, key)
 	}
 	return f.SetExtraField(key, nil)
-}
-
-// invalidRoleError refuses a role that is not <person> or <office>/<person>.
-func invalidRoleError(role string) error {
-	return fmt.Errorf("role must be <person> or <office>/<person>, each a lowercase slug, got %q", role)
 }

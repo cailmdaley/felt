@@ -1,6 +1,7 @@
 package felt
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -117,4 +118,14 @@ func (s *Storage) StampRole(f *Felt) {
 		return
 	}
 	f.Role = PersonAt(s.Path(f.ID))
+}
+
+// SetRole gives f role, refusing one that is not <office> or <office>/<person>;
+// an empty role clears it.
+func (f *Felt) SetRole(role string) error {
+	if role != "" && !ValidRole(role) {
+		return fmt.Errorf("role must be <person> or <office>/<person>, each a lowercase slug, got %q", role)
+	}
+	f.Role = role
+	return nil
 }
