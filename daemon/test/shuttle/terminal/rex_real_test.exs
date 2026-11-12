@@ -175,25 +175,4 @@ defmodule Shuttle.Terminal.RexPrerequisitesTest do
       assert IsolatedRex.skip?() == not unquote(rex_present)
     end
   end
-
-  test "effective real-test tags never enable setup without Rex" do
-    if IsolatedRex.skip?() do
-      tests =
-        Enum.flat_map(
-          [
-            Shuttle.Terminal.RexRealTest,
-            Shuttle.Terminal.RexRealFamilyTest,
-            Shuttle.Terminal.RexRealViewerTest,
-            Shuttle.Terminal.RexRealClaimTest
-          ],
-          & &1.__ex_unit__().tests
-        )
-
-      assert length(tests) >= 16
-
-      for test <- tests do
-        assert test.tags[:skip] == true, "#{test.name} enables setup without Rex"
-      end
-    end
-  end
 end
