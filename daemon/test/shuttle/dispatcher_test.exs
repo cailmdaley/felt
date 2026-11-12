@@ -467,8 +467,11 @@ defmodule Shuttle.DispatcherTest do
     # Pin a store here so store resolution is deterministic regardless of the
     # host's felt config, in this test's scope (the persistent_term cache in
     # configured_stores/0 is keyed by the base config, so a differing base in
-    # another test recomputes cleanly).
-    Shuttle.Test.Env.put_env("SHUTTLE_STORES", "/tmp")
+    # another test recomputes cleanly). A fresh directory, never a shared one
+    # such as /tmp, which may itself hold a `.felt` link to a real store.
+    store = Path.join(System.tmp_dir!(), "dispatcher-store-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(store, ".felt"))
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
 
     sessions_file =
       Path.join(
@@ -484,9 +487,10 @@ defmodule Shuttle.DispatcherTest do
     on_exit(fn ->
       File.rm(sessions_file)
       File.rm(sessions_file <> ".1")
+      File.rm_rf(store)
     end)
 
-    :ok
+    {:ok, store: store}
   end
 
   # ── Tests ──
@@ -737,13 +741,13 @@ defmodule Shuttle.DispatcherTest do
     end
   end
 
-  test "dispatch creates tmux session for eligible fiber" do
+  test "dispatch creates tmux session for eligible fiber", %{store: store} do
     result = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
     assert result == {:ok, FiberUid.session("tests/haiku")}
 
     commands = MockRunner.commands()
 
-    assert {"shuttle", ["-C", "/tmp", "show", "tests/haiku", "--json"]} in commands
+    assert {"shuttle", ["-C", store, "show", "tests/haiku", "--json"]} in commands
 
     assert Enum.any?(commands, fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
