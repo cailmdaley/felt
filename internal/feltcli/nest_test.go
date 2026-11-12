@@ -1,11 +1,31 @@
 package feltcli
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
+
+// breakFiberLock makes locking fiber id fail at once, as an interruption
+// between a move's reference rewrites; a held lock would only fail after
+// the lock timeout. The returned func mends it.
+func breakFiberLock(t *testing.T, storage *felt.Storage, id string) (mend func()) {
+	t.Helper()
+	lock := storage.Path(id) + ".lock"
+	if err := os.RemoveAll(lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(lock, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if err := os.Remove(lock); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestMoveCommandRetriesAfterRename(t *testing.T) {
 	t.Parallel()
@@ -29,17 +49,11 @@ func TestMoveCommandRetriesAfterRename(t *testing.T) {
 					args = append(args, "b")
 					target = "b/x"
 				}
-				unlock, err := storage.LockFiber("ref")
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer unlock()
+				mend := breakFiberLock(t, storage, "ref")
 				if _, err := runCommand(t, dir, args...); err == nil {
 					t.Fatal("expected interrupted move")
 				}
-				if err := unlock(); err != nil {
-					t.Fatal(err)
-				}
+				mend()
 				if spelling == "new" {
 					args[1] = target
 				}
@@ -63,17 +77,11 @@ func TestAbandonPendingMovePreservesDocuments(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	unlock, err := storage.LockFiber("ref")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unlock()
+	mend := breakFiberLock(t, storage, "ref")
 	if _, err := runCommand(t, dir, "nest", "a/x", "b"); err == nil {
 		t.Fatal("expected interruption")
 	}
-	if err := unlock(); err != nil {
-		t.Fatal(err)
-	}
+	mend()
 	before := mustRead(t, storage, "ref").Body
 	if _, err := runCommand(t, dir, "recover-move", "--abandon"); err != nil {
 		t.Fatal(err)

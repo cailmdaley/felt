@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -334,13 +333,8 @@ func TestUpdateRefreshRunsInstalledExecutableAtDownloadedTag(t *testing.T) {
 
 func TestUpdateRefreshRealExecutableSealsItsOwnBuild(t *testing.T) {
 	t.Parallel()
-	executable := filepath.Join(t.TempDir(), "felt")
-	build := exec.Command("go", "build", "-ldflags=-X main.version=2.0.0", "-o", executable, "./cmd/felt")
-	build.Dir = repoRoot(t)
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build felt: %v\n%s", err, output)
-	}
 	f := newRemoteSetupFixture(t, "claude")
+	executable := asFeltExecutable(t, f.env, "2.0.0")
 	f.env.Set("FELT_BIN", executable)
 	f.a.version = "1.0.0"
 	f.a.finishUpdate(executable, "v2.0.0")

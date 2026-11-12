@@ -54,6 +54,26 @@ func fakeCommand(t *testing.T, env *sysenv.Env, name, script string) string {
 	return sysenvtest.FakeCommand(t, env, name, script)
 }
 
+// asFeltVersionEnv names the version this test binary serves felt at when
+// TestMain finds it set.
+const asFeltVersionEnv = "FELT_TEST_AS_FELT_VERSION"
+
+// asFeltExecutable is a felt executable for env, built at version: a launcher
+// that runs this test binary as felt (see TestMain), in a separate process,
+// without a go build.
+func asFeltExecutable(t *testing.T, env *sysenv.Env, version string) string {
+	t.Helper()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.Set("FELT_TEST_BINARY", binary)
+	env.Set(asFeltVersionEnv, version)
+	path := filepath.Join(t.TempDir(), "felt")
+	linkScript(t, path, "exec \"$FELT_TEST_BINARY\" \"$@\"\n")
+	return path
+}
+
 // linkScript is sysenvtest.LinkScript.
 func linkScript(t *testing.T, path, script string) {
 	t.Helper()

@@ -25,7 +25,7 @@ type fakeTrustServer struct {
 	log       string
 	fail      string
 	mu        *sync.Mutex
-	initDelay time.Duration
+	initHangs bool // initialize never answers
 }
 
 func (s fakeTrustServer) handle(line []byte) []byte {
@@ -57,7 +57,9 @@ func (s fakeTrustServer) handle(line []byte) []byte {
 	var rpcError any
 	switch req.Method {
 	case "initialize":
-		time.Sleep(s.initDelay)
+		if s.initHangs {
+			time.Sleep(time.Hour)
+		}
 	case "hooks/list":
 		var state struct {
 			Data []struct {
@@ -134,14 +136,7 @@ func TestCodexTrustRPCProcess(t *testing.T) {
 	if os.Getenv("FELT_TRUST_RPC_HELPER") != "1" {
 		return
 	}
-	server := fakeTrustServer{hooks: os.Getenv("TRUST_HOOKS"), store: os.Getenv("TRUST_STORE"), log: os.Getenv("TRUST_LOG"), fail: os.Getenv("TRUST_FAIL")}
-	if delay := os.Getenv("TRUST_INIT_DELAY"); delay != "" {
-		var err error
-		server.initDelay, err = time.ParseDuration(delay)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+	server := fakeTrustServer{hooks: os.Getenv("TRUST_HOOKS"), store: os.Getenv("TRUST_STORE"), log: os.Getenv("TRUST_LOG"), fail: os.Getenv("TRUST_FAIL"), initHangs: os.Getenv("TRUST_INIT_HANGS") == "1"}
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	for scanner.Scan() {
@@ -294,19 +289,24 @@ func feltHook(event, status string) codexTrustHook {
 	return trustHook(codexPluginRef, codexPluginRef+":hooks/hooks.json:"+event+":0:0", status)
 }
 
+// Codex has been seen to take over twenty seconds to initialize an App
+// Server. Initialization waits the session's per-call bound, and that bound
+// defaults to a minute; the test shrinks it to watch it fire.
 func TestCodexTrustAllowsSlowServerInitialization(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
-	fakeCodexTrust(t, env, nil)
-	env.Set("TRUST_INIT_DELAY", "21s")
-	rpc, err := testApp(t, env).openCodexTrustRPC()
-	if err != nil {
-		t.Fatal(err)
+	if got := testApp(t, env).codexTrustTimeout(); got < time.Minute {
+		t.Fatalf("default Codex trust bound = %s; a cold App Server needs over 20s", got)
 	}
-	defer rpc.close()
-	var result json.RawMessage
-	if err := rpc.call("hooks/list", map[string]any{"cwds": []string{homeOf(t, env)}}, &result); err != nil {
-		t.Fatal(err)
+	fakeCodexTrust(t, env, nil)
+	env.Set("TRUST_INIT_HANGS", "1")
+	a := testApp(t, env)
+	a.trustTimeout = 50 * time.Millisecond
+	if rpc, err := a.openCodexTrustRPC(); err == nil || !strings.Contains(err.Error(), "codex initialize: no answer within 50ms") {
+		if rpc != nil {
+			rpc.close()
+		}
+		t.Fatalf("initialize against a silent server = %v; want the session bound", err)
 	}
 }
 

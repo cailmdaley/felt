@@ -37,6 +37,25 @@ func fiber(name, body string) string {
 
 // newMoveFixture is the store every move test starts from: a, b, a/x with a
 // child a/x/y, and a sibling a/xy whose name begins with x.
+// breakFiberLock makes locking fiber id fail at once, as an interruption
+// between a move's reference rewrites; a held lock would only fail after
+// the lock timeout. The returned func mends it.
+func breakFiberLock(t *testing.T, s *Storage, id string) (mend func()) {
+	t.Helper()
+	lock := s.Path(id) + lockSuffix
+	if err := os.RemoveAll(lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(lock, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if err := os.Remove(lock); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func newMoveFixture(t *testing.T) *Storage {
 	t.Helper()
 	_, s := newStore(t)
@@ -74,17 +93,11 @@ func TestMoveSubtreeRetriesInterruptedReferenceRewrites(t *testing.T) {
 	t.Parallel()
 	s := newMoveFixture(t)
 	writeFiberFile(t, s, "c", fiber("C", "See [[a/x]]."))
-	unlock, err := s.LockFiber("c")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unlock()
+	mend := breakFiberLock(t, s, "c")
 	if _, err := s.MoveSubtree("a/x", "b/x"); err == nil {
 		t.Fatal("move bypassed locked reference instead of retaining unfinished rewrites")
 	}
-	if err := unlock(); err != nil {
-		t.Fatal(err)
-	}
+	mend()
 	if _, err := s.MoveSubtree("a/x", "b/x"); err != nil {
 		t.Fatalf("retry interrupted move: %v", err)
 	}
@@ -99,11 +112,7 @@ func TestMoveRetryDoesNotReinterpretAnAlreadyRewrittenLink(t *testing.T) {
 	writeFiberFile(t, s, "b/xy", fiber("XY", ""))
 	writeFiberFile(t, s, "c", fiber("C", "See [[a/x]]."))
 	writeFiberFile(t, s, "d", fiber("D", "See [[a/x]]."))
-	unlock, err := s.LockFiber("d")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unlock()
+	mend := breakFiberLock(t, s, "d")
 	if _, err := s.MoveSubtree("a/x", "b/x"); err == nil {
 		t.Fatal("expected interrupted rewrite")
 	}
@@ -124,9 +133,7 @@ func TestMoveRetryDoesNotReinterpretAnAlreadyRewrittenLink(t *testing.T) {
 	if err := s.writeMoveJournal(&journal); err != nil {
 		t.Fatal(err)
 	}
-	if err := unlock(); err != nil {
-		t.Fatal(err)
-	}
+	mend()
 	if _, err := s.MoveSubtree("a/x", "b/x"); err != nil {
 		t.Fatal(err)
 	}

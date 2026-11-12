@@ -701,9 +701,7 @@ func TestPromotionRefusesUnknownNativeInspection(t *testing.T) {
 func TestNativeCodexInspectionRealIsolatedHome(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
-	if _, err := env.LookPath("codex"); err != nil {
-		t.Skip("codex is not installed")
-	}
+	requireRealCodex(t, env)
 	state, err := testApp(t, env).captureCodexInstallationRaw()
 	if err != nil {
 		t.Fatal(err)

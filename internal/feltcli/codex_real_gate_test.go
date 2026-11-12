@@ -10,19 +10,20 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
+// requireRealCodex runs a real-Codex test only when FELT_REQUIRE_REAL_CODEX=1,
+// and then fails rather than skips when Codex is absent or too old. These tests
+// drive private App Servers for tens of seconds, so the default suite leaves
+// them to the runs that install the pinned Codex.
 func requireRealCodex(t *testing.T, env *sysenv.Env) {
 	t.Helper()
-	reason := ""
-	if _, err := env.LookPath("codex"); err != nil {
-		reason = "codex is not installed"
-	} else if version, old := testApp(t, env).codexVersionTooOld(); old {
-		reason = "Codex " + version + " predates plugin content trust (requires " + codexHookTrustMinimum + ")"
+	if env.Getenv("FELT_REQUIRE_REAL_CODEX") != "1" {
+		t.Skip("real-Codex test; set FELT_REQUIRE_REAL_CODEX=1 to run it")
 	}
-	if reason != "" {
-		if env.Getenv("FELT_REQUIRE_REAL_CODEX") == "1" {
-			t.Fatal("required real-Codex gate: " + reason)
-		}
-		t.Skip(reason)
+	if _, err := env.LookPath("codex"); err != nil {
+		t.Fatal("required real-Codex gate: codex is not installed")
+	}
+	if version, old := testApp(t, env).codexVersionTooOld(); old {
+		t.Fatal("required real-Codex gate: Codex " + version + " predates plugin content trust (requires " + codexHookTrustMinimum + ")")
 	}
 }
 

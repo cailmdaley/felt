@@ -13,6 +13,13 @@ import (
 var testScratch string
 
 func TestMain(m *testing.M) {
+	// A test that needs a real felt executable runs this binary as one (see
+	// asFeltExecutable): it serves the command line at the version a release
+	// build would carry instead of running tests.
+	if version := os.Getenv(asFeltVersionEnv); version != "" {
+		SetVersionInfo(version, "", "unknown")
+		Execute()
+	}
 	dir, err := os.MkdirTemp("", "felt-cli-test-*")
 	if err != nil {
 		panic(err)
