@@ -250,7 +250,7 @@ fi
 // (`go build -C <tool dir> -o lock .`): the first build of each distinct
 // main.go and go.mod runs the real compiler into DEPLOY_LOCK_CACHE, and every
 // later one hard-links that executable into the tool dir. The helper is linked
-// with a 200ms TERM-to-KILL grace, so a cancelled fleet does not wait out the
+// with a 1s TERM-to-KILL grace, so a cancelled fleet does not wait out the
 // production three seconds. Every fleet builds
 // the same source twice (deployer and host), and a fresh build costs a link
 // plus macOS's first-exec assessment of the new binary.
@@ -258,7 +258,7 @@ func lockBuildCache(realGo string) string {
 	return `if [ $# = 6 ] && [ "$1 $2 $4 $5 $6" = "build -C -o lock ." ] && [ -n "${DEPLOY_LOCK_CACHE:-}" ]; then
  built="$DEPLOY_LOCK_CACHE/$(cat "$3/go.mod" "$3/main.go" | cksum | tr ' ' -)"
  if [ ! -f "$built" ]; then
-  mkdir -p "$DEPLOY_LOCK_CACHE" && '` + realGo + `' build -C "$3" -ldflags=-X=main.cancelGrace=200ms -o "$built.$$" . && mv -f "$built.$$" "$built" || exit 1
+  mkdir -p "$DEPLOY_LOCK_CACHE" && '` + realGo + `' build -C "$3" -ldflags=-X=main.cancelGrace=1s -o "$built.$$" . && mv -f "$built.$$" "$built" || exit 1
  fi
  ln -f "$built" "$3/lock" 2>/dev/null || cp "$built" "$3/lock"
  exit
