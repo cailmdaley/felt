@@ -118,6 +118,7 @@ class ModelOwner {
         const row = this.rows().find(r => { const f = r.fiber as { id: string; uid: string }; return f.id === id || f.uid === id })
         return row ? Response.json({ host: 'model-host', fibers: [{ ...row, fiber: { ...(row.fiber as object), body: '' } }] }) : Response.json({ fibers: [] }, { status: 404 })
       }
+      if (route === 'roles') return Response.json([])
       return Response.json({ fibers: [], files: [], entries: [] })
     }
     const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>
