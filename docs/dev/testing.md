@@ -250,8 +250,10 @@ waits are knobs, never sleeps: the lock helper is linked with a short
 `cancelGrace` (and in `scripts/deploy-lock`, a short `activationMargin`), and
 `SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS`, `SHUTTLE_DEPLOY_READY_*` and
 `SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS` shrink the others. A cancelled
-transaction is proven gone by its lock helper's process group
-(`awaitTransactionGone`), not by a second deployment.
+transaction is proven gone by the host lock coming free (every transaction
+shell and build inherits its descriptor), not by a second deployment. Not by
+its process group: on Linux a group of unreaped zombies still answers
+`kill(-pgid, 0)`.
 
 Parity between the Go and Elixir implementations of the same resolver is a
 shared fixture table under `daemon/test/fixtures/<resolver>/`, read by both

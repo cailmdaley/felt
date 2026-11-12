@@ -380,8 +380,9 @@ func TestDeploySSHHelperProcess(t *testing.T) {
 }
 
 // Every way a running transaction can lose its deployer or transport cancels
-// the whole transaction group on the target: once the host lock is free, no
-// process of the cancelled transaction survives to build or cycle later.
+// the whole transaction on the target. Its shells and builds inherit the host
+// lock's descriptor, so the lock comes free only once none of them survives to
+// build or cycle later.
 func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 	t.Parallel()
 	for _, how := range []string{"ssh", "runner-term", "helper-term", "helper-kill", "deployer-int", "deployer-kill", "local"} {
@@ -419,7 +420,7 @@ func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 			if e := cmd.Wait(); e == nil {
 				t.Fatalf("cancel reported success: %s", fleetRead(log))
 			}
-			f.awaitTransactionGone(t, holder)
+			deployAwait(t, "cancelled transaction to release the host lock", func() bool { return f.lockFree(t) })
 			if !strings.Contains(fleetRead(f.events), "umask 0027") {
 				t.Fatalf("login umask changed: %s", fleetRead(f.events))
 			}
@@ -430,8 +431,8 @@ func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 	}
 }
 
-// lockHolder is the pid of the lock helper holding the host lock. It leads
-// the process group its transaction runs in.
+// lockHolder is the pid of the lock helper holding the host lock, the leader
+// of its transaction's process group.
 func (f *deployFleet) lockHolder(t *testing.T) int {
 	t.Helper()
 	info := fleetRead(filepath.Join(f.home, ".shuttle/deploy.lock"))
@@ -442,16 +443,6 @@ func (f *deployFleet) lockHolder(t *testing.T) int {
 		t.Fatalf("holder %q: pid %d pgid %d %v", info, pid, pgid, e)
 	}
 	return pid
-}
-
-// awaitTransactionGone waits until the host lock is free and no process is
-// left in the cancelled transaction's group.
-func (f *deployFleet) awaitTransactionGone(t *testing.T, group int) {
-	t.Helper()
-	deployAwait(t, "lock free", func() bool { return f.lockFree(t) })
-	deployAwait(t, fmt.Sprintf("transaction group %d gone", group), func() bool {
-		return syscall.Kill(-group, 0) == syscall.ESRCH
-	})
 }
 
 func TestDeploySSHPreflightIsBoundedAndRetainsStderr(t *testing.T) {
