@@ -46,9 +46,13 @@ The suite also checks raw stream read-ahead, explicit buffer options, universal 
 ## Required real Codex plugin tests
 
 CI's Go job and `make test-linux` install checksum-pinned Codex 0.166.0 with
-`scripts/install-test-codex.sh` and set `FELT_REQUIRE_REAL_CODEX=1`. Under that
-flag, a missing or too-old Codex is a failure, not a skip. The Linux image key
-includes the installer checksum so changing the pin rebuilds the image.
+`scripts/install-test-codex.sh` and set `FELT_REQUIRE_REAL_CODEX=1`. The
+real-Codex tests run only under that flag, where a missing or too-old Codex
+is a failure, not a skip; a plain `go test ./...` skips them, since together
+they drive private App Servers for tens of seconds. Run them locally with
+`FELT_REQUIRE_REAL_CODEX=1 go test ./internal/feltcli -run 'CodexHookTrustReal|NativeCodexInspectionReal'`.
+The Linux image key includes the installer checksum so changing the pin
+rebuilds the image.
 
 `TestCodexHookTrustRealPrivateAppServer` and
 `TestCodexHookTrustRealLiveRefresh` use isolated HOME/CODEX_HOME directories,
@@ -138,6 +142,14 @@ does not rescue a short inner one: if a task's call carries a two-second
 deadline, a thirty-second `Task.await` around it still fails when the call
 does. Make incidental deadlines failure-only all the way down, and tag the
 tests whose subject is a deadline `:timing`.
+In Go, a loop that polls on a ticker takes its ticks as a channel, which
+production fills from a `time.Ticker` and a test fills one tick at a time:
+`watchHookIdle` in `internal/messaging` counts quiet polls rather than
+elapsed time, so its tests step through the two-second grace window without
+waiting it out. Simulate an interruption at the step that fails rather than
+by holding a resource until its timeout: the interrupted-move tests turn a
+fiber's lock sidecar into a directory, so the lock fails at once instead of
+after five seconds.
 In the board, wait for promised work with `settle()` from
 `ui/src/board/testFixtures.ts`, one real task turn that fake timers don't
 intercept, never a counted run of `await Promise.resolve()`: a `Response`
@@ -222,6 +234,8 @@ Reuse before writing. Each language has one place for shared support:
   - `PollerHelpers`: `start_poller!` and `make_fiber`.
   - `ApiConn`, `StubPostClient`, `StubGetFileClient`, `ForwardStub` and `Ledgers`.
 - **CLIs:** each package's `test_helpers_test.go`, plus `sysenvtest` for an injected environment and fake commands. Use `newStore`/`seedFiber` for stores on disk and `serveDaemon` for a fake daemon (`shuttlecli`; `daemonStub` in `provenance_test.go` routes by path).
+  - A test that needs a real felt executable uses `asFeltExecutable` (`feltcli/cli_harness_test.go`): a launcher that runs the test binary itself as felt at a chosen version. Don't run `go build` or `go list` from a test; under the `TestMain` fence's fresh `HOME` the go command starts from empty build and module caches.
+  - A package whose code writes files sets `FELT_TEST_FSYNC=0` in its `TestMain`. Every production fsync goes through `atomicfile.Sync` or `atomicfile.SyncDir` (a guard test in `internal/atomicfile` holds this), and that variable turns them off for the test process and the CLIs it runs. On macOS each fsync is an `F_FULLFSYNC`, which made up most of the plugin-setup tests' wall time.
 - **Board:** `ui/src/board/testFixtures.ts` (`card`, `response`, `captureFetch`), `testDevices.ts` (`matchMediaFor` and the device presets), and `ui/harness/workspace-fixtures.ts` for the browser harness.
 
 Parity between the Go and Elixir implementations of the same resolver is a
