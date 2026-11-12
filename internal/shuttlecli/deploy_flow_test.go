@@ -112,9 +112,9 @@ export LOGIN_PROFILE_LOADED=yes
 	}
 }
 
-// A host's deployments over time: a new target, a re-run that coalesces
-// without cycling, and an explicit rollback by abbreviated commit. Each keeps
-// the true rollback tree, and a dirty regular checkout is never moved.
+// A host's deployments over time: a new target and a re-run that coalesces
+// without cycling. Both keep the true rollback tree, and a dirty regular
+// checkout is never moved.
 func TestDeployRollbackLifecycle(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
@@ -155,15 +155,22 @@ func TestDeployRollbackLifecycle(t *testing.T) {
 		t.Fatalf("coalesced deploy pruned the true rollback tree: %v", err)
 	}
 
-	// A commit is not a ref to push, and lease metadata stays where an older
-	// target's pruner cannot take it for a worktree.
-	cmd := exec.Command("bash", filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", "fake", "--ref", first[:8])
+}
+
+// An explicit revision named by abbreviated commit deploys with push on: a
+// commit is not a ref to push, and lease metadata stays where an older
+// target's pruner cannot take it for a worktree.
+func TestDeployExplicitCommitRevision(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	cmd := exec.Command("bash", filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", "fake", "--ref", f.sha[:8])
 	cmd.Env = append(f.env, "CHECK_OLD_PRUNE=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("rollback: %v %s", err, out)
+		t.Fatalf("explicit revision: %v %s", err, out)
 	}
-	if !strings.Contains(fleetRead(f.state), first) {
-		t.Fatalf("rollback not live: %s", fleetRead(f.state))
+	if !strings.Contains(fleetRead(f.state), f.sha) {
+		t.Fatalf("explicit revision not live: %s", fleetRead(f.state))
 	}
 	if _, err := os.Stat(filepath.Join(f.remote+".deploy", ".leases")); !os.IsNotExist(err) {
 		t.Fatalf("lease metadata exposed to old pruner: %v", err)
@@ -198,8 +205,14 @@ func TestDeployHostLockQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, secondLog := f.start(t, "second")
-	deployAwait(t, "second waiting: "+secondLog, waiting(secondLog))
+	// The waiters queue concurrently; each run's remote shell records its pid
+	// under its FLEET_RUN name.
+	second, secondLog := f.start(t, "second", "FLEET_RUN=second")
+	killed, killedLog := f.startArgs(t, "killed", "fake", []string{"--ref", old}, "FLEET_RUN=killed")
+	stopped, stoppedLog := f.startArgs(t, "stopped", "fake", []string{"--ref", old}, "FLEET_RUN=stopped", "SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS=2")
+	for _, log := range []string{secondLog, killedLog, stoppedLog} {
+		deployAwait(t, "waiting: "+log, waiting(log))
+	}
 	if log := fleetRead(secondLog); !strings.Contains(log, "deployer=") || !strings.Contains(log, "target="+f.sha) {
 		t.Fatalf("holder not named: %s", log)
 	}
@@ -207,23 +220,18 @@ func TestDeployHostLockQueue(t *testing.T) {
 		t.Fatalf("waiting attempt overwrote the holder's diagnostics: %v", err)
 	}
 
-	killed, killedLog := f.startArgs(t, "killed", "fake", []string{"--ref", old})
-	deployAwait(t, "killed waiter waiting: "+killedLog, waiting(killedLog))
 	killed.Process.Kill()
 	if err := killed.Wait(); err == nil {
 		t.Fatal("killed waiter succeeded")
 	}
-	deployAwait(t, "killed waiter cancelled: "+killedLog, func() bool { return strings.Contains(fleetRead(killedLog), "observer EOF") })
 
-	stopped, stoppedLog := f.startArgs(t, "stopped", "fake", []string{"--ref", old}, "SHUTTLE_DEPLOY_HEARTBEAT_LEASE_SECONDS=2")
-	deployAwait(t, "stopped waiter waiting: "+stoppedLog, waiting(stoppedLog))
 	var observer int
 	for _, line := range strings.Split(fleetRead(stoppedLog), "\n") {
 		if _, err := fmt.Sscanf(line, "deploy-lock: transaction pgid=%d", &observer); err == nil {
 			break
 		}
 	}
-	remote, _ := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "remote.pid"))))
+	remote, _ := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "remote.stopped.pid"))))
 	if observer <= 0 || remote <= 0 {
 		t.Fatalf("missing observer %d or remote %d identity", observer, remote)
 	}
@@ -231,6 +239,7 @@ func TestDeployHostLockQueue(t *testing.T) {
 	if err := syscall.Kill(observer, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
+	deployAwait(t, "killed waiter cancelled: "+killedLog, func() bool { return strings.Contains(fleetRead(killedLog), "observer EOF") })
 	deployAwait(t, "stopped observer's waiter to expire its heartbeat lease", func() bool { return syscall.Kill(remote, 0) != nil })
 	syscall.Kill(observer, syscall.SIGCONT)
 	if err := stopped.Wait(); err == nil {

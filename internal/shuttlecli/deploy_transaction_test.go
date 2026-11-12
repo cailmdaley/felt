@@ -146,7 +146,7 @@ if [ "${FAIL_SSH_PREFLIGHT:-0}" = 1 ] && [ "$*" = true ]; then echo preflight-ss
 # Real SSH joins arguments, then the remote shell parses that command. The
 # isolated login shim sources this fixture's profile and preserves stderr.
 exec /usr/bin/env -i TEST_REMOTE=1 SHUTTLE_TEST_SSH_HELPER=1 SHUTTLE_TEST_GO_CACHES_PINNED=1 HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local DEPLOY_LOCK_CACHE="$DEPLOY_LOCK_CACHE" \
- FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
+ FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" FLEET_RUN="${FLEET_RUN:-}" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
  CHECK_CLEANUP_ORDER="${CHECK_CLEANUP_ORDER:-0}" FAIL_LOCK_BUILD="${FAIL_LOCK_BUILD:-0}" FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" RELEASE_BUSY_ONCE="${RELEASE_BUSY_ONCE:-0}" SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS="${SHUTTLE_DEPLOY_RELEASE_RETRY_SECONDS:-5}" \
  ACTIVATION_GATE="${ACTIVATION_GATE:-0}" CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" `+shellQuote(testBinary)+` -test.run=^TestDeploySSHHelperProcess$ -- "$*"
 `)
@@ -363,7 +363,12 @@ func TestDeploySSHHelperProcess(t *testing.T) {
 		finish(91)
 	}
 	r.Close()
-	os.WriteFile(filepath.Join(os.Getenv("FLEET_ROOT"), "remote.pid"), []byte(strconv.Itoa(remote.Process.Pid)), 0600)
+	// FLEET_RUN names one of several concurrent deployers' remote shells.
+	pidFile := "remote.pid"
+	if run := os.Getenv("FLEET_RUN"); run != "" {
+		pidFile = "remote." + run + ".pid"
+	}
+	os.WriteFile(filepath.Join(os.Getenv("FLEET_ROOT"), pidFile), []byte(strconv.Itoa(remote.Process.Pid)), 0600)
 	go func() { io.Copy(w, os.Stdin); w.Close() }()
 	if e = remote.Wait(); e != nil {
 		if exit, ok := e.(*exec.ExitError); ok && exit.ExitCode() > 0 {

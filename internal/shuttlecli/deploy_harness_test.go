@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 const (
@@ -201,7 +203,7 @@ func runHarnessDeploy(t *testing.T, c harnessDeployCase) (string, []string, erro
 	if c.piAfter != "" {
 		write(filepath.Join(fake, "pi.after"), c.piAfter, 0o644)
 	}
-	write(filepath.Join(bin, "felt"), `#!/bin/sh
+	sysenvtest.LinkScript(t, filepath.Join(bin, "felt"), `#!/bin/sh
 d="$FAKE_DIR"
 case "$*" in
   --version) printf 'felt version %s\n' "$(cat "$d/version")" ;;
@@ -218,8 +220,8 @@ case "$*" in
     [ ! -f "$d/receipt.after.json" ] || cp "$d/receipt.after.json" "$d/receipt.json" ;;
   *) exit 2 ;;
 esac
-`, 0o755)
-	write(filepath.Join(bin, "git"), `#!/bin/sh
+`)
+	sysenvtest.LinkScript(t, filepath.Join(bin, "git"), `#!/bin/sh
 [ "$1" = -C ] || exit 2
 [ -f "$2/HEAD_SHA" ] || { echo "fatal: not a git repository" >&2; exit 128; }
 case "$3 $4 $5" in
@@ -240,10 +242,10 @@ case "$3 $4 $5" in
     printf '%s' "$5" > "$2/HEAD_SHA" ;;
   *) exit 2 ;;
 esac
-`, 0o755)
-	write(filepath.Join(bin, "pi"), `#!/bin/sh
+`)
+	sysenvtest.LinkScript(t, filepath.Join(bin, "pi"), `#!/bin/sh
 [ "$1" = list ] && cat "$FAKE_DIR/pi.list"
-`, 0o755)
+`)
 
 	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 ` + shellFunction(t, string(script), "harness_setup_cmd") + `
