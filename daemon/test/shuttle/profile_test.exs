@@ -5,6 +5,7 @@ defmodule Shuttle.ProfileTest do
   @endpoint ShuttleWeb.Endpoint
 
   test "a one-second profile attributes File.stat and leaves other tracers intact" do
+    Shuttle.Test.Env.put_app_env(:profile_second_ms, 100)
     legacy = :erlang.trace_info(self(), :flags)
     msacc_previous = :erlang.system_flag(:microstate_accounting, true)
     sibling = :trace.session_create(:profile_test_sibling, self(), [])
@@ -92,11 +93,13 @@ defmodule Shuttle.ProfileTest do
 
   test "CPU mode reports function and concurrent HTTP work without file calls" do
     Shuttle.Test.Env.put_app_env(:host_class, :single_user)
+    # The clamped ten-second window, at 100 ms a second.
+    Shuttle.Test.Env.put_app_env(:profile_second_ms, 100)
     sibling = :trace.session_create(:profile_cpu_sibling, self(), [])
     parent = self()
 
-    request =
-      spawn(fn ->
+    {:ok, request} =
+      Task.start(fn ->
         send(
           parent,
           {:cpu_response, get(api_conn(), "/api/v1/debug/profile?mode=cpu&seconds=300")}

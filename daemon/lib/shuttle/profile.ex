@@ -9,6 +9,8 @@ defmodule Shuttle.Profile do
   counts queued events discarded, not calls made after tracing stops. A heap
   limit terminates an overloaded collector and fails the profile, not the VM.
   Processes and OS threads that exit during the window have no final sample.
+  A window second lasts `:profile_second_ms` (default 1_000) of the caller's
+  application environment.
   """
 
   @event_limit 200_000
@@ -42,8 +44,14 @@ defmodule Shuttle.Profile do
     mode = if Keyword.get(opts, :mode) == :cpu, do: :cpu, else: :file
     duration = if mode == :cpu, do: cpu_seconds(duration), else: seconds(duration)
     caller = self()
+    callers = Shuttle.Env.callers()
     ref = make_ref()
-    {pid, monitor} = spawn_monitor(fn -> acquire(caller, ref, duration, mode) end)
+
+    {pid, monitor} =
+      spawn_monitor(fn ->
+        Shuttle.Env.adopt_callers(callers)
+        acquire(caller, ref, duration, mode)
+      end)
 
     receive do
       {^ref, result} ->
@@ -116,7 +124,7 @@ defmodule Shuttle.Profile do
         {:DOWN, ^owner, :process, ^caller, _} -> {:error, :request_down}
         {:DOWN, ^monitor, :process, ^collector, reason} -> {:error, {:collector_down, reason}}
       after
-        duration * 1000 ->
+        duration * Shuttle.Env.app(:profile_second_ms, 1_000) ->
           after_gc = if mode == :cpu, do: :erlang.statistics(:garbage_collection)
 
           functions =
