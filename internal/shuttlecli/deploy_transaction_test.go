@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,9 +23,12 @@ type deployFleet struct {
 	env                                                             []string
 }
 
-// Fleet fixtures compile helpers and launch whole shell trees. Bound their
-// process fanout alongside the package's parallel, short-deadline hook tests.
-var deployFleetSlots = make(chan struct{}, 2)
+// Fleet fixtures launch whole shell trees. Bound their process fanout
+// alongside the package's parallel, short-deadline hook tests. A fleet spends
+// most of its time waiting on its processes (under one core each), so half
+// the test's processors keeps the rest of the package fed. A fleet waiting
+// for a slot still holds one of go test's -parallel slots.
+var deployFleetSlots = make(chan struct{}, max(2, runtime.GOMAXPROCS(0)/2))
 
 func newDeployFleet(t *testing.T) *deployFleet {
 	t.Helper()
