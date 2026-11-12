@@ -205,9 +205,9 @@ Keep the link out of the larger store's Git history (add it to that store's `.gi
 Three conventions keep several people's agents out of each other's way.
 None of them needs a field in the fibers.
 
-- **The top-level tree is the owner.** Each person's agents write under that person's top-level directories and read everywhere. `felt ls` run from inside a person's tree lists the open work there; `felt find` searches everyone's.
+- **Top-level trees are topics, and anyone adds to any of them.** Knowledge has no owner; open work names the person who answers for it in its `role:` ([Roles](roles.md)), and `felt ls` shows everyone's with the role beside it.
 - **Links are written from the shared store's root.** `[[analysis/likelihood]]` resolves in the shared repository on its own and, from a fiber inside the mount, in the larger store too, where the same fiber's id is `shared/analysis/likelihood`.
-- **The repository's `AGENTS.md` tells agents to search before they write,** and names whose tree is whose.
+- **The repository's `AGENTS.md` describes the layout** for agents that change it.
 
 Each person also says, once per checkout of the shared repository, whom that checkout works for:
 
