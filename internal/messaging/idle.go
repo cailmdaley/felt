@@ -50,7 +50,13 @@ const (
 // after which an unfired native subscription is silently dropped.
 const IdleSubscriptionLifetime = 12 * time.Hour
 
-const idleHookGrace = 2 * time.Second
+// A hook-event watcher reads the stream once per idleHookPoll, and a quiet
+// stop is idle after idleHookQuietPolls reads with no further activity: a
+// grace of about two seconds.
+const (
+	idleHookPoll       = 250 * time.Millisecond
+	idleHookQuietPolls = 8
+)
 
 // IdleSubscription is the receipt's account of the subscription.
 type IdleSubscription struct {
@@ -159,6 +165,14 @@ func ReadIdleRecord(path string) (IdleRecord, error) {
 // WatchIdle blocks until the receiver goes idle, exits, or the subscription
 // expires. An expired notice claims nothing about the receiver's state.
 func WatchIdle(ctx context.Context, env *sysenv.Env, rec IdleRecord) IdleNotice {
+	ticker := time.NewTicker(idleHookPoll)
+	defer ticker.Stop()
+	return watchIdle(ctx, env, rec, ticker.C)
+}
+
+// watchIdle is WatchIdle with a hook-event watcher reading the stream at
+// each poll.
+func watchIdle(ctx context.Context, env *sysenv.Env, rec IdleRecord, polls <-chan time.Time) IdleNotice {
 	deadline := time.Unix(rec.CreatedAt, 0).Add(IdleSubscriptionLifetime)
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
@@ -176,11 +190,11 @@ func WatchIdle(ctx context.Context, env *sysenv.Env, rec IdleRecord) IdleNotice 
 		// stop or an exit ends it.
 		if err == nil && n.State == NoticeIdle {
 			if after, busy := claudeStopLeftWork(ctx, eventsFile(env), a.ID, rec.EventsOffset, n.FinishedAt); busy {
-				n, err = watchHookIdle(ctx, eventsFile(env), a.ID, after)
+				n, err = watchHookIdle(ctx, eventsFile(env), a.ID, after, polls)
 			}
 		}
 	case IdleSignalHookEvents:
-		n, err = watchHookIdle(ctx, eventsFile(env), a.ID, rec.EventsOffset)
+		n, err = watchHookIdle(ctx, eventsFile(env), a.ID, rec.EventsOffset, polls)
 	default:
 		err = fmt.Errorf("unknown idle signal %q", rec.Signal)
 	}
@@ -316,12 +330,13 @@ type hookEvent struct {
 	Tool            string `json:"tool,omitempty"`
 }
 
-// watchHookIdle tails the event stream from offset. A `stop` with no
-// background task becomes idle once the grace window passes with no further
-// activity for the session; any activity in the window cancels it.
-func watchHookIdle(ctx context.Context, path, sessionID string, offset int64) (IdleNotice, error) {
+// watchHookIdle tails the event stream from offset, reading it again at each
+// poll. A `stop` with no background task becomes idle after
+// idleHookQuietPolls polls with no further activity for the session; any
+// activity in that window cancels it.
+func watchHookIdle(ctx context.Context, path, sessionID string, offset int64, polls <-chan time.Time) (IdleNotice, error) {
 	var candidate *hookEvent
-	var candidateSeen time.Time
+	quiet := 0
 	// Codex stops do not count spawned agents; the stream does, as
 	// spawn_agent/followup_task tool calls less subagent_stop events.
 	children := 0
@@ -336,7 +351,7 @@ func watchHookIdle(ctx context.Context, path, sessionID string, offset int64) (I
 		case "stop":
 			if e.BackgroundTasks == 0 {
 				ev := e
-				candidate, candidateSeen = &ev, time.Now()
+				candidate, quiet = &ev, 0
 			} else {
 				candidate = nil
 			}
@@ -354,8 +369,6 @@ func watchHookIdle(ctx context.Context, path, sessionID string, offset int64) (I
 	}
 	tail := eventTail{path: path, offset: offset}
 	defer tail.close()
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
 	for {
 		if err := tail.read(observe); err != nil {
 			return IdleNotice{}, err
@@ -363,13 +376,14 @@ func watchHookIdle(ctx context.Context, path, sessionID string, offset int64) (I
 		if exited != nil {
 			return *exited, nil
 		}
-		if candidate != nil && children <= 0 && time.Since(candidateSeen) >= idleHookGrace {
+		if candidate != nil && children <= 0 && quiet >= idleHookQuietPolls {
 			return IdleNotice{State: NoticeIdle, FinishedAt: time.UnixMilli(candidate.Timestamp)}, nil
 		}
 		select {
 		case <-ctx.Done():
 			return IdleNotice{}, ctx.Err()
-		case <-ticker.C:
+		case <-polls:
+			quiet++
 		}
 	}
 }

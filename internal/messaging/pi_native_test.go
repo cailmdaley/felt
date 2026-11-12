@@ -236,11 +236,14 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 				return tc.reply
 			})
 			defer closeFixture()
-			if err := RegisterPiNative(env, "session", "host", "/project", socket, "/tmp/session.jsonl", os.Getpid(), true); err != nil {
+			if err := RegisterPiNative(env, "session", "host", "/project", socket, filepath.Join(t.TempDir(), "session.jsonl"), os.Getpid(), true); err != nil {
 				t.Fatal(err)
 			}
 			req := Request{Address: "shuttle://host/pi/session", Text: "hello", MessageID: "native", Wake: true}
-			receipt, err := sendPiNative(context.Background(), env, Address{Host: "host", Harness: "pi", ID: "session"}, req)
+			// The reply alone decides the receipt: the transcript that could
+			// confirm an ambiguous reply is never written, so no observation
+			// window is spent waiting for it.
+			receipt, err, _ := sendPiNativeWithDedupMetadata(context.Background(), env, Address{Host: "host", Harness: "pi", ID: "session"}, req, 0)
 			codeMatches := (tc.code == "" && err == nil) || (tc.code != "" && ErrorCode(err) == tc.code)
 			if receipt.Status != tc.status || !codeMatches {
 				t.Fatalf("receipt=%#v err=%v", receipt, err)

@@ -72,19 +72,22 @@ func testClaudeNativeIdle(t *testing.T, background bool) {
 	if info, err := os.Stat(events); err == nil {
 		rec.EventsOffset = info.Size()
 	}
+	w := newIdlePoller(t)
+	go func() { w.done <- watchIdle(w.ctx, env, rec, w.polls) }()
+	// The first poll reaches a hook watcher only once the turn's Stop has
+	// been read; without background work the native notice already ended
+	// the watch.
+	n, done := w.poll(1)
 	if background {
+		if done {
+			t.Fatalf("idle while background work ran: %+v", n)
+		}
 		want += 30000
-		quiet := hookEvent{Timestamp: want, Type: "stop", SessionID: "session"}
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			writeEvents(t, events, quiet)
-		}()
+		writeEvents(t, events, hookEvent{Timestamp: want, Type: "stop", SessionID: "session"})
+		n, done = w.poll(3 * idleHookQuietPolls)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	n := WatchIdle(ctx, env, rec)
-	if n.State != NoticeIdle || n.FinishedAt.UnixMilli() != want {
-		t.Fatalf("%+v", n)
+	if !done || n.State != NoticeIdle || n.FinishedAt.UnixMilli() != want {
+		t.Fatalf("%v %+v", done, n)
 	}
 	frame := <-frames
 	if frame["type"] != "control" || frame["msg_id"] != idleUUID(rec) {
@@ -146,51 +149,83 @@ func writeEvents(t *testing.T, path string, events ...hookEvent) {
 	}
 }
 
+// idlePoller drives an idle watcher one poll at a time, so a test counts
+// polls instead of waiting out the grace window.
+type idlePoller struct {
+	ctx   context.Context
+	polls chan time.Time
+	done  chan IdleNotice
+}
+
+func newIdlePoller(t *testing.T) *idlePoller {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return &idlePoller{ctx: ctx, polls: make(chan time.Time), done: make(chan IdleNotice, 1)}
+}
+
+// startHookIdle watches session "s" in the stream at path from offset.
+func startHookIdle(t *testing.T, path string, offset int64) *idlePoller {
+	t.Helper()
+	w := newIdlePoller(t)
+	go func() { n, _ := watchHookIdle(w.ctx, path, "s", offset, w.polls); w.done <- n }()
+	return w
+}
+
+// poll delivers up to n polls, each once the watcher has finished with the
+// one before, and returns the notice if the watcher ends first.
+func (w *idlePoller) poll(n int) (IdleNotice, bool) {
+	for range n {
+		select {
+		case w.polls <- time.Time{}:
+		case notice := <-w.done:
+			return notice, true
+		}
+	}
+	return IdleNotice{}, false
+}
+
 // A stop with background work, or one followed by activity inside the grace
-// window, is not idle; the next quiet stop is.
+// window, is not idle; the next quiet stop is, once the window has passed.
 func TestHookIdleNeedsQuietStop(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	writeEvents(t, path, hookEvent{Timestamp: 1, Type: "stop", SessionID: "s"})
 	info, _ := os.Stat(path)
-	done := make(chan IdleNotice, 1)
-	go func() {
-		n, _ := watchHookIdle(context.Background(), path, "s", info.Size())
-		done <- n
-	}()
+	w := startHookIdle(t, path, info.Size())
 	writeEvents(t, path,
-		hookEvent{Timestamp: 2, Type: "stop", SessionID: "s", BackgroundTasks: 1},
-		hookEvent{Timestamp: 3, Type: "stop", SessionID: "other"},
-		hookEvent{Timestamp: 4, Type: "stop", SessionID: "s"},
-		hookEvent{Timestamp: 5, Type: "user_prompt_submit", SessionID: "s"})
-	select {
-	case n := <-done:
+		hookEvent{Timestamp: 2, Type: "stop", SessionID: "s"},
+		hookEvent{Timestamp: 3, Type: "user_prompt_submit", SessionID: "s"},
+		hookEvent{Timestamp: 4, Type: "stop", SessionID: "s", BackgroundTasks: 1},
+		hookEvent{Timestamp: 5, Type: "stop", SessionID: "other"})
+	if n, done := w.poll(3 * idleHookQuietPolls); done {
 		t.Fatalf("premature %+v", n)
-	case <-time.After(idleHookGrace + time.Second):
 	}
 	writeEvents(t, path, hookEvent{Timestamp: 6, Type: "stop", SessionID: "s"})
-	select {
-	case n := <-done:
-		if n.State != NoticeIdle || n.FinishedAt.UnixMilli() != 6 {
-			t.Fatalf("%+v", n)
-		}
-	case <-time.After(idleHookGrace + 2*time.Second):
-		t.Fatal("no idle notice")
+	if n, done := w.poll(idleHookQuietPolls - 1); done {
+		t.Fatalf("idle inside the grace window: %+v", n)
+	}
+	n, done := w.poll(3 * idleHookQuietPolls)
+	if !done || n.State != NoticeIdle || n.FinishedAt.UnixMilli() != 6 {
+		t.Fatalf("%v %+v", done, n)
 	}
 }
 
 func TestHookIdleSessionEndIsExit(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	writeEvents(t, path, hookEvent{Timestamp: 9, Type: "session_end", SessionID: "s"})
-	n, err := watchHookIdle(context.Background(), path, "s", 0)
+	n, err := watchHookIdle(context.Background(), path, "s", 0, nil)
 	if err != nil || n.State != NoticeExited {
 		t.Fatalf("%+v %v", n, err)
 	}
 }
 
 func TestIdleWatchExpiresWithoutClaimingState(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	env.Set("SHUTTLE_EVENTS_FILE", filepath.Join(t.TempDir(), "events.jsonl"))
-	rec := IdleRecord{MessageID: "m", Address: "shuttle://host/codex/t", Signal: IdleSignalHookEvents, CreatedAt: time.Now().Add(-IdleSubscriptionLifetime).Unix() + 1}
+	rec := IdleRecord{MessageID: "m", Address: "shuttle://host/codex/t", Signal: IdleSignalHookEvents, CreatedAt: time.Now().Add(-IdleSubscriptionLifetime).Unix() - 1}
 	n := WatchIdle(context.Background(), env, rec)
 	if n.State != NoticeExpired || !strings.Contains(IdleNoticeText(rec, n), "no claim") {
 		t.Fatalf("%+v", n)
@@ -200,46 +235,37 @@ func TestIdleWatchExpiresWithoutClaimingState(t *testing.T) {
 // A Codex stop with a spawned agent still running is not idle until the
 // child reports back.
 func TestHookIdleWaitsForSpawnedAgents(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	writeEvents(t, path,
 		hookEvent{Timestamp: 1, Type: "post_tool_use", SessionID: "s", Tool: "spawn_agent"},
 		hookEvent{Timestamp: 2, Type: "stop", SessionID: "s"})
-	done := make(chan IdleNotice, 1)
-	go func() { n, _ := watchHookIdle(context.Background(), path, "s", 0); done <- n }()
-	select {
-	case n := <-done:
+	w := startHookIdle(t, path, 0)
+	if n, done := w.poll(3 * idleHookQuietPolls); done {
 		t.Fatalf("premature %+v", n)
-	case <-time.After(idleHookGrace + time.Second):
 	}
 	writeEvents(t, path, hookEvent{Timestamp: 3, Type: "subagent_stop", SessionID: "s"})
-	select {
-	case n := <-done:
-		if n.State != NoticeIdle {
-			t.Fatalf("%+v", n)
-		}
-	case <-time.After(idleHookGrace + 2*time.Second):
-		t.Fatal("no idle notice")
+	if n, done := w.poll(3 * idleHookQuietPolls); !done || n.State != NoticeIdle {
+		t.Fatalf("%v %+v", done, n)
 	}
 }
 
 // Rotation renames the stream; the watcher follows the new file.
 func TestHookIdleFollowsRotation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	writeEvents(t, path, hookEvent{Timestamp: 1, Type: "pre_tool_use", SessionID: "s"})
-	done := make(chan IdleNotice, 1)
-	go func() { n, _ := watchHookIdle(context.Background(), path, "s", 0); done <- n }()
-	time.Sleep(500 * time.Millisecond)
+	w := startHookIdle(t, path, 0)
+	// One poll is taken only after the first read of the old file.
+	if n, done := w.poll(1); done {
+		t.Fatalf("premature %+v", n)
+	}
 	if err := os.Rename(path, path+".1"); err != nil {
 		t.Fatal(err)
 	}
 	writeEvents(t, path, hookEvent{Timestamp: 5, Type: "session_end", SessionID: "s"})
-	select {
-	case n := <-done:
-		if n.State != NoticeExited {
-			t.Fatalf("%+v", n)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("rotation not followed")
+	if n, done := w.poll(3); !done || n.State != NoticeExited {
+		t.Fatalf("rotation not followed: %v %+v", done, n)
 	}
 }
 

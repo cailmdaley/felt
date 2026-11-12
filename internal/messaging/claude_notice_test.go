@@ -79,10 +79,11 @@ func TestClaudeHangingNoticeCannotStarveOtherMail(t *testing.T) {
 	if _, err := Send(context.Background(), env, "host", req); err != nil {
 		t.Fatal(err)
 	}
-	notify := func(ctx context.Context, _ Request) error { <-ctx.Done(); return ctx.Err() }
 	now := time.Now().Add(time.Minute)
 	for i := 0; i < 2; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		// The notice hangs until the pass itself runs out of time.
+		ctx, cancel := context.WithCancel(context.Background())
+		notify := func(noticeCtx context.Context, _ Request) error { cancel(); <-noticeCtx.Done(); return noticeCtx.Err() }
 		_, _ = RecoverClaudeMail(ctx, env, "host", now.Add(time.Duration(i)*time.Second), notify)
 		cancel()
 	}
