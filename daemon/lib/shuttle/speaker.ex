@@ -240,6 +240,8 @@ defmodule Shuttle.Speaker do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
+    # A player from an earlier daemon can outlive it; the restored line resumes here.
+    Keyword.get(opts, :silence, &silence/0).()
     journal = Keyword.get_lazy(opts, :journal, &journal_path/0)
     saved = restore(journal)
     if saved.current || saved.queue != [], do: send(self(), :poll)
@@ -914,6 +916,12 @@ defmodule Shuttle.Speaker do
 
   defp play(path),
     do: Port.open({:spawn_executable, exe("afplay")}, [:exit_status, args: [path]])
+
+  defp silence do
+    dir = Path.join(Shuttle.data_dir(), "speaker")
+    Shuttle.Env.cmd("pkill", ["-f", "afplay #{dir}/"])
+    :ok
+  end
 
   defp stop(port) do
     case Port.info(port, :os_pid) do

@@ -29,6 +29,7 @@ defmodule Shuttle.SpeakerTest do
       end,
       stop: fn handle -> send(parent, {:stop, handle}) end,
       slice: fn wav, from -> {:ok, "#{wav}@#{from}"} end,
+      silence: fn -> send(parent, :silenced) end,
       # As Voice does, a route moves the card in view.
       retarget: fn item ->
         Agent.update(world, &Map.put(&1, :target, [item.fiber_id]))
@@ -55,6 +56,8 @@ defmodule Shuttle.SpeakerTest do
   end
 
   test "plays lines one at a time in arrival order", %{pid: pid, server: server} do
+    assert_received :silenced
+
     assert {:ok, %{voice: "jean", ahead: 0}} =
              Speaker.speak(%{"text" => "first", "voice" => "jean"}, server)
 
