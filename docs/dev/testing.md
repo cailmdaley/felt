@@ -249,7 +249,7 @@ Reuse before writing. Each language has one place for shared support:
   - `Shuttle.Test.Env`: scoped env, app env and `PATH`, and scoped servers.
   - `Shuttle.Test.FakeCli`: fake executables. They are content-addressed and warmed once, and vary their behaviour by scoped env, never by a rewritten script. On macOS a freshly written executable costs about a second on its first exec.
   - `FeltStoreRunner`: an in-memory felt store behind the runner seam. A test about daemon logic answers the CLIs through it (or a local runner module); the real `felt` and `shuttle` are for the suites that hold the CLI boundary itself: `dispatch_integration_*`, `threads_*`, `cross_host_identity_integration` and the parity tables. `Shuttle.CLI` takes its runner from the `:felt_runner` app-env key.
-  - `PollerHelpers`: `start_poller!` and `make_fiber`.
+  - `PollerHelpers`: `start_poller!` and `make_fiber`. Without a `:name`, `start_poller!` starts a Poller scoped to the test; a registered name is VM-wide, and two async modules that register the same one collide.
   - Case templates for suites split across modules: `PollerCase`, `ThreadsCase`, `RexRealCase`, `DispatchIntegrationCase`. A module runs its own tests one after another, so a module whose tests add up to more than ~15 s belongs in several topical modules sharing a template.
   - `TimelineFormatter` and `StackSampler`, for finding where the suite's time goes (see [Daemon suite time](#daemon-suite-time)).
   - `ApiConn`, `StubPostClient`, `StubGetFileClient`, `ForwardStub` and `Ledgers`.

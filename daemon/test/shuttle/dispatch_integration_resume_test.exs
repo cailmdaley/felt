@@ -699,7 +699,7 @@ defmodule Shuttle.DispatchIntegrationResumeTest do
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_standing_dead_orphan,
+        name: :test_poller_integration_standing_dead_orphan,
         runner: IntegrationRunner,
         poll_interval_ms: 600_000,
         felt_stores: [host]
