@@ -106,11 +106,17 @@ func testStopEndpoint(t *testing.T, claimed bool, network string) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 		address, err := bufio.NewReader(output).ReadString('\n')
 		if err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
 			t.Fatal(err)
 		}
+		// Reap the child as soon as it exits, as a daemon's own parent would:
+		// an unreaped zombie still answers for its pid and birth.
+		exited := make(chan struct{})
+		go func() { _ = cmd.Wait(); close(exited) }()
+		t.Cleanup(func() { _ = cmd.Process.Kill(); <-exited })
 		return cmd, strings.TrimSpace(address)
 	}
 	sibling, siblingAddress := start()

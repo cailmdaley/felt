@@ -393,8 +393,9 @@ func (a *app) stopDaemonEndpoint(settings hostSettings, within string) error {
 	if err := a.signalDaemonOwner(owner, syscall.SIGTERM); err != nil {
 		return err
 	}
-	for i := 0; i < 5; i++ {
-		a.daemonPause(time.Second)
+	// Check every 100 ms for five seconds before escalating to KILL.
+	for i := 0; i < 50; i++ {
+		a.daemonPause(100 * time.Millisecond)
 		birth, err := processBirth(a.env, owner.PID)
 		if err != nil {
 			if syscall.Kill(owner.PID, 0) == syscall.ESRCH {
