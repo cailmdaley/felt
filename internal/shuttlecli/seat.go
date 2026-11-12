@@ -49,7 +49,7 @@ without changing its role, lifecycle or runtime state.`,
 			if clear {
 				fmt.Fprintf(a.env.Stdout, "cleared the seat of %s%s\n", args[0], ref.Location())
 			} else {
-				fmt.Fprintf(a.env.Stdout, "%s%s is a seat of roles/%s\n", args[0], ref.Location(), block.Role)
+				fmt.Fprintf(a.env.Stdout, "%s%s is a seat of roles/%s\n", args[0], ref.Location(), shuttle.OfficeOf(block.Role))
 			}
 			return nil
 		},

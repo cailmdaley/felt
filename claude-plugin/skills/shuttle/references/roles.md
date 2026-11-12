@@ -4,14 +4,14 @@ Every worker holds a role. A role is an office, such as editor, scribe or survey
 
 ## Taking up a role
 
-**Read the charter before substantive work.** A constitution names its role in its shuttle block:
+**Read the charter before substantive work.** A constitution names its role in its top-level `role:`, `<office>` or `<office>/<person>`:
 
 ```yaml
-shuttle:
-  role: surveyor
+status: active
+role: surveyor/sam
 ```
 
-After syncing, read it with `felt -C <store> show roles/<role>`, which finds the charter in either place. The role says what kind of work this is, not who you are: `shuttle.agent` decides which model runs, and the session ledger records who ran each session.
+After syncing, read the office's charter with `felt -C <store> show roles/<office>`, which finds it in either place, then the person's instance `roles/<office>/<person>` if it exists. Older constitutions keep the role inside the shuttle block as `shuttle.role`; Shuttle still reads it, and `shuttle role` moves it out. The role says what kind of work this is, not who you are: `shuttle.agent` decides which model runs, and the session ledger records who ran each session.
 
 **If there is no role, or the role doesn't fit the work**, find the charter that does. `shuttle roles` lists the offices with each charter's id, and `roles/roles.md`, where the store keeps one, maps kinds of work to them. Read the charters that look close, and work under the one whose remit matches what this task is really asking for. A quick task that closes in one sitting can borrow a charter's practice without being assigned to it. A constitution that hands off, recurs or is resumed is persistent responsibility, and gets a role:
 
@@ -37,4 +37,4 @@ A role may carry a name that emerged from its first real run (Boswell, Colbert).
 
 ## Handoffs
 
-A new session reads the handoff and may accept, revise or question its conclusions without claiming to remember producing them. Don't wake a cold predecessor just to ask it for a summary. When you rename a role, update the constitutions whose `shuttle.role` names it.
+A new session reads the handoff and may accept, revise or question its conclusions without claiming to remember producing them. Don't wake a cold predecessor just to ask it for a summary. When you rename a role, update the constitutions whose `role:` names it.

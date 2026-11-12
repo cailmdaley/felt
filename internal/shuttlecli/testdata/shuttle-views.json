@@ -6,6 +6,7 @@
       "effort": "high",
       "host": "test-host",
       "kind": "oneshot",
+      "person": "vizier",
       "project_dir": "/work/project",
       "resolved": {
         "agent": {

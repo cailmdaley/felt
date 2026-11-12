@@ -524,6 +524,7 @@ function toCard(
     due: f.due,
     tags: f.tags,
     shuttleRole: f.shuttleRole,
+    shuttlePerson: f.shuttlePerson,
     createdAt: f.createdAt,
     closedAt: f.closedAt,
     modifiedAt: f.modifiedAt,

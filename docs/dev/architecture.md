@@ -87,7 +87,7 @@ changes, whoever wrote them, including daemon lifecycle writes. Mixed commits
 are fine. A worker resolves relevant conflicts with the work's
 context. Role charters at `roles/<role>`, or `<mount>/roles/<role>` in a repository
 linked in at the store's top level ([the rule](../concepts/roles.md#where-a-charter-lives)),
-have intrinsic IDs and no host owner. A task's optional `shuttle.role` names one role charter; `shuttle.seat`
+have intrinsic IDs and no host owner. A task's top-level `role` names its office (the first segment, whose charter it is) and the person responsible; `shuttle.seat`
 marks whether the constitution is a seat of that office.
 Synchronizing a constitution does not change its `shuttle.host` dispatch gate.
 Armed cross-host creation writes through the owner daemon; dispatch never depends on archive synchronization.

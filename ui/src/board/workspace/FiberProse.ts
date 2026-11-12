@@ -67,7 +67,7 @@ export function installBodyFileLinks(
  * is a wikilink to its charter (`roles/<slug>`, or `<mount>/roles/<slug>`),
  * live when the index names one and plain text otherwise.
  */
-function roleChip(slug: string | undefined, opts: { shuttleBase: string; onFiber: (id: string) => void }): HTMLElement | null {
+function roleChip(slug: string | undefined, person: string | undefined, opts: { shuttleBase: string; onFiber: (id: string) => void }): HTMLElement | null {
   if (!slug) return null
   const el = document.createElement('span')
   el.className = 'ws-fiber-roles'
@@ -82,6 +82,13 @@ function roleChip(slug: string | undefined, opts: { shuttleBase: string; onFiber
   link.dataset.wikilinkRaw = slug
   link.textContent = slug
   role.append(link)
+  // The person responsible, unless the role is only that person's own desk.
+  if (person && person !== slug) {
+    const who = document.createElement('span')
+    who.className = 'ws-fiber-role-person'
+    who.textContent = ` · ${person}`
+    role.append(who)
+  }
   el.append(role)
   void installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, resolve: (_, index) => charterId(slug, index.map(row => row.id)) })
   return el
@@ -120,7 +127,7 @@ export function buildFiberProse(
   }
   // An office named like the fiber itself would only say the name twice.
   const kebab = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-  const roles = card.shuttleRole && kebab(card.shuttleRole) !== kebab(channel.name) ? roleChip(card.shuttleRole, opts) : null
+  const roles = card.shuttleRole && kebab(card.shuttleRole) !== kebab(channel.name) ? roleChip(card.shuttleRole, card.shuttlePerson, opts) : null
   if (roles) header.append(roles)
   const outcome = document.createElement('div')
   const outcomeText = opts.embedded ? '' : channel.outcome ?? card.outcome ?? ''

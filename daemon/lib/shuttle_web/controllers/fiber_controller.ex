@@ -32,7 +32,7 @@ defmodule ShuttleWeb.FiberController do
   # final patch (transfer identity, description and source timestamps). The
   # generic splice of custom fields excludes them all: felt refuses a document
   # whose frontmatter repeats a key.
-  @felt_native_keys ~w(id name status tags outcome due description created-at updated-at closed-at)
+  @felt_native_keys ~w(id name status tags outcome due role description created-at updated-at closed-at)
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -277,13 +277,13 @@ defmodule ShuttleWeb.FiberController do
 
   defp tag_args(_frontmatter), do: []
 
-  # `due` and `outcome` are on `@felt_native_keys`, so the splice deliberately
+  # `due`, `outcome` and `role` are on `@felt_native_keys`, so the splice deliberately
   # skips them as "felt's to write" — which means felt has to actually be told,
   # or a one-shot create of a dated fiber would silently drop its date. `felt
-  # add` takes both (`-D`, `-o`), so no follow-up edit is needed and the create
+  # add` takes each (`-D`, `-o`, `-R`), so no follow-up edit is needed and the create
   # stays one call.
   defp native_field_args(frontmatter) do
-    [{"due", "-D"}, {"outcome", "-o"}]
+    [{"due", "-D"}, {"outcome", "-o"}, {"role", "-R"}]
     |> Enum.flat_map(fn {key, flag} ->
       case Map.get(frontmatter, key) do
         value when is_binary(value) and value != "" -> [flag, value]

@@ -65,6 +65,12 @@ func BlockOf(f *felt.Felt) (*Block, bool, error) {
 		return nil, true, fmt.Errorf("shuttle: block is malformed: %w", err)
 	}
 	block.Kind = NormalizeKind(block.Kind)
+	// The role is the fiber's top-level `role:`. A `shuttle.role` inside the
+	// block answers only when that is absent: fibers written before the role
+	// moved out of the block, and by hosts not yet upgraded.
+	if f.Role != "" {
+		block.Role = f.Role
+	}
 	return &block, true, nil
 }
 
@@ -147,11 +153,17 @@ var configKeys = map[string]bool{
 }
 
 // SetConfig replaces the typed configuration while preserving runtime and
-// unknown sibling fields in the facet.
+// unknown sibling fields in the facet. The block's role is written to the
+// fiber's top-level `role:`, and the facet keeps none.
 func SetConfig(f *felt.Felt, block *Block) error {
+	if block.Role != "" {
+		f.Role = block.Role
+	}
 	node, ok := facetNode(f)
 	if !ok {
-		return f.SetExtraField(FacetKey, block)
+		withoutRole := *block
+		withoutRole.Role = ""
+		return f.SetExtraField(FacetKey, &withoutRole)
 	}
 	var encoded yaml.Node
 	if err := encoded.Encode(block); err != nil {
@@ -165,6 +177,7 @@ func SetConfig(f *felt.Felt, block *Block) error {
 	felt.RemoveMappingKey(&encoded, "surface")
 	// Questions are worker state, not configuration; preserve the live node.
 	felt.RemoveMappingKey(&encoded, "ask")
+	felt.RemoveMappingKey(&encoded, "role")
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if configKeys[key] && !(key == "thread_parent" && block.ThreadParent == nil) {
@@ -205,10 +218,19 @@ func Resolve(f *felt.Felt, reg *AgentRegistry, now time.Time) error {
 	if err := node.Decode(&flat); err != nil || flat == nil {
 		return nil
 	}
-	// Office fields have a stable type in the daemon-facing projection.
+	// Office fields have a stable type in the daemon-facing projection: `role`
+	// is the office, the charter's slug, and `person` who is responsible.
 	role, _ := flat["role"].(string)
+	if f.Role != "" {
+		role = f.Role
+	}
 	seat, _ := flat["seat"].(bool)
-	flat["role"] = role
+	flat["role"] = ""
+	flat["person"] = ""
+	if role != "" {
+		flat["role"] = OfficeOf(role)
+		flat["person"] = PersonOf(role)
+	}
 	flat["seat"] = seat
 	// Readers of the resolved view see the kind a legacy value is read as.
 	if kind, ok := flat["kind"].(string); ok {
@@ -230,4 +252,11 @@ func Resolve(f *felt.Felt, reg *AgentRegistry, now time.Time) error {
 	}
 	f.SetJSONField(FacetKey, flat)
 	return nil
+}
+
+// SetRole makes role the fiber's role, removing any `shuttle.role` from its
+// facet; an empty role clears it.
+func SetRole(f *felt.Felt, role string) error {
+	f.Role = role
+	return SetNodeField(f, "role", nil)
 }

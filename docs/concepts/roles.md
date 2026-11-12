@@ -22,8 +22,23 @@ resolves an id by its unique tail; this is how workers read one.
 
 ## Holding a role
 
-A constitution can name one role with `shuttle.role: <role-slug>`. Setting
-`shuttle.seat: true` marks it as a seat of that office and requires a role.
+A fiber's top-level `role:` names who answers for its open work: `<office>` or
+`<office>/<person>`, each a slug. The person is the last segment, so
+`role: sam` is Sam's own desk and `role: analyst/sam` is Sam in the analyst
+office. felt stamps a new open fiber with `git config felt.person` of the
+repository that holds it; handing work over is editing the field. Shuttle reads
+a constitution's office as the role's first segment: its charter is
+`roles/<office>`, and the person's instance `roles/<office>/<person>` is
+optional and never checked. A worker reads the office's charter, then the
+person's instance if it exists. `shuttle role <fiber> analyst` stores
+`analyst/<person>` when the repository names a person.
+
+A role written inside the shuttle block, `shuttle.role`, is read when the fiber
+has no top-level `role:`; `shuttle check` warns about it and `shuttle role`
+moves it. Shuttle's resolved view (`shuttle ls --json`, `shuttle show --json`, the
+board) gives `shuttle.role` as the office and `shuttle.person` as the person.
+Setting `shuttle.seat: true` marks a constitution as a seat of its office and
+requires a role.
 A role may have multiple seats. Role and seat do not select a model or execution
 backend, and do not change lifecycle. Workers consult a relevant charter when
 its context matters; launch prompts do not name a role.

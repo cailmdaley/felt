@@ -644,7 +644,7 @@ export class Workspace {
     return slug ? roleHolds(this.opts.cards(), slug) : []
   }
   private proseRevision(state: ChannelState): string {
-    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.shuttleRole, state.card.shuttleSeat, holdsRevision(this.holds(state)), state.error, state.loaded, state.metadataKnown])
+    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.shuttleRole, state.card.shuttlePerson, state.card.shuttleSeat, holdsRevision(this.holds(state)), state.error, state.loaded, state.metadataKnown])
   }
   private drawProse(state: ChannelState, embedded = false): HTMLElement {
     return buildFiberProse(state.card, state.channel, {
@@ -1056,6 +1056,7 @@ export class Workspace {
             metadata.orchestrator = feed.orchestrator
             metadata.threadSummary = feed.threadSummary
             metadata.shuttleRole = feed.shuttleRole
+            metadata.shuttlePerson = feed.shuttlePerson
             metadata.shuttleSeat = feed.shuttleSeat
           }
           if (live.workerState) metadata.sessionUuid = live.sessionUuid

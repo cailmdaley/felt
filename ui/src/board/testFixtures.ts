@@ -50,7 +50,7 @@ export function card(over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): Kanban
     tempered: over.tempered,
     horizon: over.effectiveHorizon === 'stashed' ? 'stashed' : undefined,
     shuttle: {
-      kind: over.shuttleKind ?? 'oneshot', seat: over.shuttleSeat, role: over.shuttleRole, ask: over.ask,
+      kind: over.shuttleKind ?? 'oneshot', seat: over.shuttleSeat, role: over.shuttleRole, person: over.shuttlePerson, ask: over.ask,
       runtime: { dispatched_at: over.dispatchedAt },
     },
   }
@@ -97,7 +97,7 @@ export function served(entry: FeedRow, nowMs = Date.now()): CompositeEntry {
   const fiber = {
     status: f.status, tempered: f.tempered, horizon: f.horizon, due: f.due,
     shuttle: f.hasShuttleBlock ? {
-      kind: f.shuttleKind, seat: f.shuttleSeat, role: f.shuttleRole, ask: f.shuttleAsk,
+      kind: f.shuttleKind, seat: f.shuttleSeat, role: f.shuttleRole, person: f.shuttlePerson, ask: f.shuttleAsk,
       runtime: { dispatched_at: f.shuttleDispatchedAt },
     } : undefined,
   }

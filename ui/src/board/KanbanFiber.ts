@@ -45,8 +45,10 @@ export interface Fiber {
   hasShuttleBlock?: boolean;
   /** `shuttle.kind` — `oneshot` (default) or `standing`. */
   shuttleKind?: 'oneshot' | 'standing';
-  /** `shuttle.role` — the single office's slug (`roles/<slug>`). */
+  /** `shuttle.role` — the office's slug, its charter's (`roles/<slug>`). */
   shuttleRole?: string;
+  /** `shuttle.person` — who is responsible under the role. */
+  shuttlePerson?: string;
   /** `shuttle.seat` — an office seat, drawn among the Roles when at rest. */
   shuttleSeat?: boolean;
   /** `shuttle.blocked_on` — what a resting constitution waits for: a fiber uid, or text. */
@@ -153,6 +155,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
 
   let shuttleKind: 'oneshot' | 'standing' | undefined;
   let shuttleRole: string | undefined;
+  let shuttlePerson: string | undefined;
   let shuttleSeat: boolean | undefined;
   let shuttleBlockedOn: string | undefined;
   let shuttleSessionUuid: string | undefined;
@@ -180,6 +183,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleKind = s.kind === 'standing' ? 'standing' : 'oneshot';
     if (typeof s.host === 'string' && s.host.trim()) shuttleHost = s.host.trim();
     if (typeof s.role === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s.role)) shuttleRole = s.role;
+    if (shuttleRole && typeof s.person === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s.person)) shuttlePerson = s.person;
     if (typeof s.seat === 'boolean') shuttleSeat = s.seat;
     if (typeof s.blocked_on === 'string' && s.blocked_on.trim()) shuttleBlockedOn = s.blocked_on.trim();
 
@@ -275,6 +279,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     hasShuttleBlock: hasShuttleBlock || undefined,
     shuttleKind,
     shuttleRole,
+    shuttlePerson,
     shuttleSeat,
     shuttleBlockedOn,
     shuttleSessionUuid,

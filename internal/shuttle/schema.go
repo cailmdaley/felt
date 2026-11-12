@@ -5,11 +5,11 @@ package shuttle
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v3"
 )
@@ -63,7 +63,9 @@ type Block struct {
 	Schedule *Schedule `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	Pulse    *Pulse    `json:"pulse,omitempty" yaml:"pulse,omitempty"`
 	Ask      *Ask      `json:"ask,omitempty" yaml:"ask,omitempty"`
-	// Role names this constitution's office by its charter slug under roles/.
+	// Role is the constitution's role, `<office>` or `<office>/<person>`. It
+	// lives in the fiber's top-level `role:`; BlockOf fills it from there (see
+	// BlockOf) and SetConfig writes it back there.
 	Role string `json:"role,omitempty" yaml:"role,omitempty"`
 	// Seat places a resting constitution in the board's Roles band.
 	// A seat requires a role and does not change the lifecycle.
@@ -130,10 +132,18 @@ func NormalizeKind(kind string) string {
 	return kind
 }
 
-var rolePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+// ValidRole reports whether role is `<office>` or `<office>/<person>`, each a
+// slug.
+func ValidRole(role string) bool { return felt.ValidRole(role) }
 
-// ValidRole reports whether role has the shape of a charter slug under roles/.
-func ValidRole(role string) bool { return rolePattern.MatchString(role) }
+// OfficeOf is a role's office, its first segment: the slug of its charter.
+func OfficeOf(role string) string {
+	office, _, _ := strings.Cut(role, "/")
+	return office
+}
+
+// PersonOf is the person responsible under a role, its last segment.
+func PersonOf(role string) string { return felt.RolePerson(role) }
 
 // ---- Validation ------------------------------------------------------------
 
@@ -200,10 +210,10 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 	}
 
 	if b.Role != "" && !ValidRole(b.Role) {
-		add("role", fmt.Sprintf("must be a role slug (the leaf of roles/<slug>), got %q", b.Role))
+		add("role", fmt.Sprintf("must be <office> or <office>/<person>, each a slug, got %q", b.Role))
 	}
 	if b.Seat && b.Role == "" {
-		add("seat", "requires shuttle.role")
+		add("seat", "requires a role")
 	}
 
 	if b.Kind == "standing" {

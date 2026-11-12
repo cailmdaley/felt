@@ -75,6 +75,19 @@ describe('constitution role', () => {
     expect(role.textContent).toBe('scribe')
   })
 
+  it('names the person responsible beside the office, and opens the office charter', async () => {
+    expect(mapFeltJsonToFiber({ id: 'a', role: 'scribe/sam', shuttle: { role: 'scribe', person: 'sam' } })?.shuttlePerson).toBe('sam')
+    const onFiber = vi.fn()
+    const pane = buildFiberProse({ ...card, shuttleRole: 'scribe', shuttlePerson: 'sam' }, channel, { shuttleBase: daemon(['roles/scribe']), onFiber, onFile: vi.fn() })
+    await settle()
+    const role = pane.querySelector('.ws-fiber-role')!
+    expect(role.textContent).toBe('scribe · sam')
+    role.querySelector<HTMLAnchorElement>('a.kbn-wikilink-live')!.click()
+    expect(onFiber).toHaveBeenCalledWith('roles/scribe')
+    const desk = buildFiberProse({ ...card, shuttleRole: 'sam', shuttlePerson: 'sam' }, channel, { shuttleBase: daemon([]), onFiber, onFile: vi.fn() })
+    expect(desk.querySelector('.ws-fiber-role')!.textContent).toBe('sam')
+  })
+
   it('leaves the office plain text when the index cannot be read', async () => {
     const shuttleBase = `http://roles-${++base}.invalid`
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))

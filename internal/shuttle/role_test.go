@@ -92,37 +92,86 @@ func TestBlockOf_OfficeFieldTypes(t *testing.T) {
 	}
 }
 
-func TestSetConfig_OfficeRoundTripHasNoDuplicateKeys(t *testing.T) {
+func TestSetConfig_MovesRoleToTopLevel(t *testing.T) {
 	t.Parallel()
 	f := shuttleFiber(t, map[string]any{"kind": "oneshot", "role": "vizier", "seat": true})
 	block, _, err := BlockOf(f)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || block.Role != "vizier" {
+		t.Fatalf("legacy block role not read: %+v, %v", block, err)
 	}
 	block.Agent = "claude-sonnet"
 	if err := SetConfig(f, block); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"role", "seat"} {
-		node := f.ExtraFields[FacetKey]
-		count := 0
-		for i := 0; i < len(node.Content); i += 2 {
-			if node.Content[i].Value == key {
-				count++
-			}
-		}
-		if count != 1 {
-			t.Fatalf("%s appears %d times", key, count)
-		}
+	count := map[string]int{}
+	node := f.ExtraFields[FacetKey]
+	for i := 0; i < len(node.Content); i += 2 {
+		count[node.Content[i].Value]++
+	}
+	if count["role"] != 0 || count["seat"] != 1 || f.Role != "vizier" {
+		t.Fatalf("role not moved out of the block: keys %v, role %q", count, f.Role)
 	}
 	if got, _, err := BlockOf(f); err != nil || got.Role != "vizier" || !got.Seat {
 		t.Fatalf("office did not round-trip: %+v, %v", got, err)
 	}
-	block.Role, block.Seat = "", false
+	block.Seat = false
 	if err := SetConfig(f, block); err != nil {
 		t.Fatal(err)
 	}
-	if felt.MappingValueNode(f.ExtraFields[FacetKey], "role") != nil || felt.MappingValueNode(f.ExtraFields[FacetKey], "seat") != nil {
-		t.Fatal("SetConfig retained cleared office fields")
+	if felt.MappingValueNode(f.ExtraFields[FacetKey], "seat") != nil {
+		t.Fatal("SetConfig retained a cleared seat")
+	}
+	if err := SetRole(f, ""); err != nil || f.Role != "" {
+		t.Fatalf("SetRole did not clear: %q %v", f.Role, err)
+	}
+}
+
+func TestTopLevelRoleWinsAndProjectsOfficeAndPerson(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		top, block, office, person string
+	}{
+		{"analyst/sam", "", "analyst", "sam"},
+		{"analyst/sam", "editor", "analyst", "sam"},
+		{"", "editor", "editor", "editor"},
+		{"sam", "", "sam", "sam"},
+		{"", "", "", ""},
+	} {
+		fields := map[string]any{"kind": "oneshot"}
+		if tc.block != "" {
+			fields["role"] = tc.block
+		}
+		f := shuttleFiber(t, fields)
+		f.Role = tc.top
+		block, _, err := BlockOf(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := tc.top
+		if want == "" {
+			want = tc.block
+		}
+		if block.Role != want {
+			t.Fatalf("BlockOf role = %q, want %q", block.Role, want)
+		}
+		facet := marshalShuttle(t, f)[FacetKey].(map[string]any)
+		if facet["role"] != tc.office || facet["person"] != tc.person {
+			t.Fatalf("top %q block %q projected %#v", tc.top, tc.block, facet)
+		}
+	}
+}
+
+func TestValidRoleOfficeAndPerson(t *testing.T) {
+	t.Parallel()
+	for role, want := range map[string]bool{
+		"analyst": true, "analyst/sam": true, "data-lead/sam-2": true,
+		"": false, "a/b/c": false, "roles/analyst/sam": false, "Analyst": false, "analyst/": false,
+	} {
+		if ValidRole(role) != want {
+			t.Errorf("ValidRole(%q) != %v", role, want)
+		}
+	}
+	if OfficeOf("analyst/sam") != "analyst" || PersonOf("analyst/sam") != "sam" || OfficeOf("sam") != "sam" || PersonOf("sam") != "sam" {
+		t.Fatal("OfficeOf/PersonOf are not the first and last segments")
 	}
 }

@@ -174,9 +174,10 @@ is still read, as `oneshot`; `shuttle check` warns about it, and
 
 ### Seats
 
-A constitution can name an office with `shuttle.role: <role-slug>`. Setting
+A constitution names its office with its top-level `role: <office>` or
+`role: <office>/<person>` ([roles](../concepts/roles.md)). Setting
 `shuttle.seat: true` marks it as a seat of that role; a true seat requires a
-role. The role's charter is `roles/<role-slug>` in the shared store or in a
+role. The office's charter is `roles/<office>` in the shared store or in a
 repository linked in at its top level ([where a charter lives](../concepts/roles.md#where-a-charter-lives)).
 A role may have any number of seats, and the charter itself stays
 host-free and is never dispatched. Seat changes only where the board draws it

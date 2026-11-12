@@ -194,8 +194,10 @@ export interface KanbanCard {
   shuttleSeat?: boolean
   /** `shuttle.blocked_on` — what a resting constitution waits for: a fiber uid, or text. */
   shuttleBlockedOn?: string
-  /** `shuttle.role` — the single office's slug (`roles/<slug>`). */
+  /** `shuttle.role` — the office's slug, its charter's (`roles/<slug>`). */
   shuttleRole?: string
+  /** `shuttle.person` — who is responsible under the role. */
+  shuttlePerson?: string
   /**
    * `shuttle.schedule.expr` — 5-field cron expression for standing constitutions.
    * Absent on one-shot fibers and on fibers without a shuttle block.

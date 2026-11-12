@@ -122,6 +122,9 @@ remote draft made with --disabled stays in this store while you write it;
 				block.Agent = agent
 			}
 			if cmd.Flags().Changed("role") {
+				if !shuttle.ValidRole(role) {
+					return fmt.Errorf("--role must be <office> or <office>/<person>, each a slug, got %q", role)
+				}
 				block.Role = role
 			}
 			if cmd.Flags().Changed("project-dir") {
@@ -182,6 +185,9 @@ remote draft made with --disabled stays in this store while you write it;
 			if disabled || take {
 				child.Status = felt.StatusOpen
 			}
+			if cmd.Flags().Changed("role") {
+				block.Role = qualifyRole(block.Role, st.Path(child.ID))
+			}
 			if err := shuttle.SetConfig(child, block); err != nil {
 				return err
 			}
@@ -225,7 +231,7 @@ remote draft made with --disabled stays in this store while you write it;
 	cmd.Flags().StringVar(&host, "host", "", "Owning daemon (default: parent's host)")
 	cmd.Flags().StringVar(&agent, "agent", "", "Agent id (default: parent's agent)")
 	cmd.Flags().StringVar(&projectDir, "project-dir", "", "Worker cwd; required when changing host")
-	cmd.Flags().StringVar(&role, "role", "", "Role slug (default: parent's role)")
+	cmd.Flags().StringVar(&role, "role", "", "Role: <office> or <office>/<person> (default: parent's role; a bare office takes this checkout's felt.person)")
 	cmd.Flags().StringVar(&slug, "slug", "", "Child slug (default: derived from ask)")
 	cmd.Flags().BoolVar(&take, "take", false, "Move your live session into the thread and launch a fresh source worker")
 	cmd.Flags().BoolVar(&disabled, "disabled", false, "Create a draft instead of arming it")

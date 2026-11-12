@@ -20,13 +20,16 @@ func (a *app) roleCmd() *cobra.Command {
 	var newName string
 	cmd := &cobra.Command{
 		Use:   "role <fiber> [role]",
-		Short: "Set a constitution's office, or clear its role and seat",
-		Long: `Sets shuttle.role to a single role slug whose charter is roles/<slug> at the
-top of the shared store, or <mount>/roles/<slug> in a repository linked in at
-its top level (see the roles concept page).
---clear removes both shuttle.role and shuttle.seat. Lifecycle and runtime state
-are untouched. --new "Office name" creates a missing charter in the shared
-roles namespace before assigning the role; existing charters are preserved.`,
+		Short: "Set a constitution's role, or clear its role and seat",
+		Long: `Sets the fiber's top-level role to <office> or <office>/<person> and removes
+any shuttle.role from its block. A bare office is stored as <office>/<person>
+when the repository holding the fiber names a person (git config felt.person).
+The office's charter is roles/<office> at the top of the shared store, or
+<mount>/roles/<office> in a repository linked in at its top level (see the
+roles concept page); the per-person roles/<office>/<person> is optional.
+--clear removes the role and shuttle.seat. Lifecycle and runtime state are
+untouched. --new "Office name" creates a missing charter in the shared store's
+roles/ before assigning the role; existing charters are preserved.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clear == (len(args) == 2) {
@@ -36,7 +39,7 @@ roles namespace before assigning the role; existing charters are preserved.`,
 				return fmt.Errorf("--new requires a role slug and a non-empty office name")
 			}
 			if !clear && !shuttle.ValidRole(args[1]) {
-				return fmt.Errorf("role must be a role slug, got %q", args[1])
+				return fmt.Errorf("role must be <office> or <office>/<person>, each a slug, got %q", args[1])
 			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "use 'shuttle install' first")
 			if err != nil {
@@ -59,33 +62,33 @@ roles namespace before assigning the role; existing charters are preserved.`,
 			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "role", f, fields); routed || err != nil {
 				return err
 			}
+			role := ""
 			if clear {
-				if err := shuttle.SetNodeField(f, "role", nil); err != nil {
-					return err
-				}
 				if err := shuttle.SetNodeField(f, "seat", nil); err != nil {
 					return err
 				}
 			} else {
+				role = qualifyRole(args[1], st.Path(f.ID))
+				office := shuttle.OfficeOf(role)
 				charters, _, err := roleCharters(st)
 				if err != nil {
 					return err
 				}
-				if charters[args[1]] == nil {
+				if charters[office] == nil {
 					if !cmd.Flags().Changed("new") {
-						return noCharterError(args[1])
+						return noCharterError(office)
 					}
 					charter := &felt.Felt{
-						ID: "roles/" + args[1], Name: newName, Tags: []string{"role"},
+						ID: "roles/" + office, Name: newName, Tags: []string{"role"},
 						Body: fmt.Sprintf("The %s office serves the constitution %q. Its holders grow this charter with the office's remit, playbooks, and human gates.\n", newName, f.Name),
 					}
 					if err := createRoleCharter(roleStorage(st), charter); err != nil {
 						return fmt.Errorf("creating role charter: %w", err)
 					}
 				}
-				if err := shuttle.SetField(f, "role", args[1]); err != nil {
-					return err
-				}
+			}
+			if err := shuttle.SetRole(f, role); err != nil {
+				return err
 			}
 			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
@@ -93,7 +96,7 @@ roles namespace before assigning the role; existing charters are preserved.`,
 			if clear {
 				fmt.Fprintf(a.env.Stdout, "cleared role and seat of %s%s\n", args[0], ref.Location())
 			} else {
-				fmt.Fprintf(a.env.Stdout, "%s%s has role %s\n", args[0], ref.Location(), args[1])
+				fmt.Fprintf(a.env.Stdout, "%s%s has role %s\n", args[0], ref.Location(), role)
 			}
 			return nil
 		},
@@ -231,4 +234,18 @@ func (a *app) rolesCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// qualifyRole stores a bare office given for the fiber at file as
+// <office>/<person> when the repository holding it names a person; a role
+// already naming a person, or naming that person alone, is kept as given.
+func qualifyRole(role, file string) string {
+	if strings.Contains(role, "/") {
+		return role
+	}
+	person := felt.PersonAt(file)
+	if person == "" || person == role {
+		return role
+	}
+	return role + "/" + person
 }

@@ -162,7 +162,7 @@ func TestValidRoleAndPerson(t *testing.T) {
 	t.Parallel()
 	for role, want := range map[string]bool{
 		"sam": true, "analyst/sam": true, "data-lead/sam-2": true,
-		"": false, "a/b/c": false, "Sam": false, "analyst/": false, "/sam": false, "a--b": false, "roles/x/y": false,
+		"": false, "a/b/c": false, "roles/sam": false, "Sam": false, "analyst/": false, "/sam": false, "a--b": false, "roles/x/y": false,
 	} {
 		if got := ValidRole(role); got != want {
 			t.Errorf("ValidRole(%q) = %v, want %v", role, got, want)

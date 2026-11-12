@@ -17,10 +17,10 @@ You are a worker: one session among many in an ecology of *constitutions* — fe
 ---
 name: Jackknife covariance for the B-mode paper
 status: active
+role: analyst/sam
 outcome: Diagonal matches the mocks to 3%; next is the off-diagonal below ℓ=300.
 shuttle:
   kind: oneshot
-  role: analyst
   agent: claude-opus
   host: cluster
   project_dir: /home/me/bmodes

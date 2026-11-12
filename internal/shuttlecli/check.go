@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -29,6 +30,7 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 			// An unreadable roles namespace yields no charters, so every role
 			// is reported rather than none.
 			charters, shadowed, _ := roleCharters(storage)
+			persons := felt.NewPersonLookup()
 			for _, f := range shadowed {
 				slug := path.Base(f.ID)
 				issues = append(issues, felt.CheckIssue{
@@ -83,13 +85,29 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 						Message: fmt.Sprintf("kind %q is retired and read as %q; scripts/migrate-pinned.py rewrites it", stored, shuttle.LegacyKinds[stored]),
 					})
 				}
+				if legacy := felt.MappingValueNode(fiber.ExtraFields[shuttle.FacetKey], "role"); legacy != nil && legacy.Kind == yaml.ScalarNode {
+					issues = append(issues, felt.CheckIssue{
+						Level: felt.CheckLevelWarning, FiberID: fiber.ID, Path: shuttle.FacetKey + ".role",
+						Message: fmt.Sprintf("role is in the shuttle block; `shuttle role %s %s` moves it", fiber.ID, legacy.Value),
+					})
+					if fiber.Role != "" && shuttle.OfficeOf(fiber.Role) != shuttle.OfficeOf(legacy.Value) {
+						issues = append(issues, felt.CheckIssue{
+							Level: felt.CheckLevelWarning, FiberID: fiber.ID, Path: "role",
+							Message: fmt.Sprintf("role %q and shuttle.role %q name different offices; the top-level role wins", fiber.Role, legacy.Value),
+						})
+					}
+				}
 				if block, ok, err := shuttle.BlockOf(fiber); err == nil && ok && block.Role != "" && shuttle.ValidRole(block.Role) {
-					if charters[block.Role] == nil {
+					office := shuttle.OfficeOf(block.Role)
+					// A role that is only a person is that person's desk, which
+					// needs no charter.
+					desk := office == block.Role && office == persons.For(filepath.Dir(fiber.Path))
+					if charters[office] == nil && !desk {
 						issues = append(issues, felt.CheckIssue{
 							Level:   felt.CheckLevelWarning,
 							FiberID: fiber.ID,
-							Path:    shuttle.FacetKey + ".role",
-							Message: noCharterError(block.Role).Error(),
+							Path:    "role",
+							Message: noCharterError(office).Error(),
 						})
 					}
 				}

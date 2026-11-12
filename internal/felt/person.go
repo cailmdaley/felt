@@ -17,8 +17,11 @@ var roleSegment = `[a-z0-9]+(?:-[a-z0-9]+)*`
 var rolePattern = regexp.MustCompile(`^` + roleSegment + `(?:/` + roleSegment + `)?$`)
 
 // ValidRole reports whether role is `<office>` or `<office>/<person>`, each
-// segment a slug.
-func ValidRole(role string) bool { return rolePattern.MatchString(role) }
+// segment a slug. The office is never `roles`, so a charter path such as
+// `roles/analyst` is not mistaken for a role.
+func ValidRole(role string) bool {
+	return rolePattern.MatchString(role) && !strings.HasPrefix(role+"/", "roles/")
+}
 
 // RolePerson is the person responsible under role: its last segment, so
 // `role: sam` (Sam's own desk) and `role: analyst/sam` are both Sam's.

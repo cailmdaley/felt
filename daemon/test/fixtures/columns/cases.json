@@ -49,6 +49,8 @@
    "fiber": {"status": "active", "shuttle": {"kind": "standing"}}},
   {"name": "seat at rest", "live": false, "column": "roles", "turn": "none", "state": "Resting",
    "fiber": {"status": "open", "shuttle": {"kind": "oneshot", "seat": true, "role": "editor"}}},
+  {"name": "seat held by a person", "live": false, "column": "roles", "turn": "none", "state": "Resting",
+   "fiber": {"status": "open", "role": "editor/sam", "shuttle": {"kind": "oneshot", "seat": true, "role": "editor", "person": "sam"}}},
   {"name": "standing seat asleep", "live": false, "column": "roles", "turn": "none", "state": "Resting",
    "fiber": {"status": "active", "shuttle": {"kind": "standing", "seat": true, "role": "vizier"}}},
   {"name": "armed oneshot seat", "live": false, "column": "in_flight", "turn": "none", "state": "Working", "roster": "Armed",

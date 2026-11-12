@@ -36,6 +36,9 @@ func remoteFiberCreatePayload(f *felt.Felt, block *shuttle.Block) map[string]any
 	if f.Description != "" {
 		frontmatter["description"] = f.Description
 	}
+	if f.Role != "" {
+		frontmatter["role"] = f.Role
+	}
 	if !f.CreatedAt.IsZero() {
 		frontmatter["created-at"] = f.CreatedAt
 	}

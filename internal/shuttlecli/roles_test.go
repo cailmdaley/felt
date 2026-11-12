@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -285,5 +286,76 @@ func TestRoleChartersInMounts(t *testing.T) {
 	}
 	if !strings.Contains(out, "shared/roles/editor") || !strings.Contains(out, "shadowed by roles/editor") || strings.Contains(out, "has no charter") {
 		t.Fatalf("check:\n%s", out)
+	}
+}
+
+// The role is the fiber's top-level `role:`. Shuttle writes it there,
+// qualifies a bare office with the checkout's felt.person, still reads a
+// role left in the shuttle block, and projects the office and the person.
+func TestRoleIsTopLevelAndNamesAPerson(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, st := newStore(t)
+	for _, args := range [][]string{{"init", "-q"}, {"config", felt.PersonConfigKey, "sam"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	for _, id := range []string{"roles/analyst", "roles/editor"} {
+		if err := st.Write(&felt.Felt{ID: id, Name: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedShuttleRole(t, st, "hub", felt.StatusOpen, oneshot(), nil)
+	legacy := oneshot()
+	legacy["role"] = "editor"
+	seedShuttleRole(t, st, "old", felt.StatusOpen, legacy, nil)
+
+	if out, err := runIn(t, env, dir, "role", "hub", "analyst"); err != nil || !strings.Contains(out, "has role analyst/sam") {
+		t.Fatalf("%s: %v", out, err)
+	}
+	hub := mustRead(t, st, "hub")
+	if hub.Role != "analyst/sam" || felt.MappingValueNode(hub.ExtraFields["shuttle"], "role") != nil {
+		t.Fatalf("role %q, block %v", hub.Role, hub.ExtraFields["shuttle"])
+	}
+	if _, err := runIn(t, env, dir, "role", "hub", "editor/carol"); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustRead(t, st, "hub").Role; got != "editor/carol" {
+		t.Fatalf("two-segment role stored as %q", got)
+	}
+
+	projection := func(id string) map[string]any {
+		t.Helper()
+		out, err := runIn(t, env, dir, "show", "--json", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var shown map[string]any
+		if err := json.Unmarshal([]byte(out), &shown); err != nil {
+			t.Fatal(err)
+		}
+		return shown["shuttle"].(map[string]any)
+	}
+	if facet := projection("old"); facet["role"] != "editor" || facet["person"] != "editor" {
+		t.Fatalf("legacy role projection: %v", facet)
+	}
+	if facet := projection("hub"); facet["role"] != "editor" || facet["person"] != "carol" {
+		t.Fatalf("role projection: %v", facet)
+	}
+
+	out, err := runIn(t, env, dir, "check")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "role is in the shuttle block; `shuttle role old editor` moves it") {
+		t.Fatalf("check:\n%s", out)
+	}
+	if _, err := runIn(t, env, dir, "role", "old", "editor"); err != nil {
+		t.Fatal(err)
+	}
+	old := mustRead(t, st, "old")
+	if old.Role != "editor/sam" || felt.MappingValueNode(old.ExtraFields["shuttle"], "role") != nil {
+		t.Fatalf("legacy role not moved: %q", old.Role)
 	}
 }
