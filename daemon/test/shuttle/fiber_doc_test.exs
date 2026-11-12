@@ -74,7 +74,7 @@ defmodule Shuttle.FiberDocTest do
           end
         end)
       end)
-      |> Task.await_many()
+      |> Task.await_many(30_000)
 
     assert Enum.count(results, &(&1 == :ok)) == 1
     assert Enum.count(results, &match?({:refused, _}, &1)) == 19

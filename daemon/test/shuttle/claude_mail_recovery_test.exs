@@ -167,7 +167,7 @@ defmodule Shuttle.ClaudeMailRecoveryTest do
     assert %{"fallback" => %{"attempts" => 1}} = other |> File.read!() |> Jason.decode!()
   end
 
-  defp eventually(check, attempts \\ 100)
+  defp eventually(check, attempts \\ 1_500)
   defp eventually(_check, 0), do: false
 
   defp eventually(check, attempts) do

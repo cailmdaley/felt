@@ -217,11 +217,7 @@ defmodule Shuttle.Test.DispatchIntegrationCase do
         ref = Process.monitor(pid)
         Process.exit(pid, :kill)
 
-        receive do
-          {:DOWN, ^ref, :process, _, _} -> :ok
-        after
-          1_000 -> :ok
-        end
+        assert_receive {:DOWN, ^ref, :process, _, _}
       end
 
       # The backfill shells the real felt CLI as an OS process; killing the

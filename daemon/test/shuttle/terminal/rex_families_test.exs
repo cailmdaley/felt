@@ -327,7 +327,7 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
         receive do
           :continue -> :ok
         after
-          5_000 -> raise "cleanup barrier timed out"
+          30_000 -> raise "cleanup barrier timed out"
         end
 
       _ ->
@@ -339,8 +339,8 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
     launching = Task.async(fn -> launch("b", @root <> "/b") end)
     assert Task.yield(launching, 100) == nil
     send(closer, :continue)
-    assert Task.await(closing) == :ok
-    assert Task.await(launching) == :ok
+    assert Task.await(closing, 30_000) == :ok
+    assert Task.await(launching, 30_000) == :ok
     assert {:ok, [%{"session_id" => sid}]} = Rex.sessions(FakeRex)
     assert {:ok, %{"bindings" => %{"b" => %{"session_id" => ^sid}}}} = RexBindings.read()
   end

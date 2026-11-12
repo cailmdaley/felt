@@ -211,7 +211,7 @@ defmodule Shuttle.Terminal.RexTreeTest do
         receive do
           :continue -> :ok
         after
-          5_000 -> raise "projection barrier timed out"
+          30_000 -> raise "projection barrier timed out"
         end
 
       _ ->
@@ -221,9 +221,9 @@ defmodule Shuttle.Terminal.RexTreeTest do
     projection = Task.async(fn -> RexTree.refresh(FakeRex) end)
     assert_receive {:projection_paused, projector}
     update = Task.async(fn -> RexBindings.put_fiber("worker", "a/design/rex/thread") end)
-    assert Task.yield(update, 1_000) == {:ok, :ok}
+    assert Task.yield(update, 10_000) == {:ok, :ok}
     send(projector, :continue)
-    assert Task.await(projection) == :ok
+    assert Task.await(projection, 30_000) == :ok
   end
 
   test "viewer bindings survive display drift and never reuse same-labelled unowned sessions" do

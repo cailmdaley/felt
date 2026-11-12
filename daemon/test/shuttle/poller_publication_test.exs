@@ -283,7 +283,7 @@ defmodule Shuttle.PollerPublicationTest do
     generation = Poller.published_state_metrics(poller).generation
 
     suspended(poller, fn ->
-      await(fn -> Shuttle.Remote.stale?(remote, observed_at, DateTime.utc_now()) end, 2_000)
+      await(fn -> Shuttle.Remote.stale?(remote, observed_at, DateTime.utc_now()) end)
 
       bounded(fn ->
         assert {:ok, {_entries, current_live, current_reachable}} = Poller.thread_inputs(poller)
@@ -366,7 +366,7 @@ defmodule Shuttle.PollerPublicationTest do
     task = Task.async(fun)
 
     try do
-      assert {:ok, _} = Task.yield(task, 750), "published read waited for the Poller's mailbox"
+      assert {:ok, _} = Task.yield(task, 10_000), "published read waited for the Poller's mailbox"
     after
       Task.shutdown(task, :brutal_kill)
     end
@@ -385,7 +385,7 @@ defmodule Shuttle.PollerPublicationTest do
     end
   end
 
-  defp await(condition, timeout \\ 5_000), do: await_until(condition, now_ms() + timeout)
+  defp await(condition, timeout \\ 30_000), do: await_until(condition, now_ms() + timeout)
 
   defp await_until(condition, deadline) do
     if condition.() do

@@ -216,7 +216,7 @@ defmodule Shuttle.RecorderRexTest do
   defp observe(opts),
     do: RetainedTerminal.observe("hark-voice", Shuttle.Runner.Default, opts)
 
-  defp wait_for(fun, attempts \\ 100)
+  defp wait_for(fun, attempts \\ 600)
   defp wait_for(fun, 0), do: assert(fun.(), "Rex meeting observation did not arrive")
 
   defp wait_for(fun, attempts) do

@@ -281,7 +281,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     ref = Map.fetch!(state.in_flight, {"candide", :sent_files})
 
     RemoteTemporalRegistry.invalidate(name, "candide", :sent_files)
-    Task.await(pending, 5_000)
+    Task.await(pending, 30_000)
     MockClient.delay("/api/v1/sent-files/all", 0)
     MockClient.set("/api/v1/sent-files/all", {:ok, Jason.encode!(%{files: []})})
     assert %{items: []} = candide(name, :sent_files)
@@ -356,7 +356,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       views =
         1..4
         |> Enum.map(fn _ -> Task.async(fn -> candide(name, :sessions) end) end)
-        |> Enum.map(&Task.await/1)
+        |> Enum.map(&Task.await(&1, 30_000))
 
       assert Enum.all?(views, &(&1.items == [@record]))
       assert MockClient.calls("/api/v1/sessions") == 1

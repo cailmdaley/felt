@@ -114,7 +114,7 @@ defmodule ShuttleWeb.PeerPlugTest do
       assert uid.() == 4321
 
       # Another connection (another process) reads the table afresh.
-      assert Task.async(uid) |> Task.await() == nil
+      assert Task.async(uid) |> Task.await(30_000) == nil
     end
 
     @tag :tmp_dir

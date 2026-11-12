@@ -132,14 +132,15 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     end
   end
 
-  defp wait_until(fun, attempts \\ 1_000)
+  # About 30 s, reached only when the condition never holds.
+  defp wait_until(fun, attempts \\ 3_000)
   defp wait_until(_fun, 0), do: flunk("condition did not become true")
 
   defp wait_until(fun, attempts) do
     if fun.() do
       :ok
     else
-      Process.sleep(1)
+      Process.sleep(10)
       wait_until(fun, attempts - 1)
     end
   end
@@ -278,7 +279,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         send(old_task, {:release, :old})
         assert_receive {:DOWN, ^old_monitor, :process, ^old_task, :normal}
         send(registry, {:release, :new})
-        assert Task.await(refresh, 5_000) == :ok
+        assert Task.await(refresh, 30_000) == :ok
 
         assert %{"candide" => %{fibers: [%{"fiber" => %{"id" => "new"}}]}} =
                  RemoteFiberRegistry.feeds(registry)

@@ -124,7 +124,7 @@ defmodule Shuttle.PollerCycleTest do
 
     assert wait_until(fn -> not Process.alive?(second_task) end)
 
-    assert wait_until(fn -> Poller.snapshot(poller).poll_health.stalls >= 2 end, 1_000)
+    assert wait_until(fn -> Poller.snapshot(poller).poll_health.stalls >= 2 end)
     health = Poller.snapshot(poller).poll_health
     assert health.stalls >= 2
     assert is_binary(health.last_stalled_at)

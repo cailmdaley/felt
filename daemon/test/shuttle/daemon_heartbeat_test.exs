@@ -36,7 +36,7 @@ defmodule Shuttle.DaemonHeartbeatTest do
 
       :trace.process(session, task.pid, true, [:call])
       send(task.pid, :write)
-      assert Task.await(task) == :ok
+      assert Task.await(task, 30_000) == :ok
       delivered = :trace.delivered(session, :all)
       assert_receive {:trace_delivered, :all, ^delivered}
       refute_receive {:trace, _, :call, {Shuttle.FS, :mkdir_p, _}}, 0

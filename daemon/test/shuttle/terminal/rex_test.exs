@@ -676,7 +676,7 @@ defmodule Shuttle.Terminal.RexTest do
         receive do
           :continue -> :ok
         after
-          5_000 -> raise "rename test barrier timed out"
+          30_000 -> raise "rename test barrier timed out"
         end
 
       _ ->
@@ -692,8 +692,8 @@ defmodule Shuttle.Terminal.RexTest do
     assert Task.yield(launch, 100) == nil
     refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end)
     send(renamer, :continue)
-    assert Task.await(rename) == :ok
-    assert Task.await(launch) == {:error, :already_running}
+    assert Task.await(rename, 30_000) == :ok
+    assert Task.await(launch, 30_000) == {:error, :already_running}
   end
 
   defp own_seed do

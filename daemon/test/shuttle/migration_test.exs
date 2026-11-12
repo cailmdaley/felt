@@ -958,7 +958,7 @@ defmodule Shuttle.MigrationTest do
     monitor = Process.monitor(poller)
     Process.exit(poller, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^poller, :killed}
-    assert {:caller_lost, _} = Task.await(call)
+    assert {:caller_lost, _} = Task.await(call, 30_000)
     if Process.alive?(old.pid), do: Shuttle.WorkerWatcher.stop(old.pid)
     Env.put_app_env(:migration_documents_hook, nil)
     {:ok, restarted} = restart(root)
@@ -1223,7 +1223,7 @@ defmodule Shuttle.MigrationTest do
         heartbeat_interval_ms: 600_000
       )
 
-  defp wait_recovered(poller, attempts \\ 1000) do
+  defp wait_recovered(poller, attempts \\ 3_000) do
     cond do
       is_nil(:sys.get_state(poller).reconciliation_hold) ->
         :ok

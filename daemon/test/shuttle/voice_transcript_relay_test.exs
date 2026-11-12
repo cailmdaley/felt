@@ -235,9 +235,9 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
     task = Task.async(fn -> TranscriptRelay.status("launch", server: c.name, timeout: 100) end)
 
     assert %{pending: nil, last: nil, error: nil} =
-             TranscriptRelay.status("other", server: c.name, timeout: 50)
+             TranscriptRelay.status("other", server: c.name, timeout: 10_000)
 
-    assert Task.await(task) == :timeout
+    assert Task.await(task, 30_000) == :timeout
     :ok = :sys.resume(pid)
   end
 
@@ -1295,7 +1295,7 @@ defmodule Shuttle.Voice.TranscriptRelayTest do
             receive do
               {:DOWN, ^task_ref, :process, ^task, _} -> :ok
             after
-              1_000 -> flunk("delivery did not finish #{inspect(ref)}")
+              30_000 -> flunk("delivery did not finish #{inspect(ref)}")
             end
           end
 

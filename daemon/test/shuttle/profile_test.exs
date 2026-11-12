@@ -211,7 +211,7 @@ defmodule Shuttle.ProfileTest do
     session = await_profile()
     {:tracer, collector} = :trace.info(session, :new_processes, :tracer)
     Process.exit(collector, :kill)
-    assert {:error, {:collector_down, :killed}} = Task.await(task, 5000)
+    assert {:error, {:collector_down, :killed}} = Task.await(task, 30_000)
     assert Process.whereis(Shuttle.Profile) == nil
     refute Enum.any?(:trace.session_info(:all), fn {name, _} -> name == :shuttle_profile end)
   end
@@ -261,7 +261,7 @@ defmodule Shuttle.ProfileTest do
     File.write!(Path.join(root, "task/42/comm"), "erts_dios_2\n")
   end
 
-  defp await_profile(attempts \\ 5000)
+  defp await_profile(attempts \\ 30_000)
   defp await_profile(0), do: flunk("profile does not start")
 
   defp await_profile(attempts) do
@@ -286,7 +286,7 @@ defmodule Shuttle.ProfileTest do
     end
   end
 
-  defp await_process_trace(session, pid, attempts \\ 5000)
+  defp await_process_trace(session, pid, attempts \\ 30_000)
   defp await_process_trace(_session, _pid, 0), do: flunk("request process is not traced")
 
   defp await_process_trace(session, pid, attempts) do

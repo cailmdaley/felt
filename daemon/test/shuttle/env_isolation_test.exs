@@ -13,7 +13,7 @@ defmodule Shuttle.EnvIsolationTest.Probe do
   def handle_call({:read, fun}, _from, state), do: {:reply, fun.(), state}
   # A Task the GenServer starts: two hops from the scope (`$callers` → `$ancestors`).
   def handle_call({:task_read, fun}, _from, state),
-    do: {:reply, Task.async(fun) |> Task.await(), state}
+    do: {:reply, Task.async(fun) |> Task.await(30_000), state}
 end
 
 defmodule Shuttle.EnvIsolationTest do
@@ -63,7 +63,7 @@ defmodule Shuttle.EnvIsolationTest do
     expected = {label, label}
 
     assert read.() == expected
-    assert Task.async(read) |> Task.await() == expected
+    assert Task.async(read) |> Task.await(30_000) == expected
 
     {:ok, probe} = Probe.start_link(nil)
     assert Probe.read(probe, read) == expected

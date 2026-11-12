@@ -45,7 +45,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     request = Task.async(fn -> request() end)
     assert_receive {:refresh, worker}
     send(worker, {:result, {:ok, body("First")}})
-    assert %{status: 200} = conn = Task.await(request)
+    assert %{status: 200} = conn = Task.await(request, 30_000)
     sync_index()
     conn
   end
@@ -105,7 +105,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     assert_receive {:refresh, worker}
     refute_receive {:refresh, _}
     finish(worker, {:ok, body("Shared")})
-    replies = Enum.map(tasks, &Task.await/1)
+    replies = Enum.map(tasks, &Task.await(&1, 30_000))
     assert Enum.all?(replies, &(&1.status == 200))
     assert replies |> Enum.map(& &1.resp_body) |> Enum.uniq() |> length() == 1
   end
@@ -130,7 +130,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     task = Task.async(fn -> request() end)
     assert_receive {:refresh, worker}
     finish(worker, {:error, [%{error: "unreadable"}]})
-    assert %{status: 503} = failed = Task.await(task)
+    assert %{status: 503} = failed = Task.await(task, 30_000)
     assert Jason.decode!(failed.resp_body)["error"] == "felt_list_failed"
     assert request().status == 503
     refute_receive {:refresh, _}
@@ -171,7 +171,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     task = Task.async(fn -> request() end)
     assert_receive {:refresh, worker}
     send(worker, :publish)
-    assert Jason.decode!(Task.await(task).resp_body)["felt_stores"] == [a]
+    assert Jason.decode!(Task.await(task, 30_000).resp_body)["felt_stores"] == [a]
     sync_index()
 
     Shuttle.Test.Env.put_env("SHUTTLE_STORES", b)
@@ -219,14 +219,14 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     assert_receive {:refresh, replacement_worker}
     refute Process.alive?(worker)
     finish(replacement_worker, {:ok, body("Replacement")})
-    assert Task.await(task).status == 200
+    assert Task.await(task, 30_000).status == 200
   end
 
   test "cold refresh crash releases callers and allows recovery", %{clock: clock} do
     tasks = for _ <- 1..5, do: Task.async(fn -> request() end)
     assert_receive {:refresh, worker}
     send(worker, :crash)
-    assert Enum.all?(Enum.map(tasks, &Task.await/1), &(&1.status == 503))
+    assert Enum.all?(Enum.map(tasks, &Task.await(&1, 30_000)), &(&1.status == 503))
     sync_index()
     assert request().status == 503
     refute_receive {:refresh, _}

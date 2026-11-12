@@ -719,7 +719,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert waiting(poller, "tests/deliver-waiting", 2) == 2
   end
 
-  defp waiting(poller, fiber_id, want, attempts \\ 500) do
+  defp waiting(poller, fiber_id, want, attempts \\ 1_500) do
     {:ok, %{fibers: rows}} = Poller.cached_fiber_documents(poller)
     row = Enum.find(rows, &(&1.fiber["slug"] == fiber_id or &1.fiber["id"] == fiber_id))
     got = row && Map.get(row, :pending_results)

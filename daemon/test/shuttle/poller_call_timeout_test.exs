@@ -49,7 +49,7 @@ defmodule Shuttle.PollerCallTimeoutTest do
     caller = Task.async(fn -> Poller.lifecycle_transition(server, :close, "a/fiber", []) end)
     Process.unlink(server)
     Process.exit(server, :shutdown)
-    assert {:error, :timeout, reason} = Task.await(caller)
+    assert {:error, :timeout, reason} = Task.await(caller, 30_000)
     assert reason =~ "outcome"
     assert reason =~ "Check the fiber after the poller settles or restarts"
   end

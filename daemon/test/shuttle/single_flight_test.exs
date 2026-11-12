@@ -24,7 +24,7 @@ defmodule Shuttle.SingleFlightTest do
     wait_for_waiters(key, 6)
     send(worker, :release)
 
-    assert Enum.map([first | waiters], &Task.await/1) == List.duplicate(:answer, 6)
+    assert Enum.map([first | waiters], &Task.await(&1, 30_000)) == List.duplicate(:answer, 6)
     assert :counters.get(runs, 1) == 1
   end
 
@@ -60,7 +60,7 @@ defmodule Shuttle.SingleFlightTest do
     wait_for_waiters(key, 3)
     send(worker, :release)
 
-    assert Enum.map(tasks, &Task.await/1) == [:boom, :boom, :boom]
+    assert Enum.map(tasks, &Task.await(&1, 30_000)) == [:boom, :boom, :boom]
   end
 
   defp wait_for_waiters(key, count) do

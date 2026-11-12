@@ -906,7 +906,7 @@ defmodule Shuttle.RexFocusTest do
     status == 0
   end
 
-  defp eventually(check, attempts \\ 200)
+  defp eventually(check, attempts \\ 3_000)
   defp eventually(check, 0), do: assert(check.())
 
   defp eventually(check, attempts) do

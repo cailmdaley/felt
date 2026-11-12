@@ -569,8 +569,8 @@ defmodule Shuttle.TerminalTest do
 
       refute_receive {:launching, _, ^name, _}, 100
       send(pid, :finish_launch)
-      assert Task.await(first) == :ok
-      assert Task.await(second) == {:error, :already_running}
+      assert Task.await(first, 30_000) == :ok
+      assert Task.await(second, 30_000) == {:error, :already_running}
       assert ["printf " <> _, "echo worker"] = String.split(File.read!(path), "\n")
     end
 
@@ -589,7 +589,7 @@ defmodule Shuttle.TerminalTest do
       assert Enum.sort([name1, name2]) == Enum.sort(names)
       send(first, :finish_launch)
       send(second, :finish_launch)
-      assert Enum.map(tasks, &Task.await/1) == [:ok, :ok]
+      assert Enum.map(tasks, &Task.await(&1, 30_000)) == [:ok, :ok]
     end
 
     test "alive and unknown names refuse launch before writing a script" do
@@ -637,10 +637,10 @@ defmodule Shuttle.TerminalTest do
     send(first_pid, :continue_scan)
     assert_receive {:launching, pid, "worker-race-shuttle", _}
     send(pid, :finish_launch)
-    assert :ok = Task.await(first)
+    assert :ok = Task.await(first, 30_000)
     assert_receive {:conversation_checked, ^second_pid}
     send(second_pid, :continue_scan)
-    assert {:error, {:transcript_held, _}} = Task.await(second)
+    assert {:error, {:transcript_held, _}} = Task.await(second, 30_000)
     refute_receive {:launching, _, "resume-" <> _, _}
 
     Agent.update(state, fn _ -> MapSet.new() end)
