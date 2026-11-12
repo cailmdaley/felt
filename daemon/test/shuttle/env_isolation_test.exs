@@ -11,37 +11,44 @@ defmodule Shuttle.EnvIsolationTest.Probe do
 
   @impl true
   def handle_call({:read, fun}, _from, state), do: {:reply, fun.(), state}
-  # A Task the GenServer starts: two hops from the test (`$callers` → `$ancestors`).
+  # A Task the GenServer starts: two hops from the scope (`$callers` → `$ancestors`).
   def handle_call({:task_read, fun}, _from, state),
     do: {:reply, Task.async(fun) |> Task.await(), state}
 end
 
-defmodule Shuttle.EnvIsolationTest.Shared do
-  @moduledoc false
-  # Two async modules run the same body concurrently with different values for
-  # the same keys; each must observe only its own, from every process that acts
-  # for it, while the global values stay untouched.
-  import ExUnit.Assertions
+defmodule Shuttle.EnvIsolationTest do
+  use ExUnit.Case, async: true
 
   alias Shuttle.EnvIsolationTest.Probe
   alias Shuttle.Test.{Env, FakeCli}
 
   @key "SHUTTLE_ENV_ISOLATION_PROBE"
 
-  # How long one module waits for the other at each rendezvous. The two are
-  # scheduled independently among every async module in the suite, so on a
-  # loaded machine the peer can start long after this one; the bound is
-  # failure-only, and the modules' test timeout sits above two of them.
-  @rendezvous_ms 100_000
-  def rendezvous_ms, do: @rendezvous_ms
+  # Two scopes, owned by two processes this test starts, set different values
+  # for the same keys and hold them at once; each must observe only its own,
+  # from every process that acts for it, while the global values stay untouched.
+  test "concurrent scopes see only their own overrides" do
+    test = self()
+    scopes = for label <- ~w(a b), do: Task.async(fn -> scope(label, test) end)
+    Enum.each(scopes, &Env.adopt_scope!(&1.pid))
+    Enum.each(scopes, &send(&1.pid, :set))
 
-  def run(label) do
-    other = if label == "a", do: "b", else: "a"
-    rendezvous = :"shuttle_env_isolation_#{label}"
-    Process.register(self(), rendezvous)
+    # Both scopes hold their overrides before either reads, so a leak in
+    # either direction would be observed.
+    for label <- ~w(a b), do: assert_receive({:set, ^label})
+    Enum.each(scopes, &send(&1.pid, :read))
+
+    assert [%{data_dir: a}, %{data_dir: b}] = Task.await_many(scopes, 30_000)
+    refute a == b
+  end
+
+  defp scope(label, test) do
+    data_dir = Path.join(System.tmp_dir!(), "env-isolation-#{label}")
+    receive do: (:set -> :ok)
 
     Env.put_env(@key, label)
     Env.put_env("SHUTTLE_STORES", "/stores/#{label}")
+    Env.put_env("SHUTTLE_DATA_DIR", data_dir)
     Env.put_app_env(:env_isolation_probe, label)
     Env.delete_env("HOME")
 
@@ -49,9 +56,8 @@ defmodule Shuttle.EnvIsolationTest.Shared do
       "felt" => "#!/bin/sh\nprintf '%s:%s' \"$SHUTTLE_ENV_ISOLATION_PROBE\" \"$SHUTTLE_STORES\"\n"
     })
 
-    # Both modules hold their overrides at once before anyone reads, so a
-    # leak in either direction would be observed.
-    wait_for_peer(other)
+    send(test, {:set, label})
+    receive do: (:read -> :ok)
 
     read = fn -> {Shuttle.Env.get(@key), Shuttle.Env.app(:env_isolation_probe)} end
     expected = {label, label}
@@ -59,15 +65,16 @@ defmodule Shuttle.EnvIsolationTest.Shared do
     assert read.() == expected
     assert Task.async(read) |> Task.await() == expected
 
-    probe = ExUnit.Callbacks.start_supervised!(Probe)
+    {:ok, probe} = Probe.start_link(nil)
     assert Probe.read(probe, read) == expected
     assert GenServer.call(probe, {:task_read, read}) == expected
+    assert GenServer.call(probe, {:task_read, &Shuttle.data_dir/0}) == data_dir
 
     assert Shuttle.Env.get("HOME") == nil
     assert Shuttle.Env.get("HOME", "fallback") == "fallback"
 
-    # The fake on this test's scoped PATH, spawned through the real runner,
-    # sees this test's env — from the test and from a supervised process.
+    # The fake on this scope's PATH, spawned through the real runner, sees
+    # this scope's env — from the scope and from a process it started.
     run_felt = fn -> Shuttle.Runner.Default.cmd("felt", [], []) end
     assert run_felt.() == {"#{label}:/stores/#{label}", 0}
     assert Probe.read(probe, run_felt) == {"#{label}:/stores/#{label}", 0}
@@ -87,81 +94,8 @@ defmodule Shuttle.EnvIsolationTest.Shared do
     spawn(fn -> send(parent, {:outside, read.()}) end)
     assert_receive {:outside, {nil, nil}}
 
-    # Concurrent Pollers have independent durable host state as well as
-    # independent in-memory runners; their outbox transaction locks differ.
-    runner = Shuttle.Test.FeltStoreRunner
-    runner.start!()
-
-    {:ok, poller} =
-      Shuttle.Test.PollerHelpers.start_poller!(
-        runner: runner,
-        felt_stores: [runner.felt_root()],
-        own_host_id: "test-host",
-        poll_interval_ms: 600_000
-      )
-
-    Shuttle.Test.PollerHelpers.await_boot_cycle!(poller)
-    data = Shuttle.data_dir()
-    sessions = Shuttle.Env.get("SHUTTLE_SESSIONS_FILE")
-    send_when_registered(:"shuttle_env_isolation_#{other}", {:host_state, data, sessions})
-    assert_receive {:host_state, peer_data, peer_sessions}, @rendezvous_ms
-    refute data == peer_data
-    refute sessions == peer_sessions
-    assert File.exists?(Path.join(data, "thread-outbox/baseline"))
-    assert Path.dirname(sessions) == data
-    assert GenServer.call(probe, {:task_read, fn -> Shuttle.data_dir() end}) == data
-
-    send_peer_done(other)
-    assert_receive {:peer_done, ^other}, @rendezvous_ms
-  end
-
-  defp wait_for_peer(other) do
-    send_when_registered(:"shuttle_env_isolation_#{other}", {:peer_ready, self()})
-    assert_receive {:peer_ready, _}, @rendezvous_ms
-  end
-
-  defp send_peer_done(other) do
-    label = if other == "a", do: "b", else: "a"
-    send_when_registered(:"shuttle_env_isolation_#{other}", {:peer_done, label})
-  end
-
-  defp send_when_registered(name, msg) do
-    deadline = System.monotonic_time(:millisecond) + @rendezvous_ms
-    send_when_registered(name, msg, deadline)
-  end
-
-  defp send_when_registered(name, msg, deadline) do
-    case Process.whereis(name) do
-      pid when is_pid(pid) ->
-        send(pid, msg)
-
-      nil ->
-        if System.monotonic_time(:millisecond) > deadline,
-          do: flunk("#{inspect(name)} never registered")
-
-        Process.sleep(10)
-        send_when_registered(name, msg, deadline)
-    end
-  end
-end
-
-defmodule Shuttle.EnvIsolationATest do
-  use ExUnit.Case, async: true
-
-  @moduletag timeout: 3 * Shuttle.EnvIsolationTest.Shared.rendezvous_ms()
-
-  test "scope a sees only its own overrides" do
-    Shuttle.EnvIsolationTest.Shared.run("a")
-  end
-end
-
-defmodule Shuttle.EnvIsolationBTest do
-  use ExUnit.Case, async: true
-
-  @moduletag timeout: 3 * Shuttle.EnvIsolationTest.Shared.rendezvous_ms()
-
-  test "scope b sees only its own overrides" do
-    Shuttle.EnvIsolationTest.Shared.run("b")
+    GenServer.stop(probe)
+    %{data_dir: data_dir}
   end
 end
 

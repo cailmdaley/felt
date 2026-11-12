@@ -61,6 +61,17 @@ defmodule Shuttle.Test.Env do
   """
   def own_scope!, do: ensure_owner(self())
 
+  @doc """
+  Make `pid`, a process the calling test started, the owner of a scope of its
+  own, erased when the test exits. `pid` then sets its overrides with the
+  functions here, so one test can hold several concurrent scopes.
+  """
+  def adopt_scope!(pid) when is_pid(pid) do
+    ExUnit.Callbacks.on_exit({__MODULE__, pid}, fn -> clear(pid) end)
+    :ets.insert(@table, {{:owner, pid}, true})
+    :ok
+  end
+
   @doc "Prepend `dir` to this test's scoped `PATH`."
   def prepend_path(dir) when is_binary(dir) do
     put_env("PATH", Enum.join([dir | List.wrap(Shuttle.Env.get("PATH"))], ":"))
