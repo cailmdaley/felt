@@ -10,6 +10,8 @@ defmodule Shuttle.Voice do
   require Logger
   alias Shuttle.{Recorder, Voice.Config}
 
+  @monitor_ms 250
+
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
@@ -339,7 +341,7 @@ defmodule Shuttle.Voice do
     status =
       case state.monitor.(state.launch) do
         %{pending_words: _} = status -> status
-        _ -> %{}
+        _ -> %{pending_words: (snapshot[:pending] || %{})[:words] || 0}
       end
 
     Map.merge(snapshot, %{
@@ -918,7 +920,9 @@ defmodule Shuttle.Voice do
     Shuttle.Voice.TranscriptRelay.start(row)
   end
 
-  defp monitor(launch), do: Shuttle.Voice.TranscriptRelay.status(launch)
+  # The relay can be slow while it checks a target's terminal, so Voice, which
+  # every board polls, waits briefly and falls back to what it last saw.
+  defp monitor(launch), do: Shuttle.Voice.TranscriptRelay.status(launch, timeout: @monitor_ms)
 
   defp read_last do
     with {:ok, bytes} <- Shuttle.FS.read(last_path()),
