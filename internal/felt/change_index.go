@@ -104,21 +104,13 @@ func ScanChanges(root string, previous ChangeIndex) (ChangeScan, error) {
 			old, existed := previous[rel]
 			if result.missing {
 				if existed {
-					if id, _, ok := fiberIDFromRelativePath(rel); ok && strings.HasSuffix(rel, FileExt) {
-						changed[id] = true
-					}
+					markChanged(changed, rel, old)
 				}
 				continue
 			}
 			next[rel] = result.stamp
 			if !existed || old != result.stamp {
-				if os.FileMode(result.stamp[2]).IsDir() {
-					if rel != "." {
-						changed[filepath.ToSlash(rel)] = true
-					}
-				} else if id, _, ok := fiberIDFromRelativePath(rel); ok {
-					changed[id] = true
-				}
+				markChanged(changed, rel, result.stamp)
 			}
 			for _, entry := range result.entries {
 				if strings.HasPrefix(entry.Name(), ".") || entry.Type()&os.ModeSymlink != 0 {
@@ -149,12 +141,8 @@ func ScanChanges(root string, previous ChangeIndex) (ChangeScan, error) {
 	for rel := range next {
 		for parent := filepath.Dir(rel); ; parent = filepath.Dir(parent) {
 			if excluded[parent] {
+				markChanged(changed, rel, next[rel])
 				delete(next, rel)
-				if strings.HasSuffix(rel, FileExt) {
-					if id, _, ok := fiberIDFromRelativePath(rel); ok {
-						changed[id] = true
-					}
-				}
 				break
 			}
 			if parent == "." {
@@ -171,14 +159,28 @@ func ScanChanges(root string, previous ChangeIndex) (ChangeScan, error) {
 }
 
 func removedChangeIndex(previous ChangeIndex) ChangeScan {
-	ids := []string{}
-	for rel := range previous {
-		if strings.HasSuffix(rel, FileExt) {
-			if id, _, ok := fiberIDFromRelativePath(rel); ok {
-				ids = append(ids, id)
-			}
-		}
+	changed := map[string]bool{}
+	for rel, stamp := range previous {
+		markChanged(changed, rel, stamp)
+	}
+	ids := make([]string, 0, len(changed))
+	for id := range changed {
+		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	return ChangeScan{Index: ChangeIndex{}, IDs: ids}
+}
+
+// markChanged records the address an indexed path names when it appears,
+// changes or disappears: a directory names itself (the fiber it would hold),
+// a canonical fiber file names its fiber. A deleted directory reports itself
+// even when the index never saw its fiber file.
+func markChanged(changed map[string]bool, rel string, stamp [4]int64) {
+	if os.FileMode(stamp[2]).IsDir() {
+		if rel != "." {
+			changed[filepath.ToSlash(rel)] = true
+		}
+	} else if id, _, ok := fiberIDFromRelativePath(rel); ok && strings.HasSuffix(rel, FileExt) {
+		changed[id] = true
+	}
 }

@@ -212,3 +212,38 @@ func TestChangeIndexPrunesDirectoryReplacedByFile(t *testing.T) {
 		t.Fatal("retained child of regular file")
 	}
 }
+
+// A pass that lands between a directory rename and the file rename inside it
+// indexes the directory without its fiber file, while the listing that follows
+// already reads the renamed fiber. Deleting the directory before the next pass
+// must still report the fiber the listing holds.
+func TestChangeIndexReportsDeletedDirectoryWithoutIndexedFiber(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "moved")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "created.md"), []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	between, err := ScanChanges(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(between.IDs, []string{"moved"}) {
+		t.Fatal(between.IDs)
+	}
+	if err := os.Rename(filepath.Join(dir, "created.md"), filepath.Join(dir, "moved.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := ScanChanges(root, between.Index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(deleted.IDs, []string{"moved"}) {
+		t.Fatal(deleted.IDs)
+	}
+}
