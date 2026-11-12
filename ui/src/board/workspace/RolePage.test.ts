@@ -4,7 +4,7 @@ import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { Channel } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
-import { roleHolds, roleSlug } from './RolePage.js'
+import { charterId, mayBeCharter, roleHolds, roleSlug } from './RolePage.js'
 
 const role = card({ id: 'roles/surveyor', uid: 'surveyor', name: 'Surveyor', outcome: 'Maps a project.' })
 const channel: Channel = { uid: 'surveyor', owner: 'local', name: 'Surveyor', body: 'Reads first.', labels: ['Note'], documents: [] }
@@ -27,14 +27,21 @@ const names = (root: ParentNode, selector: string) => [...root.querySelectorAll(
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('role page', () => {
-  it('is a fiber at roles/<slug> or <mount>/roles/<slug>, never a holder beneath it or a role deeper', () => {
-    expect(roleSlug(role)).toBe('surveyor')
-    expect(roleSlug(card({ id: 'shared/roles/surveyor' }))).toBe('surveyor')
-    expect(roleSlug(card({ id: 'roles/surveyor/opus' }))).toBeNull()
-    expect(roleSlug(card({ id: 'shared/roles/surveyor/opus' }))).toBeNull()
-    expect(roleSlug(card({ id: 'a/b/roles/surveyor' }))).toBeNull()
-    expect(roleSlug(card({ id: 'roles/roles/surveyor' }))).toBeNull()
-    expect(roleSlug(card({ id: 'roles' }))).toBeNull()
+  it('is a charter the daemon\'s catalogue names, never a fiber that only looks like one', () => {
+    const catalogue = [{ slug: 'surveyor', id: 'roles/surveyor' }, { slug: 'scribe', id: 'shared/roles/scribe' }]
+    expect(roleSlug(role, catalogue)).toBe('surveyor')
+    expect(roleSlug(card({ id: 'shared/roles/scribe' }), catalogue)).toBe('scribe')
+    expect(roleSlug(card({ id: 'notes/roles/editor' }), catalogue)).toBeNull()
+    expect(roleSlug(card({ id: 'shared/roles/surveyor' }), catalogue)).toBeNull()
+    expect(roleSlug(card({ id: 'roles/surveyor/opus' }), catalogue)).toBeNull()
+    expect(roleSlug(role, [])).toBeNull()
+    expect(charterId('scribe', catalogue)).toBe('shared/roles/scribe')
+    expect(charterId('editor', catalogue)).toBeNull()
+  })
+
+  it('asks for the catalogue only on a page that could be a charter', () => {
+    for (const id of ['roles/surveyor', 'shared/roles/scribe', 'notes/roles/editor']) expect(mayBeCharter(card({ id })), id).toBe(true)
+    for (const id of ['notes/task', 'roles', 'roles/surveyor/opus']) expect(mayBeCharter(card({ id })), id).toBe(false)
   })
 
   it('holds constitutions assigned to the office, independently of seat, in Desk order', () => {
@@ -83,9 +90,9 @@ describe('role page', () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled()
   })
 
-  it('gives child notes and any other fiber no ledger', () => {
+  it('draws no ledger on a page given no holds', () => {
     for (const id of ['roles/surveyor/opus', 'notes/task']) {
-      const pane = buildFiberProse(card({ id }), channel, { shuttleBase: daemon([]), onFiber: vi.fn(), onFile: vi.fn(), holds: [draft] })
+      const pane = buildFiberProse(card({ id }), channel, { shuttleBase: daemon([]), onFiber: vi.fn(), onFile: vi.fn() })
       expect(pane.querySelector('[data-part="role-ledger"]')).toBeNull()
     }
   })

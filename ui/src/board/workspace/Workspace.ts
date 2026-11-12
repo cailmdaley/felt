@@ -4,7 +4,7 @@ import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
-import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
+import { type Charter, charters, holdsRevision, mayBeCharter, roleHolds, roleSlug } from './RolePage.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
@@ -125,6 +125,7 @@ export class Workspace {
   private readonly history: WorkspaceHistory
   private readonly channels = new Map<string, ChannelState>()
   private readonly proseRevisions = new Map<DocKey, string>()
+  private catalogue: Charter[] = []
   private current: ChannelState | null = null
   /** Constitutions opened in this session, most recent first. */
   private readLately: string[] = []
@@ -639,14 +640,24 @@ export class Workspace {
       constitution: () => { const page = proseDocument(state.channel); if (page) this.visit(page.key) },
     })
   }
-  private holds(state: ChannelState): KanbanCard[] {
-    const slug = roleSlug(state.card)
-    return slug ? roleHolds(this.opts.cards(), slug) : []
+  /** On a charter's page, the office's holds; absent on any other page. */
+  private holds(state: ChannelState): KanbanCard[] | undefined {
+    const slug = roleSlug(state.card, this.catalogue)
+    return slug ? roleHolds(this.opts.cards(), slug) : undefined
+  }
+  /** Read the charter catalogue for a page that may be a charter, redrawing it once known. */
+  private readCatalogue(state: ChannelState): void {
+    if (!mayBeCharter(state.card)) return
+    void charters(this.opts.shuttleBase).then(catalogue => {
+      this.catalogue = catalogue
+      if (!this.disposed && this.current) this.refreshProse(this.current)
+    }, () => {})
   }
   private proseRevision(state: ChannelState): string {
-    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.shuttleRole, state.card.shuttlePerson, state.card.shuttleSeat, holdsRevision(this.holds(state)), state.error, state.loaded, state.metadataKnown])
+    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.shuttleRole, state.card.shuttlePerson, state.card.shuttleSeat, roleSlug(state.card, this.catalogue), holdsRevision(this.holds(state) ?? []), state.error, state.loaded, state.metadataKnown])
   }
   private drawProse(state: ChannelState, embedded = false): HTMLElement {
+    this.readCatalogue(state)
     return buildFiberProse(state.card, state.channel, {
       embedded,
       shuttleBase: this.opts.shuttleBase,

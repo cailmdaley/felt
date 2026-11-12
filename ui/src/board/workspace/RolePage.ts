@@ -1,25 +1,47 @@
 import type { DeskColumn, KanbanCard } from '../KanbanTypes.js'
 import { DESK_COLUMN_TITLE } from '../KanbanSurfaces.js'
 import { renderMarkdown } from '../utils.js'
+import { daemonFetch } from '../daemonApi.js'
 
 /**
- * A charter's id: `roles/<slug>` at the top of the store, or
- * `<mount>/roles/<slug>` where the mount is a repository linked in at the
- * store's top level. This is the board's reading of that rule: it cannot see
- * symlinks, so any one leading segment other than `roles` counts as a mount.
+ * An office and its charter's id (`roles/<slug>`, or `<mount>/roles/<slug>`
+ * in a repository linked in at the store's top level), as `GET /api/v1/roles`
+ * lists them. The daemon reads the charter rule where it can see the links;
+ * the board takes its answer rather than guessing from a path.
  */
-const CHARTER_ID = /^(?:(?!roles\/)[^/]+\/)?roles\/([a-z0-9]+(?:-[a-z0-9]+)*)$/
+export interface Charter { slug: string; id: string }
 
-/** The slug of a role charter, at `roles/<slug>` or `<mount>/roles/<slug>`. */
-export function roleSlug(card: KanbanCard): string | null {
-  return CHARTER_ID.exec(card.id)?.[1] ?? null
+/** One catalogue fetch per daemon base. A failed fetch is dropped so the next reader retries. */
+const catalogues = new Map<string, Promise<Charter[]>>()
+
+/** The daemon's charter catalogue. */
+export function charters(shuttleBase: string): Promise<Charter[]> {
+  const hit = catalogues.get(shuttleBase)
+  if (hit) return hit
+  const load = daemonFetch(`${shuttleBase}/api/v1/roles`).then(async response => {
+    if (!response.ok) throw new Error(await response.text())
+    return await response.json() as Charter[]
+  }).catch((error: unknown) => {
+    catalogues.delete(shuttleBase)
+    throw error
+  })
+  catalogues.set(shuttleBase, load)
+  return load
 }
 
-/** The id of a slug's charter among ids, the store's own before a mount's. */
-export function charterId(slug: string, ids: readonly string[]): string | null {
-  const own = `roles/${slug}`
-  if (ids.includes(own)) return own
-  return ids.filter(id => CHARTER_ID.exec(id)?.[1] === slug).sort()[0] ?? null
+/** Whether a fiber could be a charter, so a page asks for the catalogue only when it might be one. */
+export function mayBeCharter(card: KanbanCard): boolean {
+  return /(^|\/)roles\/[^/]+$/.test(card.id)
+}
+
+/** The office whose charter this card is, if it is one. */
+export function roleSlug(card: KanbanCard, catalogue: readonly Charter[]): string | null {
+  return catalogue.find(charter => charter.id === card.id)?.slug ?? null
+}
+
+/** The id of an office's charter in the catalogue. */
+export function charterId(slug: string, catalogue: readonly Charter[]): string | null {
+  return catalogue.find(charter => charter.slug === slug)?.id ?? null
 }
 
 /** The Desk's reading order: work awaiting review, in flight, drafts, then the rest. */

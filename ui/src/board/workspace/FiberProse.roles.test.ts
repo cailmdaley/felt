@@ -13,12 +13,16 @@ const card: KanbanCard = {
 const channel: Channel = { uid: 'task', owner: 'host-a', name: 'Task', body: '', labels: ['Task'], documents: [] }
 
 let base = 0
-function daemon(ids: string[]): string {
+/** A daemon whose charter catalogue is charters (`slug=id`) and whose fiber index holds them and ids. */
+function daemon(charters: string[], ids: string[] = []): string {
   const shuttleBase = `http://roles-${++base}.invalid`
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ fibers: ids.map(id => ({ fiber: { id, name: id } })) }))))
+  const catalogue = charters.map(entry => { const [slug, id] = entry.split('='); return { slug, id, name: slug, outcome: '' } })
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/api/v1/roles')
+    ? new Response(JSON.stringify(catalogue))
+    : new Response(JSON.stringify({ fibers: [...catalogue.map(c => c.id), ...ids].map(id => ({ fiber: { id, name: id } })) }))))
   return shuttleBase
 }
-const settle = () => new Promise(resolve => setTimeout(resolve, 0))
+const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -42,7 +46,7 @@ describe('constitution role', () => {
   })
 
   it('names the office and opens its charter through the wikilink path', async () => {
-    const shuttleBase = daemon(['roles/surveyor'])
+    const shuttleBase = daemon(['surveyor=roles/surveyor'])
     const onFiber = vi.fn()
     const pane = buildFiberProse({ ...card, shuttleRole: 'surveyor' }, channel, { shuttleBase, onFiber, onFile: vi.fn() })
     await settle()
@@ -53,21 +57,16 @@ describe('constitution role', () => {
     expect(onFiber).toHaveBeenCalledWith('roles/surveyor')
   })
 
-  it('opens a charter in a mount, the store\'s own first', async () => {
-    for (const [ids, want] of [
-      [['shared/roles/scribe'], 'shared/roles/scribe'],
-      [['shared/roles/scribe', 'roles/scribe'], 'roles/scribe'],
-    ] as const) {
-      const onFiber = vi.fn()
-      const pane = buildFiberProse({ ...card, shuttleRole: 'scribe' }, channel, { shuttleBase: daemon([...ids]), onFiber, onFile: vi.fn() })
-      await settle()
-      pane.querySelector<HTMLAnchorElement>('.ws-fiber-role a.kbn-wikilink-live')!.click()
-      expect(onFiber).toHaveBeenCalledWith(want)
-    }
+  it('opens the charter the catalogue names, in a mount too', async () => {
+    const onFiber = vi.fn()
+    const pane = buildFiberProse({ ...card, shuttleRole: 'scribe' }, channel, { shuttleBase: daemon(['scribe=shared/roles/scribe'], ['roles/scribe/opus']), onFiber, onFile: vi.fn() })
+    await settle()
+    pane.querySelector<HTMLAnchorElement>('.ws-fiber-role a.kbn-wikilink-live')!.click()
+    expect(onFiber).toHaveBeenCalledWith('shared/roles/scribe')
   })
 
-  it('opens only a charter, never a deeper path, holder, case or title match', async () => {
-    const shuttleBase = daemon(['a/b/roles/scribe', 'roles/scribe/opus', 'Roles/Scribe', 'scribe-notes'])
+  it('opens nothing for an office the catalogue lacks, whatever fibers look like a charter', async () => {
+    const shuttleBase = daemon([], ['notes/roles/scribe', 'roles/scribe/opus', 'Roles/Scribe', 'scribe-notes'])
     const pane = buildFiberProse({ ...card, shuttleRole: 'scribe' }, channel, { shuttleBase, onFiber: vi.fn(), onFile: vi.fn() })
     await settle()
     const role = pane.querySelector('.ws-fiber-role')!
@@ -78,7 +77,7 @@ describe('constitution role', () => {
   it('names the person responsible beside the office, and opens the office charter', async () => {
     expect(mapFeltJsonToFiber({ id: 'a', role: 'scribe/sam', shuttle: { role: 'scribe', person: 'sam' } })?.shuttlePerson).toBe('sam')
     const onFiber = vi.fn()
-    const pane = buildFiberProse({ ...card, shuttleRole: 'scribe', shuttlePerson: 'sam' }, channel, { shuttleBase: daemon(['roles/scribe']), onFiber, onFile: vi.fn() })
+    const pane = buildFiberProse({ ...card, shuttleRole: 'scribe', shuttlePerson: 'sam' }, channel, { shuttleBase: daemon(['scribe=roles/scribe']), onFiber, onFile: vi.fn() })
     await settle()
     const role = pane.querySelector('.ws-fiber-role')!
     expect(role.textContent).toBe('scribe · sam')

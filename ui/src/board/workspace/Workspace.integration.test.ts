@@ -131,6 +131,7 @@ beforeEach(() => {
       if (source) return fiberReadResponse(source, bodyOverrides.get(`${source.originId}:${source.uid ?? source.id}`) ?? body)
     }
     if (url.includes('/api/v1/fibers')) return new Response(JSON.stringify({ fibers: [] }))
+    if (url.includes('/api/v1/roles')) return new Response(JSON.stringify([{ slug: 'surveyor', id: 'roles/surveyor', name: 'Surveyor', outcome: '' }]))
     return new Response('{}')
   }))
   window.history.replaceState(null, '', '/')

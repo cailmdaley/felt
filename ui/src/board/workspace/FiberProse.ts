@@ -6,7 +6,7 @@ import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import '../prose.css'
 import './fiber-prose.css'
 import type { Channel } from './documents.js'
-import { buildRoleLedger, charterId, roleSlug } from './RolePage.js'
+import { buildRoleLedger, charterId, charters } from './RolePage.js'
 
 /** The outcome as the reading surface's lede, including math and references. */
 export function ledeHtml(outcome: string): string {
@@ -90,7 +90,8 @@ function roleChip(slug: string | undefined, person: string | undefined, opts: { 
     role.append(who)
   }
   el.append(role)
-  void installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, resolve: (_, index) => charterId(slug, index.map(row => row.id)) })
+  void charters(opts.shuttleBase).catch(() => []).then(catalogue =>
+    installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, resolve: () => charterId(slug, catalogue) }))
   return el
 }
 
@@ -101,7 +102,7 @@ export function buildFiberProse(
     shuttleBase: string
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
-    /** On a role charter, the constitutions assigned to the office in Desk order. */
+    /** On a role charter, the constitutions assigned to the office in Desk order; absent elsewhere. */
     holds?: KanbanCard[]
     onCard?: (card: KanbanCard) => void
     /** Drawn under its own row on a constitution's page, which already shows its name and outcome. */
@@ -151,8 +152,7 @@ export function buildFiberProse(
   }
   installBodyFileLinks(body, opts.onFile)
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
-  const slug = roleSlug(card)
-  const ledger = slug ? buildRoleLedger(opts.holds ?? [], { onCard: opts.onCard ?? (() => {}) }) : null
+  const ledger = opts.holds ? buildRoleLedger(opts.holds, { onCard: opts.onCard ?? (() => {}) }) : null
   article.append(...(header.childElementCount ? [header] : []), ...(outcomeText.trim() ? [outcome] : []), ...(ledger ? [ledger] : []), body)
   scroller.append(article)
   return scroller
