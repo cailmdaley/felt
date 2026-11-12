@@ -815,7 +815,8 @@ defmodule Shuttle.RexFocusTest do
 
   test "off does not launch a stream and an in-flight event after off cannot change the target",
        c do
-    {watcher, active, pids} = watcher(c.tmp_dir, false)
+    # Only the test's ticks run, so none closes the stream before the late event.
+    {watcher, active, pids} = watcher(c.tmp_dir, false, poll_ms: 60_000)
     assert :sys.get_state(watcher).port == nil
     refute File.exists?(pids)
     Agent.update(active, fn _ -> true end)
