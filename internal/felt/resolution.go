@@ -54,20 +54,24 @@ func CommandScope(env *sysenv.Env, root, startDir string) string {
 		cwd = abs
 	}
 
+	// A directory reached through a symlinked subtree of the store (a mounted
+	// repository) is named by where it sits in the store, as the walk names
+	// its fibers; a directory outside the store lexically is compared by its
+	// resolved path.
 	feltRoot := filepath.Join(root, DirName)
-	if resolved, err := filepath.EvalSymlinks(feltRoot); err == nil {
-		feltRoot = resolved
-	}
-	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = resolved
-	}
-	rel, err := filepath.Rel(feltRoot, cwd)
-	if err != nil {
-		return ""
-	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." || strings.HasPrefix(rel, "../") {
-		return ""
+	rel, inside := relativeInside(feltRoot, cwd)
+	if !inside {
+		resolvedRoot, err := filepath.EvalSymlinks(feltRoot)
+		if err != nil {
+			resolvedRoot = feltRoot
+		}
+		resolvedCwd, err := filepath.EvalSymlinks(cwd)
+		if err != nil {
+			resolvedCwd = cwd
+		}
+		if rel, inside = relativeInside(resolvedRoot, resolvedCwd); !inside {
+			return ""
+		}
 	}
 
 	parts := strings.Split(rel, "/")
@@ -79,6 +83,17 @@ func CommandScope(env *sysenv.Env, root, startDir string) string {
 		}
 	}
 	return ""
+}
+
+// relativeInside is dir's slash-separated path below root, and whether dir is
+// strictly below it.
+func relativeInside(root, dir string) (string, bool) {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	return rel, rel != "." && rel != ".." && !strings.HasPrefix(rel, "../")
 }
 
 // Ref identifies a fiber and the store that contains it.
@@ -141,18 +156,10 @@ func resolveRefWith(storage *Storage, scopeID, query string, find func(scopeID, 
 // NamespaceStorage is the enclosing store when storage is a project view.
 // Paths exchanged outside a view are relative to this namespace.
 func NamespaceStorage(storage *Storage) *Storage {
-	root, err := filepath.EvalSymlinks(storage.Root())
-	if err != nil || filepath.Base(root) == DirName {
-		return storage
+	if root, _, ok := storage.EnclosingStore(); ok {
+		return NewStorage(filepath.Dir(root))
 	}
-	for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
-		if filepath.Base(dir) == DirName {
-			return NewStorage(filepath.Dir(dir))
-		}
-		if filepath.Dir(dir) == dir {
-			return storage
-		}
-	}
+	return storage
 }
 
 // ResolveAddressRef resolves an intrinsic UID or an exact namespace-relative

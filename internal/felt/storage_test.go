@@ -2186,6 +2186,86 @@ func TestEnclosingStoreReportsMountPoint(t *testing.T) {
 	}
 }
 
+// TestEnclosingStoreFollowsTheMountLinkHopByHop: when part of the enclosing
+// store is itself a symlink into another repository's store
+// (`loom/.felt/science -> ../../science/.felt`), a project mounted through the
+// loom's spelling belongs to the loom, not to the store the bytes resolve
+// into. Fully resolving the link first would land in `science/.felt/cmbx` and
+// name the science store as the namespace, cutting the project off from the
+// rest of the loom.
+func TestEnclosingStoreFollowsTheMountLinkHopByHop(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	loomProj, scienceProj := filepath.Join(tmp, "loom"), filepath.Join(tmp, "science")
+	loom, science := NewStorage(loomProj), NewStorage(scienceProj)
+	for _, s := range []*Storage{loom, science} {
+		if err := s.Init(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRawFiber(t, loom.root, "commons")
+	for _, id := range []string{"cmbx", "cmbx/local", "calum/x"} {
+		writeRawFiber(t, science.root, id)
+	}
+	// A relative link target, as a hand-made mount usually is.
+	if err := os.Symlink(filepath.Join("..", "..", "science", DirName), filepath.Join(loom.root, "science")); err != nil {
+		t.Fatal(err)
+	}
+	mount := func(name, target string) string {
+		t.Helper()
+		project := filepath.Join(tmp, name)
+		if err := os.MkdirAll(project, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(project, DirName)); err != nil {
+			t.Fatal(err)
+		}
+		return project
+	}
+	resolved := func(dir string) string {
+		t.Helper()
+		real, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return real
+	}
+
+	for _, tc := range []struct {
+		name, target, wantRoot, wantPrefix string
+	}{
+		{"through-loom", filepath.Join(loom.root, "science", "cmbx"), resolved(loom.root), "science/cmbx"},
+		{"direct", filepath.Join(science.root, "calum", "x"), resolved(science.root), "calum/x"},
+		{"whole-store", loom.root, "", ""},
+	} {
+		project := mount(tc.name, tc.target)
+		root, prefix, ok := NewStorage(project).EnclosingStore()
+		if root != tc.wantRoot || prefix != tc.wantPrefix || ok != (tc.wantRoot != "") {
+			t.Errorf("%s: EnclosingStore() = (%q, %q, %v), want (%q, %q)", tc.name, root, prefix, ok, tc.wantRoot, tc.wantPrefix)
+		}
+		wantNamespace := tc.wantRoot
+		if wantNamespace == "" {
+			wantNamespace = filepath.Join(project, DirName)
+		}
+		if got := NamespaceStorage(NewStorage(project)).Root(); got != wantNamespace {
+			t.Errorf("%s: NamespaceStorage root = %q, want %q", tc.name, got, wantNamespace)
+		}
+	}
+
+	// From the project mounted through the loom, the rest of the loom and the
+	// rest of the science subtree are both outside, under their loom ids.
+	external := NewStorage(filepath.Join(tmp, "through-loom")).ExternalRefs()
+	if id, ok := external.LookupPath("commons"); !ok || id != "commons" {
+		t.Errorf("LookupPath(commons) = %q, %v", id, ok)
+	}
+	if id, _, ok := external.Lookup("", "calum/x"); !ok || id != "science/calum/x" {
+		t.Errorf("Lookup(calum/x) = %q, %v; want science/calum/x", id, ok)
+	}
+	if local, ok := external.Localize("science/cmbx/local"); !ok || local != "local" {
+		t.Errorf("Localize(science/cmbx/local) = %q, %v", local, ok)
+	}
+}
+
 // TestResolveScopedIDRefusesEnclosingStorePath is the misresolution this whole
 // mechanism exists to stop: from inside the substore, a link written out in
 // full to a fiber in another project's tree must not be rescued by the

@@ -155,30 +155,87 @@ func AsExternalReference(err error) (*ExternalReference, bool) {
 // this store's slash-separated position inside it, and ok is false for an
 // ordinary top-level store.
 //
-// s.root is the unresolved path (the symlink itself), so the answer comes
-// from EvalSymlinks plus an ancestor walk looking for a `.felt` directory.
-// The result is memoized: resolution consults it once per query.
+// The enclosing store is found along the link the store was mounted by, one
+// symlink hop at a time (see enclosingStore), so a mount point that is itself
+// a symlink into another repository — `~/loom/.felt/science` linking to
+// `~/science/.felt` — still answers the loom, where the project's link
+// points. The result is memoized: resolution consults it once per query.
 func (s *Storage) EnclosingStore() (root string, prefix string, ok bool) {
 	s.enclosingOnce.Do(func() {
-		resolved, err := filepath.EvalSymlinks(s.root)
-		if err != nil {
-			return
-		}
-		for dir := filepath.Dir(resolved); ; dir = filepath.Dir(dir) {
-			if filepath.Base(dir) == DirName && looksLikeStore(dir) {
-				rel, err := filepath.Rel(dir, resolved)
-				if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-					return
-				}
-				s.external = &ExternalRefs{root: dir, prefix: filepath.ToSlash(rel), cache: map[string]string{}, via: map[string]resolution{}}
-				return
-			}
-			if parent := filepath.Dir(dir); parent == dir {
-				return
-			}
+		if root, prefix, ok := enclosingStore(s.root); ok {
+			s.external = &ExternalRefs{root: root, prefix: prefix, cache: map[string]string{}, via: map[string]resolution{}}
 		}
 	})
 	return s.external.Root(), s.external.Prefix(), s.external != nil
+}
+
+// enclosingStore walks from storeRoot, an absolute unresolved `.felt` path,
+// toward the store it is mounted in. At each step it looks at the path's
+// lexical ancestors for a directory named `.felt` that holds felt content; the
+// nearest one is the enclosing store, and the lexical remainder is the prefix.
+// Otherwise it replaces the path's first symlink component with that link's
+// target and looks again, until no symlink is left to follow. The enclosing
+// root is reported with its parent directory resolved, so the same store is
+// spelled one way however it was reached; the `.felt` itself is kept as found,
+// since resolving it could leave the store the link named.
+func enclosingStore(storeRoot string) (root, prefix string, ok bool) {
+	current := filepath.Clean(storeRoot)
+	for hops := 0; hops < maxSymlinkHops; hops++ {
+		for dir := filepath.Dir(current); ; dir = filepath.Dir(dir) {
+			if filepath.Base(dir) == DirName && looksLikeStore(dir) {
+				rel, err := filepath.Rel(dir, current)
+				if err != nil {
+					return "", "", false
+				}
+				parent, err := filepath.EvalSymlinks(filepath.Dir(dir))
+				if err != nil {
+					return "", "", false
+				}
+				return filepath.Join(parent, DirName), filepath.ToSlash(rel), true
+			}
+			if filepath.Dir(dir) == dir {
+				break
+			}
+		}
+		next, followed := followFirstSymlink(current)
+		if !followed {
+			return "", "", false
+		}
+		current = next
+	}
+	return "", "", false
+}
+
+// maxSymlinkHops bounds enclosingStore's walk, as the kernel bounds a path's
+// symlink expansions, so a link cycle ends.
+const maxSymlinkHops = 255
+
+// followFirstSymlink replaces the first symlink component of the absolute
+// path p with that link's target, resolving a relative target against the
+// link's directory. followed is false when p has no symlink component or a
+// component cannot be read.
+func followFirstSymlink(p string) (string, bool) {
+	prefix := filepath.VolumeName(p) + string(filepath.Separator)
+	rest := strings.Split(strings.TrimPrefix(p, prefix), string(filepath.Separator))
+	for i := range rest {
+		link := filepath.Join(prefix, filepath.Join(rest[:i+1]...))
+		info, err := os.Lstat(link)
+		if err != nil {
+			return "", false
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		target, err := os.Readlink(link)
+		if err != nil {
+			return "", false
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(link), target)
+		}
+		return filepath.Join(append([]string{target}, rest[i+1:]...)...), true
+	}
+	return "", false
 }
 
 // ExternalRefs returns the external-reference oracle for this store, or nil
@@ -195,7 +252,9 @@ func (s *Storage) ExternalRefs() *ExternalRefs {
 // that is merely NAMED `.felt` — a repository checked out inside someone
 // else's store, a stray fixture — is not mistaken for the store this one is
 // mounted in. One ReadDir: a fiber is either a bare `<slug>.md` or a
-// `<slug>/<slug>.md`, and one of either is enough.
+// `<slug>/<slug>.md`, and one of either is enough. A store whose fibers all
+// sit deeper is known by the `.gitignore` that `felt init` writes, which names
+// felt's lock sidecars.
 func looksLikeStore(dir string) bool {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -206,6 +265,11 @@ func looksLikeStore(dir string) bool {
 		if !entry.IsDir() {
 			if name != MystConfigName && strings.HasSuffix(name, FileExt) {
 				return true
+			}
+			if name == GitignoreName {
+				if data, err := os.ReadFile(filepath.Join(dir, name)); err == nil && strings.Contains(string(data), "*.md.lock") {
+					return true
+				}
 			}
 			continue
 		}

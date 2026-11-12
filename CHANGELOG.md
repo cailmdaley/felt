@@ -10,6 +10,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Claude and Pi hooks bridge terminal program status through tmux to supporting outer terminals; `SHUTTLE_PROGRAM_STATUS=off` disables it.
 - Shuttle supports Rex as its terminal backend with `"terminal": "rex"` in `host.json`.
+- `felt sync` also syncs each git repository mounted in the store by a symlinked directory, with the same refusals and `--push`, naming each repository; a failing mount is reported by its path and makes sync exit non-zero after the others have run.
 
 ### Removed
 
@@ -23,6 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - The board draws delivered messages and thread notices as messages again, from transcripts in every header format.
+- A project view linked into a store subtree that is itself a symlink into another repository belongs to the store its link names: felt finds the enclosing store one symlink hop at a time, so `find`, `show` and outer ids reach the whole store rather than the repository the bytes resolve into.
 
 ## [2.0.0-rc.2] — 2026-10-23
 

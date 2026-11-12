@@ -480,6 +480,114 @@ func TestSyncResolvesSymlinkedStoreAndSerializesRepository(t *testing.T) {
 	}
 }
 
+// peerCommit commits name in f's peer and pushes it, advancing f's remote.
+func peerCommit(t *testing.T, f syncFixture, name string) {
+	t.Helper()
+	writeSyncFile(t, f.peer, name, name+"\n")
+	syncTestGit(t, f.peer, "add", name)
+	syncTestGit(t, f.peer, "commit", "-m", name)
+	syncTestGit(t, f.peer, "push")
+}
+
+// mountRepo makes dir inside store a symlink to repo's .felt directory, a
+// substore whose files live in that second repository.
+func mountRepo(t *testing.T, store, dir, repo string) {
+	t.Helper()
+	target := filepath.Join(repo, ".felt")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(store, ".felt", filepath.FromSlash(dir))
+	if err := os.MkdirAll(filepath.Dir(link), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func realPath(t *testing.T, p string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return real
+}
+
+// TestSyncAlsoSyncsMountedRepositories: a store whose `science` subtree is a
+// symlink into a second repository syncs both repositories, the second once
+// however many links reach it. A mount with no upstream, or outside Git, has
+// nothing to sync and is not a failure.
+func TestSyncAlsoSyncsMountedRepositories(t *testing.T) {
+	t.Parallel()
+	t.Run("fast-forward", func(t *testing.T) {
+		t.Parallel()
+		store, science, local := newSyncFixture(t), newSyncFixture(t), newSyncFixture(t)
+		mountRepo(t, store.clone, "science", science.clone)
+		mountRepo(t, store.clone, "deep/again", science.clone)
+		mountRepo(t, store.clone, "deep/er/local", local.clone)
+		syncTestGit(t, local.clone, "branch", "--unset-upstream")
+		if err := os.Symlink(t.TempDir(), filepath.Join(store.clone, ".felt", "plain")); err != nil {
+			t.Fatal(err)
+		}
+		peerCommit(t, store, "store-upstream.md")
+		peerCommit(t, science, "science-upstream.md")
+
+		out, err := runCommand(t, store.clone, "sync")
+		if err != nil {
+			t.Fatalf("sync: %v\n%s", err, out)
+		}
+		if got := syncTestGit(t, store.clone, "show", "HEAD:store-upstream.md"); got != "store-upstream.md" {
+			t.Fatalf("store repository not fast-forwarded: %q", got)
+		}
+		if got := syncTestGit(t, science.clone, "show", "HEAD:science-upstream.md"); got != "science-upstream.md" {
+			t.Fatalf("mounted repository not fast-forwarded: %q", got)
+		}
+		if n := strings.Count(out, "Syncing "+realPath(t, science.clone)+","); n != 1 {
+			t.Fatalf("mounted repository synced %d times, want once:\n%s", n, out)
+		}
+		if !strings.Contains(out, "Skipped "+realPath(t, local.clone)+": ") {
+			t.Fatalf("a mount with no upstream should be skipped with a note:\n%s", out)
+		}
+	})
+	t.Run("push", func(t *testing.T) {
+		t.Parallel()
+		store, science := newSyncFixture(t), newSyncFixture(t)
+		mountRepo(t, store.clone, "science", science.clone)
+		for _, f := range []syncFixture{store, science} {
+			writeSyncFile(t, f.clone, "local.md", "local\n")
+			syncTestGit(t, f.clone, "add", "local.md")
+			syncTestGit(t, f.clone, "commit", "-m", "local")
+		}
+		if out, err := runCommand(t, store.clone, "sync", "--push"); err != nil {
+			t.Fatalf("sync --push: %v\n%s", err, out)
+		}
+		for _, f := range []syncFixture{store, science} {
+			branch := syncTestGit(t, f.clone, "symbolic-ref", "--short", "HEAD")
+			if remote, head := syncTestGit(t, f.remote, "rev-parse", branch), syncTestGit(t, f.clone, "rev-parse", "HEAD"); remote != head {
+				t.Fatalf("%s not published: remote %s, clone %s", f.clone, remote, head)
+			}
+		}
+	})
+	t.Run("failing mount", func(t *testing.T) {
+		t.Parallel()
+		store, broken, science := newSyncFixture(t), newSyncFixture(t), newSyncFixture(t)
+		mountRepo(t, store.clone, "a-broken", broken.clone)
+		mountRepo(t, store.clone, "science", science.clone)
+		syncTestGit(t, broken.clone, "remote", "set-url", "origin", filepath.Join(broken.root, "missing.git"))
+		peerCommit(t, science, "science-upstream.md")
+
+		out, err := runCommand(t, store.clone, "sync")
+		if err == nil || !strings.Contains(err.Error(), realPath(t, broken.clone)+", mounted at a-broken") || !strings.Contains(err.Error(), "fetching felt store upstream failed") {
+			t.Fatalf("a failing mount should be reported by its path, got %v\n%s", err, out)
+		}
+		if got := syncTestGit(t, science.clone, "show", "HEAD:science-upstream.md"); got != "science-upstream.md" {
+			t.Fatalf("a mount after the failing one was not synced: %q", got)
+		}
+	})
+}
+
 func FuzzSyncStateSequencePreservesLocalFiles(fz *testing.F) {
 	fz.Add([]byte{0})
 	fz.Add([]byte{1, 2, 0})

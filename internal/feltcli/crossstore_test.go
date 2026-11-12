@@ -26,6 +26,59 @@ func TestShowReachesEnclosingStore(t *testing.T) {
 	}
 }
 
+// TestViewMountedThroughALinkedSubtreeReachesTheOuterStore: the loom's
+// `science` subtree is a symlink into another repository's store, and a
+// project mounts `loom/.felt/science/cmbx`. Its namespace is the loom, the
+// store its link names, not the science store the bytes resolve into: show and
+// find reach the rest of the loom, and local fibers keep their short ids.
+func TestViewMountedThroughALinkedSubtreeReachesTheOuterStore(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	loom := felt.NewStorage(filepath.Join(tmp, "loom"))
+	science := felt.NewStorage(filepath.Join(tmp, "science"))
+	for _, s := range []*felt.Storage{loom, science} {
+		if err := s.Init(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFixtureFelt(t, loom, "roles/vizier", "Vizier")
+	writeFixtureFelt(t, science, "calum/debug", "Calum debug")
+	writeFixtureFelt(t, science, "cmbx/debug", "Local debug")
+	if err := os.Symlink(science.Root(), filepath.Join(loom.Root(), "science")); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(tmp, "project")
+	if err := os.MkdirAll(project, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(loom.Root(), "science", "cmbx"), filepath.Join(project, ".felt")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runCommand(t, project, "show", "roles/vizier", "--detail", "name")
+	if err != nil || !strings.Contains(out, "Vizier") {
+		t.Fatalf("show roles/vizier from the view = %v\n%s", err, out)
+	}
+
+	out, err = runCommand(t, project, "find", "debug")
+	if err != nil {
+		t.Fatalf("find: %v\n%s", err, out)
+	}
+	separator := strings.Index(out, "── elsewhere in "+loomRoot(t, project)+" ──")
+	if separator == -1 {
+		t.Fatalf("find should search the loom:\n%s", out)
+	}
+	if outer := strings.Index(out, "science/calum/debug"); outer < separator {
+		t.Fatalf("find should list the science sibling by its loom id, after the separator:\n%s", out)
+	}
+	if local := strings.Index(out, " debug\n"); local == -1 || local > separator {
+		t.Fatalf("the local fiber should print first under its short id:\n%s", out)
+	}
+	if strings.Contains(out, "science/cmbx/debug") {
+		t.Fatalf("find repeats the local fiber under its loom id:\n%s", out)
+	}
+}
+
 func TestShowResolvesIntrinsicUIDFromEnclosingStore(t *testing.T) {
 	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)

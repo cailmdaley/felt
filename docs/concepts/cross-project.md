@@ -50,6 +50,15 @@ felt edit commons/jackknife -o "Settled: 200 patches."
 At the top of the store itself there is no enclosing view, and `ls`, `tree`
 and `find` all cover every project linked in.
 
+felt finds the enclosing store along the link the view was mounted by, one
+symlink at a time: it looks above the view's path for a `.felt/` that holds
+fibers, and only if there is none does it follow the next symlink on that path
+and look again. A view linked to `~/store/.felt/science/cmbx` belongs to
+`~/store`, with prefix `science/cmbx`, even when `~/store/.felt/science` is
+itself a symlink into another repository's `.felt/` (see
+[The project as canonical](#the-project-as-canonical)). A view linked straight
+into that other `.felt/` belongs to it instead.
+
 The `-C, --directory <dir>` flag runs felt as if it had been started in `dir`,
 and works with every verb. It is the way to reach a store from somewhere that is
 not a view of it:
@@ -93,7 +102,21 @@ the rest of the store and ids from elsewhere in it do not resolve. Use
 `felt -C ~/store` for anything cross-project.
 
 The store's own git history records the symlink, not the fibers behind it; the
-project's fibers are versioned wherever the project versions them.
+project's fibers are versioned wherever the project versions them. When that is
+another git repository, `felt sync` from the store syncs it too: after the
+store's own repository, it runs the same fetch, merge and optional `--push` in
+each repository that a symlinked directory inside the store points into, once
+per repository, naming each. A symlink to a directory outside git mounts
+nothing. A mounted repository whose branch tracks no remote branch is skipped
+with a note; one that fails is reported by its path after the others have run, and
+sync exits non-zero.
+
+The same holds one level down. When the mounted directory is itself a store
+that projects link into (`~/store/.felt/science` → `~/science/.felt`, and
+`<project>/.felt` → `~/store/.felt/science/cmbx`), a project linked through
+the store's spelling is a view of `~/store`: `find` and outer ids reach the
+whole store, not only `~/science`. A project linked to
+`~/science/.felt/cmbx` directly is a view of `~/science`.
 
 ### Choosing
 

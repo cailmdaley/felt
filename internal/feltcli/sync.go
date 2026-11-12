@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,6 +28,14 @@ func (a *app) syncCmd() *cobra.Command {
 		Long: `Fetches the tracking branch of the repository that holds the store and merges
 it into the checked-out branch. A project .felt that is a symlink syncs the
 repository it points into.
+
+A directory inside the store that is a symlink into another Git repository
+mounts that repository's files in the store. After its own repository, sync
+runs the same sync in each mounted repository, once per repository and at any
+depth, naming each one. A symlink to a directory outside Git mounts nothing.
+A mounted repository whose branch tracks no remote branch is skipped with a
+note; one that fails is reported by its path after the others have run, and
+sync exits non-zero.
 
 sync never stages, stashes, or force-pushes, and commits nothing of yours; a
 diverged upstream makes a merge commit. It refuses to start with
@@ -51,7 +61,7 @@ killed merge holding the Git index lock.`,
 			if err != nil {
 				return fmt.Errorf("resolving felt store path %s: %w", storage.Root(), err)
 			}
-			return a.syncStore(cmd.Context(), storeRoot, syncPush, fetchTimeout, a.env.Stdout)
+			return a.syncStoreAndMounts(cmd.Context(), storeRoot, syncPush, fetchTimeout, a.env.Stdout)
 		},
 	}
 	command.GroupID = groupStore
@@ -59,6 +69,107 @@ killed merge holding the Git index lock.`,
 	command.Flags().DurationVar(&fetchTimeout, "fetch-timeout", syncGitTimeout, "Deadline for the network fetch only; local merge has no hard deadline")
 	return command
 }
+
+// syncStoreAndMounts syncs the repository holding storeRoot, then each
+// repository mounted in the store. A store-repository failure is returned as
+// is; mounted-repository failures carry the repository's path, and every
+// mount is attempted before any failure is returned.
+func (a *app) syncStoreAndMounts(parent context.Context, storeRoot string, push bool, fetchTimeout time.Duration, output io.Writer) error {
+	var failures []error
+	if err := a.syncStore(parent, storeRoot, push, fetchTimeout, output); err != nil {
+		failures = append(failures, err)
+	}
+	for _, mount := range a.mountedRepositories(parent, storeRoot) {
+		if _, err := fmt.Fprintf(output, "Syncing %s, mounted at %s…\n", mount.repo, mount.at); err != nil {
+			return err
+		}
+		err := a.syncStore(parent, mount.repo, push, fetchTimeout, output)
+		var noUpstream *noUpstreamError
+		switch {
+		case errors.As(err, &noUpstream):
+			if _, err := fmt.Fprintf(output, "Skipped %s: %s\n", mount.repo, noUpstream); err != nil {
+				return err
+			}
+		case err != nil:
+			failures = append(failures, fmt.Errorf("syncing %s, mounted at %s: %w", mount.repo, mount.at, err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// syncMount is a Git repository other than the store's own whose files a
+// symlinked directory places inside the store.
+type syncMount struct {
+	repo string // the repository's top-level directory
+	at   string // the symlink's slash-separated path inside the store
+}
+
+// mountedRepositories finds the repositories mounted in the store at
+// storeRoot: a walk that does not descend through symlinks, so each symlinked
+// directory is met as an entry, then walks on into its target to find mounts
+// nested inside it. Each repository is listed once, at the first place the
+// walk meets it, and the store's own repository not at all. A target outside
+// Git or inside the store's own repository is not a mount and is not walked.
+func (a *app) mountedRepositories(parent context.Context, storeRoot string) []syncMount {
+	toplevel := func(dir string) string {
+		out, err := a.runSyncGit(parent, dir, syncGitTimeout, "rev-parse", "--show-toplevel")
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(out)
+	}
+	own := toplevel(storeRoot)
+	seen := map[string]bool{}
+	walked := map[string]bool{}
+	var mounts []syncMount
+	var walk func(base, prefix string)
+	walk = func(base, prefix string) {
+		if walked[base] {
+			return
+		}
+		walked[base] = true
+		_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() && d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			if d.Type()&fs.ModeSymlink == 0 {
+				return nil
+			}
+			target, err := filepath.EvalSymlinks(p)
+			if err != nil {
+				return nil
+			}
+			if info, err := os.Stat(target); err != nil || !info.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(base, p)
+			if err != nil {
+				return nil
+			}
+			at := path.Join(prefix, filepath.ToSlash(rel))
+			repo := toplevel(target)
+			if repo == "" || repo == own {
+				return nil
+			}
+			if !seen[repo] {
+				seen[repo] = true
+				mounts = append(mounts, syncMount{repo: repo, at: at})
+			}
+			walk(target, at)
+			return nil
+		})
+	}
+	walk(storeRoot, "")
+	return mounts
+}
+
+// noUpstreamError is a branch with no remote branch to sync with.
+type noUpstreamError struct{ reason string }
+
+func (e *noUpstreamError) Error() string { return e.reason }
 
 func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fetchTimeout time.Duration, output io.Writer) error {
 	if parent == nil {
@@ -111,12 +222,12 @@ func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fet
 	}
 	trackingParts := strings.Split(strings.TrimSpace(tracking), "\n")
 	if len(trackingParts) != 2 {
-		return fmt.Errorf("branch %q has no usable upstream; set one with `git branch --set-upstream-to` and retry", branch)
+		return &noUpstreamError{fmt.Sprintf("branch %q has no usable upstream; set one with `git branch --set-upstream-to` and retry", branch)}
 	}
 	remote := strings.TrimSpace(trackingParts[0])
 	mergeRef := strings.TrimSpace(trackingParts[1])
 	if remote == "" || !strings.HasPrefix(mergeRef, "refs/heads/") {
-		return fmt.Errorf("branch %q must track a remote branch to sync", branch)
+		return &noUpstreamError{fmt.Sprintf("branch %q must track a remote branch to sync", branch)}
 	}
 	if err := rejectGitOperationInProgress(git, gitDir); err != nil {
 		return err
