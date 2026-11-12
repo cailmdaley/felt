@@ -102,6 +102,9 @@ defmodule ShuttleWeb.FiberControllerTest do
     loom = Path.join(tmp, "loom")
     project = Path.join(tmp, "project")
     File.mkdir_p!(project)
+    # A store felt made: felt recognizes the store a mount link enters by the
+    # support files `felt init` writes, since its root holds no fiber.
+    assert {:ok, _} = Shuttle.CLI.run_felt(["-C", loom, "init"])
 
     for fiber <- fixture["fibers"] do
       path = Path.join([loom, ".felt", fiber["id"], Path.basename(fiber["id"]) <> ".md"])
