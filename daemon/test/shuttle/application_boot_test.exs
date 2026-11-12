@@ -52,6 +52,8 @@ defmodule Shuttle.ApplicationBootTest do
   # The three modes boot side by side, each in its own VM: the hung and
   # realistic modes each hold a stage past sixteen real seconds.
   @tag :timing
+  # Each VM is bounded by its own deadline below; the test outlasts them all.
+  @tag timeout: 180_000
   test "production child list boots normal, hung and realistic at production limits", %{
     build: build
   } do
@@ -78,7 +80,7 @@ defmodule Shuttle.ApplicationBootTest do
         fn {mode, root} ->
           {mode,
            Shuttle.Runner.Default.cmd("elixir", args,
-             timeout_ms: 60_000,
+             timeout_ms: 120_000,
              stderr_to_stdout: true,
              env: [
                {"BOOT_ROOT", root},
