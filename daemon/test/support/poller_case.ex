@@ -370,6 +370,8 @@ defmodule Shuttle.Test.PollerCase do
   # without the dispatch/watcher/resume machinery that makes a full
   # spawn→kill→resume loop nondeterministic under the mock runner.
   def simulate_exit(poller, fiber_id, lifetime_seconds) do
+    # The boot cycle's reconcile would drop the injected entry.
+    settle_poller!(poller)
     started = DateTime.add(DateTime.utc_now(), -lifetime_seconds, :second)
     watcher = spawn(fn -> :ok end)
 

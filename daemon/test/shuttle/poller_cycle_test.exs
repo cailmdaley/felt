@@ -71,6 +71,7 @@ defmodule Shuttle.PollerCycleTest do
     assert state.poll_task_pid == nil
     assert state.poll_stall_timer_ref == nil
 
+    await_publication!(poller)
     health = Poller.snapshot(poller).poll_health
     assert health.state == "idle"
     assert health.stall_timeout_ms == 600_000
