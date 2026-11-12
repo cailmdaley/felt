@@ -186,7 +186,8 @@ func TestRemoteThreadCreatesOnOwnerAndCanBeControlledWithoutMirror(t *testing.T)
 			if r.URL.Query().Get("origin") != "worker" {
 				t.Errorf("owner read query = %s", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`{"fibers":[{"fiber":{"id":"01JARZ3NDEKTSV4RRFFQ69G5FA","slug":"parent/measure","name":"Measure","status":"open","body":"Measure\n\n## Desired State\n\n## Status","shuttle":{"kind":"oneshot","host":"worker","agent":"claude-opus","project_dir":"/remote/project"}}}]}`))
+			// The owner serves the native role beside the resolved office.
+			_, _ = w.Write([]byte(`{"fibers":[{"fiber":{"id":"01JARZ3NDEKTSV4RRFFQ69G5FA","slug":"parent/measure","name":"Measure","status":"open","role":"editor/sam","body":"Measure\n\n## Desired State\n\n## Status","shuttle":{"kind":"oneshot","host":"worker","agent":"claude-opus","project_dir":"/remote/project","role":"editor","person":"sam"}}}]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/lifecycle":
 			lifecycle.record(t, r)
 			_, _ = w.Write([]byte("owner resumed\n"))
@@ -234,6 +235,9 @@ func TestRemoteThreadCreatesOnOwnerAndCanBeControlledWithoutMirror(t *testing.T)
 	allCreates := creates.all()
 	if len(allCreates) != 2 || allCreates[1]["id"] != "parent/measure/build-report" {
 		t.Fatalf("remote child creates = %#v", allCreates)
+	}
+	if child, _ := allCreates[1]["frontmatter"].(map[string]any); child["role"] != "editor/sam" {
+		t.Fatalf("child of a remote-only parent lost its person: %#v", child)
 	}
 }
 

@@ -26,7 +26,7 @@ defmodule Shuttle.FiberDocuments do
   # Lustre-scale win). The poller's candidate projection unions this set (see
   # `kanban_fields/0`) so cache entries build directly from candidate rows.
   @kanban_fields ~w(id uid name status tags created_at closed_at modified_at
-                    outcome due horizon cold kind priority tempered
+                    outcome due role horizon cold kind priority tempered
                     shuttle start theme path report_path)
 
   @doc "Decode fiber JSON, treating a non-mapping shuttle field as absent."
@@ -533,7 +533,6 @@ defmodule Shuttle.FiberDocuments do
     fiber =
       fiber
       |> Map.delete("collaboration")
-      |> Map.put("role", office_role(fiber))
       |> Map.put("seat", get_in(fiber, ["shuttle", "seat"]) === true)
       |> Map.put("id", logical_id)
       |> put_slug(canonical_id)
@@ -564,13 +563,6 @@ defmodule Shuttle.FiberDocuments do
   end
 
   defp entry_for(_store, _fiber, _report_mode), do: []
-
-  defp office_role(fiber) do
-    case get_in(fiber, ["shuttle", "role"]) do
-      role when is_binary(role) -> role
-      _ -> nil
-    end
-  end
 
   # Resolve the fiber's companion. tapestry.html takes precedence over artifact.html and report.html.
   #

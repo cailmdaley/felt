@@ -36,33 +36,34 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
   end
 
   describe "office projection" do
-    test "reads the office and boolean seat only from shuttle fields" do
+    test "keeps the native role and reads the boolean seat only from shuttle fields" do
       fiber = %{
         "id" => "tests/office",
-        "role" => "ignored",
+        "role" => "editor/sam",
         "seat" => true,
         "collaboration" => %{"ignored" => []},
-        "shuttle" => %{"role" => "gardener", "seat" => true}
+        "shuttle" => %{"role" => "editor", "person" => "sam", "seat" => true}
       }
 
       assert [%{fiber: projected}] = FiberDocuments.entries_for_fiber("/tmp/store", fiber)
-      assert projected["role"] == "gardener"
+      assert projected["role"] == "editor/sam"
+      assert projected["shuttle"]["role"] == "editor"
       assert projected["seat"] === true
       refute Map.has_key?(projected, "collaboration")
       refute "collaboration" in FiberDocuments.kanban_fields()
+      assert "role" in FiberDocuments.kanban_fields()
     end
 
-    test "does not infer an office from a string seat or top-level metadata" do
+    test "does not infer a seat from a string seat or top-level metadata" do
       for shuttle <- [%{}, %{"seat" => "gardener"}, %{"seat" => "true"}] do
         fiber = %{
           "id" => "tests/office",
-          "role" => "ignored",
           "seat" => true,
           "shuttle" => shuttle
         }
 
         assert [%{fiber: projected}] = FiberDocuments.entries_for_fiber("/tmp/store", fiber)
-        assert projected["role"] == nil
+        refute Map.has_key?(projected, "role")
         assert projected["seat"] === false
       end
     end
