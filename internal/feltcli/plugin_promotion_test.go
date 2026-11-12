@@ -682,6 +682,7 @@ func TestPromotionRefusesUnknownNativeInspection(t *testing.T) {
 	for _, harness := range []string{"claude", "codex"} {
 		for _, output := range []string{"exit 1", "printf 'invalid json'", "printf 'null'"} {
 			t.Run(harness+"/"+output, func(t *testing.T) {
+				t.Parallel()
 				f := newRemoteSetupFixture(t, harness)
 				fakeCommand(t, f.env, harness, output+"\n")
 				called := false
@@ -716,6 +717,7 @@ func TestSingleHarnessSetupRefreshesBothEnabledCaches(t *testing.T) {
 	t.Parallel()
 	for _, target := range []string{"claude", "codex"} {
 		t.Run(target, func(t *testing.T) {
+			t.Parallel()
 			f := newRemoteSetupFixture(t, "claude")
 			codexState := t.TempDir()
 			f.env.Set("SECOND_NATIVE_STATE", codexState)
@@ -751,6 +753,7 @@ func TestSharedPromotionPreservesIndependentCodexBundles(t *testing.T) {
 	t.Parallel()
 	for _, retained := range []string{codexPluginRef, codexSkillsPluginRef} {
 		t.Run(retained, func(t *testing.T) {
+			t.Parallel()
 			f := newRemoteSetupFixture(t, "claude")
 			f.env.Set("SECOND_NATIVE_STATE", t.TempDir())
 			fakeCommand(t, f.env, "codex", "FAKE_NATIVE_STATE=\"$SECOND_NATIVE_STATE\"\nFAKE_CODEX_CACHE=1\n"+codexSetupFake)
@@ -818,6 +821,7 @@ func TestFailedPromotionRestoresExternalInstallationWithoutCurrent(t *testing.T)
 	t.Parallel()
 	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
 			f := newRemoteSetupFixture(t, harness)
 			for name, data := range map[string][]byte{"source": []byte(f.source), "installed": nil} {
 				if err := os.WriteFile(filepath.Join(f.stateDir, name), data, 0o644); err != nil {
@@ -855,6 +859,7 @@ func TestExternalClaudeRollbackRetainsUnverifiedCacheJournal(t *testing.T) {
 	for _, sourceKind := range []string{"directory", "github"} {
 		for _, interrupted := range []bool{false, true} {
 			t.Run(sourceKind+"/interrupted="+fmt.Sprint(interrupted), func(t *testing.T) {
+				t.Parallel()
 				f := newRemoteSetupFixture(t, "claude")
 				source := f.source
 				if sourceKind == "github" {
@@ -912,6 +917,7 @@ func TestPromotionRefusesUnrecoverableNativeSource(t *testing.T) {
 	t.Parallel()
 	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
 			f := newRemoteSetupFixture(t, harness)
 			marketplace, plugins := `[{"name":"cailmdaley-felt"}]`, `[]`
 			if harness == "codex" {
@@ -959,6 +965,7 @@ func TestReconcileCodexUnconfiguredStateIsUntouched(t *testing.T) {
 	t.Parallel()
 	for _, installed := range []bool{false, true} {
 		t.Run(fmt.Sprint(installed), func(t *testing.T) {
+			t.Parallel()
 			f := newRemoteSetupFixture(t, "codex")
 			if installed {
 				if err := f.a.installCodexPluginViaCLI(f.source); err != nil {

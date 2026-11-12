@@ -329,6 +329,7 @@ func TestCodexSourceSetupRefreshesOnlyInstalledBundles(t *testing.T) {
 	t.Parallel()
 	for _, retained := range []string{"felt", "felt-skills", ""} {
 		t.Run(retained, func(t *testing.T) {
+			t.Parallel()
 			f := newRemoteSetupFixture(t, "codex")
 			if err := f.a.installCodexPluginViaCLI(f.remote); err != nil {
 				t.Fatal(err)

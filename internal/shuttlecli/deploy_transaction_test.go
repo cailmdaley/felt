@@ -302,6 +302,7 @@ func TestDeployTransactionLaunchHoldsRefuseReleaseAndPruning(t *testing.T) {
 		{"migration", `"reconciliation_hold":null`, `"reconciliation_hold":{"reason":"backend conflict"}`, "backend conflict"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			f := newDeployFleet(t)
 			launcher := filepath.Join(f.repo, "bin/shuttle-launch")
 			if err := os.WriteFile(launcher, []byte(strings.ReplaceAll(fleetRead(launcher), tc.before, tc.after)), 0755); err != nil {
@@ -680,6 +681,7 @@ func TestDeployForwardsRemoteReadinessOverrides(t *testing.T) {
 	t.Parallel()
 	for _, timeout := range []string{"0", "30"} {
 		t.Run(timeout, func(t *testing.T) {
+			t.Parallel()
 			f := newDeployFleet(t)
 			fleetTouch(t, f.gate)
 			cmd, log := f.start(t, "remote-ready", "BOOTING_LAUNCHER=1", "CHECK_POLL=1", "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS="+timeout, "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1")
@@ -699,6 +701,7 @@ func TestDeployRefreshesCheckoutAfterReleaseBeforePiInspection(t *testing.T) {
 	t.Parallel()
 	for _, dirty := range []bool{false, true} {
 		t.Run(fmt.Sprint(dirty), func(t *testing.T) {
+			t.Parallel()
 			f := newDeployFleet(t)
 			fleetTouch(t, f.gate)
 			old := f.sha
@@ -822,6 +825,7 @@ func TestDeployRemotePreflightRejectsUnpublishedAndImplicitRollback(t *testing.T
 	t.Parallel()
 	for _, kind := range []string{"unpublished", "behind"} {
 		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
 			f := newDeployFleet(t)
 			fleetTouch(t, f.gate)
 			if err := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("newer"), 0600); err != nil {
