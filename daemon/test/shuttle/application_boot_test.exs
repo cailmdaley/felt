@@ -28,6 +28,23 @@ defmodule Shuttle.ApplicationBootTest do
     assert Enum.find_index(ids, &(&1 == ShuttleWeb.PeerGateThrottle)) < endpoint
   end
 
+  # A restarted Lock would grant keys its predecessor's holders still hold.
+  # The tree's own Lock spec and options run here around a stand-in process,
+  # so the probe never touches the suite's live Lock.
+  test "the Lock's exit shuts the whole tree down" do
+    Process.flag(:trap_exit, true)
+    lock = Enum.find(Shuttle.Application.child_specs(), &(&1.id == Shuttle.Lock))
+    stand_in = %{lock | start: {Agent, :start_link, [fn -> nil end]}}
+    sibling = Supervisor.child_spec({Agent, fn -> nil end}, id: :sibling)
+    opts = Keyword.delete(Shuttle.Application.supervisor_options(), :name)
+    {:ok, tree} = Supervisor.start_link([stand_in, sibling], opts)
+    [lock_pid] = for {Shuttle.Lock, pid, _, _} <- Supervisor.which_children(tree), do: pid
+
+    Process.exit(lock_pid, :kill)
+
+    assert_receive {:EXIT, ^tree, :shutdown}
+  end
+
   # The three modes boot side by side, each in its own VM: the hung and
   # realistic modes each hold a stage past sixteen real seconds.
   @tag :timing

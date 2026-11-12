@@ -164,7 +164,7 @@ defmodule Shuttle.Application do
     Shuttle.Poller.freeze_daemon_host_id!()
     :persistent_term.put({Shuttle.Terminal, :primary}, Shuttle.Host.terminal())
 
-    case Supervisor.start_link(child_specs(), strategy: :one_for_one, name: Shuttle.Supervisor) do
+    case Supervisor.start_link(child_specs(), supervisor_options()) do
       {:ok, pid} ->
         duration_ms = Shuttle.Readiness.mark_ready()
         Logger.info("Shuttle application tree started after #{duration_ms}ms")
@@ -175,12 +175,20 @@ defmodule Shuttle.Application do
     end
   end
 
+  # Shuttle.Lock is the one significant child: when it exits, the tree shuts
+  # down and the permanent application takes the VM with it, so no holder of
+  # a key outlives the Lock that granted it. The service supervisor (launchd,
+  # systemd) boots a fresh daemon; terminal workers outlive it.
+  @doc false
+  def supervisor_options,
+    do: [strategy: :one_for_one, auto_shutdown: :any_significant, name: Shuttle.Supervisor]
+
   @doc false
   def child_specs do
     core = [
       # Serializes terminal mutations, outbox transactions and document
       # writes; every later child may take its keys.
-      Shuttle.Lock,
+      Supervisor.child_spec(Shuttle.Lock, restart: :temporary, significant: true),
       {Registry, keys: :duplicate, name: Shuttle.Voice.Streams},
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},

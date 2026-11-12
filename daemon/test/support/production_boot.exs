@@ -268,6 +268,17 @@ try do
     IO.puts("INCARNATION_RELEASE_OK")
   end
 
+  # A Lock that dies takes the whole tree down rather than restarting empty
+  # beside processes that still hold its keys.
+  tree = Process.monitor(Process.whereis(Shuttle.Supervisor))
+  Process.exit(Process.whereis(Shuttle.Lock), :kill)
+
+  receive do
+    {:DOWN, ^tree, :process, _, :shutdown} -> :ok
+  after
+    30_000 -> raise "the tree outlived its Lock"
+  end
+
   IO.puts("PRODUCTION_BOOT_OK " <> Jason.encode!(%{mode: mode, version: version}))
   :erlang.halt(0)
 rescue

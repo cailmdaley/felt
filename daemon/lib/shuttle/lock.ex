@@ -5,6 +5,9 @@ defmodule Shuttle.Lock do
   A caller that finds a key held waits, in arrival order, and runs as soon as
   the holder releases it. A holder that exits releases its keys, and a waiter
   that exits leaves the queue. A process may take a key it already holds.
+
+  The ownership table lives only in this process, so the server never
+  restarts: the application supervisor shuts the daemon down when it exits.
   """
 
   use GenServer
@@ -55,10 +58,6 @@ defmodule Shuttle.Lock do
 
       %{^key => {{^pid, ref, depth}, waiters}} ->
         {:reply, :ok, put_in(state.keys[key], {{pid, ref, depth - 1}, waiters})}
-
-      # Held before this server restarted: nothing of it is left to release.
-      _ ->
-        {:reply, :ok, state}
     end
   end
 
