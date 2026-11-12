@@ -29,8 +29,8 @@ terminal and stops Codex's private managed daemon. It copies the host's own
 
 ## Production boot gate
 
-`daemon/test/shuttle/application_boot_test.exs` compiles production BEAMs once per suite in a private `MIX_BUILD_PATH`, with `REBAR_BASE_DIR` isolating dependency compiler state too, independent of release builds.
-Separate VMs verify the loaded BEAM path and production environment, enable every production child, use real Go CLIs and isolate operator files.
+`daemon/test/shuttle/application_boot_test.exs` compiles production BEAMs incrementally into the checkout's `_build/production-boot` (its own `MIX_BUILD_PATH`, with `REBAR_BASE_DIR` isolating dependency compiler state too), independent of release builds, so an unchanged tree costs a no-op compile.
+Three separate VMs, one per case and booting side by side, verify the loaded BEAM path and production environment, enable every production child, use real Go CLIs and isolate operator files.
 A synthetic Tailscale CLI drives sixteen probes against reserved `.invalid` names.
 The healthy case reaches ready; the FIFO case keeps HTTP diagnostics live beyond sixteen seconds, refuses dispatch, and recovers in the same daemon after an external writer replaces the registry.
 The realistic case uses 3,000 managed fibers and real tmux on a private socket, delays inventory eighteen seconds, then requires ready and all documents cached.

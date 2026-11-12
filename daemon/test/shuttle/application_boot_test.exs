@@ -2,13 +2,9 @@ defmodule Shuttle.ApplicationBootTest do
   use ExUnit.Case, async: true
 
   setup_all do
-    build =
-      Path.expand(
-        "../../_build/production-boot-#{System.pid()}-#{System.unique_integer([:positive])}",
-        __DIR__
-      )
-
-    on_exit(fn -> {_, 0} = System.cmd("rm", ["-rf", "--", build]) end)
+    # One production build per checkout, compiled incrementally, so an
+    # unchanged tree costs a no-op compile.
+    build = Path.expand("../../_build/production-boot", __DIR__)
 
     {output, status} =
       Shuttle.Runner.Default.cmd("mix", ["compile", "--warnings-as-errors"],
@@ -53,49 +49,67 @@ defmodule Shuttle.ApplicationBootTest do
     assert Enum.find_index(ids, &(&1 == ShuttleWeb.PeerGateThrottle)) < endpoint
   end
 
-  for mode <- ["normal", "hung", "realistic"] do
-    @tag :timing
-    test "production child list boots #{mode} at production limits", %{build: build} do
-      root = Path.join(System.tmp_dir!(), "bb-#{System.unique_integer([:positive])}")
+  # The three modes boot side by side, each in its own VM: the hung and
+  # realistic modes each hold a stage past sixteen real seconds.
+  @tag :timing
+  test "production child list boots normal, hung and realistic at production limits", %{
+    build: build
+  } do
+    paths = Path.wildcard(Path.join(build, "lib/*/ebin"))
+    script = Path.expand("../support/production_boot.exs", __DIR__)
+    vm_args = File.read!(Path.expand("../../rel/vm.args.eex", __DIR__))
+    [_, dirty_io] = Regex.run(~r/\+SDio\s+(\d+)/, vm_args)
 
-      on_exit(fn ->
-        if tmux = System.find_executable("tmux") do
-          for socket <- Path.wildcard(root <> "/tmux/tmux-*/default") do
-            System.cmd(tmux, ["-S", socket, "kill-server"],
-              env: [{"TMUX", nil}],
-              stderr_to_stdout: true
-            )
-          end
-        end
+    args =
+      ["--erl", "+S 2:2 +SDcpu 2:2 +SDio #{dirty_io}"] ++
+        Enum.flat_map(paths, &["-pa", &1]) ++ [script]
 
-        {_, 0} = System.cmd("rm", ["-rf", "--", root])
+    # Short: the realistic mode's tmux socket under it must fit sun_path.
+    roots =
+      Map.new(~w(normal hung realistic), fn mode ->
+        {mode, Path.join(System.tmp_dir!(), "bb-#{System.unique_integer([:positive])}")}
       end)
 
-      paths = Path.wildcard(Path.join(build, "lib/*/ebin"))
-      script = Path.expand("../support/production_boot.exs", __DIR__)
+    on_exit(fn -> Enum.each(Map.values(roots), &remove_boot_root/1) end)
 
-      vm_args = File.read!(Path.expand("../../rel/vm.args.eex", __DIR__))
-      [_, dirty_io] = Regex.run(~r/\+SDio\s+(\d+)/, vm_args)
+    results =
+      roots
+      |> Task.async_stream(
+        fn {mode, root} ->
+          {mode,
+           Shuttle.Runner.Default.cmd("elixir", args,
+             timeout_ms: 60_000,
+             stderr_to_stdout: true,
+             env: [
+               {"BOOT_ROOT", root},
+               {"BOOT_MODE", mode},
+               {"BOOT_BUILD_DIR", build},
+               {"HOME", root}
+             ]
+           )}
+        end,
+        timeout: :infinity
+      )
+      |> Map.new(fn {:ok, result} -> result end)
 
-      args =
-        ["--erl", "+S 2:2 +SDcpu 2:2 +SDio #{dirty_io}"] ++
-          Enum.flat_map(paths, &["-pa", &1]) ++ [script]
-
-      {output, status} =
-        Shuttle.Runner.Default.cmd("elixir", args,
-          timeout_ms: 60_000,
-          stderr_to_stdout: true,
-          env: [
-            {"BOOT_ROOT", root},
-            {"BOOT_MODE", unquote(mode)},
-            {"BOOT_BUILD_DIR", build},
-            {"HOME", root}
-          ]
-        )
-
-      assert status == 0, output
-      assert output =~ "PRODUCTION_BOOT_OK"
-      if unquote(mode) == "realistic", do: assert(output =~ "REALISTIC_SLOW_STAGE_OK")
+    for {mode, {output, status}} <- results do
+      assert status == 0, "#{mode}:\n#{output}"
+      assert output =~ "PRODUCTION_BOOT_OK", "#{mode}:\n#{output}"
     end
+
+    assert elem(results["realistic"], 0) =~ "REALISTIC_SLOW_STAGE_OK"
+  end
+
+  defp remove_boot_root(root) do
+    if tmux = System.find_executable("tmux") do
+      for socket <- Path.wildcard(root <> "/tmux/tmux-*/default") do
+        System.cmd(tmux, ["-S", socket, "kill-server"],
+          env: [{"TMUX", nil}],
+          stderr_to_stdout: true
+        )
+      end
+    end
+
+    {_, 0} = System.cmd("rm", ["-rf", "--", root])
   end
 end
