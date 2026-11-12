@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,8 +30,8 @@ func (a *app) syncCmd() *cobra.Command {
 it into the checked-out branch. A project .felt that is a symlink syncs the
 repository it points into.
 
-A directory inside the store that is a symlink into another Git repository
-mounts that repository's files in the store. After its own repository, sync
+A directory inside the store that is a symlink into another Git repository's
+.felt mounts that repository's fibers in the store. After its own repository, sync
 runs the same sync in each mounted repository, once per repository and at any
 depth, naming each one. A symlink to a directory outside Git mounts nothing.
 A mounted repository whose branch tracks no remote branch is skipped with a
@@ -143,6 +144,9 @@ func (a *app) mountedRepositories(parent context.Context, storeRoot string) []sy
 				return nil
 			}
 			if info, err := os.Stat(target); err != nil || !info.IsDir() {
+				return nil
+			}
+			if !slices.Contains(strings.Split(filepath.ToSlash(target), "/"), felt.DirName) {
 				return nil
 			}
 			rel, err := filepath.Rel(base, p)
