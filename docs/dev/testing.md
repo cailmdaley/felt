@@ -29,6 +29,11 @@ terminal and stops Codex's private managed daemon. It copies the host's own
 
 ## Production boot gate
 
+The gate is tagged `:production_boot`. `make mix-test` (and so `make test`)
+and CI, which sets `CI`, run it; a bare `mix test` leaves it out, since it
+holds production VMs past sixteen real seconds by design. Run it alone with
+`SHUTTLE_TEST_PRODUCTION_BOOT=1 mix test --only production_boot`.
+
 `daemon/test/shuttle/application_boot_test.exs` compiles production BEAMs incrementally into the checkout's `_build/production-boot` (its own `MIX_BUILD_PATH`, with `REBAR_BASE_DIR` isolating dependency compiler state too), independent of release builds, so an unchanged tree costs a no-op compile.
 Three separate VMs, one per case and booting side by side, verify the loaded BEAM path and production environment, enable every production child, use real Go CLIs and isolate operator files.
 A synthetic Tailscale CLI drives sixteen probes against reserved `.invalid` names.
@@ -361,9 +366,9 @@ test takes. To see what a slow test waits on, wrap the slow part in
 `Shuttle.Test.StackSampler.run(fun, fn -> [pid] end)`, which prints the
 stacks the named processes spend their time in.
 
-The production boot gate is the suite's floor: its realistic case holds a
-boot stage past sixteen seconds by design, and a change under `lib/` first
-recompiles `_build/production-boot`.
+Where it runs, the production boot gate is the suite's floor: its realistic
+case holds a boot stage past sixteen seconds by design, and a change under
+`lib/` first recompiles `_build/production-boot`.
 
 ## Gotchas
 

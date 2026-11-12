@@ -1,27 +1,6 @@
 defmodule Shuttle.ApplicationBootTest do
   use ExUnit.Case, async: true
 
-  setup_all do
-    # One production build per checkout, compiled incrementally, so an
-    # unchanged tree costs a no-op compile.
-    build = Path.expand("../../_build/production-boot", __DIR__)
-
-    {output, status} =
-      Shuttle.Runner.Default.cmd("mix", ["compile", "--warnings-as-errors"],
-        env: [
-          {"MIX_ENV", "prod"},
-          {"MIX_BUILD_PATH", build},
-          {"REBAR_BASE_DIR", Path.join(build, "rebar")}
-        ],
-        timeout_ms: 240_000,
-        stderr_to_stdout: true
-      )
-
-    assert status == 0, output
-    assert File.dir?(Path.join(build, "rebar/prod")), "Rebar compiler state must be private too"
-    {:ok, build: build}
-  end
-
   test "test startup never starts transcript indexing without scoped enable" do
     refute Process.whereis(Shuttle.TranscriptIndexer)
   end
@@ -52,11 +31,29 @@ defmodule Shuttle.ApplicationBootTest do
   # The three modes boot side by side, each in its own VM: the hung and
   # realistic modes each hold a stage past sixteen real seconds.
   @tag :timing
-  # Each VM is bounded by its own deadline below; the test outlasts them all.
-  @tag timeout: 180_000
-  test "production child list boots normal, hung and realistic at production limits", %{
-    build: build
-  } do
+  @tag :production_boot
+  # The compile and each VM are bounded by their own deadlines below; the test
+  # outlasts them all.
+  @tag timeout: 480_000
+  test "production child list boots normal, hung and realistic at production limits" do
+    # One production build per checkout, compiled incrementally, so an
+    # unchanged tree costs a no-op compile.
+    build = Path.expand("../../_build/production-boot", __DIR__)
+
+    {output, status} =
+      Shuttle.Runner.Default.cmd("mix", ["compile", "--warnings-as-errors"],
+        env: [
+          {"MIX_ENV", "prod"},
+          {"MIX_BUILD_PATH", build},
+          {"REBAR_BASE_DIR", Path.join(build, "rebar")}
+        ],
+        timeout_ms: 240_000,
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert File.dir?(Path.join(build, "rebar/prod")), "Rebar compiler state must be private too"
+
     paths = Path.wildcard(Path.join(build, "lib/*/ebin"))
     script = Path.expand("../support/production_boot.exs", __DIR__)
     vm_args = File.read!(Path.expand("../../rel/vm.args.eex", __DIR__))

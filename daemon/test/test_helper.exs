@@ -105,6 +105,16 @@ Shuttle.Test.Env.start!()
 # is still the tier to suspect first on a loaded machine. It runs by default;
 # `mix test --only timing` or `--exclude timing` selects it.
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
+
+# `@tag :production_boot` marks the production boot gate: production VMs held
+# past sixteen real seconds by design, after a production compile whenever
+# lib/ has changed. CI (which sets CI) and `make mix-test` run it; a bare
+# `mix test` leaves it out unless SHUTTLE_TEST_PRODUCTION_BOOT is set.
+exclude =
+  if System.get_env("CI") || System.get_env("SHUTTLE_TEST_PRODUCTION_BOOT"),
+    do: exclude,
+    else: [:production_boot | exclude]
+
 # A bare `assert_receive` waits this long for its message. It is reached only
 # when the message never comes, so it costs a passing test nothing, and it is
 # set for a machine whose cores the concurrently running suite already fills.
