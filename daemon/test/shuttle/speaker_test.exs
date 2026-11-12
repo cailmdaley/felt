@@ -4,11 +4,15 @@ defmodule Shuttle.SpeakerTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: root} do
-    world = start_supervised!({Agent, fn -> %{partial: nil, now: 0, target: nil} end})
+    name = Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}")
+
+    world =
+      start_supervised!({Agent, fn -> %{partial: nil, now: 0, target: nil, speaker: name} end})
+
     parent = self()
 
     opts = [
-      name: Module.concat(__MODULE__, "S#{System.unique_integer([:positive])}"),
+      name: name,
       poll_ms: 10,
       hold_ms: 1_500,
       clock: fn -> Agent.get(world, & &1.now) end,
@@ -41,7 +45,13 @@ defmodule Shuttle.SpeakerTest do
   # Each state lasts a few polls, so the speaker sees every one.
   defp set(world, change) do
     Agent.update(world, &Map.merge(&1, change))
-    Process.sleep(30)
+    polls(world)
+  end
+
+  defp polls(world) do
+    speaker = Agent.get(world, & &1.speaker)
+    for _ <- 1..3, do: send(speaker, :poll)
+    :sys.get_state(speaker)
   end
 
   test "plays lines one at a time in arrival order", %{pid: pid, server: server} do
@@ -56,7 +66,6 @@ defmodule Shuttle.SpeakerTest do
     send(pid, {one, {:exit_status, 0}})
     assert_receive {:play, "jean:second", two}
     send(pid, {two, {:exit_status, 0}})
-    Process.sleep(20)
     assert %{speaking: nil, queued: 0} = Speaker.show(server)
   end
 
@@ -445,7 +454,7 @@ defmodule Shuttle.SpeakerTest do
       Speaker.speak(%{"text" => "Holistic hark: the inbox is live", "voice" => "jean"}, server)
 
     # The leftover words are seen pending as the line begins, then go quiet.
-    Process.sleep(30)
+    polls(world)
     set(world, %{now: 2_000})
     assert_receive {:play, "jean:Holistic hark: the inbox is live", _}
 
@@ -597,7 +606,6 @@ defmodule Shuttle.SpeakerTest do
     assert_receive {:play, _, two}
     assert [%{to: ^to}, %{text: "a line to hear", to: nil}] = Speaker.played(server)
     send(pid, {two, {:exit_status, 0}})
-    Process.sleep(20)
     assert [_, %{to: stop}] = Speaker.played(server)
     assert is_integer(stop)
   end

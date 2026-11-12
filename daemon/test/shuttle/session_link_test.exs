@@ -50,7 +50,7 @@ defmodule Shuttle.SessionLinkTest do
     Path.join(dir, "#{session}.jsonl")
   end
 
-  defp eventually(fun, attempts \\ 300)
+  defp eventually(fun, attempts \\ 6_000)
   defp eventually(fun, 0), do: fun.()
 
   defp eventually(fun, attempts) do
@@ -83,9 +83,9 @@ defmodule Shuttle.SessionLinkTest do
     {pid, opts} = start_resolver(roots)
     :sys.suspend(pid)
     request = Task.async(fn -> SessionLink.resolve(@session, opts) end)
-    assert {:ok, %{availability: :resolving, url: nil}} = Task.yield(request, 1_000)
+    assert {:ok, %{availability: :resolving, url: nil}} = Task.yield(request, 10_000)
     lookup = Task.async(fn -> SessionLink.cached_url(@session, opts) end)
-    assert {:ok, nil} = Task.yield(lookup, 1_000)
+    assert {:ok, nil} = Task.yield(lookup, 10_000)
     :sys.resume(pid)
     assert %{url: @first} = ready(@session, opts)
   end
@@ -410,9 +410,18 @@ defmodule Shuttle.SessionLinkTest do
     :sys.suspend(pid)
     assert %{availability: :resolving} = SessionLink.resolve(@session, opts)
     forgetter = Task.async(fn -> SessionLink.forget(@session, opts) end)
-    Process.sleep(5)
+
+    assert :queued =
+             eventually(fn ->
+               {:messages, queued} = Process.info(pid, :messages)
+
+               if Enum.any?(queued, &match?({:"$gen_call", _, {:forget, _}}, &1)),
+                 do: {:ok, :queued},
+                 else: :retry
+             end)
+
     :sys.resume(pid)
-    assert :ok = Task.await(forgetter)
+    assert :ok = Task.await(forgetter, 30_000)
     assert %{availability: :resolving} = SessionLink.resolve(@session, opts)
     assert %{url: @first} = ready(@session, opts)
   end

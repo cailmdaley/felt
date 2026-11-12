@@ -178,12 +178,14 @@ defmodule Shuttle.Profile.HTTPTest do
 
     :telemetry.execute(@start, %{}, %{conn: request})
     Process.sleep(50)
+    restarted = System.monotonic_time()
     :telemetry.execute(@start, %{}, %{conn: request})
     :telemetry.execute(@stop, %{duration: nil}, %{conn: request, options: [log: false]})
+    since_restart = System.monotonic_time() - restarted
 
     result = HTTP.finish(profile)
     assert [%{"count" => 1, "duration_ms" => duration}] = result["groups"]
-    assert duration < 25
+    assert duration <= since_restart / System.convert_time_unit(1, :millisecond, :native)
     assert result["dropped"] == 1
   end
 

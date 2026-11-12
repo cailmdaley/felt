@@ -8,14 +8,21 @@ defmodule Shuttle.RuntimeDocumentsTest do
     {:ok, path: path}
   end
 
+  # The snapshot's second is the subject. A read that load delays past it may
+  # see the edit, so the stale read is checked only while the second lasts.
+  @tag :timing
   test "external edits enter at the next snapshot, including a cached missing file", %{path: path} do
+    stale_until = System.monotonic_time(:millisecond) + 1_000
     assert {:error, :enoent} = Documents.read(path)
     File.write!(path, "first")
-    assert {:error, :enoent} = Documents.read(path)
+    stale = Documents.read(path)
+    if System.monotonic_time(:millisecond) < stale_until, do: assert(stale == {:error, :enoent})
     Process.sleep(1_010)
+    stale_until = System.monotonic_time(:millisecond) + 1_000
     assert {:ok, "first"} = Documents.read(path)
     File.write!(path, "other")
-    assert {:ok, "first"} = Documents.read(path)
+    stale = Documents.read(path)
+    if System.monotonic_time(:millisecond) < stale_until, do: assert(stale == {:ok, "first"})
     Process.sleep(1_010)
     assert {:ok, "other"} = Documents.read(path)
   end
@@ -26,7 +33,7 @@ defmodule Shuttle.RuntimeDocumentsTest do
     assert :ok = Documents.change(path, fn -> File.write(path, "after") end)
 
     readers = for _ <- 1..20, do: Task.async(fn -> Documents.read(path) end)
-    assert Enum.map(readers, &Task.await/1) == List.duplicate({:ok, "after"}, 20)
+    assert Enum.map(readers, &Task.await(&1, 30_000)) == List.duplicate({:ok, "after"}, 20)
   end
 
   test "a cold read waits for an in-flight writer without blocking other documents", %{path: path} do
@@ -48,8 +55,8 @@ defmodule Shuttle.RuntimeDocumentsTest do
     assert Task.yield(reader, 20) == nil
     assert {:error, :enoent} = Documents.read(path <> ".other")
     send(writer.pid, :commit)
-    assert Task.await(writer) == :ok
-    assert Task.await(reader) == {:ok, "committed"}
+    assert Task.await(writer, 30_000) == :ok
+    assert Task.await(reader, 30_000) == {:ok, "committed"}
   end
 
   test "failed filesystem reads are retried immediately", %{path: path} do

@@ -384,8 +384,10 @@ defmodule Shuttle.PollerStoresTest do
 
     assert Poller.snapshot(poller).felt_stores == ["/tmp/host-a"]
 
-    File.write!(config_path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/host-c"]}))
-    Process.sleep(1_010)
+    Shuttle.RuntimeDocuments.change(config_path, fn ->
+      File.write!(config_path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/host-c"]}))
+    end)
+
     sync_poll_cycle!(poller)
 
     assert_eventually(fn ->

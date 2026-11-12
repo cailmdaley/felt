@@ -23,14 +23,6 @@ defmodule ShuttleWeb.TranscriptControllerTest do
     def send_chunked(_, _, _), do: raise("send_chunked failed")
   end
 
-  defmodule SlowAdapter do
-    def chunk(state, body) do
-      body = IO.iodata_to_binary(body)
-      if String.starts_with?(body, "id:"), do: Process.sleep(25)
-      {:ok, state <> body, state <> body}
-    end
-  end
-
   setup do
     root =
       Path.join(

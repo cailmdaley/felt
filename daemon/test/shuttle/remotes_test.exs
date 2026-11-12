@@ -322,22 +322,17 @@ defmodule Shuttle.RemotesTest do
   end
 
   describe "config_token/0" do
-    test "names an absent file, and observes external edits within one tick" do
+    test "names an absent file, and changes with the file's content" do
       path = Path.join(tmp_dir(), "token.json")
       Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
       assert {nil, 0, nil} = Remotes.config_token()
+      write = &Shuttle.RuntimeDocuments.change(path, fn -> File.write!(path, &1) end)
 
-      File.write!(path, ~s({"remotes": [{"name": "a", "port": 4001}]}))
-      Process.sleep(1_010)
+      write.(~s({"remotes": [{"name": "a", "port": 4001}]}))
       first = Remotes.config_token()
       assert {{_mtime, _size}, 0, nil} = first
 
-      File.write!(
-        path,
-        ~s({"remotes": [{"name": "a", "port": 4001}, {"name": "b", "port": 4002}]})
-      )
-
-      Process.sleep(1_010)
+      write.(~s({"remotes": [{"name": "a", "port": 4001}, {"name": "b", "port": 4002}]}))
       assert Remotes.config_token() != first
     end
   end
