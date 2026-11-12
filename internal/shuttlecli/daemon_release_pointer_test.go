@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,10 +48,7 @@ func TestReleasePointerThroughInstalledCLI(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	binary := filepath.Join(t.TempDir(), "shuttle")
-	build := exec.Command("go", "build", "-o", binary, "../../cmd/shuttle")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v %s", err, output)
-	}
+	linkShuttleCLI(t, binary)
 	env.Unset("SHUTTLE_RELEASE")
 	env.Set("SHUTTLE_LISTEN", "unix://"+filepath.Join(shortPrivateTempDir(t), "absent.sock"))
 	sysenvtest.FakeCommand(t, env, "tmux", "#!/bin/sh\nexit 1\n")

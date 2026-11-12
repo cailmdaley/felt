@@ -786,10 +786,7 @@ func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fakeBin, "pi"), []byte("#!/bin/sh\nprintf 'local package\\n    %s\\n' \"$PI_TREE\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	build := exec.Command("go", "build", "-o", filepath.Join(repo, "shuttle"), "../../cmd/shuttle")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build: %v %s", err, out)
-	}
+	linkShuttleCLI(t, filepath.Join(repo, "shuttle"))
 	selectedRelease := writeTestDaemonRelease(t, filepath.Join(paths[0], "bin", "rel"))
 	if err := newApp(env).selectDaemonRelease(selectedRelease); err != nil {
 		t.Fatal(err)

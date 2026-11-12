@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,6 +109,28 @@ func shortPrivateTempDir(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	return dir
+}
+
+// builtShuttleCLI builds cmd/shuttle once per test binary.
+var builtShuttleCLI = sync.OnceValues(func() (string, error) {
+	binary := filepath.Join(testFenceDir, "shuttle-cli", "shuttle")
+	if output, err := exec.Command("go", "build", "-o", binary, "../../cmd/shuttle").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("build cmd/shuttle: %v %s", err, output)
+	}
+	return binary, nil
+})
+
+// linkShuttleCLI places this checkout's built shuttle CLI at path, a hard
+// link to the one build every test shares.
+func linkShuttleCLI(t *testing.T, path string) {
+	t.Helper()
+	binary, err := builtShuttleCLI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(binary, path); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // ownHost seeds env's host identity through a host file, so resolveOwnHost

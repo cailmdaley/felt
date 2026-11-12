@@ -90,10 +90,7 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 	}
 	write(filepath.Join(root, "bin", "rel", "bin", "shuttled"), "#!/bin/sh\nexit 0\n")
 	write(filepath.Join(data, "repo"), filepath.Join(root, "bin", "rel")+"\n")
-	build := exec.Command("go", "build", "-o", filepath.Join(root, "shuttle"), "../../cmd/shuttle")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v %s", err, out)
-	}
+	linkShuttleCLI(t, filepath.Join(root, "shuttle"))
 	startLoop := exec.Command("/usr/bin/env", "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"), "SHUTTLE_DIR="+root, "SHUTTLE_DATA_DIR="+data, "SHUTTLE_PORT="+port, "SHUTTLE_CYCLE_CHILD_PORT="+port, "SHUTTLE_CYCLE_CHILD_PID_FILE="+pidFile, filepath.Join(bin, "shuttle-launch"), "--tmux")
 	if out, err := startLoop.CombinedOutput(); err != nil {
 		t.Fatalf("start real tmux loop: %v\n%s", err, out)
