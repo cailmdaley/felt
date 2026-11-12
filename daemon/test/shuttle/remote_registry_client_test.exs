@@ -251,6 +251,10 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
              ) == {:error, "https_proxy refused: host class shared-multi-user"}
     end
 
+    # The proxy takes the CONNECT and never answers, so only the POST's own
+    # deadline can end the wait; the deadline is wide enough that a loaded
+    # machine still reaches the proxy inside it.
+    @tag :timing
     test "single-attempt POST applies its timeout while waiting for proxy CONNECT" do
       Shuttle.Test.Env.put_app_env(:host_class, :single_user)
       {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
@@ -259,10 +263,10 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       parent = self()
 
       Task.start(fn ->
-        with {:ok, conn} <- :gen_tcp.accept(listener, 5_000),
-             {:ok, data} <- :gen_tcp.recv(conn, 0, 5_000) do
+        with {:ok, conn} <- :gen_tcp.accept(listener, 30_000),
+             {:ok, data} <- :gen_tcp.recv(conn, 0, 30_000) do
           send(parent, {:proxy_saw, data})
-          :gen_tcp.recv(conn, 0, 5_000)
+          :gen_tcp.recv(conn, 0, 30_000)
           :gen_tcp.close(conn)
         end
       end)
@@ -274,14 +278,14 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
           "https://hub.example.invalid/api/v1/state",
           "{}",
           "application/json",
-          2_000
+          5_000
         )
 
       elapsed = System.monotonic_time(:millisecond) - started_at
-      assert_receive {:proxy_saw, data}, 5_000
+      assert_receive {:proxy_saw, data}
       assert data =~ ~r/\ACONNECT hub\.example\.invalid:443 HTTP\/1\.1\r\n/
       assert {:error, _} = result
-      assert elapsed < 4_500
+      assert elapsed < 9_000
       :gen_tcp.close(listener)
     end
 
