@@ -4,7 +4,7 @@ defmodule Shuttle.SessionLedgerTest do
   what comes back out.
 
   The three writer *sites* (dispatch, claim, resume) are asserted through the
-  real code paths in `Shuttle.DispatchIntegrationTest` and `Shuttle.PollerTest`;
+  real code paths in `Shuttle.DispatchIntegrationTest` and the Poller suites;
   this file pins the record shape and the read path.
   """
   use ExUnit.Case, async: true

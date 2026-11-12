@@ -153,7 +153,7 @@ and add your test to its file.
 
 **Daemon** (`daemon/test/`):
 
-- **Dispatch lifecycle and quarantine:** `shuttle/poller_test.exs`, `dispatcher_test.exs`, `dispatch_integration_test.exs`, `continuation_test.exs`, `standing_role_test.exs`, `lifecycle_store_test.exs`, `daemon_heartbeat_test.exs`, and `shuttle_web/controllers/{api,lifecycle,quarantine,kill}_controller_test.exs`.
+- **Dispatch lifecycle and quarantine:** `shuttle/poller_*_test.exs` (one file per Poller topic, sharing `Shuttle.Test.PollerCase`), `dispatcher_test.exs`, `dispatch_integration_test.exs`, `continuation_test.exs`, `standing_role_test.exs`, `lifecycle_store_test.exs`, `daemon_heartbeat_test.exs`, and `shuttle_web/controllers/{api,lifecycle,quarantine,kill}_controller_test.exs`.
 - **Worker execution:** `terminal`, `rex`, `retained_terminal`, `tmux_server`, `worker_watcher`, `worker_process`, `runner`, `kitty`.
 - **Remotes and the tailnet:** `remotes_test.exs` (Go/Elixir parity fixtures in `test/fixtures/remotes/`), `tailnet_peers`, `tailnet_dial`, `remote_registry*`, `remote_{fiber,temporal}_registry`, `fleet_controller`.
 - **Owner routing:** `origin_router`, `file_relay`, `relay_helpers`.

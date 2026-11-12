@@ -264,7 +264,7 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["tmux_session"] == FiberUid.session(fiber_id)
 
     # The request waits on the Poller's dispatch call timeout, which clears
-    # GenServer's 5 s default (PollerTest pins that): shrunk below a spawn's
+    # GenServer's 5 s default (PollerStoresTest pins that): shrunk below a spawn's
     # duration, the Poller call runs out first and the request answers 504
     # poller_busy rather than dropping the connection.
     late_id = "tests/api-late-dispatch"

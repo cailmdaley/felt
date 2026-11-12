@@ -2,7 +2,7 @@ defmodule ShuttleWeb.KillControllerTest do
   @moduledoc """
   Wiring for `POST /api/v1/kill`. The kill behavior (SIGKILL + synchronous
   runtime teardown, idempotent no-session, no status write) is covered at the
-  Poller layer (`PollerTest` "kill_session …"), and the owner-routing is the
+  Poller layer (`PollerStopTest` "kill_session …"), and the owner-routing is the
   shared `Shuttle.OriginRouter` exercised by the felt-edit/transition controller
   tests. The local-branch happy path needs a running `Shuttle.Poller` GenServer,
   which ExUnit controller tests don't boot, so here we pin only the request

@@ -5,7 +5,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
   from Agent state.
 
   This is the runner for tests that need the daemon to actually discover,
-  dispatch, and reconcile — `PollerTest` and `APIControllerTest`. Tests that
+  dispatch, and reconcile — the Poller suites and `APIControllerTest`. Tests that
   only need a scripted response queue or a fixture table (`DispatcherTest`,
   `RemoteRegistryTest`, `WorkerWatcherTest`) keep their own local mocks; those
   are different abstractions that happen to share this behaviour.

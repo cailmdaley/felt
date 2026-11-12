@@ -2,7 +2,7 @@ defmodule ShuttleWeb.QuarantineControllerTest do
   @moduledoc """
   Wiring for `POST /api/v1/quarantine/release`. The quarantine behavior itself
   (fresh launches parked, dirty resumes allowed, release restores dispatch,
-  force-dispatch bypasses) is covered at the Poller layer (`PollerTest`
+  force-dispatch bypasses) is covered at the Poller layer (`PollerQuarantineTest`
   "boot quarantine …"); here we pin the HTTP contract: release reaches the
   named Poller and flips the snapshot's `boot_quarantine`, and a daemon with
   no Poller answers 503 instead of crashing the request.
