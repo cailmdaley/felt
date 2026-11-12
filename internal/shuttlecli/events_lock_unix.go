@@ -5,42 +5,33 @@ package shuttlecli
 import (
 	"os"
 	"syscall"
-	"time"
 )
 
-// eventsRotationLockWait bounds how long a hook waits for another writer's
-// rotation to finish.
-const eventsRotationLockWait = 2 * time.Second
-
 // lockEventsRotation takes an exclusive flock on the rotation lock file,
-// polling without blocking for at most eventsRotationLockWait. ok is false
-// only when another writer holds the lock past that wait. A lock that cannot
-// be used at all — the file won't open, or the filesystem refuses flock
-// (a network mount without lock support answers ENOSYS or EOPNOTSUPP) —
-// returns ok with a no-op unlock, so rotation proceeds unguarded rather than
-// never happening and letting the stream grow without bound.
-func lockEventsRotation(lockPath string) (unlock func(), ok bool) {
+// waiting in the kernel's queue until it is granted. A holder only stats,
+// renames and appends to a local file, and the kernel drops its lock when it
+// exits, so the wait is short and cannot outlive a dead writer. A lock that
+// cannot be used at all — the file won't open, or the filesystem refuses
+// flock (a network mount without lock support answers ENOSYS or EOPNOTSUPP) —
+// returns a no-op unlock, so rotation proceeds unguarded rather than never
+// happening and letting the stream grow without bound.
+func lockEventsRotation(lockPath string) (unlock func()) {
 	file, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
-		return func() {}, true
+		return func() {}
 	}
-	deadline := time.Now().Add(eventsRotationLockWait)
 	for {
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return func() {
-				_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-				_ = file.Close()
-			}, true
+		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX)
+		if err != syscall.EINTR {
+			break
 		}
-		if err != syscall.EWOULDBLOCK {
-			_ = file.Close()
-			return func() {}, true
-		}
-		if time.Now().After(deadline) {
-			_ = file.Close()
-			return nil, false
-		}
-		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil {
+		_ = file.Close()
+		return func() {}
+	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
 	}
 }

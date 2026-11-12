@@ -15,10 +15,7 @@ func TestEventAppendWaitsForRotationBarrier(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	unlock, ok := lockEventsRotation(path + eventsLockSuffix)
-	if !ok {
-		t.Fatal("lock unavailable")
-	}
+	unlock := lockEventsRotation(path + eventsLockSuffix)
 	locked := true
 	defer func() {
 		if locked {

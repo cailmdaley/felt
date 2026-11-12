@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -89,11 +88,7 @@ func (a *app) eventsMaxBytes() int64 {
 
 // appendEventLine serializes rotation and append against other writers.
 func (a *app) appendEventLine(path, line string) error {
-	unlock, ok := lockEventsRotation(path + eventsLockSuffix)
-	if !ok {
-		return fmt.Errorf("event stream lock timed out")
-	}
-	defer unlock()
+	defer lockEventsRotation(path + eventsLockSuffix)()
 	if info, err := os.Stat(path); err == nil && info.Size() >= a.eventsMaxBytes() {
 		_ = os.Rename(path, path+eventsRotatedSuffix)
 	}
