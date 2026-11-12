@@ -115,6 +115,12 @@ exclude =
     do: exclude,
     else: [:production_boot | exclude]
 
+# Every module of the running applications is loaded before the first test.
+# Loaded on first call instead, each load queues on the VM's one code server,
+# and on a loaded machine the opening tests' requests waited there for 20 s.
+for {app, _, _} <- Application.started_applications(),
+    do: :code.ensure_modules_loaded(Application.spec(app, :modules))
+
 # A bare `assert_receive` waits this long for its message. It is reached only
 # when the message never comes, so it costs a passing test nothing, and it is
 # set for a machine whose cores the concurrently running suite already fills.
