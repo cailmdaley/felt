@@ -93,6 +93,8 @@
 .ws-provenance { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-icon-button { width: var(--ws-control-height); height: var(--ws-control-height); flex: none; border-radius: var(--ws-control-radius); }
 .ws-icon-button:hover { background: var(--ws-hover); color: var(--ws-ink); }
+.ws-download { display: inline-flex; align-items: center; justify-content: center; }
+.ws-download > svg { width: 15px; height: 15px; }
 .ws-menu {
   position: fixed; z-index: 5; min-width: var(--ws-menu-width); max-width: min(var(--ws-menu-ceiling), calc(100vw - var(--ws-gap)));
   max-height: calc(100dvh - var(--ws-gap)); overflow: auto; padding: var(--ws-small-gap);

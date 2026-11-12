@@ -189,6 +189,22 @@ describe('a row', () => {
     expect(row(family, 'Mid').querySelector<HTMLElement>('.fp-doc')!.hidden).toBe(true)
     expect(row(family, 'Mid').querySelector('.fp-lead')!.getAttribute('aria-pressed')).toBe('false')
   })
+  it('offers an unfolded file for download under its own name, through its owner, without folding its row', async () => {
+    const report = file('report.html', 1), pdf = { ...file('x', 2), key: 'basalt:/runs/fit/response.pdf' }
+    const { family, place } = made({ feeds: { ...feeds, files: c => c.id === 'hub/mid' ? [report, pdf] : [], lead: async () => undefined, shuttleBase: 'http://hub:4000' } })
+    await settle()
+    click(row(family, 'Mid').querySelector('.fp-sent')!)
+    click(row(family, 'Mid').querySelector('[data-held="basalt:/runs/fit/response.pdf"]')!)
+    const download = row(family, 'Mid').querySelector<HTMLAnchorElement>('.fp-doc .fp-download')!
+    expect(download.getAttribute('href')).toBe('http://hub:4000/api/v1/file?path=%2Fruns%2Ffit%2Fresponse.pdf&origin=basalt')
+    expect(download.download).toBe('response.pdf')
+    download.addEventListener('click', event => event.preventDefault()) // jsdom does not navigate
+    download.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }))
+    expect(press(download, 'Enter').defaultPrevented).toBe(false)
+    expect(place.docs!.get(row(family, 'Mid').dataset.thread!)).toBe(pdf.key)
+    click(row(family, 'Mid').querySelector('.fp-constitution')!)
+    expect(row(family, 'Mid').querySelector('.fp-doc .fp-download')).toBeNull()
+  })
   it('counts a thread\'s sent files seen once their list has been open, without a click on each', async () => {
     let mine = [file('new.png', 1, true), file('also.png', 2, true), file('old.md', 3)]
     const seen = vi.fn((files: readonly MapFile[]) => { mine = mine.map(f => files.some(s => s.key === f.key) ? { ...f, unread: false } : f) })

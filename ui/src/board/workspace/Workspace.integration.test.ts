@@ -1408,6 +1408,13 @@ describe('workspace reader integration', () => {
     release(); await settle(); await settle()
     expect(selected()).toBe(table)
   })
+  it('offers a sent page for download under its own name, through its owner', async () => {
+    const table = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    workspace.open(cards[0], 'Desk', table); await settle(); await settle()
+    const download = document.querySelector<HTMLAnchorElement>('.ws-selected .ws-download')!
+    expect(download.getAttribute('href')).toBe('/api/v1/file?path=%2Fnotes%2Falpha%2Ftable.html&origin=host-a')
+    expect(download.download).toBe('table.html')
+  })
   it('owner-routes file mtimes in Unix seconds for embeds and body links without reordering the strip', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => {

@@ -105,8 +105,12 @@
 .fp-back:hover, .fp-back:focus-visible, .fp-step:not(:disabled):hover, .fp-step:focus-visible { border-color: var(--ws-ink-soft); background: var(--ws-hover); color: var(--ws-ink); outline: none; }
 .fp-step:disabled { opacity: .35; cursor: default; }
 /* A document unfolded under its row, framed on the row's text column, at its own full height, in the page's one scroll. */
-.fp-doc { margin: 6px 0 8px var(--fp-text); border: 1px solid var(--ws-hairline-soft); background: var(--ws-paper); cursor: auto; }
+.fp-doc { position: relative; margin: 6px 0 8px var(--fp-text); border: 1px solid var(--ws-hairline-soft); background: var(--ws-paper); cursor: auto; }
 .fp-doc[hidden] { display: none; }
+/* A file's download, quiet in its frame's top corner, as tall as the row's chips. */
+.fp-download { position: absolute; top: 6px; right: 6px; z-index: 2; display: inline-flex; align-items: center; justify-content: center; width: var(--fp-control); height: var(--fp-control); border: 1px solid var(--ws-hairline-soft); border-radius: var(--ws-control-radius); background: var(--ws-paper); color: var(--ws-ink-muted); }
+.fp-download > svg { width: 15px; height: 15px; }
+.fp-download:is(:hover, :focus-visible) { border-color: var(--ws-ink-soft); color: var(--ws-ink); outline: none; }
 .fp-doc .kbn-fileview-frame-wrap { height: 160px; }
 /* A PDF unfolds at its stage's own height, not a frame's. */
 .fp-doc .kbn-fileview-frame-wrap:has(> .kbn-fileview-pdf-stage) { height: auto; }

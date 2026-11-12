@@ -22,6 +22,7 @@ const shapes = {
   pdf: '<path d="M3.5 1.5h6l3 3v10h-9Z"/><path d="M9.5 1.5v3h3"/>',
   code: '<path d="m3 4.5 3.5 3.5L3 11.5M8.5 11.5H13"/>',
   file: '<rect x="3.5" y="1.5" width="9" height="13" rx="1"/>',
+  download: '<path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 13.5h11"/>',
 } as const
 
 export type HeaderIcon = keyof typeof shapes

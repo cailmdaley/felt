@@ -4,6 +4,7 @@ import { htmlEl as el, markPath, markSvg } from '../family/drawing.js'
 import { age } from '../civilDay.js'
 import { ASIDE_SECTIONS, SECTION_WORD, opening, outline, tally, underAll, type AsideSection, type Line, type Under } from '../family/outline.js'
 import { bindDrawnPage } from '../FileViewerPanel.js'
+import { basename, fileBytesUrl } from '../utils.js'
 import type { Conversations } from '../conversationOpening.js'
 import { threadKey, threadState, type ThreadIndex } from '../threads.js'
 import { fiberKey, parseDocKey, type DocKey } from './documents.js'
@@ -30,6 +31,15 @@ const ASIDE_WORDS: Readonly<Record<AsideSection, readonly [string, string]>> = {
 /** A sent file's mark, drawn on the acts' stroke grid in the view control's vocabulary. */
 const fileIcon = (mark: SentFile['mark']): HTMLElement => {
   const icon = el('span', 'fp-file-glyph'); icon.dataset.mark = mark; icon.innerHTML = headerIcon(SENT_ICON[mark]); return icon
+}
+
+/** Saves a file under its own name, its bytes read from the host that holds it. */
+const downloadLink = (shuttleBase: string, path: string, owner: string): HTMLAnchorElement => {
+  const link = el('a', 'fp-download'), name = basename(path)
+  link.href = fileBytesUrl(shuttleBase, path, owner); link.download = name
+  link.innerHTML = headerIcon('download')
+  link.title = `Download ${name}`; link.setAttribute('aria-label', link.title)
+  return link
 }
 
 /** What the page reads, and how to ask for it again. */
@@ -508,7 +518,8 @@ export class FamilyPage {
     if (want && !shown) {
       shown = { ...this.feeds.embed(thread.card, want), doc: want }
       this.embedded.set(thread.key, shown)
-      slot.replaceChildren(shown.el)
+      const file = parseDocKey(want)
+      slot.replaceChildren(...file ? [downloadLink(this.feeds.shuttleBase, file.path, file.owner)] : [], shown.el)
     }
     slot.hidden = !shown
   }
@@ -705,7 +716,7 @@ export class FamilyPage {
    */
   private key(event: KeyboardEvent): void {
     const model = this.model, target = event.target as HTMLElement
-    if (!model || target.closest('.fp-verbs') || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+    if (!model || target.closest('.fp-verbs, .fp-download') || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
     const item = target.closest<HTMLElement>('[data-row], [data-level]')
     if (!item || item.closest('.fp-doc')) return
     const onRow = item.getAttribute('role') === 'treeitem', owner = onRow ? item.dataset.row! : item.dataset.level!

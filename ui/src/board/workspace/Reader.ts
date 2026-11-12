@@ -25,6 +25,7 @@ import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeS
 import { PageSheet } from './PageSheet.js'
 import { SettingsMenu } from './SettingsMenu.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
+import { headerIcon } from './headerIcon.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -434,8 +435,12 @@ export class Reader {
     // A drawn page has nothing to say about itself beyond what the band says.
     if (isDrawn(frame.doc)) frame.el.dataset.drawn = ''
     else {
+      const download = element('a', 'ws-icon-button ws-download')
+      download.href = fileBytesUrl(this.opts.shuttleBase, frame.doc.path, frame.doc.owner); download.download = frame.doc.name
+      download.innerHTML = headerIcon('download')
+      download.title = `Download ${frame.doc.name}`; download.setAttribute('aria-label', download.title)
       const menu = button('ws-icon-button ws-menu-button', '⋯', () => this.openMenu(frame.doc, menu), 'Document menu')
-      frame.label.append(menu)
+      frame.label.append(download, menu)
     }
     this.labels.set(frame, { glyph, title, provenance })
     frame.label.addEventListener('dblclick', e => {
