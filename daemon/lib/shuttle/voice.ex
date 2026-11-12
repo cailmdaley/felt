@@ -167,7 +167,7 @@ defmodule Shuttle.Voice do
     do: {:reply, {:error, "fiber_id is required"}, state}
 
   def handle_call({:update, params}, from, state) do
-    params = meeting_params(params, state)
+    params = if params["meeting"] == true, do: meeting_params(params, state), else: params
 
     with :ok <- validate_update(params, state),
          :ok <- Config.validate(Map.take(params, ~w(words quiet_seconds pinned_quiet_seconds))) do
@@ -178,7 +178,8 @@ defmodule Shuttle.Voice do
   end
 
   # `meeting: true` starts one on the target, unmuted; `meeting: false` ends
-  # the current one, following again, and is a no-op outside a meeting.
+  # the current one, following again, and is a no-op outside a meeting. The end
+  # resolves when its queued operation runs, against the settings of that moment.
   defp meeting_params(%{"meeting" => true} = params, _state) do
     params
     |> Map.delete("meeting")
@@ -499,6 +500,8 @@ defmodule Shuttle.Voice do
     do: %{state | queue: state.queue ++ [operation]}
 
   defp enqueue(state, {params, from}) do
+    params = meeting_params(params, state)
+
     with :ok <-
            Config.update(
              Map.take(

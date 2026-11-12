@@ -837,6 +837,38 @@ defmodule Shuttle.VoiceTest do
     assert {:ok, %{"words" => 42}} = Config.read()
   end
 
+  test "a meeting end queued behind its start ends it", c do
+    parent = self()
+
+    {:ok, first} = Agent.start_link(fn -> true end)
+
+    # The first reconcile waits for the test, so the next updates queue.
+    reconcile = fn _enabled, _opts ->
+      if Agent.get_and_update(first, &{&1, false}) do
+        send(parent, {:reconciling, self()})
+        receive do: (:go -> :ok)
+      end
+
+      {:ok, %{available: true, capture: nil}}
+    end
+
+    stop_supervised!(Voice)
+    Env.start_scoped!({Voice, Keyword.merge(c.opts, reconcile: reconcile)})
+    card = %{"fiber_id" => "meet/card", "origin" => "test-host"}
+
+    busy = Task.async(fn -> Voice.update(%{}) end)
+    assert_receive {:reconciling, held}
+    start = Task.async(fn -> Voice.update(%{"meeting" => true, "target" => card}) end)
+    Process.sleep(20)
+    stop = Task.async(fn -> Voice.update(%{"meeting" => false}) end)
+    Process.sleep(20)
+    send(held, :go)
+
+    Task.await(busy)
+    assert {:ok, %{mode: "meeting"}} = Task.await(start)
+    assert {:ok, %{system_audio: false, mode: "following"}} = Task.await(stop)
+  end
+
   test "a meeting is Listen pinned with system audio, and stopping or following ends it" do
     card = %{"fiber_id" => "meet/card", "origin" => "test-host"}
 
