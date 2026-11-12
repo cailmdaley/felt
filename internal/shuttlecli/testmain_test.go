@@ -121,6 +121,9 @@ func runFenced(m *testing.M) int {
 	}
 	overrides := fenceOverrides(dir, home)
 	overrides["SHUTTLE_DAEMON_URL"] = "http://" + closedLoopbackAddr()
+	// A test's files need no durability; on macOS every fsync is a full
+	// flush. The CLIs and helpers this process runs inherit it.
+	overrides["FELT_TEST_FSYNC"] = "0"
 	for key, value := range overrides {
 		if err := os.Setenv(key, value); err != nil {
 			panic(err)
