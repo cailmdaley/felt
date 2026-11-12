@@ -113,6 +113,14 @@ if [ "${CHECK_CLEANUP_ORDER:-0}" = 1 ]; then
 fi
 exec `+shellQuote(realRm)+` "$@"
 `)
+	// The fake host never takes shipped Linux artifacts: a deploy host that is
+	// Linux x86_64 with a container runtime would otherwise run an extra local
+	// build transaction under the same host lock before every deploy.
+	realUname, err := exec.LookPath("uname")
+	if err != nil {
+		t.Fatal(err)
+	}
+	link(filepath.Join(f.bin, "uname"), "#!/bin/sh\nif [ \"$*\" = -sm ]; then echo \"$('"+realUname+"' -s) fixture\"; else exec '"+realUname+"' \"$@\"; fi\n")
 	realGo, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)
@@ -286,6 +294,30 @@ func deployAwait(t *testing.T, description string, condition func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// deployWait waits for a deployer started by startArgs. A deployer still
+// running after two minutes fails the test with the process table and the
+// fleet's logs instead of holding the package to its timeout.
+func (f *deployFleet) deployWait(t *testing.T, cmd *exec.Cmd) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Minute):
+	}
+	ps, _ := exec.Command("ps", "-eo", "pid,ppid,pgid,stat,wchan,args").CombinedOutput()
+	var logs strings.Builder
+	paths, _ := filepath.Glob(filepath.Join(f.root, "*.log"))
+	paths = append(paths, filepath.Join(f.home, ".shuttle/deploy/last-run.log"), f.events)
+	for _, path := range paths {
+		fmt.Fprintf(&logs, "==> %s\n%s\n", path, fleetRead(path))
+	}
+	t.Fatalf("deployer %d still running after 2m\n%s\n%s", cmd.Process.Pid, ps, logs.String())
+	return nil
+}
+
 func (f *deployFleet) start(t *testing.T, name string, extra ...string) (*exec.Cmd, string) {
 	t.Helper()
 	return f.startHost(t, name, "fake", extra...)
@@ -417,7 +449,7 @@ func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 			case "deployer-int", "local":
 				cmd.Process.Signal(syscall.SIGINT)
 			}
-			if e := cmd.Wait(); e == nil {
+			if e := f.deployWait(t, cmd); e == nil {
 				t.Fatalf("cancel reported success: %s", fleetRead(log))
 			}
 			deployAwait(t, "cancelled transaction to release the host lock", func() bool { return f.lockFree(t) })
@@ -449,7 +481,7 @@ func TestDeploySSHPreflightIsBoundedAndRetainsStderr(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
 	cmd, log := f.start(t, "ssh-preflight", "FAIL_SSH_PREFLIGHT=1")
-	if e := cmd.Wait(); e == nil {
+	if e := f.deployWait(t, cmd); e == nil {
 		t.Fatal("failed SSH preflight succeeded")
 	}
 	if !strings.Contains(fleetRead(log), "preflight-ssh-stderr-token") {
@@ -465,7 +497,7 @@ func TestDeployBootstrapFailureReportsStepAndCleansWorkspace(t *testing.T) {
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
 	cmd, log := f.start(t, "failed-bootstrap", "FAIL_LOCK_BUILD=1")
-	if err := cmd.Wait(); err == nil {
+	if err := f.deployWait(t, cmd); err == nil {
 		t.Fatal("bootstrap failure accepted")
 	}
 	got := fleetRead(log)
@@ -565,7 +597,7 @@ func TestDeployRemoteVerificationFailureHoldsReleaseAndPruning(t *testing.T) {
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
 	cmd, log := f.start(t, "remote-booting", "BOOTING_LAUNCHER=1", "CHECK_POLL=1", "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
-	if err := cmd.Wait(); err == nil || !strings.Contains(fleetRead(log), "is still booting after") {
+	if err := f.deployWait(t, cmd); err == nil || !strings.Contains(fleetRead(log), "is still booting after") {
 		t.Fatalf("remote timeout override lost: %v %s", err, fleetRead(log))
 	}
 	if events := fleetRead(f.events); strings.Contains(events, "poll-interval") || strings.Contains(events, "release\n") || strings.Contains(events, "prune\n") {
@@ -589,7 +621,7 @@ func TestDeployRemotePreflightRejectsUnpublishedAndImplicitRollback(t *testing.T
 				f.git(t, f.repo, "reset", "--hard", f.sha)
 			}
 			cmd, log := f.startHost(t, kind, "local,fake")
-			if err := cmd.Wait(); err == nil {
+			if err := f.deployWait(t, cmd); err == nil {
 				t.Fatalf("unsafe default deploy accepted: %s", fleetRead(log))
 			}
 			if got := fleetRead(f.events); got != "" {
@@ -604,7 +636,7 @@ func TestDeployFailureNamesHostAndStep(t *testing.T) {
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
 	cmd, log := f.start(t, "failed", "FAIL_BUILD=1")
-	if err := cmd.Wait(); err == nil {
+	if err := f.deployWait(t, cmd); err == nil {
 		t.Fatalf("failed build reported success: %s", fleetRead(log))
 	}
 	if got := fleetRead(log); !strings.Contains(got, "fake: build/install CLIs: failed") || !strings.Contains(got, "failed: fake") {
@@ -624,7 +656,7 @@ func TestDeployLocalDefaultsToStableRootFromLinkedWorktree(t *testing.T) {
 	f.repo = linked
 	fleetTouch(t, f.gate)
 	cmd, log := f.startHost(t, "local-linked", "local")
-	if err := cmd.Wait(); err != nil {
+	if err := f.deployWait(t, cmd); err != nil {
 		t.Fatalf("local deploy: %v %s", err, fleetRead(log))
 	}
 	canonical, err := filepath.EvalSymlinks(main)

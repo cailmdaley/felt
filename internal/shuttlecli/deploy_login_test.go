@@ -73,7 +73,7 @@ func TestDeployLoginProfileZeroExitCannotFakeCompletion(t *testing.T) {
 		t.Fatal(e)
 	}
 	cmd, log := f.start(t, "profile-exit")
-	if e := cmd.Wait(); e == nil {
+	if e := f.deployWait(t, cmd); e == nil {
 		t.Fatalf("profile exit accepted as deployment: %s", fleetRead(log))
 	}
 	if !strings.Contains(fleetRead(log), "missing deployment completion sentinel") {

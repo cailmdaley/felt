@@ -33,7 +33,7 @@ while :; do sleep 300; done
 		t.Fatalf("scheduler queue limit is not 900s: %s", fleetRead(log))
 	}
 	cmd.Process.Signal(syscall.SIGINT)
-	if e := cmd.Wait(); e == nil {
+	if e := f.deployWait(t, cmd); e == nil {
 		t.Fatalf("cancelled queue reported success: %s", fleetRead(log))
 	}
 	if events := fleetRead(f.events); !strings.Contains(events, "srun-cancelled") || strings.Contains(events, "cycle\n") {

@@ -32,7 +32,7 @@ func TestDeployActivationDefersCancellation(t *testing.T) {
 			var previous string
 			if host == "fake" {
 				base, log := f.startHost(t, "base", host)
-				if err := base.Wait(); err != nil {
+				if err := f.deployWait(t, base); err != nil {
 					t.Fatalf("base: %v %s", err, fleetRead(log))
 				}
 				tree, err := filepath.EvalSymlinks(filepath.Join(f.remote+".deploy", f.sha))

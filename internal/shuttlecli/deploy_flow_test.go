@@ -70,7 +70,7 @@ export LOGIN_PROFILE_LOADED=yes
 		t.Fatal(err)
 	}
 	fleetTouch(t, f.gate)
-	if err := cmd.Wait(); err != nil {
+	if err := f.deployWait(t, cmd); err != nil {
 		t.Fatalf("deploy: %v %s", err, fleetRead(log))
 	}
 
@@ -123,7 +123,7 @@ func TestDeployRollbackLifecycle(t *testing.T) {
 	run := func(name string, args ...string) string {
 		t.Helper()
 		cmd, log := f.startArgs(t, name, "fake", args)
-		if err := cmd.Wait(); err != nil {
+		if err := f.deployWait(t, cmd); err != nil {
 			t.Fatalf("%s: %v %s", name, err, fleetRead(log))
 		}
 		return fleetRead(log)
@@ -221,7 +221,7 @@ func TestDeployHostLockQueue(t *testing.T) {
 	}
 
 	killed.Process.Kill()
-	if err := killed.Wait(); err == nil {
+	if err := f.deployWait(t, killed); err == nil {
 		t.Fatal("killed waiter succeeded")
 	}
 
@@ -242,13 +242,13 @@ func TestDeployHostLockQueue(t *testing.T) {
 	deployAwait(t, "killed waiter cancelled: "+killedLog, func() bool { return strings.Contains(fleetRead(killedLog), "observer EOF") })
 	deployAwait(t, "stopped observer's waiter to expire its heartbeat lease", func() bool { return syscall.Kill(remote, 0) != nil })
 	syscall.Kill(observer, syscall.SIGCONT)
-	if err := stopped.Wait(); err == nil {
+	if err := f.deployWait(t, stopped); err == nil {
 		t.Fatalf("stopped observer reported success: %s", fleetRead(stoppedLog))
 	}
 
 	fleetTouch(t, f.gate)
 	for name, cmd := range map[string]*exec.Cmd{holderLog: holder, secondLog: second} {
-		if err := cmd.Wait(); err != nil {
+		if err := f.deployWait(t, cmd); err != nil {
 			t.Fatalf("%v: %s", err, fleetRead(name))
 		}
 	}
