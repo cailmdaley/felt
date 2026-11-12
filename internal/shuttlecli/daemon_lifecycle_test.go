@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"net"
@@ -13,7 +14,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
@@ -347,34 +347,28 @@ func TestDaemonStartCannotBypassLiveDaemonInAnotherProcess(t *testing.T) {
 		if err != nil {
 			os.Exit(3)
 		}
-		if err := os.WriteFile(os.Getenv("SHUTTLE_LIVE_DAEMON_ADDRESS"), []byte(listener.Addr().String()), 0o600); err != nil {
-			os.Exit(4)
-		}
+		fmt.Println(listener.Addr().String())
 		server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, `{"ready":true}`) })}
 		_ = server.Serve(listener)
 		os.Exit(0)
 	}
-	dir := t.TempDir()
-	addressFile := filepath.Join(dir, "address")
+	// The helper prints its listener's address once it is accepting; reading
+	// that line is the barrier, and its exit ends the read.
 	cmd := exec.Command(os.Args[0], "-test.run=^TestDaemonStartCannotBypassLiveDaemonInAnotherProcess$")
-	cmd.Env = append(os.Environ(), "SHUTTLE_LIVE_DAEMON_HELPER=1", "SHUTTLE_LIVE_DAEMON_ADDRESS="+addressFile)
+	cmd.Env = append(os.Environ(), "SHUTTLE_LIVE_DAEMON_HELPER=1")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
-	deadline := time.Now().Add(5 * time.Second)
-	var address string
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(addressFile)
-		if err == nil {
-			address = string(data)
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	lines := bufio.NewScanner(stdout)
+	if !lines.Scan() {
+		t.Fatalf("helper process did not publish its live listener: %v", lines.Err())
 	}
-	if address == "" {
-		t.Fatal("helper process did not publish its live listener")
-	}
+	address := lines.Text()
 	env := testEnv(t)
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	env.Set("SHUTTLE_RELEASE", release.Dir)
@@ -382,7 +376,7 @@ func TestDaemonStartCannotBypassLiveDaemonInAnotherProcess(t *testing.T) {
 	launched := false
 	a := newApp(env)
 	a.execDaemonRelease = func(string, ...string) error { launched = true; return nil }
-	_, _, err := executeApp(t, a, t.TempDir(), "daemon", "start")
+	_, _, err = executeApp(t, a, t.TempDir(), "daemon", "start")
 	if err == nil || launched || !strings.Contains(err.Error(), "daemon is already running") {
 		t.Fatalf("start result err=%v launched=%t", err, launched)
 	}
