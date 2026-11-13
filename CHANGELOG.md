@@ -6,8 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [2.0.0] — 2026-11-13
+
 ### Added
 
+- A store's root fiber can declare `neighbors:`, the stores its links reach into. `felt check` prints one line per neighbour that isn't mounted (`loom: not mounted, 18 links`) instead of an error per link, and such links never resolve to a local fiber that merely shares their last segment.
+- `felt add` and moves warn when a new id redirects an existing short link or makes it ambiguous, naming each affected link, so the writer can fix it on the spot.
+- `felt session` and `felt sync` say when felt set up a harness's plugin and its settings entries have since disappeared, with the setup command that restores them.
 - Claude and Pi hooks bridge terminal program status through tmux to supporting outer terminals; `SHUTTLE_PROGRAM_STATUS=off` disables it.
 - Shuttle supports Rex as its terminal backend with `"terminal": "rex"` in `host.json`.
 - `felt sync` also syncs each git repository mounted in the store by a symlinked directory, with the same refusals and `--push`, naming each repository; a failing mount is reported by its path and makes sync exit non-zero after the others have run.
@@ -23,6 +28,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The felt skill gate refuses at most twice per session, then lets tool calls through with a note, so a session whose plugin hooks loaded after start (as after `/login`) is no longer locked out.
+- `felt check` accepts markdown links to files and directories beside a fiber.
 - The board draws delivered messages and thread notices as messages again, from transcripts in every header format.
 - A project view linked into a store subtree that is itself a symlink into another repository belongs to the store its link names: felt finds the enclosing store one symlink hop at a time, so `find`, `show` and outer ids reach the whole store rather than the repository the bytes resolve into.
 
